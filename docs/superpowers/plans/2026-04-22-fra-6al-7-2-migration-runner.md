@@ -12,26 +12,26 @@
 
 ## File Map
 
-- Create: `/Users/admin/Documents/Work/market-agent/db/migrations/0001_init.up.sql`
+- Create: `db/migrations/0001_init.up.sql`
   Responsibility: immutable snapshot of the current normative schema pack.
-- Create: `/Users/admin/Documents/Work/market-agent/db/migrations/0001_init.down.sql`
+- Create: `db/migrations/0001_init.down.sql`
   Responsibility: reverse migration that removes product schema objects created by `0001_init` while leaving the migration system usable.
-- Create: `/Users/admin/Documents/Work/market-agent/db/scripts/migrate.ts`
+- Create: `db/scripts/migrate.ts`
   Responsibility: CLI entry point for `up`, `down`, and `status`.
-- Create: `/Users/admin/Documents/Work/market-agent/db/test/migrate.test.ts`
+- Create: `db/test/migrate.test.ts`
   Responsibility: Docker-backed integration coverage for forward/backward migration behavior.
-- Modify: `/Users/admin/Documents/Work/market-agent/db/scripts/schema-support.ts`
+- Modify: `db/scripts/schema-support.ts`
   Responsibility: add migration discovery, migration-state queries, and shared SQL-file helpers.
-- Modify: `/Users/admin/Documents/Work/market-agent/db/package.json`
+- Modify: `db/package.json`
   Responsibility: expose `npm run migrate`.
-- Modify: `/Users/admin/Documents/Work/market-agent/db/README.md`
+- Modify: `db/README.md`
   Responsibility: document tracked migration workflow and command usage.
 
 ## Task 1: Add Failing Integration Tests for `up` and `status`
 
 **Files:**
-- Create: `/Users/admin/Documents/Work/market-agent/db/test/migrate.test.ts`
-- Test: `/Users/admin/Documents/Work/market-agent/db/test/migrate.test.ts`
+- Create: `db/test/migrate.test.ts`
+- Test: `db/test/migrate.test.ts`
 
 - [ ] **Step 1: Write the failing integration tests**
 
@@ -202,7 +202,7 @@ test("migrate status reports 0001_init as applied after migrate up", { timeout: 
 Run:
 
 ```bash
-cd /Users/admin/Documents/Work/market-agent/db
+cd db
 node --experimental-strip-types --test test/migrate.test.ts
 ```
 
@@ -210,14 +210,14 @@ Expected: FAIL with `Missing script: "migrate"` and/or missing migration files s
 
 - [ ] **Step 3: Write the minimal implementation for `up` and `status`**
 
-Create `/Users/admin/Documents/Work/market-agent/db/migrations/0001_init.up.sql` by copying the normative schema pack exactly:
+Create `db/migrations/0001_init.up.sql` by copying the normative schema pack exactly:
 
 ```bash
-cp /Users/admin/Documents/Work/market-agent/spec/finance_research_db_schema.sql \
-  /Users/admin/Documents/Work/market-agent/db/migrations/0001_init.up.sql
+cp spec/finance_research_db_schema.sql \
+  db/migrations/0001_init.up.sql
 ```
 
-Create `/Users/admin/Documents/Work/market-agent/db/migrations/0001_init.down.sql` immediately so the migration registry already has a complete pair:
+Create `db/migrations/0001_init.down.sql` immediately so the migration registry already has a complete pair:
 
 ```sql
 drop table if exists eval_run_results;
@@ -280,7 +280,7 @@ drop type if exists subject_kind;
 drop extension if exists pgcrypto;
 ```
 
-Update `/Users/admin/Documents/Work/market-agent/db/package.json`:
+Update `db/package.json`:
 
 ```json
 {
@@ -306,7 +306,7 @@ Update `/Users/admin/Documents/Work/market-agent/db/package.json`:
 }
 ```
 
-Extend `/Users/admin/Documents/Work/market-agent/db/scripts/schema-support.ts` with migration helpers:
+Extend `db/scripts/schema-support.ts` with migration helpers:
 
 ```ts
 import { readFile, readdir } from "node:fs/promises";
@@ -376,7 +376,7 @@ export async function loadMigrationFiles() {
 }
 ```
 
-Create `/Users/admin/Documents/Work/market-agent/db/scripts/migrate.ts`:
+Create `db/scripts/migrate.ts`:
 
 ```ts
 import {
@@ -461,7 +461,7 @@ main().catch((error: unknown) => {
 Run:
 
 ```bash
-cd /Users/admin/Documents/Work/market-agent/db
+cd db
 node --experimental-strip-types --test test/migrate.test.ts
 ```
 
@@ -472,7 +472,7 @@ Expected: PASS for:
 - [ ] **Step 5: Commit Task 1**
 
 ```bash
-cd /Users/admin/Documents/Work/market-agent
+cd .
 git add db/package.json db/migrations/0001_init.up.sql db/migrations/0001_init.down.sql db/scripts/schema-support.ts db/scripts/migrate.ts db/test/migrate.test.ts
 git commit -m "feat(db): add migration runner up and status"
 ```
@@ -480,12 +480,12 @@ git commit -m "feat(db): add migration runner up and status"
 ## Task 2: Add Failing Rollback Tests for `down`
 
 **Files:**
-- Modify: `/Users/admin/Documents/Work/market-agent/db/test/migrate.test.ts`
-- Modify: `/Users/admin/Documents/Work/market-agent/db/scripts/migrate.ts`
+- Modify: `db/test/migrate.test.ts`
+- Modify: `db/scripts/migrate.ts`
 
 - [ ] **Step 1: Extend the integration test with rollback coverage**
 
-Append to `/Users/admin/Documents/Work/market-agent/db/test/migrate.test.ts`:
+Append to `db/test/migrate.test.ts`:
 
 ```ts
 test("migrate down rolls back the most recently applied migration", { timeout: 120000 }, async (t) => {
@@ -553,7 +553,7 @@ test("migrate down exits cleanly when nothing is applied", { timeout: 120000 }, 
 Run:
 
 ```bash
-cd /Users/admin/Documents/Work/market-agent/db
+cd db
 node --experimental-strip-types --test --test-name-pattern "migrate down" test/migrate.test.ts
 ```
 
@@ -562,7 +562,7 @@ Expected: FAIL because `migrate.ts` does not yet accept `down`.
 - [ ] **Step 3: Implement the `down` command**
 The down SQL file already exists from Task 1. Extend the runner to execute it:
 
-Replace `/Users/admin/Documents/Work/market-agent/db/scripts/migrate.ts` with:
+Replace `db/scripts/migrate.ts` with:
 
 ```ts
 import {
@@ -679,7 +679,7 @@ main().catch((error: unknown) => {
 Run:
 
 ```bash
-cd /Users/admin/Documents/Work/market-agent/db
+cd db
 node --experimental-strip-types --test --test-name-pattern "migrate down" test/migrate.test.ts
 ```
 
@@ -690,7 +690,7 @@ Expected: PASS for:
 - [ ] **Step 5: Commit Task 2**
 
 ```bash
-cd /Users/admin/Documents/Work/market-agent
+cd .
 git add db/migrations/0001_init.down.sql db/scripts/migrate.ts db/test/migrate.test.ts
 git commit -m "feat(db): add migration rollback support"
 ```
@@ -698,13 +698,13 @@ git commit -m "feat(db): add migration rollback support"
 ## Task 3: Add Migration Validation and Mismatch Guards
 
 **Files:**
-- Modify: `/Users/admin/Documents/Work/market-agent/db/scripts/schema-support.ts`
-- Modify: `/Users/admin/Documents/Work/market-agent/db/scripts/migrate.ts`
-- Create: `/Users/admin/Documents/Work/market-agent/db/test/migration-registry.test.ts`
+- Modify: `db/scripts/schema-support.ts`
+- Modify: `db/scripts/migrate.ts`
+- Create: `db/test/migration-registry.test.ts`
 
 - [ ] **Step 1: Write failing tests for duplicate, incomplete, and mismatch handling**
 
-Create `/Users/admin/Documents/Work/market-agent/db/test/migration-registry.test.ts`:
+Create `db/test/migration-registry.test.ts`:
 
 ```ts
 import { mkdtemp, writeFile } from "node:fs/promises";
@@ -738,7 +738,7 @@ test("loadMigrationFiles rejects duplicate version names", async () => {
 });
 ```
 
-Modify `/Users/admin/Documents/Work/market-agent/db/test/migrate.test.ts` by adding one mismatch assertion:
+Modify `db/test/migrate.test.ts` by adding one mismatch assertion:
 
 ```ts
 test("migrate status fails when an applied migration is missing locally", { timeout: 120000 }, async (t) => {
@@ -786,7 +786,7 @@ test("migrate status fails when an applied migration is missing locally", { time
 Run:
 
 ```bash
-cd /Users/admin/Documents/Work/market-agent/db
+cd db
 node --experimental-strip-types --test test/migration-registry.test.ts test/migrate.test.ts
 ```
 
@@ -794,7 +794,7 @@ Expected: FAIL because `loadMigrationFiles` does not yet accept a directory over
 
 - [ ] **Step 3: Implement validation guards**
 
-Replace the migration helpers in `/Users/admin/Documents/Work/market-agent/db/scripts/schema-support.ts` with:
+Replace the migration helpers in `db/scripts/schema-support.ts` with:
 
 ```ts
 export async function loadMigrationFiles(directory = migrationsDir) {
@@ -843,7 +843,7 @@ export function assertAppliedMigrationsExistLocally(
 }
 ```
 
-Update `/Users/admin/Documents/Work/market-agent/db/scripts/migrate.ts` to use the guard in both `up` and `status`:
+Update `db/scripts/migrate.ts` to use the guard in both `up` and `status`:
 
 ```ts
 import {
@@ -871,7 +871,7 @@ assertAppliedMigrationsExistLocally(
 Run:
 
 ```bash
-cd /Users/admin/Documents/Work/market-agent/db
+cd db
 node --experimental-strip-types --test test/migration-registry.test.ts test/migrate.test.ts
 ```
 
@@ -880,7 +880,7 @@ Expected: PASS for the duplicate/incomplete/missing-local checks plus the existi
 - [ ] **Step 5: Commit Task 3**
 
 ```bash
-cd /Users/admin/Documents/Work/market-agent
+cd .
 git add db/scripts/schema-support.ts db/scripts/migrate.ts db/test/migration-registry.test.ts db/test/migrate.test.ts
 git commit -m "test(db): validate migration registry invariants"
 ```
@@ -888,12 +888,12 @@ git commit -m "test(db): validate migration registry invariants"
 ## Task 4: Document and Verify the Full Migration Workflow
 
 **Files:**
-- Modify: `/Users/admin/Documents/Work/market-agent/db/README.md`
-- Modify: `/Users/admin/Documents/Work/market-agent/db/test/migrate.test.ts` (only if command output assertions need adjustment)
+- Modify: `db/README.md`
+- Modify: `db/test/migrate.test.ts` (only if command output assertions need adjustment)
 
 - [ ] **Step 1: Update README for tracked migrations**
 
-Replace `/Users/admin/Documents/Work/market-agent/db/README.md` with:
+Replace `db/README.md` with:
 
 ````md
 # DB Bootstrap
@@ -933,9 +933,9 @@ Notes:
 Run:
 
 ```bash
-cd /Users/admin/Documents/Work/market-agent/db
+cd db
 npm test
-git -C /Users/admin/Documents/Work/market-agent diff --check
+git diff --check
 ```
 
 Expected:
@@ -947,7 +947,7 @@ Expected:
 Run:
 
 ```bash
-cd /Users/admin/Documents/Work/market-agent
+cd .
 bd close fra-6al.7.2 --reason "Added tracked SQL migrations with up/down/status plus Docker-backed forward/backward migration coverage."
 bd sync
 ```
@@ -959,7 +959,7 @@ Expected:
 - [ ] **Step 4: Commit the final documentation/tracker changes**
 
 ```bash
-cd /Users/admin/Documents/Work/market-agent
+cd .
 git add db/README.md .beads/issues.jsonl
 git commit -m "docs(db): document tracked migration workflow"
 ```
@@ -967,7 +967,7 @@ git commit -m "docs(db): document tracked migration workflow"
 - [ ] **Step 5: Push and verify the branch is fully landed**
 
 ```bash
-cd /Users/admin/Documents/Work/market-agent
+cd .
 git pull --rebase
 bd sync
 git push

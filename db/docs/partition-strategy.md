@@ -130,8 +130,8 @@ select * from facts where subject_id = $1 and metric_id = $2;
 
 Service-layer rule: every `facts` read that isn't a rehydrate-everything
 admin query **must** carry an `as_of` range. The read-model layer in P1.2
-owns enforcing this — either explicit windows or a default 24-month upper
-bound derived from `now()`.
+owns enforcing this — either explicit windows or a default bounded window,
+for example `as_of >= now() - interval '24 months' and as_of < now()`.
 
 ### Partition creation cadence
 

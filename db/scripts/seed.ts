@@ -21,13 +21,14 @@ async function loadSeedFilePaths() {
 }
 
 async function main() {
-  const databaseUrl = getDatabaseUrl();
   const seedPaths = await loadSeedFilePaths();
 
   if (seedPaths.length === 0) {
     console.log("No seed files found; nothing to do.");
     return;
   }
+
+  const databaseUrl = getDatabaseUrl();
 
   await withClient(databaseUrl, async (client) => {
     for (const path of seedPaths) {

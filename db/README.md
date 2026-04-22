@@ -8,6 +8,10 @@ DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres npm run appl
 DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres npm run verify:schema
 ```
 
+Use this direct path for untracked or dev schema verification. For databases
+managed by `schema_migrations`, use the tracked migration path below instead;
+do not run both bootstrap paths against the same empty database.
+
 Run tracked migrations:
 
 ```bash

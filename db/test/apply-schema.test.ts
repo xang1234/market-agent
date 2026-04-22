@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -22,7 +23,34 @@ function loadExpectedTables() {
   ).sort();
 }
 
-function reserveHostPort(hostPort: string) {
+async function findAvailableHostPort() {
+  const server = createServer();
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object", "expected a bound TCP address");
+  const hostPort = String(address.port);
+
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
+
+  return hostPort;
+}
+
+async function reserveHostPort() {
+  const hostPort = await findAvailableHostPort();
   const containerName = `fra-6al-7-1-reserved-${process.pid}-${Date.now()}`;
   const result = run("docker", [
     "run",
@@ -33,12 +61,12 @@ function reserveHostPort(hostPort: string) {
     "-e",
     "POSTGRES_PASSWORD=postgres",
     "-p",
-    `${hostPort}:5432`,
+    `127.0.0.1:${hostPort}:5432`,
     "postgres:15",
   ]);
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
-  return containerName;
+  return { containerName, hostPort };
 }
 
 function listTables(containerName: string) {
@@ -107,7 +135,7 @@ test("apply:schema still works when the default host port is already occupied", 
     return;
   }
 
-  const reservedContainer = reserveHostPort("55432");
+  const { containerName: reservedContainer, hostPort: reservedPort } = await reserveHostPort();
   t.after(() => {
     stopPostgres(reservedContainer);
   });
@@ -118,7 +146,7 @@ test("apply:schema still works when the default host port is already occupied", 
   const hostPort = startPostgres(containerName, password);
   const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
 
-  assert.notEqual(hostPort, "55432");
+  assert.notEqual(hostPort, reservedPort);
   t.after(() => {
     stopPostgres(containerName);
   });

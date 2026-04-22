@@ -52,8 +52,16 @@ test("migrate up applies 0001_init and records it in schema_migrations", { timeo
     "0001:init",
   );
 
-  const publicTableCount = Number(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public'"));
-  assert.ok(publicTableCount >= loadExpectedTables().length);
+  const publicTables = queryValue(
+    containerName,
+    "select tablename from pg_tables where schemaname = 'public' order by tablename",
+  )
+    .split("\n")
+    .filter(Boolean)
+    .filter((table) => table !== "schema_migrations")
+    .sort();
+
+  assert.deepEqual(publicTables, loadExpectedTables());
 });
 
 test("migrate status reports 0001_init as applied after migrate up", { timeout: 120000 }, async (t) => {
@@ -218,6 +226,113 @@ test("verify:schema succeeds after migrate up", { timeout: 120000 }, async (t) =
   });
 
   assert.equal(verifyResult.status, 0, verifyResult.stderr || verifyResult.stdout);
+});
+
+test("migrate up enforces listings uniqueness and fact confidence bounds", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for db migration integration coverage");
+    return;
+  }
+
+  const containerName = createContainerName("fra-6al-7-2");
+  const password = "postgres";
+  const hostPort = startPostgres(containerName, password);
+  const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
+
+  t.after(() => {
+    stopPostgres(containerName);
+  });
+
+  await waitForPostgres(containerName);
+
+  const upResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
+    cwd: dbRoot,
+    env: { DATABASE_URL: databaseUrl },
+  });
+  assert.equal(upResult.status, 0, upResult.stderr || upResult.stdout);
+
+  const setupResult = run("docker", [
+    "exec",
+    containerName,
+    "psql",
+    "-U",
+    "postgres",
+    "-d",
+    "postgres",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-c",
+    `insert into issuers (legal_name) values ('Example Issuer');
+     insert into instruments (issuer_id, asset_type)
+     select issuer_id, 'common_stock'::asset_type from issuers where legal_name = 'Example Issuer';
+     insert into listings (instrument_id, mic, ticker, trading_currency, timezone)
+     select instrument_id, 'XNAS', 'EXMPL', 'USD', 'UTC' from instruments limit 1;
+     insert into metrics (metric_key, display_name, unit_class, aggregation, interpretation, canonical_source_class)
+     values ('test_metric', 'Test Metric', 'currency', 'sum', 'neutral', 'gaap');
+     insert into sources (provider, kind, trust_tier, license_class, retrieved_at)
+     values ('test_provider', 'internal', 'primary', 'internal', now());`,
+  ]);
+  assert.equal(setupResult.status, 0, setupResult.stderr || setupResult.stdout);
+
+  const duplicateListingResult = run("docker", [
+    "exec",
+    containerName,
+    "psql",
+    "-U",
+    "postgres",
+    "-d",
+    "postgres",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-c",
+    `insert into listings (instrument_id, mic, ticker, trading_currency, timezone)
+     select instrument_id, 'XNAS', 'EXMPL', 'USD', 'UTC' from instruments limit 1;`,
+  ]);
+  assert.notEqual(duplicateListingResult.status, 0);
+  assert.match(
+    duplicateListingResult.stderr || duplicateListingResult.stdout,
+    /duplicate key value violates unique constraint/,
+  );
+
+  const invalidConfidenceResult = run("docker", [
+    "exec",
+    containerName,
+    "psql",
+    "-U",
+    "postgres",
+    "-d",
+    "postgres",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-c",
+    `insert into facts (
+       subject_kind, subject_id, metric_id, period_kind, observed_at, as_of,
+       unit, confidence, source_id, method, definition_version,
+       verification_status, freshness_class, coverage_level
+     )
+     select
+       'issuer'::subject_kind,
+       gen_random_uuid(),
+       metric_id,
+       'fiscal_q',
+       now(),
+       now(),
+       'USD',
+       2,
+       (select source_id from sources where provider = 'test_provider'),
+       'reported'::fact_method,
+       1,
+       'authoritative'::verification_status,
+       'filing_time'::freshness_class,
+       'full'::coverage_level
+     from metrics
+     where metric_key = 'test_metric';`,
+  ]);
+  assert.notEqual(invalidConfidenceResult.status, 0);
+  assert.match(
+    invalidConfidenceResult.stderr || invalidConfidenceResult.stdout,
+    /violates check constraint/,
+  );
 });
 
 test("migrate up rolls back schema changes when recording the migration fails", { timeout: 120000 }, async (t) => {

@@ -1,5 +1,7 @@
 import {
   assertAppliedMigrationsExistLocally,
+  type MigrationFilePair,
+  type Queryable,
   ensureSchemaMigrationsTable,
   executeSql,
   getDatabaseUrl,
@@ -7,11 +9,13 @@ import {
   loadMigrationFiles,
   loadSqlFile,
   redactDatabaseUrl,
+  withAdvisoryLock,
   withTransaction,
   withClient,
 } from "./schema-support.ts";
 
 type Command = "up" | "down" | "status";
+const migrationLockKey = "finance_research_db_migrations";
 
 function getCommand(): Command {
   const command = process.argv[2];
@@ -20,44 +24,42 @@ function getCommand(): Command {
 }
 
 async function runUp(databaseUrl: string) {
+  const localMigrations = await loadMigrationFiles();
+
   await withClient(databaseUrl, async (client) => {
-    await ensureSchemaMigrationsTable(client);
+    await withMigrationLock(client, async () => {
+      await ensureSchemaMigrationsTable(client);
 
-    const localMigrations = await loadMigrationFiles();
-    const applied = await listAppliedMigrations(client);
-    assertAppliedMigrationsExistLocally(
-      localMigrations,
-      applied.map((migration) => migration.version),
-    );
-    const appliedVersions = new Set(applied.map((migration) => migration.version));
+      const applied = await listAppliedMigrations(client);
+      assertAppliedMigrationsExistLocally(localMigrations, applied);
+      const appliedVersions = new Set(applied.map((migration) => migration.version));
 
-    for (const local of localMigrations) {
-      if (appliedVersions.has(local.version)) continue;
+      for (const local of localMigrations) {
+        if (appliedVersions.has(local.version)) continue;
 
-      const sql = await loadSqlFile(local.upPath);
-      await withTransaction(client, async () => {
-        await executeSql(client, sql, `Migration ${local.version} up`);
-        await client.query(
-          "insert into schema_migrations(version, name) values ($1, $2)",
-          [local.version, local.name],
-        );
-      });
-    }
+        const sql = await loadSqlFile(local.upPath);
+        await withTransaction(client, async () => {
+          await executeSql(client, sql, `Migration ${local.version} up`);
+          await client.query(
+            "insert into schema_migrations(version, name) values ($1, $2)",
+            [local.version, local.name],
+          );
+        });
+      }
+    });
 
     console.log(`Applied pending migrations to ${redactDatabaseUrl(databaseUrl)}`);
   });
 }
 
 async function runStatus(databaseUrl: string) {
+  const localMigrations = await loadMigrationFiles();
+
   await withClient(databaseUrl, async (client) => {
     await ensureSchemaMigrationsTable(client);
 
-    const localMigrations = await loadMigrationFiles();
     const applied = await listAppliedMigrations(client);
-    assertAppliedMigrationsExistLocally(
-      localMigrations,
-      applied.map((migration) => migration.version),
-    );
+    assertAppliedMigrationsExistLocally(localMigrations, applied);
     const appliedVersions = new Set(applied.map((migration) => migration.version));
 
     for (const migration of localMigrations) {
@@ -68,35 +70,47 @@ async function runStatus(databaseUrl: string) {
 }
 
 async function runDown(databaseUrl: string) {
+  const localMigrations = await loadMigrationFiles();
+  const localMap = new Map(localMigrations.map((migration) => [migration.version, migration]));
+
   await withClient(databaseUrl, async (client) => {
-    await ensureSchemaMigrationsTable(client);
+    let rolledBack: MigrationFilePair | null = null;
 
-    const localMigrations = await loadMigrationFiles();
-    const localMap = new Map(localMigrations.map((migration) => [migration.version, migration]));
-    const applied = await listAppliedMigrations(client);
-    assertAppliedMigrationsExistLocally(
-      localMigrations,
-      applied.map((migration) => migration.version),
-    );
-    const lastApplied = applied.at(-1);
+    await withMigrationLock(client, async () => {
+      await ensureSchemaMigrationsTable(client);
 
-    if (!lastApplied) {
+      const applied = await listAppliedMigrations(client);
+      assertAppliedMigrationsExistLocally(localMigrations, applied);
+      const lastApplied = applied.at(-1);
+
+      if (!lastApplied) {
+        return;
+      }
+
+      const migration = localMap.get(lastApplied.version);
+      if (!migration) {
+        throw new Error(`Applied migration ${lastApplied.version} is missing locally.`);
+      }
+
+      const sql = await loadSqlFile(migration.downPath);
+      await withTransaction(client, async () => {
+        await executeSql(client, sql, `Migration ${migration.version} down`);
+        await client.query("delete from schema_migrations where version = $1", [migration.version]);
+      });
+      rolledBack = migration;
+    });
+
+    if (!rolledBack) {
       console.log("No applied migrations to roll back.");
       return;
     }
 
-    const migration = localMap.get(lastApplied.version);
-    if (!migration) {
-      throw new Error(`Applied migration ${lastApplied.version} is missing locally.`);
-    }
-
-    const sql = await loadSqlFile(migration.downPath);
-    await withTransaction(client, async () => {
-      await executeSql(client, sql, `Migration ${migration.version} down`);
-      await client.query("delete from schema_migrations where version = $1", [migration.version]);
-    });
-    console.log(`Rolled back ${migration.version} ${migration.name}`);
+    console.log(`Rolled back ${rolledBack.version} ${rolledBack.name}`);
   });
+}
+
+async function withMigrationLock<T>(client: Queryable, action: () => Promise<T>) {
+  return withAdvisoryLock(client, migrationLockKey, action);
 }
 
 async function main() {

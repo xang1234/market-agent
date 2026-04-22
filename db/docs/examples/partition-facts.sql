@@ -63,11 +63,11 @@ create index facts_asof_idx on facts(as_of desc);
 create index facts_verification_idx on facts(verification_status);
 
 create table facts_2026_02 partition of facts
-  for values from ('2026-02-01'::timestamptz) to ('2026-03-01'::timestamptz);
+  for values from (timestamptz '2026-02-01 00:00:00+00') to (timestamptz '2026-03-01 00:00:00+00');
 create table facts_2026_03 partition of facts
-  for values from ('2026-03-01'::timestamptz) to ('2026-04-01'::timestamptz);
+  for values from (timestamptz '2026-03-01 00:00:00+00') to (timestamptz '2026-04-01 00:00:00+00');
 create table facts_2026_04 partition of facts
-  for values from ('2026-04-01'::timestamptz) to ('2026-05-01'::timestamptz);
+  for values from (timestamptz '2026-04-01 00:00:00+00') to (timestamptz '2026-05-01 00:00:00+00');
 
 -- Rows landing in `default` indicate a missed monthly provision; the
 -- observability worker should alert and require a move out.
@@ -97,9 +97,9 @@ select
   'full',
   0.95
 from unnest(array[
-  '2026-02-15'::timestamptz,
-  '2026-03-15'::timestamptz,
-  '2026-04-15'::timestamptz
+  timestamptz '2026-02-15 00:00:00+00',
+  timestamptz '2026-03-15 00:00:00+00',
+  timestamptz '2026-04-15 00:00:00+00'
 ]) with ordinality as t(ts, g);
 
 -- Sanity check: each partition has one row.
@@ -108,8 +108,8 @@ select tableoid::regclass as partition, count(*) from facts group by 1 order by 
 -- Pruning proof: well-formed query touches one partition.
 explain (costs off)
 select * from facts
-where as_of >= '2026-03-01'::timestamptz
-  and as_of <  '2026-04-01'::timestamptz;
+where as_of >= timestamptz '2026-03-01 00:00:00+00'
+  and as_of <  timestamptz '2026-04-01 00:00:00+00';
 
 -- Anti-pattern: missing as_of predicate forces a scan over every partition.
 explain (costs off)

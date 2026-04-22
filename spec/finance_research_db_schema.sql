@@ -96,7 +96,7 @@ create table listings (
   active_to timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  unique (mic, ticker, active_from)
+  unique nulls not distinct (mic, ticker, active_from)
 );
 create index listings_instrument_idx on listings(instrument_id);
 create index listings_ticker_idx on listings(ticker);
@@ -205,7 +205,7 @@ create table mentions (
   subject_id uuid not null,
   prominence text not null check (prominence in ('headline', 'lead', 'body', 'incidental')),
   mention_count integer not null default 1,
-  confidence numeric not null,
+  confidence numeric not null check (confidence >= 0 and confidence <= 1),
   created_at timestamptz not null default now()
 );
 create index mentions_subject_idx on mentions(subject_kind, subject_id);
@@ -222,7 +222,7 @@ create table claims (
   attributed_to_type text,
   attributed_to_id text,
   effective_time timestamptz,
-  confidence numeric not null,
+  confidence numeric not null check (confidence >= 0 and confidence <= 1),
   status claim_status not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -250,7 +250,7 @@ create table entity_impacts (
   direction impact_direction not null,
   channel text not null,
   horizon impact_horizon not null,
-  confidence numeric not null,
+  confidence numeric not null check (confidence >= 0 and confidence <= 1),
   created_at timestamptz not null default now()
 );
 create index entity_impacts_subject_idx on entity_impacts(subject_kind, subject_id);
@@ -262,7 +262,7 @@ create table claim_evidence (
   document_id uuid not null references documents(document_id) on delete cascade,
   locator jsonb not null,
   excerpt_hash text,
-  confidence numeric not null,
+  confidence numeric not null check (confidence >= 0 and confidence <= 1),
   created_at timestamptz not null default now()
 );
 create index claim_evidence_claim_idx on claim_evidence(claim_id);
@@ -343,7 +343,7 @@ create table facts (
   coverage_level coverage_level not null,
   quality_flags jsonb not null default '[]'::jsonb,
   entitlement_channels jsonb not null default '["app"]'::jsonb,
-  confidence numeric not null,
+  confidence numeric not null check (confidence >= 0 and confidence <= 1),
   supersedes uuid references facts(fact_id),
   superseded_by uuid references facts(fact_id),
   invalidated_at timestamptz,

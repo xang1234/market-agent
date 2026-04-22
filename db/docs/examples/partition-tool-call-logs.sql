@@ -28,11 +28,11 @@ create index tool_call_logs_thread_idx on tool_call_logs(thread_id, created_at d
 create index tool_call_logs_agent_idx on tool_call_logs(agent_id, created_at desc);
 
 create table tool_call_logs_2026_02 partition of tool_call_logs
-  for values from ('2026-02-01'::timestamptz) to ('2026-03-01'::timestamptz);
+  for values from (timestamptz '2026-02-01 00:00:00+00') to (timestamptz '2026-03-01 00:00:00+00');
 create table tool_call_logs_2026_03 partition of tool_call_logs
-  for values from ('2026-03-01'::timestamptz) to ('2026-04-01'::timestamptz);
+  for values from (timestamptz '2026-03-01 00:00:00+00') to (timestamptz '2026-04-01 00:00:00+00');
 create table tool_call_logs_2026_04 partition of tool_call_logs
-  for values from ('2026-04-01'::timestamptz) to ('2026-05-01'::timestamptz);
+  for values from (timestamptz '2026-04-01 00:00:00+00') to (timestamptz '2026-05-01 00:00:00+00');
 
 create table tool_call_logs_default partition of tool_call_logs default;
 
@@ -43,9 +43,9 @@ select
   'ok',
   ts
 from unnest(array[
-  '2026-02-10'::timestamptz,
-  '2026-03-10'::timestamptz,
-  '2026-04-10'::timestamptz
+  timestamptz '2026-02-10 00:00:00+00',
+  timestamptz '2026-03-10 00:00:00+00',
+  timestamptz '2026-04-10 00:00:00+00'
 ]) with ordinality as t(ts, g);
 
 select tableoid::regclass as partition, count(*) from tool_call_logs group by 1 order by 1;
@@ -53,8 +53,8 @@ select tableoid::regclass as partition, count(*) from tool_call_logs group by 1 
 -- Pruning proof: hot-path query scoped to a recent window.
 explain (costs off)
 select * from tool_call_logs
-where created_at >= '2026-04-01'::timestamptz
-  and created_at <  '2026-05-01'::timestamptz
+where created_at >= timestamptz '2026-04-01 00:00:00+00'
+  and created_at <  timestamptz '2026-05-01 00:00:00+00'
 order by created_at desc
 limit 50;
 

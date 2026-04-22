@@ -9,7 +9,7 @@ const migrationsDir = join(workspaceRoot, "db", "migrations");
 const schemaPath = join(workspaceRoot, "spec", "finance_research_db_schema.sql");
 const ignoredPublicTables = new Set(["schema_migrations"]);
 
-type Queryable = Pick<Client, "query">;
+export type Queryable = Pick<Client, "query">;
 
 export type MigrationFilePair = {
   version: string;
@@ -115,7 +115,7 @@ export async function loadMigrationFiles(directory = migrationsDir) {
   const pairs = new Map<string, Partial<MigrationFilePair>>();
 
   for (const entry of entries) {
-    const match = entry.match(/^(\d{4})_(.+)\.(up|down)\.sql$/);
+    const match = entry.match(/^(\d{4})_([a-z][a-z0-9_]*)\.(up|down)\.sql$/);
     if (!match) {
       if (entry.endsWith(".sql")) {
         throw new Error(`Unexpected SQL file in migrations directory: ${entry}`);
@@ -151,12 +151,20 @@ export async function loadMigrationFiles(directory = migrationsDir) {
 
 export function assertAppliedMigrationsExistLocally(
   localMigrations: MigrationFilePair[],
-  appliedVersions: string[],
+  appliedMigrations: Array<Pick<MigrationFilePair, "version" | "name">>,
 ) {
-  const localVersions = new Set(localMigrations.map((migration) => migration.version));
-  for (const version of appliedVersions) {
-    if (!localVersions.has(version)) {
-      throw new Error(`Applied migration ${version} is missing locally.`);
+  const localByVersion = new Map(localMigrations.map((migration) => [migration.version, migration]));
+
+  for (const applied of appliedMigrations) {
+    const local = localByVersion.get(applied.version);
+    if (!local) {
+      throw new Error(`Applied migration ${applied.version} is missing locally.`);
+    }
+
+    if (local.name !== applied.name) {
+      throw new Error(
+        `Applied migration ${applied.version} name mismatch: database has ${applied.name}, local has ${local.name}.`,
+      );
     }
   }
 }
@@ -183,6 +191,20 @@ export async function withTransaction<T>(client: Queryable, action: () => Promis
   } catch (error) {
     await client.query("rollback");
     throw error;
+  }
+}
+
+export async function withAdvisoryLock<T>(
+  client: Queryable,
+  lockKey: string,
+  action: () => Promise<T>,
+) {
+  await client.query("select pg_advisory_lock(hashtext($1))", [lockKey]);
+
+  try {
+    return await action();
+  } finally {
+    await client.query("select pg_advisory_unlock(hashtext($1))", [lockKey]);
   }
 }
 

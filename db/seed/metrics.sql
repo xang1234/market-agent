@@ -15,8 +15,8 @@ insert into metrics (metric_key, display_name, unit_class, aggregation, interpre
   ('ebitda',                'EBITDA',                     'currency', 'derived',      'higher_is_better', 'derived', 1, 'Earnings before interest, taxes, depreciation, and amortization.'),
   ('eps_basic',             'EPS (Basic)',                'currency', 'derived',      'higher_is_better', 'gaap',    1, 'Net income per basic share.'),
   ('eps_diluted',           'EPS (Diluted)',              'currency', 'derived',      'higher_is_better', 'gaap',    1, 'Net income per diluted share.'),
-  ('shares_outstanding_basic',   'Shares Outstanding (Basic)',   'count', 'point_in_time', 'neutral',     'gaap',    1, 'Basic weighted-average shares outstanding.'),
-  ('shares_outstanding_diluted', 'Shares Outstanding (Diluted)', 'count', 'point_in_time', 'neutral',     'gaap',    1, 'Diluted weighted-average shares outstanding.'),
+  ('shares_outstanding_basic',   'Shares Outstanding (Basic)',   'count', 'avg',           'neutral',     'gaap',    1, 'Basic weighted-average shares outstanding.'),
+  ('shares_outstanding_diluted', 'Shares Outstanding (Diluted)', 'count', 'avg',           'neutral',     'gaap',    1, 'Diluted weighted-average shares outstanding.'),
 
   -- Balance sheet
   ('total_assets',          'Total Assets',               'currency', 'point_in_time', 'neutral',         'gaap',    1, 'Total assets at period end.'),
@@ -58,7 +58,7 @@ insert into metrics (metric_key, display_name, unit_class, aggregation, interpre
 
   -- Market data
   ('price',                 'Price',                      'currency', 'point_in_time', 'neutral',         'market',  1, 'Last trade or quote price in the listing currency.'),
-  ('market_cap',            'Market Capitalization',      'currency', 'point_in_time', 'neutral',         'market',  1, 'Shares outstanding multiplied by price.'),
+  ('market_cap',            'Market Capitalization',      'currency', 'point_in_time', 'neutral',         'derived', 1, 'Shares outstanding multiplied by price.'),
   ('enterprise_value',      'Enterprise Value',           'currency', 'derived',      'neutral',          'derived', 1, 'Market cap plus total debt less cash and equivalents.'),
   ('volume',                'Volume',                     'count',    'sum',          'neutral',          'market',  1, 'Shares traded over the period.'),
   ('dividend_per_share',    'Dividend Per Share',         'currency', 'sum',          'higher_is_better', 'gaap',    1, 'Dividends declared per share for the period.'),
