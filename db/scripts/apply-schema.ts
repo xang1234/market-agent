@@ -1,12 +1,11 @@
 import {
-  applyStatements,
+  applySqlText,
   diffTables,
   getDatabaseUrl,
   listPublicTables,
   loadExpectedTableNames,
   loadSchemaSql,
   redactDatabaseUrl,
-  splitSqlStatements,
   withClient,
 } from "./schema-support.ts";
 
@@ -14,10 +13,9 @@ async function main() {
   const databaseUrl = getDatabaseUrl();
   const schemaSql = await loadSchemaSql();
   const expectedTables = loadExpectedTableNames(schemaSql);
-  const statements = splitSqlStatements(schemaSql);
 
   await withClient(databaseUrl, async (client) => {
-    await applyStatements(client, statements);
+    await applySqlText(client, schemaSql, "finance_research_db_schema.sql");
 
     const installedTables = await listPublicTables(client);
     const { missing } = diffTables(expectedTables, installedTables);

@@ -2,11 +2,10 @@ import { readdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  applyStatements,
+  applySqlText,
   getDatabaseUrl,
   loadSqlFile,
   redactDatabaseUrl,
-  splitSqlStatements,
   withClient,
 } from "./schema-support.ts";
 
@@ -33,7 +32,7 @@ async function main() {
   await withClient(databaseUrl, async (client) => {
     for (const path of seedPaths) {
       const sql = await loadSqlFile(path);
-      await applyStatements(client, splitSqlStatements(sql));
+      await applySqlText(client, sql, `seed ${basename(path)}`);
       console.log(`Applied seed ${basename(path)}`);
     }
 

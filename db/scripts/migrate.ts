@@ -1,13 +1,13 @@
 import {
-  applyStatements,
   assertAppliedMigrationsExistLocally,
   ensureSchemaMigrationsTable,
+  executeSql,
   getDatabaseUrl,
   listAppliedMigrations,
   loadMigrationFiles,
   loadSqlFile,
   redactDatabaseUrl,
-  splitSqlStatements,
+  withTransaction,
   withClient,
 } from "./schema-support.ts";
 
@@ -35,11 +35,13 @@ async function runUp(databaseUrl: string) {
       if (appliedVersions.has(local.version)) continue;
 
       const sql = await loadSqlFile(local.upPath);
-      await applyStatements(client, splitSqlStatements(sql));
-      await client.query(
-        "insert into schema_migrations(version, name) values ($1, $2)",
-        [local.version, local.name],
-      );
+      await withTransaction(client, async () => {
+        await executeSql(client, sql, `Migration ${local.version} up`);
+        await client.query(
+          "insert into schema_migrations(version, name) values ($1, $2)",
+          [local.version, local.name],
+        );
+      });
     }
 
     console.log(`Applied pending migrations to ${redactDatabaseUrl(databaseUrl)}`);
@@ -72,6 +74,10 @@ async function runDown(databaseUrl: string) {
     const localMigrations = await loadMigrationFiles();
     const localMap = new Map(localMigrations.map((migration) => [migration.version, migration]));
     const applied = await listAppliedMigrations(client);
+    assertAppliedMigrationsExistLocally(
+      localMigrations,
+      applied.map((migration) => migration.version),
+    );
     const lastApplied = applied.at(-1);
 
     if (!lastApplied) {
@@ -85,8 +91,10 @@ async function runDown(databaseUrl: string) {
     }
 
     const sql = await loadSqlFile(migration.downPath);
-    await applyStatements(client, splitSqlStatements(sql));
-    await client.query("delete from schema_migrations where version = $1", [migration.version]);
+    await withTransaction(client, async () => {
+      await executeSql(client, sql, `Migration ${migration.version} down`);
+      await client.query("delete from schema_migrations where version = $1", [migration.version]);
+    });
     console.log(`Rolled back ${migration.version} ${migration.name}`);
   });
 }

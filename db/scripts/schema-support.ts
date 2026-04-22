@@ -7,6 +7,9 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const workspaceRoot = resolve(scriptDir, "..", "..");
 const migrationsDir = join(workspaceRoot, "db", "migrations");
 const schemaPath = join(workspaceRoot, "spec", "finance_research_db_schema.sql");
+const ignoredPublicTables = new Set(["schema_migrations"]);
+
+type Queryable = Pick<Client, "query">;
 
 export type MigrationFilePair = {
   version: string;
@@ -47,31 +50,6 @@ export function loadExpectedTableNames(schemaSql: string) {
     schemaSql.matchAll(/^create table ([a-z_][a-z0-9_]*) \($/gim),
     (match) => match[1],
   ).sort();
-}
-
-export function splitSqlStatements(schemaSql: string) {
-  const statements: string[] = [];
-  let currentStatement = "";
-
-  for (const line of schemaSql.split(/\r?\n/)) {
-    currentStatement = currentStatement ? `${currentStatement}\n${line}` : line;
-
-    if (line.trim().endsWith(";")) {
-      const statement = currentStatement.trim();
-      if (statement) {
-        statements.push(statement);
-      }
-
-      currentStatement = "";
-    }
-  }
-
-  const trailingStatement = currentStatement.trim();
-  if (trailingStatement) {
-    statements.push(trailingStatement);
-  }
-
-  return statements;
 }
 
 export function redactDatabaseUrl(databaseUrl: string) {
@@ -138,7 +116,13 @@ export async function loadMigrationFiles(directory = migrationsDir) {
 
   for (const entry of entries) {
     const match = entry.match(/^(\d{4})_(.+)\.(up|down)\.sql$/);
-    if (!match) continue;
+    if (!match) {
+      if (entry.endsWith(".sql")) {
+        throw new Error(`Unexpected SQL file in migrations directory: ${entry}`);
+      }
+
+      continue;
+    }
 
     const [, version, name, direction] = match;
     const filePath = join(directory, entry);
@@ -178,31 +162,41 @@ export function assertAppliedMigrationsExistLocally(
 }
 
 export function diffTables(expectedTables: string[], installedTables: string[]) {
-  const expected = new Set(expectedTables);
-  const installed = new Set(installedTables);
+  const filteredExpected = expectedTables.filter((table) => !ignoredPublicTables.has(table));
+  const filteredInstalled = installedTables.filter((table) => !ignoredPublicTables.has(table));
+  const expected = new Set(filteredExpected);
+  const installed = new Set(filteredInstalled);
 
   return {
-    missing: expectedTables.filter((table) => !installed.has(table)),
-    extra: installedTables.filter((table) => !expected.has(table)),
+    missing: filteredExpected.filter((table) => !installed.has(table)),
+    extra: filteredInstalled.filter((table) => !expected.has(table)),
   };
 }
 
-export async function applyStatements(client: Client, statements: string[]) {
+export async function withTransaction<T>(client: Queryable, action: () => Promise<T>) {
   await client.query("begin");
 
   try {
-    for (const [index, statement] of statements.entries()) {
-      try {
-        await client.query(statement);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`Statement ${index + 1} failed: ${message}`);
-      }
-    }
-
+    const result = await action();
     await client.query("commit");
+    return result;
   } catch (error) {
     await client.query("rollback");
     throw error;
   }
+}
+
+export async function executeSql(client: Queryable, sql: string, description: string) {
+  try {
+    await client.query(sql);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${description} failed: ${message}`);
+  }
+}
+
+export async function applySqlText(client: Queryable, sql: string, description: string) {
+  await withTransaction(client, async () => {
+    await executeSql(client, sql, description);
+  });
 }

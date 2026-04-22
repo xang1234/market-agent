@@ -27,3 +27,15 @@ test("loadMigrationFiles rejects duplicate version names", async () => {
     /Duplicate migration version 0001/,
   );
 });
+
+test("loadMigrationFiles rejects unexpected sql filenames", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "fra-6al-7-2-unexpected-"));
+  await writeFile(join(dir, "0001_init.up.sql"), "select 1;");
+  await writeFile(join(dir, "0001_init.down.sql"), "select 1;");
+  await writeFile(join(dir, "0002_broken.sql"), "select 1;");
+
+  await assert.rejects(
+    () => loadMigrationFiles(dir),
+    /Unexpected SQL file in migrations directory: 0002_broken\.sql/,
+  );
+});
