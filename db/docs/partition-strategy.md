@@ -68,25 +68,23 @@ Same for `tool_call_logs`: `primary key (tool_call_id, created_at)`.
 
 This is a breaking DDL change, which is why partitioning is deferred from the
 initial schema apply (`fra-6al.7.1`) and will land as a dedicated migration
-(proposed `0002_partition_facts.up.sql`, `0003_partition_tool_call_logs.up.sql`).
+bead downstream of `fra-6al.7`.
 
 ### Self-referential FKs on `facts`
 
 `facts.supersedes` and `facts.superseded_by` reference `facts(fact_id)`.
 Postgres only supports FKs into partitioned tables if the referenced columns
-include the partition key. Options:
+include the partition key. The decision: **widen both columns to a composite
+`(fact_id, as_of)` reference**. Supersession chains are touched infrequently
+and the FK matters most during restatement audits, so the write-time cost of
+carrying the extra column is acceptable.
 
-1. **Composite FK (preferred)** — widen both columns to
-   `(supersedes_fact_id, supersedes_as_of)` and
-   `(superseded_by_fact_id, superseded_by_as_of)`. Touches every writer of
-   supersession chains.
-2. **Drop the FK, keep the column** — rely on application-level integrity
-   (already the stance for `subject_kind + subject_id` per schema-pack notes).
-3. **Trigger-based check** — expensive at write time; rejected.
+Rejected alternatives:
 
-Leaning toward (1) since supersession chains are touched infrequently and the
-FK matters most during restatement audits. Decision to be finalized in the
-partition-migration bead.
+- Dropping the FK and relying on application-level integrity (the stance for
+  `subject_kind + subject_id`) — restatement chains are higher-stakes than
+  polymorphic subject refs; silent orphans would corrupt the audit trail.
+- Trigger-based integrity checks — expensive at write time on the hot path.
 
 ### Retention policy
 
@@ -144,17 +142,11 @@ bound derived from `now()`.
 
 ### Index strategy per partition
 
-Local indexes (Postgres creates a matching index on every partition when
-declared on the parent). Keep the schema-pack indexes unchanged:
-
-- `facts_subject_metric_idx (subject_kind, subject_id, metric_id)`
-- `facts_metric_period_idx (metric_id, period_end desc)`
-- `facts_asof_idx (as_of desc)` — often redundant under partitioning since
-  the partition key itself scopes `as_of` ranges. Keep for now; revisit if
-  write amplification becomes measurable.
-- `facts_verification_idx (verification_status)`
-- `tool_call_logs_thread_idx (thread_id, created_at desc)`
-- `tool_call_logs_agent_idx (agent_id, created_at desc)`
+Keep the schema-pack indexes as declared — Postgres propagates them to every
+current and future partition. One case to revisit: `facts_asof_idx (as_of desc)`
+is partially redundant under partitioning because the partition key itself
+scopes `as_of` ranges. Keep for now; drop if write amplification becomes
+measurable.
 
 ## Verification
 

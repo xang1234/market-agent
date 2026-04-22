@@ -2,6 +2,11 @@
 -- Standalone example; does NOT apply to the normative schema pack.
 -- Run against an empty Postgres 15+ database to exercise the pattern.
 --
+-- The enum types and minimal metrics/sources parents below are reduced
+-- copies of spec/finance_research_db_schema.sql (enums: lines 16-46;
+-- metrics/sources: lines 152-177). They exist so the FKs resolve in
+-- isolation — do not treat them as canonical definitions.
+--
 -- Usage:
 --   createdb partition_demo
 --   psql partition_demo -f db/docs/examples/partition-facts.sql
@@ -16,7 +21,6 @@ create type verification_status as enum ('authoritative', 'candidate', 'corrobor
 create type freshness_class as enum ('real_time', 'delayed_15m', 'eod', 'filing_time', 'stale');
 create type coverage_level as enum ('full', 'partial', 'sparse', 'unavailable');
 
--- Minimal parents so the facts parent's FKs resolve.
 create table metrics (
   metric_id uuid primary key default gen_random_uuid(),
   metric_key text not null unique
@@ -26,8 +30,8 @@ create table sources (
   provider text not null
 );
 
--- Parent partitioned table. Note the composite primary key — as_of must be
--- part of every unique constraint on a range-partitioned parent.
+-- as_of must be part of the primary key: Postgres requires the partition
+-- column in every unique constraint on a range-partitioned parent.
 create table facts (
   fact_id uuid not null default gen_random_uuid(),
   subject_kind subject_kind not null,
@@ -52,29 +56,26 @@ create table facts (
   primary key (fact_id, as_of)
 ) partition by range (as_of);
 
--- Local indexes propagate to every partition, current and future.
+-- Local indexes propagate to every current and future partition.
 create index facts_subject_metric_idx on facts(subject_kind, subject_id, metric_id);
 create index facts_metric_period_idx on facts(metric_id, period_end desc);
 create index facts_asof_idx on facts(as_of desc);
 create index facts_verification_idx on facts(verification_status);
 
--- Three monthly partitions covering a demo window.
 create table facts_2026_02 partition of facts
-  for values from ('2026-02-01T00:00:00Z') to ('2026-03-01T00:00:00Z');
+  for values from ('2026-02-01'::timestamptz) to ('2026-03-01'::timestamptz);
 create table facts_2026_03 partition of facts
-  for values from ('2026-03-01T00:00:00Z') to ('2026-04-01T00:00:00Z');
+  for values from ('2026-03-01'::timestamptz) to ('2026-04-01'::timestamptz);
 create table facts_2026_04 partition of facts
-  for values from ('2026-04-01T00:00:00Z') to ('2026-05-01T00:00:00Z');
+  for values from ('2026-04-01'::timestamptz) to ('2026-05-01'::timestamptz);
 
--- Default catch-all. In production this partition is monitored; rows here
--- mean someone forgot to provision the next month's partition.
+-- Rows landing in `default` indicate a missed monthly provision; the
+-- observability worker should alert and require a move out.
 create table facts_default partition of facts default;
 
--- Seed a source and metric so inserts succeed.
 insert into metrics (metric_key) values ('revenue');
 insert into sources (provider) values ('sec_edgar');
 
--- Probe rows in three different months so each partition receives data.
 insert into facts (
   subject_kind, subject_id, metric_id, period_kind, value_num, unit,
   as_of, observed_at, source_id, method,
@@ -96,9 +97,9 @@ select
   'full',
   0.95
 from unnest(array[
-  '2026-02-15T00:00:00Z'::timestamptz,
-  '2026-03-15T00:00:00Z'::timestamptz,
-  '2026-04-15T00:00:00Z'::timestamptz
+  '2026-02-15'::timestamptz,
+  '2026-03-15'::timestamptz,
+  '2026-04-15'::timestamptz
 ]) with ordinality as t(ts, g);
 
 -- Sanity check: each partition has one row.
@@ -107,10 +108,19 @@ select tableoid::regclass as partition, count(*) from facts group by 1 order by 
 -- Pruning proof: well-formed query touches one partition.
 explain (costs off)
 select * from facts
-where as_of >= '2026-03-01T00:00:00Z'
-  and as_of <  '2026-04-01T00:00:00Z';
+where as_of >= '2026-03-01'::timestamptz
+  and as_of <  '2026-04-01'::timestamptz;
 
 -- Anti-pattern: missing as_of predicate forces a scan over every partition.
 explain (costs off)
 select * from facts
 where subject_kind = 'issuer';
+
+-- Retention pattern (facts-specific): DETACH to archive, never DROP.
+-- The detached partition becomes an ordinary table — export it to object
+-- storage, record the manifest, then drop the local copy only after the
+-- archive is durable. In production, an observability worker runs this.
+alter table facts detach partition facts_2026_02;
+-- e.g. \copy facts_2026_02 to 'archive/facts_2026_02.csv' with csv header;
+--      insert into ingestion_batches (archive_uri, ...) values (...);
+-- Only drop the detached table once the archive is confirmed durable.
