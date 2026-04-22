@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useRightRail } from '../shell/useRightRail'
-import { useRequestProtectedAction } from '../shell/useAuthInterrupt'
+import {
+  useRequestProtectedAction,
+  useResumedProtectedAction,
+} from '../shell/useAuthInterrupt'
 
 // Home is a findings-first surface. This bead (P0.1.1) only needs the
 // scaffolded page — actual Home-feed work is P4.4.
@@ -22,11 +25,18 @@ export function HomePage() {
     return () => setContent(null)
   }, [setContent])
 
+  useResumedProtectedAction('save-to-watchlist', (action) => {
+    setSavedSymbol(action.symbol)
+  })
+
   const handleSave = () => {
     requestProtectedAction({
       title: 'Sign in to save to watchlist',
       description: 'Watchlists are session-scoped. Signing in will add AAPL and keep you on Home.',
-      action: () => setSavedSymbol('AAPL'),
+      action: {
+        kind: 'save-to-watchlist',
+        symbol: 'AAPL',
+      },
     })
   }
 
