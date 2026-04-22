@@ -1,0 +1,15 @@
+# Playwright MCP test artifacts (local only)
+.playwright-mcp/
+
+# Reference videos — large binaries, fetch separately
+vid1.mp4
+vid2.mp4
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp

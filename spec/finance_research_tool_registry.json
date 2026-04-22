@@ -1,0 +1,2496 @@
+{
+  "version": "1.0.0",
+  "description": "Normative tool registry for reader and analyst bundles. Tools are backend data and action surfaces; Block[] is the separate response artifact contract.",
+  "design_rules": [
+    "System selects tool bundle; model selects tools within the bundle.",
+    "Reader-only tools may access raw untrusted content; analyst-facing tools may not.",
+    "Tool inputs and outputs must validate against JSON Schema.",
+    "All outputs must be traceable to source refs or deterministic computations.",
+    "Side-effecting tools return pending actions unless policy explicitly auto-approves them.",
+    "Non-read-only tools remain write-intent policy boundaries even when approval_required is false."
+  ],
+  "bundles": [
+    {
+      "bundle_id": "quote_lookup",
+      "description": "Fast quote and profile lookups"
+    },
+    {
+      "bundle_id": "single_subject_analysis",
+      "description": "Single issuer/instrument/theme analysis"
+    },
+    {
+      "bundle_id": "peer_comparison",
+      "description": "Peer performance and metrics comparison"
+    },
+    {
+      "bundle_id": "theme_research",
+      "description": "Theme or macro-topic research"
+    },
+    {
+      "bundle_id": "segment_deep_dive",
+      "description": "Segment composition and trajectory analysis"
+    },
+    {
+      "bundle_id": "document_research",
+      "description": "Research based on claims, events, and evidence bundles"
+    },
+    {
+      "bundle_id": "filing_research",
+      "description": "Filing-centric analysis"
+    },
+    {
+      "bundle_id": "screener",
+      "description": "Screen execution and follow-up"
+    },
+    {
+      "bundle_id": "agent_management",
+      "description": "Agent CRUD and inspections"
+    },
+    {
+      "bundle_id": "alert_management",
+      "description": "Alert CRUD and approvals"
+    },
+    {
+      "bundle_id": "analyze_template_run",
+      "description": "Analyze template execution"
+    }
+  ],
+  "tools": [
+    {
+      "name": "resolve_subjects",
+      "audience": "analyst",
+      "bundles": [
+        "quote_lookup",
+        "single_subject_analysis",
+        "peer_comparison",
+        "theme_research",
+        "segment_deep_dive",
+        "document_research",
+        "filing_research",
+        "screener",
+        "analyze_template_run"
+      ],
+      "description": "Resolve free-form text into canonical subject refs.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "low",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "allow_kinds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "subjects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "subject_ref": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "issuer",
+                        "instrument",
+                        "listing",
+                        "theme",
+                        "macro_topic",
+                        "portfolio",
+                        "screen"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "id"
+                  ],
+                  "additionalProperties": false
+                },
+                "display_name": {
+                  "type": "string"
+                },
+                "confidence": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "subject_ref",
+                "display_name",
+                "confidence"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "unresolved": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "subjects",
+          "unresolved"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "resolve_period",
+      "audience": "analyst",
+      "bundles": [
+        "single_subject_analysis",
+        "peer_comparison",
+        "theme_research",
+        "segment_deep_dive",
+        "document_research",
+        "filing_research",
+        "analyze_template_run"
+      ],
+      "description": "Resolve free-form time expressions into canonical period objects.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "low",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "subject_ref": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issuer",
+                  "instrument",
+                  "listing",
+                  "theme",
+                  "macro_topic",
+                  "portfolio",
+                  "screen"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "alternatives": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "period"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "get_quote",
+      "audience": "analyst",
+      "bundles": [
+        "quote_lookup",
+        "single_subject_analysis",
+        "peer_comparison",
+        "theme_research",
+        "analyze_template_run"
+      ],
+      "description": "Return latest quote-related facts for a tradable subject.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "low",
+      "freshness_expectation": "seconds_to_minutes",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_ref": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issuer",
+                  "instrument",
+                  "listing",
+                  "theme",
+                  "macro_topic",
+                  "portfolio",
+                  "screen"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "subject_ref"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "facts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "facts"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "get_series",
+      "audience": "analyst",
+      "bundles": [
+        "single_subject_analysis",
+        "peer_comparison",
+        "theme_research",
+        "segment_deep_dive",
+        "analyze_template_run"
+      ],
+      "description": "Return normalized time series for one or more subjects.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "seconds_to_days",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_refs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "issuer",
+                    "instrument",
+                    "listing",
+                    "theme",
+                    "macro_topic",
+                    "portfolio",
+                    "screen"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "required": [
+                "kind",
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "range": {
+            "type": "string"
+          },
+          "interval": {
+            "type": "string"
+          },
+          "basis": {
+            "type": "string"
+          },
+          "normalization": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject_refs",
+          "range",
+          "interval",
+          "basis",
+          "normalization"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "as_of",
+          "series",
+          "source_ids"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "get_performance_series",
+      "audience": "analyst",
+      "bundles": [
+        "peer_comparison",
+        "theme_research",
+        "analyze_template_run"
+      ],
+      "description": "Return aligned performance series with a consistent basis and normalization.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_refs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "issuer",
+                    "instrument",
+                    "listing",
+                    "theme",
+                    "macro_topic",
+                    "portfolio",
+                    "screen"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "required": [
+                "kind",
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "range": {
+            "type": "string"
+          },
+          "basis": {
+            "type": "string"
+          },
+          "normalize": {
+            "type": "string",
+            "enum": [
+              "pct_return",
+              "index_100",
+              "raw"
+            ]
+          }
+        },
+        "required": [
+          "subject_refs",
+          "range",
+          "basis",
+          "normalize"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "as_of",
+          "series",
+          "source_ids"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "get_company_profile",
+      "audience": "analyst",
+      "bundles": [
+        "quote_lookup",
+        "single_subject_analysis",
+        "peer_comparison",
+        "analyze_template_run"
+      ],
+      "description": "Return issuer profile and key descriptors.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "low",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_ref": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issuer",
+                  "instrument",
+                  "listing",
+                  "theme",
+                  "macro_topic",
+                  "portfolio",
+                  "screen"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "subject_ref"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "profile": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "profile",
+          "source_ids"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "get_statement_facts",
+      "audience": "analyst",
+      "bundles": [
+        "single_subject_analysis",
+        "peer_comparison",
+        "segment_deep_dive",
+        "analyze_template_run"
+      ],
+      "description": "Return normalized statement facts for requested periods.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_ref": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issuer",
+                  "instrument",
+                  "listing",
+                  "theme",
+                  "macro_topic",
+                  "portfolio",
+                  "screen"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          "statement": {
+            "type": "string",
+            "enum": [
+              "income",
+              "balance",
+              "cashflow"
+            ]
+          },
+          "periods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "as_reported",
+              "as_restated"
+            ]
+          }
+        },
+        "required": [
+          "subject_ref",
+          "statement",
+          "periods",
+          "basis"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "facts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "facts",
+          "source_ids"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "get_key_stats",
+      "audience": "analyst",
+      "bundles": [
+        "single_subject_analysis",
+        "peer_comparison",
+        "analyze_template_run"
+      ],
+      "description": "Return key stats and ratios with as-of times and source refs.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "low",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_ref": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issuer",
+                  "instrument",
+                  "listing",
+                  "theme",
+                  "macro_topic",
+                  "portfolio",
+                  "screen"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "subject_ref"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "facts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "facts"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "get_segment_facts",
+      "audience": "analyst",
+      "bundles": [
+        "segment_deep_dive",
+        "single_subject_analysis",
+        "peer_comparison",
+        "analyze_template_run"
+      ],
+      "description": "Return segment-level facts, definitions, and warnings.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "high",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_ref": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issuer",
+                  "instrument",
+                  "listing",
+                  "theme",
+                  "macro_topic",
+                  "portfolio",
+                  "screen"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          "periods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "axis": {
+            "type": "string",
+            "enum": [
+              "business",
+              "geography"
+            ]
+          }
+        },
+        "required": [
+          "subject_ref",
+          "periods",
+          "axis"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "facts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "segment_definitions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "coverage_warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "facts",
+          "segment_definitions",
+          "coverage_warnings"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "get_analyst_consensus",
+      "audience": "analyst",
+      "bundles": [
+        "single_subject_analysis",
+        "peer_comparison",
+        "analyze_template_run"
+      ],
+      "description": "Return analyst rating distribution, targets, and coverage warnings.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "daily_to_weekly",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_ref": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issuer",
+                  "instrument",
+                  "listing",
+                  "theme",
+                  "macro_topic",
+                  "portfolio",
+                  "screen"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "subject_ref"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "rating_distribution": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "price_target": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "analyst_count": {
+            "type": "integer"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "coverage_warning": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rating_distribution",
+          "price_target",
+          "analyst_count",
+          "as_of"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "get_eps_surprise",
+      "audience": "analyst",
+      "bundles": [
+        "single_subject_analysis",
+        "analyze_template_run"
+      ],
+      "description": "Return estimate versus actual EPS facts by quarter.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "low",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_ref": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issuer",
+                  "instrument",
+                  "listing",
+                  "theme",
+                  "macro_topic",
+                  "portfolio",
+                  "screen"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          "n_quarters": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 12
+          }
+        },
+        "required": [
+          "subject_ref",
+          "n_quarters"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "facts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "facts"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "get_holders",
+      "audience": "analyst",
+      "bundles": [
+        "single_subject_analysis",
+        "analyze_template_run"
+      ],
+      "description": "Return institutional or insider holder information.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_ref": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issuer",
+                  "instrument",
+                  "listing",
+                  "theme",
+                  "macro_topic",
+                  "portfolio",
+                  "screen"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "institutional",
+              "insider"
+            ]
+          }
+        },
+        "required": [
+          "subject_ref",
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "holders": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "holders"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "get_claims",
+      "audience": "analyst",
+      "bundles": [
+        "document_research",
+        "theme_research",
+        "filing_research",
+        "single_subject_analysis",
+        "agent_management",
+        "analyze_template_run"
+      ],
+      "description": "Return claims for a set of subjects with predicate and time filters.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_refs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "issuer",
+                    "instrument",
+                    "listing",
+                    "theme",
+                    "macro_topic",
+                    "portfolio",
+                    "screen"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "required": [
+                "kind",
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "predicates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "range": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "trust_min": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": true
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "claims": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "claims"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "get_claim_clusters",
+      "audience": "analyst",
+      "bundles": [
+        "document_research",
+        "theme_research",
+        "agent_management",
+        "analyze_template_run"
+      ],
+      "description": "Return clustered claims for deduped research and Home feed construction.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_refs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "issuer",
+                    "instrument",
+                    "listing",
+                    "theme",
+                    "macro_topic",
+                    "portfolio",
+                    "screen"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "required": [
+                "kind",
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "range": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [],
+        "additionalProperties": true
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "clusters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "clusters"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "get_events",
+      "audience": "analyst",
+      "bundles": [
+        "document_research",
+        "theme_research",
+        "filing_research",
+        "single_subject_analysis",
+        "agent_management",
+        "analyze_template_run"
+      ],
+      "description": "Return structured events for one or more subjects.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_refs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "issuer",
+                    "instrument",
+                    "listing",
+                    "theme",
+                    "macro_topic",
+                    "portfolio",
+                    "screen"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "required": [
+                "kind",
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "event_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "range": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [],
+        "additionalProperties": true
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "get_entity_impacts",
+      "audience": "analyst",
+      "bundles": [
+        "theme_research",
+        "document_research",
+        "agent_management",
+        "analyze_template_run"
+      ],
+      "description": "Return impact edges for routing and prioritization.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_refs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "issuer",
+                    "instrument",
+                    "listing",
+                    "theme",
+                    "macro_topic",
+                    "portfolio",
+                    "screen"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "required": [
+                "kind",
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "range": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [],
+        "additionalProperties": true
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "impacts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "impacts"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "get_evidence_bundle",
+      "audience": "analyst",
+      "bundles": [
+        "document_research",
+        "filing_research",
+        "theme_research",
+        "single_subject_analysis",
+        "analyze_template_run"
+      ],
+      "description": "Return verified evidence locators and supporting documents for claims or events.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "claim_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "event_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [],
+        "additionalProperties": true
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "bundle_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "documents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "bundle_id",
+          "documents",
+          "evidence"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "get_fact_lineage",
+      "audience": "analyst",
+      "bundles": [
+        "single_subject_analysis",
+        "filing_research",
+        "analyze_template_run"
+      ],
+      "description": "Return provenance and supersession history for a fact.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "low",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "fact_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "fact_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "lineage": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "lineage"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "get_coverage_report",
+      "audience": "analyst",
+      "bundles": [
+        "single_subject_analysis",
+        "peer_comparison",
+        "analyze_template_run"
+      ],
+      "description": "Return freshness, entitlement, coverage, and warning metadata for a subject.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "low",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_ref": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issuer",
+                  "instrument",
+                  "listing",
+                  "theme",
+                  "macro_topic",
+                  "portfolio",
+                  "screen"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "subject_ref"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "coverage": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "coverage"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "get_peer_set",
+      "audience": "analyst",
+      "bundles": [
+        "peer_comparison",
+        "single_subject_analysis",
+        "analyze_template_run"
+      ],
+      "description": "Return a ranked peer set for comparison.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "low",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_ref": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issuer",
+                  "instrument",
+                  "listing",
+                  "theme",
+                  "macro_topic",
+                  "portfolio",
+                  "screen"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          "criteria": {
+            "type": "string",
+            "enum": [
+              "sector",
+              "industry",
+              "size",
+              "custom"
+            ]
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          }
+        },
+        "required": [
+          "subject_ref",
+          "criteria",
+          "n"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "peers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "peers"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "screen",
+      "audience": "analyst",
+      "bundles": [
+        "screener",
+        "theme_research",
+        "agent_management"
+      ],
+      "description": "Execute a screen and return matches and matched facts.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "filters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "universe": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "sort": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "required": [
+          "filters",
+          "sort",
+          "limit"
+        ],
+        "additionalProperties": true
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "total_count": {
+            "type": "integer"
+          },
+          "matches": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "total_count",
+          "matches"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "search_raw_documents",
+      "audience": "reader",
+      "bundles": [
+        "document_research",
+        "filing_research",
+        "theme_research",
+        "agent_management"
+      ],
+      "description": "Reader-only raw document search surface for untrusted text retrieval before extraction.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "subject_refs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "issuer",
+                    "instrument",
+                    "listing",
+                    "theme",
+                    "macro_topic",
+                    "portfolio",
+                    "screen"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "required": [
+                "kind",
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "range": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "source_policy": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": true
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "documents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "documents"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "fetch_raw_document",
+      "audience": "reader",
+      "bundles": [
+        "document_research",
+        "filing_research",
+        "theme_research",
+        "agent_management"
+      ],
+      "description": "Reader-only raw document fetch surface for parsing or extraction.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "low",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "document_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "document": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "raw_blob_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "document",
+          "raw_blob_url"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "extract_mentions",
+      "audience": "reader",
+      "bundles": [
+        "document_research",
+        "filing_research",
+        "theme_research",
+        "agent_management"
+      ],
+      "description": "Extract subject mentions from a raw document.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "schema_hint": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "document_id"
+        ],
+        "additionalProperties": true
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "items",
+          "source_ids"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "extract_claims",
+      "audience": "reader",
+      "bundles": [
+        "document_research",
+        "filing_research",
+        "theme_research",
+        "agent_management"
+      ],
+      "description": "Extract claims from a raw document.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "schema_hint": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "document_id"
+        ],
+        "additionalProperties": true
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "items",
+          "source_ids"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "extract_candidate_facts",
+      "audience": "reader",
+      "bundles": [
+        "document_research",
+        "filing_research",
+        "theme_research",
+        "agent_management"
+      ],
+      "description": "Extract candidate facts from a raw document.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "schema_hint": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "document_id"
+        ],
+        "additionalProperties": true
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "items",
+          "source_ids"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "extract_events",
+      "audience": "reader",
+      "bundles": [
+        "document_research",
+        "filing_research",
+        "theme_research",
+        "agent_management"
+      ],
+      "description": "Extract event candidates from a raw document.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "schema_hint": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "document_id"
+        ],
+        "additionalProperties": true
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "items",
+          "source_ids"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "classify_sentiment",
+      "audience": "reader",
+      "bundles": [
+        "document_research",
+        "filing_research",
+        "theme_research",
+        "agent_management"
+      ],
+      "description": "Classify sentiment and stance from a raw social document.",
+      "read_only": true,
+      "approval_required": false,
+      "cost_class": "medium",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "schema_hint": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "document_id"
+        ],
+        "additionalProperties": true
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "items",
+          "source_ids"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "create_alert",
+      "audience": "analyst",
+      "bundles": [
+        "alert_management"
+      ],
+      "description": "Approval-sensitive write-intent tool that returns a pending action until orchestration or the user confirms it.",
+      "read_only": false,
+      "approval_required": true,
+      "cost_class": "low",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "subject_ref": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issuer",
+                  "instrument",
+                  "listing",
+                  "theme",
+                  "macro_topic",
+                  "portfolio",
+                  "screen"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          "rule": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "subject_ref",
+          "rule",
+          "channels"
+        ],
+        "additionalProperties": true
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "pending_action_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "confirmation_required": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pending_action_id",
+          "confirmation_required"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "add_to_watchlist",
+      "audience": "analyst",
+      "bundles": [
+        "alert_management",
+        "analyze_template_run"
+      ],
+      "description": "Write-intent tool that may be auto-approved by policy but remains a policy boundary.",
+      "read_only": false,
+      "approval_required": false,
+      "cost_class": "low",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "watchlist_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "subject_ref": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "issuer",
+                  "instrument",
+                  "listing",
+                  "theme",
+                  "macro_topic",
+                  "portfolio",
+                  "screen"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "watchlist_id",
+          "subject_ref"
+        ],
+        "additionalProperties": false
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "pending_action_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "confirmation_required": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pending_action_id",
+          "confirmation_required"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    },
+    {
+      "name": "create_agent",
+      "audience": "analyst",
+      "bundles": [
+        "agent_management"
+      ],
+      "description": "Approval-sensitive write-intent tool that returns a pending action until explicit approval.",
+      "read_only": false,
+      "approval_required": true,
+      "cost_class": "low",
+      "freshness_expectation": "varies",
+      "input_json_schema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "thesis": {
+            "type": "string"
+          },
+          "universe": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "cadence": {
+            "type": "string"
+          },
+          "prompt_template": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "thesis",
+          "universe",
+          "cadence"
+        ],
+        "additionalProperties": true
+      },
+      "output_json_schema": {
+        "type": "object",
+        "properties": {
+          "pending_action_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "confirmation_required": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pending_action_id",
+          "confirmation_required"
+        ],
+        "additionalProperties": false
+      },
+      "error_codes": [
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "UPSTREAM_UNAVAILABLE",
+        "RATE_LIMITED",
+        "POLICY_BLOCKED"
+      ]
+    }
+  ]
+}

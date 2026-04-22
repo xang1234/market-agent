@@ -1,0 +1,1115 @@
+openapi: 3.1.0
+info:
+  title: Finance Research App API
+  version: 1.0.0
+  description: Core contracts for subjects, market, fundamentals, evidence, snapshots, chat, analyze, agents, home, watchlists, and screener. The /v1 API is the client-facing backend-for-frontend surface.
+servers:
+  - url: https://api.example.com
+security:
+  - bearerAuth: []
+# Contract rule: Clients must not call third-party providers directly.
+tags:
+  - name: Subjects
+  - name: Market
+  - name: Fundamentals
+  - name: Evidence
+  - name: Snapshots
+  - name: Chat
+  - name: Analyze
+  - name: Agents
+  - name: Home
+  - name: Watchlists
+  - name: Screener
+paths:
+  /v1/subjects/resolve:
+    post:
+      tags: [Subjects]
+      summary: Resolve free-text into subject candidates
+      operationId: resolveSubjects
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text:
+                  type: string
+                allow_kinds:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/SubjectKind'
+      responses:
+        '200':
+          description: Resolved subject candidates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subjects:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ResolvedSubject'
+                  unresolved:
+                    type: array
+                    items:
+                      type: string
+  /v1/market/quote:
+    get:
+      tags: [Market]
+      summary: Get latest quote for a subject
+      operationId: getQuote
+      parameters:
+        - in: query
+          name: subject_kind
+          required: true
+          schema:
+            $ref: '#/components/schemas/SubjectKind'
+        - in: query
+          name: subject_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Latest quote facts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FactListResponse'
+  /v1/market/series:
+    post:
+      tags: [Market]
+      summary: Get a normalized time series
+      operationId: getSeries
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject_refs, range, interval, basis, normalization]
+              properties:
+                subject_refs:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/SubjectRef'
+                range:
+                  type: string
+                interval:
+                  type: string
+                basis:
+                  type: string
+                normalization:
+                  type: string
+      responses:
+        '200':
+          description: Time series response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SeriesResponse'
+  /v1/fundamentals/profile:
+    get:
+      tags: [Fundamentals]
+      summary: Get company profile
+      operationId: getCompanyProfile
+      parameters:
+        - in: query
+          name: subject_kind
+          required: true
+          schema:
+            $ref: '#/components/schemas/SubjectKind'
+        - in: query
+          name: subject_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Company profile
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/fundamentals/statements:
+    post:
+      tags: [Fundamentals]
+      summary: Get statement facts
+      operationId: getStatementFacts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject_ref, statement, periods, basis]
+              properties:
+                subject_ref:
+                  $ref: '#/components/schemas/SubjectRef'
+                statement:
+                  type: string
+                  enum: [income, balance, cashflow]
+                periods:
+                  type: array
+                  items:
+                    type: string
+                basis:
+                  type: string
+                  enum: [as_reported, as_restated]
+      responses:
+        '200':
+          description: Statement facts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FactListResponse'
+  /v1/evidence/claims/search:
+    post:
+      tags: [Evidence]
+      summary: Search claims by subject, predicate, and time range
+      operationId: searchClaims
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subject_refs:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/SubjectRef'
+                predicates:
+                  type: array
+                  items:
+                    type: string
+                range:
+                  type: object
+                  properties:
+                    start:
+                      type: string
+                      format: date-time
+                    end:
+                      type: string
+                      format: date-time
+                trust_min:
+                  type: string
+                  enum: [primary, secondary, tertiary, user]
+      responses:
+        '200':
+          description: Matching claims
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  claims:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Claim'
+  /v1/evidence/events/search:
+    post:
+      tags: [Evidence]
+      summary: Search events
+      operationId: searchEvents
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subject_refs:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/SubjectRef'
+                event_types:
+                  type: array
+                  items:
+                    type: string
+                range:
+                  type: object
+                  properties:
+                    start:
+                      type: string
+                      format: date-time
+                    end:
+                      type: string
+                      format: date-time
+      responses:
+        '200':
+          description: Matching events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Event'
+  /v1/evidence/documents/{documentId}:
+    get:
+      tags: [Evidence]
+      summary: Get document metadata and parse status
+      operationId: getDocument
+      parameters:
+        - in: path
+          name: documentId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Document metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+  /v1/evidence/evidence-bundles:
+    post:
+      tags: [Evidence]
+      summary: Build an evidence bundle from claim or event refs
+      operationId: buildEvidenceBundle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                claim_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                event_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        '200':
+          description: Evidence bundle
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bundle_id:
+                    type: string
+                    format: uuid
+                  documents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Document'
+                  evidence:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+  /v1/snapshots/{snapshotId}:
+    get:
+      tags: [Snapshots]
+      summary: Fetch a sealed snapshot manifest
+      operationId: getSnapshot
+      parameters:
+        - in: path
+          name: snapshotId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Snapshot manifest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotManifest'
+  /v1/snapshots/{snapshotId}/transform:
+    post:
+      tags: [Snapshots]
+      summary: Apply an allowed transform to a sealed snapshot
+      description: Snapshot transforms are backend-mediated interactions over sealed snapshots.
+      operationId: transformSnapshot
+      parameters:
+        - in: path
+          name: snapshotId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transform]
+              properties:
+                transform:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: Transformed block data or series data
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '409':
+          description: Transform requires refresh
+  /v1/chat/threads:
+    get:
+      tags: [Chat]
+      summary: List chat threads
+      operationId: listThreads
+      responses:
+        '200':
+          description: Chat threads
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  threads:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChatThread'
+    post:
+      tags: [Chat]
+      summary: Create a thread
+      operationId: createThread
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                primary_subject_ref:
+                  $ref: '#/components/schemas/SubjectRef'
+                title:
+                  type: string
+      responses:
+        '201':
+          description: Thread created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThread'
+  /v1/chat/threads/{threadId}/messages:
+    post:
+      tags: [Chat]
+      summary: Append a user message and start a run
+      operationId: createMessage
+      parameters:
+        - in: path
+          name: threadId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                attachments:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                    format: uuid
+  /v1/chat/threads/{threadId}/stream:
+    get:
+      tags: [Chat]
+      summary: SSE stream for a thread run
+      description: SSE chat streaming is a backend-mediated run transport.
+      operationId: streamThread
+      parameters:
+        - in: path
+          name: threadId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: run_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: text/event-stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                default:
+                  value: |
+                    event: turn.started
+                    data: {"run_id":"..."}
+
+                    event: snapshot.sealed
+                    data: {"snapshot_id":"..."}
+
+                    event: block.added
+                    data: {"id":"b1","kind":"section"}
+
+                    event: block.delta
+                    data: {"id":"b2","segment":{"type":"text","text":"Revenue grew "}}
+
+                    event: turn.completed
+                    data: {"message_id":"..."}
+  /v1/analyze/templates:
+    get:
+      tags: [Analyze]
+      summary: List analyze templates
+      operationId: listAnalyzeTemplates
+      responses:
+        '200':
+          description: Templates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  templates:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AnalyzeTemplate'
+    post:
+      tags: [Analyze]
+      summary: Create analyze template
+      operationId: createAnalyzeTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalyzeTemplateInput'
+      responses:
+        '201':
+          description: Created template
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyzeTemplate'
+  /v1/analyze/runs:
+    post:
+      tags: [Analyze]
+      summary: Run an analyze template against a subject
+      operationId: runAnalyzeTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [template_id, primary_subject_ref]
+              properties:
+                template_id:
+                  type: string
+                  format: uuid
+                primary_subject_ref:
+                  $ref: '#/components/schemas/SubjectRef'
+      responses:
+        '202':
+          description: Analyze accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                    format: uuid
+  /v1/agents:
+    get:
+      tags: [Agents]
+      summary: List agents
+      operationId: listAgents
+      responses:
+        '200':
+          description: Agent list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Agent'
+    post:
+      tags: [Agents]
+      summary: Create agent
+      operationId: createAgent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentInput'
+      responses:
+        '201':
+          description: Created agent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+  /v1/agents/{agentId}/findings:
+    get:
+      tags: [Agents]
+      summary: List findings for an agent
+      operationId: listAgentFindings
+      parameters:
+        - in: path
+          name: agentId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Findings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  findings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Finding'
+  /v1/agents/{agentId}/activity:
+    get:
+      tags: [Agents]
+      summary: List run activity for an agent
+      operationId: listAgentActivity
+      parameters:
+        - in: path
+          name: agentId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Activity items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  activity:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RunActivity'
+  /v1/home/feed:
+    get:
+      tags: [Home]
+      summary: Get deduped findings-first home feed
+      operationId: getHomeFeed
+      responses:
+        '200':
+          description: Home feed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HomeFeedItem'
+  /v1/watchlists:
+    get:
+      tags: [Watchlists]
+      summary: List watchlists
+      operationId: listWatchlists
+      responses:
+        '200':
+          description: Watchlists
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  watchlists:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Watchlist'
+    post:
+      tags: [Watchlists]
+      summary: Create watchlist
+      operationId: createWatchlist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WatchlistInput'
+      responses:
+        '201':
+          description: Created watchlist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Watchlist'
+  /v1/screener/search:
+    post:
+      tags: [Screener]
+      summary: Execute a screen
+      operationId: runScreen
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filters, sort, limit]
+              properties:
+                filters:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+                universe:
+                  type: object
+                  additionalProperties: true
+                sort:
+                  type: object
+                  additionalProperties: true
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 500
+      responses:
+        '200':
+          description: Screen results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_count:
+                    type: integer
+                  matches:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    SubjectKind:
+      type: string
+      description: Canonical subject discriminator. Ticker is a listing locator, not canonical identity.
+      enum: [issuer, instrument, listing, theme, macro_topic, portfolio, screen]
+    SubjectRef:
+      $ref: './finance_research_block_schema.json#/$defs/SubjectRef'
+    ResolvedSubject:
+      type: object
+      description: Resolver result carrying a canonical subject reference plus any lower-confidence alternatives.
+      properties:
+        subject_ref:
+          $ref: '#/components/schemas/SubjectRef'
+        display_name:
+          type: string
+        confidence:
+          type: number
+        alternatives:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubjectRef'
+    Fact:
+      type: object
+      description: Facts are the unit of truth for displayed values.
+      properties:
+        fact_id:
+          type: string
+          format: uuid
+        metric_key:
+          type: string
+        value_num:
+          type: number
+        value_text:
+          type: string
+        unit:
+          type: string
+        currency:
+          type: string
+        as_of:
+          type: string
+          format: date-time
+        source_id:
+          type: string
+          format: uuid
+        verification_status:
+          type: string
+        freshness_class:
+          type: string
+        coverage_level:
+          type: string
+    FactListResponse:
+      type: object
+      properties:
+        facts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Fact'
+    SeriesPoint:
+      type: object
+      properties:
+        x:
+          oneOf:
+            - type: string
+            - type: number
+        y:
+          type: number
+    SeriesResponse:
+      type: object
+      properties:
+        snapshot_compatible:
+          type: boolean
+        as_of:
+          type: string
+          format: date-time
+        series:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              points:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SeriesPoint'
+    Claim:
+      type: object
+      description: Claims are extracted assertions from evidence, not canonical truth.
+      properties:
+        claim_id:
+          type: string
+          format: uuid
+        predicate:
+          type: string
+        text_canonical:
+          type: string
+        polarity:
+          type: string
+        modality:
+          type: string
+        confidence:
+          type: number
+        status:
+          type: string
+    Event:
+      type: object
+      description: Events are state changes assembled from claims and source references.
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+        occurred_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+    Document:
+      type: object
+      properties:
+        document_id:
+          type: string
+          format: uuid
+        source_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+        title:
+          type: string
+        author:
+          type: string
+        published_at:
+          type: string
+          format: date-time
+        parse_status:
+          type: string
+    SnapshotManifest:
+      type: object
+      description: Snapshot manifests seal the exact fact, claim, event, and source references that support an answer or finding at a specific as_of.
+      properties:
+        snapshot_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        subject_refs:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubjectRef'
+        as_of:
+          type: string
+          format: date-time
+        basis:
+          type: string
+        normalization:
+          type: string
+        coverage_start:
+          type: string
+          format: date-time
+        source_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        allowed_transforms:
+          type: object
+          additionalProperties: true
+    BlockEnvelope:
+      type: object
+      properties:
+        blocks:
+          type: array
+          items:
+            $ref: './finance_research_block_schema.json#/$defs/Block'
+    AnalyzeTemplateInput:
+      type: object
+      required: [name, prompt_template, source_categories]
+      properties:
+        name:
+          type: string
+        prompt_template:
+          type: string
+        source_categories:
+          type: array
+          items:
+            type: string
+        added_subject_refs:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubjectRef'
+        block_layout_hint:
+          type: object
+          additionalProperties: true
+        peer_policy:
+          type: object
+          additionalProperties: true
+        disclosure_policy:
+          type: object
+          additionalProperties: true
+    AnalyzeTemplate:
+      allOf:
+        - $ref: '#/components/schemas/AnalyzeTemplateInput'
+        - type: object
+          properties:
+            template_id:
+              type: string
+              format: uuid
+            version:
+              type: integer
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
+    AgentInput:
+      type: object
+      required: [name, thesis, universe, cadence]
+      properties:
+        name:
+          type: string
+        thesis:
+          type: string
+        universe:
+          type: object
+          additionalProperties: true
+        source_policy:
+          type: object
+          additionalProperties: true
+        cadence:
+          type: string
+        prompt_template:
+          type: string
+        alert_rules:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    Agent:
+      allOf:
+        - $ref: '#/components/schemas/AgentInput'
+        - type: object
+          properties:
+            agent_id:
+              type: string
+              format: uuid
+            enabled:
+              type: boolean
+            watermarks:
+              type: object
+              additionalProperties: true
+    Finding:
+      type: object
+      description: Findings are snapshotted product artifacts built from evidence graph objects.
+      properties:
+        finding_id:
+          type: string
+          format: uuid
+        agent_id:
+          type: string
+          format: uuid
+        snapshot_id:
+          type: string
+          format: uuid
+        headline:
+          type: string
+        severity:
+          type: string
+        subject_refs:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubjectRef'
+        summary_blocks:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+    RunActivity:
+      type: object
+      properties:
+        run_activity_id:
+          type: string
+          format: uuid
+        agent_id:
+          type: string
+          format: uuid
+        stage:
+          type: string
+        subject_refs:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubjectRef'
+        source_refs:
+          type: array
+          items:
+            type: string
+            format: uuid
+        summary:
+          type: string
+        ts:
+          type: string
+          format: date-time
+    HomeFeedItem:
+      type: object
+      properties:
+        item_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [finding, cluster]
+        headline:
+          type: string
+        summary:
+          type: string
+        severity:
+          type: string
+        subject_refs:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubjectRef'
+        source_refs:
+          type: array
+          items:
+            type: string
+            format: uuid
+        ts:
+          type: string
+          format: date-time
+    WatchlistInput:
+      type: object
+      required: [name, mode]
+      properties:
+        name:
+          type: string
+        mode:
+          type: string
+          enum: [manual, screen, agent, theme, portfolio]
+        membership_spec:
+          type: object
+          additionalProperties: true
+    Watchlist:
+      allOf:
+        - $ref: '#/components/schemas/WatchlistInput'
+        - type: object
+          properties:
+            watchlist_id:
+              type: string
+              format: uuid
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
+    ChatThread:
+      type: object
+      properties:
+        thread_id:
+          type: string
+          format: uuid
+        primary_subject_ref:
+          $ref: '#/components/schemas/SubjectRef'
+        title:
+          type: string
+        latest_snapshot_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time

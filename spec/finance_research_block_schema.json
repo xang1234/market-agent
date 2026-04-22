@@ -1,0 +1,547 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/finance_research_block_schema.json",
+  "title": "Finance Research Block Schema",
+  "description": "Typed assistant-response schema for structured Block[] artifacts rendered by Chat, Analyze, and findings surfaces.",
+  "type": "object",
+  "required": ["blocks"],
+  "properties": {
+    "blocks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Block" },
+      "minItems": 1
+    }
+  },
+  "$defs": {
+    "UUID": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F-]{36}$"
+    },
+    "SubjectKind": {
+      "type": "string",
+      "description": "Canonical subject discriminator. Ticker is a listing locator, not canonical identity.",
+      "enum": ["issuer", "instrument", "listing", "theme", "macro_topic", "portfolio", "screen"]
+    },
+    "SubjectRef": {
+      "type": "object",
+      "description": "kind determines whether the id points to an issuer, instrument, listing, theme, macro topic, portfolio, or screen.",
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/SubjectKind" },
+        "id": { "$ref": "#/$defs/UUID" }
+      },
+      "additionalProperties": false
+    },
+    "DisclosureTier": {
+      "type": "string",
+      "enum": ["real_time", "delayed_15m", "eod", "filing_time", "estimate", "candidate", "tertiary_source"]
+    },
+    "DataRef": {
+      "description": "Canonical backend binding for a block. Historical dataRef/queryRef language maps to data_ref in this schema.",
+      "type": "object",
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "type": "string" },
+        "id": { "type": "string" },
+        "params": { "type": "object", "additionalProperties": true }
+      },
+      "additionalProperties": false
+    },
+    "InteractiveSpec": {
+      "type": "object",
+      "properties": {
+        "ranges": { "type": "array", "items": { "type": "string" } },
+        "intervals": { "type": "array", "items": { "type": "string" } },
+        "sort_fields": { "type": "array", "items": { "type": "string" } },
+        "range_end_max": { "type": "string" },
+        "hover_details": { "type": "boolean" },
+        "collapsible": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "BaseBlock": {
+      "description": "Shared render, audit, provenance, and snapshot binding fields for every block.",
+      "type": "object",
+      "required": ["id", "kind", "snapshot_id", "data_ref", "source_refs", "as_of"],
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "type": "string" },
+        "snapshot_id": { "$ref": "#/$defs/UUID" },
+        "data_ref": { "$ref": "#/$defs/DataRef" },
+        "source_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/UUID" }
+        },
+        "as_of": { "type": "string", "format": "date-time" },
+        "title": { "type": "string" },
+        "disclosure_tier": { "$ref": "#/$defs/DisclosureTier" },
+        "interactive": { "$ref": "#/$defs/InteractiveSpec" }
+      }
+    },
+    "TextSegment": {
+      "type": "object",
+      "required": ["type", "text"],
+      "properties": {
+        "type": { "const": "text" },
+        "text": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "RefSegment": {
+      "type": "object",
+      "required": ["type", "ref_kind", "ref_id"],
+      "properties": {
+        "type": { "const": "ref" },
+        "ref_kind": { "type": "string", "enum": ["fact", "claim", "event"] },
+        "ref_id": { "$ref": "#/$defs/UUID" },
+        "format": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "RichText": {
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "rich_text" },
+            "segments": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  { "$ref": "#/$defs/TextSegment" },
+                  { "$ref": "#/$defs/RefSegment" }
+                ]
+              }
+            }
+          },
+          "required": ["segments"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "Section": {
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "section" },
+            "children": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/Block" }
+            },
+            "collapsible": { "type": "boolean" }
+          },
+          "required": ["children"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "MetricCell": {
+      "type": "object",
+      "required": ["label", "value_ref"],
+      "properties": {
+        "label": { "type": "string" },
+        "value_ref": { "$ref": "#/$defs/UUID" },
+        "format": { "type": "string" },
+        "delta_ref": { "$ref": "#/$defs/UUID" }
+      },
+      "additionalProperties": false
+    },
+    "MetricRow": {
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "metric_row" },
+            "items": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/MetricCell" }
+            }
+          },
+          "required": ["items"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "Table": {
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "table" },
+            "columns": { "type": "array", "items": { "type": "string" } },
+            "rows": { "type": "array", "items": { "type": "array", "items": { "type": ["string", "number", "object"] } } }
+          },
+          "required": ["columns", "rows"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "SeriesPoint": {
+      "type": "object",
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": ["string", "number"] },
+        "y": { "type": "number" },
+        "label": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "Series": {
+      "type": "object",
+      "required": ["name", "points"],
+      "properties": {
+        "name": { "type": "string" },
+        "points": { "type": "array", "items": { "$ref": "#/$defs/SeriesPoint" } },
+        "unit": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "LineChart": {
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "line_chart" },
+            "series": { "type": "array", "items": { "$ref": "#/$defs/Series" } },
+            "x_type": { "type": "string", "enum": ["time", "category"] },
+            "y_format": { "type": "string" }
+          },
+          "required": ["series", "x_type"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "RevenueBars": {
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "revenue_bars" },
+            "bars": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["label", "value_ref"],
+                "properties": {
+                  "label": { "type": "string" },
+                  "value_ref": { "$ref": "#/$defs/UUID" },
+                  "delta_ref": { "$ref": "#/$defs/UUID" }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["bars"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "PerfComparison": {
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "perf_comparison" },
+            "subject_refs": { "type": "array", "items": { "$ref": "#/$defs/SubjectRef" } },
+            "default_range": { "type": "string" },
+            "basis": { "type": "string" },
+            "normalization": { "type": "string", "enum": ["raw", "pct_return", "index_100"] }
+          },
+          "required": ["subject_refs", "default_range", "basis", "normalization"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "SegmentDonut": {
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "segment_donut" },
+            "segments": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "value_ref"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "value_ref": { "$ref": "#/$defs/UUID" },
+                  "definition_as_of": { "type": "string", "format": "date-time" }
+                },
+                "additionalProperties": false
+              }
+            },
+            "coverage_warnings": { "type": "array", "items": { "type": "string" } }
+          },
+          "required": ["segments"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "SegmentTrajectory": {
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "segment_trajectory" },
+            "series": { "type": "array", "items": { "$ref": "#/$defs/Series" } }
+          },
+          "required": ["series"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "MetricsComparison": {
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "metrics_comparison" },
+            "subjects": { "type": "array", "items": { "$ref": "#/$defs/SubjectRef" } },
+            "metrics": { "type": "array", "items": { "type": "string" } }
+          },
+          "required": ["subjects", "metrics"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "AnalystConsensus": {
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "analyst_consensus" },
+            "analyst_count_ref": { "$ref": "#/$defs/UUID" },
+            "distribution": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["bucket", "count_ref"],
+                "properties": {
+                  "bucket": { "type": "string" },
+                  "count_ref": { "$ref": "#/$defs/UUID" }
+                },
+                "additionalProperties": false
+              }
+            },
+            "coverage_warning": { "type": "string" }
+          },
+          "required": ["analyst_count_ref", "distribution"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "PriceTargetRange": {
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "price_target_range" },
+            "current_price_ref": { "$ref": "#/$defs/UUID" },
+            "low_ref": { "$ref": "#/$defs/UUID" },
+            "avg_ref": { "$ref": "#/$defs/UUID" },
+            "high_ref": { "$ref": "#/$defs/UUID" },
+            "upside_ref": { "$ref": "#/$defs/UUID" }
+          },
+          "required": ["current_price_ref", "low_ref", "avg_ref", "high_ref"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "EpsSurprise": {
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "eps_surprise" },
+            "quarters": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["label", "estimate_ref", "actual_ref"],
+                "properties": {
+                  "label": { "type": "string" },
+                  "estimate_ref": { "$ref": "#/$defs/UUID" },
+                  "actual_ref": { "$ref": "#/$defs/UUID" },
+                  "surprise_ref": { "$ref": "#/$defs/UUID" }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["quarters"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "FilingsList": {
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "filings_list" },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["document_id", "form", "filed_at"],
+                "properties": {
+                  "document_id": { "$ref": "#/$defs/UUID" },
+                  "form": { "type": "string" },
+                  "filed_at": { "type": "string", "format": "date-time" },
+                  "period": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["items"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "NewsCluster": {
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "news_cluster" },
+            "cluster_id": { "$ref": "#/$defs/UUID" },
+            "headline": { "type": "string" },
+            "claim_refs": { "type": "array", "items": { "$ref": "#/$defs/UUID" } },
+            "document_refs": { "type": "array", "items": { "$ref": "#/$defs/UUID" } }
+          },
+          "required": ["cluster_id", "headline", "claim_refs"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "FindingCard": {
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "finding_card" },
+            "finding_id": { "$ref": "#/$defs/UUID" },
+            "headline": { "type": "string" },
+            "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+            "subject_refs": { "type": "array", "items": { "$ref": "#/$defs/SubjectRef" } }
+          },
+          "required": ["finding_id", "headline", "severity"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "SentimentTrend": {
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "sentiment_trend" },
+            "series": { "type": "array", "items": { "$ref": "#/$defs/Series" } }
+          },
+          "required": ["series"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "MentionVolume": {
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "mention_volume" },
+            "series": { "type": "array", "items": { "$ref": "#/$defs/Series" } }
+          },
+          "required": ["series"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "Sources": {
+      "description": "Provenance block required whenever external evidence appears in the answer.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "sources" },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["source_id", "label"],
+                "properties": {
+                  "source_id": { "$ref": "#/$defs/UUID" },
+                  "label": { "type": "string" },
+                  "url": { "type": "string", "format": "uri" }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["items"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "Disclosure": {
+      "description": "Disclosure block for trust and compliance notes; orchestration may inject it.",
+      "allOf": [
+        { "$ref": "#/$defs/BaseBlock" },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "disclosure" },
+            "items": { "type": "array", "items": { "type": "string" } }
+          },
+          "required": ["items"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "Block": {
+      "oneOf": [
+        { "$ref": "#/$defs/RichText" },
+        { "$ref": "#/$defs/Section" },
+        { "$ref": "#/$defs/MetricRow" },
+        { "$ref": "#/$defs/Table" },
+        { "$ref": "#/$defs/LineChart" },
+        { "$ref": "#/$defs/RevenueBars" },
+        { "$ref": "#/$defs/PerfComparison" },
+        { "$ref": "#/$defs/SegmentDonut" },
+        { "$ref": "#/$defs/SegmentTrajectory" },
+        { "$ref": "#/$defs/MetricsComparison" },
+        { "$ref": "#/$defs/AnalystConsensus" },
+        { "$ref": "#/$defs/PriceTargetRange" },
+        { "$ref": "#/$defs/EpsSurprise" },
+        { "$ref": "#/$defs/FilingsList" },
+        { "$ref": "#/$defs/NewsCluster" },
+        { "$ref": "#/$defs/FindingCard" },
+        { "$ref": "#/$defs/SentimentTrend" },
+        { "$ref": "#/$defs/MentionVolume" },
+        { "$ref": "#/$defs/Sources" },
+        { "$ref": "#/$defs/Disclosure" }
+      ]
+    }
+  }
+}
