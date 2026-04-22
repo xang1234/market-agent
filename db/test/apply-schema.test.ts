@@ -1,53 +1,25 @@
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
+import {
+  createContainerName,
+  dbRoot,
+  dockerAvailable,
+  run,
+  startPostgres,
+  stopPostgres,
+  waitForPostgres,
+  workspaceRoot,
+} from "./docker-pg.ts";
 
-const workspaceRoot = join(import.meta.dirname, "..", "..");
-const dbRoot = join(workspaceRoot, "db");
 const schemaPath = join(workspaceRoot, "spec", "finance_research_db_schema.sql");
-
-function run(command: string, args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
-  return spawnSync(command, args, {
-    cwd: options.cwd ?? workspaceRoot,
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      ...options.env,
-    },
-  });
-}
 
 function loadExpectedTables() {
   return Array.from(
     readFileSync(schemaPath, "utf8").matchAll(/^create table ([a-z_][a-z0-9_]*) \($/gim),
     (match) => match[1],
   ).sort();
-}
-
-function dockerAvailable() {
-  const result = run("docker", ["version", "--format", "{{.Server.Version}}"]);
-  return result.status === 0;
-}
-
-function createContainerName() {
-  return `fra-6al-7-1-${process.pid}-${Date.now()}`;
-}
-
-function lookupPublishedHostPort(containerName: string) {
-  const result = run("docker", [
-    "port",
-    containerName,
-    "5432/tcp",
-  ]);
-
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-
-  const mapping = result.stdout.trim();
-  const match = mapping.match(/:(\d+)$/);
-  assert.ok(match, `expected docker port output to include a host port, got: ${mapping}`);
-  return match[1];
 }
 
 function reserveHostPort(hostPort: string) {
@@ -67,41 +39,6 @@ function reserveHostPort(hostPort: string) {
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   return containerName;
-}
-
-function startPostgres(containerName: string, password: string) {
-  const result = run("docker", [
-    "run",
-    "--detach",
-    "--rm",
-    "--name",
-    containerName,
-    "-e",
-    `POSTGRES_PASSWORD=${password}`,
-    "-p",
-    "127.0.0.1::5432",
-    "postgres:15",
-  ]);
-
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  return lookupPublishedHostPort(containerName);
-}
-
-function stopPostgres(containerName: string) {
-  run("docker", ["rm", "--force", containerName]);
-}
-
-async function waitForPostgres(containerName: string) {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    const result = run("docker", ["exec", containerName, "pg_isready", "-U", "postgres"]);
-    if (result.status === 0) {
-      return;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-
-  assert.fail(`Timed out waiting for Postgres container ${containerName}`);
 }
 
 function listTables(containerName: string) {
@@ -127,7 +64,7 @@ test("apply:schema loads the normative schema into a fresh Postgres 15 database"
     return;
   }
 
-  const containerName = createContainerName();
+  const containerName = createContainerName("fra-6al-7-1");
   const password = "postgres";
   const hostPort = startPostgres(containerName, password);
   const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
@@ -176,7 +113,7 @@ test("apply:schema still works when the default host port is already occupied", 
   });
   await waitForPostgres(reservedContainer);
 
-  const containerName = createContainerName();
+  const containerName = createContainerName("fra-6al-7-1");
   const password = "postgres";
   const hostPort = startPostgres(containerName, password);
   const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;

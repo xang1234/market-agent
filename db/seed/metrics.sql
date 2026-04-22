@@ -1,5 +1,4 @@
 -- Core metrics registry.
--- Idempotent: re-applying via ON CONFLICT (metric_key) DO NOTHING leaves existing rows untouched.
 -- unit_class in ('currency', 'percent', 'count', 'ratio', 'duration', 'enum')
 -- aggregation in ('sum', 'avg', 'point_in_time', 'ttm', 'yoy', 'qoq', 'derived')
 -- interpretation in ('higher_is_better', 'lower_is_better', 'neutral')

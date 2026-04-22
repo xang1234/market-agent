@@ -1,5 +1,5 @@
 import { readdir } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   applyStatements,
@@ -13,31 +13,31 @@ import {
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const seedDir = resolve(scriptDir, "..", "seed");
 
-async function loadSeedFiles() {
-  const entries = (await readdir(seedDir))
+async function loadSeedFilePaths() {
+  const entries = await readdir(seedDir);
+  return entries
     .filter((name) => name.endsWith(".sql"))
-    .sort();
-
-  return entries.map((name) => ({ name, path: join(seedDir, name) }));
+    .sort()
+    .map((name) => join(seedDir, name));
 }
 
 async function main() {
   const databaseUrl = getDatabaseUrl();
-  const seedFiles = await loadSeedFiles();
+  const seedPaths = await loadSeedFilePaths();
 
-  if (seedFiles.length === 0) {
+  if (seedPaths.length === 0) {
     console.log("No seed files found; nothing to do.");
     return;
   }
 
   await withClient(databaseUrl, async (client) => {
-    for (const file of seedFiles) {
-      const sql = await loadSqlFile(file.path);
+    for (const path of seedPaths) {
+      const sql = await loadSqlFile(path);
       await applyStatements(client, splitSqlStatements(sql));
-      console.log(`Applied seed ${file.name}`);
+      console.log(`Applied seed ${basename(path)}`);
     }
 
-    console.log(`Seeded ${redactDatabaseUrl(databaseUrl)} (${seedFiles.length} file(s)).`);
+    console.log(`Seeded ${redactDatabaseUrl(databaseUrl)} (${seedPaths.length} file(s)).`);
   });
 }
 

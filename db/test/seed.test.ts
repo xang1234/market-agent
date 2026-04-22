@@ -1,104 +1,51 @@
-import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
+import {
+  createContainerName,
+  dbRoot,
+  dockerAvailable,
+  queryValue,
+  run,
+  startPostgres,
+  stopPostgres,
+  waitForPostgres,
+} from "./docker-pg.ts";
 
-const workspaceRoot = join(import.meta.dirname, "..", "..");
-const dbRoot = join(workspaceRoot, "db");
-const metricsSeedPath = join(dbRoot, "seed", "metrics.sql");
-const sourcesSeedPath = join(dbRoot, "seed", "sources.sql");
+const METRICS_DIGEST_EXPR =
+  "md5(string_agg(metric_key || ':' || display_name || ':' || unit_class || ':' || aggregation || ':' || interpretation || ':' || canonical_source_class, ',' order by metric_key))";
+const SOURCES_DIGEST_EXPR =
+  "md5(string_agg(source_id::text || ':' || provider || ':' || kind::text || ':' || trust_tier::text || ':' || license_class, ',' order by source_id))";
 
-function run(command: string, args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
-  return spawnSync(command, args, {
-    cwd: options.cwd ?? workspaceRoot,
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      ...options.env,
-    },
+type SeedSnapshot = {
+  metricCount: string;
+  sourceCount: string;
+  metricsDigest: string;
+  sourcesDigest: string;
+};
+
+function snapshotSeed(containerName: string): SeedSnapshot {
+  const row = queryValue(
+    containerName,
+    `select
+       (select count(*) from metrics) || '|' ||
+       (select count(*) from sources) || '|' ||
+       (select ${METRICS_DIGEST_EXPR} from metrics) || '|' ||
+       (select ${SOURCES_DIGEST_EXPR} from sources)`,
+  );
+  const [metricCount, sourceCount, metricsDigest, sourcesDigest] = row.split("|");
+  return { metricCount, sourceCount, metricsDigest, sourcesDigest };
+}
+
+function runSeed(databaseUrl: string) {
+  return run("npm", ["run", "seed", "--", "--database-url", databaseUrl], {
+    cwd: dbRoot,
+    env: { DATABASE_URL: databaseUrl },
   });
 }
 
-function dockerAvailable() {
-  const result = run("docker", ["version", "--format", "{{.Server.Version}}"]);
-  return result.status === 0;
-}
-
-function createContainerName() {
-  return `fra-6al-7-3-${process.pid}-${Date.now()}`;
-}
-
-function lookupPublishedHostPort(containerName: string) {
-  const result = run("docker", ["port", containerName, "5432/tcp"]);
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  const mapping = result.stdout.trim();
-  const match = mapping.match(/:(\d+)$/);
-  assert.ok(match, `expected docker port output to include a host port, got: ${mapping}`);
-  return match[1];
-}
-
-function startPostgres(containerName: string, password: string) {
-  const result = run("docker", [
-    "run",
-    "--detach",
-    "--rm",
-    "--name",
-    containerName,
-    "-e",
-    `POSTGRES_PASSWORD=${password}`,
-    "-p",
-    "127.0.0.1::5432",
-    "postgres:15",
-  ]);
-
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  return lookupPublishedHostPort(containerName);
-}
-
-function stopPostgres(containerName: string) {
-  run("docker", ["rm", "--force", containerName]);
-}
-
-async function waitForPostgres(containerName: string) {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    const result = run("docker", ["exec", containerName, "pg_isready", "-U", "postgres"]);
-    if (result.status === 0) return;
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-
-  assert.fail(`Timed out waiting for Postgres container ${containerName}`);
-}
-
-function queryValue(containerName: string, sql: string) {
-  const result = run("docker", [
-    "exec",
-    containerName,
-    "psql",
-    "-U",
-    "postgres",
-    "-d",
-    "postgres",
-    "-tAc",
-    sql,
-  ]);
-
-  assert.equal(result.status, 0, result.stderr || result.stdout);
-  return result.stdout.trim();
-}
-
-function countMetricKeysInSeedFile() {
-  const sql = readFileSync(metricsSeedPath, "utf8");
-  return Array.from(sql.matchAll(/^\s*\('([a-z_]+)',/gm)).length;
-}
-
-function countSourcesInSeedFile() {
-  const sql = readFileSync(sourcesSeedPath, "utf8");
-  return Array.from(sql.matchAll(/^\s*\('[0-9a-f-]{36}',/gm)).length;
-}
-
 async function bootstrapDatabase(t: test.TestContext) {
-  const containerName = createContainerName();
+  const containerName = createContainerName("fra-6al-7-3");
   const password = "postgres";
   const hostPort = startPostgres(containerName, password);
   const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
@@ -126,19 +73,12 @@ test("seed populates metrics and sources with the expected registry", { timeout:
 
   const { containerName, databaseUrl } = await bootstrapDatabase(t);
 
-  const seedResult = run("npm", ["run", "seed", "--", "--database-url", databaseUrl], {
-    cwd: dbRoot,
-    env: { DATABASE_URL: databaseUrl },
-  });
+  const seedResult = runSeed(databaseUrl);
   assert.equal(seedResult.status, 0, seedResult.stderr || seedResult.stdout);
 
-  const expectedMetricCount = countMetricKeysInSeedFile();
-  assert.ok(expectedMetricCount > 0, "expected seed file to define at least one metric");
-  assert.equal(queryValue(containerName, "select count(*) from metrics"), String(expectedMetricCount));
-
-  const expectedSourceCount = countSourcesInSeedFile();
-  assert.ok(expectedSourceCount > 0, "expected seed file to define at least one source");
-  assert.equal(queryValue(containerName, "select count(*) from sources"), String(expectedSourceCount));
+  const { metricCount, sourceCount } = snapshotSeed(containerName);
+  assert.equal(Number(metricCount) > 0, true, "expected metrics to be populated");
+  assert.equal(Number(sourceCount) > 0, true, "expected sources to be populated");
 
   for (const coreMetric of ["revenue", "net_income", "eps_diluted", "gross_margin", "pe_ratio"]) {
     assert.equal(
@@ -163,45 +103,15 @@ test("seed is idempotent: re-running produces no duplicates", { timeout: 180000 
 
   const { containerName, databaseUrl } = await bootstrapDatabase(t);
 
-  const first = run("npm", ["run", "seed", "--", "--database-url", databaseUrl], {
-    cwd: dbRoot,
-    env: { DATABASE_URL: databaseUrl },
-  });
+  const first = runSeed(databaseUrl);
   assert.equal(first.status, 0, first.stderr || first.stdout);
 
-  const metricsAfterFirst = queryValue(containerName, "select count(*) from metrics");
-  const sourcesAfterFirst = queryValue(containerName, "select count(*) from sources");
-  const metricsDigestAfterFirst = queryValue(
-    containerName,
-    "select md5(string_agg(metric_key || ':' || display_name || ':' || unit_class || ':' || aggregation || ':' || interpretation || ':' || canonical_source_class, ',' order by metric_key)) from metrics",
-  );
-  const sourcesDigestAfterFirst = queryValue(
-    containerName,
-    "select md5(string_agg(source_id::text || ':' || provider || ':' || kind::text || ':' || trust_tier::text || ':' || license_class, ',' order by source_id)) from sources",
-  );
+  const before = snapshotSeed(containerName);
 
-  const second = run("npm", ["run", "seed", "--", "--database-url", databaseUrl], {
-    cwd: dbRoot,
-    env: { DATABASE_URL: databaseUrl },
-  });
+  const second = runSeed(databaseUrl);
   assert.equal(second.status, 0, second.stderr || second.stdout);
 
-  assert.equal(queryValue(containerName, "select count(*) from metrics"), metricsAfterFirst);
-  assert.equal(queryValue(containerName, "select count(*) from sources"), sourcesAfterFirst);
-  assert.equal(
-    queryValue(
-      containerName,
-      "select md5(string_agg(metric_key || ':' || display_name || ':' || unit_class || ':' || aggregation || ':' || interpretation || ':' || canonical_source_class, ',' order by metric_key)) from metrics",
-    ),
-    metricsDigestAfterFirst,
-  );
-  assert.equal(
-    queryValue(
-      containerName,
-      "select md5(string_agg(source_id::text || ':' || provider || ':' || kind::text || ':' || trust_tier::text || ':' || license_class, ',' order by source_id)) from sources",
-    ),
-    sourcesDigestAfterFirst,
-  );
+  assert.deepEqual(snapshotSeed(containerName), before);
 });
 
 test("seeded metric and source rows satisfy referential contracts for facts", { timeout: 120000 }, async (t) => {
@@ -212,10 +122,7 @@ test("seeded metric and source rows satisfy referential contracts for facts", { 
 
   const { containerName, databaseUrl } = await bootstrapDatabase(t);
 
-  const seedResult = run("npm", ["run", "seed", "--", "--database-url", databaseUrl], {
-    cwd: dbRoot,
-    env: { DATABASE_URL: databaseUrl },
-  });
+  const seedResult = runSeed(databaseUrl);
   assert.equal(seedResult.status, 0, seedResult.stderr || seedResult.stdout);
 
   const insertFact = run("docker", [

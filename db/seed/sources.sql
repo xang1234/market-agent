@@ -1,9 +1,8 @@
--- Minimal source registry.
--- Idempotent: re-applying via ON CONFLICT (source_id) DO NOTHING leaves existing rows untouched.
+-- Minimal source registry. Each row is a provider/kind classifier used by facts.source_id
+-- before individual documents are ingested. Fixed UUIDs anchor ON CONFLICT idempotency —
+-- gen_random_uuid() defaults would silently duplicate rows on re-seed.
 -- source_kind in ('filing', 'press_release', 'transcript', 'article', 'research_note', 'social_post', 'upload', 'internal')
 -- trust_tier in ('primary', 'secondary', 'tertiary', 'user')
--- retrieved_at is set to a stable sentinel so re-running the seed is a true no-op.
--- Each row is a provider/kind classifier used by facts.source_id before individual documents are ingested.
 
 insert into sources (source_id, provider, kind, canonical_url, trust_tier, license_class, retrieved_at) values
   ('00000000-0000-4000-a000-000000000001', 'sec_edgar',     'filing',        'https://www.sec.gov/cgi-bin/browse-edgar', 'primary',   'public',   '2000-01-01T00:00:00Z'),
