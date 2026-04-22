@@ -10,12 +10,12 @@ import {
   withClient,
 } from "./schema-support.ts";
 
-type Command = "up" | "status";
+type Command = "up" | "down" | "status";
 
 function getCommand(): Command {
   const command = process.argv[2];
-  if (command === "up" || command === "status") return command;
-  throw new Error('Usage: npm run migrate -- <up|status> [--database-url <url>]');
+  if (command === "up" || command === "down" || command === "status") return command;
+  throw new Error('Usage: npm run migrate -- <up|down|status> [--database-url <url>]');
 }
 
 async function runUp(databaseUrl: string) {
@@ -56,12 +56,43 @@ async function runStatus(databaseUrl: string) {
   });
 }
 
+async function runDown(databaseUrl: string) {
+  await withClient(databaseUrl, async (client) => {
+    await ensureSchemaMigrationsTable(client);
+
+    const localMigrations = await loadMigrationFiles();
+    const localMap = new Map(localMigrations.map((migration) => [migration.version, migration]));
+    const applied = await listAppliedMigrations(client);
+    const lastApplied = applied.at(-1);
+
+    if (!lastApplied) {
+      console.log("No applied migrations to roll back.");
+      return;
+    }
+
+    const migration = localMap.get(lastApplied.version);
+    if (!migration) {
+      throw new Error(`Applied migration ${lastApplied.version} is missing locally.`);
+    }
+
+    const sql = await loadSqlFile(migration.downPath);
+    await applyStatements(client, splitSqlStatements(sql));
+    await client.query("delete from schema_migrations where version = $1", [migration.version]);
+    console.log(`Rolled back ${migration.version} ${migration.name}`);
+  });
+}
+
 async function main() {
   const databaseUrl = getDatabaseUrl();
   const command = getCommand();
 
   if (command === "up") {
     await runUp(databaseUrl);
+    return;
+  }
+
+  if (command === "down") {
+    await runDown(databaseUrl);
     return;
   }
 

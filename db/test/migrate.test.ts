@@ -157,3 +157,65 @@ test("migrate status reports 0001_init as applied after migrate up", { timeout: 
   assert.equal(statusResult.status, 0, statusResult.stderr || statusResult.stdout);
   assert.match(statusResult.stdout, /0001\s+init\s+applied/);
 });
+
+test("migrate down rolls back the most recently applied migration", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for db migration integration coverage");
+    return;
+  }
+
+  const containerName = createContainerName();
+  const password = "postgres";
+  const hostPort = startPostgres(containerName, password);
+  const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
+
+  t.after(() => {
+    stopPostgres(containerName);
+  });
+
+  await waitForPostgres(containerName);
+
+  const upResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
+    cwd: dbRoot,
+    env: { DATABASE_URL: databaseUrl },
+  });
+  assert.equal(upResult.status, 0, upResult.stderr || upResult.stdout);
+
+  const downResult = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], {
+    cwd: dbRoot,
+    env: { DATABASE_URL: databaseUrl },
+  });
+  assert.equal(downResult.status, 0, downResult.stderr || downResult.stdout);
+
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "0");
+  assert.equal(
+    queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename <> 'schema_migrations'"),
+    "0",
+  );
+});
+
+test("migrate down exits cleanly when nothing is applied", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for db migration integration coverage");
+    return;
+  }
+
+  const containerName = createContainerName();
+  const password = "postgres";
+  const hostPort = startPostgres(containerName, password);
+  const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
+
+  t.after(() => {
+    stopPostgres(containerName);
+  });
+
+  await waitForPostgres(containerName);
+
+  const downResult = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], {
+    cwd: dbRoot,
+    env: { DATABASE_URL: databaseUrl },
+  });
+
+  assert.equal(downResult.status, 0, downResult.stderr || downResult.stdout);
+  assert.match(downResult.stdout, /No applied migrations to roll back/);
+});
