@@ -8,6 +8,7 @@
   },
   "scripts": {
     "apply:schema": "node --experimental-strip-types scripts/apply-schema.ts",
+    "migrate": "node --experimental-strip-types scripts/migrate.ts",
     "verify:schema": "node --experimental-strip-types scripts/verify-schema.ts",
     "test": "node --experimental-strip-types --test test/**/*.test.ts"
   },
