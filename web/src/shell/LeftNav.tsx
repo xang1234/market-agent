@@ -1,8 +1,13 @@
 import { NavLink } from 'react-router-dom'
+import { SessionControl } from './SessionControl'
 
 // Primary workspaces, per spec §3.7. These are app navigation route groups,
 // not /v1/* HTTP endpoint groups. Symbol detail is an entered route group
 // keyed by canonical SubjectRef, reached from any surface — not a left-nav item.
+//
+// Protected surfaces are still listed in the nav even when unauthenticated;
+// clicking them is allowed and intentional — the route enters and the main
+// canvas collapses to the in-shell auth gate (spec §3.10).
 const PRIMARY_WORKSPACES = [
   { to: '/home', label: 'Home' },
   { to: '/agents', label: 'Agents' },
@@ -17,7 +22,7 @@ export function LeftNav() {
       <div className="border-b border-neutral-200 px-4 py-4 text-sm font-semibold tracking-wide text-neutral-700">
         Finance Research
       </div>
-      <ul className="flex flex-col gap-1 px-2 py-3">
+      <ul className="flex flex-1 flex-col gap-1 px-2 py-3">
         {PRIMARY_WORKSPACES.map(({ to, label }) => (
           <li key={to}>
             <NavLink
@@ -36,6 +41,7 @@ export function LeftNav() {
           </li>
         ))}
       </ul>
+      <SessionControl />
     </nav>
   )
 }

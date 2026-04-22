@@ -8,8 +8,10 @@ import { RightRailProvider, RightRailSlot } from './RightRailSlot'
 //
 // Shell chrome is not auth-gated as a whole; public routes (Home, Screener,
 // Analyze-entry, entered symbol detail) render inside the same shell as
-// protected routes (Chat, Agents, user-owned watchlists). In-shell auth gates
-// live inside protected main-canvas content (coming in P0.1.2).
+// protected routes (Chat, Agents, user-owned watchlists). In-shell auth
+// gates for protected main-canvas content are enforced by <ProtectedSurface>
+// in App.tsx, rendered inside <Outlet /> — the shell itself stays mounted
+// across auth transitions.
 export function WorkspaceShell() {
   return (
     <RightRailProvider>
