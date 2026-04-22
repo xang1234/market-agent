@@ -1,30 +1,12 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
+import { useRightRail } from './useRightRail'
 
-// The right rail is SHELL-OWNED, not surface-owned. Surfaces opt in to the rail
-// by pushing content via `useRightRail` (from a child route). Screener defaults
-// to a denser main-canvas layout and does not opt in.
-type RightRailContextValue = {
-  content: ReactNode
-  setContent: (node: ReactNode) => void
-}
-
-const RightRailContext = createContext<RightRailContextValue | null>(null)
-
-export function RightRailProvider({ children }: { children: ReactNode }) {
-  const [content, setContent] = useState<ReactNode>(null)
-  const value = useMemo(() => ({ content, setContent }), [content])
-  return <RightRailContext.Provider value={value}>{children}</RightRailContext.Provider>
-}
-
-export function useRightRail() {
-  const ctx = useContext(RightRailContext)
-  if (!ctx) throw new Error('useRightRail must be used inside RightRailProvider')
-  return ctx
-}
-
+// Always mounted — main-canvas width stays stable across tab switches
+// regardless of whether a surface has pushed content. When no content is
+// pushed the rail renders as an empty labeled landmark; surfaces that want
+// the wider canvas (e.g., Screener per spec §3.7) will opt out via a
+// context flag when that surface ships.
 export function RightRailSlot() {
   const { content } = useRightRail()
-  if (content == null) return null
   return (
     <aside
       aria-label="Activity rail"

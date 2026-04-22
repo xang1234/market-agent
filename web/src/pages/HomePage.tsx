@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useRightRail } from '../shell/RightRailSlot'
+import { useRightRail } from '../shell/useRightRail'
 import { useRequestProtectedAction } from '../shell/useAuthInterrupt'
 
 // Home is a findings-first surface. This bead (P0.1.1) only needs the
