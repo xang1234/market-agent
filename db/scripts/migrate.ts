@@ -1,5 +1,6 @@
 import {
   applyStatements,
+  assertAppliedMigrationsExistLocally,
   ensureSchemaMigrationsTable,
   getDatabaseUrl,
   listAppliedMigrations,
@@ -24,6 +25,10 @@ async function runUp(databaseUrl: string) {
 
     const localMigrations = await loadMigrationFiles();
     const applied = await listAppliedMigrations(client);
+    assertAppliedMigrationsExistLocally(
+      localMigrations,
+      applied.map((migration) => migration.version),
+    );
     const appliedVersions = new Set(applied.map((migration) => migration.version));
 
     for (const local of localMigrations) {
@@ -47,6 +52,10 @@ async function runStatus(databaseUrl: string) {
 
     const localMigrations = await loadMigrationFiles();
     const applied = await listAppliedMigrations(client);
+    assertAppliedMigrationsExistLocally(
+      localMigrations,
+      applied.map((migration) => migration.version),
+    );
     const appliedVersions = new Set(applied.map((migration) => migration.version));
 
     for (const migration of localMigrations) {

@@ -219,3 +219,42 @@ test("migrate down exits cleanly when nothing is applied", { timeout: 120000 }, 
   assert.equal(downResult.status, 0, downResult.stderr || downResult.stdout);
   assert.match(downResult.stdout, /No applied migrations to roll back/);
 });
+
+test("migrate status fails when an applied migration is missing locally", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for db migration integration coverage");
+    return;
+  }
+
+  const containerName = createContainerName();
+  const password = "postgres";
+  const hostPort = startPostgres(containerName, password);
+  const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
+
+  t.after(() => {
+    stopPostgres(containerName);
+  });
+
+  await waitForPostgres(containerName);
+
+  const result = run("docker", [
+    "exec",
+    containerName,
+    "psql",
+    "-U",
+    "postgres",
+    "-d",
+    "postgres",
+    "-c",
+    "create table schema_migrations (version text primary key, name text not null, applied_at timestamptz not null default now()); insert into schema_migrations(version, name) values ('9999', 'missing_local');",
+  ]);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  const statusResult = run("npm", ["run", "migrate", "--", "status", "--database-url", databaseUrl], {
+    cwd: dbRoot,
+    env: { DATABASE_URL: databaseUrl },
+  });
+
+  assert.notEqual(statusResult.status, 0);
+  assert.match(statusResult.stderr || statusResult.stdout, /Applied migration 9999 is missing locally/);
+});

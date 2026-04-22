@@ -132,8 +132,8 @@ export async function listAppliedMigrations(client: Client) {
   return result.rows;
 }
 
-export async function loadMigrationFiles() {
-  const entries = (await readdir(migrationsDir)).sort();
+export async function loadMigrationFiles(directory = migrationsDir) {
+  const entries = (await readdir(directory)).sort();
   const pairs = new Map<string, Partial<MigrationFilePair>>();
 
   for (const entry of entries) {
@@ -141,17 +141,17 @@ export async function loadMigrationFiles() {
     if (!match) continue;
 
     const [, version, name, direction] = match;
-    const existing = pairs.get(version) ?? { version, name };
-    const filePath = join(migrationsDir, entry);
+    const filePath = join(directory, entry);
+    const existing = pairs.get(version);
 
-    if (direction === "up") existing.upPath = filePath;
-    if (direction === "down") existing.downPath = filePath;
-
-    if (existing.name !== name) {
-      throw new Error(`Migration ${version} has inconsistent names: ${existing.name} vs ${name}`);
+    if (existing && existing.name && existing.name !== name) {
+      throw new Error(`Duplicate migration version ${version}`);
     }
 
-    pairs.set(version, existing);
+    const next = existing ?? { version, name };
+    if (direction === "up") next.upPath = filePath;
+    if (direction === "down") next.downPath = filePath;
+    pairs.set(version, next);
   }
 
   const migrations = Array.from(pairs.values()).map((pair) => {
@@ -163,6 +163,18 @@ export async function loadMigrationFiles() {
   });
 
   return migrations.sort((a, b) => a.version.localeCompare(b.version));
+}
+
+export function assertAppliedMigrationsExistLocally(
+  localMigrations: MigrationFilePair[],
+  appliedVersions: string[],
+) {
+  const localVersions = new Set(localMigrations.map((migration) => migration.version));
+  for (const version of appliedVersions) {
+    if (!localVersions.has(version)) {
+      throw new Error(`Applied migration ${version} is missing locally.`);
+    }
+  }
 }
 
 export function diffTables(expectedTables: string[], installedTables: string[]) {
