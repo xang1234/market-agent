@@ -1,9 +1,9 @@
-import { Outlet } from 'react-router-dom'
 import { AuthInterrupt } from './AuthInterrupt'
 import { AuthInterruptProvider } from './AuthInterruptProvider'
 import { PrimaryTabs } from './PrimaryTabs'
 import { RightRailProvider } from './RightRailProvider'
 import { RightRailSlot } from './RightRailSlot'
+import { RouteScopeGate } from './RouteScopeGate'
 import { TopBar } from './TopBar'
 import { WatchlistSlot } from './WatchlistSlot'
 
@@ -21,9 +21,11 @@ import { WatchlistSlot } from './WatchlistSlot'
 // Shell chrome is not auth-gated as a whole; public routes (Home, Screener,
 // Analyze-entry, entered symbol detail) render inside the same shell as
 // protected routes (Chat, Agents, user-owned watchlists). In-shell auth
-// gates for protected main-canvas content are enforced by <ProtectedSurface>
-// in App.tsx, rendered inside <Outlet /> — the shell itself stays mounted
-// across auth transitions.
+// gates for protected main-canvas content are driven by route-level scope
+// metadata (fra-6al.2.3) — each route declares `handle: { scope, label }`
+// and <RouteScopeGate /> walks useMatches() to swap in <AuthGate /> when
+// the current match is protected and the session is null. The shell
+// itself stays mounted across auth transitions.
 //
 // The shell also owns the <AuthInterrupt /> modal (P0.1.3): public surfaces
 // fire protected actions via useRequestProtectedAction, and this single
@@ -40,7 +42,7 @@ export function WorkspaceShell() {
             <PrimaryTabs />
             <div className="flex min-h-0 flex-1">
               <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-                <Outlet />
+                <RouteScopeGate />
               </main>
               <RightRailSlot />
             </div>

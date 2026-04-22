@@ -8,9 +8,9 @@ import { useAuthInterrupt } from './useAuthInterrupt'
 // action is discarded without a route change.
 export function AuthInterrupt() {
   const { pending, cancel } = useAuthInterrupt()
-  const { signIn } = useAuth()
+  const { session, signIn } = useAuth()
 
-  if (pending == null) return null
+  if (pending == null || session != null) return null
 
   return (
     <div
