@@ -35,7 +35,41 @@ function createContainerName() {
   return `fra-6al-7-1-${process.pid}-${Date.now()}`;
 }
 
-function startPostgres(containerName: string, password: string, hostPort: string) {
+function lookupPublishedHostPort(containerName: string) {
+  const result = run("docker", [
+    "port",
+    containerName,
+    "5432/tcp",
+  ]);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  const mapping = result.stdout.trim();
+  const match = mapping.match(/:(\d+)$/);
+  assert.ok(match, `expected docker port output to include a host port, got: ${mapping}`);
+  return match[1];
+}
+
+function reserveHostPort(hostPort: string) {
+  const containerName = `fra-6al-7-1-reserved-${process.pid}-${Date.now()}`;
+  const result = run("docker", [
+    "run",
+    "--detach",
+    "--rm",
+    "--name",
+    containerName,
+    "-e",
+    "POSTGRES_PASSWORD=postgres",
+    "-p",
+    `${hostPort}:5432`,
+    "postgres:15",
+  ]);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  return containerName;
+}
+
+function startPostgres(containerName: string, password: string) {
   const result = run("docker", [
     "run",
     "--detach",
@@ -45,11 +79,12 @@ function startPostgres(containerName: string, password: string, hostPort: string
     "-e",
     `POSTGRES_PASSWORD=${password}`,
     "-p",
-    `${hostPort}:5432`,
+    "127.0.0.1::5432",
     "postgres:15",
   ]);
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
+  return lookupPublishedHostPort(containerName);
 }
 
 function stopPostgres(containerName: string) {
@@ -94,10 +129,9 @@ test("apply:schema loads the normative schema into a fresh Postgres 15 database"
 
   const containerName = createContainerName();
   const password = "postgres";
-  const hostPort = "55432";
+  const hostPort = startPostgres(containerName, password);
   const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
 
-  startPostgres(containerName, password, hostPort);
   t.after(() => {
     stopPostgres(containerName);
   });
@@ -128,4 +162,38 @@ test("apply:schema loads the normative schema into a fresh Postgres 15 database"
   for (const tableName of expectedTables) {
     assert.match(dtOutput, new RegExp(`\\b${tableName}\\b`), `expected \\dt output to include ${tableName}`);
   }
+});
+
+test("apply:schema still works when the default host port is already occupied", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for db/apply-schema integration coverage");
+    return;
+  }
+
+  const reservedContainer = reserveHostPort("55432");
+  t.after(() => {
+    stopPostgres(reservedContainer);
+  });
+  await waitForPostgres(reservedContainer);
+
+  const containerName = createContainerName();
+  const password = "postgres";
+  const hostPort = startPostgres(containerName, password);
+  const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
+
+  assert.notEqual(hostPort, "55432");
+  t.after(() => {
+    stopPostgres(containerName);
+  });
+
+  await waitForPostgres(containerName);
+
+  const applyResult = run("npm", ["run", "apply:schema", "--", "--database-url", databaseUrl], {
+    cwd: dbRoot,
+    env: {
+      DATABASE_URL: databaseUrl,
+    },
+  });
+
+  assert.equal(applyResult.status, 0, applyResult.stderr || applyResult.stdout);
 });
