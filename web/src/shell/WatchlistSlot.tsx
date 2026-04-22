@@ -10,7 +10,10 @@ const TIMEFRAMES = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y'] as const
 
 export function WatchlistSlot() {
   return (
-    <aside className="flex h-full w-56 shrink-0 flex-col border-r border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+    <aside
+      aria-label="Watchlist"
+      className="flex h-full w-56 shrink-0 flex-col border-r border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900"
+    >
       <div className="flex items-center justify-between border-b border-neutral-200 px-3 py-3 dark:border-neutral-800">
         <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
           Watchlist
