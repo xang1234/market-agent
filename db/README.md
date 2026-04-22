@@ -17,6 +17,13 @@ DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres npm run migr
 DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres npm run migrate -- down
 ```
 
+Seed reference data (metrics registry + minimal source registry):
+
+```bash
+cd db
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres npm run seed
+```
+
 Run integration tests:
 
 ```bash
@@ -28,3 +35,4 @@ Notes:
 - `0001_init.up.sql` is an immutable snapshot of the current normative schema pack.
 - `schema_migrations` tracks applied migration versions.
 - `down` rolls back one migration per invocation.
+- Seed files in `db/seed/*.sql` are applied in lexical order and are idempotent — rerunning does not duplicate rows.
