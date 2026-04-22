@@ -1,4 +1,6 @@
 import { Outlet } from 'react-router-dom'
+import { AuthInterrupt } from './AuthInterrupt'
+import { AuthInterruptProvider } from './AuthInterruptProvider'
 import { LeftNav } from './LeftNav'
 import { RightRailProvider, RightRailSlot } from './RightRailSlot'
 
@@ -12,16 +14,23 @@ import { RightRailProvider, RightRailSlot } from './RightRailSlot'
 // gates for protected main-canvas content are enforced by <ProtectedSurface>
 // in App.tsx, rendered inside <Outlet /> — the shell itself stays mounted
 // across auth transitions.
+//
+// The shell also owns the <AuthInterrupt /> modal (P0.1.3): public surfaces
+// fire protected actions via useRequestProtectedAction, and this single modal
+// instance handles the sign-in prompt + action resume across all surfaces.
 export function WorkspaceShell() {
   return (
-    <RightRailProvider>
-      <div className="flex h-full w-full bg-neutral-50 text-neutral-900">
-        <LeftNav />
-        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <Outlet />
-        </main>
-        <RightRailSlot />
-      </div>
-    </RightRailProvider>
+    <AuthInterruptProvider>
+      <RightRailProvider>
+        <div className="flex h-full w-full bg-neutral-50 text-neutral-900">
+          <LeftNav />
+          <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+            <Outlet />
+          </main>
+          <RightRailSlot />
+        </div>
+        <AuthInterrupt />
+      </RightRailProvider>
+    </AuthInterruptProvider>
   )
 }
