@@ -6,11 +6,11 @@ export function ScreenerPage() {
     <div className="flex flex-1 flex-col gap-6 overflow-auto p-6">
       <header>
         <h1 className="text-2xl font-semibold">Screener</h1>
-        <p className="mt-1 text-sm text-neutral-600">
+        <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
           Build, refine, and view one active screen. Full surface ships with P1.4b.
         </p>
       </header>
-      <div className="rounded-md border border-neutral-200 bg-white p-6 text-sm text-neutral-500">
+      <div className="rounded-md border border-neutral-200 bg-white p-6 text-sm text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400">
         Query controls + result table — public browsing; saving requires session.
       </div>
     </div>

@@ -26,7 +26,7 @@ export function RightRailSlot() {
   const { content } = useRightRail()
   if (content == null) return null
   return (
-    <aside className="flex h-full w-80 shrink-0 flex-col border-l border-neutral-200 bg-white">
+    <aside className="flex h-full w-80 shrink-0 flex-col border-l border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
       {content}
     </aside>
   )

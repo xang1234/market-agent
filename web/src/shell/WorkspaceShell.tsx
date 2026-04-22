@@ -22,7 +22,7 @@ export function WorkspaceShell() {
   return (
     <AuthInterruptProvider>
       <RightRailProvider>
-        <div className="flex h-full w-full bg-neutral-50 text-neutral-900">
+        <div className="flex h-full w-full bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
           <LeftNav />
           <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
             <Outlet />
