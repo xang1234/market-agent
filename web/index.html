@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Finance Research</title>
+    <script>
+      // Pre-React theme application: avoids a flash of incorrect theme on
+      // initial paint. Reads the same key/strategy the ThemeProvider uses so
+      // the two agree. Kept intentionally tiny; anything more complex belongs
+      // in ThemeProvider itself after hydration.
+      (function () {
+        // Scope the try to just the storage read — matchMedia is separate so
+        // that a Safari-private-mode user whose OS is dark still gets dark
+        // on first paint even when localStorage throws.
+        var mode = 'system';
+        try {
+          var stored = localStorage.getItem('theme');
+          if (stored === 'light' || stored === 'dark') mode = stored;
+        } catch (_) {
+          // localStorage unavailable — treat as unset and fall through.
+        }
+        var resolved =
+          mode === 'system'
+            ? window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light'
+            : mode;
+        if (resolved === 'dark') document.documentElement.classList.add('dark');
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
