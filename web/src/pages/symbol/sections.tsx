@@ -1,8 +1,12 @@
 // Scaffold sections for the entered subject-detail shell. Each is a minimal
-// placeholder that names the bead which fills in the real content, so the
+// placeholder that names the phase which fills in the real content, so the
 // route tree is complete and navigable today. Kept in one file because each
-// placeholder is trivial; when P1.3 / P1.3b / P4.1 / P4.6 land the real
-// surfaces, those beads should split this into per-section modules.
+// placeholder is trivial; when P1.3 (overview + financials + earnings core
+// tabs) and P1.3b (holders + signals + Analyze entry integration) land,
+// those beads should split this into per-section modules.
+//
+// Phase references are used instead of bead IDs — phase numbers are stable
+// normative spec markers, bead IDs are project-local and can drift.
 
 type SectionScaffoldProps = {
   testId: string
@@ -28,7 +32,7 @@ export function OverviewSection() {
     <SectionScaffold
       testId="section-overview"
       title="Overview"
-      source="Subject overview blocks (identity, classification, key stats, recent findings) ship with fra-6al.5b (P1.3 symbol overview)."
+      source="Identity, classification, key stats, and recent findings ship with P1.3 (symbol detail core tabs) — consuming the resolver (P0.3) and first quote snapshot (P0.4)."
     />
   )
 }
@@ -38,7 +42,7 @@ export function FinancialsSection() {
     <SectionScaffold
       testId="section-financials"
       title="Financials"
-      source="Normalized statement blocks + segment views ship with P3.* (promotion rules + aggregation layer) feeding this surface via P1.3b."
+      source="Normalized statement blocks and segment views ship with P1.3, sourced from P3.* (promotion rules) and the P4.1 aggregation layer."
     />
   )
 }
@@ -48,7 +52,7 @@ export function EarningsSection() {
     <SectionScaffold
       testId="section-earnings"
       title="Earnings"
-      source="Earnings history, guidance, call commentary, and estimate context ship with P3.2 (earnings) + P4.1 (aggregation)."
+      source="Earnings history, guidance, call commentary, and estimate context ship with P1.3, built on P3.2 (earnings) and P4.1 (aggregation / consensus)."
     />
   )
 }
@@ -58,7 +62,7 @@ export function HoldersSection() {
     <SectionScaffold
       testId="section-holders"
       title="Holders"
-      source="Holder composition, recent filings, and insider activity ship with P3.3 (ownership) + P4.1."
+      source="Holder composition, recent filings, and insider activity ship with P1.3b, built on P3.3 (ownership) and P4.1."
     />
   )
 }
@@ -68,7 +72,7 @@ export function SignalsSection() {
     <SectionScaffold
       testId="section-signals"
       title="Signals"
-      source="Extensible section for community, sentiment, news pulse, and future alt-data — ships with P4.6 (specialized social + news blocks). Not a source-specific /reddit or /news route."
+      source="Extensible section for community, sentiment, news pulse, and future alt-data. Surface ships with P1.3b, content blocks ship with P4.6 (specialized social + news blocks). Deliberately not a source-specific /reddit or /news route."
     />
   )
 }
