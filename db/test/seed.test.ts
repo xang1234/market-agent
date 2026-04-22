@@ -1,5 +1,4 @@
-import { join } from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import {
   createContainerName,
@@ -25,12 +24,14 @@ type SeedSnapshot = {
 };
 
 function snapshotSeed(containerName: string): SeedSnapshot {
+  // -tAc uses '|' as the default column separator, giving the same
+  // pipe-delimited row without an explicit concat.
   const row = queryValue(
     containerName,
     `select
-       (select count(*) from metrics) || '|' ||
-       (select count(*) from sources) || '|' ||
-       (select ${METRICS_DIGEST_EXPR} from metrics) || '|' ||
+       (select count(*) from metrics),
+       (select count(*) from sources),
+       (select ${METRICS_DIGEST_EXPR} from metrics),
        (select ${SOURCES_DIGEST_EXPR} from sources)`,
   );
   const [metricCount, sourceCount, metricsDigest, sourcesDigest] = row.split("|");
@@ -44,7 +45,7 @@ function runSeed(databaseUrl: string) {
   });
 }
 
-async function bootstrapDatabase(t: test.TestContext) {
+async function bootstrapDatabase(t: TestContext) {
   const containerName = createContainerName("fra-6al-7-3");
   const password = "postgres";
   const hostPort = startPostgres(containerName, password);

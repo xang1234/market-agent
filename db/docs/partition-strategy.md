@@ -88,15 +88,16 @@ Rejected alternatives:
 
 ### Retention policy
 
-| Table             | Hot (online)     | Warm (detach, archive to object store) | Cold (drop) |
-| ----------------- | ---------------- | -------------------------------------- | ----------- |
-| `facts`           | 24 months        | 24–120 months                          | never       |
-| `tool_call_logs`  | 90 days          | 90–180 days                            | > 180 days  |
+| Table             | Hot (online)     | Warm (detach, archive to object store) | Local DROP            |
+| ----------------- | ---------------- | -------------------------------------- | --------------------- |
+| `facts`           | 24 months        | 24–120 months                          | only after archive    |
+| `tool_call_logs`  | 90 days          | 90–180 days                            | > 180 days, no archive|
 
-`facts` is evidence and never deleted — old partitions are **detached** and
-exported to object storage, with a manifest row kept in `ingestion_batches`
-(to be added) so restatements can be rehydrated. `tool_call_logs` is
-orchestration telemetry — rolling DROP is fine once the warm window expires.
+`facts` is evidence: the *data* is never lost. Old partitions are **detached**
+and exported to object storage, with a manifest row kept in `ingestion_batches`
+(to be added) so restatements can be rehydrated; the local partition may then
+be dropped once the archive is durable. `tool_call_logs` is orchestration
+telemetry — rolling DROP without archive is fine once the warm window expires.
 
 ### Cross-partition query patterns
 

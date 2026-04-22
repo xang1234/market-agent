@@ -116,11 +116,11 @@ explain (costs off)
 select * from facts
 where subject_kind = 'issuer';
 
--- Retention pattern (facts-specific): DETACH to archive, never DROP.
--- The detached partition becomes an ordinary table — export it to object
--- storage, record the manifest, then drop the local copy only after the
--- archive is durable. In production, an observability worker runs this.
+-- Retention pattern (facts-specific): DETACH, archive, then DROP — in that
+-- order. The evidence plane never loses data; the local partition may be
+-- dropped only after the archive is durable. In production, an observability
+-- worker runs this sequence on schedule.
 alter table facts detach partition facts_2026_02;
 -- e.g. \copy facts_2026_02 to 'archive/facts_2026_02.csv' with csv header;
 --      insert into ingestion_batches (archive_uri, ...) values (...);
--- Only drop the detached table once the archive is confirmed durable.
+--      drop table facts_2026_02;   -- only after the archive is confirmed.
