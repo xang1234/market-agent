@@ -5,7 +5,7 @@ import { ThemeProvider } from './shell/ThemeProvider'
 import { WorkspaceShell } from './shell/WorkspaceShell'
 import { HomePage } from './pages/HomePage'
 import { AgentsPage } from './pages/AgentsPage'
-import { ChatPage } from './pages/ChatPage'
+import { ChatEmptyState, ChatLayout, ChatThreadView } from './pages/ChatPage'
 import { ScreenerPage } from './pages/ScreenerPage'
 import { AnalyzePage } from './pages/AnalyzePage'
 
@@ -40,10 +40,13 @@ export function App() {
                 path="chat"
                 element={
                   <ProtectedSurface destinationLabel="Chat">
-                    <ChatPage />
+                    <ChatLayout />
                   </ProtectedSurface>
                 }
-              />
+              >
+                <Route index element={<ChatEmptyState />} />
+                <Route path=":threadId" element={<ChatThreadView />} />
+              </Route>
               <Route path="screener" element={<ScreenerPage />} />
               <Route path="analyze" element={<AnalyzePage />} />
               <Route path="*" element={<Navigate to="/home" replace />} />
