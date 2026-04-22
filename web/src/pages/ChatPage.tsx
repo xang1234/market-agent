@@ -5,11 +5,14 @@ import { Outlet, useParams } from 'react-router-dom'
 // Chat stays thread-scoped (not symbol-scoped) so threads can span themes,
 // multiple subjects, or imported Analyze artifacts.
 //
-// ChatLayout is the route-level element; the <ProtectedSurface> guard lives
-// in App.tsx on the parent route so `index` + `:threadId` both inherit it
-// without each needing its own wrap. P2.1 (fra-2fu.1 thread coordinator)
-// will replace this with the real layout: persistent thread list + SSE
-// transport + composer.
+// ChatLayout is the route-level element. Auth gating is driven by route
+// metadata (fra-6al.2.3): the `/chat` route in App.tsx declares
+// `handle: { scope: 'protected', label: 'Chat' }`, and RouteScopeGate
+// (mounted in WorkspaceShell's main canvas) walks useMatches() to swap
+// in <AuthGate /> when unauthed. The `:threadId` child route inherits
+// the parent's scope automatically — no child-level handle needed.
+// P2.1 (fra-2fu.1 thread coordinator) will replace this with the real
+// layout: persistent thread list + SSE transport + composer.
 
 export function ChatLayout() {
   return (
