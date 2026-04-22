@@ -8,6 +8,14 @@ import { AgentsPage } from './pages/AgentsPage'
 import { ChatEmptyState, ChatLayout, ChatThreadView } from './pages/ChatPage'
 import { ScreenerPage } from './pages/ScreenerPage'
 import { AnalyzePage } from './pages/AnalyzePage'
+import { SubjectDetailShell } from './shell/SubjectDetailShell'
+import {
+  EarningsSection,
+  FinancialsSection,
+  HoldersSection,
+  OverviewSection,
+  SignalsSection,
+} from './pages/symbol/sections'
 
 // Route model per spec §3.7 + §3.8. WorkspaceShell is the layout route —
 // persistent across all primary-workspace transitions. Child routes render
@@ -49,6 +57,14 @@ export function App() {
               </Route>
               <Route path="screener" element={<ScreenerPage />} />
               <Route path="analyze" element={<AnalyzePage />} />
+              <Route path="symbol/:subjectRef" element={<SubjectDetailShell />}>
+                <Route index element={<Navigate to="overview" replace />} />
+                <Route path="overview" element={<OverviewSection />} />
+                <Route path="financials" element={<FinancialsSection />} />
+                <Route path="earnings" element={<EarningsSection />} />
+                <Route path="holders" element={<HoldersSection />} />
+                <Route path="signals" element={<SignalsSection />} />
+              </Route>
               <Route path="*" element={<Navigate to="/home" replace />} />
             </Route>
           </Routes>
