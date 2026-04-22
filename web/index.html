@@ -11,19 +11,23 @@
       // the two agree. Kept intentionally tiny; anything more complex belongs
       // in ThemeProvider itself after hydration.
       (function () {
+        // Scope the try to just the storage read — matchMedia is separate so
+        // that a Safari-private-mode user whose OS is dark still gets dark
+        // on first paint even when localStorage throws.
+        var mode = 'system';
         try {
           var stored = localStorage.getItem('theme');
-          var mode = stored === 'light' || stored === 'dark' ? stored : 'system';
-          var resolved =
-            mode === 'system'
-              ? window.matchMedia('(prefers-color-scheme: dark)').matches
-                ? 'dark'
-                : 'light'
-              : mode;
-          if (resolved === 'dark') document.documentElement.classList.add('dark');
+          if (stored === 'light' || stored === 'dark') mode = stored;
         } catch (_) {
-          // localStorage / matchMedia unavailable — fall through to light.
+          // localStorage unavailable — treat as unset and fall through.
         }
+        var resolved =
+          mode === 'system'
+            ? window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light'
+            : mode;
+        if (resolved === 'dark') document.documentElement.classList.add('dark');
       })();
     </script>
   </head>
