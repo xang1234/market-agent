@@ -19,6 +19,7 @@ import {
   getCurrentRoutePath,
   parsePendingProtectedAction,
   planPendingProtectedActionResume,
+  planProtectedActionResumeDispatch,
   serializePendingProtectedAction,
   type PendingProtectedAction,
   type ProtectedAction,
@@ -50,6 +51,8 @@ export function AuthInterruptProvider({ children }: { children: ReactNode }) {
   const location = useLocation()
   const navigate = useNavigate()
   const resumeTokenRef = useRef(0)
+  const queuedResumeKeyRef = useRef<string | null>(null)
+  const dispatchedResumeKeyRef = useRef<string | null>(null)
   const [pending, setPendingState] = useState<PendingProtectedAction | null>(
     readStoredPendingProtectedAction,
   )
@@ -85,6 +88,27 @@ export function AuthInterruptProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
+  const dispatchPlannedResume = useCallback(
+    (path: string, action: ProtectedAction) => {
+      const plan = planProtectedActionResumeDispatch(
+        dispatchedResumeKeyRef.current,
+        path,
+        action,
+      )
+      if (!plan.shouldDispatch) return
+
+      dispatchedResumeKeyRef.current = plan.resumeKey
+      dispatchResumedAction(action)
+
+      queueMicrotask(() => {
+        if (dispatchedResumeKeyRef.current === plan.resumeKey) {
+          dispatchedResumeKeyRef.current = null
+        }
+      })
+    },
+    [dispatchResumedAction],
+  )
+
   useEffect(() => {
     const plan = planPendingProtectedActionResume({
       currentPath,
@@ -95,12 +119,34 @@ export function AuthInterruptProvider({ children }: { children: ReactNode }) {
     if (plan.type === 'idle') return
 
     if (plan.type === 'dispatch') {
+      const dispatchPlan = planProtectedActionResumeDispatch(
+        dispatchedResumeKeyRef.current,
+        currentPath,
+        plan.action,
+      )
+      if (!dispatchPlan.shouldDispatch) return
+
+      dispatchedResumeKeyRef.current = dispatchPlan.resumeKey
       queueMicrotask(() => {
         setPending(null)
         dispatchResumedAction(plan.action)
+        queueMicrotask(() => {
+          if (dispatchedResumeKeyRef.current === dispatchPlan.resumeKey) {
+            dispatchedResumeKeyRef.current = null
+          }
+        })
       })
       return
     }
+
+    const queuedPlan = planProtectedActionResumeDispatch(
+      queuedResumeKeyRef.current,
+      plan.to,
+      plan.action,
+    )
+    if (!queuedPlan.shouldDispatch) return
+
+    queuedResumeKeyRef.current = queuedPlan.resumeKey
 
     queueMicrotask(() => {
       setPending(null)
@@ -115,11 +161,12 @@ export function AuthInterruptProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (queuedResume == null || currentPath !== queuedResume.path) return
 
-    dispatchResumedAction(queuedResume.action)
+    dispatchPlannedResume(queuedResume.path, queuedResume.action)
     queueMicrotask(() => {
+      queuedResumeKeyRef.current = null
       setQueuedResume(null)
     })
-  }, [currentPath, dispatchResumedAction, queuedResume])
+  }, [currentPath, dispatchPlannedResume, queuedResume])
 
   const requestProtectedAction = useCallback(
     (req: ProtectedActionRequest) => {

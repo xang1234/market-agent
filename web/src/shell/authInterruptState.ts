@@ -21,6 +21,11 @@ export type ProtectedActionResumePlan =
   | { type: 'dispatch'; action: ProtectedAction }
   | { type: 'navigate'; to: string; action: ProtectedAction }
 
+export type ProtectedActionResumeDispatchPlan = {
+  shouldDispatch: boolean
+  resumeKey: string
+}
+
 type RouteLike = {
   pathname: string
   search?: string
@@ -37,12 +42,20 @@ function isProtectedAction(value: unknown): value is ProtectedAction {
   return value.kind === 'save-to-watchlist' && typeof value.symbol === 'string'
 }
 
+function isAppRoutePath(value: unknown): value is string {
+  return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//')
+}
+
 export function getCurrentRoutePath({ pathname, search = '', hash = '' }: RouteLike): string {
   return `${pathname}${search}${hash}`
 }
 
 export function serializePendingProtectedAction(pending: PendingProtectedAction): string {
   return JSON.stringify(pending)
+}
+
+function getProtectedActionResumeKey(path: string, action: ProtectedAction): string {
+  return `${path}\u0000${JSON.stringify(action)}`
 }
 
 export function parsePendingProtectedAction(raw: string | null): PendingProtectedAction | null {
@@ -52,7 +65,7 @@ export function parsePendingProtectedAction(raw: string | null): PendingProtecte
     const parsed = JSON.parse(raw)
     if (!isRecord(parsed)) return null
     if (typeof parsed.title !== 'string') return null
-    if (typeof parsed.returnTo !== 'string') return null
+    if (!isAppRoutePath(parsed.returnTo)) return null
     if ('description' in parsed && parsed.description != null && typeof parsed.description !== 'string') {
       return null
     }
@@ -66,6 +79,19 @@ export function parsePendingProtectedAction(raw: string | null): PendingProtecte
     }
   } catch {
     return null
+  }
+}
+
+export function planProtectedActionResumeDispatch(
+  lastResumeKey: string | null,
+  path: string,
+  action: ProtectedAction,
+): ProtectedActionResumeDispatchPlan {
+  const resumeKey = getProtectedActionResumeKey(path, action)
+
+  return {
+    shouldDispatch: lastResumeKey !== resumeKey,
+    resumeKey,
   }
 }
 

@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  planProtectedActionResumeDispatch,
   parsePendingProtectedAction,
   planPendingProtectedActionResume,
   serializePendingProtectedAction,
@@ -27,6 +28,18 @@ test('serialize/parse round-trips pending protected actions', () => {
 test('parsePendingProtectedAction rejects invalid payloads', () => {
   assert.equal(parsePendingProtectedAction('{"action":{"kind":"unknown"}}'), null)
   assert.equal(parsePendingProtectedAction('{"returnTo":"/home"}'), null)
+  assert.equal(
+    parsePendingProtectedAction(
+      '{"title":"Sign in","returnTo":"//evil.com","action":{"kind":"save-to-watchlist","symbol":"AAPL"}}',
+    ),
+    null,
+  )
+  assert.equal(
+    parsePendingProtectedAction(
+      '{"title":"Sign in","returnTo":"https://evil.com","action":{"kind":"save-to-watchlist","symbol":"AAPL"}}',
+    ),
+    null,
+  )
   assert.equal(parsePendingProtectedAction('not-json'), null)
 })
 
@@ -75,4 +88,34 @@ test('resume plan does nothing without both session and pending action', () => {
     }),
     { type: 'idle' },
   )
+})
+
+test('planned resume dispatch skips duplicate path/action pairs', () => {
+  const first = planProtectedActionResumeDispatch(null, '/home', pendingAction.action)
+  assert.deepEqual(first, {
+    shouldDispatch: true,
+    resumeKey: '/home\u0000{"kind":"save-to-watchlist","symbol":"AAPL"}',
+  })
+
+  const second = planProtectedActionResumeDispatch(
+    first.resumeKey,
+    '/home',
+    pendingAction.action,
+  )
+  assert.deepEqual(second, {
+    shouldDispatch: false,
+    resumeKey: '/home\u0000{"kind":"save-to-watchlist","symbol":"AAPL"}',
+  })
+})
+
+test('planned resume dispatch allows distinct path/action pairs', () => {
+  const first = planProtectedActionResumeDispatch(null, '/home', pendingAction.action)
+  const second = planProtectedActionResumeDispatch(
+    first.resumeKey,
+    '/chat/abc123',
+    pendingAction.action,
+  )
+
+  assert.equal(second.shouldDispatch, true)
+  assert.equal(second.resumeKey, '/chat/abc123\u0000{"kind":"save-to-watchlist","symbol":"AAPL"}')
 })
