@@ -1,0 +1,20 @@
+{
+  "name": "db",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "apply:schema": "node --experimental-strip-types scripts/apply-schema.ts",
+    "verify:schema": "node --experimental-strip-types scripts/verify-schema.ts",
+    "test": "node --experimental-strip-types --test test/**/*.test.ts"
+  },
+  "dependencies": {
+    "pg": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0"
+  }
+}
