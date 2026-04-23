@@ -173,6 +173,41 @@ test("ticker matching multiple MICs returns ambiguous with multiple_listings axi
   assert.equal(micFiltered.subject_ref.id, apple.listing_id);
 });
 
+test("ticker resolution ignores expired historical listings", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver lookup coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-3-3");
+  const client = await connectedClient(t, databaseUrl);
+  const apple = await seedAppleChain(client);
+
+  const retiredIssuer = await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name, cik) values ('Retired Apple Listing Corp.', '9999998')
+     returning issuer_id`,
+  );
+  const retiredInstrument = await client.query<{ instrument_id: string }>(
+    `insert into instruments (issuer_id, asset_type) values ($1, 'common_stock')
+     returning instrument_id`,
+    [retiredIssuer.rows[0].issuer_id],
+  );
+  await client.query(
+    `insert into listings (
+       instrument_id, mic, ticker, trading_currency, timezone, active_from, active_to
+     ) values (
+       $1, 'XNYS', 'AAPL', 'USD', 'America/New_York',
+       now() - interval '10 years',
+       now() - interval '5 years'
+     )`,
+    [retiredInstrument.rows[0].instrument_id],
+  );
+
+  const envelope = await resolveByTicker(client, "AAPL");
+  assert.ok(isResolved(envelope));
+  assert.equal(envelope.subject_ref.id, apple.listing_id);
+});
+
 test("same ticker across different issuers surfaces multiple_issuers axis", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for resolver lookup coverage");

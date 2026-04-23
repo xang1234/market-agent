@@ -130,7 +130,9 @@ export async function resolveByTicker(
                   from listings l
                   join instruments i on i.instrument_id = l.instrument_id
                   join issuers iss on iss.issuer_id = i.issuer_id
-                 where l.ticker = $1`;
+                 where l.ticker = $1
+                   and (l.active_from is null or l.active_from <= now())
+                   and (l.active_to is null or l.active_to > now())`;
 
   let result: QueryResult<ListingRow>;
   if (opts.mic) {
