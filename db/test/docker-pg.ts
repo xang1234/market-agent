@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
 import assert from "node:assert/strict";
+import { Client } from "pg";
 
 export const workspaceRoot = join(import.meta.dirname, "..", "..");
 export const dbRoot = join(workspaceRoot, "db");
@@ -86,6 +87,16 @@ export function queryValue(containerName: string, sql: string) {
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   return result.stdout.trim();
+}
+
+// Open a pg client against `databaseUrl`, wait for connect, and register
+// teardown. Shared lifecycle for tests that bring their own DB interactions
+// on top of bootstrapDatabase.
+export async function connectedClient(t: TestContext, databaseUrl: string): Promise<Client> {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  t.after(() => client.end());
+  return client;
 }
 
 // Spin up a Postgres container, apply the normative schema via `npm run

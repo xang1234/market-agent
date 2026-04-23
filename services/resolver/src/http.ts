@@ -1,8 +1,9 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type Server, type ServerResponse } from "node:http";
 import {
   isAmbiguous,
   isNotFound,
   isResolved,
+  notFound,
   type ResolverEnvelope,
 } from "./envelope.ts";
 import {
@@ -113,7 +114,7 @@ async function dispatchFreeText(
   // Name / alias lookup is intentionally out of scope for 3.4 — the alias
   // plane will land with the search-to-subject flow (fra-6al.4). For now,
   // inputs that only have a name_candidate fall through to not_found.
-  return { outcome: "not_found", normalized_input: n.trimmed, reason: "no_candidates" };
+  return notFound({ normalized_input: n.trimmed, reason: "no_candidates" });
 }
 
 function envelopeToSubjects(envelope: ResolverEnvelope): ResolvedSubject[] {
@@ -186,13 +187,7 @@ async function readBody(req: NodeJS.ReadableStream): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-type WritableResponse = {
-  statusCode: number;
-  setHeader(name: string, value: string): void;
-  end(data?: string): void;
-};
-
-function respond(res: WritableResponse, status: number, body: object) {
+function respond(res: ServerResponse, status: number, body: object) {
   res.statusCode = status;
   res.setHeader("content-type", "application/json");
   res.end(JSON.stringify(body));

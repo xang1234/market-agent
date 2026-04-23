@@ -1,7 +1,7 @@
-import test, { type TestContext } from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
-import { Client } from "pg";
-import { bootstrapDatabase, dockerAvailable } from "../../../db/test/docker-pg.ts";
+import type { Client } from "pg";
+import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import {
   resolveByCik,
   resolveByInput,
@@ -16,13 +16,6 @@ type AppleChain = {
   instrument_id: string;
   listing_id: string;
 };
-
-async function connectedClient(t: TestContext, databaseUrl: string): Promise<Client> {
-  const client = new Client({ connectionString: databaseUrl });
-  await client.connect();
-  t.after(() => client.end());
-  return client;
-}
 
 async function seedAppleChain(client: Client): Promise<AppleChain> {
   const issuer = await client.query<{ issuer_id: string }>(

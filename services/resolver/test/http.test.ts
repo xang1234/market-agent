@@ -1,8 +1,8 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
-import { Client } from "pg";
-import { bootstrapDatabase, dockerAvailable } from "../../../db/test/docker-pg.ts";
+import type { Client } from "pg";
+import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import {
   createResolverServer,
   handleResolveSubjects,
@@ -17,26 +17,20 @@ type AppleChain = {
   listing_id: string;
 };
 
-async function connectedClient(t: TestContext, databaseUrl: string): Promise<Client> {
-  const client = new Client({ connectionString: databaseUrl });
-  await client.connect();
-  t.after(() => client.end());
-  return client;
-}
-
 async function seedAppleChain(client: Client): Promise<AppleChain> {
   const issuer = await client.query<{ issuer_id: string }>(
     `insert into issuers (legal_name, cik, lei, domicile, sector, industry)
-     values ('Apple Inc.', '320193', 'HWUPKR0MPOU8FGXBT394', 'US', 'Technology', 'Consumer Electronics')
+     values ($1, $2, $3, $4, $5, $6)
      returning issuer_id`,
+    ["Apple Inc.", "320193", "HWUPKR0MPOU8FGXBT394", "US", "Technology", "Consumer Electronics"],
   );
   const issuer_id = issuer.rows[0].issuer_id;
 
   const instrument = await client.query<{ instrument_id: string }>(
-    `insert into instruments (issuer_id, asset_type, isin)
-     values ($1, 'common_stock', 'US0378331005')
+    `insert into instruments (issuer_id, asset_type, share_class, isin)
+     values ($1, 'common_stock', null, $2)
      returning instrument_id`,
-    [issuer_id],
+    [issuer_id, "US0378331005"],
   );
   const instrument_id = instrument.rows[0].instrument_id;
 
@@ -55,6 +49,14 @@ async function startServer(t: TestContext, client: Client): Promise<string> {
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const { port } = server.address() as AddressInfo;
   return `http://127.0.0.1:${port}`;
+}
+
+function postResolve(base: string, body: unknown): Promise<Response> {
+  return fetch(`${base}/v1/subjects/resolve`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: typeof body === "string" ? body : JSON.stringify(body),
+  });
 }
 
 // OpenAPI-schema-shaped assertion: every ResolvedSubject has the required
@@ -234,11 +236,7 @@ test("server: POST /v1/subjects/resolve returns 200 with the OpenAPI-shaped resp
   const apple = await seedAppleChain(client);
   const base = await startServer(t, client);
 
-  const res = await fetch(`${base}/v1/subjects/resolve`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text: "AAPL" }),
-  });
+  const res = await postResolve(base, { text: "AAPL" });
 
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("content-type"), "application/json");
@@ -259,11 +257,7 @@ test("server: malformed JSON body returns 400 with a descriptive error", { timeo
   const client = await connectedClient(t, databaseUrl);
   const base = await startServer(t, client);
 
-  const res = await fetch(`${base}/v1/subjects/resolve`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: "{not valid json",
-  });
+  const res = await postResolve(base, "{not valid json");
 
   assert.equal(res.status, 400);
   const body = (await res.json()) as { error: string };
@@ -280,11 +274,7 @@ test("server: missing 'text' returns 400 per request schema", { timeout: 120000 
   const client = await connectedClient(t, databaseUrl);
   const base = await startServer(t, client);
 
-  const res = await fetch(`${base}/v1/subjects/resolve`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ allow_kinds: ["issuer"] }),
-  });
+  const res = await postResolve(base, { allow_kinds: ["issuer"] });
 
   assert.equal(res.status, 400);
   const body = (await res.json()) as { error: string };
@@ -322,11 +312,7 @@ test("server: unknown text returns 200 with empty subjects and unresolved popula
   const client = await connectedClient(t, databaseUrl);
   const base = await startServer(t, client);
 
-  const res = await fetch(`${base}/v1/subjects/resolve`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text: "NOTREAL" }),
-  });
+  const res = await postResolve(base, { text: "NOTREAL" });
 
   assert.equal(res.status, 200);
   const body = await res.json();
