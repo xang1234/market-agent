@@ -7,6 +7,9 @@ import { Client } from "pg";
 export const workspaceRoot = join(import.meta.dirname, "..", "..");
 export const dbRoot = join(workspaceRoot, "db");
 type Cleanup = () => void | Promise<void>;
+type CommandResult = ReturnType<typeof run>;
+type CommandRunner = typeof run;
+type Sleep = (ms: number) => Promise<void>;
 const cleanupStacks = new WeakMap<TestContext, Cleanup[]>();
 
 export function run(
@@ -74,6 +77,11 @@ export async function waitForPostgres(containerName: string) {
   assert.fail(`Timed out waiting for Postgres container ${containerName}`);
 }
 
+function isStartupRace(result: CommandResult) {
+  const combinedOutput = `${result.stderr}\n${result.stdout}`.toLowerCase();
+  return combinedOutput.includes("the database system is starting up");
+}
+
 export function queryValue(containerName: string, sql: string) {
   const result = run("docker", [
     "exec",
@@ -111,6 +119,40 @@ export function registerLifoCleanup(t: TestContext, cleanup: Cleanup) {
   stack.push(cleanup);
 }
 
+export async function applySchemaWithRetry(
+  databaseUrl: string,
+  options: {
+    runner?: CommandRunner;
+    sleep?: Sleep;
+    maxAttempts?: number;
+    retryDelayMs?: number;
+  } = {},
+) {
+  const runner = options.runner ?? run;
+  const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const maxAttempts = options.maxAttempts ?? 5;
+  const retryDelayMs = options.retryDelayMs ?? 1000;
+  let lastResult: CommandResult | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const applyResult = runner("npm", ["run", "apply:schema", "--", "--database-url", databaseUrl], {
+      cwd: dbRoot,
+      env: { DATABASE_URL: databaseUrl },
+    });
+    if (applyResult.status === 0) return;
+
+    lastResult = applyResult;
+    if (attempt === maxAttempts || !isStartupRace(applyResult)) {
+      break;
+    }
+
+    await sleep(retryDelayMs);
+  }
+
+  assert.notEqual(lastResult, null);
+  assert.equal(lastResult.status, 0, lastResult.stderr || lastResult.stdout);
+}
+
 // Open a pg client against `databaseUrl`, wait for connect, and register
 // teardown. Shared lifecycle for tests that bring their own DB interactions
 // on top of bootstrapDatabase.
@@ -135,12 +177,7 @@ export async function bootstrapDatabase(
   const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
 
   await waitForPostgres(containerName);
-
-  const applyResult = run("npm", ["run", "apply:schema", "--", "--database-url", databaseUrl], {
-    cwd: dbRoot,
-    env: { DATABASE_URL: databaseUrl },
-  });
-  assert.equal(applyResult.status, 0, applyResult.stderr || applyResult.stdout);
+  await applySchemaWithRetry(databaseUrl);
 
   return { containerName, databaseUrl };
 }
