@@ -10,6 +10,9 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  NODE_VERSION: '22'
+
 jobs:
   web:
     name: web (typecheck, lint, test)
@@ -23,7 +26,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -47,15 +50,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: db/package-lock.json
 
       - run: npm ci
-
-      # Warm the postgres:15 image once so test-side `docker run` is instant.
-      - name: Pre-pull postgres image
-        run: docker pull postgres:15
 
       - run: npm test
 
@@ -68,7 +67,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: services/resolver/package-lock.json
 
@@ -81,9 +80,6 @@ jobs:
       - name: Install resolver deps
         working-directory: services/resolver
         run: npm ci
-
-      - name: Pre-pull postgres image
-        run: docker pull postgres:15
 
       - name: Run resolver tests
         working-directory: services/resolver
