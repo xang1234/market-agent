@@ -43,11 +43,15 @@ export function normalize(input: string): NormalizedQuery {
   };
 }
 
+// The three patterns below are disjoint by charset and length (CIK is pure
+// digits, ISIN requires two leading letters, LEI is 20 chars), so the check
+// order is not semantic — changing it cannot produce a different classification.
 function detectIdentifier(trimmed: string): IdentifierHint | undefined {
   if (/^\d{1,10}$/.test(trimmed)) {
-    // Strip leading zeros so "0000320193" and "320193" resolve to the same
-    // issuer. "0" collapses to "0" rather than the empty string.
-    const value = trimmed.replace(/^0+/, "") || "0";
+    // "320193" and "0000320193" should normalize to the same hint so the
+    // issuer lookup doesn't treat padded and unpadded CIKs as separate.
+    const stripped = trimmed.replace(/^0+/, "");
+    const value = stripped.length === 0 ? "0" : stripped;
     return { kind: "cik", value };
   }
 

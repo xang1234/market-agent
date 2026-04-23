@@ -95,7 +95,7 @@ test("LEI pattern: 20 alphanumeric characters becomes a lei hint (case-folded)",
   });
 });
 
-test("identifier patterns are mutually exclusive by length and charset", () => {
+test("each identifier pattern classifies to its own kind", () => {
   // CIK is pure digits; ISIN requires two leading letters; LEI is 20 chars.
   assert.equal(normalize("US0378331005").identifier_hint?.kind, "isin");
   assert.equal(normalize("HWUPKR0MPOU8FGXBT394").identifier_hint?.kind, "lei");
@@ -108,6 +108,17 @@ test("ticker-shaped input that also matches an identifier pattern surfaces both 
   const n = normalize("HWUPKR0MPOU8FGXBT394");
   assert.equal(n.ticker_candidate, "HWUPKR0MPOU8FGXBT394");
   assert.equal(n.identifier_hint?.kind, "lei");
+});
+
+test("punctuation-bearing input like 'AAPL,' preserves the comma in ticker_candidate", () => {
+  // ticker_candidate is deliberately permissive: it preserves every non-whitespace
+  // character case-folded. "AAPL," won't match listings.ticker and will fall
+  // through to name_candidate matching; this is intentional graceful failure,
+  // not a bug. Pinning behavior so a future edit doesn't silently strip
+  // punctuation here and start collapsing share-class suffixes.
+  const n = normalize("AAPL,");
+  assert.equal(n.ticker_candidate, "AAPL,");
+  assert.equal(n.name_candidate, "aapl");
 });
 
 test("bead verification premise: 'google' normalizes to a form that can feed issuer, GOOG, and GOOGL matching paths", () => {
