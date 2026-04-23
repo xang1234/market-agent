@@ -44,9 +44,11 @@ export function normalize(input: string): NormalizedQuery {
 }
 
 // Strip leading zeros so "320193" and "0000320193" resolve to the same
-// issuer. All-zeros collapses to "0". Shared between normalize's hint
-// classifier and the CIK resolver so both read/write sides agree.
+// issuer. All-zeros collapses to "0"; empty input stays empty (the
+// fallback is for "0000" → "0", not "" → "0"). Shared between normalize's
+// hint classifier and the CIK resolver so both read/write sides agree.
 export function normalizeCik(value: string): string {
+  if (value.length === 0) return "";
   const stripped = value.replace(/^0+/, "");
   return stripped.length === 0 ? "0" : stripped;
 }

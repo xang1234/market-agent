@@ -63,6 +63,10 @@ export async function resolveByInput(
       return resolveByIsin(db, input.value);
     case "lei":
       return resolveByLei(db, input.value);
+    default: {
+      const _exhaustive: never = input;
+      throw new Error(`Unhandled resolver input kind: ${(_exhaustive as ResolverInput).kind}`);
+    }
   }
 }
 

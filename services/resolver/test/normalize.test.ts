@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalize } from "../src/normalize.ts";
+import { normalize, normalizeCik } from "../src/normalize.ts";
 
 test("trims whitespace and uppercases the ticker candidate when input has no internal whitespace", () => {
   for (const input of ["aapl", "AAPL", "  aapl  ", "Aapl"]) {
@@ -60,6 +60,14 @@ test("CIK pattern: any 1-10 digit string becomes a cik hint with leading zeros s
   assert.deepEqual(normalize("0000320193").identifier_hint, { kind: "cik", value: "320193" });
   assert.deepEqual(normalize("1").identifier_hint, { kind: "cik", value: "1" });
   assert.deepEqual(normalize("0").identifier_hint, { kind: "cik", value: "0" });
+});
+
+test("normalizeCik preserves empty input — the '0' fallback is only for all-zeros, not empty", () => {
+  assert.equal(normalizeCik(""), "");
+  assert.equal(normalizeCik("0"), "0");
+  assert.equal(normalizeCik("0000"), "0");
+  assert.equal(normalizeCik("0000320193"), "320193");
+  assert.equal(normalizeCik("320193"), "320193");
 });
 
 test("CIK padding variants normalize to the same hint so issuer lookup doesn't see duplicates", () => {
