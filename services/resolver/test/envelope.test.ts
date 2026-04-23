@@ -20,11 +20,11 @@ const alphabetIssuer: SubjectRef = {
   kind: "issuer",
   id: "22222222-2222-4222-a222-222222222222",
 };
-const googlClistingClass: SubjectRef = {
+const googlListing: SubjectRef = {
   kind: "listing",
   id: "33333333-3333-4333-a333-333333333333",
 };
-const googListingClass: SubjectRef = {
+const googListing: SubjectRef = {
   kind: "listing",
   id: "44444444-4444-4444-a444-444444444444",
 };
@@ -59,14 +59,14 @@ test("resolved envelope accepts an explicit canonical_kind that differs from sub
 test("resolved envelope can carry lower-confidence alternatives without demoting to ambiguous", () => {
   const alternatives: ResolverCandidate[] = [
     {
-      subject_ref: googlClistingClass,
+      subject_ref: googlListing,
       display_name: "GOOGL (Class A)",
       confidence: 0.4,
       match_reason: "alias",
     },
   ];
   const envelope = resolved({
-    subject_ref: googListingClass,
+    subject_ref: googListing,
     display_name: "GOOG (Class C)",
     confidence: 0.85,
     alternatives,
@@ -80,12 +80,12 @@ test("resolved rejects an alternative with higher confidence than the chosen tar
   assert.throws(
     () =>
       resolved({
-        subject_ref: googListingClass,
+        subject_ref: googListing,
         display_name: "GOOG",
         confidence: 0.5,
         alternatives: [
           {
-            subject_ref: googlClistingClass,
+            subject_ref: googlListing,
             display_name: "GOOGL",
             confidence: 0.9,
           },
@@ -108,8 +108,8 @@ test("resolved rejects out-of-range confidence", () => {
 test("ambiguous envelope requires >= 2 candidates ranked by confidence descending", () => {
   const envelope = ambiguous({
     candidates: [
-      { subject_ref: googlClistingClass, display_name: "GOOGL", confidence: 0.7 },
-      { subject_ref: googListingClass, display_name: "GOOG", confidence: 0.6 },
+      { subject_ref: googlListing, display_name: "GOOGL", confidence: 0.7 },
+      { subject_ref: googListing, display_name: "GOOG", confidence: 0.6 },
       { subject_ref: alphabetIssuer, display_name: "Alphabet Inc.", confidence: 0.5 },
     ],
     ambiguity_axis: "multiple_listings",
@@ -126,7 +126,7 @@ test("ambiguous rejects a single-candidate list (callers must use resolved)", ()
     () =>
       ambiguous({
         candidates: [
-          { subject_ref: googListingClass, display_name: "GOOG", confidence: 0.9 },
+          { subject_ref: googListing, display_name: "GOOG", confidence: 0.9 },
         ],
       }),
     /requires >= 2 candidates/,
@@ -138,8 +138,8 @@ test("ambiguous rejects candidates not ranked by confidence descending", () => {
     () =>
       ambiguous({
         candidates: [
-          { subject_ref: googlClistingClass, display_name: "GOOGL", confidence: 0.3 },
-          { subject_ref: googListingClass, display_name: "GOOG", confidence: 0.9 },
+          { subject_ref: googlListing, display_name: "GOOGL", confidence: 0.3 },
+          { subject_ref: googListing, display_name: "GOOG", confidence: 0.9 },
         ],
       }),
     /ranked by confidence descending/,
@@ -151,8 +151,8 @@ test("ambiguous rejects candidate confidence outside [0, 1]", () => {
     () =>
       ambiguous({
         candidates: [
-          { subject_ref: googlClistingClass, display_name: "GOOGL", confidence: 1.5 },
-          { subject_ref: googListingClass, display_name: "GOOG", confidence: 0.9 },
+          { subject_ref: googlListing, display_name: "GOOGL", confidence: 1.5 },
+          { subject_ref: googListing, display_name: "GOOG", confidence: 0.9 },
         ],
       }),
     /must be a finite number in \[0, 1\]/,
@@ -173,8 +173,8 @@ test("type guards discriminate each outcome exclusively", () => {
     resolved({ subject_ref: aaplListing, display_name: "AAPL", confidence: 0.99 }),
     ambiguous({
       candidates: [
-        { subject_ref: googlClistingClass, display_name: "GOOGL", confidence: 0.7 },
-        { subject_ref: googListingClass, display_name: "GOOG", confidence: 0.6 },
+        { subject_ref: googlListing, display_name: "GOOGL", confidence: 0.7 },
+        { subject_ref: googListing, display_name: "GOOG", confidence: 0.6 },
       ],
     }),
     notFound({ normalized_input: "NOTREAL" }),
@@ -196,8 +196,8 @@ test("type guards discriminate each outcome exclusively", () => {
 test("spec §6.1 examples: GOOG → ambiguous, AAPL → resolved-listing, NOTREAL → not_found", () => {
   ambiguous({
     candidates: [
-      { subject_ref: googListingClass, display_name: "GOOG (Class C)", confidence: 0.55 },
-      { subject_ref: googlClistingClass, display_name: "GOOGL (Class A)", confidence: 0.45 },
+      { subject_ref: googListing, display_name: "GOOG (Class C)", confidence: 0.55 },
+      { subject_ref: googlListing, display_name: "GOOGL (Class A)", confidence: 0.45 },
     ],
     ambiguity_axis: "multiple_listings",
   });
