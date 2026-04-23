@@ -7,9 +7,16 @@ type StreamRoute = {
   runId: string | null;
 };
 
+const INVALID_STREAM_ROUTE = Symbol("INVALID_STREAM_ROUTE");
+
 export function createChatServer(): Server {
   return createServer((req, res) => {
     const route = matchStreamRoute(req.method ?? "GET", req.url ?? "/");
+
+    if (route === INVALID_STREAM_ROUTE) {
+      respondJson(res, 400, { error: "invalid request path" });
+      return;
+    }
 
     if (route == null) {
       respondJson(res, 404, { error: "not found" });
@@ -51,7 +58,7 @@ export function createChatServer(): Server {
   });
 }
 
-function matchStreamRoute(method: string, rawUrl: string): StreamRoute | null {
+function matchStreamRoute(method: string, rawUrl: string): StreamRoute | typeof INVALID_STREAM_ROUTE | null {
   if (method !== "GET") {
     return null;
   }
@@ -63,8 +70,14 @@ function matchStreamRoute(method: string, rawUrl: string): StreamRoute | null {
   }
 
   const runId = url.searchParams.get("run_id");
+  let threadId: string;
+  try {
+    threadId = decodeURIComponent(match[1]);
+  } catch {
+    return INVALID_STREAM_ROUTE;
+  }
   return {
-    threadId: decodeURIComponent(match[1]),
+    threadId,
     runId: runId && runId.trim() !== "" ? runId : null,
   };
 }
