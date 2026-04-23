@@ -6,6 +6,8 @@ import { Client } from "pg";
 
 export const workspaceRoot = join(import.meta.dirname, "..", "..");
 export const dbRoot = join(workspaceRoot, "db");
+type Cleanup = () => void | Promise<void>;
+const cleanupStacks = new WeakMap<TestContext, Cleanup[]>();
 
 export function run(
   command: string,
@@ -89,13 +91,33 @@ export function queryValue(containerName: string, sql: string) {
   return result.stdout.trim();
 }
 
+// node:test runs t.after() hooks in registration order, so shared helpers
+// keep their own stack and drain it in reverse to close clients before
+// stopping the backing Postgres container.
+export function registerLifoCleanup(t: TestContext, cleanup: Cleanup) {
+  let stack = cleanupStacks.get(t);
+  if (!stack) {
+    stack = [];
+    cleanupStacks.set(t, stack);
+    t.after(async () => {
+      const callbacks = cleanupStacks.get(t) ?? [];
+      cleanupStacks.delete(t);
+      for (let index = callbacks.length - 1; index >= 0; index -= 1) {
+        await callbacks[index]();
+      }
+    });
+  }
+
+  stack.push(cleanup);
+}
+
 // Open a pg client against `databaseUrl`, wait for connect, and register
 // teardown. Shared lifecycle for tests that bring their own DB interactions
 // on top of bootstrapDatabase.
 export async function connectedClient(t: TestContext, databaseUrl: string): Promise<Client> {
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
-  t.after(() => client.end());
+  registerLifoCleanup(t, () => client.end());
   return client;
 }
 
@@ -108,7 +130,7 @@ export async function bootstrapDatabase(
 ): Promise<{ containerName: string; databaseUrl: string }> {
   const containerName = createContainerName(prefix);
   const password = "postgres";
-  t.after(() => stopPostgres(containerName));
+  registerLifoCleanup(t, () => stopPostgres(containerName));
   const hostPort = startPostgres(containerName, password);
   const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
 
