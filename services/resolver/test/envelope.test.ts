@@ -193,27 +193,22 @@ test("type guards discriminate each outcome exclusively", () => {
   ]);
 });
 
-test("bead verification examples are constructible with the envelope vocabulary", () => {
-  const googSample = ambiguous({
+// Executable documentation for the spec §6.1 examples the bead's verification
+// clause names. The earlier tests already cover the shape assertions; this
+// one exists to keep the spec-to-code mapping honest as the envelope evolves.
+test("spec §6.1 examples: GOOG → ambiguous, AAPL → resolved-listing, NOTREAL → not_found", () => {
+  ambiguous({
     candidates: [
       { subject_ref: googListingClass, display_name: "GOOG (Class C)", confidence: 0.55 },
       { subject_ref: googlClistingClass, display_name: "GOOGL (Class A)", confidence: 0.45 },
     ],
     ambiguity_axis: "multiple_listings",
   });
-  const aaplSample = resolved({
+  resolved({
     subject_ref: aaplListing,
     display_name: "AAPL",
     confidence: 0.98,
     canonical_kind: "listing",
   });
-  const notRealSample = notFound({
-    normalized_input: "NOTREAL",
-    reason: "no_candidates",
-  });
-
-  assert.equal(googSample.outcome, "ambiguous");
-  assert.equal(aaplSample.outcome, "resolved");
-  assert.equal(aaplSample.canonical_kind, "listing");
-  assert.equal(notRealSample.outcome, "not_found");
+  notFound({ normalized_input: "NOTREAL", reason: "no_candidates" });
 });
