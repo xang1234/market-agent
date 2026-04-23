@@ -9,6 +9,22 @@ export type AmbiguityAxis =
   | "multiple_instruments"
   | "other";
 
+export type NotFoundReason =
+  | "unknown_ticker"
+  | "unknown_cik"
+  | "unknown_lei"
+  | "unknown_isin"
+  | "no_candidates"
+  | "other";
+
+// Confidence floors paired with the invariants assertConfidence enforces.
+// Unique-indexed identifiers (CIK/LEI/ISIN): DB uniqueness is the guarantee.
+// Ticker: locator per spec §4.1, not identity — even a single hit could be a
+// historically reused symbol, so cap below unique identifiers.
+export const CONFIDENCE_UNIQUE_IDENTIFIER = 0.99;
+export const CONFIDENCE_TICKER_SINGLE = 0.95;
+export const CONFIDENCE_TICKER_AMBIGUOUS = 0.5;
+
 export type ResolverCandidate = {
   subject_ref: SubjectRef;
   display_name: string;
@@ -34,7 +50,7 @@ export type AmbiguousEnvelope = {
 export type NotFoundEnvelope = {
   outcome: "not_found";
   normalized_input: string;
-  reason?: string;
+  reason?: NotFoundReason;
 };
 
 export type ResolverEnvelope = ResolvedEnvelope | AmbiguousEnvelope | NotFoundEnvelope;
@@ -124,7 +140,10 @@ export function ambiguous(args: {
   };
 }
 
-export function notFound(args: { normalized_input: string; reason?: string }): NotFoundEnvelope {
+export function notFound(args: {
+  normalized_input: string;
+  reason?: NotFoundReason;
+}): NotFoundEnvelope {
   return {
     outcome: "not_found",
     normalized_input: args.normalized_input,

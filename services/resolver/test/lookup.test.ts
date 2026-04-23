@@ -1,15 +1,7 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { Client } from "pg";
-import {
-  createContainerName,
-  dbRoot,
-  dockerAvailable,
-  run,
-  startPostgres,
-  stopPostgres,
-  waitForPostgres,
-} from "../../../db/test/docker-pg.ts";
+import { bootstrapDatabase, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import {
   resolveByCik,
   resolveByInput,
@@ -25,26 +17,11 @@ type AppleChain = {
   listing_id: string;
 };
 
-async function bootstrapDatabase(t: TestContext) {
-  const containerName = createContainerName("fra-6al-3-3");
-  const password = "postgres";
-  const hostPort = startPostgres(containerName, password);
-  const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
-
-  t.after(() => stopPostgres(containerName));
-  await waitForPostgres(containerName);
-
-  const applyResult = run("npm", ["run", "apply:schema", "--", "--database-url", databaseUrl], {
-    cwd: dbRoot,
-    env: { DATABASE_URL: databaseUrl },
-  });
-  assert.equal(applyResult.status, 0, applyResult.stderr || applyResult.stdout);
-
+async function connectedClient(t: TestContext, databaseUrl: string): Promise<Client> {
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
   t.after(() => client.end());
-
-  return { client, databaseUrl };
+  return client;
 }
 
 async function seedAppleChain(client: Client): Promise<AppleChain> {
@@ -99,7 +76,8 @@ test("cross-family equivalence: ticker/CIK/ISIN/LEI all trace back to the same A
     return;
   }
 
-  const { client } = await bootstrapDatabase(t);
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-3-3");
+  const client = await connectedClient(t, databaseUrl);
   const apple = await seedAppleChain(client);
 
   const byTicker = await resolveByTicker(client, "AAPL");
@@ -137,7 +115,8 @@ test("case-insensitive ISIN and LEI lookups", { timeout: 120000 }, async (t) => 
     return;
   }
 
-  const { client } = await bootstrapDatabase(t);
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-3-3");
+  const client = await connectedClient(t, databaseUrl);
   const apple = await seedAppleChain(client);
 
   const isinLower = await resolveByIsin(client, "us0378331005");
@@ -155,7 +134,8 @@ test("unknown identifiers produce not_found with normalized input", { timeout: 1
     return;
   }
 
-  const { client } = await bootstrapDatabase(t);
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-3-3");
+  const client = await connectedClient(t, databaseUrl);
 
   const ticker = await resolveByTicker(client, "NOTREAL");
   const cik = await resolveByCik(client, "9999999999");
@@ -180,7 +160,8 @@ test("ticker matching multiple MICs returns ambiguous with multiple_listings axi
     return;
   }
 
-  const { client } = await bootstrapDatabase(t);
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-3-3");
+  const client = await connectedClient(t, databaseUrl);
   const apple = await seedAppleChain(client);
 
   await client.query(
@@ -194,9 +175,9 @@ test("ticker matching multiple MICs returns ambiguous with multiple_listings axi
   assert.equal(envelope.candidates.length, 2);
   assert.equal(envelope.ambiguity_axis, "multiple_listings");
 
-  const mic_filtered = await resolveByTicker(client, "AAPL", { mic: "XNAS" });
-  assert.ok(isResolved(mic_filtered));
-  assert.equal(mic_filtered.subject_ref.id, apple.listing_id);
+  const micFiltered = await resolveByTicker(client, "AAPL", { mic: "XNAS" });
+  assert.ok(isResolved(micFiltered));
+  assert.equal(micFiltered.subject_ref.id, apple.listing_id);
 });
 
 test("same ticker across different issuers surfaces multiple_issuers axis", { timeout: 120000 }, async (t) => {
@@ -205,7 +186,8 @@ test("same ticker across different issuers surfaces multiple_issuers axis", { ti
     return;
   }
 
-  const { client } = await bootstrapDatabase(t);
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-3-3");
+  const client = await connectedClient(t, databaseUrl);
   await seedAppleChain(client);
 
   const otherIssuer = await client.query<{ issuer_id: string }>(
@@ -234,7 +216,8 @@ test("resolveByInput dispatches to the right family based on discriminator", { t
     return;
   }
 
-  const { client } = await bootstrapDatabase(t);
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-3-3");
+  const client = await connectedClient(t, databaseUrl);
   const apple = await seedAppleChain(client);
 
   const viaTicker = await resolveByInput(client, { kind: "ticker", value: "AAPL" });

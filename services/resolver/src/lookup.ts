@@ -1,11 +1,16 @@
 import type { QueryResult } from "pg";
 import {
   ambiguous,
+  CONFIDENCE_TICKER_AMBIGUOUS,
+  CONFIDENCE_TICKER_SINGLE,
+  CONFIDENCE_UNIQUE_IDENTIFIER,
   notFound,
   resolved,
+  type NotFoundReason,
   type ResolverCandidate,
   type ResolverEnvelope,
 } from "./envelope.ts";
+import { normalizeCik } from "./normalize.ts";
 
 // Minimal queryable surface — a `pg.Client` or `pg.Pool` both satisfy it,
 // and callers can stub it in tests without dragging the full pg type in.
@@ -15,15 +20,6 @@ export type QueryExecutor = {
     values?: unknown[],
   ): Promise<QueryResult<R>>;
 };
-
-// Confidence floor per entry family.
-// - Unique-indexed identifiers (CIK, LEI, ISIN) are globally unique in the
-//   DB; a hit is authoritative. Leave 0.01 of headroom for policy overrides.
-// - Ticker is a locator per spec §4.1 — even a single hit today could be a
-//   historically reused symbol, so rank it below unique identifiers.
-const CONFIDENCE_UNIQUE_IDENTIFIER = 0.99;
-const CONFIDENCE_TICKER_SINGLE = 0.95;
-const CONFIDENCE_TICKER_AMBIGUOUS = 0.5;
 
 type IssuerRow = {
   issuer_id: string;
@@ -48,10 +44,10 @@ type ListingRow = {
   legal_name: string;
 };
 
-export type TickerInput = { kind: "ticker"; value: string; mic?: string };
-export type CikInput = { kind: "cik"; value: string };
-export type IsinInput = { kind: "isin"; value: string };
-export type LeiInput = { kind: "lei"; value: string };
+type TickerInput = { kind: "ticker"; value: string; mic?: string };
+type CikInput = { kind: "cik"; value: string };
+type IsinInput = { kind: "isin"; value: string };
+type LeiInput = { kind: "lei"; value: string };
 export type ResolverInput = TickerInput | CikInput | IsinInput | LeiInput;
 
 export async function resolveByInput(
@@ -74,20 +70,10 @@ export async function resolveByCik(
   db: QueryExecutor,
   cik: string,
 ): Promise<ResolverEnvelope> {
-  const normalized = stripLeadingZeros(cik.trim());
-  const result: QueryResult<IssuerRow> = await db.query(
-    "select issuer_id, legal_name from issuers where cik = $1",
-    [normalized],
-  );
-
-  if (result.rows.length === 0) return notFound({ normalized_input: normalized, reason: "unknown_cik" });
-
-  const row = result.rows[0];
-  return resolved({
-    subject_ref: { kind: "issuer", id: row.issuer_id },
-    display_name: row.legal_name,
-    confidence: CONFIDENCE_UNIQUE_IDENTIFIER,
-    canonical_kind: "issuer",
+  return resolveByIssuerIdentifier(db, {
+    normalized: normalizeCik(cik.trim()),
+    column: "cik",
+    reason: "unknown_cik",
   });
 }
 
@@ -95,20 +81,10 @@ export async function resolveByLei(
   db: QueryExecutor,
   lei: string,
 ): Promise<ResolverEnvelope> {
-  const normalized = lei.trim().toUpperCase();
-  const result: QueryResult<IssuerRow> = await db.query(
-    "select issuer_id, legal_name from issuers where lei = $1",
-    [normalized],
-  );
-
-  if (result.rows.length === 0) return notFound({ normalized_input: normalized, reason: "unknown_lei" });
-
-  const row = result.rows[0];
-  return resolved({
-    subject_ref: { kind: "issuer", id: row.issuer_id },
-    display_name: row.legal_name,
-    confidence: CONFIDENCE_UNIQUE_IDENTIFIER,
-    canonical_kind: "issuer",
+  return resolveByIssuerIdentifier(db, {
+    normalized: lei.trim().toUpperCase(),
+    column: "lei",
+    reason: "unknown_lei",
   });
 }
 
@@ -125,7 +101,9 @@ export async function resolveByIsin(
     [normalized],
   );
 
-  if (result.rows.length === 0) return notFound({ normalized_input: normalized, reason: "unknown_isin" });
+  if (result.rows.length === 0) {
+    return notFound({ normalized_input: normalized, reason: "unknown_isin" });
+  }
 
   const row = result.rows[0];
   return resolved({
@@ -150,11 +128,19 @@ export async function resolveByTicker(
                   join issuers iss on iss.issuer_id = i.issuer_id
                  where l.ticker = $1`;
 
-  const result: QueryResult<ListingRow> = opts.mic
-    ? await db.query(`${base} and l.mic = $2 order by l.mic`, [normalized, opts.mic.toUpperCase()])
-    : await db.query(`${base} order by l.mic`, [normalized]);
+  let result: QueryResult<ListingRow>;
+  if (opts.mic) {
+    result = await db.query(`${base} and l.mic = $2 order by l.mic`, [
+      normalized,
+      opts.mic.toUpperCase(),
+    ]);
+  } else {
+    result = await db.query(`${base} order by l.mic`, [normalized]);
+  }
 
-  if (result.rows.length === 0) return notFound({ normalized_input: normalized, reason: "unknown_ticker" });
+  if (result.rows.length === 0) {
+    return notFound({ normalized_input: normalized, reason: "unknown_ticker" });
+  }
 
   if (result.rows.length === 1) {
     const row = result.rows[0];
@@ -179,6 +165,29 @@ export async function resolveByTicker(
   return ambiguous({ candidates, ambiguity_axis: axis });
 }
 
+async function resolveByIssuerIdentifier(
+  db: QueryExecutor,
+  args: { normalized: string; column: "cik" | "lei"; reason: NotFoundReason },
+): Promise<ResolverEnvelope> {
+  // `column` is a typed literal, not user input, so the interpolation is safe.
+  const result: QueryResult<IssuerRow> = await db.query(
+    `select issuer_id, legal_name from issuers where ${args.column} = $1`,
+    [args.normalized],
+  );
+
+  if (result.rows.length === 0) {
+    return notFound({ normalized_input: args.normalized, reason: args.reason });
+  }
+
+  const row = result.rows[0];
+  return resolved({
+    subject_ref: { kind: "issuer", id: row.issuer_id },
+    display_name: row.legal_name,
+    confidence: CONFIDENCE_UNIQUE_IDENTIFIER,
+    canonical_kind: "issuer",
+  });
+}
+
 function instrumentDisplayName(row: InstrumentRow): string {
   return row.share_class ? `${row.legal_name} (${row.share_class})` : row.legal_name;
 }
@@ -186,12 +195,4 @@ function instrumentDisplayName(row: InstrumentRow): string {
 function listingDisplayName(row: ListingRow): string {
   const base = row.share_class ? `${row.legal_name} (${row.share_class})` : row.legal_name;
   return `${row.ticker} · ${row.mic} — ${base}`;
-}
-
-// "320193" and "0000320193" must resolve to the same issuer. The DB column
-// is plain text, so normalization happens on both write (seeds/inserts)
-// and read (here). All-zeros collapses to "0" rather than empty string.
-function stripLeadingZeros(value: string): string {
-  const stripped = value.replace(/^0+/, "");
-  return stripped.length === 0 ? "0" : stripped;
 }

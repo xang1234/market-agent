@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+import type { TestContext } from "node:test";
 import assert from "node:assert/strict";
 
 export const workspaceRoot = join(import.meta.dirname, "..", "..");
@@ -85,4 +86,28 @@ export function queryValue(containerName: string, sql: string) {
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   return result.stdout.trim();
+}
+
+// Spin up a Postgres container, apply the normative schema via `npm run
+// apply:schema` in the db/ package, and register teardown. Returns the
+// container name and a connection URL; callers bring their own pg client.
+export async function bootstrapDatabase(
+  t: TestContext,
+  prefix: string,
+): Promise<{ containerName: string; databaseUrl: string }> {
+  const containerName = createContainerName(prefix);
+  const password = "postgres";
+  const hostPort = startPostgres(containerName, password);
+  const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
+
+  t.after(() => stopPostgres(containerName));
+  await waitForPostgres(containerName);
+
+  const applyResult = run("npm", ["run", "apply:schema", "--", "--database-url", databaseUrl], {
+    cwd: dbRoot,
+    env: { DATABASE_URL: databaseUrl },
+  });
+  assert.equal(applyResult.status, 0, applyResult.stderr || applyResult.stdout);
+
+  return { containerName, databaseUrl };
 }
