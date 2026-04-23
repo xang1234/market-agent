@@ -1,14 +1,11 @@
-import test, { type TestContext } from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  createContainerName,
+  bootstrapDatabase,
   dbRoot,
   dockerAvailable,
   queryValue,
   run,
-  startPostgres,
-  stopPostgres,
-  waitForPostgres,
 } from "./docker-pg.ts";
 
 const METRICS_DIGEST_EXPR =
@@ -45,34 +42,13 @@ function runSeed(databaseUrl: string) {
   });
 }
 
-async function bootstrapDatabase(t: TestContext) {
-  const containerName = createContainerName("fra-6al-7-3");
-  const password = "postgres";
-  const hostPort = startPostgres(containerName, password);
-  const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
-
-  t.after(() => {
-    stopPostgres(containerName);
-  });
-
-  await waitForPostgres(containerName);
-
-  const applyResult = run("npm", ["run", "apply:schema", "--", "--database-url", databaseUrl], {
-    cwd: dbRoot,
-    env: { DATABASE_URL: databaseUrl },
-  });
-  assert.equal(applyResult.status, 0, applyResult.stderr || applyResult.stdout);
-
-  return { containerName, databaseUrl };
-}
-
 test("seed populates metrics and sources with the expected registry", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for db seed integration coverage");
     return;
   }
 
-  const { containerName, databaseUrl } = await bootstrapDatabase(t);
+  const { containerName, databaseUrl } = await bootstrapDatabase(t, "fra-6al-7-3");
 
   const seedResult = runSeed(databaseUrl);
   assert.equal(seedResult.status, 0, seedResult.stderr || seedResult.stdout);
@@ -102,7 +78,7 @@ test("seed is idempotent: re-running produces no duplicates", { timeout: 180000 
     return;
   }
 
-  const { containerName, databaseUrl } = await bootstrapDatabase(t);
+  const { containerName, databaseUrl } = await bootstrapDatabase(t, "fra-6al-7-3");
 
   const first = runSeed(databaseUrl);
   assert.equal(first.status, 0, first.stderr || first.stdout);
@@ -121,7 +97,7 @@ test("seeded metric and source rows satisfy referential contracts for facts", { 
     return;
   }
 
-  const { containerName, databaseUrl } = await bootstrapDatabase(t);
+  const { containerName, databaseUrl } = await bootstrapDatabase(t, "fra-6al-7-3");
 
   const seedResult = runSeed(databaseUrl);
   assert.equal(seedResult.status, 0, seedResult.stderr || seedResult.stdout);

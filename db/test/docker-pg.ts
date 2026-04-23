@@ -1,6 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+import type { TestContext } from "node:test";
 import assert from "node:assert/strict";
+import { Client } from "pg";
 
 export const workspaceRoot = join(import.meta.dirname, "..", "..");
 export const dbRoot = join(workspaceRoot, "db");
@@ -85,4 +87,38 @@ export function queryValue(containerName: string, sql: string) {
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   return result.stdout.trim();
+}
+
+// Open a pg client against `databaseUrl`, wait for connect, and register
+// teardown. Shared lifecycle for tests that bring their own DB interactions
+// on top of bootstrapDatabase.
+export async function connectedClient(t: TestContext, databaseUrl: string): Promise<Client> {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  t.after(() => client.end());
+  return client;
+}
+
+// Spin up a Postgres container, apply the normative schema via `npm run
+// apply:schema` in the db/ package, and register teardown. Returns the
+// container name and a connection URL; callers bring their own pg client.
+export async function bootstrapDatabase(
+  t: TestContext,
+  prefix: string,
+): Promise<{ containerName: string; databaseUrl: string }> {
+  const containerName = createContainerName(prefix);
+  const password = "postgres";
+  t.after(() => stopPostgres(containerName));
+  const hostPort = startPostgres(containerName, password);
+  const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
+
+  await waitForPostgres(containerName);
+
+  const applyResult = run("npm", ["run", "apply:schema", "--", "--database-url", databaseUrl], {
+    cwd: dbRoot,
+    env: { DATABASE_URL: databaseUrl },
+  });
+  assert.equal(applyResult.status, 0, applyResult.stderr || applyResult.stdout);
+
+  return { containerName, databaseUrl };
 }
