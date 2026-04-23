@@ -90,13 +90,18 @@ async function dispatchFreeText(
   const n = normalize(text);
 
   if (n.identifier_hint) {
-    switch (n.identifier_hint.kind) {
+    const hint = n.identifier_hint;
+    switch (hint.kind) {
       case "cik":
-        return resolveByCik(db, n.identifier_hint.value);
+        return resolveByCik(db, hint.value);
       case "isin":
-        return resolveByIsin(db, n.identifier_hint.value);
+        return resolveByIsin(db, hint.value);
       case "lei":
-        return resolveByLei(db, n.identifier_hint.value);
+        return resolveByLei(db, hint.value);
+      default: {
+        const _exhaustive: never = hint;
+        throw new Error(`Unhandled identifier_hint kind: ${(_exhaustive as { kind: string }).kind}`);
+      }
     }
   }
 
@@ -137,33 +142,38 @@ function envelopeToSubjects(envelope: ResolverEnvelope): ResolvedSubject[] {
 
 export function createResolverServer(db: QueryExecutor): Server {
   return createServer(async (req, res) => {
-    if (req.method !== "POST" || req.url !== "/v1/subjects/resolve") {
-      respond(res, 404, { error: "not found" });
-      return;
-    }
-
-    const body = await readBody(req);
-
-    let parsed: unknown;
     try {
-      parsed = JSON.parse(body);
-    } catch {
-      respond(res, 400, { error: "request body must be valid JSON" });
-      return;
-    }
+      if (req.method !== "POST" || req.url !== "/v1/subjects/resolve") {
+        respond(res, 404, { error: "not found" });
+        return;
+      }
 
-    const validation = validateResolveRequest(parsed);
-    if (!validation.valid) {
-      respond(res, 400, { error: validation.error });
-      return;
-    }
+      const body = await readBody(req);
 
-    try {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        respond(res, 400, { error: "request body must be valid JSON" });
+        return;
+      }
+
+      const validation = validateResolveRequest(parsed);
+      if (!validation.valid) {
+        respond(res, 400, { error: validation.error });
+        return;
+      }
+
       const response = await handleResolveSubjects(db, validation.request);
       respond(res, 200, response);
     } catch (error) {
+      // Keep the server alive on unexpected errors — dropped sockets during
+      // readBody, downstream query failures, etc. Headers may already be
+      // sent for long-tail races; skip responding in that case.
       const message = error instanceof Error ? error.message : String(error);
-      respond(res, 500, { error: `internal resolver error: ${message}` });
+      if (!res.headersSent) {
+        respond(res, 500, { error: `internal resolver error: ${message}` });
+      }
     }
   });
 }
