@@ -55,3 +55,25 @@ test("writeVerifierFailLog writes null details when the field is omitted", { tim
   );
   assert.deepEqual(rows[0], { thread_id: null, snapshot_id: null, details: null });
 });
+
+test("writeVerifierFailLog normalizes explicit null details to SQL NULL", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for observability integration coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-8-2");
+  const client = await connectedClient(t, databaseUrl);
+
+  const { verifier_fail_log_id } = await writeVerifierFailLog(client, {
+    reason_code: "snapshot_stale",
+    details: null as never,
+  });
+
+  const { rows } = await client.query(
+    `select details, details is null as is_sql_null
+     from verifier_fail_logs where verifier_fail_log_id = $1`,
+    [verifier_fail_log_id],
+  );
+  assert.deepEqual(rows[0], { details: null, is_sql_null: true });
+});

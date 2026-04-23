@@ -10,4 +10,4 @@ export type { VerifierFailLogInput, VerifierFailLogRow } from "./verifier-fail.t
 export { writeEvalRunResult } from "./eval-run.ts";
 export type { EvalRunResultInput, EvalRunResultRow } from "./eval-run.ts";
 
-export type { QueryExecutor } from "./types.ts";
+export type { JsonValue, QueryExecutor } from "./types.ts";

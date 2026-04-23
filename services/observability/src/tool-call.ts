@@ -1,10 +1,10 @@
-import type { QueryExecutor } from "./types.ts";
+import { serializeJsonValue, type JsonValue, type QueryExecutor } from "./types.ts";
 
 export type ToolCallLogInput = {
   thread_id?: string | null;
   agent_id?: string | null;
   tool_name: string;
-  args: unknown;
+  args: JsonValue;
   result_hash?: string | null;
   duration_ms?: number | null;
   status: string;
@@ -31,7 +31,7 @@ export async function writeToolCallLog(
       input.thread_id ?? null,
       input.agent_id ?? null,
       input.tool_name,
-      JSON.stringify(input.args),
+      serializeJsonValue(input.args),
       input.result_hash ?? null,
       input.duration_ms ?? null,
       input.status,

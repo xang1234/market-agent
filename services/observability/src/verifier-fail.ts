@@ -1,10 +1,10 @@
-import type { QueryExecutor } from "./types.ts";
+import { serializeNullableJsonValue, type JsonValue, type QueryExecutor } from "./types.ts";
 
 export type VerifierFailLogInput = {
   thread_id?: string | null;
   snapshot_id?: string | null;
   reason_code: string;
-  details?: unknown;
+  details?: JsonValue | null;
 };
 
 export type VerifierFailLogRow = {
@@ -27,7 +27,7 @@ export async function writeVerifierFailLog(
       input.thread_id ?? null,
       input.snapshot_id ?? null,
       input.reason_code,
-      input.details === undefined ? null : JSON.stringify(input.details),
+      serializeNullableJsonValue(input.details),
     ],
   );
   return rows[0];

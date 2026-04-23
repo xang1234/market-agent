@@ -18,8 +18,8 @@ unchanged) and returns the generated primary key plus `created_at`.
 
 - Provide the insert primitives so any backend service can log without
   duplicating SQL.
-- Preserve jsonb column semantics by `JSON.stringify`-ing payloads before
-  binding them to `$N::jsonb` parameters.
+- Preserve jsonb column semantics by validating JSON-compatible payloads
+  before binding them to `$N::jsonb` parameters.
 
 ## Explicitly out of scope
 
@@ -43,6 +43,11 @@ await writeToolCallLog(db, {
   duration_ms: 42,
 });
 ```
+
+`args`, `result_json`, and `details` accept JSON-compatible values only.
+Optional `details` are normalized so `undefined` and `null` both store as
+SQL `NULL`, while nested `null` values inside an object/array remain valid
+JSON.
 
 ## Tests
 

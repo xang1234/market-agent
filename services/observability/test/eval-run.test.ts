@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { writeEvalRunResult } from "../src/eval-run.ts";
+import type { QueryExecutor } from "../src/types.ts";
 
 test("writeEvalRunResult persists a row and round-trips result_json", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
@@ -33,4 +34,27 @@ test("writeEvalRunResult persists a row and round-trips result_json", { timeout:
     prompt_version: "resolver/v1.2",
     result_json: { passed: 47, failed: 3, cases: [{ id: "GOOG/GOOGL", outcome: "ambiguous" }] },
   });
+});
+
+test("writeEvalRunResult rejects non-JSON-compatible payloads before query execution", async () => {
+  let queryCalls = 0;
+  const db: QueryExecutor = {
+    query: async () => {
+      queryCalls += 1;
+      throw new Error("query should not run");
+    },
+  };
+  const payload: Record<string, unknown> = { suite: "ticker_disambiguation" };
+  payload.self = payload;
+
+  await assert.rejects(
+    writeEvalRunResult(db, {
+      suite_name: "ticker_disambiguation",
+      model_version: "claude-opus-4-7",
+      prompt_version: "resolver/v1.2",
+      result_json: payload as never,
+    }),
+    /circular/i,
+  );
+  assert.equal(queryCalls, 0);
 });

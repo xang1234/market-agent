@@ -1,10 +1,10 @@
-import type { QueryExecutor } from "./types.ts";
+import { serializeJsonValue, type JsonValue, type QueryExecutor } from "./types.ts";
 
 export type EvalRunResultInput = {
   suite_name: string;
   model_version: string;
   prompt_version: string;
-  result_json: unknown;
+  result_json: JsonValue;
 };
 
 export type EvalRunResultRow = {
@@ -27,7 +27,7 @@ export async function writeEvalRunResult(
       input.suite_name,
       input.model_version,
       input.prompt_version,
-      JSON.stringify(input.result_json),
+      serializeJsonValue(input.result_json),
     ],
   );
   return rows[0];
