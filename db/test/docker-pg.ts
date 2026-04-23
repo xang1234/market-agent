@@ -9,6 +9,7 @@ export const dbRoot = join(workspaceRoot, "db");
 type Cleanup = () => void | Promise<void>;
 type CommandResult = ReturnType<typeof run>;
 type CommandRunner = typeof run;
+type ConnectionProbe = (databaseUrl: string) => Promise<void>;
 type Sleep = (ms: number) => Promise<void>;
 const cleanupStacks = new WeakMap<TestContext, Cleanup[]>();
 
@@ -67,10 +68,72 @@ export function stopPostgres(containerName: string) {
   run("docker", ["rm", "--force", containerName]);
 }
 
-export async function waitForPostgres(containerName: string) {
+function isTransientConnectionFailure(error: unknown) {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    message.includes("the database system is starting up") ||
+    message.includes("connection terminated unexpectedly") ||
+    message.includes("server closed the connection unexpectedly") ||
+    message.includes("terminating connection due to administrator command") ||
+    message.includes("connection refused") ||
+    message.includes("econnrefused")
+  );
+}
+
+export async function waitForDatabaseConnection(
+  databaseUrl: string,
+  options: {
+    probe?: ConnectionProbe;
+    sleep?: Sleep;
+    maxAttempts?: number;
+    retryDelayMs?: number;
+  } = {},
+) {
+  const probe = options.probe ?? probeDatabaseConnection;
+  const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const maxAttempts = options.maxAttempts ?? 10;
+  const retryDelayMs = options.retryDelayMs ?? 1000;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await probe(databaseUrl);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt === maxAttempts || !isTransientConnectionFailure(error)) {
+        throw error;
+      }
+
+      await sleep(retryDelayMs);
+    }
+  }
+
+  throw lastError;
+}
+
+async function probeDatabaseConnection(databaseUrl: string) {
+  const client = new Client({ connectionString: databaseUrl });
+
+  try {
+    await client.connect();
+    await client.query("select 1");
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
+export async function waitForPostgres(containerName: string, databaseUrl?: string) {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     const result = run("docker", ["exec", containerName, "pg_isready", "-U", "postgres"]);
-    if (result.status === 0) return;
+    if (result.status === 0) {
+      if (databaseUrl) {
+        await waitForDatabaseConnection(databaseUrl);
+      }
+
+      return;
+    }
+
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 
@@ -176,7 +239,7 @@ export async function bootstrapDatabase(
   const hostPort = startPostgres(containerName, password);
   const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
 
-  await waitForPostgres(containerName);
+  await waitForPostgres(containerName, databaseUrl);
   await applySchemaWithRetry(databaseUrl);
 
   return { containerName, databaseUrl };
