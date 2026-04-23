@@ -101,7 +101,7 @@ test("apply:schema loads the normative schema into a fresh Postgres 15 database"
     stopPostgres(containerName);
   });
 
-  await waitForPostgres(containerName);
+  await waitForPostgres(containerName, databaseUrl);
 
   const applyResult = run("npm", ["run", "apply:schema", "--", "--database-url", databaseUrl], {
     cwd: dbRoot,
@@ -151,7 +151,7 @@ test("apply:schema still works when the default host port is already occupied", 
     stopPostgres(containerName);
   });
 
-  await waitForPostgres(containerName);
+  await waitForPostgres(containerName, databaseUrl);
 
   const applyResult = run("npm", ["run", "apply:schema", "--", "--database-url", databaseUrl], {
     cwd: dbRoot,

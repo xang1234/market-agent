@@ -118,3 +118,68 @@ test("applySchemaWithRetry does not retry non-startup failures", async () => {
 
   assert.equal(calls, 1);
 });
+
+test("waitForDatabaseConnection retries transient connection resets before succeeding", async () => {
+  const api = dockerPg as Record<string, unknown>;
+  assert.equal(typeof api.waitForDatabaseConnection, "function");
+
+  const waitForDatabaseConnection = api.waitForDatabaseConnection as (
+    databaseUrl: string,
+    options: {
+      probe: (databaseUrl: string) => Promise<void>;
+      sleep: (ms: number) => Promise<void>;
+      maxAttempts?: number;
+      retryDelayMs?: number;
+    },
+  ) => Promise<void>;
+
+  let calls = 0;
+  const delays: number[] = [];
+  await waitForDatabaseConnection("postgresql://example", {
+    probe: async () => {
+      calls += 1;
+      if (calls < 3) {
+        throw new Error("Connection terminated unexpectedly");
+      }
+    },
+    sleep: async (ms) => {
+      delays.push(ms);
+    },
+    maxAttempts: 4,
+    retryDelayMs: 125,
+  });
+
+  assert.equal(calls, 3);
+  assert.deepEqual(delays, [125, 125]);
+});
+
+test("waitForDatabaseConnection does not retry non-transient connection failures", async () => {
+  const api = dockerPg as Record<string, unknown>;
+  assert.equal(typeof api.waitForDatabaseConnection, "function");
+
+  const waitForDatabaseConnection = api.waitForDatabaseConnection as (
+    databaseUrl: string,
+    options: {
+      probe: (databaseUrl: string) => Promise<void>;
+      sleep: (ms: number) => Promise<void>;
+      maxAttempts?: number;
+      retryDelayMs?: number;
+    },
+  ) => Promise<void>;
+
+  let calls = 0;
+  await assert.rejects(
+    waitForDatabaseConnection("postgresql://example", {
+      probe: async () => {
+        calls += 1;
+        throw new Error("password authentication failed for user postgres");
+      },
+      sleep: async () => {},
+      maxAttempts: 4,
+      retryDelayMs: 125,
+    }),
+    /password authentication failed/,
+  );
+
+  assert.equal(calls, 1);
+});
