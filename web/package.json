@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "vite",
+    "typecheck": "tsc -b",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "node --experimental-strip-types --test src/**/*.test.ts",
