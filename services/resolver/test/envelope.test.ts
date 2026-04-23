@@ -193,9 +193,6 @@ test("type guards discriminate each outcome exclusively", () => {
   ]);
 });
 
-// Executable documentation for the spec §6.1 examples the bead's verification
-// clause names. The earlier tests already cover the shape assertions; this
-// one exists to keep the spec-to-code mapping honest as the envelope evolves.
 test("spec §6.1 examples: GOOG → ambiguous, AAPL → resolved-listing, NOTREAL → not_found", () => {
   ambiguous({
     candidates: [
