@@ -6,6 +6,12 @@ import { Client } from "pg";
 
 export const workspaceRoot = join(import.meta.dirname, "..", "..");
 export const dbRoot = join(workspaceRoot, "db");
+type Cleanup = () => void | Promise<void>;
+type CommandResult = ReturnType<typeof run>;
+type CommandRunner = typeof run;
+type ConnectionProbe = (databaseUrl: string) => Promise<void>;
+type Sleep = (ms: number) => Promise<void>;
+const cleanupStacks = new WeakMap<TestContext, Cleanup[]>();
 
 export function run(
   command: string,
@@ -62,14 +68,81 @@ export function stopPostgres(containerName: string) {
   run("docker", ["rm", "--force", containerName]);
 }
 
-export async function waitForPostgres(containerName: string) {
+function isTransientConnectionFailure(error: unknown) {
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    message.includes("the database system is starting up") ||
+    message.includes("connection terminated unexpectedly") ||
+    message.includes("server closed the connection unexpectedly") ||
+    message.includes("terminating connection due to administrator command") ||
+    message.includes("connection refused") ||
+    message.includes("econnrefused")
+  );
+}
+
+export async function waitForDatabaseConnection(
+  databaseUrl: string,
+  options: {
+    probe?: ConnectionProbe;
+    sleep?: Sleep;
+    maxAttempts?: number;
+    retryDelayMs?: number;
+  } = {},
+) {
+  const probe = options.probe ?? probeDatabaseConnection;
+  const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const maxAttempts = options.maxAttempts ?? 10;
+  const retryDelayMs = options.retryDelayMs ?? 1000;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await probe(databaseUrl);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt === maxAttempts || !isTransientConnectionFailure(error)) {
+        throw error;
+      }
+
+      await sleep(retryDelayMs);
+    }
+  }
+
+  throw lastError;
+}
+
+async function probeDatabaseConnection(databaseUrl: string) {
+  const client = new Client({ connectionString: databaseUrl });
+
+  try {
+    await client.connect();
+    await client.query("select 1");
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
+export async function waitForPostgres(containerName: string, databaseUrl?: string) {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     const result = run("docker", ["exec", containerName, "pg_isready", "-U", "postgres"]);
-    if (result.status === 0) return;
+    if (result.status === 0) {
+      if (databaseUrl) {
+        await waitForDatabaseConnection(databaseUrl);
+      }
+
+      return;
+    }
+
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 
   assert.fail(`Timed out waiting for Postgres container ${containerName}`);
+}
+
+function isStartupRace(result: CommandResult) {
+  const combinedOutput = `${result.stderr}\n${result.stdout}`.toLowerCase();
+  return combinedOutput.includes("the database system is starting up");
 }
 
 export function queryValue(containerName: string, sql: string) {
@@ -95,21 +168,71 @@ export function queryValue(containerName: string, sql: string) {
 //   08003 connection_does_not_exist
 const TEARDOWN_DISCONNECT_CODES = new Set(["57P01", "08006", "08003"]);
 
+// node:test runs t.after() hooks in registration order, so shared helpers
+// keep their own stack and drain it in reverse to close clients before
+// stopping the backing Postgres container.
+export function registerLifoCleanup(t: TestContext, cleanup: Cleanup) {
+  let stack = cleanupStacks.get(t);
+  if (!stack) {
+    stack = [];
+    cleanupStacks.set(t, stack);
+    t.after(async () => {
+      const callbacks = cleanupStacks.get(t) ?? [];
+      cleanupStacks.delete(t);
+      for (let index = callbacks.length - 1; index >= 0; index -= 1) {
+        await callbacks[index]();
+      }
+    });
+  }
+
+  stack.push(cleanup);
+}
+
+export async function applySchemaWithRetry(
+  databaseUrl: string,
+  options: {
+    runner?: CommandRunner;
+    sleep?: Sleep;
+    maxAttempts?: number;
+    retryDelayMs?: number;
+  } = {},
+) {
+  const runner = options.runner ?? run;
+  const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const maxAttempts = options.maxAttempts ?? 5;
+  const retryDelayMs = options.retryDelayMs ?? 1000;
+  let lastResult: CommandResult | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const applyResult = runner("npm", ["run", "apply:schema", "--", "--database-url", databaseUrl], {
+      cwd: dbRoot,
+      env: { DATABASE_URL: databaseUrl },
+    });
+    if (applyResult.status === 0) return;
+
+    lastResult = applyResult;
+    if (attempt === maxAttempts || !isStartupRace(applyResult)) {
+      break;
+    }
+
+    await sleep(retryDelayMs);
+  }
+
+  assert.notEqual(lastResult, null);
+  assert.equal(lastResult.status, 0, lastResult.stderr || lastResult.stdout);
+}
+
 // Open a pg client against `databaseUrl`, wait for connect, and register
 // teardown. Shared lifecycle for tests that bring their own DB interactions
 // on top of bootstrapDatabase.
 export async function connectedClient(t: TestContext, databaseUrl: string): Promise<Client> {
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
-  // bootstrapDatabase registers its stopPostgres hook first, so under FIFO
-  // node:test ordering, docker kills the postmaster before this client ends.
-  // Without an error listener, pg's 'error' event would bubble as unhandled
-  // and node:test would attribute it to the just-finished test.
   client.on("error", (err: Error & { code?: string }) => {
     if (err.code && TEARDOWN_DISCONNECT_CODES.has(err.code)) return;
-    console.error("unexpected pg client error during teardown", err);
+    console.error("unexpected pg client error", err);
   });
-  t.after(() => client.end().catch(() => {}));
+  registerLifoCleanup(t, () => client.end().catch(() => {}));
   return client;
 }
 
@@ -122,17 +245,12 @@ export async function bootstrapDatabase(
 ): Promise<{ containerName: string; databaseUrl: string }> {
   const containerName = createContainerName(prefix);
   const password = "postgres";
-  t.after(() => stopPostgres(containerName));
+  registerLifoCleanup(t, () => stopPostgres(containerName));
   const hostPort = startPostgres(containerName, password);
   const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
 
-  await waitForPostgres(containerName);
-
-  const applyResult = run("npm", ["run", "apply:schema", "--", "--database-url", databaseUrl], {
-    cwd: dbRoot,
-    env: { DATABASE_URL: databaseUrl },
-  });
-  assert.equal(applyResult.status, 0, applyResult.stderr || applyResult.stdout);
+  await waitForPostgres(containerName, databaseUrl);
+  await applySchemaWithRetry(databaseUrl);
 
   return { containerName, databaseUrl };
 }

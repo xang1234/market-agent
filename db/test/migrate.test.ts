@@ -38,7 +38,7 @@ test("migrate up applies 0001_init and records it in schema_migrations", { timeo
     stopPostgres(containerName);
   });
 
-  await waitForPostgres(containerName);
+  await waitForPostgres(containerName, databaseUrl);
 
   const migrateResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
     cwd: dbRoot,
@@ -79,7 +79,7 @@ test("migrate status reports 0001_init as applied after migrate up", { timeout: 
     stopPostgres(containerName);
   });
 
-  await waitForPostgres(containerName);
+  await waitForPostgres(containerName, databaseUrl);
 
   const upResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
     cwd: dbRoot,
@@ -111,7 +111,7 @@ test("migrate down rolls back the most recently applied migration", { timeout: 1
     stopPostgres(containerName);
   });
 
-  await waitForPostgres(containerName);
+  await waitForPostgres(containerName, databaseUrl);
 
   const upResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
     cwd: dbRoot,
@@ -147,7 +147,7 @@ test("migrate down exits cleanly when nothing is applied", { timeout: 120000 }, 
     stopPostgres(containerName);
   });
 
-  await waitForPostgres(containerName);
+  await waitForPostgres(containerName, databaseUrl);
 
   const downResult = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], {
     cwd: dbRoot,
@@ -173,7 +173,7 @@ test("migrate status fails when an applied migration is missing locally", { time
     stopPostgres(containerName);
   });
 
-  await waitForPostgres(containerName);
+  await waitForPostgres(containerName, databaseUrl);
 
   const result = run("docker", [
     "exec",
@@ -212,7 +212,7 @@ test("verify:schema succeeds after migrate up", { timeout: 120000 }, async (t) =
     stopPostgres(containerName);
   });
 
-  await waitForPostgres(containerName);
+  await waitForPostgres(containerName, databaseUrl);
 
   const upResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
     cwd: dbRoot,
@@ -243,7 +243,7 @@ test("migrate up enforces listings uniqueness and fact confidence bounds", { tim
     stopPostgres(containerName);
   });
 
-  await waitForPostgres(containerName);
+  await waitForPostgres(containerName, databaseUrl);
 
   const upResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
     cwd: dbRoot,
@@ -350,7 +350,7 @@ test("migrate up rolls back schema changes when recording the migration fails", 
     stopPostgres(containerName);
   });
 
-  await waitForPostgres(containerName);
+  await waitForPostgres(containerName, databaseUrl);
 
   const triggerResult = run("docker", [
     "exec",
@@ -404,7 +404,7 @@ test("migrate down rolls back schema changes when removing the migration record 
     stopPostgres(containerName);
   });
 
-  await waitForPostgres(containerName);
+  await waitForPostgres(containerName, databaseUrl);
 
   const upResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
     cwd: dbRoot,
@@ -460,7 +460,7 @@ test("migrate down fails when any applied migration is missing locally", { timeo
     stopPostgres(containerName);
   });
 
-  await waitForPostgres(containerName);
+  await waitForPostgres(containerName, databaseUrl);
 
   const upResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
     cwd: dbRoot,
