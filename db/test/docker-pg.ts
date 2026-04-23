@@ -95,7 +95,24 @@ export function queryValue(containerName: string, sql: string) {
 export async function connectedClient(t: TestContext, databaseUrl: string): Promise<Client> {
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
-  t.after(() => client.end());
+  // `bootstrapDatabase` registers its `stopPostgres` t.after hook first, so
+  // under FIFO ordering the container is torn down before this client ends.
+  // When `docker rm --force` kills the postmaster, pg emits 57P01 on the
+  // open socket; without an error listener, node:test routes the unhandled
+  // event to the just-finished test and marks it failed. The listener here
+  // absorbs expected teardown disconnects while leaving real errors visible.
+  client.on("error", (err: Error & { code?: string }) => {
+    if (err.code === "57P01" || err.code === "08006" || err.code === "08003") return;
+    console.error("unexpected pg client error during teardown", err);
+  });
+  t.after(async () => {
+    try {
+      await client.end();
+    } catch {
+      // Swallow end-time errors for the same teardown race; the connection
+      // is already gone and the test body has completed.
+    }
+  });
   return client;
 }
 
