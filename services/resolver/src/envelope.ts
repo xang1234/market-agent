@@ -93,6 +93,9 @@ export function resolved(args: {
   alternatives?: ResolverCandidate[];
 }): ResolvedEnvelope {
   assertConfidence(args.confidence, "resolved.confidence");
+  if (args.canonical_kind !== undefined && args.canonical_kind !== args.subject_ref.kind) {
+    throw new Error("canonical_kind must match subject_ref.kind");
+  }
 
   if (args.alternatives) {
     for (const [i, candidate] of args.alternatives.entries()) {

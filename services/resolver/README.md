@@ -6,18 +6,16 @@ This package owns the deterministic boundary that converts lookup input
 (user text, provider-origin identity records) into canonical finance
 identity outputs: `issuer`, `instrument`, `listing`, or a typed `SubjectRef`.
 
-## Current scope: `fra-6al.3.1` — resolver envelope
+## Current scope: `fra-6al.3` — resolver service
 
-Types and constructors for the three-outcome response envelope that every
-resolver call must return:
+This package includes the resolver envelope, free-text normalization,
+database-backed lookup entry points, and the `/v1/subjects/resolve` HTTP
+handler. Every resolver call returns one of three outcomes:
 
 - `resolved` — one canonical target chosen confidently.
 - `ambiguous` — multiple plausible targets; ranked candidates are returned
   without silently picking one.
 - `not_found` — input normalizable but not mappable to a supported target.
-
-No lookup, normalization, or HTTP wiring lives here yet — those are
-`fra-6al.3.2`, `fra-6al.3.3`, `fra-6al.3.4` respectively.
 
 ## Usage
 

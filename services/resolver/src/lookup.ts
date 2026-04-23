@@ -101,7 +101,7 @@ export async function resolveByIsin(
     `select i.instrument_id, i.issuer_id, i.asset_type, i.share_class, iss.legal_name
        from instruments i
        join issuers iss on iss.issuer_id = i.issuer_id
-      where i.isin = $1`,
+      where upper(i.isin) = $1`,
     [normalized],
   );
 
@@ -177,7 +177,7 @@ async function resolveByIssuerIdentifier(
 ): Promise<ResolverEnvelope> {
   // `column` is a typed literal, not user input, so the interpolation is safe.
   const result: QueryResult<IssuerRow> = await db.query(
-    `select issuer_id, legal_name from issuers where ${args.column} = $1`,
+    `select issuer_id, legal_name from issuers where upper(${args.column}) = $1`,
     [args.normalized],
   );
 

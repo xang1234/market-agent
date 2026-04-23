@@ -108,10 +108,10 @@ export async function bootstrapDatabase(
 ): Promise<{ containerName: string; databaseUrl: string }> {
   const containerName = createContainerName(prefix);
   const password = "postgres";
+  t.after(() => stopPostgres(containerName));
   const hostPort = startPostgres(containerName, password);
   const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
 
-  t.after(() => stopPostgres(containerName));
   await waitForPostgres(containerName);
 
   const applyResult = run("npm", ["run", "apply:schema", "--", "--database-url", databaseUrl], {

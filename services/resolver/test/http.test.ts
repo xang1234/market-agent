@@ -9,6 +9,7 @@ import {
   validateResolveRequest,
   type ResolveResponse,
 } from "../src/http.ts";
+import type { QueryExecutor } from "../src/lookup.ts";
 import type { SubjectKind } from "../src/subject-ref.ts";
 
 type AppleChain = {
@@ -43,8 +44,8 @@ async function seedAppleChain(client: Client): Promise<AppleChain> {
   return { issuer_id, instrument_id, listing_id: listing.rows[0].listing_id };
 }
 
-async function startServer(t: TestContext, client: Client): Promise<string> {
-  const server = createResolverServer(client);
+async function startServer(t: TestContext, db: QueryExecutor): Promise<string> {
+  const server = createResolverServer(db);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const { port } = server.address() as AddressInfo;
@@ -127,6 +128,45 @@ test("validateResolveRequest accepts allow_kinds when every entry is canonical",
     (result as { request: { allow_kinds?: SubjectKind[] } }).request.allow_kinds,
     ["issuer", "listing"],
   );
+});
+
+test("handler: identifier-like input falls back to ticker lookup when identifier resolution misses", async () => {
+  const calls: string[] = [];
+  const db: QueryExecutor = {
+    query: async (text, values) => {
+      if (text.includes("from issuers")) {
+        calls.push(`identifier:${String(values?.[0])}`);
+        return { rows: [] } as never;
+      }
+
+      if (text.includes("from listings l")) {
+        calls.push(`ticker:${String(values?.[0])}`);
+        return {
+          rows: [
+            {
+              listing_id: "11111111-1111-4111-a111-111111111111",
+              instrument_id: "22222222-2222-4222-a222-222222222222",
+              issuer_id: "33333333-3333-4333-a333-333333333333",
+              mic: "XHKG",
+              ticker: "700",
+              share_class: null,
+              legal_name: "Tencent Holdings Ltd.",
+            },
+          ],
+        } as never;
+      }
+
+      throw new Error(`Unexpected query: ${text}`);
+    },
+  };
+
+  const response = await handleResolveSubjects(db, { text: "700" });
+
+  assert.deepEqual(calls, ["identifier:700", "ticker:700"]);
+  assert.equal(response.subjects.length, 1);
+  assert.equal(response.subjects[0].subject_ref.kind, "listing");
+  assert.equal(response.subjects[0].subject_ref.id, "11111111-1111-4111-a111-111111111111");
+  assert.deepEqual(response.unresolved, []);
 });
 
 test("handler: ticker text returns a single listing subject with matching confidence", { timeout: 120000 }, async (t) => {
@@ -262,6 +302,46 @@ test("server: malformed JSON body returns 400 with a descriptive error", { timeo
   assert.equal(res.status, 400);
   const body = (await res.json()) as { error: string };
   assert.match(body.error, /valid JSON/);
+});
+
+test("server: internal failures return a generic 500 and log details", async (t) => {
+  const db: QueryExecutor = {
+    query: async () => {
+      throw new Error("secret database detail");
+    },
+  };
+  const base = await startServer(t, db);
+
+  const originalConsoleError = console.error;
+  const logged: unknown[][] = [];
+  console.error = (...args: unknown[]) => {
+    logged.push(args);
+  };
+  t.after(() => {
+    console.error = originalConsoleError;
+  });
+
+  const res = await postResolve(base, { text: "AAPL" });
+
+  assert.equal(res.status, 500);
+  assert.deepEqual(await res.json(), { error: "internal resolver error" });
+  assert.equal(logged.length, 1);
+  assert.equal(logged[0][0], "resolver request failed");
+  assert.match(String(logged[0][1]), /secret database detail/);
+});
+
+test("server: oversized request body returns 413", async (t) => {
+  const db: QueryExecutor = {
+    query: async () => {
+      throw new Error("query should not run for oversized bodies");
+    },
+  };
+  const base = await startServer(t, db);
+
+  const res = await postResolve(base, { text: "A".repeat(70 * 1024) });
+
+  assert.equal(res.status, 413);
+  assert.deepEqual(await res.json(), { error: "request body too large" });
 });
 
 test("server: missing 'text' returns 400 per request schema", { timeout: 120000 }, async (t) => {

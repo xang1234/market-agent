@@ -16,6 +16,14 @@ import {
 import { normalize } from "./normalize.ts";
 import { SUBJECT_KINDS, type SubjectKind, type SubjectRef } from "./subject-ref.ts";
 
+const MAX_REQUEST_BODY_BYTES = 64 * 1024;
+
+class RequestBodyTooLargeError extends Error {
+  constructor() {
+    super("request body too large");
+  }
+}
+
 export type ResolveRequest = {
   text: string;
   allow_kinds?: SubjectKind[];
@@ -89,26 +97,35 @@ async function dispatchFreeText(
   text: string,
 ): Promise<ResolverEnvelope> {
   const n = normalize(text);
+  let identifierEnvelope: ResolverEnvelope | null = null;
 
   if (n.identifier_hint) {
     const hint = n.identifier_hint;
     switch (hint.kind) {
       case "cik":
-        return resolveByCik(db, hint.value);
+        identifierEnvelope = await resolveByCik(db, hint.value);
+        break;
       case "isin":
-        return resolveByIsin(db, hint.value);
+        identifierEnvelope = await resolveByIsin(db, hint.value);
+        break;
       case "lei":
-        return resolveByLei(db, hint.value);
+        identifierEnvelope = await resolveByLei(db, hint.value);
+        break;
       default: {
         const _exhaustive: never = hint;
         throw new Error(`Unhandled identifier_hint kind: ${(_exhaustive as { kind: string }).kind}`);
       }
+    }
+
+    if (!isNotFound(identifierEnvelope) || !n.ticker_candidate) {
+      return identifierEnvelope;
     }
   }
 
   if (n.ticker_candidate) {
     const envelope = await resolveByTicker(db, n.ticker_candidate);
     if (!isNotFound(envelope)) return envelope;
+    if (identifierEnvelope) return identifierEnvelope;
   }
 
   // Name / alias lookup is intentionally out of scope for 3.4 — the alias
@@ -171,9 +188,16 @@ export function createResolverServer(db: QueryExecutor): Server {
       // Keep the server alive on unexpected errors — dropped sockets during
       // readBody, downstream query failures, etc. Headers may already be
       // sent for long-tail races; skip responding in that case.
-      const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof RequestBodyTooLargeError) {
+        if (!res.headersSent) {
+          respond(res, 413, { error: error.message });
+        }
+        return;
+      }
+
+      console.error("resolver request failed", error);
       if (!res.headersSent) {
-        respond(res, 500, { error: `internal resolver error: ${message}` });
+        respond(res, 500, { error: "internal resolver error" });
       }
     }
   });
@@ -181,8 +205,15 @@ export function createResolverServer(db: QueryExecutor): Server {
 
 async function readBody(req: NodeJS.ReadableStream): Promise<string> {
   const chunks: Buffer[] = [];
+  let totalBytes = 0;
   for await (const chunk of req) {
-    chunks.push(chunk as Buffer);
+    const buffer =
+      Buffer.isBuffer(chunk) ? chunk : chunk instanceof Uint8Array ? Buffer.from(chunk) : Buffer.from(String(chunk));
+    totalBytes += buffer.length;
+    if (totalBytes > MAX_REQUEST_BODY_BYTES) {
+      throw new RequestBodyTooLargeError();
+    }
+    chunks.push(buffer);
   }
   return Buffer.concat(chunks).toString("utf8");
 }

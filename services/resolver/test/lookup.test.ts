@@ -121,6 +121,36 @@ test("case-insensitive ISIN and LEI lookups", { timeout: 120000 }, async (t) => 
   assert.equal(leiLower.subject_ref.id, apple.issuer_id);
 });
 
+test("mixed-case stored ISIN and LEI resolve from normalized input", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver lookup coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-3-3");
+  const client = await connectedClient(t, databaseUrl);
+
+  const issuer = await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name, lei) values ($1, $2)
+     returning issuer_id`,
+    ["Mixed Case Corp.", "ab12cd34ef56gh78jk90"],
+  );
+  const instrument = await client.query<{ instrument_id: string }>(
+    `insert into instruments (issuer_id, asset_type, isin)
+     values ($1, 'common_stock', $2)
+     returning instrument_id`,
+    [issuer.rows[0].issuer_id, "us0000000001"],
+  );
+
+  const byIsin = await resolveByIsin(client, "US0000000001");
+  const byLei = await resolveByLei(client, "AB12CD34EF56GH78JK90");
+
+  assert.ok(isResolved(byIsin));
+  assert.ok(isResolved(byLei));
+  assert.equal(byIsin.subject_ref.id, instrument.rows[0].instrument_id);
+  assert.equal(byLei.subject_ref.id, issuer.rows[0].issuer_id);
+});
+
 test("unknown identifiers produce not_found with normalized input", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for resolver lookup coverage");

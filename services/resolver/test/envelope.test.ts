@@ -44,16 +44,17 @@ test("resolved envelope carries the canonical ref and defaults canonical_kind to
   assert.equal(isNotFound(envelope), false);
 });
 
-test("resolved envelope accepts an explicit canonical_kind that differs from subject_ref.kind", () => {
-  const envelope = resolved({
-    subject_ref: aaplListing,
-    display_name: "Apple Inc.",
-    confidence: 0.95,
-    canonical_kind: "issuer",
-  });
-
-  assert.equal(envelope.canonical_kind, "issuer");
-  assert.equal(envelope.subject_ref.kind, "listing");
+test("resolved envelope rejects canonical_kind that differs from subject_ref.kind", () => {
+  assert.throws(
+    () =>
+      resolved({
+        subject_ref: aaplListing,
+        display_name: "Apple Inc.",
+        confidence: 0.95,
+        canonical_kind: "issuer",
+      }),
+    /canonical_kind must match subject_ref.kind/,
+  );
 });
 
 test("resolved envelope can carry lower-confidence alternatives without demoting to ambiguous", () => {
