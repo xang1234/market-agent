@@ -162,6 +162,12 @@ export function queryValue(containerName: string, sql: string) {
   return result.stdout.trim();
 }
 
+// SQLSTATE codes pg emits when the server vanishes under it:
+//   57P01 admin_shutdown            — postmaster killed (our `docker rm --force`)
+//   08006 connection_failure
+//   08003 connection_does_not_exist
+const TEARDOWN_DISCONNECT_CODES = new Set(["57P01", "08006", "08003"]);
+
 // node:test runs t.after() hooks in registration order, so shared helpers
 // keep their own stack and drain it in reverse to close clients before
 // stopping the backing Postgres container.
@@ -222,7 +228,11 @@ export async function applySchemaWithRetry(
 export async function connectedClient(t: TestContext, databaseUrl: string): Promise<Client> {
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
-  registerLifoCleanup(t, () => client.end());
+  client.on("error", (err: Error & { code?: string }) => {
+    if (err.code && TEARDOWN_DISCONNECT_CODES.has(err.code)) return;
+    console.error("unexpected pg client error", err);
+  });
+  registerLifoCleanup(t, () => client.end().catch(() => {}));
   return client;
 }
 
