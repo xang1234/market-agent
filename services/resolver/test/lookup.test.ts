@@ -275,6 +275,69 @@ test("issuer alias lookup expands to issuer plus active listing candidates", { t
   );
 });
 
+test("issuer alias lookup includes all active listings and excludes expired listings", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver lookup coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-4-5");
+  const client = await connectedClient(t, databaseUrl);
+  const issuer = await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name, former_names)
+     values ($1, $2::jsonb)
+     returning issuer_id`,
+    ["Alphabet Inc.", JSON.stringify(["Google"])],
+  );
+  const classA = await client.query<{ instrument_id: string }>(
+    `insert into instruments (issuer_id, asset_type, share_class)
+     values ($1, 'common_stock', 'Class A')
+     returning instrument_id`,
+    [issuer.rows[0].issuer_id],
+  );
+  const classC = await client.query<{ instrument_id: string }>(
+    `insert into instruments (issuer_id, asset_type, share_class)
+     values ($1, 'common_stock', 'Class C')
+     returning instrument_id`,
+    [issuer.rows[0].issuer_id],
+  );
+  const googl = await client.query<{ listing_id: string }>(
+    `insert into listings (instrument_id, mic, ticker, trading_currency, timezone)
+     values ($1, 'XNAS', 'GOOGL', 'USD', 'America/New_York')
+     returning listing_id`,
+    [classA.rows[0].instrument_id],
+  );
+  const goog = await client.query<{ listing_id: string }>(
+    `insert into listings (instrument_id, mic, ticker, trading_currency, timezone)
+     values ($1, 'XNAS', 'GOOG', 'USD', 'America/New_York')
+     returning listing_id`,
+    [classC.rows[0].instrument_id],
+  );
+  const expired = await client.query<{ listing_id: string }>(
+    `insert into listings (
+       instrument_id, mic, ticker, trading_currency, timezone, active_from, active_to
+     ) values (
+       $1, 'XNYS', 'GOOG', 'USD', 'America/New_York',
+       now() - interval '10 years',
+       now() - interval '5 years'
+     )
+     returning listing_id`,
+    [classC.rows[0].instrument_id],
+  );
+
+  const envelope = await resolveByNameCandidate(client, "Google");
+
+  assert.ok(isAmbiguous(envelope));
+  assert.equal(envelope.ambiguity_axis, "issuer_vs_listing");
+  assert.deepEqual(
+    envelope.candidates.map((candidate) => candidate.subject_ref.id).sort(),
+    [issuer.rows[0].issuer_id, googl.rows[0].listing_id, goog.rows[0].listing_id].sort(),
+  );
+  assert.ok(
+    envelope.candidates.every((candidate) => candidate.subject_ref.id !== expired.rows[0].listing_id),
+  );
+});
+
 test("name lookup filters broad DB rows with Unicode-aware JS normalization", async () => {
   const db = {
     query: async () =>
