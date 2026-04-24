@@ -1,6 +1,7 @@
 import { useContext, useEffect, useEffectEvent } from 'react'
 import { AuthInterruptContext, type ProtectedActionOfKind } from './authInterruptTypes'
 import type { ProtectedActionKind } from './authInterruptState'
+import { registerProtectedActionHandler } from './protectedActionRegistry'
 
 // Consumer hook for the auth-interrupt slot. Most callers want the narrower
 // `useRequestProtectedAction` below — this one exposes the full context
@@ -21,14 +22,11 @@ export function useResumedProtectedAction<K extends ProtectedActionKind>(
   actionType: K,
   onResume: (action: ProtectedActionOfKind<K>) => void,
 ) {
-  const { resumedAction, clearResumedAction } = useAuthInterrupt()
   const onResumeEvent = useEffectEvent(onResume)
 
   useEffect(() => {
-    if (resumedAction?.actionType !== actionType) return
-
-    const action = resumedAction as ProtectedActionOfKind<K>
-    onResumeEvent(action)
-    clearResumedAction(action.resumeToken)
-  }, [resumedAction, actionType, clearResumedAction])
+    return registerProtectedActionHandler(actionType, (action) => {
+      onResumeEvent(action as ProtectedActionOfKind<K>)
+    })
+  }, [actionType])
 }

@@ -38,6 +38,7 @@ export type PendingProtectedAction = {
 
 export type ProtectedActionResumePlan =
   | { type: 'idle' }
+  | { type: 'expired' }
   | { type: 'dispatch'; action: ProtectedAction }
   | { type: 'navigate'; to: string; action: ProtectedAction }
 
@@ -153,7 +154,7 @@ export function parsePendingProtectedAction(
     if (!isRouteSnapshot(parsed.returnTo)) return null
     if (!isValidTimestamp(parsed.createdAt)) return null
     if (!isValidTimestamp(parsed.expiresAt)) return null
-    if (parsed.expiresAt <= parsed.createdAt || parsed.expiresAt < now) return null
+    if (parsed.expiresAt <= parsed.createdAt || parsed.expiresAt <= now) return null
     if ('description' in parsed && parsed.description != null && typeof parsed.description !== 'string') {
       return null
     }
@@ -189,13 +190,17 @@ export function planProtectedActionResumeDispatch(
 export function planPendingProtectedActionResume({
   currentPath,
   hasSession,
+  now = Date.now(),
   pending,
 }: {
   currentPath: string
   hasSession: boolean
+  now?: number
   pending: PendingProtectedAction | null
 }): ProtectedActionResumePlan {
   if (!hasSession || pending == null) return { type: 'idle' }
+  if (pending.expiresAt <= now) return { type: 'expired' }
+
   const returnTo = getRouteSnapshotPath(pending.returnTo)
 
   if (currentPath === returnTo) {

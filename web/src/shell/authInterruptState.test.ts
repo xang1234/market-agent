@@ -81,6 +81,10 @@ test('parsePendingProtectedAction rejects stale pending actions', () => {
   const serialized = serializePendingProtectedAction(pendingAction)
 
   assert.equal(
+    parsePendingProtectedAction(serialized, { now: 1_000 + AUTH_INTERRUPT_TTL_MS }),
+    null,
+  )
+  assert.equal(
     parsePendingProtectedAction(serialized, { now: 1_000 + AUTH_INTERRUPT_TTL_MS + 1 }),
     null,
   )
@@ -91,6 +95,7 @@ test('resume plan dispatches immediately when already at returnTo path', () => {
     currentPath: '/home',
     hasSession: true,
     pending: pendingAction,
+    now: 1_000,
   })
 
   assert.deepEqual(plan, {
@@ -104,6 +109,7 @@ test('resume plan navigates when auth returns on a different route', () => {
     currentPath: '/auth/callback',
     hasSession: true,
     pending: pendingAction,
+    now: 1_000,
   })
 
   assert.deepEqual(plan, {
@@ -131,6 +137,17 @@ test('resume plan does nothing without both session and pending action', () => {
     }),
     { type: 'idle' },
   )
+})
+
+test('resume plan expires loaded pending actions before dispatch', () => {
+  const plan = planPendingProtectedActionResume({
+    currentPath: '/home',
+    hasSession: true,
+    pending: pendingAction,
+    now: pendingAction.expiresAt,
+  })
+
+  assert.deepEqual(plan, { type: 'expired' })
 })
 
 test('planned resume dispatch skips duplicate path/action pairs', () => {

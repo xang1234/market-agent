@@ -12,7 +12,6 @@ import {
   AuthInterruptContext,
   type AuthInterruptContextValue,
   type ProtectedActionRequest,
-  type ResumedProtectedAction,
 } from './authInterruptTypes'
 import {
   AUTH_INTERRUPT_STORAGE_KEY,
@@ -26,6 +25,7 @@ import {
   type PendingProtectedAction,
   type ProtectedAction,
 } from './authInterruptState'
+import { dispatchProtectedAction } from './protectedActionRegistry'
 
 type QueuedResume = {
   action: ProtectedAction
@@ -36,7 +36,14 @@ function readStoredPendingProtectedAction(): PendingProtectedAction | null {
   if (typeof window === 'undefined') return null
 
   try {
-    return parsePendingProtectedAction(window.sessionStorage.getItem(AUTH_INTERRUPT_STORAGE_KEY))
+    const raw = window.sessionStorage.getItem(AUTH_INTERRUPT_STORAGE_KEY)
+    const pending = parsePendingProtectedAction(raw)
+
+    if (raw != null && pending == null) {
+      window.sessionStorage.removeItem(AUTH_INTERRUPT_STORAGE_KEY)
+    }
+
+    return pending
   } catch {
     return null
   }
@@ -52,14 +59,12 @@ export function AuthInterruptProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
-  const resumeTokenRef = useRef(0)
   const queuedResumeKeyRef = useRef<string | null>(null)
   const dispatchedResumeKeyRef = useRef<string | null>(null)
   const [pending, setPendingState] = useState<PendingProtectedAction | null>(
     readStoredPendingProtectedAction,
   )
   const [queuedResume, setQueuedResume] = useState<QueuedResume | null>(null)
-  const [resumedAction, setResumedAction] = useState<ResumedProtectedAction | null>(null)
   const { pathname, search, hash } = location
   const currentPath = getCurrentRoutePath({ pathname, search, hash })
   const currentRoute = useMemo(
@@ -87,14 +92,6 @@ export function AuthInterruptProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const dispatchResumedAction = useCallback((action: ProtectedAction) => {
-    resumeTokenRef.current += 1
-    setResumedAction({
-      ...action,
-      resumeToken: resumeTokenRef.current,
-    })
-  }, [])
-
   const dispatchPlannedResume = useCallback(
     (path: string, action: ProtectedAction) => {
       const plan = planProtectedActionResumeDispatch(
@@ -105,7 +102,7 @@ export function AuthInterruptProvider({ children }: { children: ReactNode }) {
       if (!plan.shouldDispatch) return
 
       dispatchedResumeKeyRef.current = plan.resumeKey
-      dispatchResumedAction(action)
+      dispatchProtectedAction(action)
 
       queueMicrotask(() => {
         if (dispatchedResumeKeyRef.current === plan.resumeKey) {
@@ -113,7 +110,7 @@ export function AuthInterruptProvider({ children }: { children: ReactNode }) {
         }
       })
     },
-    [dispatchResumedAction],
+    [],
   )
 
   useEffect(() => {
@@ -124,6 +121,11 @@ export function AuthInterruptProvider({ children }: { children: ReactNode }) {
     })
 
     if (plan.type === 'idle') return
+
+    if (plan.type === 'expired') {
+      queueMicrotask(() => setPending(null))
+      return
+    }
 
     if (plan.type === 'dispatch') {
       const dispatchPlan = planProtectedActionResumeDispatch(
@@ -136,7 +138,7 @@ export function AuthInterruptProvider({ children }: { children: ReactNode }) {
       dispatchedResumeKeyRef.current = dispatchPlan.resumeKey
       queueMicrotask(() => {
         setPending(null)
-        dispatchResumedAction(plan.action)
+        dispatchProtectedAction(plan.action)
         queueMicrotask(() => {
           if (dispatchedResumeKeyRef.current === dispatchPlan.resumeKey) {
             dispatchedResumeKeyRef.current = null
@@ -163,7 +165,7 @@ export function AuthInterruptProvider({ children }: { children: ReactNode }) {
       })
     })
     navigate(plan.to, { replace: true })
-  }, [currentPath, dispatchResumedAction, navigate, pending, session, setPending])
+  }, [currentPath, navigate, pending, session, setPending])
 
   useEffect(() => {
     if (queuedResume == null || currentPath !== queuedResume.path) return
@@ -178,7 +180,7 @@ export function AuthInterruptProvider({ children }: { children: ReactNode }) {
   const requestProtectedAction = useCallback(
     (req: ProtectedActionRequest) => {
       if (session != null) {
-        dispatchResumedAction(req.action)
+        dispatchProtectedAction(req.action)
         return
       }
 
@@ -189,26 +191,18 @@ export function AuthInterruptProvider({ children }: { children: ReactNode }) {
         }),
       )
     },
-    [currentRoute, dispatchResumedAction, session, setPending],
+    [currentRoute, session, setPending],
   )
 
   const cancel = useCallback(() => setPending(null), [setPending])
-
-  const clearResumedAction = useCallback((resumeToken: number) => {
-    setResumedAction((current) =>
-      current?.resumeToken === resumeToken ? null : current,
-    )
-  }, [])
 
   const value = useMemo<AuthInterruptContextValue>(
     () => ({
       requestProtectedAction,
       pending,
       cancel,
-      resumedAction,
-      clearResumedAction,
     }),
-    [requestProtectedAction, pending, cancel, resumedAction, clearResumedAction],
+    [requestProtectedAction, pending, cancel],
   )
 
   return (
