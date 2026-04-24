@@ -51,6 +51,44 @@ const listedSubject: ResolvedSubject = {
   },
 }
 
+const issuerWithActiveListing: ResolvedSubject = {
+  subject_ref: {
+    kind: 'issuer',
+    id: '33333333-3333-4333-a333-333333333333',
+  },
+  display_name: 'Apple Inc.',
+  confidence: 0.99,
+  context: {
+    issuer: {
+      subject_ref: {
+        kind: 'issuer',
+        id: '33333333-3333-4333-a333-333333333333',
+      },
+      legal_name: 'Apple Inc.',
+    },
+    active_listings: [
+      {
+        subject_ref: {
+          kind: 'listing',
+          id: '11111111-1111-4111-a111-111111111111',
+        },
+        instrument_ref: {
+          kind: 'instrument',
+          id: '44444444-4444-4444-a444-444444444444',
+        },
+        issuer_ref: {
+          kind: 'issuer',
+          id: '33333333-3333-4333-a333-333333333333',
+        },
+        mic: 'XNAS',
+        ticker: 'AAPL',
+        trading_currency: 'USD',
+        timezone: 'America/New_York',
+      },
+    ],
+  },
+}
+
 test('createQuoteSnapshotStub returns the P1.1-compatible quote shape', () => {
   const quote = createQuoteSnapshotStub(listedSubject)
 
@@ -74,6 +112,17 @@ test('createQuoteSnapshotStub stays listing-oriented when issuer context exists'
   assert.equal(quote.listing.ticker, 'AAPL')
   assert.equal(quote.issuer_profile?.legal_name, 'Apple Inc.')
   assert.equal(quote.issuer_profile?.sector, 'Technology')
+})
+
+test('createQuoteSnapshotStub uses active listing identity for issuer entries', () => {
+  const quote = createQuoteSnapshotStub(issuerWithActiveListing)
+
+  assert.deepEqual(quote.subject_ref, {
+    kind: 'listing',
+    id: '11111111-1111-4111-a111-111111111111',
+  })
+  assert.equal(quote.listing.ticker, 'AAPL')
+  assert.equal(quote.listing.mic, 'XNAS')
 })
 
 test('quote formatting keeps signed moves explicit', () => {

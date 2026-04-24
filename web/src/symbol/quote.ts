@@ -48,7 +48,7 @@ export function createQuoteSnapshotStub(subject: ResolvedSubject): QuoteSnapshot
   const percentMove = previousClose === 0 ? 0 : (absoluteMove / previousClose) * 100
 
   return {
-    subject_ref: subject.subject_ref,
+    subject_ref: listing.subject_ref,
     display_name: subject.display_label ?? subject.display_name,
     listing: {
       ticker: listing.ticker,
