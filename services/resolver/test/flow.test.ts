@@ -18,18 +18,30 @@ const appleIssuer = "33333333-3333-4333-a333-333333333333";
 const appleInstrument = "44444444-4444-4444-a444-444444444444";
 
 function singleListingDb(): QueryExecutor {
+  const listing = {
+    listing_id: aaplXnas.id,
+    instrument_id: appleInstrument,
+    issuer_id: appleIssuer,
+    mic: "XNAS",
+    ticker: "AAPL",
+    trading_currency: "USD",
+    timezone: "America/New_York",
+    active_from: null,
+    active_to: null,
+    asset_type: "common_stock",
+    share_class: null,
+    isin: "US0378331005",
+    legal_name: "Apple Inc.",
+    cik: "320193",
+    lei: "HWUPKR0MPOU8FGXBT394",
+    domicile: "US",
+    sector: "Technology",
+    industry: "Consumer Electronics",
+  };
+
   return scriptedDb({
-    listings: [
-      {
-        listing_id: aaplXnas.id,
-        instrument_id: appleInstrument,
-        issuer_id: appleIssuer,
-        mic: "XNAS",
-        ticker: "AAPL",
-        share_class: null,
-        legal_name: "Apple Inc.",
-      },
-    ],
+    listings: [listing],
+    listingDetails: [listing],
     aliases: [],
   });
 }
@@ -43,6 +55,8 @@ function ambiguousListingDb(): QueryExecutor {
         issuer_id: appleIssuer,
         mic: "XNAS",
         ticker: "AAPL",
+        trading_currency: "USD",
+        timezone: "America/New_York",
         share_class: null,
         legal_name: "Apple Inc.",
       },
@@ -52,8 +66,52 @@ function ambiguousListingDb(): QueryExecutor {
         issuer_id: appleIssuer,
         mic: "XFRA",
         ticker: "AAPL",
+        trading_currency: "EUR",
+        timezone: "Europe/Berlin",
         share_class: null,
         legal_name: "Apple Inc.",
+      },
+    ],
+    listingDetails: [
+      {
+        listing_id: aaplXnas.id,
+        instrument_id: appleInstrument,
+        issuer_id: appleIssuer,
+        mic: "XNAS",
+        ticker: "AAPL",
+        trading_currency: "USD",
+        timezone: "America/New_York",
+        active_from: null,
+        active_to: null,
+        asset_type: "common_stock",
+        share_class: null,
+        isin: "US0378331005",
+        legal_name: "Apple Inc.",
+        cik: "320193",
+        lei: "HWUPKR0MPOU8FGXBT394",
+        domicile: "US",
+        sector: "Technology",
+        industry: "Consumer Electronics",
+      },
+      {
+        listing_id: aaplXfra.id,
+        instrument_id: appleInstrument,
+        issuer_id: appleIssuer,
+        mic: "XFRA",
+        ticker: "AAPL",
+        trading_currency: "EUR",
+        timezone: "Europe/Berlin",
+        active_from: null,
+        active_to: null,
+        asset_type: "common_stock",
+        share_class: null,
+        isin: "US0378331005",
+        legal_name: "Apple Inc.",
+        cik: "320193",
+        lei: "HWUPKR0MPOU8FGXBT394",
+        domicile: "US",
+        sector: "Technology",
+        industry: "Consumer Electronics",
       },
     ],
     aliases: [],
@@ -62,6 +120,87 @@ function ambiguousListingDb(): QueryExecutor {
 
 function emptyDb(): QueryExecutor {
   return scriptedDb({ listings: [], aliases: [] });
+}
+
+function issuerIdentifierDb(): QueryExecutor {
+  return scriptedDb({
+    listings: [],
+    aliases: [],
+    issuerIdentifiers: [
+      {
+        issuer_id: appleIssuer,
+        legal_name: "Apple Inc.",
+      },
+    ],
+    issuerDetails: [
+      {
+        issuer_id: appleIssuer,
+        legal_name: "Apple Inc.",
+        cik: "320193",
+        lei: "HWUPKR0MPOU8FGXBT394",
+        domicile: "US",
+        sector: "Technology",
+        industry: "Consumer Electronics",
+      },
+    ],
+    activeListings: [
+      {
+        listing_id: aaplXnas.id,
+        instrument_id: appleInstrument,
+        issuer_id: appleIssuer,
+        mic: "XNAS",
+        ticker: "AAPL",
+        trading_currency: "USD",
+        timezone: "America/New_York",
+        active_from: null,
+        active_to: null,
+      },
+    ],
+  });
+}
+
+function instrumentIdentifierDb(): QueryExecutor {
+  return scriptedDb({
+    listings: [],
+    aliases: [],
+    instrumentIdentifiers: [
+      {
+        instrument_id: appleInstrument,
+        issuer_id: appleIssuer,
+        asset_type: "common_stock",
+        share_class: null,
+        legal_name: "Apple Inc.",
+      },
+    ],
+    instrumentDetails: [
+      {
+        instrument_id: appleInstrument,
+        issuer_id: appleIssuer,
+        asset_type: "common_stock",
+        share_class: null,
+        isin: "US0378331005",
+        legal_name: "Apple Inc.",
+        cik: "320193",
+        lei: "HWUPKR0MPOU8FGXBT394",
+        domicile: "US",
+        sector: "Technology",
+        industry: "Consumer Electronics",
+      },
+    ],
+    activeListings: [
+      {
+        listing_id: aaplXnas.id,
+        instrument_id: appleInstrument,
+        issuer_id: appleIssuer,
+        mic: "XNAS",
+        ticker: "AAPL",
+        trading_currency: "USD",
+        timezone: "America/New_York",
+        active_from: null,
+        active_to: null,
+      },
+    ],
+  });
 }
 
 test("search-to-subject flow auto-advances a unique deterministic hit into hydrated handoff", async () => {
@@ -75,6 +214,26 @@ test("search-to-subject flow auto-advances a unique deterministic hit into hydra
   assert.equal(result.handoff.identity_level, "listing");
   assert.equal(result.handoff.display_label, "AAPL · XNAS — Apple Inc.");
   assert.equal(result.handoff.normalized_input, "AAPL");
+});
+
+test("hydrated listing bundle carries canonical key plus issuer, instrument, and listing context", async () => {
+  const result = await runSearchToSubjectFlow(singleListingDb(), { text: "AAPL" });
+
+  assert.equal(result.status, "hydrated");
+  assert.deepEqual(result.handoff.subject_ref, aaplXnas);
+  assert.equal(result.handoff.display_labels.primary, "AAPL · XNAS — Apple Inc.");
+  assert.equal(result.handoff.display_labels.ticker, "AAPL");
+  assert.equal(result.handoff.display_labels.mic, "XNAS");
+  assert.equal(result.handoff.context.issuer?.subject_ref.id, appleIssuer);
+  assert.equal(result.handoff.context.issuer?.legal_name, "Apple Inc.");
+  assert.equal(result.handoff.context.issuer?.cik, "320193");
+  assert.equal(result.handoff.context.instrument?.subject_ref.id, appleInstrument);
+  assert.equal(result.handoff.context.instrument?.asset_type, "common_stock");
+  assert.equal(result.handoff.context.instrument?.isin, "US0378331005");
+  assert.equal(result.handoff.context.listing?.subject_ref.id, aaplXnas.id);
+  assert.equal(result.handoff.context.listing?.ticker, "AAPL");
+  assert.equal(result.handoff.context.listing?.mic, "XNAS");
+  assert.deepEqual(persistedSubjectRefs([result.handoff]), [aaplXnas]);
 });
 
 test("search-to-subject flow pauses at ambiguity without producing handoff", async () => {
@@ -103,6 +262,36 @@ test("search-to-subject flow hydrates the explicitly chosen ambiguous candidate"
   assert.equal(result.handoff.resolution_path, "explicit_choice");
   assert.deepEqual(result.handoff.subject_ref, aaplXfra);
   assert.equal(result.handoff.display_label, "AAPL · XFRA — Apple Inc.");
+  assert.equal(result.handoff.context.listing?.trading_currency, "EUR");
+});
+
+test("hydrated issuer bundle carries issuer context and active listing entry context", async () => {
+  const result = await runSearchToSubjectFlow(issuerIdentifierDb(), { text: "0000320193" });
+
+  assert.equal(result.status, "hydrated");
+  assert.equal(result.handoff.identity_level, "issuer");
+  assert.deepEqual(result.handoff.subject_ref, { kind: "issuer", id: appleIssuer });
+  assert.equal(result.handoff.display_labels.legal_name, "Apple Inc.");
+  assert.equal(result.handoff.context.issuer?.subject_ref.id, appleIssuer);
+  assert.equal(result.handoff.context.issuer?.sector, "Technology");
+  assert.equal(result.handoff.context.active_listings?.[0]?.subject_ref.id, aaplXnas.id);
+  assert.equal(result.handoff.context.active_listings?.[0]?.ticker, "AAPL");
+  assert.deepEqual(persistedSubjectRefs([result.handoff]), [{ kind: "issuer", id: appleIssuer }]);
+});
+
+test("hydrated instrument bundle carries instrument, issuer, and active listing context", async () => {
+  const result = await runSearchToSubjectFlow(instrumentIdentifierDb(), {
+    text: "US0378331005",
+  });
+
+  assert.equal(result.status, "hydrated");
+  assert.equal(result.handoff.identity_level, "instrument");
+  assert.deepEqual(result.handoff.subject_ref, { kind: "instrument", id: appleInstrument });
+  assert.equal(result.handoff.context.issuer?.subject_ref.id, appleIssuer);
+  assert.equal(result.handoff.context.instrument?.subject_ref.id, appleInstrument);
+  assert.equal(result.handoff.context.instrument?.asset_type, "common_stock");
+  assert.equal(result.handoff.context.instrument?.isin, "US0378331005");
+  assert.equal(result.handoff.context.active_listings?.[0]?.subject_ref.id, aaplXnas.id);
 });
 
 test("search-to-subject flow ends not_found without subject hydration", async () => {
@@ -117,12 +306,48 @@ test("search-to-subject flow ends not_found without subject hydration", async ()
 
 type ScriptRows = {
   listings: Array<Record<string, unknown>>;
+  listingDetails?: Array<Record<string, unknown>>;
+  issuerIdentifiers?: Array<Record<string, unknown>>;
+  issuerDetails?: Array<Record<string, unknown>>;
+  instrumentIdentifiers?: Array<Record<string, unknown>>;
+  instrumentDetails?: Array<Record<string, unknown>>;
+  activeListings?: Array<Record<string, unknown>>;
   aliases: Array<Record<string, unknown>>;
 };
 
 function scriptedDb(rows: ScriptRows): QueryExecutor {
   return {
-    query: async (text: string) => {
+    query: async (text: string, values?: unknown[]) => {
+      if (text.includes("where l.listing_id = $1")) {
+        return {
+          rows: rows.listingDetails?.filter((row) => row.listing_id === values?.[0]) ?? [],
+        } as never;
+      }
+
+      if (text.includes("where iss.issuer_id = $1")) {
+        return {
+          rows: rows.issuerDetails?.filter((row) => row.issuer_id === values?.[0]) ?? [],
+        } as never;
+      }
+
+      if (text.includes("where i.instrument_id = $1")) {
+        return {
+          rows: rows.instrumentDetails?.filter((row) => row.instrument_id === values?.[0]) ?? [],
+        } as never;
+      }
+
+      if (text.includes("i.issuer_id = $1")) {
+        return {
+          rows: rows.activeListings?.filter((row) => row.issuer_id === values?.[0]) ?? [],
+        } as never;
+      }
+
+      if (text.includes("l.instrument_id = $1")) {
+        return {
+          rows: rows.activeListings?.filter((row) => row.instrument_id === values?.[0]) ?? [],
+        } as never;
+      }
+
       if (text.includes("from listings l")) {
         return { rows: rows.listings } as never;
       }
@@ -132,14 +357,20 @@ function scriptedDb(rows: ScriptRows): QueryExecutor {
       }
 
       if (text.includes("from issuers where upper")) {
-        return { rows: [] } as never;
+        return { rows: rows.issuerIdentifiers ?? [] } as never;
       }
 
-      if (text.includes("from instruments i")) {
-        return { rows: [] } as never;
+      if (text.includes("where upper(i.isin)")) {
+        return { rows: rows.instrumentIdentifiers ?? [] } as never;
       }
 
       throw new Error(`Unexpected query: ${text}`);
     },
   };
+}
+
+function persistedSubjectRefs(
+  handoffs: Array<{ subject_ref: SubjectRef }>,
+): SubjectRef[] {
+  return handoffs.map((handoff) => handoff.subject_ref);
 }
