@@ -53,7 +53,8 @@ async function insertIssuerAlias(
 ) {
   await client.query(
     `insert into issuer_aliases (issuer_id, raw_name, normalized_name, match_reason)
-     values ($1, $2, $3, $4)`,
+     values ($1, $2, $3, $4)
+     on conflict do nothing`,
     [issuer_id, raw_name, normalizeNameForLookup(raw_name), match_reason],
   );
 }

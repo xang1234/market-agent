@@ -268,7 +268,7 @@ test("migrate up creates indexed issuer aliases and backfills issuer names", { t
   await client.query(
     `insert into issuers (legal_name, former_names)
      values ($1, $2::jsonb)`,
-    ["Alphabet Inc.", JSON.stringify(["Google"])],
+    ["Alphabet Inc.", JSON.stringify(["Google", null, ""])],
   );
 
   const upResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
@@ -291,6 +291,80 @@ test("migrate up creates indexed issuer aliases and backfills issuer names", { t
   );
   assert.equal(
     queryValue(containerName, "select count(*) from issuer_aliases where normalized_name = 'google' and match_reason = 'former_name'"),
+    "1",
+  );
+  assert.equal(
+    queryValue(containerName, "select count(*) from issuer_aliases where normalized_name = ''"),
+    "0",
+  );
+});
+
+test("migrate up keeps issuer aliases synchronized on issuer writes", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for db migration integration coverage");
+    return;
+  }
+
+  const containerName = createContainerName("fra-6al-4-6");
+  const password = "postgres";
+  const hostPort = startPostgres(containerName, password);
+  const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
+
+  t.after(() => {
+    stopPostgres(containerName);
+  });
+
+  await waitForPostgres(containerName, databaseUrl);
+
+  const upResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
+    cwd: dbRoot,
+    env: { DATABASE_URL: databaseUrl },
+  });
+  assert.equal(upResult.status, 0, upResult.stderr || upResult.stdout);
+
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  t.after(() => client.end().catch(() => {}));
+
+  const issuer = await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name, former_names)
+     values ($1, $2::jsonb)
+     returning issuer_id`,
+    ["Trigger Corp.", JSON.stringify(["Old Trigger", null, ""])],
+  );
+  const issuerId = issuer.rows[0].issuer_id;
+
+  assert.equal(
+    queryValue(containerName, `select count(*) from issuer_aliases where issuer_id = '${issuerId}' and normalized_name = 'trigger corp' and match_reason = 'legal_name'`),
+    "1",
+  );
+  assert.equal(
+    queryValue(containerName, `select count(*) from issuer_aliases where issuer_id = '${issuerId}' and normalized_name = 'old trigger' and match_reason = 'former_name'`),
+    "1",
+  );
+  assert.equal(
+    queryValue(containerName, `select count(*) from issuer_aliases where issuer_id = '${issuerId}' and normalized_name = ''`),
+    "0",
+  );
+
+  await client.query(
+    `update issuers
+        set legal_name = $2,
+            former_names = $3::jsonb
+      where issuer_id = $1`,
+    [issuerId, "Renamed Corp.", JSON.stringify(["Earlier Corp"])],
+  );
+
+  assert.equal(
+    queryValue(containerName, `select count(*) from issuer_aliases where issuer_id = '${issuerId}' and normalized_name in ('trigger corp', 'old trigger')`),
+    "0",
+  );
+  assert.equal(
+    queryValue(containerName, `select count(*) from issuer_aliases where issuer_id = '${issuerId}' and normalized_name = 'renamed corp' and match_reason = 'legal_name'`),
+    "1",
+  );
+  assert.equal(
+    queryValue(containerName, `select count(*) from issuer_aliases where issuer_id = '${issuerId}' and normalized_name = 'earlier corp' and match_reason = 'former_name'`),
     "1",
   );
 });

@@ -56,7 +56,8 @@ async function insertIssuerAlias(
 ) {
   await client.query(
     `insert into issuer_aliases (issuer_id, raw_name, normalized_name, match_reason)
-     values ($1, $2, $3, $4)`,
+     values ($1, $2, $3, $4)
+     on conflict do nothing`,
     [issuer_id, raw_name, normalizeNameForLookup(raw_name), match_reason],
   );
 }
@@ -387,6 +388,7 @@ test("name lookup reads indexed issuer_aliases rows instead of scanning issuer n
     query: async (text: string, values?: unknown[]) => {
       assert.doesNotMatch(text, /issuer_names/);
       assert.match(text, /issuer_aliases/);
+      assert.match(text, /where\s+ia\.normalized_name\s*=\s*\$1/i);
       assert.deepEqual(values, ["apple inc"]);
 
       return {
