@@ -111,7 +111,13 @@ export function symbolDetailPathForSubject(subjectRef: SubjectRef): string {
 }
 
 export function parseSubjectRouteParam(param: string | undefined): SubjectRef {
-  const decoded = decodeURIComponent(param ?? '')
+  const raw = param ?? ''
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(raw)
+  } catch {
+    decoded = raw
+  }
   const separator = decoded.indexOf(':')
   const kind = decoded.slice(0, separator)
   const id = decoded.slice(separator + 1)

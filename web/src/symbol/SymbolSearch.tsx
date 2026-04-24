@@ -40,7 +40,15 @@ export function SymbolSearch({
   const [status, setStatus] = useState<SearchStatus>('idle')
   const [message, setMessage] = useState<string | null>(null)
   const requestSeq = useRef(0)
+  const resolveControllerRef = useRef<AbortController | null>(null)
   const trimmedQuery = query.trim()
+
+  useEffect(() => {
+    return () => {
+      resolveControllerRef.current?.abort()
+      resolveControllerRef.current = null
+    }
+  }, [])
 
   const hasCandidates = typeahead.candidates.length > 0
   const activeDescendant =
@@ -110,12 +118,16 @@ export function SymbolSearch({
     if (!trimmedQuery) return
     const seq = requestSeq.current + 1
     requestSeq.current = seq
+    resolveControllerRef.current?.abort()
+    const controller = new AbortController()
+    resolveControllerRef.current = controller
     setStatus('resolving')
     setMessage(null)
 
     try {
       const response = await resolveSubjects({
         text: trimmedQuery,
+        signal: controller.signal,
         ...(candidate ? { choice: { subject_ref: candidate.subject_ref } } : {}),
       })
       if (requestSeq.current !== seq) return
@@ -135,11 +147,14 @@ export function SymbolSearch({
       setTypeahead(createSymbolTypeaheadState([]))
       setMessage(`No subject found for ${plan.unresolved || trimmedQuery}`)
     } catch (error) {
-      if (requestSeq.current !== seq) return
+      if (controller.signal.aborted || requestSeq.current !== seq) return
       setMessage(error instanceof Error ? error.message : 'Subject resolve failed')
       setStatus('error')
       return
     } finally {
+      if (resolveControllerRef.current === controller) {
+        resolveControllerRef.current = null
+      }
       if (requestSeq.current === seq) {
         setStatus((current) => (current === 'error' ? current : 'idle'))
       }

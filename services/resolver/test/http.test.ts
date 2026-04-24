@@ -724,6 +724,22 @@ test("server: oversized request body returns 413", async (t) => {
   assert.deepEqual(await res.json(), { error: "request body too large" });
 });
 
+test("server: choice subject_ref not in candidate set returns 400", async (t) => {
+  const base = await startServer(t, hydratedListingDb([hydratedAaplXnas, hydratedAaplXfra]));
+
+  const res = await postResolve(base, {
+    text: "AAPL",
+    choice: {
+      subject_ref: { kind: "listing", id: "99999999-9999-4999-a999-999999999999" },
+    },
+  });
+
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), {
+    error: "choice subject_ref must match one of the ambiguous candidates",
+  });
+});
+
 test("server: missing 'text' returns 400 per request schema", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for resolver http coverage");

@@ -43,6 +43,7 @@ paths:
                 choice:
                   type: object
                   description: Explicit candidate choice to hydrate after an ambiguous resolution.
+                  required: [subject_ref]
                   properties:
                     subject_ref:
                       $ref: '#/components/schemas/SubjectRef'

@@ -4,6 +4,7 @@ import {
   clearSymbolTypeaheadForQueryChange,
   createSymbolTypeaheadState,
   moveSymbolTypeaheadHighlight,
+  parseSubjectRouteParam,
   planSymbolResolution,
   selectedSymbolCandidate,
   symbolDetailPathForSubject,
@@ -123,4 +124,11 @@ test('route fallback display avoids presenting raw subject refs as market labels
   assert.deepEqual(subject.display_labels, {
     primary: 'Listing subject',
   })
+})
+
+test('parseSubjectRouteParam falls back without crashing on malformed percent-encoding', () => {
+  const subjectRef = parseSubjectRouteParam('listing%ZZbroken')
+
+  assert.equal(subjectRef.kind, 'listing')
+  assert.equal(typeof subjectRef.id, 'string')
 })

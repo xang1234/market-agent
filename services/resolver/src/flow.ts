@@ -24,6 +24,13 @@ import type { SubjectKind, SubjectRef } from "./subject-ref.ts";
 
 export type ResolutionPath = "auto_advanced" | "explicit_choice";
 
+export class InvalidChoiceError extends Error {
+  constructor(message = "choice subject_ref must match one of the ambiguous candidates") {
+    super(message);
+    this.name = "InvalidChoiceError";
+  }
+}
+
 export type SubjectChoice = {
   subject_ref: SubjectRef;
 };
@@ -195,7 +202,7 @@ export async function runSearchToSubjectFlow(
       subjectRefsEqual(candidate.subject_ref, request.choice!.subject_ref),
     );
     if (!chosen) {
-      throw new Error("choice subject_ref must match one of the ambiguous candidates");
+      throw new InvalidChoiceError();
     }
     const canonicalSelection = resolvedFromCandidate(chosen);
     const handoff = await handoffFromResolved(db, canonicalSelection, normalized_input, "explicit_choice");

@@ -3,6 +3,7 @@ import {
   type ResolverCandidate,
 } from "./envelope.ts";
 import {
+  InvalidChoiceError,
   runSearchToSubjectFlow,
   type HydratedSubjectContext,
   type HydratedSubjectHandoff,
@@ -196,6 +197,13 @@ export function createResolverServer(db: QueryExecutor): Server {
       if (error instanceof RequestBodyTooLargeError) {
         if (!res.headersSent) {
           respond(res, 413, { error: error.message });
+        }
+        return;
+      }
+
+      if (error instanceof InvalidChoiceError) {
+        if (!res.headersSent) {
+          respond(res, 400, { error: error.message });
         }
         return;
       }

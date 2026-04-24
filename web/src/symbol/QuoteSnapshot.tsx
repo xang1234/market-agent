@@ -44,7 +44,7 @@ export function QuoteSnapshot({ subject }: QuoteSnapshotProps) {
             {formatSignedNumber(quote.absolute_move)} ({formatSignedPercent(quote.percent_move)})
           </div>
           <div className="pb-1 text-xs text-neutral-500 dark:text-neutral-400">
-            {quote.session_state.replace('_', ' ')} · {quote.delay_class} · {formatQuoteTime(quote.as_of)}
+            {quote.session_state.replaceAll('_', ' ')} · {quote.delay_class} · {formatQuoteTime(quote.as_of)}
           </div>
         </div>
         {quote.issuer_profile ? (
