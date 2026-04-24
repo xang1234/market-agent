@@ -210,6 +210,10 @@ test("handler: identifier-like input falls back to name lookup when identifier a
         return { rows: [] } as never;
       }
 
+      if (text.includes("i.issuer_id = any")) {
+        return { rows: [] } as never;
+      }
+
       if (text.includes("from listings l")) {
         calls.push(`ticker:${String(values?.[0])}`);
         return { rows: [] } as never;

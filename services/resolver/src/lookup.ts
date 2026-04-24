@@ -1,6 +1,7 @@
 import type { QueryResult } from "pg";
 import {
   ambiguous,
+  CONFIDENCE_NAME_ALIAS_LISTING,
   CONFIDENCE_NAME_FORMER,
   CONFIDENCE_NAME_LEGAL,
   CONFIDENCE_TICKER_AMBIGUOUS,
@@ -8,6 +9,7 @@ import {
   CONFIDENCE_UNIQUE_IDENTIFIER,
   notFound,
   resolved,
+  type AmbiguityAxis,
   type NotFoundReason,
   type ResolverCandidate,
   type ResolverEnvelope,
@@ -107,15 +109,22 @@ export async function resolveByNameCandidate(
     return notFound({ normalized_input: normalized, reason: "no_candidates" });
   }
 
-  const candidates = dedupeIssuerNameRows(matchedRows).map((row) => ({
+  const issuerRows = dedupeIssuerNameRows(matchedRows);
+  const issuerCandidates = issuerRows.map((row) => ({
     subject_ref: { kind: "issuer" as const, id: row.issuer_id },
     display_name: row.legal_name,
     confidence:
       row.match_reason === "legal_name" ? CONFIDENCE_NAME_LEGAL : CONFIDENCE_NAME_FORMER,
     match_reason: row.match_reason,
   }));
+  const aliasIssuerIds = issuerRows
+    .filter((row) => row.match_reason === "former_name")
+    .map((row) => row.issuer_id);
+  const listingCandidates = await listingCandidatesForAliasIssuers(db, aliasIssuerIds);
+  const candidates = dedupeCandidates([...issuerCandidates, ...listingCandidates])
+    .sort((a, b) => b.confidence - a.confidence);
 
-  if (candidates.length === 1) {
+  if (candidates.length === 1 && candidates[0].subject_ref.kind === "issuer") {
     const candidate = candidates[0];
     return resolved({
       subject_ref: candidate.subject_ref,
@@ -125,7 +134,7 @@ export async function resolveByNameCandidate(
     });
   }
 
-  return ambiguous({ candidates, ambiguity_axis: "multiple_issuers" });
+  return ambiguous({ candidates, ambiguity_axis: inferNameAmbiguityAxis(candidates) });
 }
 
 export async function resolveByCik(
@@ -259,6 +268,54 @@ function instrumentDisplayName(row: InstrumentRow): string {
 function listingDisplayName(row: ListingRow): string {
   const base = row.share_class ? `${row.legal_name} (${row.share_class})` : row.legal_name;
   return `${row.ticker} · ${row.mic} — ${base}`;
+}
+
+async function listingCandidatesForAliasIssuers(
+  db: QueryExecutor,
+  issuerIds: string[],
+): Promise<ResolverCandidate[]> {
+  if (issuerIds.length === 0) return [];
+
+  const result: QueryResult<ListingRow> = await db.query(
+    `select l.listing_id, l.instrument_id, l.mic, l.ticker,
+            i.issuer_id, i.share_class, iss.legal_name
+       from listings l
+       join instruments i on i.instrument_id = l.instrument_id
+       join issuers iss on iss.issuer_id = i.issuer_id
+      where i.issuer_id = any($1::uuid[])
+        and (l.active_from is null or l.active_from <= now())
+        and (l.active_to is null or l.active_to > now())
+      order by iss.legal_name, l.mic, l.ticker`,
+    [issuerIds],
+  );
+
+  return result.rows.map((row) => ({
+    subject_ref: { kind: "listing", id: row.listing_id },
+    display_name: listingDisplayName(row),
+    confidence: CONFIDENCE_NAME_ALIAS_LISTING,
+    match_reason: "alias_related_listing",
+  }));
+}
+
+function dedupeCandidates(candidates: ResolverCandidate[]): ResolverCandidate[] {
+  const bySubject = new Map<string, ResolverCandidate>();
+  for (const candidate of candidates) {
+    const key = `${candidate.subject_ref.kind}:${candidate.subject_ref.id}`;
+    const existing = bySubject.get(key);
+    if (!existing || candidate.confidence > existing.confidence) {
+      bySubject.set(key, candidate);
+    }
+  }
+  return [...bySubject.values()];
+}
+
+function inferNameAmbiguityAxis(candidates: ResolverCandidate[]): AmbiguityAxis {
+  const kinds = new Set(candidates.map((candidate) => candidate.subject_ref.kind));
+  if (kinds.has("issuer") && kinds.has("listing")) return "issuer_vs_listing";
+  if (kinds.size === 1 && kinds.has("issuer")) return "multiple_issuers";
+  if (kinds.size === 1 && kinds.has("listing")) return "multiple_listings";
+  if (kinds.size === 1 && kinds.has("instrument")) return "multiple_instruments";
+  return "other";
 }
 
 function normalizeNameForLookup(value: string): string {

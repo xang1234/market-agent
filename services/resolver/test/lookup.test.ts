@@ -204,17 +204,75 @@ test("issuer former-name lookup resolves to the canonical issuer subject", { tim
 
   const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-4-4");
   const client = await connectedClient(t, databaseUrl);
-  const apple = await seedAppleChain(client);
-  await client.query("update issuers set former_names = $1::jsonb where issuer_id = $2", [
-    JSON.stringify(["Apple Computer, Inc."]),
-    apple.issuer_id,
-  ]);
+  const issuer = await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name, former_names)
+     values ($1, $2::jsonb)
+     returning issuer_id`,
+    ["Apple Inc.", JSON.stringify(["Apple Computer, Inc."])],
+  );
 
   const envelope = await resolveByNameCandidate(client, "apple computer inc");
 
   assert.ok(isResolved(envelope));
   assert.equal(envelope.subject_ref.kind, "issuer");
+  assert.equal(envelope.subject_ref.id, issuer.rows[0].issuer_id);
+});
+
+test("issuer legal-name lookup stays issuer-only even when listings exist", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver lookup coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-4-5");
+  const client = await connectedClient(t, databaseUrl);
+  const apple = await seedAppleChain(client);
+
+  const envelope = await resolveByNameCandidate(client, "Apple Inc.");
+
+  assert.ok(isResolved(envelope));
+  assert.equal(envelope.subject_ref.kind, "issuer");
   assert.equal(envelope.subject_ref.id, apple.issuer_id);
+});
+
+test("issuer alias lookup expands to issuer plus active listing candidates", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver lookup coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-4-5");
+  const client = await connectedClient(t, databaseUrl);
+  const issuer = await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name, former_names)
+     values ($1, $2::jsonb)
+     returning issuer_id`,
+    ["Alphabet Inc.", JSON.stringify(["Google"])],
+  );
+  const instrument = await client.query<{ instrument_id: string }>(
+    `insert into instruments (issuer_id, asset_type, share_class)
+     values ($1, 'common_stock', 'Class C')
+     returning instrument_id`,
+    [issuer.rows[0].issuer_id],
+  );
+  const listing = await client.query<{ listing_id: string }>(
+    `insert into listings (instrument_id, mic, ticker, trading_currency, timezone)
+     values ($1, 'XNAS', 'GOOG', 'USD', 'America/New_York')
+     returning listing_id`,
+    [instrument.rows[0].instrument_id],
+  );
+
+  const envelope = await resolveByNameCandidate(client, "Google");
+
+  assert.ok(isAmbiguous(envelope));
+  assert.equal(envelope.ambiguity_axis, "issuer_vs_listing");
+  assert.deepEqual(
+    envelope.candidates.map((candidate) => candidate.subject_ref),
+    [
+      { kind: "issuer", id: issuer.rows[0].issuer_id },
+      { kind: "listing", id: listing.rows[0].listing_id },
+    ],
+  );
 });
 
 test("name lookup filters broad DB rows with Unicode-aware JS normalization", async () => {
