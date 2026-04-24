@@ -5,6 +5,7 @@ import {
   isNotFound,
   isResolved,
   notFound,
+  resolved,
   type AmbiguityAxis,
   type ResolverCandidate,
   type ResolverEnvelope,
@@ -133,7 +134,7 @@ async function dispatchFreeText(
     if (!isNotFound(envelope)) candidateEnvelopes.push(envelope);
   }
 
-  if (n.name_candidate && !n.identifier_hint) {
+  if (n.name_candidate) {
     const envelope = await resolveByNameCandidate(db, n.name_candidate);
     if (!isNotFound(envelope)) candidateEnvelopes.push(envelope);
   }
@@ -166,13 +167,12 @@ function mergeCandidateEnvelopes(envelopes: ResolverEnvelope[]): ResolverEnvelop
 
   if (deduped.length === 1) {
     const [candidate] = deduped;
-    return {
-      outcome: "resolved",
+    return resolved({
       subject_ref: candidate.subject_ref,
       display_name: candidate.display_name,
       confidence: candidate.confidence,
       canonical_kind: candidate.subject_ref.kind,
-    };
+    });
   }
 
   return ambiguous({

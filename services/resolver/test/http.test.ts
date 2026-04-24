@@ -160,7 +160,7 @@ test("handler: identifier-like input falls back to ticker lookup when identifier
   const calls: string[] = [];
   const db: QueryExecutor = {
     query: async (text, values) => {
-      if (text.includes("from issuers")) {
+      if (text.includes("from issuers where upper")) {
         calls.push(`identifier:${String(values?.[0])}`);
         return { rows: [] } as never;
       }
@@ -182,16 +182,62 @@ test("handler: identifier-like input falls back to ticker lookup when identifier
         } as never;
       }
 
+      if (text.includes("with issuer_names")) {
+        calls.push(`name:${String(values?.[0])}`);
+        return { rows: [] } as never;
+      }
+
       throw new Error(`Unexpected query: ${text}`);
     },
   };
 
   const response = await handleResolveSubjects(db, { text: "700" });
 
-  assert.deepEqual(calls, ["identifier:700", "ticker:700"]);
+  assert.deepEqual(calls, ["identifier:700", "ticker:700", "name:700"]);
   assert.equal(response.subjects.length, 1);
   assert.equal(response.subjects[0].subject_ref.kind, "listing");
   assert.equal(response.subjects[0].subject_ref.id, "11111111-1111-4111-a111-111111111111");
+  assert.deepEqual(response.unresolved, []);
+});
+
+test("handler: identifier-like input falls back to name lookup when identifier and ticker miss", async () => {
+  const calls: string[] = [];
+  const db: QueryExecutor = {
+    query: async (text, values) => {
+      if (text.includes("from issuers where upper")) {
+        calls.push(`identifier:${String(values?.[0])}`);
+        return { rows: [] } as never;
+      }
+
+      if (text.includes("from listings l")) {
+        calls.push(`ticker:${String(values?.[0])}`);
+        return { rows: [] } as never;
+      }
+
+      if (text.includes("with issuer_names")) {
+        calls.push(`name:${String(values?.[0])}`);
+        return {
+          rows: [
+            {
+              issuer_id: "33333333-3333-4333-a333-333333333333",
+              legal_name: "Seven Hundred Holdings Ltd.",
+              matched_name: "700",
+              match_reason: "former_name",
+            },
+          ],
+        } as never;
+      }
+
+      throw new Error(`Unexpected query: ${text}`);
+    },
+  };
+
+  const response = await handleResolveSubjects(db, { text: "700" });
+
+  assert.deepEqual(calls, ["identifier:700", "ticker:700", "name:700"]);
+  assert.equal(response.subjects.length, 1);
+  assert.equal(response.subjects[0].subject_ref.kind, "issuer");
+  assert.equal(response.subjects[0].subject_ref.id, "33333333-3333-4333-a333-333333333333");
   assert.deepEqual(response.unresolved, []);
 });
 

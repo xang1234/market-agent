@@ -351,14 +351,17 @@ test("resolveByInput dispatches to the right family based on discriminator", { t
   const viaCik = await resolveByInput(client, { kind: "cik", value: "0000320193" });
   const viaIsin = await resolveByInput(client, { kind: "isin", value: "US0378331005" });
   const viaLei = await resolveByInput(client, { kind: "lei", value: "HWUPKR0MPOU8FGXBT394" });
+  const viaName = await resolveByInput(client, { kind: "name", value: "Apple Inc." });
 
   assert.ok(isResolved(viaTicker));
   assert.ok(isResolved(viaCik));
   assert.ok(isResolved(viaIsin));
   assert.ok(isResolved(viaLei));
+  assert.ok(isResolved(viaName));
 
   assert.equal(viaCik.subject_ref.id, apple.issuer_id);
   assert.equal(viaIsin.subject_ref.id, apple.instrument_id);
   assert.equal(viaTicker.subject_ref.id, apple.listing_id);
   assert.equal(viaLei.subject_ref.id, apple.issuer_id);
+  assert.equal(viaName.subject_ref.id, apple.issuer_id);
 });
