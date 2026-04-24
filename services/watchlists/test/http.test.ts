@@ -54,7 +54,9 @@ test("server: missing x-user-id header returns 401", { timeout: 120000 }, async 
     t.skip("Docker is required for watchlists coverage");
     return;
   }
-  const { client, base } = await setupWatchlistsServer(t);
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-6-1");
+  const client = await connectedClient(t, databaseUrl);
+  const base = await startServer(t, client);
 
   const res = await fetch(`${base}/v1/watchlists/default/members`);
   assert.equal(res.status, 401);
@@ -66,7 +68,9 @@ test("server: malformed x-user-id returns 401", { timeout: 120000 }, async (t) =
     t.skip("Docker is required for watchlists coverage");
     return;
   }
-  const { client, base } = await setupWatchlistsServer(t);
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-6-1");
+  const client = await connectedClient(t, databaseUrl);
+  const base = await startServer(t, client);
 
   const res = await fetch(
     `${base}/v1/watchlists/default/members`,
