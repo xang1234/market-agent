@@ -14,3 +14,11 @@ test("ci workflow includes services/dev-api coverage", async () => {
   assert.match(workflow, /cache-dependency-path:\s*services\/dev-api\/package-lock\.json/);
   assert.match(workflow, /run:\s*npm test/);
 });
+
+test("ci workflow includes services/watchlists coverage", async () => {
+  const workflow = await readFile(CI_WORKFLOW, "utf8");
+
+  assert.match(workflow, /\bwatchlists\b/);
+  assert.match(workflow, /working-directory:\s*services\/watchlists/);
+  assert.match(workflow, /cache-dependency-path:\s*services\/watchlists\/package-lock\.json/);
+});

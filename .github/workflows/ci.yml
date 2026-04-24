@@ -104,3 +104,30 @@ jobs:
       - run: npm ci
 
       - run: npm test
+
+  watchlists:
+    name: watchlists (integration tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: services/watchlists/package-lock.json
+
+      # Watchlists tests invoke `npm run apply:schema` inside db/, so the db
+      # workspace needs its dependencies installed too.
+      - name: Install db deps (needed by watchlists integration harness)
+        working-directory: db
+        run: npm ci
+
+      - name: Install watchlists deps
+        working-directory: services/watchlists
+        run: npm ci
+
+      - name: Run watchlists tests
+        working-directory: services/watchlists
+        run: npm test

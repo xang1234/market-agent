@@ -31,6 +31,7 @@ async function createShellFixture(envOverrides: Record<string, string> = {}) {
     CHAT_PORT: "4310",
     RESOLVER_PORT: "4311",
     DEV_API_PORT: "4312",
+    WATCHLISTS_PORT: "4313",
     DEV_POSTGRES_USER: "postgres",
     DEV_POSTGRES_PASSWORD: "postgres",
     DEV_POSTGRES_DB: "market_agent",
@@ -162,7 +163,7 @@ test("up rolls back already-started services when a later readiness check fails"
     [
       "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
       `TRACE_FILE="${traceFile}"`,
-      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api"',
+      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api" "$ROOT/services/watchlists"',
       "ensure_command(){ :; }",
       "ensure_install(){ :; }",
       "npm(){ :; }",
@@ -199,7 +200,7 @@ test("up rolls back when postgres never becomes ready", async () => {
     [
       "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
       `TRACE_FILE="${traceFile}"`,
-      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api"',
+      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api" "$ROOT/services/watchlists"',
       "ensure_command(){ :; }",
       "ensure_install(){ :; }",
       "sleep(){ :; }",

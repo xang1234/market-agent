@@ -49,10 +49,10 @@ test("migrate up applies pending migrations and records them in schema_migration
   });
 
   assert.equal(migrateResult.status, 0, migrateResult.stderr || migrateResult.stdout);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "2");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "3");
   assert.deepEqual(
     queryValue(containerName, "select version || ':' || name from schema_migrations order by version").split("\n"),
-    ["0001:init", "0002:issuer_aliases"],
+    ["0001:init", "0002:issuer_aliases", "0003:default_manual_watchlist"],
   );
 
   const publicTables = queryValue(
@@ -98,6 +98,7 @@ test("migrate status reports all migrations as applied after migrate up", { time
   assert.equal(statusResult.status, 0, statusResult.stderr || statusResult.stdout);
   assert.match(statusResult.stdout, /0001\s+init\s+applied/);
   assert.match(statusResult.stdout, /0002\s+issuer_aliases\s+applied/);
+  assert.match(statusResult.stdout, /0003\s+default_manual_watchlist\s+applied/);
 });
 
 test("migrate down rolls back the most recently applied migration", { timeout: 120000 }, async (t) => {
@@ -129,13 +130,13 @@ test("migrate down rolls back the most recently applied migration", { timeout: 1
   });
   assert.equal(downResult.status, 0, downResult.stderr || downResult.stdout);
 
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "1");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "2");
   assert.equal(
-    queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'issuer_aliases'"),
+    queryValue(containerName, "select count(*) from pg_indexes where schemaname = 'public' and indexname = 'watchlists_default_manual_per_user_idx'"),
     "0",
   );
   assert.equal(
-    queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'issuers'"),
+    queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'issuer_aliases'"),
     "1",
   );
 });
@@ -362,6 +363,82 @@ test("migrate up keeps issuer aliases synchronized on issuer writes", { timeout:
   );
 });
 
+test("migrate up provisions the implicit default manual watchlist on user insert", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for db migration integration coverage");
+    return;
+  }
+
+  const containerName = createContainerName("fra-6al-6-1");
+  const password = "postgres";
+  const hostPort = startPostgres(containerName, password);
+  const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
+
+  registerLifoCleanup(t, () => stopPostgres(containerName));
+
+  await waitForPostgres(containerName, databaseUrl);
+
+  const client = await connectedClient(t, databaseUrl);
+
+  // Seed a user before migrations run so the backfill path is exercised alongside the trigger.
+  await client.query(readFileSync(initMigrationPath, "utf8"));
+  await client.query(`
+    create table schema_migrations (
+      version text primary key,
+      name text not null,
+      applied_at timestamptz not null default now()
+    );
+    insert into schema_migrations(version, name) values ('0001', 'init');
+  `);
+  const preMigrationUser = await client.query<{ user_id: string }>(
+    `insert into users (email) values ($1) returning user_id`,
+    ["pre-migration@example.test"],
+  );
+  const preMigrationUserId = preMigrationUser.rows[0].user_id;
+
+  const upResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
+    cwd: dbRoot,
+    env: { DATABASE_URL: databaseUrl },
+  });
+  assert.equal(upResult.status, 0, upResult.stderr || upResult.stdout);
+
+  // Backfill: the existing user now has exactly one manual watchlist named 'Watchlist'.
+  assert.equal(
+    queryValue(containerName, `select count(*) from watchlists where user_id = '${preMigrationUserId}' and mode = 'manual' and name = 'Watchlist'`),
+    "1",
+  );
+
+  // Trigger: inserting a fresh user auto-creates one manual watchlist.
+  const postMigrationUser = await client.query<{ user_id: string }>(
+    `insert into users (email) values ($1) returning user_id`,
+    ["post-migration@example.test"],
+  );
+  const postMigrationUserId = postMigrationUser.rows[0].user_id;
+  assert.equal(
+    queryValue(containerName, `select count(*) from watchlists where user_id = '${postMigrationUserId}' and mode = 'manual'`),
+    "1",
+  );
+
+  // Invariant: the unique partial index rejects a second manual watchlist for the same user.
+  await assert.rejects(
+    client.query(
+      `insert into watchlists (user_id, name, mode) values ($1, $2, 'manual')`,
+      [postMigrationUserId, "Second Manual"],
+    ),
+    /watchlists_default_manual_per_user_idx|duplicate key/i,
+  );
+
+  // Non-manual modes are not constrained by the partial index.
+  await client.query(
+    `insert into watchlists (user_id, name, mode) values ($1, $2, 'screen')`,
+    [postMigrationUserId, "Screen Derivation"],
+  );
+  assert.equal(
+    queryValue(containerName, `select count(*) from watchlists where user_id = '${postMigrationUserId}'`),
+    "2",
+  );
+});
+
 test("migrate up enforces listings uniqueness and fact confidence bounds", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for db migration integration coverage");
@@ -575,9 +652,9 @@ test("migrate down rolls back schema changes when removing the migration record 
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /rejecting schema_migrations delete/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "2");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "3");
   assert.equal(
-    queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'issuer_aliases'"),
+    queryValue(containerName, "select count(*) from pg_indexes where schemaname = 'public' and indexname = 'watchlists_default_manual_per_user_idx'"),
     "1",
   );
 });
@@ -627,6 +704,6 @@ test("migrate down fails when any applied migration is missing locally", { timeo
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /Applied migration 0000 is missing locally/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "3");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "4");
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
 });
