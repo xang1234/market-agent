@@ -1,5 +1,6 @@
 import {
   displaySubjectRef,
+  subjectFromRef,
   type IssuerContext,
   type ListingContext,
   type ResolvedSubject,
@@ -38,6 +39,15 @@ export type QuoteSnapshot = {
 
 const STUB_AS_OF = '2026-04-24T14:45:00.000Z'
 const STUB_SOURCE_ID = 'p1.1-stub'
+
+// Row-hydration entry point for the default manual watchlist (fra-6al.6.2).
+// Persisted watchlist rows only carry a SubjectRef, so we build the same
+// minimal ResolvedSubject that the URL-entered landing uses and run it
+// through createQuoteSnapshotStub. No second quote identity model — rows
+// and landing converge on the same derivation for the same subject.
+export function quoteFromSubjectRef(subjectRef: SubjectRef): QuoteSnapshot {
+  return createQuoteSnapshotStub(subjectFromRef(subjectRef))
+}
 
 export function createQuoteSnapshotStub(subject: ResolvedSubject): QuoteSnapshot {
   const listing = listingForSubject(subject)

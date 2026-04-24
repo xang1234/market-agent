@@ -2,13 +2,16 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   subjectFromRouteParam,
+  subjectRouteParam,
   type ListingContext,
   type ResolvedSubject,
+  type SubjectRef,
 } from './search.ts'
 import {
   createQuoteSnapshotStub,
   formatSignedNumber,
   quoteDirection,
+  quoteFromSubjectRef,
   subjectDisplayName,
 } from './quote.ts'
 
@@ -183,6 +186,48 @@ test('createQuoteSnapshotStub avoids raw route fallback labels as ticker context
 
   assert.equal(quote.listing.ticker, 'N/A')
   assert.equal(quote.listing.mic, 'UNKNOWN')
+})
+
+test('quoteFromSubjectRef matches landing-from-URL hydration for the same subject', () => {
+  const subjectRef: SubjectRef = {
+    kind: 'listing',
+    id: '11111111-1111-4111-a111-111111111111',
+  }
+  const fromRef = quoteFromSubjectRef(subjectRef)
+  const fromRoute = createQuoteSnapshotStub(
+    subjectFromRouteParam(subjectRouteParam(subjectRef)),
+  )
+
+  assert.deepEqual(fromRef, fromRoute)
+})
+
+test('quoteFromSubjectRef preserves the row-hydration shape without listing context', () => {
+  const issuerRef: SubjectRef = {
+    kind: 'issuer',
+    id: '33333333-3333-4333-a333-333333333333',
+  }
+  const quote = quoteFromSubjectRef(issuerRef)
+
+  assert.deepEqual(quote.subject_ref, { kind: 'listing', id: issuerRef.id })
+  assert.equal(quote.listing.ticker, 'N/A')
+  assert.equal(quote.listing.mic, 'UNKNOWN')
+  assert.equal(quote.currency, 'USD')
+  assert.equal(quote.delay_class, 'delayed')
+  assert.equal(quote.session_state, 'regular')
+  assert.ok(Number.isFinite(quote.latest_price))
+  assert.ok(Number.isFinite(quote.absolute_move))
+  assert.ok(Number.isFinite(quote.percent_move))
+  assert.ok(typeof quote.as_of === 'string' && quote.as_of.length > 0)
+})
+
+test('quoteFromSubjectRef is stable for the same subject across calls', () => {
+  const ref: SubjectRef = {
+    kind: 'listing',
+    id: '22222222-2222-4222-a222-222222222222',
+  }
+  const first = quoteFromSubjectRef(ref)
+  const second = quoteFromSubjectRef(ref)
+  assert.deepEqual(first, second)
 })
 
 test('quote formatting keeps signed moves explicit', () => {
