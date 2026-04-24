@@ -9,7 +9,7 @@ import {
   validateResolveRequest,
   type ResolveResponse,
 } from "../src/http.ts";
-import type { QueryExecutor } from "../src/lookup.ts";
+import { normalizeNameForLookup, type QueryExecutor } from "../src/lookup.ts";
 import type { SubjectKind } from "../src/subject-ref.ts";
 
 type AppleChain = {
@@ -26,6 +26,7 @@ async function seedAppleChain(client: Client): Promise<AppleChain> {
     ["Apple Inc.", "320193", "HWUPKR0MPOU8FGXBT394", "US", "Technology", "Consumer Electronics"],
   );
   const issuer_id = issuer.rows[0].issuer_id;
+  await insertIssuerAlias(client, issuer_id, "Apple Inc.", "legal_name");
 
   const instrument = await client.query<{ instrument_id: string }>(
     `insert into instruments (issuer_id, asset_type, share_class, isin)
@@ -44,6 +45,19 @@ async function seedAppleChain(client: Client): Promise<AppleChain> {
   return { issuer_id, instrument_id, listing_id: listing.rows[0].listing_id };
 }
 
+async function insertIssuerAlias(
+  client: Client,
+  issuer_id: string,
+  raw_name: string,
+  match_reason: "legal_name" | "former_name",
+) {
+  await client.query(
+    `insert into issuer_aliases (issuer_id, raw_name, normalized_name, match_reason)
+     values ($1, $2, $3, $4)`,
+    [issuer_id, raw_name, normalizeNameForLookup(raw_name), match_reason],
+  );
+}
+
 async function seedAlphabetChain(client: Client) {
   const issuer = await client.query<{ issuer_id: string }>(
     `insert into issuers (legal_name, former_names)
@@ -52,6 +66,8 @@ async function seedAlphabetChain(client: Client) {
     ["Alphabet Inc.", JSON.stringify(["GOOG"])],
   );
   const issuer_id = issuer.rows[0].issuer_id;
+  await insertIssuerAlias(client, issuer_id, "Alphabet Inc.", "legal_name");
+  await insertIssuerAlias(client, issuer_id, "GOOG", "former_name");
 
   const instrument = await client.query<{ instrument_id: string }>(
     `insert into instruments (issuer_id, asset_type, share_class)
@@ -182,7 +198,7 @@ test("handler: identifier-like input falls back to ticker lookup when identifier
         } as never;
       }
 
-      if (text.includes("with issuer_names")) {
+      if (text.includes("from issuer_aliases")) {
         calls.push("name");
         return { rows: [] } as never;
       }
@@ -219,7 +235,7 @@ test("handler: identifier-like input falls back to name lookup when identifier a
         return { rows: [] } as never;
       }
 
-      if (text.includes("with issuer_names")) {
+      if (text.includes("from issuer_aliases")) {
         calls.push("name");
         return {
           rows: [

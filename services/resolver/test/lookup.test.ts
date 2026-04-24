@@ -9,6 +9,7 @@ import {
   resolveByLei,
   resolveByNameCandidate,
   resolveByTicker,
+  normalizeNameForLookup,
 } from "../src/lookup.ts";
 import { isAmbiguous, isResolved, isNotFound } from "../src/envelope.ts";
 
@@ -26,6 +27,7 @@ async function seedAppleChain(client: Client): Promise<AppleChain> {
     ["Apple Inc.", "320193", "HWUPKR0MPOU8FGXBT394", "US", "Technology", "Consumer Electronics"],
   );
   const issuer_id = issuer.rows[0].issuer_id;
+  await insertIssuerAlias(client, issuer_id, "Apple Inc.", "legal_name");
 
   const instrument = await client.query<{ instrument_id: string }>(
     `insert into instruments (issuer_id, asset_type, share_class, isin)
@@ -44,6 +46,19 @@ async function seedAppleChain(client: Client): Promise<AppleChain> {
   const listing_id = listing.rows[0].listing_id;
 
   return { issuer_id, instrument_id, listing_id };
+}
+
+async function insertIssuerAlias(
+  client: Client,
+  issuer_id: string,
+  raw_name: string,
+  match_reason: "legal_name" | "former_name",
+) {
+  await client.query(
+    `insert into issuer_aliases (issuer_id, raw_name, normalized_name, match_reason)
+     values ($1, $2, $3, $4)`,
+    [issuer_id, raw_name, normalizeNameForLookup(raw_name), match_reason],
+  );
 }
 
 async function traceIssuerFromListing(client: Client, listing_id: string) {
@@ -210,6 +225,8 @@ test("issuer former-name lookup resolves to the canonical issuer subject", { tim
      returning issuer_id`,
     ["Apple Inc.", JSON.stringify(["Apple Computer, Inc."])],
   );
+  await insertIssuerAlias(client, issuer.rows[0].issuer_id, "Apple Inc.", "legal_name");
+  await insertIssuerAlias(client, issuer.rows[0].issuer_id, "Apple Computer, Inc.", "former_name");
 
   const envelope = await resolveByNameCandidate(client, "apple computer inc");
 
@@ -249,6 +266,8 @@ test("issuer alias lookup expands to issuer plus active listing candidates", { t
      returning issuer_id`,
     ["Alphabet Inc.", JSON.stringify(["Google"])],
   );
+  await insertIssuerAlias(client, issuer.rows[0].issuer_id, "Alphabet Inc.", "legal_name");
+  await insertIssuerAlias(client, issuer.rows[0].issuer_id, "Google", "former_name");
   const instrument = await client.query<{ instrument_id: string }>(
     `insert into instruments (issuer_id, asset_type, share_class)
      values ($1, 'common_stock', 'Class C')
@@ -289,6 +308,8 @@ test("issuer alias lookup includes all active listings and excludes expired list
      returning issuer_id`,
     ["Alphabet Inc.", JSON.stringify(["Google"])],
   );
+  await insertIssuerAlias(client, issuer.rows[0].issuer_id, "Alphabet Inc.", "legal_name");
+  await insertIssuerAlias(client, issuer.rows[0].issuer_id, "Google", "former_name");
   const classA = await client.query<{ instrument_id: string }>(
     `insert into instruments (issuer_id, asset_type, share_class)
      values ($1, 'common_stock', 'Class A')
@@ -338,17 +359,12 @@ test("issuer alias lookup includes all active listings and excludes expired list
   );
 });
 
-test("name lookup filters broad DB rows with Unicode-aware JS normalization", async () => {
+test("name lookup queries the Unicode-aware normalized lookup key", async () => {
   const db = {
-    query: async () =>
-      ({
+    query: async (_text: string, values?: unknown[]) => {
+      assert.deepEqual(values, ["société générale s a"]);
+      return {
         rows: [
-          {
-            issuer_id: "11111111-1111-4111-a111-111111111111",
-            legal_name: "Cafe Inc.",
-            matched_name: "Cafe Inc.",
-            match_reason: "legal_name",
-          },
           {
             issuer_id: "22222222-2222-4222-a222-222222222222",
             legal_name: "Société Générale S.A.",
@@ -356,13 +372,40 @@ test("name lookup filters broad DB rows with Unicode-aware JS normalization", as
             match_reason: "legal_name",
           },
         ],
-      }) as never,
+      } as never;
+    },
   };
 
   const envelope = await resolveByNameCandidate(db, "société générale s a");
 
   assert.ok(isResolved(envelope));
   assert.equal(envelope.subject_ref.id, "22222222-2222-4222-a222-222222222222");
+});
+
+test("name lookup reads indexed issuer_aliases rows instead of scanning issuer names", async () => {
+  const db = {
+    query: async (text: string, values?: unknown[]) => {
+      assert.doesNotMatch(text, /issuer_names/);
+      assert.match(text, /issuer_aliases/);
+      assert.deepEqual(values, ["apple inc"]);
+
+      return {
+        rows: [
+          {
+            issuer_id: "11111111-1111-4111-a111-111111111111",
+            legal_name: "Apple Inc.",
+            matched_name: "Apple Inc.",
+            match_reason: "legal_name",
+          },
+        ],
+      } as never;
+    },
+  };
+
+  const envelope = await resolveByNameCandidate(db, "Apple Inc.");
+
+  assert.ok(isResolved(envelope));
+  assert.equal(envelope.subject_ref.id, "11111111-1111-4111-a111-111111111111");
 });
 
 test("name lookup preserves multiple matching issuers as ambiguity", { timeout: 120000 }, async (t) => {
@@ -383,6 +426,8 @@ test("name lookup preserves multiple matching issuers as ambiguity", { timeout: 
      returning issuer_id`,
     ["Acme Technologies Inc.", JSON.stringify(["Acme"])],
   );
+  await insertIssuerAlias(client, first.rows[0].issuer_id, "Acme", "former_name");
+  await insertIssuerAlias(client, second.rows[0].issuer_id, "Acme", "former_name");
 
   const envelope = await resolveByNameCandidate(client, "Acme");
 

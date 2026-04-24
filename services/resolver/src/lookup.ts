@@ -88,22 +88,20 @@ export async function resolveByNameCandidate(
 ): Promise<ResolverEnvelope> {
   const normalized = normalizeNameForLookup(name);
   const result: QueryResult<IssuerNameRow> = await db.query(
-    `with issuer_names as (
-       select issuer_id, legal_name, legal_name as matched_name, 'legal_name' as match_reason
-         from issuers
-       union all
-       select i.issuer_id, i.legal_name, former_name.value as matched_name, 'former_name' as match_reason
-         from issuers i
-         cross join lateral jsonb_array_elements_text(i.former_names) as former_name(value)
-     )
-     select issuer_id, legal_name, matched_name, match_reason
-       from issuer_names
-      order by case match_reason when 'legal_name' then 0 else 1 end, legal_name`,
+    `select iss.issuer_id,
+            iss.legal_name,
+            ia.raw_name as matched_name,
+            ia.match_reason
+       from issuer_aliases ia
+       join issuers iss on iss.issuer_id = ia.issuer_id
+      where ia.normalized_name = $1
+      order by case ia.match_reason when 'legal_name' then 0 else 1 end,
+               iss.legal_name,
+               ia.raw_name`,
+    [normalized],
   );
 
-  const matchedRows = result.rows.filter(
-    (row) => normalizeNameForLookup(row.matched_name) === normalized,
-  );
+  const matchedRows = result.rows;
 
   if (matchedRows.length === 0) {
     return notFound({ normalized_input: normalized, reason: "no_candidates" });
@@ -318,7 +316,7 @@ function inferNameAmbiguityAxis(candidates: ResolverCandidate[]): AmbiguityAxis 
   return "other";
 }
 
-function normalizeNameForLookup(value: string): string {
+export function normalizeNameForLookup(value: string): string {
   return value
     .trim()
     .toLowerCase()

@@ -68,6 +68,18 @@ create table issuers (
 create unique index issuers_cik_idx on issuers(cik) where cik is not null;
 create unique index issuers_lei_idx on issuers(lei) where lei is not null;
 
+create table issuer_aliases (
+  issuer_alias_id uuid primary key default gen_random_uuid(),
+  issuer_id uuid not null references issuers(issuer_id) on delete cascade,
+  raw_name text not null,
+  normalized_name text not null,
+  match_reason text not null check (match_reason in ('legal_name', 'former_name')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index issuer_aliases_normalized_name_idx on issuer_aliases(normalized_name);
+create unique index issuer_aliases_unique_idx on issuer_aliases(issuer_id, match_reason, raw_name);
+
 -- Instruments model the tradable security independent of venue so share classes,
 -- ADRs, ETFs, bonds, and other instrument variants are not collapsed into issuer identity.
 create table instruments (

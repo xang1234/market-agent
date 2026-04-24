@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Client } from "pg";
 import {
   createContainerName,
   dbRoot,
@@ -15,6 +16,7 @@ import {
 } from "./docker-pg.ts";
 
 const schemaPath = join(workspaceRoot, "spec", "finance_research_db_schema.sql");
+const initMigrationPath = join(dbRoot, "migrations", "0001_init.up.sql");
 
 function loadExpectedTables() {
   return Array.from(
@@ -23,7 +25,7 @@ function loadExpectedTables() {
   ).sort();
 }
 
-test("migrate up applies 0001_init and records it in schema_migrations", { timeout: 120000 }, async (t) => {
+test("migrate up applies pending migrations and records them in schema_migrations", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for db migration integration coverage");
     return;
@@ -46,10 +48,10 @@ test("migrate up applies 0001_init and records it in schema_migrations", { timeo
   });
 
   assert.equal(migrateResult.status, 0, migrateResult.stderr || migrateResult.stdout);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "1");
-  assert.equal(
-    queryValue(containerName, "select version || ':' || name from schema_migrations order by version"),
-    "0001:init",
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "2");
+  assert.deepEqual(
+    queryValue(containerName, "select version || ':' || name from schema_migrations order by version").split("\n"),
+    ["0001:init", "0002:issuer_aliases"],
   );
 
   const publicTables = queryValue(
@@ -64,7 +66,7 @@ test("migrate up applies 0001_init and records it in schema_migrations", { timeo
   assert.deepEqual(publicTables, loadExpectedTables());
 });
 
-test("migrate status reports 0001_init as applied after migrate up", { timeout: 120000 }, async (t) => {
+test("migrate status reports all migrations as applied after migrate up", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for db migration integration coverage");
     return;
@@ -94,6 +96,7 @@ test("migrate status reports 0001_init as applied after migrate up", { timeout: 
 
   assert.equal(statusResult.status, 0, statusResult.stderr || statusResult.stdout);
   assert.match(statusResult.stdout, /0001\s+init\s+applied/);
+  assert.match(statusResult.stdout, /0002\s+issuer_aliases\s+applied/);
 });
 
 test("migrate down rolls back the most recently applied migration", { timeout: 120000 }, async (t) => {
@@ -125,10 +128,14 @@ test("migrate down rolls back the most recently applied migration", { timeout: 1
   });
   assert.equal(downResult.status, 0, downResult.stderr || downResult.stdout);
 
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "0");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "1");
   assert.equal(
-    queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename <> 'schema_migrations'"),
+    queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'issuer_aliases'"),
     "0",
+  );
+  assert.equal(
+    queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'issuers'"),
+    "1",
   );
 });
 
@@ -226,6 +233,66 @@ test("verify:schema succeeds after migrate up", { timeout: 120000 }, async (t) =
   });
 
   assert.equal(verifyResult.status, 0, verifyResult.stderr || verifyResult.stdout);
+});
+
+test("migrate up creates indexed issuer aliases and backfills issuer names", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for db migration integration coverage");
+    return;
+  }
+
+  const containerName = createContainerName("fra-6al-4-6");
+  const password = "postgres";
+  const hostPort = startPostgres(containerName, password);
+  const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
+
+  t.after(() => {
+    stopPostgres(containerName);
+  });
+
+  await waitForPostgres(containerName, databaseUrl);
+
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  t.after(() => client.end().catch(() => {}));
+
+  await client.query(readFileSync(initMigrationPath, "utf8"));
+  await client.query(`
+    create table schema_migrations (
+      version text primary key,
+      name text not null,
+      applied_at timestamptz not null default now()
+    );
+    insert into schema_migrations(version, name) values ('0001', 'init');
+  `);
+  await client.query(
+    `insert into issuers (legal_name, former_names)
+     values ($1, $2::jsonb)`,
+    ["Alphabet Inc.", JSON.stringify(["Google"])],
+  );
+
+  const upResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
+    cwd: dbRoot,
+    env: { DATABASE_URL: databaseUrl },
+  });
+  assert.equal(upResult.status, 0, upResult.stderr || upResult.stdout);
+
+  assert.equal(
+    queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'issuer_aliases'"),
+    "1",
+  );
+  assert.equal(
+    queryValue(containerName, "select count(*) from pg_indexes where schemaname = 'public' and indexname = 'issuer_aliases_normalized_name_idx'"),
+    "1",
+  );
+  assert.equal(
+    queryValue(containerName, "select count(*) from issuer_aliases where normalized_name = 'alphabet inc' and match_reason = 'legal_name'"),
+    "1",
+  );
+  assert.equal(
+    queryValue(containerName, "select count(*) from issuer_aliases where normalized_name = 'google' and match_reason = 'former_name'"),
+    "1",
+  );
 });
 
 test("migrate up enforces listings uniqueness and fact confidence bounds", { timeout: 120000 }, async (t) => {
@@ -441,8 +508,11 @@ test("migrate down rolls back schema changes when removing the migration record 
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /rejecting schema_migrations delete/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "1");
-  assert.equal(queryValue(containerName, "select count(*) from users"), "0");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "2");
+  assert.equal(
+    queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'issuer_aliases'"),
+    "1",
+  );
 });
 
 test("migrate down fails when any applied migration is missing locally", { timeout: 120000 }, async (t) => {
@@ -490,6 +560,6 @@ test("migrate down fails when any applied migration is missing locally", { timeo
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /Applied migration 0000 is missing locally/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "2");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "3");
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
 });
