@@ -19,7 +19,7 @@ export type ResumedProtectedAction = ProtectedAction & {
 
 export type ProtectedActionOfKind<K extends ProtectedActionKind> = Extract<
   ResumedProtectedAction,
-  { kind: K }
+  { actionType: K }
 >
 
 export type AuthInterruptContextValue = {

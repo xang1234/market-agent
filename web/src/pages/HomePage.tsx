@@ -5,6 +5,7 @@ import {
   useRequestProtectedAction,
   useResumedProtectedAction,
 } from '../shell/useAuthInterrupt'
+import { ProtectedActionType } from '../shell/authInterruptState'
 
 // Home is a findings-first surface. This bead (P0.1.1) only needs the
 // scaffolded page — actual Home-feed work is P4.4.
@@ -26,8 +27,8 @@ export function HomePage() {
     return () => setContent(null)
   }, [setContent])
 
-  useResumedProtectedAction('save-to-watchlist', (action) => {
-    setSavedSymbol(action.symbol)
+  useResumedProtectedAction(ProtectedActionType.SaveToWatchlist, (action) => {
+    setSavedSymbol(action.payload.symbol)
   })
 
   const handleSave = () => {
@@ -35,8 +36,10 @@ export function HomePage() {
       title: 'Sign in to save to watchlist',
       description: 'Watchlists are session-scoped. Signing in will add AAPL and keep you on Home.',
       action: {
-        kind: 'save-to-watchlist',
-        symbol: 'AAPL',
+        actionType: ProtectedActionType.SaveToWatchlist,
+        payload: {
+          symbol: 'AAPL',
+        },
       },
     })
   }

@@ -18,17 +18,17 @@ export function useRequestProtectedAction() {
 }
 
 export function useResumedProtectedAction<K extends ProtectedActionKind>(
-  kind: K,
+  actionType: K,
   onResume: (action: ProtectedActionOfKind<K>) => void,
 ) {
   const { resumedAction, clearResumedAction } = useAuthInterrupt()
   const onResumeEvent = useEffectEvent(onResume)
 
   useEffect(() => {
-    if (resumedAction?.kind !== kind) return
+    if (resumedAction?.actionType !== actionType) return
 
     const action = resumedAction as ProtectedActionOfKind<K>
     onResumeEvent(action)
     clearResumedAction(action.resumeToken)
-  }, [resumedAction, kind, clearResumedAction])
+  }, [resumedAction, actionType, clearResumedAction])
 }

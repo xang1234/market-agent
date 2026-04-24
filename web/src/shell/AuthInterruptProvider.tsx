@@ -16,7 +16,9 @@ import {
 } from './authInterruptTypes'
 import {
   AUTH_INTERRUPT_STORAGE_KEY,
+  createPendingProtectedAction,
   getCurrentRoutePath,
+  getCurrentRouteSnapshot,
   parsePendingProtectedAction,
   planPendingProtectedActionResume,
   planProtectedActionResumeDispatch,
@@ -58,7 +60,12 @@ export function AuthInterruptProvider({ children }: { children: ReactNode }) {
   )
   const [queuedResume, setQueuedResume] = useState<QueuedResume | null>(null)
   const [resumedAction, setResumedAction] = useState<ResumedProtectedAction | null>(null)
-  const currentPath = getCurrentRoutePath(location)
+  const { pathname, search, hash } = location
+  const currentPath = getCurrentRoutePath({ pathname, search, hash })
+  const currentRoute = useMemo(
+    () => getCurrentRouteSnapshot({ pathname, search, hash }),
+    [hash, pathname, search],
+  )
 
   const setPending = useCallback((next: PendingProtectedAction | null) => {
     setPendingState(next)
@@ -175,12 +182,14 @@ export function AuthInterruptProvider({ children }: { children: ReactNode }) {
         return
       }
 
-      setPending({
-        ...req,
-        returnTo: currentPath,
-      })
+      setPending(
+        createPendingProtectedAction({
+          ...req,
+          returnTo: currentRoute,
+        }),
+      )
     },
-    [currentPath, dispatchResumedAction, session, setPending],
+    [currentRoute, dispatchResumedAction, session, setPending],
   )
 
   const cancel = useCallback(() => setPending(null), [setPending])
