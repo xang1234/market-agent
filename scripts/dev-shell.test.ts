@@ -191,6 +191,41 @@ test("up rolls back already-started services when a later readiness check fails"
   await rm(fixture.root, { recursive: true, force: true });
 });
 
+test("up rolls back when postgres never becomes ready", async () => {
+  const fixture = await createShellFixture();
+  const traceFile = join(fixture.root, "trace.log");
+
+  const result = await runBash(
+    [
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      `TRACE_FILE="${traceFile}"`,
+      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api"',
+      "ensure_command(){ :; }",
+      "ensure_install(){ :; }",
+      "sleep(){ :; }",
+      'compose(){ printf "compose:%s\\n" "$*" >> "$TRACE_FILE"; case "$*" in "exec -T postgres pg_isready"*) return 1 ;; esac; return 0; }',
+      'start_process(){ local name="$1"; printf "start:%s\\n" "$name" >> "$TRACE_FILE"; sleep 60 & echo $! > "$PID_DIR/$name.pid"; }',
+      'status(){ printf "status\\n" >> "$TRACE_FILE"; }',
+      "up",
+    ].join("\n"),
+    fixture.root,
+  );
+
+  assert.notEqual(result.code, 0);
+
+  const trace = await readFile(traceFile, "utf8");
+  assert.match(trace, /compose:up -d/);
+  assert.match(trace, /compose:down/);
+  assert.doesNotMatch(trace, /start:/);
+  assert.doesNotMatch(trace, /^status$/m);
+
+  const pidDirEntries = await readdir(join(fixture.root, ".dev", "pids"));
+  assert.deepEqual(pidDirEntries, []);
+
+  await killTrackedPids(fixture.root).catch(() => {});
+  await rm(fixture.root, { recursive: true, force: true });
+});
+
 test("runtime DATABASE_URL is derived from primitive postgres vars", async () => {
   const fixture = await createShellFixture({
     DEV_POSTGRES_PORT: "5544",

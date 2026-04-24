@@ -210,7 +210,7 @@ wait_for_postgres() {
   done
 
   echo "postgres did not become ready" >&2
-  exit 1
+  return 1
 }
 
 build_database_url() {
