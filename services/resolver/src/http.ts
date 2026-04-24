@@ -1,24 +1,12 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
 import {
-  ambiguous,
   isAmbiguous,
   isNotFound,
   isResolved,
-  notFound,
-  resolved,
-  type AmbiguityAxis,
-  type ResolverCandidate,
   type ResolverEnvelope,
 } from "./envelope.ts";
-import {
-  resolveByCik,
-  resolveByIsin,
-  resolveByLei,
-  resolveByNameCandidate,
-  resolveByTicker,
-  type QueryExecutor,
-} from "./lookup.ts";
-import { normalize } from "./normalize.ts";
+import { searchSubjectCandidates } from "./flow.ts";
+import type { QueryExecutor } from "./lookup.ts";
 import { SUBJECT_KINDS, type SubjectKind, type SubjectRef } from "./subject-ref.ts";
 
 const MAX_REQUEST_BODY_BYTES = 64 * 1024;
@@ -82,7 +70,7 @@ export async function handleResolveSubjects(
   db: QueryExecutor,
   request: ResolveRequest,
 ): Promise<ResolveResponse> {
-  const envelope = await dispatchFreeText(db, request.text);
+  const { envelope } = await searchSubjectCandidates(db, request.text);
   const allSubjects = envelopeToSubjects(envelope);
 
   const subjects =
@@ -95,111 +83,6 @@ export async function handleResolveSubjects(
     : [];
 
   return { subjects, unresolved };
-}
-
-async function dispatchFreeText(
-  db: QueryExecutor,
-  text: string,
-): Promise<ResolverEnvelope> {
-  const n = normalize(text);
-  let identifierEnvelope: ResolverEnvelope | null = null;
-
-  if (n.identifier_hint) {
-    const hint = n.identifier_hint;
-    switch (hint.kind) {
-      case "cik":
-        identifierEnvelope = await resolveByCik(db, hint.value);
-        break;
-      case "isin":
-        identifierEnvelope = await resolveByIsin(db, hint.value);
-        break;
-      case "lei":
-        identifierEnvelope = await resolveByLei(db, hint.value);
-        break;
-      default: {
-        const _exhaustive: never = hint;
-        throw new Error(`Unhandled identifier_hint kind: ${(_exhaustive as { kind: string }).kind}`);
-      }
-    }
-
-    if (!isNotFound(identifierEnvelope) || (!n.ticker_candidate && !n.name_candidate)) {
-      return identifierEnvelope;
-    }
-  }
-
-  const candidateEnvelopes: ResolverEnvelope[] = [];
-
-  if (n.ticker_candidate) {
-    const envelope = await resolveByTicker(db, n.ticker_candidate);
-    if (!isNotFound(envelope)) candidateEnvelopes.push(envelope);
-  }
-
-  if (n.name_candidate) {
-    const envelope = await resolveByNameCandidate(db, n.name_candidate);
-    if (!isNotFound(envelope)) candidateEnvelopes.push(envelope);
-  }
-
-  if (candidateEnvelopes.length > 0) {
-    return mergeCandidateEnvelopes(candidateEnvelopes);
-  }
-
-  if (identifierEnvelope) return identifierEnvelope;
-
-  return notFound({ normalized_input: n.trimmed, reason: "no_candidates" });
-}
-
-function mergeCandidateEnvelopes(envelopes: ResolverEnvelope[]): ResolverEnvelope {
-  const candidates: ResolverCandidate[] = [];
-
-  for (const envelope of envelopes) {
-    if (isResolved(envelope)) {
-      candidates.push({
-        subject_ref: envelope.subject_ref,
-        display_name: envelope.display_name,
-        confidence: envelope.confidence,
-      });
-    } else if (isAmbiguous(envelope)) {
-      candidates.push(...envelope.candidates);
-    }
-  }
-
-  const deduped = dedupeCandidates(candidates).sort((a, b) => b.confidence - a.confidence);
-
-  if (deduped.length === 1) {
-    const [candidate] = deduped;
-    return resolved({
-      subject_ref: candidate.subject_ref,
-      display_name: candidate.display_name,
-      confidence: candidate.confidence,
-      canonical_kind: candidate.subject_ref.kind,
-    });
-  }
-
-  return ambiguous({
-    candidates: deduped,
-    ambiguity_axis: inferAmbiguityAxis(deduped),
-  });
-}
-
-function dedupeCandidates(candidates: ResolverCandidate[]): ResolverCandidate[] {
-  const bySubject = new Map<string, ResolverCandidate>();
-  for (const candidate of candidates) {
-    const key = `${candidate.subject_ref.kind}:${candidate.subject_ref.id}`;
-    const existing = bySubject.get(key);
-    if (!existing || candidate.confidence > existing.confidence) {
-      bySubject.set(key, candidate);
-    }
-  }
-  return [...bySubject.values()];
-}
-
-function inferAmbiguityAxis(candidates: ResolverCandidate[]): AmbiguityAxis {
-  const kinds = new Set(candidates.map((candidate) => candidate.subject_ref.kind));
-  if (kinds.has("issuer") && kinds.has("listing")) return "issuer_vs_listing";
-  if (kinds.size === 1 && kinds.has("issuer")) return "multiple_issuers";
-  if (kinds.size === 1 && kinds.has("listing")) return "multiple_listings";
-  if (kinds.size === 1 && kinds.has("instrument")) return "multiple_instruments";
-  return "other";
 }
 
 function envelopeToSubjects(envelope: ResolverEnvelope): ResolvedSubject[] {
