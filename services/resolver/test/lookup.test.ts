@@ -217,6 +217,33 @@ test("issuer former-name lookup resolves to the canonical issuer subject", { tim
   assert.equal(envelope.subject_ref.id, apple.issuer_id);
 });
 
+test("name lookup filters broad DB rows with Unicode-aware JS normalization", async () => {
+  const db = {
+    query: async () =>
+      ({
+        rows: [
+          {
+            issuer_id: "11111111-1111-4111-a111-111111111111",
+            legal_name: "Cafe Inc.",
+            matched_name: "Cafe Inc.",
+            match_reason: "legal_name",
+          },
+          {
+            issuer_id: "22222222-2222-4222-a222-222222222222",
+            legal_name: "Société Générale S.A.",
+            matched_name: "Société Générale S.A.",
+            match_reason: "legal_name",
+          },
+        ],
+      }) as never,
+  };
+
+  const envelope = await resolveByNameCandidate(db, "société générale s a");
+
+  assert.ok(isResolved(envelope));
+  assert.equal(envelope.subject_ref.id, "22222222-2222-4222-a222-222222222222");
+});
+
 test("name lookup preserves multiple matching issuers as ambiguity", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for resolver lookup coverage");

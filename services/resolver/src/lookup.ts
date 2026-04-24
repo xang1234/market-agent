@@ -1,6 +1,8 @@
 import type { QueryResult } from "pg";
 import {
   ambiguous,
+  CONFIDENCE_NAME_FORMER,
+  CONFIDENCE_NAME_LEGAL,
   CONFIDENCE_TICKER_AMBIGUOUS,
   CONFIDENCE_TICKER_SINGLE,
   CONFIDENCE_UNIQUE_IDENTIFIER,
@@ -94,19 +96,22 @@ export async function resolveByNameCandidate(
      )
      select issuer_id, legal_name, matched_name, match_reason
        from issuer_names
-      where btrim(regexp_replace(regexp_replace(lower(matched_name), '[^[:alnum:][:space:]]+', ' ', 'g'), '\\s+', ' ', 'g')) = $1
       order by case match_reason when 'legal_name' then 0 else 1 end, legal_name`,
-    [normalized],
   );
 
-  if (result.rows.length === 0) {
+  const matchedRows = result.rows.filter(
+    (row) => normalizeNameForLookup(row.matched_name) === normalized,
+  );
+
+  if (matchedRows.length === 0) {
     return notFound({ normalized_input: normalized, reason: "no_candidates" });
   }
 
-  const candidates = dedupeIssuerNameRows(result.rows).map((row) => ({
+  const candidates = dedupeIssuerNameRows(matchedRows).map((row) => ({
     subject_ref: { kind: "issuer" as const, id: row.issuer_id },
     display_name: row.legal_name,
-    confidence: row.match_reason === "legal_name" ? 0.9 : 0.85,
+    confidence:
+      row.match_reason === "legal_name" ? CONFIDENCE_NAME_LEGAL : CONFIDENCE_NAME_FORMER,
     match_reason: row.match_reason,
   }));
 

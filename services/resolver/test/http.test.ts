@@ -183,7 +183,7 @@ test("handler: identifier-like input falls back to ticker lookup when identifier
       }
 
       if (text.includes("with issuer_names")) {
-        calls.push(`name:${String(values?.[0])}`);
+        calls.push("name");
         return { rows: [] } as never;
       }
 
@@ -193,7 +193,8 @@ test("handler: identifier-like input falls back to ticker lookup when identifier
 
   const response = await handleResolveSubjects(db, { text: "700" });
 
-  assert.deepEqual(calls, ["identifier:700", "ticker:700", "name:700"]);
+  assert.equal(calls[0], "identifier:700");
+  assert.deepEqual(new Set(calls.slice(1)), new Set(["ticker:700", "name"]));
   assert.equal(response.subjects.length, 1);
   assert.equal(response.subjects[0].subject_ref.kind, "listing");
   assert.equal(response.subjects[0].subject_ref.id, "11111111-1111-4111-a111-111111111111");
@@ -215,7 +216,7 @@ test("handler: identifier-like input falls back to name lookup when identifier a
       }
 
       if (text.includes("with issuer_names")) {
-        calls.push(`name:${String(values?.[0])}`);
+        calls.push("name");
         return {
           rows: [
             {
@@ -234,7 +235,8 @@ test("handler: identifier-like input falls back to name lookup when identifier a
 
   const response = await handleResolveSubjects(db, { text: "700" });
 
-  assert.deepEqual(calls, ["identifier:700", "ticker:700", "name:700"]);
+  assert.equal(calls[0], "identifier:700");
+  assert.deepEqual(new Set(calls.slice(1)), new Set(["ticker:700", "name"]));
   assert.equal(response.subjects.length, 1);
   assert.equal(response.subjects[0].subject_ref.kind, "issuer");
   assert.equal(response.subjects[0].subject_ref.id, "33333333-3333-4333-a333-333333333333");

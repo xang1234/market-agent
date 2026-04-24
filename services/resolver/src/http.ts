@@ -122,7 +122,7 @@ async function dispatchFreeText(
       }
     }
 
-    if (!isNotFound(identifierEnvelope) || !n.ticker_candidate) {
+    if (!isNotFound(identifierEnvelope) || (!n.ticker_candidate && !n.name_candidate)) {
       return identifierEnvelope;
     }
   }
