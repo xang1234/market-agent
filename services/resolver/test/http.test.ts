@@ -145,6 +145,10 @@ function hydratedListingDb(listingRefs: SubjectRef[]): QueryExecutor {
 
   return {
     query: async (text, values) => {
+      if (text.includes("insert into tool_call_logs")) {
+        return toolCallLogInsertResult();
+      }
+
       if (text.includes("where l.listing_id = $1")) {
         return {
           rows: listingDetails.filter((row) => row.listing_id === values?.[0]),
@@ -164,6 +168,17 @@ function hydratedListingDb(listingRefs: SubjectRef[]): QueryExecutor {
       throw new Error(`Unexpected query: ${text}`);
     },
   };
+}
+
+function toolCallLogInsertResult() {
+  return {
+    rows: [
+      {
+        tool_call_id: "55555555-5555-4555-a555-555555555555",
+        created_at: new Date("2026-04-24T00:00:00.000Z"),
+      },
+    ],
+  } as never;
 }
 
 async function startServer(t: TestContext, db: QueryExecutor): Promise<string> {
@@ -309,6 +324,10 @@ test("handler: identifier-like input falls back to ticker lookup when identifier
   const calls: string[] = [];
   const db: QueryExecutor = {
     query: async (text, values) => {
+      if (text.includes("insert into tool_call_logs")) {
+        return toolCallLogInsertResult();
+      }
+
       if (text.includes("from issuers where upper")) {
         calls.push(`identifier:${String(values?.[0])}`);
         return { rows: [] } as never;
@@ -381,6 +400,10 @@ test("handler: identifier-like input falls back to name lookup when identifier a
   const calls: string[] = [];
   const db: QueryExecutor = {
     query: async (text, values) => {
+      if (text.includes("insert into tool_call_logs")) {
+        return toolCallLogInsertResult();
+      }
+
       if (text.includes("from issuers where upper")) {
         calls.push(`identifier:${String(values?.[0])}`);
         return { rows: [] } as never;

@@ -178,13 +178,15 @@ export async function runSearchToSubjectFlow(
   }
 
   if (isResolved(envelope)) {
+    const handoff = await handoffFromResolved(db, envelope, normalized_input, "auto_advanced");
+    await writeResolutionPathLog(db, handoff);
     return {
       status: "hydrated",
       stage: "hydrated_handoff",
       normalized_input,
       candidate_search: envelope,
       canonical_selection: envelope,
-      handoff: await handoffFromResolved(db, envelope, normalized_input, "auto_advanced"),
+      handoff,
     };
   }
 
@@ -196,6 +198,8 @@ export async function runSearchToSubjectFlow(
       throw new Error("choice subject_ref must match one of the ambiguous candidates");
     }
     const canonicalSelection = resolvedFromCandidate(chosen);
+    const handoff = await handoffFromResolved(db, canonicalSelection, normalized_input, "explicit_choice");
+    await writeResolutionPathLog(db, handoff);
 
     return {
       status: "hydrated",
@@ -203,7 +207,7 @@ export async function runSearchToSubjectFlow(
       normalized_input,
       candidate_search: envelope,
       canonical_selection: canonicalSelection,
-      handoff: await handoffFromResolved(db, canonicalSelection, normalized_input, "explicit_choice"),
+      handoff,
     };
   }
 
@@ -595,6 +599,26 @@ function displayLabelsFor(
     mic: context.listing?.mic,
     share_class: context.instrument?.share_class,
   });
+}
+
+async function writeResolutionPathLog(
+  db: QueryExecutor,
+  handoff: HydratedSubjectHandoff,
+): Promise<void> {
+  await db.query(
+    `insert into tool_call_logs (tool_name, args, status)
+     values ($1, $2::jsonb, $3)`,
+    [
+      "resolver.search_to_subject_flow",
+      JSON.stringify({
+        resolution_path: handoff.resolution_path,
+        normalized_input: handoff.normalized_input,
+        subject_ref: handoff.subject_ref,
+        identity_level: handoff.identity_level,
+      }),
+      "ok",
+    ],
+  );
 }
 
 function stripUndefined<T extends Record<string, unknown>>(value: T): T {

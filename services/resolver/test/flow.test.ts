@@ -236,6 +236,22 @@ test("hydrated listing bundle carries canonical key plus issuer, instrument, and
   assert.deepEqual(persistedSubjectRefs([result.handoff]), [aaplXnas]);
 });
 
+test("auto-advanced resolution writes resolution path telemetry", async () => {
+  const { db, toolLogs } = withToolLogCapture(singleListingDb());
+
+  await runSearchToSubjectFlow(db, { text: "AAPL" });
+
+  assert.equal(toolLogs.length, 1);
+  assert.equal(toolLogs[0].tool_name, "resolver.search_to_subject_flow");
+  assert.equal(toolLogs[0].status, "ok");
+  assert.deepEqual(toolLogs[0].args, {
+    resolution_path: "auto_advanced",
+    normalized_input: "AAPL",
+    subject_ref: aaplXnas,
+    identity_level: "listing",
+  });
+});
+
 test("search-to-subject flow pauses at ambiguity without producing handoff", async () => {
   const result = await runSearchToSubjectFlow(ambiguousListingDb(), { text: "AAPL" });
 
@@ -263,6 +279,25 @@ test("search-to-subject flow hydrates the explicitly chosen ambiguous candidate"
   assert.deepEqual(result.handoff.subject_ref, aaplXfra);
   assert.equal(result.handoff.display_label, "AAPL · XFRA — Apple Inc.");
   assert.equal(result.handoff.context.listing?.trading_currency, "EUR");
+});
+
+test("explicit-choice resolution writes resolution path telemetry", async () => {
+  const { db, toolLogs } = withToolLogCapture(ambiguousListingDb());
+
+  await runSearchToSubjectFlow(db, {
+    text: "AAPL",
+    choice: { subject_ref: aaplXfra },
+  });
+
+  assert.equal(toolLogs.length, 1);
+  assert.equal(toolLogs[0].tool_name, "resolver.search_to_subject_flow");
+  assert.equal(toolLogs[0].status, "ok");
+  assert.deepEqual(toolLogs[0].args, {
+    resolution_path: "explicit_choice",
+    normalized_input: "AAPL",
+    subject_ref: aaplXfra,
+    identity_level: "listing",
+  });
 });
 
 test("hydrated issuer bundle carries issuer context and active listing entry context", async () => {
@@ -318,6 +353,17 @@ type ScriptRows = {
 function scriptedDb(rows: ScriptRows): QueryExecutor {
   return {
     query: async (text: string, values?: unknown[]) => {
+      if (text.includes("insert into tool_call_logs")) {
+        return {
+          rows: [
+            {
+              tool_call_id: "55555555-5555-4555-a555-555555555555",
+              created_at: new Date("2026-04-24T00:00:00.000Z"),
+            },
+          ],
+        } as never;
+      }
+
       if (text.includes("where l.listing_id = $1")) {
         return {
           rows: rows.listingDetails?.filter((row) => row.listing_id === values?.[0]) ?? [],
@@ -373,4 +419,35 @@ function persistedSubjectRefs(
   handoffs: Array<{ subject_ref: SubjectRef }>,
 ): SubjectRef[] {
   return handoffs.map((handoff) => handoff.subject_ref);
+}
+
+function withToolLogCapture(db: QueryExecutor): {
+  db: QueryExecutor;
+  toolLogs: Array<{ tool_name: string; args: unknown; status: string }>;
+} {
+  const toolLogs: Array<{ tool_name: string; args: unknown; status: string }> = [];
+  return {
+    toolLogs,
+    db: {
+      query: async (text, values) => {
+        if (text.includes("insert into tool_call_logs")) {
+          toolLogs.push({
+            tool_name: String(values?.[0]),
+            args: JSON.parse(String(values?.[1])),
+            status: String(values?.[2]),
+          });
+          return {
+            rows: [
+              {
+                tool_call_id: "55555555-5555-4555-a555-555555555555",
+                created_at: new Date("2026-04-24T00:00:00.000Z"),
+              },
+            ],
+          } as never;
+        }
+
+        return db.query(text, values);
+      },
+    },
+  };
 }
