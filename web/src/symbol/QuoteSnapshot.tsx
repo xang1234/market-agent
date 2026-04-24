@@ -44,7 +44,7 @@ export function QuoteSnapshot({ subject }: QuoteSnapshotProps) {
             {formatSignedNumber(quote.absolute_move)} ({formatSignedPercent(quote.percent_move)})
           </div>
           <div className="pb-1 text-xs text-neutral-500 dark:text-neutral-400">
-            {quote.session_state.replaceAll('_', ' ')} · {quote.delay_class} · {formatQuoteTime(quote.as_of)}
+            {quote.session_state.replaceAll('_', ' ')} · {quote.delay_class} · {formatQuoteTime(quote.as_of, quote.listing.timezone)}
           </div>
         </div>
         {quote.issuer_profile ? (
@@ -103,10 +103,11 @@ function QuoteSparkline({
   )
 }
 
-function formatQuoteTime(asOf: string): string {
+function formatQuoteTime(asOf: string, timeZone?: string): string {
   return new Intl.DateTimeFormat('en-US', {
     hour: 'numeric',
     minute: '2-digit',
     timeZoneName: 'short',
+    ...(timeZone ? { timeZone } : {}),
   }).format(new Date(asOf))
 }
