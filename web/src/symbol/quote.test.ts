@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  subjectFromRouteParam,
+  type ListingContext,
+  type ResolvedSubject,
+} from './search.ts'
+import {
   createQuoteSnapshotStub,
   formatSignedNumber,
   quoteDirection,
   subjectDisplayName,
-  type ResolvedSubject,
 } from './quote.ts'
 
 const listedSubject: ResolvedSubject = {
@@ -89,6 +93,43 @@ const issuerWithActiveListing: ResolvedSubject = {
   },
 }
 
+const betaListingContext: ListingContext = {
+  subject_ref: {
+    kind: 'listing',
+    id: '55555555-5555-4555-a555-555555555555',
+  },
+  instrument_ref: {
+    kind: 'instrument',
+    id: '66666666-6666-4666-a666-666666666666',
+  },
+  issuer_ref: {
+    kind: 'issuer',
+    id: '77777777-7777-4777-a777-777777777777',
+  },
+  mic: 'XNYS',
+  ticker: 'BETA',
+  trading_currency: 'USD',
+  timezone: 'America/New_York',
+}
+
+const betaListedSubject: ResolvedSubject = {
+  subject_ref: betaListingContext.subject_ref,
+  display_name: 'Beta Corp.',
+  confidence: 0.92,
+  context: {
+    listing: betaListingContext,
+  },
+}
+
+const betaIssuerSubject: ResolvedSubject = {
+  subject_ref: betaListingContext.issuer_ref,
+  display_name: 'Beta Corp.',
+  confidence: 0.92,
+  context: {
+    active_listings: [betaListingContext],
+  },
+}
+
 test('createQuoteSnapshotStub returns the P1.1-compatible quote shape', () => {
   const quote = createQuoteSnapshotStub(listedSubject)
 
@@ -123,6 +164,25 @@ test('createQuoteSnapshotStub uses active listing identity for issuer entries', 
   })
   assert.equal(quote.listing.ticker, 'AAPL')
   assert.equal(quote.listing.mic, 'XNAS')
+})
+
+test('createQuoteSnapshotStub seeds values from listing identity', () => {
+  const listingQuote = createQuoteSnapshotStub(betaListedSubject)
+  const issuerQuote = createQuoteSnapshotStub(betaIssuerSubject)
+
+  assert.equal(issuerQuote.latest_price, listingQuote.latest_price)
+  assert.equal(issuerQuote.absolute_move, listingQuote.absolute_move)
+  assert.equal(issuerQuote.percent_move, listingQuote.percent_move)
+  assert.deepEqual(issuerQuote.recent_range, listingQuote.recent_range)
+})
+
+test('createQuoteSnapshotStub avoids raw route fallback labels as ticker context', () => {
+  const quote = createQuoteSnapshotStub(
+    subjectFromRouteParam('listing%3A11111111-1111-4111-a111-111111111111'),
+  )
+
+  assert.equal(quote.listing.ticker, 'N/A')
+  assert.equal(quote.listing.mic, 'UNKNOWN')
 })
 
 test('quote formatting keeps signed moves explicit', () => {

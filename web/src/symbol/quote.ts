@@ -41,7 +41,7 @@ const STUB_SOURCE_ID = 'p1.1-stub'
 
 export function createQuoteSnapshotStub(subject: ResolvedSubject): QuoteSnapshot {
   const listing = listingForSubject(subject)
-  const seed = stableSeed(`${listing.ticker}:${listing.mic}:${subject.subject_ref.id}`)
+  const seed = stableSeed(`${listing.ticker}:${listing.mic}:${listing.subject_ref.id}`)
   const basePrice = listing.ticker === 'AAPL' ? 196.58 : 40 + (seed % 24_000) / 100
   const absoluteMove = listing.ticker === 'AAPL' ? 1.24 : ((seed % 900) - 450) / 100
   const previousClose = basePrice - absoluteMove
@@ -99,7 +99,7 @@ function listingForSubject(subject: ResolvedSubject): ListingContext {
 
   const ticker =
     subject.display_labels?.ticker ??
-    (subject.subject_ref.kind === 'listing' ? subject.display_name.split(/\s+/)[0] : 'N/A')
+    ''
 
   return {
     subject_ref: {
@@ -114,8 +114,8 @@ function listingForSubject(subject: ResolvedSubject): ListingContext {
       kind: 'issuer',
       id: 'p1.1-stub-issuer',
     },
-    mic: subject.display_labels?.mic ?? 'XNAS',
-    ticker: ticker.toUpperCase(),
+    mic: subject.display_labels?.mic ?? 'UNKNOWN',
+    ticker: ticker ? ticker.toUpperCase() : 'N/A',
     trading_currency: 'USD',
     timezone: 'America/New_York',
   }

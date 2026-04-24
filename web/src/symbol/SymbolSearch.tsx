@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'rea
 import { useNavigate } from 'react-router-dom'
 import {
   candidateListingLabel,
+  clearSymbolTypeaheadForQueryChange,
   createSymbolTypeaheadState,
   moveSymbolTypeaheadHighlight,
   planSymbolResolution,
@@ -107,6 +108,8 @@ export function SymbolSearch({
 
   const resolveAndPlan = async (candidate?: ResolvedSubject) => {
     if (!trimmedQuery) return
+    const seq = requestSeq.current + 1
+    requestSeq.current = seq
     setStatus('resolving')
     setMessage(null)
 
@@ -115,6 +118,7 @@ export function SymbolSearch({
         text: trimmedQuery,
         ...(candidate ? { choice: { subject_ref: candidate.subject_ref } } : {}),
       })
+      if (requestSeq.current !== seq) return
       const plan = planSymbolResolution(response)
 
       if (plan.state === 'enter_subject') {
@@ -131,11 +135,14 @@ export function SymbolSearch({
       setTypeahead(createSymbolTypeaheadState([]))
       setMessage(`No subject found for ${plan.unresolved || trimmedQuery}`)
     } catch (error) {
+      if (requestSeq.current !== seq) return
       setMessage(error instanceof Error ? error.message : 'Subject resolve failed')
       setStatus('error')
       return
     } finally {
-      setStatus((current) => (current === 'error' ? current : 'idle'))
+      if (requestSeq.current === seq) {
+        setStatus((current) => (current === 'error' ? current : 'idle'))
+      }
     }
   }
 
@@ -146,12 +153,11 @@ export function SymbolSearch({
   }
 
   const handleQueryChange = (nextQuery: string) => {
+    requestSeq.current += 1
     setQuery(nextQuery)
-    if (!nextQuery.trim()) {
-      setTypeahead(createSymbolTypeaheadState([]))
-      setMessage(null)
-      setStatus('idle')
-    }
+    setTypeahead((current) => clearSymbolTypeaheadForQueryChange(current, nextQuery))
+    setMessage(null)
+    setStatus('idle')
   }
 
   return (

@@ -128,12 +128,14 @@ export function parseSubjectRouteParam(param: string | undefined): SubjectRef {
 
 export function subjectFromRouteParam(param: string | undefined): ResolvedSubject {
   const subjectRef = parseSubjectRouteParam(param)
+  const displayName = routeFallbackDisplayName(subjectRef)
+
   return {
     subject_ref: subjectRef,
-    display_name: displaySubjectRef(subjectRef),
+    display_name: displayName,
     confidence: 1,
     display_labels: {
-      primary: displaySubjectRef(subjectRef),
+      primary: displayName,
     },
   }
 }
@@ -172,7 +174,7 @@ export function createSymbolTypeaheadState(
 ): SymbolTypeaheadState {
   return {
     candidates,
-    highlightedIndex: candidates.length > 0 ? 0 : -1,
+    highlightedIndex: candidates.length === 1 ? 0 : -1,
   }
 }
 
@@ -182,6 +184,13 @@ export function moveSymbolTypeaheadHighlight(
 ): SymbolTypeaheadState {
   if (state.candidates.length === 0) {
     return { ...state, highlightedIndex: -1 }
+  }
+
+  if (state.highlightedIndex < 0) {
+    return {
+      ...state,
+      highlightedIndex: direction === 'next' ? 0 : state.candidates.length - 1,
+    }
   }
 
   const delta = direction === 'next' ? 1 : -1
@@ -199,6 +208,14 @@ export function selectedSymbolCandidate(
 ): ResolvedSubject | null {
   if (state.highlightedIndex < 0) return null
   return state.candidates[state.highlightedIndex] ?? null
+}
+
+export function clearSymbolTypeaheadForQueryChange(
+  state: SymbolTypeaheadState,
+  nextQuery: string,
+): SymbolTypeaheadState {
+  if (state.candidates.length === 0 && !nextQuery.trim()) return state
+  return createSymbolTypeaheadState([])
 }
 
 export async function resolveSubjects(args: {
@@ -249,4 +266,13 @@ function isSubjectRef(value: unknown): value is SubjectRef {
 
 function isSubjectKind(value: string): value is SubjectKind {
   return (SUBJECT_KINDS as readonly string[]).includes(value)
+}
+
+function routeFallbackDisplayName(subjectRef: SubjectRef): string {
+  const label = subjectRef.kind
+    .split('_')
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(' ')
+
+  return `${label} subject`
 }

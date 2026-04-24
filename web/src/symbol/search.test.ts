@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  clearSymbolTypeaheadForQueryChange,
   createSymbolTypeaheadState,
   moveSymbolTypeaheadHighlight,
   planSymbolResolution,
   selectedSymbolCandidate,
   symbolDetailPathForSubject,
+  subjectFromRouteParam,
   subjectRouteParam,
   type ResolvedSubject,
 } from './search.ts'
@@ -87,19 +89,38 @@ test('planSymbolResolution stops hydration for not found input', () => {
   })
 })
 
-test('typeahead highlight moves with arrow keys and wraps over ranked candidates', () => {
+test('typeahead does not preselect ambiguous candidates before explicit movement', () => {
   const initial = createSymbolTypeaheadState([appleListing, appleFrankfurt])
 
-  assert.equal(initial.highlightedIndex, 0)
-  assert.equal(selectedSymbolCandidate(initial), appleListing)
+  assert.equal(initial.highlightedIndex, -1)
+  assert.equal(selectedSymbolCandidate(initial), null)
 
   const next = moveSymbolTypeaheadHighlight(initial, 'next')
-  assert.equal(next.highlightedIndex, 1)
-  assert.equal(selectedSymbolCandidate(next), appleFrankfurt)
+  assert.equal(next.highlightedIndex, 0)
+  assert.equal(selectedSymbolCandidate(next), appleListing)
 
   const wrappedNext = moveSymbolTypeaheadHighlight(next, 'next')
-  assert.equal(wrappedNext.highlightedIndex, 0)
+  assert.equal(wrappedNext.highlightedIndex, 1)
 
   const wrappedPrevious = moveSymbolTypeaheadHighlight(wrappedNext, 'previous')
-  assert.equal(wrappedPrevious.highlightedIndex, 1)
+  assert.equal(wrappedPrevious.highlightedIndex, 0)
+})
+
+test('typeahead query edits clear candidates even when the next query is non-empty', () => {
+  const current = createSymbolTypeaheadState([appleListing, appleFrankfurt])
+  const next = clearSymbolTypeaheadForQueryChange(current, 'AAPX')
+
+  assert.deepEqual(next, {
+    candidates: [],
+    highlightedIndex: -1,
+  })
+})
+
+test('route fallback display avoids presenting raw subject refs as market labels', () => {
+  const subject = subjectFromRouteParam('listing%3A11111111-1111-4111-a111-111111111111')
+
+  assert.equal(subject.display_name, 'Listing subject')
+  assert.deepEqual(subject.display_labels, {
+    primary: 'Listing subject',
+  })
 })
