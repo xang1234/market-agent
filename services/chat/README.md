@@ -17,4 +17,5 @@ coordinator lands in `fra-2fu.1`.
 ```bash
 cd services/chat
 npm test
+npm run dev
 ```

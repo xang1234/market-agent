@@ -84,3 +84,23 @@ jobs:
       - name: Run resolver tests
         working-directory: services/resolver
         run: npm test
+
+  dev-api:
+    name: dev-api (tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/dev-api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: services/dev-api/package-lock.json
+
+      - run: npm ci
+
+      - run: npm test
