@@ -1,17 +1,20 @@
 // Persistent left-rail watchlist slot (spec §3.7, IA refactor fra-4pz).
-// Content is a placeholder here; P0.4b (fra-6al.6 Manual watchlist
-// management baseline) fills in the add/remove controls, row rendering,
-// sparklines, and the timeframe strip (1D/5D/1M/3M/YTD/1Y/5Y) that scopes
-// the sparklines.
-//
-// Header/dropdown and timeframe strip are stubbed at render-time so the
-// chrome's shape is visible now; watchlist mutations come with P0.4b. The
-// symbol entry itself already reuses the shell-owned search contract.
+// fra-6al.6.1 ships the default-manual membership list; quote hydration
+// per row (price / move / freshness) and the timeframe strip that scopes
+// sparklines are still upcoming (fra-6al.6.2 and beyond). The timeframe
+// chrome stays rendered but disabled so the slot's shape is visible.
+import { useAuth } from './useAuth'
 import { SymbolSearch } from '../symbol/SymbolSearch'
+import { ManualWatchlist } from '../watchlists/ManualWatchlist'
+import { useManualWatchlist } from '../watchlists/useManualWatchlist'
 
 const TIMEFRAMES = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y'] as const
 
 export function WatchlistSlot() {
+  const { session } = useAuth()
+  const userId = session?.userId ?? null
+  const watchlist = useManualWatchlist(userId)
+
   return (
     <aside
       aria-label="Watchlist"
@@ -26,7 +29,17 @@ export function WatchlistSlot() {
         </div>
       </div>
       <div className="border-b border-neutral-200 px-2 py-2 dark:border-neutral-800">
-        <SymbolSearch placement="watchlist" placeholder="Add symbol" />
+        <SymbolSearch
+          placement="watchlist"
+          placeholder="Add symbol"
+          onResolvedSubject={
+            userId
+              ? (subject) => {
+                  void watchlist.addSubject(subject.subject_ref)
+                }
+              : undefined
+          }
+        />
       </div>
       <div className="flex items-center gap-0.5 border-b border-neutral-200 px-2 py-1.5 dark:border-neutral-800">
         {TIMEFRAMES.map((tf) => (
@@ -40,8 +53,19 @@ export function WatchlistSlot() {
           </button>
         ))}
       </div>
-      <div className="flex flex-1 items-center justify-center p-4 text-center text-xs text-neutral-500 dark:text-neutral-400">
-        Watchlist rows ship with P0.4b (manual watchlist baseline).
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {userId ? (
+          <ManualWatchlist
+            members={watchlist.members}
+            status={watchlist.status}
+            message={watchlist.message}
+            onRemove={(ref) => void watchlist.removeSubject(ref)}
+          />
+        ) : (
+          <div className="p-4 text-center text-xs text-neutral-500 dark:text-neutral-400">
+            Sign in to view your watchlist.
+          </div>
+        )}
       </div>
     </aside>
   )

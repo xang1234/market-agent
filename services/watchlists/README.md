@@ -29,5 +29,5 @@ subject_id)` tuple, enforced by the schema's unique constraint.
 ```bash
 cd services/watchlists
 npm test                 # requires Docker for Postgres integration
-DATABASE_URL=... npm run dev
+DATABASE_URL=... npm run dev    # defaults to 127.0.0.1:4313
 ```

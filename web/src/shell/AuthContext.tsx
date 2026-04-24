@@ -1,8 +1,11 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { AuthContext, type AuthContextValue, type AuthSession } from './authTypes'
 
+// Stable dev UUID so mock-backed surfaces that persist by user_id (e.g.
+// watchlists, fra-6al.6.1) can round-trip the same canonical id every run.
+// Real auth replaces this with a backend-issued UUID.
 const DEFAULT_MOCK_SESSION: AuthSession = {
-  userId: 'mock-user',
+  userId: '00000000-0000-4000-8000-000000000001',
   displayName: 'Mock User',
 }
 

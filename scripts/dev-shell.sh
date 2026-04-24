@@ -285,11 +285,13 @@ up() {
   ensure_install "$ROOT/services/chat"
   ensure_install "$ROOT/services/resolver"
   ensure_install "$ROOT/services/dev-api"
+  ensure_install "$ROOT/services/watchlists"
 
   assert_port_available web "$WEB_PORT"
   assert_port_available chat "$CHAT_PORT"
   assert_port_available resolver "$RESOLVER_PORT"
   assert_port_available dev-api "$DEV_API_PORT"
+  assert_port_available watchlists "$WATCHLISTS_PORT"
 
   if [[ "$(container_status postgres)" == "running" ]]; then
     postgres_was_running=1
@@ -330,6 +332,7 @@ up() {
   start_and_track_process chat "$ROOT/services/chat" "npm run dev"
   start_and_track_process resolver "$ROOT/services/resolver" "npm run dev"
   start_and_track_process dev-api "$ROOT/services/dev-api" "npm run dev"
+  start_and_track_process watchlists "$ROOT/services/watchlists" "npm run dev"
 
   if ! wait_for_service web "$WEB_PORT"; then
     cleanup_failed_up
@@ -351,6 +354,11 @@ up() {
     return 1
   fi
 
+  if ! wait_for_service watchlists "$WATCHLISTS_PORT"; then
+    cleanup_failed_up
+    return 1
+  fi
+
   status
 }
 
@@ -366,6 +374,7 @@ status() {
   printf "chat      %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status chat "$CHAT_PORT")" "$CHAT_PORT" "$LOG_DIR/chat.log"
   printf "resolver  %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status resolver "$RESOLVER_PORT")" "$RESOLVER_PORT" "$LOG_DIR/resolver.log"
   printf "dev-api   %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status dev-api "$DEV_API_PORT")" "$DEV_API_PORT" "$LOG_DIR/dev-api.log"
+  printf "watchlists %-7s http://127.0.0.1:%s  log=%s\n" "$(service_status watchlists "$WATCHLISTS_PORT")" "$WATCHLISTS_PORT" "$LOG_DIR/watchlists.log"
 }
 
 configure_runtime_env

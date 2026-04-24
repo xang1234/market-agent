@@ -2,7 +2,7 @@ import { Pool } from "pg";
 import { createWatchlistsServer } from "./http.ts";
 
 const host = process.env.WATCHLISTS_HOST ?? "127.0.0.1";
-const port = Number(process.env.WATCHLISTS_PORT ?? "4312");
+const port = Number(process.env.WATCHLISTS_PORT ?? "4313");
 const databaseUrl = process.env.DATABASE_URL;
 
 if (!databaseUrl) {

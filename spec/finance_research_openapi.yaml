@@ -678,6 +678,9 @@ paths:
       tags: [Watchlists]
       summary: Create watchlist
       operationId: createWatchlist
+      description: |
+        Out of scope for P0.4b (fra-6al.6) baseline; list-management CRUD
+        beyond the implicit default manual list is tracked in fra-wlc.
       requestBody:
         required: true
         content:
@@ -691,6 +694,89 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Watchlist'
+  /v1/watchlists/default/members:
+    get:
+      tags: [Watchlists]
+      summary: List members of the user's default manual watchlist
+      operationId: listDefaultManualWatchlistMembers
+      description: |
+        Returns the canonical SubjectRef for each member of the implicit
+        default manual watchlist (fra-6al.6.1). Quote hydration per row
+        lands with fra-6al.6.2.
+      responses:
+        '200':
+          description: Members
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [members]
+                properties:
+                  members:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WatchlistMember'
+        '401':
+          description: Missing or malformed user credential
+    post:
+      tags: [Watchlists]
+      summary: Add a member to the user's default manual watchlist
+      operationId: addDefaultManualWatchlistMember
+      description: |
+        Idempotent on the `(subject_kind, subject_id)` tuple — adding the
+        same canonical subject twice yields one row. The `status` field
+        discriminates between first-add (201 + `created`) and repeat
+        (200 + `already_present`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject_ref]
+              properties:
+                subject_ref:
+                  $ref: '#/components/schemas/SubjectRef'
+      responses:
+        '201':
+          description: Member created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddWatchlistMemberResponse'
+        '200':
+          description: Member already present (idempotent repeat)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddWatchlistMemberResponse'
+        '400':
+          description: Malformed subject_ref
+        '401':
+          description: Missing or malformed user credential
+  /v1/watchlists/default/members/{subject_kind}/{subject_id}:
+    delete:
+      tags: [Watchlists]
+      summary: Remove a member from the user's default manual watchlist
+      operationId: removeDefaultManualWatchlistMember
+      parameters:
+        - in: path
+          name: subject_kind
+          required: true
+          schema:
+            $ref: '#/components/schemas/SubjectKind'
+        - in: path
+          name: subject_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Member removed
+        '404':
+          description: Member not present on this watchlist
+        '401':
+          description: Missing or malformed user credential
   /v1/screener/search:
     post:
       tags: [Screener]
@@ -1128,6 +1214,24 @@ components:
             updated_at:
               type: string
               format: date-time
+    WatchlistMember:
+      type: object
+      required: [subject_ref, created_at]
+      properties:
+        subject_ref:
+          $ref: '#/components/schemas/SubjectRef'
+        created_at:
+          type: string
+          format: date-time
+    AddWatchlistMemberResponse:
+      type: object
+      required: [status, member]
+      properties:
+        status:
+          type: string
+          enum: [created, already_present]
+        member:
+          $ref: '#/components/schemas/WatchlistMember'
     ChatThread:
       type: object
       properties:
