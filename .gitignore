@@ -17,6 +17,11 @@ Thumbs.db
 # Local package installs
 db/node_modules/
 services/*/node_modules/
+web/node_modules/
+
+# Local dev shell artifacts
+.dev/
+.env.dev
 
 # bv (beads viewer) local config and caches
 .bv/

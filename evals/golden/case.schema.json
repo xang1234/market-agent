@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GoldenEvalCase",
+  "type": "object",
+  "required": ["id", "category", "prompt"],
+  "properties": {
+    "id": { "type": "string" },
+    "category": { "type": "string" },
+    "prompt": { "type": "string" },
+    "expected": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

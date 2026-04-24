@@ -48,4 +48,5 @@ The constructor functions enforce invariants the TypeScript compiler can't:
 ```bash
 cd services/resolver
 npm test
+npm run dev
 ```
