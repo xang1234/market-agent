@@ -1,15 +1,19 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
 import {
+  ambiguous,
   isAmbiguous,
   isNotFound,
   isResolved,
   notFound,
+  type AmbiguityAxis,
+  type ResolverCandidate,
   type ResolverEnvelope,
 } from "./envelope.ts";
 import {
   resolveByCik,
   resolveByIsin,
   resolveByLei,
+  resolveByNameCandidate,
   resolveByTicker,
   type QueryExecutor,
 } from "./lookup.ts";
@@ -122,16 +126,80 @@ async function dispatchFreeText(
     }
   }
 
+  const candidateEnvelopes: ResolverEnvelope[] = [];
+
   if (n.ticker_candidate) {
     const envelope = await resolveByTicker(db, n.ticker_candidate);
-    if (!isNotFound(envelope)) return envelope;
-    if (identifierEnvelope) return identifierEnvelope;
+    if (!isNotFound(envelope)) candidateEnvelopes.push(envelope);
   }
 
-  // Name / alias lookup is intentionally out of scope for 3.4 — the alias
-  // plane will land with the search-to-subject flow (fra-6al.4). For now,
-  // inputs that only have a name_candidate fall through to not_found.
+  if (n.name_candidate && !n.identifier_hint) {
+    const envelope = await resolveByNameCandidate(db, n.name_candidate);
+    if (!isNotFound(envelope)) candidateEnvelopes.push(envelope);
+  }
+
+  if (candidateEnvelopes.length > 0) {
+    return mergeCandidateEnvelopes(candidateEnvelopes);
+  }
+
+  if (identifierEnvelope) return identifierEnvelope;
+
   return notFound({ normalized_input: n.trimmed, reason: "no_candidates" });
+}
+
+function mergeCandidateEnvelopes(envelopes: ResolverEnvelope[]): ResolverEnvelope {
+  const candidates: ResolverCandidate[] = [];
+
+  for (const envelope of envelopes) {
+    if (isResolved(envelope)) {
+      candidates.push({
+        subject_ref: envelope.subject_ref,
+        display_name: envelope.display_name,
+        confidence: envelope.confidence,
+      });
+    } else if (isAmbiguous(envelope)) {
+      candidates.push(...envelope.candidates);
+    }
+  }
+
+  const deduped = dedupeCandidates(candidates).sort((a, b) => b.confidence - a.confidence);
+
+  if (deduped.length === 1) {
+    const [candidate] = deduped;
+    return {
+      outcome: "resolved",
+      subject_ref: candidate.subject_ref,
+      display_name: candidate.display_name,
+      confidence: candidate.confidence,
+      canonical_kind: candidate.subject_ref.kind,
+    };
+  }
+
+  return ambiguous({
+    candidates: deduped,
+    ambiguity_axis: inferAmbiguityAxis(deduped),
+  });
+}
+
+function dedupeCandidates(candidates: ResolverCandidate[]): ResolverCandidate[] {
+  const bySubject = new Map<string, ResolverCandidate>();
+  for (const candidate of candidates) {
+    const key = `${candidate.subject_ref.kind}:${candidate.subject_ref.id}`;
+    const existing = bySubject.get(key);
+    if (!existing || candidate.confidence > existing.confidence) {
+      bySubject.set(key, candidate);
+    }
+  }
+  return [...bySubject.values()];
+}
+
+function inferAmbiguityAxis(candidates: ResolverCandidate[]): AmbiguityAxis {
+  const kinds = new Set(candidates.map((candidate) => candidate.subject_ref.kind));
+  if (kinds.has("issuer") && kinds.has("listing")) return "issuer_vs_listing";
+  if (kinds.size === 1 && kinds.has("issuer")) return "multiple_issuers";
+  if (kinds.size === 1 && kinds.has("listing")) return "multiple_listings";
+  if (kinds.size === 1 && kinds.has("instrument")) return "multiple_instruments";
+  return "other";
 }
 
 function envelopeToSubjects(envelope: ResolverEnvelope): ResolvedSubject[] {

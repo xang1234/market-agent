@@ -44,6 +44,32 @@ async function seedAppleChain(client: Client): Promise<AppleChain> {
   return { issuer_id, instrument_id, listing_id: listing.rows[0].listing_id };
 }
 
+async function seedAlphabetChain(client: Client) {
+  const issuer = await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name, former_names)
+     values ($1, $2::jsonb)
+     returning issuer_id`,
+    ["Alphabet Inc.", JSON.stringify(["GOOG"])],
+  );
+  const issuer_id = issuer.rows[0].issuer_id;
+
+  const instrument = await client.query<{ instrument_id: string }>(
+    `insert into instruments (issuer_id, asset_type, share_class)
+     values ($1, 'common_stock', 'Class C')
+     returning instrument_id`,
+    [issuer_id],
+  );
+
+  const listing = await client.query<{ listing_id: string }>(
+    `insert into listings (instrument_id, mic, ticker, trading_currency, timezone)
+     values ($1, 'XNAS', 'GOOG', 'USD', 'America/New_York')
+     returning listing_id`,
+    [instrument.rows[0].instrument_id],
+  );
+
+  return { issuer_id, listing_id: listing.rows[0].listing_id };
+}
+
 async function startServer(t: TestContext, db: QueryExecutor): Promise<string> {
   const server = createResolverServer(db);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -240,6 +266,47 @@ test("handler: unknown text returns empty subjects and surfaces the input in unr
   assert.equal(response.subjects.length, 0);
   assert.equal(response.unresolved.length, 1);
   assert.equal(response.unresolved[0], "NOTREAL");
+});
+
+test("handler: issuer legal-name text returns an issuer subject", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver http coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-4-4");
+  const client = await connectedClient(t, databaseUrl);
+  const apple = await seedAppleChain(client);
+
+  const response = await handleResolveSubjects(client, { text: "Apple Inc." });
+
+  assert.equal(response.subjects.length, 1);
+  assert.equal(response.unresolved.length, 0);
+  assert.equal(response.subjects[0].subject_ref.kind, "issuer");
+  assert.equal(response.subjects[0].subject_ref.id, apple.issuer_id);
+});
+
+test("handler: ticker plus issuer alias preserves issuer-vs-listing ambiguity", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver http coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-4-4");
+  const client = await connectedClient(t, databaseUrl);
+  const alphabet = await seedAlphabetChain(client);
+
+  const response = await handleResolveSubjects(client, { text: "GOOG" });
+
+  assert.equal(response.subjects.length, 2);
+  assert.deepEqual(
+    response.subjects.map((subject) => subject.subject_ref).sort((a, b) => a.kind.localeCompare(b.kind)),
+    [
+      { kind: "issuer", id: alphabet.issuer_id },
+      { kind: "listing", id: alphabet.listing_id },
+    ],
+  );
+  assert.equal(response.unresolved.length, 0);
 });
 
 test("handler: ambiguous ticker returns one subject entry per candidate with equal confidence", { timeout: 120000 }, async (t) => {

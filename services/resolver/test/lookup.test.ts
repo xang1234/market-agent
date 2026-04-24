@@ -7,6 +7,7 @@ import {
   resolveByInput,
   resolveByIsin,
   resolveByLei,
+  resolveByNameCandidate,
   resolveByTicker,
 } from "../src/lookup.ts";
 import { isAmbiguous, isResolved, isNotFound } from "../src/envelope.ts";
@@ -175,6 +176,74 @@ test("unknown identifiers produce not_found with normalized input", { timeout: 1
   assert.equal(cik.reason, "unknown_cik");
   assert.equal(isin.reason, "unknown_isin");
   assert.equal(lei.reason, "unknown_lei");
+});
+
+test("issuer legal-name lookup resolves to the canonical issuer subject", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver lookup coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-4-4");
+  const client = await connectedClient(t, databaseUrl);
+  const apple = await seedAppleChain(client);
+
+  const envelope = await resolveByNameCandidate(client, "Apple Inc.");
+
+  assert.ok(isResolved(envelope));
+  assert.equal(envelope.subject_ref.kind, "issuer");
+  assert.equal(envelope.subject_ref.id, apple.issuer_id);
+  assert.equal(envelope.canonical_kind, "issuer");
+});
+
+test("issuer former-name lookup resolves to the canonical issuer subject", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver lookup coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-4-4");
+  const client = await connectedClient(t, databaseUrl);
+  const apple = await seedAppleChain(client);
+  await client.query("update issuers set former_names = $1::jsonb where issuer_id = $2", [
+    JSON.stringify(["Apple Computer, Inc."]),
+    apple.issuer_id,
+  ]);
+
+  const envelope = await resolveByNameCandidate(client, "apple computer inc");
+
+  assert.ok(isResolved(envelope));
+  assert.equal(envelope.subject_ref.kind, "issuer");
+  assert.equal(envelope.subject_ref.id, apple.issuer_id);
+});
+
+test("name lookup preserves multiple matching issuers as ambiguity", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver lookup coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-4-4");
+  const client = await connectedClient(t, databaseUrl);
+  const first = await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name, former_names) values ($1, $2::jsonb)
+     returning issuer_id`,
+    ["Acme Holdings Inc.", JSON.stringify(["Acme"])],
+  );
+  const second = await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name, former_names) values ($1, $2::jsonb)
+     returning issuer_id`,
+    ["Acme Technologies Inc.", JSON.stringify(["Acme"])],
+  );
+
+  const envelope = await resolveByNameCandidate(client, "Acme");
+
+  assert.ok(isAmbiguous(envelope));
+  assert.equal(envelope.ambiguity_axis, "multiple_issuers");
+  assert.deepEqual(
+    envelope.candidates.map((candidate) => candidate.subject_ref.id).sort(),
+    [first.rows[0].issuer_id, second.rows[0].issuer_id].sort(),
+  );
 });
 
 test("ticker matching multiple MICs returns ambiguous with multiple_listings axis", { timeout: 120000 }, async (t) => {
