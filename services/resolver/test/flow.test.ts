@@ -252,6 +252,13 @@ test("auto-advanced resolution writes resolution path telemetry", async () => {
   });
 });
 
+test("resolution telemetry failures prevent hydrated results from bypassing required logs", async () => {
+  await assert.rejects(
+    runSearchToSubjectFlow(withFailingToolLog(singleListingDb()), { text: "AAPL" }),
+    /telemetry unavailable/,
+  );
+});
+
 test("search-to-subject flow pauses at ambiguity without producing handoff", async () => {
   const result = await runSearchToSubjectFlow(ambiguousListingDb(), { text: "AAPL" });
 
@@ -263,6 +270,15 @@ test("search-to-subject flow pauses at ambiguity without producing handoff", asy
     [aaplXnas, aaplXfra],
   );
   assert.equal("handoff" in result, false);
+});
+
+test("needs-choice flow does not write resolution path telemetry", async () => {
+  const { db, toolLogs } = withToolLogCapture(ambiguousListingDb());
+
+  const result = await runSearchToSubjectFlow(db, { text: "AAPL" });
+
+  assert.equal(result.status, "needs_choice");
+  assert.equal(toolLogs.length, 0);
 });
 
 test("search-to-subject flow hydrates the explicitly chosen ambiguous candidate", async () => {
@@ -337,6 +353,15 @@ test("search-to-subject flow ends not_found without subject hydration", async ()
   assert.equal(result.normalized_input, "NOTREAL");
   assert.equal(result.reason, "no_candidates");
   assert.equal("handoff" in result, false);
+});
+
+test("not_found flow does not write resolution path telemetry", async () => {
+  const { db, toolLogs } = withToolLogCapture(emptyDb());
+
+  const result = await runSearchToSubjectFlow(db, { text: "NOTREAL" });
+
+  assert.equal(result.status, "not_found");
+  assert.equal(toolLogs.length, 0);
 });
 
 type ScriptRows = {
@@ -448,6 +473,18 @@ function withToolLogCapture(db: QueryExecutor): {
 
         return db.query(text, values);
       },
+    },
+  };
+}
+
+function withFailingToolLog(db: QueryExecutor): QueryExecutor {
+  return {
+    query: async (text, values) => {
+      if (text.includes("insert into tool_call_logs")) {
+        throw new Error("telemetry unavailable");
+      }
+
+      return db.query(text, values);
     },
   };
 }
