@@ -40,6 +40,13 @@ paths:
                   type: array
                   items:
                     $ref: '#/components/schemas/SubjectKind'
+                choice:
+                  type: object
+                  description: Explicit candidate choice to hydrate after an ambiguous resolution.
+                  required: [subject_ref]
+                  properties:
+                    subject_ref:
+                      $ref: '#/components/schemas/SubjectRef'
       responses:
         '200':
           description: Resolved subject candidates
@@ -742,14 +749,41 @@ components:
       $ref: './finance_research_block_schema.json#/$defs/SubjectRef'
     ResolvedSubject:
       type: object
-      description: Resolver result carrying a canonical subject reference plus any lower-confidence alternatives.
+      description: Resolver result carrying a canonical subject reference, hydrated handoff context when resolved, plus any lower-confidence alternatives.
       properties:
         subject_ref:
           $ref: '#/components/schemas/SubjectRef'
         display_name:
           type: string
+          description: Backward-compatible display label alias.
         confidence:
           type: number
+        identity_level:
+          $ref: '#/components/schemas/SubjectKind'
+        display_label:
+          type: string
+        display_labels:
+          type: object
+          properties:
+            primary:
+              type: string
+            legal_name:
+              type: string
+            ticker:
+              type: string
+            mic:
+              type: string
+            share_class:
+              type: string
+        normalized_input:
+          type: string
+        resolution_path:
+          type: string
+          enum: [auto_advanced, explicit_choice]
+        context:
+          type: object
+          description: Entry context for issuer, instrument, listing, or active listing details. Persist only subject_ref.
+          additionalProperties: true
         alternatives:
           type: array
           items:

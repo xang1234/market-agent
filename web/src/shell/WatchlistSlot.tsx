@@ -4,8 +4,11 @@
 // sparklines, and the timeframe strip (1D/5D/1M/3M/YTD/1Y/5Y) that scopes
 // the sparklines.
 //
-// Header/dropdown/"+" button/timeframe strip are stubbed at render-time so
-// the chrome's shape is visible now; their behavior comes with P0.4b.
+// Header/dropdown and timeframe strip are stubbed at render-time so the
+// chrome's shape is visible now; watchlist mutations come with P0.4b. The
+// symbol entry itself already reuses the shell-owned search contract.
+import { SymbolSearch } from '../symbol/SymbolSearch'
+
 const TIMEFRAMES = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y'] as const
 
 export function WatchlistSlot() {
@@ -21,14 +24,9 @@ export function WatchlistSlot() {
             ▾
           </span>
         </div>
-        <button
-          type="button"
-          disabled
-          aria-label="Add to watchlist (ships with P0.4b)"
-          className="rounded px-1.5 text-sm text-neutral-400 disabled:cursor-not-allowed dark:text-neutral-500"
-        >
-          +
-        </button>
+      </div>
+      <div className="border-b border-neutral-200 px-2 py-2 dark:border-neutral-800">
+        <SymbolSearch placement="watchlist" placeholder="Add symbol" />
       </div>
       <div className="flex items-center gap-0.5 border-b border-neutral-200 px-2 py-1.5 dark:border-neutral-800">
         {TIMEFRAMES.map((tf) => (

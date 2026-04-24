@@ -2,12 +2,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Client } from "pg";
 import {
+  connectedClient,
   createContainerName,
   dbRoot,
   dockerAvailable,
   queryValue,
+  registerLifoCleanup,
   run,
   startPostgres,
   stopPostgres,
@@ -246,15 +247,11 @@ test("migrate up creates indexed issuer aliases and backfills issuer names", { t
   const hostPort = startPostgres(containerName, password);
   const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
 
-  t.after(() => {
-    stopPostgres(containerName);
-  });
+  registerLifoCleanup(t, () => stopPostgres(containerName));
 
   await waitForPostgres(containerName, databaseUrl);
 
-  const client = new Client({ connectionString: databaseUrl });
-  await client.connect();
-  t.after(() => client.end().catch(() => {}));
+  const client = await connectedClient(t, databaseUrl);
 
   await client.query(readFileSync(initMigrationPath, "utf8"));
   await client.query(`
@@ -310,9 +307,7 @@ test("migrate up keeps issuer aliases synchronized on issuer writes", { timeout:
   const hostPort = startPostgres(containerName, password);
   const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
 
-  t.after(() => {
-    stopPostgres(containerName);
-  });
+  registerLifoCleanup(t, () => stopPostgres(containerName));
 
   await waitForPostgres(containerName, databaseUrl);
 
@@ -322,9 +317,7 @@ test("migrate up keeps issuer aliases synchronized on issuer writes", { timeout:
   });
   assert.equal(upResult.status, 0, upResult.stderr || upResult.stdout);
 
-  const client = new Client({ connectionString: databaseUrl });
-  await client.connect();
-  t.after(() => client.end().catch(() => {}));
+  const client = await connectedClient(t, databaseUrl);
 
   const issuer = await client.query<{ issuer_id: string }>(
     `insert into issuers (legal_name, former_names)

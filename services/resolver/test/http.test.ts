@@ -10,12 +10,23 @@ import {
   type ResolveResponse,
 } from "../src/http.ts";
 import { normalizeNameForLookup, type QueryExecutor } from "../src/lookup.ts";
-import type { SubjectKind } from "../src/subject-ref.ts";
+import type { SubjectKind, SubjectRef } from "../src/subject-ref.ts";
 
 type AppleChain = {
   issuer_id: string;
   instrument_id: string;
   listing_id: string;
+};
+
+const hydratedAppleIssuer = "33333333-3333-4333-a333-333333333333";
+const hydratedAppleInstrument = "44444444-4444-4444-a444-444444444444";
+const hydratedAaplXnas: SubjectRef = {
+  kind: "listing",
+  id: "11111111-1111-4111-a111-111111111111",
+};
+const hydratedAaplXfra: SubjectRef = {
+  kind: "listing",
+  id: "22222222-2222-4222-a222-222222222222",
 };
 
 async function seedAppleChain(client: Client): Promise<AppleChain> {
@@ -87,6 +98,89 @@ async function seedAlphabetChain(client: Client) {
   return { issuer_id, listing_id: listing.rows[0].listing_id };
 }
 
+function hydratedListingDb(listingRefs: SubjectRef[]): QueryExecutor {
+  const listingDetails = [
+    {
+      listing_id: hydratedAaplXnas.id,
+      instrument_id: hydratedAppleInstrument,
+      issuer_id: hydratedAppleIssuer,
+      mic: "XNAS",
+      ticker: "AAPL",
+      trading_currency: "USD",
+      timezone: "America/New_York",
+      active_from: null,
+      active_to: null,
+      asset_type: "common_stock",
+      share_class: null,
+      isin: "US0378331005",
+      legal_name: "Apple Inc.",
+      cik: "320193",
+      lei: "HWUPKR0MPOU8FGXBT394",
+      domicile: "US",
+      sector: "Technology",
+      industry: "Consumer Electronics",
+    },
+    {
+      listing_id: hydratedAaplXfra.id,
+      instrument_id: hydratedAppleInstrument,
+      issuer_id: hydratedAppleIssuer,
+      mic: "XFRA",
+      ticker: "AAPL",
+      trading_currency: "EUR",
+      timezone: "Europe/Berlin",
+      active_from: null,
+      active_to: null,
+      asset_type: "common_stock",
+      share_class: null,
+      isin: "US0378331005",
+      legal_name: "Apple Inc.",
+      cik: "320193",
+      lei: "HWUPKR0MPOU8FGXBT394",
+      domicile: "US",
+      sector: "Technology",
+      industry: "Consumer Electronics",
+    },
+  ];
+  const listingIds = new Set(listingRefs.map((ref) => ref.id));
+
+  return {
+    query: async (text, values) => {
+      if (text.includes("insert into tool_call_logs")) {
+        return toolCallLogInsertResult();
+      }
+
+      if (text.includes("where l.listing_id = $1")) {
+        return {
+          rows: listingDetails.filter((row) => row.listing_id === values?.[0]),
+        } as never;
+      }
+
+      if (text.includes("from listings l")) {
+        return {
+          rows: listingDetails.filter((row) => listingIds.has(row.listing_id)),
+        } as never;
+      }
+
+      if (text.includes("from issuer_aliases")) {
+        return { rows: [] } as never;
+      }
+
+      throw new Error(`Unexpected query: ${text}`);
+    },
+  };
+}
+
+function toolCallLogInsertResult() {
+  return {
+    rows: [
+      {
+        tool_call_id: "55555555-5555-4555-a555-555555555555",
+        created_at: new Date("2026-04-24T00:00:00.000Z"),
+      },
+    ],
+  } as never;
+}
+
 async function startServer(t: TestContext, db: QueryExecutor): Promise<string> {
   const server = createResolverServer(db);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -104,7 +198,8 @@ function postResolve(base: string, body: unknown): Promise<Response> {
 }
 
 // OpenAPI-schema-shaped assertion: every ResolvedSubject has the required
-// primitive fields and alternatives (if present) are SubjectRef-only.
+// primitive fields, optional hydrated handoff fields, and alternatives (if
+// present) are SubjectRef-only.
 function assertResolveResponseShape(body: unknown): asserts body is ResolveResponse {
   assert.equal(typeof body, "object");
   assert.ok(body !== null);
@@ -120,6 +215,25 @@ function assertResolveResponseShape(body: unknown): asserts body is ResolveRespo
     assert.equal(typeof ref?.id, "string");
     assert.equal(typeof s.display_name, "string");
     assert.equal(typeof s.confidence, "number");
+    if (s.identity_level !== undefined) {
+      assert.equal(typeof s.identity_level, "string");
+    }
+    if (s.display_label !== undefined) {
+      assert.equal(typeof s.display_label, "string");
+    }
+    if (s.display_labels !== undefined) {
+      assert.equal(typeof s.display_labels, "object");
+      assert.equal(typeof (s.display_labels as Record<string, unknown>).primary, "string");
+    }
+    if (s.normalized_input !== undefined) {
+      assert.equal(typeof s.normalized_input, "string");
+    }
+    if (s.resolution_path !== undefined) {
+      assert.ok(["auto_advanced", "explicit_choice"].includes(String(s.resolution_path)));
+    }
+    if (s.context !== undefined) {
+      assert.equal(typeof s.context, "object");
+    }
     if (s.alternatives !== undefined) {
       assert.ok(Array.isArray(s.alternatives));
       for (const alt of s.alternatives as unknown[]) {
@@ -173,13 +287,77 @@ test("validateResolveRequest accepts allow_kinds when every entry is canonical",
   );
 });
 
+test("validateResolveRequest accepts an explicit subject choice", () => {
+  const result = validateResolveRequest({
+    text: "AAPL",
+    choice: { subject_ref: hydratedAaplXfra },
+  });
+
+  assert.deepEqual(result, {
+    valid: true,
+    request: { text: "AAPL", choice: { subject_ref: hydratedAaplXfra } },
+  });
+});
+
+test("validateResolveRequest rejects malformed explicit choices", () => {
+  assert.deepEqual(validateResolveRequest({ text: "AAPL", choice: null }), {
+    valid: false,
+    error: "'choice' must be an object",
+  });
+  assert.deepEqual(validateResolveRequest({ text: "AAPL", choice: {} }), {
+    valid: false,
+    error: "'choice.subject_ref' is required",
+  });
+  assert.deepEqual(
+    validateResolveRequest({
+      text: "AAPL",
+      choice: { subject_ref: { kind: "ticker", id: hydratedAaplXfra.id } },
+    }),
+    {
+      valid: false,
+      error: "'choice.subject_ref.kind' must be a valid SubjectKind",
+    },
+  );
+});
+
 test("handler: identifier-like input falls back to ticker lookup when identifier resolution misses", async () => {
   const calls: string[] = [];
   const db: QueryExecutor = {
     query: async (text, values) => {
+      if (text.includes("insert into tool_call_logs")) {
+        return toolCallLogInsertResult();
+      }
+
       if (text.includes("from issuers where upper")) {
         calls.push(`identifier:${String(values?.[0])}`);
         return { rows: [] } as never;
+      }
+
+      if (text.includes("where l.listing_id = $1")) {
+        return {
+          rows: [
+            {
+              listing_id: "11111111-1111-4111-a111-111111111111",
+              instrument_id: "22222222-2222-4222-a222-222222222222",
+              issuer_id: "33333333-3333-4333-a333-333333333333",
+              mic: "XHKG",
+              ticker: "700",
+              trading_currency: "HKD",
+              timezone: "Asia/Hong_Kong",
+              active_from: null,
+              active_to: null,
+              asset_type: "common_stock",
+              share_class: null,
+              isin: null,
+              legal_name: "Tencent Holdings Ltd.",
+              cik: null,
+              lei: null,
+              domicile: "KY",
+              sector: "Communication Services",
+              industry: "Internet Content & Information",
+            },
+          ],
+        } as never;
       }
 
       if (text.includes("from listings l")) {
@@ -222,8 +400,32 @@ test("handler: identifier-like input falls back to name lookup when identifier a
   const calls: string[] = [];
   const db: QueryExecutor = {
     query: async (text, values) => {
+      if (text.includes("insert into tool_call_logs")) {
+        return toolCallLogInsertResult();
+      }
+
       if (text.includes("from issuers where upper")) {
         calls.push(`identifier:${String(values?.[0])}`);
+        return { rows: [] } as never;
+      }
+
+      if (text.includes("where iss.issuer_id = $1")) {
+        return {
+          rows: [
+            {
+              issuer_id: "33333333-3333-4333-a333-333333333333",
+              legal_name: "Seven Hundred Holdings Ltd.",
+              cik: null,
+              lei: null,
+              domicile: "KY",
+              sector: "Communication Services",
+              industry: "Internet Content & Information",
+            },
+          ],
+        } as never;
+      }
+
+      if (text.includes("i.issuer_id = $1")) {
         return { rows: [] } as never;
       }
 
@@ -262,6 +464,48 @@ test("handler: identifier-like input falls back to name lookup when identifier a
   assert.equal(response.subjects[0].subject_ref.kind, "issuer");
   assert.equal(response.subjects[0].subject_ref.id, "33333333-3333-4333-a333-333333333333");
   assert.deepEqual(response.unresolved, []);
+});
+
+test("handler: resolved listing returns hydrated subject bundle fields", async () => {
+  const response = await handleResolveSubjects(hydratedListingDb([hydratedAaplXnas]), {
+    text: "AAPL",
+  });
+
+  assert.equal(response.subjects.length, 1);
+  assert.deepEqual(response.unresolved, []);
+
+  const [subject] = response.subjects as Array<Record<string, unknown>>;
+  assert.deepEqual(subject.subject_ref, hydratedAaplXnas);
+  assert.equal(subject.display_name, "AAPL · XNAS — Apple Inc.");
+  assert.equal(subject.display_label, "AAPL · XNAS — Apple Inc.");
+  assert.equal(subject.identity_level, "listing");
+  assert.equal(subject.normalized_input, "AAPL");
+  assert.equal(subject.resolution_path, "auto_advanced");
+  assert.equal((subject.display_labels as Record<string, unknown>).ticker, "AAPL");
+  assert.equal((subject.display_labels as Record<string, unknown>).mic, "XNAS");
+  assert.equal(
+    ((subject.context as Record<string, unknown>).listing as Record<string, unknown>).trading_currency,
+    "USD",
+  );
+});
+
+test("handler: explicit ambiguous choice returns selected hydrated subject bundle", async () => {
+  const response = await handleResolveSubjects(hydratedListingDb([hydratedAaplXnas, hydratedAaplXfra]), {
+    text: "AAPL",
+    choice: { subject_ref: hydratedAaplXfra },
+  });
+
+  assert.equal(response.subjects.length, 1);
+  assert.deepEqual(response.unresolved, []);
+
+  const [subject] = response.subjects as Array<Record<string, unknown>>;
+  assert.deepEqual(subject.subject_ref, hydratedAaplXfra);
+  assert.equal(subject.resolution_path, "explicit_choice");
+  assert.equal((subject.display_labels as Record<string, unknown>).mic, "XFRA");
+  assert.equal(
+    ((subject.context as Record<string, unknown>).listing as Record<string, unknown>).trading_currency,
+    "EUR",
+  );
 });
 
 test("handler: ticker text returns a single listing subject with matching confidence", { timeout: 120000 }, async (t) => {
@@ -478,6 +722,22 @@ test("server: oversized request body returns 413", async (t) => {
 
   assert.equal(res.status, 413);
   assert.deepEqual(await res.json(), { error: "request body too large" });
+});
+
+test("server: choice subject_ref not in candidate set returns 400", async (t) => {
+  const base = await startServer(t, hydratedListingDb([hydratedAaplXnas, hydratedAaplXfra]));
+
+  const res = await postResolve(base, {
+    text: "AAPL",
+    choice: {
+      subject_ref: { kind: "listing", id: "99999999-9999-4999-a999-999999999999" },
+    },
+  });
+
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), {
+    error: "choice subject_ref must match one of the ambiguous candidates",
+  });
 });
 
 test("server: missing 'text' returns 400 per request schema", { timeout: 120000 }, async (t) => {

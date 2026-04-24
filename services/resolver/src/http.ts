@@ -1,24 +1,17 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
 import {
-  ambiguous,
-  isAmbiguous,
-  isNotFound,
-  isResolved,
-  notFound,
-  resolved,
-  type AmbiguityAxis,
   type ResolverCandidate,
-  type ResolverEnvelope,
 } from "./envelope.ts";
 import {
-  resolveByCik,
-  resolveByIsin,
-  resolveByLei,
-  resolveByNameCandidate,
-  resolveByTicker,
-  type QueryExecutor,
-} from "./lookup.ts";
-import { normalize } from "./normalize.ts";
+  InvalidChoiceError,
+  runSearchToSubjectFlow,
+  type HydratedSubjectContext,
+  type HydratedSubjectHandoff,
+  type ResolutionPath,
+  type SubjectChoice,
+  type SubjectDisplayLabels,
+} from "./flow.ts";
+import type { QueryExecutor } from "./lookup.ts";
 import { SUBJECT_KINDS, type SubjectKind, type SubjectRef } from "./subject-ref.ts";
 
 const MAX_REQUEST_BODY_BYTES = 64 * 1024;
@@ -32,6 +25,7 @@ class RequestBodyTooLargeError extends Error {
 export type ResolveRequest = {
   text: string;
   allow_kinds?: SubjectKind[];
+  choice?: SubjectChoice;
 };
 
 // Matches spec/finance_research_openapi.yaml `/v1/subjects/resolve` 200 body.
@@ -42,6 +36,12 @@ export type ResolvedSubject = {
   display_name: string;
   confidence: number;
   alternatives?: SubjectRef[];
+  identity_level?: SubjectKind;
+  display_label?: string;
+  display_labels?: SubjectDisplayLabels;
+  normalized_input?: string;
+  resolution_path?: ResolutionPath;
+  context?: HydratedSubjectContext;
 };
 
 export type ResolveResponse = {
@@ -75,15 +75,53 @@ export function validateResolveRequest(body: unknown): RequestValidation {
     allow_kinds = obj.allow_kinds as SubjectKind[];
   }
 
-  return { valid: true, request: { text: obj.text, ...(allow_kinds ? { allow_kinds } : {}) } };
+  let choice: SubjectChoice | undefined;
+  if (obj.choice !== undefined) {
+    if (typeof obj.choice !== "object" || obj.choice === null) {
+      return { valid: false, error: "'choice' must be an object" };
+    }
+    const choiceObj = obj.choice as Record<string, unknown>;
+    const subjectRef = choiceObj.subject_ref;
+    if (typeof subjectRef !== "object" || subjectRef === null) {
+      return { valid: false, error: "'choice.subject_ref' is required" };
+    }
+    const ref = subjectRef as Record<string, unknown>;
+    if (typeof ref.kind !== "string" || !(SUBJECT_KINDS as readonly string[]).includes(ref.kind)) {
+      return { valid: false, error: "'choice.subject_ref.kind' must be a valid SubjectKind" };
+    }
+    if (typeof ref.id !== "string") {
+      return { valid: false, error: "'choice.subject_ref.id' must be a string" };
+    }
+    choice = { subject_ref: { kind: ref.kind as SubjectKind, id: ref.id } };
+  }
+
+  return {
+    valid: true,
+    request: {
+      text: obj.text,
+      ...(allow_kinds ? { allow_kinds } : {}),
+      ...(choice ? { choice } : {}),
+    },
+  };
 }
 
 export async function handleResolveSubjects(
   db: QueryExecutor,
   request: ResolveRequest,
 ): Promise<ResolveResponse> {
-  const envelope = await dispatchFreeText(db, request.text);
-  const allSubjects = envelopeToSubjects(envelope);
+  const flow = await runSearchToSubjectFlow(db, {
+    text: request.text,
+    ...(request.choice ? { choice: request.choice } : {}),
+  });
+
+  if (flow.status === "not_found") {
+    return { subjects: [], unresolved: [flow.normalized_input] };
+  }
+
+  const allSubjects =
+    flow.status === "hydrated"
+      ? [subjectFromHandoff(flow.handoff, flow.canonical_selection.alternatives)]
+      : flow.candidates.map(candidateToSubject);
 
   const subjects =
     request.allow_kinds && request.allow_kinds.length > 0
@@ -91,139 +129,39 @@ export async function handleResolveSubjects(
       : allSubjects;
 
   const unresolved = subjects.length === 0
-    ? [isNotFound(envelope) ? envelope.normalized_input : request.text]
+    ? [request.text]
     : [];
 
   return { subjects, unresolved };
 }
 
-async function dispatchFreeText(
-  db: QueryExecutor,
-  text: string,
-): Promise<ResolverEnvelope> {
-  const n = normalize(text);
-  let identifierEnvelope: ResolverEnvelope | null = null;
-
-  if (n.identifier_hint) {
-    const hint = n.identifier_hint;
-    switch (hint.kind) {
-      case "cik":
-        identifierEnvelope = await resolveByCik(db, hint.value);
-        break;
-      case "isin":
-        identifierEnvelope = await resolveByIsin(db, hint.value);
-        break;
-      case "lei":
-        identifierEnvelope = await resolveByLei(db, hint.value);
-        break;
-      default: {
-        const _exhaustive: never = hint;
-        throw new Error(`Unhandled identifier_hint kind: ${(_exhaustive as { kind: string }).kind}`);
-      }
-    }
-
-    if (!isNotFound(identifierEnvelope) || (!n.ticker_candidate && !n.name_candidate)) {
-      return identifierEnvelope;
-    }
+function subjectFromHandoff(
+  handoff: HydratedSubjectHandoff,
+  alternatives: ResolverCandidate[] | undefined,
+): ResolvedSubject {
+  const subject: ResolvedSubject = {
+    subject_ref: handoff.subject_ref,
+    display_name: handoff.display_label,
+    confidence: handoff.confidence,
+    identity_level: handoff.identity_level,
+    display_label: handoff.display_label,
+    display_labels: handoff.display_labels,
+    normalized_input: handoff.normalized_input,
+    resolution_path: handoff.resolution_path,
+    context: handoff.context,
+  };
+  if (alternatives && alternatives.length > 0) {
+    subject.alternatives = alternatives.map((candidate) => candidate.subject_ref);
   }
-
-  const candidateEnvelopes: ResolverEnvelope[] = [];
-
-  if (n.ticker_candidate) {
-    const envelope = await resolveByTicker(db, n.ticker_candidate);
-    if (!isNotFound(envelope)) candidateEnvelopes.push(envelope);
-  }
-
-  if (n.name_candidate) {
-    const envelope = await resolveByNameCandidate(db, n.name_candidate);
-    if (!isNotFound(envelope)) candidateEnvelopes.push(envelope);
-  }
-
-  if (candidateEnvelopes.length > 0) {
-    return mergeCandidateEnvelopes(candidateEnvelopes);
-  }
-
-  if (identifierEnvelope) return identifierEnvelope;
-
-  return notFound({ normalized_input: n.trimmed, reason: "no_candidates" });
+  return subject;
 }
 
-function mergeCandidateEnvelopes(envelopes: ResolverEnvelope[]): ResolverEnvelope {
-  const candidates: ResolverCandidate[] = [];
-
-  for (const envelope of envelopes) {
-    if (isResolved(envelope)) {
-      candidates.push({
-        subject_ref: envelope.subject_ref,
-        display_name: envelope.display_name,
-        confidence: envelope.confidence,
-      });
-    } else if (isAmbiguous(envelope)) {
-      candidates.push(...envelope.candidates);
-    }
-  }
-
-  const deduped = dedupeCandidates(candidates).sort((a, b) => b.confidence - a.confidence);
-
-  if (deduped.length === 1) {
-    const [candidate] = deduped;
-    return resolved({
-      subject_ref: candidate.subject_ref,
-      display_name: candidate.display_name,
-      confidence: candidate.confidence,
-      canonical_kind: candidate.subject_ref.kind,
-    });
-  }
-
-  return ambiguous({
-    candidates: deduped,
-    ambiguity_axis: inferAmbiguityAxis(deduped),
-  });
-}
-
-function dedupeCandidates(candidates: ResolverCandidate[]): ResolverCandidate[] {
-  const bySubject = new Map<string, ResolverCandidate>();
-  for (const candidate of candidates) {
-    const key = `${candidate.subject_ref.kind}:${candidate.subject_ref.id}`;
-    const existing = bySubject.get(key);
-    if (!existing || candidate.confidence > existing.confidence) {
-      bySubject.set(key, candidate);
-    }
-  }
-  return [...bySubject.values()];
-}
-
-function inferAmbiguityAxis(candidates: ResolverCandidate[]): AmbiguityAxis {
-  const kinds = new Set(candidates.map((candidate) => candidate.subject_ref.kind));
-  if (kinds.has("issuer") && kinds.has("listing")) return "issuer_vs_listing";
-  if (kinds.size === 1 && kinds.has("issuer")) return "multiple_issuers";
-  if (kinds.size === 1 && kinds.has("listing")) return "multiple_listings";
-  if (kinds.size === 1 && kinds.has("instrument")) return "multiple_instruments";
-  return "other";
-}
-
-function envelopeToSubjects(envelope: ResolverEnvelope): ResolvedSubject[] {
-  if (isResolved(envelope)) {
-    const subject: ResolvedSubject = {
-      subject_ref: envelope.subject_ref,
-      display_name: envelope.display_name,
-      confidence: envelope.confidence,
-    };
-    if (envelope.alternatives && envelope.alternatives.length > 0) {
-      subject.alternatives = envelope.alternatives.map((c) => c.subject_ref);
-    }
-    return [subject];
-  }
-
-  if (isAmbiguous(envelope)) {
-    return envelope.candidates.map((c) => ({
-      subject_ref: c.subject_ref,
-      display_name: c.display_name,
-      confidence: c.confidence,
-    }));
-  }
-
-  return [];
+function candidateToSubject(candidate: ResolverCandidate): ResolvedSubject {
+  return {
+    subject_ref: candidate.subject_ref,
+    display_name: candidate.display_name,
+    confidence: candidate.confidence,
+  };
 }
 
 export function createResolverServer(db: QueryExecutor): Server {
@@ -259,6 +197,13 @@ export function createResolverServer(db: QueryExecutor): Server {
       if (error instanceof RequestBodyTooLargeError) {
         if (!res.headersSent) {
           respond(res, 413, { error: error.message });
+        }
+        return;
+      }
+
+      if (error instanceof InvalidChoiceError) {
+        if (!res.headersSent) {
+          respond(res, 400, { error: error.message });
         }
         return;
       }

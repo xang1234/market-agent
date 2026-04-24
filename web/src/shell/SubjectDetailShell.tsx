@@ -1,10 +1,14 @@
-import { NavLink, Outlet, useParams } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useParams } from 'react-router-dom'
+import { QuoteSnapshot } from '../symbol/QuoteSnapshot'
+import {
+  isResolvedSubject,
+  subjectFromRouteParam,
+  type ResolvedSubject,
+} from '../symbol/search'
 
 // Entered subject-detail shell. Swapped into the workspace shell's main
 // canvas at `/symbol/:subjectRef/...`, owning:
-//   - the subject header (ticker, display name, quote snapshot — stubbed
-//     here; real data lands with fra-6al.3 resolver + fra-6al.5 quote
-//     snapshot)
+//   - the subject header with display identity and first quote snapshot
 //   - local section navigation (Overview / Financials / Earnings /
 //     Holders / Signals)
 //   - an <Outlet /> for section content
@@ -31,25 +35,16 @@ const SECTIONS = [
 
 export function SubjectDetailShell() {
   const { subjectRef } = useParams<{ subjectRef: string }>()
+  const location = useLocation()
+  const subject = subjectFromLocationState(location.state) ?? subjectFromRouteParam(subjectRef)
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header
         data-testid="subject-header"
         className="border-b border-neutral-200 px-8 py-5 dark:border-neutral-800"
       >
-        <div className="flex items-baseline gap-3">
-          <h1 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100">
-            {subjectRef}
-          </h1>
-          <span className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-            subject
-          </span>
-        </div>
-        <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-          Subject header (display name, quote snapshot, freshness) ships with
-          fra-6al.3 (resolver) + fra-6al.5 (quote snapshot). The URL segment
-          is a canonical <code>SubjectRef</code>, not a ticker.
-        </p>
+        <QuoteSnapshot subject={subject} />
       </header>
       <nav
         aria-label="Subject sections"
@@ -78,4 +73,10 @@ export function SubjectDetailShell() {
       </div>
     </div>
   )
+}
+
+function subjectFromLocationState(state: unknown): ResolvedSubject | null {
+  if (typeof state !== 'object' || state === null) return null
+  const subject = (state as { subject?: unknown }).subject
+  return isResolvedSubject(subject) ? subject : null
 }
