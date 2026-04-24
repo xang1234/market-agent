@@ -24,6 +24,8 @@ export type NotFoundReason =
 export const CONFIDENCE_UNIQUE_IDENTIFIER = 0.99;
 export const CONFIDENCE_TICKER_SINGLE = 0.95;
 export const CONFIDENCE_TICKER_AMBIGUOUS = 0.5;
+export const CONFIDENCE_NAME_LEGAL = 0.9;
+export const CONFIDENCE_NAME_FORMER = 0.85;
 
 export type ResolverCandidate = {
   subject_ref: SubjectRef;

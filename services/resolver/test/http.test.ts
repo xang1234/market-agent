@@ -44,6 +44,32 @@ async function seedAppleChain(client: Client): Promise<AppleChain> {
   return { issuer_id, instrument_id, listing_id: listing.rows[0].listing_id };
 }
 
+async function seedAlphabetChain(client: Client) {
+  const issuer = await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name, former_names)
+     values ($1, $2::jsonb)
+     returning issuer_id`,
+    ["Alphabet Inc.", JSON.stringify(["GOOG"])],
+  );
+  const issuer_id = issuer.rows[0].issuer_id;
+
+  const instrument = await client.query<{ instrument_id: string }>(
+    `insert into instruments (issuer_id, asset_type, share_class)
+     values ($1, 'common_stock', 'Class C')
+     returning instrument_id`,
+    [issuer_id],
+  );
+
+  const listing = await client.query<{ listing_id: string }>(
+    `insert into listings (instrument_id, mic, ticker, trading_currency, timezone)
+     values ($1, 'XNAS', 'GOOG', 'USD', 'America/New_York')
+     returning listing_id`,
+    [instrument.rows[0].instrument_id],
+  );
+
+  return { issuer_id, listing_id: listing.rows[0].listing_id };
+}
+
 async function startServer(t: TestContext, db: QueryExecutor): Promise<string> {
   const server = createResolverServer(db);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -134,7 +160,7 @@ test("handler: identifier-like input falls back to ticker lookup when identifier
   const calls: string[] = [];
   const db: QueryExecutor = {
     query: async (text, values) => {
-      if (text.includes("from issuers")) {
+      if (text.includes("from issuers where upper")) {
         calls.push(`identifier:${String(values?.[0])}`);
         return { rows: [] } as never;
       }
@@ -156,16 +182,64 @@ test("handler: identifier-like input falls back to ticker lookup when identifier
         } as never;
       }
 
+      if (text.includes("with issuer_names")) {
+        calls.push("name");
+        return { rows: [] } as never;
+      }
+
       throw new Error(`Unexpected query: ${text}`);
     },
   };
 
   const response = await handleResolveSubjects(db, { text: "700" });
 
-  assert.deepEqual(calls, ["identifier:700", "ticker:700"]);
+  assert.equal(calls[0], "identifier:700");
+  assert.deepEqual(new Set(calls.slice(1)), new Set(["ticker:700", "name"]));
   assert.equal(response.subjects.length, 1);
   assert.equal(response.subjects[0].subject_ref.kind, "listing");
   assert.equal(response.subjects[0].subject_ref.id, "11111111-1111-4111-a111-111111111111");
+  assert.deepEqual(response.unresolved, []);
+});
+
+test("handler: identifier-like input falls back to name lookup when identifier and ticker miss", async () => {
+  const calls: string[] = [];
+  const db: QueryExecutor = {
+    query: async (text, values) => {
+      if (text.includes("from issuers where upper")) {
+        calls.push(`identifier:${String(values?.[0])}`);
+        return { rows: [] } as never;
+      }
+
+      if (text.includes("from listings l")) {
+        calls.push(`ticker:${String(values?.[0])}`);
+        return { rows: [] } as never;
+      }
+
+      if (text.includes("with issuer_names")) {
+        calls.push("name");
+        return {
+          rows: [
+            {
+              issuer_id: "33333333-3333-4333-a333-333333333333",
+              legal_name: "Seven Hundred Holdings Ltd.",
+              matched_name: "700",
+              match_reason: "former_name",
+            },
+          ],
+        } as never;
+      }
+
+      throw new Error(`Unexpected query: ${text}`);
+    },
+  };
+
+  const response = await handleResolveSubjects(db, { text: "700" });
+
+  assert.equal(calls[0], "identifier:700");
+  assert.deepEqual(new Set(calls.slice(1)), new Set(["ticker:700", "name"]));
+  assert.equal(response.subjects.length, 1);
+  assert.equal(response.subjects[0].subject_ref.kind, "issuer");
+  assert.equal(response.subjects[0].subject_ref.id, "33333333-3333-4333-a333-333333333333");
   assert.deepEqual(response.unresolved, []);
 });
 
@@ -240,6 +314,47 @@ test("handler: unknown text returns empty subjects and surfaces the input in unr
   assert.equal(response.subjects.length, 0);
   assert.equal(response.unresolved.length, 1);
   assert.equal(response.unresolved[0], "NOTREAL");
+});
+
+test("handler: issuer legal-name text returns an issuer subject", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver http coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-4-4");
+  const client = await connectedClient(t, databaseUrl);
+  const apple = await seedAppleChain(client);
+
+  const response = await handleResolveSubjects(client, { text: "Apple Inc." });
+
+  assert.equal(response.subjects.length, 1);
+  assert.equal(response.unresolved.length, 0);
+  assert.equal(response.subjects[0].subject_ref.kind, "issuer");
+  assert.equal(response.subjects[0].subject_ref.id, apple.issuer_id);
+});
+
+test("handler: ticker plus issuer alias preserves issuer-vs-listing ambiguity", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver http coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-4-4");
+  const client = await connectedClient(t, databaseUrl);
+  const alphabet = await seedAlphabetChain(client);
+
+  const response = await handleResolveSubjects(client, { text: "GOOG" });
+
+  assert.equal(response.subjects.length, 2);
+  assert.deepEqual(
+    response.subjects.map((subject) => subject.subject_ref).sort((a, b) => a.kind.localeCompare(b.kind)),
+    [
+      { kind: "issuer", id: alphabet.issuer_id },
+      { kind: "listing", id: alphabet.listing_id },
+    ],
+  );
+  assert.equal(response.unresolved.length, 0);
 });
 
 test("handler: ambiguous ticker returns one subject entry per candidate with equal confidence", { timeout: 120000 }, async (t) => {

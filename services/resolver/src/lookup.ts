@@ -1,6 +1,8 @@
 import type { QueryResult } from "pg";
 import {
   ambiguous,
+  CONFIDENCE_NAME_FORMER,
+  CONFIDENCE_NAME_LEGAL,
   CONFIDENCE_TICKER_AMBIGUOUS,
   CONFIDENCE_TICKER_SINGLE,
   CONFIDENCE_UNIQUE_IDENTIFIER,
@@ -26,6 +28,11 @@ type IssuerRow = {
   legal_name: string;
 };
 
+type IssuerNameRow = IssuerRow & {
+  matched_name: string;
+  match_reason: "legal_name" | "former_name";
+};
+
 type InstrumentRow = {
   instrument_id: string;
   issuer_id: string;
@@ -48,7 +55,8 @@ type TickerInput = { kind: "ticker"; value: string; mic?: string };
 type CikInput = { kind: "cik"; value: string };
 type IsinInput = { kind: "isin"; value: string };
 type LeiInput = { kind: "lei"; value: string };
-export type ResolverInput = TickerInput | CikInput | IsinInput | LeiInput;
+type NameInput = { kind: "name"; value: string };
+export type ResolverInput = TickerInput | CikInput | IsinInput | LeiInput | NameInput;
 
 export async function resolveByInput(
   db: QueryExecutor,
@@ -63,11 +71,61 @@ export async function resolveByInput(
       return resolveByIsin(db, input.value);
     case "lei":
       return resolveByLei(db, input.value);
+    case "name":
+      return resolveByNameCandidate(db, input.value);
     default: {
       const _exhaustive: never = input;
       throw new Error(`Unhandled resolver input kind: ${(_exhaustive as ResolverInput).kind}`);
     }
   }
+}
+
+export async function resolveByNameCandidate(
+  db: QueryExecutor,
+  name: string,
+): Promise<ResolverEnvelope> {
+  const normalized = normalizeNameForLookup(name);
+  const result: QueryResult<IssuerNameRow> = await db.query(
+    `with issuer_names as (
+       select issuer_id, legal_name, legal_name as matched_name, 'legal_name' as match_reason
+         from issuers
+       union all
+       select i.issuer_id, i.legal_name, former_name.value as matched_name, 'former_name' as match_reason
+         from issuers i
+         cross join lateral jsonb_array_elements_text(i.former_names) as former_name(value)
+     )
+     select issuer_id, legal_name, matched_name, match_reason
+       from issuer_names
+      order by case match_reason when 'legal_name' then 0 else 1 end, legal_name`,
+  );
+
+  const matchedRows = result.rows.filter(
+    (row) => normalizeNameForLookup(row.matched_name) === normalized,
+  );
+
+  if (matchedRows.length === 0) {
+    return notFound({ normalized_input: normalized, reason: "no_candidates" });
+  }
+
+  const candidates = dedupeIssuerNameRows(matchedRows).map((row) => ({
+    subject_ref: { kind: "issuer" as const, id: row.issuer_id },
+    display_name: row.legal_name,
+    confidence:
+      row.match_reason === "legal_name" ? CONFIDENCE_NAME_LEGAL : CONFIDENCE_NAME_FORMER,
+    match_reason: row.match_reason,
+  }));
+
+  if (candidates.length === 1) {
+    const candidate = candidates[0];
+    return resolved({
+      subject_ref: candidate.subject_ref,
+      display_name: candidate.display_name,
+      confidence: candidate.confidence,
+      canonical_kind: "issuer",
+    });
+  }
+
+  return ambiguous({ candidates, ambiguity_axis: "multiple_issuers" });
 }
 
 export async function resolveByCik(
@@ -201,4 +259,24 @@ function instrumentDisplayName(row: InstrumentRow): string {
 function listingDisplayName(row: ListingRow): string {
   const base = row.share_class ? `${row.legal_name} (${row.share_class})` : row.legal_name;
   return `${row.ticker} · ${row.mic} — ${base}`;
+}
+
+function normalizeNameForLookup(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function dedupeIssuerNameRows(rows: IssuerNameRow[]): IssuerNameRow[] {
+  const byIssuer = new Map<string, IssuerNameRow>();
+  for (const row of rows) {
+    const existing = byIssuer.get(row.issuer_id);
+    if (!existing || (existing.match_reason !== "legal_name" && row.match_reason === "legal_name")) {
+      byIssuer.set(row.issuer_id, row);
+    }
+  }
+  return [...byIssuer.values()];
 }
