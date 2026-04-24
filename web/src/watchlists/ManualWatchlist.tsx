@@ -110,13 +110,13 @@ function WatchlistRow({
 
 function primaryLabel(quote: QuoteSnapshot, ref: SubjectRef): string {
   if (quote.listing.ticker && quote.listing.ticker !== 'N/A') return quote.listing.ticker
-  return `${ref.kind}:${truncateId(ref.id)}`
+  return truncateId(ref.id)
 }
 
 function secondaryLabel(quote: QuoteSnapshot, ref: SubjectRef): string {
   const mic = quote.listing.mic
   if (mic && mic !== 'UNKNOWN') return `${mic} · ${quote.currency}`
-  return truncateId(ref.id)
+  return ref.kind
 }
 
 function freshnessLabel(quote: QuoteSnapshot): string {
