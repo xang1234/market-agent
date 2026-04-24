@@ -1,10 +1,14 @@
 // Persistent left-rail watchlist slot (spec §3.7, IA refactor fra-4pz).
 // fra-6al.6.1 shipped the default-manual membership list; fra-6al.6.2 adds
 // per-row quote hydration (price / move / freshness) reusing the P0.4
-// listing-oriented snapshot rule. The timeframe strip that scopes row
-// sparklines is still upcoming and stays rendered-but-disabled so the
+// listing-oriented snapshot rule; fra-6al.6.3 wires the resume handler
+// that completes a save-to-watchlist action dispatched by the inline auth
+// interrupt from a public subject route. The timeframe strip that scopes
+// row sparklines is still upcoming and stays rendered-but-disabled so the
 // slot's shape is visible.
 import { useAuth } from './useAuth'
+import { ProtectedActionType } from './authInterruptState'
+import { useResumedProtectedAction } from './useAuthInterrupt'
 import { SymbolSearch } from '../symbol/SymbolSearch'
 import { ManualWatchlist } from '../watchlists/ManualWatchlist'
 import { useManualWatchlist } from '../watchlists/useManualWatchlist'
@@ -15,6 +19,10 @@ export function WatchlistSlot() {
   const { session } = useAuth()
   const userId = session?.userId ?? null
   const watchlist = useManualWatchlist(userId)
+
+  useResumedProtectedAction(ProtectedActionType.SaveToWatchlist, (action) => {
+    void watchlist.addSubject(action.payload.subject_ref)
+  })
 
   return (
     <aside
