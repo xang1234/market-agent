@@ -20,6 +20,8 @@ export function WatchlistSlot() {
   const userId = session?.userId ?? null
   const watchlist = useManualWatchlist(userId)
 
+  // addSubject swallows rejections into watchlist.message, which the
+  // sidebar already renders — no extra error path needed here.
   useResumedProtectedAction(ProtectedActionType.SaveToWatchlist, (action) => {
     void watchlist.addSubject(action.payload.subject_ref)
   })

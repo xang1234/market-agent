@@ -3,9 +3,7 @@ import { webDevFlags } from '../devFlags'
 import { useRightRail } from '../shell/useRightRail'
 
 // Home is a findings-first surface. This bead (P0.1.1) only needs the
-// scaffolded page — actual Home-feed work is P4.4. The P0.1.3 inline-auth
-// scaffold that lived here was retired in fra-6al.6.3; the real save-to-
-// watchlist CTA now lives on the public subject-detail route.
+// scaffolded page — actual Home-feed work is P4.4.
 export function HomePage() {
   const { setContent } = useRightRail()
 

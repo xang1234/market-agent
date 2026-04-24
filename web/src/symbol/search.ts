@@ -271,10 +271,15 @@ export function candidateListingLabel(subject: ResolvedSubject): string {
   return subject.identity_level ?? subject.subject_ref.kind
 }
 
-function isSubjectRef(value: unknown): value is SubjectRef {
+export function isSubjectRef(value: unknown): value is SubjectRef {
   if (typeof value !== 'object' || value === null) return false
   const obj = value as Record<string, unknown>
-  return typeof obj.id === 'string' && typeof obj.kind === 'string' && isSubjectKind(obj.kind)
+  return (
+    typeof obj.id === 'string' &&
+    obj.id.length > 0 &&
+    typeof obj.kind === 'string' &&
+    isSubjectKind(obj.kind)
+  )
 }
 
 function isSubjectKind(value: string): value is SubjectKind {
