@@ -70,12 +70,18 @@ export function stopPostgres(containerName: string) {
 
 function isTransientConnectionFailure(error: unknown) {
   const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? String((error as { code?: unknown }).code).toLowerCase()
+      : "";
   return (
+    code === "econnreset" ||
     message.includes("the database system is starting up") ||
     message.includes("connection terminated unexpectedly") ||
     message.includes("server closed the connection unexpectedly") ||
     message.includes("terminating connection due to administrator command") ||
     message.includes("connection refused") ||
+    message.includes("econnreset") ||
     message.includes("econnrefused")
   );
 }

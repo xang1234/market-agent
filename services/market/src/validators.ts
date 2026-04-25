@@ -28,7 +28,7 @@ export function assertCurrency(s: unknown, label = "currency"): asserts s is str
 }
 
 export function assertUuid(s: unknown, label: string): asserts s is string {
-  if (typeof s !== "string" || !UUID_V4.test(s)) {
+  if (!isUuidV4(s)) {
     throw new Error(`${label}: must be a UUID v4; received ${String(s)}`);
   }
 }
@@ -37,6 +37,10 @@ export function assertBoolean(b: unknown, label: string): asserts b is boolean {
   if (typeof b !== "boolean") {
     throw new Error(`${label}: must be a boolean; received ${String(b)}`);
   }
+}
+
+export function isUuidV4(s: unknown): s is string {
+  return typeof s === "string" && UUID_V4.test(s);
 }
 
 export function assertOneOf<T extends string>(

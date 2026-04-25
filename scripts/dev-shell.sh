@@ -286,12 +286,14 @@ up() {
   ensure_install "$ROOT/services/resolver"
   ensure_install "$ROOT/services/dev-api"
   ensure_install "$ROOT/services/watchlists"
+  ensure_install "$ROOT/services/market"
 
   assert_port_available web "$WEB_PORT"
   assert_port_available chat "$CHAT_PORT"
   assert_port_available resolver "$RESOLVER_PORT"
   assert_port_available dev-api "$DEV_API_PORT"
   assert_port_available watchlists "$WATCHLISTS_PORT"
+  assert_port_available market "$MARKET_PORT"
 
   if [[ "$(container_status postgres)" == "running" ]]; then
     postgres_was_running=1
@@ -333,6 +335,7 @@ up() {
   start_and_track_process resolver "$ROOT/services/resolver" "npm run dev"
   start_and_track_process dev-api "$ROOT/services/dev-api" "npm run dev"
   start_and_track_process watchlists "$ROOT/services/watchlists" "npm run dev"
+  start_and_track_process market "$ROOT/services/market" "npm run dev"
 
   if ! wait_for_service web "$WEB_PORT"; then
     cleanup_failed_up
@@ -359,6 +362,11 @@ up() {
     return 1
   fi
 
+  if ! wait_for_service market "$MARKET_PORT"; then
+    cleanup_failed_up
+    return 1
+  fi
+
   status
 }
 
@@ -375,6 +383,7 @@ status() {
   printf "resolver  %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status resolver "$RESOLVER_PORT")" "$RESOLVER_PORT" "$LOG_DIR/resolver.log"
   printf "dev-api   %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status dev-api "$DEV_API_PORT")" "$DEV_API_PORT" "$LOG_DIR/dev-api.log"
   printf "watchlists %-7s http://127.0.0.1:%s  log=%s\n" "$(service_status watchlists "$WATCHLISTS_PORT")" "$WATCHLISTS_PORT" "$LOG_DIR/watchlists.log"
+  printf "market    %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status market "$MARKET_PORT")" "$MARKET_PORT" "$LOG_DIR/market.log"
 }
 
 configure_runtime_env

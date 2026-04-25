@@ -1,92 +1,50 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  subjectFromRouteParam,
-  subjectRouteParam,
-  type ListingContext,
-  type ResolvedSubject,
-  type SubjectRef,
-} from './search.ts'
-import {
-  createQuoteSnapshotStub,
+  fetchQuoteSnapshot,
   formatSignedNumber,
+  issuerProfileFromSubject,
+  listingIdForQuote,
+  quoteBelongsToListing,
+  QuoteFetchError,
   quoteDirection,
-  quoteFromSubjectRef,
+  snapshotFromWire,
   subjectDisplayName,
+  type QuoteSnapshot,
+  type ResolvedSubject,
 } from './quote.ts'
 
+const APPLE_LISTING_ID = '11111111-1111-4111-a111-111111111111'
+const MICROSOFT_LISTING_ID = '22222222-2222-4222-a222-222222222222'
+const APPLE_ISSUER_ID = '33333333-3333-4333-a333-333333333333'
+const POLYGON_SOURCE_ID = '00000000-0000-4000-a000-000000000001'
+
 const listedSubject: ResolvedSubject = {
-  subject_ref: {
-    kind: 'listing',
-    id: '11111111-1111-4111-a111-111111111111',
-  },
+  subject_ref: { kind: 'listing', id: APPLE_LISTING_ID },
   display_name: 'Apple Inc.',
   confidence: 0.95,
-  display_labels: {
-    primary: 'Apple Inc.',
-    ticker: 'AAPL',
-    mic: 'XNAS',
-  },
+  display_labels: { primary: 'Apple Inc.', ticker: 'AAPL', mic: 'XNAS' },
   context: {
     issuer: {
-      subject_ref: {
-        kind: 'issuer',
-        id: '33333333-3333-4333-a333-333333333333',
-      },
+      subject_ref: { kind: 'issuer', id: APPLE_ISSUER_ID },
       legal_name: 'Apple Inc.',
       sector: 'Technology',
       industry: 'Consumer Electronics',
-    },
-    listing: {
-      subject_ref: {
-        kind: 'listing',
-        id: '11111111-1111-4111-a111-111111111111',
-      },
-      instrument_ref: {
-        kind: 'instrument',
-        id: '44444444-4444-4444-a444-444444444444',
-      },
-      issuer_ref: {
-        kind: 'issuer',
-        id: '33333333-3333-4333-a333-333333333333',
-      },
-      mic: 'XNAS',
-      ticker: 'AAPL',
-      trading_currency: 'USD',
-      timezone: 'America/New_York',
     },
   },
 }
 
 const issuerWithActiveListing: ResolvedSubject = {
-  subject_ref: {
-    kind: 'issuer',
-    id: '33333333-3333-4333-a333-333333333333',
-  },
+  subject_ref: { kind: 'issuer', id: APPLE_ISSUER_ID },
   display_name: 'Apple Inc.',
   confidence: 0.99,
   context: {
-    issuer: {
-      subject_ref: {
-        kind: 'issuer',
-        id: '33333333-3333-4333-a333-333333333333',
-      },
-      legal_name: 'Apple Inc.',
-    },
+    issuer: { subject_ref: { kind: 'issuer', id: APPLE_ISSUER_ID }, legal_name: 'Apple Inc.' },
     active_listings: [
       {
-        subject_ref: {
-          kind: 'listing',
-          id: '11111111-1111-4111-a111-111111111111',
-        },
-        instrument_ref: {
-          kind: 'instrument',
-          id: '44444444-4444-4444-a444-444444444444',
-        },
-        issuer_ref: {
-          kind: 'issuer',
-          id: '33333333-3333-4333-a333-333333333333',
-        },
+        subject_ref: { kind: 'listing', id: APPLE_LISTING_ID },
+        instrument_ref: { kind: 'instrument', id: '44444444-4444-4444-a444-444444444444' },
+        issuer_ref: { kind: 'issuer', id: APPLE_ISSUER_ID },
         mic: 'XNAS',
         ticker: 'AAPL',
         trading_currency: 'USD',
@@ -96,138 +54,126 @@ const issuerWithActiveListing: ResolvedSubject = {
   },
 }
 
-const betaListingContext: ListingContext = {
-  subject_ref: {
-    kind: 'listing',
-    id: '55555555-5555-4555-a555-555555555555',
+const baseWireResponse = {
+  quote: {
+    listing: { kind: 'listing' as const, id: APPLE_LISTING_ID },
+    price: 196.58,
+    prev_close: 195.34,
+    change_abs: 1.24,
+    change_pct: 0.006348,
+    session_state: 'regular' as const,
+    as_of: '2026-04-22T15:30:00.000Z',
+    delay_class: 'delayed_15m' as const,
+    currency: 'USD',
+    source_id: POLYGON_SOURCE_ID,
   },
-  instrument_ref: {
-    kind: 'instrument',
-    id: '66666666-6666-4666-a666-666666666666',
-  },
-  issuer_ref: {
-    kind: 'issuer',
-    id: '77777777-7777-4777-a777-777777777777',
-  },
-  mic: 'XNYS',
-  ticker: 'BETA',
-  trading_currency: 'USD',
-  timezone: 'America/New_York',
+  listing_context: { ticker: 'AAPL', mic: 'XNAS', timezone: 'America/New_York' },
 }
 
-const betaListedSubject: ResolvedSubject = {
-  subject_ref: betaListingContext.subject_ref,
-  display_name: 'Beta Corp.',
-  confidence: 0.92,
-  context: {
-    listing: betaListingContext,
-  },
-}
+test('snapshotFromWire converts a backend GetQuoteResponse into a QuoteSnapshot', () => {
+  const snapshot = snapshotFromWire(baseWireResponse)
 
-const betaIssuerSubject: ResolvedSubject = {
-  subject_ref: betaListingContext.issuer_ref,
-  display_name: 'Beta Corp.',
-  confidence: 0.92,
-  context: {
-    active_listings: [betaListingContext],
-  },
-}
-
-test('createQuoteSnapshotStub returns the P1.1-compatible quote shape', () => {
-  const quote = createQuoteSnapshotStub(listedSubject)
-
-  assert.deepEqual(quote.subject_ref, listedSubject.subject_ref)
-  assert.equal(quote.listing.ticker, 'AAPL')
-  assert.equal(quote.listing.mic, 'XNAS')
-  assert.equal(quote.currency, 'USD')
-  assert.equal(quote.delay_class, 'delayed')
-  assert.equal(quote.source_id, 'p1.1-stub')
-  assert.equal(typeof quote.as_of, 'string')
-  assert.ok(Number.isFinite(quote.latest_price))
-  assert.ok(Number.isFinite(quote.absolute_move))
-  assert.ok(Number.isFinite(quote.percent_move))
-  assert.ok(quote.recent_range.length >= 5)
+  assert.deepEqual(snapshot.subject_ref, { kind: 'listing', id: APPLE_LISTING_ID })
+  assert.equal(snapshot.listing.ticker, 'AAPL')
+  assert.equal(snapshot.listing.mic, 'XNAS')
+  assert.equal(snapshot.listing.timezone, 'America/New_York')
+  assert.equal(snapshot.latest_price, 196.58)
+  assert.equal(snapshot.prev_close, 195.34)
+  assert.equal(snapshot.absolute_move, 1.24)
+  // change_pct (fraction) becomes percent_move (percentage points)
+  assert.ok(Math.abs(snapshot.percent_move - 0.6348) < 1e-6)
+  assert.equal(snapshot.currency, 'USD')
+  assert.equal(snapshot.delay_class, 'delayed_15m')
+  assert.equal(snapshot.session_state, 'regular')
+  // Verification clause: the live source_id surfaces in the snapshot.
+  assert.equal(snapshot.source_id, POLYGON_SOURCE_ID)
+  assert.notEqual(snapshot.source_id, 'p1.1-stub')
 })
 
-test('createQuoteSnapshotStub stays listing-oriented when issuer context exists', () => {
-  const quote = createQuoteSnapshotStub(listedSubject)
-
-  assert.deepEqual(quote.subject_ref, listedSubject.subject_ref)
-  assert.equal(quote.listing.ticker, 'AAPL')
-  assert.equal(quote.issuer_profile?.legal_name, 'Apple Inc.')
-  assert.equal(quote.issuer_profile?.sector, 'Technology')
+test('listingIdForQuote uses subject_ref.id directly for listing-kind subjects', () => {
+  assert.equal(listingIdForQuote(listedSubject), APPLE_LISTING_ID)
 })
 
-test('createQuoteSnapshotStub uses active listing identity for issuer entries', () => {
-  const quote = createQuoteSnapshotStub(issuerWithActiveListing)
+test('listingIdForQuote falls back to active_listings[0] for issuer-kind subjects', () => {
+  assert.equal(listingIdForQuote(issuerWithActiveListing), APPLE_LISTING_ID)
+})
 
-  assert.deepEqual(quote.subject_ref, {
-    kind: 'listing',
-    id: '11111111-1111-4111-a111-111111111111',
+test('listingIdForQuote returns null when no listing context is available', () => {
+  const issuerOnly: ResolvedSubject = {
+    subject_ref: { kind: 'issuer', id: APPLE_ISSUER_ID },
+    display_name: 'Apple Inc.',
+    confidence: 0.99,
+  }
+  assert.equal(listingIdForQuote(issuerOnly), null)
+})
+
+test('quoteBelongsToListing rejects snapshots fetched for a previous listing', () => {
+  const snapshot = snapshotFromWire(baseWireResponse)
+
+  assert.equal(quoteBelongsToListing(snapshot, APPLE_LISTING_ID), true)
+  assert.equal(quoteBelongsToListing(snapshot, MICROSOFT_LISTING_ID), false)
+  assert.equal(quoteBelongsToListing(snapshot, null), false)
+})
+
+test('fetchQuoteSnapshot calls the listing-id-bound market endpoint and decodes the response', async () => {
+  let calledUrl: string | null = null
+  const mockFetch = (async (url: string | URL) => {
+    calledUrl = String(url)
+    return new Response(JSON.stringify(baseWireResponse), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }) as typeof fetch
+
+  const snapshot = await fetchQuoteSnapshot(APPLE_LISTING_ID, { fetchImpl: mockFetch })
+  assert.match(calledUrl ?? '', /\/v1\/market\/quote\?subject_kind=listing&subject_id=11111111/)
+  assert.equal(snapshot.source_id, POLYGON_SOURCE_ID)
+  assert.equal(snapshot.listing.ticker, 'AAPL')
+})
+
+test('fetchQuoteSnapshot throws QuoteFetchError on non-2xx responses with the status preserved', async () => {
+  const mockFetch = (async () =>
+    new Response(JSON.stringify({ error: 'not found' }), {
+      status: 404,
+      headers: { 'content-type': 'application/json' },
+    })) as typeof fetch
+
+  await assert.rejects(
+    fetchQuoteSnapshot(APPLE_LISTING_ID, { fetchImpl: mockFetch }),
+    (err: unknown) => err instanceof QuoteFetchError && err.status === 404,
+  )
+})
+
+test('fetchQuoteSnapshot URL-encodes the listing id', async () => {
+  let calledUrl: string | null = null
+  const mockFetch = (async (url: string | URL) => {
+    calledUrl = String(url)
+    return new Response(JSON.stringify(baseWireResponse), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }) as typeof fetch
+
+  await fetchQuoteSnapshot('weird id with spaces', { fetchImpl: mockFetch })
+  assert.match(calledUrl ?? '', /weird%20id%20with%20spaces/)
+})
+
+test('issuerProfileFromSubject extracts only the relevant issuer display fields', () => {
+  const profile = issuerProfileFromSubject(listedSubject)
+  assert.deepEqual(profile, {
+    legal_name: 'Apple Inc.',
+    sector: 'Technology',
+    industry: 'Consumer Electronics',
   })
-  assert.equal(quote.listing.ticker, 'AAPL')
-  assert.equal(quote.listing.mic, 'XNAS')
 })
 
-test('createQuoteSnapshotStub seeds values from listing identity', () => {
-  const listingQuote = createQuoteSnapshotStub(betaListedSubject)
-  const issuerQuote = createQuoteSnapshotStub(betaIssuerSubject)
-
-  assert.equal(issuerQuote.latest_price, listingQuote.latest_price)
-  assert.equal(issuerQuote.absolute_move, listingQuote.absolute_move)
-  assert.equal(issuerQuote.percent_move, listingQuote.percent_move)
-  assert.deepEqual(issuerQuote.recent_range, listingQuote.recent_range)
-})
-
-test('createQuoteSnapshotStub avoids raw route fallback labels as ticker context', () => {
-  const quote = createQuoteSnapshotStub(
-    subjectFromRouteParam('listing%3A11111111-1111-4111-a111-111111111111'),
-  )
-
-  assert.equal(quote.listing.ticker, 'N/A')
-  assert.equal(quote.listing.mic, 'UNKNOWN')
-})
-
-test('quoteFromSubjectRef matches landing-from-URL hydration for the same subject', () => {
-  const subjectRef: SubjectRef = {
-    kind: 'listing',
-    id: '11111111-1111-4111-a111-111111111111',
+test('issuerProfileFromSubject returns null when no issuer context exists', () => {
+  const noIssuer: ResolvedSubject = {
+    subject_ref: { kind: 'listing', id: APPLE_LISTING_ID },
+    display_name: 'Apple Inc.',
+    confidence: 0.95,
   }
-  const fromRef = quoteFromSubjectRef(subjectRef)
-  const fromRoute = createQuoteSnapshotStub(
-    subjectFromRouteParam(subjectRouteParam(subjectRef)),
-  )
-
-  assert.deepEqual(fromRef, fromRoute)
-})
-
-test('quoteFromSubjectRef preserves the row-hydration shape without listing context', () => {
-  const issuerRef: SubjectRef = {
-    kind: 'issuer',
-    id: '33333333-3333-4333-a333-333333333333',
-  }
-  const quote = quoteFromSubjectRef(issuerRef)
-
-  assert.deepEqual(quote.subject_ref, { kind: 'listing', id: issuerRef.id })
-  assert.equal(quote.listing.ticker, 'N/A')
-  assert.equal(quote.listing.mic, 'UNKNOWN')
-  assert.equal(quote.currency, 'USD')
-  assert.equal(quote.delay_class, 'delayed')
-  assert.equal(quote.session_state, 'regular')
-  assert.ok(Number.isFinite(quote.latest_price))
-  assert.ok(Number.isFinite(quote.absolute_move))
-  assert.ok(Number.isFinite(quote.percent_move))
-  assert.ok(typeof quote.as_of === 'string' && quote.as_of.length > 0)
-})
-
-test('quoteFromSubjectRef is stable for the same subject across calls', () => {
-  const ref: SubjectRef = {
-    kind: 'listing',
-    id: '22222222-2222-4222-a222-222222222222',
-  }
-  const first = quoteFromSubjectRef(ref)
-  const second = quoteFromSubjectRef(ref)
-  assert.deepEqual(first, second)
+  assert.equal(issuerProfileFromSubject(noIssuer), null)
 })
 
 test('quote formatting keeps signed moves explicit', () => {
@@ -242,13 +188,23 @@ test('quote formatting keeps signed moves explicit', () => {
 test('subjectDisplayName falls back to resolver display_name before raw subject ref', () => {
   assert.equal(
     subjectDisplayName({
-      subject_ref: {
-        kind: 'listing',
-        id: '55555555-5555-4555-a555-555555555555',
-      },
+      subject_ref: { kind: 'listing', id: '55555555-5555-4555-a555-555555555555' },
       display_name: 'Microsoft Corp.',
       confidence: 0.94,
     }),
     'Microsoft Corp.',
   )
+})
+
+test('QuoteSnapshot type does not retain stub-only fields', () => {
+  // Compile-time assertion: QuoteSnapshot used to carry display_name,
+  // recent_range, and issuer_profile from the stub days. They now live on
+  // ResolvedSubject (display) or are deferred to P1.1b (recent_range).
+  const sample: QuoteSnapshot = snapshotFromWire(baseWireResponse)
+  // @ts-expect-error — display_name is no longer on QuoteSnapshot
+  assert.equal(sample.display_name, undefined)
+  // @ts-expect-error — recent_range is no longer on QuoteSnapshot
+  assert.equal(sample.recent_range, undefined)
+  // @ts-expect-error — issuer_profile is no longer on QuoteSnapshot
+  assert.equal(sample.issuer_profile, undefined)
 })
