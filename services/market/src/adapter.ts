@@ -26,6 +26,18 @@ export {
   type NormalizedBars,
 } from "./bar.ts";
 
+export {
+  applyCorporateActions,
+  corporateAction,
+  CORPORATE_ACTION_KINDS,
+  type CashDividend,
+  type CorporateAction,
+  type CorporateActionKind,
+  type SpinOff,
+  type Split,
+  type StockDividend,
+} from "./corporate-actions.ts";
+
 export type QuoteRequest = {
   listing: ListingSubjectRef;
 };
