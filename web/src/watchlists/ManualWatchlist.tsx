@@ -144,6 +144,7 @@ function moveClassName(quote: QuoteSnapshot): string {
 
 function primaryLabel(state: RowState, ref: SubjectRef): string {
   if (state.status === 'ready') return state.quote.listing.ticker
+  if (state.status === 'loading') return 'Loading…'
   return truncateId(ref.id)
 }
 

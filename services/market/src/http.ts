@@ -2,9 +2,7 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 import type { MarketDataAdapter } from "./adapter.ts";
 import { ListingNotFoundError, type ListingRepository, type ListingRecord } from "./listings.ts";
 import type { NormalizedQuote } from "./quote.ts";
-
-const UUID_PATTERN =
-  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
+import { isUuidV4 } from "./validators.ts";
 
 export type MarketServerDeps = {
   adapter: MarketDataAdapter;
@@ -86,7 +84,7 @@ function matchRoute(method: string, rawUrl: string): Route | null {
     const subjectKind = searchParams.get("subject_kind");
     const subjectId = searchParams.get("subject_id");
     if (subjectKind !== "listing") return null;
-    if (!subjectId || !UUID_PATTERN.test(subjectId)) return null;
+    if (!isUuidV4(subjectId)) return null;
     return { action: "get_quote", subject_id: subjectId };
   }
 

@@ -63,13 +63,7 @@ export function QuoteSnapshot({ subject }: QuoteSnapshotProps) {
           <p className="mt-3 text-sm text-neutral-500 dark:text-neutral-400">
             {state.status === 'loading' ? 'Loading quote…' : `Quote unavailable: ${state.reason}`}
           </p>
-          {issuerProfile ? (
-            <p className="mt-3 max-w-2xl text-sm text-neutral-600 dark:text-neutral-400">
-              {issuerProfile.legal_name}
-              {issuerProfile.sector ? ` · ${issuerProfile.sector}` : ''}
-              {issuerProfile.industry ? ` · ${issuerProfile.industry}` : ''}
-            </p>
-          ) : null}
+          <IssuerProfileLine profile={issuerProfile} />
         </section>
       </div>
     )
@@ -109,13 +103,7 @@ export function QuoteSnapshot({ subject }: QuoteSnapshotProps) {
             {quote.session_state.replaceAll('_', ' ')} · {quote.delay_class.replaceAll('_', ' ')} · {formatQuoteTime(quote.as_of, quote.listing.timezone)}
           </div>
         </div>
-        {issuerProfile ? (
-          <p className="mt-3 max-w-2xl text-sm text-neutral-600 dark:text-neutral-400">
-            {issuerProfile.legal_name}
-            {issuerProfile.sector ? ` · ${issuerProfile.sector}` : ''}
-            {issuerProfile.industry ? ` · ${issuerProfile.industry}` : ''}
-          </p>
-        ) : null}
+        <IssuerProfileLine profile={issuerProfile} />
       </section>
       <section
         aria-label="Quote provenance"
@@ -130,6 +118,21 @@ export function QuoteSnapshot({ subject }: QuoteSnapshotProps) {
         </div>
       </section>
     </div>
+  )
+}
+
+function IssuerProfileLine({
+  profile,
+}: {
+  profile: { legal_name: string; sector?: string; industry?: string } | null
+}) {
+  if (!profile) return null
+  return (
+    <p className="mt-3 max-w-2xl text-sm text-neutral-600 dark:text-neutral-400">
+      {profile.legal_name}
+      {profile.sector ? ` · ${profile.sector}` : ''}
+      {profile.industry ? ` · ${profile.industry}` : ''}
+    </p>
   )
 }
 

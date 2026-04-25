@@ -66,6 +66,8 @@ export class QuoteFetchError extends Error {
   }
 }
 
+type FetchImpl = typeof fetch
+
 const MARKET_API_BASE = '/v1/market'
 
 // Resolves the listing-kind UUID to use for a quote fetch. For a listing-kind
@@ -87,7 +89,7 @@ export function listingIdForQuote(subject: ResolvedSubject): string | null {
 // two places.
 export async function fetchQuoteSnapshot(
   listingId: string,
-  init: { signal?: AbortSignal; fetchImpl?: typeof fetch } = {},
+  init: { signal?: AbortSignal; fetchImpl?: FetchImpl } = {},
 ): Promise<QuoteSnapshot> {
   const fetchFn = init.fetchImpl ?? fetch
   const url = `${MARKET_API_BASE}/quote?subject_kind=listing&subject_id=${encodeURIComponent(listingId)}`
