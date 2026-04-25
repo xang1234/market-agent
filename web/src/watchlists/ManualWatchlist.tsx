@@ -74,11 +74,17 @@ function WatchlistRow({
   )
 
   useEffect(() => {
-    if (!listingId) return
+    if (!listingId) {
+      setState({ status: 'unavailable' })
+      return
+    }
     const controller = new AbortController()
     setState({ status: 'loading' })
     fetchQuoteSnapshot(listingId, { signal: controller.signal })
-      .then((quote) => setState({ status: 'ready', quote }))
+      .then((quote) => {
+        if (controller.signal.aborted) return
+        setState({ status: 'ready', quote })
+      })
       .catch((err) => {
         if (controller.signal.aborted) return
         console.warn('watchlist row quote fetch failed', err)

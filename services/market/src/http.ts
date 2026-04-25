@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer, type Server, type ServerResponse } from "node:http";
 import type { MarketDataAdapter } from "./adapter.ts";
 import { ListingNotFoundError, type ListingRepository, type ListingRecord } from "./listings.ts";
 import type { NormalizedQuote } from "./quote.ts";
@@ -32,27 +32,34 @@ export function createMarketServer(deps: MarketServerDeps): Server {
         return;
       }
 
-      if (route.action === "healthz") {
-        respond(res, 200, { status: "ok", service: "market" });
-        return;
-      }
-
-      if (route.action === "get_quote") {
-        const record = await deps.listings.find(route.subject_id);
-        if (!record) {
-          respond(res, 404, { error: `listing not found: ${route.subject_id}` });
+      switch (route.action) {
+        case "healthz":
+          respond(res, 200, { status: "ok", service: "market" });
+          return;
+        case "get_quote": {
+          const record = await deps.listings.find(route.subject_id);
+          if (!record) {
+            respond(res, 404, { error: `listing not found: ${route.subject_id}` });
+            return;
+          }
+          const quote = await deps.adapter.getQuote({
+            listing: { kind: "listing", id: route.subject_id },
+          });
+          const response: GetQuoteResponse = {
+            quote,
+            listing_context: listingContext(record),
+          };
+          respond(res, 200, response);
           return;
         }
-
-        const quote = await deps.adapter.getQuote({
-          listing: { kind: "listing", id: route.subject_id },
-        });
-        const response: GetQuoteResponse = {
-          quote,
-          listing_context: listingContext(record),
-        };
-        respond(res, 200, response);
-        return;
+        default: {
+          // Exhaustiveness: adding a Route variant without a handler is a
+          // compile-time error here, not a silent hang at runtime.
+          const _exhaustive: never = route;
+          void _exhaustive;
+          respond(res, 500, { error: "unhandled route" });
+          return;
+        }
       }
     } catch (error) {
       if (error instanceof ListingNotFoundError) {

@@ -30,11 +30,17 @@ export function QuoteSnapshot({ subject }: QuoteSnapshotProps) {
   )
 
   useEffect(() => {
-    if (!listingId) return
+    if (!listingId) {
+      setState({ status: 'unavailable', reason: 'no listing context for this subject' })
+      return
+    }
     const controller = new AbortController()
     setState({ status: 'loading' })
     fetchQuoteSnapshot(listingId, { signal: controller.signal })
-      .then((quote) => setState({ status: 'ready', quote }))
+      .then((quote) => {
+        if (controller.signal.aborted) return
+        setState({ status: 'ready', quote })
+      })
       .catch((err) => {
         if (controller.signal.aborted) return
         setState({

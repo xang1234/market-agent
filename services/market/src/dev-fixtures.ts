@@ -63,9 +63,9 @@ const DEV_SNAPSHOTS: Record<string, DevSnapshot> = {
 
 // A polygon fetcher that returns canned snapshot payloads for known tickers.
 // Routes match the real polygon API path so the adapter can run unmodified.
-// A stable as_of comes from the injected clock so consumers see deterministic
-// freshness in dev (the as_of moves only when the server is restarted with a
-// new clock, not on every request).
+// The injected clock determines the snapshot's lastTrade.t — tests pass a
+// fixed clock for deterministic as_of; dev passes `() => new Date()` so the
+// rendered freshness reflects the live wall clock.
 export function createDevPolygonFetcher(opts: { clock: () => Date }): PolygonFetcher {
   return async (path: string) => {
     const snapshotMatch = path.match(
