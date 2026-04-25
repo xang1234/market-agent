@@ -165,6 +165,8 @@ function applyShareCountAction(
   if (!Number.isFinite(ratio) || ratio <= 0) return bars;
 
   const effMs = Date.parse(action.effective_date);
+  if (!Number.isFinite(effMs)) return bars;
+
   return bars.map((bar) => {
     if (Date.parse(bar.ts) >= effMs) return bar;
     return {
@@ -188,12 +190,20 @@ function applyValueDistribution(
   distributionValue: number,
 ): NormalizedBar[] {
   const effMs = Date.parse(effective_date);
+  if (!Number.isFinite(effMs)) return bars;
 
+  // Find the bar whose ts is the maximum among bars with ts < effMs (the
+  // immediate prior trading bar). Forward scan with running max is
+  // order-independent: callers may pass bars in any order without changing
+  // the answer. Bars typically come from NormalizedBars (sorted ascending
+  // by contract), but this function does not require it.
   let prevClose: number | undefined;
-  for (let i = bars.length - 1; i >= 0; i--) {
-    if (Date.parse(bars[i].ts) < effMs) {
-      prevClose = bars[i].close;
-      break;
+  let prevMs = -Infinity;
+  for (const bar of bars) {
+    const ms = Date.parse(bar.ts);
+    if (Number.isFinite(ms) && ms < effMs && ms > prevMs) {
+      prevMs = ms;
+      prevClose = bar.close;
     }
   }
   // No bar before the ex-date in the requested range, or distribution is

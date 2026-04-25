@@ -441,6 +441,62 @@ test("applyCorporateActions returns a fresh array; caller can mutate without aff
   assert.equal(bars[0].close, 100);
 });
 
+test("cash dividend lookup of prevClose is order-independent (unsorted bars accepted)", () => {
+  // Reverse the ascending order so the "latest by index" pre-ex bar is NOT
+  // the same as the "latest by ts" pre-ex bar. The factor must come from
+  // the bar with the largest ts < effMs ($100, the day before ex), not from
+  // the bar that happens to be later in the array ($50, two days before).
+  const bars = [
+    bar("2026-01-02", 100), // Tuesday close (immediate prior trading day)
+    bar("2026-01-01", 50), // Monday close (older)
+    bar("2026-01-03", 99), // Wednesday: ex-dividend
+  ];
+  const dividend: CashDividend = {
+    kind: "cash_dividend",
+    listing: aaplListing,
+    effective_date: "2026-01-03T00:00:00.000Z",
+    cash_amount: 1,
+    currency: "USD",
+    source_id: SOURCE_ID,
+  };
+  const adjusted = applyCorporateActions(bars, [dividend], "split_and_div_adjusted");
+  // Factor uses prevClose=100 (max ts pre-ex), not 50.
+  // Tuesday: 100 * 0.99 = 99
+  // Monday:  50  * 0.99 = 49.5
+  assert.equal(ROUND(adjusted[0].close), 99);
+  assert.equal(ROUND(adjusted[1].close), 49.5);
+  assert.equal(adjusted[2].close, 99);
+});
+
+test("malformed effective_date is a safe no-op (does not silently adjust every bar)", () => {
+  const bars = [bar("2026-01-01", 100), bar("2026-01-02", 102)];
+  // Bypassing the smart constructor — applyCorporateActions must not assume
+  // its inputs were validated.
+  const badSplit: Split = {
+    kind: "split",
+    listing: aaplListing,
+    effective_date: "not-an-iso-timestamp",
+    numerator: 2,
+    denominator: 1,
+    source_id: SOURCE_ID,
+  };
+  const badDividend: CashDividend = {
+    kind: "cash_dividend",
+    listing: aaplListing,
+    effective_date: "not-an-iso-timestamp",
+    cash_amount: 1,
+    currency: "USD",
+    source_id: SOURCE_ID,
+  };
+  const splitResult = applyCorporateActions(bars, [badSplit], "split_adjusted");
+  assert.equal(splitResult[0].close, 100, "split with bad date must not corrupt prices");
+  assert.equal(splitResult[1].close, 102);
+
+  const divResult = applyCorporateActions(bars, [badDividend], "split_and_div_adjusted");
+  assert.equal(divResult[0].close, 100, "dividend with bad date must not corrupt prices");
+  assert.equal(divResult[1].close, 102);
+});
+
 test("applyCorporateActions accepts a CorporateAction union member without narrowing at the call site", () => {
   // Type-level: list typed as the union should compile.
   const actions: CorporateAction[] = [
