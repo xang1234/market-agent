@@ -1,8 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createPolygonAdapter } from "../../src/adapters/polygon.ts";
+import { createPolygonAdapter, PolygonFetchError } from "../../src/adapters/polygon.ts";
 import { quoteMove } from "../../src/quote.ts";
 import {
+  assertUnavailableContract,
+  isAvailable,
+  isUnavailable,
+} from "../../src/availability.ts";
+import {
+  aaplBarRange,
   aaplCtx,
   aaplListing,
   aaplSnapshotPayload,
@@ -12,6 +18,9 @@ import {
   SNAPSHOT_PATH,
 } from "../fixtures.ts";
 
+const FIXED_NOW = "2026-04-22T20:00:00.000Z";
+const fixedClock = () => new Date(FIXED_NOW);
+
 test("polygon adapter normalizes a snapshot payload into a NormalizedQuote with move math", async () => {
   const adapter = createPolygonAdapter({
     sourceId: POLYGON_SOURCE_ID,
@@ -20,7 +29,10 @@ test("polygon adapter normalizes a snapshot payload into a NormalizedQuote with 
     resolveListing: async () => aaplCtx,
   });
 
-  const quote = await adapter.getQuote({ listing: aaplListing });
+  const outcome = await adapter.getQuote({ listing: aaplListing });
+  assert.equal(isAvailable(outcome), true);
+  if (!isAvailable(outcome)) return;
+  const quote = outcome.data;
 
   assert.equal(quote.listing.id, aaplListing.id);
   assert.equal(quote.price, 187.42);
@@ -45,8 +57,10 @@ test("polygon adapter uses configured recency instead of response status", async
     resolveListing: async () => aaplCtx,
   });
 
-  const quote = await adapter.getQuote({ listing: aaplListing });
-  assert.equal(quote.delay_class, "delayed_15m");
+  const outcome = await adapter.getQuote({ listing: aaplListing });
+  assert.equal(isAvailable(outcome), true);
+  if (!isAvailable(outcome)) return;
+  assert.equal(outcome.data.delay_class, "delayed_15m");
 });
 
 test("polygon adapter derives session state from last trade timestamp when snapshot has no session field", async () => {
@@ -73,8 +87,10 @@ test("polygon adapter derives session state from last trade timestamp when snaps
       resolveListing: async () => aaplCtx,
     });
 
-    const quote = await adapter.getQuote({ listing: aaplListing });
-    assert.equal(quote.session_state, expected, `timestamp=${timestamp}`);
+    const outcome = await adapter.getQuote({ listing: aaplListing });
+    assert.equal(isAvailable(outcome), true);
+    if (!isAvailable(outcome)) continue;
+    assert.equal(outcome.data.session_state, expected, `timestamp=${timestamp}`);
   }
 });
 
@@ -95,12 +111,14 @@ test("polygon adapter maps market_status values onto SessionState", async () => 
       }),
       resolveListing: async () => aaplCtx,
     });
-    const quote = await adapter.getQuote({ listing: aaplListing });
-    assert.equal(quote.session_state, expected, `vendor market_status=${vendor}`);
+    const outcome = await adapter.getQuote({ listing: aaplListing });
+    assert.equal(isAvailable(outcome), true);
+    if (!isAvailable(outcome)) continue;
+    assert.equal(outcome.data.session_state, expected, `vendor market_status=${vendor}`);
   }
 });
 
-test("polygon adapter throws when prev_close is missing (cannot compute change)", async () => {
+test("polygon adapter returns unavailable(provider_error) when prev_close is missing", async () => {
   const adapter = createPolygonAdapter({
     sourceId: POLYGON_SOURCE_ID,
     delayClass: POLYGON_DELAY_CLASS,
@@ -114,14 +132,22 @@ test("polygon adapter throws when prev_close is missing (cannot compute change)"
       },
     }),
     resolveListing: async () => aaplCtx,
+    clock: fixedClock,
   });
-  await assert.rejects(
-    adapter.getQuote({ listing: aaplListing }),
-    /prevDay\.c missing/,
-  );
+
+  const outcome = await adapter.getQuote({ listing: aaplListing });
+  assert.equal(isUnavailable(outcome), true);
+  if (!isUnavailable(outcome)) return;
+  assert.doesNotThrow(() => assertUnavailableContract(outcome));
+  assert.equal(outcome.reason, "provider_error");
+  assert.equal(outcome.retryable, false, "malformed payload won't fix on retry");
+  assert.equal(outcome.listing.id, aaplListing.id);
+  assert.equal(outcome.source_id, POLYGON_SOURCE_ID);
+  assert.equal(outcome.as_of, FIXED_NOW);
+  assert.match(outcome.detail ?? "", /prevDay\.c missing/);
 });
 
-test("polygon adapter throws on a malformed last-trade snapshot", async () => {
+test("polygon adapter returns unavailable when last trade is malformed", async () => {
   const adapter = createPolygonAdapter({
     sourceId: POLYGON_SOURCE_ID,
     delayClass: POLYGON_DELAY_CLASS,
@@ -129,15 +155,158 @@ test("polygon adapter throws on a malformed last-trade snapshot", async () => {
       [SNAPSHOT_PATH]: { status: "OK", ticker: { lastTrade: {}, prevDay: { c: 99 } } },
     }),
     resolveListing: async () => aaplCtx,
+    clock: fixedClock,
   });
 
-  await assert.rejects(
-    adapter.getQuote({ listing: aaplListing }),
-    /lastTrade missing price or timestamp/,
-  );
+  const outcome = await adapter.getQuote({ listing: aaplListing });
+  assert.equal(isUnavailable(outcome), true);
+  if (!isUnavailable(outcome)) return;
+  assert.equal(outcome.reason, "provider_error");
+  assert.match(outcome.detail ?? "", /lastTrade missing price or timestamp/);
 });
 
-test("polygon adapter rejects a malformed bar range pre-fetch (no wasted network call)", async () => {
+test("polygon adapter classifies a 503 from the fetcher as a retryable provider_error", async () => {
+  const adapter = createPolygonAdapter({
+    sourceId: POLYGON_SOURCE_ID,
+    delayClass: POLYGON_DELAY_CLASS,
+    fetcher: async () => {
+      throw new PolygonFetchError(503, "503 Service Unavailable");
+    },
+    resolveListing: async () => aaplCtx,
+    clock: fixedClock,
+  });
+
+  const outcome = await adapter.getQuote({ listing: aaplListing });
+  assert.equal(isUnavailable(outcome), true);
+  if (!isUnavailable(outcome)) return;
+  assert.doesNotThrow(() => assertUnavailableContract(outcome));
+  assert.equal(outcome.reason, "provider_error");
+  assert.equal(outcome.retryable, true);
+  assert.equal(outcome.source_id, POLYGON_SOURCE_ID);
+  assert.equal(outcome.as_of, FIXED_NOW);
+});
+
+test("polygon adapter classifies a 404 from the fetcher as missing_coverage", async () => {
+  const adapter = createPolygonAdapter({
+    sourceId: POLYGON_SOURCE_ID,
+    delayClass: POLYGON_DELAY_CLASS,
+    fetcher: async () => {
+      throw new PolygonFetchError(404, "ticker not found");
+    },
+    resolveListing: async () => aaplCtx,
+    clock: fixedClock,
+  });
+
+  const outcome = await adapter.getQuote({ listing: aaplListing });
+  assert.equal(isUnavailable(outcome), true);
+  if (!isUnavailable(outcome)) return;
+  assert.equal(outcome.reason, "missing_coverage");
+  assert.equal(outcome.retryable, false, "404 won't resolve by retrying");
+});
+
+test("polygon adapter classifies a 429 from the fetcher as rate_limited", async () => {
+  const adapter = createPolygonAdapter({
+    sourceId: POLYGON_SOURCE_ID,
+    delayClass: POLYGON_DELAY_CLASS,
+    fetcher: async () => {
+      throw new PolygonFetchError(429, "rate limit exceeded");
+    },
+    resolveListing: async () => aaplCtx,
+    clock: fixedClock,
+  });
+
+  const outcome = await adapter.getQuote({ listing: aaplListing });
+  assert.equal(isUnavailable(outcome), true);
+  if (!isUnavailable(outcome)) return;
+  assert.equal(outcome.reason, "rate_limited");
+  assert.equal(outcome.retryable, true);
+});
+
+test("polygon adapter classifies a 401 from the fetcher as non-retryable provider_error", async () => {
+  const adapter = createPolygonAdapter({
+    sourceId: POLYGON_SOURCE_ID,
+    delayClass: POLYGON_DELAY_CLASS,
+    fetcher: async () => {
+      throw new PolygonFetchError(401, "unauthorized");
+    },
+    resolveListing: async () => aaplCtx,
+    clock: fixedClock,
+  });
+
+  const outcome = await adapter.getQuote({ listing: aaplListing });
+  assert.equal(isUnavailable(outcome), true);
+  if (!isUnavailable(outcome)) return;
+  assert.equal(outcome.reason, "provider_error");
+  assert.equal(outcome.retryable, false);
+});
+
+test("polygon adapter classifies a generic network error as retryable provider_error", async () => {
+  const adapter = createPolygonAdapter({
+    sourceId: POLYGON_SOURCE_ID,
+    delayClass: POLYGON_DELAY_CLASS,
+    fetcher: async () => {
+      throw new Error("ECONNRESET: connection reset by peer");
+    },
+    resolveListing: async () => aaplCtx,
+    clock: fixedClock,
+  });
+
+  const outcome = await adapter.getQuote({ listing: aaplListing });
+  assert.equal(isUnavailable(outcome), true);
+  if (!isUnavailable(outcome)) return;
+  assert.equal(outcome.reason, "provider_error");
+  assert.equal(outcome.retryable, true);
+  assert.match(outcome.detail ?? "", /ECONNRESET/);
+});
+
+test("polygon adapter wraps resolveListing failures as unavailable too", async () => {
+  const adapter = createPolygonAdapter({
+    sourceId: POLYGON_SOURCE_ID,
+    delayClass: POLYGON_DELAY_CLASS,
+    fetcher: async () => {
+      throw new Error("should not be reached");
+    },
+    resolveListing: async () => {
+      throw new Error("listing context lookup failed");
+    },
+    clock: fixedClock,
+  });
+
+  const outcome = await adapter.getQuote({ listing: aaplListing });
+  assert.equal(isUnavailable(outcome), true);
+  if (!isUnavailable(outcome)) return;
+  assert.equal(outcome.reason, "provider_error");
+});
+
+test("polygon adapter unavailable envelope never carries raw provider field names in detail", async () => {
+  // Spec §6.2.1: raw provider error payloads must not leak. The detail string
+  // is human-readable but must come from our classifier, not be a passthrough
+  // of a vendor JSON blob.
+  const adapter = createPolygonAdapter({
+    sourceId: POLYGON_SOURCE_ID,
+    delayClass: POLYGON_DELAY_CLASS,
+    fetcher: async () => {
+      // Vendor-shaped error body — must not appear verbatim in the envelope.
+      const vendorErr = JSON.stringify({
+        request_id: "abc-123",
+        error: { ticker: "unknown", lastTrade: null },
+      });
+      throw new PolygonFetchError(503, `polygon api: ${vendorErr}`);
+    },
+    resolveListing: async () => aaplCtx,
+    clock: fixedClock,
+  });
+
+  const outcome = await adapter.getQuote({ listing: aaplListing });
+  assert.equal(isUnavailable(outcome), true);
+  if (!isUnavailable(outcome)) return;
+  // The envelope itself must not surface vendor field names structurally.
+  for (const banned of ["ticker", "lastTrade", "request_id", "results"]) {
+    assert.equal(banned in outcome, false, `vendor field "${banned}" leaked into envelope`);
+  }
+});
+
+test("polygon adapter throws (does NOT wrap) when caller passes a malformed bar range", async () => {
   let fetched = false;
   const adapter = createPolygonAdapter({
     sourceId: POLYGON_SOURCE_ID,
@@ -149,9 +318,9 @@ test("polygon adapter rejects a malformed bar range pre-fetch (no wasted network
     resolveListing: async () => aaplCtx,
   });
 
-  // "2026-04-22" is Date.parse-able (returns midnight UTC ms) but is NOT a
-  // valid offset-bearing ISO-8601 timestamp. Pre-fetch validation must reject
-  // it before any network call leaves the adapter.
+  // Pre-fetch validation rejects caller misuse before any network call.
+  // Caller bugs (bad range) intentionally throw so they don't masquerade as
+  // provider unavailability — that would mask real consumer errors.
   await assert.rejects(
     adapter.getBars({
       listing: aaplListing,
@@ -162,7 +331,6 @@ test("polygon adapter rejects a malformed bar range pre-fetch (no wasted network
   );
   assert.equal(fetched, false, "no fetch should have been issued for a malformed range");
 
-  // Range with start >= end must also be rejected pre-fetch.
   await assert.rejects(
     adapter.getBars({
       listing: aaplListing,
@@ -194,7 +362,7 @@ test("polygon adapter normalizes aggs into NormalizedBars and reports adjusted b
     resolveListing: async () => aaplCtx,
   });
 
-  const bars = await adapter.getBars({
+  const outcome = await adapter.getBars({
     listing: aaplListing,
     interval: "1d",
     range: {
@@ -202,6 +370,9 @@ test("polygon adapter normalizes aggs into NormalizedBars and reports adjusted b
       end: new Date(1_700_179_200_000).toISOString(),
     },
   });
+  assert.equal(isAvailable(outcome), true);
+  if (!isAvailable(outcome)) return;
+  const bars = outcome.data;
 
   assert.equal(bars.bars.length, 2);
   assert.equal(bars.adjustment_basis, "split_and_div_adjusted");
@@ -239,7 +410,7 @@ test("polygon adapter follows aggregate next_url pages", async () => {
     resolveListing: async () => aaplCtx,
   });
 
-  const bars = await adapter.getBars({
+  const outcome = await adapter.getBars({
     listing: aaplListing,
     interval: "1d",
     range: {
@@ -249,7 +420,9 @@ test("polygon adapter follows aggregate next_url pages", async () => {
   });
 
   assert.deepEqual(fetched, [firstPath, nextUrl]);
-  assert.equal(bars.bars.length, 2);
+  assert.equal(isAvailable(outcome), true);
+  if (!isAvailable(outcome)) return;
+  assert.equal(outcome.data.bars.length, 2);
 });
 
 test("polygon adapter reports unadjusted basis when provider response is unadjusted", async () => {
@@ -266,7 +439,7 @@ test("polygon adapter reports unadjusted basis when provider response is unadjus
     resolveListing: async () => aaplCtx,
   });
 
-  const bars = await adapter.getBars({
+  const outcome = await adapter.getBars({
     listing: aaplListing,
     interval: "1d",
     range: {
@@ -275,7 +448,9 @@ test("polygon adapter reports unadjusted basis when provider response is unadjus
     },
   });
 
-  assert.equal(bars.adjustment_basis, "unadjusted");
+  assert.equal(isAvailable(outcome), true);
+  if (!isAvailable(outcome)) return;
+  assert.equal(outcome.data.adjustment_basis, "unadjusted");
 });
 
 test("polygon adapter does not leak vendor field names into normalized quote output", async () => {
@@ -292,7 +467,10 @@ test("polygon adapter does not leak vendor field names into normalized quote out
     resolveListing: async () => aaplCtx,
   });
 
-  const quote = await adapter.getQuote({ listing: aaplListing });
+  const outcome = await adapter.getQuote({ listing: aaplListing });
+  assert.equal(isAvailable(outcome), true);
+  if (!isAvailable(outcome)) return;
+  const quote = outcome.data;
 
   for (const banned of [
     "ticker",
@@ -308,4 +486,66 @@ test("polygon adapter does not leak vendor field names into normalized quote out
   ]) {
     assert.equal(banned in quote, false, `vendor field "${banned}" leaked into quote`);
   }
+});
+
+test("polygon adapter classifies bar fetch failures (5xx) as unavailable", async () => {
+  const adapter = createPolygonAdapter({
+    sourceId: POLYGON_SOURCE_ID,
+    delayClass: POLYGON_DELAY_CLASS,
+    fetcher: async () => {
+      throw new PolygonFetchError(502, "bad gateway");
+    },
+    resolveListing: async () => aaplCtx,
+    clock: fixedClock,
+  });
+
+  const outcome = await adapter.getBars({
+    listing: aaplListing,
+    interval: "1d",
+    range: aaplBarRange,
+  });
+  assert.equal(isUnavailable(outcome), true);
+  if (!isUnavailable(outcome)) return;
+  assert.equal(outcome.reason, "provider_error");
+  assert.equal(outcome.retryable, true);
+});
+
+test("polygon adapter classifies an inconsistent multi-page adjusted flag as unavailable", async () => {
+  const firstPath = "/v2/aggs/ticker/AAPL/range/1/day/1700006400000/1700179200000?adjusted=true&sort=asc&limit=50000";
+  const nextUrl = "https://api.polygon.io/v2/aggs/ticker/AAPL/range/1/day/next?cursor=mismatch";
+  const adapter = createPolygonAdapter({
+    sourceId: POLYGON_SOURCE_ID,
+    delayClass: POLYGON_DELAY_CLASS,
+    fetcher: async (path) => {
+      if (path === firstPath) {
+        return {
+          adjusted: true,
+          next_url: nextUrl,
+          results: [{ t: 1_700_006_400_000, o: 100, h: 101, l: 99, c: 100.5, v: 10_000 }],
+        };
+      }
+      if (path === nextUrl) {
+        return {
+          adjusted: false,
+          results: [{ t: 1_700_092_800_000, o: 100.5, h: 102, l: 100.4, c: 101.7, v: 12_000 }],
+        };
+      }
+      throw new Error(`unexpected fetch: ${path}`);
+    },
+    resolveListing: async () => aaplCtx,
+    clock: fixedClock,
+  });
+
+  const outcome = await adapter.getBars({
+    listing: aaplListing,
+    interval: "1d",
+    range: {
+      start: new Date(1_700_006_400_000).toISOString(),
+      end: new Date(1_700_179_200_000).toISOString(),
+    },
+  });
+  assert.equal(isUnavailable(outcome), true);
+  if (!isUnavailable(outcome)) return;
+  assert.equal(outcome.reason, "provider_error");
+  assert.equal(outcome.retryable, false);
 });

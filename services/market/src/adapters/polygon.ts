@@ -1,11 +1,13 @@
 import type {
   BarsRequest,
   MarketDataAdapter,
+  MarketDataOutcome,
   NormalizedBar,
   NormalizedBars,
   NormalizedQuote,
   QuoteRequest,
 } from "../adapter.ts";
+import { available, unavailable, type AvailabilityReason } from "../availability.ts";
 import { assertBarRange, normalizedBars, type AdjustmentBasis, type BarInterval } from "../bar.ts";
 import { DELAY_CLASSES, normalizedQuote, type DelayClass, type SessionState } from "../quote.ts";
 import type { ListingSubjectRef, UUID } from "../subject-ref.ts";
@@ -24,7 +26,22 @@ export type PolygonAdapterDeps = {
   delayClass: DelayClass;
   fetcher: PolygonFetcher;
   resolveListing: (listing: ListingSubjectRef) => Promise<PolygonListingContext>;
+  // Optional clock for the `as_of` timestamp on unavailable envelopes; defaults
+  // to wall-clock time. Tests inject a fixed clock for deterministic outputs.
+  clock?: () => Date;
 };
+
+// Fetcher implementations should throw a PolygonFetchError when an HTTP-layer
+// failure occurs so the adapter can classify the outcome by status code rather
+// than guessing from a generic Error message.
+export class PolygonFetchError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "PolygonFetchError";
+    this.status = status;
+  }
+}
 
 type PolygonSnapshotPayload = {
   status?: string;
@@ -68,94 +85,168 @@ const INTERVAL_TO_POLYGON: Record<BarInterval, { multiplier: number; timespan: s
 
 export function createPolygonAdapter(deps: PolygonAdapterDeps): MarketDataAdapter {
   assertOneOf(deps.delayClass, DELAY_CLASSES, "polygon.delayClass");
+  const clock = deps.clock ?? (() => new Date());
+
+  const wrapUnavailable = (
+    listing: ListingSubjectRef,
+    err: unknown,
+  ): MarketDataOutcome<never> => {
+    const classified = classifyError(err);
+    return unavailable({
+      reason: classified.reason,
+      listing,
+      source_id: deps.sourceId,
+      as_of: clock().toISOString(),
+      retryable: classified.retryable,
+      detail: classified.detail,
+    });
+  };
 
   return {
     providerName: "polygon",
     sourceId: deps.sourceId,
 
-    async getQuote(request: QuoteRequest): Promise<NormalizedQuote> {
-      const ctx = await deps.resolveListing(request.listing);
-      const path = `/v2/snapshot/locale/us/markets/stocks/tickers/${encodeURIComponent(ctx.ticker)}`;
-      const raw = (await deps.fetcher(path)) as PolygonSnapshotPayload;
+    async getQuote(request: QuoteRequest): Promise<MarketDataOutcome<NormalizedQuote>> {
+      try {
+        const ctx = await deps.resolveListing(request.listing);
+        const path = `/v2/snapshot/locale/us/markets/stocks/tickers/${encodeURIComponent(ctx.ticker)}`;
+        const raw = (await deps.fetcher(path)) as PolygonSnapshotPayload;
 
-      const price = raw?.ticker?.lastTrade?.p;
-      const tNs = raw?.ticker?.lastTrade?.t;
-      const prevClose = raw?.ticker?.prevDay?.c;
+        const price = raw?.ticker?.lastTrade?.p;
+        const tNs = raw?.ticker?.lastTrade?.t;
+        const prevClose = raw?.ticker?.prevDay?.c;
 
-      if (typeof price !== "number" || typeof tNs !== "number") {
-        throw new Error("polygon: snapshot.lastTrade missing price or timestamp");
+        if (typeof price !== "number" || typeof tNs !== "number") {
+          throw new MalformedPayloadError("snapshot.lastTrade missing price or timestamp");
+        }
+        if (typeof prevClose !== "number") {
+          throw new MalformedPayloadError("snapshot.prevDay.c missing — cannot compute change");
+        }
+
+        const as_of = new Date(Math.floor(tNs / 1_000_000)).toISOString();
+
+        return available(
+          normalizedQuote({
+            listing: request.listing,
+            price,
+            prev_close: prevClose,
+            session_state: classifySession(raw?.ticker?.market_status, as_of),
+            as_of,
+            delay_class: deps.delayClass,
+            currency: ctx.currency,
+            source_id: deps.sourceId,
+          }),
+        );
+      } catch (err) {
+        return wrapUnavailable(request.listing, err);
       }
-      if (typeof prevClose !== "number") {
-        throw new Error("polygon: snapshot.prevDay.c missing — cannot compute change");
-      }
-
-      const as_of = new Date(Math.floor(tNs / 1_000_000)).toISOString();
-
-      return normalizedQuote({
-        listing: request.listing,
-        price,
-        prev_close: prevClose,
-        session_state: classifySession(raw?.ticker?.market_status, as_of),
-        as_of,
-        delay_class: deps.delayClass,
-        currency: ctx.currency,
-        source_id: deps.sourceId,
-      });
     },
 
-    async getBars(request: BarsRequest): Promise<NormalizedBars> {
+    async getBars(request: BarsRequest): Promise<MarketDataOutcome<NormalizedBars>> {
+      // Pre-fetch validation runs before the try/catch so caller-side bugs
+      // (malformed range) surface as exceptions rather than masquerading as
+      // provider unavailability.
       assertBarRange(request.range, "getBars.request.range");
-      const ctx = await deps.resolveListing(request.listing);
-      const tspec = INTERVAL_TO_POLYGON[request.interval];
-      const startMs = Date.parse(request.range.start);
-      const endMs = Date.parse(request.range.end);
 
-      const path =
-        `/v2/aggs/ticker/${encodeURIComponent(ctx.ticker)}/range/` +
-        `${tspec.multiplier}/${tspec.timespan}/${startMs}/${endMs}` +
-        `?adjusted=true&sort=asc&limit=50000`;
-      const pages = await fetchAggPages(deps.fetcher, path);
+      try {
+        const ctx = await deps.resolveListing(request.listing);
+        const tspec = INTERVAL_TO_POLYGON[request.interval];
+        const startMs = Date.parse(request.range.start);
+        const endMs = Date.parse(request.range.end);
 
-      const rawBars = pages.flatMap((page) => page.results ?? []);
-      const bars: NormalizedBar[] = rawBars.map((row, i) => {
-        const { t, o, h, l, c, v } = row;
-        if (
-          typeof t !== "number" ||
-          typeof o !== "number" ||
-          typeof h !== "number" ||
-          typeof l !== "number" ||
-          typeof c !== "number" ||
-          typeof v !== "number"
-        ) {
-          throw new Error(`polygon: aggs row ${i} missing OHLCV field`);
-        }
-        return {
-          ts: new Date(t).toISOString(),
-          open: o,
-          high: h,
-          low: l,
-          close: c,
-          volume: v,
-        };
-      });
+        const path =
+          `/v2/aggs/ticker/${encodeURIComponent(ctx.ticker)}/range/` +
+          `${tspec.multiplier}/${tspec.timespan}/${startMs}/${endMs}` +
+          `?adjusted=true&sort=asc&limit=50000`;
+        const pages = await fetchAggPages(deps.fetcher, path);
 
-      const adjustment_basis = aggregateAdjustmentBasis(pages);
+        const rawBars = pages.flatMap((page) => page.results ?? []);
+        const bars: NormalizedBar[] = rawBars.map((row, i) => {
+          const { t, o, h, l, c, v } = row;
+          if (
+            typeof t !== "number" ||
+            typeof o !== "number" ||
+            typeof h !== "number" ||
+            typeof l !== "number" ||
+            typeof c !== "number" ||
+            typeof v !== "number"
+          ) {
+            throw new MalformedPayloadError(`aggs row ${i} missing OHLCV field`);
+          }
+          return {
+            ts: new Date(t).toISOString(),
+            open: o,
+            high: h,
+            low: l,
+            close: c,
+            volume: v,
+          };
+        });
 
-      const asOf = bars.length > 0 ? bars[bars.length - 1].ts : request.range.end;
+        const adjustment_basis = aggregateAdjustmentBasis(pages);
+        const asOf = bars.length > 0 ? bars[bars.length - 1].ts : request.range.end;
 
-      return normalizedBars({
-        listing: request.listing,
-        interval: request.interval,
-        range: request.range,
-        bars,
-        as_of: asOf,
-        delay_class: deps.delayClass,
-        currency: ctx.currency,
-        source_id: deps.sourceId,
-        adjustment_basis,
-      });
+        return available(
+          normalizedBars({
+            listing: request.listing,
+            interval: request.interval,
+            range: request.range,
+            bars,
+            as_of: asOf,
+            delay_class: deps.delayClass,
+            currency: ctx.currency,
+            source_id: deps.sourceId,
+            adjustment_basis,
+          }),
+        );
+      } catch (err) {
+        return wrapUnavailable(request.listing, err);
+      }
     },
   };
+}
+
+// Internal sentinel for "200 OK but the payload is missing required fields."
+// Classified as a non-retryable provider_error since retrying produces the
+// same broken response.
+class MalformedPayloadError extends Error {
+  constructor(message: string) {
+    super(`polygon: ${message}`);
+    this.name = "MalformedPayloadError";
+  }
+}
+
+type ClassifiedError = {
+  reason: AvailabilityReason;
+  retryable: boolean;
+  detail: string;
+};
+
+function classifyError(err: unknown): ClassifiedError {
+  if (err instanceof PolygonFetchError) {
+    if (err.status === 404) {
+      return { reason: "missing_coverage", retryable: false, detail: `polygon: ${err.message}` };
+    }
+    if (err.status === 429) {
+      return { reason: "rate_limited", retryable: true, detail: `polygon: ${err.message}` };
+    }
+    if (err.status >= 500 && err.status < 600) {
+      return { reason: "provider_error", retryable: true, detail: `polygon: ${err.message}` };
+    }
+    // Other 4xx responses are caller misconfiguration (auth, bad request).
+    // Surface as provider_error but mark non-retryable so we don't loop on
+    // a deterministic failure.
+    return { reason: "provider_error", retryable: false, detail: `polygon: ${err.message}` };
+  }
+  if (err instanceof MalformedPayloadError) {
+    return { reason: "provider_error", retryable: false, detail: err.message };
+  }
+  if (err instanceof Error) {
+    // Unknown provider-side or fetcher errors (e.g., network failure thrown
+    // without a status). Allow retry — caller can decide whether to backoff.
+    return { reason: "provider_error", retryable: true, detail: `polygon: ${err.message}` };
+  }
+  return { reason: "provider_error", retryable: false, detail: "polygon: unknown error" };
 }
 
 async function fetchAggPages(fetcher: PolygonFetcher, firstPath: string): Promise<PolygonAggsPayload[]> {
@@ -165,7 +256,7 @@ async function fetchAggPages(fetcher: PolygonFetcher, firstPath: string): Promis
 
   while (nextPath) {
     if (seen.has(nextPath)) {
-      throw new Error(`polygon: aggregate pagination loop detected for ${nextPath}`);
+      throw new MalformedPayloadError(`aggregate pagination loop detected for ${nextPath}`);
     }
     seen.add(nextPath);
 
@@ -186,7 +277,7 @@ function aggregateAdjustmentBasis(pages: PolygonAggsPayload[]): AdjustmentBasis 
   const distinct = new Set(flags);
 
   if (distinct.size > 1) {
-    throw new Error("polygon: inconsistent aggregate adjusted flags across pages");
+    throw new MalformedPayloadError("inconsistent aggregate adjusted flags across pages");
   }
 
   return flags[0] === true ? "split_and_div_adjusted" : "unadjusted";
