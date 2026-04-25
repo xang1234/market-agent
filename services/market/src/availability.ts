@@ -69,7 +69,7 @@ export function unavailable(input: UnavailableInput): UnavailableEnvelope {
   const envelope: UnavailableEnvelope = {
     outcome: "unavailable",
     reason: input.reason,
-    listing: freezeListingRef(input.listing, "unavailable"),
+    listing: freezeListingRef(input.listing, "unavailable.listing"),
     source_id: input.source_id,
     as_of: input.as_of,
     retryable: input.retryable,

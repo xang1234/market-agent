@@ -276,4 +276,5 @@ test("contract: a provider 5xx surfaces as a normalized unavailable envelope (no
   if (!isUnavailable(barsOutcome)) return;
   assert.doesNotThrow(() => assertUnavailableContract(barsOutcome));
   assert.equal(barsOutcome.reason, "provider_error");
+  assert.equal(barsOutcome.retryable, true);
 });

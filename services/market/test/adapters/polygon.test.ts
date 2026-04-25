@@ -276,21 +276,22 @@ test("polygon adapter wraps resolveListing failures as unavailable too", async (
   assert.equal(isUnavailable(outcome), true);
   if (!isUnavailable(outcome)) return;
   assert.equal(outcome.reason, "provider_error");
+  assert.equal(outcome.retryable, false);
 });
 
 test("polygon adapter unavailable envelope never carries raw provider field names in detail", async () => {
   // Spec §6.2.1: raw provider error payloads must not leak. The detail string
   // is human-readable but must come from our classifier, not be a passthrough
   // of a vendor JSON blob.
+  const vendorErr = JSON.stringify({
+    request_id: "abc-123",
+    error: { ticker: "unknown", lastTrade: null },
+  });
   const adapter = createPolygonAdapter({
     sourceId: POLYGON_SOURCE_ID,
     delayClass: POLYGON_DELAY_CLASS,
     fetcher: async () => {
       // Vendor-shaped error body — must not appear verbatim in the envelope.
-      const vendorErr = JSON.stringify({
-        request_id: "abc-123",
-        error: { ticker: "unknown", lastTrade: null },
-      });
       throw new PolygonFetchError(503, `polygon api: ${vendorErr}`);
     },
     resolveListing: async () => aaplCtx,
@@ -300,10 +301,56 @@ test("polygon adapter unavailable envelope never carries raw provider field name
   const outcome = await adapter.getQuote({ listing: aaplListing });
   assert.equal(isUnavailable(outcome), true);
   if (!isUnavailable(outcome)) return;
-  // The envelope itself must not surface vendor field names structurally.
+  // The envelope must not surface vendor field names structurally...
   for (const banned of ["ticker", "lastTrade", "request_id", "results"]) {
     assert.equal(banned in outcome, false, `vendor field "${banned}" leaked into envelope`);
   }
+  // ...nor pass them through verbatim in the human-readable detail string.
+  assert.equal(typeof outcome.detail, "string");
+  assert.equal(outcome.detail.includes(vendorErr), false);
+  for (const banned of ["ticker", "lastTrade", "request_id", "results"]) {
+    assert.equal(
+      outcome.detail.includes(banned),
+      false,
+      `vendor field "${banned}" leaked into outcome.detail: ${outcome.detail}`,
+    );
+  }
+});
+
+test("polygon adapter rejects malformed listing refs before resolving or fetching", async () => {
+  const malformedListing = { kind: "listing", id: 123 } as unknown as typeof aaplListing;
+  let resolved = false;
+  let fetched = false;
+  const adapter = createPolygonAdapter({
+    sourceId: POLYGON_SOURCE_ID,
+    delayClass: POLYGON_DELAY_CLASS,
+    fetcher: async () => {
+      fetched = true;
+      return aaplSnapshotPayload({ marketStatus: null });
+    },
+    resolveListing: async () => {
+      resolved = true;
+      return aaplCtx;
+    },
+  });
+
+  await assert.rejects(
+    adapter.getQuote({ listing: malformedListing }),
+    /getQuote\.request\.listing/,
+  );
+  assert.equal(resolved, false, "quote lookup should not resolve malformed listing refs");
+  assert.equal(fetched, false, "quote lookup should not fetch malformed listing refs");
+
+  await assert.rejects(
+    adapter.getBars({
+      listing: malformedListing,
+      interval: "1d",
+      range: aaplBarRange,
+    }),
+    /getBars\.request\.listing/,
+  );
+  assert.equal(resolved, false, "bar lookup should not resolve malformed listing refs");
+  assert.equal(fetched, false, "bar lookup should not fetch malformed listing refs");
 });
 
 test("polygon adapter throws (does NOT wrap) when caller passes a malformed bar range", async () => {

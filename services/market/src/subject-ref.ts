@@ -12,9 +12,7 @@ export function freezeListingRef(
   ref: ListingSubjectRef,
   label: string,
 ): ListingSubjectRef {
-  if (ref?.kind !== "listing") {
-    throw new Error(`${label}: listing must be a listing SubjectRef`);
-  }
+  assertListingRef(ref, label);
   return Object.freeze({ kind: ref.kind, id: ref.id });
 }
 

@@ -10,7 +10,7 @@ import type {
 import { available, unavailable, type AvailabilityReason } from "../availability.ts";
 import { assertBarRange, normalizedBars, type AdjustmentBasis, type BarInterval } from "../bar.ts";
 import { DELAY_CLASSES, normalizedQuote, type DelayClass, type SessionState } from "../quote.ts";
-import type { ListingSubjectRef, UUID } from "../subject-ref.ts";
+import { assertListingRef, type ListingSubjectRef, type UUID } from "../subject-ref.ts";
 import { assertOneOf } from "../validators.ts";
 
 export type PolygonListingContext = {
@@ -107,8 +107,10 @@ export function createPolygonAdapter(deps: PolygonAdapterDeps): MarketDataAdapte
     sourceId: deps.sourceId,
 
     async getQuote(request: QuoteRequest): Promise<MarketDataOutcome<NormalizedQuote>> {
+      assertListingRef(request.listing, "getQuote.request.listing");
+
       try {
-        const ctx = await deps.resolveListing(request.listing);
+        const ctx = await resolveListing(deps, request.listing);
         const path = `/v2/snapshot/locale/us/markets/stocks/tickers/${encodeURIComponent(ctx.ticker)}`;
         const raw = (await deps.fetcher(path)) as PolygonSnapshotPayload;
 
@@ -144,12 +146,13 @@ export function createPolygonAdapter(deps: PolygonAdapterDeps): MarketDataAdapte
 
     async getBars(request: BarsRequest): Promise<MarketDataOutcome<NormalizedBars>> {
       // Pre-fetch validation runs before the try/catch so caller-side bugs
-      // (malformed range) surface as exceptions rather than masquerading as
-      // provider unavailability.
+      // (malformed listing/range) surface as exceptions rather than
+      // masquerading as provider unavailability.
+      assertListingRef(request.listing, "getBars.request.listing");
       assertBarRange(request.range, "getBars.request.range");
 
       try {
-        const ctx = await deps.resolveListing(request.listing);
+        const ctx = await resolveListing(deps, request.listing);
         const tspec = INTERVAL_TO_POLYGON[request.interval];
         const startMs = Date.parse(request.range.start);
         const endMs = Date.parse(request.range.end);
@@ -216,6 +219,13 @@ class MalformedPayloadError extends Error {
   }
 }
 
+class ListingResolutionError extends Error {
+  constructor(err: unknown) {
+    super(errorMessage(err, "listing context lookup failed"));
+    this.name = "ListingResolutionError";
+  }
+}
+
 type ClassifiedError = {
   reason: AvailabilityReason;
   retryable: boolean;
@@ -223,20 +233,23 @@ type ClassifiedError = {
 };
 
 function classifyError(err: unknown): ClassifiedError {
+  if (err instanceof ListingResolutionError) {
+    return { reason: "provider_error", retryable: false, detail: `polygon: ${err.message}` };
+  }
   if (err instanceof PolygonFetchError) {
     if (err.status === 404) {
-      return { reason: "missing_coverage", retryable: false, detail: `polygon: ${err.message}` };
+      return { reason: "missing_coverage", retryable: false, detail: polygonHttpDetail(err.status) };
     }
     if (err.status === 429) {
-      return { reason: "rate_limited", retryable: true, detail: `polygon: ${err.message}` };
+      return { reason: "rate_limited", retryable: true, detail: polygonHttpDetail(err.status) };
     }
     if (err.status >= 500 && err.status < 600) {
-      return { reason: "provider_error", retryable: true, detail: `polygon: ${err.message}` };
+      return { reason: "provider_error", retryable: true, detail: polygonHttpDetail(err.status) };
     }
     // Other 4xx responses are caller misconfiguration (auth, bad request).
     // Surface as provider_error but mark non-retryable so we don't loop on
     // a deterministic failure.
-    return { reason: "provider_error", retryable: false, detail: `polygon: ${err.message}` };
+    return { reason: "provider_error", retryable: false, detail: polygonHttpDetail(err.status) };
   }
   if (err instanceof MalformedPayloadError) {
     return { reason: "provider_error", retryable: false, detail: err.message };
@@ -247,6 +260,27 @@ function classifyError(err: unknown): ClassifiedError {
     return { reason: "provider_error", retryable: true, detail: `polygon: ${err.message}` };
   }
   return { reason: "provider_error", retryable: false, detail: "polygon: unknown error" };
+}
+
+async function resolveListing(
+  deps: PolygonAdapterDeps,
+  listing: ListingSubjectRef,
+): Promise<PolygonListingContext> {
+  try {
+    return await deps.resolveListing(listing);
+  } catch (err) {
+    throw new ListingResolutionError(err);
+  }
+}
+
+function polygonHttpDetail(status: number): string {
+  return `polygon: HTTP ${status}`;
+}
+
+function errorMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message.length > 0) return err.message;
+  if (typeof err === "string" && err.length > 0) return err;
+  return fallback;
 }
 
 async function fetchAggPages(fetcher: PolygonFetcher, firstPath: string): Promise<PolygonAggsPayload[]> {

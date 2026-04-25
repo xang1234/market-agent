@@ -52,7 +52,15 @@ test("unavailable rejects non-listing SubjectRefs", () => {
   const issuerRef = { kind: "issuer", id: aaplListing.id } as unknown as typeof aaplListing;
   assert.throws(
     () => unavailable({ ...validUnavailable(), listing: issuerRef }),
-    /listing must be a listing SubjectRef/,
+    /listing/,
+  );
+});
+
+test("unavailable rejects listing refs with non-string ids", () => {
+  const malformedListing = { kind: "listing", id: 123 } as unknown as typeof aaplListing;
+  assert.throws(
+    () => unavailable({ ...validUnavailable(), listing: malformedListing }),
+    /listing/,
   );
 });
 
@@ -120,6 +128,12 @@ test("assertUnavailableContract rejects an envelope whose listing is not kind=li
   const env = unavailable(validUnavailable()) as UnavailableEnvelope;
   const tampered = { ...env, listing: { kind: "issuer", id: env.listing.id } };
   assert.throws(() => assertUnavailableContract(tampered), /listing/);
+});
+
+test("assertUnavailableContract rejects an envelope whose detail is not a string", () => {
+  const env = unavailable(validUnavailable()) as UnavailableEnvelope;
+  const tampered = { ...env, detail: 123 };
+  assert.throws(() => assertUnavailableContract(tampered), /detail/);
 });
 
 test("every AvailabilityReason value is accepted by the smart constructor", () => {
