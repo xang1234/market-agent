@@ -10,7 +10,7 @@
 //   "split_adjusted":         splits + stock dividends only (share-count CAs)
 //   "split_and_div_adjusted": all CA classes (also cash dividends, spin-offs)
 
-import type { ListingSubjectRef, UUID } from "./subject-ref.ts";
+import { freezeListingRef, type ListingSubjectRef, type UUID } from "./subject-ref.ts";
 import type { AdjustmentBasis, NormalizedBar } from "./bar.ts";
 import {
   assertCurrency,
@@ -19,13 +19,6 @@ import {
   assertOneOf,
   assertUuid,
 } from "./validators.ts";
-
-function freezeListing(ref: ListingSubjectRef, label: string): ListingSubjectRef {
-  if (ref?.kind !== "listing") {
-    throw new Error(`${label}: listing must be a listing SubjectRef`);
-  }
-  return Object.freeze({ kind: ref.kind, id: ref.id });
-}
 
 export type CorporateActionKind =
   | "split"
@@ -90,7 +83,7 @@ export function corporateAction(input: CorporateAction): CorporateAction {
   assertOneOf(input.kind, CORPORATE_ACTION_KINDS, "corporateAction.kind");
   assertIso8601Utc(input.effective_date, `corporateAction[${input.kind}].effective_date`);
   assertUuid(input.source_id, `corporateAction[${input.kind}].source_id`);
-  const listing = freezeListing(input.listing, `corporateAction[${input.kind}].listing`);
+  const listing = freezeListingRef(input.listing, `corporateAction[${input.kind}].listing`);
 
   switch (input.kind) {
     case "split":
@@ -108,7 +101,7 @@ export function corporateAction(input: CorporateAction): CorporateAction {
       return Object.freeze({
         ...input,
         listing,
-        target_listing: freezeListing(
+        target_listing: freezeListingRef(
           input.target_listing,
           "corporateAction[spin_off].target_listing",
         ),
@@ -184,7 +177,8 @@ function applyShareCountAction(
   if (!Number.isFinite(effMs)) return bars;
 
   return bars.map((bar, i) => {
-    if (tsMs[i] >= effMs) return bar;
+    const ms = tsMs[i];
+    if (!Number.isFinite(ms) || ms >= effMs) return bar;
     return {
       ts: bar.ts,
       open: bar.open / ratio,
@@ -231,7 +225,8 @@ function applyValueDistribution(
   if (!Number.isFinite(factor) || factor <= 0) return bars;
 
   return bars.map((bar, i) => {
-    if (tsMs[i] >= effMs) return bar;
+    const ms = tsMs[i];
+    if (!Number.isFinite(ms) || ms >= effMs) return bar;
     return {
       ts: bar.ts,
       open: bar.open * factor,

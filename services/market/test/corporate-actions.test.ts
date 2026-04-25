@@ -328,7 +328,7 @@ test("corporateAction rejects bad inputs distinctly per kind", () => {
         denominator: 1,
         source_id: SOURCE_ID,
       }),
-    /listing must be a listing SubjectRef/,
+    /listing/,
   );
   assert.throws(
     () =>
@@ -337,6 +337,31 @@ test("corporateAction rejects bad inputs distinctly per kind", () => {
         listing: aaplListing,
         effective_date: "2026-01-03T00:00:00.000Z",
         target_listing: { kind: "issuer", id: targetListing.id } as unknown as ListingSubjectRef,
+        spinoff_value: 5,
+        currency: "USD",
+        source_id: SOURCE_ID,
+      }),
+    /target_listing/,
+  );
+  assert.throws(
+    () =>
+      corporateAction({
+        kind: "split",
+        listing: { kind: "listing", id: 42 } as unknown as ListingSubjectRef,
+        effective_date: "2026-01-03T00:00:00.000Z",
+        numerator: 2,
+        denominator: 1,
+        source_id: SOURCE_ID,
+      }),
+    /listing/,
+  );
+  assert.throws(
+    () =>
+      corporateAction({
+        kind: "spin_off",
+        listing: aaplListing,
+        effective_date: "2026-01-03T00:00:00.000Z",
+        target_listing: { kind: "listing", id: 42 } as unknown as ListingSubjectRef,
         spinoff_value: 5,
         currency: "USD",
         source_id: SOURCE_ID,
@@ -544,6 +569,50 @@ test("malformed effective_date does not reorder otherwise valid corporate action
   assert.equal(ROUND(adjusted[1].close), 49.5);
   assert.equal(ROUND(adjusted[2].close), 50);
   assert.equal(adjusted[3].close, 50);
+});
+
+test("bars with malformed timestamps are not share-count adjusted", () => {
+  const badTsBar = { ...bar("2026-01-01", 100, 1_000), ts: "not-an-iso-timestamp" };
+  const bars = [
+    badTsBar,
+    bar("2026-01-01", 100, 1_000),
+    bar("2026-01-02", 50, 2_000),
+  ];
+  const split: Split = {
+    kind: "split",
+    listing: aaplListing,
+    effective_date: "2026-01-02T00:00:00.000Z",
+    numerator: 2,
+    denominator: 1,
+    source_id: SOURCE_ID,
+  };
+  const adjusted = applyCorporateActions(bars, [split], "split_adjusted");
+  assert.equal(adjusted[0].close, 100);
+  assert.equal(adjusted[0].volume, 1_000);
+  assert.equal(adjusted[1].close, 50);
+  assert.equal(adjusted[1].volume, 2_000);
+  assert.equal(adjusted[2].close, 50);
+});
+
+test("bars with malformed timestamps are not value-distribution adjusted", () => {
+  const badTsBar = { ...bar("2026-01-01", 200), ts: "not-an-iso-timestamp" };
+  const bars = [
+    bar("2026-01-01", 100),
+    badTsBar,
+    bar("2026-01-02", 99),
+  ];
+  const dividend: CashDividend = {
+    kind: "cash_dividend",
+    listing: aaplListing,
+    effective_date: "2026-01-02T00:00:00.000Z",
+    cash_amount: 1,
+    currency: "USD",
+    source_id: SOURCE_ID,
+  };
+  const adjusted = applyCorporateActions(bars, [dividend], "split_and_div_adjusted");
+  assert.equal(adjusted[0].close, 99);
+  assert.equal(adjusted[1].close, 200);
+  assert.equal(adjusted[2].close, 99);
 });
 
 test("applyCorporateActions accepts a CorporateAction union member without narrowing at the call site", () => {
