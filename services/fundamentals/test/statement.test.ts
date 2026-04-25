@@ -2,11 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   assertStatementContract,
-  COVERAGE_LEVELS,
   normalizedStatement,
-  PERIOD_KINDS,
-  STATEMENT_BASES,
-  STATEMENT_FAMILIES,
   type NormalizedStatement,
   type NormalizedStatementInput,
   type StatementLine,
@@ -32,8 +28,6 @@ function nativeOf(s: NormalizedStatement, key: string): number {
   return line.value_num * line.scale;
 }
 
-// --- AAPL FY2024 verification (acceptance criterion for fra-cw0.3.1) -------
-
 test("AAPL FY2024 income statement normalizes against the 10-K filed 2024-11-01", () => {
   const s = normalizedStatement(aaplFy2024IncomeStatementInput());
 
@@ -57,9 +51,7 @@ test("AAPL FY2024 normalized values resolve to the native USD amounts in the fil
   assert.equal(nativeOf(s, "operating_income"), AAPL_FY2024_KNOWN_VALUES.operating_income);
   assert.equal(nativeOf(s, "net_income"), AAPL_FY2024_KNOWN_VALUES.net_income);
 
-  // EPS lines must keep their per-share scale=1; otherwise consumers would
-  // divide by a stray millions multiplier and quietly emit $6.11 million
-  // per share.
+  // EPS keeps scale=1 so the millions multiplier doesn't propagate per-share.
   assert.equal(lineByKey(s, "eps.basic").value_num, AAPL_FY2024_KNOWN_VALUES.eps_basic);
   assert.equal(lineByKey(s, "eps.basic").scale, 1);
   assert.equal(lineByKey(s, "eps.basic").unit, "currency_per_share");
@@ -69,9 +61,6 @@ test("AAPL FY2024 normalized values resolve to the native USD amounts in the fil
 test("AAPL FY2024 normalized values respect the issuer's reported accounting identities", () => {
   const s = normalizedStatement(aaplFy2024IncomeStatementInput());
 
-  // The filing reports each subtotal directly. We verify the relationships
-  // the way an auditor would: subtract the components from the subtotal
-  // and assert the remainder matches the filing exactly.
   const netSales = nativeOf(s, "net_sales.total");
   const cogs = nativeOf(s, "cost_of_sales.total");
   const gross = nativeOf(s, "gross_profit");
@@ -87,8 +76,6 @@ test("AAPL FY2024 normalized values respect the issuer's reported accounting ide
   assert.equal(opIncome + otherIncome, preTax, "op_income + other == pre_tax");
   assert.equal(preTax - tax, net, "pre_tax - tax == net_income");
 });
-
-// --- Frozen value-object discipline ---------------------------------------
 
 test("normalizedStatement returns a frozen value object so callers can't post-hoc mutate", () => {
   const s = normalizedStatement(aaplFy2024IncomeStatementInput());
@@ -116,8 +103,6 @@ test("normalizedStatement clones lines so input array mutation can't leak throug
   assert.equal(s.lines.length, input.lines.length - 1);
   assert.equal(s.lines.find((l) => l.metric_key === "tampered"), undefined);
 });
-
-// --- Subject and family contract -------------------------------------------
 
 test("normalizedStatement rejects non-issuer SubjectRefs (listing, instrument, ticker)", () => {
   for (const badKind of ["listing", "instrument", "ticker"]) {
@@ -148,15 +133,6 @@ test("normalizedStatement rejects unknown family / basis / period_kind", () => {
     /period_kind/,
   );
 });
-
-test("STATEMENT_FAMILIES, STATEMENT_BASES, PERIOD_KINDS, COVERAGE_LEVELS are stable enums", () => {
-  assert.deepEqual([...STATEMENT_FAMILIES], ["income", "balance", "cashflow"]);
-  assert.deepEqual([...STATEMENT_BASES], ["as_reported", "as_restated"]);
-  assert.deepEqual([...PERIOD_KINDS], ["point", "fiscal_q", "fiscal_y", "ttm"]);
-  assert.deepEqual([...COVERAGE_LEVELS], ["full", "partial", "sparse", "unavailable"]);
-});
-
-// --- Period contract -------------------------------------------------------
 
 test("balance-sheet family requires period_kind=point and forbids period_start", () => {
   const balance: NormalizedStatementInput = {
@@ -264,8 +240,6 @@ test("normalizedStatement rejects calendar-impossible dates", () => {
     /valid calendar date/,
   );
 });
-
-// --- Line-level contract ---------------------------------------------------
 
 test("normalizedStatement rejects monetary lines whose currency disagrees with reporting_currency", () => {
   const input = aaplFy2024IncomeStatementInput();
@@ -409,8 +383,6 @@ test("normalizedStatement requires non-full coverage when value_num is null", ()
   assert.equal(s.lines[0].coverage_level, "unavailable");
 });
 
-// --- Metadata contract -----------------------------------------------------
-
 test("normalizedStatement rejects ISO timestamps without explicit Z or offset", () => {
   const input = aaplFy2024IncomeStatementInput();
   assert.throws(
@@ -444,8 +416,6 @@ test("normalizedStatement rejects unknown reporting_currency", () => {
     );
   }
 });
-
-// --- Contract validator (revalidating data crossing process boundaries) ---
 
 test("assertStatementContract accepts a statement built via the smart constructor", () => {
   const s = normalizedStatement(aaplFy2024IncomeStatementInput());

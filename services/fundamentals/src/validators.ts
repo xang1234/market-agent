@@ -27,11 +27,11 @@ export function assertIsoDate(s: unknown, label: string): asserts s is string {
   if (typeof s !== "string" || !ISO_DATE.test(s)) {
     throw new Error(`${label}: must be an ISO-8601 date (YYYY-MM-DD); received ${String(s)}`);
   }
-  // Reject calendar-impossible dates like 2024-02-30 that the regex would otherwise admit.
   const m = ISO_DATE.exec(s)!;
   const y = Number(m[1]);
   const mo = Number(m[2]);
   const d = Number(m[3]);
+  // Round-trip through Date.UTC catches calendar-impossible dates the regex admits (2024-02-30).
   const dt = new Date(Date.UTC(y, mo - 1, d));
   if (
     dt.getUTCFullYear() !== y ||
@@ -71,11 +71,7 @@ export function assertInteger(n: unknown, label: string): asserts n is number {
 }
 
 export function assertMetricKey(s: unknown, label: string): asserts s is string {
-  // Accept the canonical-key shape that the metric mapper (P1.2 / fra-cw0.3.3)
-  // will hand out: dotted lowercase segments, e.g. `revenue.total`,
-  // `eps.diluted`, `operating_expenses.research_and_development`. Statement
-  // normalization owns shape validation; the mapper owns identity resolution
-  // to `metrics.metric_id`.
+  // Dotted lowercase segments, e.g. `revenue.total`, `eps.diluted`.
   if (typeof s !== "string" || !METRIC_KEY.test(s)) {
     throw new Error(`${label}: must be a dotted lowercase metric key; received ${String(s)}`);
   }

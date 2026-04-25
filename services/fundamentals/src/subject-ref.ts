@@ -1,7 +1,7 @@
-// Statement and metric reads anchor on issuer identity (spec §6.3.1) — listings
-// are venue-specific, but reported financial statements are produced by the
-// reporting entity. Accepting only `issuer` SubjectRefs here enforces the
-// boundary that P0.3b establishes upstream.
+// Statement and metric reads anchor on issuer identity (spec §6.3.1):
+// listings are venue-specific, but reported financial statements belong to
+// the reporting entity. Accepting only `issuer` SubjectRefs here enforces
+// that boundary.
 export type UUID = string;
 
 export type IssuerSubjectRef = {

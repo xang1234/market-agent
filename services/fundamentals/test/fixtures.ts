@@ -7,24 +7,11 @@ export const aaplIssuer: IssuerSubjectRef = {
   id: "22222222-2222-4222-a222-222222222222",
 };
 
-// Stand-in for the SEC EDGAR `data.sec.gov` source row that fra-cw0.3.4
-// will create. Persisted alongside the normalized statement so promotion to
-// `Fact` can preserve provenance without re-fetching.
 export const SEC_EDGAR_SOURCE_ID = "00000000-0000-4000-a000-0000000000ed";
 
-// AAPL FY2024 income statement, taken directly from the 10-K filed
-// 2024-11-01 covering the fiscal year ended Sep 28, 2024. Values are
-// reported in millions of USD; `scale: 1_000_000` makes
-// `value_num × scale` resolve to the native USD figure. EPS values are
-// per-share USD and intentionally use `scale: 1` (`unit:
-// "currency_per_share"`) so they don't accidentally inherit the millions
-// scale from surrounding rows.
-//
-// Internal accounting identities (verified against the filing):
-//   net_sales.total - cost_of_sales.total  == gross_profit
-//   gross_profit - operating_expenses.total == operating_income
-//   operating_income + other_income_net    == income_before_taxes
-//   income_before_taxes - income_tax_expense == net_income
+// AAPL FY2024 income statement, from the 10-K filed 2024-11-01 covering
+// the fiscal year ended 2024-09-28. Reported in millions of USD; EPS lines
+// use scale=1 so the millions multiplier doesn't propagate per-share.
 const AAPL_FY2024_INCOME_LINES: StatementLine[] = [
   {
     metric_key: "net_sales.products",
