@@ -239,7 +239,7 @@ test("Facts produced from AAPL companyfacts carry both SEC source_id and resolve
 
 // --- Source-row contract --------------------------------------------------
 
-test("buildSecSource produces a primary-tier filing source with EDGAR archive URL", () => {
+test("buildSecSource produces a primary-tier filing source aligned with db/seed/sources.sql", () => {
   const source = buildSecSource({
     source_id: SEC_SOURCE_ID,
     cik: AAPL_CIK,
@@ -247,11 +247,10 @@ test("buildSecSource produces a primary-tier filing source with EDGAR archive UR
     retrieved_at: RETRIEVED_AT,
     content_hash: "sha256:abc123",
   });
-  assert.equal(source.provider, "sec.gov");
+  assert.equal(source.provider, "sec_edgar");
   assert.equal(source.kind, "filing");
   assert.equal(source.trust_tier, "primary");
-  assert.equal(source.license_class, "public_domain");
-  assert.equal(source.accession_number, AAPL_FY2024_ACCN);
+  assert.equal(source.license_class, "public");
   // EDGAR archive URL: cik unpadded, accession-no-dashes in path.
   assert.equal(
     source.canonical_url,
@@ -430,17 +429,118 @@ test("US_GAAP_TO_METRIC_KEY collapses revenue aliases to a single canonical key"
   );
 });
 
-test("SEC_INCOME_METRIC_KEYS lists the income-statement keys this module emits", () => {
-  // Sanity: every key the extractor can produce for income-family extraction
-  // is exposed for downstream registry/coverage tooling.
+test("extractStatement throws upfront for balance/cashflow families (income-only in this bead)", () => {
+  for (const family of ["balance", "cashflow"] as const) {
+    assert.throws(
+      () =>
+        extractStatement({
+          subject: aaplIssuer,
+          facts: aaplCompanyFactsFixture(),
+          family,
+          fiscal_year: 2024,
+          fiscal_period: "FY",
+          source_id: SEC_SOURCE_ID,
+          as_of: "2024-11-01T20:30:00.000Z",
+        }),
+      /not yet supported/,
+      `expected family=${family} to be rejected`,
+    );
+  }
+});
+
+test("extractStatement rejects a payload missing the us-gaap taxonomy", () => {
+  const fixture: SecCompanyFacts = {
+    cik: AAPL_CIK,
+    entityName: "Apple Inc.",
+    facts: {},
+  };
+  assert.throws(
+    () =>
+      extractStatement({
+        subject: aaplIssuer,
+        facts: fixture,
+        family: "income",
+        fiscal_year: 2024,
+        fiscal_period: "FY",
+        source_id: SEC_SOURCE_ID,
+        as_of: "2024-11-01T20:30:00.000Z",
+      }),
+    /no "us-gaap" taxonomy/,
+  );
+});
+
+test("extractStatement collision policy: modern (post-ASC 606) concept name wins over legacy aliases", () => {
+  // Construct a fixture where both `Revenues` (legacy) and
+  // `RevenueFromContractWithCustomerExcludingAssessedTax` (post-ASC 606)
+  // are present with different values. The modern tag must win.
+  const fixture = aaplCompanyFactsFixture();
+  fixture.facts["us-gaap"]!.Revenues = {
+    label: "Revenues (legacy)",
+    description: "Pre-ASC 606 revenue tag.",
+    units: {
+      USD: [value({ val: 999_999_999, end: "2024-09-28", start: "2023-10-01" })],
+    },
+  };
+  const input = extractStatement({
+    subject: aaplIssuer,
+    facts: fixture,
+    family: "income",
+    fiscal_year: 2024,
+    fiscal_period: "FY",
+    source_id: SEC_SOURCE_ID,
+    as_of: "2024-11-01T20:30:00.000Z",
+  });
+  const revenue = input.lines.find((l) => l.metric_key === "revenue");
+  assert.equal(revenue?.value_num, 391_035_000_000);
+});
+
+test("extractStatement rejects period drift across matched concepts", () => {
+  const fixture = aaplCompanyFactsFixture();
+  // Tamper one concept's period_end to disagree with the others.
+  const tampered = fixture.facts["us-gaap"]!.NetIncomeLoss;
+  tampered.units.USD = tampered.units.USD.map((v) => ({ ...v, end: "2024-09-29" }));
+  assert.throws(
+    () =>
+      extractStatement({
+        subject: aaplIssuer,
+        facts: fixture,
+        family: "income",
+        fiscal_year: 2024,
+        fiscal_period: "FY",
+        source_id: SEC_SOURCE_ID,
+        as_of: "2024-11-01T20:30:00.000Z",
+      }),
+    /period .* disagrees with prior matches/,
+  );
+});
+
+test("extractStatement output: lines are plain mutable inputs (NormalizedStatementInput, not yet frozen)", () => {
+  // The contract is "input to normalizedStatement(...)", which freezes
+  // downstream. Keep the extraction output intentionally caller-owned so
+  // tests like the full-pipeline test can spread/mutate it before
+  // normalizing.
+  const input = extractStatement({
+    subject: aaplIssuer,
+    facts: aaplCompanyFactsFixture(),
+    family: "income",
+    fiscal_year: 2024,
+    fiscal_period: "FY",
+    source_id: SEC_SOURCE_ID,
+    as_of: "2024-11-01T20:30:00.000Z",
+  });
+  assert.equal(Object.isFrozen(input), false);
+  assert.equal(Object.isFrozen(input.lines), false);
+});
+
+test("SEC_INCOME_METRIC_KEYS lists every income-family metric_key the extractor can emit", () => {
+  // Every metric_key reachable from the US_GAAP_TO_METRIC_KEY mapping for
+  // income-family concepts must be in SEC_INCOME_METRIC_KEYS so a registry
+  // built from these keys covers the extractor's full output range.
   const set = new Set(SEC_INCOME_METRIC_KEYS);
-  for (const key of Object.values(US_GAAP_TO_METRIC_KEY)) {
-    if (
-      key === "operating_expenses" // OperatingExpenses is mapped but classified income-relevant
-    ) continue;
+  for (const metricKey of Object.values(US_GAAP_TO_METRIC_KEY)) {
     assert.ok(
-      set.has(key),
-      `expected SEC_INCOME_METRIC_KEYS to include "${key}" (mapped from a US-GAAP concept)`,
+      set.has(metricKey),
+      `expected SEC_INCOME_METRIC_KEYS to include "${metricKey}"`,
     );
   }
 });

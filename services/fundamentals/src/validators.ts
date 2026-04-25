@@ -70,6 +70,12 @@ export function assertInteger(n: unknown, label: string): asserts n is number {
   }
 }
 
+export function assertPositiveInteger(n: unknown, label: string): asserts n is number {
+  if (typeof n !== "number" || !Number.isInteger(n) || n < 1) {
+    throw new Error(`${label}: must be a positive integer; received ${String(n)}`);
+  }
+}
+
 export function assertMetricKey(s: unknown, label: string): asserts s is string {
   // Dotted lowercase segments, e.g. `revenue.total`, `eps.diluted`.
   if (typeof s !== "string" || !METRIC_KEY.test(s)) {

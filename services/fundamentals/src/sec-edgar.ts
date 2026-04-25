@@ -1,17 +1,12 @@
 // SEC EDGAR primary-source anchor (spec §6.3.1).
 //
-// data.sec.gov publishes per-issuer "companyfacts" JSON aggregating the
-// XBRL-tagged values from filed 10-K / 10-Q forms. This module:
-//
-// - Models the companyfacts response schema as TypeScript value objects.
-// - Fetches via an injected fetcher (mirrors `services/market` adapter
-//   pattern; tests use a fake fetcher returning canned payloads, prod
-//   sets the SEC-required User-Agent header).
-// - Builds a `Source` row pointing at a specific filing accession so every
-//   downstream `Fact` carries a primary-source provenance link.
-// - Maps US-GAAP concept names to canonical `metric_key`s aligned with
-//   `db/seed/metrics.sql`, so values extracted here resolve through the
-//   `metric-mapper` to the same `metric_id`s a hand-seeded registry uses.
+// Models data.sec.gov's per-issuer XBRL `companyfacts` payload, builds a
+// `Source` row pointing at a specific filing accession, and extracts a
+// `NormalizedStatementInput` from the payload for a (fiscal_year,
+// fiscal_period, family) target. US-GAAP concept names map to canonical
+// `metric_key`s aligned with `db/seed/metrics.sql`, so values extracted
+// here resolve through the metric-mapper to the same `metric_id`s a
+// hand-seeded registry uses.
 
 import type {
   FiscalPeriod,
@@ -21,8 +16,8 @@ import type {
 } from "./statement.ts";
 import type { IssuerSubjectRef, UUID } from "./subject-ref.ts";
 import {
-  assertInteger,
   assertIso8601Utc,
+  assertPositiveInteger,
   assertUuid,
 } from "./validators.ts";
 
@@ -69,11 +64,7 @@ export class SecEdgarFetchError extends Error {
 }
 
 export function companyFactsPath(cik: number): string {
-  if (!Number.isInteger(cik) || cik < 1) {
-    throw new Error(
-      `companyFactsPath.cik: must be a positive integer; received ${cik}`,
-    );
-  }
+  assertPositiveInteger(cik, "companyFactsPath.cik");
   return `/api/xbrl/companyfacts/CIK${String(cik).padStart(10, "0")}.json`;
 }
 
@@ -86,6 +77,8 @@ export async function fetchCompanyFacts(
   return raw;
 }
 
+// Top-level shape only — concept and unit walking is defended structurally
+// in extractStatement. A deep XBRL validator is out of scope.
 export function assertCompanyFacts(
   value: unknown,
   label: string,
@@ -94,9 +87,7 @@ export function assertCompanyFacts(
     throw new Error(`${label}: must be an object`);
   }
   const v = value as Record<string, unknown>;
-  if (!Number.isInteger(v.cik) || (v.cik as number) < 1) {
-    throw new Error(`${label}.cik: must be a positive integer`);
-  }
+  assertPositiveInteger(v.cik, `${label}.cik`);
   if (typeof v.entityName !== "string" || v.entityName.length === 0) {
     throw new Error(`${label}.entityName: must be a non-empty string`);
   }
@@ -107,16 +98,18 @@ export function assertCompanyFacts(
 
 // --- Source row ------------------------------------------------------------
 
+// `provider` and `license_class` match db/seed/sources.sql so dedup against
+// the seeded base row works on (provider, kind) rather than on string
+// drift between value-object and seed.
 export type SecSource = {
   source_id: UUID;
-  provider: "sec.gov";
+  provider: "sec_edgar";
   kind: "filing";
   canonical_url: string;
   trust_tier: "primary";
-  license_class: "public_domain";
+  license_class: "public";
   retrieved_at: string;
   content_hash: string;
-  accession_number: string;
 };
 
 export type BuildSecSourceInput = {
@@ -129,12 +122,7 @@ export type BuildSecSourceInput = {
 
 export function buildSecSource(input: BuildSecSourceInput): SecSource {
   assertUuid(input.source_id, "buildSecSource.source_id");
-  assertInteger(input.cik, "buildSecSource.cik");
-  if (input.cik < 1) {
-    throw new Error(
-      `buildSecSource.cik: must be positive; received ${input.cik}`,
-    );
-  }
+  assertPositiveInteger(input.cik, "buildSecSource.cik");
   if (!ACCESSION_PATTERN.test(input.accession_number)) {
     throw new Error(
       `buildSecSource.accession_number: must match NNNNNNNNNN-NN-NNNNNN; received "${input.accession_number}"`,
@@ -146,14 +134,13 @@ export function buildSecSource(input: BuildSecSourceInput): SecSource {
   }
   return Object.freeze({
     source_id: input.source_id,
-    provider: "sec.gov",
+    provider: "sec_edgar",
     kind: "filing",
     canonical_url: edgarFilingUrl(input.cik, input.accession_number),
     trust_tier: "primary",
-    license_class: "public_domain",
+    license_class: "public",
     retrieved_at: input.retrieved_at,
     content_hash: input.content_hash,
-    accession_number: input.accession_number,
   });
 }
 
@@ -167,20 +154,20 @@ function edgarFilingUrl(cik: number, accession_number: string): string {
 
 // --- US-GAAP concept → metric_key mapping ----------------------------------
 
-// Aligned with db/seed/metrics.sql. The mapping is many-to-one because
-// US-GAAP concept naming evolved (e.g., the ASC 606 update introduced
-// `RevenueFromContractWithCustomerExcludingAssessedTax` alongside legacy
-// `Revenues`/`SalesRevenueNet`). Multiple aliases collapse to the same
-// canonical metric so a 20-year history reads as one series.
+// Order matters: extractStatement walks this map in declared order so
+// concept-name aliases collapse deterministically. Modern (post-ASC 606)
+// names appear before legacy aliases so transition-year filings — where
+// both `RevenueFromContractWithCustomerExcludingAssessedTax` and
+// `Revenues` are present — pick the modern tag.
 export const US_GAAP_TO_METRIC_KEY: Readonly<Record<string, string>> = {
-  // Revenue
-  Revenues: "revenue",
-  SalesRevenueNet: "revenue",
+  // Revenue (modern → legacy)
   RevenueFromContractWithCustomerExcludingAssessedTax: "revenue",
+  SalesRevenueNet: "revenue",
+  Revenues: "revenue",
 
   // Costs and gross profit
-  CostOfRevenue: "cost_of_revenue",
   CostOfGoodsAndServicesSold: "cost_of_revenue",
+  CostOfRevenue: "cost_of_revenue",
   GrossProfit: "gross_profit",
 
   // Operating
@@ -223,6 +210,11 @@ export type ExtractStatementInput = {
 export function extractStatement(
   input: ExtractStatementInput,
 ): NormalizedStatementInput {
+  if (input.family !== "income") {
+    throw new Error(
+      `extractStatement: family="${input.family}" not yet supported (income-only in this bead)`,
+    );
+  }
   const usGaap = input.facts.facts["us-gaap"];
   if (!usGaap) {
     throw new Error(
@@ -230,22 +222,21 @@ export function extractStatement(
     );
   }
 
-  // Walk every us-gaap concept that maps to a known metric_key. For each,
-  // pick the value matching (fy, fp, form) and translate to a StatementLine.
-  // Collisions on metric_key (multiple concepts mapping to the same key, e.g.
-  // both `Revenues` and `RevenueFromContractWithCustomerExcludingAssessedTax`
-  // present) keep the first value; later matches throw the same
-  // duplicate-key error that NormalizedStatement enforces.
   const expectedForm = input.fiscal_period === "FY" ? "10-K" : "10-Q";
   const lines: StatementLine[] = [];
   const seenKeys = new Set<string>();
+  const observedCurrencies = new Set<string>();
   let resolvedPeriodStart: string | null = null;
   let resolvedPeriodEnd: string | null = null;
 
-  for (const [conceptName, concept] of Object.entries(usGaap)) {
-    const metricKey = US_GAAP_TO_METRIC_KEY[conceptName];
-    if (!metricKey) continue;
-    if (!relevantToFamily(metricKey, input.family)) continue;
+  // Walk the MAPPING in declared order (not the response): this fixes the
+  // collision policy at code-defined priority. First-mapped concept that
+  // has a matching value wins.
+  for (const [conceptName, metricKey] of Object.entries(US_GAAP_TO_METRIC_KEY)) {
+    if (!INCOME_KEYS.has(metricKey)) continue;
+    if (seenKeys.has(metricKey)) continue;
+    const concept = usGaap[conceptName];
+    if (!concept) continue;
 
     for (const [unitCode, values] of Object.entries(concept.units)) {
       const lineUnit = UNIT_TO_LINE_UNIT[unitCode];
@@ -259,8 +250,20 @@ export function extractStatement(
       );
       if (!match) continue;
 
-      if (seenKeys.has(metricKey)) continue;
-      seenKeys.add(metricKey);
+      // Period agreement: every matched value must share the same
+      // (start, end). XBRL typos and restatements should fail loudly here
+      // rather than silently picking last-iteration.
+      if (resolvedPeriodEnd === null) {
+        resolvedPeriodStart = match.start ?? null;
+        resolvedPeriodEnd = match.end;
+      } else if (
+        match.end !== resolvedPeriodEnd ||
+        (match.start ?? null) !== resolvedPeriodStart
+      ) {
+        throw new Error(
+          `extractStatement: concept "${conceptName}" period (${match.start ?? "—"}..${match.end}) disagrees with prior matches (${resolvedPeriodStart ?? "—"}..${resolvedPeriodEnd})`,
+        );
+      }
 
       const line: StatementLine = {
         metric_key: metricKey,
@@ -269,11 +272,13 @@ export function extractStatement(
         scale: 1,
         coverage_level: "full",
       };
-      if (lineUnit.currency !== undefined) line.currency = lineUnit.currency;
+      if (lineUnit.currency !== undefined) {
+        line.currency = lineUnit.currency;
+        observedCurrencies.add(lineUnit.currency);
+      }
       lines.push(line);
-
-      if (match.start !== undefined) resolvedPeriodStart = match.start;
-      resolvedPeriodEnd = match.end;
+      seenKeys.add(metricKey);
+      break; // one unit per concept per period
     }
   }
 
@@ -282,17 +287,24 @@ export function extractStatement(
       `extractStatement: no us-gaap values for fiscal_year=${input.fiscal_year} fiscal_period="${input.fiscal_period}" form="${expectedForm}"`,
     );
   }
+  if (observedCurrencies.size > 1) {
+    throw new Error(
+      `extractStatement: matched values use multiple currencies (${[...observedCurrencies].join(", ")}); single-currency reporting is required`,
+    );
+  }
+  const reportingCurrency =
+    observedCurrencies.size === 1 ? [...observedCurrencies][0] : "USD";
 
   return {
     subject: input.subject,
     family: input.family,
     basis: "as_reported",
-    period_kind: input.family === "balance" ? "point" : input.fiscal_period === "FY" ? "fiscal_y" : "fiscal_q",
-    period_start: input.family === "balance" ? null : resolvedPeriodStart,
+    period_kind: input.fiscal_period === "FY" ? "fiscal_y" : "fiscal_q",
+    period_start: resolvedPeriodStart,
     period_end: resolvedPeriodEnd,
     fiscal_year: input.fiscal_year,
     fiscal_period: input.fiscal_period,
-    reporting_currency: "USD",
+    reporting_currency: reportingCurrency,
     as_of: input.as_of,
     reported_at: input.reported_at ?? null,
     source_id: input.source_id,
@@ -300,10 +312,9 @@ export function extractStatement(
   };
 }
 
-// Income vs balance vs cashflow categorization. Keeps the per-call extract
-// scoped to one statement family so a caller asking for "income" doesn't
-// accidentally pull in balance-sheet line items that share a metric.
-const INCOME_KEYS = new Set([
+// metric_keys this module emits for income-family extraction. Used by
+// downstream coverage tooling to know what registry entries to expect.
+const INCOME_KEYS: ReadonlySet<string> = new Set([
   "revenue",
   "cost_of_revenue",
   "gross_profit",
@@ -315,15 +326,6 @@ const INCOME_KEYS = new Set([
   "shares_outstanding_basic",
   "shares_outstanding_diluted",
 ]);
-
-function relevantToFamily(
-  metricKey: string,
-  family: StatementFamily,
-): boolean {
-  if (family === "income") return INCOME_KEYS.has(metricKey);
-  // Balance-sheet and cashflow concept maps land in later beads.
-  return false;
-}
 
 export const SEC_INCOME_METRIC_KEYS: ReadonlyArray<string> = Object.freeze(
   Array.from(INCOME_KEYS),
