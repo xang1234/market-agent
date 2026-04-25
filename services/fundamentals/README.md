@@ -6,13 +6,12 @@ The fundamentals service: the issuer-anchored layer that turns
 filing-backed or vendor-backed statement inputs into canonical value
 objects keyed by metric definitions (spec §6.3.1).
 
-`fra-cw0.3.1` landed the canonical statement value object.
-`fra-cw0.3.2` landed fiscal-calendar normalization.
-`fra-cw0.3.3` lands the metric mapper (this module).
-Sibling beads still open:
+All four child beads of `fra-cw0.3` have landed:
 
-- `fra-cw0.3.4` — SEC EDGAR primary-source anchor (populates
-  `sources.source_id` and feeds the normalizer for US issuers).
+- `fra-cw0.3.1` — canonical statement value object
+- `fra-cw0.3.2` — fiscal-calendar normalization
+- `fra-cw0.3.3` — metric mapper
+- `fra-cw0.3.4` — SEC EDGAR primary-source anchor (this module)
 
 ## Fiscal calendar
 
@@ -46,6 +45,26 @@ rejects duplicate keys and duplicate ids. `mapStatement(registry, s)`
 returns the same statement with `metric_id` attached to every line, plus
 a unit-class compatibility check (e.g., a `currency` line cannot map to
 a `shares` metric).
+
+## SEC EDGAR primary-source anchor
+
+`src/sec-edgar.ts` integrates the `data.sec.gov` companyfacts API: it
+models the response schema, fetches via an injected `SecEdgarFetcher`
+(matching the market service's adapter pattern), maps US-GAAP concept
+names to canonical `metric_key`s aligned with `db/seed/metrics.sql`, and
+extracts a `NormalizedStatementInput` for a given (fiscal_year,
+fiscal_period, family) tuple. `buildSecSource(...)` produces the `Source`
+row that downstream `Fact` rows reference for primary-source provenance.
+
+Acceptance criterion (`fra-cw0.3.4`): pulling AAPL FY2024 companyfacts,
+extracting the income statement, and mapping through the metric registry
+produces a `MappedStatement` whose every line carries both an SEC
+`source_id` and a resolved `metric_id`.
+
+The US-GAAP concept map collapses naming-convention drift across GAAP
+revisions — e.g. `Revenues`, `SalesRevenueNet`, and the post-ASC 606
+`RevenueFromContractWithCustomerExcludingAssessedTax` all map to
+`metric_key: "revenue"` so a 20-year history reads as one series.
 
 ## Commands
 
