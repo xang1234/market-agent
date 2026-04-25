@@ -117,4 +117,3 @@ export function removeMemberFromList(
     (m) => !(m.subject_ref.kind === subjectRef.kind && m.subject_ref.id === subjectRef.id),
   )
 }
-

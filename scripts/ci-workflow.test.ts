@@ -22,3 +22,11 @@ test("ci workflow includes services/watchlists coverage", async () => {
   assert.match(workflow, /working-directory:\s*services\/watchlists/);
   assert.match(workflow, /cache-dependency-path:\s*services\/watchlists\/package-lock\.json/);
 });
+
+test("ci workflow includes services/market coverage", async () => {
+  const workflow = await readFile(CI_WORKFLOW, "utf8");
+
+  assert.match(workflow, /\bmarket\b/);
+  assert.match(workflow, /working-directory:\s*services\/market/);
+  assert.match(workflow, /cache-dependency-path:\s*services\/market\/package-lock\.json/);
+});

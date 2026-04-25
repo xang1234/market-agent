@@ -1,6 +1,4 @@
 import type {
-  AdjustmentBasis,
-  BarInterval,
   BarsRequest,
   MarketDataAdapter,
   NormalizedBar,
@@ -8,17 +6,10 @@ import type {
   NormalizedQuote,
   QuoteRequest,
 } from "../adapter.ts";
-import { normalizedQuote, type DelayClass, type SessionState } from "../quote.ts";
+import { assertBarRange, normalizedBars, type AdjustmentBasis, type BarInterval } from "../bar.ts";
+import { DELAY_CLASSES, normalizedQuote, type DelayClass, type SessionState } from "../quote.ts";
 import type { ListingSubjectRef, UUID } from "../subject-ref.ts";
-
-// Polygon adapter. Translates Polygon's REST shapes into the provider-neutral
-// records defined in ../adapter.ts and ../quote.ts. No Polygon-typed fields
-// escape this file.
-//
-// Quote retrieval uses Polygon's snapshot endpoint, which returns latest trade
-// + previous-day close in one call so the move math (`change_abs`,
-// `change_pct`) can be derived without a second hop. The smart constructor in
-// ../quote.ts validates every field; a malformed Polygon payload throws here.
+import { assertOneOf } from "../validators.ts";
 
 export type PolygonListingContext = {
   ticker: string;
@@ -30,13 +21,11 @@ export type PolygonFetcher = (path: string) => Promise<unknown>;
 
 export type PolygonAdapterDeps = {
   sourceId: UUID;
+  delayClass: DelayClass;
   fetcher: PolygonFetcher;
   resolveListing: (listing: ListingSubjectRef) => Promise<PolygonListingContext>;
 };
 
-// Polygon snapshot, abridged to the fields we consume. Treated as `unknown` at
-// the boundary and validated explicitly so a malformed payload raises here
-// instead of letting NaN flow through the smart constructor.
 type PolygonSnapshotPayload = {
   status?: string;
   ticker?: {
@@ -66,6 +55,7 @@ type PolygonAggsPayload = {
   }>;
   resultsCount?: number;
   adjusted?: boolean;
+  next_url?: string;
 };
 
 const INTERVAL_TO_POLYGON: Record<BarInterval, { multiplier: number; timespan: string }> = {
@@ -77,6 +67,8 @@ const INTERVAL_TO_POLYGON: Record<BarInterval, { multiplier: number; timespan: s
 };
 
 export function createPolygonAdapter(deps: PolygonAdapterDeps): MarketDataAdapter {
+  assertOneOf(deps.delayClass, DELAY_CLASSES, "polygon.delayClass");
+
   return {
     providerName: "polygon",
     sourceId: deps.sourceId,
@@ -97,37 +89,34 @@ export function createPolygonAdapter(deps: PolygonAdapterDeps): MarketDataAdapte
         throw new Error("polygon: snapshot.prevDay.c missing — cannot compute change");
       }
 
-      // Polygon last-trade timestamps are nanoseconds since epoch.
       const as_of = new Date(Math.floor(tNs / 1_000_000)).toISOString();
 
       return normalizedQuote({
         listing: request.listing,
         price,
         prev_close: prevClose,
-        session_state: classifySession(raw?.ticker?.market_status),
+        session_state: classifySession(raw?.ticker?.market_status, as_of),
         as_of,
-        delay_class: classifyDelay(raw?.status),
+        delay_class: deps.delayClass,
         currency: ctx.currency,
         source_id: deps.sourceId,
       });
     },
 
     async getBars(request: BarsRequest): Promise<NormalizedBars> {
+      assertBarRange(request.range, "getBars.request.range");
       const ctx = await deps.resolveListing(request.listing);
       const tspec = INTERVAL_TO_POLYGON[request.interval];
       const startMs = Date.parse(request.range.start);
       const endMs = Date.parse(request.range.end);
-      if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
-        throw new Error("polygon: bar range start/end must be ISO-8601 timestamps");
-      }
 
       const path =
         `/v2/aggs/ticker/${encodeURIComponent(ctx.ticker)}/range/` +
         `${tspec.multiplier}/${tspec.timespan}/${startMs}/${endMs}` +
-        `?adjusted=true`;
-      const raw = (await deps.fetcher(path)) as PolygonAggsPayload;
+        `?adjusted=true&sort=asc&limit=50000`;
+      const pages = await fetchAggPages(deps.fetcher, path);
 
-      const rawBars = raw?.results ?? [];
+      const rawBars = pages.flatMap((page) => page.results ?? []);
       const bars: NormalizedBar[] = rawBars.map((row, i) => {
         const { t, o, h, l, c, v } = row;
         if (
@@ -150,43 +139,61 @@ export function createPolygonAdapter(deps: PolygonAdapterDeps): MarketDataAdapte
         };
       });
 
-      // Bar-level invariants land in fra-cw0.1.3; for now the adapter just
-      // preserves provider order and surfaces the adjustment basis flag.
-      const adjustment_basis: AdjustmentBasis = raw?.adjusted === true
-        ? "split_and_div_adjusted"
-        : "unadjusted";
+      const adjustment_basis = aggregateAdjustmentBasis(pages);
 
       const asOf = bars.length > 0 ? bars[bars.length - 1].ts : request.range.end;
 
-      return {
+      return normalizedBars({
         listing: request.listing,
         interval: request.interval,
         range: request.range,
         bars,
         as_of: asOf,
-        delay_class: "eod",
+        delay_class: deps.delayClass,
         currency: ctx.currency,
         source_id: deps.sourceId,
         adjustment_basis,
-      };
+      });
     },
   };
 }
 
-function classifyDelay(status: string | undefined): DelayClass {
-  // Polygon free tier returns DELAYED status; paid Stocks Starter+ returns OK.
-  if (status === "OK") return "real_time";
-  if (status === "DELAYED") return "delayed_15m";
-  return "unknown";
+async function fetchAggPages(fetcher: PolygonFetcher, firstPath: string): Promise<PolygonAggsPayload[]> {
+  const pages: PolygonAggsPayload[] = [];
+  const seen = new Set<string>();
+  let nextPath: string | undefined = firstPath;
+
+  while (nextPath) {
+    if (seen.has(nextPath)) {
+      throw new Error(`polygon: aggregate pagination loop detected for ${nextPath}`);
+    }
+    seen.add(nextPath);
+
+    const page = (await fetcher(nextPath)) as PolygonAggsPayload;
+    pages.push(page);
+    nextPath = typeof page.next_url === "string" && page.next_url.length > 0
+      ? page.next_url
+      : undefined;
+  }
+
+  return pages;
 }
 
-// Polygon's snapshot endpoint exposes `market_status` as one of:
-// "open" | "closed" | "early_hours" | "late_hours" | "extended-hours".
-// Map vendor strings to our internal SessionState enum. Venue-specific session
-// boundaries (e.g. RTH vs ETH for non-US listings) are out of scope for this
-// adapter; cross-venue session handling lives in the bar contract subtask
-// (fra-cw0.1.3) where it actually matters.
-function classifySession(status: string | undefined): SessionState {
+function aggregateAdjustmentBasis(pages: PolygonAggsPayload[]): AdjustmentBasis {
+  const flags = pages
+    .map((page) => page.adjusted)
+    .filter((flag): flag is boolean => typeof flag === "boolean");
+  const distinct = new Set(flags);
+
+  if (distinct.size > 1) {
+    throw new Error("polygon: inconsistent aggregate adjusted flags across pages");
+  }
+
+  return flags[0] === true ? "split_and_div_adjusted" : "unadjusted";
+}
+
+// Polygon's `market_status` values: open, closed, early_hours, late_hours, extended-hours.
+function classifySession(status: string | undefined, asOf: string): SessionState {
   switch (status) {
     case "open":
       return "regular";
@@ -198,6 +205,30 @@ function classifySession(status: string | undefined): SessionState {
     case "closed":
       return "closed";
     default:
-      return "regular";
+      return classifyUsEquitySession(asOf);
   }
+}
+
+function classifyUsEquitySession(asOf: string): SessionState {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(asOf));
+  const byType = new Map(parts.map((part) => [part.type, part.value]));
+  const weekday = byType.get("weekday");
+  const hour = Number(byType.get("hour"));
+  const minute = Number(byType.get("minute"));
+
+  if (weekday === "Sat" || weekday === "Sun" || !Number.isFinite(hour) || !Number.isFinite(minute)) {
+    return "closed";
+  }
+
+  const minutes = hour * 60 + minute;
+  if (minutes >= 4 * 60 && minutes < 9 * 60 + 30) return "pre_market";
+  if (minutes >= 9 * 60 + 30 && minutes < 16 * 60) return "regular";
+  if (minutes >= 16 * 60 && minutes < 20 * 60) return "post_market";
+  return "closed";
 }

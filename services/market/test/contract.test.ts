@@ -3,53 +3,42 @@ import assert from "node:assert/strict";
 import {
   assertQuoteContract,
   normalizedQuote,
+  quoteMove,
   type NormalizedQuote,
 } from "../src/quote.ts";
+import {
+  assertBarsContract,
+  normalizedBars,
+  type NormalizedBars,
+} from "../src/bar.ts";
 import type { MarketDataAdapter } from "../src/adapter.ts";
 import { createPolygonAdapter } from "../src/adapters/polygon.ts";
-import type { ListingSubjectRef } from "../src/subject-ref.ts";
+import {
+  aaplAggsPath,
+  aaplAggsPayload,
+  aaplBarRange,
+  aaplCtx,
+  aaplListing,
+  aaplSnapshotPayload,
+  FIXTURE_SOURCE_ID,
+  makeRouteFetcher,
+  POLYGON_DELAY_CLASS,
+  POLYGON_SOURCE_ID,
+  SNAPSHOT_PATH,
+} from "./fixtures.ts";
 
-// Schema-assertion contract test (fra-cw0.1.2 verification clause). For each
-// adapter the market service ships, retrieving a quote must produce a record
-// that satisfies `assertQuoteContract`. New adapters added by future subtasks
-// should append a row to the table below — that is the schema gate every
-// adapter has to pass before consumers see its output.
-
-const aaplListing: ListingSubjectRef = {
-  kind: "listing",
-  id: "11111111-1111-4111-a111-111111111111",
-};
-const POLYGON_SOURCE_ID = "00000000-0000-4000-a000-000000000001";
-const FIXTURE_SOURCE_ID = "00000000-0000-4000-a000-0000000000ff";
-
-const polygon: MarketDataAdapter = createPolygonAdapter({
-  sourceId: POLYGON_SOURCE_ID,
-  fetcher: async (path: string) => {
-    if (path === "/v2/snapshot/locale/us/markets/stocks/tickers/AAPL") {
-      return {
-        status: "OK",
-        ticker: {
-          lastTrade: { p: 187.42, t: 1_700_000_000_000_000_000 },
-          day: { c: 187.42 },
-          prevDay: { c: 185.0 },
-          market_status: "open",
-        },
-      };
-    }
-    throw new Error(`unexpected fetch: ${path}`);
-  },
-  resolveListing: async () => ({ ticker: "AAPL", mic: "XNAS", currency: "USD" }),
-});
-
-function fixtureAdapter(quote: NormalizedQuote): MarketDataAdapter {
+function fixtureAdapter(records: {
+  quote: NormalizedQuote;
+  bars: NormalizedBars;
+}): MarketDataAdapter {
   return {
     providerName: "fixture",
     sourceId: FIXTURE_SOURCE_ID,
     async getQuote() {
-      return quote;
+      return records.quote;
     },
     async getBars() {
-      throw new Error("fixture: bars not exercised in this contract test");
+      return records.bars;
     },
   };
 }
@@ -65,32 +54,87 @@ const fixtureQuote = normalizedQuote({
   source_id: FIXTURE_SOURCE_ID,
 });
 
+const fixtureBars = normalizedBars({
+  listing: aaplListing,
+  interval: "1d",
+  range: aaplBarRange,
+  bars: [
+    {
+      ts: aaplBarRange.start,
+      open: 100,
+      high: 101,
+      low: 99,
+      close: 100.5,
+      volume: 10_000,
+    },
+  ],
+  as_of: aaplBarRange.start,
+  delay_class: "eod",
+  currency: "USD",
+  source_id: FIXTURE_SOURCE_ID,
+  adjustment_basis: "split_and_div_adjusted",
+});
+
+function polygonAdapter(opts: { adjusted: boolean }): MarketDataAdapter {
+  return createPolygonAdapter({
+    sourceId: POLYGON_SOURCE_ID,
+    delayClass: POLYGON_DELAY_CLASS,
+    fetcher: makeRouteFetcher({
+      [SNAPSHOT_PATH]: aaplSnapshotPayload(),
+      [aaplAggsPath()]: aaplAggsPayload({ adjusted: opts.adjusted }),
+    }),
+    resolveListing: async () => aaplCtx,
+  });
+}
+
 const adapters: Array<[string, MarketDataAdapter]> = [
-  ["polygon", polygon],
-  ["fixture", fixtureAdapter(fixtureQuote)],
+  ["polygon", polygonAdapter({ adjusted: true })],
+  ["fixture", fixtureAdapter({ quote: fixtureQuote, bars: fixtureBars })],
 ];
 
 for (const [name, adapter] of adapters) {
   test(`adapter ${name}: getQuote output satisfies the spec §6.2.1 quote contract`, async () => {
     const quote = await adapter.getQuote({ listing: aaplListing });
 
-    // Schema assertion: the bead's verification clause.
     assert.doesNotThrow(() => assertQuoteContract(quote));
 
-    // Required metadata fields named in the bead description.
-    assert.equal(typeof quote.as_of, "string");
-    assert.notEqual(quote.as_of, "");
-    assert.equal(typeof quote.delay_class, "string");
-    assert.equal(typeof quote.currency, "string");
-    assert.equal(typeof quote.source_id, "string");
+    for (const key of ["as_of", "delay_class", "currency", "source_id"] as const) {
+      assert.equal(typeof quote[key], "string");
+      assert.notEqual(quote[key], "");
+    }
 
-    // Identity carried straight through.
     assert.equal(quote.listing.kind, "listing");
     assert.equal(quote.listing.id, aaplListing.id);
 
-    // Move math computed and consistent.
-    assert.equal(quote.change_abs, quote.price - quote.prev_close);
-    assert.equal(quote.change_pct, (quote.price - quote.prev_close) / quote.prev_close);
+    const move = quoteMove(quote);
+    assert.equal(move.change_abs, quote.price - quote.prev_close);
+    assert.equal(move.change_pct, (quote.price - quote.prev_close) / quote.prev_close);
+  });
+
+  test(`adapter ${name}: getBars output satisfies the spec §6.2.1 bar contract`, async () => {
+    const bars = await adapter.getBars({
+      listing: aaplListing,
+      interval: "1d",
+      range: aaplBarRange,
+    });
+
+    assert.doesNotThrow(() => assertBarsContract(bars));
+
+    for (const key of [
+      "as_of",
+      "delay_class",
+      "currency",
+      "source_id",
+      "adjustment_basis",
+    ] as const) {
+      assert.equal(typeof bars[key], "string");
+      assert.notEqual(bars[key], "");
+    }
+
+    assert.equal(bars.listing.kind, "listing");
+    assert.equal(bars.listing.id, aaplListing.id);
+    assert.deepEqual(bars.range, aaplBarRange);
+    assert.equal(bars.interval, "1d");
   });
 
   test(`adapter ${name}: source_id matches the adapter's declared sourceId`, async () => {
@@ -99,10 +143,24 @@ for (const [name, adapter] of adapters) {
   });
 }
 
+// Bead verification clause: explicit adjusted-vs-unadjusted gate.
+for (const adjusted of [true, false]) {
+  test(`bar contract gate accepts both adjusted (${adjusted}) and unadjusted polygon responses`, async () => {
+    const adapter = polygonAdapter({ adjusted });
+    const bars = await adapter.getBars({
+      listing: aaplListing,
+      interval: "1d",
+      range: aaplBarRange,
+    });
+    assert.doesNotThrow(() => assertBarsContract(bars));
+    assert.equal(
+      bars.adjustment_basis,
+      adjusted ? "split_and_div_adjusted" : "unadjusted",
+    );
+  });
+}
+
 test("contract test detects an adapter that emits a non-conformant quote", async () => {
-  // A deliberately-broken adapter that bypasses the smart constructor and
-  // returns an object missing required metadata. This proves the contract
-  // gate would catch a regression in any future adapter.
   const brokenAdapter: MarketDataAdapter = {
     providerName: "broken",
     sourceId: FIXTURE_SOURCE_ID,
@@ -127,4 +185,43 @@ test("contract test detects an adapter that emits a non-conformant quote", async
 
   const q = await brokenAdapter.getQuote({ listing: aaplListing });
   assert.throws(() => assertQuoteContract(q), /source_id/);
+});
+
+test("contract test detects an adapter that emits non-conformant bars", async () => {
+  const brokenAdapter: MarketDataAdapter = {
+    providerName: "broken",
+    sourceId: FIXTURE_SOURCE_ID,
+    async getQuote() {
+      throw new Error("not used");
+    },
+    async getBars() {
+      return {
+        listing: aaplListing,
+        interval: "1d",
+        range: aaplBarRange,
+        bars: [
+          {
+            ts: aaplBarRange.start,
+            open: 100,
+            high: 101,
+            low: 99,
+            close: 100.5,
+            volume: 10_000,
+          },
+        ],
+        as_of: aaplBarRange.start,
+        delay_class: "eod",
+        currency: "USD",
+        source_id: FIXTURE_SOURCE_ID,
+        // adjustment_basis deliberately omitted.
+      } as unknown as NormalizedBars;
+    },
+  };
+
+  const result = await brokenAdapter.getBars({
+    listing: aaplListing,
+    interval: "1d",
+    range: aaplBarRange,
+  });
+  assert.throws(() => assertBarsContract(result), /adjustment_basis/);
 });

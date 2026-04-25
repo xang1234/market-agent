@@ -8,12 +8,17 @@ import type {
 import { normalizedQuote } from "../src/quote.ts";
 import { createPolygonAdapter } from "../src/adapters/polygon.ts";
 import type { ListingSubjectRef } from "../src/subject-ref.ts";
+import {
+  aaplCtx,
+  aaplListing,
+  aaplSnapshotPayload,
+  FIXTURE_SOURCE_ID,
+  makeRouteFetcher,
+  POLYGON_DELAY_CLASS,
+  POLYGON_SOURCE_ID,
+  SNAPSHOT_PATH,
+} from "./fixtures.ts";
 
-// A consumer is anything that takes a MarketDataAdapter and produces a result
-// purely from normalized fields. The bead's verification clause is "Swap
-// adapter fixture; consumers unchanged" — so this consumer must produce the
-// same output for any adapter that returns equivalent normalized records,
-// regardless of which provider (or test fixture) is behind it.
 async function priceSummaryConsumer(
   adapter: MarketDataAdapter,
   listing: ListingSubjectRef,
@@ -26,17 +31,6 @@ async function priceSummaryConsumer(
   };
 }
 
-const aaplListing: ListingSubjectRef = {
-  kind: "listing",
-  id: "11111111-1111-4111-a111-111111111111",
-};
-
-const POLYGON_SOURCE_ID = "00000000-0000-4000-a000-000000000001";
-const FIXTURE_SOURCE_ID = "00000000-0000-4000-a000-0000000000ff";
-
-// Hand-rolled fixture adapter: returns canned normalized records directly,
-// proving the interface itself is sufficient — the consumer never sees vendor
-// types from any specific provider.
 function createFixtureAdapter(records: {
   quote: NormalizedQuote;
   bars: NormalizedBars;
@@ -65,7 +59,7 @@ test("consumers receive identical normalized shapes from a fixture adapter and t
       prev_close: expectedPrevClose,
       session_state: "regular",
       as_of: new Date(1_700_000_000_000).toISOString(),
-      delay_class: "real_time",
+      delay_class: POLYGON_DELAY_CLASS,
       currency: expectedCurrency,
       source_id: FIXTURE_SOURCE_ID,
     }),
@@ -87,24 +81,20 @@ test("consumers receive identical normalized shapes from a fixture adapter and t
 
   const polygon = createPolygonAdapter({
     sourceId: POLYGON_SOURCE_ID,
-    fetcher: async (path: string) => {
-      assert.equal(path, "/v2/snapshot/locale/us/markets/stocks/tickers/AAPL");
-      return {
-        status: "OK",
-        ticker: {
-          lastTrade: { p: expectedPrice, t: 1_700_000_000_000_000_000 },
-          prevDay: { c: expectedPrevClose },
-          market_status: "open",
-        },
-      };
-    },
-    resolveListing: async () => ({ ticker: "AAPL", mic: "XNAS", currency: expectedCurrency }),
+    delayClass: POLYGON_DELAY_CLASS,
+    fetcher: makeRouteFetcher({
+      [SNAPSHOT_PATH]: aaplSnapshotPayload({
+        price: expectedPrice,
+        prevClose: expectedPrevClose,
+      }),
+    }),
+    resolveListing: async () => aaplCtx,
   });
 
   const fromFixture = await priceSummaryConsumer(fixture, aaplListing);
   const fromPolygon = await priceSummaryConsumer(polygon, aaplListing);
 
-  // The whole point of the seam: swapping the adapter must not change what the
+  // The seam guarantee: swapping the adapter must not change what the
   // consumer observes for equivalent underlying market state.
   assert.deepEqual(fromFixture, fromPolygon);
 });
@@ -112,16 +102,10 @@ test("consumers receive identical normalized shapes from a fixture adapter and t
 test("normalized records carry the spec §6.2.1 required metadata fields", async () => {
   const polygon = createPolygonAdapter({
     sourceId: POLYGON_SOURCE_ID,
+    delayClass: POLYGON_DELAY_CLASS,
     fetcher: async (path: string) => {
-      if (path === "/v2/snapshot/locale/us/markets/stocks/tickers/AAPL") {
-        return {
-          status: "OK",
-          ticker: {
-            lastTrade: { p: 1, t: 1_700_000_000_000_000_000 },
-            prevDay: { c: 0.99 },
-            market_status: "open",
-          },
-        };
+      if (path === SNAPSHOT_PATH) {
+        return aaplSnapshotPayload({ price: 1, prevClose: 0.99 });
       }
       if (path.startsWith("/v2/aggs/ticker/AAPL/")) {
         return {
@@ -132,7 +116,7 @@ test("normalized records carry the spec §6.2.1 required metadata fields", async
       }
       throw new Error(`unexpected fetch: ${path}`);
     },
-    resolveListing: async () => ({ ticker: "AAPL", mic: "XNAS", currency: "USD" }),
+    resolveListing: async () => aaplCtx,
   });
 
   const quote = await polygon.getQuote({ listing: aaplListing });
@@ -162,8 +146,9 @@ test("normalized records carry the spec §6.2.1 required metadata fields", async
 test("adapter exposes its provider name and source_id for provenance routing", () => {
   const polygon = createPolygonAdapter({
     sourceId: POLYGON_SOURCE_ID,
+    delayClass: POLYGON_DELAY_CLASS,
     fetcher: async () => ({}),
-    resolveListing: async () => ({ ticker: "AAPL", mic: "XNAS", currency: "USD" }),
+    resolveListing: async () => aaplCtx,
   });
 
   assert.equal(polygon.providerName, "polygon");

@@ -4,16 +4,13 @@ import {
   assertQuoteContract,
   DELAY_CLASSES,
   normalizedQuote,
+  quoteMove,
   SESSION_STATES,
   type NormalizedQuote,
 } from "../src/quote.ts";
 import type { ListingSubjectRef } from "../src/subject-ref.ts";
+import { aaplListing, POLYGON_SOURCE_ID as SOURCE_ID } from "./fixtures.ts";
 
-const aaplListing: ListingSubjectRef = {
-  kind: "listing",
-  id: "11111111-1111-4111-a111-111111111111",
-};
-const SOURCE_ID = "00000000-0000-4000-a000-000000000001";
 const AS_OF = "2026-04-22T15:30:00.000Z";
 
 function validInput() {
@@ -29,17 +26,31 @@ function validInput() {
   };
 }
 
-test("normalizedQuote derives change_abs and change_pct from price and prev_close", () => {
+test("quoteMove derives absolute and percentage move from price and prev_close", () => {
   const q = normalizedQuote(validInput());
-  // 187.42 - 185.00 = 2.42
-  assert.equal(Math.abs(q.change_abs - 2.42) < 1e-9, true);
-  // 2.42 / 185.00 ≈ 0.01308...
-  assert.equal(Math.abs(q.change_pct - (2.42 / 185.0)) < 1e-12, true);
+  const move = quoteMove(q);
+  assert.ok(Math.abs(move.change_abs - 2.42) < 1e-9);
+  assert.ok(Math.abs(move.change_pct - (2.42 / 185.0)) < 1e-12);
+});
+
+test("normalizedQuote carries required absolute and percentage move fields", () => {
+  const q = normalizedQuote(validInput());
+
+  assert.ok(Math.abs(q.change_abs - 2.42) < 1e-9);
+  assert.ok(Math.abs(q.change_pct - (2.42 / 185.0)) < 1e-12);
 });
 
 test("normalizedQuote returns a frozen object so adapters can't post-hoc mutate", () => {
   const q = normalizedQuote(validInput());
   assert.equal(Object.isFrozen(q), true);
+});
+
+test("normalizedQuote clones and freezes the nested listing ref", () => {
+  const input = validInput();
+  const q = normalizedQuote(input);
+
+  assert.notEqual(q.listing, input.listing);
+  assert.equal(Object.isFrozen(q.listing), true);
 });
 
 test("normalizedQuote rejects non-listing SubjectRef kinds (issuer, instrument)", () => {
@@ -128,15 +139,8 @@ test("assertQuoteContract accepts a quote built via the smart constructor", () =
   assert.doesNotThrow(() => assertQuoteContract(q));
 });
 
-test("assertQuoteContract rejects a quote where change_abs disagrees with price - prev_close", () => {
-  const q = normalizedQuote(validInput()) as NormalizedQuote;
-  // Bypass the freeze for the purpose of the test by cloning + tampering.
-  const tampered = { ...q, change_abs: 999.9 };
-  assert.throws(() => assertQuoteContract(tampered), /change_abs.*disagrees/);
-});
-
 test("assertQuoteContract rejects a quote missing required metadata fields", () => {
-  for (const drop of ["as_of", "delay_class", "currency", "source_id"] as const) {
+  for (const drop of ["as_of", "delay_class", "currency", "source_id", "change_abs", "change_pct"] as const) {
     const q = normalizedQuote(validInput()) as NormalizedQuote;
     const tampered: Record<string, unknown> = { ...q };
     delete tampered[drop];
@@ -152,4 +156,11 @@ test("assertQuoteContract rejects a quote whose listing is not kind=listing", ()
   const q = normalizedQuote(validInput()) as NormalizedQuote;
   const tampered = { ...q, listing: { kind: "issuer", id: q.listing.id } };
   assert.throws(() => assertQuoteContract(tampered), /listing/);
+});
+
+test("assertQuoteContract rejects quote move fields that disagree with price and prev_close", () => {
+  const q = normalizedQuote(validInput());
+
+  assert.throws(() => assertQuoteContract({ ...q, change_abs: 999 }), /change_abs/);
+  assert.throws(() => assertQuoteContract({ ...q, change_pct: 999 }), /change_pct/);
 });
