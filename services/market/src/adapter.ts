@@ -1,6 +1,7 @@
 import type { ListingSubjectRef, UUID } from "./subject-ref.ts";
 import type { NormalizedQuote } from "./quote.ts";
 import type { BarInterval, BarRange, NormalizedBars } from "./bar.ts";
+import type { MarketDataOutcome } from "./availability.ts";
 
 export {
   assertQuoteContract,
@@ -26,6 +27,20 @@ export {
   type NormalizedBars,
 } from "./bar.ts";
 
+export {
+  assertUnavailableContract,
+  available,
+  AVAILABILITY_REASONS,
+  isAvailable,
+  isUnavailable,
+  unavailable,
+  type AvailabilityReason,
+  type AvailableEnvelope,
+  type MarketDataOutcome,
+  type UnavailableEnvelope,
+  type UnavailableInput,
+} from "./availability.ts";
+
 export type QuoteRequest = {
   listing: ListingSubjectRef;
 };
@@ -39,6 +54,6 @@ export type BarsRequest = {
 export type MarketDataAdapter = {
   readonly providerName: string;
   readonly sourceId: UUID;
-  getQuote(request: QuoteRequest): Promise<NormalizedQuote>;
-  getBars(request: BarsRequest): Promise<NormalizedBars>;
+  getQuote(request: QuoteRequest): Promise<MarketDataOutcome<NormalizedQuote>>;
+  getBars(request: BarsRequest): Promise<MarketDataOutcome<NormalizedBars>>;
 };

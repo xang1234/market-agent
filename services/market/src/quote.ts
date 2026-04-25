@@ -1,4 +1,9 @@
-import type { ListingSubjectRef, UUID } from "./subject-ref.ts";
+import {
+  assertListingRef,
+  freezeListingRef,
+  type ListingSubjectRef,
+  type UUID,
+} from "./subject-ref.ts";
 import {
   assertCurrency,
   assertFinitePositive,
@@ -49,9 +54,7 @@ export type NormalizedQuote = {
 export type NormalizedQuoteInput = Omit<NormalizedQuote, "change_abs" | "change_pct">;
 
 export function normalizedQuote(input: NormalizedQuoteInput): NormalizedQuote {
-  if (input.listing?.kind !== "listing") {
-    throw new Error("normalizedQuote: listing must be a listing SubjectRef");
-  }
+  const listing = freezeListingRef(input.listing, "normalizedQuote");
   assertFinitePositive(input.price, "normalizedQuote.price");
   assertFinitePositive(input.prev_close, "normalizedQuote.prev_close");
   assertOneOf(input.session_state, SESSION_STATES, "normalizedQuote.session_state");
@@ -64,10 +67,7 @@ export function normalizedQuote(input: NormalizedQuoteInput): NormalizedQuote {
   const change_pct = change_abs / input.prev_close;
 
   return Object.freeze({
-    listing: Object.freeze({
-      kind: input.listing.kind,
-      id: input.listing.id,
-    }),
+    listing,
     price: input.price,
     prev_close: input.prev_close,
     change_abs,
@@ -90,14 +90,7 @@ export function assertQuoteContract(value: unknown): asserts value is Normalized
   }
   const q = value as Record<string, unknown>;
 
-  if (
-    !q.listing ||
-    typeof q.listing !== "object" ||
-    (q.listing as { kind?: unknown }).kind !== "listing" ||
-    typeof (q.listing as { id?: unknown }).id !== "string"
-  ) {
-    throw new Error("quote.listing: must be a listing SubjectRef with string id");
-  }
+  assertListingRef(q.listing, "quote.listing");
 
   assertFinitePositive(q.price, "quote.price");
   assertFinitePositive(q.prev_close, "quote.prev_close");
