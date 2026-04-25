@@ -198,10 +198,9 @@ export const AAPL_FY2024_KNOWN_VALUES = {
   eps_diluted: 6.08,
 } as const;
 
-// Canonical metric definitions for the AAPL income statement. The metric_id
-// UUIDs are stable test fixtures: a real deployment seeds the `metrics`
-// table from a migration, but the mapper's contract (key → id, every line
-// resolves) is testable from in-memory definitions alone.
+// AAPL income-statement metric registry, using the canonical vocabulary
+// from db/seed/metrics.sql. EPS folds into `unit_class: "currency"` (with
+// `aggregation: "derived"`); share counts use `unit_class: "count"`.
 export const AAPL_INCOME_METRIC_DEFINITIONS: ReadonlyArray<MetricDefinition> = [
   metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0001", "net_sales.products", "Net sales — products", "currency", "sum", "higher_is_better"),
   metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0002", "net_sales.services", "Net sales — services", "currency", "sum", "higher_is_better"),
@@ -218,10 +217,10 @@ export const AAPL_INCOME_METRIC_DEFINITIONS: ReadonlyArray<MetricDefinition> = [
   metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa000d", "income_before_taxes", "Income before provision for income taxes", "currency", "sum", "higher_is_better"),
   metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa000e", "income_tax_expense", "Provision for income taxes", "currency", "sum", "lower_is_better"),
   metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa000f", "net_income", "Net income", "currency", "sum", "higher_is_better"),
-  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0010", "eps.basic", "Earnings per share — basic", "currency_per_share", "weighted_average", "higher_is_better"),
-  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0011", "eps.diluted", "Earnings per share — diluted", "currency_per_share", "weighted_average", "higher_is_better"),
-  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0012", "weighted_average_shares.basic", "Weighted-average shares outstanding — basic", "shares", "weighted_average", "neutral"),
-  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0013", "weighted_average_shares.diluted", "Weighted-average shares outstanding — diluted", "shares", "weighted_average", "neutral"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0010", "eps.basic", "Earnings per share — basic", "currency", "derived", "higher_is_better"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0011", "eps.diluted", "Earnings per share — diluted", "currency", "derived", "higher_is_better"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0012", "weighted_average_shares.basic", "Weighted-average shares outstanding — basic", "count", "avg", "neutral"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0013", "weighted_average_shares.diluted", "Weighted-average shares outstanding — diluted", "count", "avg", "neutral"),
 ];
 
 export function aaplIncomeMetricRegistry(): MetricRegistry {
@@ -243,7 +242,8 @@ function metric(
     unit_class,
     aggregation,
     interpretation,
-    canonical_source_class: "filing",
+    canonical_source_class: "gaap",
     definition_version: 1,
+    notes: null,
   };
 }

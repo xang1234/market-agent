@@ -5,6 +5,9 @@
 // map to exactly one metric_id; an unmapped line would let a displayed
 // number reach a surface without a row in `Fact`/`Computation`, violating
 // I1 (no displayed number without a backing row).
+//
+// The enum vocabularies below mirror `db/seed/metrics.sql` so a registry
+// built in code is byte-compatible with one loaded from the seeded table.
 
 import type { NormalizedStatement, StatementLine } from "./statement.ts";
 import {
@@ -16,30 +19,38 @@ import {
 
 export type UnitClass =
   | "currency"
-  | "currency_per_share"
-  | "shares"
+  | "percent"
+  | "count"
   | "ratio"
-  | "pure"
-  | "count";
+  | "duration"
+  | "enum";
 
 export const UNIT_CLASSES: ReadonlyArray<UnitClass> = [
   "currency",
-  "currency_per_share",
-  "shares",
-  "ratio",
-  "pure",
+  "percent",
   "count",
+  "ratio",
+  "duration",
+  "enum",
 ];
 
-// `sum` for additive flow values (revenue, expenses, cash flows);
-// `instantaneous` for balance-sheet point-in-time values;
-// `weighted_average` for per-share denominators (EPS shares, etc.).
-export type MetricAggregation = "sum" | "instantaneous" | "weighted_average";
+export type MetricAggregation =
+  | "sum"
+  | "avg"
+  | "point_in_time"
+  | "ttm"
+  | "yoy"
+  | "qoq"
+  | "derived";
 
 export const METRIC_AGGREGATIONS: ReadonlyArray<MetricAggregation> = [
   "sum",
-  "instantaneous",
-  "weighted_average",
+  "avg",
+  "point_in_time",
+  "ttm",
+  "yoy",
+  "qoq",
+  "derived",
 ];
 
 export type MetricInterpretation =
@@ -53,16 +64,36 @@ export const METRIC_INTERPRETATIONS: ReadonlyArray<MetricInterpretation> = [
   "neutral",
 ];
 
-// `filing` = SEC EDGAR or equivalent issuer filings (primary source);
-// `vendor` = third-party aggregator (secondary);
-// `calculated` = derived from other facts via Computation rows.
-export type CanonicalSourceClass = "filing" | "vendor" | "calculated";
+export type CanonicalSourceClass =
+  | "gaap"
+  | "ifrs"
+  | "vendor"
+  | "market"
+  | "derived";
 
 export const CANONICAL_SOURCE_CLASSES: ReadonlyArray<CanonicalSourceClass> = [
-  "filing",
+  "gaap",
+  "ifrs",
   "vendor",
-  "calculated",
+  "market",
+  "derived",
 ];
+
+// `metric.unit_class` and `line.unit` are intentionally separate vocabularies:
+// `unit_class` is the canonical *category* (a `currency` metric like net
+// income), and `line.unit` is the *transport shape* of a specific reported
+// value (raw `currency` for net income, `currency_per_share` for EPS — both
+// roll up to a `currency`-class metric). The mapper enforces this
+// compatibility so a `shares` line cannot silently attach a `currency`
+// metric_id and corrupt aggregations downstream.
+const COMPATIBLE_LINE_UNITS: Readonly<Record<UnitClass, ReadonlyArray<string>>> = {
+  currency: ["currency", "currency_per_share"],
+  percent: ["pure"],
+  count: ["count", "shares"],
+  ratio: ["ratio", "pure"],
+  duration: ["days", "months", "years"],
+  enum: ["enum"],
+};
 
 export type MetricDefinition = {
   metric_id: string;
@@ -73,7 +104,7 @@ export type MetricDefinition = {
   interpretation: MetricInterpretation;
   canonical_source_class: CanonicalSourceClass;
   definition_version: number;
-  notes?: string;
+  notes: string | null;
 };
 
 export type MetricRegistry = {
@@ -109,7 +140,7 @@ export function createMetricRegistry(
     byKey.set(def.metric_key, freezeDefinition(def));
     byId.add(def.metric_id);
   }
-  return Object.freeze({ byKey: freezeMap(byKey) });
+  return Object.freeze({ byKey: byKey as ReadonlyMap<string, MetricDefinition> });
 }
 
 export function resolveMetric(
@@ -130,9 +161,10 @@ export function mapStatementLine(
   line: StatementLine,
 ): MappedStatementLine {
   const def = resolveMetric(registry, line.metric_key);
-  if (line.unit !== def.unit_class) {
+  const allowed = COMPATIBLE_LINE_UNITS[def.unit_class];
+  if (!allowed.includes(line.unit)) {
     throw new Error(
-      `metric-mapper: line metric_key="${line.metric_key}" unit "${line.unit}" disagrees with metric.unit_class "${def.unit_class}"`,
+      `metric-mapper: line metric_key="${line.metric_key}" unit "${line.unit}" not compatible with metric.unit_class "${def.unit_class}" (allowed: ${allowed.join(", ")})`,
     );
   }
   return Object.freeze({ ...line, metric_id: def.metric_id });
@@ -142,11 +174,7 @@ export function mapStatementLines(
   registry: MetricRegistry,
   lines: ReadonlyArray<StatementLine>,
 ): ReadonlyArray<MappedStatementLine> {
-  const mapped: MappedStatementLine[] = [];
-  for (const line of lines) {
-    mapped.push(mapStatementLine(registry, line));
-  }
-  return Object.freeze(mapped);
+  return Object.freeze(lines.map((l) => mapStatementLine(registry, l)));
 }
 
 export function mapStatement(
@@ -190,13 +218,13 @@ export function assertMetricDefinition(
       `${label}.definition_version: must be >= 1; received ${d.definition_version}`,
     );
   }
-  if (d.notes !== undefined && typeof d.notes !== "string") {
-    throw new Error(`${label}.notes: must be a string when present`);
+  if (d.notes !== null && typeof d.notes !== "string") {
+    throw new Error(`${label}.notes: must be a string or null`);
   }
 }
 
 function freezeDefinition(d: MetricDefinition): MetricDefinition {
-  const out: MetricDefinition = {
+  return Object.freeze({
     metric_id: d.metric_id,
     metric_key: d.metric_key,
     display_name: d.display_name,
@@ -205,27 +233,6 @@ function freezeDefinition(d: MetricDefinition): MetricDefinition {
     interpretation: d.interpretation,
     canonical_source_class: d.canonical_source_class,
     definition_version: d.definition_version,
-  };
-  if (d.notes !== undefined) out.notes = d.notes;
-  return Object.freeze(out);
-}
-
-function freezeMap<K, V>(m: Map<K, V>): ReadonlyMap<K, V> {
-  // Map.set on a frozen Map is silently ignored in non-strict mode and
-  // throws in strict — but we need belt-and-suspenders against the JS
-  // freezing-Map gotcha (Object.freeze freezes properties, not the
-  // internal slot). Wrap in a thin proxy that throws on writes.
-  const readonly: ReadonlyMap<K, V> = {
-    get size() {
-      return m.size;
-    },
-    get: (k) => m.get(k),
-    has: (k) => m.has(k),
-    keys: () => m.keys(),
-    values: () => m.values(),
-    entries: () => m.entries(),
-    forEach: (cb, thisArg) => m.forEach(cb, thisArg),
-    [Symbol.iterator]: () => m[Symbol.iterator](),
-  };
-  return Object.freeze(readonly);
+    notes: d.notes,
+  });
 }

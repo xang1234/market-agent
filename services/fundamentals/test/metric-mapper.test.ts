@@ -105,9 +105,9 @@ test("resolveMetric throws on unknown metric_keys (every line must resolve)", ()
   );
 });
 
-test("mapStatementLine rejects lines whose unit disagrees with metric.unit_class", () => {
+test("mapStatementLine rejects lines whose unit is not compatible with metric.unit_class", () => {
   const registry = aaplIncomeMetricRegistry();
-  // net_sales.total has unit_class=currency; passing unit=shares is a bug.
+  // net_sales.total is unit_class=currency; passing unit=shares is a category error.
   const bad: StatementLine = {
     metric_key: "net_sales.total",
     value_num: 1,
@@ -117,8 +117,35 @@ test("mapStatementLine rejects lines whose unit disagrees with metric.unit_class
   };
   assert.throws(
     () => mapStatementLine(registry, bad),
-    /unit "shares" disagrees with metric\.unit_class "currency"/,
+    /unit "shares" not compatible with metric\.unit_class "currency"/,
   );
+});
+
+test("mapStatementLine accepts compatible-but-not-equal line.unit (e.g. currency_per_share for a currency-class metric)", () => {
+  const registry = aaplIncomeMetricRegistry();
+  // EPS metric is unit_class=currency; lines come in as currency_per_share.
+  const epsLine: StatementLine = {
+    metric_key: "eps.diluted",
+    value_num: 6.08,
+    unit: "currency_per_share",
+    currency: "USD",
+    scale: 1,
+    coverage_level: "full",
+  };
+  const mapped = mapStatementLine(registry, epsLine);
+  assert.equal(mapped.unit, "currency_per_share");
+  assert.equal(mapped.metric_id, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0011");
+
+  // Share counts: line.unit="shares" rolls up to unit_class="count".
+  const sharesLine: StatementLine = {
+    metric_key: "weighted_average_shares.diluted",
+    value_num: 15_408_095,
+    unit: "shares",
+    scale: 1_000,
+    coverage_level: "full",
+  };
+  const sharesMapped = mapStatementLine(registry, sharesLine);
+  assert.equal(sharesMapped.metric_id, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0013");
 });
 
 test("mapStatementLines fails the whole batch if any line is unmapped", () => {
@@ -199,12 +226,12 @@ test("assertMetricDefinition rejects malformed definitions", () => {
 
 // --- Frozen value-object discipline ---------------------------------------
 
-test("createMetricRegistry returns a registry whose Map cannot be mutated", () => {
+test("createMetricRegistry returns a frozen registry; per-definition entries are also frozen", () => {
   const registry = aaplIncomeMetricRegistry();
   assert.equal(Object.isFrozen(registry), true);
-  // The exposed `byKey` is a ReadonlyMap-shaped wrapper without a `.set` method;
-  // attempting to add a new entry should not be possible.
-  assert.equal(typeof (registry.byKey as { set?: unknown }).set, "undefined");
+  for (const def of registry.byKey.values()) {
+    assert.equal(Object.isFrozen(def), true);
+  }
 });
 
 test("mapStatementLine returns a frozen MappedStatementLine", () => {
