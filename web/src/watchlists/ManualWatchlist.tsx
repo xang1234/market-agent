@@ -1,9 +1,10 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
+  fetchQuoteSnapshot,
   formatQuotePrice,
   formatSignedPercent,
   quoteDirection,
-  quoteFromSubjectRef,
   type QuoteSnapshot,
 } from '../symbol/quote'
 import { symbolDetailPathForSubject } from '../symbol/search'
@@ -17,12 +18,11 @@ type ManualWatchlistProps = {
   onRemove: (subjectRef: SubjectRef) => void
 }
 
-// fra-6al.6.2: each row reuses the P0.4 listing-oriented quote snapshot —
-// quoteFromSubjectRef feeds the same createQuoteSnapshotStub that subject
-// detail uses, so row and landing agree on price / move / freshness for the
-// same subject. Richer listing context (real ticker / MIC) will arrive when
-// a SubjectRef hydration endpoint lands; until then the stub's N/A fallback
-// is honest about the absent context instead of inventing one.
+// Each row hydrates its quote independently from the market service. Members
+// whose subject_ref is not listing-kind (e.g. an issuer added before listing
+// hydration lands) render a quote-unavailable state — surfacing the absent
+// context honestly is the rule established in fra-6al.6.2 and preserved here
+// now that the stub is gone.
 export function ManualWatchlist({ members, status, message, onRemove }: ManualWatchlistProps) {
   if (status === 'loading' && members.length === 0) {
     return (
@@ -56,6 +56,11 @@ export function ManualWatchlist({ members, status, message, onRemove }: ManualWa
   )
 }
 
+type RowState =
+  | { status: 'loading' }
+  | { status: 'unavailable' }
+  | { status: 'ready'; quote: QuoteSnapshot }
+
 function WatchlistRow({
   member,
   onRemove,
@@ -63,37 +68,53 @@ function WatchlistRow({
   member: WatchlistMember
   onRemove: (subjectRef: SubjectRef) => void
 }) {
-  const quote = quoteFromSubjectRef(member.subject_ref)
-  const direction = quoteDirection(quote)
-  const moveClassName =
-    direction === 'up'
-      ? 'text-emerald-700 dark:text-emerald-400'
-      : direction === 'down'
-        ? 'text-red-700 dark:text-red-400'
-        : 'text-neutral-500 dark:text-neutral-400'
+  const listingId = member.subject_ref.kind === 'listing' ? member.subject_ref.id : null
+  const [state, setState] = useState<RowState>(
+    listingId ? { status: 'loading' } : { status: 'unavailable' },
+  )
+
+  useEffect(() => {
+    if (!listingId) return
+    const controller = new AbortController()
+    setState({ status: 'loading' })
+    fetchQuoteSnapshot(listingId, { signal: controller.signal })
+      .then((quote) => setState({ status: 'ready', quote }))
+      .catch((err) => {
+        if (controller.signal.aborted) return
+        console.warn('watchlist row quote fetch failed', err)
+        setState({ status: 'unavailable' })
+      })
+    return () => controller.abort()
+  }, [listingId])
 
   return (
     <li className="flex items-stretch">
       <Link
         to={symbolDetailPathForSubject(member.subject_ref)}
-        title={freshnessLabel(quote)}
+        title={state.status === 'ready' ? freshnessLabel(state.quote) : undefined}
         className="flex min-w-0 flex-1 items-center justify-between gap-2 px-3 py-2 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
       >
         <span className="min-w-0 flex-1">
           <span className="block truncate font-medium text-neutral-800 dark:text-neutral-100">
-            {primaryLabel(quote, member.subject_ref)}
+            {primaryLabel(state, member.subject_ref)}
           </span>
           <span className="block truncate text-[10px] text-neutral-500 dark:text-neutral-400">
-            {secondaryLabel(quote, member.subject_ref)}
+            {secondaryLabel(state, member.subject_ref)}
           </span>
         </span>
         <span className="shrink-0 text-right">
-          <span className="block tabular-nums font-medium text-neutral-900 dark:text-neutral-50">
-            {formatQuotePrice(quote.latest_price, quote.currency)}
-          </span>
-          <span className={`block text-[10px] tabular-nums ${moveClassName}`}>
-            {formatSignedPercent(quote.percent_move)}
-          </span>
+          {state.status === 'ready' ? (
+            <>
+              <span className="block tabular-nums font-medium text-neutral-900 dark:text-neutral-50">
+                {formatQuotePrice(state.quote.latest_price, state.quote.currency)}
+              </span>
+              <span className={`block text-[10px] tabular-nums ${moveClassName(state.quote)}`}>
+                {formatSignedPercent(state.quote.percent_move)}
+              </span>
+            </>
+          ) : (
+            <span className="block text-[10px] text-neutral-400 dark:text-neutral-500">—</span>
+          )}
         </span>
       </Link>
       <button
@@ -108,19 +129,27 @@ function WatchlistRow({
   )
 }
 
-function primaryLabel(quote: QuoteSnapshot, ref: SubjectRef): string {
-  if (quote.listing.ticker && quote.listing.ticker !== 'N/A') return quote.listing.ticker
+function moveClassName(quote: QuoteSnapshot): string {
+  const direction = quoteDirection(quote)
+  if (direction === 'up') return 'text-emerald-700 dark:text-emerald-400'
+  if (direction === 'down') return 'text-red-700 dark:text-red-400'
+  return 'text-neutral-500 dark:text-neutral-400'
+}
+
+function primaryLabel(state: RowState, ref: SubjectRef): string {
+  if (state.status === 'ready') return state.quote.listing.ticker
   return truncateId(ref.id)
 }
 
-function secondaryLabel(quote: QuoteSnapshot, ref: SubjectRef): string {
-  const mic = quote.listing.mic
-  if (mic && mic !== 'UNKNOWN') return `${mic} · ${quote.currency}`
+function secondaryLabel(state: RowState, ref: SubjectRef): string {
+  if (state.status === 'ready') {
+    return `${state.quote.listing.mic} · ${state.quote.currency}`
+  }
   return ref.kind
 }
 
 function freshnessLabel(quote: QuoteSnapshot): string {
-  return `${quote.session_state.replaceAll('_', ' ')} · ${quote.delay_class} · ${quote.as_of}`
+  return `${quote.session_state.replaceAll('_', ' ')} · ${quote.delay_class.replaceAll('_', ' ')} · ${quote.as_of}`
 }
 
 function truncateId(id: string): string {

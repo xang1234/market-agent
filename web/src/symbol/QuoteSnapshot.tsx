@@ -1,10 +1,14 @@
+import { useEffect, useState } from 'react'
 import {
-  createQuoteSnapshotStub,
+  fetchQuoteSnapshot,
   formatQuotePrice,
   formatSignedNumber,
   formatSignedPercent,
+  issuerProfileFromSubject,
+  listingIdForQuote,
   quoteDirection,
   subjectDisplayName,
+  type QuoteSnapshot as QuoteSnapshotData,
   type ResolvedSubject,
 } from './quote.ts'
 
@@ -12,8 +16,60 @@ type QuoteSnapshotProps = {
   subject: ResolvedSubject
 }
 
+type FetchState =
+  | { status: 'loading' }
+  | { status: 'unavailable'; reason: string }
+  | { status: 'ready'; quote: QuoteSnapshotData }
+
 export function QuoteSnapshot({ subject }: QuoteSnapshotProps) {
-  const quote = createQuoteSnapshotStub(subject)
+  const listingId = listingIdForQuote(subject)
+  const [state, setState] = useState<FetchState>(
+    listingId
+      ? { status: 'loading' }
+      : { status: 'unavailable', reason: 'no listing context for this subject' },
+  )
+
+  useEffect(() => {
+    if (!listingId) return
+    const controller = new AbortController()
+    setState({ status: 'loading' })
+    fetchQuoteSnapshot(listingId, { signal: controller.signal })
+      .then((quote) => setState({ status: 'ready', quote }))
+      .catch((err) => {
+        if (controller.signal.aborted) return
+        setState({
+          status: 'unavailable',
+          reason: err instanceof Error ? err.message : 'quote fetch failed',
+        })
+      })
+    return () => controller.abort()
+  }, [listingId])
+
+  const issuerProfile = issuerProfileFromSubject(subject)
+
+  if (state.status !== 'ready') {
+    return (
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(260px,360px)]">
+        <section className="min-w-0">
+          <h1 className="min-w-0 truncate text-2xl font-semibold text-neutral-950 dark:text-neutral-50">
+            {subjectDisplayName(subject)}
+          </h1>
+          <p className="mt-3 text-sm text-neutral-500 dark:text-neutral-400">
+            {state.status === 'loading' ? 'Loading quote…' : `Quote unavailable: ${state.reason}`}
+          </p>
+          {issuerProfile ? (
+            <p className="mt-3 max-w-2xl text-sm text-neutral-600 dark:text-neutral-400">
+              {issuerProfile.legal_name}
+              {issuerProfile.sector ? ` · ${issuerProfile.sector}` : ''}
+              {issuerProfile.industry ? ` · ${issuerProfile.industry}` : ''}
+            </p>
+          ) : null}
+        </section>
+      </div>
+    )
+  }
+
+  const quote = state.quote
   const direction = quoteDirection(quote)
   const moveClassName =
     direction === 'up'
@@ -44,62 +100,30 @@ export function QuoteSnapshot({ subject }: QuoteSnapshotProps) {
             {formatSignedNumber(quote.absolute_move)} ({formatSignedPercent(quote.percent_move)})
           </div>
           <div className="pb-1 text-xs text-neutral-500 dark:text-neutral-400">
-            {quote.session_state.replaceAll('_', ' ')} · {quote.delay_class} · {formatQuoteTime(quote.as_of, quote.listing.timezone)}
+            {quote.session_state.replaceAll('_', ' ')} · {quote.delay_class.replaceAll('_', ' ')} · {formatQuoteTime(quote.as_of, quote.listing.timezone)}
           </div>
         </div>
-        {quote.issuer_profile ? (
+        {issuerProfile ? (
           <p className="mt-3 max-w-2xl text-sm text-neutral-600 dark:text-neutral-400">
-            {quote.issuer_profile.legal_name}
-            {quote.issuer_profile.sector ? ` · ${quote.issuer_profile.sector}` : ''}
-            {quote.issuer_profile.industry ? ` · ${quote.issuer_profile.industry}` : ''}
+            {issuerProfile.legal_name}
+            {issuerProfile.sector ? ` · ${issuerProfile.sector}` : ''}
+            {issuerProfile.industry ? ` · ${issuerProfile.industry}` : ''}
           </p>
         ) : null}
       </section>
       <section
-        aria-label="Recent quote range"
+        aria-label="Quote provenance"
         className="flex min-h-28 flex-col justify-between rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
       >
         <div className="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
-          <span>Recent range</span>
-          <span>{quote.source_id}</span>
+          <span>Source</span>
+          <span className="truncate" title={quote.source_id}>{quote.source_id.slice(0, 8)}…</span>
         </div>
-        <QuoteSparkline values={quote.recent_range} direction={direction} />
+        <div className="mt-2 text-xs text-neutral-600 dark:text-neutral-400">
+          Prev close: <span className="tabular-nums">{formatQuotePrice(quote.prev_close, quote.currency)}</span>
+        </div>
       </section>
     </div>
-  )
-}
-
-function QuoteSparkline({
-  values,
-  direction,
-}: {
-  values: number[]
-  direction: 'up' | 'down' | 'flat'
-}) {
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  const span = Math.max(max - min, 1)
-  const points = values
-    .map((value, index) => {
-      const x = (index / Math.max(values.length - 1, 1)) * 280
-      const y = 72 - ((value - min) / span) * 64
-      return `${x.toFixed(1)},${y.toFixed(1)}`
-    })
-    .join(' ')
-  const stroke =
-    direction === 'up' ? '#047857' : direction === 'down' ? '#b91c1c' : '#525252'
-
-  return (
-    <svg viewBox="0 0 280 80" role="img" aria-label="Small recent price chart" className="h-20 w-full">
-      <polyline
-        fill="none"
-        stroke={stroke}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="3"
-        points={points}
-      />
-    </svg>
   )
 }
 

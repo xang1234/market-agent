@@ -1,6 +1,5 @@
 import {
   displaySubjectRef,
-  subjectFromRef,
   type IssuerContext,
   type ListingContext,
   type ResolvedSubject,
@@ -9,19 +8,21 @@ import {
 
 export type { ResolvedSubject }
 
-export type QuoteDelayClass = 'realtime' | 'delayed' | 'eod'
-export type QuoteSessionState = 'pre_market' | 'regular' | 'after_hours' | 'closed'
+// Aligned with services/market/src/quote.ts so the frontend speaks the same
+// vocabulary as the spec §6.2.1 quote contract.
+export type QuoteDelayClass = 'real_time' | 'delayed_15m' | 'eod' | 'unknown'
+export type QuoteSessionState = 'pre_market' | 'regular' | 'post_market' | 'closed'
 export type QuoteDirection = 'up' | 'down' | 'flat'
 
 export type QuoteSnapshot = {
   subject_ref: SubjectRef
-  display_name: string
   listing: {
     ticker: string
     mic: string
     timezone: string
   }
   latest_price: number
+  prev_close: number
   absolute_move: number
   percent_move: number
   currency: string
@@ -29,52 +30,89 @@ export type QuoteSnapshot = {
   delay_class: QuoteDelayClass
   session_state: QuoteSessionState
   source_id: string
-  recent_range: number[]
-  issuer_profile?: {
-    legal_name: string
-    sector?: string
-    industry?: string
+}
+
+// Mirrors GetQuoteResponse in services/market/src/http.ts. We type the wire
+// shape narrowly so callers see decode failures up front instead of seeing
+// `undefined` propagate through the UI.
+type WireNormalizedQuote = {
+  listing: { kind: 'listing'; id: string }
+  price: number
+  prev_close: number
+  change_abs: number
+  change_pct: number
+  session_state: QuoteSessionState
+  as_of: string
+  delay_class: QuoteDelayClass
+  currency: string
+  source_id: string
+}
+
+type WireGetQuoteResponse = {
+  quote: WireNormalizedQuote
+  listing_context: {
+    ticker: string
+    mic: string
+    timezone: string
   }
 }
 
-const STUB_AS_OF = '2026-04-24T14:45:00.000Z'
-const STUB_SOURCE_ID = 'p1.1-stub'
-
-// Row-hydration entry point for the default manual watchlist (fra-6al.6.2).
-// Persisted watchlist rows only carry a SubjectRef, so we build the same
-// minimal ResolvedSubject that the URL-entered landing uses and run it
-// through createQuoteSnapshotStub. No second quote identity model — rows
-// and landing converge on the same derivation for the same subject.
-export function quoteFromSubjectRef(subjectRef: SubjectRef): QuoteSnapshot {
-  return createQuoteSnapshotStub(subjectFromRef(subjectRef))
+export class QuoteFetchError extends Error {
+  readonly status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'QuoteFetchError'
+    this.status = status
+  }
 }
 
-export function createQuoteSnapshotStub(subject: ResolvedSubject): QuoteSnapshot {
-  const listing = listingForSubject(subject)
-  const seed = stableSeed(`${listing.ticker}:${listing.mic}:${listing.subject_ref.id}`)
-  const basePrice = listing.ticker === 'AAPL' ? 196.58 : 40 + (seed % 24_000) / 100
-  const absoluteMove = listing.ticker === 'AAPL' ? 1.24 : ((seed % 900) - 450) / 100
-  const previousClose = basePrice - absoluteMove
-  const percentMove = previousClose === 0 ? 0 : (absoluteMove / previousClose) * 100
+const MARKET_API_BASE = '/v1/market'
 
+// Resolves the listing-kind UUID to use for a quote fetch. For a listing-kind
+// subject, the subject_ref.id is the listing UUID directly. For an issuer-
+// kind subject with hydrated active_listings, we use the first active
+// listing. Anything else (issuer without context, instrument, etc.) returns
+// null — the caller must surface a "quote unavailable" UI rather than guess.
+export function listingIdForQuote(subject: ResolvedSubject): string | null {
+  if (subject.subject_ref.kind === 'listing') return subject.subject_ref.id
+  const listing =
+    subject.context?.listing ?? subject.context?.active_listings?.[0]
+  return listing ? listing.subject_ref.id : null
+}
+
+// Async quote fetch from the market service. Returns a normalized snapshot
+// the UI can render directly. Display-only fields (issuer profile, headline
+// name) live on the ResolvedSubject the caller already holds — keeping the
+// quote envelope strictly market data avoids re-deriving subject identity in
+// two places.
+export async function fetchQuoteSnapshot(
+  listingId: string,
+  init: { signal?: AbortSignal; fetchImpl?: typeof fetch } = {},
+): Promise<QuoteSnapshot> {
+  const fetchFn = init.fetchImpl ?? fetch
+  const url = `${MARKET_API_BASE}/quote?subject_kind=listing&subject_id=${encodeURIComponent(listingId)}`
+  const res = await fetchFn(url, { signal: init.signal })
+  if (!res.ok) {
+    throw new QuoteFetchError(res.status, `market quote fetch failed: HTTP ${res.status}`)
+  }
+  const body = (await res.json()) as WireGetQuoteResponse
+  return snapshotFromWire(body)
+}
+
+export function snapshotFromWire(body: WireGetQuoteResponse): QuoteSnapshot {
+  const { quote, listing_context } = body
   return {
-    subject_ref: listing.subject_ref,
-    display_name: subject.display_label ?? subject.display_name,
-    listing: {
-      ticker: listing.ticker,
-      mic: listing.mic,
-      timezone: listing.timezone,
-    },
-    latest_price: roundMoney(basePrice),
-    absolute_move: roundMoney(absoluteMove),
-    percent_move: roundPercent(percentMove),
-    currency: listing.trading_currency,
-    as_of: STUB_AS_OF,
-    delay_class: 'delayed',
-    session_state: 'regular',
-    source_id: STUB_SOURCE_ID,
-    recent_range: recentRange(basePrice, absoluteMove),
-    ...(subject.context?.issuer ? { issuer_profile: issuerProfile(subject.context.issuer) } : {}),
+    subject_ref: { kind: 'listing', id: quote.listing.id },
+    listing: { ...listing_context },
+    latest_price: quote.price,
+    prev_close: quote.prev_close,
+    absolute_move: quote.change_abs,
+    percent_move: quote.change_pct * 100,
+    currency: quote.currency,
+    as_of: quote.as_of,
+    delay_class: quote.delay_class,
+    session_state: quote.session_state,
+    source_id: quote.source_id,
   }
 }
 
@@ -103,63 +141,16 @@ export function quoteDirection(quote: Pick<QuoteSnapshot, 'absolute_move'>): Quo
   return 'flat'
 }
 
-function listingForSubject(subject: ResolvedSubject): ListingContext {
-  const listing = subject.context?.listing ?? subject.context?.active_listings?.[0]
-  if (listing) return listing
-
-  const ticker =
-    subject.display_labels?.ticker ??
-    ''
-
-  return {
-    subject_ref: {
-      kind: 'listing',
-      id: subject.subject_ref.id,
-    },
-    instrument_ref: {
-      kind: 'instrument',
-      id: 'p1.1-stub-instrument',
-    },
-    issuer_ref: {
-      kind: 'issuer',
-      id: 'p1.1-stub-issuer',
-    },
-    mic: subject.display_labels?.mic ?? 'UNKNOWN',
-    ticker: ticker ? ticker.toUpperCase() : 'N/A',
-    trading_currency: 'USD',
-    timezone: 'America/New_York',
-  }
-}
-
-function issuerProfile(issuer: IssuerContext): QuoteSnapshot['issuer_profile'] {
+export function issuerProfileFromSubject(
+  subject: ResolvedSubject,
+): { legal_name: string; sector?: string; industry?: string } | null {
+  const issuer = subject.context?.issuer
+  if (!issuer) return null
   return {
     legal_name: issuer.legal_name,
     ...(issuer.sector ? { sector: issuer.sector } : {}),
     ...(issuer.industry ? { industry: issuer.industry } : {}),
   }
-}
-
-function recentRange(basePrice: number, absoluteMove: number): number[] {
-  const step = Math.max(Math.abs(absoluteMove), basePrice * 0.002)
-  return [-2.2, -1.1, -1.5, -0.2, 0.4, 0.1, 1].map((offset) =>
-    roundMoney(basePrice + offset * step),
-  )
-}
-
-function stableSeed(input: string): number {
-  let hash = 0
-  for (const char of input) {
-    hash = (hash * 31 + char.charCodeAt(0)) >>> 0
-  }
-  return hash
-}
-
-function roundMoney(value: number): number {
-  return Math.round(value * 100) / 100
-}
-
-function roundPercent(value: number): number {
-  return Math.round(value * 100) / 100
 }
 
 export function subjectDisplayName(subject: ResolvedSubject): string {
@@ -170,3 +161,7 @@ export function subjectDisplayName(subject: ResolvedSubject): string {
     displaySubjectRef(subject.subject_ref)
   )
 }
+
+// Re-export so callers don't need to import from search.ts when they're
+// already pulling quote helpers.
+export type { IssuerContext, ListingContext }

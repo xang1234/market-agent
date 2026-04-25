@@ -1,0 +1,92 @@
+// Dev-only listing records and a polygon snapshot fetcher that returns canned
+// data for known tickers. Stable UUIDs let the web frontend hard-link to a
+// listing (e.g., `/symbol/listing/<uuid>`) without a DB seed step. Production
+// wiring replaces both with DB-backed listings + a real polygon HTTP client
+// using POLYGON_API_KEY.
+
+import type { PolygonFetcher } from "./adapters/polygon.ts";
+import type { ListingRecord } from "./listings.ts";
+import type { UUID } from "./subject-ref.ts";
+
+// Single dev-mode source UUID; all fixture quotes carry this as `source_id`.
+// Differs from any "stub" sentinel — verifiable via the bead's clause that
+// the landing surface must show a live source UUID, not a stub string.
+export const DEV_POLYGON_SOURCE_ID: UUID = "00000000-0000-4000-a000-000000000001";
+
+export const DEV_LISTINGS: ReadonlyArray<ListingRecord> = [
+  {
+    listing_id: "11111111-1111-4111-a111-111111111111",
+    ticker: "AAPL",
+    mic: "XNAS",
+    trading_currency: "USD",
+    timezone: "America/New_York",
+  },
+  {
+    listing_id: "22222222-2222-4222-a222-222222222222",
+    ticker: "MSFT",
+    mic: "XNAS",
+    trading_currency: "USD",
+    timezone: "America/New_York",
+  },
+  {
+    listing_id: "33333333-3333-4333-a333-333333333333",
+    ticker: "GOOGL",
+    mic: "XNAS",
+    trading_currency: "USD",
+    timezone: "America/New_York",
+  },
+  {
+    listing_id: "44444444-4444-4444-a444-444444444444",
+    ticker: "TSLA",
+    mic: "XNAS",
+    trading_currency: "USD",
+    timezone: "America/New_York",
+  },
+  {
+    listing_id: "55555555-5555-4555-a555-555555555555",
+    ticker: "NVDA",
+    mic: "XNAS",
+    trading_currency: "USD",
+    timezone: "America/New_York",
+  },
+];
+
+type DevSnapshot = { price: number; prev_close: number };
+
+const DEV_SNAPSHOTS: Record<string, DevSnapshot> = {
+  AAPL: { price: 196.58, prev_close: 195.34 },
+  MSFT: { price: 415.92, prev_close: 412.50 },
+  GOOGL: { price: 178.21, prev_close: 179.05 },
+  TSLA: { price: 248.40, prev_close: 252.10 },
+  NVDA: { price: 142.18, prev_close: 138.55 },
+};
+
+// A polygon fetcher that returns canned snapshot payloads for known tickers.
+// Routes match the real polygon API path so the adapter can run unmodified.
+// A stable as_of comes from the injected clock so consumers see deterministic
+// freshness in dev (the as_of moves only when the server is restarted with a
+// new clock, not on every request).
+export function createDevPolygonFetcher(opts: { clock: () => Date }): PolygonFetcher {
+  return async (path: string) => {
+    const snapshotMatch = path.match(
+      /^\/v2\/snapshot\/locale\/us\/markets\/stocks\/tickers\/([^?]+)/,
+    );
+    if (snapshotMatch) {
+      const ticker = decodeURIComponent(snapshotMatch[1]);
+      const snap = DEV_SNAPSHOTS[ticker];
+      if (!snap) {
+        throw new Error(`dev fixture: unknown ticker ${ticker}`);
+      }
+      const tNs = opts.clock().getTime() * 1_000_000;
+      return {
+        status: "OK",
+        ticker: {
+          lastTrade: { p: snap.price, t: tNs },
+          prevDay: { c: snap.prev_close },
+          market_status: "open",
+        },
+      };
+    }
+    throw new Error(`dev fixture: unsupported path ${path}`);
+  };
+}
