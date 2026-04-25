@@ -1,14 +1,18 @@
 import { NavLink, Outlet, useLocation, useParams } from 'react-router-dom'
 import { QuoteSnapshot } from '../symbol/QuoteSnapshot'
+import { subjectDisplayName } from '../symbol/quote'
 import {
   isResolvedSubject,
   subjectFromRouteParam,
   type ResolvedSubject,
 } from '../symbol/search'
+import { ProtectedActionType } from './authInterruptState'
+import { useRequestProtectedAction } from './useAuthInterrupt'
 
 // Entered subject-detail shell. Swapped into the workspace shell's main
 // canvas at `/symbol/:subjectRef/...`, owning:
-//   - the subject header with display identity and first quote snapshot
+//   - the subject header with display identity, first quote snapshot, and
+//     the Save-to-watchlist CTA (P0.4b inline auth interrupt entry, fra-6al.6.3)
 //   - local section navigation (Overview / Financials / Earnings /
 //     Holders / Signals)
 //   - an <Outlet /> for section content
@@ -45,6 +49,9 @@ export function SubjectDetailShell() {
         className="border-b border-neutral-200 px-8 py-5 dark:border-neutral-800"
       >
         <QuoteSnapshot subject={subject} />
+        <div className="mt-4 flex items-center gap-2">
+          <SaveToWatchlistButton subject={subject} />
+        </div>
       </header>
       <nav
         aria-label="Subject sections"
@@ -72,6 +79,41 @@ export function SubjectDetailShell() {
         <Outlet />
       </div>
     </div>
+  )
+}
+
+// Public-route entry point for the watchlist save action. Unauth clicks
+// fire the inline auth interrupt with the resolved SubjectRef preserved
+// in the pending payload; AuthInterruptProvider re-dispatches after sign-
+// in and WatchlistSlot's resume handler completes the membership add.
+function SaveToWatchlistButton({ subject }: { subject: ResolvedSubject }) {
+  const requestProtectedAction = useRequestProtectedAction()
+  const displayName = subjectDisplayName(subject)
+
+  const handleClick = () => {
+    requestProtectedAction({
+      title: 'Sign in to save to watchlist',
+      description: `Saving ${displayName} to your watchlist requires sign-in. We'll bring you right back here.`,
+      action: {
+        actionType: ProtectedActionType.SaveToWatchlist,
+        payload: {
+          subject_ref: subject.subject_ref,
+          display_name: displayName,
+        },
+      },
+    })
+  }
+
+  return (
+    <button
+      type="button"
+      data-testid="save-to-watchlist"
+      onClick={handleClick}
+      className="inline-flex items-center gap-1 rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:border-neutral-400 hover:text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:border-neutral-500 dark:hover:text-neutral-50"
+    >
+      <span aria-hidden="true">+</span>
+      Save to watchlist
+    </button>
   )
 }
 

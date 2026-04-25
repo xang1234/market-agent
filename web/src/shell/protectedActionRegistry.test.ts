@@ -10,7 +10,8 @@ import {
 const action: ProtectedAction = {
   actionType: ProtectedActionType.SaveToWatchlist,
   payload: {
-    symbol: 'AAPL',
+    subject_ref: { kind: 'listing', id: '11111111-1111-4111-a111-111111111111' },
+    display_name: 'Apple Inc.',
   },
 }
 

@@ -133,9 +133,16 @@ export function parseSubjectRouteParam(param: string | undefined): SubjectRef {
 }
 
 export function subjectFromRouteParam(param: string | undefined): ResolvedSubject {
-  const subjectRef = parseSubjectRouteParam(param)
-  const displayName = routeFallbackDisplayName(subjectRef)
+  return subjectFromRef(parseSubjectRouteParam(param))
+}
 
+// Build a minimal ResolvedSubject from a bare SubjectRef. Shared between the
+// URL-entered landing path (subjectFromRouteParam) and the watchlist row
+// hydration path (fra-6al.6.2) so both feed createQuoteSnapshotStub with the
+// same shape — the verification that row values equal landing values for the
+// same subject reduces to a single derivation function over a single subject.
+export function subjectFromRef(subjectRef: SubjectRef): ResolvedSubject {
+  const displayName = routeFallbackDisplayName(subjectRef)
   return {
     subject_ref: subjectRef,
     display_name: displayName,
@@ -264,10 +271,15 @@ export function candidateListingLabel(subject: ResolvedSubject): string {
   return subject.identity_level ?? subject.subject_ref.kind
 }
 
-function isSubjectRef(value: unknown): value is SubjectRef {
+export function isSubjectRef(value: unknown): value is SubjectRef {
   if (typeof value !== 'object' || value === null) return false
   const obj = value as Record<string, unknown>
-  return typeof obj.id === 'string' && typeof obj.kind === 'string' && isSubjectKind(obj.kind)
+  return (
+    typeof obj.id === 'string' &&
+    obj.id.length > 0 &&
+    typeof obj.kind === 'string' &&
+    isSubjectKind(obj.kind)
+  )
 }
 
 function isSubjectKind(value: string): value is SubjectKind {

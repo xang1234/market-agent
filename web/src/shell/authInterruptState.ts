@@ -1,3 +1,5 @@
+import { isSubjectRef, type SubjectRef } from '../symbol/search.ts'
+
 export const AUTH_INTERRUPT_STORAGE_KEY = 'auth-interrupt'
 export const AUTH_INTERRUPT_SCHEMA_VERSION = 1
 export const AUTH_INTERRUPT_TTL_MS = 15 * 60 * 1_000
@@ -12,7 +14,8 @@ export type ProtectedActionType =
 export type SaveToWatchlistProtectedAction = {
   actionType: typeof ProtectedActionType.SaveToWatchlist
   payload: {
-    symbol: string
+    subject_ref: SubjectRef
+    display_name?: string
   }
 }
 
@@ -62,8 +65,16 @@ function isProtectedAction(value: unknown): value is ProtectedAction {
 
   if (value.actionType !== ProtectedActionType.SaveToWatchlist) return false
   if (!isRecord(value.payload)) return false
+  if (!isSubjectRef(value.payload.subject_ref)) return false
+  if (
+    'display_name' in value.payload &&
+    value.payload.display_name != null &&
+    typeof value.payload.display_name !== 'string'
+  ) {
+    return false
+  }
 
-  return typeof value.payload.symbol === 'string'
+  return true
 }
 
 function isAppRoutePathname(value: unknown): value is string {
