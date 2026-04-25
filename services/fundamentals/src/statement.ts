@@ -1,4 +1,9 @@
-import { assertIssuerRef, type IssuerSubjectRef, type UUID } from "./subject-ref.ts";
+import {
+  assertIssuerRef,
+  freezeIssuerRef,
+  type IssuerSubjectRef,
+  type UUID,
+} from "./subject-ref.ts";
 import {
   assertCurrency,
   assertFiniteNumber,
@@ -93,9 +98,8 @@ export type NormalizedStatement = {
   lines: ReadonlyArray<StatementLine>;
 };
 
-export type NormalizedStatementInput = Omit<NormalizedStatement, "reported_at" | "lines"> & {
+export type NormalizedStatementInput = Omit<NormalizedStatement, "reported_at"> & {
   reported_at?: string | null;
-  lines: ReadonlyArray<StatementLine>;
 };
 
 export function normalizedStatement(
@@ -104,7 +108,7 @@ export function normalizedStatement(
   assertStatementContract(input);
 
   return Object.freeze({
-    subject: Object.freeze({ kind: input.subject.kind, id: input.subject.id }),
+    subject: freezeIssuerRef(input.subject, "statement.subject"),
     family: input.family,
     basis: input.basis,
     period_kind: input.period_kind,
