@@ -143,6 +143,13 @@ export function quoteDirection(quote: Pick<QuoteSnapshot, 'absolute_move'>): Quo
   return 'flat'
 }
 
+export function quoteBelongsToListing(
+  quote: Pick<QuoteSnapshot, 'subject_ref'>,
+  listingId: string | null,
+): boolean {
+  return listingId !== null && quote.subject_ref.kind === 'listing' && quote.subject_ref.id === listingId
+}
+
 export function issuerProfileFromSubject(
   subject: ResolvedSubject,
 ): { legal_name: string; sector?: string; industry?: string } | null {

@@ -5,6 +5,7 @@ import {
   formatSignedNumber,
   issuerProfileFromSubject,
   listingIdForQuote,
+  quoteBelongsToListing,
   QuoteFetchError,
   quoteDirection,
   snapshotFromWire,
@@ -14,6 +15,7 @@ import {
 } from './quote.ts'
 
 const APPLE_LISTING_ID = '11111111-1111-4111-a111-111111111111'
+const MICROSOFT_LISTING_ID = '22222222-2222-4222-a222-222222222222'
 const APPLE_ISSUER_ID = '33333333-3333-4333-a333-333333333333'
 const POLYGON_SOURCE_ID = '00000000-0000-4000-a000-000000000001'
 
@@ -105,9 +107,17 @@ test('listingIdForQuote returns null when no listing context is available', () =
   assert.equal(listingIdForQuote(issuerOnly), null)
 })
 
+test('quoteBelongsToListing rejects snapshots fetched for a previous listing', () => {
+  const snapshot = snapshotFromWire(baseWireResponse)
+
+  assert.equal(quoteBelongsToListing(snapshot, APPLE_LISTING_ID), true)
+  assert.equal(quoteBelongsToListing(snapshot, MICROSOFT_LISTING_ID), false)
+  assert.equal(quoteBelongsToListing(snapshot, null), false)
+})
+
 test('fetchQuoteSnapshot calls the listing-id-bound market endpoint and decodes the response', async () => {
   let calledUrl: string | null = null
-  const mockFetch = (async (url: string | URL, _init?: RequestInit) => {
+  const mockFetch = (async (url: string | URL) => {
     calledUrl = String(url)
     return new Response(JSON.stringify(baseWireResponse), {
       status: 200,
@@ -192,9 +202,9 @@ test('QuoteSnapshot type does not retain stub-only fields', () => {
   // ResolvedSubject (display) or are deferred to P1.1b (recent_range).
   const sample: QuoteSnapshot = snapshotFromWire(baseWireResponse)
   // @ts-expect-error — display_name is no longer on QuoteSnapshot
-  sample.display_name
+  assert.equal(sample.display_name, undefined)
   // @ts-expect-error — recent_range is no longer on QuoteSnapshot
-  sample.recent_range
+  assert.equal(sample.recent_range, undefined)
   // @ts-expect-error — issuer_profile is no longer on QuoteSnapshot
-  sample.issuer_profile
+  assert.equal(sample.issuer_profile, undefined)
 })

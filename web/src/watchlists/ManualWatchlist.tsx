@@ -4,6 +4,7 @@ import {
   fetchQuoteSnapshot,
   formatQuotePrice,
   formatSignedPercent,
+  quoteBelongsToListing,
   quoteDirection,
   type QuoteSnapshot,
 } from '../symbol/quote'
@@ -56,6 +57,11 @@ export function ManualWatchlist({ members, status, message, onRemove }: ManualWa
   )
 }
 
+type RowFetchState =
+  | { status: 'idle' }
+  | { status: 'unavailable'; listingId: string }
+  | { status: 'ready'; listingId: string; quote: QuoteSnapshot }
+
 type RowState =
   | { status: 'loading' }
   | { status: 'unavailable' }
@@ -69,29 +75,29 @@ function WatchlistRow({
   onRemove: (subjectRef: SubjectRef) => void
 }) {
   const listingId = member.subject_ref.kind === 'listing' ? member.subject_ref.id : null
-  const [state, setState] = useState<RowState>(
-    listingId ? { status: 'loading' } : { status: 'unavailable' },
-  )
+  const [fetchState, setFetchState] = useState<RowFetchState>({ status: 'idle' })
 
   useEffect(() => {
-    if (!listingId) {
-      setState({ status: 'unavailable' })
-      return
-    }
+    if (!listingId) return
     const controller = new AbortController()
-    setState({ status: 'loading' })
     fetchQuoteSnapshot(listingId, { signal: controller.signal })
       .then((quote) => {
         if (controller.signal.aborted) return
-        setState({ status: 'ready', quote })
+        if (!quoteBelongsToListing(quote, listingId)) {
+          setFetchState({ status: 'unavailable', listingId })
+          return
+        }
+        setFetchState({ status: 'ready', listingId, quote })
       })
       .catch((err) => {
         if (controller.signal.aborted) return
         console.warn('watchlist row quote fetch failed', err)
-        setState({ status: 'unavailable' })
+        setFetchState({ status: 'unavailable', listingId })
       })
     return () => controller.abort()
   }, [listingId])
+
+  const state = rowStateForListing(fetchState, listingId)
 
   return (
     <li className="flex items-stretch">
@@ -133,6 +139,21 @@ function WatchlistRow({
       </button>
     </li>
   )
+}
+
+function rowStateForListing(state: RowFetchState, listingId: string | null): RowState {
+  if (!listingId) return { status: 'unavailable' }
+  if (
+    state.status === 'ready' &&
+    state.listingId === listingId &&
+    quoteBelongsToListing(state.quote, listingId)
+  ) {
+    return { status: 'ready', quote: state.quote }
+  }
+  if (state.status === 'unavailable' && state.listingId === listingId) {
+    return { status: 'unavailable' }
+  }
+  return { status: 'loading' }
 }
 
 function moveClassName(quote: QuoteSnapshot): string {
