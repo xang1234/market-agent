@@ -139,7 +139,7 @@ test("waitForDatabaseConnection retries transient connection resets before succe
     probe: async () => {
       calls += 1;
       if (calls < 3) {
-        throw new Error("Connection terminated unexpectedly");
+        throw new Error("read ECONNRESET");
       }
     },
     sleep: async (ms) => {
