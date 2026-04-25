@@ -63,6 +63,7 @@ test("mapStatement preserves all NormalizedStatement fields except lines", () =>
   assert.equal(mapped.fiscal_period, statement.fiscal_period);
   assert.equal(mapped.reporting_currency, statement.reporting_currency);
   assert.equal(mapped.as_of, statement.as_of);
+  assert.equal(mapped.reported_at, statement.reported_at);
   assert.equal(mapped.source_id, statement.source_id);
 });
 
@@ -221,6 +222,23 @@ test("assertMetricDefinition rejects malformed definitions", () => {
   assert.throws(
     () => assertMetricDefinition({ ...valid, definition_version: 0 }, "d"),
     /definition_version/,
+  );
+
+  // notes is `string | null` (matches the schema's nullable text column);
+  // undefined and non-string values are rejected.
+  assert.doesNotThrow(() =>
+    assertMetricDefinition({ ...valid, notes: null }, "d"),
+  );
+  assert.doesNotThrow(() =>
+    assertMetricDefinition({ ...valid, notes: "explanatory note" }, "d"),
+  );
+  assert.throws(
+    () => assertMetricDefinition({ ...valid, notes: undefined }, "d"),
+    /notes/,
+  );
+  assert.throws(
+    () => assertMetricDefinition({ ...valid, notes: 42 }, "d"),
+    /notes/,
   );
 });
 
