@@ -1,5 +1,6 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
-import type { MarketDataAdapter } from "./adapter.ts";
+import { isAvailable, type MarketDataAdapter } from "./adapter.ts";
+import type { UnavailableEnvelope } from "./availability.ts";
 import { ListingNotFoundError, type ListingRepository, type ListingRecord } from "./listings.ts";
 import type { NormalizedQuote } from "./quote.ts";
 import { isUuidV4 } from "./validators.ts";
@@ -43,8 +44,16 @@ export function createMarketServer(deps: MarketServerDeps): Server {
           const quote = await deps.adapter.getQuote({
             listing: { kind: "listing", id: route.subject_id },
           });
+          if (!isAvailable(quote)) {
+            respond(res, statusForUnavailable(quote), {
+              error: "market quote unavailable",
+              unavailable: quote,
+              listing_context: listingContext(record),
+            });
+            return;
+          }
           const response: GetQuoteResponse = {
-            quote,
+            quote: quote.data,
             listing_context: listingContext(record),
           };
           respond(res, 200, response);
@@ -97,6 +106,19 @@ function listingContext(record: ListingRecord): GetQuoteResponse["listing_contex
     mic: record.mic,
     timezone: record.timezone,
   };
+}
+
+function statusForUnavailable(unavailable: UnavailableEnvelope): number {
+  switch (unavailable.reason) {
+    case "missing_coverage":
+      return 404;
+    case "rate_limited":
+      return 429;
+    case "provider_error":
+      return 502;
+    case "stale_data":
+      return 503;
+  }
 }
 
 function respond(res: ServerResponse, status: number, body: object) {

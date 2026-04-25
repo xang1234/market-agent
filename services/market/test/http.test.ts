@@ -109,6 +109,14 @@ test("GET /v1/market/quote returns 502 when the upstream adapter throws", async 
     `${url}/v1/market/quote?subject_kind=listing&subject_id=${APPLE_LISTING_ID}`,
   );
   assert.equal(res.status, 502);
+  const body = (await res.json()) as {
+    error: string;
+    unavailable: { outcome: string; reason: string; retryable: boolean };
+  };
+  assert.equal(body.error, "market quote unavailable");
+  assert.equal(body.unavailable.outcome, "unavailable");
+  assert.equal(body.unavailable.reason, "provider_error");
+  assert.equal(body.unavailable.retryable, true);
 });
 
 test("unknown routes return 404 without leaking implementation details", async (t) => {
