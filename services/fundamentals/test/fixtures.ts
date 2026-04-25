@@ -1,5 +1,10 @@
 import type { IssuerSubjectRef } from "../src/subject-ref.ts";
 import type { NormalizedStatementInput, StatementLine } from "../src/statement.ts";
+import {
+  createMetricRegistry,
+  type MetricDefinition,
+  type MetricRegistry,
+} from "../src/metric-mapper.ts";
 
 // Issuer-anchored: AAPL the reporting entity, not its XNAS listing.
 export const aaplIssuer: IssuerSubjectRef = {
@@ -192,3 +197,53 @@ export const AAPL_FY2024_KNOWN_VALUES = {
   eps_basic: 6.11,
   eps_diluted: 6.08,
 } as const;
+
+// Canonical metric definitions for the AAPL income statement. The metric_id
+// UUIDs are stable test fixtures: a real deployment seeds the `metrics`
+// table from a migration, but the mapper's contract (key → id, every line
+// resolves) is testable from in-memory definitions alone.
+export const AAPL_INCOME_METRIC_DEFINITIONS: ReadonlyArray<MetricDefinition> = [
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0001", "net_sales.products", "Net sales — products", "currency", "sum", "higher_is_better"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0002", "net_sales.services", "Net sales — services", "currency", "sum", "higher_is_better"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0003", "net_sales.total", "Total net sales", "currency", "sum", "higher_is_better"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0004", "cost_of_sales.products", "Cost of sales — products", "currency", "sum", "lower_is_better"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0005", "cost_of_sales.services", "Cost of sales — services", "currency", "sum", "lower_is_better"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0006", "cost_of_sales.total", "Total cost of sales", "currency", "sum", "lower_is_better"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0007", "gross_profit", "Gross profit", "currency", "sum", "higher_is_better"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0008", "operating_expenses.research_and_development", "Research and development", "currency", "sum", "neutral"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0009", "operating_expenses.selling_general_and_administrative", "Selling, general and administrative", "currency", "sum", "lower_is_better"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa000a", "operating_expenses.total", "Total operating expenses", "currency", "sum", "lower_is_better"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa000b", "operating_income", "Operating income", "currency", "sum", "higher_is_better"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa000c", "other_income_net", "Other income / (expense), net", "currency", "sum", "neutral"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa000d", "income_before_taxes", "Income before provision for income taxes", "currency", "sum", "higher_is_better"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa000e", "income_tax_expense", "Provision for income taxes", "currency", "sum", "lower_is_better"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa000f", "net_income", "Net income", "currency", "sum", "higher_is_better"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0010", "eps.basic", "Earnings per share — basic", "currency_per_share", "weighted_average", "higher_is_better"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0011", "eps.diluted", "Earnings per share — diluted", "currency_per_share", "weighted_average", "higher_is_better"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0012", "weighted_average_shares.basic", "Weighted-average shares outstanding — basic", "shares", "weighted_average", "neutral"),
+  metric("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0013", "weighted_average_shares.diluted", "Weighted-average shares outstanding — diluted", "shares", "weighted_average", "neutral"),
+];
+
+export function aaplIncomeMetricRegistry(): MetricRegistry {
+  return createMetricRegistry(AAPL_INCOME_METRIC_DEFINITIONS);
+}
+
+function metric(
+  metric_id: string,
+  metric_key: string,
+  display_name: string,
+  unit_class: MetricDefinition["unit_class"],
+  aggregation: MetricDefinition["aggregation"],
+  interpretation: MetricDefinition["interpretation"],
+): MetricDefinition {
+  return {
+    metric_id,
+    metric_key,
+    display_name,
+    unit_class,
+    aggregation,
+    interpretation,
+    canonical_source_class: "filing",
+    definition_version: 1,
+  };
+}

@@ -7,10 +7,10 @@ filing-backed or vendor-backed statement inputs into canonical value
 objects keyed by metric definitions (spec §6.3.1).
 
 `fra-cw0.3.1` landed the canonical statement value object.
-`fra-cw0.3.2` lands fiscal-calendar normalization (this module).
+`fra-cw0.3.2` landed fiscal-calendar normalization.
+`fra-cw0.3.3` lands the metric mapper (this module).
 Sibling beads still open:
 
-- `fra-cw0.3.3` — metric mapper (`metric_key` → `metrics.metric_id`).
 - `fra-cw0.3.4` — SEC EDGAR primary-source anchor (populates
   `sources.source_id` and feeds the normalizer for US issuers).
 
@@ -32,6 +32,20 @@ kinds cover the dominant patterns:
 The acceptance criterion (`fra-cw0.3.2`) is that AAPL FY25 and calendar
 2025 are not silently merged: their `period_end`s are `2025-09-27` and
 `2025-12-31` respectively.
+
+## Metric mapper
+
+`src/metric-mapper.ts` resolves `metric_key` strings on `StatementLine`s
+to canonical `metric_id` UUIDs from the `metrics` table. The contract is
+that **every normalized line maps to exactly one metric_id** — an
+unmapped line would let a displayed number reach a surface without a
+backing row in `Fact`/`Computation`, violating I1.
+
+`createMetricRegistry(definitions[])` builds an immutable registry that
+rejects duplicate keys and duplicate ids. `mapStatement(registry, s)`
+returns the same statement with `metric_id` attached to every line, plus
+a unit-class compatibility check (e.g., a `currency` line cannot map to
+a `shares` metric).
 
 ## Commands
 
