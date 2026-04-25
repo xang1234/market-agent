@@ -58,6 +58,26 @@ jobs:
 
       - run: npm test
 
+  market:
+    name: market (tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/market
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: services/market/package-lock.json
+
+      - run: npm ci
+
+      - run: npm test
+
   resolver:
     name: resolver (integration tests)
     runs-on: ubuntu-latest
