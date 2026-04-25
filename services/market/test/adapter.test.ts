@@ -6,7 +6,8 @@ import type {
   NormalizedQuote,
 } from "../src/adapter.ts";
 import { normalizedQuote } from "../src/quote.ts";
-import { createPolygonAdapter } from "../src/adapters/polygon.ts";
+import { available, isAvailable, isUnavailable } from "../src/availability.ts";
+import { createPolygonAdapter, PolygonFetchError } from "../src/adapters/polygon.ts";
 import type { ListingSubjectRef } from "../src/subject-ref.ts";
 import {
   aaplCtx,
@@ -22,8 +23,10 @@ import {
 async function priceSummaryConsumer(
   adapter: MarketDataAdapter,
   listing: ListingSubjectRef,
-): Promise<{ price: number; currency: string; delay_class: string }> {
-  const quote = await adapter.getQuote({ listing });
+): Promise<{ price: number; currency: string; delay_class: string } | { unavailable: true }> {
+  const outcome = await adapter.getQuote({ listing });
+  if (isUnavailable(outcome)) return { unavailable: true };
+  const quote = outcome.data;
   return {
     price: quote.price,
     currency: quote.currency,
@@ -39,10 +42,10 @@ function createFixtureAdapter(records: {
     providerName: "fixture",
     sourceId: FIXTURE_SOURCE_ID,
     async getQuote() {
-      return records.quote;
+      return available(records.quote);
     },
     async getBars() {
-      return records.bars;
+      return available(records.bars);
     },
   };
 }
@@ -119,12 +122,15 @@ test("normalized records carry the spec §6.2.1 required metadata fields", async
     resolveListing: async () => aaplCtx,
   });
 
-  const quote = await polygon.getQuote({ listing: aaplListing });
+  const quoteOutcome = await polygon.getQuote({ listing: aaplListing });
+  assert.equal(isAvailable(quoteOutcome), true);
+  if (!isAvailable(quoteOutcome)) return;
+  const quote = quoteOutcome.data;
   for (const key of ["as_of", "delay_class", "currency", "source_id"] as const) {
     assert.ok(quote[key] !== undefined && quote[key] !== "", `quote missing ${key}`);
   }
 
-  const bars = await polygon.getBars({
+  const barsOutcome = await polygon.getBars({
     listing: aaplListing,
     interval: "1d",
     range: {
@@ -132,6 +138,9 @@ test("normalized records carry the spec §6.2.1 required metadata fields", async
       end: new Date(1_700_092_800_000).toISOString(),
     },
   });
+  assert.equal(isAvailable(barsOutcome), true);
+  if (!isAvailable(barsOutcome)) return;
+  const bars = barsOutcome.data;
   for (const key of [
     "as_of",
     "delay_class",
@@ -153,4 +162,27 @@ test("adapter exposes its provider name and source_id for provenance routing", (
 
   assert.equal(polygon.providerName, "polygon");
   assert.equal(polygon.sourceId, POLYGON_SOURCE_ID);
+});
+
+test("seam guarantee: a provider 5xx never leaks raw provider error shapes to consumers", async () => {
+  // The "broken provider" raises an error shaped exactly like a vendor JSON
+  // body. The consumer must NEVER observe those vendor field names — only
+  // the normalized envelope.
+  const polygon = createPolygonAdapter({
+    sourceId: POLYGON_SOURCE_ID,
+    delayClass: POLYGON_DELAY_CLASS,
+    fetcher: async () => {
+      throw new PolygonFetchError(
+        503,
+        JSON.stringify({ request_id: "abc", error: { ticker: "X", lastTrade: null } }),
+      );
+    },
+    resolveListing: async () => aaplCtx,
+    clock: () => new Date("2026-04-22T20:00:00.000Z"),
+  });
+
+  const summary = await priceSummaryConsumer(polygon, aaplListing);
+  // Consumer's observable surface: either a clean summary, or a single
+  // unavailable signal. No raw vendor fields, no leaked error objects.
+  assert.deepEqual(summary, { unavailable: true });
 });

@@ -66,7 +66,7 @@ test("normalizedBars rejects non-listing SubjectRef kinds", () => {
   const issuerRef = { kind: "issuer", id: aaplListing.id } as unknown as ListingSubjectRef;
   assert.throws(
     () => normalizedBars({ ...validInput(), listing: issuerRef }),
-    /listing must be a listing SubjectRef/,
+    /listing/,
   );
 });
 

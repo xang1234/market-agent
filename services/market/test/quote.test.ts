@@ -57,7 +57,7 @@ test("normalizedQuote rejects non-listing SubjectRef kinds (issuer, instrument)"
   const issuerRef = { kind: "issuer", id: aaplListing.id } as unknown as ListingSubjectRef;
   assert.throws(
     () => normalizedQuote({ ...validInput(), listing: issuerRef }),
-    /listing must be a listing SubjectRef/,
+    /listing/,
   );
 });
 

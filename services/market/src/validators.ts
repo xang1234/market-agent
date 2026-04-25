@@ -33,6 +33,12 @@ export function assertUuid(s: unknown, label: string): asserts s is string {
   }
 }
 
+export function assertBoolean(b: unknown, label: string): asserts b is boolean {
+  if (typeof b !== "boolean") {
+    throw new Error(`${label}: must be a boolean; received ${String(b)}`);
+  }
+}
+
 export function assertOneOf<T extends string>(
   s: unknown,
   values: ReadonlyArray<T>,
