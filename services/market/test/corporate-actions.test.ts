@@ -507,6 +507,45 @@ test("malformed effective_date is a safe no-op (does not silently adjust every b
   assert.equal(divResult[1].close, 102);
 });
 
+test("malformed effective_date does not reorder otherwise valid corporate actions", () => {
+  const bars = [
+    bar("2026-01-01", 100),
+    bar("2026-03-01", 99),
+    bar("2026-08-31", 100),
+    bar("2026-09-01", 50),
+  ];
+  const split: Split = {
+    kind: "split",
+    listing: aaplListing,
+    effective_date: "2026-09-01T00:00:00.000Z",
+    numerator: 2,
+    denominator: 1,
+    source_id: SOURCE_ID,
+  };
+  const badSplit: Split = {
+    ...split,
+    effective_date: "not-an-iso-timestamp",
+  };
+  const dividend: CashDividend = {
+    kind: "cash_dividend",
+    listing: aaplListing,
+    effective_date: "2026-03-01T00:00:00.000Z",
+    cash_amount: 1,
+    currency: "USD",
+    source_id: SOURCE_ID,
+  };
+
+  const adjusted = applyCorporateActions(
+    bars,
+    [split, badSplit, dividend],
+    "split_and_div_adjusted",
+  );
+  assert.equal(ROUND(adjusted[0].close), 49.5);
+  assert.equal(ROUND(adjusted[1].close), 49.5);
+  assert.equal(ROUND(adjusted[2].close), 50);
+  assert.equal(adjusted[3].close, 50);
+});
+
 test("applyCorporateActions accepts a CorporateAction union member without narrowing at the call site", () => {
   // Type-level: list typed as the union should compile.
   const actions: CorporateAction[] = [

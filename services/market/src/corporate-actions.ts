@@ -126,9 +126,14 @@ export function applyCorporateActions(
   const eligible = basis === "split_adjusted" ? SHARE_COUNT_KINDS : ALL_CA_KINDS;
   const filtered = actions.filter((a) => eligible.has(a.kind));
 
-  const sorted = [...filtered].sort(
-    (a, b) => Date.parse(a.effective_date) - Date.parse(b.effective_date),
-  );
+  const sorted = [...filtered].sort((a, b) => {
+    const aMs = Date.parse(a.effective_date);
+    const bMs = Date.parse(b.effective_date);
+    if (!Number.isFinite(aMs) && !Number.isFinite(bMs)) return 0;
+    if (!Number.isFinite(aMs)) return 1;
+    if (!Number.isFinite(bMs)) return -1;
+    return aMs - bMs;
+  });
 
   // Pre-parse bar timestamps once. CA adjustments never modify `ts`, so the
   // parallel tsMs array stays valid across the action loop. At realistic
