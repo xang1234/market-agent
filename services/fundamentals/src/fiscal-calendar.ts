@@ -27,11 +27,16 @@ export const FISCAL_CALENDAR_KINDS: ReadonlyArray<FiscalCalendarKind> = [
   "last_weekday",
 ];
 
-export type FiscalCalendar = {
-  kind: FiscalCalendarKind;
-  fiscal_year_end_month: number;
-  fiscal_year_end_weekday?: Weekday;
-};
+export type FiscalCalendar =
+  | {
+      kind: "calendar" | "fixed_month_end";
+      fiscal_year_end_month: number;
+    }
+  | {
+      kind: "last_weekday";
+      fiscal_year_end_month: number;
+      fiscal_year_end_weekday: Weekday;
+    };
 
 export const CALENDAR_YEAR_FISCAL: FiscalCalendar = Object.freeze({
   kind: "calendar",
@@ -99,11 +104,7 @@ export function fiscalYearEnd(c: FiscalCalendar, fy: number): string {
       return formatIsoDate(lastDayOfMonth(fy, c.fiscal_year_end_month));
     case "last_weekday":
       return formatIsoDate(
-        lastWeekdayOfMonth(
-          fy,
-          c.fiscal_year_end_month,
-          c.fiscal_year_end_weekday as Weekday,
-        ),
+        lastWeekdayOfMonth(fy, c.fiscal_year_end_month, c.fiscal_year_end_weekday),
       );
   }
 }
@@ -153,8 +154,6 @@ function calendarQuarterEnd(
   return formatIsoDate(lastDayOfMonth(year, month));
 }
 
-// For last_weekday: walk back 13 weeks per quarter from FY end. Q1 absorbs
-// the 53rd week when present, so Q1 length is FY-end - prior-FY-end - 39w.
 function weekQuarterEnd(
   c: FiscalCalendar,
   fy: number,
@@ -217,19 +216,18 @@ export function assertCalendar(
       `${label}.fiscal_year_end_month: must be 1..12; received ${c.fiscal_year_end_month}`,
     );
   }
-  if (c.kind === "last_weekday") {
-    if (
-      !Number.isInteger(c.fiscal_year_end_weekday) ||
-      (c.fiscal_year_end_weekday as number) < 0 ||
-      (c.fiscal_year_end_weekday as number) > 6
-    ) {
+  if (c.kind !== "last_weekday") {
+    if (c.fiscal_year_end_weekday !== undefined) {
       throw new Error(
-        `${label}.fiscal_year_end_weekday: required for kind="last_weekday"; must be an integer 0..6`,
+        `${label}.fiscal_year_end_weekday: must be omitted unless kind="last_weekday"`,
       );
     }
-  } else if (c.fiscal_year_end_weekday !== undefined) {
+    return;
+  }
+  const wd = c.fiscal_year_end_weekday;
+  if (typeof wd !== "number" || !Number.isInteger(wd) || wd < 0 || wd > 6) {
     throw new Error(
-      `${label}.fiscal_year_end_weekday: must be omitted unless kind="last_weekday"`,
+      `${label}.fiscal_year_end_weekday: required for kind="last_weekday"; must be an integer 0..6`,
     );
   }
 }

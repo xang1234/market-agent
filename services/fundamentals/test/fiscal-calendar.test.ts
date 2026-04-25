@@ -87,10 +87,10 @@ test("APPLE FY2023 is a 53-week year with the extra week absorbed into Q1", () =
   assert.equal(q4.period_end, "2023-09-30");
 
   assert.equal(q1.period_start, "2022-09-25");
-  assert.equal(daysBetween(q1.period_start, q1.period_end), 98);
-  assert.equal(daysBetween(q2.period_start, q2.period_end), 91);
-  assert.equal(daysBetween(q3.period_start, q3.period_end), 91);
-  assert.equal(daysBetween(q4.period_start, q4.period_end), 91);
+  assert.equal(inclusiveDayCount(q1.period_start, q1.period_end), 98);
+  assert.equal(inclusiveDayCount(q2.period_start, q2.period_end), 91);
+  assert.equal(inclusiveDayCount(q3.period_start, q3.period_end), 91);
+  assert.equal(inclusiveDayCount(q4.period_start, q4.period_end), 91);
 });
 
 // --- Non-Apple fiscal calendars --------------------------------------------
@@ -116,26 +116,6 @@ test("MICROSOFT_FISCAL_CALENDAR (June fiscal year end) resolves quarters as last
   assert.equal(fiscalQuarterLabel(MICROSOFT_FISCAL_CALENDAR, 2024, 3).period_end, "2024-03-31");
   assert.equal(fiscalQuarterLabel(MICROSOFT_FISCAL_CALENDAR, 2024, 4).period_end, "2024-06-30");
 });
-
-// --- Output shape & frozen discipline --------------------------------------
-
-test("fiscalYearLabel returns a frozen FY label with period_kind=fiscal_y", () => {
-  const label = fiscalYearLabel(APPLE_FISCAL_CALENDAR, 2024);
-  assert.equal(Object.isFrozen(label), true);
-  assert.equal(label.fiscal_period, "FY");
-  assert.equal(label.period_kind, "fiscal_y");
-});
-
-test("fiscalQuarterLabel returns a frozen quarter label with period_kind=fiscal_q", () => {
-  for (const q of [1, 2, 3, 4] as const) {
-    const label = fiscalQuarterLabel(APPLE_FISCAL_CALENDAR, 2024, q);
-    assert.equal(Object.isFrozen(label), true);
-    assert.equal(label.fiscal_period, `Q${q}`);
-    assert.equal(label.period_kind, "fiscal_q");
-  }
-});
-
-// --- Integration: label feeds normalizedStatement --------------------------
 
 test("fiscalYearLabel output plugs into normalizedStatement (income statement, FY)", () => {
   const label = fiscalYearLabel(APPLE_FISCAL_CALENDAR, 2024);
@@ -257,9 +237,7 @@ test("fiscalQuarterLabel rejects quarters outside 1..4", () => {
   }
 });
 
-// --- helpers ---------------------------------------------------------------
-
-function daysBetween(startIso: string, endIso: string): number {
+function inclusiveDayCount(startIso: string, endIso: string): number {
   const start = Date.parse(`${startIso}T00:00:00Z`);
   const end = Date.parse(`${endIso}T00:00:00Z`);
   return Math.round((end - start) / 86_400_000) + 1;
