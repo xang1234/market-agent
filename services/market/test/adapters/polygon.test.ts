@@ -510,6 +510,37 @@ test("polygon adapter classifies bar fetch failures (5xx) as unavailable", async
   assert.equal(outcome.retryable, true);
 });
 
+test("polygon adapter classifies a response missing the adjusted flag as unavailable", async () => {
+  const adapter = createPolygonAdapter({
+    sourceId: POLYGON_SOURCE_ID,
+    delayClass: POLYGON_DELAY_CLASS,
+    fetcher: makeRouteFetcher({
+      "/v2/aggs/ticker/AAPL/range/1/day/1700006400000/1700092800000?adjusted=true&sort=asc&limit=50000": {
+        // adjusted flag deliberately omitted — we requested adjusted=true so
+        // its absence means we can't classify the basis.
+        resultsCount: 1,
+        results: [{ t: 1_700_006_400_000, o: 1, h: 1, l: 1, c: 1, v: 1 }],
+      },
+    }),
+    resolveListing: async () => aaplCtx,
+    clock: fixedClock,
+  });
+
+  const outcome = await adapter.getBars({
+    listing: aaplListing,
+    interval: "1d",
+    range: {
+      start: new Date(1_700_006_400_000).toISOString(),
+      end: new Date(1_700_092_800_000).toISOString(),
+    },
+  });
+  assert.equal(isUnavailable(outcome), true);
+  if (!isUnavailable(outcome)) return;
+  assert.equal(outcome.reason, "provider_error");
+  assert.equal(outcome.retryable, false);
+  assert.match(outcome.detail ?? "", /missing adjusted flag/);
+});
+
 test("polygon adapter classifies an inconsistent multi-page adjusted flag as unavailable", async () => {
   const firstPath = "/v2/aggs/ticker/AAPL/range/1/day/1700006400000/1700179200000?adjusted=true&sort=asc&limit=50000";
   const nextUrl = "https://api.polygon.io/v2/aggs/ticker/AAPL/range/1/day/next?cursor=mismatch";

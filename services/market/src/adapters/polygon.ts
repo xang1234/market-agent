@@ -271,16 +271,22 @@ async function fetchAggPages(fetcher: PolygonFetcher, firstPath: string): Promis
 }
 
 function aggregateAdjustmentBasis(pages: PolygonAggsPayload[]): AdjustmentBasis {
-  const flags = pages
-    .map((page) => page.adjusted)
-    .filter((flag): flag is boolean => typeof flag === "boolean");
-  const distinct = new Set(flags);
-
-  if (distinct.size > 1) {
-    throw new MalformedPayloadError("inconsistent aggregate adjusted flags across pages");
+  let first: boolean | undefined;
+  for (const page of pages) {
+    if (typeof page.adjusted !== "boolean") continue;
+    if (first === undefined) {
+      first = page.adjusted;
+    } else if (page.adjusted !== first) {
+      throw new MalformedPayloadError("inconsistent aggregate adjusted flags across pages");
+    }
   }
-
-  return flags[0] === true ? "split_and_div_adjusted" : "unadjusted";
+  if (first === undefined) {
+    // We always send `?adjusted=true`, so a missing flag in the response means
+    // we can't confirm whether values were adjusted. Surfacing as malformed
+    // (vs. silently defaulting to "unadjusted") prevents misclassified series.
+    throw new MalformedPayloadError("aggregate response missing adjusted flag");
+  }
+  return first ? "split_and_div_adjusted" : "unadjusted";
 }
 
 // Polygon's `market_status` values: open, closed, early_hours, late_hours, extended-hours.

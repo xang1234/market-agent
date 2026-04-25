@@ -1,4 +1,9 @@
-import type { ListingSubjectRef, UUID } from "./subject-ref.ts";
+import {
+  assertListingRef,
+  freezeListingRef,
+  type ListingSubjectRef,
+  type UUID,
+} from "./subject-ref.ts";
 import { DELAY_CLASSES, type DelayClass } from "./quote.ts";
 import {
   assertCurrency,
@@ -65,9 +70,7 @@ export type NormalizedBars = {
 };
 
 export function normalizedBars(input: NormalizedBars): NormalizedBars {
-  if (input.listing?.kind !== "listing") {
-    throw new Error("normalizedBars: listing must be a listing SubjectRef");
-  }
+  const listing = freezeListingRef(input.listing, "normalizedBars");
   assertOneOf(input.interval, BAR_INTERVALS, "normalizedBars.interval");
   assertBarRange(input.range, "normalizedBars.range");
   assertIso8601Utc(input.as_of, "normalizedBars.as_of");
@@ -99,10 +102,6 @@ export function normalizedBars(input: NormalizedBars): NormalizedBars {
     prevMs = barMs;
   }
 
-  const listing = Object.freeze({
-    kind: input.listing.kind,
-    id: input.listing.id,
-  });
   const range = Object.freeze({ start: input.range.start, end: input.range.end });
   const bars = input.bars.map((b) => Object.freeze({ ...b }));
   Object.freeze(bars);
@@ -126,14 +125,7 @@ export function assertBarsContract(value: unknown): asserts value is NormalizedB
   }
   const r = value as Record<string, unknown>;
 
-  if (
-    !r.listing ||
-    typeof r.listing !== "object" ||
-    (r.listing as { kind?: unknown }).kind !== "listing" ||
-    typeof (r.listing as { id?: unknown }).id !== "string"
-  ) {
-    throw new Error("bars.listing: must be a listing SubjectRef with string id");
-  }
+  assertListingRef(r.listing, "bars.listing");
 
   assertOneOf(r.interval, BAR_INTERVALS, "bars.interval");
   assertBarRange(r.range, "bars.range");
