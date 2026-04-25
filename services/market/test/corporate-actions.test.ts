@@ -140,7 +140,7 @@ test("cash dividend adjustment scales pre-ex prices but leaves volume unchanged"
   assert.equal(adjusted[0].volume, 1_000, "cash dividend does not adjust volume");
 });
 
-test("split_adjusted basis applies splits + stock dividends but skips cash dividends", () => {
+test("split_adjusted basis skips cash dividends and spin-offs", () => {
   const bars = [bar("2026-01-01", 100, 1_000), bar("2026-01-02", 99, 1_000)];
   const dividend: CashDividend = {
     kind: "cash_dividend",
@@ -150,8 +150,18 @@ test("split_adjusted basis applies splits + stock dividends but skips cash divid
     currency: "USD",
     source_id: SOURCE_ID,
   };
-  const result = applyCorporateActions(bars, [dividend], "split_adjusted");
-  assert.equal(result[0].close, 100, "cash dividend not applied at split_adjusted basis");
+  const spinoff: SpinOff = {
+    kind: "spin_off",
+    listing: aaplListing,
+    effective_date: "2026-01-02T00:00:00.000Z",
+    target_listing: targetListing,
+    spinoff_value: 5,
+    currency: "USD",
+    source_id: SOURCE_ID,
+  };
+  const result = applyCorporateActions(bars, [dividend, spinoff], "split_adjusted");
+  assert.equal(result[0].close, 100, "value-distribution actions ignored at split_adjusted basis");
+  assert.equal(result[1].close, 99);
 });
 
 test("stock dividend (1 new share per 10 held) scales pre-ex prices by 11/10", () => {
@@ -417,7 +427,7 @@ test("applyCorporateActions filters out actions outside the eligible set for the
   assert.equal(splitOnly[1].close, 49.5);
   assert.equal(splitOnly[2].close, 49.5);
 
-  const both = applyCorporateActions(bars, [dividend, split], "split_and_div_adjusted") as NormalizedBar[];
+  const both = applyCorporateActions(bars, [dividend, split], "split_and_div_adjusted");
   // Both applied (oldest-first: dividend on Jan 2, then split on Jan 3).
   // After dividend: bars[0] → 99 (close on Jan 1 was 100, factor 99/100).
   // After split: pre-Jan-3 bars halved: bars[0] → 49.5, bars[1] → 49.5.

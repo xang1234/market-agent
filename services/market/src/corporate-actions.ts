@@ -130,22 +130,32 @@ export function applyCorporateActions(
     (a, b) => Date.parse(a.effective_date) - Date.parse(b.effective_date),
   );
 
+  // Pre-parse bar timestamps once. CA adjustments never modify `ts`, so the
+  // parallel tsMs array stays valid across the action loop. At realistic
+  // scale (multi-year daily series with ~20 actions) this saves O(N×M)
+  // string→number conversions inside the per-action map/scan.
   let result = bars.map(cloneBar);
+  const tsMs = result.map((b) => Date.parse(b.ts));
+
   for (const action of sorted) {
-    result = applyOne(result, action);
+    result = applyOne(result, tsMs, action);
   }
   return result;
 }
 
-function applyOne(bars: NormalizedBar[], action: CorporateAction): NormalizedBar[] {
+function applyOne(
+  bars: NormalizedBar[],
+  tsMs: number[],
+  action: CorporateAction,
+): NormalizedBar[] {
   switch (action.kind) {
     case "split":
     case "stock_dividend":
-      return applyShareCountAction(bars, action);
+      return applyShareCountAction(bars, tsMs, action);
     case "cash_dividend":
-      return applyValueDistribution(bars, action.effective_date, action.cash_amount);
+      return applyValueDistribution(bars, tsMs, action.effective_date, action.cash_amount);
     case "spin_off":
-      return applyValueDistribution(bars, action.effective_date, action.spinoff_value);
+      return applyValueDistribution(bars, tsMs, action.effective_date, action.spinoff_value);
   }
 }
 
@@ -156,6 +166,7 @@ function applyOne(bars: NormalizedBar[], action: CorporateAction): NormalizedBar
 //                          n new ones per d held (10% stock div = 11/10 = 1.1)
 function applyShareCountAction(
   bars: NormalizedBar[],
+  tsMs: number[],
   action: Split | StockDividend,
 ): NormalizedBar[] {
   const ratio =
@@ -167,8 +178,8 @@ function applyShareCountAction(
   const effMs = Date.parse(action.effective_date);
   if (!Number.isFinite(effMs)) return bars;
 
-  return bars.map((bar) => {
-    if (Date.parse(bar.ts) >= effMs) return bar;
+  return bars.map((bar, i) => {
+    if (tsMs[i] >= effMs) return bar;
     return {
       ts: bar.ts,
       open: bar.open / ratio,
@@ -186,6 +197,7 @@ function applyShareCountAction(
 // adjusted series treats the ex-date drop as a non-event.
 function applyValueDistribution(
   bars: NormalizedBar[],
+  tsMs: number[],
   effective_date: string,
   distributionValue: number,
 ): NormalizedBar[] {
@@ -199,11 +211,11 @@ function applyValueDistribution(
   // by contract), but this function does not require it.
   let prevClose: number | undefined;
   let prevMs = -Infinity;
-  for (const bar of bars) {
-    const ms = Date.parse(bar.ts);
+  for (let i = 0; i < bars.length; i++) {
+    const ms = tsMs[i];
     if (Number.isFinite(ms) && ms < effMs && ms > prevMs) {
       prevMs = ms;
-      prevClose = bar.close;
+      prevClose = bars[i].close;
     }
   }
   // No bar before the ex-date in the requested range, or distribution is
@@ -213,8 +225,8 @@ function applyValueDistribution(
   const factor = (prevClose - distributionValue) / prevClose;
   if (!Number.isFinite(factor) || factor <= 0) return bars;
 
-  return bars.map((bar) => {
-    if (Date.parse(bar.ts) >= effMs) return bar;
+  return bars.map((bar, i) => {
+    if (tsMs[i] >= effMs) return bar;
     return {
       ts: bar.ts,
       open: bar.open * factor,
