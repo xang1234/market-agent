@@ -395,6 +395,28 @@ test("extractStatement skips concepts whose form doesn't match the period (10-K 
   );
 });
 
+test("extractStatement rejects matched statements with no observed reporting currency", () => {
+  const fixture = aaplCompanyFactsFixture();
+  const sharesConcept = fixture.facts["us-gaap"]!.WeightedAverageNumberOfSharesOutstandingBasic;
+  fixture.facts["us-gaap"] = {
+    WeightedAverageNumberOfSharesOutstandingBasic: sharesConcept,
+  };
+
+  assert.throws(
+    () =>
+      extractStatement({
+        subject: aaplIssuer,
+        facts: fixture,
+        family: "income",
+        fiscal_year: 2024,
+        fiscal_period: "FY",
+        source_id: SEC_SOURCE_ID,
+        as_of: "2024-11-01T20:30:00.000Z",
+      }),
+    /no monetary lines extracted.*reporting_currency/,
+  );
+});
+
 test("extractStatement (income) ignores balance/cashflow concepts even if present", () => {
   // Inject a balance-sheet concept; it must NOT appear in the income lines.
   const fixture = aaplCompanyFactsFixture();

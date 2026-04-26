@@ -118,6 +118,25 @@ test("normalizedStatement rejects non-issuer SubjectRefs (listing, instrument, t
   }
 });
 
+test("normalizedStatement rejects issuer SubjectRefs with non-UUID ids", () => {
+  const input = aaplFy2024IncomeStatementInput();
+  for (const bad of [
+    "not-a-uuid",
+    "22222222-2222-2222-2222-222222222222", // version digit is 2, not 4
+    "",
+  ]) {
+    assert.throws(
+      () =>
+        normalizedStatement({
+          ...input,
+          subject: { kind: "issuer", id: bad } as never,
+        }),
+      /statement\.subject\.id.*UUID v4/,
+      `expected subject.id=${JSON.stringify(bad)} to be rejected`,
+    );
+  }
+});
+
 test("normalizedStatement rejects unknown family / basis / period_kind", () => {
   const valid = aaplFy2024IncomeStatementInput();
   assert.throws(

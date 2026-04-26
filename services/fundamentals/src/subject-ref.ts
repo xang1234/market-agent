@@ -2,6 +2,8 @@
 // listings are venue-specific, but reported financial statements belong to
 // the reporting entity. Accepting only `issuer` SubjectRefs here enforces
 // that boundary.
+import { assertUuid } from "./validators.ts";
+
 export type UUID = string;
 
 export type IssuerSubjectRef = {
@@ -24,9 +26,9 @@ export function assertIssuerRef(
   if (
     !value ||
     typeof value !== "object" ||
-    (value as { kind?: unknown }).kind !== "issuer" ||
-    typeof (value as { id?: unknown }).id !== "string"
+    (value as { kind?: unknown }).kind !== "issuer"
   ) {
     throw new Error(`${label}: must be an issuer SubjectRef with string id`);
   }
+  assertUuid((value as { id?: unknown }).id, `${label}.id`);
 }

@@ -292,8 +292,12 @@ export function extractStatement(
       `extractStatement: matched values use multiple currencies (${[...observedCurrencies].join(", ")}); single-currency reporting is required`,
     );
   }
-  const reportingCurrency =
-    observedCurrencies.size === 1 ? [...observedCurrencies][0] : "USD";
+  if (observedCurrencies.size === 0) {
+    throw new Error(
+      `extractStatement: no monetary lines extracted; cannot derive reporting_currency`,
+    );
+  }
+  const reportingCurrency = observedCurrencies.values().next().value as string;
 
   return {
     subject: input.subject,
