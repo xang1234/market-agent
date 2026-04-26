@@ -5,7 +5,7 @@ import {
   type FundamentalsOutcome,
   type UnavailableEnvelope,
 } from "./availability.ts";
-import { buildKeyStats, type KeyStatsEnvelope } from "./key-stats.ts";
+import type { KeyStatsEnvelope } from "./key-stats.ts";
 import type { IssuerProfile } from "./profile.ts";
 import type { IssuerProfileRepository } from "./issuer-repository.ts";
 import type { StatsRepository } from "./stats-repository.ts";
@@ -139,19 +139,16 @@ async function fetchStatsOutcome(
   clock: () => Date,
   subject_id: UUID,
 ): Promise<FundamentalsOutcome<KeyStatsEnvelope>> {
-  const inputs = await deps.stats.findStatsInputs(subject_id);
-  if (!inputs) {
+  const envelope = await deps.stats.find(subject_id);
+  if (!envelope) {
     return missingCoverage(
       deps,
       subject_id,
       clock().toISOString(),
-      `stats inputs not found for issuer: ${subject_id}`,
+      `stats not found for issuer: ${subject_id}`,
     );
   }
-  // buildKeyStats freezes the envelope and threads coverage_warnings on
-  // sparse inputs — the handler passes the result through as-is to keep
-  // the derivation transparent (per the bead's contract).
-  return { outcome: "available", data: buildKeyStats(inputs) };
+  return { outcome: "available", data: envelope };
 }
 
 function missingCoverage(

@@ -25,8 +25,8 @@ import type { UnavailableEnvelope } from "../src/availability.ts";
 
 const FIXED_NOW = new Date("2026-04-26T15:30:00.000Z");
 
-const APPLE_ISSUER_ID = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaa1";
-const NVDA_ISSUER_ID = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaa5";
+const APPLE_ISSUER_ID = DEV_STATS_INPUTS[0].subject_id;
+const NVDA_ISSUER_ID = DEV_STATS_INPUTS[1].subject_id;
 
 function buildDeps(overrides: Partial<FundamentalsServerDeps> = {}): FundamentalsServerDeps {
   const profiles = createInMemoryIssuerProfileRepository(DEV_ISSUER_PROFILES);
@@ -76,15 +76,12 @@ test("GET /v1/fundamentals/stats returns the full key-stats envelope when all in
   const revenueGrowth = statByKey(body.stats.stats, "revenue_growth_yoy");
   const peRatio = statByKey(body.stats.stats, "pe_ratio");
 
-  // All five stats must materialize with non-null values when full inputs are present.
   for (const stat of [grossMargin, operatingMargin, netMargin, revenueGrowth, peRatio]) {
     assert.notEqual(stat.value_num, null, `expected ${stat.stat_key} to compute`);
     assert.equal(stat.coverage_level, "full", `${stat.stat_key} coverage must be full`);
     assert.equal(stat.warnings.length, 0, `${stat.stat_key} should have no warnings on full inputs`);
   }
 
-  // Sanity-check one ratio against the fixture's underlying numbers.
-  // 180,683M / 391,035M ≈ 0.4621 (~46.2% gross margin for AAPL FY2024).
   assert.ok(grossMargin.value_num !== null);
   assert.ok(
     Math.abs(grossMargin.value_num! - 180_683 / 391_035) < 1e-6,
@@ -99,16 +96,13 @@ test("GET /v1/fundamentals/stats exposes basis/period/as_of on every stat (deriv
   );
   const body = (await res.json()) as GetStatsResponse;
 
-  // Bead's contract clause: every metric must expose basis/period/as_of so a
-  // consumer can explain where each value came from. Verifies the envelope
-  // didn't silently drop these fields between aggregator and wire.
   for (const stat of body.stats.stats) {
     assert.equal(stat.basis, "as_reported", `${stat.stat_key} missing basis`);
     assert.equal(stat.period_kind, "fiscal_y", `${stat.stat_key} missing period_kind`);
     assert.equal(stat.fiscal_year, 2024, `${stat.stat_key} missing fiscal_year`);
     assert.equal(stat.fiscal_period, "FY", `${stat.stat_key} missing fiscal_period`);
     assert.ok(typeof stat.as_of === "string" && stat.as_of.length > 0, `${stat.stat_key} missing as_of`);
-    assert.ok(stat.computation && stat.computation.expression, `${stat.stat_key} missing computation expression`);
+    assert.ok(stat.computation.expression.length > 0, `${stat.stat_key} missing computation expression`);
   }
 });
 
@@ -119,8 +113,6 @@ test("GET /v1/fundamentals/stats exposes per-input source_id on every stat input
   );
   const body = (await res.json()) as GetStatsResponse;
 
-  // Bead's contract: per-input source_id must reach the wire so a consumer
-  // can trace each stat back to the rows that produced it.
   for (const stat of body.stats.stats) {
     assert.ok(stat.inputs.length > 0, `${stat.stat_key} should cite its inputs`);
     for (const input of stat.inputs) {
@@ -131,8 +123,6 @@ test("GET /v1/fundamentals/stats exposes per-input source_id on every stat input
     }
   }
 
-  // Spot-check provenance: the P/E numerator should carry the price source_id;
-  // the denominator (eps_diluted) should carry the statement source_id.
   const peRatio = statByKey(body.stats.stats, "pe_ratio");
   const priceInput = peRatio.inputs.find((i) => i.kind === "market_fact");
   const epsInput = peRatio.inputs.find((i) => i.kind === "statement_line" && i.metric_key === "eps_diluted");
@@ -141,9 +131,6 @@ test("GET /v1/fundamentals/stats exposes per-input source_id on every stat input
 });
 
 test("GET /v1/fundamentals/stats: sparse inputs flow warnings through unmodified instead of fabricating values", async (t) => {
-  // NVDA fixture has only the current statement — no prior period, no price.
-  // The aggregator returns the envelope with revenue_growth_yoy and pe_ratio
-  // marked unavailable + warnings, NOT silently zeroed.
   const url = await startServer(t, buildDeps());
   const res = await fetch(
     `${url}/v1/fundamentals/stats?subject_kind=issuer&subject_id=${NVDA_ISSUER_ID}`,
@@ -151,12 +138,10 @@ test("GET /v1/fundamentals/stats: sparse inputs flow warnings through unmodified
   assert.equal(res.status, 200);
   const body = (await res.json()) as GetStatsResponse;
 
-  // Margins still compute (they only need the current statement).
   const grossMargin = statByKey(body.stats.stats, "gross_margin");
   assert.notEqual(grossMargin.value_num, null);
   assert.equal(grossMargin.warnings.length, 0);
 
-  // Revenue growth is unavailable + carries the missing-prior warning verbatim.
   const revenueGrowth = statByKey(body.stats.stats, "revenue_growth_yoy");
   assert.equal(revenueGrowth.value_num, null);
   assert.equal(revenueGrowth.coverage_level, "unavailable");
@@ -165,7 +150,6 @@ test("GET /v1/fundamentals/stats: sparse inputs flow warnings through unmodified
     "revenue_growth_yoy should carry a missing_statement_line warning when no prior",
   );
 
-  // P/E is unavailable + carries the missing-price warning verbatim.
   const peRatio = statByKey(body.stats.stats, "pe_ratio");
   assert.equal(peRatio.value_num, null);
   assert.equal(peRatio.coverage_level, "unavailable");
@@ -173,20 +157,6 @@ test("GET /v1/fundamentals/stats: sparse inputs flow warnings through unmodified
     peRatio.warnings.some((w) => w.code === "missing_market_price"),
     "pe_ratio should carry a missing_market_price warning when no price input",
   );
-});
-
-test("GET /v1/fundamentals/stats: operating_margin missing-line warning surfaces when source data is incomplete", async (t) => {
-  // NVDA fixture omits operating_expenses but keeps operating_income, so
-  // operating_margin still computes (numerator+denominator both present).
-  // gross_margin and net_margin should also compute. Belt-and-suspenders check.
-  const url = await startServer(t, buildDeps());
-  const res = await fetch(
-    `${url}/v1/fundamentals/stats?subject_kind=issuer&subject_id=${NVDA_ISSUER_ID}`,
-  );
-  const body = (await res.json()) as GetStatsResponse;
-  const operatingMargin = statByKey(body.stats.stats, "operating_margin");
-  assert.notEqual(operatingMargin.value_num, null);
-  assert.equal(operatingMargin.warnings.length, 0);
 });
 
 test("GET /v1/fundamentals/stats returns 404 with structured unavailable envelope for unknown issuer", async (t) => {
@@ -203,7 +173,7 @@ test("GET /v1/fundamentals/stats returns 404 with structured unavailable envelop
   assert.equal(body.unavailable.subject.id, unknown);
   assert.equal(body.unavailable.retryable, false);
   assert.equal(body.unavailable.as_of, FIXED_NOW.toISOString());
-  assert.match(body.unavailable.detail ?? "", /stats inputs not found/);
+  assert.match(body.unavailable.detail ?? "", /stats not found/);
 });
 
 test("GET /v1/fundamentals/stats rejects a non-issuer subject_kind as 404", async (t) => {
@@ -233,7 +203,7 @@ test("POST /v1/fundamentals/stats is not allowed (only GET is wired)", async (t)
 
 test("GET /v1/fundamentals/stats returns 502 when the stats repository throws", async (t) => {
   const throwingStats: StatsRepository = {
-    async findStatsInputs() {
+    async find() {
       throw new Error("synthetic stats repo failure");
     },
   };

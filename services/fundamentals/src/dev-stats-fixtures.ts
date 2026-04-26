@@ -1,19 +1,12 @@
-// Hand-authored MappedStatement fixtures for dev/test. Real production
-// path will read these from a statements service that runs the full
-// extractStatement → normalizedStatement → mapStatement pipeline. The
-// metric_id UUIDs here are stable but synthetic — they don't need to
-// match any seeded metric registry to satisfy buildKeyStats.
-
+import { DEV_ISSUER_PROFILES } from "./dev-fixtures.ts";
 import type { MappedStatement, MappedStatementLine } from "./metric-mapper.ts";
 import type { MarketPriceInput } from "./key-stats.ts";
 import type { StatsRepositoryRecord } from "./stats-repository.ts";
-import type { IssuerSubjectRef, UUID } from "./subject-ref.ts";
+import type { UUID } from "./subject-ref.ts";
 
 export const DEV_STATEMENT_SOURCE_ID: UUID = "00000000-0000-4000-a000-000000000003";
 export const DEV_PRICE_SOURCE_ID: UUID = "00000000-0000-4000-a000-000000000004";
 
-// Stable synthetic metric_ids per canonical metric_key, so a fixture line
-// keyed on "revenue" always carries the same metric_id across fixtures.
 const METRIC_ID: Readonly<Record<string, UUID>> = {
   revenue: "11111111-1111-4111-9111-111111111111",
   cost_of_revenue: "22222222-2222-4222-9222-222222222222",
@@ -25,15 +18,8 @@ const METRIC_ID: Readonly<Record<string, UUID>> = {
   eps_diluted: "88888888-8888-4888-9888-888888888888",
 };
 
-const APPLE_ISSUER: IssuerSubjectRef = {
-  kind: "issuer",
-  id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaa1",
-};
-
-const NVDA_ISSUER: IssuerSubjectRef = {
-  kind: "issuer",
-  id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaa5",
-};
+const APPLE_ISSUER = DEV_ISSUER_PROFILES[0].subject;
+const NVDA_ISSUER = DEV_ISSUER_PROFILES[4].subject;
 
 function moneyLine(metric_key: string, value_num: number, currency = "USD"): MappedStatementLine {
   return {
@@ -118,10 +104,8 @@ const APPLE_PRICE: MarketPriceInput = {
   source_id: DEV_PRICE_SOURCE_ID,
 };
 
-// Sparse case: an issuer with only a current statement — no prior, no
-// price. buildKeyStats should still return the envelope; revenue_growth
-// and pe_ratio will carry "missing_*" warnings rather than fabricated
-// values. Used by the integration test that proves warnings flow through.
+// Sparse fixture: only the current statement, no prior, no price — exercises
+// the warnings-flow-through path.
 const NVDA_FY2024_STATEMENT: MappedStatement = {
   subject: NVDA_ISSUER,
   family: "income",
