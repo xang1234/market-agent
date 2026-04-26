@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { useSubjectDetailContext } from '../../shell/subjectDetailOutletContext.ts'
+import { Card } from '../../symbol/Card.tsx'
+import { FetchStateView } from '../../symbol/FetchStateView.tsx'
 import { issuerIdFromSubject } from '../../symbol/profile.ts'
+import { SegmentedToggle } from '../../symbol/SegmentedToggle.tsx'
 import {
   fetchStatements,
   findLineValue,
@@ -12,16 +15,19 @@ import {
 import {
   axisLabel,
   fetchSegments,
-  sumSegmentMetric,
   type SegmentAxis,
   type SegmentFactsEnvelope,
 } from '../../symbol/segments.ts'
-import { useFetched, type VisibleFetchState } from '../../symbol/useFetched.ts'
+import { useFetched } from '../../symbol/useFetched.ts'
 
 const STATEMENT_FAMILY = 'income' as const
 const PERIOD_COUNT = 5
+// Apple, MSFT, NVDA, etc. each have a different fiscal year end (Sep, Jun,
+// Jan…), so a calendar-year heuristic is wrong in general. The current
+// fixture caps at FY2024 for every issuer; a real backend would expose a
+// "latest period" hint we'd consume here instead.
 const LATEST_FISCAL_YEAR = 2024
-const SEGMENT_PERIOD = `${LATEST_FISCAL_YEAR}-FY`
+const SEGMENT_PERIOD = recentFyPeriods(LATEST_FISCAL_YEAR, 1)[0]
 
 const INCOME_LINE_ORDER: ReadonlyArray<{ metric_key: string; label: string; emphasis?: 'subtotal' | 'eps' }> = [
   { metric_key: 'revenue', label: 'Revenue' },
@@ -39,7 +45,10 @@ const BASIS_OPTIONS: ReadonlyArray<{ value: StatementBasis; label: string }> = [
   { value: 'as_restated', label: 'As restated' },
 ]
 
-const SEGMENT_AXIS_OPTIONS: ReadonlyArray<SegmentAxis> = ['business', 'geography']
+const AXIS_OPTIONS: ReadonlyArray<{ value: SegmentAxis; label: string }> = [
+  { value: 'business', label: axisLabel('business') },
+  { value: 'geography', label: axisLabel('geography') },
+]
 
 export function FinancialsSection() {
   const { subject } = useSubjectDetailContext()
@@ -79,82 +88,56 @@ export function FinancialsSection() {
 
   return (
     <div data-testid="section-financials" className="flex w-full flex-col gap-6 p-8">
-      <StatementsCard
-        issuerId={issuerId}
-        basis={basis}
-        onBasisChange={setBasis}
-        state={statements}
-      />
-      <SegmentsCard
-        issuerId={issuerId}
-        axis={axis}
-        onAxisChange={setAxis}
-        state={segments}
-      />
+      <Card
+        testId="financials-statements"
+        headingId="financials-statements-heading"
+        heading={`Income statement · last ${PERIOD_COUNT} FY`}
+        action={
+          <SegmentedToggle
+            options={BASIS_OPTIONS}
+            value={basis}
+            onChange={setBasis}
+            ariaLabel="Statement basis"
+            testIdPrefix="basis"
+          />
+        }
+      >
+        <FetchStateView
+          state={statements}
+          noun="statements"
+          idleMessage="Issuer context unavailable for this entry. Open this symbol from search to load financials."
+        >
+          {(data) => <StatementsTable response={data} />}
+        </FetchStateView>
+      </Card>
+      <Card
+        testId="financials-segments"
+        headingId="financials-segments-heading"
+        heading={`Segments · ${SEGMENT_PERIOD} · revenue share`}
+        action={
+          <SegmentedToggle
+            options={AXIS_OPTIONS}
+            value={axis}
+            onChange={setAxis}
+            ariaLabel="Segment axis"
+            testIdPrefix="axis"
+          />
+        }
+      >
+        <FetchStateView
+          state={segments}
+          noun="segments"
+          idleMessage="Issuer context unavailable for this entry. Open this symbol from search to load segments."
+        >
+          {(envelope) => <SegmentsView envelope={envelope} />}
+        </FetchStateView>
+      </Card>
     </div>
   )
 }
 
-function StatementsCard({
-  issuerId,
-  basis,
-  onBasisChange,
-  state,
-}: {
-  issuerId: string | null
-  basis: StatementBasis
-  onBasisChange: (b: StatementBasis) => void
-  state: VisibleFetchState<GetStatementsResponse>
-}) {
-  return (
-    <section
-      data-testid="financials-statements"
-      aria-labelledby="financials-statements-heading"
-      className="flex flex-col gap-3 rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3
-          id="financials-statements-heading"
-          className="text-sm font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400"
-        >
-          Income statement · last {PERIOD_COUNT} FY
-        </h3>
-        <BasisToggle current={basis} onChange={onBasisChange} />
-      </div>
-      <StatementsBody issuerId={issuerId} state={state} />
-    </section>
-  )
-}
-
-function StatementsBody({
-  issuerId,
-  state,
-}: {
-  issuerId: string | null
-  state: VisibleFetchState<GetStatementsResponse>
-}) {
-  if (issuerId === null) {
-    return (
-      <p className="text-sm text-neutral-500 dark:text-neutral-400">
-        Issuer context unavailable for this entry. Open this symbol from search to load financials.
-      </p>
-    )
-  }
-  if (state.status === 'idle' || state.status === 'loading') {
-    return <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading statements…</p>
-  }
-  if (state.status === 'unavailable') {
-    return <p className="text-sm text-neutral-500 dark:text-neutral-400">Statements unavailable: {state.reason}</p>
-  }
-  return <StatementsTable response={state.data} />
-}
-
 function StatementsTable({ response }: { response: GetStatementsResponse }) {
   const periods = response.results
-  // Period order on the wire is whatever the request asked for; preserve it.
-  // Only the available outcomes carry a usable statement; per-period misses
-  // become em-dash columns rather than missing columns so the basis toggle
-  // can reveal "this period wasn't restated" without collapsing the table.
   const reportingCurrency = firstAvailableCurrency(periods)
   return (
     <div className="-mx-2 overflow-x-auto">
@@ -232,103 +215,17 @@ function formatCompactDollars(value: number): string {
   return value.toFixed(0)
 }
 
-function BasisToggle({
-  current,
-  onChange,
-}: {
-  current: StatementBasis
-  onChange: (b: StatementBasis) => void
-}) {
-  return (
-    <div role="radiogroup" aria-label="Statement basis" className="inline-flex rounded-md border border-neutral-200 dark:border-neutral-700">
-      {BASIS_OPTIONS.map((opt) => {
-        const active = opt.value === current
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            data-testid={`basis-${opt.value}`}
-            onClick={() => onChange(opt.value)}
-            className={
-              active
-                ? 'bg-neutral-900 px-3 py-1 text-xs font-medium text-white dark:bg-neutral-100 dark:text-neutral-900'
-                : 'px-3 py-1 text-xs font-medium text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100'
-            }
-          >
-            {opt.label}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-function SegmentsCard({
-  issuerId,
-  axis,
-  onAxisChange,
-  state,
-}: {
-  issuerId: string | null
-  axis: SegmentAxis
-  onAxisChange: (a: SegmentAxis) => void
-  state: VisibleFetchState<SegmentFactsEnvelope>
-}) {
-  return (
-    <section
-      data-testid="financials-segments"
-      aria-labelledby="financials-segments-heading"
-      className="flex flex-col gap-3 rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3
-          id="financials-segments-heading"
-          className="text-sm font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400"
-        >
-          Segments · {SEGMENT_PERIOD} · revenue share
-        </h3>
-        <AxisToggle current={axis} onChange={onAxisChange} />
-      </div>
-      <SegmentsBody issuerId={issuerId} state={state} />
-    </section>
-  )
-}
-
-function SegmentsBody({
-  issuerId,
-  state,
-}: {
-  issuerId: string | null
-  state: VisibleFetchState<SegmentFactsEnvelope>
-}) {
-  if (issuerId === null) {
-    return (
-      <p className="text-sm text-neutral-500 dark:text-neutral-400">
-        Issuer context unavailable for this entry. Open this symbol from search to load segments.
-      </p>
-    )
-  }
-  if (state.status === 'idle' || state.status === 'loading') {
-    return <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading segments…</p>
-  }
-  if (state.status === 'unavailable') {
-    return <p className="text-sm text-neutral-500 dark:text-neutral-400">Segments unavailable: {state.reason}</p>
-  }
-  return <SegmentsView envelope={state.data} />
-}
-
 function SegmentsView({ envelope }: { envelope: SegmentFactsEnvelope }) {
-  const total = sumSegmentMetric(envelope, 'revenue')
-  const slices = envelope.facts
-    .filter((f) => f.metric_key === 'revenue' && f.value_num !== null)
-    .map((f) => ({
-      segment_id: f.segment_id,
-      value: f.value_num as number,
-      share: total === 0 ? 0 : (f.value_num as number) / total,
-      label: envelope.segment_definitions.find((d) => d.segment_id === f.segment_id)?.segment_name ?? f.segment_id,
-    }))
+  const definitionsById = new Map(envelope.segment_definitions.map((d) => [d.segment_id, d]))
+  const revenueFacts = envelope.facts.filter((f) => f.metric_key === 'revenue' && f.value_num !== null)
+  let total = 0
+  for (const fact of revenueFacts) total += fact.value_num as number
+  const slices = revenueFacts.map((f) => ({
+    segment_id: f.segment_id,
+    value: f.value_num as number,
+    share: total === 0 ? 0 : (f.value_num as number) / total,
+    label: definitionsById.get(f.segment_id)?.segment_name ?? f.segment_id,
+  }))
 
   if (slices.length === 0) {
     return <p className="text-sm text-neutral-500 dark:text-neutral-400">No revenue facts in this segment envelope.</p>
@@ -437,38 +334,5 @@ function SegmentTrajectory({
         </li>
       ))}
     </ul>
-  )
-}
-
-function AxisToggle({
-  current,
-  onChange,
-}: {
-  current: SegmentAxis
-  onChange: (a: SegmentAxis) => void
-}) {
-  return (
-    <div role="radiogroup" aria-label="Segment axis" className="inline-flex rounded-md border border-neutral-200 dark:border-neutral-700">
-      {SEGMENT_AXIS_OPTIONS.map((value) => {
-        const active = value === current
-        return (
-          <button
-            key={value}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            data-testid={`axis-${value}`}
-            onClick={() => onChange(value)}
-            className={
-              active
-                ? 'bg-neutral-900 px-3 py-1 text-xs font-medium text-white dark:bg-neutral-100 dark:text-neutral-900'
-                : 'px-3 py-1 text-xs font-medium text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100'
-            }
-          >
-            {axisLabel(value)}
-          </button>
-        )
-      })}
-    </div>
   )
 }

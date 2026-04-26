@@ -99,7 +99,6 @@ export async function fetchStatements(
   return (await res.json()) as GetStatementsResponse
 }
 
-// fiscal_year-FY format the wire expects, e.g. "2024-FY". Newest year first.
 export function recentFyPeriods(latestFiscalYear: number, count: number): string[] {
   const periods: string[] = []
   for (let i = 0; i < count; i++) {

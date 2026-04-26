@@ -1,5 +1,7 @@
 import { useSubjectDetailContext } from '../../shell/subjectDetailOutletContext.ts'
-import { useFetched, type VisibleFetchState } from '../../symbol/useFetched.ts'
+import { Card } from '../../symbol/Card.tsx'
+import { FetchStateView } from '../../symbol/FetchStateView.tsx'
+import { useFetched } from '../../symbol/useFetched.ts'
 import {
   fetchIssuerProfile,
   issuerIdFromSubject,
@@ -71,63 +73,47 @@ export function OverviewSection() {
       className="flex w-full flex-col gap-6 p-8"
     >
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
-        <ProfileCard issuerId={issuerId} state={profile} />
-        <PerformanceCard listingId={listingId} state={series} />
+        <Card testId="overview-profile" headingId="overview-profile-heading" heading="Company profile">
+          <FetchStateView
+            state={profile}
+            noun="profile"
+            idleMessage="Issuer context unavailable for this entry. Open this symbol from search to load the company profile."
+          >
+            {(data) => <ProfileBody profile={data} />}
+          </FetchStateView>
+        </Card>
+        <Card testId="overview-performance" headingId="overview-performance-heading" heading="Performance · 30d">
+          <FetchStateView
+            state={series}
+            noun="series"
+            idleMessage="No listing context for this subject."
+          >
+            {(bars) =>
+              bars.length < 2 ? (
+                <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                  Not enough bars in the requested range to draw a line.
+                </p>
+              ) : (
+                <Sparkline bars={bars} />
+              )
+            }
+          </FetchStateView>
+        </Card>
       </div>
-      <KeyStatsRow issuerId={issuerId} state={stats} />
+      <Card testId="overview-key-stats" headingId="overview-key-stats-heading" heading="Key stats">
+        <FetchStateView
+          state={stats}
+          noun="key stats"
+          idleMessage="Issuer context unavailable for this entry. Open this symbol from search to load key stats."
+        >
+          {(envelope) => <KeyStatsBody envelope={envelope} />}
+        </FetchStateView>
+      </Card>
     </div>
   )
 }
 
-function ProfileCard({
-  issuerId,
-  state,
-}: {
-  issuerId: string | null
-  state: VisibleFetchState<IssuerProfile>
-}) {
-  return (
-    <section
-      data-testid="overview-profile"
-      aria-labelledby="overview-profile-heading"
-      className="flex flex-col gap-3 rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900"
-    >
-      <h3
-        id="overview-profile-heading"
-        className="text-sm font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400"
-      >
-        Company profile
-      </h3>
-      <ProfileBody issuerId={issuerId} state={state} />
-    </section>
-  )
-}
-
-function ProfileBody({
-  issuerId,
-  state,
-}: {
-  issuerId: string | null
-  state: VisibleFetchState<IssuerProfile>
-}) {
-  if (issuerId === null) {
-    return (
-      <p className="text-sm text-neutral-500 dark:text-neutral-400">
-        Issuer context unavailable for this entry. Open this symbol from search to load the company profile.
-      </p>
-    )
-  }
-  if (state.status === 'idle' || state.status === 'loading') {
-    return <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading profile…</p>
-  }
-  if (state.status === 'unavailable') {
-    return (
-      <p className="text-sm text-neutral-500 dark:text-neutral-400">
-        Profile unavailable: {state.reason}
-      </p>
-    )
-  }
-  const profile = state.data
+function ProfileBody({ profile }: { profile: IssuerProfile }) {
   return (
     <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
       <ProfileRow label="Legal name" value={profile.legal_name} />
@@ -193,54 +179,6 @@ function ExchangeBadge({ exchange }: { exchange: IssuerProfileExchange }) {
   )
 }
 
-function PerformanceCard({
-  listingId,
-  state,
-}: {
-  listingId: string | null
-  state: VisibleFetchState<NormalizedBar[]>
-}) {
-  return (
-    <section
-      data-testid="overview-performance"
-      aria-labelledby="overview-performance-heading"
-      className="flex flex-col gap-3 rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900"
-    >
-      <div className="flex items-center justify-between">
-        <h3
-          id="overview-performance-heading"
-          className="text-sm font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400"
-        >
-          Performance · 30d
-        </h3>
-      </div>
-      <PerformanceBody listingId={listingId} state={state} />
-    </section>
-  )
-}
-
-function PerformanceBody({
-  listingId,
-  state,
-}: {
-  listingId: string | null
-  state: VisibleFetchState<NormalizedBar[]>
-}) {
-  if (listingId === null) {
-    return <p className="text-sm text-neutral-500 dark:text-neutral-400">No listing context for this subject.</p>
-  }
-  if (state.status === 'idle' || state.status === 'loading') {
-    return <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading series…</p>
-  }
-  if (state.status === 'unavailable') {
-    return <p className="text-sm text-neutral-500 dark:text-neutral-400">Series unavailable: {state.reason}</p>
-  }
-  if (state.data.length < 2) {
-    return <p className="text-sm text-neutral-500 dark:text-neutral-400">Not enough bars in the requested range to draw a line.</p>
-  }
-  return <Sparkline bars={state.data} />
-}
-
 function Sparkline({ bars }: { bars: NormalizedBar[] }) {
   const width = 320
   const height = 80
@@ -290,51 +228,7 @@ function formatPrice(value: number): string {
   return value.toFixed(2)
 }
 
-function KeyStatsRow({
-  issuerId,
-  state,
-}: {
-  issuerId: string | null
-  state: VisibleFetchState<KeyStatsEnvelope>
-}) {
-  return (
-    <section
-      data-testid="overview-key-stats"
-      aria-labelledby="overview-key-stats-heading"
-      className="flex flex-col gap-3 rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900"
-    >
-      <h3
-        id="overview-key-stats-heading"
-        className="text-sm font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400"
-      >
-        Key stats
-      </h3>
-      <KeyStatsBody issuerId={issuerId} state={state} />
-    </section>
-  )
-}
-
-function KeyStatsBody({
-  issuerId,
-  state,
-}: {
-  issuerId: string | null
-  state: VisibleFetchState<KeyStatsEnvelope>
-}) {
-  if (issuerId === null) {
-    return (
-      <p className="text-sm text-neutral-500 dark:text-neutral-400">
-        Issuer context unavailable for this entry. Open this symbol from search to load key stats.
-      </p>
-    )
-  }
-  if (state.status === 'idle' || state.status === 'loading') {
-    return <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading key stats…</p>
-  }
-  if (state.status === 'unavailable') {
-    return <p className="text-sm text-neutral-500 dark:text-neutral-400">Key stats unavailable: {state.reason}</p>
-  }
-  const envelope = state.data
+function KeyStatsBody({ envelope }: { envelope: KeyStatsEnvelope }) {
   const byKey = new Map(envelope.stats.map((s) => [s.stat_key, s] as const))
   return (
     <div className="flex flex-col gap-3">

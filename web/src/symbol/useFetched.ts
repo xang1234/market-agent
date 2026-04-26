@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 
-// Stored state carries the fetch's input key so a mid-flight dep change
-// doesn't surface stale data — visibleFetchState() collapses key-mismatched
-// results into 'loading' instead.
+// `key` on stored states discriminates "current fetch" from "stale carryover";
+// visibleFetchState() collapses mismatched-key results to 'loading'.
 type StoredFetchState<T> =
   | { status: 'idle' }
   | { status: 'unavailable'; key: string; reason: string }
@@ -59,9 +58,7 @@ export function useFetched<T>(
         })
       })
     return () => controller.abort()
-    // doFetch identity is excluded — the closure is fresh per render but
-    // we only re-run when the key changes, matching the inline pattern in
-    // QuoteSnapshot.
+    // key-only deps: doFetch closure is intentionally fresh per render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 

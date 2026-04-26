@@ -100,23 +100,6 @@ export async function fetchSegments(
   return body.segments
 }
 
-// Sums the named metric across an envelope's facts. Skips segments whose
-// value_num is null (so a sparse disclosure can't fabricate an inflated
-// total). Used as the donut total when the wire envelope doesn't ship a
-// consolidated_totals echo.
-export function sumSegmentMetric(
-  envelope: Pick<SegmentFactsEnvelope, 'facts'>,
-  metric_key: string,
-): number {
-  let total = 0
-  for (const fact of envelope.facts) {
-    if (fact.metric_key !== metric_key) continue
-    if (fact.value_num === null) continue
-    total += fact.value_num
-  }
-  return total
-}
-
 const AXIS_LABELS: Readonly<Record<SegmentAxis, string>> = {
   business: 'Business',
   geography: 'Geography',

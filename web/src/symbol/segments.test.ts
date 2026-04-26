@@ -4,7 +4,6 @@ import {
   axisLabel,
   fetchSegments,
   SegmentsFetchError,
-  sumSegmentMetric,
   type GetSegmentsRequest,
   type SegmentFactsEnvelope,
 } from './segments.ts'
@@ -76,22 +75,6 @@ test('fetchSegments throws SegmentsFetchError on non-2xx with the status code', 
     () => fetchSegments(appleRequest(), { fetchImpl }),
     (err: unknown) => err instanceof SegmentsFetchError && err.status === 404,
   )
-})
-
-test('sumSegmentMetric sums only matching-key facts and skips null value_num', () => {
-  assert.equal(sumSegmentMetric(baseEnvelope, 'revenue'), 231_167_000_000)
-  // Sparse: a fact with null value_num doesn't pull the total down to zero
-  // and doesn't add a fabricated 0 either.
-  const sparse: SegmentFactsEnvelope = {
-    ...baseEnvelope,
-    facts: [
-      ...baseEnvelope.facts,
-      { ...baseEnvelope.facts[0], segment_id: 'ipad', value_num: null },
-    ],
-  }
-  assert.equal(sumSegmentMetric(sparse, 'revenue'), 231_167_000_000)
-  // Different metric: returns 0 when nothing matches.
-  assert.equal(sumSegmentMetric(baseEnvelope, 'nonexistent'), 0)
 })
 
 test('axisLabel returns a human label for every known axis', () => {
