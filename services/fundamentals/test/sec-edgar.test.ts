@@ -494,6 +494,29 @@ test("extractStatement collision policy: modern (post-ASC 606) concept name wins
   assert.equal(revenue?.value_num, 391_035_000_000);
 });
 
+test("extractStatement skips concepts whose `units` field is malformed (defensive)", () => {
+  // assertCompanyFacts validates only top-level shape; deeper malformations
+  // shouldn't crash extractStatement with a confusing TypeError.
+  const fixture = aaplCompanyFactsFixture();
+  // Inject a mapped concept with no `units` field (e.g., truncated payload).
+  // Bypass the type system since this models bad runtime data.
+  const usGaap = fixture.facts["us-gaap"] as Record<string, unknown>;
+  usGaap.NetIncomeLoss = { label: "Net Income / (Loss)", description: "Malformed." };
+
+  const input = extractStatement({
+    subject: aaplIssuer,
+    facts: fixture,
+    family: "income",
+    fiscal_year: 2024,
+    fiscal_period: "FY",
+    source_id: SEC_SOURCE_ID,
+    as_of: "2024-11-01T20:30:00.000Z",
+  });
+  // Other concepts still extract; the malformed one is silently skipped.
+  assert.equal(input.lines.find((l) => l.metric_key === "net_income"), undefined);
+  assert.ok(input.lines.find((l) => l.metric_key === "revenue"));
+});
+
 test("extractStatement rejects period drift across matched concepts", () => {
   const fixture = aaplCompanyFactsFixture();
   // Tamper one concept's period_end to disagree with the others.

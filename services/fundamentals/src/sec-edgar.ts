@@ -236,7 +236,7 @@ export function extractStatement(
     if (!INCOME_KEYS.has(metricKey)) continue;
     if (seenKeys.has(metricKey)) continue;
     const concept = usGaap[conceptName];
-    if (!concept) continue;
+    if (!concept || !concept.units || typeof concept.units !== "object") continue;
 
     for (const [unitCode, values] of Object.entries(concept.units)) {
       const lineUnit = UNIT_TO_LINE_UNIT[unitCode];
