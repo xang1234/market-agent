@@ -1,12 +1,6 @@
-// Scaffold sections for the entered subject-detail shell. Each is a minimal
-// placeholder that names the phase which fills in the real content, so the
-// route tree is complete and navigable today. Kept in one file because each
-// placeholder is trivial; when P1.3 (overview + financials + earnings core
-// tabs) and P1.3b (holders + signals + Analyze entry integration) land,
-// those beads should split this into per-section modules.
-//
-// Phase references are used instead of bead IDs — phase numbers are stable
-// normative spec markers, bead IDs are project-local and can drift.
+// Placeholders for sections that haven't shipped yet. OverviewSection has
+// moved to its own module (./OverviewSection). When P1.3 financials/earnings
+// and P1.3b holders/signals land, those should also split out.
 
 type SectionScaffoldProps = {
   testId: string
@@ -27,15 +21,7 @@ function SectionScaffold({ testId, title, source }: SectionScaffoldProps) {
   )
 }
 
-export function OverviewSection() {
-  return (
-    <SectionScaffold
-      testId="section-overview"
-      title="Overview"
-      source="Identity, classification, key stats, and recent findings ship with P1.3 (symbol detail core tabs) — consuming the resolver (P0.3) and first quote snapshot (P0.4)."
-    />
-  )
-}
+export { OverviewSection } from './OverviewSection'
 
 export function FinancialsSection() {
   return (
