@@ -7,11 +7,13 @@ import {
   type GetProfileResponse,
 } from "../src/http.ts";
 import { createInMemoryIssuerProfileRepository } from "../src/issuer-repository.ts";
+import { createInMemoryStatementRepository } from "../src/statement-repository.ts";
 import { createInMemoryStatsRepository } from "../src/stats-repository.ts";
 import {
   DEV_FUNDAMENTALS_SOURCE_ID,
   DEV_ISSUER_PROFILES,
 } from "../src/dev-fixtures.ts";
+import { DEV_STATEMENTS } from "../src/dev-statement-fixtures.ts";
 import { DEV_STATS_INPUTS } from "../src/dev-stats-fixtures.ts";
 import type { UnavailableEnvelope } from "../src/availability.ts";
 import { assertIssuerProfileContract } from "../src/profile.ts";
@@ -21,9 +23,11 @@ const FIXED_NOW = new Date("2026-04-26T15:30:00.000Z");
 function buildDeps(): FundamentalsServerDeps {
   const profiles = createInMemoryIssuerProfileRepository(DEV_ISSUER_PROFILES);
   const stats = createInMemoryStatsRepository(DEV_STATS_INPUTS);
+  const statements = createInMemoryStatementRepository(DEV_STATEMENTS);
   return {
     profiles,
     stats,
+    statements,
     source_id: DEV_FUNDAMENTALS_SOURCE_ID,
     clock: () => FIXED_NOW,
   };
@@ -147,6 +151,7 @@ test("GET /v1/fundamentals/profile returns 502 when the repository throws an une
       },
     },
     stats: createInMemoryStatsRepository(DEV_STATS_INPUTS),
+    statements: createInMemoryStatementRepository(DEV_STATEMENTS),
     source_id: DEV_FUNDAMENTALS_SOURCE_ID,
     clock: () => FIXED_NOW,
   };

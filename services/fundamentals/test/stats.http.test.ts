@@ -7,6 +7,7 @@ import {
   type GetStatsResponse,
 } from "../src/http.ts";
 import { createInMemoryIssuerProfileRepository } from "../src/issuer-repository.ts";
+import { createInMemoryStatementRepository } from "../src/statement-repository.ts";
 import {
   createInMemoryStatsRepository,
   type StatsRepository,
@@ -15,6 +16,7 @@ import {
   DEV_FUNDAMENTALS_SOURCE_ID,
   DEV_ISSUER_PROFILES,
 } from "../src/dev-fixtures.ts";
+import { DEV_STATEMENTS } from "../src/dev-statement-fixtures.ts";
 import {
   DEV_PRICE_SOURCE_ID,
   DEV_STATEMENT_SOURCE_ID,
@@ -31,9 +33,11 @@ const NVDA_ISSUER_ID = DEV_STATS_INPUTS[1].subject_id;
 function buildDeps(overrides: Partial<FundamentalsServerDeps> = {}): FundamentalsServerDeps {
   const profiles = createInMemoryIssuerProfileRepository(DEV_ISSUER_PROFILES);
   const stats = createInMemoryStatsRepository(DEV_STATS_INPUTS);
+  const statements = createInMemoryStatementRepository(DEV_STATEMENTS);
   return {
     profiles,
     stats,
+    statements,
     source_id: DEV_FUNDAMENTALS_SOURCE_ID,
     clock: () => FIXED_NOW,
     ...overrides,

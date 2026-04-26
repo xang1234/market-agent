@@ -1,4 +1,4 @@
-import { createServer, type Server, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
   isAvailable,
   unavailable,
@@ -8,6 +8,18 @@ import {
 import type { KeyStatsEnvelope } from "./key-stats.ts";
 import type { IssuerProfile } from "./profile.ts";
 import type { IssuerProfileRepository } from "./issuer-repository.ts";
+import {
+  parsePeriod,
+  type ParsedPeriod,
+  type StatementRepository,
+} from "./statement-repository.ts";
+import {
+  STATEMENT_BASES,
+  STATEMENT_FAMILIES,
+  type NormalizedStatement,
+  type StatementBasis,
+  type StatementFamily,
+} from "./statement.ts";
 import type { StatsRepository } from "./stats-repository.ts";
 import type { IssuerSubjectRef, UUID } from "./subject-ref.ts";
 import { isUuidV4 } from "./validators.ts";
@@ -15,6 +27,7 @@ import { isUuidV4 } from "./validators.ts";
 export type FundamentalsServerDeps = {
   profiles: IssuerProfileRepository;
   stats: StatsRepository;
+  statements: StatementRepository;
   source_id: UUID;
   clock?: () => Date;
 };
@@ -26,6 +39,25 @@ export type GetProfileResponse = {
 export type GetStatsResponse = {
   stats: KeyStatsEnvelope;
 };
+
+export type GetStatementsRequest = {
+  subject_ref: IssuerSubjectRef;
+  statement: StatementFamily;
+  periods: string[];
+  basis: StatementBasis;
+};
+
+export type StatementResultEntry = {
+  period: string;
+  outcome: FundamentalsOutcome<NormalizedStatement>;
+};
+
+export type GetStatementsResponse = {
+  query: GetStatementsRequest;
+  results: ReadonlyArray<StatementResultEntry>;
+};
+
+const MAX_REQUEST_BODY_BYTES = 64 * 1024;
 
 export function createFundamentalsServer(deps: FundamentalsServerDeps): Server {
   const clock = deps.clock ?? (() => new Date());
@@ -68,6 +100,21 @@ export function createFundamentalsServer(deps: FundamentalsServerDeps): Server {
           respond(res, 200, response);
           return;
         }
+        case "get_statements": {
+          const body = await readJsonBody(req, MAX_REQUEST_BODY_BYTES);
+          if (body.kind === "error") {
+            respond(res, body.status, { error: body.error });
+            return;
+          }
+          const validated = validateStatementsRequest(body.value);
+          if (validated.kind === "error") {
+            respond(res, 400, { error: validated.error });
+            return;
+          }
+          const response = await fetchStatementsResponse(deps, clock, validated.request, validated.parsedPeriods);
+          respond(res, 200, response);
+          return;
+        }
         default: {
           const _exhaustive: never = route;
           void _exhaustive;
@@ -87,7 +134,8 @@ export function createFundamentalsServer(deps: FundamentalsServerDeps): Server {
 type Route =
   | { action: "healthz" }
   | { action: "get_profile"; subject_id: string }
-  | { action: "get_stats"; subject_id: string };
+  | { action: "get_stats"; subject_id: string }
+  | { action: "get_statements" };
 
 function matchRoute(method: string, rawUrl: string): Route | null {
   const url = new URL(rawUrl, "http://localhost");
@@ -103,6 +151,10 @@ function matchRoute(method: string, rawUrl: string): Route | null {
   if (method === "GET" && pathname === "/v1/fundamentals/stats") {
     const subjectId = issuerSubjectIdFromQuery(searchParams);
     return subjectId === null ? null : { action: "get_stats", subject_id: subjectId };
+  }
+
+  if (method === "POST" && pathname === "/v1/fundamentals/statements") {
+    return { action: "get_statements" };
   }
 
   return null;
@@ -151,6 +203,114 @@ async function fetchStatsOutcome(
   return { outcome: "available", data: envelope };
 }
 
+type ValidatedStatementsRequest =
+  | {
+      kind: "ok";
+      request: GetStatementsRequest;
+      parsedPeriods: ReadonlyArray<ParsedPeriod>;
+    }
+  | { kind: "error"; error: string };
+
+function validateStatementsRequest(value: unknown): ValidatedStatementsRequest {
+  if (value === null || typeof value !== "object") {
+    return { kind: "error", error: "request body must be a JSON object" };
+  }
+  const body = value as Record<string, unknown>;
+
+  const subjectRef = body.subject_ref;
+  if (
+    typeof subjectRef !== "object" ||
+    subjectRef === null ||
+    (subjectRef as { kind?: unknown }).kind !== "issuer"
+  ) {
+    return { kind: "error", error: "subject_ref must be an issuer SubjectRef" };
+  }
+  const subjectId = (subjectRef as { id?: unknown }).id;
+  if (!isUuidV4(subjectId)) {
+    return { kind: "error", error: "subject_ref.id must be a UUID v4" };
+  }
+
+  const statement = body.statement;
+  if (typeof statement !== "string" || !(STATEMENT_FAMILIES as ReadonlyArray<string>).includes(statement)) {
+    return {
+      kind: "error",
+      error: `statement must be one of ${STATEMENT_FAMILIES.join(", ")}`,
+    };
+  }
+
+  const basis = body.basis;
+  if (typeof basis !== "string" || !(STATEMENT_BASES as ReadonlyArray<string>).includes(basis)) {
+    return {
+      kind: "error",
+      error: `basis must be one of ${STATEMENT_BASES.join(", ")}`,
+    };
+  }
+
+  if (!Array.isArray(body.periods)) {
+    return { kind: "error", error: "periods must be a non-empty array of strings" };
+  }
+  if (body.periods.length === 0) {
+    return { kind: "error", error: "periods must be a non-empty array of strings" };
+  }
+  const parsedPeriods: ParsedPeriod[] = [];
+  const seen = new Set<string>();
+  for (const raw of body.periods) {
+    const parsed = parsePeriod(raw);
+    if (parsed.kind === "error") {
+      return { kind: "error", error: parsed.reason };
+    }
+    if (seen.has(parsed.period.raw)) {
+      return { kind: "error", error: `duplicate period "${parsed.period.raw}"` };
+    }
+    seen.add(parsed.period.raw);
+    parsedPeriods.push(parsed.period);
+  }
+
+  return {
+    kind: "ok",
+    request: {
+      subject_ref: { kind: "issuer", id: subjectId },
+      statement: statement as StatementFamily,
+      periods: body.periods as string[],
+      basis: basis as StatementBasis,
+    },
+    parsedPeriods,
+  };
+}
+
+async function fetchStatementsResponse(
+  deps: FundamentalsServerDeps,
+  clock: () => Date,
+  request: GetStatementsRequest,
+  parsedPeriods: ReadonlyArray<ParsedPeriod>,
+): Promise<GetStatementsResponse> {
+  const issuer_id = request.subject_ref.id;
+  const results = await Promise.all(
+    parsedPeriods.map(async (period): Promise<StatementResultEntry> => {
+      const statement = await deps.statements.find({
+        issuer_id,
+        family: request.statement,
+        basis: request.basis,
+        fiscal_year: period.fiscal_year,
+        fiscal_period: period.fiscal_period,
+      });
+      if (!statement) {
+        return {
+          period: period.raw,
+          outcome: missingCoverage(
+            deps,
+            issuer_id,
+            clock().toISOString(),
+            `${request.statement} statement not found for ${issuer_id} at ${period.raw} (basis ${request.basis})`,
+          ),
+        };
+      }
+      return { period: period.raw, outcome: { outcome: "available", data: statement } };
+    }),
+  );
+  return { query: request, results };
+}
+
 function missingCoverage(
   deps: FundamentalsServerDeps,
   subject_id: UUID,
@@ -185,4 +345,44 @@ function respond(res: ServerResponse, status: number, body: object) {
   res.statusCode = status;
   res.setHeader("content-type", "application/json");
   res.end(JSON.stringify(body));
+}
+
+type JsonBodyResult =
+  | { kind: "ok"; value: unknown }
+  | { kind: "error"; status: number; error: string };
+
+async function readJsonBody(
+  req: IncomingMessage,
+  maxBytes: number,
+): Promise<JsonBodyResult> {
+  const contentType = (req.headers["content-type"] ?? "").toString().toLowerCase();
+  if (!contentType.startsWith("application/json")) {
+    return { kind: "error", status: 415, error: "content-type must be application/json" };
+  }
+
+  let total = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    const buf = chunk instanceof Buffer ? chunk : Buffer.from(chunk as Uint8Array);
+    total += buf.byteLength;
+    if (total > maxBytes) {
+      return { kind: "error", status: 413, error: `request body exceeds ${maxBytes} bytes` };
+    }
+    chunks.push(buf);
+  }
+
+  if (total === 0) {
+    return { kind: "error", status: 400, error: "request body is empty" };
+  }
+
+  const text = Buffer.concat(chunks, total).toString("utf8");
+  try {
+    return { kind: "ok", value: JSON.parse(text) };
+  } catch (err) {
+    return {
+      kind: "error",
+      status: 400,
+      error: `invalid JSON: ${err instanceof Error ? err.message : "parse failed"}`,
+    };
+  }
 }
