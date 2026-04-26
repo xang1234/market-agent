@@ -933,10 +933,13 @@ components:
           type: string
     SeriesItem:
       type: object
-      required: [listing, points, coverage_start, coverage_end, coverage_level]
+      required: [listing, currency, points, coverage_start, coverage_end, coverage_level]
       properties:
         listing:
           $ref: '#/components/schemas/SubjectRef'
+        currency:
+          type: string
+          description: Original listing trading currency; cross-currency side-by-side responses must keep this visible.
         name:
           type: string
           description: Optional display label; clients must use listing for identity.
@@ -962,6 +965,25 @@ components:
         unavailable_reason:
           type: string
           enum: [provider_error, missing_coverage, rate_limited, stale_data]
+    SeriesFxRate:
+      type: object
+      required: [base_currency, quote_currency, rate, as_of, source_id]
+      properties:
+        base_currency:
+          type: string
+          description: Currency being converted from.
+        quote_currency:
+          type: string
+          description: Target currency being converted into.
+        rate:
+          type: number
+          exclusiveMinimum: 0
+        as_of:
+          type: string
+          format: date-time
+        source_id:
+          type: string
+          format: uuid
     SeriesResponse:
       type: object
       required: [query, snapshot_compatible, as_of, series]
@@ -977,6 +999,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SeriesItem'
+        target_currency:
+          type: string
+          description: Present only when normalization is currency_normalized.
+        fx_rates:
+          type: array
+          description: Source-backed FX rates required for currency_normalized cross-currency comparisons.
+          items:
+            $ref: '#/components/schemas/SeriesFxRate'
     Claim:
       type: object
       description: Claims are extracted assertions from evidence, not canonical truth.

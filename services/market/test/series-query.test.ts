@@ -24,6 +24,12 @@ const RANGE = {
 };
 const FRESHNESS_BOUNDARY = "2026-04-22T15:30:00.000Z";
 const SNAPSHOT_AS_OF = "2026-04-22T15:30:00.000Z";
+const FX_SOURCE_ID = "00000000-0000-4000-a000-0000000000f1";
+
+const asmlListing: ListingSubjectRef = {
+  kind: "listing",
+  id: "66666666-6666-4666-a666-666666666666",
+};
 
 function validInput(): NormalizedSeriesQuery {
   return {
@@ -69,6 +75,7 @@ function validSeriesResponseInput(
     series: [
       {
         listing: aaplListing,
+        currency: "USD",
         points: [
           point("2026-02-01T00:00:00.000Z", 4),
           point("2026-03-01T00:00:00.000Z", 8),
@@ -76,6 +83,7 @@ function validSeriesResponseInput(
       },
       {
         listing: msftListing,
+        currency: "USD",
         points: [
           point(RANGE.start, 0),
           point("2026-02-01T00:00:00.000Z", 2),
@@ -277,6 +285,7 @@ test("normalizedSeriesResponse exposes per-subject coverage without backfilling"
 
   const [aapl, msft] = response.series;
   assert.equal(aapl.listing.id, aaplListing.id);
+  assert.equal(aapl.currency, "USD");
   assert.equal(aapl.coverage_start, "2026-02-01T00:00:00.000Z");
   assert.equal(aapl.coverage_end, "2026-03-01T00:00:00.000Z");
   assert.equal(aapl.coverage_level, "partial");
@@ -287,6 +296,7 @@ test("normalizedSeriesResponse exposes per-subject coverage without backfilling"
   );
 
   assert.equal(msft.listing.id, msftListing.id);
+  assert.equal(msft.currency, "USD");
   assert.equal(msft.coverage_start, RANGE.start);
   assert.equal(msft.coverage_level, "full");
 
@@ -301,8 +311,8 @@ test("normalizedSeriesResponse marks empty subject history as explicitly unavail
   const response = normalizedSeriesResponse(
     validSeriesResponseInput({
       series: [
-        { listing: aaplListing, points: [] },
-        { listing: msftListing, points: [point(RANGE.start, 0)] },
+        { listing: aaplListing, currency: "USD", points: [] },
+        { listing: msftListing, currency: "USD", points: [point(RANGE.start, 0)] },
       ],
     }),
   );
@@ -315,12 +325,97 @@ test("normalizedSeriesResponse marks empty subject history as explicitly unavail
   assert.deepEqual(aapl.points, []);
 });
 
+test("normalizedSeriesResponse carries visible currencies for side-by-side cross-currency comparisons", () => {
+  const response = normalizedSeriesResponse(
+    validSeriesResponseInput({
+      query: {
+        ...validInput(),
+        subject_refs: [aaplListing, asmlListing],
+        normalization: "pct_return",
+      },
+      series: [
+        { listing: aaplListing, currency: "USD", points: [point(RANGE.start, 0)] },
+        { listing: asmlListing, currency: "EUR", points: [point(RANGE.start, 0)] },
+      ],
+    }),
+  );
+
+  assert.deepEqual(
+    response.series.map((series) => series.currency),
+    ["USD", "EUR"],
+  );
+  assert.equal(response.target_currency, undefined);
+  assert.equal(response.fx_rates, undefined);
+  assert.doesNotThrow(() => assertSeriesResponseContract(response));
+});
+
+test("normalizedSeriesResponse rejects currency-normalized cross-currency series without FX rates", () => {
+  assert.throws(
+    () =>
+      normalizedSeriesResponse(
+        validSeriesResponseInput({
+          query: {
+            ...validInput(),
+            subject_refs: [aaplListing, asmlListing],
+            normalization: "currency_normalized",
+          },
+          target_currency: "USD",
+          series: [
+            { listing: aaplListing, currency: "USD", points: [point(RANGE.start, 0)] },
+            { listing: asmlListing, currency: "EUR", points: [point(RANGE.start, 0)] },
+          ],
+        }),
+      ),
+    /fx_rates/,
+  );
+});
+
+test("normalizedSeriesResponse accepts source-backed FX metadata for currency-normalized comparisons", () => {
+  const response = normalizedSeriesResponse(
+    validSeriesResponseInput({
+      query: {
+        ...validInput(),
+        subject_refs: [aaplListing, asmlListing],
+        normalization: "currency_normalized",
+      },
+      target_currency: "USD",
+      fx_rates: [
+        {
+          base_currency: "EUR",
+          quote_currency: "USD",
+          rate: 1.08,
+          as_of: SNAPSHOT_AS_OF,
+          source_id: FX_SOURCE_ID,
+        },
+      ],
+      series: [
+        { listing: aaplListing, currency: "USD", points: [point(RANGE.start, 0)] },
+        { listing: asmlListing, currency: "EUR", points: [point(RANGE.start, 0)] },
+      ],
+    }),
+  );
+
+  assert.equal(response.target_currency, "USD");
+  assert.deepEqual(response.fx_rates, [
+    {
+      base_currency: "EUR",
+      quote_currency: "USD",
+      rate: 1.08,
+      as_of: SNAPSHOT_AS_OF,
+      source_id: FX_SOURCE_ID,
+    },
+  ]);
+  assert.doesNotThrow(() => assertSeriesResponseContract(response));
+  assert.equal(Object.isFrozen(response.fx_rates), true);
+  assert.equal(Object.isFrozen(response.fx_rates?.[0]), true);
+});
+
 test("normalizedSeriesResponse rejects contradictory or incomplete subject coverage", () => {
   assert.throws(
     () =>
       normalizedSeriesResponse(
         validSeriesResponseInput({
-          series: [{ listing: aaplListing, points: [point(RANGE.start, 0)] }],
+          series: [{ listing: aaplListing, currency: "USD", points: [point(RANGE.start, 0)] }],
         }),
       ),
     /missing series for subject/,
@@ -333,10 +428,11 @@ test("normalizedSeriesResponse rejects contradictory or incomplete subject cover
           series: [
             {
               listing: aaplListing,
+              currency: "USD",
               points: [point(RANGE.start, 0)],
               unavailable_reason: "missing_coverage",
             },
-            { listing: msftListing, points: [point(RANGE.start, 0)] },
+            { listing: msftListing, currency: "USD", points: [point(RANGE.start, 0)] },
           ],
         }),
       ),
@@ -350,9 +446,10 @@ test("normalizedSeriesResponse rejects contradictory or incomplete subject cover
           series: [
             {
               listing: aaplListing,
+              currency: "USD",
               points: [point("2025-12-31T00:00:00.000Z", 0)],
             },
-            { listing: msftListing, points: [point(RANGE.start, 0)] },
+            { listing: msftListing, currency: "USD", points: [point(RANGE.start, 0)] },
           ],
         }),
       ),

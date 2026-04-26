@@ -22,8 +22,16 @@ import {
   assertListingRef,
   freezeListingRef,
   type ListingSubjectRef,
+  type UUID,
 } from "./subject-ref.ts";
-import { assertBoolean, assertIso8601Utc, assertOneOf } from "./validators.ts";
+import {
+  assertBoolean,
+  assertCurrency,
+  assertFinitePositive,
+  assertIso8601Utc,
+  assertOneOf,
+  assertUuid,
+} from "./validators.ts";
 
 // Spec §5 (SnapshotManifest): canonical normalization vocabulary. `raw` is
 // the price/level passthrough; `pct_return` rebases each series to period
@@ -65,6 +73,7 @@ export type SeriesPoint = {
 
 export type NormalizedSeries = {
   listing: ListingSubjectRef;
+  currency: string;
   points: ReadonlyArray<SeriesPoint>;
   coverage_start: string | null;
   coverage_end: string | null;
@@ -74,8 +83,17 @@ export type NormalizedSeries = {
 
 export type NormalizedSeriesInput = {
   listing: ListingSubjectRef;
+  currency: string;
   points: ReadonlyArray<SeriesPoint>;
   unavailable_reason?: AvailabilityReason;
+};
+
+export type SeriesFxRate = {
+  base_currency: string;
+  quote_currency: string;
+  rate: number;
+  as_of: string;
+  source_id: UUID;
 };
 
 export type NormalizedSeriesResponse = {
@@ -83,6 +101,8 @@ export type NormalizedSeriesResponse = {
   snapshot_compatible: boolean;
   as_of: string;
   series: ReadonlyArray<NormalizedSeries>;
+  target_currency?: string;
+  fx_rates?: ReadonlyArray<SeriesFxRate>;
 };
 
 export type NormalizedSeriesResponseInput = {
@@ -90,6 +110,8 @@ export type NormalizedSeriesResponseInput = {
   snapshot_compatible: boolean;
   as_of: string;
   series: ReadonlyArray<NormalizedSeriesInput>;
+  target_currency?: string;
+  fx_rates?: ReadonlyArray<SeriesFxRate>;
 };
 
 export type SeriesCacheIdentity = NormalizedSeriesQuery & {
@@ -160,13 +182,19 @@ export function normalizedSeriesResponse(
   );
   const as_of = canonicalTimestamp(input.as_of, "normalizedSeriesResponse.as_of");
   const series = normalizeSeriesResponseSubjects(input.series, query);
+  const fx = normalizeSeriesFx(input, query, series);
 
-  return Object.freeze({
+  const response: NormalizedSeriesResponse = {
     query,
     snapshot_compatible: input.snapshot_compatible,
     as_of,
     series,
-  });
+  };
+  if (fx) {
+    response.target_currency = fx.target_currency;
+    response.fx_rates = fx.fx_rates;
+  }
+  return Object.freeze(response);
 }
 
 export function seriesCacheIdentity(
@@ -280,11 +308,18 @@ export function assertSeriesResponseContract(
   }
   const response = value as Record<string, unknown>;
   assertSeriesQueryContract(response.query);
+  const query = normalizedSeriesQuery(response.query as NormalizedSeriesQuery);
   assertBoolean(response.snapshot_compatible, "seriesResponse.snapshot_compatible");
   assertIso8601Utc(response.as_of, "seriesResponse.as_of");
   assertSeriesContractItems(
     response.series,
-    normalizedSeriesQuery(response.query as NormalizedSeriesQuery),
+    query,
+  );
+  assertSeriesFxContract(
+    response,
+    query,
+    response.series as ReadonlyArray<NormalizedSeries>,
+    "seriesResponse",
   );
 }
 
@@ -387,6 +422,7 @@ function normalizeSeriesResponseSubject(
   }
   const item = value as Record<string, unknown>;
   const listing = freezeListingRef(item.listing as ListingSubjectRef, `${label}.listing`);
+  assertCurrency(item.currency, `${label}.currency`);
   const points = normalizeSeriesPoints(item.points, query.range, `${label}.points`);
 
   if (points.length === 0) {
@@ -394,6 +430,7 @@ function normalizeSeriesResponseSubject(
     assertOneOf(reason, AVAILABILITY_REASONS, `${label}.unavailable_reason`);
     return Object.freeze({
       listing,
+      currency: item.currency,
       points,
       coverage_start: null,
       coverage_end: null,
@@ -421,6 +458,7 @@ function normalizeSeriesResponseSubject(
 
   return Object.freeze({
     listing,
+    currency: item.currency,
     points,
     coverage_start,
     coverage_end,
@@ -519,6 +557,7 @@ function assertSeriesContractItem(
   }
   const item = value as Record<string, unknown>;
   assertListingRef(item.listing, `${label}.listing`);
+  assertCurrency(item.currency, `${label}.currency`);
   const points = normalizeSeriesPoints(item.points, query.range, `${label}.points`);
   if (!Object.hasOwn(item, "coverage_start")) {
     throw new Error(`${label}.coverage_start: required coverage field`);
@@ -582,6 +621,160 @@ function assertSeriesContractItem(
       `${label}.unavailable_reason: must be omitted when coverage is available`,
     );
   }
+}
+
+function normalizeSeriesFx(
+  input: NormalizedSeriesResponseInput,
+  query: NormalizedSeriesQuery,
+  series: ReadonlyArray<NormalizedSeries>,
+): { target_currency: string; fx_rates: ReadonlyArray<SeriesFxRate> } | null {
+  if (query.normalization !== "currency_normalized") {
+    if (input.target_currency !== undefined) {
+      throw new Error(
+        "normalizedSeriesResponse.target_currency: must be omitted unless normalization is currency_normalized",
+      );
+    }
+    if (input.fx_rates !== undefined) {
+      throw new Error(
+        "normalizedSeriesResponse.fx_rates: must be omitted unless normalization is currency_normalized",
+      );
+    }
+    return null;
+  }
+
+  assertCurrency(
+    input.target_currency,
+    "normalizedSeriesResponse.target_currency",
+  );
+  const target_currency = input.target_currency;
+  const fx_rates = normalizeFxRates(
+    input.fx_rates,
+    target_currency,
+    "normalizedSeriesResponse.fx_rates",
+  );
+  assertFxRatesCoverSeriesCurrencies(
+    series,
+    target_currency,
+    fx_rates,
+    "normalizedSeriesResponse.fx_rates",
+  );
+  return { target_currency, fx_rates };
+}
+
+function assertSeriesFxContract(
+  response: Record<string, unknown>,
+  query: NormalizedSeriesQuery,
+  series: ReadonlyArray<NormalizedSeries>,
+  label: string,
+): void {
+  if (query.normalization !== "currency_normalized") {
+    if (response.target_currency !== undefined) {
+      throw new Error(
+        `${label}.target_currency: must be omitted unless normalization is currency_normalized`,
+      );
+    }
+    if (response.fx_rates !== undefined) {
+      throw new Error(
+        `${label}.fx_rates: must be omitted unless normalization is currency_normalized`,
+      );
+    }
+    return;
+  }
+
+  assertCurrency(response.target_currency, `${label}.target_currency`);
+  const target_currency = response.target_currency as string;
+  const fx_rates = normalizeFxRates(
+    response.fx_rates,
+    target_currency,
+    `${label}.fx_rates`,
+  );
+  assertFxRatesCoverSeriesCurrencies(
+    series,
+    target_currency,
+    fx_rates,
+    `${label}.fx_rates`,
+  );
+}
+
+function normalizeFxRates(
+  value: unknown,
+  targetCurrency: string,
+  label: string,
+): ReadonlyArray<SeriesFxRate> {
+  if (!Array.isArray(value)) {
+    throw new Error(`${label}: must be an array of source-backed FX rates`);
+  }
+  const seen = new Set<string>();
+  const rates = value.map((rate, index) => {
+    const normalized = normalizeFxRate(
+      rate,
+      targetCurrency,
+      `${label}[${index}]`,
+    );
+    const key = `${normalized.base_currency}/${normalized.quote_currency}`;
+    if (seen.has(key)) {
+      throw new Error(`${label}[${index}]: duplicate FX rate ${key}`);
+    }
+    seen.add(key);
+    return normalized;
+  });
+  return Object.freeze(rates);
+}
+
+function normalizeFxRate(
+  value: unknown,
+  targetCurrency: string,
+  label: string,
+): SeriesFxRate {
+  if (value === null || typeof value !== "object") {
+    throw new Error(`${label}: must be an object`);
+  }
+  const rate = value as Record<string, unknown>;
+  assertCurrency(rate.base_currency, `${label}.base_currency`);
+  assertCurrency(rate.quote_currency, `${label}.quote_currency`);
+  if (rate.quote_currency !== targetCurrency) {
+    throw new Error(
+      `${label}.quote_currency: must equal target_currency ${targetCurrency}`,
+    );
+  }
+  assertFinitePositive(rate.rate, `${label}.rate`);
+  const as_of = canonicalTimestamp(rate.as_of as string, `${label}.as_of`);
+  assertUuid(rate.source_id, `${label}.source_id`);
+  return Object.freeze({
+    base_currency: rate.base_currency,
+    quote_currency: rate.quote_currency,
+    rate: rate.rate,
+    as_of,
+    source_id: rate.source_id,
+  });
+}
+
+function assertFxRatesCoverSeriesCurrencies(
+  series: ReadonlyArray<{ currency: string }>,
+  targetCurrency: string,
+  fxRates: ReadonlyArray<SeriesFxRate>,
+  label: string,
+): void {
+  const rateCurrencies = new Set(
+    fxRates
+      .filter((rate) => rate.quote_currency === targetCurrency)
+      .map((rate) => rate.base_currency),
+  );
+
+  for (const currency of uniqueCurrencies(series)) {
+    if (currency === targetCurrency) continue;
+    if (!rateCurrencies.has(currency)) {
+      throw new Error(
+        `${label}: missing FX rate from ${currency} to ${targetCurrency}`,
+      );
+    }
+  }
+}
+
+function uniqueCurrencies(
+  series: ReadonlyArray<{ currency: string }>,
+): ReadonlyArray<string> {
+  return [...new Set(series.map((item) => item.currency))];
 }
 
 function assertFiniteNumber(value: unknown, label: string): asserts value is number {
