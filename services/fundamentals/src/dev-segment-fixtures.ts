@@ -1,4 +1,5 @@
 import { DEV_ISSUER_PROFILES } from "./dev-fixtures.ts";
+import { METRIC_ID } from "./dev-stats-fixtures.ts";
 import type { BuildSegmentFactsInput, SegmentDefinitionInput, SegmentFactInput } from "./segment-facts.ts";
 import type { SegmentsRepositoryRecord } from "./segments-repository.ts";
 import type { UUID } from "./subject-ref.ts";
@@ -6,8 +7,7 @@ import type { UUID } from "./subject-ref.ts";
 export const DEV_SEGMENT_FIXTURE_SOURCE_ID: UUID = "00000000-0000-4000-a000-000000000006";
 
 const APPLE_ISSUER = DEV_ISSUER_PROFILES[0].subject;
-
-const REVENUE_METRIC_ID: UUID = "11111111-1111-4111-9111-111111111111";
+const REVENUE_METRIC_ID = METRIC_ID.revenue;
 
 const APPLE_BUSINESS_DEFINITIONS: ReadonlyArray<SegmentDefinitionInput> = [
   { segment_id: "iphone", segment_name: "iPhone", definition_as_of: "2024-09-28" },
@@ -98,8 +98,6 @@ const APPLE_BUSINESS_FY2023: BuildSegmentFactsInput = {
   ],
 };
 
-// Geography-axis fixture for FY2024 — exercises the axis branch and gives
-// the financials tab a second axis to render donuts/trajectories from.
 const APPLE_GEOGRAPHY_DEFINITIONS: ReadonlyArray<SegmentDefinitionInput> = [
   { segment_id: "americas", segment_name: "Americas", definition_as_of: "2024-09-28" },
   { segment_id: "europe", segment_name: "Europe", definition_as_of: "2024-09-28" },

@@ -87,8 +87,6 @@ test("POST /v1/fundamentals/segments returns the segment-facts envelope for the 
   assert.equal(envelope.fiscal_period, "FY");
   assert.equal(envelope.reporting_currency, "USD");
 
-  // The fixture seeds 5 business definitions + 5 facts + a consolidated total.
-  // The aggregator must emit definitions and facts in the envelope, not collapse.
   assert.equal(envelope.segment_definitions.length, 5);
   assert.equal(envelope.facts.length, 5);
 
@@ -97,15 +95,10 @@ test("POST /v1/fundamentals/segments returns the segment-facts envelope for the 
   assert.equal(iphone?.source_id, DEV_SEGMENT_FIXTURE_SOURCE_ID);
 });
 
-test("POST /v1/fundamentals/segments coverage_warnings flow through the wire unmodified", async (t) => {
+test("POST /v1/fundamentals/segments exposes the coverage_warnings array on the wire envelope", async (t) => {
   const url = await startServer(t, buildDeps());
   const res = await postSegments(url, appleBusinessRequest("2024-FY"));
   const body = (await res.json()) as GetSegmentsResponse;
-  // The Apple FY2024 fixture is internally consistent (consolidated total
-  // matches the segment sum), so we expect zero warnings on this happy path.
-  // The "warnings flow through" assertion lives in the broader contract:
-  // when warnings exist they reach the wire as-is. Here we assert the
-  // shape so a future change that drops the array at the wire fails.
   assert.ok(Array.isArray(body.segments.coverage_warnings));
   assert.equal(body.segments.coverage_warnings.length, 0);
 });
@@ -120,7 +113,6 @@ test("POST /v1/fundamentals/segments honors the axis branch (business vs geograp
 
   assert.equal(businessBody.segments.axis, "business");
   assert.equal(geographyBody.segments.axis, "geography");
-  // The two axes have disjoint segment_id sets — proves the lookup keyed on axis.
   const businessIds = new Set(businessBody.segments.segment_definitions.map((d) => d.segment_id));
   const geographyIds = new Set(geographyBody.segments.segment_definitions.map((d) => d.segment_id));
   for (const id of businessIds) {
@@ -130,7 +122,6 @@ test("POST /v1/fundamentals/segments honors the axis branch (business vs geograp
 
 test("POST /v1/fundamentals/segments returns 404 with structured envelope when axis+period is missing", async (t) => {
   const url = await startServer(t, buildDeps());
-  // 2022-FY business segments aren't seeded.
   const res = await postSegments(url, appleBusinessRequest("2022-FY"));
   assert.equal(res.status, 404);
   const body = (await res.json()) as { error: string; unavailable: UnavailableEnvelope };

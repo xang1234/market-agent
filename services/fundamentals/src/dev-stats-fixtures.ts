@@ -7,7 +7,7 @@ import type { UUID } from "./subject-ref.ts";
 export const DEV_STATEMENT_SOURCE_ID: UUID = "00000000-0000-4000-a000-000000000003";
 export const DEV_PRICE_SOURCE_ID: UUID = "00000000-0000-4000-a000-000000000004";
 
-const METRIC_ID: Readonly<Record<string, UUID>> = {
+export const METRIC_ID: Readonly<Record<string, UUID>> = {
   revenue: "11111111-1111-4111-9111-111111111111",
   cost_of_revenue: "22222222-2222-4222-9222-222222222222",
   gross_profit: "33333333-3333-4333-9333-333333333333",

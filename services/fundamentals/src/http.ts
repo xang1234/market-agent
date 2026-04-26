@@ -258,23 +258,12 @@ type ValidatedStatementsRequest =
   | { kind: "error"; error: string };
 
 function validateStatementsRequest(value: unknown): ValidatedStatementsRequest {
-  if (value === null || typeof value !== "object") {
-    return { kind: "error", error: "request body must be a JSON object" };
-  }
-  const body = value as Record<string, unknown>;
+  const objectResult = validateRequestObject(value);
+  if (objectResult.kind === "error") return objectResult;
+  const body = objectResult.body;
 
-  const subjectRef = body.subject_ref;
-  if (
-    typeof subjectRef !== "object" ||
-    subjectRef === null ||
-    (subjectRef as { kind?: unknown }).kind !== "issuer"
-  ) {
-    return { kind: "error", error: "subject_ref must be an issuer SubjectRef" };
-  }
-  const subjectId = (subjectRef as { id?: unknown }).id;
-  if (!isUuidV4(subjectId)) {
-    return { kind: "error", error: "subject_ref.id must be a UUID v4" };
-  }
+  const subjectResult = validateIssuerSubjectRef(body.subject_ref);
+  if (subjectResult.kind === "error") return subjectResult;
 
   const statement = body.statement;
   if (typeof statement !== "string" || !(STATEMENT_FAMILIES as ReadonlyArray<string>).includes(statement)) {
@@ -284,18 +273,10 @@ function validateStatementsRequest(value: unknown): ValidatedStatementsRequest {
     };
   }
 
-  const basis = body.basis;
-  if (typeof basis !== "string" || !(STATEMENT_BASES as ReadonlyArray<string>).includes(basis)) {
-    return {
-      kind: "error",
-      error: `basis must be one of ${STATEMENT_BASES.join(", ")}`,
-    };
-  }
+  const basisResult = validateBasis(body.basis);
+  if (basisResult.kind === "error") return basisResult;
 
-  if (!Array.isArray(body.periods)) {
-    return { kind: "error", error: "periods must be a non-empty array of strings" };
-  }
-  if (body.periods.length === 0) {
+  if (!Array.isArray(body.periods) || body.periods.length === 0) {
     return { kind: "error", error: "periods must be a non-empty array of strings" };
   }
   const parsedPeriods: ParsedPeriod[] = [];
@@ -315,10 +296,10 @@ function validateStatementsRequest(value: unknown): ValidatedStatementsRequest {
   return {
     kind: "ok",
     request: {
-      subject_ref: { kind: "issuer", id: subjectId },
+      subject_ref: { kind: "issuer", id: subjectResult.id },
       statement: statement as StatementFamily,
       periods: body.periods as string[],
-      basis: basis as StatementBasis,
+      basis: basisResult.basis,
     },
     parsedPeriods,
   };
@@ -333,33 +314,20 @@ type ValidatedSegmentsRequest =
   | { kind: "error"; error: string };
 
 function validateSegmentsRequest(value: unknown): ValidatedSegmentsRequest {
-  if (value === null || typeof value !== "object") {
-    return { kind: "error", error: "request body must be a JSON object" };
-  }
-  const body = value as Record<string, unknown>;
+  const objectResult = validateRequestObject(value);
+  if (objectResult.kind === "error") return objectResult;
+  const body = objectResult.body;
 
-  const subjectRef = body.subject_ref;
-  if (
-    typeof subjectRef !== "object" ||
-    subjectRef === null ||
-    (subjectRef as { kind?: unknown }).kind !== "issuer"
-  ) {
-    return { kind: "error", error: "subject_ref must be an issuer SubjectRef" };
-  }
-  const subjectId = (subjectRef as { id?: unknown }).id;
-  if (!isUuidV4(subjectId)) {
-    return { kind: "error", error: "subject_ref.id must be a UUID v4" };
-  }
+  const subjectResult = validateIssuerSubjectRef(body.subject_ref);
+  if (subjectResult.kind === "error") return subjectResult;
 
   const axis = body.axis;
   if (typeof axis !== "string" || !(SEGMENT_AXES as ReadonlyArray<string>).includes(axis)) {
     return { kind: "error", error: `axis must be one of ${SEGMENT_AXES.join(", ")}` };
   }
 
-  const basis = body.basis;
-  if (typeof basis !== "string" || !(STATEMENT_BASES as ReadonlyArray<string>).includes(basis)) {
-    return { kind: "error", error: `basis must be one of ${STATEMENT_BASES.join(", ")}` };
-  }
+  const basisResult = validateBasis(body.basis);
+  if (basisResult.kind === "error") return basisResult;
 
   const parsed = parsePeriod(body.period);
   if (parsed.kind === "error") {
@@ -369,13 +337,57 @@ function validateSegmentsRequest(value: unknown): ValidatedSegmentsRequest {
   return {
     kind: "ok",
     request: {
-      subject_ref: { kind: "issuer", id: subjectId },
+      subject_ref: { kind: "issuer", id: subjectResult.id },
       axis: axis as SegmentAxis,
       period: parsed.period.raw,
-      basis: basis as StatementBasis,
+      basis: basisResult.basis,
     },
     parsedPeriod: parsed.period,
   };
+}
+
+type RequestObjectResult =
+  | { kind: "ok"; body: Record<string, unknown> }
+  | { kind: "error"; error: string };
+
+function validateRequestObject(value: unknown): RequestObjectResult {
+  if (value === null || typeof value !== "object") {
+    return { kind: "error", error: "request body must be a JSON object" };
+  }
+  return { kind: "ok", body: value as Record<string, unknown> };
+}
+
+type IssuerSubjectRefResult =
+  | { kind: "ok"; id: UUID }
+  | { kind: "error"; error: string };
+
+function validateIssuerSubjectRef(value: unknown): IssuerSubjectRefResult {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    (value as { kind?: unknown }).kind !== "issuer"
+  ) {
+    return { kind: "error", error: "subject_ref must be an issuer SubjectRef" };
+  }
+  const id = (value as { id?: unknown }).id;
+  if (!isUuidV4(id)) {
+    return { kind: "error", error: "subject_ref.id must be a UUID v4" };
+  }
+  return { kind: "ok", id };
+}
+
+type BasisResult =
+  | { kind: "ok"; basis: StatementBasis }
+  | { kind: "error"; error: string };
+
+function validateBasis(value: unknown): BasisResult {
+  if (typeof value !== "string" || !(STATEMENT_BASES as ReadonlyArray<string>).includes(value)) {
+    return {
+      kind: "error",
+      error: `basis must be one of ${STATEMENT_BASES.join(", ")}`,
+    };
+  }
+  return { kind: "ok", basis: value as StatementBasis };
 }
 
 async function fetchSegmentsOutcome(
