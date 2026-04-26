@@ -87,6 +87,78 @@ export function createDevPolygonFetcher(opts: { clock: () => Date }): PolygonFet
         },
       };
     }
+    const aggsMatch = path.match(
+      /^\/v2\/aggs\/ticker\/([^/]+)\/range\/(\d+)\/(minute|hour|day)\/(\d+)\/(\d+)/,
+    );
+    if (aggsMatch) {
+      const ticker = decodeURIComponent(aggsMatch[1]);
+      const multiplier = Number(aggsMatch[2]);
+      const timespan = aggsMatch[3] as "minute" | "hour" | "day";
+      const startMs = Number(aggsMatch[4]);
+      const endMs = Number(aggsMatch[5]);
+      const snap = DEV_SNAPSHOTS[ticker];
+      if (!snap) {
+        throw new Error(`dev fixture: unknown ticker ${ticker}`);
+      }
+      return {
+        adjusted: true,
+        results: synthesizeAggBars({ ticker, prevClose: snap.prev_close, multiplier, timespan, startMs, endMs }),
+      };
+    }
     throw new Error(`dev fixture: unsupported path ${path}`);
   };
+}
+
+// Generate deterministic per-period bars for a ticker. The walk is seeded by
+// the ticker so the same range yields the same bars across calls (keeps dev
+// reloads stable and makes failing tests reproducible). Each bar satisfies the
+// NormalizedBar invariants (low <= open,close <= high; volume non-negative).
+function synthesizeAggBars(opts: {
+  ticker: string;
+  prevClose: number;
+  multiplier: number;
+  timespan: "minute" | "hour" | "day";
+  startMs: number;
+  endMs: number;
+}): Array<{ t: number; o: number; h: number; l: number; c: number; v: number }> {
+  const stepMs = periodStepMs(opts.timespan) * opts.multiplier;
+  let seed = tickerSeed(opts.ticker);
+  let close = opts.prevClose;
+  const bars: Array<{ t: number; o: number; h: number; l: number; c: number; v: number }> = [];
+  for (let t = opts.startMs; t < opts.endMs; t += stepMs) {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    const driftPct = ((seed % 4001) - 2000) / 100_000; // ±2.0% drift
+    const open = close;
+    close = round2(open * (1 + driftPct));
+    const span = Math.max(0.01, Math.abs(close - open));
+    const high = round2(Math.max(open, close) + span * 0.5);
+    const low = round2(Math.min(open, close) - span * 0.5);
+    const volume = 1_000_000 + (seed % 500_000);
+    bars.push({ t, o: open, h: high, l: low, c: close, v: volume });
+  }
+  return bars;
+}
+
+function periodStepMs(timespan: "minute" | "hour" | "day"): number {
+  switch (timespan) {
+    case "minute":
+      return 60_000;
+    case "hour":
+      return 3_600_000;
+    case "day":
+      return 86_400_000;
+  }
+}
+
+function tickerSeed(ticker: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < ticker.length; i++) {
+    h = (h ^ ticker.charCodeAt(i)) >>> 0;
+    h = (h * 16777619) >>> 0;
+  }
+  return h;
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }
