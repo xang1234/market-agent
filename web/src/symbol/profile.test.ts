@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   fetchIssuerProfile,
-  issuerIdForProfile,
+  issuerIdFromSubject,
   ProfileFetchError,
   profileBelongsToIssuer,
   type IssuerProfile,
@@ -35,16 +35,16 @@ const baseProfile: IssuerProfile = {
   source_id: FUNDAMENTALS_SOURCE_ID,
 }
 
-test('issuerIdForProfile returns the subject id for an issuer-kind subject', () => {
+test('issuerIdFromSubject returns the subject id for an issuer-kind subject', () => {
   const subject: ResolvedSubject = {
     subject_ref: { kind: 'issuer', id: APPLE_ISSUER_ID },
     display_name: 'Apple Inc.',
     confidence: 1,
   }
-  assert.equal(issuerIdForProfile(subject), APPLE_ISSUER_ID)
+  assert.equal(issuerIdFromSubject(subject), APPLE_ISSUER_ID)
 })
 
-test('issuerIdForProfile pulls the issuer linkage from a hydrated listing subject', () => {
+test('issuerIdFromSubject pulls the issuer linkage from a hydrated listing subject', () => {
   const subject: ResolvedSubject = {
     subject_ref: { kind: 'listing', id: APPLE_LISTING_ID },
     display_name: 'Apple Inc.',
@@ -56,16 +56,16 @@ test('issuerIdForProfile pulls the issuer linkage from a hydrated listing subjec
       },
     },
   }
-  assert.equal(issuerIdForProfile(subject), APPLE_ISSUER_ID)
+  assert.equal(issuerIdFromSubject(subject), APPLE_ISSUER_ID)
 })
 
-test('issuerIdForProfile returns null for a bare listing subject without context', () => {
+test('issuerIdFromSubject returns null for a bare listing subject without context', () => {
   const subject: ResolvedSubject = {
     subject_ref: { kind: 'listing', id: APPLE_LISTING_ID },
     display_name: 'Listing subject',
     confidence: 1,
   }
-  assert.equal(issuerIdForProfile(subject), null)
+  assert.equal(issuerIdFromSubject(subject), null)
 })
 
 test('fetchIssuerProfile decodes the wire envelope and returns the profile', async () => {

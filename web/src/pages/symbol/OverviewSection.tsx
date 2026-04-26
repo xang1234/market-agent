@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSubjectDetailContext } from '../../shell/subjectDetailOutletContext.ts'
 import {
   fetchIssuerProfile,
-  issuerIdForProfile,
-  ProfileFetchError,
+  issuerIdFromSubject,
   profileBelongsToIssuer,
   type IssuerProfile,
   type IssuerProfileExchange,
@@ -11,8 +10,6 @@ import {
 import {
   fetchKeyStats,
   formatStatValue,
-  issuerIdForStats,
-  StatsFetchError,
   statLabel,
   statsBelongToIssuer,
   type KeyStat,
@@ -23,15 +20,13 @@ import { listingIdForQuote } from '../../symbol/quote.ts'
 import {
   fetchSeries,
   recentDailyQuery,
-  SeriesFetchError,
   singleListingOutcome,
   type NormalizedBar,
 } from '../../symbol/series.ts'
 
-// Stored state carries the fetch's input key so renders can detect a stale
-// result after the dep changes mid-flight. visibleFetchState() collapses
-// stale results into 'loading' so the UI doesn't show last-issuer's data
-// while the new fetch is in flight.
+// Stored state carries the fetch's input key so a mid-flight dep change
+// doesn't surface stale data — visibleFetchState() collapses key-mismatched
+// results into 'loading' instead.
 type StoredFetchState<T> =
   | { status: 'idle' }
   | { status: 'unavailable'; key: string; reason: string }
@@ -42,6 +37,10 @@ type VisibleFetchState<T> =
   | { status: 'loading' }
   | { status: 'unavailable'; reason: string }
   | { status: 'ready'; data: T }
+
+type FetchedResult<T> =
+  | { kind: 'ready'; data: T }
+  | { kind: 'unavailable'; reason: string }
 
 function visibleFetchState<T>(
   state: StoredFetchState<T>,
@@ -67,12 +66,36 @@ const STAT_ORDER: ReadonlyArray<KeyStatKey> = [
 
 export function OverviewSection() {
   const { subject } = useSubjectDetailContext()
-  const issuerId = issuerIdForProfile(subject)
+  const issuerId = issuerIdFromSubject(subject)
   const listingId = listingIdForQuote(subject)
 
-  const profile = useProfile(issuerId)
-  const stats = useStats(issuerIdForStats(subject))
-  const series = useRecentSeries(listingId)
+  const profile = useFetched<IssuerProfile>(issuerId, async (id, signal) => {
+    const data = await fetchIssuerProfile(id, { signal })
+    if (!profileBelongsToIssuer(data, id)) {
+      return { kind: 'unavailable', reason: 'profile response did not match requested issuer' }
+    }
+    return { kind: 'ready', data }
+  })
+
+  const stats = useFetched<KeyStatsEnvelope>(issuerId, async (id, signal) => {
+    const data = await fetchKeyStats(id, { signal })
+    if (!statsBelongToIssuer(data, id)) {
+      return { kind: 'unavailable', reason: 'stats response did not match requested issuer' }
+    }
+    return { kind: 'ready', data }
+  })
+
+  const series = useFetched<NormalizedBar[]>(listingId, async (id, signal) => {
+    const response = await fetchSeries(recentDailyQuery(id), { signal })
+    const outcome = singleListingOutcome(response, id)
+    if (outcome === null) {
+      return { kind: 'unavailable', reason: 'series response did not include this listing' }
+    }
+    if (outcome.outcome === 'unavailable') {
+      return { kind: 'unavailable', reason: outcome.detail ?? outcome.reason }
+    }
+    return { kind: 'ready', data: outcome.data.bars }
+  })
 
   return (
     <div
@@ -87,8 +110,6 @@ export function OverviewSection() {
     </div>
   )
 }
-
-// -- Profile card -----------------------------------------------------------
 
 function ProfileCard({
   issuerId,
@@ -204,8 +225,6 @@ function ExchangeBadge({ exchange }: { exchange: IssuerProfileExchange }) {
   )
 }
 
-// -- Performance card -------------------------------------------------------
-
 function PerformanceCard({
   listingId,
   state,
@@ -302,8 +321,6 @@ function Sparkline({ bars }: { bars: NormalizedBar[] }) {
 function formatPrice(value: number): string {
   return value.toFixed(2)
 }
-
-// -- Key stats row ----------------------------------------------------------
 
 function KeyStatsRow({
   issuerId,
@@ -409,101 +426,38 @@ function KeyStatMissingTile({ statKey }: { statKey: KeyStatKey }) {
   )
 }
 
-// -- Hooks ------------------------------------------------------------------
-
-function fetchErrorReason(err: unknown, fallback: string): string {
-  if (err instanceof Error) return err.message
-  return fallback
-}
-
-function useProfile(issuerId: string | null): VisibleFetchState<IssuerProfile> {
-  const [stored, setStored] = useState<StoredFetchState<IssuerProfile>>({ status: 'idle' })
+function useFetched<T>(
+  key: string | null,
+  doFetch: (key: string, signal: AbortSignal) => Promise<FetchedResult<T>>,
+): VisibleFetchState<T> {
+  const [stored, setStored] = useState<StoredFetchState<T>>({ status: 'idle' })
 
   useEffect(() => {
-    if (issuerId === null) return
+    if (key === null) return
     const controller = new AbortController()
-    fetchIssuerProfile(issuerId, { signal: controller.signal })
-      .then((profile) => {
+    doFetch(key, controller.signal)
+      .then((result) => {
         if (controller.signal.aborted) return
-        if (!profileBelongsToIssuer(profile, issuerId)) {
-          setStored({ status: 'unavailable', key: issuerId, reason: 'profile response did not match requested issuer' })
-          return
+        if (result.kind === 'ready') {
+          setStored({ status: 'ready', key, data: result.data })
+        } else {
+          setStored({ status: 'unavailable', key, reason: result.reason })
         }
-        setStored({ status: 'ready', key: issuerId, data: profile })
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         if (controller.signal.aborted) return
         setStored({
           status: 'unavailable',
-          key: issuerId,
-          reason: err instanceof ProfileFetchError ? err.message : fetchErrorReason(err, 'profile fetch failed'),
+          key,
+          reason: err instanceof Error ? err.message : 'fetch failed',
         })
       })
     return () => controller.abort()
-  }, [issuerId])
+    // doFetch identity is excluded — the closure is fresh per render but
+    // we only re-run when the key changes, matching the inline pattern in
+    // QuoteSnapshot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
 
-  return visibleFetchState(stored, issuerId)
-}
-
-function useStats(issuerId: string | null): VisibleFetchState<KeyStatsEnvelope> {
-  const [stored, setStored] = useState<StoredFetchState<KeyStatsEnvelope>>({ status: 'idle' })
-
-  useEffect(() => {
-    if (issuerId === null) return
-    const controller = new AbortController()
-    fetchKeyStats(issuerId, { signal: controller.signal })
-      .then((envelope) => {
-        if (controller.signal.aborted) return
-        if (!statsBelongToIssuer(envelope, issuerId)) {
-          setStored({ status: 'unavailable', key: issuerId, reason: 'stats response did not match requested issuer' })
-          return
-        }
-        setStored({ status: 'ready', key: issuerId, data: envelope })
-      })
-      .catch((err) => {
-        if (controller.signal.aborted) return
-        setStored({
-          status: 'unavailable',
-          key: issuerId,
-          reason: err instanceof StatsFetchError ? err.message : fetchErrorReason(err, 'stats fetch failed'),
-        })
-      })
-    return () => controller.abort()
-  }, [issuerId])
-
-  return visibleFetchState(stored, issuerId)
-}
-
-function useRecentSeries(listingId: string | null): VisibleFetchState<NormalizedBar[]> {
-  const [stored, setStored] = useState<StoredFetchState<NormalizedBar[]>>({ status: 'idle' })
-
-  useEffect(() => {
-    if (listingId === null) return
-    const controller = new AbortController()
-    fetchSeries(recentDailyQuery(listingId), { signal: controller.signal })
-      .then((response) => {
-        if (controller.signal.aborted) return
-        const outcome = singleListingOutcome(response, listingId)
-        if (outcome === null) {
-          setStored({ status: 'unavailable', key: listingId, reason: 'series response did not include this listing' })
-          return
-        }
-        if (outcome.outcome === 'unavailable') {
-          setStored({ status: 'unavailable', key: listingId, reason: outcome.detail ?? outcome.reason })
-          return
-        }
-        setStored({ status: 'ready', key: listingId, data: outcome.data.bars })
-      })
-      .catch((err) => {
-        if (controller.signal.aborted) return
-        setStored({
-          status: 'unavailable',
-          key: listingId,
-          reason: err instanceof SeriesFetchError ? err.message : fetchErrorReason(err, 'series fetch failed'),
-        })
-      })
-    return () => controller.abort()
-  }, [listingId])
-
-  return visibleFetchState(stored, listingId)
+  return visibleFetchState(stored, key)
 }

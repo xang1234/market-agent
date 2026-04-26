@@ -1,6 +1,4 @@
-// Mirrors services/market/src/series-query.ts and the per-listing outcome
-// envelope from services/market/src/http.ts. Kept narrow so decode failures
-// surface here rather than as undefined deep in the UI.
+import type { SubjectRef } from './search.ts'
 
 export type BarInterval = '1m' | '5m' | '15m' | '1h' | '1d'
 
@@ -15,8 +13,10 @@ export type SeriesNormalization =
   | 'index_100'
   | 'currency_normalized'
 
+type ListingRef = SubjectRef & { kind: 'listing' }
+
 export type NormalizedSeriesQuery = {
-  subject_refs: { kind: 'listing'; id: string }[]
+  subject_refs: ListingRef[]
   range: { start: string; end: string }
   interval: BarInterval
   basis: AdjustmentBasis
@@ -33,7 +33,7 @@ export type NormalizedBar = {
 }
 
 export type NormalizedBars = {
-  listing: { kind: 'listing'; id: string }
+  listing: ListingRef
   interval: BarInterval
   range: { start: string; end: string }
   bars: NormalizedBar[]
@@ -55,7 +55,7 @@ export type SeriesOutcome =
   | {
       outcome: 'unavailable'
       reason: AvailabilityReason
-      listing: { kind: 'listing'; id: string }
+      listing: ListingRef
       source_id: string
       as_of: string
       retryable: boolean
@@ -63,7 +63,7 @@ export type SeriesOutcome =
     }
 
 export type SeriesResultEntry = {
-  listing: { kind: 'listing'; id: string }
+  listing: ListingRef
   outcome: SeriesOutcome
 }
 
@@ -102,10 +102,7 @@ export async function fetchSeries(
   return (await res.json()) as GetSeriesResponse
 }
 
-// Build a query for the small "limited performance" view on the overview tab:
-// 30 days of daily bars, raw + split-and-div-adjusted (the only basis the
-// market service emits today). `endIso` lets callers (and tests) pin the
-// upper bound; defaults to now.
+// split_and_div_adjusted is the only basis the market service emits today.
 export function recentDailyQuery(
   listingId: string,
   endIso: string = new Date().toISOString(),
@@ -121,10 +118,6 @@ export function recentDailyQuery(
   }
 }
 
-// Pulls the single-listing outcome from a series response. The series
-// endpoint returns per-listing outcomes inside a 200 — collapsing them to
-// "did we get bars" loses the unavailable reason, so callers should switch
-// on outcome.outcome rather than treating null as a generic miss.
 export function singleListingOutcome(
   response: GetSeriesResponse,
   listingId: string,

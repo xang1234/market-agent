@@ -3,17 +3,14 @@ import test from 'node:test'
 import {
   fetchKeyStats,
   formatStatValue,
-  issuerIdForStats,
   StatsFetchError,
   statLabel,
   statsBelongToIssuer,
   type KeyStat,
   type KeyStatsEnvelope,
 } from './stats.ts'
-import type { ResolvedSubject } from './search.ts'
 
 const APPLE_ISSUER_ID = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaa1'
-const APPLE_LISTING_ID = '11111111-1111-4111-a111-111111111111'
 
 function envelope(overrides: Partial<KeyStatsEnvelope> = {}): KeyStatsEnvelope {
   return {
@@ -31,22 +28,6 @@ function envelope(overrides: Partial<KeyStatsEnvelope> = {}): KeyStatsEnvelope {
     ...overrides,
   }
 }
-
-test('issuerIdForStats matches issuerIdForProfile semantics for hydrated and bare subjects', () => {
-  const issuerSubject: ResolvedSubject = {
-    subject_ref: { kind: 'issuer', id: APPLE_ISSUER_ID },
-    display_name: 'Apple Inc.',
-    confidence: 1,
-  }
-  assert.equal(issuerIdForStats(issuerSubject), APPLE_ISSUER_ID)
-
-  const bareListing: ResolvedSubject = {
-    subject_ref: { kind: 'listing', id: APPLE_LISTING_ID },
-    display_name: 'Listing subject',
-    confidence: 1,
-  }
-  assert.equal(issuerIdForStats(bareListing), null)
-})
 
 test('fetchKeyStats unwraps the wire envelope into a KeyStatsEnvelope', async () => {
   let calledUrl = ''
@@ -73,7 +54,7 @@ test('fetchKeyStats throws StatsFetchError on non-2xx with the status code', asy
   )
 })
 
-test('statsBelongToIssuer rejects mismatched envelopes (would hide a stale fetch)', () => {
+test('statsBelongToIssuer rejects mismatched envelopes', () => {
   const env = { subject: { kind: 'issuer' as const, id: APPLE_ISSUER_ID } }
   assert.equal(statsBelongToIssuer(env, APPLE_ISSUER_ID), true)
   assert.equal(statsBelongToIssuer(env, 'different-id'), false)
@@ -104,7 +85,7 @@ test("formatStatValue renders a multiple suffix for format_hint='multiple'", () 
   assert.equal(formatStatValue(stat), '32.34×')
 })
 
-test('formatStatValue renders an em-dash when value_num is null (sparse-coverage path)', () => {
+test('formatStatValue renders an em-dash when value_num is null', () => {
   assert.equal(formatStatValue({ value_num: null, format_hint: 'percent' }), '—')
   assert.equal(formatStatValue({ value_num: null, format_hint: 'multiple' }), '—')
 })

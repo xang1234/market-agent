@@ -1,7 +1,7 @@
 import type { ResolvedSubject, SubjectRef } from './search.ts'
 
 export type IssuerProfileExchange = {
-  listing: { kind: 'listing'; id: string }
+  listing: SubjectRef & { kind: 'listing' }
   mic: string
   ticker: string
   trading_currency: string
@@ -9,7 +9,7 @@ export type IssuerProfileExchange = {
 }
 
 export type IssuerProfile = {
-  subject: { kind: 'issuer'; id: string }
+  subject: SubjectRef & { kind: 'issuer' }
   legal_name: string
   former_names: string[]
   cik?: string
@@ -39,12 +39,10 @@ type FetchImpl = typeof fetch
 
 const FUNDAMENTALS_API_BASE = '/v1/fundamentals'
 
-// Resolves the issuer-kind UUID to use for a profile fetch. For an issuer-
-// kind subject the subject_ref.id is the issuer UUID directly. For a hydrated
-// listing/instrument subject the issuer linkage comes from context.issuer.
-// Anything bare (URL entry without resolver hydration) returns null — the
-// caller renders a "context unavailable" message rather than guessing.
-export function issuerIdForProfile(subject: ResolvedSubject): string | null {
+// Returns null for a bare listing/instrument subject without resolver
+// hydration — caller renders a "context unavailable" message rather than
+// guessing the issuer linkage.
+export function issuerIdFromSubject(subject: ResolvedSubject): string | null {
   if (subject.subject_ref.kind === 'issuer') return subject.subject_ref.id
   return subject.context?.issuer?.subject_ref.id ?? null
 }
@@ -68,8 +66,4 @@ export function profileBelongsToIssuer(
   issuerId: string | null,
 ): boolean {
   return issuerId !== null && profile.subject.kind === 'issuer' && profile.subject.id === issuerId
-}
-
-export function listingRefForExchange(exchange: IssuerProfileExchange): SubjectRef {
-  return { kind: 'listing', id: exchange.listing.id }
 }

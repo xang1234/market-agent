@@ -1,4 +1,4 @@
-import type { ResolvedSubject } from './search.ts'
+import type { SubjectRef } from './search.ts'
 
 export type KeyStatKey =
   | 'gross_margin'
@@ -45,7 +45,7 @@ export type KeyStat = {
 }
 
 export type KeyStatsEnvelope = {
-  subject: { kind: 'issuer'; id: string }
+  subject: SubjectRef & { kind: 'issuer' }
   family: 'key_stats'
   basis: string
   period_kind: string
@@ -74,11 +74,6 @@ export class StatsFetchError extends Error {
 type FetchImpl = typeof fetch
 
 const FUNDAMENTALS_API_BASE = '/v1/fundamentals'
-
-export function issuerIdForStats(subject: ResolvedSubject): string | null {
-  if (subject.subject_ref.kind === 'issuer') return subject.subject_ref.id
-  return subject.context?.issuer?.subject_ref.id ?? null
-}
 
 export async function fetchKeyStats(
   issuerId: string,

@@ -22,7 +22,6 @@ test('recentDailyQuery binds all five dimensions of the spec series query', () =
   assert.equal(q.basis, 'split_and_div_adjusted')
   assert.equal(q.normalization, 'raw')
   assert.equal(q.range.end, FIXED_END)
-  // 30 day window: end - start should be 30 * 86400_000 ms.
   const span = Date.parse(q.range.end) - Date.parse(q.range.start)
   assert.equal(span, 30 * 24 * 60 * 60 * 1000)
 })
@@ -106,7 +105,7 @@ test('singleListingOutcome returns the matching per-listing outcome', () => {
   assert.equal(outcome!.outcome, 'unavailable')
 })
 
-test('singleListingOutcome returns null when the listing is not in the response (e.g., sibling-only query)', () => {
+test('singleListingOutcome returns null when the listing is not in the response', () => {
   const query: NormalizedSeriesQuery = recentDailyQuery(MSFT_LISTING_ID, FIXED_END)
   const response: GetSeriesResponse = { query, results: [] }
   assert.equal(singleListingOutcome(response, APPLE_LISTING_ID), null)
