@@ -1,4 +1,4 @@
-// Segment-fact aggregation (spec §6.3.3, fra-cw0.4.2).
+// Segment-fact aggregation (spec §6.3.3).
 //
 // Segment disclosures live in their own envelope, NOT folded into the
 // consolidated income/balance/cashflow statement tables. Each envelope
@@ -7,12 +7,11 @@
 // can always trace a displayed slice back to the disclosure that
 // produced it.
 //
-// The aggregator does not extract segments from raw filings — that is
-// P6.1 (segment extraction refinement). It accepts already-resolved
-// segment inputs and is responsible for: cross-checking facts against
-// definitions, emitting coverage warnings instead of fabricating
-// missing slices, and (when a consolidated total is provided) flagging
-// reconciliation gaps.
+// Upstream extraction from raw filings is out of scope (P6.1). This
+// module accepts already-resolved segment inputs and: cross-checks
+// facts against definitions, emits coverage warnings instead of
+// fabricating missing slices, and (when a consolidated total is given)
+// flags reconciliation gaps.
 
 import type { CoverageLevel, FiscalPeriod, PeriodKind, StatementBasis } from "./statement.ts";
 import { freezeIssuerRef, type IssuerSubjectRef, type UUID } from "./subject-ref.ts";
@@ -24,6 +23,7 @@ import {
   assertIso8601Utc,
   assertIsoDate,
   assertMetricKey,
+  assertNonEmptyString,
   assertOneOf,
   assertUuid,
 } from "./validators.ts";
@@ -36,14 +36,6 @@ const SEGMENT_PERIOD_KINDS: ReadonlyArray<PeriodKind> = ["fiscal_q", "fiscal_y",
 
 const FY_PERIOD_KINDS: ReadonlySet<PeriodKind> = new Set(["fiscal_y", "ttm"]);
 
-const COVERAGE_ORDER: Readonly<Record<CoverageLevel, number>> = {
-  full: 0,
-  partial: 1,
-  sparse: 2,
-  unavailable: 3,
-};
-
-// Tolerance for "sum of segment values matches consolidated total".
 // Native-unit values come from the same scale-normalized layer, so
 // reconciliation is essentially exact for clean inputs; the epsilon
 // covers ordinary float rounding when many large numbers are summed.
@@ -167,18 +159,24 @@ export function buildSegmentFacts(
 ): SegmentFactsEnvelope {
   assertEnvelope(input);
 
-  const definitions = input.segment_definitions.map((d, i) =>
-    assertSegmentDefinition(d, `segmentFacts.segment_definitions[${i}]`),
-  );
-  const definitionIds = new Set(definitions.map((d) => d.segment_id));
+  const definitions: SegmentDefinition[] = [];
+  const definitionIds = new Set<string>();
+  for (let i = 0; i < input.segment_definitions.length; i++) {
+    const label = `segmentFacts.segment_definitions[${i}]`;
+    const def = assertSegmentDefinition(input.segment_definitions[i], label);
+    if (definitionIds.has(def.segment_id)) {
+      throw new Error(`${label}.segment_id: duplicate segment_id "${def.segment_id}"`);
+    }
+    definitionIds.add(def.segment_id);
+    definitions.push(def);
+  }
 
   const facts: SegmentFact[] = [];
   const warnings: SegmentCoverageWarning[] = [];
   const seenSegmentMetric = new Set<string>();
   const factSegmentIds = new Set<string>();
 
-  for (let i = 0; i < input.segment_definitions.length; i++) {
-    const def = definitions[i];
+  for (const def of definitions) {
     if (def.parent_segment_id && !definitionIds.has(def.parent_segment_id)) {
       warnings.push({
         code: "unknown_parent_segment",
@@ -263,16 +261,17 @@ export function buildSegmentFacts(
     const policy = input.freshness_policy;
     if (policy.max_segment_definition_age_ms !== undefined) {
       const max = policy.max_segment_definition_age_ms;
+      const policyMs = Date.parse(policy.as_of);
       // definition_as_of is a calendar date (no time component). Treat it
       // as end-of-day UTC so a same-day policy reference doesn't wrongly
       // mark a definition as up to ~24h stale.
       for (const def of definitions) {
-        const ageMs = Date.parse(policy.as_of) - Date.parse(def.definition_as_of + "T23:59:59.999Z");
+        const ageMs = policyMs - Date.parse(def.definition_as_of + "T23:59:59.999Z");
         if (ageMs > max) {
           warnings.push({
             code: "stale_segment_definition",
             segment_id: def.segment_id,
-            message: `segment "${def.segment_id}" definition_as_of ${def.definition_as_of} is older than freshness policy by ${ageMs - max}ms.`,
+            message: `segment "${def.segment_id}" definition_as_of ${def.definition_as_of} is older than freshness policy by ${ageMs}ms.`,
           });
         }
       }
@@ -280,12 +279,15 @@ export function buildSegmentFacts(
   }
 
   if (input.consolidated_totals) {
+    const topLevelIds = new Set(
+      definitions.filter((d) => d.parent_segment_id === undefined).map((d) => d.segment_id),
+    );
     for (let i = 0; i < input.consolidated_totals.length; i++) {
       const total = assertConsolidatedTotal(
         input.consolidated_totals[i],
         `segmentFacts.consolidated_totals[${i}]`,
       );
-      const reconciliationWarning = reconcile(facts, definitions, total, input.reporting_currency);
+      const reconciliationWarning = reconcile(facts, topLevelIds, total, input.reporting_currency);
       if (reconciliationWarning) warnings.push(reconciliationWarning);
     }
   }
@@ -308,9 +310,11 @@ export function buildSegmentFacts(
   });
 }
 
+// `topLevelIds` excludes child segments — child slices already roll up
+// into their parent and would double-count if summed alongside it.
 function reconcile(
   facts: ReadonlyArray<SegmentFact>,
-  definitions: ReadonlyArray<SegmentDefinition>,
+  topLevelIds: ReadonlySet<string>,
   total: ConsolidatedTotalInput,
   reportingCurrency: string,
 ): SegmentCoverageWarning | null {
@@ -321,14 +325,6 @@ function reconcile(
       message: `consolidated_total metric "${total.metric_key}" currency ${total.currency} does not match envelope reporting_currency ${reportingCurrency}.`,
     };
   }
-
-  // Reconcile only against top-level segments — child slices already roll
-  // up into their parent and would double-count if summed alongside it.
-  const topLevelIds = new Set(
-    definitions
-      .filter((d) => d.parent_segment_id === undefined)
-      .map((d) => d.segment_id),
-  );
 
   let sum = 0;
   let counted = 0;
@@ -431,42 +427,16 @@ function assertEnvelope(input: BuildSegmentFactsInput): void {
   if (!Array.isArray(input.facts)) {
     throw new Error("segmentFacts.facts: must be an array");
   }
-  assertUniqueDefinitionIds(input.segment_definitions);
-}
-
-function assertUniqueDefinitionIds(
-  defs: ReadonlyArray<SegmentDefinitionInput>,
-): void {
-  const seen = new Set<string>();
-  for (let i = 0; i < defs.length; i++) {
-    const id = defs[i].segment_id;
-    if (typeof id !== "string" || id.length === 0) {
-      throw new Error(`segmentFacts.segment_definitions[${i}].segment_id: must be a non-empty string`);
-    }
-    if (seen.has(id)) {
-      throw new Error(
-        `segmentFacts.segment_definitions[${i}].segment_id: duplicate segment_id "${id}"`,
-      );
-    }
-    seen.add(id);
-  }
 }
 
 function assertSegmentDefinition(
   d: SegmentDefinitionInput,
   label: string,
 ): SegmentDefinition {
-  if (typeof d.segment_id !== "string" || d.segment_id.length === 0) {
-    throw new Error(`${label}.segment_id: must be a non-empty string`);
-  }
-  if (typeof d.segment_name !== "string" || d.segment_name.length === 0) {
-    throw new Error(`${label}.segment_name: must be a non-empty string`);
-  }
-  if (
-    d.parent_segment_id !== undefined &&
-    (typeof d.parent_segment_id !== "string" || d.parent_segment_id.length === 0)
-  ) {
-    throw new Error(`${label}.parent_segment_id: must be a non-empty string when present`);
+  assertNonEmptyString(d.segment_id, `${label}.segment_id`);
+  assertNonEmptyString(d.segment_name, `${label}.segment_name`);
+  if (d.parent_segment_id !== undefined) {
+    assertNonEmptyString(d.parent_segment_id, `${label}.parent_segment_id`);
   }
   if (d.description !== undefined && typeof d.description !== "string") {
     throw new Error(`${label}.description: must be a string when present`);
@@ -479,17 +449,13 @@ function assertFactInput(
   f: SegmentFactInput,
   label: string,
 ): SegmentFactInput {
-  if (typeof f.segment_id !== "string" || f.segment_id.length === 0) {
-    throw new Error(`${label}.segment_id: must be a non-empty string`);
-  }
+  assertNonEmptyString(f.segment_id, `${label}.segment_id`);
   assertMetricKey(f.metric_key, `${label}.metric_key`);
   assertUuid(f.metric_id, `${label}.metric_id`);
   if (f.value_num !== null) {
     assertFiniteNumber(f.value_num, `${label}.value_num`);
   }
-  if (typeof f.unit !== "string" || f.unit.length === 0) {
-    throw new Error(`${label}.unit: must be a non-empty string`);
-  }
+  assertNonEmptyString(f.unit, `${label}.unit`);
   if (f.currency !== undefined) {
     assertCurrency(f.currency, `${label}.currency`);
   }
@@ -517,9 +483,7 @@ function assertConsolidatedTotal(
   assertUuid(t.metric_id, `${label}.metric_id`);
   assertFiniteNumber(t.value_num, `${label}.value_num`);
   assertFinitePositive(t.scale, `${label}.scale`);
-  if (typeof t.unit !== "string" || t.unit.length === 0) {
-    throw new Error(`${label}.unit: must be a non-empty string`);
-  }
+  assertNonEmptyString(t.unit, `${label}.unit`);
   if (t.currency !== undefined) {
     assertCurrency(t.currency, `${label}.currency`);
   }
@@ -541,18 +505,4 @@ function assertFreshnessPolicy(
       );
     }
   }
-}
-
-// Exposed for tests / consumers that want to compute "worst coverage" across
-// a set of segment facts the way key-stats does for ratio inputs.
-export function worstSegmentCoverage(
-  facts: ReadonlyArray<{ coverage_level: CoverageLevel }>,
-): CoverageLevel {
-  let worst: CoverageLevel = "full";
-  for (const f of facts) {
-    if (COVERAGE_ORDER[f.coverage_level] > COVERAGE_ORDER[worst]) {
-      worst = f.coverage_level;
-    }
-  }
-  return worst;
 }

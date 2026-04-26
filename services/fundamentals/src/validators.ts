@@ -82,3 +82,9 @@ export function assertMetricKey(s: unknown, label: string): asserts s is string 
     throw new Error(`${label}: must be a dotted lowercase metric key; received ${String(s)}`);
   }
 }
+
+export function assertNonEmptyString(s: unknown, label: string): asserts s is string {
+  if (typeof s !== "string" || s.length === 0) {
+    throw new Error(`${label}: must be a non-empty string; received ${String(s)}`);
+  }
+}
