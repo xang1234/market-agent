@@ -1,14 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  assertSeriesResponseContract,
   assertSeriesQueryContract,
   normalizedSeriesQuery,
+  normalizedSeriesResponse,
   SERIES_NORMALIZATIONS,
   seriesCacheIdentity,
   seriesCacheKey,
   seriesTransformReuseDecision,
   type NormalizedSeriesQuery,
+  type NormalizedSeriesResponseInput,
   type SeriesAllowedTransform,
+  type SeriesPoint,
 } from "../src/series-query.ts";
 import { ADJUSTMENT_BASES, BAR_INTERVALS } from "../src/bar.ts";
 import type { ListingSubjectRef } from "../src/subject-ref.ts";
@@ -49,6 +53,37 @@ function reuseDecision(input: {
     allowed_transforms: input.allowed_transforms ?? [allowedTransform()],
     requested_query: input.requested_query ?? validInput(),
   });
+}
+
+function point(x: string, y = 100): SeriesPoint {
+  return { x, y };
+}
+
+function validSeriesResponseInput(
+  overrides: Partial<NormalizedSeriesResponseInput> = {},
+): NormalizedSeriesResponseInput {
+  return {
+    query: validInput(),
+    as_of: SNAPSHOT_AS_OF,
+    snapshot_compatible: true,
+    series: [
+      {
+        listing: aaplListing,
+        points: [
+          point("2026-02-01T00:00:00.000Z", 4),
+          point("2026-03-01T00:00:00.000Z", 8),
+        ],
+      },
+      {
+        listing: msftListing,
+        points: [
+          point(RANGE.start, 0),
+          point("2026-02-01T00:00:00.000Z", 2),
+        ],
+      },
+    ],
+    ...overrides,
+  };
 }
 
 test("normalizedSeriesQuery accepts a fully bound query and returns frozen output", () => {
@@ -228,6 +263,146 @@ test("assertSeriesQueryContract validates untrusted cross-boundary input", () =>
   assert.doesNotThrow(() => assertSeriesQueryContract(validInput()));
   assert.throws(() => assertSeriesQueryContract(null), /must be an object/);
   assert.throws(() => assertSeriesQueryContract({}), /subject_refs/);
+});
+
+test("normalizedSeriesResponse exposes per-subject coverage without backfilling", () => {
+  const response = normalizedSeriesResponse(validSeriesResponseInput());
+
+  assert.equal(response.snapshot_compatible, true);
+  assert.equal(response.as_of, SNAPSHOT_AS_OF);
+  assert.equal(response.query.range.start, RANGE.start);
+  assert.equal(response.query.range.end, RANGE.end);
+  assert.equal(response.query.basis, "split_and_div_adjusted");
+  assert.equal(response.query.normalization, "pct_return");
+
+  const [aapl, msft] = response.series;
+  assert.equal(aapl.listing.id, aaplListing.id);
+  assert.equal(aapl.coverage_start, "2026-02-01T00:00:00.000Z");
+  assert.equal(aapl.coverage_end, "2026-03-01T00:00:00.000Z");
+  assert.equal(aapl.coverage_level, "partial");
+  assert.equal(aapl.unavailable_reason, undefined);
+  assert.deepEqual(
+    aapl.points.map((p) => p.x),
+    ["2026-02-01T00:00:00.000Z", "2026-03-01T00:00:00.000Z"],
+  );
+
+  assert.equal(msft.listing.id, msftListing.id);
+  assert.equal(msft.coverage_start, RANGE.start);
+  assert.equal(msft.coverage_level, "full");
+
+  assert.equal(Object.isFrozen(response), true);
+  assert.equal(Object.isFrozen(response.query), true);
+  assert.equal(Object.isFrozen(response.series), true);
+  assert.equal(Object.isFrozen(response.series[0]), true);
+  assert.equal(Object.isFrozen(response.series[0].points[0]), true);
+});
+
+test("normalizedSeriesResponse marks empty subject history as explicitly unavailable", () => {
+  const response = normalizedSeriesResponse(
+    validSeriesResponseInput({
+      series: [
+        { listing: aaplListing, points: [] },
+        { listing: msftListing, points: [point(RANGE.start, 0)] },
+      ],
+    }),
+  );
+
+  const [aapl] = response.series;
+  assert.equal(aapl.coverage_level, "unavailable");
+  assert.equal(aapl.coverage_start, null);
+  assert.equal(aapl.coverage_end, null);
+  assert.equal(aapl.unavailable_reason, "missing_coverage");
+  assert.deepEqual(aapl.points, []);
+});
+
+test("normalizedSeriesResponse rejects contradictory or incomplete subject coverage", () => {
+  assert.throws(
+    () =>
+      normalizedSeriesResponse(
+        validSeriesResponseInput({
+          series: [{ listing: aaplListing, points: [point(RANGE.start, 0)] }],
+        }),
+      ),
+    /missing series for subject/,
+  );
+
+  assert.throws(
+    () =>
+      normalizedSeriesResponse(
+        validSeriesResponseInput({
+          series: [
+            {
+              listing: aaplListing,
+              points: [point(RANGE.start, 0)],
+              unavailable_reason: "missing_coverage",
+            },
+            { listing: msftListing, points: [point(RANGE.start, 0)] },
+          ],
+        }),
+      ),
+    /unavailable_reason/,
+  );
+
+  assert.throws(
+    () =>
+      normalizedSeriesResponse(
+        validSeriesResponseInput({
+          series: [
+            {
+              listing: aaplListing,
+              points: [point("2025-12-31T00:00:00.000Z", 0)],
+            },
+            { listing: msftListing, points: [point(RANGE.start, 0)] },
+          ],
+        }),
+      ),
+    /outside requested range/,
+  );
+});
+
+test("assertSeriesResponseContract requires explicit coverage fields", () => {
+  const response = normalizedSeriesResponse(validSeriesResponseInput());
+  assert.doesNotThrow(() => assertSeriesResponseContract(response));
+
+  const tampered = {
+    ...response,
+    series: response.series.map((series, index) => {
+      if (index !== 0) return series;
+      const copy: Record<string, unknown> = { ...series };
+      delete copy.coverage_start;
+      return copy;
+    }),
+  };
+
+  assert.throws(() => assertSeriesResponseContract(tampered), /coverage_start/);
+});
+
+test("assertSeriesResponseContract rejects inconsistent coverage metadata", () => {
+  const response = normalizedSeriesResponse(validSeriesResponseInput());
+
+  assert.throws(
+    () =>
+      assertSeriesResponseContract({
+        ...response,
+        series: response.series.map((series, index) =>
+          index === 0 ? { ...series, coverage_level: "full" } : series,
+        ),
+      }),
+    /coverage_level/,
+  );
+
+  assert.throws(
+    () =>
+      assertSeriesResponseContract({
+        ...response,
+        series: response.series.map((series, index) =>
+          index === 0
+            ? { ...series, coverage_start: "2026-01-15T00:00:00.000Z" }
+            : series,
+        ),
+      }),
+    /coverage_start/,
+  );
 });
 
 test("normalizedSeriesQuery accepts every basis × normalization combination", () => {
