@@ -7,12 +7,14 @@ import {
   type GetProfileResponse,
 } from "../src/http.ts";
 import { createInMemoryIssuerProfileRepository } from "../src/issuer-repository.ts";
+import { createInMemorySegmentsRepository } from "../src/segments-repository.ts";
 import { createInMemoryStatementRepository } from "../src/statement-repository.ts";
 import { createInMemoryStatsRepository } from "../src/stats-repository.ts";
 import {
   DEV_FUNDAMENTALS_SOURCE_ID,
   DEV_ISSUER_PROFILES,
 } from "../src/dev-fixtures.ts";
+import { DEV_SEGMENTS } from "../src/dev-segment-fixtures.ts";
 import { DEV_STATEMENTS } from "../src/dev-statement-fixtures.ts";
 import { DEV_STATS_INPUTS } from "../src/dev-stats-fixtures.ts";
 import type { UnavailableEnvelope } from "../src/availability.ts";
@@ -24,10 +26,12 @@ function buildDeps(): FundamentalsServerDeps {
   const profiles = createInMemoryIssuerProfileRepository(DEV_ISSUER_PROFILES);
   const stats = createInMemoryStatsRepository(DEV_STATS_INPUTS);
   const statements = createInMemoryStatementRepository(DEV_STATEMENTS);
+  const segments = createInMemorySegmentsRepository(DEV_SEGMENTS);
   return {
     profiles,
     stats,
     statements,
+    segments,
     source_id: DEV_FUNDAMENTALS_SOURCE_ID,
     clock: () => FIXED_NOW,
   };
@@ -152,6 +156,7 @@ test("GET /v1/fundamentals/profile returns 502 when the repository throws an une
     },
     stats: createInMemoryStatsRepository(DEV_STATS_INPUTS),
     statements: createInMemoryStatementRepository(DEV_STATEMENTS),
+    segments: createInMemorySegmentsRepository(DEV_SEGMENTS),
     source_id: DEV_FUNDAMENTALS_SOURCE_ID,
     clock: () => FIXED_NOW,
   };

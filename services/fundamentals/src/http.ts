@@ -9,6 +9,12 @@ import type { KeyStatsEnvelope } from "./key-stats.ts";
 import type { IssuerProfile } from "./profile.ts";
 import type { IssuerProfileRepository } from "./issuer-repository.ts";
 import {
+  SEGMENT_AXES,
+  type SegmentAxis,
+  type SegmentFactsEnvelope,
+} from "./segment-facts.ts";
+import type { SegmentsRepository } from "./segments-repository.ts";
+import {
   parsePeriod,
   type ParsedPeriod,
   type StatementRepository,
@@ -28,6 +34,7 @@ export type FundamentalsServerDeps = {
   profiles: IssuerProfileRepository;
   stats: StatsRepository;
   statements: StatementRepository;
+  segments: SegmentsRepository;
   source_id: UUID;
   clock?: () => Date;
 };
@@ -55,6 +62,17 @@ export type StatementResultEntry = {
 export type GetStatementsResponse = {
   query: GetStatementsRequest;
   results: ReadonlyArray<StatementResultEntry>;
+};
+
+export type GetSegmentsRequest = {
+  subject_ref: IssuerSubjectRef;
+  axis: SegmentAxis;
+  period: string;
+  basis: StatementBasis;
+};
+
+export type GetSegmentsResponse = {
+  segments: SegmentFactsEnvelope;
 };
 
 const MAX_REQUEST_BODY_BYTES = 64 * 1024;
@@ -115,6 +133,29 @@ export function createFundamentalsServer(deps: FundamentalsServerDeps): Server {
           respond(res, 200, response);
           return;
         }
+        case "get_segments": {
+          const body = await readJsonBody(req, MAX_REQUEST_BODY_BYTES);
+          if (body.kind === "error") {
+            respond(res, body.status, { error: body.error });
+            return;
+          }
+          const validated = validateSegmentsRequest(body.value);
+          if (validated.kind === "error") {
+            respond(res, 400, { error: validated.error });
+            return;
+          }
+          const outcome = await fetchSegmentsOutcome(deps, clock, validated.request, validated.parsedPeriod);
+          if (!isAvailable(outcome)) {
+            respond(res, statusForUnavailable(outcome), {
+              error: "fundamentals segments unavailable",
+              unavailable: outcome,
+            });
+            return;
+          }
+          const response: GetSegmentsResponse = { segments: outcome.data };
+          respond(res, 200, response);
+          return;
+        }
         default: {
           const _exhaustive: never = route;
           void _exhaustive;
@@ -135,7 +176,8 @@ type Route =
   | { action: "healthz" }
   | { action: "get_profile"; subject_id: string }
   | { action: "get_stats"; subject_id: string }
-  | { action: "get_statements" };
+  | { action: "get_statements" }
+  | { action: "get_segments" };
 
 function matchRoute(method: string, rawUrl: string): Route | null {
   const url = new URL(rawUrl, "http://localhost");
@@ -155,6 +197,10 @@ function matchRoute(method: string, rawUrl: string): Route | null {
 
   if (method === "POST" && pathname === "/v1/fundamentals/statements") {
     return { action: "get_statements" };
+  }
+
+  if (method === "POST" && pathname === "/v1/fundamentals/segments") {
+    return { action: "get_segments" };
   }
 
   return null;
@@ -276,6 +322,85 @@ function validateStatementsRequest(value: unknown): ValidatedStatementsRequest {
     },
     parsedPeriods,
   };
+}
+
+type ValidatedSegmentsRequest =
+  | {
+      kind: "ok";
+      request: GetSegmentsRequest;
+      parsedPeriod: ParsedPeriod;
+    }
+  | { kind: "error"; error: string };
+
+function validateSegmentsRequest(value: unknown): ValidatedSegmentsRequest {
+  if (value === null || typeof value !== "object") {
+    return { kind: "error", error: "request body must be a JSON object" };
+  }
+  const body = value as Record<string, unknown>;
+
+  const subjectRef = body.subject_ref;
+  if (
+    typeof subjectRef !== "object" ||
+    subjectRef === null ||
+    (subjectRef as { kind?: unknown }).kind !== "issuer"
+  ) {
+    return { kind: "error", error: "subject_ref must be an issuer SubjectRef" };
+  }
+  const subjectId = (subjectRef as { id?: unknown }).id;
+  if (!isUuidV4(subjectId)) {
+    return { kind: "error", error: "subject_ref.id must be a UUID v4" };
+  }
+
+  const axis = body.axis;
+  if (typeof axis !== "string" || !(SEGMENT_AXES as ReadonlyArray<string>).includes(axis)) {
+    return { kind: "error", error: `axis must be one of ${SEGMENT_AXES.join(", ")}` };
+  }
+
+  const basis = body.basis;
+  if (typeof basis !== "string" || !(STATEMENT_BASES as ReadonlyArray<string>).includes(basis)) {
+    return { kind: "error", error: `basis must be one of ${STATEMENT_BASES.join(", ")}` };
+  }
+
+  const parsed = parsePeriod(body.period);
+  if (parsed.kind === "error") {
+    return { kind: "error", error: parsed.reason };
+  }
+
+  return {
+    kind: "ok",
+    request: {
+      subject_ref: { kind: "issuer", id: subjectId },
+      axis: axis as SegmentAxis,
+      period: parsed.period.raw,
+      basis: basis as StatementBasis,
+    },
+    parsedPeriod: parsed.period,
+  };
+}
+
+async function fetchSegmentsOutcome(
+  deps: FundamentalsServerDeps,
+  clock: () => Date,
+  request: GetSegmentsRequest,
+  parsedPeriod: ParsedPeriod,
+): Promise<FundamentalsOutcome<SegmentFactsEnvelope>> {
+  const issuer_id = request.subject_ref.id;
+  const envelope = await deps.segments.find({
+    issuer_id,
+    axis: request.axis,
+    basis: request.basis,
+    fiscal_year: parsedPeriod.fiscal_year,
+    fiscal_period: parsedPeriod.fiscal_period,
+  });
+  if (!envelope) {
+    return missingCoverage(
+      deps,
+      issuer_id,
+      clock().toISOString(),
+      `${request.axis} segments not found for ${issuer_id} at ${parsedPeriod.raw} (basis ${request.basis})`,
+    );
+  }
+  return { outcome: "available", data: envelope };
 }
 
 async function fetchStatementsResponse(
