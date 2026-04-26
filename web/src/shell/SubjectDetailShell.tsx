@@ -7,6 +7,7 @@ import {
   type ResolvedSubject,
 } from '../symbol/search'
 import { ProtectedActionType } from './authInterruptState'
+import type { SubjectDetailOutletContext } from './subjectDetailOutletContext'
 import { useRequestProtectedAction } from './useAuthInterrupt'
 
 // Entered subject-detail shell. Swapped into the workspace shell's main
@@ -76,7 +77,7 @@ export function SubjectDetailShell() {
         ))}
       </nav>
       <div className="flex min-h-0 flex-1 overflow-auto">
-        <Outlet />
+        <Outlet context={{ subject } satisfies SubjectDetailOutletContext} />
       </div>
     </div>
   )

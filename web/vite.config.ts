@@ -19,6 +19,10 @@ export default defineConfig({
         target: process.env.MARKET_ORIGIN ?? 'http://127.0.0.1:4321',
         changeOrigin: true,
       },
+      '/v1/fundamentals': {
+        target: process.env.FUNDAMENTALS_ORIGIN ?? 'http://127.0.0.1:4322',
+        changeOrigin: true,
+      },
     },
   },
 })
