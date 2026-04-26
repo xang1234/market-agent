@@ -266,6 +266,8 @@ test("POST /v1/fundamentals/statements: missing_coverage envelope as_of is pinne
   const url = await startServer(t, buildDeps());
   const res = await postStatements(url, appleIncomeRequest(["2019-FY"]));
   const body = (await res.json()) as GetStatementsResponse;
-  const outcome = body.results[0].outcome as UnavailableEnvelope;
-  assert.equal(outcome.as_of, FIXED_NOW.toISOString());
+  const outcome = body.results[0].outcome;
+  assert.equal(outcome.outcome, "unavailable");
+  if (outcome.outcome !== "unavailable") return;
+  assert.equal((outcome as UnavailableEnvelope).as_of, FIXED_NOW.toISOString());
 });
