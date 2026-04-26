@@ -329,9 +329,14 @@ function reconcile(
   let sum = 0;
   let counted = 0;
   let nullEncountered = false;
+  // Skip duplicate (segment_id, metric_key) facts so the duplicate_segment_metric
+  // warning isn't compounded by a spurious reconciliation_gap from double-counting.
+  const seenSegments = new Set<string>();
   for (const fact of facts) {
     if (fact.metric_key !== total.metric_key) continue;
     if (!topLevelIds.has(fact.segment_id)) continue;
+    if (seenSegments.has(fact.segment_id)) continue;
+    seenSegments.add(fact.segment_id);
     if (fact.value_num === null) {
       nullEncountered = true;
       continue;

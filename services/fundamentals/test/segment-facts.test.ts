@@ -283,6 +283,35 @@ test("buildSegmentFacts flags duplicate (segment, metric) facts so callers don't
   assert.equal(envelope.facts.length, 2);
 });
 
+test("buildSegmentFacts reconciliation does not double-count duplicate facts when summing top-level segments", () => {
+  // Products appears twice (caller bug); together with Services they'd inflate
+  // the sum to ~686B and produce a spurious reconciliation_gap if the duplicate
+  // weren't skipped. The duplicate_segment_metric warning still fires.
+  const envelope = buildSegmentFacts({
+    ...envelopeBase(),
+    axis: "business",
+    segment_definitions: [
+      businessDef("biz_products", "Products"),
+      businessDef("biz_services", "Services"),
+    ],
+    facts: [
+      revenueFact("biz_products", AAPL_FY2024_PRODUCTS, { metric_key: "revenue" }),
+      revenueFact("biz_products", AAPL_FY2024_PRODUCTS, { metric_key: "revenue" }),
+      revenueFact("biz_services", AAPL_FY2024_SERVICES, { metric_key: "revenue" }),
+    ],
+    consolidated_totals: [consolidatedTotal({ metric_key: "revenue" })],
+  });
+  assert.equal(
+    envelope.coverage_warnings.find((w) => w.code === "reconciliation_gap"),
+    undefined,
+    "reconcile must dedup by (segment_id, metric_key) so duplicates don't inflate the sum",
+  );
+  assert.ok(
+    envelope.coverage_warnings.find((w) => w.code === "duplicate_segment_metric"),
+    "duplicate_segment_metric must still surface the data-quality issue",
+  );
+});
+
 test("buildSegmentFacts refuses implicit FX by emitting currency_mismatch on facts", () => {
   const envelope = buildSegmentFacts({
     ...envelopeBase(),
