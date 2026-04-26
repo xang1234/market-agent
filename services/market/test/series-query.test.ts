@@ -281,3 +281,10 @@ test("seriesCacheKey rejects malformed freshness boundaries", () => {
     /freshness_boundary/,
   );
 });
+
+test("seriesCacheKey preserves sub-millisecond freshness precision", () => {
+  const first = seriesCacheKey(validInput(), "2026-04-22T15:30:00.000000001Z");
+  const second = seriesCacheKey(validInput(), "2026-04-22T15:30:00.000999999Z");
+
+  assert.notEqual(first, second);
+});

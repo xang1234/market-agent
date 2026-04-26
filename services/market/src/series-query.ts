@@ -47,6 +47,8 @@ export type SeriesCacheIdentity = NormalizedSeriesQuery & {
 };
 
 const SERIES_CACHE_KEY_VERSION = "series:v1";
+const CACHE_TIMESTAMP =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|([+-])(\d{2}):(\d{2}))$/;
 
 export function normalizedSeriesQuery(
   input: NormalizedSeriesQuery,
@@ -172,5 +174,52 @@ function freezeCanonicalSubjectSet(
 
 function canonicalTimestamp(value: string, label: string): string {
   assertIso8601Utc(value, label);
-  return new Date(value).toISOString();
+  const match = CACHE_TIMESTAMP.exec(value);
+  if (!match) {
+    throw new Error(`${label}: must be an ISO-8601 timestamp with explicit Z or offset; received ${String(value)}`);
+  }
+
+  const [
+    ,
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    second,
+    fraction,
+    zone,
+    offsetSign,
+    offsetHour,
+    offsetMinute,
+  ] = match;
+  const localSecond = new Date(
+    Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+      0,
+    ),
+  );
+  localSecond.setUTCFullYear(Number(year));
+
+  const offsetMinutes =
+    zone === "Z"
+      ? 0
+      : (offsetSign === "+" ? 1 : -1) *
+        (Number(offsetHour) * 60 + Number(offsetMinute));
+  const utcSecond = new Date(localSecond.getTime() - offsetMinutes * 60_000);
+  const datePart = utcSecond.toISOString().slice(0, 19);
+  return `${datePart}.${canonicalFraction(fraction)}Z`;
+}
+
+function canonicalFraction(fraction: string | undefined): string {
+  if (!fraction || /^0+$/.test(fraction)) {
+    return "000";
+  }
+  const trimmed = fraction.replace(/0+$/, "");
+  return trimmed.length < 3 ? trimmed.padEnd(3, "0") : trimmed;
 }
