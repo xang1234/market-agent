@@ -13,15 +13,15 @@
 // fiscal years). Each input retains its own source_id and as_of so
 // freshness and provider can be inspected at the leaf.
 
-import type { FiscalPeriod, PeriodKind } from "./statement.ts";
+import { FISCAL_PERIODS, type FiscalPeriod, type PeriodKind } from "./statement.ts";
 import { freezeIssuerRef, type IssuerSubjectRef, type UUID } from "./subject-ref.ts";
 import {
   assertCurrency,
   assertFiniteNumber,
-  assertInteger,
   assertIso8601Utc,
   assertIsoDate,
   assertMetricKey,
+  assertNonNegativeInteger,
   assertOneOf,
   assertUuid,
 } from "./validators.ts";
@@ -42,26 +42,8 @@ const CONSENSUS_PERIOD_KINDS: ReadonlyArray<PeriodKind> = ["fiscal_q", "fiscal_y
 
 export type AnalystRatingCounts = Readonly<Record<AnalystRating, number>>;
 
-export type RatingDistributionInput = {
-  counts: AnalystRatingCounts;
-  contributor_count: number;
-  as_of: string;
-  source_id: UUID;
-};
-
 export type RatingDistribution = {
   counts: AnalystRatingCounts;
-  contributor_count: number;
-  as_of: string;
-  source_id: UUID;
-};
-
-export type PriceTargetInput = {
-  currency: string;
-  low: number;
-  mean: number;
-  median: number;
-  high: number;
   contributor_count: number;
   as_of: string;
   source_id: UUID;
@@ -74,25 +56,6 @@ export type PriceTarget = {
   median: number;
   high: number;
   contributor_count: number;
-  as_of: string;
-  source_id: UUID;
-};
-
-export type ConsensusEstimateInput = {
-  metric_key: string;
-  metric_id: UUID;
-  period_kind: PeriodKind;
-  period_end: string;
-  fiscal_year: number;
-  fiscal_period: FiscalPeriod;
-  contributor_count: number;
-  mean: number;
-  median: number;
-  low: number;
-  high: number;
-  std_dev?: number;
-  unit: string;
-  currency?: string;
   as_of: string;
   source_id: UUID;
 };
@@ -150,9 +113,9 @@ export type BuildAnalystConsensusInput = {
   subject: IssuerSubjectRef;
   analyst_count: number;
   as_of: string;
-  rating_distribution?: RatingDistributionInput;
-  price_target?: PriceTargetInput;
-  estimates?: ReadonlyArray<ConsensusEstimateInput>;
+  rating_distribution?: RatingDistribution;
+  price_target?: PriceTarget;
+  estimates?: ReadonlyArray<ConsensusEstimate>;
   freshness_policy?: ConsensusFreshnessPolicy;
   coverage_thresholds?: ConsensusCoverageThresholds;
 };
@@ -240,6 +203,30 @@ export function buildAnalystConsensus(
     }
   }
 
+  const floor = input.coverage_thresholds?.min_contributor_count;
+  const stalePolicy = input.freshness_policy?.max_input_age_ms !== undefined
+    ? { policyMs: Date.parse(input.freshness_policy.as_of), max: input.freshness_policy.max_input_age_ms }
+    : undefined;
+
+  if (floor !== undefined && ratingDistribution && ratingDistribution.contributor_count <= floor) {
+    warnings.push({
+      code: "low_coverage",
+      message: `rating_distribution contributor_count ${ratingDistribution.contributor_count} is at or below low_coverage floor ${floor}.`,
+    });
+  }
+  if (floor !== undefined && priceTarget && priceTarget.contributor_count <= floor) {
+    warnings.push({
+      code: "low_coverage",
+      message: `price_target contributor_count ${priceTarget.contributor_count} is at or below low_coverage floor ${floor}.`,
+    });
+  }
+  if (stalePolicy && ratingDistribution) {
+    pushIfStale(warnings, "rating_distribution", ratingDistribution.as_of, stalePolicy.policyMs, stalePolicy.max);
+  }
+  if (stalePolicy && priceTarget) {
+    pushIfStale(warnings, "price_target", priceTarget.as_of, stalePolicy.policyMs, stalePolicy.max);
+  }
+
   const estimates: ConsensusEstimate[] = [];
   const seenEstimateKeys = new Set<string>();
   if (!input.estimates || input.estimates.length === 0) {
@@ -298,26 +285,7 @@ export function buildAnalystConsensus(
           message: `estimate "${e.metric_key}" currency ${e.currency} does not match price_target currency ${priceTarget.currency}.`,
         });
       }
-      estimates.push(freezeEstimate(e));
-    }
-  }
-
-  if (input.coverage_thresholds?.min_contributor_count !== undefined) {
-    const floor = input.coverage_thresholds.min_contributor_count;
-    if (ratingDistribution && ratingDistribution.contributor_count <= floor) {
-      warnings.push({
-        code: "low_coverage",
-        message: `rating_distribution contributor_count ${ratingDistribution.contributor_count} is at or below low_coverage floor ${floor}.`,
-      });
-    }
-    if (priceTarget && priceTarget.contributor_count <= floor) {
-      warnings.push({
-        code: "low_coverage",
-        message: `price_target contributor_count ${priceTarget.contributor_count} is at or below low_coverage floor ${floor}.`,
-      });
-    }
-    for (const e of estimates) {
-      if (e.contributor_count <= floor) {
+      if (floor !== undefined && e.contributor_count <= floor) {
         warnings.push({
           code: "low_coverage",
           metric_key: e.metric_key,
@@ -325,29 +293,18 @@ export function buildAnalystConsensus(
           message: `estimate "${e.metric_key}" ${e.fiscal_year} ${e.fiscal_period} contributor_count ${e.contributor_count} is at or below low_coverage floor ${floor}.`,
         });
       }
-    }
-  }
-
-  if (input.freshness_policy?.max_input_age_ms !== undefined) {
-    const policy = input.freshness_policy;
-    const policyMs = Date.parse(policy.as_of);
-    const max = policy.max_input_age_ms;
-    if (ratingDistribution) {
-      pushIfStale(warnings, "rating_distribution", ratingDistribution.as_of, policyMs, max);
-    }
-    if (priceTarget) {
-      pushIfStale(warnings, "price_target", priceTarget.as_of, policyMs, max);
-    }
-    for (const e of estimates) {
-      pushIfStale(
-        warnings,
-        `estimate "${e.metric_key}" ${e.fiscal_year} ${e.fiscal_period}`,
-        e.as_of,
-        policyMs,
-        max,
-        e.metric_key,
-        e.period_end,
-      );
+      if (stalePolicy) {
+        pushIfStale(
+          warnings,
+          `estimate "${e.metric_key}" ${e.fiscal_year} ${e.fiscal_period}`,
+          e.as_of,
+          stalePolicy.policyMs,
+          stalePolicy.max,
+          e.metric_key,
+          e.period_end,
+        );
+      }
+      estimates.push(freezeEstimate(e));
     }
   }
 
@@ -388,12 +345,7 @@ function pushIfStale(
 
 function assertEnvelope(input: BuildAnalystConsensusInput): void {
   freezeIssuerRef(input.subject, "analystConsensus.subject");
-  assertInteger(input.analyst_count, "analystConsensus.analyst_count");
-  if (input.analyst_count < 0) {
-    throw new Error(
-      `analystConsensus.analyst_count: must be >= 0; received ${input.analyst_count}`,
-    );
-  }
+  assertNonNegativeInteger(input.analyst_count, "analystConsensus.analyst_count");
   assertIso8601Utc(input.as_of, "analystConsensus.as_of");
   if (input.estimates !== undefined && !Array.isArray(input.estimates)) {
     throw new Error("analystConsensus.estimates: must be an array when present");
@@ -401,9 +353,9 @@ function assertEnvelope(input: BuildAnalystConsensusInput): void {
 }
 
 function assertRatingDistribution(
-  d: RatingDistributionInput,
+  d: RatingDistribution,
   label: string,
-): RatingDistributionInput {
+): RatingDistribution {
   if (d === null || typeof d !== "object") {
     throw new Error(`${label}: must be an object`);
   }
@@ -411,24 +363,15 @@ function assertRatingDistribution(
     throw new Error(`${label}.counts: must be an object`);
   }
   for (const rating of ANALYST_RATINGS) {
-    const value = d.counts[rating];
-    assertInteger(value, `${label}.counts.${rating}`);
-    if (value < 0) {
-      throw new Error(`${label}.counts.${rating}: must be >= 0; received ${value}`);
-    }
+    assertNonNegativeInteger(d.counts[rating], `${label}.counts.${rating}`);
   }
-  assertInteger(d.contributor_count, `${label}.contributor_count`);
-  if (d.contributor_count < 0) {
-    throw new Error(
-      `${label}.contributor_count: must be >= 0; received ${d.contributor_count}`,
-    );
-  }
+  assertNonNegativeInteger(d.contributor_count, `${label}.contributor_count`);
   assertIso8601Utc(d.as_of, `${label}.as_of`);
   assertUuid(d.source_id, `${label}.source_id`);
   return d;
 }
 
-function assertPriceTarget(p: PriceTargetInput, label: string): PriceTargetInput {
+function assertPriceTarget(p: PriceTarget, label: string): PriceTarget {
   if (p === null || typeof p !== "object") {
     throw new Error(`${label}: must be an object`);
   }
@@ -443,10 +386,7 @@ function assertPriceTarget(p: PriceTargetInput, label: string): PriceTargetInput
   return p;
 }
 
-function assertEstimate(
-  e: ConsensusEstimateInput,
-  label: string,
-): ConsensusEstimateInput {
+function assertEstimate(e: ConsensusEstimate, label: string): ConsensusEstimate {
   if (e === null || typeof e !== "object") {
     throw new Error(`${label}: must be an object`);
   }
@@ -454,8 +394,8 @@ function assertEstimate(
   assertUuid(e.metric_id, `${label}.metric_id`);
   assertOneOf(e.period_kind, CONSENSUS_PERIOD_KINDS, `${label}.period_kind`);
   assertIsoDate(e.period_end, `${label}.period_end`);
-  assertInteger(e.fiscal_year, `${label}.fiscal_year`);
-  assertOneOf(e.fiscal_period, ["FY", "Q1", "Q2", "Q3", "Q4"], `${label}.fiscal_period`);
+  assertNonNegativeInteger(e.fiscal_year, `${label}.fiscal_year`);
+  assertOneOf(e.fiscal_period, FISCAL_PERIODS, `${label}.fiscal_period`);
   if (e.period_kind === "fiscal_q" && e.fiscal_period === "FY") {
     throw new Error(
       `${label}.fiscal_period: period_kind="fiscal_q" requires Q1..Q4; received "FY"`,
@@ -509,14 +449,7 @@ function assertCoverageThresholds(
   }
 }
 
-function assertNonNegativeInteger(n: unknown, label: string): asserts n is number {
-  assertInteger(n, label);
-  if (n < 0) {
-    throw new Error(`${label}: must be >= 0; received ${n}`);
-  }
-}
-
-function freezeRatingDistribution(d: RatingDistributionInput): RatingDistribution {
+function freezeRatingDistribution(d: RatingDistribution): RatingDistribution {
   return Object.freeze({
     counts: Object.freeze({
       strong_buy: d.counts.strong_buy,
@@ -531,7 +464,7 @@ function freezeRatingDistribution(d: RatingDistributionInput): RatingDistributio
   });
 }
 
-function freezePriceTarget(p: PriceTargetInput): PriceTarget {
+function freezePriceTarget(p: PriceTarget): PriceTarget {
   return Object.freeze({
     currency: p.currency,
     low: p.low,
@@ -544,7 +477,7 @@ function freezePriceTarget(p: PriceTargetInput): PriceTarget {
   });
 }
 
-function freezeEstimate(e: ConsensusEstimateInput): ConsensusEstimate {
+function freezeEstimate(e: ConsensusEstimate): ConsensusEstimate {
   const out: ConsensusEstimate = {
     metric_key: e.metric_key,
     metric_id: e.metric_id,

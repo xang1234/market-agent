@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import {
   buildAnalystConsensus,
   type AnalystConsensusEnvelope,
-  type ConsensusEstimateInput,
-  type PriceTargetInput,
-  type RatingDistributionInput,
+  type ConsensusEstimate,
+  type PriceTarget,
+  type RatingDistribution,
 } from "../src/analyst-consensus.ts";
 import { aaplIssuer } from "./fixtures.ts";
 
@@ -16,8 +16,8 @@ const EPS_DILUTED_METRIC_ID = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0011";
 const REVENUE_METRIC_ID = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0003";
 
 function ratingDistribution(
-  overrides: Partial<RatingDistributionInput> = {},
-): RatingDistributionInput {
+  overrides: Partial<RatingDistribution> = {},
+): RatingDistribution {
   return {
     counts: { strong_buy: 14, buy: 18, hold: 10, sell: 2, strong_sell: 1 },
     contributor_count: 45,
@@ -27,7 +27,7 @@ function ratingDistribution(
   };
 }
 
-function priceTarget(overrides: Partial<PriceTargetInput> = {}): PriceTargetInput {
+function priceTarget(overrides: Partial<PriceTarget> = {}): PriceTarget {
   return {
     currency: "USD",
     low: 175,
@@ -41,7 +41,7 @@ function priceTarget(overrides: Partial<PriceTargetInput> = {}): PriceTargetInpu
   };
 }
 
-function epsEstimateFy2025(overrides: Partial<ConsensusEstimateInput> = {}): ConsensusEstimateInput {
+function epsEstimateFy2025(overrides: Partial<ConsensusEstimate> = {}): ConsensusEstimate {
   return {
     metric_key: "eps.diluted",
     metric_id: EPS_DILUTED_METRIC_ID,
@@ -64,8 +64,8 @@ function epsEstimateFy2025(overrides: Partial<ConsensusEstimateInput> = {}): Con
 }
 
 function revenueEstimateFy2025(
-  overrides: Partial<ConsensusEstimateInput> = {},
-): ConsensusEstimateInput {
+  overrides: Partial<ConsensusEstimate> = {},
+): ConsensusEstimate {
   return {
     metric_key: "revenue",
     metric_id: REVENUE_METRIC_ID,
@@ -392,7 +392,7 @@ test("buildAnalystConsensus rejects a negative analyst_count", () => {
         analyst_count: -1,
         as_of: "2026-04-20T13:00:00.000Z",
       }),
-    /analystConsensus.analyst_count: must be >= 0/,
+    /analystConsensus.analyst_count: must be a non-negative integer/,
   );
 });
 
@@ -433,7 +433,7 @@ test("buildAnalystConsensus rejects negative rating bucket counts", () => {
           counts: { strong_buy: -1, buy: 0, hold: 0, sell: 0, strong_sell: 0 },
         }),
       }),
-    /counts\.strong_buy: must be >= 0/,
+    /counts\.strong_buy: must be a non-negative integer/,
   );
 });
 
