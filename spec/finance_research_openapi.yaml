@@ -97,21 +97,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [subject_refs, range, interval, basis, normalization]
-              properties:
-                subject_refs:
-                  type: array
-                  items:
-                    $ref: '#/components/schemas/SubjectRef'
-                range:
-                  type: string
-                interval:
-                  type: string
-                basis:
-                  type: string
-                normalization:
-                  type: string
+              $ref: '#/components/schemas/SeriesQuery'
       responses:
         '200':
           description: Time series response
@@ -912,16 +898,76 @@ components:
             $ref: '#/components/schemas/Fact'
     SeriesPoint:
       type: object
+      required: [x, y]
       properties:
         x:
-          oneOf:
-            - type: string
-            - type: number
+          type: string
+          format: date-time
         y:
           type: number
+    SeriesRange:
+      type: object
+      required: [start, end]
+      properties:
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+    SeriesQuery:
+      type: object
+      required: [subject_refs, range, interval, basis, normalization]
+      properties:
+        subject_refs:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubjectRef'
+        range:
+          $ref: '#/components/schemas/SeriesRange'
+        interval:
+          type: string
+        basis:
+          type: string
+        normalization:
+          type: string
+    SeriesItem:
+      type: object
+      required: [listing, points, coverage_start, coverage_end, coverage_level]
+      properties:
+        listing:
+          $ref: '#/components/schemas/SubjectRef'
+        name:
+          type: string
+          description: Optional display label; clients must use listing for identity.
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/SeriesPoint'
+        coverage_start:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: First effective point timestamp for this subject, or null when unavailable.
+        coverage_end:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: Last effective point timestamp for this subject, or null when unavailable.
+        coverage_level:
+          type: string
+          enum: [full, partial, unavailable]
+        unavailable_reason:
+          type: string
+          enum: [provider_error, missing_coverage, rate_limited, stale_data]
     SeriesResponse:
       type: object
+      required: [query, snapshot_compatible, as_of, series]
       properties:
+        query:
+          $ref: '#/components/schemas/SeriesQuery'
         snapshot_compatible:
           type: boolean
         as_of:
@@ -930,14 +976,7 @@ components:
         series:
           type: array
           items:
-            type: object
-            properties:
-              name:
-                type: string
-              points:
-                type: array
-                items:
-                  $ref: '#/components/schemas/SeriesPoint'
+            $ref: '#/components/schemas/SeriesItem'
     Claim:
       type: object
       description: Claims are extracted assertions from evidence, not canonical truth.

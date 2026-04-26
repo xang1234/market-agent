@@ -72,7 +72,7 @@ export type NormalizedBars = {
 export function normalizedBars(input: NormalizedBars): NormalizedBars {
   const listing = freezeListingRef(input.listing, "normalizedBars");
   assertOneOf(input.interval, BAR_INTERVALS, "normalizedBars.interval");
-  assertBarRange(input.range, "normalizedBars.range");
+  const range = freezeBarRange(input.range, "normalizedBars.range");
   assertIso8601Utc(input.as_of, "normalizedBars.as_of");
   assertOneOf(input.delay_class, DELAY_CLASSES, "normalizedBars.delay_class");
   assertCurrency(input.currency, "normalizedBars.currency");
@@ -82,8 +82,8 @@ export function normalizedBars(input: NormalizedBars): NormalizedBars {
   if (!Array.isArray(input.bars)) {
     throw new Error("normalizedBars.bars: must be an array");
   }
-  const startMs = Date.parse(input.range.start);
-  const endMs = Date.parse(input.range.end);
+  const startMs = Date.parse(range.start);
+  const endMs = Date.parse(range.end);
   let prevMs = -Infinity;
   for (let i = 0; i < input.bars.length; i++) {
     const bar = input.bars[i];
@@ -91,7 +91,7 @@ export function normalizedBars(input: NormalizedBars): NormalizedBars {
     const barMs = Date.parse(bar.ts);
     if (barMs < startMs || barMs >= endMs) {
       throw new Error(
-        `normalizedBars.bars[${i}].ts: ${bar.ts} falls outside requested range [${input.range.start}, ${input.range.end})`,
+        `normalizedBars.bars[${i}].ts: ${bar.ts} falls outside requested range [${range.start}, ${range.end})`,
       );
     }
     if (barMs <= prevMs) {
@@ -102,7 +102,6 @@ export function normalizedBars(input: NormalizedBars): NormalizedBars {
     prevMs = barMs;
   }
 
-  const range = Object.freeze({ start: input.range.start, end: input.range.end });
   const bars = input.bars.map((b) => Object.freeze({ ...b }));
   Object.freeze(bars);
 
@@ -170,6 +169,11 @@ export function assertBarRange(value: unknown, label: string): asserts value is 
   if (Date.parse(r.start) >= Date.parse(r.end)) {
     throw new Error(`${label}: start must be strictly before end`);
   }
+}
+
+export function freezeBarRange(range: BarRange, label: string): BarRange {
+  assertBarRange(range, label);
+  return Object.freeze({ start: range.start, end: range.end });
 }
 
 function assertNormalizedBar(value: unknown, index: number): asserts value is NormalizedBar {
