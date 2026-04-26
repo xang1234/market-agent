@@ -13,7 +13,11 @@ export function currencyPrefix(currency: string): string {
 }
 
 export function formatCurrency2(value: number, currency: string): string {
-  return `${currencyPrefix(currency)}${value.toFixed(2)}`
+  // Sign goes outside the currency prefix so negatives render as "-$12.34",
+  // not "$-12.34" (the conventional placement; matches what Intl.NumberFormat
+  // would produce when we eventually swap to it).
+  const sign = value < 0 ? '-' : ''
+  return `${sign}${currencyPrefix(currency)}${Math.abs(value).toFixed(2)}`
 }
 
 export function formatCompactDollars(value: number): string {

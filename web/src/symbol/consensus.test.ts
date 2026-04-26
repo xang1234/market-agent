@@ -9,7 +9,7 @@ import {
 } from './consensus.ts'
 
 const APPLE_ISSUER_ID = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaa1'
-const SOURCE_ID = '00000000-0000-4000-a000-000000000005'
+const SOURCE_ID = '00000000-0000-4000-a000-000000000008'
 
 const baseEnvelope: AnalystConsensusEnvelope = {
   subject: { kind: 'issuer', id: APPLE_ISSUER_ID },

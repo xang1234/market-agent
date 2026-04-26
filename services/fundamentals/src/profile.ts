@@ -108,8 +108,16 @@ export function assertIssuerProfileContract(
   if (!Array.isArray(p.exchanges)) {
     throw new Error("issuerProfile.exchanges: must be an array");
   }
+  const seenListingIds = new Set<string>();
   for (let i = 0; i < p.exchanges.length; i++) {
     assertExchangeContract(p.exchanges[i], `issuerProfile.exchanges[${i}]`);
+    const id = (p.exchanges[i] as IssuerProfileExchange).listing.id;
+    if (seenListingIds.has(id)) {
+      throw new Error(
+        `issuerProfile.exchanges[${i}]: duplicate listing id "${id}" — each exchange must reference a distinct listing`,
+      );
+    }
+    seenListingIds.add(id);
   }
 
   for (const field of OPTIONAL_STRING_FIELDS) {

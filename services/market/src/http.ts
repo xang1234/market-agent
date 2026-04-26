@@ -204,43 +204,64 @@ async function fanOutOne(
   query: NormalizedSeriesQuery,
   listing: ListingSubjectRef,
 ): Promise<SeriesResultEntry> {
-  const record = await deps.listings.find(listing.id);
-  if (!record) {
+  // The per-listing envelope contract requires every leg to resolve to an
+  // outcome — a thrown error here would propagate through Promise.all and
+  // collapse the entire batch into a single 502, dropping envelopes for
+  // siblings that succeeded. So unhandled failures synthesize a
+  // provider_error envelope instead, and ListingNotFoundError specifically
+  // maps to missing_coverage to mirror the explicit not-found branch.
+  try {
+    const record = await deps.listings.find(listing.id);
+    if (!record) {
+      return {
+        listing,
+        outcome: unavailable({
+          reason: "missing_coverage",
+          listing,
+          source_id: deps.adapter.sourceId,
+          as_of: clock().toISOString(),
+          retryable: false,
+          detail: `listing not found: ${listing.id}`,
+        }),
+      };
+    }
+
+    const outcome = await deps.adapter.getBars({
+      listing,
+      interval: query.interval,
+      range: query.range,
+    });
+
+    if (isAvailable(outcome) && outcome.data.adjustment_basis !== query.basis) {
+      return {
+        listing,
+        outcome: unavailable({
+          reason: "missing_coverage",
+          listing,
+          source_id: outcome.data.source_id,
+          as_of: outcome.data.as_of,
+          retryable: false,
+          detail:
+            `adapter returned adjustment_basis="${outcome.data.adjustment_basis}" but query bound basis="${query.basis}"`,
+        }),
+      };
+    }
+
+    return { listing, outcome };
+  } catch (err) {
+    const reason = err instanceof ListingNotFoundError ? "missing_coverage" : "provider_error";
     return {
       listing,
       outcome: unavailable({
-        reason: "missing_coverage",
+        reason,
         listing,
         source_id: deps.adapter.sourceId,
         as_of: clock().toISOString(),
-        retryable: false,
-        detail: `listing not found: ${listing.id}`,
+        retryable: reason === "provider_error",
+        detail: errorMessage(err, "fan-out leg failed"),
       }),
     };
   }
-
-  const outcome = await deps.adapter.getBars({
-    listing,
-    interval: query.interval,
-    range: query.range,
-  });
-
-  if (isAvailable(outcome) && outcome.data.adjustment_basis !== query.basis) {
-    return {
-      listing,
-      outcome: unavailable({
-        reason: "missing_coverage",
-        listing,
-        source_id: outcome.data.source_id,
-        as_of: outcome.data.as_of,
-        retryable: false,
-        detail:
-          `adapter returned adjustment_basis="${outcome.data.adjustment_basis}" but query bound basis="${query.basis}"`,
-      }),
-    };
-  }
-
-  return { listing, outcome };
 }
 
 type JsonBodyResult =

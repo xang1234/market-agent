@@ -3,7 +3,7 @@ import { DEV_ISSUER_PROFILES } from "./dev-fixtures.ts";
 import { METRIC_ID } from "./dev-stats-fixtures.ts";
 import type { UUID } from "./subject-ref.ts";
 
-export const DEV_CONSENSUS_SOURCE_ID: UUID = "00000000-0000-4000-a000-000000000005";
+export const DEV_CONSENSUS_SOURCE_ID: UUID = "00000000-0000-4000-a000-000000000008";
 
 const APPLE_ISSUER = DEV_ISSUER_PROFILES[0].subject;
 

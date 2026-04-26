@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { useSubjectDetailContext } from '../../shell/subjectDetailOutletContext.ts'
 import { Card } from '../../symbol/Card.tsx'
 import { FetchStateView } from '../../symbol/FetchStateView.tsx'
@@ -159,7 +160,7 @@ function ProfileRow({ label, value, mono }: { label: string; value: string; mono
   )
 }
 
-function ProfileLabel({ children }: { children: React.ReactNode }) {
+function ProfileLabel({ children }: { children: ReactNode }) {
   return (
     <dt className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
       {children}

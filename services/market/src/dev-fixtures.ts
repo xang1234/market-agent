@@ -121,6 +121,11 @@ function synthesizeAggBars(opts: {
   startMs: number;
   endMs: number;
 }): Array<{ t: number; o: number; h: number; l: number; c: number; v: number }> {
+  if (!Number.isInteger(opts.multiplier) || opts.multiplier <= 0) {
+    throw new Error(
+      `dev fixture: multiplier must be a positive integer (got ${opts.multiplier})`,
+    );
+  }
   const stepMs = periodStepMs(opts.timespan) * opts.multiplier;
   let seed = tickerSeed(opts.ticker);
   let close = opts.prevClose;
