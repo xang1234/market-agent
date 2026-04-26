@@ -15,7 +15,7 @@ import {
   type BarRange,
 } from "./bar.ts";
 import { assertListingRef, type ListingSubjectRef } from "./subject-ref.ts";
-import { assertOneOf } from "./validators.ts";
+import { assertIso8601Utc, assertOneOf } from "./validators.ts";
 
 // Spec §5 (SnapshotManifest): canonical normalization vocabulary. `raw` is
 // the price/level passthrough; `pct_return` rebases each series to period
@@ -42,6 +42,12 @@ export type NormalizedSeriesQuery = {
   normalization: SeriesNormalization;
 };
 
+export type SeriesCacheIdentity = NormalizedSeriesQuery & {
+  freshness_boundary: string;
+};
+
+const SERIES_CACHE_KEY_VERSION = "series:v1";
+
 export function normalizedSeriesQuery(
   input: NormalizedSeriesQuery,
 ): NormalizedSeriesQuery {
@@ -65,6 +71,38 @@ export function normalizedSeriesQuery(
     basis: input.basis,
     normalization: input.normalization,
   });
+}
+
+export function seriesCacheIdentity(
+  input: NormalizedSeriesQuery,
+  freshness_boundary: string,
+): SeriesCacheIdentity {
+  const q = normalizedSeriesQuery(input);
+  const subject_refs = freezeCanonicalSubjectSet(q.subject_refs);
+  const range = Object.freeze({
+    start: canonicalTimestamp(q.range.start, "seriesCacheIdentity.range.start"),
+    end: canonicalTimestamp(q.range.end, "seriesCacheIdentity.range.end"),
+  });
+
+  return Object.freeze({
+    subject_refs,
+    range,
+    interval: q.interval,
+    basis: q.basis,
+    normalization: q.normalization,
+    freshness_boundary: canonicalTimestamp(
+      freshness_boundary,
+      "seriesCacheIdentity.freshness_boundary",
+    ),
+  });
+}
+
+export function seriesCacheKey(
+  input: NormalizedSeriesQuery,
+  freshness_boundary: string,
+): string {
+  const identity = seriesCacheIdentity(input, freshness_boundary);
+  return `${SERIES_CACHE_KEY_VERSION}:${JSON.stringify(identity)}`;
 }
 
 export function assertSeriesQueryContract(
@@ -121,4 +159,18 @@ function freezeSubjectRefs(
       Object.freeze({ kind: ref.kind, id: ref.id } as ListingSubjectRef),
     ),
   );
+}
+
+function freezeCanonicalSubjectSet(
+  subject_refs: ReadonlyArray<ListingSubjectRef>,
+): ReadonlyArray<ListingSubjectRef> {
+  const refs = subject_refs
+    .map((ref) => ({ kind: ref.kind, id: ref.id } as ListingSubjectRef))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return Object.freeze(refs.map((ref) => Object.freeze(ref)));
+}
+
+function canonicalTimestamp(value: string, label: string): string {
+  assertIso8601Utc(value, label);
+  return new Date(value).toISOString();
 }

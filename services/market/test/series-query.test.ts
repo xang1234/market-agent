@@ -4,6 +4,8 @@ import {
   assertSeriesQueryContract,
   normalizedSeriesQuery,
   SERIES_NORMALIZATIONS,
+  seriesCacheIdentity,
+  seriesCacheKey,
   type NormalizedSeriesQuery,
 } from "../src/series-query.ts";
 import { ADJUSTMENT_BASES, BAR_INTERVALS } from "../src/bar.ts";
@@ -14,6 +16,7 @@ const RANGE = {
   start: "2026-01-01T00:00:00.000Z",
   end: "2026-04-01T00:00:00.000Z",
 };
+const FRESHNESS_BOUNDARY = "2026-04-22T15:30:00.000Z";
 
 function validInput(): NormalizedSeriesQuery {
   return {
@@ -212,4 +215,69 @@ test("normalizedSeriesQuery accepts every basis × normalization combination", (
       assert.equal(q.normalization, normalization);
     }
   }
+});
+
+test("seriesCacheKey misses when any cache identity dimension changes", () => {
+  const base = validInput();
+  const baseKey = seriesCacheKey(base, FRESHNESS_BOUNDARY);
+  assert.equal(seriesCacheKey({ ...base }, FRESHNESS_BOUNDARY), baseKey);
+
+  const variants: Array<[string, NormalizedSeriesQuery, string]> = [
+    [
+      "subject set",
+      { ...base, subject_refs: [aaplListing] },
+      FRESHNESS_BOUNDARY,
+    ],
+    [
+      "range",
+      {
+        ...base,
+        range: {
+          start: "2026-01-02T00:00:00.000Z",
+          end: RANGE.end,
+        },
+      },
+      FRESHNESS_BOUNDARY,
+    ],
+    ["interval", { ...base, interval: "1h" }, FRESHNESS_BOUNDARY],
+    ["basis", { ...base, basis: "unadjusted" }, FRESHNESS_BOUNDARY],
+    ["normalization", { ...base, normalization: "raw" }, FRESHNESS_BOUNDARY],
+    ["freshness", base, "2026-04-22T15:31:00.000Z"],
+  ];
+
+  for (const [dimension, query, freshness] of variants) {
+    assert.notEqual(
+      seriesCacheKey(query, freshness),
+      baseKey,
+      `${dimension} must be part of series cache identity`,
+    );
+  }
+});
+
+test("seriesCacheIdentity canonicalizes subject set and timestamp spellings", () => {
+  const aThenM = seriesCacheIdentity(validInput(), FRESHNESS_BOUNDARY);
+  const mThenA = seriesCacheIdentity(
+    {
+      ...validInput(),
+      subject_refs: [msftListing, aaplListing],
+      range: {
+        start: "2025-12-31T19:00:00.000-05:00",
+        end: "2026-03-31T20:00:00.000-04:00",
+      },
+    },
+    "2026-04-22T11:30:00.000-04:00",
+  );
+
+  assert.deepEqual(mThenA, aThenM);
+  assert.equal(Object.isFrozen(aThenM), true);
+  assert.equal(Object.isFrozen(aThenM.subject_refs), true);
+  assert.equal(Object.isFrozen(aThenM.subject_refs[0]), true);
+  assert.equal(Object.isFrozen(aThenM.range), true);
+});
+
+test("seriesCacheKey rejects malformed freshness boundaries", () => {
+  assert.throws(
+    () => seriesCacheKey(validInput(), "2026-04-22"),
+    /freshness_boundary/,
+  );
 });
