@@ -46,6 +46,28 @@ export type SeriesCacheIdentity = NormalizedSeriesQuery & {
   freshness_boundary: string;
 };
 
+export type SeriesAllowedTransform = {
+  range: BarRange;
+  interval: BarInterval;
+};
+
+export type SeriesTransformReuseRejectionReason =
+  | "identity_changed"
+  | "requires_fresher_data"
+  | "interval_not_allowed"
+  | "range_not_allowed";
+
+export type SeriesTransformReuseDecision =
+  | { allowed: true }
+  | { allowed: false; reason: SeriesTransformReuseRejectionReason };
+
+export type SeriesTransformReuseInput = {
+  sealed_identity: SeriesCacheIdentity;
+  snapshot_as_of: string;
+  allowed_transforms: ReadonlyArray<SeriesAllowedTransform>;
+  requested_query: NormalizedSeriesQuery;
+};
+
 const SERIES_CACHE_KEY_VERSION = "series:v1";
 const CACHE_TIMESTAMP =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|([+-])(\d{2}):(\d{2}))$/;
@@ -105,6 +127,59 @@ export function seriesCacheKey(
 ): string {
   const identity = seriesCacheIdentity(input, freshness_boundary);
   return `${SERIES_CACHE_KEY_VERSION}:${JSON.stringify(identity)}`;
+}
+
+export function seriesTransformReuseDecision(
+  input: SeriesTransformReuseInput,
+): SeriesTransformReuseDecision {
+  const sealed = seriesCacheIdentity(
+    input.sealed_identity,
+    input.sealed_identity.freshness_boundary,
+  );
+  const requested = seriesCacheIdentity(
+    input.requested_query,
+    sealed.freshness_boundary,
+  );
+  const snapshot_as_of = canonicalTimestamp(
+    input.snapshot_as_of,
+    "seriesTransformReuseDecision.snapshot_as_of",
+  );
+  const allowed_transforms = normalizedAllowedTransforms(
+    input.allowed_transforms,
+  );
+
+  if (
+    !sameSubjectSet(requested.subject_refs, sealed.subject_refs) ||
+    requested.basis !== sealed.basis ||
+    requested.normalization !== sealed.normalization
+  ) {
+    return denySeriesReuse("identity_changed");
+  }
+
+  if (compareCanonicalTimestamps(requested.range.end, snapshot_as_of) > 0) {
+    return denySeriesReuse("requires_fresher_data");
+  }
+
+  if (
+    !allowed_transforms.some(
+      (transform) => transform.interval === requested.interval,
+    )
+  ) {
+    return denySeriesReuse("interval_not_allowed");
+  }
+
+  if (
+    !allowed_transforms.some(
+      (transform) =>
+        transform.interval === requested.interval &&
+        transform.range.start === requested.range.start &&
+        transform.range.end === requested.range.end,
+    )
+  ) {
+    return denySeriesReuse("range_not_allowed");
+  }
+
+  return Object.freeze({ allowed: true });
 }
 
 export function assertSeriesQueryContract(
@@ -176,7 +251,9 @@ function canonicalTimestamp(value: string, label: string): string {
   assertIso8601Utc(value, label);
   const match = CACHE_TIMESTAMP.exec(value);
   if (!match) {
-    throw new Error(`${label}: must be an ISO-8601 timestamp with explicit Z or offset; received ${String(value)}`);
+    throw new Error(
+      `${label}: must be an ISO-8601 timestamp with explicit Z or offset; received ${String(value)}`,
+    );
   }
 
   const [
@@ -222,4 +299,91 @@ function canonicalFraction(fraction: string | undefined): string {
   }
   const trimmed = fraction.replace(/0+$/, "");
   return trimmed.length < 3 ? trimmed.padEnd(3, "0") : trimmed;
+}
+
+function normalizedAllowedTransforms(
+  value: unknown,
+): ReadonlyArray<SeriesAllowedTransform> {
+  if (!Array.isArray(value)) {
+    throw new Error(
+      "seriesTransformReuseDecision.allowed_transforms: must be an array",
+    );
+  }
+  return Object.freeze(
+    value.map((transform, index) =>
+      normalizeAllowedTransform(
+        transform,
+        `seriesTransformReuseDecision.allowed_transforms[${index}]`,
+      ),
+    ),
+  );
+}
+
+function normalizeAllowedTransform(
+  value: unknown,
+  label: string,
+): SeriesAllowedTransform {
+  if (value === null || typeof value !== "object") {
+    throw new Error(`${label}: must be an object`);
+  }
+  const transform = value as Record<string, unknown>;
+  assertOneOf(transform.interval, BAR_INTERVALS, `${label}.interval`);
+  assertBarRange(transform.range, `${label}.range`);
+  const range = transform.range as BarRange;
+  return Object.freeze({
+    interval: transform.interval,
+    range: Object.freeze({
+      start: canonicalTimestamp(range.start, `${label}.range.start`),
+      end: canonicalTimestamp(range.end, `${label}.range.end`),
+    }),
+  });
+}
+
+function sameSubjectSet(
+  left: ReadonlyArray<ListingSubjectRef>,
+  right: ReadonlyArray<ListingSubjectRef>,
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((ref, index) => ref.id === right[index].id)
+  );
+}
+
+function compareCanonicalTimestamps(left: string, right: string): number {
+  const leftParts = canonicalTimestampParts(left);
+  const rightParts = canonicalTimestampParts(right);
+  const secondDiff = leftParts.secondMs - rightParts.secondMs;
+  if (secondDiff !== 0) {
+    return secondDiff;
+  }
+  return leftParts.fractionNanos - rightParts.fractionNanos;
+}
+
+function canonicalTimestampParts(value: string): {
+  secondMs: number;
+  fractionNanos: number;
+} {
+  const match = CACHE_TIMESTAMP.exec(value);
+  if (!match) {
+    throw new Error(`timestamp: expected canonical timestamp; received ${value}`);
+  }
+  const [, year, month, day, hour, minute, second, fraction] = match;
+  return {
+    secondMs: Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+      0,
+    ),
+    fractionNanos: Number((fraction ?? "0").padEnd(9, "0")),
+  };
+}
+
+function denySeriesReuse(
+  reason: SeriesTransformReuseRejectionReason,
+): SeriesTransformReuseDecision {
+  return Object.freeze({ allowed: false, reason });
 }

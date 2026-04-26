@@ -6,7 +6,9 @@ import {
   SERIES_NORMALIZATIONS,
   seriesCacheIdentity,
   seriesCacheKey,
+  seriesTransformReuseDecision,
   type NormalizedSeriesQuery,
+  type SeriesAllowedTransform,
 } from "../src/series-query.ts";
 import { ADJUSTMENT_BASES, BAR_INTERVALS } from "../src/bar.ts";
 import type { ListingSubjectRef } from "../src/subject-ref.ts";
@@ -17,6 +19,7 @@ const RANGE = {
   end: "2026-04-01T00:00:00.000Z",
 };
 const FRESHNESS_BOUNDARY = "2026-04-22T15:30:00.000Z";
+const SNAPSHOT_AS_OF = "2026-04-22T15:30:00.000Z";
 
 function validInput(): NormalizedSeriesQuery {
   return {
@@ -26,6 +29,26 @@ function validInput(): NormalizedSeriesQuery {
     basis: "split_and_div_adjusted",
     normalization: "pct_return",
   };
+}
+
+function allowedTransform(
+  range = RANGE,
+  interval: NormalizedSeriesQuery["interval"] = "1d",
+): SeriesAllowedTransform {
+  return { range, interval };
+}
+
+function reuseDecision(input: {
+  requested_query?: NormalizedSeriesQuery;
+  allowed_transforms?: ReadonlyArray<SeriesAllowedTransform>;
+  snapshot_as_of?: string;
+}) {
+  return seriesTransformReuseDecision({
+    sealed_identity: seriesCacheIdentity(validInput(), FRESHNESS_BOUNDARY),
+    snapshot_as_of: input.snapshot_as_of ?? SNAPSHOT_AS_OF,
+    allowed_transforms: input.allowed_transforms ?? [allowedTransform()],
+    requested_query: input.requested_query ?? validInput(),
+  });
 }
 
 test("normalizedSeriesQuery accepts a fully bound query and returns frozen output", () => {
@@ -287,4 +310,68 @@ test("seriesCacheKey preserves sub-millisecond freshness precision", () => {
   const second = seriesCacheKey(validInput(), "2026-04-22T15:30:00.000999999Z");
 
   assert.notEqual(first, second);
+});
+
+test("seriesTransformReuseDecision allows explicitly listed in-snapshot transforms", () => {
+  const decision = reuseDecision({});
+
+  assert.deepEqual(decision, { allowed: true });
+  assert.equal(Object.isFrozen(decision), true);
+});
+
+test("seriesTransformReuseDecision rejects subject, basis, and normalization changes", () => {
+  const variants: Array<[string, NormalizedSeriesQuery]> = [
+    ["subject set", { ...validInput(), subject_refs: [aaplListing] }],
+    ["basis", { ...validInput(), basis: "unadjusted" }],
+    ["normalization", { ...validInput(), normalization: "raw" }],
+  ];
+
+  for (const [dimension, requested_query] of variants) {
+    assert.deepEqual(
+      reuseDecision({ requested_query }),
+      { allowed: false, reason: "identity_changed" },
+      `${dimension} changes must cross the snapshot boundary`,
+    );
+  }
+});
+
+test("seriesTransformReuseDecision rejects unlisted intervals", () => {
+  assert.deepEqual(
+    reuseDecision({ allowed_transforms: [allowedTransform(RANGE, "1h")] }),
+    { allowed: false, reason: "interval_not_allowed" },
+  );
+});
+
+test("seriesTransformReuseDecision treats allowed transforms as exact range and interval pairs", () => {
+  const otherRange = {
+    start: "2026-02-01T00:00:00.000Z",
+    end: "2026-03-01T00:00:00.000Z",
+  };
+
+  assert.deepEqual(
+    reuseDecision({
+      allowed_transforms: [
+        allowedTransform(RANGE, "1h"),
+        allowedTransform(otherRange, "1d"),
+      ],
+    }),
+    { allowed: false, reason: "range_not_allowed" },
+  );
+});
+
+test("seriesTransformReuseDecision rejects transforms requiring fresher data than snapshot as_of", () => {
+  const futureRange = {
+    start: RANGE.start,
+    end: "2026-04-23T00:00:00.000Z",
+  };
+  const requested_query = { ...validInput(), range: futureRange };
+
+  assert.deepEqual(
+    reuseDecision({
+      requested_query,
+      allowed_transforms: [allowedTransform(futureRange, "1d")],
+      snapshot_as_of: SNAPSHOT_AS_OF,
+    }),
+    { allowed: false, reason: "requires_fresher_data" },
+  );
 });
