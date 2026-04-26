@@ -64,6 +64,16 @@ export function assertOneOf<T extends string>(
   }
 }
 
+export function assertBoolean(b: unknown, label: string): asserts b is boolean {
+  if (typeof b !== "boolean") {
+    throw new Error(`${label}: must be a boolean; received ${String(b)}`);
+  }
+}
+
+export function isUuidV4(s: unknown): s is string {
+  return typeof s === "string" && UUID_V4.test(s);
+}
+
 export function assertInteger(n: unknown, label: string): asserts n is number {
   if (typeof n !== "number" || !Number.isInteger(n)) {
     throw new Error(`${label}: must be an integer; received ${String(n)}`);
