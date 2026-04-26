@@ -336,7 +336,7 @@ function pushIfStale(
   if (ageMs <= maxAgeMs) return;
   const warning: ConsensusCoverageWarning = {
     code: "stale_input",
-    message: `${label} as_of ${inputAsOf} is older than freshness policy by ${ageMs}ms.`,
+    message: `${label} as_of ${inputAsOf} is older than freshness policy by ${ageMs - maxAgeMs}ms.`,
   };
   if (metric_key !== undefined) warning.metric_key = metric_key;
   if (period_end !== undefined) warning.period_end = period_end;
