@@ -271,7 +271,7 @@ export function buildSegmentFacts(
           warnings.push({
             code: "stale_segment_definition",
             segment_id: def.segment_id,
-            message: `segment "${def.segment_id}" definition_as_of ${def.definition_as_of} is older than freshness policy by ${ageMs}ms.`,
+            message: `segment "${def.segment_id}" definition_as_of ${def.definition_as_of} is older than freshness policy by ${ageMs - max}ms.`,
           });
         }
       }
