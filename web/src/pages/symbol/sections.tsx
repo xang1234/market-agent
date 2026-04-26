@@ -22,16 +22,7 @@ function SectionScaffold({ testId, title, source }: SectionScaffoldProps) {
 }
 
 export { OverviewSection } from './OverviewSection'
-
-export function FinancialsSection() {
-  return (
-    <SectionScaffold
-      testId="section-financials"
-      title="Financials"
-      source="Normalized statement blocks and segment views ship with P1.3, sourced from P3.* (promotion rules) and the P4.1 aggregation layer."
-    />
-  )
-}
+export { FinancialsSection } from './FinancialsSection'
 
 export function EarningsSection() {
   return (
