@@ -51,9 +51,6 @@ test("GET /v1/fundamentals/profile returns the issuer profile envelope", async (
   assert.equal(res.status, 200);
   const body = (await res.json()) as GetProfileResponse;
 
-  // The contract must verify end-to-end through the same assert the smart
-  // constructor uses, so the wire shape stays a strict subset of what
-  // consumers can rely on.
   assert.doesNotThrow(() => assertIssuerProfileContract(body.profile));
 
   assert.equal(body.profile.subject.kind, "issuer");
@@ -62,8 +59,6 @@ test("GET /v1/fundamentals/profile returns the issuer profile envelope", async (
   assert.equal(body.profile.sector, "Technology");
   assert.equal(body.profile.industry, "Consumer Electronics");
   assert.equal(body.profile.source_id, DEV_FUNDAMENTALS_SOURCE_ID);
-  // Live source UUID, not a stub sentinel — same clause as the market quote
-  // verification, copied here so a future stub regression fails loudly.
   assert.notEqual(body.profile.source_id, "p1.2-stub");
 
   assert.equal(body.profile.exchanges.length, 1);
@@ -101,9 +96,8 @@ test("GET /v1/fundamentals/profile surfaces unknown issuer as a 404 with structu
 });
 
 test("GET /v1/fundamentals/profile rejects a non-issuer subject_kind as not-found", async (t) => {
+  // Spec §6.3.1: listing identity is not appropriate for fundamentals reads.
   const url = await startServer(t, buildDeps());
-  // Listing identity is not appropriate for fundamentals reads (spec §6.3.1);
-  // the route refuses to dispatch for any non-issuer subject_kind.
   const res = await fetch(
     `${url}/v1/fundamentals/profile?subject_kind=listing&subject_id=${APPLE_ISSUER_ID}`,
   );
@@ -142,9 +136,6 @@ test("unknown routes return 404 without leaking implementation details", async (
 });
 
 test("GET /v1/fundamentals/profile returns 502 when the repository throws an unexpected error", async (t) => {
-  // Simulates an unexpected DB-layer failure — distinct from a missing row.
-  // The handler maps this to a 502 ("upstream … unavailable") rather than
-  // surfacing the raw error to the client.
   const deps: FundamentalsServerDeps = {
     profiles: {
       async find() {

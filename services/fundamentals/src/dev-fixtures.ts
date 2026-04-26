@@ -1,11 +1,6 @@
-// Dev-only issuer profile records. Stable issuer UUIDs let the web frontend
-// hard-link to a known issuer without seeding the DB. Production wiring
-// replaces this in-memory map with a DB-backed IssuerProfileRepository
-// reading the issuers/instruments/listings tables.
-//
-// Listing UUIDs here align with services/market/src/dev-fixtures.ts so the
-// overview tab can chain a profile lookup → quote lookup with consistent
-// listing identity in dev mode.
+// Listing UUIDs MUST match services/market/src/dev-fixtures.ts so dev-mode
+// profile lookups chain to /v1/market/quote without re-resolution. If you
+// change one side, change the other.
 
 import type { IssuerProfileRecord } from "./issuer-repository.ts";
 import type { UUID } from "./subject-ref.ts";

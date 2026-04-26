@@ -70,6 +70,12 @@ export function assertBoolean(b: unknown, label: string): asserts b is boolean {
   }
 }
 
+export function assertNonEmptyString(value: unknown, label: string): asserts value is string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`${label}: must be a non-empty string; received ${String(value)}`);
+  }
+}
+
 export function isUuidV4(s: unknown): s is string {
   return typeof s === "string" && UUID_V4.test(s);
 }

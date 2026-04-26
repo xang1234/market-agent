@@ -5,30 +5,17 @@ import {
   type FundamentalsOutcome,
   type UnavailableEnvelope,
 } from "./availability.ts";
-import { issuerProfile, type IssuerProfile } from "./profile.ts";
-import {
-  IssuerNotFoundError,
-  type IssuerProfileRepository,
-} from "./issuer-repository.ts";
+import type { IssuerProfile } from "./profile.ts";
+import type { IssuerProfileRepository } from "./issuer-repository.ts";
 import type { IssuerSubjectRef, UUID } from "./subject-ref.ts";
 import { isUuidV4 } from "./validators.ts";
 
 export type FundamentalsServerDeps = {
   profiles: IssuerProfileRepository;
-  // Source UUID attributed to profile envelopes the repository hands back.
-  // The repo stores `IssuerProfileRecord` (no source_id); the HTTP layer
-  // tags each envelope with this dependency so swapping data sources
-  // (operator-curated DB now, eventual provider-fed sources table later)
-  // doesn't require changing the wire shape.
   source_id: UUID;
-  // Optional clock used for envelope `as_of`. Defaults to wall-clock; tests
-  // pin a fixed clock for deterministic envelopes.
   clock?: () => Date;
 };
 
-// Wire shape for /v1/fundamentals/profile. Wrapping in `{ profile: ... }`
-// (rather than spreading IssuerProfile flat) leaves room to add envelope-
-// level fields (warnings, partial-coverage notes) without breaking clients.
 export type GetProfileResponse = {
   profile: IssuerProfile;
 };
@@ -49,8 +36,7 @@ export function createFundamentalsServer(deps: FundamentalsServerDeps): Server {
           respond(res, 200, { status: "ok", service: "fundamentals" });
           return;
         case "get_profile": {
-          const subject: IssuerSubjectRef = { kind: "issuer", id: route.subject_id };
-          const outcome = await fetchProfileOutcome(deps, clock, subject);
+          const outcome = await fetchProfileOutcome(deps, clock, route.subject_id);
           if (!isAvailable(outcome)) {
             respond(res, statusForUnavailable(outcome), {
               error: "fundamentals profile unavailable",
@@ -63,8 +49,6 @@ export function createFundamentalsServer(deps: FundamentalsServerDeps): Server {
           return;
         }
         default: {
-          // Exhaustiveness: adding a Route variant without a handler is a
-          // compile-time error here, not a silent hang at runtime.
           const _exhaustive: never = route;
           void _exhaustive;
           respond(res, 500, { error: "unhandled route" });
@@ -72,10 +56,6 @@ export function createFundamentalsServer(deps: FundamentalsServerDeps): Server {
         }
       }
     } catch (error) {
-      if (error instanceof IssuerNotFoundError) {
-        if (!res.headersSent) respond(res, 404, { error: error.message });
-        return;
-      }
       console.error("fundamentals request failed", error);
       if (!res.headersSent) {
         respond(res, 502, { error: "upstream fundamentals data unavailable" });
@@ -105,33 +85,26 @@ function matchRoute(method: string, rawUrl: string): Route | null {
   return null;
 }
 
-// Promotes a repository lookup into a FundamentalsOutcome. A missing record
-// becomes a missing_coverage envelope (mirror of services/market's
-// listing-not-found path) so consumers see the same shape whether the
-// failure is "no row in DB" or "provider gave up".
 async function fetchProfileOutcome(
   deps: FundamentalsServerDeps,
   clock: () => Date,
-  subject: IssuerSubjectRef,
+  subject_id: UUID,
 ): Promise<FundamentalsOutcome<IssuerProfile>> {
-  const record = await deps.profiles.find(subject.id);
+  const record = await deps.profiles.find(subject_id);
   const as_of = clock().toISOString();
   if (!record) {
+    const subject: IssuerSubjectRef = { kind: "issuer", id: subject_id };
     return unavailable({
       reason: "missing_coverage",
       subject,
       source_id: deps.source_id,
       as_of,
       retryable: false,
-      detail: `issuer not found: ${subject.id}`,
+      detail: `issuer not found: ${subject_id}`,
     });
   }
-  // record.subject already matches `subject` (we found it by subject.id), but
-  // explicit override keeps the wire `subject` field bound to the request,
-  // not whatever shape the storage record happened to carry.
-  const profile = issuerProfile({
+  const profile: IssuerProfile = Object.freeze({
     ...record,
-    subject,
     as_of,
     source_id: deps.source_id,
   });

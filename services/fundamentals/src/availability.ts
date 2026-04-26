@@ -11,10 +11,6 @@ import {
   assertUuid,
 } from "./validators.ts";
 
-// Mirrors services/market/src/availability.ts so consumers compose the two
-// services without translating envelope shapes. The only structural
-// difference is the bound subject kind: market data is listing-anchored,
-// fundamentals reads are issuer-anchored (spec §6.3.1).
 export type AvailabilityReason =
   | "provider_error"
   | "missing_coverage"

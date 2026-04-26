@@ -1,24 +1,7 @@
-// IssuerProfile is the durable, deterministic identity envelope the
-// fundamentals service exposes for an issuer (spec §6.3 — "owns company
-// profile, ..."). Used by the symbol-detail overview tab (P1.3) as the
-// company-blurb data, and by financials/earnings tabs as the issuer
-// identity context they share.
-//
-// Why a separate envelope from the resolver's HydratedSubjectContext:
-// - Resolver hydration is the *search-result* shape — minimal, geared at
-//   "what subject is this user typing about?".
-// - This profile is the *symbol-detail* shape — explicit as_of, source_id,
-//   and exchange list with canonical listing SubjectRefs so the UI can
-//   chain to /v1/market/quote without re-resolving identity.
-//
-// Both eventually read the same `issuers` table; this envelope is the
-// fundamentals-owned read model rather than a resolver leak.
-
 import {
   assertIssuerRef,
   assertListingRef,
   freezeIssuerRef,
-  freezeListingRef,
   type IssuerSubjectRef,
   type ListingSubjectRef,
   type UUID,
@@ -26,14 +9,11 @@ import {
 import {
   assertCurrency,
   assertIso8601Utc,
+  assertNonEmptyString,
   assertUuid,
 } from "./validators.ts";
 
 export type IssuerProfileExchange = {
-  // Canonical listing identity. Letting the profile cite listings by
-  // SubjectRef (not just MIC+ticker text) is what makes the symbol-detail
-  // shell "open exchange XNAS" / "fetch quote for the XNAS listing" a
-  // type-safe lookup rather than a string-join.
   listing: ListingSubjectRef;
   mic: string;
   ticker: string;
@@ -55,7 +35,9 @@ export type IssuerProfile = {
   source_id: UUID;
 };
 
-export type IssuerProfileInput = {
+export type IssuerProfileRecord = Omit<IssuerProfile, "as_of" | "source_id">;
+
+export type IssuerProfileRecordInput = {
   subject: IssuerSubjectRef;
   legal_name: string;
   former_names?: ReadonlyArray<string>;
@@ -65,45 +47,43 @@ export type IssuerProfileInput = {
   sector?: string;
   industry?: string;
   exchanges?: ReadonlyArray<IssuerProfileExchange>;
+};
+
+export type IssuerProfileInput = IssuerProfileRecordInput & {
   as_of: string;
   source_id: UUID;
 };
 
-export function issuerProfile(input: IssuerProfileInput): IssuerProfile {
-  assertIssuerRef(input.subject, "issuerProfile.subject");
+const OPTIONAL_STRING_FIELDS = ["cik", "lei", "domicile", "sector", "industry"] as const;
+const EMPTY_FROZEN_STRINGS: ReadonlyArray<string> = Object.freeze([]);
+const EMPTY_FROZEN_EXCHANGES: ReadonlyArray<IssuerProfileExchange> = Object.freeze([]);
+
+export function freezeIssuerProfileRecord(input: IssuerProfileRecordInput): IssuerProfileRecord {
   assertNonEmptyString(input.legal_name, "issuerProfile.legal_name");
-  assertIso8601Utc(input.as_of, "issuerProfile.as_of");
-  assertUuid(input.source_id, "issuerProfile.source_id");
 
-  const former_names = freezeFormerNames(
-    input.former_names ?? [],
-    "issuerProfile.former_names",
-  );
-  const exchanges = freezeExchanges(
-    input.exchanges ?? [],
-    "issuerProfile.exchanges",
-  );
-
-  const out: IssuerProfile = {
+  const out: IssuerProfileRecord = {
     subject: freezeIssuerRef(input.subject, "issuerProfile.subject"),
     legal_name: input.legal_name,
-    former_names,
-    exchanges,
-    as_of: input.as_of,
-    source_id: input.source_id,
+    former_names: freezeFormerNames(input.former_names ?? EMPTY_FROZEN_STRINGS, "issuerProfile.former_names"),
+    exchanges: freezeExchanges(input.exchanges ?? EMPTY_FROZEN_EXCHANGES, "issuerProfile.exchanges"),
   };
-  if (input.cik !== undefined) out.cik = assertOptionalString(input.cik, "issuerProfile.cik");
-  if (input.lei !== undefined) out.lei = assertOptionalString(input.lei, "issuerProfile.lei");
-  if (input.domicile !== undefined) {
-    out.domicile = assertOptionalString(input.domicile, "issuerProfile.domicile");
-  }
-  if (input.sector !== undefined) {
-    out.sector = assertOptionalString(input.sector, "issuerProfile.sector");
-  }
-  if (input.industry !== undefined) {
-    out.industry = assertOptionalString(input.industry, "issuerProfile.industry");
+  for (const field of OPTIONAL_STRING_FIELDS) {
+    const value = input[field];
+    if (value === undefined) continue;
+    assertNonEmptyString(value, `issuerProfile.${field}`);
+    out[field] = value;
   }
   return Object.freeze(out);
+}
+
+export function issuerProfile(input: IssuerProfileInput): IssuerProfile {
+  assertIso8601Utc(input.as_of, "issuerProfile.as_of");
+  assertUuid(input.source_id, "issuerProfile.source_id");
+  return Object.freeze({
+    ...freezeIssuerProfileRecord(input),
+    as_of: input.as_of,
+    source_id: input.source_id,
+  });
 }
 
 export function assertIssuerProfileContract(
@@ -132,9 +112,9 @@ export function assertIssuerProfileContract(
     assertExchangeContract(p.exchanges[i], `issuerProfile.exchanges[${i}]`);
   }
 
-  for (const key of ["cik", "lei", "domicile", "sector", "industry"] as const) {
-    if (p[key] !== undefined) {
-      assertOptionalString(p[key], `issuerProfile.${key}`);
+  for (const field of OPTIONAL_STRING_FIELDS) {
+    if (p[field] !== undefined) {
+      assertNonEmptyString(p[field], `issuerProfile.${field}`);
     }
   }
 }
@@ -161,9 +141,8 @@ function freezeExchanges(
   if (!Array.isArray(exchanges)) {
     throw new Error(`${label}: must be an array`);
   }
-  // Reject duplicates of the same listing — two entries pointing at the
-  // same listing UUID would let downstream rendering count an exchange
-  // twice in any per-issuer aggregate.
+  if (exchanges.length === 0) return EMPTY_FROZEN_EXCHANGES;
+  // Duplicate listing ids would double-count exchanges in any per-issuer aggregate.
   const seen = new Set<string>();
   const frozen: IssuerProfileExchange[] = [];
   for (let i = 0; i < exchanges.length; i++) {
@@ -177,7 +156,7 @@ function freezeExchanges(
     seen.add(e.listing.id);
     frozen.push(
       Object.freeze({
-        listing: freezeListingRef(e.listing, `${label}[${i}].listing`),
+        listing: Object.freeze({ kind: e.listing.kind, id: e.listing.id }),
         mic: e.mic,
         ticker: e.ticker,
         trading_currency: e.trading_currency,
@@ -195,21 +174,9 @@ function freezeFormerNames(
   if (!Array.isArray(names)) {
     throw new Error(`${label}: must be an array`);
   }
+  if (names.length === 0) return EMPTY_FROZEN_STRINGS;
   for (let i = 0; i < names.length; i++) {
     assertNonEmptyString(names[i], `${label}[${i}]`);
   }
   return Object.freeze([...names]);
-}
-
-function assertNonEmptyString(value: unknown, label: string): asserts value is string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(`${label}: must be a non-empty string; received ${String(value)}`);
-  }
-}
-
-function assertOptionalString(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(`${label}: must be a non-empty string when present; received ${String(value)}`);
-  }
-  return value;
 }
