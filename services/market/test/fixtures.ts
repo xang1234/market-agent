@@ -6,6 +6,11 @@ export const aaplListing: ListingSubjectRef = {
   id: "11111111-1111-4111-a111-111111111111",
 };
 
+export const msftListing: ListingSubjectRef = {
+  kind: "listing",
+  id: "33333333-3333-4333-a333-333333333333",
+};
+
 export const aaplCtx = { ticker: "AAPL", mic: "XNAS", currency: "USD" };
 
 export const POLYGON_SOURCE_ID = "00000000-0000-4000-a000-000000000001";

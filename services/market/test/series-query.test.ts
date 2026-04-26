@@ -1,0 +1,215 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  assertSeriesQueryContract,
+  normalizedSeriesQuery,
+  SERIES_NORMALIZATIONS,
+  type NormalizedSeriesQuery,
+} from "../src/series-query.ts";
+import { ADJUSTMENT_BASES, BAR_INTERVALS } from "../src/bar.ts";
+import type { ListingSubjectRef } from "../src/subject-ref.ts";
+import { aaplListing, msftListing } from "./fixtures.ts";
+
+const RANGE = {
+  start: "2026-01-01T00:00:00.000Z",
+  end: "2026-04-01T00:00:00.000Z",
+};
+
+function validInput(): NormalizedSeriesQuery {
+  return {
+    subject_refs: [aaplListing, msftListing],
+    range: RANGE,
+    interval: "1d",
+    basis: "split_and_div_adjusted",
+    normalization: "pct_return",
+  };
+}
+
+test("normalizedSeriesQuery accepts a fully bound query and returns frozen output", () => {
+  const input = validInput();
+  const q = normalizedSeriesQuery(input);
+
+  assert.equal(Object.isFrozen(q), true);
+  assert.equal(Object.isFrozen(q.subject_refs), true);
+  assert.equal(Object.isFrozen(q.subject_refs[0]), true);
+  assert.equal(Object.isFrozen(q.range), true);
+
+  assert.notEqual(q.subject_refs, input.subject_refs);
+  assert.notEqual(q.subject_refs[0], input.subject_refs[0]);
+  assert.notEqual(q.range, input.range);
+
+  assert.equal(q.subject_refs.length, 2);
+  assert.equal(q.subject_refs[0].id, aaplListing.id);
+  assert.equal(q.range.start, RANGE.start);
+  assert.equal(q.interval, "1d");
+  assert.equal(q.basis, "split_and_div_adjusted");
+  assert.equal(q.normalization, "pct_return");
+});
+
+test("normalizedSeriesQuery accepts a single-subject query", () => {
+  const q = normalizedSeriesQuery({ ...validInput(), subject_refs: [aaplListing] });
+  assert.equal(q.subject_refs.length, 1);
+});
+
+test("normalizedSeriesQuery rejects a query missing subject_refs", () => {
+  assert.throws(
+    () =>
+      normalizedSeriesQuery({
+        range: RANGE,
+        interval: "1d",
+        basis: "split_and_div_adjusted",
+        normalization: "pct_return",
+      } as unknown as NormalizedSeriesQuery),
+    /subject_refs/,
+  );
+});
+
+test("normalizedSeriesQuery rejects a query missing range", () => {
+  assert.throws(
+    () =>
+      normalizedSeriesQuery({
+        subject_refs: [aaplListing, msftListing],
+        interval: "1d",
+        basis: "split_and_div_adjusted",
+        normalization: "pct_return",
+      } as unknown as NormalizedSeriesQuery),
+    /range/,
+  );
+});
+
+test("normalizedSeriesQuery rejects a query missing interval", () => {
+  assert.throws(
+    () =>
+      normalizedSeriesQuery({
+        subject_refs: [aaplListing, msftListing],
+        range: RANGE,
+        basis: "split_and_div_adjusted",
+        normalization: "pct_return",
+      } as unknown as NormalizedSeriesQuery),
+    /interval/,
+  );
+});
+
+test("normalizedSeriesQuery rejects a query missing basis", () => {
+  assert.throws(
+    () =>
+      normalizedSeriesQuery({
+        subject_refs: [aaplListing, msftListing],
+        range: RANGE,
+        interval: "1d",
+        normalization: "pct_return",
+      } as unknown as NormalizedSeriesQuery),
+    /basis/,
+  );
+});
+
+test("normalizedSeriesQuery rejects a query missing normalization", () => {
+  assert.throws(
+    () =>
+      normalizedSeriesQuery({
+        subject_refs: [aaplListing, msftListing],
+        range: RANGE,
+        interval: "1d",
+        basis: "split_and_div_adjusted",
+      } as unknown as NormalizedSeriesQuery),
+    /normalization/,
+  );
+});
+
+test("normalizedSeriesQuery rejects an empty subject_refs array", () => {
+  assert.throws(
+    () => normalizedSeriesQuery({ ...validInput(), subject_refs: [] }),
+    /at least one/,
+  );
+});
+
+test("normalizedSeriesQuery rejects duplicate listing ids in subject_refs", () => {
+  assert.throws(
+    () =>
+      normalizedSeriesQuery({
+        ...validInput(),
+        subject_refs: [aaplListing, aaplListing],
+      }),
+    /duplicate listing id/,
+  );
+});
+
+test("normalizedSeriesQuery rejects non-listing SubjectRef kinds", () => {
+  const issuerRef = { kind: "issuer", id: aaplListing.id } as unknown as ListingSubjectRef;
+  assert.throws(
+    () => normalizedSeriesQuery({ ...validInput(), subject_refs: [issuerRef] }),
+    /listing SubjectRef/,
+  );
+});
+
+test("normalizedSeriesQuery rejects unknown interval values", () => {
+  assert.throws(
+    () =>
+      normalizedSeriesQuery({
+        ...validInput(),
+        interval: "1wk" as unknown as (typeof BAR_INTERVALS)[number],
+      }),
+    /interval/,
+  );
+});
+
+test("normalizedSeriesQuery rejects unknown basis values", () => {
+  assert.throws(
+    () =>
+      normalizedSeriesQuery({
+        ...validInput(),
+        basis: "raw" as unknown as (typeof ADJUSTMENT_BASES)[number],
+      }),
+    /basis/,
+  );
+});
+
+test("normalizedSeriesQuery rejects unknown normalization values", () => {
+  assert.throws(
+    () =>
+      normalizedSeriesQuery({
+        ...validInput(),
+        normalization:
+          "log_return" as unknown as (typeof SERIES_NORMALIZATIONS)[number],
+      }),
+    /normalization/,
+  );
+});
+
+test("normalizedSeriesQuery rejects a range whose start is not strictly before end", () => {
+  assert.throws(
+    () =>
+      normalizedSeriesQuery({
+        ...validInput(),
+        range: { start: RANGE.end, end: RANGE.start },
+      }),
+    /start must be strictly before end/,
+  );
+});
+
+test("normalizedSeriesQuery rejects a range with a non-ISO timestamp", () => {
+  assert.throws(
+    () =>
+      normalizedSeriesQuery({
+        ...validInput(),
+        range: { start: "2026-01-01", end: RANGE.end },
+      }),
+    /range\.start/,
+  );
+});
+
+test("assertSeriesQueryContract validates untrusted cross-boundary input", () => {
+  assert.doesNotThrow(() => assertSeriesQueryContract(validInput()));
+  assert.throws(() => assertSeriesQueryContract(null), /must be an object/);
+  assert.throws(() => assertSeriesQueryContract({}), /subject_refs/);
+});
+
+test("normalizedSeriesQuery accepts every basis × normalization combination", () => {
+  for (const basis of ADJUSTMENT_BASES) {
+    for (const normalization of SERIES_NORMALIZATIONS) {
+      const q = normalizedSeriesQuery({ ...validInput(), basis, normalization });
+      assert.equal(q.basis, basis);
+      assert.equal(q.normalization, normalization);
+    }
+  }
+});
