@@ -159,6 +159,33 @@ export function isResolvedSubject(value: unknown): value is ResolvedSubject {
   return isSubjectRef(obj.subject_ref) && typeof obj.display_name === 'string'
 }
 
+// Shared narrower for React Router `state` payloads built via
+// `navigate(path, { state: { subject } })` or `<Link state={{ subject }}>`.
+// Returns null on shape mismatch so callers fall back to URL-based hydration
+// instead of crashing on garbage state.
+export function subjectFromRouterState(state: unknown): ResolvedSubject | null {
+  if (typeof state !== 'object' || state === null) return null
+  const subject = (state as { subject?: unknown }).subject
+  return isResolvedSubject(subject) ? subject : null
+}
+
+// Strict counterpart to parseSubjectRouteParam: takes an already-decoded
+// `kind:id` string (e.g. from `URLSearchParams.get`), returns null on
+// anything that isn't a known SubjectKind paired with a non-empty id.
+// `parseSubjectRouteParam` itself coerces malformed input into a
+// `{kind: 'listing', id: '<raw>'}` fallback to support the legacy
+// ticker-style `/symbol/AAPL` URL — surfaces that don't have that
+// fallback contract (e.g. Analyze's `?subject=` query) should use this.
+export function parseSubjectRefString(decoded: string): SubjectRef | null {
+  const separator = decoded.indexOf(':')
+  if (separator <= 0) return null
+  const kind = decoded.slice(0, separator)
+  const id = decoded.slice(separator + 1)
+  if (id.length === 0) return null
+  if (!isSubjectKind(kind)) return null
+  return { kind, id }
+}
+
 export function planSymbolResolution(response: ResolveSubjectsResponse): SymbolResolutionPlan {
   if (response.subjects.length === 1) {
     const [subject] = response.subjects

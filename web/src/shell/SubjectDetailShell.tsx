@@ -1,9 +1,10 @@
-import { NavLink, Outlet, useLocation, useParams } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation, useParams } from 'react-router-dom'
+import { analyzeEntryFromSubject } from '../analyze/analyzeEntry'
 import { QuoteSnapshot } from '../symbol/QuoteSnapshot'
 import { subjectDisplayName } from '../symbol/quote'
 import {
-  isResolvedSubject,
   subjectFromRouteParam,
+  subjectFromRouterState,
   type ResolvedSubject,
 } from '../symbol/search'
 import { ProtectedActionType } from './authInterruptState'
@@ -38,10 +39,13 @@ const SECTIONS = [
   { to: 'signals', label: 'Signals' },
 ] as const
 
+const HEADER_ACTION_CLASS =
+  'inline-flex items-center gap-1 rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:border-neutral-400 hover:text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:border-neutral-500 dark:hover:text-neutral-50'
+
 export function SubjectDetailShell() {
   const { subjectRef } = useParams<{ subjectRef: string }>()
   const location = useLocation()
-  const subject = subjectFromLocationState(location.state) ?? subjectFromRouteParam(subjectRef)
+  const subject = subjectFromRouterState(location.state) ?? subjectFromRouteParam(subjectRef)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -52,6 +56,7 @@ export function SubjectDetailShell() {
         <QuoteSnapshot subject={subject} />
         <div className="mt-4 flex items-center gap-2">
           <SaveToWatchlistButton subject={subject} />
+          <AnalyzeThisSubjectButton subject={subject} />
         </div>
       </header>
       <nav
@@ -110,7 +115,7 @@ function SaveToWatchlistButton({ subject }: { subject: ResolvedSubject }) {
       type="button"
       data-testid="save-to-watchlist"
       onClick={handleClick}
-      className="inline-flex items-center gap-1 rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:border-neutral-400 hover:text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:border-neutral-500 dark:hover:text-neutral-50"
+      className={HEADER_ACTION_CLASS}
     >
       <span aria-hidden="true">+</span>
       Save to watchlist
@@ -118,8 +123,23 @@ function SaveToWatchlistButton({ subject }: { subject: ResolvedSubject }) {
   )
 }
 
-function subjectFromLocationState(state: unknown): ResolvedSubject | null {
-  if (typeof state !== 'object' || state === null) return null
-  const subject = (state as { subject?: unknown }).subject
-  return isResolvedSubject(subject) ? subject : null
+// Top-level workspace transition: Analyze stays a primary workspace and
+// must NOT become a nested symbol-detail tab (spec §3.4.4). A real `<Link>`
+// (not navigate-on-click) preserves middle-click / cmd-click / right-click
+// semantics; the carried router state lets AnalyzePage render context
+// without re-resolving from raw text.
+function AnalyzeThisSubjectButton({ subject }: { subject: ResolvedSubject }) {
+  const entry = analyzeEntryFromSubject(subject)
+  const displayName = subjectDisplayName(subject)
+  return (
+    <Link
+      data-testid="analyze-this-subject"
+      to={entry.to}
+      state={entry.state}
+      aria-label={`Analyze ${displayName}`}
+      className={HEADER_ACTION_CLASS}
+    >
+      Analyze
+    </Link>
+  )
 }

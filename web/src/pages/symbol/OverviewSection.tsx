@@ -26,6 +26,7 @@ import {
   singleListingOutcome,
   type NormalizedBar,
 } from '../../symbol/series.ts'
+import { Sparkline } from '../../symbol/Sparkline.tsx'
 
 const STAT_ORDER: ReadonlyArray<KeyStatKey> = [
   'gross_margin',
@@ -95,7 +96,7 @@ export function OverviewSection() {
                   Not enough bars in the requested range to draw a line.
                 </p>
               ) : (
-                <Sparkline bars={bars} />
+                <PriceSparkline bars={bars} />
               )
             }
           </FetchStateView>
@@ -180,23 +181,8 @@ function ExchangeBadge({ exchange }: { exchange: IssuerProfileExchange }) {
   )
 }
 
-function Sparkline({ bars }: { bars: NormalizedBar[] }) {
-  const width = 320
-  const height = 80
-  const padX = 4
-  const padY = 6
+function PriceSparkline({ bars }: { bars: NormalizedBar[] }) {
   const closes = bars.map((b) => b.close)
-  const min = Math.min(...closes)
-  const max = Math.max(...closes)
-  const span = max - min || 1
-  const innerW = width - padX * 2
-  const innerH = height - padY * 2
-  const points = bars.map((bar, i) => {
-    const x = padX + (i / (bars.length - 1)) * innerW
-    const y = padY + (1 - (bar.close - min) / span) * innerH
-    return `${x.toFixed(2)},${y.toFixed(2)}`
-  })
-  const path = `M ${points.join(' L ')}`
   const first = bars[0].close
   const last = bars[bars.length - 1].close
   const trendClass =
@@ -207,15 +193,11 @@ function Sparkline({ bars }: { bars: NormalizedBar[] }) {
         : 'stroke-neutral-500'
   return (
     <div className="flex flex-col gap-2">
-      <svg
-        role="img"
-        aria-label={`30-day price line from ${formatPrice(first)} to ${formatPrice(last)}`}
-        viewBox={`0 0 ${width} ${height}`}
-        className="h-20 w-full"
-        preserveAspectRatio="none"
-      >
-        <path d={path} fill="none" strokeWidth={1.5} className={trendClass} />
-      </svg>
+      <Sparkline
+        values={closes}
+        ariaLabel={`30-day price line from ${formatPrice(first)} to ${formatPrice(last)}`}
+        trendStrokeClass={trendClass}
+      />
       <div className="flex items-center justify-between text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
         <span>{formatPrice(first)}</span>
         <span>{bars.length} bars</span>

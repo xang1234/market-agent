@@ -1,11 +1,16 @@
 import { createInMemoryConsensusRepository } from "./consensus-repository.ts";
 import { createInMemoryEarningsRepository } from "./earnings-repository.ts";
+import { createInMemoryHoldersRepository } from "./holders-repository.ts";
 import { createInMemoryIssuerProfileRepository } from "./issuer-repository.ts";
 import { createInMemorySegmentsRepository } from "./segments-repository.ts";
 import { createInMemoryStatementRepository } from "./statement-repository.ts";
 import { createInMemoryStatsRepository } from "./stats-repository.ts";
 import { DEV_CONSENSUS_INPUTS } from "./dev-consensus-fixtures.ts";
 import { DEV_EARNINGS_INPUTS } from "./dev-earnings-fixtures.ts";
+import {
+  DEV_INSIDER_HOLDERS_INPUTS,
+  DEV_INSTITUTIONAL_HOLDERS_INPUTS,
+} from "./dev-holders-fixtures.ts";
 import {
   DEV_FUNDAMENTALS_SOURCE_ID,
   DEV_ISSUER_PROFILES,
@@ -24,6 +29,10 @@ const statements = createInMemoryStatementRepository(DEV_STATEMENTS);
 const segments = createInMemorySegmentsRepository(DEV_SEGMENTS);
 const consensus = createInMemoryConsensusRepository(DEV_CONSENSUS_INPUTS);
 const earnings = createInMemoryEarningsRepository(DEV_EARNINGS_INPUTS);
+const holders = createInMemoryHoldersRepository({
+  institutional: DEV_INSTITUTIONAL_HOLDERS_INPUTS,
+  insider: DEV_INSIDER_HOLDERS_INPUTS,
+});
 const server = createFundamentalsServer({
   profiles,
   stats,
@@ -31,6 +40,7 @@ const server = createFundamentalsServer({
   segments,
   consensus,
   earnings,
+  holders,
   source_id: DEV_FUNDAMENTALS_SOURCE_ID,
 });
 server.listen(port, host, () => {

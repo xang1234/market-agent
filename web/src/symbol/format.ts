@@ -20,10 +20,21 @@ export function formatCurrency2(value: number, currency: string): string {
   return `${sign}${currencyPrefix(currency)}${Math.abs(value).toFixed(2)}`
 }
 
-export function formatCompactDollars(value: number): string {
+export function formatCompactNumber(value: number): string {
   const abs = Math.abs(value)
   if (abs >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`
   if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
   if (abs >= 1_000) return `${(value / 1_000).toFixed(0)}K`
   return value.toFixed(0)
+}
+
+// Retained for currency-shaped call sites; identical magnitude logic to
+// formatCompactNumber but the name documents intent at the call site.
+export function formatCompactDollars(value: number): string {
+  return formatCompactNumber(value)
+}
+
+export function formatCompactCurrency(value: number, currency: string): string {
+  const sign = value < 0 ? '-' : ''
+  return `${sign}${currencyPrefix(currency)}${formatCompactNumber(Math.abs(value))}`
 }
