@@ -10,7 +10,7 @@
 // the candidate registry already holds pre-hydrated values.
 
 import type { ScreenerCandidate, ScreenerCandidateRepository } from "./candidate.ts";
-import { getFieldDefinition } from "./fields.ts";
+import { getFieldDefinition, type FieldDefinition } from "./fields.ts";
 import type {
   EnumClause,
   NumericClause,
@@ -57,9 +57,10 @@ export function executeScreenerQuery(
     total_count: matched.length,
     page: query.page,
     as_of: deps.clock().toISOString(),
-    // The executor reads from the in-memory candidate registry, not
-    // from a sealed snapshot. Dynamic-watchlist / theme replay flows
-    // (P4.7, P4.1) will set this to true once snapshot binding lands.
+    // The executor reads the live in-memory candidate registry, not a
+    // sealed snapshot — so two replays of the same query may legitimately
+    // disagree as the registry refreshes. Snapshot-bound execution flips
+    // this to true.
     snapshot_compatible: false,
   });
 }
@@ -114,70 +115,58 @@ function numericClauseMatches(
 }
 
 function isEnumClause(clause: ScreenerClause): clause is EnumClause {
-  return "values" in clause;
+  return getFieldDefinition(clause.field)?.kind === "enum";
 }
+
+function candidateUniverseValue(c: ScreenerCandidate, field: string): string | undefined {
+  return c.universe[field as keyof typeof c.universe];
+}
+
+function candidateMarketValue(c: ScreenerCandidate, field: string): string | number | null {
+  return c.quote[field as keyof ScreenerQuoteSummary] as string | number | null;
+}
+
+function candidateFundamentalsValue(c: ScreenerCandidate, field: string): number | null {
+  return c.fundamentals[field as keyof ScreenerFundamentalsSummary];
+}
+
+function sortableValueFor(c: ScreenerCandidate, def: FieldDefinition): number | null {
+  if (def.dimension === "market") {
+    return c.quote[def.field as keyof ScreenerQuoteSummary] as number | null;
+  }
+  if (def.dimension === "fundamentals") {
+    return c.fundamentals[def.field as keyof ScreenerFundamentalsSummary];
+  }
+  return null;
+}
+
+type ResolvedSort = { def: FieldDefinition; direction: SortSpec["direction"] };
 
 function sortCandidates(
   sort: ReadonlyArray<SortSpec>,
   candidates: ReadonlyArray<ScreenerCandidate>,
 ): ReadonlyArray<ScreenerCandidate> {
-  // `Array.sort` mutates; copy first so the candidate repo's frozen list
-  // stays untouched.
+  // Resolve each sort spec's FieldDefinition once instead of per
+  // comparison — an N-row sort would otherwise do O(N log N) registry
+  // lookups per spec. `Array.sort` mutates, so copy first.
+  const resolved: ResolvedSort[] = sort.map((spec) => ({
+    def: getFieldDefinition(spec.field) as FieldDefinition,
+    direction: spec.direction,
+  }));
   const copy = [...candidates];
-  copy.sort((a, b) => compareCandidates(sort, a, b));
+  copy.sort((a, b) => {
+    for (const { def, direction } of resolved) {
+      const av = sortableValueFor(a, def);
+      const bv = sortableValueFor(b, def);
+      // Nulls always sort last regardless of direction. Otherwise asc-sort
+      // would parade no-data candidates to the top, drowning real signal.
+      if (av === null && bv === null) continue;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      if (av === bv) continue;
+      return direction === "asc" ? av - bv : bv - av;
+    }
+    return 0;
+  });
   return copy;
-}
-
-function compareCandidates(
-  sort: ReadonlyArray<SortSpec>,
-  a: ScreenerCandidate,
-  b: ScreenerCandidate,
-): number {
-  for (const spec of sort) {
-    const av = sortableValue(a, spec.field);
-    const bv = sortableValue(b, spec.field);
-    // Nulls always sort last regardless of direction. Otherwise asc-sort
-    // would parade no-data candidates to the top, drowning real signal.
-    if (av === null && bv === null) continue;
-    if (av === null) return 1;
-    if (bv === null) return -1;
-    if (av === bv) continue;
-    return spec.direction === "asc" ? av - bv : bv - av;
-  }
-  return 0;
-}
-
-function sortableValue(c: ScreenerCandidate, field: string): number | null {
-  const def = getFieldDefinition(field);
-  // Validation in cw0.7.1 already rejected non-sortable / unknown sort
-  // fields, so this is defensive only — if the registry says market or
-  // fundamentals, look there; otherwise treat as null.
-  if (def?.dimension === "market") {
-    return c.quote[field as keyof ScreenerQuoteSummary] as number | null;
-  }
-  if (def?.dimension === "fundamentals") {
-    return c.fundamentals[field as keyof ScreenerFundamentalsSummary] as number | null;
-  }
-  return null;
-}
-
-function candidateUniverseValue(
-  c: ScreenerCandidate,
-  field: string,
-): string | undefined {
-  return c.universe[field as keyof typeof c.universe];
-}
-
-function candidateMarketValue(
-  c: ScreenerCandidate,
-  field: string,
-): string | number | null {
-  return c.quote[field as keyof ScreenerQuoteSummary] as string | number | null;
-}
-
-function candidateFundamentalsValue(
-  c: ScreenerCandidate,
-  field: string,
-): number | null {
-  return c.fundamentals[field as keyof ScreenerFundamentalsSummary] as number | null;
 }

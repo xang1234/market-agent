@@ -263,8 +263,8 @@ function freezeRow(value: unknown, label: string): ScreenerResultRow {
   const display = freezeDisplay(raw.display, `${label}.display`);
   const rank = raw.rank;
   assertPositiveInteger(rank, `${label}.rank`);
-  const quote = freezeQuote(raw.quote, `${label}.quote`);
-  const fundamentals = freezeFundamentals(
+  const quote = freezeQuoteSummary(raw.quote, `${label}.quote`);
+  const fundamentals = freezeFundamentalsSummary(
     raw.fundamentals,
     `${label}.fundamentals`,
   );
@@ -278,7 +278,7 @@ function freezeRow(value: unknown, label: string): ScreenerResultRow {
   });
 }
 
-function freezeDisplay(value: unknown, label: string): ScreenerDisplay {
+export function freezeDisplay(value: unknown, label: string): ScreenerDisplay {
   if (value === null || typeof value !== "object") {
     throw new Error(`${label}: must be an object`);
   }
@@ -295,7 +295,7 @@ function freezeDisplay(value: unknown, label: string): ScreenerDisplay {
   return Object.freeze(out);
 }
 
-function freezeQuote(value: unknown, label: string): ScreenerQuoteSummary {
+export function freezeQuoteSummary(value: unknown, label: string): ScreenerQuoteSummary {
   if (value === null || typeof value !== "object") {
     throw new Error(`${label}: must be an object`);
   }
@@ -330,7 +330,7 @@ function freezeQuote(value: unknown, label: string): ScreenerQuoteSummary {
   });
 }
 
-function freezeFundamentals(
+export function freezeFundamentalsSummary(
   value: unknown,
   label: string,
 ): ScreenerFundamentalsSummary {

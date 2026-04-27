@@ -30,6 +30,9 @@ export type ScreenerServerDeps = {
 
 const MAX_REQUEST_BODY_BYTES = 64 * 1024;
 
+// /v1/screener/screens/:id  and  /v1/screener/screens/:id/replay
+const SCREEN_PATH_RE = /^\/v1\/screener\/screens\/([^/]+)(?:\/(replay))?$/;
+
 export function createScreenerServer(deps: ScreenerServerDeps): Server {
   const clock = deps.clock ?? (() => new Date());
 
@@ -99,8 +102,7 @@ function matchRoute(method: string, rawUrl: string): Route | null {
   if (method === "POST" && pathname === "/v1/screener/screens") return { action: "save_screen" };
   if (method === "GET" && pathname === "/v1/screener/screens") return { action: "list_screens" };
 
-  // /v1/screener/screens/:id  and  /v1/screener/screens/:id/replay
-  const screenMatch = /^\/v1\/screener\/screens\/([^/]+)(?:\/(replay))?$/.exec(pathname);
+  const screenMatch = SCREEN_PATH_RE.exec(pathname);
   if (screenMatch) {
     const screen_id = screenMatch[1];
     const tail = screenMatch[2];
@@ -202,11 +204,8 @@ async function handleGetScreen(
   deps: ScreenerServerDeps,
   screen_id: string,
 ): Promise<void> {
-  const screen = await deps.screens.find(screen_id);
-  if (!screen) {
-    respond(res, 404, { error: `screen not found: ${screen_id}` });
-    return;
-  }
+  const screen = await loadScreenOr404(res, deps, screen_id);
+  if (!screen) return;
   respond(res, 200, { screen });
 }
 
@@ -226,20 +225,26 @@ async function handleReplayScreen(
   clock: () => Date,
   screen_id: string,
 ): Promise<void> {
+  const screen = await loadScreenOr404(res, deps, screen_id);
+  if (!screen) return;
+  const response = executeScreenerQuery(
+    { candidates: deps.candidates, clock },
+    replayScreen(screen),
+  );
+  respond(res, 200, response);
+}
+
+async function loadScreenOr404(
+  res: ServerResponse,
+  deps: ScreenerServerDeps,
+  screen_id: string,
+): Promise<ScreenSubject | null> {
   const screen = await deps.screens.find(screen_id);
   if (!screen) {
     respond(res, 404, { error: `screen not found: ${screen_id}` });
-    return;
+    return null;
   }
-  // Replay: get the query from the screen, hand it to the executor.
-  // The cw0.7.3 contract — replay returns a query, never cached rows —
-  // is preserved by going through the executor for fresh data.
-  const query = replayScreen(screen);
-  const response = executeScreenerQuery(
-    { candidates: deps.candidates, clock },
-    query,
-  );
-  respond(res, 200, response);
+  return screen;
 }
 
 function respond(res: ServerResponse, status: number, body: object) {

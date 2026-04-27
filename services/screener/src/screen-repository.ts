@@ -65,11 +65,11 @@ export function createInMemoryScreenRepository(
     },
     async list() {
       // Sort by updated_at desc so the freshest screens come first — the
-      // typical "recent saved screens" UI ordering.
+      // typical "recent saved screens" UI ordering. ISO-8601 UTC compares
+      // correctly as plain strings, so localeCompare suffices. Frozen so
+      // callers can't mutate the snapshot.
       return Object.freeze(
-        [...byId.values()].sort((a, b) =>
-          a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0,
-        ),
+        [...byId.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
       );
     },
     async delete(screen_id) {
