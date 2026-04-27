@@ -13,6 +13,7 @@ import {
   formatCompactCurrency,
   formatCompactNumber,
   formatCurrency2,
+  formatIsoTimestamp,
 } from '../symbol/format.ts'
 import { symbolDetailPathForSubject } from '../symbol/search.ts'
 import { signedTextClass } from '../symbol/signedColor.ts'
@@ -566,7 +567,7 @@ function SavedScreensPanel({
                   {screen.name}
                 </div>
                 <div className="text-xs text-neutral-500 dark:text-neutral-400">
-                  Updated {screen.updated_at}
+                  Updated {formatIsoTimestamp(screen.updated_at)}
                 </div>
               </div>
               <div className="flex shrink-0 gap-1">

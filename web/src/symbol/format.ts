@@ -38,3 +38,20 @@ export function formatCompactCurrency(value: number, currency: string): string {
   const sign = value < 0 ? '-' : ''
   return `${sign}${currencyPrefix(currency)}${formatCompactNumber(Math.abs(value))}`
 }
+
+// Localized "updated at" date used by saved-screen rows and other meta lines.
+// Falls back to the raw string if the input doesn't parse, so a server bug
+// still produces a readable label.
+const ISO_DATE_FMT = new Intl.DateTimeFormat('en-US', {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+})
+
+export function formatIsoTimestamp(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return ISO_DATE_FMT.format(d)
+}
