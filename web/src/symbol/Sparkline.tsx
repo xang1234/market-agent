@@ -3,11 +3,11 @@
 //   - domain: [lo, hi] pins the y-range (sentiment scores in [-1, 1] etc.)
 // `baseline` optionally draws a dashed reference line (e.g. the 0 baseline
 // for sentiment); pass null to omit.
+//
+// Path/baseline math lives in sparklineGeometry.ts so the flat-series and
+// domain-boundary branches stay testable without a React renderer.
 
-const DEFAULT_WIDTH = 320
-const DEFAULT_HEIGHT = 80
-const PAD_X = 4
-const PAD_Y = 6
+import { computeSparklineGeometry, SPARKLINE_DEFAULTS } from './sparklineGeometry.ts'
 
 type SparklineProps = {
   values: ReadonlyArray<number>
@@ -25,23 +25,11 @@ export function Sparkline({
   trendStrokeClass,
   domain = 'auto',
   baseline = null,
-  width = DEFAULT_WIDTH,
-  height = DEFAULT_HEIGHT,
+  width = SPARKLINE_DEFAULTS.width,
+  height = SPARKLINE_DEFAULTS.height,
 }: SparklineProps) {
-  if (values.length < 2) return null
-  const innerW = width - PAD_X * 2
-  const innerH = height - PAD_Y * 2
-  const [lo, hi] = resolveDomain(values, domain)
-  const span = hi - lo || 1
-  const path = values
-    .map((value, i) => {
-      const x = PAD_X + (i / (values.length - 1)) * innerW
-      const y = PAD_Y + (1 - (value - lo) / span) * innerH
-      return `${i === 0 ? 'M' : 'L'} ${x.toFixed(2)},${y.toFixed(2)}`
-    })
-    .join(' ')
-  const baselineY =
-    baseline === null ? null : PAD_Y + (1 - (baseline - lo) / span) * innerH
+  const geometry = computeSparklineGeometry({ values, domain, baseline, width, height })
+  if (geometry === null) return null
   return (
     <svg
       role="img"
@@ -50,32 +38,18 @@ export function Sparkline({
       className="h-20 w-full"
       preserveAspectRatio="none"
     >
-      {baselineY !== null && (
+      {geometry.baselineY !== null && (
         <line
-          x1={PAD_X}
-          x2={width - PAD_X}
-          y1={baselineY}
-          y2={baselineY}
+          x1={SPARKLINE_DEFAULTS.padX}
+          x2={width - SPARKLINE_DEFAULTS.padX}
+          y1={geometry.baselineY}
+          y2={geometry.baselineY}
           strokeWidth={1}
           strokeDasharray="2 3"
           className="stroke-neutral-300 dark:stroke-neutral-700"
         />
       )}
-      <path d={path} fill="none" strokeWidth={1.5} className={trendStrokeClass} />
+      <path d={geometry.path} fill="none" strokeWidth={1.5} className={trendStrokeClass} />
     </svg>
   )
-}
-
-function resolveDomain(
-  values: ReadonlyArray<number>,
-  domain: 'auto' | readonly [number, number],
-): readonly [number, number] {
-  if (domain !== 'auto') return domain
-  let lo = values[0]
-  let hi = values[0]
-  for (let i = 1; i < values.length; i++) {
-    if (values[i] < lo) lo = values[i]
-    if (values[i] > hi) hi = values[i]
-  }
-  return [lo, hi]
 }
