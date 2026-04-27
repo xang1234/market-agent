@@ -3,13 +3,14 @@ import test from 'node:test'
 import {
   createDefaultQueryDraft,
   draftToQuery,
+  queryToDraft,
   setLimit,
   setNumericRange,
   setOffset,
   setSort,
   setUniverseSelection,
 } from './queryDraft.ts'
-import { SCREENER_LIMIT_MAX } from './contracts.ts'
+import { SCREENER_LIMIT_MAX, type ScreenerQuery } from './contracts.ts'
 
 test('default draft converts to a valid query with non-empty sort and default limit', () => {
   const query = draftToQuery(createDefaultQueryDraft())
@@ -111,4 +112,54 @@ test('clearing both bounds removes the field from draft state too', () => {
   assert.ok('pe_ratio' in draft.fundamentalsNumeric)
   draft = setNumericRange(draft, 'fundamentals', 'pe_ratio', { min: '', max: '' })
   assert.ok(!('pe_ratio' in draft.fundamentalsNumeric))
+})
+
+test('queryToDraft restores a draft that round-trips back to the same envelope', () => {
+  let draft = createDefaultQueryDraft()
+  draft = setUniverseSelection(draft, 'asset_type', ['common_stock', 'etf'])
+  draft = setNumericRange(draft, 'market', 'change_pct', { min: '-0.05', max: '0.1' })
+  draft = setNumericRange(draft, 'fundamentals', 'market_cap', { min: '1000000000', max: '' })
+  draft = setSort(draft, { field: 'volume', direction: 'asc' })
+  draft = setLimit(draft, 100)
+  draft = setOffset(draft, 50)
+
+  const original = draftToQuery(draft)
+  const restored = draftToQuery(queryToDraft(original))
+
+  assert.deepEqual(restored, original)
+})
+
+test('queryToDraft loads a server envelope into a workspace-renderable draft', () => {
+  const query: ScreenerQuery = {
+    universe: [{ field: 'sector', values: ['Technology'] }],
+    market: [{ field: 'last_price', min: 10, max: 1000 }],
+    fundamentals: [{ field: 'pe_ratio', max: 30 }],
+    sort: [{ field: 'market_cap', direction: 'desc' }],
+    page: { limit: 25, offset: 75 },
+  }
+  const draft = queryToDraft(query)
+
+  assert.deepEqual(draft.universe, { sector: ['Technology'] })
+  assert.deepEqual(draft.marketNumeric, { last_price: { min: '10', max: '1000' } })
+  assert.deepEqual(draft.fundamentalsNumeric, { pe_ratio: { min: '', max: '30' } })
+  assert.deepEqual(draft.sort, { field: 'market_cap', direction: 'desc' })
+  assert.equal(draft.limit, 25)
+  assert.equal(draft.offset, 75)
+})
+
+test('queryToDraft drops market enum clauses the workspace cannot render today', () => {
+  // delay_class is a registered enum field on the market dimension
+  // (services/screener/src/fields.ts), but the workspace UI exposes
+  // only numeric market filters. Restoration silently drops what it
+  // cannot show — the saved screen on the backend keeps the clause.
+  const query: ScreenerQuery = {
+    universe: [],
+    market: [{ field: 'delay_class', values: ['real_time'] }],
+    fundamentals: [],
+    sort: [{ field: 'market_cap', direction: 'desc' }],
+    page: { limit: 10 },
+  }
+  const draft = queryToDraft(query)
+
+  assert.deepEqual(draft.marketNumeric, {})
 })

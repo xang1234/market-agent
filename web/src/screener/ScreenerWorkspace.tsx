@@ -1,5 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
+import {
+  ProtectedActionType,
+  SCREEN_NAME_MAX_LENGTH,
+} from '../shell/authInterruptState.ts'
+import { useAuth } from '../shell/useAuth.ts'
+import {
+  useRequestProtectedAction,
+  useResumedProtectedAction,
+} from '../shell/useAuthInterrupt.ts'
 import {
   formatCompactCurrency,
   formatCompactNumber,
@@ -23,6 +32,7 @@ import {
   createDefaultQueryDraft,
   draftToQuery,
   emptyNumericRange,
+  queryToDraft,
   setLimit,
   setNumericRange,
   setOffset,
@@ -30,6 +40,13 @@ import {
   setUniverseSelection,
   type QueryDraft,
 } from './queryDraft.ts'
+import {
+  deleteSavedScreen,
+  listSavedScreens,
+  saveScreen,
+  SavedScreensFetchError,
+  type ScreenSubject,
+} from './savedScreens.ts'
 import { searchScreener, ScreenerFetchError } from './searchScreener.ts'
 
 type Status = 'loading' | 'error' | 'ready'
@@ -42,6 +59,8 @@ type Status = 'loading' | 'error' | 'ready'
 // per refinement, the exact split this surface exists to avoid.
 export function ScreenerWorkspace() {
   const navigate = useNavigate()
+  const { session } = useAuth()
+  const requestProtectedAction = useRequestProtectedAction()
   const [draft, setDraft] = useState<QueryDraft>(() => createDefaultQueryDraft())
   const [response, setResponse] = useState<ScreenerResponse | null>(null)
   // Status starts as 'loading' because the mount effect kicks off the
@@ -51,6 +70,9 @@ export function ScreenerWorkspace() {
   // visible "running initial screen" affordance.
   const [status, setStatus] = useState<Status>('loading')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [screenName, setScreenName] = useState('')
+  const [savedScreens, setSavedScreens] = useState<ScreenSubject[]>([])
+  const [savedMessage, setSavedMessage] = useState<string | null>(null)
 
   // Each run gets a fresh AbortController so an in-flight fetch is
   // dropped when a faster refinement supersedes it. AbortError flows
@@ -117,6 +139,98 @@ export function ScreenerWorkspace() {
     runSearch(next)
   }
 
+  // Saved-screens list is user-owned per spec §6.7 — only fetch when
+  // the user is authed. The list reloads on session change so a
+  // sign-in (including via the auth interrupt) populates it. The
+  // panel below is conditionally rendered on `session`, so a stale
+  // post-sign-out value never reaches the DOM. Inline .then/.catch
+  // (matching `useManualWatchlist`) keeps setState off the synchronous
+  // effect-body path, satisfying react-hooks/set-state-in-effect.
+  useEffect(() => {
+    if (session == null) return
+    const controller = new AbortController()
+    listSavedScreens({ signal: controller.signal })
+      .then((screens) => {
+        if (controller.signal.aborted) return
+        setSavedScreens(screens)
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) return
+        setSavedMessage(savedErrorMessage(err))
+      })
+    return () => controller.abort()
+  }, [session])
+
+  // Refreshes the list from event-handler contexts (post-save resume
+  // and post-delete failure). Async/await is fine here — we're not in
+  // an effect body.
+  const refreshSavedScreens = useCallback(async () => {
+    try {
+      const screens = await listSavedScreens()
+      setSavedScreens(screens)
+    } catch (err) {
+      setSavedMessage(savedErrorMessage(err))
+    }
+  }, [])
+
+  // Resumes the SaveScreen action that the auth interrupt deferred.
+  // The action's payload carries the original name + definition the
+  // user clicked Save with — sessionStorage round-tripped them
+  // through the sign-in flow, satisfying the bead's "preserves
+  // current screen definition" verification.
+  useResumedProtectedAction(ProtectedActionType.SaveScreen, async (action) => {
+    try {
+      await saveScreen(action.payload)
+      setSavedMessage(null)
+      setScreenName('')
+      await refreshSavedScreens()
+    } catch (err) {
+      setSavedMessage(savedErrorMessage(err))
+    }
+  })
+
+  const handleSaveClick = () => {
+    const name = screenName.trim()
+    if (name.length === 0) {
+      setSavedMessage('Name a screen before saving.')
+      return
+    }
+    if (name.length > SCREEN_NAME_MAX_LENGTH) {
+      setSavedMessage(`Name must be ≤ ${SCREEN_NAME_MAX_LENGTH} characters.`)
+      return
+    }
+    setSavedMessage(null)
+    requestProtectedAction({
+      title: 'Sign in to save this screen',
+      description: 'Saved screens are tied to your account so you can reopen them later.',
+      action: {
+        actionType: ProtectedActionType.SaveScreen,
+        payload: { name, definition: draftToQuery(draft) },
+      },
+    })
+  }
+
+  const handleOpenSaved = (screen: ScreenSubject) => {
+    const next = queryToDraft(screen.definition)
+    setDraft(next)
+    setScreenName(screen.name)
+    runSearch(next)
+  }
+
+  const handleDeleteSaved = async (screen: ScreenSubject) => {
+    // Optimistic removal — the panel only renders when authed, so
+    // Delete cannot reach this code path without a session and does
+    // not need the auth interrupt.
+    const previous = savedScreens
+    setSavedScreens((current) => current.filter((s) => s.screen_id !== screen.screen_id))
+    try {
+      await deleteSavedScreen({ screen_id: screen.screen_id })
+    } catch (err) {
+      setSavedScreens(previous)
+      setSavedMessage(savedErrorMessage(err))
+    }
+  }
+
   return (
     <div className="flex flex-1 flex-col gap-6 overflow-auto p-6">
       <header>
@@ -147,17 +261,44 @@ export function ScreenerWorkspace() {
           onChange={setDraft}
         />
         <SortLimitControls draft={draft} onChange={setDraft} />
-        <div className="lg:col-span-3 flex items-center justify-between gap-3 border-t border-neutral-200 pt-3 dark:border-neutral-800">
-          <RunStatus status={status} errorMessage={errorMessage} />
-          <button
-            type="submit"
-            className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-neutral-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-700 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-300"
-            disabled={status === 'loading'}
-          >
-            {status === 'loading' ? 'Running…' : 'Run'}
-          </button>
+        <div className="lg:col-span-3 flex flex-wrap items-center justify-between gap-3 border-t border-neutral-200 pt-3 dark:border-neutral-800">
+          <RunStatus status={status} errorMessage={errorMessage} savedMessage={savedMessage} />
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={screenName}
+              onChange={(event) => setScreenName(event.target.value)}
+              placeholder="Name this screen"
+              aria-label="Screen name"
+              maxLength={SCREEN_NAME_MAX_LENGTH}
+              className="w-48 rounded-md border border-neutral-200 bg-neutral-50 px-2 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+            />
+            <button
+              type="button"
+              onClick={handleSaveClick}
+              className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-800 shadow-sm hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800"
+            >
+              Save
+            </button>
+            <button
+              type="submit"
+              className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-neutral-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-700 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-300"
+              disabled={status === 'loading'}
+            >
+              {status === 'loading' ? 'Running…' : 'Run'}
+            </button>
+          </div>
         </div>
       </form>
+
+      {session != null ? (
+        <SavedScreensPanel
+          screens={savedScreens}
+          message={savedMessage}
+          onOpen={handleOpenSaved}
+          onDelete={handleDeleteSaved}
+        />
+      ) : null}
 
       <ScreenerResults
         response={response}
@@ -343,10 +484,22 @@ function SortLimitControls({
 function RunStatus({
   status,
   errorMessage,
+  savedMessage,
 }: {
   status: Status
   errorMessage: string | null
+  savedMessage: string | null
 }) {
+  // The savedMessage takes priority over the run state because it's
+  // a direct response to the user's last action (Save click); the run
+  // hint underneath is a steady-state affordance and can wait.
+  if (savedMessage) {
+    return (
+      <span className="text-xs text-red-600 dark:text-red-400" role="status">
+        {savedMessage}
+      </span>
+    )
+  }
   if (status === 'error') {
     return (
       <span className="text-xs text-red-600 dark:text-red-400" role="status">
@@ -362,6 +515,78 @@ function RunStatus({
     )
   }
   return <span className="text-xs text-neutral-400 dark:text-neutral-500">Edit a filter and run.</span>
+}
+
+function SavedScreensPanel({
+  screens,
+  message,
+  onOpen,
+  onDelete,
+}: {
+  screens: ScreenSubject[]
+  message: string | null
+  onOpen: (screen: ScreenSubject) => void
+  onDelete: (screen: ScreenSubject) => void
+}) {
+  return (
+    <section
+      aria-label="Saved screens"
+      className="rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
+    >
+      <header className="flex items-center justify-between pb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+        <span>Saved screens</span>
+        <span className="font-normal normal-case">{screens.length}</span>
+      </header>
+      {screens.length === 0 ? (
+        <p className="px-1 py-2 text-xs text-neutral-500 dark:text-neutral-400">
+          No saved screens yet. Build one above and click Save.
+        </p>
+      ) : (
+        <ul className="divide-y divide-neutral-100 dark:divide-neutral-800">
+          {screens.map((screen) => (
+            <li
+              key={screen.screen_id}
+              className="flex items-center justify-between gap-2 py-2 text-sm"
+            >
+              <div className="min-w-0">
+                <div className="truncate font-medium text-neutral-900 dark:text-neutral-100">
+                  {screen.name}
+                </div>
+                <div className="text-xs text-neutral-500 dark:text-neutral-400">
+                  Updated {screen.updated_at}
+                </div>
+              </div>
+              <div className="flex shrink-0 gap-1">
+                <button
+                  type="button"
+                  onClick={() => onOpen(screen)}
+                  className="rounded-md border border-neutral-200 px-2 py-1 text-xs hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                >
+                  Open
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDelete(screen)}
+                  className="rounded-md border border-neutral-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 dark:border-neutral-700 dark:text-red-400 dark:hover:bg-red-950/30"
+                >
+                  Delete
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {message ? (
+        <p className="mt-2 text-xs text-red-600 dark:text-red-400">{message}</p>
+      ) : null}
+    </section>
+  )
+}
+
+function savedErrorMessage(err: unknown): string {
+  if (err instanceof SavedScreensFetchError) return err.message
+  if (err instanceof Error) return err.message
+  return 'Saved-screen request failed'
 }
 
 function ScreenerResults({

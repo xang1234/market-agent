@@ -163,3 +163,53 @@ function parseOptionalNumber(raw: string): number | null {
   if (!Number.isFinite(num)) return null
   return num
 }
+
+// Reverse projection: ScreenerQuery → QueryDraft. Used when reopening a
+// saved screen (cw0.8.2) to restore the workspace form. Numeric clauses
+// become string min/max bounds; the first sort spec wins (the workspace
+// only exposes a single sort axis); offset and limit pass through.
+//
+// Lossy for clause kinds the workspace doesn't render (currently:
+// market-dimension enum clauses like delay_class). The saved screen's
+// definition stays intact on the backend; only the form display drops
+// what it cannot show. Round-trip identity holds for any query the
+// workspace itself produces.
+export function queryToDraft(query: ScreenerQuery): QueryDraft {
+  const universe: Record<string, ReadonlyArray<string>> = {}
+  for (const clause of query.universe) {
+    if (clause.values.length > 0) universe[clause.field] = [...clause.values]
+  }
+
+  const marketNumeric: Record<string, NumericRangeDraft> = {}
+  for (const clause of query.market) {
+    if (isNumericClause(clause)) {
+      marketNumeric[clause.field] = numericClauseToRange(clause)
+    }
+  }
+
+  const fundamentalsNumeric: Record<string, NumericRangeDraft> = {}
+  for (const clause of query.fundamentals) {
+    fundamentalsNumeric[clause.field] = numericClauseToRange(clause)
+  }
+
+  const firstSort = query.sort[0] ?? DEFAULT_SORT
+  return {
+    universe,
+    marketNumeric,
+    fundamentalsNumeric,
+    sort: { field: firstSort.field, direction: firstSort.direction },
+    limit: query.page.limit,
+    offset: query.page.offset ?? 0,
+  }
+}
+
+function isNumericClause(clause: ScreenerClause): clause is NumericClause {
+  return 'min' in clause || 'max' in clause
+}
+
+function numericClauseToRange(clause: NumericClause): NumericRangeDraft {
+  return {
+    min: clause.min === undefined ? '' : String(clause.min),
+    max: clause.max === undefined ? '' : String(clause.max),
+  }
+}
