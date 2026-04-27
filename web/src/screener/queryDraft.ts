@@ -204,7 +204,11 @@ export function queryToDraft(query: ScreenerQuery): QueryDraft {
 }
 
 function isNumericClause(clause: ScreenerClause): clause is NumericClause {
-  return 'min' in clause || 'max' in clause
+  // Discriminate by absence of `values` rather than presence of
+  // min/max — a NumericClause is allowed by the type to have neither
+  // bound (the validator forbids it, but the type doesn't), and that
+  // empty case should still resolve to numeric.
+  return !('values' in clause)
 }
 
 function numericClauseToRange(clause: NumericClause): NumericRangeDraft {

@@ -7,9 +7,12 @@
 // auth enforcement lands with the real auth backend; for now the
 // gating happens here through `requestProtectedAction`.
 
-import type { ScreenerQuery, ScreenerResponse } from './contracts.ts'
-
-const SCREENER_API_BASE = '/v1/screener'
+import type { ScreenerQuery } from './contracts.ts'
+import {
+  readScreenerErrorMessage,
+  SCREENER_API_BASE,
+  ScreenerFetchError,
+} from './screenerFetch.ts'
 
 export type ScreenSubject = {
   screen_id: string
@@ -22,15 +25,6 @@ export type ScreenSubject = {
 export type SaveScreenResult = {
   status: 'created' | 'replaced'
   screen: ScreenSubject
-}
-
-export class SavedScreensFetchError extends Error {
-  readonly status: number
-  constructor(status: number, message: string) {
-    super(message)
-    this.name = 'SavedScreensFetchError'
-    this.status = status
-  }
 }
 
 type FetchImpl = typeof fetch
@@ -59,9 +53,10 @@ export async function saveScreen(
     signal: args.signal,
   })
   if (!response.ok) {
-    throw new SavedScreensFetchError(
+    throw new ScreenerFetchError(
       response.status,
-      (await readErrorMessage(response)) ?? `save screen failed with HTTP ${response.status}`,
+      (await readScreenerErrorMessage(response)) ??
+        `save screen failed with HTTP ${response.status}`,
     )
   }
   return (await response.json()) as SaveScreenResult
@@ -72,30 +67,14 @@ export async function listSavedScreens(args: CommonArgs = {}): Promise<ScreenSub
   const url = args.endpoint ?? `${SCREENER_API_BASE}/screens`
   const response = await fetchImpl(url, { method: 'GET', signal: args.signal })
   if (!response.ok) {
-    throw new SavedScreensFetchError(
+    throw new ScreenerFetchError(
       response.status,
-      (await readErrorMessage(response)) ?? `list screens failed with HTTP ${response.status}`,
+      (await readScreenerErrorMessage(response)) ??
+        `list screens failed with HTTP ${response.status}`,
     )
   }
   const body = (await response.json()) as { screens: ScreenSubject[] }
   return body.screens
-}
-
-export async function getSavedScreen(
-  args: { screen_id: string } & CommonArgs,
-): Promise<ScreenSubject> {
-  const fetchImpl = args.fetchImpl ?? fetch
-  const url =
-    args.endpoint ?? `${SCREENER_API_BASE}/screens/${encodeURIComponent(args.screen_id)}`
-  const response = await fetchImpl(url, { method: 'GET', signal: args.signal })
-  if (!response.ok) {
-    throw new SavedScreensFetchError(
-      response.status,
-      (await readErrorMessage(response)) ?? `get screen failed with HTTP ${response.status}`,
-    )
-  }
-  const body = (await response.json()) as { screen: ScreenSubject }
-  return body.screen
 }
 
 export async function deleteSavedScreen(
@@ -110,35 +89,10 @@ export async function deleteSavedScreen(
   // that id. Treating 404 as success here keeps optimistic-delete UX
   // simple without a separate retry path.
   if (!response.ok && response.status !== 404) {
-    throw new SavedScreensFetchError(
+    throw new ScreenerFetchError(
       response.status,
-      (await readErrorMessage(response)) ?? `delete screen failed with HTTP ${response.status}`,
+      (await readScreenerErrorMessage(response)) ??
+        `delete screen failed with HTTP ${response.status}`,
     )
-  }
-}
-
-export async function replaySavedScreen(
-  args: { screen_id: string } & CommonArgs,
-): Promise<ScreenerResponse> {
-  const fetchImpl = args.fetchImpl ?? fetch
-  const url =
-    args.endpoint ??
-    `${SCREENER_API_BASE}/screens/${encodeURIComponent(args.screen_id)}/replay`
-  const response = await fetchImpl(url, { method: 'POST', signal: args.signal })
-  if (!response.ok) {
-    throw new SavedScreensFetchError(
-      response.status,
-      (await readErrorMessage(response)) ?? `replay screen failed with HTTP ${response.status}`,
-    )
-  }
-  return (await response.json()) as ScreenerResponse
-}
-
-async function readErrorMessage(response: Response): Promise<string | null> {
-  try {
-    const body = (await response.json()) as { error?: unknown }
-    return typeof body?.error === 'string' && body.error.length > 0 ? body.error : null
-  } catch {
-    return null
   }
 }

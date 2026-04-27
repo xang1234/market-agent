@@ -1,15 +1,11 @@
 import type { ScreenerQuery, ScreenerResponse } from './contracts.ts'
+import {
+  readScreenerErrorMessage,
+  SCREENER_API_BASE,
+  ScreenerFetchError,
+} from './screenerFetch.ts'
 
-const SCREENER_API_BASE = '/v1/screener'
-
-export class ScreenerFetchError extends Error {
-  readonly status: number
-  constructor(status: number, message: string) {
-    super(message)
-    this.name = 'ScreenerFetchError'
-    this.status = status
-  }
-}
+export { ScreenerFetchError }
 
 type FetchImpl = typeof fetch
 
@@ -32,7 +28,7 @@ export async function searchScreener(
     signal: args.signal,
   })
   if (!response.ok) {
-    const detail = await safeReadErrorMessage(response)
+    const detail = await readScreenerErrorMessage(response)
     throw new ScreenerFetchError(
       response.status,
       detail ?? `screener search failed with HTTP ${response.status}`,
@@ -42,16 +38,4 @@ export async function searchScreener(
   // trusts the response shape and reads it as ScreenerResponse without
   // re-running the contract assertions client-side.
   return (await response.json()) as ScreenerResponse
-}
-
-async function safeReadErrorMessage(response: Response): Promise<string | null> {
-  try {
-    const body = (await response.json()) as { error?: unknown }
-    if (typeof body?.error === 'string' && body.error.length > 0) {
-      return body.error
-    }
-    return null
-  } catch {
-    return null
-  }
 }

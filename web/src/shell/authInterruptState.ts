@@ -26,6 +26,11 @@ export type SaveToWatchlistProtectedAction = {
 // The screener service validates the envelope at the POST boundary;
 // this trust boundary's job is only to keep obviously malformed
 // objects out of the resume flow, not to re-validate every clause.
+//
+// Mirror of `SCREEN_NAME_MAX_LENGTH` in services/screener/src/screen-subject.ts.
+// Same drift discipline as `SCREENER_LIMIT_MAX` in screener/contracts.ts —
+// the server still rejects out-of-range values; this constant only lets
+// the UI surface a friendlier error before the round-trip.
 export const SCREEN_NAME_MAX_LENGTH = 200
 export type SaveScreenProtectedAction = {
   actionType: typeof ProtectedActionType.SaveScreen

@@ -44,10 +44,10 @@ import {
   deleteSavedScreen,
   listSavedScreens,
   saveScreen,
-  SavedScreensFetchError,
   type ScreenSubject,
 } from './savedScreens.ts'
-import { searchScreener, ScreenerFetchError } from './searchScreener.ts'
+import { ScreenerFetchError } from './screenerFetch.ts'
+import { searchScreener } from './searchScreener.ts'
 
 type Status = 'loading' | 'error' | 'ready'
 
@@ -180,10 +180,16 @@ export function ScreenerWorkspace() {
   // current screen definition" verification.
   useResumedProtectedAction(ProtectedActionType.SaveScreen, async (action) => {
     try {
-      await saveScreen(action.payload)
+      const result = await saveScreen(action.payload)
       setSavedMessage(null)
       setScreenName('')
-      await refreshSavedScreens()
+      // The POST response already carries the canonical screen, so
+      // splice it in locally instead of round-tripping a list GET.
+      // Newest-first matches the server's `updated_at` desc order.
+      setSavedScreens((current) => [
+        result.screen,
+        ...current.filter((s) => s.screen_id !== result.screen.screen_id),
+      ])
     } catch (err) {
       setSavedMessage(savedErrorMessage(err))
     }
@@ -220,14 +226,15 @@ export function ScreenerWorkspace() {
   const handleDeleteSaved = async (screen: ScreenSubject) => {
     // Optimistic removal — the panel only renders when authed, so
     // Delete cannot reach this code path without a session and does
-    // not need the auth interrupt.
-    const previous = savedScreens
+    // not need the auth interrupt. On failure we re-fetch instead of
+    // restoring a captured snapshot so concurrent Deletes on different
+    // rows don't trample each other's state.
     setSavedScreens((current) => current.filter((s) => s.screen_id !== screen.screen_id))
     try {
       await deleteSavedScreen({ screen_id: screen.screen_id })
     } catch (err) {
-      setSavedScreens(previous)
       setSavedMessage(savedErrorMessage(err))
+      void refreshSavedScreens()
     }
   }
 
@@ -267,7 +274,13 @@ export function ScreenerWorkspace() {
             <input
               type="text"
               value={screenName}
-              onChange={(event) => setScreenName(event.target.value)}
+              onChange={(event) => {
+                setScreenName(event.target.value)
+                // The validation message ("Name a screen before saving")
+                // becomes stale the moment the user starts typing — clear
+                // it here so the toolbar slot reverts to its run-state hint.
+                if (savedMessage) setSavedMessage(null)
+              }}
               placeholder="Name this screen"
               aria-label="Screen name"
               maxLength={SCREEN_NAME_MAX_LENGTH}
@@ -584,7 +597,6 @@ function SavedScreensPanel({
 }
 
 function savedErrorMessage(err: unknown): string {
-  if (err instanceof SavedScreensFetchError) return err.message
   if (err instanceof Error) return err.message
   return 'Saved-screen request failed'
 }
