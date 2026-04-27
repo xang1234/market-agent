@@ -1,6 +1,6 @@
 # Screener
 
-Tracking beads: `fra-cw0.7` and child beads `fra-cw0.7.1` … `fra-cw0.7.3`.
+Tracking beads: `fra-cw0.7` and child beads `fra-cw0.7.1` … `fra-cw0.7.4`.
 
 The screening service: structured filter-and-rank query envelopes, result-row
 contracts, and persistable `screen` subjects (spec §6.7.1). Internally the
@@ -13,13 +13,48 @@ and inventing their own join semantics.
 - `fra-cw0.7.1` — query envelope + validator (`src/query.ts`, `src/fields.ts`)
 - `fra-cw0.7.2` — result-row + response envelope (`src/result.ts`, `src/subject-ref.ts`)
 - `fra-cw0.7.3` — persistable `screen` subject + replay (`src/screen-subject.ts`)
+- `fra-cw0.7.4` — executor + HTTP runtime (`src/candidate.ts`, `src/executor.ts`,
+  `src/screen-repository.ts`, `src/http.ts`, `src/dev.ts`)
 
 ## Commands
 
 ```bash
 cd services/screener
-npm test
+npm test                    # all unit + HTTP integration tests
+npm run dev                 # start dev server on 127.0.0.1:4323
 ```
+
+## Runtime (cw0.7.4)
+
+The executor is a pure pipeline over a pre-hydrated candidate registry —
+filter → sort → page → assemble — keyed off the closed field registry from
+cw0.7.1. Pre-hydration is a deliberate architectural choice: the executor
+must not fan out N×K HTTP calls to `services/market` and
+`services/fundamentals` per query. A future poller will keep the registry
+fresh; for now `src/dev-candidates.ts` seeds AAPL/MSFT/GOOGL/TSLA/NVDA
+with listing UUIDs that match `services/market`'s dev fixtures so the
+symbol-entry handoff lands on the same canonical identity.
+
+Two semantics worth flagging because they are easy to get wrong:
+
+1. **Numeric clauses on `null` fields exclude the candidate.** Otherwise
+   `pe_ratio > 5` would silently match loss-makers that have no P/E.
+2. **`null`s always sort last**, regardless of `asc`/`desc` direction —
+   otherwise `asc` would parade no-data rows to the top.
+
+`POST /v1/screener/screens/:id/replay` re-runs the persisted query through
+the executor every call (fresh `as_of`); it never returns cached rows.
+This is the cw0.7.3 contract enforced at the HTTP boundary.
+
+| Endpoint                                       | Purpose                          |
+| ---------------------------------------------- | -------------------------------- |
+| `GET  /healthz`                                | service identity                 |
+| `POST /v1/screener/search`                     | run a query, return rows         |
+| `POST /v1/screener/screens`                    | create or replace a saved screen |
+| `GET  /v1/screener/screens`                    | list saved screens               |
+| `GET  /v1/screener/screens/:id`                | fetch one saved screen           |
+| `DELETE /v1/screener/screens/:id`              | delete a saved screen            |
+| `POST /v1/screener/screens/:id/replay`         | re-execute a saved screen        |
 
 ## Query envelope contract
 
