@@ -176,6 +176,44 @@ test("normalizedScreenerResponse preserves a non-zero offset that the query carr
   assert.equal(r.page.offset, 100);
 });
 
+test("normalizedScreenerResponse rejects a stringly-typed response page.limit (not just non-echo)", () => {
+  // Without shape validation, "50" !== 50 fires the echo error with a
+  // misleading "expected 50, got 50" message because String(50) === "50".
+  // The shape assertion surfaces the real cause first.
+  assert.throws(
+    () =>
+      normalizedScreenerResponse({
+        ...validResponse(),
+        page: { limit: "50" } as unknown as { limit: number },
+      }),
+    /page\.limit: must be a finite number/,
+  );
+});
+
+test("normalizedScreenerResponse rejects a non-integer or stringly-typed response page.offset", () => {
+  assert.throws(
+    () =>
+      normalizedScreenerResponse({
+        ...validResponse(),
+        query: validQuery({ page: { limit: 50, offset: 0 } }),
+        page: { limit: 50, offset: "0" } as unknown as {
+          limit: number;
+          offset: number;
+        },
+      }),
+    /page\.offset: must be a finite number/,
+  );
+  assert.throws(
+    () =>
+      normalizedScreenerResponse({
+        ...validResponse(),
+        query: validQuery({ page: { limit: 50, offset: 0 } }),
+        page: { limit: 50, offset: 1.5 },
+      }),
+    /page\.offset: must be an integer/,
+  );
+});
+
 test("normalizedScreenerResponse rejects non-strictly-increasing rank", () => {
   assert.throws(
     () =>

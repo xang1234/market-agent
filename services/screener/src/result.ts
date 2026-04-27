@@ -14,6 +14,8 @@
 
 import { DELAY_CLASSES_FOR_SCREENER } from "./fields.ts";
 import {
+  LIMIT_MAX,
+  LIMIT_MIN,
   normalizedScreenerQuery,
   type ScreenerPage,
   type ScreenerQuery,
@@ -26,6 +28,7 @@ import {
   assertBoolean,
   assertCurrency,
   assertHasFields,
+  assertIntegerInRange,
   assertIso8601Utc,
   assertNonEmptyString,
   assertNonNegativeInteger,
@@ -173,16 +176,26 @@ function freezePageEcho(
     throw new Error(`${label}: must be an object`);
   }
   const raw = value as Record<string, unknown>;
-  if (raw.limit !== queryPage.limit) {
+  // Validate shape before the echo comparison: a stringly-typed `"50"`
+  // would print identically to numeric 50 and produce a "expected 50,
+  // got 50" error that hides the type mismatch. Asserting integer-in-range
+  // first surfaces the real cause.
+  const limit = raw.limit;
+  assertIntegerInRange(limit, `${label}.limit`, LIMIT_MIN, LIMIT_MAX);
+  if (limit !== queryPage.limit) {
     throw new Error(
-      `${label}.limit: response page must echo query page (expected ${queryPage.limit}, got ${String(raw.limit)})`,
+      `${label}.limit: response page must echo query page (expected ${queryPage.limit}, got ${limit})`,
     );
   }
+  const offset = raw.offset;
+  if (offset !== undefined) {
+    assertNonNegativeInteger(offset, `${label}.offset`);
+  }
   const queryOffset = queryPage.offset ?? 0;
-  const responseOffset = raw.offset ?? 0;
+  const responseOffset = offset ?? 0;
   if (responseOffset !== queryOffset) {
     throw new Error(
-      `${label}.offset: response page must echo query page (expected ${queryOffset}, got ${String(raw.offset)})`,
+      `${label}.offset: response page must echo query page (expected ${queryOffset}, got ${responseOffset})`,
     );
   }
   const out: { limit: number; offset?: number } = { limit: queryPage.limit };
