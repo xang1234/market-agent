@@ -38,6 +38,14 @@ export function assertFinitePositive(value: unknown, label: string): asserts val
   }
 }
 
+export function assertNullableFinitePositive(
+  value: unknown,
+  label: string,
+): asserts value is number | null {
+  if (value === null) return;
+  assertFinitePositive(value, label);
+}
+
 export function assertFiniteNonNegative(
   value: unknown,
   label: string,
@@ -46,6 +54,14 @@ export function assertFiniteNonNegative(
   if ((value as number) < 0) {
     throw new Error(`${label}: must be a finite non-negative number; received ${String(value)}`);
   }
+}
+
+export function assertNullableFiniteNonNegative(
+  value: unknown,
+  label: string,
+): asserts value is number | null {
+  if (value === null) return;
+  assertFiniteNonNegative(value, label);
 }
 
 export function assertBoolean(value: unknown, label: string): asserts value is boolean {
@@ -110,5 +126,27 @@ export function assertNonNegativeInteger(
   assertInteger(value, label);
   if ((value as number) < 0) {
     throw new Error(`${label}: must be a non-negative integer; received ${String(value)}`);
+  }
+}
+
+export function assertPositiveInteger(
+  value: unknown,
+  label: string,
+): asserts value is number {
+  assertInteger(value, label);
+  if ((value as number) < 1) {
+    throw new Error(`${label}: must be a positive integer; received ${String(value)}`);
+  }
+}
+
+export function assertHasFields(
+  raw: Record<string, unknown>,
+  fields: ReadonlyArray<string>,
+  label: string,
+): void {
+  for (const field of fields) {
+    if (!Object.hasOwn(raw, field)) {
+      throw new Error(`${label}.${field}: required field`);
+    }
   }
 }

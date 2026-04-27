@@ -25,12 +25,15 @@ import {
 import {
   assertBoolean,
   assertCurrency,
-  assertFiniteNonNegative,
-  assertFinitePositive,
+  assertHasFields,
   assertIso8601Utc,
   assertNonEmptyString,
+  assertNonNegativeInteger,
+  assertNullableFiniteNonNegative,
   assertNullableFiniteNumber,
+  assertNullableFinitePositive,
   assertOneOf,
+  assertPositiveInteger,
 } from "./validators.ts";
 
 // Compact quote snapshot — fixed shape so the screener table can render
@@ -125,15 +128,10 @@ export function normalizedScreenerResponse(
     "normalizedScreenerResponse.snapshot_compatible",
   );
   assertIso8601Utc(input.as_of, "normalizedScreenerResponse.as_of");
-  assertFiniteNonNegative(
+  assertNonNegativeInteger(
     input.total_count,
     "normalizedScreenerResponse.total_count",
   );
-  if (!Number.isInteger(input.total_count)) {
-    throw new Error(
-      `normalizedScreenerResponse.total_count: must be an integer; received ${String(input.total_count)}`,
-    );
-  }
 
   const page = freezePageEcho(
     input.page,
@@ -250,15 +248,8 @@ function freezeRow(value: unknown, label: string): ScreenerResultRow {
     `${label}.subject_ref`,
   );
   const display = freezeDisplay(raw.display, `${label}.display`);
-  if (
-    typeof raw.rank !== "number" ||
-    !Number.isInteger(raw.rank) ||
-    raw.rank < 1
-  ) {
-    throw new Error(
-      `${label}.rank: must be a 1-based positive integer; received ${String(raw.rank)}`,
-    );
-  }
+  const rank = raw.rank;
+  assertPositiveInteger(rank, `${label}.rank`);
   const quote = freezeQuote(raw.quote, `${label}.quote`);
   const fundamentals = freezeFundamentals(
     raw.fundamentals,
@@ -268,7 +259,7 @@ function freezeRow(value: unknown, label: string): ScreenerResultRow {
   return Object.freeze({
     subject_ref,
     display,
-    rank: raw.rank,
+    rank,
     quote,
     fundamentals,
   });
@@ -296,35 +287,33 @@ function freezeQuote(value: unknown, label: string): ScreenerQuoteSummary {
     throw new Error(`${label}: must be an object`);
   }
   const raw = value as Record<string, unknown>;
-  for (const field of QUOTE_FIELDS) {
-    if (!Object.hasOwn(raw, field)) {
-      throw new Error(`${label}.${field}: required field`);
-    }
-  }
+  assertHasFields(raw, QUOTE_FIELDS, label);
+
   // Prices are positive when present (matches market service convention);
   // change_pct can be any sign; volume is non-negative.
-  if (raw.last_price !== null) {
-    assertFinitePositive(raw.last_price, `${label}.last_price`);
-  }
-  if (raw.prev_close !== null) {
-    assertFinitePositive(raw.prev_close, `${label}.prev_close`);
-  }
-  assertNullableFiniteNumber(raw.change_pct, `${label}.change_pct`);
-  if (raw.volume !== null) {
-    assertFiniteNonNegative(raw.volume, `${label}.volume`);
-  }
-  assertOneOf(raw.delay_class, DELAY_CLASSES_FOR_SCREENER, `${label}.delay_class`);
-  assertCurrency(raw.currency, `${label}.currency`);
-  assertIso8601Utc(raw.as_of, `${label}.as_of`);
+  const last_price = raw.last_price;
+  assertNullableFinitePositive(last_price, `${label}.last_price`);
+  const prev_close = raw.prev_close;
+  assertNullableFinitePositive(prev_close, `${label}.prev_close`);
+  const change_pct = raw.change_pct;
+  assertNullableFiniteNumber(change_pct, `${label}.change_pct`);
+  const volume = raw.volume;
+  assertNullableFiniteNonNegative(volume, `${label}.volume`);
+  const delay_class = raw.delay_class;
+  assertOneOf(delay_class, DELAY_CLASSES_FOR_SCREENER, `${label}.delay_class`);
+  const currency = raw.currency;
+  assertCurrency(currency, `${label}.currency`);
+  const as_of = raw.as_of;
+  assertIso8601Utc(as_of, `${label}.as_of`);
 
   return Object.freeze({
-    last_price: raw.last_price as number | null,
-    prev_close: raw.prev_close as number | null,
-    change_pct: raw.change_pct as number | null,
-    volume: raw.volume as number | null,
-    delay_class: raw.delay_class as string,
-    currency: raw.currency as string,
-    as_of: raw.as_of as string,
+    last_price,
+    prev_close,
+    change_pct,
+    volume,
+    delay_class,
+    currency,
+    as_of,
   });
 }
 
@@ -336,31 +325,29 @@ function freezeFundamentals(
     throw new Error(`${label}: must be an object`);
   }
   const raw = value as Record<string, unknown>;
-  for (const field of FUNDAMENTALS_FIELDS) {
-    if (!Object.hasOwn(raw, field)) {
-      throw new Error(`${label}.${field}: required field`);
-    }
-  }
+  assertHasFields(raw, FUNDAMENTALS_FIELDS, label);
+
   // market_cap is a non-negative quantity when present; the rest are
   // signed (margins, growth, P/E can all be negative).
-  if (raw.market_cap !== null) {
-    assertFiniteNonNegative(raw.market_cap, `${label}.market_cap`);
-  }
-  assertNullableFiniteNumber(raw.pe_ratio, `${label}.pe_ratio`);
-  assertNullableFiniteNumber(raw.gross_margin, `${label}.gross_margin`);
-  assertNullableFiniteNumber(raw.operating_margin, `${label}.operating_margin`);
-  assertNullableFiniteNumber(raw.net_margin, `${label}.net_margin`);
-  assertNullableFiniteNumber(
-    raw.revenue_growth_yoy,
-    `${label}.revenue_growth_yoy`,
-  );
+  const market_cap = raw.market_cap;
+  assertNullableFiniteNonNegative(market_cap, `${label}.market_cap`);
+  const pe_ratio = raw.pe_ratio;
+  assertNullableFiniteNumber(pe_ratio, `${label}.pe_ratio`);
+  const gross_margin = raw.gross_margin;
+  assertNullableFiniteNumber(gross_margin, `${label}.gross_margin`);
+  const operating_margin = raw.operating_margin;
+  assertNullableFiniteNumber(operating_margin, `${label}.operating_margin`);
+  const net_margin = raw.net_margin;
+  assertNullableFiniteNumber(net_margin, `${label}.net_margin`);
+  const revenue_growth_yoy = raw.revenue_growth_yoy;
+  assertNullableFiniteNumber(revenue_growth_yoy, `${label}.revenue_growth_yoy`);
 
   return Object.freeze({
-    market_cap: raw.market_cap as number | null,
-    pe_ratio: raw.pe_ratio as number | null,
-    gross_margin: raw.gross_margin as number | null,
-    operating_margin: raw.operating_margin as number | null,
-    net_margin: raw.net_margin as number | null,
-    revenue_growth_yoy: raw.revenue_growth_yoy as number | null,
+    market_cap,
+    pe_ratio,
+    gross_margin,
+    operating_margin,
+    net_margin,
+    revenue_growth_yoy,
   });
 }
