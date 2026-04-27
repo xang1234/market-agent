@@ -1,14 +1,6 @@
 // Dev-only screener candidates. Listing UUIDs are reused from
-// `services/market/src/dev-fixtures.ts` so the screener returns
-// row.subject_refs that the existing market service knows about — a
-// click-through from screener to symbol-detail lands on the same
-// canonical identity. Numbers are calibrated to recent (~2026-Q1)
-// real-world values for plausibility, not precision: tests pin a
-// fixed clock so timestamps and sort orderings stay deterministic.
-//
-// Production wiring would replace this with a poller that joins
-// listings + market quote + fundamentals key-stats into per-listing
-// candidate rows on a refresh cadence.
+// `services/market/src/dev-fixtures.ts` so a click-through from
+// screener to symbol-detail lands on the same canonical identity.
 
 import type { ScreenerCandidate } from "./candidate.ts";
 

@@ -36,7 +36,13 @@ export function executeScreenerQuery(
   query: ScreenerQuery,
 ): ScreenerResponse {
   const all = deps.candidates.list();
-  const matched = all.filter((c) => candidateMatchesQuery(query, c));
+  // Pre-resolve market clauses' enum/numeric kind once instead of asking
+  // the field registry per (candidate × clause) inside the filter.
+  const marketResolved: ResolvedMarketClause[] = query.market.map((clause) => ({
+    clause,
+    isEnum: getFieldDefinition(clause.field)?.kind === "enum",
+  }));
+  const matched = all.filter((c) => candidateMatchesQuery(query, marketResolved, c));
   const sorted = sortCandidates(query.sort, matched);
   const offset = query.page.offset ?? 0;
   const paged = sorted.slice(offset, offset + query.page.limit);
@@ -65,8 +71,11 @@ export function executeScreenerQuery(
   });
 }
 
+type ResolvedMarketClause = { clause: ScreenerClause; isEnum: boolean };
+
 function candidateMatchesQuery(
   query: ScreenerQuery,
+  market: ReadonlyArray<ResolvedMarketClause>,
   c: ScreenerCandidate,
 ): boolean {
   for (const clause of query.universe) {
@@ -74,8 +83,14 @@ function candidateMatchesQuery(
       return false;
     }
   }
-  for (const clause of query.market) {
-    if (!marketClauseMatches(clause, c)) return false;
+  for (const { clause, isEnum } of market) {
+    const value = candidateMarketValue(c, clause.field);
+    if (isEnum) {
+      if (typeof value !== "string") return false;
+      if (!enumClauseMatches(clause as EnumClause, value)) return false;
+    } else {
+      if (!numericClauseMatches(clause as NumericClause, value as number | null)) return false;
+    }
   }
   for (const clause of query.fundamentals) {
     if (!numericClauseMatches(clause, candidateFundamentalsValue(c, clause.field))) {
@@ -83,17 +98,6 @@ function candidateMatchesQuery(
     }
   }
   return true;
-}
-
-function marketClauseMatches(
-  clause: ScreenerClause,
-  c: ScreenerCandidate,
-): boolean {
-  if (isEnumClause(clause)) {
-    const value = candidateMarketValue(c, clause.field);
-    return typeof value === "string" && enumClauseMatches(clause, value);
-  }
-  return numericClauseMatches(clause, candidateMarketValue(c, clause.field) as number | null);
 }
 
 function enumClauseMatches(clause: EnumClause, value: string | undefined): boolean {
@@ -112,10 +116,6 @@ function numericClauseMatches(
   if (clause.min !== undefined && value < clause.min) return false;
   if (clause.max !== undefined && value > clause.max) return false;
   return true;
-}
-
-function isEnumClause(clause: ScreenerClause): clause is EnumClause {
-  return getFieldDefinition(clause.field)?.kind === "enum";
 }
 
 function candidateUniverseValue(c: ScreenerCandidate, field: string): string | undefined {
@@ -146,13 +146,14 @@ function sortCandidates(
   sort: ReadonlyArray<SortSpec>,
   candidates: ReadonlyArray<ScreenerCandidate>,
 ): ReadonlyArray<ScreenerCandidate> {
-  // Resolve each sort spec's FieldDefinition once instead of per
-  // comparison — an N-row sort would otherwise do O(N log N) registry
-  // lookups per spec. `Array.sort` mutates, so copy first.
-  const resolved: ResolvedSort[] = sort.map((spec) => ({
-    def: getFieldDefinition(spec.field) as FieldDefinition,
-    direction: spec.direction,
-  }));
+  // Resolve each sort spec's FieldDefinition once instead of per comparison.
+  const resolved: ResolvedSort[] = sort.map((spec) => {
+    const def = getFieldDefinition(spec.field);
+    if (!def) {
+      throw new Error(`sortCandidates: unknown sort field '${spec.field}'`);
+    }
+    return { def, direction: spec.direction };
+  });
   const copy = [...candidates];
   copy.sort((a, b) => {
     for (const { def, direction } of resolved) {

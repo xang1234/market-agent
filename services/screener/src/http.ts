@@ -204,8 +204,7 @@ async function handleGetScreen(
   deps: ScreenerServerDeps,
   screen_id: string,
 ): Promise<void> {
-  const screen = await loadScreenOr404(res, deps, screen_id);
-  if (!screen) return;
+  const screen = await loadScreenOrThrow(deps, screen_id);
   respond(res, 200, { screen });
 }
 
@@ -225,8 +224,7 @@ async function handleReplayScreen(
   clock: () => Date,
   screen_id: string,
 ): Promise<void> {
-  const screen = await loadScreenOr404(res, deps, screen_id);
-  if (!screen) return;
+  const screen = await loadScreenOrThrow(deps, screen_id);
   const response = executeScreenerQuery(
     { candidates: deps.candidates, clock },
     replayScreen(screen),
@@ -234,16 +232,12 @@ async function handleReplayScreen(
   respond(res, 200, response);
 }
 
-async function loadScreenOr404(
-  res: ServerResponse,
+async function loadScreenOrThrow(
   deps: ScreenerServerDeps,
   screen_id: string,
-): Promise<ScreenSubject | null> {
+): Promise<ScreenSubject> {
   const screen = await deps.screens.find(screen_id);
-  if (!screen) {
-    respond(res, 404, { error: `screen not found: ${screen_id}` });
-    return null;
-  }
+  if (!screen) throw new ScreenNotFoundError(screen_id);
   return screen;
 }
 

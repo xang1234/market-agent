@@ -58,16 +58,11 @@ export function createInMemoryScreenRepository(
         : { status: "created", screen };
     },
     async find(screen_id) {
-      // Validate the lookup key shape so a typo / malformed UUID surfaces
-      // here rather than as a silent miss.
       assertUuid(screen_id, "find.screen_id");
       return byId.get(screen_id) ?? null;
     },
     async list() {
-      // Sort by updated_at desc so the freshest screens come first — the
-      // typical "recent saved screens" UI ordering. ISO-8601 UTC compares
-      // correctly as plain strings, so localeCompare suffices. Frozen so
-      // callers can't mutate the snapshot.
+      // Freshest first. ISO-8601 UTC compares correctly as plain strings.
       return Object.freeze(
         [...byId.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
       );
