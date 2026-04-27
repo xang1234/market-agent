@@ -20,6 +20,8 @@
 import {
   getFieldDefinition,
   type FieldDefinition,
+  type FieldKind,
+  type ScreenerDimension,
 } from "./fields.ts";
 import {
   assertFiniteNumber,
@@ -30,6 +32,29 @@ import {
 
 export type SortDirection = "asc" | "desc";
 export const SORT_DIRECTIONS: ReadonlyArray<SortDirection> = ["asc", "desc"];
+
+// The five required dimensions of a screener envelope. Exported so callers
+// (tests, future serializers) can enumerate them without restating the list.
+export const SCREENER_DIMENSIONS = [
+  "universe",
+  "market",
+  "fundamentals",
+  "sort",
+  "page",
+] as const;
+
+// Per-dimension matrix of which clause kinds are legal. Universe is identity
+// (categorical only); fundamentals is quantitative (numeric only); market
+// straddles both. The validator drives off this table so adding a new
+// dimension is one entry rather than scattered if/else branches.
+const ALLOWED_CLAUSE_KINDS: Record<
+  ScreenerDimension,
+  ReadonlyArray<FieldKind>
+> = {
+  universe: ["enum"],
+  market: ["enum", "numeric"],
+  fundamentals: ["numeric"],
+};
 
 export const LIMIT_MIN = 1;
 // Mirrors `/v1/screener/search` request schema cap. Hard cap protects the
@@ -78,23 +103,17 @@ export function normalizedScreenerQuery(input: ScreenerQuery): ScreenerQuery {
     input.universe,
     "normalizedScreenerQuery.universe",
     "universe",
-    { allowNumeric: false },
-  ) as ReadonlyArray<EnumClause>;
-
+  );
   const market = freezeClauseArray(
     input.market,
     "normalizedScreenerQuery.market",
     "market",
-    { allowNumeric: true },
   );
-
   const fundamentals = freezeClauseArray(
     input.fundamentals,
     "normalizedScreenerQuery.fundamentals",
     "fundamentals",
-    { allowEnum: false },
-  ) as ReadonlyArray<NumericClause>;
-
+  );
   const sort = freezeSortSpecs(input.sort, "normalizedScreenerQuery.sort");
   const page = freezePage(input.page, "normalizedScreenerQuery.page");
 
@@ -119,21 +138,31 @@ export function assertScreenerQueryContract(
   normalizedScreenerQuery(value as ScreenerQuery);
 }
 
-type ClauseDimension = "universe" | "market" | "fundamentals";
-
 function freezeClauseArray(
   value: unknown,
   label: string,
-  dimension: ClauseDimension,
-  opts: { allowEnum?: boolean; allowNumeric?: boolean } = {},
+  dimension: "universe",
+): ReadonlyArray<EnumClause>;
+function freezeClauseArray(
+  value: unknown,
+  label: string,
+  dimension: "fundamentals",
+): ReadonlyArray<NumericClause>;
+function freezeClauseArray(
+  value: unknown,
+  label: string,
+  dimension: "market",
+): ReadonlyArray<ScreenerClause>;
+function freezeClauseArray(
+  value: unknown,
+  label: string,
+  dimension: ScreenerDimension,
 ): ReadonlyArray<ScreenerClause> {
-  const allowEnum = opts.allowEnum ?? true;
-  const allowNumeric = opts.allowNumeric ?? true;
-
   if (!Array.isArray(value)) {
     throw new Error(`${label}: must be an array`);
   }
 
+  const allowedKinds = ALLOWED_CLAUSE_KINDS[dimension];
   const seenFields = new Set<string>();
   const frozen: ScreenerClause[] = [];
 
@@ -159,6 +188,11 @@ function freezeClauseArray(
         `${itemLabel}.field: "${field}" belongs to the ${def.dimension} dimension, not ${dimension}`,
       );
     }
+    if (!allowedKinds.includes(def.kind)) {
+      throw new Error(
+        `${itemLabel}.field: ${def.kind} field "${field}" is not allowed in the ${dimension} dimension`,
+      );
+    }
     if (seenFields.has(field)) {
       throw new Error(
         `${itemLabel}.field: duplicate clause for "${field}" — combine bounds into a single clause`,
@@ -166,21 +200,11 @@ function freezeClauseArray(
     }
     seenFields.add(field);
 
-    if (def.kind === "enum") {
-      if (!allowEnum) {
-        throw new Error(
-          `${itemLabel}.field: enum field "${field}" is not allowed in the ${dimension} dimension`,
-        );
-      }
-      frozen.push(freezeEnumClause(raw, def, itemLabel));
-    } else {
-      if (!allowNumeric) {
-        throw new Error(
-          `${itemLabel}.field: numeric field "${field}" is not allowed in the ${dimension} dimension`,
-        );
-      }
-      frozen.push(freezeNumericClause(raw, def, itemLabel));
-    }
+    frozen.push(
+      def.kind === "enum"
+        ? freezeEnumClause(raw, def, itemLabel)
+        : freezeNumericClause(raw, def, itemLabel),
+    );
   }
 
   return Object.freeze(frozen);

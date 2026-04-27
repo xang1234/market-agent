@@ -55,12 +55,13 @@ export const ASSET_TYPES: ReadonlyArray<AssetType> = [
 
 // Delay class mirrors `services/market/src/quote.ts` DELAY_CLASSES. Re-stating
 // the values here keeps the screener service free of cross-package imports;
-// drift would surface as a screener test failure rather than a silent
-// production mismatch.
+// `test/delay-class-drift.test.ts` cross-imports the market constant and
+// asserts equality so a typo or rename can never silently diverge.
 export const DELAY_CLASSES_FOR_SCREENER: ReadonlyArray<string> = [
-  "realtime",
+  "real_time",
   "delayed_15m",
   "eod",
+  "unknown",
 ];
 
 const DEFINITIONS: ReadonlyArray<FieldDefinition> = [

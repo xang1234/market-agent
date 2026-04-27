@@ -5,6 +5,7 @@ import {
   LIMIT_MAX,
   LIMIT_MIN,
   normalizedScreenerQuery,
+  SCREENER_DIMENSIONS,
   type ScreenerQuery,
 } from "../src/query.ts";
 
@@ -16,7 +17,7 @@ function validQuery(overrides: Partial<ScreenerQuery> = {}): ScreenerQuery {
     ],
     market: [
       { field: "last_price", min: 5 },
-      { field: "delay_class", values: ["realtime", "delayed_15m"] },
+      { field: "delay_class", values: ["real_time", "delayed_15m"] },
     ],
     fundamentals: [
       { field: "market_cap", min: 1_000_000_000 },
@@ -64,7 +65,7 @@ test("normalizedScreenerQuery accepts empty filter dimensions when sort and page
 });
 
 test("normalizedScreenerQuery rejects a missing dimension", () => {
-  for (const dimension of ["universe", "market", "fundamentals", "sort", "page"] as const) {
+  for (const dimension of SCREENER_DIMENSIONS) {
     const base = validQuery() as Record<string, unknown>;
     delete base[dimension];
     assert.throws(
