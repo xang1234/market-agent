@@ -251,10 +251,12 @@ test("replay → execute round-trip: save + reopen runs the query against fresh 
   assert.notEqual(firstResponse.as_of, secondResponse.as_of);
 });
 
-test("replayScreen rejects malformed input", () => {
+test("replayScreen rejects null / non-object input but trusts the typed contract", () => {
   assert.throws(() => replayScreen(null as unknown as ScreenSubject), /must be/);
-  // Even a structurally-correct ScreenSubject built without persistScreen
-  // gets re-canonicalized — and a corrupt definition is rejected.
+  // replayScreen trusts the ScreenSubject type — callers that build
+  // one from untrusted input should run it through
+  // assertScreenSubjectContract first. Verify the contract guard
+  // rejects a bogus hand-built definition at the boundary.
   const bogus = {
     screen_id: SCREEN_ID,
     name: "bogus",
@@ -262,7 +264,7 @@ test("replayScreen rejects malformed input", () => {
     created_at: CREATED_AT,
     updated_at: UPDATED_AT,
   };
-  assert.throws(() => replayScreen(bogus), /sort/);
+  assert.throws(() => assertScreenSubjectContract(bogus), /sort/);
 });
 
 test("screenSubjectRef constructs a frozen { kind: 'screen', id } SubjectRef", () => {

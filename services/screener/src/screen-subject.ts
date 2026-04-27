@@ -22,13 +22,12 @@ import {
   normalizedScreenerQuery,
   type ScreenerQuery,
 } from "./query.ts";
+import { type UUID } from "./subject-ref.ts";
 import {
   assertIso8601Utc,
   assertNonEmptyString,
   assertUuid,
 } from "./validators.ts";
-
-export type UUID = string;
 
 export type ScreenSubjectRef = {
   kind: "screen";
@@ -68,11 +67,7 @@ export function persistScreen(input: PersistScreenInput): ScreenSubject {
   assertIso8601Utc(input.created_at, "persistScreen.created_at");
   const updated_at = input.updated_at ?? input.created_at;
   assertIso8601Utc(updated_at, "persistScreen.updated_at");
-  if (Date.parse(updated_at) < Date.parse(input.created_at)) {
-    throw new Error(
-      `persistScreen.updated_at: must be >= created_at (created_at=${input.created_at}, updated_at=${updated_at})`,
-    );
-  }
+  assertChronological(input.created_at, updated_at, "persistScreen");
 
   return Object.freeze({
     screen_id: input.screen_id,
@@ -87,14 +82,18 @@ export function persistScreen(input: PersistScreenInput): ScreenSubject {
 // not `ScreenerResponse` — is the contract: callers must re-execute
 // against the screener service to get rows. There is no path that
 // returns prehydrated rows from this function, by design.
+//
+// Trusts the typed input: a `ScreenSubject` reaching this seam has
+// already been canonicalized by `persistScreen` or
+// `assertScreenSubjectContract`. Re-validating per call would burn
+// per-replay allocations on the watchlist hot path. Callers
+// constructing a `ScreenSubject` from untrusted input should run it
+// through `assertScreenSubjectContract` once at the boundary.
 export function replayScreen(screen: ScreenSubject): ScreenerQuery {
   if (screen === null || typeof screen !== "object") {
     throw new Error("replayScreen: must be a ScreenSubject");
   }
-  // Re-canonicalize defensively in case a caller hand-built a
-  // ScreenSubject without going through persistScreen. The frozen
-  // output is safe to hand back to the screener service for execution.
-  return normalizedScreenerQuery(screen.definition);
+  return screen.definition;
 }
 
 export function screenSubjectRef(screen: ScreenSubject): ScreenSubjectRef {
@@ -109,16 +108,17 @@ export function assertScreenSubjectContract(
     throw new Error("screenSubject: must be an object");
   }
   const raw = value as Record<string, unknown>;
-  assertUuid(raw.screen_id, "screenSubject.screen_id");
-  assertScreenName(raw.name, "screenSubject.name");
-  assertScreenerQueryContract(raw.definition);
-  assertIso8601Utc(raw.created_at, "screenSubject.created_at");
-  assertIso8601Utc(raw.updated_at, "screenSubject.updated_at");
-  if (Date.parse(raw.updated_at) < Date.parse(raw.created_at)) {
-    throw new Error(
-      `screenSubject.updated_at: must be >= created_at (created_at=${raw.created_at}, updated_at=${raw.updated_at})`,
-    );
-  }
+  const screen_id = raw.screen_id;
+  const name = raw.name;
+  const definition = raw.definition;
+  const created_at = raw.created_at;
+  const updated_at = raw.updated_at;
+  assertUuid(screen_id, "screenSubject.screen_id");
+  assertScreenName(name, "screenSubject.name");
+  assertScreenerQueryContract(definition);
+  assertIso8601Utc(created_at, "screenSubject.created_at");
+  assertIso8601Utc(updated_at, "screenSubject.updated_at");
+  assertChronological(created_at, updated_at, "screenSubject");
 }
 
 function assertScreenName(value: unknown, label: string): asserts value is string {
@@ -126,6 +126,18 @@ function assertScreenName(value: unknown, label: string): asserts value is strin
   if ((value as string).length > SCREEN_NAME_MAX_LENGTH) {
     throw new Error(
       `${label}: must be <= ${SCREEN_NAME_MAX_LENGTH} characters; received ${(value as string).length}`,
+    );
+  }
+}
+
+function assertChronological(
+  created_at: string,
+  updated_at: string,
+  prefix: string,
+): void {
+  if (Date.parse(updated_at) < Date.parse(created_at)) {
+    throw new Error(
+      `${prefix}.updated_at: must be >= created_at (created_at=${created_at}, updated_at=${updated_at})`,
     );
   }
 }
