@@ -24,6 +24,22 @@ export class PortfolioNotFoundError extends Error {
   }
 }
 
+function toIso(value: Date | string): string {
+  return value instanceof Date ? value.toISOString() : String(value);
+}
+
+function toIsoOrNull(value: Date | string | null): string | null {
+  return value === null ? null : toIso(value);
+}
+
+// pg returns numeric as string by default to preserve precision; coerce at the
+// row seam since callers consume floats. Documented precision tradeoff — this
+// surface is research-context exposure tracking, not tax-lot accounting
+// (spec §4.2.1).
+function toFiniteNumber(value: string | number): number {
+  return typeof value === "number" ? value : Number(value);
+}
+
 type PortfolioRow = {
   portfolio_id: string;
   user_id: string;
@@ -39,8 +55,8 @@ function toPortfolio(row: PortfolioRow): Portfolio {
     user_id: row.user_id,
     name: row.name,
     base_currency: row.base_currency,
-    created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
-    updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at),
+    created_at: toIso(row.created_at),
+    updated_at: toIso(row.updated_at),
   };
 }
 
@@ -124,18 +140,6 @@ type HoldingRow = {
   updated_at: Date | string;
 };
 
-// pg returns numeric as string by default to preserve precision; coerce to a
-// finite JS number at this seam since callers consume floats. Documented as a
-// known precision-tradeoff; not for tax-lot accounting (see spec §4.2.1).
-function toFiniteNumber(value: string | number): number {
-  return typeof value === "number" ? value : Number(value);
-}
-
-function toIsoOrNull(value: Date | string | null): string | null {
-  if (value === null) return null;
-  return value instanceof Date ? value.toISOString() : String(value);
-}
-
 function toHolding(row: HoldingRow): PortfolioHolding {
   return {
     portfolio_holding_id: row.portfolio_holding_id,
@@ -145,17 +149,14 @@ function toHolding(row: HoldingRow): PortfolioHolding {
     cost_basis: row.cost_basis === null ? null : toFiniteNumber(row.cost_basis),
     opened_at: toIsoOrNull(row.opened_at),
     closed_at: toIsoOrNull(row.closed_at),
-    created_at: toIsoOrNull(row.created_at) as string,
-    updated_at: toIsoOrNull(row.updated_at) as string,
+    created_at: toIso(row.created_at),
+    updated_at: toIso(row.updated_at),
   };
 }
 
 const HOLDING_COLUMNS = `portfolio_holding_id, portfolio_id, subject_kind, subject_id,
   quantity, cost_basis, opened_at, closed_at, created_at, updated_at`;
 
-// Holding ops are scoped through `getPortfolio(userId, portfolioId)` first so
-// the user-ownership check happens before any holding row is touched. A stray
-// portfolio_id guess returns 404 for the parent, never leaks holdings.
 export async function createHolding(
   db: QueryExecutor,
   portfolioId: string,

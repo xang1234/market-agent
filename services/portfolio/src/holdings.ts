@@ -5,13 +5,12 @@
 // Rejecting `theme` / `screen` / `portfolio` at this seam is the contract that
 // keeps overlay math honest (spec §4.2.1).
 
+import type { UUID } from "./portfolio.ts";
 import {
   assertFiniteNumber,
   assertIso8601Utc,
   assertUuid,
 } from "./validators.ts";
-
-export type UUID = string;
 
 export const HOLDING_SUBJECT_KINDS = ["instrument", "listing"] as const;
 export type HoldingSubjectKind = (typeof HOLDING_SUBJECT_KINDS)[number];
@@ -64,8 +63,15 @@ export function assertHoldingSubjectRef(
   assertUuid(obj.id, `${label}.id`);
 }
 
-// Validates a raw create-payload from the HTTP boundary. Throws on any
-// invalid field; callers should treat thrown errors as 400.
+function assertOptional(
+  value: unknown,
+  label: string,
+  assertValue: (v: unknown, l: string) => void,
+): void {
+  if (value === undefined || value === null) return;
+  assertValue(value, label);
+}
+
 export function assertPortfolioHoldingCreateInput(
   raw: unknown,
 ): asserts raw is PortfolioHoldingCreateInput {
@@ -75,13 +81,7 @@ export function assertPortfolioHoldingCreateInput(
   const obj = raw as Record<string, unknown>;
   assertHoldingSubjectRef(obj.subject_ref, "holding.subject_ref");
   assertFiniteNumber(obj.quantity, "holding.quantity");
-  if (obj.cost_basis !== undefined && obj.cost_basis !== null) {
-    assertFiniteNumber(obj.cost_basis, "holding.cost_basis");
-  }
-  if (obj.opened_at !== undefined && obj.opened_at !== null) {
-    assertIso8601Utc(obj.opened_at, "holding.opened_at");
-  }
-  if (obj.closed_at !== undefined && obj.closed_at !== null) {
-    assertIso8601Utc(obj.closed_at, "holding.closed_at");
-  }
+  assertOptional(obj.cost_basis, "holding.cost_basis", assertFiniteNumber);
+  assertOptional(obj.opened_at, "holding.opened_at", assertIso8601Utc);
+  assertOptional(obj.closed_at, "holding.closed_at", assertIso8601Utc);
 }

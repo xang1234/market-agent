@@ -90,15 +90,13 @@ export function createPortfolioServer(db: QueryExecutor): Server {
           return;
         }
         case "list_holdings": {
-          // Ownership check by reading the parent portfolio first; throws
-          // PortfolioNotFoundError (→ 404) if the portfolio isn't this user's.
-          await getPortfolio(db, userId, route.portfolio_id);
+          await assertPortfolioOwned(db, userId, route.portfolio_id);
           const holdings = await listHoldings(db, route.portfolio_id);
           respond(res, 200, { holdings } satisfies ListHoldingsResponse);
           return;
         }
         case "create_holding": {
-          await getPortfolio(db, userId, route.portfolio_id);
+          await assertPortfolioOwned(db, userId, route.portfolio_id);
           const body = await readBody(req);
           let parsed: unknown;
           try {
@@ -118,7 +116,7 @@ export function createPortfolioServer(db: QueryExecutor): Server {
           return;
         }
         case "delete_holding": {
-          await getPortfolio(db, userId, route.portfolio_id);
+          await assertPortfolioOwned(db, userId, route.portfolio_id);
           await deleteHolding(db, route.portfolio_id, route.portfolio_holding_id);
           res.statusCode = 204;
           res.end();
@@ -231,4 +229,16 @@ function errorMessage(err: unknown, fallback: string): string {
   if (err instanceof Error && err.message.length > 0) return err.message;
   if (typeof err === "string" && err.length > 0) return err;
   return fallback;
+}
+
+// Holding routes guard parent ownership before touching any holding row: a
+// stray portfolio_id guess returns 404 for the parent and never leaks a
+// holding's existence. `getPortfolio` is the only DB read that's user-scoped,
+// so reusing it keeps that invariant in one place.
+async function assertPortfolioOwned(
+  db: QueryExecutor,
+  userId: string,
+  portfolioId: string,
+): Promise<void> {
+  await getPortfolio(db, userId, portfolioId);
 }

@@ -105,18 +105,19 @@ test("holdings: POST creates a holding bound to a listing", { timeout: 120000 },
   assert.equal(res.status, 201);
 });
 
-for (const badKind of ["theme", "macro_topic", "portfolio", "screen", "issuer"] as const) {
-  test(`holdings: POST rejects subject_kind=${badKind} with 400`, { timeout: 120000 }, async (t) => {
-    if (!dockerAvailable()) {
-      t.skip("Docker is required for portfolio coverage");
-      return;
-    }
-    const { databaseUrl } = await bootstrapDatabase(t, "fra-cw0-9-2");
-    const client = await connectedClient(t, databaseUrl);
-    const userId = await seedUser(client, `create-holding-${badKind}@example.test`);
-    const base = await startServer(t, client);
-    const pid = await createPortfolioFor(base, userId, { name: "Core", base_currency: "USD" });
+test("holdings: POST rejects every non-instrument/listing subject_kind with 400", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for portfolio coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-cw0-9-2");
+  const client = await connectedClient(t, databaseUrl);
+  const userId = await seedUser(client, "create-holding-bad-kinds@example.test");
+  const base = await startServer(t, client);
+  const pid = await createPortfolioFor(base, userId, { name: "Core", base_currency: "USD" });
 
+  const badKinds = ["theme", "macro_topic", "portfolio", "screen", "issuer"] as const;
+  for (const badKind of badKinds) {
     const res = await fetch(
       `${base}/v1/portfolios/${pid}/holdings`,
       withUser(userId, {
@@ -128,11 +129,11 @@ for (const badKind of ["theme", "macro_topic", "portfolio", "screen", "issuer"] 
         }),
       }),
     );
-    assert.equal(res.status, 400);
+    assert.equal(res.status, 400, `expected 400 for kind=${badKind}`);
     const body = (await res.json()) as { error: string };
-    assert.match(body.error, /subject_ref\.kind/);
-  });
-}
+    assert.match(body.error, /subject_ref\.kind/, `expected subject_ref.kind in error for kind=${badKind}`);
+  }
+});
 
 test("holdings: POST rejects raw ticker as subject_id", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
