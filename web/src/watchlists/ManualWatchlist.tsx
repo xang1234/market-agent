@@ -1,14 +1,4 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import {
-  fetchQuoteSnapshot,
-  formatQuotePrice,
-  formatSignedPercent,
-  quoteBelongsToListing,
-  quoteDirection,
-  type QuoteSnapshot,
-} from '../symbol/quote'
-import { symbolDetailPathForSubject } from '../symbol/search'
+import { QuoteRow } from '../symbol/QuoteRow'
 import type { SubjectRef, WatchlistMember } from './membership'
 import type { ManualWatchlistStatus } from './useManualWatchlist'
 
@@ -19,11 +9,10 @@ type ManualWatchlistProps = {
   onRemove: (subjectRef: SubjectRef) => void
 }
 
-// Each row hydrates its quote independently from the market service. Members
-// whose subject_ref is not listing-kind (e.g. an issuer added before listing
-// hydration lands) render a quote-unavailable state — surfacing the absent
-// context honestly is the rule established in fra-6al.6.2 and preserved here
-// now that the stub is gone.
+// Each row hydrates its own quote through the shared QuoteRow component
+// (cw0.10.1) so watchlist members and held holdings render identically
+// for the same subject. Members whose subject_ref is not listing-kind
+// surface a quote-unavailable state — the rule from fra-6al.6.2.
 export function ManualWatchlist({ members, status, message, onRemove }: ManualWatchlistProps) {
   if (status === 'loading' && members.length === 0) {
     return (
@@ -44,10 +33,19 @@ export function ManualWatchlist({ members, status, message, onRemove }: ManualWa
   return (
     <ul aria-label="Watchlist members" className="divide-y divide-neutral-200 dark:divide-neutral-800">
       {members.map((member) => (
-        <WatchlistRow
+        <QuoteRow
           key={`${member.subject_ref.kind}:${member.subject_ref.id}`}
-          member={member}
-          onRemove={onRemove}
+          subjectRef={member.subject_ref}
+          trailing={
+            <button
+              type="button"
+              onClick={() => onRemove(member.subject_ref)}
+              aria-label={`Remove ${member.subject_ref.kind} from watchlist`}
+              className="shrink-0 px-2 text-xs text-neutral-400 hover:text-red-600 dark:text-neutral-500 dark:hover:text-red-400"
+            >
+              ×
+            </button>
+          }
         />
       ))}
       {message ? (
@@ -55,131 +53,4 @@ export function ManualWatchlist({ members, status, message, onRemove }: ManualWa
       ) : null}
     </ul>
   )
-}
-
-type RowFetchState =
-  | { status: 'idle' }
-  | { status: 'unavailable'; listingId: string }
-  | { status: 'ready'; listingId: string; quote: QuoteSnapshot }
-
-type RowState =
-  | { status: 'loading' }
-  | { status: 'unavailable' }
-  | { status: 'ready'; quote: QuoteSnapshot }
-
-function WatchlistRow({
-  member,
-  onRemove,
-}: {
-  member: WatchlistMember
-  onRemove: (subjectRef: SubjectRef) => void
-}) {
-  const listingId = member.subject_ref.kind === 'listing' ? member.subject_ref.id : null
-  const [fetchState, setFetchState] = useState<RowFetchState>({ status: 'idle' })
-
-  useEffect(() => {
-    if (!listingId) return
-    const controller = new AbortController()
-    fetchQuoteSnapshot(listingId, { signal: controller.signal })
-      .then((quote) => {
-        if (controller.signal.aborted) return
-        if (!quoteBelongsToListing(quote, listingId)) {
-          setFetchState({ status: 'unavailable', listingId })
-          return
-        }
-        setFetchState({ status: 'ready', listingId, quote })
-      })
-      .catch((err) => {
-        if (controller.signal.aborted) return
-        console.warn('watchlist row quote fetch failed', err)
-        setFetchState({ status: 'unavailable', listingId })
-      })
-    return () => controller.abort()
-  }, [listingId])
-
-  const state = rowStateForListing(fetchState, listingId)
-
-  return (
-    <li className="flex items-stretch">
-      <Link
-        to={symbolDetailPathForSubject(member.subject_ref)}
-        title={state.status === 'ready' ? freshnessLabel(state.quote) : undefined}
-        className="flex min-w-0 flex-1 items-center justify-between gap-2 px-3 py-2 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
-      >
-        <span className="min-w-0 flex-1">
-          <span className="block truncate font-medium text-neutral-800 dark:text-neutral-100">
-            {primaryLabel(state, member.subject_ref)}
-          </span>
-          <span className="block truncate text-[10px] text-neutral-500 dark:text-neutral-400">
-            {secondaryLabel(state, member.subject_ref)}
-          </span>
-        </span>
-        <span className="shrink-0 text-right">
-          {state.status === 'ready' ? (
-            <>
-              <span className="block tabular-nums font-medium text-neutral-900 dark:text-neutral-50">
-                {formatQuotePrice(state.quote.latest_price, state.quote.currency)}
-              </span>
-              <span className={`block text-[10px] tabular-nums ${moveClassName(state.quote)}`}>
-                {formatSignedPercent(state.quote.percent_move)}
-              </span>
-            </>
-          ) : (
-            <span className="block text-[10px] text-neutral-400 dark:text-neutral-500">—</span>
-          )}
-        </span>
-      </Link>
-      <button
-        type="button"
-        onClick={() => onRemove(member.subject_ref)}
-        aria-label={`Remove ${member.subject_ref.kind} from watchlist`}
-        className="shrink-0 px-2 text-xs text-neutral-400 hover:text-red-600 dark:text-neutral-500 dark:hover:text-red-400"
-      >
-        ×
-      </button>
-    </li>
-  )
-}
-
-function rowStateForListing(state: RowFetchState, listingId: string | null): RowState {
-  if (!listingId) return { status: 'unavailable' }
-  if (
-    state.status === 'ready' &&
-    state.listingId === listingId &&
-    quoteBelongsToListing(state.quote, listingId)
-  ) {
-    return { status: 'ready', quote: state.quote }
-  }
-  if (state.status === 'unavailable' && state.listingId === listingId) {
-    return { status: 'unavailable' }
-  }
-  return { status: 'loading' }
-}
-
-function moveClassName(quote: QuoteSnapshot): string {
-  const direction = quoteDirection(quote)
-  if (direction === 'up') return 'text-emerald-700 dark:text-emerald-400'
-  if (direction === 'down') return 'text-red-700 dark:text-red-400'
-  return 'text-neutral-500 dark:text-neutral-400'
-}
-
-function primaryLabel(state: RowState, ref: SubjectRef): string {
-  if (state.status === 'ready') return state.quote.listing.ticker
-  if (state.status === 'loading') return 'Loading…'
-  return truncateId(ref.id)
-}
-
-function secondaryLabel(state: RowState, ref: SubjectRef): string {
-  if (state.status === 'ready') {
-    return `${state.quote.listing.mic} · ${state.quote.currency}`
-  }
-  return ref.kind
-}
-
-function freshnessLabel(quote: QuoteSnapshot): string {
-  return `${quote.session_state.replaceAll('_', ' ')} · ${quote.delay_class.replaceAll('_', ' ')} · ${quote.as_of}`
-}
-
-function truncateId(id: string): string {
-  return id.length <= 10 ? id : `${id.slice(0, 8)}…`
 }
