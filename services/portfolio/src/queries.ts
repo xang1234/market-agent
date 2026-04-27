@@ -1,5 +1,10 @@
 import type { QueryResult } from "pg";
 import type { Portfolio, PortfolioCreateInput } from "./portfolio.ts";
+import type {
+  HoldingSubjectKind,
+  PortfolioHolding,
+  PortfolioHoldingCreateInput,
+} from "./holdings.ts";
 
 // Matches the watchlists / resolver minimal queryable surface. `pg.Client` and
 // `pg.Pool` both satisfy it; tests stub it without importing the full pg type.
@@ -95,4 +100,108 @@ export async function deletePortfolio(
     [portfolioId, userId],
   );
   if ((result.rowCount ?? 0) === 0) throw new PortfolioNotFoundError(portfolioId);
+}
+
+export class HoldingNotFoundError extends Error {
+  readonly portfolio_holding_id: string;
+  constructor(portfolio_holding_id: string) {
+    super(`holding not found: ${portfolio_holding_id}`);
+    this.name = "HoldingNotFoundError";
+    this.portfolio_holding_id = portfolio_holding_id;
+  }
+}
+
+type HoldingRow = {
+  portfolio_holding_id: string;
+  portfolio_id: string;
+  subject_kind: HoldingSubjectKind;
+  subject_id: string;
+  quantity: string | number;
+  cost_basis: string | number | null;
+  opened_at: Date | string | null;
+  closed_at: Date | string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
+};
+
+// pg returns numeric as string by default to preserve precision; coerce to a
+// finite JS number at this seam since callers consume floats. Documented as a
+// known precision-tradeoff; not for tax-lot accounting (see spec §4.2.1).
+function toFiniteNumber(value: string | number): number {
+  return typeof value === "number" ? value : Number(value);
+}
+
+function toIsoOrNull(value: Date | string | null): string | null {
+  if (value === null) return null;
+  return value instanceof Date ? value.toISOString() : String(value);
+}
+
+function toHolding(row: HoldingRow): PortfolioHolding {
+  return {
+    portfolio_holding_id: row.portfolio_holding_id,
+    portfolio_id: row.portfolio_id,
+    subject_ref: { kind: row.subject_kind, id: row.subject_id },
+    quantity: toFiniteNumber(row.quantity),
+    cost_basis: row.cost_basis === null ? null : toFiniteNumber(row.cost_basis),
+    opened_at: toIsoOrNull(row.opened_at),
+    closed_at: toIsoOrNull(row.closed_at),
+    created_at: toIsoOrNull(row.created_at) as string,
+    updated_at: toIsoOrNull(row.updated_at) as string,
+  };
+}
+
+const HOLDING_COLUMNS = `portfolio_holding_id, portfolio_id, subject_kind, subject_id,
+  quantity, cost_basis, opened_at, closed_at, created_at, updated_at`;
+
+// Holding ops are scoped through `getPortfolio(userId, portfolioId)` first so
+// the user-ownership check happens before any holding row is touched. A stray
+// portfolio_id guess returns 404 for the parent, never leaks holdings.
+export async function createHolding(
+  db: QueryExecutor,
+  portfolioId: string,
+  input: PortfolioHoldingCreateInput,
+): Promise<PortfolioHolding> {
+  const result = await db.query<HoldingRow>(
+    `insert into portfolio_holdings
+       (portfolio_id, subject_kind, subject_id, quantity, cost_basis, opened_at, closed_at)
+     values ($1, $2, $3, $4, $5, $6, $7)
+     returning ${HOLDING_COLUMNS}`,
+    [
+      portfolioId,
+      input.subject_ref.kind,
+      input.subject_ref.id,
+      input.quantity,
+      input.cost_basis ?? null,
+      input.opened_at ?? null,
+      input.closed_at ?? null,
+    ],
+  );
+  return toHolding(result.rows[0]);
+}
+
+export async function listHoldings(
+  db: QueryExecutor,
+  portfolioId: string,
+): Promise<PortfolioHolding[]> {
+  const result = await db.query<HoldingRow>(
+    `select ${HOLDING_COLUMNS}
+       from portfolio_holdings
+      where portfolio_id = $1
+      order by created_at asc, portfolio_holding_id asc`,
+    [portfolioId],
+  );
+  return result.rows.map(toHolding);
+}
+
+export async function deleteHolding(
+  db: QueryExecutor,
+  portfolioId: string,
+  portfolioHoldingId: string,
+): Promise<void> {
+  const result = await db.query(
+    `delete from portfolio_holdings
+      where portfolio_holding_id = $1 and portfolio_id = $2`,
+    [portfolioHoldingId, portfolioId],
+  );
+  if ((result.rowCount ?? 0) === 0) throw new HoldingNotFoundError(portfolioHoldingId);
 }

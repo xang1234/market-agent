@@ -5,14 +5,22 @@ import {
   type ServerResponse,
 } from "node:http";
 import {
+  createHolding,
   createPortfolio,
+  deleteHolding,
   deletePortfolio,
   getPortfolio,
+  HoldingNotFoundError,
+  listHoldings,
   listPortfolios,
   PortfolioNotFoundError,
   type QueryExecutor,
 } from "./queries.ts";
 import { assertPortfolioCreateInput, type Portfolio } from "./portfolio.ts";
+import {
+  assertPortfolioHoldingCreateInput,
+  type PortfolioHolding,
+} from "./holdings.ts";
 import { isUuidV4 } from "./validators.ts";
 
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
@@ -27,6 +35,8 @@ class RequestBodyTooLargeError extends Error {
 export type ListPortfoliosResponse = { portfolios: Portfolio[] };
 export type GetPortfolioResponse = { portfolio: Portfolio };
 export type CreatePortfolioResponse = { portfolio: Portfolio };
+export type ListHoldingsResponse = { holdings: PortfolioHolding[] };
+export type CreateHoldingResponse = { holding: PortfolioHolding };
 
 export function createPortfolioServer(db: QueryExecutor): Server {
   return createServer(async (req, res) => {
@@ -79,6 +89,41 @@ export function createPortfolioServer(db: QueryExecutor): Server {
           res.end();
           return;
         }
+        case "list_holdings": {
+          // Ownership check by reading the parent portfolio first; throws
+          // PortfolioNotFoundError (→ 404) if the portfolio isn't this user's.
+          await getPortfolio(db, userId, route.portfolio_id);
+          const holdings = await listHoldings(db, route.portfolio_id);
+          respond(res, 200, { holdings } satisfies ListHoldingsResponse);
+          return;
+        }
+        case "create_holding": {
+          await getPortfolio(db, userId, route.portfolio_id);
+          const body = await readBody(req);
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(body);
+          } catch {
+            respond(res, 400, { error: "request body must be valid JSON" });
+            return;
+          }
+          try {
+            assertPortfolioHoldingCreateInput(parsed);
+          } catch (err) {
+            respond(res, 400, { error: errorMessage(err, "invalid holding input") });
+            return;
+          }
+          const holding = await createHolding(db, route.portfolio_id, parsed);
+          respond(res, 201, { holding } satisfies CreateHoldingResponse);
+          return;
+        }
+        case "delete_holding": {
+          await getPortfolio(db, userId, route.portfolio_id);
+          await deleteHolding(db, route.portfolio_id, route.portfolio_holding_id);
+          res.statusCode = 204;
+          res.end();
+          return;
+        }
         default: {
           const _exhaustive: never = route;
           void _exhaustive;
@@ -95,6 +140,10 @@ export function createPortfolioServer(db: QueryExecutor): Server {
         if (!res.headersSent) respond(res, 404, { error: error.message });
         return;
       }
+      if (error instanceof HoldingNotFoundError) {
+        if (!res.headersSent) respond(res, 404, { error: error.message });
+        return;
+      }
 
       console.error("portfolio request failed", error);
       if (!res.headersSent) respond(res, 500, { error: "internal portfolio error" });
@@ -106,7 +155,10 @@ type Route =
   | { action: "list" }
   | { action: "create" }
   | { action: "get"; portfolio_id: string }
-  | { action: "delete"; portfolio_id: string };
+  | { action: "delete"; portfolio_id: string }
+  | { action: "list_holdings"; portfolio_id: string }
+  | { action: "create_holding"; portfolio_id: string }
+  | { action: "delete_holding"; portfolio_id: string; portfolio_holding_id: string };
 
 function matchRoute(method: string, rawUrl: string): Route | null {
   const url = new URL(rawUrl, "http://localhost");
@@ -118,12 +170,31 @@ function matchRoute(method: string, rawUrl: string): Route | null {
     return null;
   }
 
-  const match = pathname.match(/^\/v1\/portfolios\/([^/]+)$/);
-  if (match) {
-    const portfolio_id = match[1];
+  const portfolioMatch = pathname.match(/^\/v1\/portfolios\/([^/]+)$/);
+  if (portfolioMatch) {
+    const portfolio_id = portfolioMatch[1];
     if (!isUuidV4(portfolio_id)) return null;
     if (method === "GET") return { action: "get", portfolio_id };
     if (method === "DELETE") return { action: "delete", portfolio_id };
+    return null;
+  }
+
+  const holdingsMatch = pathname.match(/^\/v1\/portfolios\/([^/]+)\/holdings$/);
+  if (holdingsMatch) {
+    const portfolio_id = holdingsMatch[1];
+    if (!isUuidV4(portfolio_id)) return null;
+    if (method === "GET") return { action: "list_holdings", portfolio_id };
+    if (method === "POST") return { action: "create_holding", portfolio_id };
+    return null;
+  }
+
+  const holdingMatch = pathname.match(/^\/v1\/portfolios\/([^/]+)\/holdings\/([^/]+)$/);
+  if (holdingMatch) {
+    const portfolio_id = holdingMatch[1];
+    const portfolio_holding_id = holdingMatch[2];
+    if (!isUuidV4(portfolio_id) || !isUuidV4(portfolio_holding_id)) return null;
+    if (method === "DELETE") return { action: "delete_holding", portfolio_id, portfolio_holding_id };
+    return null;
   }
 
   return null;
