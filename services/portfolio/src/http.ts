@@ -66,20 +66,8 @@ export function createPortfolioServer(db: QueryExecutor): Server {
           return;
         }
         case "create": {
-          const body = await readBody(req);
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(body);
-          } catch {
-            respond(res, 400, { error: "request body must be valid JSON" });
-            return;
-          }
-          try {
-            assertPortfolioCreateInput(parsed);
-          } catch (err) {
-            respond(res, 400, { error: errorMessage(err, "invalid portfolio input") });
-            return;
-          }
+          const parsed = await parseAndAssert(req, res, assertPortfolioCreateInput, "invalid portfolio input");
+          if (parsed === null) return;
           const portfolio = await createPortfolio(db, userId, parsed);
           respond(res, 201, { portfolio } satisfies CreatePortfolioResponse);
           return;
@@ -103,20 +91,8 @@ export function createPortfolioServer(db: QueryExecutor): Server {
         }
         case "create_holding": {
           await assertPortfolioOwned(db, userId, route.portfolio_id);
-          const body = await readBody(req);
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(body);
-          } catch {
-            respond(res, 400, { error: "request body must be valid JSON" });
-            return;
-          }
-          try {
-            assertPortfolioHoldingCreateInput(parsed);
-          } catch (err) {
-            respond(res, 400, { error: errorMessage(err, "invalid holding input") });
-            return;
-          }
+          const parsed = await parseAndAssert(req, res, assertPortfolioHoldingCreateInput, "invalid holding input");
+          if (parsed === null) return;
           const holding = await createHolding(db, route.portfolio_id, parsed);
           respond(res, 201, { holding } satisfies CreateHoldingResponse);
           return;
@@ -129,20 +105,8 @@ export function createPortfolioServer(db: QueryExecutor): Server {
           return;
         }
         case "overlay_inputs": {
-          const body = await readBody(req);
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(body);
-          } catch {
-            respond(res, 400, { error: "request body must be valid JSON" });
-            return;
-          }
-          try {
-            assertOverlayInputsRequest(parsed);
-          } catch (err) {
-            respond(res, 400, { error: errorMessage(err, "invalid overlay input request") });
-            return;
-          }
+          const parsed = await parseAndAssert(req, res, assertOverlayInputsRequest, "invalid overlay input request");
+          if (parsed === null) return;
           const overlays = await getOverlayInputs(db, userId, parsed.subject_refs);
           respond(res, 200, { overlays } satisfies OverlayInputsResponse);
           return;
@@ -237,6 +201,31 @@ function readUserId(req: IncomingMessage): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return isUuidV4(trimmed) ? trimmed : null;
+}
+
+// Reads, parses, and contract-validates a JSON body in one shot. Responds 400
+// and returns `null` on any failure so the caller can `return` immediately.
+async function parseAndAssert<T>(
+  req: IncomingMessage,
+  res: ServerResponse,
+  assert: (raw: unknown) => asserts raw is T,
+  fallback: string,
+): Promise<T | null> {
+  const body = await readBody(req);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    respond(res, 400, { error: "request body must be valid JSON" });
+    return null;
+  }
+  try {
+    assert(parsed);
+  } catch (err) {
+    respond(res, 400, { error: errorMessage(err, fallback) });
+    return null;
+  }
+  return parsed;
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {

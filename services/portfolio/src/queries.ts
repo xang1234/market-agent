@@ -221,11 +221,10 @@ type OverlayInputRow = {
   closed_at: Date | string | null;
 };
 
-// Bulk-fetches overlay contributions for the given subjects, scoped to the
-// caller's own portfolios. The lockstep `unnest($2::text[], $3::uuid[])`
-// pairs (kind[i], id[i]) so the join filters on exact matches without a
-// cartesian explosion. Subjects with no contributions get an empty
-// contributions array — the response shape stays predictable per request.
+// `unnest($2::text[], $3::uuid[])` lockstep-pairs (kind[i], id[i]) so the
+// join filters on exact (kind, id) matches in one round trip — no cartesian
+// product, no N+1. Subjects with no contributions surface as an empty array
+// so the response shape stays predictable per request.
 export async function getOverlayInputs(
   db: QueryExecutor,
   userId: string,
@@ -250,18 +249,23 @@ export async function getOverlayInputs(
 
   const bySubjectKey = new Map<string, OverlayContribution[]>();
   for (const row of result.rows) {
-    const key = `${row.subject_kind}|${row.subject_id}`;
-    const list = bySubjectKey.get(key) ?? [];
-    if (list.length === 0) bySubjectKey.set(key, list);
+    const key = subjectKey(row.subject_kind, row.subject_id);
+    let list = bySubjectKey.get(key);
+    if (!list) {
+      list = [];
+      bySubjectKey.set(key, list);
+    }
     list.push(toOverlayContribution(row));
   }
 
-  // One entry per requested subject_ref preserves caller order and gives
-  // the client a predictable shape even when nothing is held.
   return subjectRefs.map((subject_ref) => ({
     subject_ref,
-    contributions: bySubjectKey.get(`${subject_ref.kind}|${subject_ref.id}`) ?? [],
+    contributions: bySubjectKey.get(subjectKey(subject_ref.kind, subject_ref.id)) ?? [],
   }));
+}
+
+function subjectKey(kind: HoldingSubjectKind, id: string): string {
+  return `${kind}|${id}`;
 }
 
 function toOverlayContribution(row: OverlayInputRow): OverlayContribution {

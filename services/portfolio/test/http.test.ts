@@ -1,35 +1,7 @@
-import test, { type TestContext } from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
-import type { AddressInfo } from "node:net";
-import type { Client } from "pg";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { createPortfolioServer } from "../src/http.ts";
-
-async function startServer(t: TestContext, db: Parameters<typeof createPortfolioServer>[0]): Promise<string> {
-  const server = createPortfolioServer(db);
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
-  const { port } = server.address() as AddressInfo;
-  return `http://127.0.0.1:${port}`;
-}
-
-async function seedUser(client: Client, email: string): Promise<string> {
-  const result = await client.query<{ user_id: string }>(
-    `insert into users (email) values ($1) returning user_id`,
-    [email],
-  );
-  return result.rows[0].user_id;
-}
-
-function withUser(userId: string, init: RequestInit = {}): RequestInit {
-  return {
-    ...init,
-    headers: {
-      ...(init.headers ?? {}),
-      "x-user-id": userId,
-    },
-  };
-}
+import { seedUser, startServer, withUser } from "./helpers.ts";
 
 test("server: missing x-user-id header returns 401", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {

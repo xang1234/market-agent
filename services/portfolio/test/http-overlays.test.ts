@@ -1,66 +1,7 @@
-import test, { type TestContext } from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
-import type { AddressInfo } from "node:net";
-import type { Client } from "pg";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { createPortfolioServer } from "../src/http.ts";
-
-async function startServer(t: TestContext, db: Parameters<typeof createPortfolioServer>[0]): Promise<string> {
-  const server = createPortfolioServer(db);
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
-  const { port } = server.address() as AddressInfo;
-  return `http://127.0.0.1:${port}`;
-}
-
-async function seedUser(client: Client, email: string): Promise<string> {
-  const result = await client.query<{ user_id: string }>(
-    `insert into users (email) values ($1) returning user_id`,
-    [email],
-  );
-  return result.rows[0].user_id;
-}
-
-function withUser(userId: string, init: RequestInit = {}): RequestInit {
-  return {
-    ...init,
-    headers: {
-      ...(init.headers ?? {}),
-      "x-user-id": userId,
-    },
-  };
-}
-
-async function createPortfolioFor(base: string, userId: string, body: { name: string; base_currency: string }): Promise<string> {
-  const res = await fetch(
-    `${base}/v1/portfolios`,
-    withUser(userId, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }),
-  );
-  assert.equal(res.status, 201);
-  const json = (await res.json()) as { portfolio: { portfolio_id: string } };
-  return json.portfolio.portfolio_id;
-}
-
-async function addHolding(
-  base: string,
-  userId: string,
-  portfolioId: string,
-  body: Record<string, unknown>,
-): Promise<void> {
-  const res = await fetch(
-    `${base}/v1/portfolios/${portfolioId}/holdings`,
-    withUser(userId, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }),
-  );
-  assert.equal(res.status, 201);
-}
+import { addHolding, createPortfolioFor, seedUser, startServer, withUser } from "./helpers.ts";
 
 const APPLE_INSTRUMENT = "11111111-1111-4111-a111-111111111111";
 const MSFT_INSTRUMENT = "22222222-2222-4222-a222-222222222222";
@@ -81,7 +22,7 @@ type OverlayResponse = {
   }>;
 };
 
-test("overlays: USD and EUR portfolios holding the same subject contribute separately (cw0.9.3 verification)", { timeout: 120000 }, async (t) => {
+test("overlays: USD and EUR portfolios holding the same subject contribute separately", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for portfolio coverage");
     return;
@@ -91,18 +32,22 @@ test("overlays: USD and EUR portfolios holding the same subject contribute separ
   const userId = await seedUser(client, "overlay-distinct-fx@example.test");
   const base = await startServer(t, client);
 
-  const usdPid = await createPortfolioFor(base, userId, { name: "Core USD", base_currency: "USD" });
-  const eurPid = await createPortfolioFor(base, userId, { name: "Core EUR", base_currency: "EUR" });
-  await addHolding(base, userId, usdPid, {
-    subject_ref: { kind: "instrument", id: APPLE_INSTRUMENT },
-    quantity: 100,
-    cost_basis: 17500,
-  });
-  await addHolding(base, userId, eurPid, {
-    subject_ref: { kind: "instrument", id: APPLE_INSTRUMENT },
-    quantity: 50,
-    cost_basis: 8200,
-  });
+  const [usdPid, eurPid] = await Promise.all([
+    createPortfolioFor(base, userId, { name: "Core USD", base_currency: "USD" }),
+    createPortfolioFor(base, userId, { name: "Core EUR", base_currency: "EUR" }),
+  ]);
+  await Promise.all([
+    addHolding(base, userId, usdPid, {
+      subject_ref: { kind: "instrument", id: APPLE_INSTRUMENT },
+      quantity: 100,
+      cost_basis: 17500,
+    }),
+    addHolding(base, userId, eurPid, {
+      subject_ref: { kind: "instrument", id: APPLE_INSTRUMENT },
+      quantity: 50,
+      cost_basis: 8200,
+    }),
+  ]);
 
   const res = await fetch(
     `${base}/v1/portfolios/overlays`,
@@ -241,17 +186,19 @@ test("overlays: held_state is 'closed' when closed_at is set, 'open' otherwise",
   const base = await startServer(t, client);
   const pid = await createPortfolioFor(base, userId, { name: "Core", base_currency: "USD" });
 
-  await addHolding(base, userId, pid, {
-    subject_ref: { kind: "instrument", id: APPLE_INSTRUMENT },
-    quantity: 100,
-    opened_at: "2025-01-15T00:00:00.000Z",
-  });
-  await addHolding(base, userId, pid, {
-    subject_ref: { kind: "instrument", id: MSFT_INSTRUMENT },
-    quantity: 50,
-    opened_at: "2025-01-15T00:00:00.000Z",
-    closed_at: "2025-12-31T00:00:00.000Z",
-  });
+  await Promise.all([
+    addHolding(base, userId, pid, {
+      subject_ref: { kind: "instrument", id: APPLE_INSTRUMENT },
+      quantity: 100,
+      opened_at: "2025-01-15T00:00:00.000Z",
+    }),
+    addHolding(base, userId, pid, {
+      subject_ref: { kind: "instrument", id: MSFT_INSTRUMENT },
+      quantity: 50,
+      opened_at: "2025-01-15T00:00:00.000Z",
+      closed_at: "2025-12-31T00:00:00.000Z",
+    }),
+  ]);
 
   const res = await fetch(
     `${base}/v1/portfolios/overlays`,
