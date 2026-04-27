@@ -11,6 +11,7 @@ and inventing their own join semantics.
 ## Status
 
 - `fra-cw0.7.1` — query envelope + validator (`src/query.ts`, `src/fields.ts`)
+- `fra-cw0.7.2` — result-row + response envelope (`src/result.ts`, `src/subject-ref.ts`)
 
 ## Commands
 
@@ -46,3 +47,33 @@ type ScreenerQuery = {
 suitable for use as a cache-identity input or as the body of a persisted
 `screen` subject (cw0.7.3). `assertScreenerQueryContract(value)` is the
 cross-boundary type-narrowing assertion for HTTP handlers and replay.
+
+## Result-row + response contract
+
+Each row is intentionally thinner than symbol-detail hydration: identity +
+display + rank + compact quote and fundamentals summaries — sufficient
+for screener-table rendering, no more. Selecting a row hands off
+`row.subject_ref` (canonical `{kind, id}`) to the symbol-entry flow.
+
+```ts
+type ScreenerResultRow = {
+  subject_ref: { kind: "issuer" | "instrument" | "listing"; id: UUID };
+  display: { primary: string; ticker?; mic?; legal_name?; share_class? };
+  rank: number;             // 1-based, strictly increasing across rows
+  quote: ScreenerQuoteSummary;        // fixed shape, nullable numerics
+  fundamentals: ScreenerFundamentalsSummary;
+};
+
+type ScreenerResponse = {
+  query: ScreenerQuery;             // echoed for replay / cache identity
+  rows: ReadonlyArray<ScreenerResultRow>;
+  total_count: number;              // matches before pagination
+  page: ScreenerPage;               // must echo query.page exactly
+  as_of: string;
+  snapshot_compatible: boolean;
+};
+```
+
+`normalizedScreenerResponse(input)` and `assertScreenerResponseContract(value)`
+mirror the query-side helpers: freeze + canonicalize on the trust side,
+type-narrow assertion at HTTP/replay boundaries.
