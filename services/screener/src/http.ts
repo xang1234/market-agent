@@ -79,7 +79,7 @@ export function createScreenerServer(deps: ScreenerServerDeps): Server {
         return;
       }
       console.error("screener request failed", error);
-      if (!res.headersSent) respond(res, 502, { error: "screener request failed" });
+      if (!res.headersSent) respond(res, 500, { error: "internal screener error" });
     }
   });
 }
@@ -163,11 +163,11 @@ async function handleSaveScreen(
   const screen_id =
     typeof raw.screen_id === "string" ? raw.screen_id : randomUUID();
   const now = clock().toISOString();
-  // For a new screen the client typically omits timestamps; for a replace
-  // they may pass created_at to preserve original birth time. updated_at
-  // is always bumped server-side so the on-wire updated_at can't lie.
-  const created_at =
-    typeof raw.created_at === "string" ? raw.created_at : now;
+  // The server is authoritative for both timestamps. created_at is preserved
+  // from the existing record on replace; updated_at is always bumped to `now`
+  // so neither can be spoofed by the client.
+  const existing = isUuidV4(screen_id) ? await deps.screens.find(screen_id) : null;
+  const created_at = existing?.created_at ?? now;
   const updated_at = now;
 
   let screen: ScreenSubject;

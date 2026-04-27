@@ -172,6 +172,44 @@ test("POST /v1/screener/screens with the same screen_id replaces and returns 200
   });
 });
 
+test("POST /v1/screener/screens replace preserves original created_at even when client omits it", async () => {
+  // Server is authoritative for created_at — a PUT-shaped replace body
+  // without timestamps must NOT rewrite the screen's birth time. The
+  // updated_at clock advances; created_at stays.
+  let now = new Date("2026-04-22T15:30:00.000Z");
+  const clock = () => now;
+
+  await withServer({ clock }, async (baseUrl) => {
+    const created = (await (
+      await fetch(`${baseUrl}/v1/screener/screens`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "v1", definition: baseQuery() }),
+      })
+    ).json()) as { screen: ScreenSubject };
+    const original_created_at = created.screen.created_at;
+
+    now = new Date("2026-05-01T10:00:00.000Z");
+    const replaced = (await (
+      await fetch(`${baseUrl}/v1/screener/screens`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        // Deliberately omit created_at — the server must look up the
+        // existing record and preserve it rather than defaulting to now.
+        body: JSON.stringify({
+          screen_id: created.screen.screen_id,
+          name: "v2",
+          definition: baseQuery(),
+        }),
+      })
+    ).json()) as { status: string; screen: ScreenSubject };
+
+    assert.equal(replaced.status, "replaced");
+    assert.equal(replaced.screen.created_at, original_created_at);
+    assert.equal(replaced.screen.updated_at, "2026-05-01T10:00:00.000Z");
+  });
+});
+
 test("GET /v1/screener/screens lists saved screens", async () => {
   await withServer({}, async (baseUrl) => {
     await fetch(`${baseUrl}/v1/screener/screens`, {
