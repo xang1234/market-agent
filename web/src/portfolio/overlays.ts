@@ -3,13 +3,20 @@
 // subject_ref with the contributing portfolios; an empty contributions
 // list means the user holds no position in that subject.
 
-import type { SubjectRef } from '../symbol/search.ts'
+import type { SubjectKind, SubjectRef } from '../symbol/search.ts'
 
 export const PORTFOLIO_API_BASE = '/v1/portfolios'
 
 const USER_ID_HEADER = 'x-user-id'
 
-export type HeldSubjectKind = 'instrument' | 'listing'
+// Mirror of HOLDING_SUBJECT_KINDS in services/portfolio/src/holdings.ts.
+// Server enforces the same allowlist at the API boundary; this constant
+// keeps the web boundary check (`isHeldSubjectRef`) one-line-aligned with
+// the server contract.
+export const HELD_SUBJECT_KINDS = ['instrument', 'listing'] as const
+export type HeldSubjectKind = (typeof HELD_SUBJECT_KINDS)[number]
+
+export type HeldSubjectRef = SubjectRef & { kind: HeldSubjectKind }
 
 export type HeldState = 'open' | 'closed'
 
@@ -25,7 +32,7 @@ export type OverlayContribution = {
 }
 
 export type SubjectOverlay = {
-  subject_ref: { kind: HeldSubjectKind; id: string }
+  subject_ref: HeldSubjectRef
   contributions: ReadonlyArray<OverlayContribution>
 }
 
@@ -40,15 +47,13 @@ export class PortfolioFetchError extends Error {
   }
 }
 
-export function isHeldSubjectRef(
-  ref: SubjectRef,
-): ref is { kind: HeldSubjectKind; id: string } {
-  return ref.kind === 'instrument' || ref.kind === 'listing'
+export function isHeldSubjectRef(ref: SubjectRef): ref is HeldSubjectRef {
+  return (HELD_SUBJECT_KINDS as ReadonlyArray<SubjectKind>).includes(ref.kind)
 }
 
 export async function fetchOverlays(args: {
   userId: string
-  subjectRefs: ReadonlyArray<{ kind: HeldSubjectKind; id: string }>
+  subjectRefs: ReadonlyArray<HeldSubjectRef>
   endpoint?: string
   fetchImpl?: FetchImpl
   signal?: AbortSignal

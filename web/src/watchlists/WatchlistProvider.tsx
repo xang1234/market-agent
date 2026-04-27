@@ -1,12 +1,13 @@
-// Shared owner of the manual-watchlist membership state. Lifted out of
-// WatchlistSlot so the subject-detail header (cw0.10.2) can read membership
-// without double-fetching, and so an add from the rail is observed live by
-// every surface that derives from the same list.
-
-import type { ReactNode } from 'react'
-import { useManualWatchlist } from './useManualWatchlist'
+import { useMemo, type ReactNode } from 'react'
+import { useManualWatchlist, type ManualWatchlistState } from './useManualWatchlist'
 import { WatchlistContext } from './watchlistContext'
 
+// Mounts useManualWatchlist once at the workspace level so the rail and
+// the subject-detail header read from one source — an add from the rail
+// is observed live by the header. The context value is memoized so
+// consumers don't re-render on every shell render. With userId === null
+// the inner hook stays in 'idle' and never fires a fetch (see
+// useManualWatchlist).
 export function WatchlistProvider({
   userId,
   children,
@@ -14,6 +15,10 @@ export function WatchlistProvider({
   userId: string | null
   children: ReactNode
 }) {
-  const watchlist = useManualWatchlist(userId)
-  return <WatchlistContext.Provider value={watchlist}>{children}</WatchlistContext.Provider>
+  const { members, status, message, addSubject, removeSubject } = useManualWatchlist(userId)
+  const value = useMemo<ManualWatchlistState>(
+    () => ({ members, status, message, addSubject, removeSubject }),
+    [members, status, message, addSubject, removeSubject],
+  )
+  return <WatchlistContext.Provider value={value}>{children}</WatchlistContext.Provider>
 }

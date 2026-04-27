@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { SubjectRef, WatchlistMember } from './membership.ts'
-import { subjectMembershipBadges } from './subjectMembership.ts'
+import { isSubjectWatchlisted } from './subjectMembership.ts'
 
 const APPLE_LISTING: SubjectRef = {
   kind: 'listing',
@@ -17,50 +17,21 @@ const member = (ref: SubjectRef): WatchlistMember => ({
   created_at: '2026-04-27T00:00:00Z',
 })
 
-test('badges reports both flags independently when subject is watchlisted AND held', () => {
-  const badges = subjectMembershipBadges({
-    subjectRef: APPLE_LISTING,
-    watchlistMembers: [member(APPLE_LISTING)],
-    held: true,
-  })
-  assert.deepStrictEqual(badges, { watchlisted: true, held: true })
+test('isSubjectWatchlisted true when the exact ref is in the list', () => {
+  assert.equal(isSubjectWatchlisted(APPLE_LISTING, [member(APPLE_LISTING)]), true)
 })
 
-test('badges does NOT collapse the two states — held alone keeps watchlisted false', () => {
-  const badges = subjectMembershipBadges({
-    subjectRef: APPLE_LISTING,
-    watchlistMembers: [member(MICROSOFT_LISTING)],
-    held: true,
-  })
-  assert.deepStrictEqual(badges, { watchlisted: false, held: true })
+test('isSubjectWatchlisted false when the list contains a different subject', () => {
+  assert.equal(isSubjectWatchlisted(APPLE_LISTING, [member(MICROSOFT_LISTING)]), false)
 })
 
-test('badges reports watchlisted alone when not held', () => {
-  const badges = subjectMembershipBadges({
-    subjectRef: APPLE_LISTING,
-    watchlistMembers: [member(APPLE_LISTING)],
-    held: false,
-  })
-  assert.deepStrictEqual(badges, { watchlisted: true, held: false })
+test('isSubjectWatchlisted false on an empty list', () => {
+  assert.equal(isSubjectWatchlisted(APPLE_LISTING, []), false)
 })
 
-test('badges reports neither when the subject is unknown to both surfaces', () => {
-  const badges = subjectMembershipBadges({
-    subjectRef: APPLE_LISTING,
-    watchlistMembers: [member(MICROSOFT_LISTING)],
-    held: false,
-  })
-  assert.deepStrictEqual(badges, { watchlisted: false, held: false })
-})
-
-test('watchlist match requires both kind and id to match (cross-kind id collisions are not members)', () => {
-  // A theme with the same UUID as a listing must not register as the
-  // listing being watchlisted. Subject identity is (kind, id), not id alone.
+test('isSubjectWatchlisted requires both kind and id to match (cross-kind id collisions are not members)', () => {
+  // Pins the contract that subject identity is (kind, id), not id alone.
+  // A theme with the same UUID as a listing must not register.
   const themeWithSameId: SubjectRef = { kind: 'theme', id: APPLE_LISTING.id }
-  const badges = subjectMembershipBadges({
-    subjectRef: APPLE_LISTING,
-    watchlistMembers: [member(themeWithSameId)],
-    held: false,
-  })
-  assert.deepStrictEqual(badges, { watchlisted: false, held: false })
+  assert.equal(isSubjectWatchlisted(APPLE_LISTING, [member(themeWithSameId)]), false)
 })

@@ -58,9 +58,9 @@ export function SubjectDetailShell() {
         className="border-b border-neutral-200 px-8 py-5 dark:border-neutral-800"
       >
         <QuoteSnapshot subject={subject} />
-        <div className="mt-3">
+        {userId !== null ? (
           <SubjectMembershipBadges subjectRef={subject.subject_ref} userId={userId} />
-        </div>
+        ) : null}
         <div className="mt-4 flex items-center gap-2">
           <SaveToWatchlistButton subject={subject} />
           <AnalyzeThisSubjectButton subject={subject} />
