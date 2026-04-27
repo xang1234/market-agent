@@ -17,7 +17,6 @@ import { isUuidV4 } from "./validators.ts";
 
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
 const USER_ID_HEADER = "x-user-id";
-const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 class RequestBodyTooLargeError extends Error {
   constructor() {
@@ -135,7 +134,7 @@ function readUserId(req: IncomingMessage): string | null {
   const value = Array.isArray(raw) ? raw[0] : raw;
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
-  return USER_ID_PATTERN.test(trimmed) ? trimmed : null;
+  return isUuidV4(trimmed) ? trimmed : null;
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {

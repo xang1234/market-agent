@@ -1,5 +1,5 @@
 import type { QueryResult } from "pg";
-import type { Portfolio } from "./portfolio.ts";
+import type { Portfolio, PortfolioCreateInput } from "./portfolio.ts";
 
 // Matches the watchlists / resolver minimal queryable surface. `pg.Client` and
 // `pg.Pool` both satisfy it; tests stub it without importing the full pg type.
@@ -42,7 +42,7 @@ function toPortfolio(row: PortfolioRow): Portfolio {
 export async function createPortfolio(
   db: QueryExecutor,
   userId: string,
-  input: { name: string; base_currency: string },
+  input: PortfolioCreateInput,
 ): Promise<Portfolio> {
   const result = await db.query<PortfolioRow>(
     `insert into portfolios (user_id, name, base_currency)
