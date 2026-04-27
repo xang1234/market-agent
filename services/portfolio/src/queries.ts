@@ -233,11 +233,17 @@ export async function getOverlayInputs(
   const kinds = subjectRefs.map((r) => r.kind);
   const ids = subjectRefs.map((r) => r.id);
 
+  // `select distinct` inside the unnest subquery deduplicates duplicate
+  // (kind, id) pairs in the input. Without it, a duplicate input would
+  // produce multiple identical join rows and N× the real contributions
+  // for that subject. The response still emits one entry per
+  // caller-supplied subject_ref (duplicates included) — the fix is to
+  // ensure each entry's contributions list isn't multiplied.
   const result = await db.query<OverlayInputRow>(
     `select ph.subject_kind, ph.subject_id,
             p.portfolio_id, p.name as portfolio_name, p.base_currency,
             ph.quantity, ph.cost_basis, ph.opened_at, ph.closed_at
-       from unnest($2::text[], $3::uuid[]) as q(kind, id)
+       from (select distinct kind, id from unnest($2::text[], $3::uuid[]) as t(kind, id)) as q
        join portfolio_holdings ph
          on ph.subject_kind = q.kind::subject_kind and ph.subject_id = q.id
        join portfolios p

@@ -79,6 +79,47 @@ test("overlays: USD and EUR portfolios holding the same subject contribute separ
   assert.equal(eur.portfolio_id, eurPid);
 });
 
+test("overlays: duplicate subject_refs do not multiply contributions (PR #28 review)", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for portfolio coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-cw0-9-3");
+  const client = await connectedClient(t, databaseUrl);
+  const userId = await seedUser(client, "overlay-dup-refs@example.test");
+  const base = await startServer(t, client);
+  const pid = await createPortfolioFor(base, userId, { name: "Core", base_currency: "USD" });
+  await addHolding(base, userId, pid, {
+    subject_ref: { kind: "instrument", id: APPLE_INSTRUMENT },
+    quantity: 100,
+    cost_basis: 17500,
+  });
+
+  const res = await fetch(
+    `${base}/v1/portfolios/overlays`,
+    withUser(userId, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        subject_refs: [
+          { kind: "instrument", id: APPLE_INSTRUMENT },
+          { kind: "instrument", id: APPLE_INSTRUMENT },
+        ],
+      }),
+    }),
+  );
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as OverlayResponse;
+  // The response still mirrors caller order (one entry per requested subject_ref),
+  // but each entry's contributions list reflects exactly one holding — not two.
+  assert.equal(body.overlays.length, 2);
+  for (const entry of body.overlays) {
+    assert.equal(entry.contributions.length, 1, "duplicate input must not multiply contributions");
+    assert.equal(entry.contributions[0].quantity, 100);
+    assert.equal(entry.contributions[0].cost_basis, 17500);
+  }
+});
+
 test("overlays: empty contributions for a subject with no holdings", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for portfolio coverage");
