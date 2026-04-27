@@ -12,6 +12,7 @@ and inventing their own join semantics.
 
 - `fra-cw0.7.1` — query envelope + validator (`src/query.ts`, `src/fields.ts`)
 - `fra-cw0.7.2` — result-row + response envelope (`src/result.ts`, `src/subject-ref.ts`)
+- `fra-cw0.7.3` — persistable `screen` subject + replay (`src/screen-subject.ts`)
 
 ## Commands
 
@@ -77,3 +78,42 @@ type ScreenerResponse = {
 `normalizedScreenerResponse(input)` and `assertScreenerResponseContract(value)`
 mirror the query-side helpers: freeze + canonicalize on the trust side,
 type-narrow assertion at HTTP/replay boundaries.
+
+## Persistable `screen` subject
+
+A `screen` is a canonical SubjectKind in its own right (one of seven —
+issuer/instrument/listing/theme/macro_topic/portfolio/screen). It is
+the *named, persisted screener query* that downstream subjects (dynamic
+watchlists, themes, agents) reference when they want to "include the
+universe from screen X."
+
+```ts
+type ScreenSubject = {
+  screen_id: UUID;
+  name: string;                       // <= 200 chars, non-empty
+  definition: ScreenerQuery;          // frozen, canonicalized
+  created_at: string;                 // ISO 8601 UTC
+  updated_at: string;                 // >= created_at
+};
+
+type ScreenSubjectRef = { kind: "screen"; id: UUID };
+```
+
+The defining contract is **"reopen runs the query; does NOT replay
+stale rows."** Three structural enforcements:
+
+1. `ScreenSubject` has no `rows` / `as_of` / `total_count` — a stale
+   snapshot has nowhere to live.
+2. `definition` is the frozen `ScreenerQuery` envelope (cw0.7.1), not
+   a string DSL — replay is byte-for-byte deterministic, no parser.
+3. `replayScreen(screen): ScreenerQuery` returns a query, not a
+   response. Any caller that wants rows hands the query back to the
+   screener service for fresh execution.
+
+```ts
+persistScreen({ screen_id, name, definition, created_at, updated_at? })
+  → frozen ScreenSubject
+replayScreen(screen) → ScreenerQuery     // ready for fresh execution
+screenSubjectRef(screen) → { kind: "screen", id: screen.screen_id }
+assertScreenSubjectContract(value)        // cross-boundary guard
+```
