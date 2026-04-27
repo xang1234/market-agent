@@ -9,6 +9,8 @@ import {
 import type { ConsensusRepository } from "./consensus-repository.ts";
 import type { EarningsEventsEnvelope } from "./earnings.ts";
 import type { EarningsRepository } from "./earnings-repository.ts";
+import { HOLDER_KINDS, type HolderKind, type HoldersEnvelope } from "./holders.ts";
+import type { HoldersRepository } from "./holders-repository.ts";
 import type { KeyStatsEnvelope } from "./key-stats.ts";
 import type { IssuerProfile } from "./profile.ts";
 import type { IssuerProfileRepository } from "./issuer-repository.ts";
@@ -41,6 +43,7 @@ export type FundamentalsServerDeps = {
   segments: SegmentsRepository;
   consensus: ConsensusRepository;
   earnings: EarningsRepository;
+  holders: HoldersRepository;
   source_id: UUID;
   clock?: () => Date;
 };
@@ -87,6 +90,10 @@ export type GetConsensusResponse = {
 
 export type GetEarningsResponse = {
   earnings: EarningsEventsEnvelope;
+};
+
+export type GetHoldersResponse = {
+  holders: HoldersEnvelope;
 };
 
 const MAX_REQUEST_BODY_BYTES = 64 * 1024;
@@ -173,6 +180,19 @@ export function createFundamentalsServer(deps: FundamentalsServerDeps): Server {
           respond(res, 200, response);
           return;
         }
+        case "get_holders": {
+          const outcome = await fetchHoldersOutcome(deps, clock, route.subject_id, route.kind);
+          if (!isAvailable(outcome)) {
+            respond(res, statusForUnavailable(outcome), {
+              error: "fundamentals holders unavailable",
+              unavailable: outcome,
+            });
+            return;
+          }
+          const response: GetHoldersResponse = { holders: outcome.data };
+          respond(res, 200, response);
+          return;
+        }
         case "get_segments": {
           const body = await readJsonBody(req, MAX_REQUEST_BODY_BYTES);
           if (body.kind === "error") {
@@ -218,6 +238,7 @@ type Route =
   | { action: "get_stats"; subject_id: string }
   | { action: "get_consensus"; subject_id: string }
   | { action: "get_earnings"; subject_id: string }
+  | { action: "get_holders"; subject_id: string; kind: HolderKind }
   | { action: "get_statements" }
   | { action: "get_segments" };
 
@@ -245,6 +266,16 @@ function matchRoute(method: string, rawUrl: string): Route | null {
   if (method === "GET" && pathname === "/v1/fundamentals/earnings") {
     const subjectId = issuerSubjectIdFromQuery(searchParams);
     return subjectId === null ? null : { action: "get_earnings", subject_id: subjectId };
+  }
+
+  if (method === "GET" && pathname === "/v1/fundamentals/holders") {
+    const subjectId = issuerSubjectIdFromQuery(searchParams);
+    if (subjectId === null) return null;
+    const kind = searchParams.get("kind");
+    if (kind === null || !(HOLDER_KINDS as ReadonlyArray<string>).includes(kind)) {
+      return null;
+    }
+    return { action: "get_holders", subject_id: subjectId, kind: kind as HolderKind };
   }
 
   if (method === "POST" && pathname === "/v1/fundamentals/statements") {
@@ -330,6 +361,24 @@ async function fetchEarningsOutcome(
       subject_id,
       clock().toISOString(),
       `earnings not found for issuer: ${subject_id}`,
+    );
+  }
+  return { outcome: "available", data: envelope };
+}
+
+async function fetchHoldersOutcome(
+  deps: FundamentalsServerDeps,
+  clock: () => Date,
+  subject_id: UUID,
+  kind: HolderKind,
+): Promise<FundamentalsOutcome<HoldersEnvelope>> {
+  const envelope = await deps.holders.find(subject_id, kind);
+  if (!envelope) {
+    return missingCoverage(
+      deps,
+      subject_id,
+      clock().toISOString(),
+      `${kind} holders not found for issuer: ${subject_id}`,
     );
   }
   return { outcome: "available", data: envelope };

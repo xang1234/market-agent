@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom'
+import { ANALYZE_PATH } from '../analyze/analyzeEntry'
 
 // Horizontal workspace tabs, sitting in the main-canvas header per the video
 // target. Replaces the prior left-nav list (bead fra-4pz IA refactor).
@@ -9,7 +10,7 @@ const PRIMARY_WORKSPACES = [
   { to: '/agents', label: 'Agents' },
   { to: '/chat', label: 'Chat' },
   { to: '/screener', label: 'Screener' },
-  { to: '/analyze', label: 'Analyze' },
+  { to: ANALYZE_PATH, label: 'Analyze' },
 ] as const
 
 export function PrimaryTabs() {

@@ -9,6 +9,7 @@ import {
 } from "../src/http.ts";
 import { createInMemoryConsensusRepository } from "../src/consensus-repository.ts";
 import { createInMemoryEarningsRepository } from "../src/earnings-repository.ts";
+import { createInMemoryHoldersRepository } from "../src/holders-repository.ts";
 import { createInMemoryIssuerProfileRepository } from "../src/issuer-repository.ts";
 import {
   createInMemorySegmentsRepository,
@@ -18,6 +19,10 @@ import { createInMemoryStatementRepository } from "../src/statement-repository.t
 import { createInMemoryStatsRepository } from "../src/stats-repository.ts";
 import { DEV_CONSENSUS_INPUTS } from "../src/dev-consensus-fixtures.ts";
 import { DEV_EARNINGS_INPUTS } from "../src/dev-earnings-fixtures.ts";
+import {
+  DEV_INSIDER_HOLDERS_INPUTS,
+  DEV_INSTITUTIONAL_HOLDERS_INPUTS,
+} from "../src/dev-holders-fixtures.ts";
 import {
   DEV_FUNDAMENTALS_SOURCE_ID,
   DEV_ISSUER_PROFILES,
@@ -40,6 +45,10 @@ function buildDeps(overrides: Partial<FundamentalsServerDeps> = {}): Fundamental
   const segments = createInMemorySegmentsRepository(DEV_SEGMENTS);
   const consensus = createInMemoryConsensusRepository(DEV_CONSENSUS_INPUTS);
   const earnings = createInMemoryEarningsRepository(DEV_EARNINGS_INPUTS);
+  const holders = createInMemoryHoldersRepository({
+    institutional: DEV_INSTITUTIONAL_HOLDERS_INPUTS,
+    insider: DEV_INSIDER_HOLDERS_INPUTS,
+  });
   return {
     profiles,
     stats,
@@ -47,6 +56,7 @@ function buildDeps(overrides: Partial<FundamentalsServerDeps> = {}): Fundamental
     segments,
     consensus,
     earnings,
+    holders,
     source_id: DEV_FUNDAMENTALS_SOURCE_ID,
     clock: () => FIXED_NOW,
     ...overrides,

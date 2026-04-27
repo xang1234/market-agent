@@ -21,6 +21,7 @@ import {
 } from '../../symbol/earnings.ts'
 import { currencyPrefix, formatCompactDollars, formatCurrency2 } from '../../symbol/format.ts'
 import { issuerIdFromSubject } from '../../symbol/profile.ts'
+import { Th } from '../../symbol/Th.tsx'
 import { useFetched } from '../../symbol/useFetched.ts'
 
 export function EarningsSection() {
@@ -160,17 +161,6 @@ function EarningsRow({ event, currency }: { event: EarningsEvent; currency: stri
         {formatSurprise(event.surprise_pct, event.surprise_direction)}
       </td>
     </tr>
-  )
-}
-
-function Th({ children, align }: { children: string; align?: 'right' }) {
-  return (
-    <th
-      scope="col"
-      className={`px-2 py-2 font-medium text-neutral-500 dark:text-neutral-400 ${align === 'right' ? 'text-right' : 'text-left'}`}
-    >
-      {children}
-    </th>
   )
 }
 
