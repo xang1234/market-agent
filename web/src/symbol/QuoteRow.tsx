@@ -1,55 +1,24 @@
-// Shared quote-row skeleton (cw0.10.1).
-//
-// Used by manual-watchlist members and portfolio-held holdings — both
-// surfaces present the same subject the same way. The contract is
-// "same subject renders identical values"; that identity is enforced
-// by routing the per-row hydration + presentation through one
-// component and one pure view function (`quoteRowView` in
-// quoteRowView.ts). The pure projection lives in its own .ts module so
-// the node:test harness can import it without a JSX loader.
+// Shared quote-row skeleton. Both watchlist members and portfolio holdings
+// route through this component so the same subject renders identically on
+// either surface. Hydration goes through `useFetched`; presentation comes
+// from the pure `quoteRowView` projection in quoteRowView.ts.
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import {
-  fetchQuoteSnapshot,
-  quoteBelongsToListing,
-  type QuoteDirection,
-} from './quote.ts'
-import { quoteRowView, type QuoteRowFetchState } from './quoteRowView.ts'
+import { fetchQuoteSnapshot, quoteBelongsToListing, type QuoteDirection } from './quote.ts'
+import { quoteRowView } from './quoteRowView.ts'
 import type { SubjectRef } from './search.ts'
-
-type FetchImpl = typeof fetch
+import { NEGATIVE_CLASS, NEUTRAL_CLASS, POSITIVE_CLASS } from './signedColor.ts'
+import { useFetched, type FetchedResult } from './useFetched.ts'
 
 type QuoteRowProps = {
   subjectRef: SubjectRef
   trailing?: ReactNode
-  fetchImpl?: FetchImpl
 }
 
-export function QuoteRow({ subjectRef, trailing, fetchImpl }: QuoteRowProps) {
+export function QuoteRow({ subjectRef, trailing }: QuoteRowProps) {
   const listingId = subjectRef.kind === 'listing' ? subjectRef.id : null
-  const [state, setState] = useState<QuoteRowFetchState>({ status: 'idle' })
-
-  useEffect(() => {
-    if (!listingId) return
-    const controller = new AbortController()
-    fetchQuoteSnapshot(listingId, { signal: controller.signal, fetchImpl })
-      .then((quote) => {
-        if (controller.signal.aborted) return
-        if (!quoteBelongsToListing(quote, listingId)) {
-          setState({ status: 'unavailable', listingId })
-          return
-        }
-        setState({ status: 'ready', listingId, quote })
-      })
-      .catch((err) => {
-        if (controller.signal.aborted) return
-        console.warn('quote row fetch failed', err)
-        setState({ status: 'unavailable', listingId })
-      })
-    return () => controller.abort()
-  }, [listingId, fetchImpl])
-
+  const state = useFetched(listingId, fetchQuoteForListing)
   const view = quoteRowView(state, subjectRef)
 
   return (
@@ -73,7 +42,7 @@ export function QuoteRow({ subjectRef, trailing, fetchImpl }: QuoteRowProps) {
               <span className="block tabular-nums font-medium text-neutral-900 dark:text-neutral-50">
                 {view.price.text}
               </span>
-              <span className={`block text-[10px] tabular-nums ${moveClassName(view.price.direction)}`}>
+              <span className={`block text-[10px] tabular-nums ${DIRECTION_CLASS[view.price.direction]}`}>
                 {view.price.percent}
               </span>
             </>
@@ -87,8 +56,19 @@ export function QuoteRow({ subjectRef, trailing, fetchImpl }: QuoteRowProps) {
   )
 }
 
-function moveClassName(direction: QuoteDirection): string {
-  if (direction === 'up') return 'text-emerald-700 dark:text-emerald-400'
-  if (direction === 'down') return 'text-red-700 dark:text-red-400'
-  return 'text-neutral-500 dark:text-neutral-400'
+const DIRECTION_CLASS: Readonly<Record<QuoteDirection, string>> = {
+  up: POSITIVE_CLASS,
+  down: NEGATIVE_CLASS,
+  flat: NEUTRAL_CLASS,
+}
+
+async function fetchQuoteForListing(
+  listingId: string,
+  signal: AbortSignal,
+): Promise<FetchedResult<Awaited<ReturnType<typeof fetchQuoteSnapshot>>>> {
+  const quote = await fetchQuoteSnapshot(listingId, { signal })
+  if (!quoteBelongsToListing(quote, listingId)) {
+    return { kind: 'unavailable', reason: 'listing mismatch' }
+  }
+  return { kind: 'ready', data: quote }
 }

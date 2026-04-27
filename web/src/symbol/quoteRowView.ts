@@ -1,26 +1,20 @@
-// Pure projection from per-row fetch state to display fields.
-//
-// Lives in its own .ts module (no JSX) so the node:test harness — which
-// runs with `--experimental-strip-types` and can't process .tsx — can
-// import the pure view directly. The shared component in QuoteRow.tsx
-// is a thin renderer over this projection; both watchlist and held
-// surfaces flow through it, which is what the cw0.10.1 verification
-// "same subject renders identical values" actually pins down.
+// Pure projection from a fetched-quote state to the row's display fields.
+// Lives in its own .ts module (no JSX) so node:test can import it directly.
+// `<QuoteRow>` is a thin renderer over this projection; both watchlist and
+// held surfaces flow through it, which is what pins down the cw0.10.1
+// "same subject renders identical values" verification.
 
 import {
   formatQuotePrice,
   formatSignedPercent,
-  quoteBelongsToListing,
   quoteDirection,
   type QuoteDirection,
   type QuoteSnapshot,
 } from './quote.ts'
 import { symbolDetailPathForSubject, type SubjectRef } from './search.ts'
+import type { VisibleFetchState } from './useFetched.ts'
 
-export type QuoteRowFetchState =
-  | { status: 'idle' }
-  | { status: 'unavailable'; listingId: string }
-  | { status: 'ready'; listingId: string; quote: QuoteSnapshot }
+export type QuoteRowState = VisibleFetchState<QuoteSnapshot>
 
 export type QuoteRowView = {
   href: string
@@ -29,20 +23,11 @@ export type QuoteRowView = {
   price: { text: string; direction: QuoteDirection; percent: string; freshness: string } | null
 }
 
-export function quoteRowView(
-  state: QuoteRowFetchState,
-  subjectRef: SubjectRef,
-): QuoteRowView {
+export function quoteRowView(state: QuoteRowState, subjectRef: SubjectRef): QuoteRowView {
   const href = symbolDetailPathForSubject(subjectRef)
-  const listingId = subjectRef.kind === 'listing' ? subjectRef.id : null
 
-  if (
-    state.status === 'ready' &&
-    listingId !== null &&
-    state.listingId === listingId &&
-    quoteBelongsToListing(state.quote, listingId)
-  ) {
-    const { quote } = state
+  if (state.status === 'ready') {
+    const quote = state.data
     return {
       href,
       primary: quote.listing.ticker,
@@ -56,13 +41,9 @@ export function quoteRowView(
     }
   }
 
-  const isLoading =
-    listingId !== null &&
-    !(state.status === 'unavailable' && state.listingId === listingId)
-
   return {
     href,
-    primary: isLoading ? 'Loading…' : truncateId(subjectRef.id),
+    primary: state.status === 'loading' ? 'Loading…' : truncateId(subjectRef.id),
     secondary: subjectRef.kind,
     price: null,
   }

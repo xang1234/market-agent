@@ -1,10 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import {
-  quoteRowView,
-  type QuoteRowFetchState,
-  type QuoteRowView,
-} from './quoteRowView.ts'
+import { quoteRowView, type QuoteRowState, type QuoteRowView } from './quoteRowView.ts'
 import type { QuoteSnapshot } from './quote.ts'
 import type { SubjectRef } from './search.ts'
 
@@ -28,16 +24,8 @@ const APPLE_QUOTE: QuoteSnapshot = {
   source_id: '00000000-0000-4000-a000-000000000001',
 }
 
-const READY_STATE: QuoteRowFetchState = {
-  status: 'ready',
-  listingId: APPLE_LISTING_ID,
-  quote: APPLE_QUOTE,
-}
+const READY_STATE: QuoteRowState = { status: 'ready', data: APPLE_QUOTE }
 
-// Snapshot used by the "shared render" verification (cw0.10.1): the
-// expected projection of (READY_STATE, APPLE_LISTING_REF) is recorded
-// here so any future drift in the watchlist or held surface is caught
-// the moment it touches the view shape.
 const APPLE_READY_VIEW: QuoteRowView = {
   href: `/symbol/${encodeURIComponent('listing:' + APPLE_LISTING_ID)}/overview`,
   primary: 'AAPL',
@@ -55,10 +43,6 @@ test('quoteRowView projects a ready quote for a listing-kind subject', () => {
 })
 
 test('quoteRowView produces identical output on repeated calls (shared-render contract)', () => {
-  // The contract from fra-cw0.10.1 says the same subject must render
-  // identical values across both watchlist and held surfaces. Both
-  // surfaces consume `quoteRowView`; identity is purely a function of
-  // its inputs being equal.
   const first = quoteRowView(READY_STATE, APPLE_LISTING_REF)
   const second = quoteRowView(READY_STATE, APPLE_LISTING_REF)
   assert.deepStrictEqual(first, second)
@@ -66,7 +50,7 @@ test('quoteRowView produces identical output on repeated calls (shared-render co
 })
 
 test('quoteRowView returns a loading view while a listing has not resolved yet', () => {
-  const view = quoteRowView({ status: 'idle' }, APPLE_LISTING_REF)
+  const view = quoteRowView({ status: 'loading' }, APPLE_LISTING_REF)
   assert.equal(view.primary, 'Loading…')
   assert.equal(view.secondary, 'listing')
   assert.equal(view.price, null)
@@ -74,7 +58,7 @@ test('quoteRowView returns a loading view while a listing has not resolved yet',
 
 test('quoteRowView falls back to a truncated id when the listing is unavailable', () => {
   const view = quoteRowView(
-    { status: 'unavailable', listingId: APPLE_LISTING_ID },
+    { status: 'unavailable', reason: 'listing mismatch' },
     APPLE_LISTING_REF,
   )
   assert.equal(view.primary, '11111111…')
@@ -82,23 +66,12 @@ test('quoteRowView falls back to a truncated id when the listing is unavailable'
   assert.equal(view.price, null)
 })
 
-test('quoteRowView shows the unavailable view for non-listing subjects regardless of state', () => {
-  // Held holdings can be instrument-kind (services/portfolio's
-  // HOLDING_SUBJECT_KINDS) — those don't resolve to a quote here.
+test('quoteRowView shows an idle view for non-listing subjects (no fetch keyed)', () => {
+  // useFetched returns 'idle' when its key is null — the case for held
+  // holdings whose subject_ref is instrument-kind (HOLDING_SUBJECT_KINDS
+  // in services/portfolio/src/holdings.ts).
   const view = quoteRowView({ status: 'idle' }, APPLE_INSTRUMENT_REF)
   assert.equal(view.primary, '44444444…')
   assert.equal(view.secondary, 'instrument')
   assert.equal(view.price, null)
-})
-
-test('quoteRowView ignores a stale ready state for a different listing', () => {
-  // A row that re-keys to a new listingId before the previous fetch
-  // resolved must not paint last subject's quote on the new row.
-  const otherListingRef: SubjectRef = {
-    kind: 'listing',
-    id: '22222222-2222-4222-a222-222222222222',
-  }
-  const view = quoteRowView(READY_STATE, otherListingRef)
-  assert.equal(view.price, null)
-  assert.equal(view.primary, 'Loading…')
 })
