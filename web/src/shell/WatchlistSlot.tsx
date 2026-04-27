@@ -11,14 +11,14 @@ import { ProtectedActionType } from './authInterruptState'
 import { useResumedProtectedAction } from './useAuthInterrupt'
 import { SymbolSearch } from '../symbol/SymbolSearch'
 import { ManualWatchlist } from '../watchlists/ManualWatchlist'
-import { useManualWatchlist } from '../watchlists/useManualWatchlist'
+import { useWatchlist } from '../watchlists/watchlistContext'
 
 const TIMEFRAMES = ['1D', '5D', '1M', '3M', 'YTD', '1Y', '5Y'] as const
 
 export function WatchlistSlot() {
   const { session } = useAuth()
   const userId = session?.userId ?? null
-  const watchlist = useManualWatchlist(userId)
+  const watchlist = useWatchlist()
 
   // addSubject swallows rejections into watchlist.message, which the
   // sidebar already renders — no extra error path needed here.
