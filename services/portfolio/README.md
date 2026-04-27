@@ -1,8 +1,9 @@
 # Portfolio
 
-Tracking beads: `fra-cw0.9.1` (Portfolio model with required `base_currency`)
-and `fra-cw0.9.2` (PortfolioHolding bound to canonical market identity).
-Overlay-input read models (`fra-cw0.9.3`) extend this surface in a follow-up.
+Tracking beads: `fra-cw0.9.1` (Portfolio model with required `base_currency`),
+`fra-cw0.9.2` (PortfolioHolding bound to canonical market identity), and
+`fra-cw0.9.3` (overlay-input read model keyed by subject + contributing
+portfolio).
 
 ## Scope (spec §3.16, §4.2.1)
 
@@ -51,6 +52,20 @@ Holdings (scoped under a portfolio the caller owns):
 - `DELETE /v1/portfolios/:portfolio_id/holdings/:portfolio_holding_id` → `204` / `404`
 
 Deleting a portfolio cascades to its holdings (FK `on delete cascade`).
+
+Overlay inputs (read model derived from holdings, not a stored entity):
+
+- `POST /v1/portfolios/overlays` with
+  `{ subject_refs: [{ kind: "instrument" | "listing", id }, ...] }` (max 100)
+  → `200 { overlays: [{ subject_ref, contributions: [...] }] }`. Each
+  contribution carries `portfolio_id`, `portfolio_name`, `base_currency`,
+  `quantity`, `cost_basis`, `held_state`, `opened_at`, `closed_at`.
+- The response array is one entry per requested `subject_ref`, in caller
+  order; empty `contributions` means no holdings.
+- Multiple portfolios with different base currencies holding the same
+  subject produce distinct contributions — this layer never silently nets
+  across currencies through an implicit FX step. Consumers that want a
+  single number must apply their own FX policy.
 
 ## Dev
 

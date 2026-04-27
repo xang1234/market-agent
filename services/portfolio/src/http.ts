@@ -9,6 +9,7 @@ import {
   createPortfolio,
   deleteHolding,
   deletePortfolio,
+  getOverlayInputs,
   getPortfolio,
   HoldingNotFoundError,
   listHoldings,
@@ -21,6 +22,10 @@ import {
   assertPortfolioHoldingCreateInput,
   type PortfolioHolding,
 } from "./holdings.ts";
+import {
+  assertOverlayInputsRequest,
+  type SubjectOverlayInputs,
+} from "./overlays.ts";
 import { isUuidV4 } from "./validators.ts";
 
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
@@ -37,6 +42,7 @@ export type GetPortfolioResponse = { portfolio: Portfolio };
 export type CreatePortfolioResponse = { portfolio: Portfolio };
 export type ListHoldingsResponse = { holdings: PortfolioHolding[] };
 export type CreateHoldingResponse = { holding: PortfolioHolding };
+export type OverlayInputsResponse = { overlays: SubjectOverlayInputs[] };
 
 export function createPortfolioServer(db: QueryExecutor): Server {
   return createServer(async (req, res) => {
@@ -122,6 +128,25 @@ export function createPortfolioServer(db: QueryExecutor): Server {
           res.end();
           return;
         }
+        case "overlay_inputs": {
+          const body = await readBody(req);
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(body);
+          } catch {
+            respond(res, 400, { error: "request body must be valid JSON" });
+            return;
+          }
+          try {
+            assertOverlayInputsRequest(parsed);
+          } catch (err) {
+            respond(res, 400, { error: errorMessage(err, "invalid overlay input request") });
+            return;
+          }
+          const overlays = await getOverlayInputs(db, userId, parsed.subject_refs);
+          respond(res, 200, { overlays } satisfies OverlayInputsResponse);
+          return;
+        }
         default: {
           const _exhaustive: never = route;
           void _exhaustive;
@@ -156,11 +181,19 @@ type Route =
   | { action: "delete"; portfolio_id: string }
   | { action: "list_holdings"; portfolio_id: string }
   | { action: "create_holding"; portfolio_id: string }
-  | { action: "delete_holding"; portfolio_id: string; portfolio_holding_id: string };
+  | { action: "delete_holding"; portfolio_id: string; portfolio_holding_id: string }
+  | { action: "overlay_inputs" };
 
 function matchRoute(method: string, rawUrl: string): Route | null {
   const url = new URL(rawUrl, "http://localhost");
   const { pathname } = url;
+
+  // Match /overlays before /:portfolio_id so it isn't shadowed by the
+  // single-portfolio route.
+  if (pathname === "/v1/portfolios/overlays") {
+    if (method === "POST") return { action: "overlay_inputs" };
+    return null;
+  }
 
   if (pathname === "/v1/portfolios") {
     if (method === "GET") return { action: "list" };

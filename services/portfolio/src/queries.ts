@@ -2,9 +2,11 @@ import type { QueryResult } from "pg";
 import type { Portfolio, PortfolioCreateInput } from "./portfolio.ts";
 import type {
   HoldingSubjectKind,
+  HoldingSubjectRef,
   PortfolioHolding,
   PortfolioHoldingCreateInput,
 } from "./holdings.ts";
+import type { OverlayContribution, SubjectOverlayInputs } from "./overlays.ts";
 
 // Matches the watchlists / resolver minimal queryable surface. `pg.Client` and
 // `pg.Pool` both satisfy it; tests stub it without importing the full pg type.
@@ -205,4 +207,72 @@ export async function deleteHolding(
     [portfolioHoldingId, portfolioId],
   );
   if ((result.rowCount ?? 0) === 0) throw new HoldingNotFoundError(portfolioHoldingId);
+}
+
+type OverlayInputRow = {
+  subject_kind: HoldingSubjectKind;
+  subject_id: string;
+  portfolio_id: string;
+  portfolio_name: string;
+  base_currency: string;
+  quantity: string | number;
+  cost_basis: string | number | null;
+  opened_at: Date | string | null;
+  closed_at: Date | string | null;
+};
+
+// Bulk-fetches overlay contributions for the given subjects, scoped to the
+// caller's own portfolios. The lockstep `unnest($2::text[], $3::uuid[])`
+// pairs (kind[i], id[i]) so the join filters on exact matches without a
+// cartesian explosion. Subjects with no contributions get an empty
+// contributions array — the response shape stays predictable per request.
+export async function getOverlayInputs(
+  db: QueryExecutor,
+  userId: string,
+  subjectRefs: ReadonlyArray<HoldingSubjectRef>,
+): Promise<SubjectOverlayInputs[]> {
+  const kinds = subjectRefs.map((r) => r.kind);
+  const ids = subjectRefs.map((r) => r.id);
+
+  const result = await db.query<OverlayInputRow>(
+    `select ph.subject_kind, ph.subject_id,
+            p.portfolio_id, p.name as portfolio_name, p.base_currency,
+            ph.quantity, ph.cost_basis, ph.opened_at, ph.closed_at
+       from unnest($2::text[], $3::uuid[]) as q(kind, id)
+       join portfolio_holdings ph
+         on ph.subject_kind = q.kind::subject_kind and ph.subject_id = q.id
+       join portfolios p
+         on p.portfolio_id = ph.portfolio_id
+      where p.user_id = $1
+      order by ph.subject_kind, ph.subject_id, p.created_at asc, p.portfolio_id asc`,
+    [userId, kinds, ids],
+  );
+
+  const bySubjectKey = new Map<string, OverlayContribution[]>();
+  for (const row of result.rows) {
+    const key = `${row.subject_kind}|${row.subject_id}`;
+    const list = bySubjectKey.get(key) ?? [];
+    if (list.length === 0) bySubjectKey.set(key, list);
+    list.push(toOverlayContribution(row));
+  }
+
+  // One entry per requested subject_ref preserves caller order and gives
+  // the client a predictable shape even when nothing is held.
+  return subjectRefs.map((subject_ref) => ({
+    subject_ref,
+    contributions: bySubjectKey.get(`${subject_ref.kind}|${subject_ref.id}`) ?? [],
+  }));
+}
+
+function toOverlayContribution(row: OverlayInputRow): OverlayContribution {
+  return {
+    portfolio_id: row.portfolio_id,
+    portfolio_name: row.portfolio_name,
+    base_currency: row.base_currency,
+    quantity: toFiniteNumber(row.quantity),
+    cost_basis: row.cost_basis === null ? null : toFiniteNumber(row.cost_basis),
+    held_state: row.closed_at === null ? "open" : "closed",
+    opened_at: toIsoOrNull(row.opened_at),
+    closed_at: toIsoOrNull(row.closed_at),
+  };
 }
