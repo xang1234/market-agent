@@ -100,6 +100,10 @@ export function assertUuid(value: unknown, label: string): asserts value is stri
   }
 }
 
+export function isUuidV4(value: unknown): value is string {
+  return typeof value === "string" && UUID_V4.test(value);
+}
+
 export function assertInteger(value: unknown, label: string): asserts value is number {
   assertFiniteNumber(value, label);
   if (!Number.isInteger(value)) {
