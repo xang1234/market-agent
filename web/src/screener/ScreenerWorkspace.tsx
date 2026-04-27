@@ -5,7 +5,8 @@ import {
   formatCompactNumber,
   formatCurrency2,
 } from '../symbol/format.ts'
-import { symbolDetailPathForSubject, type SubjectRef } from '../symbol/search.ts'
+import { symbolDetailPathForSubject } from '../symbol/search.ts'
+import { signedTextClass } from '../symbol/signedColor.ts'
 import {
   FUNDAMENTALS_NUMERIC_FIELDS,
   MARKET_NUMERIC_FIELDS,
@@ -80,21 +81,22 @@ export function ScreenerWorkspace() {
       })
   }
 
-  // Auto-run with defaults on first mount so the user sees rows
-  // without having to click a button before any interaction.
   useEffect(() => {
     const controller = new AbortController()
     controllerRef.current = controller
-    void performSearch(draftToQuery(createDefaultQueryDraft()), controller)
+    void performSearch(draftToQuery(draft), controller)
     return () => {
       controller.abort()
       if (controllerRef.current === controller) controllerRef.current = null
     }
+    // Mount-only: draft here is the initial useState value and never
+    // re-fires this effect — refinements run through `runSearch`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Imperative path used by Run / pagination buttons. Synchronous
-  // setStatus is fine here — it runs in an event handler, not an
-  // effect, so the lint rule doesn't apply.
+  // Synchronous setStatus is fine here — this runs in an event
+  // handler, not an effect, so react-hooks/set-state-in-effect doesn't
+  // apply.
   const runSearch = (nextDraft: QueryDraft) => {
     controllerRef.current?.abort()
     const controller = new AbortController()
@@ -248,40 +250,26 @@ function NumericRangeControls({
               ) : null}
             </span>
             <div className="flex gap-2">
-              <input
-                type="number"
-                inputMode="decimal"
-                step={spec.step ?? 'any'}
-                placeholder="min"
-                value={range.min}
-                onChange={(event) =>
-                  onChange(
-                    setNumericRange(draft, dimension, spec.field, {
-                      ...range,
-                      min: event.target.value,
-                    }),
-                  )
-                }
-                aria-label={`${spec.label} min`}
-                className="min-w-0 flex-1 rounded-md border border-neutral-200 bg-neutral-50 px-2 py-1 text-sm tabular-nums dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
-              />
-              <input
-                type="number"
-                inputMode="decimal"
-                step={spec.step ?? 'any'}
-                placeholder="max"
-                value={range.max}
-                onChange={(event) =>
-                  onChange(
-                    setNumericRange(draft, dimension, spec.field, {
-                      ...range,
-                      max: event.target.value,
-                    }),
-                  )
-                }
-                aria-label={`${spec.label} max`}
-                className="min-w-0 flex-1 rounded-md border border-neutral-200 bg-neutral-50 px-2 py-1 text-sm tabular-nums dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
-              />
+              {(['min', 'max'] as const).map((bound) => (
+                <input
+                  key={bound}
+                  type="number"
+                  inputMode="decimal"
+                  step={spec.step ?? 'any'}
+                  placeholder={bound}
+                  value={range[bound]}
+                  onChange={(event) =>
+                    onChange(
+                      setNumericRange(draft, dimension, spec.field, {
+                        ...range,
+                        [bound]: event.target.value,
+                      }),
+                    )
+                  }
+                  aria-label={`${spec.label} ${bound}`}
+                  className="min-w-0 flex-1 rounded-md border border-neutral-200 bg-neutral-50 px-2 py-1 text-sm tabular-nums dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+                />
+              ))}
             </div>
           </div>
         )
@@ -517,12 +505,7 @@ function formatRowCells(row: ScreenerResultRow): { row: ScreenerResultRow; cells
   const change = row.quote.change_pct
   const lastPrice = last === null ? '—' : formatCurrency2(last, row.quote.currency)
   const changePct = change === null ? '—' : `${(change * 100).toFixed(2)}%`
-  const changeClass =
-    change === null || change === 0
-      ? 'text-neutral-500 dark:text-neutral-400'
-      : change > 0
-        ? 'text-emerald-700 dark:text-emerald-400'
-        : 'text-red-700 dark:text-red-400'
+  const changeClass = signedTextClass(change ?? 0)
   const volume = row.quote.volume === null ? '—' : formatCompactNumber(row.quote.volume)
   const marketCap =
     row.fundamentals.market_cap === null
@@ -536,12 +519,3 @@ function formatRowCells(row: ScreenerResultRow): { row: ScreenerResultRow; cells
   }
 }
 
-// Type-narrow proof that ScreenerSubjectRef satisfies the broader
-// SubjectRef shape consumed by symbolDetailPathForSubject. Without
-// this the import would still work (structurally compatible) but
-// any drift in either side would surface as a confusing usage error
-// far from the source.
-const _subjectRefCompat: ScreenerResultRow['subject_ref'] extends SubjectRef
-  ? true
-  : false = true
-void _subjectRefCompat

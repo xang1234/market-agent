@@ -12,6 +12,8 @@
 // type narrowing — it does NOT re-validate, so a server-side
 // contract change must still propagate the type here.
 
+import type { SubjectRef } from '../symbol/search.ts'
+
 export type SortDirection = 'asc' | 'desc'
 
 export type EnumClause = {
@@ -51,6 +53,17 @@ export type ScreenerSubjectRef = {
   kind: ScreenerSubjectKind
   id: string
 }
+
+// Compile-time guard that the screener row's subject_ref is structurally
+// assignable to the broader app-wide SubjectRef. Lets the workspace hand
+// row.subject_ref directly to symbolDetailPathForSubject without an
+// adapter; if either side drifts (a new SubjectKind on one side, a
+// rename on the other), the build breaks here rather than surfacing as
+// a confusing usage error in the workspace.
+const _screenerSubjectRefIsSubjectRef: ScreenerSubjectRef extends SubjectRef
+  ? true
+  : false = true
+void _screenerSubjectRefIsSubjectRef
 
 export type ScreenerDisplay = {
   primary: string
