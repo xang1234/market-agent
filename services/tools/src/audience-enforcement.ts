@@ -348,6 +348,12 @@ function permissiveAdditionalPropertiesMatches(
     ) {
       matches.push(Object.freeze({ path: additionalPropertiesPath }));
     }
+    if (
+      Object.hasOwn(value, "patternProperties") &&
+      !hasRawPropertyNameGuard(value)
+    ) {
+      matches.push(Object.freeze({ path: `${path}.patternProperties` }));
+    }
   }
 
   return Object.freeze(matches);
