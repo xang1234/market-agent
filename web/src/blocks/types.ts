@@ -16,6 +16,22 @@ export const CHART_COMPARISON_BLOCK_KINDS = [
 ] as const
 export type ChartComparisonBlockKind = (typeof CHART_COMPARISON_BLOCK_KINDS)[number]
 
+export const RESEARCH_EVIDENCE_BLOCK_KINDS = [
+  'analyst_consensus',
+  'price_target_range',
+  'eps_surprise',
+  'filings_list',
+  'news_cluster',
+  'finding_card',
+] as const
+export type ResearchEvidenceBlockKind = (typeof RESEARCH_EVIDENCE_BLOCK_KINDS)[number]
+
+export const TRUST_PROVENANCE_BLOCK_KINDS = ['sources', 'disclosure'] as const
+export type TrustProvenanceBlockKind = (typeof TRUST_PROVENANCE_BLOCK_KINDS)[number]
+
+export const FINDING_SEVERITIES = ['low', 'medium', 'high', 'critical'] as const
+export type FindingSeverity = (typeof FINDING_SEVERITIES)[number]
+
 export const DISCLOSURE_TIERS = [
   'real_time',
   'delayed_15m',
@@ -194,6 +210,98 @@ export type ChartComparisonBlock =
   | SentimentTrendBlock
   | MentionVolumeBlock
 
+export type AnalystDistributionBucket = {
+  bucket: string
+  count_ref: string
+}
+
+export type AnalystConsensusBlock = BaseBlock & {
+  kind: 'analyst_consensus'
+  analyst_count_ref: string
+  distribution: ReadonlyArray<AnalystDistributionBucket>
+  coverage_warning?: string
+}
+
+export type PriceTargetRangeBlock = BaseBlock & {
+  kind: 'price_target_range'
+  current_price_ref: string
+  low_ref: string
+  avg_ref: string
+  high_ref: string
+  upside_ref?: string
+}
+
+export type EpsSurpriseQuarter = {
+  label: string
+  estimate_ref: string
+  actual_ref: string
+  surprise_ref?: string
+}
+
+export type EpsSurpriseBlock = BaseBlock & {
+  kind: 'eps_surprise'
+  quarters: ReadonlyArray<EpsSurpriseQuarter>
+}
+
+export type FilingItem = {
+  document_id: string
+  form: string
+  filed_at: string
+  period?: string
+}
+
+export type FilingsListBlock = BaseBlock & {
+  kind: 'filings_list'
+  items: ReadonlyArray<FilingItem>
+}
+
+export type NewsClusterBlock = BaseBlock & {
+  kind: 'news_cluster'
+  cluster_id: string
+  headline: string
+  claim_refs: ReadonlyArray<string>
+  document_refs?: ReadonlyArray<string>
+}
+
+export type FindingCardBlock = BaseBlock & {
+  kind: 'finding_card'
+  finding_id: string
+  headline: string
+  severity: FindingSeverity
+  subject_refs?: ReadonlyArray<SubjectRef>
+}
+
+export type ResearchEvidenceBlock =
+  | AnalystConsensusBlock
+  | PriceTargetRangeBlock
+  | EpsSurpriseBlock
+  | FilingsListBlock
+  | NewsClusterBlock
+  | FindingCardBlock
+
+export type SourceItem = {
+  source_id: string
+  label: string
+  url?: string
+}
+
+export type SourcesBlock = BaseBlock & {
+  kind: 'sources'
+  items: ReadonlyArray<SourceItem>
+}
+
+export type DisclosureBlock = BaseBlock & {
+  kind: 'disclosure'
+  items: ReadonlyArray<string>
+}
+
+export type TrustProvenanceBlock = SourcesBlock | DisclosureBlock
+
 // Open variant lets Section.children carry kinds whose typed shape
 // ships later. Narrow this once the full catalog is unioned.
-export type Block = NarrativeLayoutBlock | ChartComparisonBlock | (BaseBlock & { kind: string })
+export type Block =
+  | NarrativeLayoutBlock
+  | ChartComparisonBlock
+  | ResearchEvidenceBlock
+  | TrustProvenanceBlock
+  | (BaseBlock & { kind: string })

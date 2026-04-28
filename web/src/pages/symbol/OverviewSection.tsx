@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { pluralize } from '../../format/pluralize.ts'
 import { useSubjectDetailContext } from '../../shell/subjectDetailOutletContext.ts'
 import { Card } from '../../symbol/Card.tsx'
 import { FetchStateView } from '../../symbol/FetchStateView.tsx'
@@ -252,7 +253,7 @@ function KeyStatTile({ stat }: { stat: KeyStat }) {
           title={warningSummary}
           className="text-xs text-amber-700 dark:text-amber-400"
         >
-          {stat.warnings.length} warning{stat.warnings.length === 1 ? '' : 's'}
+          {stat.warnings.length} {pluralize(stat.warnings.length, 'warning')}
         </span>
       )}
     </div>

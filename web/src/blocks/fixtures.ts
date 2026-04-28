@@ -1,15 +1,23 @@
 import type {
+  AnalystConsensusBlock,
+  DisclosureBlock,
+  EpsSurpriseBlock,
+  FilingsListBlock,
+  FindingCardBlock,
   LineChartBlock,
   MentionVolumeBlock,
   MetricRowBlock,
   MetricsComparisonBlock,
+  NewsClusterBlock,
   PerfComparisonBlock,
+  PriceTargetRangeBlock,
   RevenueBarsBlock,
   RichTextBlock,
   SectionBlock,
   SegmentDonutBlock,
   SegmentTrajectoryBlock,
   SentimentTrendBlock,
+  SourcesBlock,
   TableBlock,
 } from './types.ts'
 
@@ -164,7 +172,7 @@ export const segmentDonutFixture: SegmentDonutBlock = {
   segments: [
     { name: 'iPhone', value_ref: '22222222-2222-4222-9222-aaaaaaaaaaaa' },
     { name: 'Mac', value_ref: '22222222-2222-4222-9222-bbbbbbbbbbbb' },
-    { name: 'iPad', value_ref: '22222222-2222-4222-9222-cccccccccccc', definition_as_of: '2024-09-30' },
+    { name: 'iPad', value_ref: '22222222-2222-4222-9222-cccccccccccc', definition_as_of: '2024-09-30T00:00:00.000Z' },
     { name: 'Wearables', value_ref: '22222222-2222-4222-9222-dddddddddddd' },
     { name: 'Services', value_ref: '22222222-2222-4222-9222-eeeeeeeeeeee' },
   ],
@@ -268,3 +276,180 @@ export const mentionVolumeFixture: MentionVolumeBlock = {
     },
   ],
 }
+
+const FIXTURE_DOC_REF_A = 'aaaaaaaa-1111-4111-9111-111111111111'
+const FIXTURE_DOC_REF_B = 'aaaaaaaa-2222-4222-9222-222222222222'
+const FIXTURE_DOC_REF_C = 'aaaaaaaa-3333-4333-9333-333333333333'
+const FIXTURE_FINDING_ID = 'bbbbbbbb-1111-4111-9111-111111111111'
+const FIXTURE_CLUSTER_ID = 'cccccccc-1111-4111-9111-111111111111'
+
+export const analystConsensusFixture: AnalystConsensusBlock = {
+  id: 'ac-1',
+  kind: 'analyst_consensus',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: { kind: 'analyst_consensus', id: 'ac-1' },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  title: 'Analyst recommendations',
+  analyst_count_ref: 'dddddddd-1111-4111-9111-111111111111',
+  distribution: [
+    { bucket: 'Strong Buy', count_ref: 'dddddddd-1111-4111-9111-111111111aaa' },
+    { bucket: 'Buy', count_ref: 'dddddddd-1111-4111-9111-111111111bbb' },
+    { bucket: 'Hold', count_ref: 'dddddddd-1111-4111-9111-111111111ccc' },
+    { bucket: 'Sell', count_ref: 'dddddddd-1111-4111-9111-111111111ddd' },
+    { bucket: 'Strong Sell', count_ref: 'dddddddd-1111-4111-9111-111111111eee' },
+  ],
+  coverage_warning: 'Coverage thinned in FY24 — 3 of 12 prior analysts dropped the name.',
+}
+
+export const priceTargetRangeFixture: PriceTargetRangeBlock = {
+  id: 'ptr-1',
+  kind: 'price_target_range',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: { kind: 'price_target_range', id: 'ptr-1' },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  title: 'Analyst price targets',
+  current_price_ref: 'eeeeeeee-1111-4111-9111-aaaaaaaaaaaa',
+  low_ref: 'eeeeeeee-1111-4111-9111-bbbbbbbbbbbb',
+  avg_ref: 'eeeeeeee-1111-4111-9111-cccccccccccc',
+  high_ref: 'eeeeeeee-1111-4111-9111-dddddddddddd',
+  upside_ref: 'eeeeeeee-1111-4111-9111-eeeeeeeeeeee',
+}
+
+export const epsSurpriseFixture: EpsSurpriseBlock = {
+  id: 'eps-1',
+  kind: 'eps_surprise',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: { kind: 'eps_surprise', id: 'eps-1' },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  title: 'EPS surprise (4 quarters)',
+  quarters: [
+    {
+      label: 'Q1 FY24',
+      estimate_ref: 'ffffffff-1111-4111-9111-aaaaaaaaaaaa',
+      actual_ref: 'ffffffff-2222-4222-9222-aaaaaaaaaaaa',
+      surprise_ref: 'ffffffff-3333-4333-9333-aaaaaaaaaaaa',
+    },
+    {
+      label: 'Q2 FY24',
+      estimate_ref: 'ffffffff-1111-4111-9111-bbbbbbbbbbbb',
+      actual_ref: 'ffffffff-2222-4222-9222-bbbbbbbbbbbb',
+      surprise_ref: 'ffffffff-3333-4333-9333-bbbbbbbbbbbb',
+    },
+    {
+      label: 'Q3 FY24',
+      estimate_ref: 'ffffffff-1111-4111-9111-cccccccccccc',
+      actual_ref: 'ffffffff-2222-4222-9222-cccccccccccc',
+    },
+    {
+      label: 'Q4 FY24',
+      estimate_ref: 'ffffffff-1111-4111-9111-dddddddddddd',
+      actual_ref: 'ffffffff-2222-4222-9222-dddddddddddd',
+      surprise_ref: 'ffffffff-3333-4333-9333-dddddddddddd',
+    },
+  ],
+}
+
+export const filingsListFixture: FilingsListBlock = {
+  id: 'fl-1',
+  kind: 'filings_list',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: { kind: 'filings_list', id: 'fl-1' },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  title: 'Recent filings',
+  items: [
+    { document_id: FIXTURE_DOC_REF_A, form: '10-K', filed_at: '2024-11-01T17:35:00.000Z', period: 'FY24' },
+    { document_id: FIXTURE_DOC_REF_B, form: '8-K', filed_at: '2024-10-31T20:00:00.000Z' },
+    { document_id: FIXTURE_DOC_REF_C, form: '10-Q', filed_at: '2024-08-02T17:30:00.000Z', period: 'Q3 FY24' },
+  ],
+}
+
+export const newsClusterFixture: NewsClusterBlock = {
+  id: 'nc-1',
+  kind: 'news_cluster',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: { kind: 'news_cluster', id: 'nc-1' },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  title: 'Latest cluster',
+  cluster_id: FIXTURE_CLUSTER_ID,
+  headline: 'Apple guides cautiously on services growth as China demand softens.',
+  claim_refs: [FIXTURE_CLAIM_REF, '33333333-3333-4333-9333-bbbbbbbbbbbb'],
+  document_refs: [FIXTURE_DOC_REF_A, FIXTURE_DOC_REF_B],
+}
+
+export const findingCardFixture: FindingCardBlock = {
+  id: 'fc-1',
+  kind: 'finding_card',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: { kind: 'finding_card', id: 'fc-1' },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  title: 'Margin pressure flagged',
+  finding_id: FIXTURE_FINDING_ID,
+  headline: 'Services margin compression tracked across two consecutive quarters.',
+  severity: 'high',
+  subject_refs: [
+    { kind: 'issuer', id: '99999999-9999-4999-9999-999999999991' },
+  ],
+}
+
+export const sourcesFixture: SourcesBlock = {
+  id: 'src-1',
+  kind: 'sources',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: { kind: 'sources', id: 'src-1' },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  items: [
+    {
+      source_id: '44444444-4444-4444-9444-aaaaaaaaaaaa',
+      label: 'Apple Inc. Form 10-K (FY24)',
+      url: 'https://www.sec.gov/Archives/edgar/data/0000320193/000032019324000123/aapl-20240928.htm',
+    },
+    {
+      source_id: '44444444-4444-4444-9444-bbbbbbbbbbbb',
+      label: 'Q3 FY24 earnings call transcript',
+    },
+  ],
+}
+
+export const disclosureFixture: DisclosureBlock = {
+  id: 'disc-1',
+  kind: 'disclosure',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: { kind: 'disclosure', id: 'disc-1' },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  disclosure_tier: 'estimate',
+  items: [
+    'Forward estimates are model-derived and may diverge from consensus.',
+    'Quotes are delayed by 15 minutes during regular trading hours.',
+  ],
+}
+
+export const ALL_BLOCK_FIXTURES = [
+  richTextFixture,
+  sectionFixture,
+  metricRowFixture,
+  tableFixture,
+  lineChartFixture,
+  revenueBarsFixture,
+  perfComparisonFixture,
+  segmentDonutFixture,
+  segmentTrajectoryFixture,
+  metricsComparisonFixture,
+  sentimentTrendFixture,
+  mentionVolumeFixture,
+  analystConsensusFixture,
+  priceTargetRangeFixture,
+  epsSurpriseFixture,
+  filingsListFixture,
+  newsClusterFixture,
+  findingCardFixture,
+  sourcesFixture,
+  disclosureFixture,
+] as const

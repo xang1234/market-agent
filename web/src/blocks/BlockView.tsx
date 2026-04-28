@@ -5,6 +5,8 @@ import {
   useBlockRegistry,
   type BlockRegistry,
 } from './Registry.ts'
+import type { SnapshotManifest } from './snapshotManifest.ts'
+import { SnapshotManifestContext } from './snapshotManifestContext.ts'
 
 type BlockRegistryProviderProps = {
   registry: BlockRegistry
@@ -13,6 +15,15 @@ type BlockRegistryProviderProps = {
 
 export function BlockRegistryProvider({ registry, children }: BlockRegistryProviderProps): ReactElement {
   return <BlockRegistryContext.Provider value={registry}>{children}</BlockRegistryContext.Provider>
+}
+
+type SnapshotManifestProviderProps = {
+  manifest: SnapshotManifest
+  children: ReactNode
+}
+
+export function SnapshotManifestProvider({ manifest, children }: SnapshotManifestProviderProps): ReactElement {
+  return <SnapshotManifestContext.Provider value={manifest}>{children}</SnapshotManifestContext.Provider>
 }
 
 type BlockViewProps = { block: Block }
