@@ -19,6 +19,7 @@ import {
   resolveByTicker,
   type QueryExecutor,
 } from "./lookup.ts";
+import { writeToolCallLog } from "../../observability/src/tool-call.ts";
 import { normalize } from "./normalize.ts";
 import type { SubjectKind, SubjectRef } from "./subject-ref.ts";
 
@@ -612,20 +613,16 @@ async function writeResolutionPathLog(
   db: QueryExecutor,
   handoff: HydratedSubjectHandoff,
 ): Promise<void> {
-  await db.query(
-    `insert into tool_call_logs (tool_name, args, status)
-     values ($1, $2::jsonb, $3)`,
-    [
-      "resolver.search_to_subject_flow",
-      JSON.stringify({
-        resolution_path: handoff.resolution_path,
-        normalized_input: handoff.normalized_input,
-        subject_ref: handoff.subject_ref,
-        identity_level: handoff.identity_level,
-      }),
-      "ok",
-    ],
-  );
+  await writeToolCallLog(db, {
+    tool_name: "resolver.search_to_subject_flow",
+    args: {
+      resolution_path: handoff.resolution_path,
+      normalized_input: handoff.normalized_input,
+      subject_ref: handoff.subject_ref,
+      identity_level: handoff.identity_level,
+    },
+    status: "ok",
+  });
 }
 
 function stripUndefined<T extends Record<string, unknown>>(value: T): T {
