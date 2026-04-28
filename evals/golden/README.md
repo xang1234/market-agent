@@ -11,7 +11,7 @@ these cases through the observability golden runner and persists summaries to
 - `cases/` stores versioned golden cases. The default smoke suite covers all
   14 required categories from `stock-agent-v2.md`.
 - `results/` stores generated eval artifacts
-- `case.schema.json` describes the starter case shape
+- `case.schema.json` describes a single case or case-list file
 
 The runner API lives in `services/observability/src/golden-eval-runner.ts`:
 

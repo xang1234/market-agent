@@ -44,6 +44,46 @@ test("loadGoldenEvalCases validates category membership", () => {
   );
 });
 
+test("loadGoldenEvalCases rejects unexpected case fields", () => {
+  const casesDir = mkdtempSync(join(tmpdir(), "golden-eval-cases-"));
+  writeFileSync(
+    join(casesDir, "bad.json"),
+    JSON.stringify([
+      {
+        id: "extra-field",
+        category: "ticker_name_disambiguation",
+        prompt: "Should fail schema validation",
+        unexpected: true,
+      },
+    ]),
+    "utf8",
+  );
+
+  assert.throws(
+    () => loadGoldenEvalCases(casesDir),
+    /unexpected properties: unexpected/,
+  );
+});
+
+test("loadGoldenEvalCases rejects empty case arrays", () => {
+  const casesDir = mkdtempSync(join(tmpdir(), "golden-eval-cases-"));
+  writeFileSync(
+    join(casesDir, "valid.json"),
+    JSON.stringify({
+      id: "valid",
+      category: "ticker_name_disambiguation",
+      prompt: "Valid case",
+    }),
+    "utf8",
+  );
+  writeFileSync(join(casesDir, "empty.json"), "[]", "utf8");
+
+  assert.throws(
+    () => loadGoldenEvalCases(casesDir),
+    /must contain at least one case/,
+  );
+});
+
 test("runGoldenEvalSuite evaluates cases and persists summarized results", async () => {
   const inserted: unknown[][] = [];
   const db: QueryExecutor = {

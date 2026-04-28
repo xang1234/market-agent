@@ -96,6 +96,7 @@ export const DEFAULT_GOLDEN_EVAL_CASES_DIR = resolve(
 );
 
 const CATEGORY_SET = new Set<string>(GOLDEN_EVAL_CATEGORIES);
+const CASE_PROPERTY_SET = new Set(["id", "category", "prompt", "expected"]);
 
 export function loadGoldenEvalCases(casesDir: string): ReadonlyArray<GoldenEvalCase> {
   if (!existsSync(casesDir)) {
@@ -173,6 +174,10 @@ function parseGoldenEvalCaseFile(
     return Object.freeze([parseGoldenEvalCase(parsed, sourceLabel)]);
   }
 
+  if (parsed.length === 0) {
+    throw new Error(`${sourceLabel}: must contain at least one case`);
+  }
+
   return Object.freeze(
     parsed.map((item, index) =>
       parseGoldenEvalCase(item, `${sourceLabel}[${index}]`),
@@ -182,6 +187,7 @@ function parseGoldenEvalCaseFile(
 
 function parseGoldenEvalCase(value: unknown, label: string): GoldenEvalCase {
   const raw = record(value, label);
+  assertOnlyKnownProperties(raw, CASE_PROPERTY_SET, label);
   const id = nonEmptyString(raw.id, `${label}.id`);
   const category = categoryValue(raw.category, `${label}.category`);
   const prompt = nonEmptyString(raw.prompt, `${label}.prompt`);
@@ -256,6 +262,20 @@ function record(value: unknown, label: string): Record<string, unknown> {
     throw new Error(`${label}: must be an object`);
   }
   return value as Record<string, unknown>;
+}
+
+function assertOnlyKnownProperties(
+  value: Record<string, unknown>,
+  allowed: ReadonlySet<string>,
+  label: string,
+): void {
+  const unexpected = Object.keys(value)
+    .filter((key) => !allowed.has(key))
+    .sort();
+
+  if (unexpected.length > 0) {
+    throw new Error(`${label}: unexpected properties: ${unexpected.join(", ")}`);
+  }
 }
 
 function nonEmptyString(value: unknown, label: string): string {

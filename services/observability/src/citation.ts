@@ -84,15 +84,13 @@ function collectBlockCitationInputs(
   rows: CitationLogInput[],
   seen: Set<string>,
 ): void {
-  const source_id = primarySourceId(block);
-
   for (const ref of extractBlockRefs(block)) {
     const row = {
       snapshot_id: block.snapshot_id,
       block_id: block.id,
       ref_kind: ref.ref_kind,
       ref_id: ref.ref_id,
-      source_id,
+      source_id: null,
     };
     const key = [
       row.snapshot_id,
@@ -110,11 +108,6 @@ function collectBlockCitationInputs(
   for (const child of block.children ?? []) {
     collectBlockCitationInputs(child, rows, seen);
   }
-}
-
-function primarySourceId(block: CitationLogBlock): string | null {
-  const [sourceId] = block.source_refs ?? [];
-  return typeof sourceId === "string" && sourceId.length > 0 ? sourceId : null;
 }
 
 function extractBlockRefs(

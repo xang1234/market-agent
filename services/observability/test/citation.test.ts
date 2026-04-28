@@ -120,14 +120,41 @@ test("citationLogInputsForBlocks extracts one row per block citation ref", () =>
       block_id: "summary",
       ref_kind: "fact",
       ref_id: fact_id,
-      source_id,
+      source_id: null,
     },
     {
       snapshot_id,
       block_id: "summary",
       ref_kind: "claim",
       ref_id: claim_id,
-      source_id,
+      source_id: null,
+    },
+  ]);
+});
+
+test("citationLogInputsForBlocks does not infer citation source_id from block source_refs", () => {
+  const snapshot_id = randomUUID();
+  const source_id = randomUUID();
+  const alternate_source_id = randomUUID();
+  const fact_id = randomUUID();
+
+  const rows = citationLogInputsForBlocks([
+    {
+      id: "summary",
+      kind: "rich_text",
+      snapshot_id,
+      source_refs: [source_id, alternate_source_id],
+      segments: [{ type: "ref", ref_kind: "fact", ref_id: fact_id }],
+    },
+  ]);
+
+  assert.deepEqual(rows, [
+    {
+      snapshot_id,
+      block_id: "summary",
+      ref_kind: "fact",
+      ref_id: fact_id,
+      source_id: null,
     },
   ]);
 });
@@ -164,14 +191,14 @@ test("citationLogInputsForBlocks extracts nested section and value refs", () => 
       block_id: "metrics",
       ref_kind: "fact",
       ref_id: value_ref,
-      source_id,
+      source_id: null,
     },
     {
       snapshot_id,
       block_id: "metrics",
       ref_kind: "fact",
       ref_id: delta_ref,
-      source_id,
+      source_id: null,
     },
   ]);
 });
