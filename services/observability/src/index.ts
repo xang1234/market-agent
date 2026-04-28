@@ -1,5 +1,16 @@
-export { writeToolCallLog } from "./tool-call.ts";
-export type { ToolCallLogInput, ToolCallLogRow } from "./tool-call.ts";
+export {
+  hashJsonValue,
+  runLoggedToolCall,
+  toolCallArgsDigest,
+  writeToolCallLog,
+} from "./tool-call.ts";
+export type {
+  RunLoggedToolCallInput,
+  ToolCallArgsDigest,
+  ToolCallLogInput,
+  ToolCallLogRow,
+  ToolCallLogStatus,
+} from "./tool-call.ts";
 
 export { writeCitationLog } from "./citation.ts";
 export type { CitationLogInput, CitationLogRow } from "./citation.ts";

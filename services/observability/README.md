@@ -26,8 +26,7 @@ unchanged) and returns the generated primary key plus `created_at`.
 
 ## Explicitly out of scope
 
-- **Structured wrappers** around specific tool invocations — PX.1
-  (`fra-hyz.1`) owns the `tool_call_log` tool wrapper and the `citation_log`
+- **Citation binding on block emission** — PX.1 owns the `citation_log`
   binding on block emission. The `agent_run_log` writer ships here under
   `fra-hyz.1.1`; orchestration code that calls `start`/`completeAgentRunLog`
   around a run lives in the agent runtime, not in this package.
@@ -39,20 +38,32 @@ unchanged) and returns the generated primary key plus `created_at`.
 ## Usage
 
 ```ts
-import { writeToolCallLog } from "observability";
+import { runLoggedToolCall, writeToolCallLog } from "observability";
 
 await writeToolCallLog(db, {
   tool_name: "resolver.resolveByTicker",
   args: { text: "AAPL" },
+  result: { subject_ref: "listing:XNAS:AAPL" },
   status: "ok",
   duration_ms: 42,
 });
+
+const quote = await runLoggedToolCall(db, {
+  tool_name: "market.quote",
+  args: { symbol: "AAPL" },
+  invoke: ({ symbol }) => fetchQuote(symbol),
+});
 ```
 
-`args`, `result_json`, and `details` accept JSON-compatible values only.
+`args`, `result`, `result_json`, and `details` accept JSON-compatible values only.
 Optional `details` are normalized so `undefined` and `null` both store as
 SQL `NULL`, while nested `null` values inside an object/array remain valid
 JSON.
+
+`tool_call_logs.args` stores a stable `sha256:` digest instead of raw arguments;
+`result_hash` is computed from `result` when callers do not pass an explicit
+hash. This keeps operational logs useful for correlation without retaining raw
+tool payloads.
 
 ## Tests
 
