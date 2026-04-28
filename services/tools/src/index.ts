@@ -1,4 +1,13 @@
 export {
+  selectToolBundle,
+} from "./bundle-selector.ts";
+export type {
+  BundleSelection,
+  BundleSelectionInput,
+  PreResolveBundleClassification,
+} from "./bundle-selector.ts";
+
+export {
   DEFAULT_TOOL_REGISTRY_PATH,
   TOOL_AUDIENCES,
   TOOL_COST_CLASSES,
