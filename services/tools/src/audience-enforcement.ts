@@ -50,6 +50,14 @@ export type AuthorizeToolCallInput = {
   arguments?: JsonValue;
 };
 
+export type AuthorizeToolResultInput = {
+  registry: ToolRegistry;
+  bundle_id: string;
+  audience: ToolAudience;
+  tool_name: string;
+  result: JsonValue;
+};
+
 export type ToolCallAuthorization =
   | {
       ok: true;
@@ -149,6 +157,53 @@ export function toolsForAudience(
 export function authorizeToolCall(
   input: AuthorizeToolCallInput,
 ): ToolCallAuthorization {
+  const authorization = authorizeToolAccess(input);
+  if (!authorization.ok) {
+    return authorization;
+  }
+
+  if (input.audience === "analyst" && input.arguments !== undefined) {
+    const [match] = rawDocumentFieldMatches(input.arguments, "arguments");
+    if (match) {
+      return rawDocumentPayloadRejection({
+        audience: input.audience,
+        tool_name: input.tool_name,
+        match,
+      });
+    }
+  }
+
+  return authorization;
+}
+
+export function authorizeToolResult(
+  input: AuthorizeToolResultInput,
+): ToolCallAuthorization {
+  const authorization = authorizeToolAccess(input);
+  if (!authorization.ok) {
+    return authorization;
+  }
+
+  if (input.audience === "analyst") {
+    const [match] = rawDocumentFieldMatches(input.result, "result");
+    if (match) {
+      return rawDocumentPayloadRejection({
+        audience: input.audience,
+        tool_name: input.tool_name,
+        match,
+      });
+    }
+  }
+
+  return authorization;
+}
+
+function authorizeToolAccess(
+  input: Pick<
+    AuthorizeToolCallInput,
+    "registry" | "bundle_id" | "audience" | "tool_name"
+  >,
+): ToolCallAuthorization {
   assertRegistryAudienceBoundary(input.registry);
 
   const tool = input.registry.getTool(input.tool_name);
@@ -183,24 +238,25 @@ export function authorizeToolCall(
     });
   }
 
-  if (input.audience === "analyst" && input.arguments !== undefined) {
-    const [match] = rawDocumentFieldMatches(input.arguments, "arguments");
-    if (match) {
-      return Object.freeze({
-        ok: false,
-        reason: "raw_document_payload",
-        audience: input.audience,
-        tool_name: input.tool_name,
-        path: match.path,
-        field: match.field,
-        message: `Analyst audience cannot receive raw document field "${match.field}" at ${match.path}`,
-      });
-    }
-  }
-
   return Object.freeze({
     ok: true,
     tool,
+  });
+}
+
+function rawDocumentPayloadRejection(input: {
+  audience: ToolAudience;
+  tool_name: string;
+  match: RawDocumentFieldMatch;
+}): ToolCallAuthorization {
+  return Object.freeze({
+    ok: false,
+    reason: "raw_document_payload",
+    audience: input.audience,
+    tool_name: input.tool_name,
+    path: input.match.path,
+    field: input.match.field,
+    message: `Analyst audience cannot receive raw document field "${input.match.field}" at ${input.match.path}`,
   });
 }
 
