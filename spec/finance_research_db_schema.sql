@@ -590,3 +590,16 @@ create table eval_run_results (
   result_json jsonb not null,
   created_at timestamptz not null default now()
 );
+
+create table agent_run_logs (
+  agent_run_log_id uuid primary key default gen_random_uuid(),
+  agent_id uuid,
+  started_at timestamptz not null default now(),
+  ended_at timestamptz,
+  duration_ms integer,
+  inputs_watermark jsonb,
+  outputs_summary jsonb,
+  status text not null default 'running',
+  error text
+);
+create index agent_run_logs_agent_started_idx on agent_run_logs(agent_id, started_at desc);

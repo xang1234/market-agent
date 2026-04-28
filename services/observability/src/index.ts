@@ -10,4 +10,12 @@ export type { VerifierFailLogInput, VerifierFailLogRow } from "./verifier-fail.t
 export { writeEvalRunResult } from "./eval-run.ts";
 export type { EvalRunResultInput, EvalRunResultRow } from "./eval-run.ts";
 
+export { startAgentRunLog, completeAgentRunLog } from "./agent-run.ts";
+export type {
+  AgentRunLogStartInput,
+  AgentRunLogStartRow,
+  AgentRunLogCompleteInput,
+  AgentRunLogCompleteRow,
+} from "./agent-run.ts";
+
 export type { JsonValue, QueryExecutor } from "./types.ts";

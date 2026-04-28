@@ -10,6 +10,9 @@ by the normative schema pack:
 - `writeCitationLog` → `citation_logs` (requires an existing `snapshot_id`)
 - `writeVerifierFailLog` → `verifier_fail_logs`
 - `writeEvalRunResult` → `eval_run_results`
+- `startAgentRunLog` / `completeAgentRunLog` → `agent_run_logs` (operational
+  audit per agent run; one row spans the run and is closed with a terminal
+  status, outputs summary, and server-computed `duration_ms`)
 
 Each helper accepts a `QueryExecutor` (a `pg.Client` or `pg.Pool` works
 unchanged) and returns the generated primary key plus `created_at`.
@@ -24,8 +27,10 @@ unchanged) and returns the generated primary key plus `created_at`.
 ## Explicitly out of scope
 
 - **Structured wrappers** around specific tool invocations — PX.1
-  (`fra-hyz.1`) owns `agent_run_log`, the `tool_call_log` tool wrapper, and
-  the `citation_log` binding on block emission.
+  (`fra-hyz.1`) owns the `tool_call_log` tool wrapper and the `citation_log`
+  binding on block emission. The `agent_run_log` writer ships here under
+  `fra-hyz.1.1`; orchestration code that calls `start`/`completeAgentRunLog`
+  around a run lives in the agent runtime, not in this package.
 - **Eval runner + golden set execution** — covered by PX.1 children
   (`fra-2yd`, `fra-gfq`).
 - **Status / reason-code taxonomies** — callers choose the vocabulary
