@@ -9,13 +9,15 @@ export type QueryExecutor = {
   ): Promise<QueryResult<R>>;
 };
 
+export type JsonObject = { [key: string]: JsonValue };
+
 export type JsonValue =
   | null
   | boolean
   | number
   | string
   | JsonValue[]
-  | { [key: string]: JsonValue };
+  | JsonObject;
 
 function assertJsonValue(value: unknown, path: string, seen: Set<object>): asserts value is JsonValue {
   if (value === null) return;

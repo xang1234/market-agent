@@ -12,6 +12,8 @@ by the normative schema pack:
   per `(block_id, ref_kind, ref_id)`
 - `writeVerifierFailLog` → `verifier_fail_logs`
 - `writeEvalRunResult` → `eval_run_results`
+- `runGoldenEvalSuite` → evaluates loaded golden cases and persists a summarized
+  `eval_run_results` row
 - `startAgentRunLog` / `completeAgentRunLog` → `agent_run_logs` (operational
   audit per agent run; one row spans the run and is closed with a terminal
   status, outputs summary, and server-computed `duration_ms`)
@@ -33,8 +35,9 @@ unchanged) and returns the generated primary key plus `created_at`.
   here under `fra-hyz.1.1`; orchestration code that calls
   `start`/`completeAgentRunLog` around a run lives in the agent runtime, not in
   this package.
-- **Eval runner + golden set execution** — covered by PX.1 children
-  (`fra-2yd`, `fra-gfq`).
+- **Nightly scheduling and drift report generation** — covered by PX.1 children
+  (`fra-2yd`, `fra-gfq`). This package provides the runner primitive and result
+  persistence; scheduling it remains an orchestration concern.
 - **Status / reason-code taxonomies** — callers choose the vocabulary
   today; PX.1 formalizes it.
 
@@ -79,6 +82,29 @@ segments, metric rows, revenue bars, segment donuts, and block-level
 `fact_refs`/`claim_refs`/`event_refs`. It also captures fact refs from
 analyst-consensus, price-target-range, and EPS-surprise blocks. Duplicate refs
 inside one block are deduplicated before insert.
+
+Golden evals:
+
+```ts
+import {
+  DEFAULT_GOLDEN_EVAL_CASES_DIR,
+  loadGoldenEvalCases,
+  runGoldenEvalSuite,
+} from "observability";
+
+const cases = loadGoldenEvalCases(DEFAULT_GOLDEN_EVAL_CASES_DIR);
+await runGoldenEvalSuite(db, {
+  suite_name: "golden-smoke",
+  model_version: "model-2026-04-29",
+  prompt_version: "analyst/v1",
+  cases,
+  evaluate: async (testCase) => evaluateGoldenCase(testCase),
+});
+```
+
+`runGoldenEvalSuite` requires coverage for the 14 categories listed in
+`stock-agent-v2.md`, records each case outcome, summarizes pass/fail counts by
+category, and writes the JSON summary to `eval_run_results`.
 
 ## Tests
 

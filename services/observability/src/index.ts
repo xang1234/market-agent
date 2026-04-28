@@ -30,6 +30,24 @@ export type { VerifierFailLogInput, VerifierFailLogRow } from "./verifier-fail.t
 export { writeEvalRunResult } from "./eval-run.ts";
 export type { EvalRunResultInput, EvalRunResultRow } from "./eval-run.ts";
 
+export {
+  DEFAULT_GOLDEN_EVAL_CASES_DIR,
+  GOLDEN_EVAL_CATEGORIES,
+  assertGoldenEvalCategoryCoverage,
+  loadGoldenEvalCases,
+  runGoldenEvalSuite,
+} from "./golden-eval-runner.ts";
+export type {
+  GoldenEvalCase,
+  GoldenEvalCaseResult,
+  GoldenEvalCategory,
+  GoldenEvalCategorySummary,
+  GoldenEvalEvaluator,
+  GoldenEvalRunResultJson,
+  RunGoldenEvalSuiteInput,
+  RunGoldenEvalSuiteResult,
+} from "./golden-eval-runner.ts";
+
 export { startAgentRunLog, completeAgentRunLog } from "./agent-run.ts";
 export type {
   AgentRunLogStartInput,

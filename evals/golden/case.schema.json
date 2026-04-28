@@ -5,7 +5,25 @@
   "required": ["id", "category", "prompt"],
   "properties": {
     "id": { "type": "string" },
-    "category": { "type": "string" },
+    "category": {
+      "type": "string",
+      "enum": [
+        "ticker_name_disambiguation",
+        "issuer_listing_confusion",
+        "themes_macro_topics",
+        "fiscal_calendar_alignment",
+        "corporate_actions",
+        "restatements",
+        "segment_redefinitions",
+        "low_analyst_coverage",
+        "delisted_acquired_names",
+        "multi_entity_documents",
+        "candidate_authoritative_fact_promotion",
+        "social_rumor_handling",
+        "block_choice_correctness",
+        "snapshot_transform_correctness"
+      ]
+    },
     "prompt": { "type": "string" },
     "expected": {
       "type": "object",

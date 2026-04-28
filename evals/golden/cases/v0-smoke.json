@@ -1,0 +1,114 @@
+[
+  {
+    "id": "ticker-name-disambiguation-goog-googl",
+    "category": "ticker_name_disambiguation",
+    "prompt": "Resolve whether GOOG and GOOGL should collapse into one listing or remain distinct.",
+    "expected": {
+      "outcome": "distinct_listings"
+    }
+  },
+  {
+    "id": "issuer-listing-confusion-aapl",
+    "category": "issuer_listing_confusion",
+    "prompt": "Explain why Apple Inc. issuer context is not enough to fetch a venue-sensitive quote.",
+    "expected": {
+      "requires_listing_ref": true
+    }
+  },
+  {
+    "id": "themes-macro-topics-ai-chips",
+    "category": "themes_macro_topics",
+    "prompt": "Classify AI chips alpha as a theme subject rather than a ticker chat.",
+    "expected": {
+      "subject_kind": "theme"
+    }
+  },
+  {
+    "id": "fiscal-calendar-alignment-retailer",
+    "category": "fiscal_calendar_alignment",
+    "prompt": "Compare a fiscal-year retailer with a calendar-year peer without mixing periods.",
+    "expected": {
+      "requires_period_normalization": true
+    }
+  },
+  {
+    "id": "corporate-actions-adjusted-series",
+    "category": "corporate_actions",
+    "prompt": "Use split-adjusted history when comparing a post-split listing against peers.",
+    "expected": {
+      "adjustment_basis": "split_adjusted"
+    }
+  },
+  {
+    "id": "restatements-prior-period",
+    "category": "restatements",
+    "prompt": "Detect when a company restated a prior period and cite the updated filing facts.",
+    "expected": {
+      "requires_restatement_note": true
+    }
+  },
+  {
+    "id": "segment-redefinitions-business-lines",
+    "category": "segment_redefinitions",
+    "prompt": "Explain a segment trend when the issuer changed business segment definitions.",
+    "expected": {
+      "requires_segment_definition_warning": true
+    }
+  },
+  {
+    "id": "low-analyst-coverage-small-cap",
+    "category": "low_analyst_coverage",
+    "prompt": "Summarize analyst consensus for a name with only one contributing analyst.",
+    "expected": {
+      "requires_coverage_warning": true
+    }
+  },
+  {
+    "id": "delisted-acquired-name-resolution",
+    "category": "delisted_acquired_names",
+    "prompt": "Resolve a delisted acquired company without treating it as an active listing.",
+    "expected": {
+      "active_listing_required": false
+    }
+  },
+  {
+    "id": "multi-entity-document-earnings-call",
+    "category": "multi_entity_documents",
+    "prompt": "Extract claims from a document that discusses two issuers and keep subject refs separate.",
+    "expected": {
+      "requires_entity_linking": true
+    }
+  },
+  {
+    "id": "candidate-authoritative-fact-promotion",
+    "category": "candidate_authoritative_fact_promotion",
+    "prompt": "Promote a candidate revenue fact only after authoritative source confirmation.",
+    "expected": {
+      "requires_authoritative_source": true
+    }
+  },
+  {
+    "id": "social-rumor-handling",
+    "category": "social_rumor_handling",
+    "prompt": "Handle an unverified social rumor without presenting it as a confirmed event.",
+    "expected": {
+      "requires_uncertainty_label": true
+    }
+  },
+  {
+    "id": "block-choice-correctness-peer-table",
+    "category": "block_choice_correctness",
+    "prompt": "Choose a peer comparison table block instead of prose for a multi-company metric comparison.",
+    "expected": {
+      "block_kind": "table"
+    }
+  },
+  {
+    "id": "snapshot-transform-correctness-index-100",
+    "category": "snapshot_transform_correctness",
+    "prompt": "Render an index-100 performance comparison without changing sealed snapshot values.",
+    "expected": {
+      "transform": "index_100"
+    }
+  }
+]
