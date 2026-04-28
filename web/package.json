@@ -11,7 +11,7 @@
     "typecheck": "tsc -b",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "sync:schema": "cp ../spec/finance_research_block_schema.json src/blocks/blockSchema.json",
+    "sync:schema": "node -e \"require('node:fs').copyFileSync('../spec/finance_research_block_schema.json', 'src/blocks/blockSchema.json')\"",
     "test": "node --experimental-strip-types --test src/**/*.test.ts",
     "preview": "vite preview"
   },

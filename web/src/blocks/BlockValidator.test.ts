@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { validateBlock } from './BlockValidator.ts'
-import { ALL_BLOCK_FIXTURES, richTextFixture } from './fixtures.ts'
+import { ALL_BLOCK_FIXTURES, richTextFixture, sourcesFixture } from './fixtures.ts'
 
 test('validateBlock accepts every canonical fixture', () => {
   for (const block of ALL_BLOCK_FIXTURES) {
@@ -44,6 +44,21 @@ test('validateBlock rejects a block with a wrongly-typed field', () => {
 
 test('validateBlock rejects a block with a non-UUID snapshot_id', () => {
   const result = validateBlock({ ...richTextFixture, snapshot_id: 'not-a-uuid' })
+  assert.equal(result.valid, false)
+})
+
+test('validateBlock rejects a structurally invalid UUID snapshot_id', () => {
+  const result = validateBlock({ ...richTextFixture, snapshot_id: '------------------------------------' })
+  assert.equal(result.valid, false)
+})
+
+test('validateBlock rejects sources URLs with unsafe schemes', () => {
+  const [source] = sourcesFixture.items
+  assert.ok(source, 'expected sources fixture to include at least one item')
+  const result = validateBlock({
+    ...sourcesFixture,
+    items: [{ ...source, url: 'javascript:alert(1)' }],
+  })
   assert.equal(result.valid, false)
 })
 

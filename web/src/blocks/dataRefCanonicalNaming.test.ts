@@ -12,9 +12,19 @@ const NON_CANONICAL_PATTERNS = [
   ['queryRef', /\bqueryRef\b/],
 ] as const
 
+function isEmitterSource(name: string): boolean {
+  const pathSegments = name.split(/[\\/]/)
+  return (
+    (name.endsWith('.ts') || name.endsWith('.tsx')) &&
+    !name.includes('.test.') &&
+    !name.includes('.spec.') &&
+    !pathSegments.includes('__tests__')
+  )
+}
+
 test('block emitter sources use the canonical data_ref naming', () => {
   const files = readdirSync(BLOCKS_DIR, { recursive: true, encoding: 'utf-8' })
-    .filter((name) => name.endsWith('.ts') || name.endsWith('.tsx'))
+    .filter(isEmitterSource)
     .map((name) => join(BLOCKS_DIR, name))
     .filter((path) => path !== SELF_PATH)
   assert.ok(files.length > 0, 'expected at least one emitter source to scan')
@@ -30,6 +40,6 @@ test('block emitter sources use the canonical data_ref naming', () => {
   assert.deepEqual(
     violations,
     [],
-    'Found non-canonical data_ref aliases in block emitter sources — replace with data_ref',
+    'Found non-canonical camelCase ref aliases in block emitter sources; replace with canonical snake_case names.',
   )
 })

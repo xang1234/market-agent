@@ -20,9 +20,9 @@ export function SubjectChipList({
       data-testid={testId}
       className={`flex list-none flex-wrap p-0 text-xs ${dense ? 'gap-1' : 'gap-2'}`}
     >
-      {subjects.map((subject, index) => (
+      {subjects.map((subject) => (
         <li
-          key={`${keyPrefix}-${index}`}
+          key={`${keyPrefix}-${subject.kind}-${subject.id}`}
           data-subject-kind={subject.kind}
           data-subject-id={subject.id}
           className="rounded bg-neutral-100 px-2 py-0.5 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"

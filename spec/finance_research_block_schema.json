@@ -19,7 +19,7 @@
   "$defs": {
     "UUID": {
       "type": "string",
-      "pattern": "^[0-9a-fA-F-]{36}$"
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
     },
     "SubjectKind": {
       "type": "string",
@@ -953,7 +953,8 @@
                   },
                   "url": {
                     "type": "string",
-                    "format": "uri"
+                    "format": "uri",
+                    "pattern": "^https://"
                   }
                 },
                 "additionalProperties": false
