@@ -6,6 +6,12 @@ import type {
 } from "./registry.ts";
 import { TOOL_AUDIENCES } from "./registry.ts";
 import { toolsForAudience } from "./audience-enforcement.ts";
+import {
+  analystPromptTemplateForBundle,
+  analystPromptTemplateBundleIds,
+  type AnalystPromptTemplate,
+  type PromptCachePrefix,
+} from "./prompt-templates.ts";
 
 export type PreResolveBundleClassification = {
   bundle_id: string;
@@ -25,6 +31,8 @@ export type BundleSelection =
       bundle_id: string;
       bundle: ToolBundleDefinition;
       tools: ReadonlyArray<ToolDefinition>;
+      prompt_template: AnalystPromptTemplate;
+      prompt_cache_prefix: PromptCachePrefix;
       classification: PreResolveBundleClassification;
     }
   | {
@@ -34,6 +42,14 @@ export type BundleSelection =
       bundle_id: string;
       message: string;
       available_bundle_ids: ReadonlyArray<string>;
+    }
+  | {
+      ok: false;
+      reason: "missing_prompt_template";
+      audience: ToolAudience;
+      bundle_id: string;
+      message: string;
+      available_template_bundle_ids: ReadonlyArray<string>;
     };
 
 export function selectToolBundle(input: BundleSelectionInput): BundleSelection {
@@ -51,6 +67,18 @@ export function selectToolBundle(input: BundleSelectionInput): BundleSelection {
       available_bundle_ids: input.registry.bundleIds(),
     });
   }
+  const promptTemplate = analystPromptTemplateForBundle(bundle.bundle_id);
+
+  if (!promptTemplate) {
+    return Object.freeze({
+      ok: false,
+      reason: "missing_prompt_template",
+      audience,
+      bundle_id: bundle.bundle_id,
+      message: `Missing analyst prompt template for bundle "${bundle.bundle_id}"`,
+      available_template_bundle_ids: analystPromptTemplateBundleIds(),
+    });
+  }
 
   return Object.freeze({
     ok: true,
@@ -62,6 +90,8 @@ export function selectToolBundle(input: BundleSelectionInput): BundleSelection {
       bundle_id: bundle.bundle_id,
       audience,
     }),
+    prompt_template: promptTemplate,
+    prompt_cache_prefix: promptTemplate.prompt_cache_prefix,
     classification,
   });
 }
