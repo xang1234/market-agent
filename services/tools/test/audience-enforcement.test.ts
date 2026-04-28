@@ -127,6 +127,78 @@ test("validateRegistryAudienceBoundary rejects analyst additional-property schem
   ]);
 });
 
+test("validateRegistryAudienceBoundary rejects analyst pattern-property schemas without a raw-key guard", () => {
+  const registry = parseToolRegistry(
+    registryFixture({
+      tools: [
+        toolFixture({
+          name: "pattern_analyst_tool",
+          input_json_schema: {
+            type: "object",
+            patternProperties: {
+              ".*": { type: "string" },
+            },
+            additionalProperties: false,
+          },
+        }),
+      ],
+    }),
+  );
+
+  const result = validateRegistryAudienceBoundary(registry);
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.violations, [
+    {
+      reason: "analyst_permissive_schema",
+      tool_name: "pattern_analyst_tool",
+      audience: "analyst",
+      path: "input_json_schema.patternProperties",
+      message:
+        'Analyst tool "pattern_analyst_tool" permits arbitrary raw document fields at input_json_schema.patternProperties',
+    },
+  ]);
+});
+
+test("validateRegistryAudienceBoundary rejects analyst objects that omit additionalProperties", () => {
+  const registry = parseToolRegistry(
+    registryFixture({
+      tools: [
+        toolFixture({
+          name: "missing_additional_properties_tool",
+          output_json_schema: {
+            type: "object",
+            properties: {
+              claim: {
+                type: "object",
+                properties: {
+                  claim_id: { type: "string" },
+                },
+              },
+            },
+            required: ["claim"],
+            additionalProperties: false,
+          },
+        }),
+      ],
+    }),
+  );
+
+  const result = validateRegistryAudienceBoundary(registry);
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.violations, [
+    {
+      reason: "analyst_permissive_schema",
+      tool_name: "missing_additional_properties_tool",
+      audience: "analyst",
+      path: "output_json_schema.properties.claim.additionalProperties",
+      message:
+        'Analyst tool "missing_additional_properties_tool" permits arbitrary raw document fields at output_json_schema.properties.claim.additionalProperties',
+    },
+  ]);
+});
+
 test("toolsForAudience separates reader-only tools from analyst tools inside shared bundles", () => {
   const registry = loadToolRegistry();
 
