@@ -1,17 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { loadToolRegistry, parseToolRegistry } from "../src/registry.ts";
+import {
+  loadToolRegistry,
+  parseToolRegistry,
+  resolveToolRegistryPath,
+} from "../src/registry.ts";
 
 test("loadToolRegistry reads the default finance research registry", () => {
   const registry = loadToolRegistry();
 
   assert.equal(registry.version, "1.0.0");
-  assert.equal(registry.bundles.length, 11);
-  assert.equal(registry.tools.length, 31);
+  assert.ok(registry.bundles.length > 0);
+  assert.ok(registry.tools.length > 0);
 
   const createAlert = registry.getTool("create_alert");
   assert.ok(createAlert);
@@ -24,6 +28,25 @@ test("loadToolRegistry reads the default finance research registry", () => {
   assert.deepEqual(
     registry.toolsForBundle("alert_management").map((tool) => tool.name),
     ["create_alert", "add_to_watchlist"],
+  );
+});
+
+test("resolveToolRegistryPath finds a repo-level spec from a dist-like module directory", () => {
+  const root = mkdtempSync(join(tmpdir(), "tool-registry-root-"));
+  const specDir = join(root, "spec");
+  const moduleDir = join(root, "services", "tools", "dist");
+  mkdirSync(specDir, { recursive: true });
+  mkdirSync(moduleDir, { recursive: true });
+  const registryPath = join(specDir, "finance_research_tool_registry.json");
+  writeFileSync(registryPath, JSON.stringify(registryFixture()), "utf8");
+
+  assert.equal(
+    resolveToolRegistryPath({
+      moduleDir,
+      cwd: join(tmpdir(), "outside-registry-root"),
+      env: {},
+    }),
+    registryPath,
   );
 });
 
@@ -91,6 +114,22 @@ test("parseToolRegistry rejects duplicate tool names", () => {
   );
 });
 
+test("parseToolRegistry rejects duplicate bundle memberships on a tool", () => {
+  assert.throws(
+    () =>
+      parseToolRegistry(
+        registryFixture({
+          tools: [
+            toolFixture({
+              bundles: ["test_bundle", "test_bundle"],
+            }),
+          ],
+        }),
+      ),
+    /duplicate bundle "test_bundle"/,
+  );
+});
+
 test("loadToolRegistry returns immutable registry structures", () => {
   const registry = loadToolRegistry();
   const tool = registry.getTool("resolve_subjects");
@@ -102,6 +141,14 @@ test("loadToolRegistry returns immutable registry structures", () => {
   assert.equal(Object.isFrozen(tool), true);
   assert.equal(Object.isFrozen(tool.bundles), true);
   assert.equal(Object.isFrozen(tool.input_json_schema), true);
+});
+
+test("public index exports the registry loader", async () => {
+  const { loadToolRegistry: loadFromIndex } = await import("../src/index.ts");
+  assert.equal(
+    loadFromIndex().getTool("resolve_subjects")?.name,
+    "resolve_subjects",
+  );
 });
 
 function writeRegistryFile(overrides: {

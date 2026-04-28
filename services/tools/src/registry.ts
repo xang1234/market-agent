@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -60,16 +60,27 @@ export type LoadToolRegistryOptions = {
   registryPath?: string;
 };
 
+export type ResolveToolRegistryPathOptions = {
+  registryPath?: string;
+  moduleDir?: string;
+  cwd?: string;
+  env?: Record<string, string | undefined>;
+};
+
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
+export const TOOL_REGISTRY_RELATIVE_PATH =
+  "spec/finance_research_tool_registry.json";
+export const TOOL_REGISTRY_PATH_ENV = "FINANCE_RESEARCH_TOOL_REGISTRY_PATH";
 export const DEFAULT_TOOL_REGISTRY_PATH = resolve(
   MODULE_DIR,
-  "../../../spec/finance_research_tool_registry.json",
+  "../../../",
+  TOOL_REGISTRY_RELATIVE_PATH,
 );
 
 export function loadToolRegistry(
   options: LoadToolRegistryOptions = {},
 ): ToolRegistry {
-  const registryPath = options.registryPath ?? DEFAULT_TOOL_REGISTRY_PATH;
+  const registryPath = resolveToolRegistryPath(options);
   const raw = readFileSync(registryPath, "utf8");
   let parsed: unknown;
 
@@ -81,6 +92,29 @@ export function loadToolRegistry(
   }
 
   return parseToolRegistry(parsed, registryPath);
+}
+
+export function resolveToolRegistryPath(
+  options: ResolveToolRegistryPathOptions = {},
+): string {
+  const env = options.env ?? process.env;
+  const explicitPath = options.registryPath ?? env[TOOL_REGISTRY_PATH_ENV];
+  if (explicitPath) {
+    return resolve(explicitPath);
+  }
+
+  const startDirs = uniqueStrings([
+    options.moduleDir ?? MODULE_DIR,
+    options.cwd ?? process.cwd(),
+  ]);
+  for (const startDir of startDirs) {
+    const registryPath = findRegistryPathAbove(startDir);
+    if (registryPath) {
+      return registryPath;
+    }
+  }
+
+  return DEFAULT_TOOL_REGISTRY_PATH;
 }
 
 export function parseToolRegistry(
@@ -182,6 +216,7 @@ function freezeTools(
       seen.add(name);
 
       const bundles = freezeStringArray(raw.bundles, `${itemLabel}.bundles`);
+      rejectDuplicateStrings(bundles, `${itemLabel}.bundles`, "bundle");
       for (const bundleId of bundles) {
         if (!bundleIds.has(bundleId)) {
           throw new Error(
@@ -224,6 +259,39 @@ function freezeTools(
       });
     }),
   );
+}
+
+function findRegistryPathAbove(startDir: string): string | undefined {
+  let current = resolve(startDir);
+  for (;;) {
+    const candidate = resolve(current, TOOL_REGISTRY_RELATIVE_PATH);
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+    const parent = dirname(current);
+    if (parent === current) {
+      return undefined;
+    }
+    current = parent;
+  }
+}
+
+function uniqueStrings(values: ReadonlyArray<string>): ReadonlyArray<string> {
+  return Object.freeze([...new Set(values)]);
+}
+
+function rejectDuplicateStrings(
+  values: ReadonlyArray<string>,
+  label: string,
+  noun: string,
+): void {
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (seen.has(value)) {
+      throw new Error(`${label}: duplicate ${noun} "${value}"`);
+    }
+    seen.add(value);
+  }
 }
 
 function assertRecord(value: unknown, label: string): Record<string, unknown> {
