@@ -10,6 +10,7 @@ const BLOCKS_DIR = dirname(SELF_PATH)
 const NON_CANONICAL_PATTERNS = [
   ['dataRef', /\bdataRef\b/],
   ['queryRef', /\bqueryRef\b/],
+  ['query_ref', /\bquery_ref\b/],
 ] as const
 
 function isEmitterSource(name: string): boolean {
@@ -40,6 +41,6 @@ test('block emitter sources use the canonical data_ref naming', () => {
   assert.deepEqual(
     violations,
     [],
-    'Found non-canonical camelCase ref aliases in block emitter sources; replace with canonical snake_case names.',
+    'Found non-canonical ref aliases in block emitter sources; replace with canonical data_ref.',
   )
 })
