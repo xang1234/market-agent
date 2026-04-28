@@ -31,7 +31,7 @@ test("interceptToolCall routes create_alert through a pending approval action", 
   assert.equal(interception.pending_action.read_only, false);
   assert.equal(
     interception.pending_action.pending_action_id,
-    "pa_b72a1c82bf7bd8ed0b81081c",
+    "b72a1c82-bf7b-58ed-8b81-081ca8ec9948",
   );
   assert.equal(Object.isFrozen(interception), true);
   assert.equal(Object.isFrozen(interception.pending_action), true);
@@ -46,6 +46,7 @@ test("interceptToolCall routes create_agent through a pending approval action", 
     audience: "analyst",
     tool_name: "create_agent",
     arguments: {
+      name: "Margin recovery monitor",
       thesis: "Track margin recovery after inventory normalization",
       universe: { subject_refs: [] },
       cadence: "daily",
@@ -58,6 +59,13 @@ test("interceptToolCall routes create_agent through a pending approval action", 
   assert.equal(interception.action, "pending_approval");
   assert.equal(interception.pending_action.tool_name, "create_agent");
   assert.equal(interception.pending_action.bundle_id, "agent_management");
+  assert.deepEqual(interception.pending_action.arguments, {
+    name: "Margin recovery monitor",
+    thesis: "Track margin recovery after inventory normalization",
+    universe: { subject_refs: [] },
+    cadence: "daily",
+    prompt_template: "segment_margin_watch",
+  });
 });
 
 test("interceptToolCall allows non-approval write-intent tools but flags the policy boundary", () => {

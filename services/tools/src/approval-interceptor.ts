@@ -124,8 +124,19 @@ function pendingActionId(input: ApprovalInterceptionInput): string {
   const digest = createHash("sha256")
     .update(stableJson(seed))
     .digest("hex")
-    .slice(0, 24);
-  return `pa_${digest}`;
+    .slice(0, 32);
+  return deterministicUuid(digest);
+}
+
+function deterministicUuid(hex: string): string {
+  const chars = [...hex];
+  chars[12] = "5";
+  chars[16] = ((Number.parseInt(chars[16], 16) & 0x3) | 0x8).toString(16);
+  return `${chars.slice(0, 8).join("")}-${chars.slice(8, 12).join("")}-${chars
+    .slice(12, 16)
+    .join("")}-${chars.slice(16, 20).join("")}-${chars
+    .slice(20, 32)
+    .join("")}`;
 }
 
 function stableJson(value: unknown): string {
