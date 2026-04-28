@@ -11,12 +11,14 @@ export {
   RAW_DOCUMENT_FIELD_NAMES,
   assertRegistryAudienceBoundary,
   authorizeToolCall,
+  authorizeToolResult,
   toolsForAudience,
   validateRegistryAudienceBoundary,
 } from "./audience-enforcement.ts";
 export type {
   AudienceBoundaryViolation,
   AuthorizeToolCallInput,
+  AuthorizeToolResultInput,
   RegistryAudienceBoundaryValidation,
   ToolCallAuthorization,
   ToolsForAudienceInput,

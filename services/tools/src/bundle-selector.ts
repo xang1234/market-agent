@@ -1,8 +1,11 @@
 import type {
+  ToolAudience,
   ToolBundleDefinition,
   ToolDefinition,
   ToolRegistry,
 } from "./registry.ts";
+import { TOOL_AUDIENCES } from "./registry.ts";
+import { toolsForAudience } from "./audience-enforcement.ts";
 
 export type PreResolveBundleClassification = {
   bundle_id: string;
@@ -11,12 +14,14 @@ export type PreResolveBundleClassification = {
 
 export type BundleSelectionInput = {
   registry: ToolRegistry;
+  audience: ToolAudience;
   classification: PreResolveBundleClassification;
 };
 
 export type BundleSelection =
   | {
       ok: true;
+      audience: ToolAudience;
       bundle_id: string;
       bundle: ToolBundleDefinition;
       tools: ReadonlyArray<ToolDefinition>;
@@ -25,12 +30,14 @@ export type BundleSelection =
   | {
       ok: false;
       reason: "unknown_bundle";
+      audience: ToolAudience;
       bundle_id: string;
       message: string;
       available_bundle_ids: ReadonlyArray<string>;
     };
 
 export function selectToolBundle(input: BundleSelectionInput): BundleSelection {
+  const audience = runtimeAudience(input.audience);
   const classification = freezeClassification(input.classification);
   const bundle = input.registry.getBundle(classification.bundle_id);
 
@@ -38,6 +45,7 @@ export function selectToolBundle(input: BundleSelectionInput): BundleSelection {
     return Object.freeze({
       ok: false,
       reason: "unknown_bundle",
+      audience,
       bundle_id: classification.bundle_id,
       message: `Unknown tool bundle "${classification.bundle_id}"`,
       available_bundle_ids: input.registry.bundleIds(),
@@ -46,11 +54,25 @@ export function selectToolBundle(input: BundleSelectionInput): BundleSelection {
 
   return Object.freeze({
     ok: true,
+    audience,
     bundle_id: bundle.bundle_id,
     bundle,
-    tools: input.registry.toolsForBundle(bundle.bundle_id),
+    tools: toolsForAudience({
+      registry: input.registry,
+      bundle_id: bundle.bundle_id,
+      audience,
+    }),
     classification,
   });
+}
+
+function runtimeAudience(audience: ToolAudience): ToolAudience {
+  if (typeof audience !== "string" || !TOOL_AUDIENCES.includes(audience)) {
+    throw new Error(
+      `bundle selection audience: must be one of ${TOOL_AUDIENCES.join(", ")}`,
+    );
+  }
+  return audience;
 }
 
 function freezeClassification(

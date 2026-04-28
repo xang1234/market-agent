@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   assertRegistryAudienceBoundary,
   authorizeToolCall,
+  authorizeToolResult,
   toolsForAudience,
   validateRegistryAudienceBoundary,
 } from "../src/audience-enforcement.ts";
@@ -142,6 +143,56 @@ test("authorizeToolCall rejects analyst calls that carry raw_blob_url", () => {
     message:
       'Analyst audience cannot receive raw document field "raw_blob_url" at arguments.raw_blob_url',
   });
+});
+
+test("authorizeToolResult rejects raw document handles before analyst delivery", () => {
+  const registry = loadToolRegistry();
+
+  const authorization = authorizeToolResult({
+    registry,
+    bundle_id: "document_research",
+    audience: "analyst",
+    tool_name: "get_evidence_bundle",
+    result: {
+      documents: [
+        {
+          document_id: "70a0cc2e-e198-4b59-a5c9-9bd2da4a359b",
+          raw_blob_url: "s3://raw-filings/aapl-10q.html",
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(authorization, {
+    ok: false,
+    reason: "raw_document_payload",
+    audience: "analyst",
+    tool_name: "get_evidence_bundle",
+    path: "result.documents[0].raw_blob_url",
+    field: "raw_blob_url",
+    message:
+      'Analyst audience cannot receive raw document field "raw_blob_url" at result.documents[0].raw_blob_url',
+  });
+});
+
+test("authorizeToolResult allows reader results to carry raw document handles", () => {
+  const registry = loadToolRegistry();
+
+  const authorization = authorizeToolResult({
+    registry,
+    bundle_id: "document_research",
+    audience: "reader",
+    tool_name: "fetch_raw_document",
+    result: {
+      document: {
+        document_id: "70a0cc2e-e198-4b59-a5c9-9bd2da4a359b",
+      },
+      raw_blob_url: "s3://raw-filings/aapl-10q.html",
+    },
+  });
+
+  assert.equal(authorization.ok, true);
+  assert.equal(authorization.tool.name, "fetch_raw_document");
 });
 
 function registryFixture(overrides: {
