@@ -8,6 +8,21 @@ export type {
 } from "./bundle-selector.ts";
 
 export {
+  ANALYST_PROMPT_TEMPLATES,
+  ANALYST_PROMPT_TEMPLATE_VERSION,
+  analystPromptTemplateBundleIds,
+  analystPromptTemplateForBundle,
+  assertAnalystPromptTemplates,
+  validateAnalystPromptTemplates,
+} from "./prompt-templates.ts";
+export type {
+  AnalystPromptTemplate,
+  AnalystPromptTemplateValidation,
+  PromptCachePrefix,
+  PromptCachePrefixMessage,
+} from "./prompt-templates.ts";
+
+export {
   interceptToolCall,
 } from "./approval-interceptor.ts";
 export type {

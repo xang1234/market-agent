@@ -21,6 +21,11 @@ test("selectToolBundle selects every registered bundle from pre-resolve classifi
     assert.equal(selection.audience, "analyst");
     assert.equal(selection.bundle_id, bundle_id);
     assert.equal(selection.bundle.bundle_id, bundle_id);
+    assert.equal(selection.prompt_template.bundle_id, bundle_id);
+    assert.equal(
+      selection.prompt_cache_prefix.cache_key,
+      `analyst:${bundle_id}:${selection.prompt_template.version}`,
+    );
     assert.deepEqual(
       selection.tools.map((tool) => tool.name),
       registry
