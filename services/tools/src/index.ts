@@ -8,6 +8,15 @@ export type {
 } from "./bundle-selector.ts";
 
 export {
+  interceptToolCall,
+} from "./approval-interceptor.ts";
+export type {
+  ApprovalInterception,
+  ApprovalInterceptionInput,
+  PendingToolAction,
+} from "./approval-interceptor.ts";
+
+export {
   RAW_DOCUMENT_FIELD_NAMES,
   assertRegistryAudienceBoundary,
   authorizeToolCall,
