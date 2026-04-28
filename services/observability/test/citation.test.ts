@@ -176,6 +176,62 @@ test("citationLogInputsForBlocks extracts nested section and value refs", () => 
   ]);
 });
 
+test("citationLogInputsForBlocks extracts consensus and estimate block refs", () => {
+  const snapshot_id = randomUUID();
+  const analyst_count_ref = randomUUID();
+  const buy_count_ref = randomUUID();
+  const current_price_ref = randomUUID();
+  const low_ref = randomUUID();
+  const avg_ref = randomUUID();
+  const high_ref = randomUUID();
+  const upside_ref = randomUUID();
+  const estimate_ref = randomUUID();
+  const actual_ref = randomUUID();
+  const surprise_ref = randomUUID();
+
+  const rows = citationLogInputsForBlocks([
+    {
+      id: "consensus",
+      kind: "analyst_consensus",
+      snapshot_id,
+      analyst_count_ref,
+      distribution: [{ bucket: "buy", count_ref: buy_count_ref }],
+    },
+    {
+      id: "price-targets",
+      kind: "price_target_range",
+      snapshot_id,
+      current_price_ref,
+      low_ref,
+      avg_ref,
+      high_ref,
+      upside_ref,
+    },
+    {
+      id: "eps",
+      kind: "eps_surprise",
+      snapshot_id,
+      quarters: [{ label: "Q1", estimate_ref, actual_ref, surprise_ref }],
+    },
+  ]);
+
+  assert.deepEqual(
+    rows.map((row) => [row.block_id, row.ref_kind, row.ref_id]),
+    [
+      ["consensus", "fact", analyst_count_ref],
+      ["consensus", "fact", buy_count_ref],
+      ["price-targets", "fact", current_price_ref],
+      ["price-targets", "fact", low_ref],
+      ["price-targets", "fact", avg_ref],
+      ["price-targets", "fact", high_ref],
+      ["price-targets", "fact", upside_ref],
+      ["eps", "fact", estimate_ref],
+      ["eps", "fact", actual_ref],
+      ["eps", "fact", surprise_ref],
+    ],
+  );
+});
+
 test("writeCitationLogsForBlocks writes every extracted citation row", async () => {
   const inserted: unknown[][] = [];
   const db = {

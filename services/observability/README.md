@@ -76,8 +76,9 @@ tool payloads.
 
 `writeCitationLogsForBlocks` walks nested section children, rich-text ref
 segments, metric rows, revenue bars, segment donuts, and block-level
-`fact_refs`/`claim_refs`/`event_refs`. Duplicate refs inside one block are
-deduplicated before insert.
+`fact_refs`/`claim_refs`/`event_refs`. It also captures fact refs from
+analyst-consensus, price-target-range, and EPS-surprise blocks. Duplicate refs
+inside one block are deduplicated before insert.
 
 ## Tests
 
