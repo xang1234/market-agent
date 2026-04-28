@@ -8,6 +8,21 @@ export type {
 } from "./bundle-selector.ts";
 
 export {
+  RAW_DOCUMENT_FIELD_NAMES,
+  assertRegistryAudienceBoundary,
+  authorizeToolCall,
+  toolsForAudience,
+  validateRegistryAudienceBoundary,
+} from "./audience-enforcement.ts";
+export type {
+  AudienceBoundaryViolation,
+  AuthorizeToolCallInput,
+  RegistryAudienceBoundaryValidation,
+  ToolCallAuthorization,
+  ToolsForAudienceInput,
+} from "./audience-enforcement.ts";
+
+export {
   DEFAULT_TOOL_REGISTRY_PATH,
   TOOL_AUDIENCES,
   TOOL_COST_CLASSES,
