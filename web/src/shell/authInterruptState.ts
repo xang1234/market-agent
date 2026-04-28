@@ -1,3 +1,4 @@
+import type { ScreenerQuery } from '../screener/contracts.ts'
 import { isSubjectRef, type SubjectRef } from '../symbol/search.ts'
 
 export const AUTH_INTERRUPT_STORAGE_KEY = 'auth-interrupt'
@@ -6,6 +7,7 @@ export const AUTH_INTERRUPT_TTL_MS = 15 * 60 * 1_000
 
 export const ProtectedActionType = {
   SaveToWatchlist: 'save-to-watchlist',
+  SaveScreen: 'save-screen',
 } as const
 
 export type ProtectedActionType =
@@ -19,7 +21,28 @@ export type SaveToWatchlistProtectedAction = {
   }
 }
 
-export type ProtectedAction = SaveToWatchlistProtectedAction
+// SaveScreen carries the full ScreenerQuery envelope so a deferred
+// save survives a sessionStorage round-trip without losing any clause.
+// The screener service validates the envelope at the POST boundary;
+// this trust boundary's job is only to keep obviously malformed
+// objects out of the resume flow, not to re-validate every clause.
+//
+// Mirror of `SCREEN_NAME_MAX_LENGTH` in services/screener/src/screen-subject.ts.
+// Same drift discipline as `SCREENER_LIMIT_MAX` in screener/contracts.ts —
+// the server still rejects out-of-range values; this constant only lets
+// the UI surface a friendlier error before the round-trip.
+export const SCREEN_NAME_MAX_LENGTH = 200
+export type SaveScreenProtectedAction = {
+  actionType: typeof ProtectedActionType.SaveScreen
+  payload: {
+    name: string
+    definition: ScreenerQuery
+  }
+}
+
+export type ProtectedAction =
+  | SaveToWatchlistProtectedAction
+  | SaveScreenProtectedAction
 
 export type ProtectedActionKind = ProtectedAction['actionType']
 
@@ -62,18 +85,46 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isProtectedAction(value: unknown): value is ProtectedAction {
   if (!isRecord(value)) return false
-
-  if (value.actionType !== ProtectedActionType.SaveToWatchlist) return false
   if (!isRecord(value.payload)) return false
-  if (!isSubjectRef(value.payload.subject_ref)) return false
+
+  switch (value.actionType) {
+    case ProtectedActionType.SaveToWatchlist:
+      return isSaveToWatchlistPayload(value.payload)
+    case ProtectedActionType.SaveScreen:
+      return isSaveScreenPayload(value.payload)
+    default:
+      return false
+  }
+}
+
+function isSaveToWatchlistPayload(payload: Record<string, unknown>): boolean {
+  if (!isSubjectRef(payload.subject_ref)) return false
   if (
-    'display_name' in value.payload &&
-    value.payload.display_name != null &&
-    typeof value.payload.display_name !== 'string'
+    'display_name' in payload &&
+    payload.display_name != null &&
+    typeof payload.display_name !== 'string'
   ) {
     return false
   }
+  return true
+}
 
+// Top-level shape check only. Every clause-level invariant lives in
+// services/screener/src/query.ts and is enforced when the resumed
+// handler POSTs the envelope; duplicating ~300 lines of clause
+// validation here would drift from the server.
+function isSaveScreenPayload(payload: Record<string, unknown>): boolean {
+  if (typeof payload.name !== 'string') return false
+  if (payload.name.length === 0) return false
+  if (payload.name.length > SCREEN_NAME_MAX_LENGTH) return false
+  if (!isRecord(payload.definition)) return false
+  const def = payload.definition
+  if (!Array.isArray(def.universe)) return false
+  if (!Array.isArray(def.market)) return false
+  if (!Array.isArray(def.fundamentals)) return false
+  if (!Array.isArray(def.sort) || def.sort.length === 0) return false
+  if (!isRecord(def.page)) return false
+  if (typeof def.page.limit !== 'number') return false
   return true
 }
 

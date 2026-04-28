@@ -1,3 +1,4 @@
+import { WatchlistProvider } from '../watchlists/WatchlistProvider'
 import { AuthInterrupt } from './AuthInterrupt'
 import { AuthInterruptProvider } from './AuthInterruptProvider'
 import { PrimaryTabs } from './PrimaryTabs'
@@ -5,6 +6,7 @@ import { RightRailProvider } from './RightRailProvider'
 import { RightRailSlot } from './RightRailSlot'
 import { RouteScopeGate } from './RouteScopeGate'
 import { TopBar } from './TopBar'
+import { useAuth } from './useAuth'
 import { WatchlistSlot } from './WatchlistSlot'
 
 // The persistent workspace shell. Per the video target (bead fra-4pz IA
@@ -32,23 +34,27 @@ import { WatchlistSlot } from './WatchlistSlot'
 // modal instance handles the sign-in prompt + action resume across all
 // surfaces.
 export function WorkspaceShell() {
+  const { session } = useAuth()
+  const userId = session?.userId ?? null
   return (
     <AuthInterruptProvider>
       <RightRailProvider>
-        <div className="flex h-full w-full bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
-          <WatchlistSlot />
-          <div className="flex min-w-0 flex-1 flex-col">
-            <TopBar />
-            <PrimaryTabs />
-            <div className="flex min-h-0 flex-1">
-              <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-                <RouteScopeGate />
-              </main>
-              <RightRailSlot />
+        <WatchlistProvider userId={userId}>
+          <div className="flex h-full w-full bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
+            <WatchlistSlot />
+            <div className="flex min-w-0 flex-1 flex-col">
+              <TopBar />
+              <PrimaryTabs />
+              <div className="flex min-h-0 flex-1">
+                <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                  <RouteScopeGate />
+                </main>
+                <RightRailSlot />
+              </div>
             </div>
           </div>
-        </div>
-        <AuthInterrupt />
+          <AuthInterrupt />
+        </WatchlistProvider>
       </RightRailProvider>
     </AuthInterruptProvider>
   )

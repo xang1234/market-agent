@@ -7,6 +7,8 @@ import {
   subjectFromRouterState,
   type ResolvedSubject,
 } from '../symbol/search'
+import { SubjectMembershipBadges } from '../watchlists/SubjectMembershipBadges'
+import { useAuth } from './useAuth'
 import { ProtectedActionType } from './authInterruptState'
 import type { SubjectDetailOutletContext } from './subjectDetailOutletContext'
 import { useRequestProtectedAction } from './useAuthInterrupt'
@@ -46,6 +48,8 @@ export function SubjectDetailShell() {
   const { subjectRef } = useParams<{ subjectRef: string }>()
   const location = useLocation()
   const subject = subjectFromRouterState(location.state) ?? subjectFromRouteParam(subjectRef)
+  const { session } = useAuth()
+  const userId = session?.userId ?? null
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -54,6 +58,9 @@ export function SubjectDetailShell() {
         className="border-b border-neutral-200 px-8 py-5 dark:border-neutral-800"
       >
         <QuoteSnapshot subject={subject} />
+        {userId !== null ? (
+          <SubjectMembershipBadges subjectRef={subject.subject_ref} userId={userId} />
+        ) : null}
         <div className="mt-4 flex items-center gap-2">
           <SaveToWatchlistButton subject={subject} />
           <AnalyzeThisSubjectButton subject={subject} />

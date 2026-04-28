@@ -1,0 +1,30 @@
+// Per-subject held-state lookup for the subject-detail header.
+//
+// The portfolio service exposes overlays as a bulk read: one POST returns
+// contributions for an array of subject_refs. The header only cares about
+// one subject, so we send a one-element array. A future surface (e.g. a
+// list of N subjects with held badges) should batch through `fetchOverlays`
+// directly and pass the array — don't loop this hook.
+
+import { displaySubjectRef, type SubjectRef } from '../symbol/search.ts'
+import { useFetched, type FetchedResult, type VisibleFetchState } from '../symbol/useFetched.ts'
+import { fetchOverlays, hasOpenPosition, isHeldSubjectRef } from './overlays.ts'
+
+export type SubjectHeldState = VisibleFetchState<boolean>
+
+// Returns 'idle' for subjects that can't be held by contract (issuer, theme,
+// macro_topic, portfolio, screen) — those never reach the network.
+export function useSubjectHeld(subjectRef: SubjectRef, userId: string | null): SubjectHeldState {
+  const heldKindRef = isHeldSubjectRef(subjectRef) ? subjectRef : null
+  const key = userId && heldKindRef ? `${userId} ${displaySubjectRef(heldKindRef)}` : null
+
+  return useFetched(key, async (_key, signal): Promise<FetchedResult<boolean>> => {
+    if (!userId || !heldKindRef) return { kind: 'unavailable', reason: 'no key' }
+    const overlays = await fetchOverlays({
+      userId,
+      subjectRefs: [heldKindRef],
+      signal,
+    })
+    return { kind: 'ready', data: hasOpenPosition(overlays[0]) }
+  })
+}
