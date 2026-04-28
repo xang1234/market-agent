@@ -18,13 +18,19 @@ export const RAW_DOCUMENT_FIELD_NAMES: ReadonlyArray<string> = Object.freeze([
 ]);
 
 export type AudienceBoundaryViolation = {
-  reason: "analyst_raw_schema";
   tool_name: string;
   audience: ToolAudience;
   path: string;
-  field: string;
   message: string;
-};
+} & (
+  | {
+      reason: "analyst_raw_schema";
+      field: string;
+    }
+  | {
+      reason: "analyst_permissive_schema";
+    }
+);
 
 export type RegistryAudienceBoundaryValidation =
   | {
@@ -120,6 +126,18 @@ export function validateRegistryAudienceBoundary(
       "output_json_schema",
     )) {
       violations.push(analystRawSchemaViolation(tool, match));
+    }
+    for (const match of permissiveAdditionalPropertiesMatches(
+      tool.input_json_schema,
+      "input_json_schema",
+    )) {
+      violations.push(analystPermissiveSchemaViolation(tool, match));
+    }
+    for (const match of permissiveAdditionalPropertiesMatches(
+      tool.output_json_schema,
+      "output_json_schema",
+    )) {
+      violations.push(analystPermissiveSchemaViolation(tool, match));
     }
   }
 
@@ -274,10 +292,100 @@ function analystRawSchemaViolation(
   });
 }
 
+function analystPermissiveSchemaViolation(
+  tool: ToolDefinition,
+  match: PermissiveAdditionalPropertiesMatch,
+): AudienceBoundaryViolation {
+  return Object.freeze({
+    reason: "analyst_permissive_schema",
+    tool_name: tool.name,
+    audience: tool.audience,
+    path: match.path,
+    message: `Analyst tool "${tool.name}" permits arbitrary raw document fields at ${match.path}`,
+  });
+}
+
 type RawDocumentFieldMatch = {
   path: string;
   field: string;
 };
+
+type PermissiveAdditionalPropertiesMatch = {
+  path: string;
+};
+
+function permissiveAdditionalPropertiesMatches(
+  value: JsonValue | undefined,
+  path: string,
+): ReadonlyArray<PermissiveAdditionalPropertiesMatch> {
+  if (value === undefined || value === null || typeof value !== "object") {
+    return Object.freeze([]);
+  }
+
+  const matches: PermissiveAdditionalPropertiesMatch[] = [];
+
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      matches.push(
+        ...permissiveAdditionalPropertiesMatches(item, `${path}[${index}]`),
+      );
+    });
+    return Object.freeze(matches);
+  }
+
+  for (const [key, item] of Object.entries(value)) {
+    const childPath = `${path}.${key}`;
+    matches.push(...permissiveAdditionalPropertiesMatches(item, childPath));
+  }
+
+  if (isObjectSchema(value)) {
+    const additionalPropertiesPath = `${path}.additionalProperties`;
+    if (!Object.hasOwn(value, "additionalProperties")) {
+      matches.push(Object.freeze({ path: additionalPropertiesPath }));
+    } else if (
+      value.additionalProperties === true ||
+      (value.additionalProperties !== false && !hasRawPropertyNameGuard(value))
+    ) {
+      matches.push(Object.freeze({ path: additionalPropertiesPath }));
+    }
+  }
+
+  return Object.freeze(matches);
+}
+
+function isObjectSchema(value: JsonObject): boolean {
+  return (
+    value.type === "object" ||
+    Object.hasOwn(value, "properties") ||
+    Object.hasOwn(value, "required") ||
+    Object.hasOwn(value, "additionalProperties")
+  );
+}
+
+function hasRawPropertyNameGuard(value: JsonObject): boolean {
+  const propertyNames = value.propertyNames;
+  if (
+    propertyNames === null ||
+    typeof propertyNames !== "object" ||
+    Array.isArray(propertyNames)
+  ) {
+    return false;
+  }
+
+  const notSchema = propertyNames.not;
+  if (notSchema === null || typeof notSchema !== "object" || Array.isArray(notSchema)) {
+    return false;
+  }
+
+  const rawEnum = notSchema.enum;
+  if (!Array.isArray(rawEnum)) {
+    return false;
+  }
+
+  return RAW_DOCUMENT_FIELD_NAMES.every((fieldName) =>
+    rawEnum.includes(fieldName),
+  );
+}
 
 function rawDocumentFieldMatches(
   value: JsonValue | undefined,
