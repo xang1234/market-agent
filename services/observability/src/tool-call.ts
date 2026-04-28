@@ -80,31 +80,38 @@ export async function runLoggedToolCall<
 ): Promise<Result> {
   const now = input.now ?? Date.now;
   const startedAt = now();
+  let result: Result;
 
   try {
-    const result = await input.invoke(input.args);
-    await writeToolCallLog(db, {
-      thread_id: input.thread_id,
-      agent_id: input.agent_id,
-      tool_name: input.tool_name,
-      args: input.args,
-      result,
-      duration_ms: elapsedMilliseconds(startedAt, now()),
-      status: "ok",
-    });
-    return result;
+    result = await input.invoke(input.args);
   } catch (error) {
-    await writeToolCallLog(db, {
-      thread_id: input.thread_id,
-      agent_id: input.agent_id,
-      tool_name: input.tool_name,
-      args: input.args,
-      duration_ms: elapsedMilliseconds(startedAt, now()),
-      status: "error",
-      error_code: input.errorCode?.(error) ?? defaultErrorCode(error),
-    });
+    try {
+      await writeToolCallLog(db, {
+        thread_id: input.thread_id,
+        agent_id: input.agent_id,
+        tool_name: input.tool_name,
+        args: input.args,
+        duration_ms: elapsedMilliseconds(startedAt, now()),
+        status: "error",
+        error_code: input.errorCode?.(error) ?? defaultErrorCode(error),
+      });
+    } catch {
+      // Preserve the original tool failure; callers should not see a logging error
+      // in place of the failed tool invocation they need to handle.
+    }
     throw error;
   }
+
+  await writeToolCallLog(db, {
+    thread_id: input.thread_id,
+    agent_id: input.agent_id,
+    tool_name: input.tool_name,
+    args: input.args,
+    result,
+    duration_ms: elapsedMilliseconds(startedAt, now()),
+    status: "ok",
+  });
+  return result;
 }
 
 export function toolCallArgsDigest(args: JsonValue): ToolCallArgsDigest {
@@ -128,7 +135,7 @@ function stableJson(value: JsonValue): string {
   }
 
   return `{${Object.entries(value)
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`)
     .join(",")}}`;
 }

@@ -173,3 +173,55 @@ test("runLoggedToolCall records failed tool invocations and rethrows", async () 
   assert.equal(calls[0].values?.[6], "error");
   assert.equal(calls[0].values?.[7], "RATE_LIMITED");
 });
+
+test("runLoggedToolCall does not classify success log failures as tool failures", async () => {
+  const calls: Array<{ text: string; values?: unknown[] }> = [];
+  const dbError = new Error("tool_call_logs unavailable");
+  const db = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      calls.push({ text, values });
+      throw dbError;
+    },
+  };
+
+  await assert.rejects(
+    runLoggedToolCall(db, {
+      tool_name: "resolver.resolveByTicker",
+      args: { symbol: "MSFT" },
+      invoke: async () => ({ subject_ref: "MSFT:XNAS" }),
+    }),
+    /tool_call_logs unavailable/,
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].values?.[6], "ok");
+});
+
+test("runLoggedToolCall preserves the original tool error when error logging fails", async () => {
+  const calls: Array<{ text: string; values?: unknown[] }> = [];
+  const dbError = new Error("tool_call_logs unavailable");
+  const db = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      calls.push({ text, values });
+      throw dbError;
+    },
+  };
+  const toolError = Object.assign(new Error("provider rate limited"), {
+    code: "RATE_LIMITED",
+  });
+
+  await assert.rejects(
+    runLoggedToolCall(db, {
+      tool_name: "market.quote",
+      args: { symbol: "NVDA" },
+      invoke: async () => {
+        throw toolError;
+      },
+    }),
+    /provider rate limited/,
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].values?.[6], "error");
+  assert.equal(calls[0].values?.[7], "RATE_LIMITED");
+});
