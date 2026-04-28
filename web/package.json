@@ -11,10 +11,13 @@
     "typecheck": "tsc -b",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "sync:schema": "node -e \"require('node:fs').copyFileSync('../spec/finance_research_block_schema.json', 'src/blocks/blockSchema.json')\"",
     "test": "node --experimental-strip-types --test src/**/*.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-router-dom": "^7.14.2"

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { pluralize } from '../../format/pluralize.ts'
 import { useSubjectDetailContext } from '../../shell/subjectDetailOutletContext.ts'
 import { Card } from '../../symbol/Card.tsx'
 import { FetchStateView } from '../../symbol/FetchStateView.tsx'
@@ -233,7 +234,7 @@ function SegmentsView({ envelope }: { envelope: SegmentFactsEnvelope }) {
           data-testid="segments-warnings"
           className="md:col-span-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700/40 dark:bg-amber-950/40 dark:text-amber-200"
         >
-          {envelope.coverage_warnings.length} coverage warning{envelope.coverage_warnings.length === 1 ? '' : 's'}
+          {envelope.coverage_warnings.length} {pluralize(envelope.coverage_warnings.length, 'coverage warning')}
         </div>
       )}
     </div>

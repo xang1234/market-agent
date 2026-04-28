@@ -1,8 +1,9 @@
 import type { ReactElement } from 'react'
-import type { PerfComparisonBlock, SubjectRef } from './types.ts'
+import type { PerfComparisonBlock } from './types.ts'
 import { ChartCard } from './ChartCard.tsx'
+import { LabelValueCell } from './LabelValueCell.tsx'
+import { SubjectChipList } from './SubjectChipList.tsx'
 import { perfNormalizationLabel } from './perfComparison.ts'
-import { formatSubjectRefShort } from './subjectRef.ts'
 
 type PerfComparisonProps = { block: PerfComparisonBlock }
 
@@ -18,45 +19,16 @@ export function PerfComparison({ block }: PerfComparisonProps): ReactElement {
         'data-normalization': block.normalization,
       }}
     >
-      <SubjectList blockId={block.id} subjects={block.subject_refs} />
+      <SubjectChipList
+        testId={`block-perf-comparison-${block.id}-subjects`}
+        keyPrefix={`${block.id}-subj`}
+        subjects={block.subject_refs}
+      />
       <dl className="grid grid-cols-3 gap-2 text-xs text-neutral-600 dark:text-neutral-400">
-        <PerfMeta label="Range" value={block.default_range} />
-        <PerfMeta label="Basis" value={block.basis} />
-        <PerfMeta label="Normalization" value={perfNormalizationLabel(block.normalization)} />
+        <LabelValueCell label="Range">{block.default_range}</LabelValueCell>
+        <LabelValueCell label="Basis">{block.basis}</LabelValueCell>
+        <LabelValueCell label="Normalization">{perfNormalizationLabel(block.normalization)}</LabelValueCell>
       </dl>
     </ChartCard>
-  )
-}
-
-type SubjectListProps = { blockId: string; subjects: ReadonlyArray<SubjectRef> }
-
-function SubjectList({ blockId, subjects }: SubjectListProps): ReactElement {
-  return (
-    <ul
-      data-testid={`block-perf-comparison-${blockId}-subjects`}
-      className="flex list-none flex-wrap gap-2 p-0 text-xs"
-    >
-      {subjects.map((subject, index) => (
-        <li
-          key={`${blockId}-subj-${index}`}
-          data-subject-kind={subject.kind}
-          data-subject-id={subject.id}
-          className="rounded bg-neutral-100 px-2 py-0.5 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
-        >
-          {formatSubjectRefShort(subject)}
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-type PerfMetaProps = { label: string; value: string }
-
-function PerfMeta({ label, value }: PerfMetaProps): ReactElement {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <dt className="uppercase tracking-wide text-neutral-500">{label}</dt>
-      <dd className="text-neutral-800 dark:text-neutral-200">{value}</dd>
-    </div>
   )
 }
