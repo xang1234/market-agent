@@ -17,6 +17,19 @@ export type {
 } from "./approval-interceptor.ts";
 
 export {
+  DEFAULT_TOOL_CALL_BUDGET,
+  EMPTY_TOOL_CALL_USAGE,
+  checkToolCallBudget,
+  recordToolCallUsage,
+} from "./budget-gate.ts";
+export type {
+  CheckToolCallBudgetInput,
+  ToolCallBudget,
+  ToolCallBudgetDecision,
+  ToolCallUsage,
+} from "./budget-gate.ts";
+
+export {
   RAW_DOCUMENT_FIELD_NAMES,
   assertRegistryAudienceBoundary,
   authorizeToolCall,
