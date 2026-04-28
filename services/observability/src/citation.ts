@@ -24,6 +24,14 @@ export type CitationLogBlock = {
   children?: ReadonlyArray<CitationLogBlock>;
   items?: ReadonlyArray<unknown>;
   bars?: ReadonlyArray<unknown>;
+  distribution?: ReadonlyArray<unknown>;
+  quarters?: ReadonlyArray<unknown>;
+  analyst_count_ref?: string;
+  current_price_ref?: string;
+  low_ref?: string;
+  avg_ref?: string;
+  high_ref?: string;
+  upside_ref?: string;
   claim_refs?: ReadonlyArray<string>;
   event_refs?: ReadonlyArray<string>;
   fact_refs?: ReadonlyArray<string>;
@@ -149,6 +157,35 @@ function extractBlockRefs(
         continue;
       }
       pushRef(refs, "fact", segment.value_ref);
+    }
+  }
+
+  if (block.kind === "analyst_consensus") {
+    pushRef(refs, "fact", block.analyst_count_ref);
+    for (const item of block.distribution ?? []) {
+      if (!isRecord(item)) {
+        continue;
+      }
+      pushRef(refs, "fact", item.count_ref);
+    }
+  }
+
+  if (block.kind === "price_target_range") {
+    pushRef(refs, "fact", block.current_price_ref);
+    pushRef(refs, "fact", block.low_ref);
+    pushRef(refs, "fact", block.avg_ref);
+    pushRef(refs, "fact", block.high_ref);
+    pushRef(refs, "fact", block.upside_ref);
+  }
+
+  if (block.kind === "eps_surprise") {
+    for (const quarter of block.quarters ?? []) {
+      if (!isRecord(quarter)) {
+        continue;
+      }
+      pushRef(refs, "fact", quarter.estimate_ref);
+      pushRef(refs, "fact", quarter.actual_ref);
+      pushRef(refs, "fact", quarter.surprise_ref);
     }
   }
 
