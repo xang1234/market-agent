@@ -223,20 +223,99 @@
         "properties": {
           "period": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": {
+              "$ref": "#/$defs/analyst_safe_json_value"
+            },
+            "propertyNames": {
+              "not": {
+                "enum": [
+                  "raw_blob_url",
+                  "raw_blob_id",
+                  "raw_bytes",
+                  "raw_html",
+                  "raw_pdf",
+                  "raw_text",
+                  "raw_transcript",
+                  "raw_content",
+                  "document_bytes"
+                ]
+              }
+            }
           },
           "alternatives": {
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           }
         },
         "required": [
           "period"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -303,14 +382,76 @@
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           }
         },
         "required": [
           "facts"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -400,7 +541,24 @@
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           },
           "source_ids": {
@@ -416,7 +574,52 @@
           "series",
           "source_ids"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -505,7 +708,24 @@
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           },
           "source_ids": {
@@ -521,7 +741,52 @@
           "series",
           "source_ids"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -585,7 +850,24 @@
         "properties": {
           "profile": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": {
+              "$ref": "#/$defs/analyst_safe_json_value"
+            },
+            "propertyNames": {
+              "not": {
+                "enum": [
+                  "raw_blob_url",
+                  "raw_blob_id",
+                  "raw_bytes",
+                  "raw_html",
+                  "raw_pdf",
+                  "raw_text",
+                  "raw_transcript",
+                  "raw_content",
+                  "document_bytes"
+                ]
+              }
+            }
           },
           "source_ids": {
             "type": "array",
@@ -599,7 +881,52 @@
           "profile",
           "source_ids"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -689,7 +1016,24 @@
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           },
           "source_ids": {
@@ -704,7 +1048,52 @@
           "facts",
           "source_ids"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -769,14 +1158,76 @@
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           }
         },
         "required": [
           "facts"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -857,14 +1308,48 @@
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           },
           "segment_definitions": {
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           },
           "coverage_warnings": {
@@ -879,7 +1364,52 @@
           "segment_definitions",
           "coverage_warnings"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -942,11 +1472,45 @@
         "properties": {
           "rating_distribution": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": {
+              "$ref": "#/$defs/analyst_safe_json_value"
+            },
+            "propertyNames": {
+              "not": {
+                "enum": [
+                  "raw_blob_url",
+                  "raw_blob_id",
+                  "raw_bytes",
+                  "raw_html",
+                  "raw_pdf",
+                  "raw_text",
+                  "raw_transcript",
+                  "raw_content",
+                  "document_bytes"
+                ]
+              }
+            }
           },
           "price_target": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": {
+              "$ref": "#/$defs/analyst_safe_json_value"
+            },
+            "propertyNames": {
+              "not": {
+                "enum": [
+                  "raw_blob_url",
+                  "raw_blob_id",
+                  "raw_bytes",
+                  "raw_html",
+                  "raw_pdf",
+                  "raw_text",
+                  "raw_transcript",
+                  "raw_content",
+                  "document_bytes"
+                ]
+              }
+            }
           },
           "analyst_count": {
             "type": "integer"
@@ -965,7 +1529,52 @@
           "analyst_count",
           "as_of"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -1035,14 +1644,76 @@
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           }
         },
         "required": [
           "facts"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -1114,14 +1785,76 @@
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           }
         },
         "required": [
           "holders"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -1187,14 +1920,93 @@
           },
           "range": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": {
+              "$ref": "#/$defs/analyst_safe_json_value"
+            },
+            "propertyNames": {
+              "not": {
+                "enum": [
+                  "raw_blob_url",
+                  "raw_blob_id",
+                  "raw_bytes",
+                  "raw_html",
+                  "raw_pdf",
+                  "raw_text",
+                  "raw_transcript",
+                  "raw_content",
+                  "document_bytes"
+                ]
+              }
+            }
           },
           "trust_min": {
             "type": "string"
           }
         },
         "required": [],
-        "additionalProperties": true
+        "additionalProperties": {
+          "$ref": "#/$defs/analyst_safe_json_value"
+        },
+        "propertyNames": {
+          "not": {
+            "enum": [
+              "raw_blob_url",
+              "raw_blob_id",
+              "raw_bytes",
+              "raw_html",
+              "raw_pdf",
+              "raw_text",
+              "raw_transcript",
+              "raw_content",
+              "document_bytes"
+            ]
+          }
+        },
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "output_json_schema": {
         "type": "object",
@@ -1203,14 +2015,76 @@
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           }
         },
         "required": [
           "claims"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -1268,11 +2142,90 @@
           },
           "range": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": {
+              "$ref": "#/$defs/analyst_safe_json_value"
+            },
+            "propertyNames": {
+              "not": {
+                "enum": [
+                  "raw_blob_url",
+                  "raw_blob_id",
+                  "raw_bytes",
+                  "raw_html",
+                  "raw_pdf",
+                  "raw_text",
+                  "raw_transcript",
+                  "raw_content",
+                  "document_bytes"
+                ]
+              }
+            }
           }
         },
         "required": [],
-        "additionalProperties": true
+        "additionalProperties": {
+          "$ref": "#/$defs/analyst_safe_json_value"
+        },
+        "propertyNames": {
+          "not": {
+            "enum": [
+              "raw_blob_url",
+              "raw_blob_id",
+              "raw_bytes",
+              "raw_html",
+              "raw_pdf",
+              "raw_text",
+              "raw_transcript",
+              "raw_content",
+              "document_bytes"
+            ]
+          }
+        },
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "output_json_schema": {
         "type": "object",
@@ -1281,14 +2234,76 @@
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           }
         },
         "required": [
           "clusters"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -1354,11 +2369,90 @@
           },
           "range": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": {
+              "$ref": "#/$defs/analyst_safe_json_value"
+            },
+            "propertyNames": {
+              "not": {
+                "enum": [
+                  "raw_blob_url",
+                  "raw_blob_id",
+                  "raw_bytes",
+                  "raw_html",
+                  "raw_pdf",
+                  "raw_text",
+                  "raw_transcript",
+                  "raw_content",
+                  "document_bytes"
+                ]
+              }
+            }
           }
         },
         "required": [],
-        "additionalProperties": true
+        "additionalProperties": {
+          "$ref": "#/$defs/analyst_safe_json_value"
+        },
+        "propertyNames": {
+          "not": {
+            "enum": [
+              "raw_blob_url",
+              "raw_blob_id",
+              "raw_bytes",
+              "raw_html",
+              "raw_pdf",
+              "raw_text",
+              "raw_transcript",
+              "raw_content",
+              "document_bytes"
+            ]
+          }
+        },
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "output_json_schema": {
         "type": "object",
@@ -1367,14 +2461,76 @@
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           }
         },
         "required": [
           "events"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -1432,11 +2588,90 @@
           },
           "range": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": {
+              "$ref": "#/$defs/analyst_safe_json_value"
+            },
+            "propertyNames": {
+              "not": {
+                "enum": [
+                  "raw_blob_url",
+                  "raw_blob_id",
+                  "raw_bytes",
+                  "raw_html",
+                  "raw_pdf",
+                  "raw_text",
+                  "raw_transcript",
+                  "raw_content",
+                  "document_bytes"
+                ]
+              }
+            }
           }
         },
         "required": [],
-        "additionalProperties": true
+        "additionalProperties": {
+          "$ref": "#/$defs/analyst_safe_json_value"
+        },
+        "propertyNames": {
+          "not": {
+            "enum": [
+              "raw_blob_url",
+              "raw_blob_id",
+              "raw_bytes",
+              "raw_html",
+              "raw_pdf",
+              "raw_text",
+              "raw_transcript",
+              "raw_content",
+              "document_bytes"
+            ]
+          }
+        },
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "output_json_schema": {
         "type": "object",
@@ -1445,14 +2680,76 @@
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           }
         },
         "required": [
           "impacts"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -1496,7 +2793,69 @@
           }
         },
         "required": [],
-        "additionalProperties": true
+        "additionalProperties": {
+          "$ref": "#/$defs/analyst_safe_json_value"
+        },
+        "propertyNames": {
+          "not": {
+            "enum": [
+              "raw_blob_url",
+              "raw_blob_id",
+              "raw_bytes",
+              "raw_html",
+              "raw_pdf",
+              "raw_text",
+              "raw_transcript",
+              "raw_content",
+              "document_bytes"
+            ]
+          }
+        },
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "output_json_schema": {
         "type": "object",
@@ -1509,14 +2868,48 @@
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           },
           "evidence": {
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           }
         },
@@ -1525,7 +2918,52 @@
           "documents",
           "evidence"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -1568,14 +3006,76 @@
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           }
         },
         "required": [
           "lineage"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -1638,13 +3138,75 @@
         "properties": {
           "coverage": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": {
+              "$ref": "#/$defs/analyst_safe_json_value"
+            },
+            "propertyNames": {
+              "not": {
+                "enum": [
+                  "raw_blob_url",
+                  "raw_blob_id",
+                  "raw_bytes",
+                  "raw_html",
+                  "raw_pdf",
+                  "raw_text",
+                  "raw_transcript",
+                  "raw_content",
+                  "document_bytes"
+                ]
+              }
+            }
           }
         },
         "required": [
           "coverage"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -1725,14 +3287,76 @@
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           }
         },
         "required": [
           "peers"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -1762,16 +3386,67 @@
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           },
           "universe": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": {
+              "$ref": "#/$defs/analyst_safe_json_value"
+            },
+            "propertyNames": {
+              "not": {
+                "enum": [
+                  "raw_blob_url",
+                  "raw_blob_id",
+                  "raw_bytes",
+                  "raw_html",
+                  "raw_pdf",
+                  "raw_text",
+                  "raw_transcript",
+                  "raw_content",
+                  "document_bytes"
+                ]
+              }
+            }
           },
           "sort": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": {
+              "$ref": "#/$defs/analyst_safe_json_value"
+            },
+            "propertyNames": {
+              "not": {
+                "enum": [
+                  "raw_blob_url",
+                  "raw_blob_id",
+                  "raw_bytes",
+                  "raw_html",
+                  "raw_pdf",
+                  "raw_text",
+                  "raw_transcript",
+                  "raw_content",
+                  "document_bytes"
+                ]
+              }
+            }
           },
           "limit": {
             "type": "integer",
@@ -1784,7 +3459,69 @@
           "sort",
           "limit"
         ],
-        "additionalProperties": true
+        "additionalProperties": {
+          "$ref": "#/$defs/analyst_safe_json_value"
+        },
+        "propertyNames": {
+          "not": {
+            "enum": [
+              "raw_blob_url",
+              "raw_blob_id",
+              "raw_bytes",
+              "raw_html",
+              "raw_pdf",
+              "raw_text",
+              "raw_transcript",
+              "raw_content",
+              "document_bytes"
+            ]
+          }
+        },
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "output_json_schema": {
         "type": "object",
@@ -1796,7 +3533,24 @@
             "type": "array",
             "items": {
               "type": "object",
-              "additionalProperties": true
+              "additionalProperties": {
+                "$ref": "#/$defs/analyst_safe_json_value"
+              },
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "raw_blob_url",
+                    "raw_blob_id",
+                    "raw_bytes",
+                    "raw_html",
+                    "raw_pdf",
+                    "raw_text",
+                    "raw_transcript",
+                    "raw_content",
+                    "document_bytes"
+                  ]
+                }
+              }
             }
           }
         },
@@ -1804,7 +3558,52 @@
           "total_count",
           "matches"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "error_codes": [
         "INVALID_ARGUMENT",
@@ -2310,7 +4109,24 @@
           },
           "rule": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": {
+              "$ref": "#/$defs/analyst_safe_json_value"
+            },
+            "propertyNames": {
+              "not": {
+                "enum": [
+                  "raw_blob_url",
+                  "raw_blob_id",
+                  "raw_bytes",
+                  "raw_html",
+                  "raw_pdf",
+                  "raw_text",
+                  "raw_transcript",
+                  "raw_content",
+                  "document_bytes"
+                ]
+              }
+            }
           },
           "channels": {
             "type": "array",
@@ -2324,7 +4140,69 @@
           "rule",
           "channels"
         ],
-        "additionalProperties": true
+        "additionalProperties": {
+          "$ref": "#/$defs/analyst_safe_json_value"
+        },
+        "propertyNames": {
+          "not": {
+            "enum": [
+              "raw_blob_url",
+              "raw_blob_id",
+              "raw_bytes",
+              "raw_html",
+              "raw_pdf",
+              "raw_text",
+              "raw_transcript",
+              "raw_content",
+              "document_bytes"
+            ]
+          }
+        },
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "output_json_schema": {
         "type": "object",
@@ -2450,7 +4328,24 @@
           },
           "universe": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": {
+              "$ref": "#/$defs/analyst_safe_json_value"
+            },
+            "propertyNames": {
+              "not": {
+                "enum": [
+                  "raw_blob_url",
+                  "raw_blob_id",
+                  "raw_bytes",
+                  "raw_html",
+                  "raw_pdf",
+                  "raw_text",
+                  "raw_transcript",
+                  "raw_content",
+                  "document_bytes"
+                ]
+              }
+            }
           },
           "cadence": {
             "type": "string"
@@ -2465,7 +4360,69 @@
           "universe",
           "cadence"
         ],
-        "additionalProperties": true
+        "additionalProperties": {
+          "$ref": "#/$defs/analyst_safe_json_value"
+        },
+        "propertyNames": {
+          "not": {
+            "enum": [
+              "raw_blob_url",
+              "raw_blob_id",
+              "raw_bytes",
+              "raw_html",
+              "raw_pdf",
+              "raw_text",
+              "raw_transcript",
+              "raw_content",
+              "document_bytes"
+            ]
+          }
+        },
+        "$defs": {
+          "analyst_safe_json_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              },
+              {
+                "type": "object",
+                "propertyNames": {
+                  "not": {
+                    "enum": [
+                      "raw_blob_url",
+                      "raw_blob_id",
+                      "raw_bytes",
+                      "raw_html",
+                      "raw_pdf",
+                      "raw_text",
+                      "raw_transcript",
+                      "raw_content",
+                      "document_bytes"
+                    ]
+                  }
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/analyst_safe_json_value"
+                }
+              }
+            ]
+          }
+        }
       },
       "output_json_schema": {
         "type": "object",

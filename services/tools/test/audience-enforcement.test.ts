@@ -53,6 +53,80 @@ test("validateRegistryAudienceBoundary rejects analyst schemas that expose raw d
   );
 });
 
+test("validateRegistryAudienceBoundary rejects analyst schemas with permissive additional properties", () => {
+  const registry = parseToolRegistry(
+    registryFixture({
+      tools: [
+        toolFixture({
+          name: "permissive_analyst_tool",
+          output_json_schema: {
+            type: "object",
+            properties: {
+              document: {
+                type: "object",
+                additionalProperties: true,
+              },
+            },
+            required: ["document"],
+            additionalProperties: false,
+          },
+        }),
+      ],
+    }),
+  );
+
+  const result = validateRegistryAudienceBoundary(registry);
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.violations, [
+    {
+      reason: "analyst_permissive_schema",
+      tool_name: "permissive_analyst_tool",
+      audience: "analyst",
+      path: "output_json_schema.properties.document.additionalProperties",
+      message:
+        'Analyst tool "permissive_analyst_tool" permits arbitrary raw document fields at output_json_schema.properties.document.additionalProperties',
+    },
+  ]);
+});
+
+test("validateRegistryAudienceBoundary rejects analyst additional-property schemas without a raw-key guard", () => {
+  const registry = parseToolRegistry(
+    registryFixture({
+      tools: [
+        toolFixture({
+          name: "unguarded_analyst_tool",
+          input_json_schema: {
+            type: "object",
+            properties: {
+              filters: {
+                type: "object",
+                additionalProperties: { type: "string" },
+              },
+            },
+            required: ["filters"],
+            additionalProperties: false,
+          },
+        }),
+      ],
+    }),
+  );
+
+  const result = validateRegistryAudienceBoundary(registry);
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.violations, [
+    {
+      reason: "analyst_permissive_schema",
+      tool_name: "unguarded_analyst_tool",
+      audience: "analyst",
+      path: "input_json_schema.properties.filters.additionalProperties",
+      message:
+        'Analyst tool "unguarded_analyst_tool" permits arbitrary raw document fields at input_json_schema.properties.filters.additionalProperties',
+    },
+  ]);
+});
+
 test("toolsForAudience separates reader-only tools from analyst tools inside shared bundles", () => {
   const registry = loadToolRegistry();
 
@@ -220,8 +294,8 @@ function toolFixture(overrides: Record<string, unknown> = {}) {
     approval_required: false,
     cost_class: "low",
     freshness_expectation: "varies",
-    input_json_schema: { type: "object" },
-    output_json_schema: { type: "object" },
+    input_json_schema: { type: "object", additionalProperties: false },
+    output_json_schema: { type: "object", additionalProperties: false },
     error_codes: ["INVALID_ARGUMENT"],
     ...overrides,
   };
