@@ -12,8 +12,17 @@ export type {
   ToolCallLogStatus,
 } from "./tool-call.ts";
 
-export { writeCitationLog } from "./citation.ts";
-export type { CitationLogInput, CitationLogRow } from "./citation.ts";
+export {
+  citationLogInputsForBlocks,
+  writeCitationLog,
+  writeCitationLogsForBlocks,
+} from "./citation.ts";
+export type {
+  CitationLogBlock,
+  CitationLogInput,
+  CitationLogRow,
+  CitationRefKind,
+} from "./citation.ts";
 
 export { writeVerifierFailLog } from "./verifier-fail.ts";
 export type { VerifierFailLogInput, VerifierFailLogRow } from "./verifier-fail.ts";

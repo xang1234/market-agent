@@ -8,6 +8,8 @@ by the normative schema pack:
 
 - `writeToolCallLog` → `tool_call_logs`
 - `writeCitationLog` → `citation_logs` (requires an existing `snapshot_id`)
+- `writeCitationLogsForBlocks` → extracts block refs and writes one citation row
+  per `(block_id, ref_kind, ref_id)`
 - `writeVerifierFailLog` → `verifier_fail_logs`
 - `writeEvalRunResult` → `eval_run_results`
 - `startAgentRunLog` / `completeAgentRunLog` → `agent_run_logs` (operational
@@ -26,10 +28,11 @@ unchanged) and returns the generated primary key plus `created_at`.
 
 ## Explicitly out of scope
 
-- **Citation binding on block emission** — PX.1 owns the `citation_log`
-  binding on block emission. The `agent_run_log` writer ships here under
-  `fra-hyz.1.1`; orchestration code that calls `start`/`completeAgentRunLog`
-  around a run lives in the agent runtime, not in this package.
+- **Block emission orchestration** — callers still decide when a snapshot is
+  sealed and when emitted blocks are durable. The `agent_run_log` writer ships
+  here under `fra-hyz.1.1`; orchestration code that calls
+  `start`/`completeAgentRunLog` around a run lives in the agent runtime, not in
+  this package.
 - **Eval runner + golden set execution** — covered by PX.1 children
   (`fra-2yd`, `fra-gfq`).
 - **Status / reason-code taxonomies** — callers choose the vocabulary
@@ -38,7 +41,11 @@ unchanged) and returns the generated primary key plus `created_at`.
 ## Usage
 
 ```ts
-import { runLoggedToolCall, writeToolCallLog } from "observability";
+import {
+  runLoggedToolCall,
+  writeCitationLogsForBlocks,
+  writeToolCallLog,
+} from "observability";
 
 await writeToolCallLog(db, {
   tool_name: "resolver.resolveByTicker",
@@ -53,6 +60,8 @@ const quote = await runLoggedToolCall(db, {
   args: { symbol: "AAPL" },
   invoke: ({ symbol }) => fetchQuote(symbol),
 });
+
+await writeCitationLogsForBlocks(db, emittedBlocks);
 ```
 
 `args`, `result`, `result_json`, and `details` accept JSON-compatible values only.
@@ -64,6 +73,11 @@ JSON.
 `result_hash` is computed from `result` when callers do not pass an explicit
 hash. This keeps operational logs useful for correlation without retaining raw
 tool payloads.
+
+`writeCitationLogsForBlocks` walks nested section children, rich-text ref
+segments, metric rows, revenue bars, segment donuts, and block-level
+`fact_refs`/`claim_refs`/`event_refs`. Duplicate refs inside one block are
+deduplicated before insert.
 
 ## Tests
 
