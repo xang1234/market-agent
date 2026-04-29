@@ -316,14 +316,16 @@ function timestampParts(value: unknown, label: string): { epochNanoseconds: bigi
     throw new Error(`${label}: must be an ISO-8601 timestamp with explicit Z or offset`);
   }
   const [, year, month, day, hour, minute, second, fraction, zone, offsetSign, offsetHour, offsetMinute] = match;
-  const utcSecondMs = Date.UTC(
+  const utcSecondDate = new Date(0);
+  utcSecondDate.setUTCFullYear(
     Number(year),
     Number(month) - 1,
     Number(day),
-    Number(hour),
-    Number(minute),
-    Number(second),
-  ) - offsetMinutes(zone, offsetSign, offsetHour, offsetMinute) * 60_000;
+  );
+  utcSecondDate.setUTCHours(Number(hour), Number(minute), Number(second), 0);
+  const utcSecondMs =
+    utcSecondDate.getTime() -
+    offsetMinutes(zone, offsetSign, offsetHour, offsetMinute) * 60_000;
   if (!Number.isFinite(utcSecondMs)) {
     throw new Error(`${label}: must be an ISO-8601 timestamp with explicit Z or offset`);
   }

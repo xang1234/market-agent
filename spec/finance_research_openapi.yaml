@@ -1048,6 +1048,31 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SubjectRef'
+        fact_refs:
+          type: array
+          items:
+            type: string
+            format: uuid
+        claim_refs:
+          type: array
+          items:
+            type: string
+            format: uuid
+        event_refs:
+          type: array
+          items:
+            type: string
+            format: uuid
+        document_refs:
+          type: array
+          items:
+            type: string
+            format: uuid
+        series_specs:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
         as_of:
           type: string
           format: date-time
@@ -1063,6 +1088,22 @@ components:
           items:
             type: string
             format: uuid
+        tool_call_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        tool_call_result_hashes:
+          type: array
+          items:
+            type: object
+            required: [tool_call_id, result_hash]
+            properties:
+              tool_call_id:
+                type: string
+                format: uuid
+              result_hash:
+                type: string
         allowed_transforms:
           type: object
           additionalProperties: true

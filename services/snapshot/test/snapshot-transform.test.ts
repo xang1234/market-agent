@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   checkSnapshotTransform,
+  normalizeSnapshotTransformRequest,
   snapshotTransformBoundaryResponse,
 } from "../src/snapshot-transform.ts";
 import type { SnapshotSubjectRef } from "../src/manifest-staging.ts";
@@ -215,6 +216,23 @@ test("checkSnapshotTransform canonicalizes equivalent timestamp offsets", () => 
       }),
     }),
     { allowed: true, status: 200 },
+  );
+});
+
+test("normalizeSnapshotTransformRequest preserves four-digit years below 100", () => {
+  assert.deepEqual(
+    normalizeSnapshotTransformRequest(
+      validRequest({
+        range: {
+          start: "0001-01-01T00:00:00Z",
+          end: "0001-01-02T00:00:00Z",
+        },
+      }),
+    ).range,
+    {
+      start: "0001-01-01T00:00:00.000000000Z",
+      end: "0001-01-02T00:00:00.000000000Z",
+    },
   );
 });
 

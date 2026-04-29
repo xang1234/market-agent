@@ -200,14 +200,8 @@ function assertSnapshotTransactionClient(db: QueryExecutor): asserts db is Snaps
 function isPoolLike(db: QueryExecutor): boolean {
   const candidate = db as {
     connect?: unknown;
-    totalCount?: unknown;
-    idleCount?: unknown;
-    waitingCount?: unknown;
   };
-  return (
-    typeof candidate.connect === "function" &&
-    ("totalCount" in candidate || "idleCount" in candidate || "waitingCount" in candidate)
-  );
+  return typeof candidate.connect === "function";
 }
 
 function jsonParam(value: unknown): string {

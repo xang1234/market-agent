@@ -101,6 +101,22 @@ test("snapshotTransactionClient rejects pool-like executors before starting a tr
   assert.deepEqual(queries, []);
 });
 
+test("snapshotTransactionClient rejects query-plus-connect pool wrappers", () => {
+  const { db, queries } = recordingDb();
+  const poolWrapper = Object.assign(db, {
+    async connect() {
+      throw new Error("sealSnapshot must not acquire clients through wrapper pools");
+    },
+  });
+
+  assert.throws(
+    () => snapshotTransactionClient(poolWrapper),
+    /requires a pinned transaction client/i,
+  );
+
+  assert.deepEqual(queries, []);
+});
+
 test("sealSnapshotWithPool pins the seal transaction to one acquired client", async () => {
   const { db: client, queries } = recordingDb();
   let connectCount = 0;
