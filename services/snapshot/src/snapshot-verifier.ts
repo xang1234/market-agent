@@ -128,6 +128,7 @@ export type SnapshotVerificationInput = {
 
 export type SnapshotVerifierReasonCode =
   | "invalid_verifier_input"
+  | "tool_call_log_audit_failed"
   | "missing_fact_ref"
   | "missing_subject_ref"
   | "missing_claim_ref"
@@ -175,6 +176,29 @@ const DISCLOSURE_TIER_RANK: Record<RequiredDisclosure["tier"], number> = {
   candidate: 5,
   tertiary_source: 6,
 };
+
+const REGISTERED_BLOCK_KINDS = new Set([
+  "rich_text",
+  "section",
+  "metric_row",
+  "table",
+  "line_chart",
+  "revenue_bars",
+  "perf_comparison",
+  "segment_donut",
+  "segment_trajectory",
+  "metrics_comparison",
+  "analyst_consensus",
+  "price_target_range",
+  "eps_surprise",
+  "filings_list",
+  "news_cluster",
+  "finding_card",
+  "sentiment_trend",
+  "mention_volume",
+  "sources",
+  "disclosure",
+]);
 
 export async function verifySnapshotSeal(
   input: SnapshotVerificationInput,
@@ -918,6 +942,14 @@ function verifyBlockBindings(
   };
 
   for (const block of flattenBlocks(input.blocks)) {
+    if (!REGISTERED_BLOCK_KINDS.has(block.kind)) {
+      addFailure("invalid_block_binding", {
+        block_id: block.id,
+        field: "kind",
+        reason: "unknown_block_kind",
+        actual: block.kind,
+      });
+    }
     if (block.snapshot_id !== input.snapshot_id) {
       addFailure("invalid_block_binding", {
         block_id: block.id,
@@ -1446,7 +1478,9 @@ function verifyApprovals(
     if (
       !action.read_only &&
       (action.approval_required === undefined ||
-        (action.approval_required === true && action.approved !== true))
+        (action.approval_required === true &&
+          action.approved !== true &&
+          action.pending_action_id == null))
     ) {
       addFailure("unapproved_side_effect", {
         tool_name: action.tool_name,

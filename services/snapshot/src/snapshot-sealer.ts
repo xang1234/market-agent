@@ -1,7 +1,12 @@
-import type { QueryExecutor, SnapshotManifestDraft } from "./manifest-staging.ts";
+import {
+  auditManifestToolCallLog,
+  type QueryExecutor,
+  type SnapshotManifestDraft,
+} from "./manifest-staging.ts";
 import {
   type SnapshotVerificationInput,
   type SnapshotVerificationResult,
+  type SnapshotVerifierFailure,
   verifySnapshotSeal,
 } from "./snapshot-verifier.ts";
 
@@ -77,6 +82,27 @@ export async function sealSnapshot(
   const verification = await verifySnapshotSeal(verificationInput, db);
   if (!verification.ok) {
     return Object.freeze({ ok: false, verification });
+  }
+
+  const toolCallAudit = await auditManifestToolCallLog(db, input.manifest, {
+    ...(input.thread_id == null ? {} : { thread_id: input.thread_id }),
+  });
+  if (!toolCallAudit.ok) {
+    const failure: SnapshotVerifierFailure = Object.freeze({
+      reason_code: "tool_call_log_audit_failed",
+      details: Object.freeze({
+        missing_tool_call_ids: [...toolCallAudit.missing_tool_call_ids],
+        mismatched_tool_call_ids: [...toolCallAudit.mismatched_tool_call_ids],
+      }),
+    });
+    await writeSealFailure(db, input, failure);
+    return Object.freeze({
+      ok: false,
+      verification: Object.freeze({
+        ok: false,
+        failures: Object.freeze([failure]),
+      }),
+    });
   }
 
   await db.query("begin");
@@ -216,6 +242,24 @@ function isPoolLike(db: QueryExecutor): boolean {
 
 function isAcquiredClient(db: QueryExecutor): db is SnapshotPoolClient {
   return typeof (db as { release?: unknown }).release === "function";
+}
+
+async function writeSealFailure(
+  db: QueryExecutor,
+  input: SnapshotSealInput,
+  failure: SnapshotVerifierFailure,
+): Promise<void> {
+  await db.query(
+    `insert into verifier_fail_logs
+       (thread_id, snapshot_id, reason_code, details)
+     values ($1, $2, $3, $4::jsonb)`,
+    [
+      input.thread_id ?? null,
+      input.snapshot_id,
+      failure.reason_code,
+      JSON.stringify(failure.details),
+    ],
+  );
 }
 
 function jsonParam(value: unknown): string {

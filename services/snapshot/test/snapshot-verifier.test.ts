@@ -1989,6 +1989,27 @@ test("verifySnapshotSeal accepts aggregate disclosure blocks with stricter tiers
   });
 });
 
+test("verifySnapshotSeal accepts approval-required write intents resolved as pending actions", async () => {
+  const result = await verifySnapshotSeal({
+    ...baseInput,
+    tool_actions: [
+      {
+        tool_call_id: actionId,
+        tool_name: "create_alert",
+        read_only: false,
+        approval_required: true,
+        approved: false,
+        pending_action_id: pendingActionId,
+      },
+    ],
+  });
+
+  assert.deepEqual(result, {
+    ok: true,
+    failures: [],
+  });
+});
+
 test("verifySnapshotSeal rejects write intents without approval metadata", async () => {
   const result = await verifySnapshotSeal({
     ...baseInput,
@@ -2009,5 +2030,33 @@ test("verifySnapshotSeal rejects write intents without approval metadata", async
     tool_call_id: null,
     approval_required: null,
     pending_action_id: null,
+  });
+});
+
+test("verifySnapshotSeal rejects unknown block kinds even when data_ref matches", async () => {
+  const result = await verifySnapshotSeal({
+    ...baseInput,
+    blocks: [
+      {
+        id: "unregistered",
+        kind: "made_up_block",
+        snapshot_id: snapshotId,
+        data_ref: { kind: "made_up_block", id: "made-up" },
+        source_refs: [sourceId],
+        as_of: "2026-04-29T00:00:00.000Z",
+      },
+      baseInput.blocks[1],
+    ],
+  });
+
+  assert.deepEqual(
+    result.failures.map((failure) => failure.reason_code),
+    ["invalid_block_binding"],
+  );
+  assert.deepEqual(result.failures[0].details, {
+    block_id: "unregistered",
+    field: "kind",
+    reason: "unknown_block_kind",
+    actual: "made_up_block",
   });
 });
