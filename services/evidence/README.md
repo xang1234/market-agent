@@ -25,6 +25,20 @@ database round trip for malformed `kind`, `trust_tier`, timestamp, or empty
 license/provider metadata. The database still enforces referential integrity:
 `documents.source_id` must point at an existing source row.
 
+## Document Repo
+
+`createDocument` writes rows to `documents` and treats
+`(content_hash, raw_blob_id)` as the identity for raw content. The first ingest
+returns `{ status: "created" }`; a later ingest of the same content returns
+`{ status: "already_present" }` with the existing row.
+
+`getDocument` reads a document by `document_id`.
+
+The repository validates document kind, parse status, UUID references,
+timestamps, and required hash/blob metadata before querying. Parent document
+threading is accepted as metadata here; threaded-source behavior is covered by
+`fra-8la`.
+
 ## Tests
 
 ```bash
