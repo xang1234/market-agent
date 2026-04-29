@@ -48,6 +48,18 @@ export type {
   RunGoldenEvalSuiteResult,
 } from "./golden-eval-runner.ts";
 
+export {
+  buildGoldenEvalDriftReport,
+  readLatestGoldenEvalDriftReport,
+} from "./drift-report.ts";
+export type {
+  BuildGoldenEvalDriftReportInput,
+  GoldenEvalCategoryDrift,
+  GoldenEvalDriftReport,
+  GoldenEvalDriftRun,
+  ReadLatestGoldenEvalDriftReportInput,
+} from "./drift-report.ts";
+
 export { startAgentRunLog, completeAgentRunLog } from "./agent-run.ts";
 export type {
   AgentRunLogStartInput,
