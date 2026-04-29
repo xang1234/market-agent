@@ -373,11 +373,6 @@ async function stubChatTurnRunner(
     tool_name: "resolve_subjects",
     status: "ok",
   });
-  emit("snapshot.staged", {
-    stub: true,
-    snapshot_id: snapshotId,
-    status: "staged",
-  });
   if (persistAssistantMessage) {
     const persisted = await persistAssistantMessage({
       threadId: context.threadId,
@@ -390,6 +385,11 @@ async function stubChatTurnRunner(
     snapshotId = persisted.snapshot_id;
     messageId = persisted.message_id;
   }
+  emit("snapshot.staged", {
+    stub: true,
+    snapshot_id: snapshotId,
+    status: "staged",
+  });
   emit("snapshot.sealed", {
     stub: true,
     snapshot_id: snapshotId,

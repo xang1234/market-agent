@@ -308,6 +308,7 @@ test("default turn runner persists assistant message before snapshot.sealed", as
   );
   assert.equal(turn.events[4].snapshot_id, "22222222-2222-4222-a222-222222222222");
   assert.equal(turn.events[8].message_id, "33333333-3333-4333-a333-333333333333");
+  assert.equal(turn.events[3].snapshot_id, turn.events[4].snapshot_id);
 });
 
 test("default turn runner emits turn.error when assistant message persistence fails", async () => {
@@ -322,9 +323,9 @@ test("default turn runner emits turn.error when assistant message persistence fa
 
   assert.deepEqual(
     turn.events.map((event) => event.type),
-    ["turn.started", "tool.started", "tool.completed", "snapshot.staged", "turn.error"],
+    ["turn.started", "tool.started", "tool.completed", "turn.error"],
   );
-  assert.equal(turn.events[4].error_code, "Error");
+  assert.equal(turn.events[3].error_code, "Error");
 });
 
 type ChatTurnEventMutation = {
