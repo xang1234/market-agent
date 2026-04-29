@@ -152,6 +152,35 @@ jobs:
         working-directory: services/watchlists
         run: npm test
 
+  observability:
+    name: observability (integration tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            db/package-lock.json
+            services/observability/package-lock.json
+
+      # Observability tests use the shared db/test Docker harness and invoke
+      # `npm run apply:schema` inside db/, so db dependencies must be present.
+      - name: Install db deps (needed by observability integration harness)
+        working-directory: db
+        run: npm ci
+
+      - name: Install observability deps
+        working-directory: services/observability
+        run: npm ci
+
+      - name: Run observability tests
+        working-directory: services/observability
+        run: npm test
+
   evidence:
     name: evidence (integration tests)
     runs-on: ubuntu-latest

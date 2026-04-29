@@ -57,6 +57,7 @@ export type {
   GoldenEvalCategoryDrift,
   GoldenEvalDriftReport,
   GoldenEvalDriftRun,
+  GoldenEvalDriftRunRef,
   ReadLatestGoldenEvalDriftReportInput,
 } from "./drift-report.ts";
 

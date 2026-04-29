@@ -238,6 +238,17 @@ test("createDocument rejects malformed document metadata before querying", async
     /content_hash: must be a non-empty string/,
   );
 
+  await assert.rejects(
+    createDocument(db, {
+      source_id: SOURCE_ID,
+      kind: "filing",
+      published_at: "2026-02-31T00:00:00Z",
+      content_hash: "sha256:document-content",
+      raw_blob_id: "sha256:document-content",
+    }),
+    /published_at: must be an ISO-8601 timestamp with explicit Z or offset/,
+  );
+
   assert.equal(queryCalls, 0);
 });
 

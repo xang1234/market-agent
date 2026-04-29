@@ -116,6 +116,17 @@ test("createSource rejects malformed source metadata before querying", async () 
     /provider: must be a non-empty string/,
   );
 
+  await assert.rejects(
+    createSource(db, {
+      provider: "sec_edgar",
+      kind: "filing",
+      trust_tier: "primary",
+      license_class: "public",
+      retrieved_at: "2026-02-31T00:00:00Z",
+    }),
+    /retrieved_at: must be an ISO-8601 timestamp with explicit Z or offset/,
+  );
+
   assert.equal(queryCalls, 0);
 });
 

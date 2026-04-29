@@ -43,7 +43,7 @@ export type ReadLatestGoldenEvalDriftReportInput = {
   suite_name: string;
 };
 
-type GoldenEvalDriftRunRef = {
+export type GoldenEvalDriftRunRef = {
   eval_run_result_id: string;
   created_at: string;
   suite_name: string;
