@@ -6,6 +6,8 @@ import {
   ANALYST_PROMPT_TEMPLATE_VERSION,
   ANALYST_PROMPT_TEMPLATES,
   analystPromptTemplateForBundle,
+  buildPromptCachePrefix,
+  promptCachePrefixHash,
   validateAnalystPromptTemplates,
 } from "../src/prompt-templates.ts";
 
@@ -33,7 +35,7 @@ test("each analyst prompt template carries system and policy prompts in the cach
     assert.equal(template.prompt_cache_prefix.cache_key, `analyst:${template.bundle_id}:${template.version}`);
     assert.deepEqual(
       template.prompt_cache_prefix.messages.map((message) => message.name),
-      ["bundle_system", "bundle_policy"],
+      ["system", "bundle_policy"],
     );
     assert.deepEqual(
       template.prompt_cache_prefix.messages.map((message) => message.content),
@@ -54,4 +56,77 @@ test("analystPromptTemplateForBundle returns the immutable template for a bundle
     template.policy_prompt.includes("structured claims, events, facts, and evidence bundles"),
     true,
   );
+});
+
+test("buildPromptCachePrefix enforces cache-stable prompt ordering and excludes user turn", () => {
+  const template = analystPromptTemplateForBundle("document_research");
+  assert.ok(template);
+
+  const prefix = buildPromptCachePrefix({
+    template,
+    tools: [{ name: "get_claims" }, { name: "get_events" }],
+    response_schema: { schema_id: "finance_research_blocks/v1" },
+    few_shots: [{ name: "document_example", content: "Use structured evidence only." }],
+    thread_summary: "User is researching AAPL supplier risk.",
+    resolved_context: {
+      subjects: [{ kind: "listing", id: "00000000-0000-4000-8000-000000000001" }],
+      period: "FY2026",
+    },
+    user_turn: "What changed in the latest filing?",
+  });
+
+  assert.deepEqual(
+    prefix.messages.map((message) => message.name),
+    [
+      "tools",
+      "system",
+      "bundle_policy",
+      "response_schema",
+      "few_shots",
+      "thread_summary",
+      "resolved_context",
+    ],
+  );
+  assert.equal(
+    prefix.messages.some((message) => message.content.includes("latest filing")),
+    false,
+  );
+  assert.equal(prefix.user_turn, "What changed in the latest filing?");
+  assert.equal(Object.isFrozen(prefix), true);
+  assert.equal(Object.isFrozen(prefix.messages), true);
+});
+
+test("prompt-cache prefix hash is stable across volatile user turns within a bundle", () => {
+  const template = analystPromptTemplateForBundle("single_subject_analysis");
+  assert.ok(template);
+  const stableInput = {
+    template,
+    tools: [{ name: "resolve_subjects" }, { name: "get_facts" }],
+    response_schema: { schema_id: "finance_research_blocks/v1" },
+    few_shots: [{ name: "facts_table", content: "Return metric_row blocks." }],
+    thread_summary: "User is tracking quarterly margin recovery.",
+    resolved_context: {
+      subjects: [{ kind: "listing", id: "00000000-0000-4000-8000-000000000001" }],
+      period: "FY2026",
+    },
+  };
+
+  const first = buildPromptCachePrefix({
+    ...stableInput,
+    user_turn: "Summarize margins.",
+  });
+  const second = buildPromptCachePrefix({
+    ...stableInput,
+    user_turn: "Now compare revenue growth.",
+  });
+  const changedBundle = buildPromptCachePrefix({
+    ...stableInput,
+    template: analystPromptTemplateForBundle("peer_comparison")!,
+    user_turn: "Now compare revenue growth.",
+  });
+
+  assert.equal(first.cache_key, second.cache_key);
+  assert.equal(promptCachePrefixHash(first), promptCachePrefixHash(second));
+  assert.notEqual(first.cache_key, changedBundle.cache_key);
+  assert.notEqual(promptCachePrefixHash(first), promptCachePrefixHash(changedBundle));
 });

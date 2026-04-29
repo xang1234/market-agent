@@ -13,11 +13,15 @@ export {
   analystPromptTemplateBundleIds,
   analystPromptTemplateForBundle,
   assertAnalystPromptTemplates,
+  buildPromptCachePrefix,
+  promptCachePrefixHash,
   validateAnalystPromptTemplates,
 } from "./prompt-templates.ts";
 export type {
   AnalystPromptTemplate,
   AnalystPromptTemplateValidation,
+  BuildPromptCachePrefixInput,
+  PromptCacheFewShot,
   PromptCachePrefix,
   PromptCachePrefixMessage,
 } from "./prompt-templates.ts";
