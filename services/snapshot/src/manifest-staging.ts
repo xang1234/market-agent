@@ -107,6 +107,7 @@ export type ToolCallLogAudit = {
   mismatched_tool_call_ids: ReadonlyArray<string>;
   extra_tool_call_ids: ReadonlyArray<string>;
   duplicate_tool_call_ids: ReadonlyArray<string>;
+  missing_hash_tool_call_ids: ReadonlyArray<string>;
 };
 
 export type ToolCallLogAuditOptions = {
@@ -298,19 +299,19 @@ export async function auditManifestToolCallLog(
     ...duplicateToolCallIds,
     ...duplicateHashToolCallIds,
   ]);
-  for (const toolCallId of uniqueToolCallIds) {
-    if (!expectedHashes.has(toolCallId)) {
-      throw new Error(`auditManifestToolCallLog.tool_call_result_hashes: missing hash for ${toolCallId}`);
-    }
-  }
+  const missingHashToolCallIds = uniqueToolCallIds.filter((toolCallId) => !expectedHashes.has(toolCallId));
 
   if (uniqueToolCallIds.length === 0) {
     return Object.freeze({
-      ok: extraToolCallIds.length === 0 && duplicateAuditToolCallIds.length === 0,
+      ok:
+        extraToolCallIds.length === 0 &&
+        duplicateAuditToolCallIds.length === 0 &&
+        missingHashToolCallIds.length === 0,
       missing_tool_call_ids: Object.freeze([]),
       mismatched_tool_call_ids: Object.freeze([]),
       extra_tool_call_ids: Object.freeze(extraToolCallIds),
       duplicate_tool_call_ids: Object.freeze(duplicateAuditToolCallIds),
+      missing_hash_tool_call_ids: Object.freeze(missingHashToolCallIds),
     });
   }
 
@@ -343,6 +344,7 @@ export async function auditManifestToolCallLog(
   const missing = uniqueToolCallIds.filter((toolCallId) => !found.has(toolCallId));
   const mismatched = uniqueToolCallIds.filter((toolCallId) => {
     if (!found.has(toolCallId)) return false;
+    if (!expectedHashes.has(toolCallId)) return false;
     return found.get(toolCallId) !== expectedHashes.get(toolCallId);
   });
 
@@ -351,11 +353,13 @@ export async function auditManifestToolCallLog(
       missing.length === 0 &&
       mismatched.length === 0 &&
       extraToolCallIds.length === 0 &&
-      duplicateAuditToolCallIds.length === 0,
+      duplicateAuditToolCallIds.length === 0 &&
+      missingHashToolCallIds.length === 0,
     missing_tool_call_ids: Object.freeze(missing),
     mismatched_tool_call_ids: Object.freeze(mismatched),
     extra_tool_call_ids: Object.freeze(extraToolCallIds),
     duplicate_tool_call_ids: Object.freeze(duplicateAuditToolCallIds),
+    missing_hash_tool_call_ids: Object.freeze(missingHashToolCallIds),
   });
 }
 

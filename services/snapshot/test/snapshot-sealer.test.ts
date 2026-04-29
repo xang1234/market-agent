@@ -80,6 +80,7 @@ test("sealSnapshot rejects missing tool-call audit rows before starting a transa
     mismatched_tool_call_ids: [],
     extra_tool_call_ids: [],
     duplicate_tool_call_ids: [],
+    missing_hash_tool_call_ids: [],
   });
   assert.deepEqual(queries.map((query) => normalizedSql(query.text)), [
     "select from tool_call_logs",
@@ -109,6 +110,33 @@ test("sealSnapshot rejects extra and duplicate tool-call result hashes before st
     mismatched_tool_call_ids: [],
     extra_tool_call_ids: [extraToolCallId],
     duplicate_tool_call_ids: [toolCallId],
+    missing_hash_tool_call_ids: [],
+  });
+  assert.deepEqual(queries.map((query) => normalizedSql(query.text)), [
+    "select from tool_call_logs",
+    "insert into verifier_fail_logs",
+  ]);
+});
+
+test("sealSnapshot rejects missing tool-call result hashes before starting a transaction", async () => {
+  const { db, queries } = recordingDb();
+
+  const result = await sealSnapshot(snapshotTransactionClient(db), {
+    ...validSealInput(),
+    manifest: {
+      ...manifest,
+      tool_call_result_hashes: [],
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.verification.failures[0]?.reason_code, "tool_call_log_audit_failed");
+  assert.deepEqual(result.verification.failures[0]?.details, {
+    missing_tool_call_ids: [],
+    mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [],
+    duplicate_tool_call_ids: [],
+    missing_hash_tool_call_ids: [toolCallId],
   });
   assert.deepEqual(queries.map((query) => normalizedSql(query.text)), [
     "select from tool_call_logs",

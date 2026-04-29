@@ -175,6 +175,7 @@ test("auditManifestToolCallLog reports missing staged tool calls", async () => {
     mismatched_tool_call_ids: [],
     extra_tool_call_ids: [],
     duplicate_tool_call_ids: [],
+    missing_hash_tool_call_ids: [],
   });
   assert.match(queries[0].text, /tool_call_logs/);
   assert.deepEqual(queries[0].values, [
@@ -219,6 +220,7 @@ test("auditManifestToolCallLog scopes audit to successful thread and agent calls
     mismatched_tool_call_ids: [],
     extra_tool_call_ids: [],
     duplicate_tool_call_ids: [],
+    missing_hash_tool_call_ids: [],
   });
   assert.match(queries[0].text, /status = any\(\$2::text\[\]\)/);
   assert.match(queries[0].text, /thread_id = \$3::uuid/);
@@ -229,6 +231,36 @@ test("auditManifestToolCallLog scopes audit to successful thread and agent calls
     threadId,
     agentId,
   ]);
+});
+
+test("auditManifestToolCallLog reports missing result hash entries without throwing", async () => {
+  const db = {
+    async query<R extends Record<string, unknown>>() {
+      return {
+        rows: [{ tool_call_id: firstToolCallId, result_hash: fakeFirstHash }] as R[],
+        rowCount: 1,
+        command: "SELECT",
+        oid: 0,
+        fields: [],
+      };
+    },
+  };
+
+  const result = await auditManifestToolCallLog(db, {
+    tool_call_ids: [firstToolCallId, secondToolCallId],
+    tool_call_result_hashes: [
+      { tool_call_id: firstToolCallId, result_hash: fakeFirstHash },
+    ],
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    missing_tool_call_ids: [secondToolCallId],
+    mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [],
+    duplicate_tool_call_ids: [],
+    missing_hash_tool_call_ids: [secondToolCallId],
+  });
 });
 
 test("auditManifestToolCallLog rejects refs whose contribution hash differs from the durable tool log", async () => {
@@ -269,6 +301,7 @@ test("auditManifestToolCallLog rejects refs whose contribution hash differs from
     mismatched_tool_call_ids: [firstToolCallId],
     extra_tool_call_ids: [],
     duplicate_tool_call_ids: [],
+    missing_hash_tool_call_ids: [],
   });
   assert.match(queries[0].text, /result_hash/);
 });
@@ -305,6 +338,7 @@ test("auditManifestToolCallLog rejects extra and duplicate result hash entries",
     mismatched_tool_call_ids: [],
     extra_tool_call_ids: [extraToolCallId],
     duplicate_tool_call_ids: [firstToolCallId],
+    missing_hash_tool_call_ids: [],
   });
 });
 
@@ -354,5 +388,6 @@ test("auditManifestToolCallLog accepts full tool result hashes with embedded man
     mismatched_tool_call_ids: [],
     extra_tool_call_ids: [],
     duplicate_tool_call_ids: [],
+    missing_hash_tool_call_ids: [],
   });
 });
