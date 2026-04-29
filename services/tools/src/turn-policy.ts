@@ -66,6 +66,8 @@ function createTurnToolPolicyWithSession(
   input: TurnToolPolicyInput,
   session?: TurnToolPolicySession,
 ): TurnToolPolicy {
+  const budget = normalizeBudget(input.budget);
+  const usage = normalizeUsage(input.usage);
   const selection = selectToolBundle({
     registry: input.registry,
     audience: input.audience,
@@ -81,8 +83,6 @@ function createTurnToolPolicyWithSession(
     return selection;
   }
 
-  const budget = normalizeBudget(input.budget);
-  const usage = normalizeUsage(input.usage);
   const policySession = session ?? {
     acceptedDecisions: new WeakSet<AcceptedToolCallBudgetDecision>(),
     reservedUsage: usage,

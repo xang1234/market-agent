@@ -277,18 +277,20 @@ function prefixMessage(
 
 function toolDescriptors(tools: ReadonlyArray<ToolDefinition>): ReadonlyArray<JsonValue> {
   return Object.freeze(
-    tools.map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      audience: tool.audience,
-      read_only: tool.read_only,
-      approval_required: tool.approval_required,
-      cost_class: tool.cost_class,
-      freshness_expectation: tool.freshness_expectation,
-      input_json_schema: tool.input_json_schema,
-      output_json_schema: tool.output_json_schema,
-      error_codes: tool.error_codes,
-    })),
+    [...tools]
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        audience: tool.audience,
+        read_only: tool.read_only,
+        approval_required: tool.approval_required,
+        cost_class: tool.cost_class,
+        freshness_expectation: tool.freshness_expectation,
+        input_json_schema: tool.input_json_schema,
+        output_json_schema: tool.output_json_schema,
+        error_codes: tool.error_codes,
+      })),
   );
 }
 

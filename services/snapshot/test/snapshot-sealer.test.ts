@@ -6,7 +6,11 @@ import {
   sealSnapshotWithPool,
   snapshotTransactionClient,
 } from "../src/snapshot-sealer.ts";
-import type { QueryExecutor, SnapshotManifestDraft } from "../src/manifest-staging.ts";
+import {
+  stageSnapshotManifest,
+  type QueryExecutor,
+  type SnapshotManifestDraft,
+} from "../src/manifest-staging.ts";
 
 const snapshotId = "00000000-0000-4000-8000-000000000001";
 const listingId = "00000000-0000-4000-8000-000000000002";
@@ -15,36 +19,34 @@ const sourceId = "00000000-0000-4000-8000-000000000004";
 const toolCallId = "00000000-0000-4000-8000-000000000005";
 const extraToolCallId = "00000000-0000-4000-8000-000000000006";
 
-const manifest: SnapshotManifestDraft = Object.freeze({
-  subject_refs: Object.freeze([{ kind: "listing", id: listingId }]),
-  fact_refs: Object.freeze([]),
-  claim_refs: Object.freeze([]),
-  event_refs: Object.freeze([]),
-  document_refs: Object.freeze([documentId]),
-  series_specs: Object.freeze([]),
-  source_ids: Object.freeze([sourceId]),
-  tool_call_ids: Object.freeze([toolCallId]),
-  tool_call_result_hashes: Object.freeze([
-    Object.freeze({ tool_call_id: toolCallId, result_hash: `sha256:${"1".repeat(64)}` }),
-  ]),
-  as_of: "2026-04-29T00:00:00.000Z",
+const manifest = stageSnapshotManifest({
+  subject_refs: [{ kind: "listing", id: listingId }],
   basis: "split_adjusted",
   normalization: "raw",
+  as_of: "2026-04-29T00:00:00.000Z",
   coverage_start: "2026-04-01T00:00:00.000Z",
-  allowed_transforms: Object.freeze({
-    series: Object.freeze([
-      Object.freeze({
-        range: Object.freeze({
+  allowed_transforms: {
+    series: [
+      {
+        range: {
           start: "2026-04-01T00:00:00Z",
           end: "2026-04-29T00:00:00Z",
-        }),
+        },
         interval: "1d",
-      }),
-    ]),
-  }),
+      },
+    ],
+  },
   model_version: "snapshot-test-v1",
   parent_snapshot: null,
+  tool_calls: [
+    {
+      tool_call_id: toolCallId,
+      document_refs: [documentId],
+      source_ids: [sourceId],
+    },
+  ],
 });
+const toolCallResultHash = manifest.tool_call_result_hashes[0].result_hash;
 
 test("sealSnapshot persists a verified snapshot inside one transaction", async () => {
   const { db, queries } = recordingDb();
@@ -64,7 +66,7 @@ test("sealSnapshot persists a verified snapshot inside one transaction", async (
   assert.deepEqual(jsonValueAt(queries[2].values, 5), [documentId]);
   assert.deepEqual(jsonValueAt(queries[2].values, 6), []);
   assert.deepEqual(jsonValueAt(queries[2].values, 9), [
-    { tool_call_id: toolCallId, result_hash: `sha256:${"1".repeat(64)}` },
+    { tool_call_id: toolCallId, result_hash: toolCallResultHash },
   ]);
 });
 
@@ -97,8 +99,8 @@ test("sealSnapshot rejects extra and duplicate tool-call result hashes before st
     manifest: {
       ...manifest,
       tool_call_result_hashes: [
-        { tool_call_id: toolCallId, result_hash: `sha256:${"1".repeat(64)}` },
-        { tool_call_id: toolCallId, result_hash: `sha256:${"1".repeat(64)}` },
+        { tool_call_id: toolCallId, result_hash: toolCallResultHash },
+        { tool_call_id: toolCallId, result_hash: toolCallResultHash },
         { tool_call_id: extraToolCallId, result_hash: `sha256:${"2".repeat(64)}` },
       ],
     },
@@ -372,7 +374,7 @@ function recordingDb(
 ) {
   const queries: Array<{ text: string; values?: unknown[] }> = [];
   const toolCallRows = options.toolCallRows ?? [
-    { tool_call_id: toolCallId, result_hash: `sha256:${"1".repeat(64)}` },
+    { tool_call_id: toolCallId, result_hash: toolCallResultHash },
   ];
   const db: QueryExecutor & { release(): void } = {
     release() {

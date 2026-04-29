@@ -10,6 +10,8 @@ export type JsonValue =
   | JsonValue[]
   | JsonObject;
 
+export const STAGED_SNAPSHOT_MANIFEST: unique symbol = Symbol("snapshot.stagedManifest");
+
 export type QueryExecutor = {
   query<R extends Record<string, unknown> = Record<string, unknown>>(
     text: string,
@@ -54,6 +56,7 @@ export const SNAPSHOT_NORMALIZATIONS = [
 export type SnapshotNormalization = (typeof SNAPSHOT_NORMALIZATIONS)[number];
 
 export type SnapshotManifestDraft = {
+  readonly [STAGED_SNAPSHOT_MANIFEST]?: true;
   subject_refs: ReadonlyArray<SnapshotSubjectRef>;
   fact_refs: ReadonlyArray<string>;
   claim_refs: ReadonlyArray<string>;
@@ -219,6 +222,7 @@ export function stageSnapshotManifest(
   );
 
   return Object.freeze({
+    [STAGED_SNAPSHOT_MANIFEST]: true,
     subject_refs: Object.freeze(subject_refs.values()),
     fact_refs: Object.freeze(fact_refs.values()),
     claim_refs: Object.freeze(claim_refs.values()),
@@ -307,9 +311,11 @@ export async function auditManifestToolCallLog(
     ...duplicateHashToolCallIds,
   ]);
   const missingHashToolCallIds = uniqueToolCallIds.filter((toolCallId) => !expectedHashes.has(toolCallId));
-  const missingProvenance = uniqueToolCallIds.length === 0 && hasProvenanceBearingRefs(manifest);
+  const missingProvenance =
+    hasProvenanceBearingRefs(manifest) &&
+    (uniqueToolCallIds.length === 0 || !isStagedSnapshotManifest(manifest));
 
-  if (uniqueToolCallIds.length === 0) {
+  if (uniqueToolCallIds.length === 0 || missingProvenance) {
     return Object.freeze({
       ok:
         extraToolCallIds.length === 0 &&
@@ -364,14 +370,21 @@ export async function auditManifestToolCallLog(
       mismatched.length === 0 &&
       extraToolCallIds.length === 0 &&
       duplicateAuditToolCallIds.length === 0 &&
-      missingHashToolCallIds.length === 0,
+      missingHashToolCallIds.length === 0 &&
+      !missingProvenance,
     missing_tool_call_ids: Object.freeze(missing),
     mismatched_tool_call_ids: Object.freeze(mismatched),
     extra_tool_call_ids: Object.freeze(extraToolCallIds),
     duplicate_tool_call_ids: Object.freeze(duplicateAuditToolCallIds),
     missing_hash_tool_call_ids: Object.freeze(missingHashToolCallIds),
-    missing_provenance: false,
+    missing_provenance: missingProvenance,
   });
+}
+
+function isStagedSnapshotManifest(
+  manifest: Pick<SnapshotManifestDraft, typeof STAGED_SNAPSHOT_MANIFEST>,
+): boolean {
+  return manifest[STAGED_SNAPSHOT_MANIFEST] === true;
 }
 
 function hasProvenanceBearingRefs(

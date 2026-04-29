@@ -53,6 +53,28 @@ test("per-thread coordinator serializes concurrent turns for the same thread", a
   assert.deepEqual(second.events.map((event) => event.type), ["turn.started", "turn.completed"]);
 });
 
+test("per-thread coordinator retains runner turn.started payloads", async () => {
+  const observedPayloads: unknown[] = [];
+  const coordinator = createChatCoordinator({
+    runner: ({ emit }) => {
+      emit("turn.started", { subject_resolution: true });
+      emit("turn.completed", { message_id: "message-1" });
+    },
+  });
+
+  const turn = coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1" });
+  turn.subscribe((event) => {
+    if (event.type === "turn.started") {
+      observedPayloads.push(event.subject_resolution);
+    }
+  });
+  await turn.completed;
+
+  assert.equal(turn.events[0].type, "turn.started");
+  assert.equal(turn.events[0].subject_resolution, true);
+  assert.deepEqual(observedPayloads, [true]);
+});
+
 test("per-thread coordinator drops idle thread queues after completion", async () => {
   const coordinator = createChatCoordinator({
     runner: ({ emit }) => {

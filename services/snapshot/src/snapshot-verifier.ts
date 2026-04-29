@@ -1566,7 +1566,7 @@ function verifyApprovals(
       pendingActionStatus = verifiedPendingActionStatus(action, pendingActions);
     }
 
-    if (action.approval_required === undefined || pendingActionStatus !== null) {
+    if (action.approval_required !== true || pendingActionStatus !== null) {
       addFailure("unapproved_side_effect", {
         tool_name: action.tool_name,
         tool_call_id: action.tool_call_id ?? null,

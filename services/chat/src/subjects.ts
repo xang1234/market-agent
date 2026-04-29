@@ -108,7 +108,12 @@ export function chatSubjectPreResolutionFromFlow(
       normalized_input: flow.normalized_input,
       candidates: flow.candidates,
       ...(flow.ambiguity_axis ? { ambiguity_axis: flow.ambiguity_axis } : {}),
-      message: ambiguityMessage(inputText, flow.normalized_input, flow.candidates),
+      message: ambiguityMessage(
+        inputText,
+        flow.normalized_input,
+        flow.candidates,
+        flow.ambiguity_axis,
+      ),
     };
   }
 
@@ -125,10 +130,11 @@ function ambiguityMessage(
   inputText: string,
   normalizedInput: string,
   candidates: ResolverCandidate[],
+  ambiguityAxis?: AmbiguityAxis,
 ): string {
   const lookupText = displayLookupText(inputText, normalizedInput);
   const candidateText = joinCandidateNames(candidates);
-  const prompt = looksLikeShareClassAmbiguity(candidates)
+  const prompt = ambiguityAxis === "multiple_listings" || looksLikeShareClassAmbiguity(candidates)
     ? "Which share class"
     : "Which subject";
 

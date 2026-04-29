@@ -1901,7 +1901,7 @@ test("verifySnapshotSeal accepts deterministic pending approval ids", async () =
   });
 });
 
-test("verifySnapshotSeal allows write intents that do not require approval", async () => {
+test("verifySnapshotSeal rejects write intents with explicit approval_required false", async () => {
   const result = await verifySnapshotSeal({
     ...baseInput,
     tool_actions: [
@@ -1913,9 +1913,15 @@ test("verifySnapshotSeal allows write intents that do not require approval", asy
     ],
   });
 
-  assert.deepEqual(result, {
-    ok: true,
-    failures: [],
+  assert.deepEqual(
+    result.failures.map((failure) => failure.reason_code),
+    ["unapproved_side_effect"],
+  );
+  assert.deepEqual(result.failures[0].details, {
+    tool_name: "add_to_watchlist",
+    tool_call_id: null,
+    approval_required: false,
+    pending_action_id: null,
   });
 });
 

@@ -339,7 +339,15 @@ class MutableChatTurnHandle implements ChatTurnHandle {
     let startedEvent: ChatSseEvent | null = null;
     const emit: ChatTurnEmit = (type, payload = {}) => {
       if (type === "turn.started" && startedEvent) {
-        return startedEvent;
+        if (Object.keys(payload).length === 0) {
+          return startedEvent;
+        }
+        const event = sequencer.next(type, payload);
+        startedEvent = event;
+        return this.append(event);
+      }
+      if (type !== "turn.started" && startedEvent === null) {
+        startedEvent = this.append(sequencer.next("turn.started"));
       }
       const event = sequencer.next(type, payload);
       if (type === "turn.started") {
@@ -349,7 +357,6 @@ class MutableChatTurnHandle implements ChatTurnHandle {
     };
 
     try {
-      emit("turn.started");
       await this.#runner({ ...this.input, emit });
     } catch (error) {
       emit("turn.error", {
@@ -551,8 +558,8 @@ async function stubChatTurnRunner(
   let messageId = "message-1";
   const preResolution = context.subjectPreResolution ?? null;
 
-  emit("turn.started", { stub: true });
   if (!preResolution) {
+    emit("turn.started", { stub: true });
     emit("tool.started", {
       stub: true,
       tool_call_id: "tool-call-1",

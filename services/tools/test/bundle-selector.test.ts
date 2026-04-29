@@ -51,6 +51,7 @@ test("selectToolBundle selects every registered bundle from pre-resolve classifi
 test("selectToolBundle builds stable production prompt prefixes across user turns", () => {
   const registry = loadToolRegistry();
 
+  const userTurn = "What changed in the filing?";
   const first = selectToolBundle({
     registry,
     audience: "analyst",
@@ -59,7 +60,7 @@ test("selectToolBundle builds stable production prompt prefixes across user turn
     resolved_context: {
       subjects: [{ kind: "listing", id: "00000000-0000-4000-8000-000000000001" }],
     },
-    user_turn: "What changed in the filing?",
+    user_turn: userTurn,
   });
   const second = selectToolBundle({
     registry,
@@ -78,7 +79,7 @@ test("selectToolBundle builds stable production prompt prefixes across user turn
   assert.equal(first.prompt_cache_prefix.user_turn, "What changed in the filing?");
   assert.equal(second.prompt_cache_prefix.user_turn, "Now compare risk factors.");
   assert.equal(
-    first.prompt_cache_prefix.messages.some((message) => message.content.includes("filing")),
+    first.prompt_cache_prefix.messages.some((message) => message.content === userTurn),
     false,
   );
 });

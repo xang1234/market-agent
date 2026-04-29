@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  STAGED_SNAPSHOT_MANIFEST,
   auditManifestToolCallLog,
   stageSnapshotManifest,
   type SnapshotManifestDraft,
@@ -73,7 +74,11 @@ test("stageSnapshotManifest collects refs from tool-call outputs with audit ids"
   assert.match(manifest.tool_call_result_hashes[0].result_hash, /^sha256:[0-9a-f]{64}$/);
   assert.match(manifest.tool_call_result_hashes[1].result_hash, /^sha256:[0-9a-f]{64}$/);
 
-  const { tool_call_result_hashes, ...rest } = manifest;
+  const {
+    [STAGED_SNAPSHOT_MANIFEST]: _staged,
+    tool_call_result_hashes,
+    ...rest
+  } = manifest;
   assert.deepEqual(rest, {
     subject_refs: [{ kind: "listing", id: listingId }],
     fact_refs: [firstFactId, secondFactId],
@@ -344,6 +349,33 @@ test("auditManifestToolCallLog rejects extra and duplicate result hash entries",
     duplicate_tool_call_ids: [firstToolCallId],
     missing_hash_tool_call_ids: [],
     missing_provenance: false,
+  });
+});
+
+test("auditManifestToolCallLog rejects mixed-provenance refs on unmarked manifests", async () => {
+  const db = {
+    async query<R extends Record<string, unknown>>() {
+      throw new Error("tool_call_logs must not be queried for unmarked provenance-bearing manifests");
+    },
+  };
+
+  const result = await auditManifestToolCallLog(db, {
+    fact_refs: [firstFactId],
+    source_ids: [firstSourceId],
+    tool_call_ids: [firstToolCallId],
+    tool_call_result_hashes: [
+      { tool_call_id: firstToolCallId, result_hash: fakeFirstHash },
+    ],
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    missing_tool_call_ids: [],
+    mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [],
+    duplicate_tool_call_ids: [],
+    missing_hash_tool_call_ids: [],
+    missing_provenance: true,
   });
 });
 

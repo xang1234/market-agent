@@ -101,6 +101,31 @@ test("createTurnToolPolicy returns the selector rejection for unknown bundles", 
   });
 });
 
+test("createTurnToolPolicy validates budget and usage before bundle selection", () => {
+  const registry = loadToolRegistry();
+
+  assert.throws(
+    () =>
+      createTurnToolPolicy({
+        registry,
+        audience: "analyst",
+        classification: { bundle_id: "made_up_bundle" },
+        budget: { low: -1 },
+      }),
+    /budget\.low: must be a non-negative integer/,
+  );
+  assert.throws(
+    () =>
+      createTurnToolPolicy({
+        registry,
+        audience: "analyst",
+        classification: { bundle_id: "made_up_bundle" },
+        usage: { medium: -1 },
+      }),
+    /usage\.medium: must be a non-negative integer/,
+  );
+});
+
 test("turn tool policy stress-limits cost classes and returns an explicit partial-answer note", () => {
   const registry = loadToolRegistry();
   let policy = createTurnToolPolicy({

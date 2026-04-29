@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { loadChatServerOptionsFromEnv } from "../src/runtime.ts";
 
@@ -18,7 +19,7 @@ test("runtime config loads assistant persistence from configured module", async 
   );
 
   const options = await loadChatServerOptionsFromEnv({
-    CHAT_PERSISTENCE_MODULE: `file://${modulePath}`,
+    CHAT_PERSISTENCE_MODULE: pathToFileURL(modulePath).href,
   });
 
   assert.equal(typeof options.persistAssistantMessage, "function");
@@ -84,7 +85,7 @@ test("runtime config loads subject pre-resolver from configured module", async (
   );
 
   const options = await loadChatServerOptionsFromEnv({
-    CHAT_SUBJECT_RESOLVER_MODULE: `file://${modulePath}`,
+    CHAT_SUBJECT_RESOLVER_MODULE: pathToFileURL(modulePath).href,
   });
 
   assert.equal(typeof options.preResolveSubject, "function");

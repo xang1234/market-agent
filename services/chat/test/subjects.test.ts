@@ -64,6 +64,29 @@ test("chat subject pre-resolve converts ambiguous GOOG into a share-class clarif
   assert.deepEqual(result.candidates, googleShareClassCandidates());
 });
 
+test("chat subject pre-resolve prefers resolver ambiguity axis for clarification wording", async () => {
+  const result = await preResolveChatSubject({
+    text: "BRK",
+    resolveSubject: async () => ({
+      status: "needs_choice",
+      stage: "canonical_selection",
+      normalized_input: "BRK",
+      candidate_search: {
+        outcome: "ambiguous",
+        ambiguity_axis: "multiple_listings",
+        candidates: berkshireListingCandidates(),
+      },
+      ambiguity_axis: "multiple_listings",
+      candidates: berkshireListingCandidates(),
+    }),
+  });
+
+  assert.equal(result.status, "needs_clarification");
+  assert.match(result.message, /Which share class/i);
+  assert.match(result.message, /BRK\.A/);
+  assert.match(result.message, /BRK\.B/);
+});
+
 test("chat subject pre-resolve returns not-found clarification without hydration", async () => {
   const result = await preResolveChatSubject({
     text: "NOTREAL",
@@ -106,6 +129,13 @@ function googleShareClassCandidates() {
   return [
     { subject_ref: googListing, display_name: "GOOG (Class C)", confidence: 0.55 },
     { subject_ref: googlListing, display_name: "GOOGL (Class A)", confidence: 0.45 },
+  ];
+}
+
+function berkshireListingCandidates() {
+  return [
+    { subject_ref: googListing, display_name: "BRK.A", confidence: 0.55 },
+    { subject_ref: googlListing, display_name: "BRK.B", confidence: 0.45 },
   ];
 }
 

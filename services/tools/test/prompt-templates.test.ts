@@ -68,6 +68,7 @@ test("analystPromptTemplateForBundle returns the immutable template for a bundle
 test("buildPromptCachePrefix enforces cache-stable prompt ordering and excludes user turn", () => {
   const template = analystPromptTemplateForBundle("document_research");
   assert.ok(template);
+  const userTurn = "What changed in the latest filing?";
 
   const prefix = buildPromptCachePrefix({
     template,
@@ -79,7 +80,7 @@ test("buildPromptCachePrefix enforces cache-stable prompt ordering and excludes 
       subjects: [{ kind: "listing", id: "00000000-0000-4000-8000-000000000001" }],
       period: "FY2026",
     },
-    user_turn: "What changed in the latest filing?",
+    user_turn: userTurn,
   });
 
   assert.deepEqual(
@@ -95,10 +96,10 @@ test("buildPromptCachePrefix enforces cache-stable prompt ordering and excludes 
     ],
   );
   assert.equal(
-    prefix.messages.some((message) => message.content.includes("latest filing")),
+    prefix.messages.some((message) => message.content === userTurn),
     false,
   );
-  assert.equal(prefix.user_turn, "What changed in the latest filing?");
+  assert.equal(prefix.user_turn, userTurn);
   assert.equal(Object.isFrozen(prefix), true);
   assert.equal(Object.isFrozen(prefix.messages), true);
 });

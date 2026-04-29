@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type {
@@ -48,7 +48,10 @@ export async function loadChatServerOptionsFromEnv(
 
 function moduleSpecifier(specifier: string, cwd: string): string {
   const trimmed = specifier.trim();
-  if (trimmed.startsWith(".") || trimmed.startsWith("/")) {
+  if (trimmed.startsWith("file:")) {
+    return trimmed;
+  }
+  if (trimmed.startsWith(".") || isAbsolute(trimmed)) {
     return pathToFileURL(resolve(cwd, trimmed)).href;
   }
   return trimmed;
