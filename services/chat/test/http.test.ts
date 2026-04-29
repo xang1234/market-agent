@@ -5,6 +5,10 @@ import type { AddressInfo } from "node:net";
 import test, { type TestContext } from "node:test";
 import { createChatCoordinator, type ChatTurnRunner } from "../src/coordinator.ts";
 import { createChatServer, createSseFrameWriter } from "../src/http.ts";
+import type {
+  ChatNotFoundSubjectPreResolution,
+  ChatResolvedSubjectPreResolution,
+} from "../src/subjects.ts";
 
 async function startServer(
   t: TestContext,
@@ -326,6 +330,81 @@ test("stream route surfaces ambiguous subject pre-resolution as a clarification 
   assert.equal(events[8].data.clarification, true);
 });
 
+test("stream route surfaces hydrated subject handoff in the resolver payload", async (t) => {
+  const base = await startServer(t, {
+    preResolveSubject: async () => resolvedAaplPreResolution(),
+  });
+
+  const response = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-456&subject=AAPL`,
+  );
+
+  assert.equal(response.status, 200);
+  const events = await readSseEvents(response, 9);
+
+  assert.equal(events[2].event, "tool.completed");
+  assert.equal(events[2].data.resolution_status, "resolved");
+  assert.deepEqual(events[2].data.subject_ref, {
+    kind: "listing",
+    id: "11111111-1111-4111-a111-111111111111",
+  });
+  assert.equal((events[2].data.display_labels as Record<string, unknown>).ticker, "AAPL");
+  assert.equal(
+    ((events[2].data.context as Record<string, unknown>).listing as Record<string, unknown>).ticker,
+    "AAPL",
+  );
+  assert.equal(
+    ((events[2].data.handoff as Record<string, unknown>).display_labels as Record<string, unknown>).mic,
+    "XNAS",
+  );
+  assert.deepEqual(events[8].data.subject_ref, {
+    kind: "listing",
+    id: "11111111-1111-4111-a111-111111111111",
+  });
+});
+
+test("stream route surfaces not-found subject pre-resolution as a clarification response", async (t) => {
+  const base = await startServer(t, {
+    preResolveSubject: async ({ text }): Promise<ChatNotFoundSubjectPreResolution> => ({
+      status: "not_found",
+      input_text: text,
+      normalized_input: "NOTREAL",
+      reason: "no_candidates",
+      message: 'I could not resolve "NOTREAL" to a known subject.',
+    }),
+  });
+
+  const response = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-456&subject=NOTREAL`,
+  );
+
+  assert.equal(response.status, 200);
+  const events = await readSseEvents(response, 9);
+
+  assert.equal(events[2].data.resolution_status, "not_found");
+  assert.equal(events[2].data.reason, "no_candidates");
+  assert.match(
+    ((events[6].data.delta as Record<string, unknown>).segment as Record<string, unknown>).text as string,
+    /could not resolve "NOTREAL"/,
+  );
+  assert.equal(events[8].data.clarification, true);
+});
+
+test("stream route fails closed when subject text is provided without a resolver hook", async (t) => {
+  const base = await startServer(t);
+
+  const response = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-456&subject=GOOG`,
+  );
+
+  assert.equal(response.status, 200);
+  const [event] = await readSseEvents(response, 1);
+
+  assert.equal(event.event, "turn.error");
+  assert.equal(event.data.error_code, "Error");
+  assert.equal(event.data.message, "subject pre-resolver is not configured");
+});
+
 test("stream route emits sequenced success-path coordinator events with correlation fields", async (t) => {
   const base = await startServer(t);
 
@@ -607,3 +686,50 @@ test("stream route stays open long enough to emit a heartbeat", async (t) => {
 
   await reader.cancel();
 });
+
+function resolvedAaplPreResolution(): ChatResolvedSubjectPreResolution {
+  const subjectRef = {
+    kind: "listing" as const,
+    id: "11111111-1111-4111-a111-111111111111",
+  };
+  return {
+    status: "resolved",
+    input_text: "AAPL",
+    normalized_input: "AAPL",
+    subject_ref: subjectRef,
+    identity_level: "listing",
+    display_label: "AAPL · XNAS — Apple Inc.",
+    resolution_path: "auto_advanced",
+    confidence: 0.95,
+    handoff: {
+      subject_ref: subjectRef,
+      identity_level: "listing",
+      display_label: "AAPL · XNAS — Apple Inc.",
+      display_labels: {
+        primary: "AAPL · XNAS — Apple Inc.",
+        ticker: "AAPL",
+        mic: "XNAS",
+      },
+      normalized_input: "AAPL",
+      resolution_path: "auto_advanced",
+      confidence: 0.95,
+      context: {
+        listing: {
+          subject_ref: subjectRef,
+          instrument_ref: {
+            kind: "instrument",
+            id: "22222222-2222-4222-a222-222222222222",
+          },
+          issuer_ref: {
+            kind: "issuer",
+            id: "33333333-3333-4333-a333-333333333333",
+          },
+          mic: "XNAS",
+          ticker: "AAPL",
+          trading_currency: "USD",
+          timezone: "America/New_York",
+        },
+      },
+    },
+  };
+}

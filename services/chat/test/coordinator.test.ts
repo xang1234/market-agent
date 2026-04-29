@@ -3,8 +3,10 @@ import test from "node:test";
 import {
   ChatTurnUnavailableError,
   createChatCoordinator,
+  type ChatTurnRunContext,
   type ChatTurnRunner,
 } from "../src/coordinator.ts";
+import type { ChatResolvedSubjectPreResolution } from "../src/subjects.ts";
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -328,7 +330,142 @@ test("default turn runner emits turn.error when assistant message persistence fa
   assert.equal(turn.events[3].error_code, "Error");
 });
 
+test("subject pre-resolution short-circuits ambiguous subjects before custom runners", async () => {
+  let runnerCalls = 0;
+  const coordinator = createChatCoordinator({
+    preResolveSubject: async ({ text }) => ({
+      status: "needs_clarification",
+      input_text: text,
+      normalized_input: "GOOG",
+      ambiguity_axis: "multiple_listings",
+      candidates: [
+        {
+          subject_ref: { kind: "listing", id: "11111111-1111-4111-a111-111111111111" },
+          display_name: "GOOG (Class C)",
+          confidence: 0.55,
+        },
+        {
+          subject_ref: { kind: "listing", id: "22222222-2222-4222-a222-222222222222" },
+          display_name: "GOOGL (Class A)",
+          confidence: 0.45,
+        },
+      ],
+      message: "Which share class did you mean for GOOG: GOOG (Class C) or GOOGL (Class A)?",
+    }),
+    runner: ({ emit }) => {
+      runnerCalls += 1;
+      emit("turn.completed", { message_id: "model-message" });
+    },
+  });
+
+  const turn = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    subjectText: "GOOG",
+  });
+  await turn.completed;
+
+  assert.equal(runnerCalls, 0);
+  assert.deepEqual(
+    turn.events.map((event) => event.type),
+    [
+      "turn.started",
+      "tool.started",
+      "tool.completed",
+      "snapshot.staged",
+      "snapshot.sealed",
+      "block.began",
+      "block.delta",
+      "block.completed",
+      "turn.completed",
+    ],
+  );
+  assert.equal(turn.events[2].resolution_status, "needs_clarification");
+  assert.equal("subject_ref" in turn.events[2], false);
+  assert.match(
+    ((turn.events[6].delta as Record<string, unknown>).segment as Record<string, unknown>).text as string,
+    /Which share class did you mean for GOOG/,
+  );
+});
+
+test("subject pre-resolution passes hydrated context to custom runners without raw subject text", async () => {
+  let observedContext: ChatTurnRunContext | null = null;
+  const coordinator = createChatCoordinator({
+    preResolveSubject: async () => resolvedAaplPreResolution(),
+    runner: (context) => {
+      observedContext = context;
+      context.emit("turn.completed", {
+        message_id: "message-1",
+        subject_ref: context.subjectPreResolution?.subject_ref,
+      });
+    },
+  });
+
+  const turn = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    subjectText: "AAPL",
+  });
+  await turn.completed;
+
+  assert.equal(observedContext?.subjectText, undefined);
+  assert.equal(observedContext?.subjectPreResolution?.status, "resolved");
+  assert.deepEqual(observedContext?.subjectPreResolution?.subject_ref, {
+    kind: "listing",
+    id: "11111111-1111-4111-a111-111111111111",
+  });
+  assert.equal(observedContext?.subjectPreResolution?.handoff.context.listing?.ticker, "AAPL");
+  assert.deepEqual(turn.events.map((event) => event.type), ["turn.completed"]);
+});
+
 type ChatTurnEventMutation = {
   type: string;
   seq: number;
 };
+
+function resolvedAaplPreResolution(): ChatResolvedSubjectPreResolution {
+  const subjectRef = {
+    kind: "listing" as const,
+    id: "11111111-1111-4111-a111-111111111111",
+  };
+  return {
+    status: "resolved",
+    input_text: "AAPL",
+    normalized_input: "AAPL",
+    subject_ref: subjectRef,
+    identity_level: "listing",
+    display_label: "AAPL · XNAS — Apple Inc.",
+    resolution_path: "auto_advanced",
+    confidence: 0.95,
+    handoff: {
+      subject_ref: subjectRef,
+      identity_level: "listing",
+      display_label: "AAPL · XNAS — Apple Inc.",
+      display_labels: {
+        primary: "AAPL · XNAS — Apple Inc.",
+        ticker: "AAPL",
+        mic: "XNAS",
+      },
+      normalized_input: "AAPL",
+      resolution_path: "auto_advanced",
+      confidence: 0.95,
+      context: {
+        listing: {
+          subject_ref: subjectRef,
+          instrument_ref: {
+            kind: "instrument",
+            id: "22222222-2222-4222-a222-222222222222",
+          },
+          issuer_ref: {
+            kind: "issuer",
+            id: "33333333-3333-4333-a333-333333333333",
+          },
+          mic: "XNAS",
+          ticker: "AAPL",
+          trading_currency: "USD",
+          timezone: "America/New_York",
+        },
+      },
+    },
+  };
+}
