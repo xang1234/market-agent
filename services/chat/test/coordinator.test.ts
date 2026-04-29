@@ -137,6 +137,32 @@ test("per-thread coordinator normalizes omitted turn id to run id", async () => 
   assert.equal(implicit.events[0].turn_id, "run-1");
 });
 
+test("per-thread coordinator keys NUL-containing identities without collisions", async () => {
+  const startedTurns: string[] = [];
+  const coordinator = createChatCoordinator({
+    runner: ({ runId, turnId, emit }) => {
+      startedTurns.push(`${runId}:${turnId}`);
+      emit("turn.started", { stub: true });
+      emit("turn.completed", { message_id: `message-${startedTurns.length}` });
+    },
+  });
+
+  const first = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    turnId: "turn-a\0turn-b",
+  });
+  const second = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1\0turn-a",
+    turnId: "turn-b",
+  });
+  await Promise.all([first.completed, second.completed]);
+
+  assert.notEqual(first, second);
+  assert.deepEqual(startedTurns, ["run-1:turn-a\0turn-b", "run-1\0turn-a:turn-b"]);
+});
+
 test("per-thread coordinator isolates subscriber failures from shared turn execution", async () => {
   const coordinator = createChatCoordinator({
     runner: ({ emit }) => {

@@ -212,7 +212,7 @@ function normalizeTurnInput(input: ChatTurnInput): NormalizedChatTurnInput {
 }
 
 function turnKey(input: NormalizedChatTurnInput): string {
-  return `${input.threadId}\0${input.runId}\0${input.turnId}`;
+  return JSON.stringify([input.threadId, input.runId, input.turnId]);
 }
 
 class MutableChatTurnHandle implements ChatTurnHandle {
