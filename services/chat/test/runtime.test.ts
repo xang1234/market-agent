@@ -59,3 +59,33 @@ test("runtime config resolves relative persistence modules from the process cwd"
     message_id: "relative-message",
   });
 });
+
+test("runtime config loads subject pre-resolver from configured module", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "chat-runtime-subject-"));
+  const modulePath = join(dir, "subjects.mjs");
+  await writeFile(
+    modulePath,
+    `export async function preResolveSubject({ text }) {
+      return {
+        status: 'needs_clarification',
+        input_text: text,
+        normalized_input: text,
+        candidates: [],
+        message: 'Which subject did you mean?'
+      };
+    }`,
+  );
+
+  const options = await loadChatServerOptionsFromEnv({
+    CHAT_SUBJECT_RESOLVER_MODULE: `file://${modulePath}`,
+  });
+
+  assert.equal(typeof options.preResolveSubject, "function");
+  assert.deepEqual(await options.preResolveSubject!({ text: "GOOG" }), {
+    status: "needs_clarification",
+    input_text: "GOOG",
+    normalized_input: "GOOG",
+    candidates: [],
+    message: "Which subject did you mean?",
+  });
+});

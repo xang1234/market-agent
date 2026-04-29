@@ -1,6 +1,6 @@
 # Chat Service
 
-Tracking beads: `fra-u9l`, `fra-cty`, `fra-eom`, `fra-d7t`.
+Tracking beads: `fra-u9l`, `fra-cty`, `fra-eom`, `fra-d7t`, `fra-siv`.
 
 This package owns the chat streaming transport and the in-process turn
 coordinator used by the current stub turn runner.
@@ -15,6 +15,9 @@ coordinator used by the current stub turn runner.
 - serializes turn execution per `thread_id`
 - can load a `persistAssistantMessage` hook from `CHAT_PERSISTENCE_MODULE`
   so assistant messages are persisted only after snapshot sealing succeeds
+- can pre-resolve `subject` query text through a `preResolveSubject` hook before
+  producing a response; ambiguous resolver envelopes surface as clarification
+  turns instead of silently selecting a subject
 
 ## Persistence Hook
 
@@ -23,6 +26,17 @@ or path relative to the process working directory. The module must export
 `persistAssistantMessage(input)`, which returns `{ snapshot_id, message_id }`
 only after a snapshot has sealed and the chat message row has been committed.
 When the variable is omitted, the dev server keeps the stub-only stream path.
+
+## Subject Pre-Resolution Hook
+
+`CHAT_SUBJECT_RESOLVER_MODULE` may be a package specifier, absolute path, file
+URL, or path relative to the process working directory. The module must export
+`preResolveSubject({ text, choice? })`. `services/chat/src/subjects.ts` exposes
+`preResolveChatSubjectWithResolver(db, request)` for modules that should call
+the shared P0.3 `runSearchToSubjectFlow` resolver directly. When a stream
+request includes `?subject=GOOG` and the resolver returns `needs_choice`, the
+chat service emits a clarification message with the candidate list in the
+`resolve_subjects` tool payload rather than hydrating a subject implicitly.
 
 ## Resume Retention
 

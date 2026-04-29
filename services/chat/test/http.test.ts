@@ -271,6 +271,61 @@ test("stream route uses server-level assistant persistence before snapshot.seale
   assert.equal(events[8].data.message_id, "33333333-3333-4333-a333-333333333333");
 });
 
+test("stream route surfaces ambiguous subject pre-resolution as a clarification response", async (t) => {
+  const resolvedTexts: string[] = [];
+  const base = await startServer(t, {
+    preResolveSubject: async ({ text }) => {
+      resolvedTexts.push(text);
+      return {
+        status: "needs_clarification",
+        input_text: text,
+        normalized_input: "GOOG",
+        ambiguity_axis: "multiple_listings",
+        candidates: [
+          {
+            subject_ref: { kind: "listing", id: "11111111-1111-4111-a111-111111111111" },
+            display_name: "GOOG (Class C)",
+            confidence: 0.55,
+          },
+          {
+            subject_ref: { kind: "listing", id: "22222222-2222-4222-a222-222222222222" },
+            display_name: "GOOGL (Class A)",
+            confidence: 0.45,
+          },
+        ],
+        message: "Which share class did you mean for GOOG: GOOG (Class C) or GOOGL (Class A)?",
+      };
+    },
+  });
+
+  const response = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-456&subject=GOOG`,
+  );
+
+  assert.equal(response.status, 200);
+  const events = await readSseEvents(response, 9);
+
+  assert.deepEqual(resolvedTexts, ["GOOG"]);
+  assert.deepEqual(events.map((event) => event.event), [
+    "turn.started",
+    "tool.started",
+    "tool.completed",
+    "snapshot.staged",
+    "snapshot.sealed",
+    "block.began",
+    "block.delta",
+    "block.completed",
+    "turn.completed",
+  ]);
+  assert.equal(events[2].data.resolution_status, "needs_clarification");
+  assert.equal("subject_ref" in events[2].data, false);
+  assert.match(
+    ((events[6].data.delta as Record<string, unknown>).segment as Record<string, unknown>).text as string,
+    /Which share class did you mean for GOOG/,
+  );
+  assert.equal(events[8].data.clarification, true);
+});
+
 test("stream route emits sequenced success-path coordinator events with correlation fields", async (t) => {
   const base = await startServer(t);
 

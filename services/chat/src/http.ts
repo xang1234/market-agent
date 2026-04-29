@@ -6,6 +6,7 @@ import {
   type ChatCoordinator,
 } from "./coordinator.ts";
 import type { ChatSseEvent } from "./sse.ts";
+import type { ChatSubjectPreResolver } from "./subjects.ts";
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const MAX_PENDING_SSE_FRAMES = 100;
@@ -16,6 +17,7 @@ type StreamRoute = {
   threadId: string;
   runId: string | null;
   turnId: string | null;
+  subjectText: string | null;
 };
 
 type SseWritable = {
@@ -30,11 +32,13 @@ const INVALID_STREAM_ROUTE = Symbol("INVALID_STREAM_ROUTE");
 export type ChatServerOptions = {
   coordinator?: ChatCoordinator;
   persistAssistantMessage?: ChatAssistantMessagePersistence;
+  preResolveSubject?: ChatSubjectPreResolver;
 };
 
 export function createChatServer(options: ChatServerOptions = {}): Server {
   const coordinator = options.coordinator ?? createChatCoordinator({
     persistAssistantMessage: options.persistAssistantMessage,
+    preResolveSubject: options.preResolveSubject,
   });
 
   return createServer(async (req, res) => {
@@ -67,6 +71,7 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
       threadId: route.threadId,
       runId,
       turnId,
+      ...(route.subjectText ? { subjectText: route.subjectText } : {}),
     };
     const turn = resumeAfterSeq > 0
       ? coordinator.getTurn(turnInput)
@@ -160,6 +165,7 @@ function matchStreamRoute(method: string, rawUrl: string): StreamRoute | typeof 
 
   const runId = nonEmptyQueryParam(url.searchParams.get("run_id"));
   const turnId = nonEmptyQueryParam(url.searchParams.get("turn_id"));
+  const subjectText = nonEmptyQueryParam(url.searchParams.get("subject"));
   let threadId: string;
   try {
     threadId = decodeURIComponent(match[1]);
@@ -170,6 +176,7 @@ function matchStreamRoute(method: string, rawUrl: string): StreamRoute | typeof 
     threadId,
     runId,
     turnId,
+    subjectText,
   };
 }
 

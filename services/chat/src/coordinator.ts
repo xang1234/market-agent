@@ -1,13 +1,19 @@
+import { createHash } from "node:crypto";
 import {
   createChatSseSequencer,
   type ChatSseEvent,
   type ChatSseWireEventType,
 } from "./sse.ts";
+import type {
+  ChatSubjectPreResolution,
+  ChatSubjectPreResolver,
+} from "./subjects.ts";
 
 export type ChatTurnInput = {
   threadId: string;
   runId: string;
   turnId?: string;
+  subjectText?: string;
 };
 
 export type ChatTurnEmit = (
@@ -57,6 +63,7 @@ export type ChatCoordinator = {
 export type ChatCoordinatorOptions = {
   runner?: ChatTurnRunner;
   persistAssistantMessage?: ChatAssistantMessagePersistence;
+  preResolveSubject?: ChatSubjectPreResolver;
   completedTurnRetentionMs?: number;
   maxCompletedTurns?: number;
   completedTurnTombstoneRetentionMs?: number;
@@ -102,7 +109,11 @@ export function createChatCoordinator(
   options: ChatCoordinatorOptions = {},
 ): ChatCoordinator {
   const persistAssistantMessage = options.persistAssistantMessage;
-  const runner = options.runner ?? ((context) => stubChatTurnRunner(context, persistAssistantMessage));
+  const preResolveSubject = options.preResolveSubject;
+  const runner = options.runner ?? ((context) => stubChatTurnRunner(context, {
+    persistAssistantMessage,
+    preResolveSubject,
+  }));
   const completedTurnRetentionMs = nonNegativeFiniteNumber(
     options.completedTurnRetentionMs ?? DEFAULT_COMPLETED_TURN_RETENTION_MS,
     "completedTurnRetentionMs",
@@ -351,15 +362,17 @@ class MutableChatTurnHandle implements ChatTurnHandle {
 
 async function stubChatTurnRunner(
   context: ChatTurnRunContext,
-  persistAssistantMessage?: ChatAssistantMessagePersistence,
+  options: {
+    persistAssistantMessage?: ChatAssistantMessagePersistence;
+    preResolveSubject?: ChatSubjectPreResolver;
+  } = {},
 ) {
   const { emit } = context;
-  const assistantBlocks = Object.freeze([
-    Object.freeze({ type: "text", text: "Stub research stream ready." }),
-  ]);
-  const contentHash = "stub-block-1";
+  let assistantText = "Stub research stream ready.";
+  let contentHash = "stub-block-1";
   let snapshotId = "snapshot-1";
   let messageId = "message-1";
+  let preResolution: ChatSubjectPreResolution | null = null;
 
   emit("turn.started", { stub: true });
   emit("tool.started", {
@@ -367,14 +380,34 @@ async function stubChatTurnRunner(
     tool_call_id: "tool-call-1",
     tool_name: "resolve_subjects",
   });
-  emit("tool.completed", {
-    stub: true,
-    tool_call_id: "tool-call-1",
-    tool_name: "resolve_subjects",
-    status: "ok",
-  });
-  if (persistAssistantMessage) {
-    const persisted = await persistAssistantMessage({
+
+  const subjectText = nonEmptySubjectText(context.subjectText);
+  if (subjectText) {
+    if (!options.preResolveSubject) {
+      throw new Error("subject pre-resolver is not configured");
+    }
+    preResolution = await options.preResolveSubject({ text: subjectText });
+    emit("tool.completed", subjectToolCompletedPayload(preResolution));
+
+    if (preResolution.status !== "resolved") {
+      assistantText = preResolution.message;
+      contentHash = contentHashForText(preResolution.message);
+    }
+  } else {
+    emit("tool.completed", {
+      stub: true,
+      tool_call_id: "tool-call-1",
+      tool_name: "resolve_subjects",
+      status: "ok",
+    });
+  }
+
+  const assistantBlocks = Object.freeze([
+    Object.freeze({ type: "text", text: assistantText }),
+  ]);
+
+  if (options.persistAssistantMessage) {
+    const persisted = await options.persistAssistantMessage({
       threadId: context.threadId,
       runId: context.runId,
       turnId: context.turnId ?? context.runId,
@@ -418,7 +451,58 @@ async function stubChatTurnRunner(
   emit("turn.completed", {
     stub: true,
     message_id: messageId,
+    ...(preResolution?.status === "resolved" ? { subject_ref: preResolution.subject_ref } : {}),
+    ...(preResolution !== null && preResolution.status !== "resolved" ? { clarification: true } : {}),
   });
+}
+
+function subjectToolCompletedPayload(
+  preResolution: ChatSubjectPreResolution,
+): Record<string, unknown> {
+  const base = {
+    stub: true,
+    tool_call_id: "tool-call-1",
+    tool_name: "resolve_subjects",
+    status: preResolution.status === "resolved" ? "ok" : preResolution.status,
+    resolution_status: preResolution.status,
+    normalized_input: preResolution.normalized_input,
+  };
+
+  if (preResolution.status === "resolved") {
+    return {
+      ...base,
+      subject_ref: preResolution.subject_ref,
+      identity_level: preResolution.identity_level,
+      display_label: preResolution.display_label,
+      resolution_path: preResolution.resolution_path,
+      confidence: preResolution.confidence,
+    };
+  }
+
+  if (preResolution.status === "needs_clarification") {
+    return {
+      ...base,
+      candidates: preResolution.candidates,
+      ...(preResolution.ambiguity_axis ? { ambiguity_axis: preResolution.ambiguity_axis } : {}),
+    };
+  }
+
+  return {
+    ...base,
+    ...(preResolution.reason ? { reason: preResolution.reason } : {}),
+  };
+}
+
+function nonEmptySubjectText(value: string | undefined): string | null {
+  if (value === undefined) {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function contentHashForText(text: string): string {
+  return `sha256:${createHash("sha256").update(text).digest("hex")}`;
 }
 
 function errorCode(error: unknown): string {
