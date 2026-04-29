@@ -12,6 +12,7 @@ import {
   type BundleSelection,
   type PreResolveBundleClassification,
 } from "./bundle-selector.ts";
+import type { PromptCacheFewShot } from "./prompt-templates.ts";
 import type {
   JsonValue,
   ToolAudience,
@@ -25,6 +26,11 @@ export type TurnToolPolicyInput = {
   classification: PreResolveBundleClassification;
   usage?: Partial<ToolCallUsage>;
   budget?: Partial<ToolCallBudget>;
+  response_schema?: JsonValue;
+  few_shots?: ReadonlyArray<PromptCacheFewShot>;
+  thread_summary?: string | null;
+  resolved_context?: JsonValue;
+  user_turn?: string;
 };
 
 export type TurnToolCallInput = {
@@ -64,6 +70,11 @@ function createTurnToolPolicyWithSession(
     registry: input.registry,
     audience: input.audience,
     classification: input.classification,
+    response_schema: input.response_schema,
+    few_shots: input.few_shots,
+    thread_summary: input.thread_summary,
+    resolved_context: input.resolved_context,
+    user_turn: input.user_turn,
   });
 
   if (!selection.ok) {
@@ -109,6 +120,11 @@ function createTurnToolPolicyWithSession(
         classification: selection.classification,
         budget,
         usage: recordToolCallUsage(usage, decision.tool),
+        response_schema: input.response_schema,
+        few_shots: input.few_shots,
+        thread_summary: input.thread_summary,
+        resolved_context: input.resolved_context,
+        user_turn: input.user_turn,
       }, policySession);
     },
   });

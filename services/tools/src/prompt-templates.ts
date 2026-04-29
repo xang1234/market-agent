@@ -31,7 +31,7 @@ export type PromptCacheFewShot = {
 
 export type BuildPromptCachePrefixInput = {
   template: AnalystPromptTemplate;
-  tools: ReadonlyArray<Pick<ToolDefinition, "name">>;
+  tools: ReadonlyArray<ToolDefinition>;
   response_schema: JsonValue;
   few_shots?: ReadonlyArray<PromptCacheFewShot>;
   thread_summary?: string | null;
@@ -202,7 +202,7 @@ export function buildPromptCachePrefix(
 ): PromptCachePrefix {
   const template = input.template;
   const messages = Object.freeze([
-    prefixMessage("tools", canonicalJson(toolNames(input.tools))),
+    prefixMessage("tools", canonicalJson(toolDescriptors(input.tools))),
     prefixMessage("system", template.system_prompt),
     prefixMessage("bundle_policy", template.policy_prompt),
     prefixMessage("response_schema", canonicalJson(input.response_schema)),
@@ -275,8 +275,21 @@ function prefixMessage(
   });
 }
 
-function toolNames(tools: ReadonlyArray<Pick<ToolDefinition, "name">>): ReadonlyArray<string> {
-  return Object.freeze(tools.map((tool) => tool.name));
+function toolDescriptors(tools: ReadonlyArray<ToolDefinition>): ReadonlyArray<JsonValue> {
+  return Object.freeze(
+    tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      audience: tool.audience,
+      read_only: tool.read_only,
+      approval_required: tool.approval_required,
+      cost_class: tool.cost_class,
+      freshness_expectation: tool.freshness_expectation,
+      input_json_schema: tool.input_json_schema,
+      output_json_schema: tool.output_json_schema,
+      error_codes: tool.error_codes,
+    })),
+  );
 }
 
 function canonicalJson(value: JsonValue | ReadonlyArray<unknown>): string {

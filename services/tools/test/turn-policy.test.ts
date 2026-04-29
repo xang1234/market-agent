@@ -29,6 +29,38 @@ test("createTurnToolPolicy selects each registered bundle with a default budget"
   }
 });
 
+test("createTurnToolPolicy forwards prompt prefix context into bundle selection", () => {
+  const registry = loadToolRegistry();
+
+  const policy = createTurnToolPolicy({
+    registry,
+    audience: "analyst",
+    classification: { bundle_id: "document_research" },
+    response_schema: { schema_id: "finance_research_blocks/v1" },
+    few_shots: [{ name: "document_example", content: "Use structured evidence only." }],
+    thread_summary: "Researching supplier risk.",
+    resolved_context: {
+      subjects: [{ kind: "listing", id: "00000000-0000-4000-8000-000000000001" }],
+    },
+    user_turn: "What changed in the latest filing?",
+  });
+
+  assert.equal(policy.ok, true);
+  assert.equal(policy.selection.prompt_cache_prefix.user_turn, "What changed in the latest filing?");
+  assert.equal(
+    policy.selection.prompt_cache_prefix.messages.some((message) =>
+      message.content.includes("Researching supplier risk"),
+    ),
+    true,
+  );
+  assert.equal(
+    policy.selection.prompt_cache_prefix.messages.some((message) =>
+      message.content.includes("latest filing"),
+    ),
+    false,
+  );
+});
+
 test("createTurnToolPolicy returns the selector rejection for unknown bundles", () => {
   const registry = loadToolRegistry();
 

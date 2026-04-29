@@ -10,6 +10,13 @@ import {
   promptCachePrefixHash,
   validateAnalystPromptTemplates,
 } from "../src/prompt-templates.ts";
+import type { ToolDefinition } from "../src/registry.ts";
+
+function registryTool(name: string): ToolDefinition {
+  const tool = loadToolRegistry().getTool(name);
+  assert.ok(tool);
+  return tool;
+}
 
 test("analyst prompt templates cover every registered bundle exactly once", () => {
   const registry = loadToolRegistry();
@@ -64,7 +71,7 @@ test("buildPromptCachePrefix enforces cache-stable prompt ordering and excludes 
 
   const prefix = buildPromptCachePrefix({
     template,
-    tools: [{ name: "get_claims" }, { name: "get_events" }],
+    tools: [registryTool("get_claims"), registryTool("get_events")],
     response_schema: { schema_id: "finance_research_blocks/v1" },
     few_shots: [{ name: "document_example", content: "Use structured evidence only." }],
     thread_summary: "User is researching AAPL supplier risk.",
@@ -101,7 +108,7 @@ test("prompt-cache prefix hash is stable across volatile user turns within a bun
   assert.ok(template);
   const stableInput = {
     template,
-    tools: [{ name: "resolve_subjects" }, { name: "get_facts" }],
+    tools: [registryTool("resolve_subjects"), registryTool("get_statement_facts")],
     response_schema: { schema_id: "finance_research_blocks/v1" },
     few_shots: [{ name: "facts_table", content: "Return metric_row blocks." }],
     thread_summary: "User is tracking quarterly margin recovery.",
@@ -129,4 +136,37 @@ test("prompt-cache prefix hash is stable across volatile user turns within a bun
   assert.equal(promptCachePrefixHash(first), promptCachePrefixHash(second));
   assert.notEqual(first.cache_key, changedBundle.cache_key);
   assert.notEqual(promptCachePrefixHash(first), promptCachePrefixHash(changedBundle));
+});
+
+test("prompt-cache prefix hash changes when selected tool definitions change", () => {
+  const registry = loadToolRegistry();
+  const template = analystPromptTemplateForBundle("document_research");
+  assert.ok(template);
+  const tool = registry.getTool("get_claims");
+  assert.ok(tool);
+  const baseInput = {
+    template,
+    response_schema: { schema_id: "finance_research_blocks/v1" },
+    thread_summary: "Researching supplier risk.",
+    resolved_context: {
+      subjects: [{ kind: "listing", id: "00000000-0000-4000-8000-000000000001" }],
+    },
+  };
+
+  const original = buildPromptCachePrefix({
+    ...baseInput,
+    tools: [tool],
+  });
+  const changed = buildPromptCachePrefix({
+    ...baseInput,
+    tools: [
+      {
+        ...tool,
+        description: `${tool.description} Changed for cache invalidation.`,
+      },
+    ],
+  });
+
+  assert.notEqual(original.cache_key, changed.cache_key);
+  assert.notEqual(promptCachePrefixHash(original), promptCachePrefixHash(changed));
 });
