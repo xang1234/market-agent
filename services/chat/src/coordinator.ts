@@ -416,29 +416,12 @@ function subjectAwareRunner(
 
     const { subjectText: _subjectText, ...resolvedContext } = context;
     const toolCallId = subjectResolutionToolCallId(context);
-    let emittedResolution = false;
-    const emitWithSubjectResolution: ChatTurnEmit = (type, payload = {}) => {
-      if (!emittedResolution) {
-        emittedResolution = true;
-        if (type === "turn.started") {
-          const event = resolvedContext.emit(type, payload);
-          emitSubjectResolutionToolEvents(resolvedContext.emit, preResolution, toolCallId);
-          return event;
-        }
-        emitSubjectResolutionToolEvents(resolvedContext.emit, preResolution, toolCallId);
-      }
-      return resolvedContext.emit(type, payload);
-    };
+    emitSubjectResolutionToolEvents(resolvedContext.emit, preResolution, toolCallId);
 
     await runner({
       ...resolvedContext,
-      emit: emitWithSubjectResolution,
       subjectPreResolution: preResolution,
     });
-
-    if (!emittedResolution) {
-      emitSubjectResolutionToolEvents(resolvedContext.emit, preResolution, toolCallId);
-    }
   };
 }
 

@@ -341,20 +341,21 @@ test("stream route surfaces hydrated subject handoff in the resolver payload", a
 
   assert.equal(response.status, 200);
   const events = await readSseEvents(response, 9);
+  const toolCompleted = events.find((event) => event.event === "tool.completed");
+  assert.ok(toolCompleted, "expected a resolver tool completion event");
 
-  assert.equal(events[2].event, "tool.completed");
-  assert.equal(events[2].data.resolution_status, "resolved");
-  assert.deepEqual(events[2].data.subject_ref, {
+  assert.equal(toolCompleted.data.resolution_status, "resolved");
+  assert.deepEqual(toolCompleted.data.subject_ref, {
     kind: "listing",
     id: "11111111-1111-4111-a111-111111111111",
   });
-  assert.equal((events[2].data.display_labels as Record<string, unknown>).ticker, "AAPL");
+  assert.equal((toolCompleted.data.display_labels as Record<string, unknown>).ticker, "AAPL");
   assert.equal(
-    ((events[2].data.context as Record<string, unknown>).listing as Record<string, unknown>).ticker,
+    ((toolCompleted.data.context as Record<string, unknown>).listing as Record<string, unknown>).ticker,
     "AAPL",
   );
   assert.equal(
-    ((events[2].data.handoff as Record<string, unknown>).display_labels as Record<string, unknown>).mic,
+    ((toolCompleted.data.handoff as Record<string, unknown>).display_labels as Record<string, unknown>).mic,
     "XNAS",
   );
   assert.deepEqual(events[8].data.subject_ref, {

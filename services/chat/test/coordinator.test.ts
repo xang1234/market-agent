@@ -424,6 +424,31 @@ test("subject pre-resolution passes hydrated context to custom runners without r
   assert.equal((turn.events[1].handoff as Record<string, unknown>).display_label, "AAPL · XNAS — Apple Inc.");
 });
 
+test("subject pre-resolution emits resolved handoff before custom runner failures", async () => {
+  const coordinator = createChatCoordinator({
+    preResolveSubject: async () => resolvedAaplPreResolution(),
+    runner: () => {
+      throw new Error("model failed before first emit");
+    },
+  });
+
+  const turn = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    subjectText: "AAPL",
+  });
+  await turn.completed;
+
+  assert.deepEqual(turn.events.map((event) => event.type), [
+    "tool.started",
+    "tool.completed",
+    "turn.error",
+  ]);
+  assert.equal(turn.events[1].resolution_status, "resolved");
+  assert.equal((turn.events[1].handoff as Record<string, unknown>).display_label, "AAPL · XNAS — Apple Inc.");
+  assert.equal(turn.events[2].message, "model failed before first emit");
+});
+
 test("subject clarification turns use the injected renderer before persistence", async () => {
   const persisted: string[] = [];
   const coordinator = createChatCoordinator({
