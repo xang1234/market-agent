@@ -245,6 +245,32 @@ test("stream route uses turn_id query parameter for event correlation", async (t
   assert.equal(event.data.turn_id, "turn-789");
 });
 
+test("stream route uses server-level assistant persistence before snapshot.sealed", async (t) => {
+  const persistCalls: string[] = [];
+  const base = await startServer(t, {
+    persistAssistantMessage: async ({ threadId, runId, turnId }) => {
+      persistCalls.push(`${threadId}:${runId}:${turnId}`);
+      return {
+        snapshot_id: "22222222-2222-4222-a222-222222222222",
+        message_id: "33333333-3333-4333-a333-333333333333",
+      };
+    },
+  });
+
+  const response = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-456&turn_id=turn-789`,
+  );
+
+  assert.equal(response.status, 200);
+  const events = await readSseEvents(response, 9);
+
+  assert.deepEqual(persistCalls, ["thread-123:run-456:turn-789"]);
+  assert.equal(events[4].event, "snapshot.sealed");
+  assert.equal(events[4].data.snapshot_id, "22222222-2222-4222-a222-222222222222");
+  assert.equal(events[8].event, "turn.completed");
+  assert.equal(events[8].data.message_id, "33333333-3333-4333-a333-333333333333");
+});
+
 test("stream route emits sequenced success-path coordinator events with correlation fields", async (t) => {
   const base = await startServer(t);
 

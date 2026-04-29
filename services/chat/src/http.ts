@@ -2,6 +2,7 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 import {
   ChatTurnUnavailableError,
   createChatCoordinator,
+  type ChatAssistantMessagePersistence,
   type ChatCoordinator,
 } from "./coordinator.ts";
 import type { ChatSseEvent } from "./sse.ts";
@@ -28,10 +29,13 @@ const INVALID_STREAM_ROUTE = Symbol("INVALID_STREAM_ROUTE");
 
 export type ChatServerOptions = {
   coordinator?: ChatCoordinator;
+  persistAssistantMessage?: ChatAssistantMessagePersistence;
 };
 
 export function createChatServer(options: ChatServerOptions = {}): Server {
-  const coordinator = options.coordinator ?? createChatCoordinator();
+  const coordinator = options.coordinator ?? createChatCoordinator({
+    persistAssistantMessage: options.persistAssistantMessage,
+  });
 
   return createServer(async (req, res) => {
     const route = matchStreamRoute(req.method ?? "GET", req.url ?? "/");
