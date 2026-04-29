@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import type { Client } from "pg";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { writeCitationLog } from "../src/citation.ts";
+import {
+  citationLogInputsForBlocks,
+  writeCitationLog,
+  writeCitationLogsForBlocks,
+} from "../src/citation.ts";
 
 async function seedMinimalSnapshot(client: Client): Promise<string> {
   const { rows } = await client.query<{ snapshot_id: string }>(
@@ -87,4 +91,294 @@ test("writeCitationLog rejects a snapshot_id that does not exist (FK enforced)",
     }),
     /foreign key|citation_logs_snapshot_id_fkey/i,
   );
+});
+
+test("citationLogInputsForBlocks extracts one row per block citation ref", () => {
+  const snapshot_id = randomUUID();
+  const source_id = randomUUID();
+  const fact_id = randomUUID();
+  const claim_id = randomUUID();
+
+  const rows = citationLogInputsForBlocks([
+    {
+      id: "summary",
+      kind: "rich_text",
+      snapshot_id,
+      source_refs: [source_id],
+      segments: [
+        { type: "text", text: "Revenue grew " },
+        { type: "ref", ref_kind: "fact", ref_id: fact_id, format: "12%" },
+        { type: "ref", ref_kind: "fact", ref_id: fact_id, format: "12%" },
+        { type: "ref", ref_kind: "claim", ref_id: claim_id },
+      ],
+    },
+  ]);
+
+  assert.deepEqual(rows, [
+    {
+      snapshot_id,
+      block_id: "summary",
+      ref_kind: "fact",
+      ref_id: fact_id,
+      source_id: null,
+    },
+    {
+      snapshot_id,
+      block_id: "summary",
+      ref_kind: "claim",
+      ref_id: claim_id,
+      source_id: null,
+    },
+  ]);
+});
+
+test("citationLogInputsForBlocks does not infer citation source_id from block source_refs", () => {
+  const snapshot_id = randomUUID();
+  const source_id = randomUUID();
+  const alternate_source_id = randomUUID();
+  const fact_id = randomUUID();
+
+  const rows = citationLogInputsForBlocks([
+    {
+      id: "summary",
+      kind: "rich_text",
+      snapshot_id,
+      source_refs: [source_id, alternate_source_id],
+      segments: [{ type: "ref", ref_kind: "fact", ref_id: fact_id }],
+    },
+  ]);
+
+  assert.deepEqual(rows, [
+    {
+      snapshot_id,
+      block_id: "summary",
+      ref_kind: "fact",
+      ref_id: fact_id,
+      source_id: null,
+    },
+  ]);
+});
+
+test("citationLogInputsForBlocks extracts nested section and value refs", () => {
+  const snapshot_id = randomUUID();
+  const source_id = randomUUID();
+  const value_ref = randomUUID();
+  const delta_ref = randomUUID();
+
+  const rows = citationLogInputsForBlocks([
+    {
+      id: "section-1",
+      kind: "section",
+      snapshot_id,
+      source_refs: [source_id],
+      children: [
+        {
+          id: "metrics",
+          kind: "metric_row",
+          snapshot_id,
+          source_refs: [source_id],
+          items: [
+            { label: "Revenue", value_ref, delta_ref },
+          ],
+        },
+      ],
+    },
+  ]);
+
+  assert.deepEqual(rows, [
+    {
+      snapshot_id,
+      block_id: "metrics",
+      ref_kind: "fact",
+      ref_id: value_ref,
+      source_id: null,
+    },
+    {
+      snapshot_id,
+      block_id: "metrics",
+      ref_kind: "fact",
+      ref_id: delta_ref,
+      source_id: null,
+    },
+  ]);
+});
+
+test("citationLogInputsForBlocks extracts consensus and estimate block refs", () => {
+  const snapshot_id = randomUUID();
+  const analyst_count_ref = randomUUID();
+  const buy_count_ref = randomUUID();
+  const current_price_ref = randomUUID();
+  const low_ref = randomUUID();
+  const avg_ref = randomUUID();
+  const high_ref = randomUUID();
+  const upside_ref = randomUUID();
+  const estimate_ref = randomUUID();
+  const actual_ref = randomUUID();
+  const surprise_ref = randomUUID();
+
+  const rows = citationLogInputsForBlocks([
+    {
+      id: "consensus",
+      kind: "analyst_consensus",
+      snapshot_id,
+      analyst_count_ref,
+      distribution: [{ bucket: "buy", count_ref: buy_count_ref }],
+    },
+    {
+      id: "price-targets",
+      kind: "price_target_range",
+      snapshot_id,
+      current_price_ref,
+      low_ref,
+      avg_ref,
+      high_ref,
+      upside_ref,
+    },
+    {
+      id: "eps",
+      kind: "eps_surprise",
+      snapshot_id,
+      quarters: [{ label: "Q1", estimate_ref, actual_ref, surprise_ref }],
+    },
+  ]);
+
+  assert.deepEqual(
+    rows.map((row) => [row.block_id, row.ref_kind, row.ref_id]),
+    [
+      ["consensus", "fact", analyst_count_ref],
+      ["consensus", "fact", buy_count_ref],
+      ["price-targets", "fact", current_price_ref],
+      ["price-targets", "fact", low_ref],
+      ["price-targets", "fact", avg_ref],
+      ["price-targets", "fact", high_ref],
+      ["price-targets", "fact", upside_ref],
+      ["eps", "fact", estimate_ref],
+      ["eps", "fact", actual_ref],
+      ["eps", "fact", surprise_ref],
+    ],
+  );
+});
+
+test("citationLogInputsForBlocks extracts document refs from blocks", () => {
+  const snapshot_id = randomUUID();
+  const claim_ref = randomUUID();
+  const document_ref = randomUUID();
+
+  const rows = citationLogInputsForBlocks([
+    {
+      id: "news",
+      kind: "news_cluster",
+      snapshot_id,
+      claim_refs: [claim_ref],
+      document_refs: [document_ref],
+    },
+  ]);
+
+  assert.deepEqual(rows, [
+    {
+      snapshot_id,
+      block_id: "news",
+      ref_kind: "claim",
+      ref_id: claim_ref,
+      source_id: null,
+    },
+    {
+      snapshot_id,
+      block_id: "news",
+      ref_kind: "document",
+      ref_id: document_ref,
+      source_id: null,
+    },
+  ]);
+});
+
+test("writeCitationLogsForBlocks writes extracted citation rows in one statement", async () => {
+  const queries: unknown[][] = [];
+  const db = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      assert.match(text, /insert into citation_logs/);
+      queries.push(values ?? []);
+      return {
+        rows: [
+          {
+            citation_log_id: randomUUID(),
+            created_at: new Date("2026-04-29T00:00:00.000Z"),
+          },
+          {
+            citation_log_id: randomUUID(),
+            created_at: new Date("2026-04-29T00:00:01.000Z"),
+          },
+        ] as R[],
+        command: "INSERT",
+        rowCount: 2,
+        oid: 0,
+        fields: [],
+      };
+    },
+  };
+  const snapshot_id = randomUUID();
+  const fact_id = randomUUID();
+  const claim_id = randomUUID();
+
+  const rows = await writeCitationLogsForBlocks(db, [
+    {
+      id: "block-1",
+      kind: "rich_text",
+      snapshot_id,
+      segments: [
+        { type: "ref", ref_kind: "fact", ref_id: fact_id },
+        { type: "ref", ref_kind: "claim", ref_id: claim_id },
+      ],
+    },
+  ]);
+
+  assert.equal(rows.length, 2);
+  assert.deepEqual(queries, [
+    [
+      [snapshot_id, snapshot_id],
+      ["block-1", "block-1"],
+      ["fact", "claim"],
+      [fact_id, claim_id],
+      [null, null],
+    ],
+  ]);
+});
+
+test("writeCitationLogsForBlocks writes every extracted citation row", async () => {
+  const inserted: unknown[][] = [];
+  const db = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      assert.match(text, /insert into citation_logs/);
+      inserted.push(values ?? []);
+      return {
+        rows: [
+          {
+            citation_log_id: randomUUID(),
+            created_at: new Date("2026-04-29T00:00:00.000Z"),
+          },
+        ] as R[],
+        command: "INSERT",
+        rowCount: 1,
+        oid: 0,
+        fields: [],
+      };
+    },
+  };
+  const snapshot_id = randomUUID();
+  const ref_id = randomUUID();
+
+  const rows = await writeCitationLogsForBlocks(db, [
+    {
+      id: "block-1",
+      kind: "rich_text",
+      snapshot_id,
+      source_refs: [],
+      segments: [{ type: "ref", ref_kind: "event", ref_id }],
+    },
+  ]);
+
+  assert.equal(rows.length, 1);
+  assert.deepEqual(inserted, [
+    [[snapshot_id], ["block-1"], ["event"], [ref_id], [null]],
+  ]);
 });

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { toolCallArgsDigest } from "../../observability/src/tool-call.ts";
 import type { QueryExecutor } from "../src/lookup.ts";
 import type { SubjectRef } from "../src/subject-ref.ts";
 import { runSearchToSubjectFlow } from "../src/flow.ts";
@@ -244,12 +245,12 @@ test("auto-advanced resolution writes resolution path telemetry", async () => {
   assert.equal(toolLogs.length, 1);
   assert.equal(toolLogs[0].tool_name, "resolver.search_to_subject_flow");
   assert.equal(toolLogs[0].status, "ok");
-  assert.deepEqual(toolLogs[0].args, {
+  assert.deepEqual(toolLogs[0].args, toolCallArgsDigest({
     resolution_path: "auto_advanced",
     normalized_input: "AAPL",
     subject_ref: aaplXnas,
     identity_level: "listing",
-  });
+  }));
 });
 
 test("resolution telemetry failures prevent hydrated results from bypassing required logs", async () => {
@@ -308,12 +309,12 @@ test("explicit-choice resolution writes resolution path telemetry", async () => 
   assert.equal(toolLogs.length, 1);
   assert.equal(toolLogs[0].tool_name, "resolver.search_to_subject_flow");
   assert.equal(toolLogs[0].status, "ok");
-  assert.deepEqual(toolLogs[0].args, {
+  assert.deepEqual(toolLogs[0].args, toolCallArgsDigest({
     resolution_path: "explicit_choice",
     normalized_input: "AAPL",
     subject_ref: aaplXfra,
     identity_level: "listing",
-  });
+  }));
 });
 
 test("hydrated issuer bundle carries issuer context and active listing entry context", async () => {
@@ -457,9 +458,9 @@ function withToolLogCapture(db: QueryExecutor): {
       query: async (text, values) => {
         if (text.includes("insert into tool_call_logs")) {
           toolLogs.push({
-            tool_name: String(values?.[0]),
-            args: JSON.parse(String(values?.[1])),
-            status: String(values?.[2]),
+            tool_name: String(values?.[2]),
+            args: JSON.parse(String(values?.[3])),
+            status: String(values?.[6]),
           });
           return {
             rows: [
