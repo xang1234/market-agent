@@ -192,6 +192,33 @@ test("turn tool policy reserves budget for accepted decisions before they are re
   assert.equal(third.limit, 2);
 });
 
+test("turn tool policy records batched accepted decisions in reservation order", () => {
+  const registry = loadToolRegistry();
+  const policy = createTurnToolPolicy({
+    registry,
+    audience: "analyst",
+    classification: { bundle_id: "single_subject_analysis" },
+    budget: { low: 8, medium: 4, high: 2 },
+  });
+  assert.equal(policy.ok, true);
+
+  const first = policy.checkToolCall({ tool_name: "get_segment_facts" });
+  const second = policy.checkToolCall({ tool_name: "get_segment_facts" });
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+
+  const nextPolicy = policy.recordAcceptedToolCall(first);
+  assert.equal(nextPolicy.ok, true);
+  const finalPolicy = nextPolicy.recordAcceptedToolCall(second);
+  assert.equal(finalPolicy.ok, true);
+  assert.deepEqual(finalPolicy.usage, { low: 0, medium: 0, high: 2 });
+
+  assert.throws(
+    () => policy.recordAcceptedToolCall(second),
+    /accepted tool-call decision/,
+  );
+});
+
 test("turn tool policy keeps model-selected tools inside the system-selected bundle", () => {
   const registry = loadToolRegistry();
   const policy = createTurnToolPolicy({

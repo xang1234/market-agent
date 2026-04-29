@@ -47,7 +47,19 @@ export type TurnToolPolicy =
     }
   | Extract<BundleSelection, { ok: false }>;
 
+type TurnToolPolicySession = {
+  acceptedDecisions: WeakSet<AcceptedToolCallBudgetDecision>;
+  reservedUsage: ToolCallUsage;
+};
+
 export function createTurnToolPolicy(input: TurnToolPolicyInput): TurnToolPolicy {
+  return createTurnToolPolicyWithSession(input);
+}
+
+function createTurnToolPolicyWithSession(
+  input: TurnToolPolicyInput,
+  session?: TurnToolPolicySession,
+): TurnToolPolicy {
   const selection = selectToolBundle({
     registry: input.registry,
     audience: input.audience,
@@ -60,8 +72,10 @@ export function createTurnToolPolicy(input: TurnToolPolicyInput): TurnToolPolicy
 
   const budget = normalizeBudget(input.budget);
   const usage = normalizeUsage(input.usage);
-  const acceptedDecisions = new WeakSet<AcceptedToolCallBudgetDecision>();
-  let reservedUsage = usage;
+  const policySession = session ?? {
+    acceptedDecisions: new WeakSet<AcceptedToolCallBudgetDecision>(),
+    reservedUsage: usage,
+  };
 
   return Object.freeze({
     ok: true,
@@ -77,25 +91,25 @@ export function createTurnToolPolicy(input: TurnToolPolicyInput): TurnToolPolicy
         audience: selection.audience,
         tool_name: toolCall.tool_name,
         arguments: toolCall.arguments,
-        usage: reservedUsage,
+        usage: policySession.reservedUsage,
         budget,
       });
       if (decision.ok) {
-        acceptedDecisions.add(decision);
-        reservedUsage = recordToolCallUsage(reservedUsage, decision.tool);
+        policySession.acceptedDecisions.add(decision);
+        policySession.reservedUsage = recordToolCallUsage(policySession.reservedUsage, decision.tool);
       }
       return decision;
     },
     recordAcceptedToolCall(decision) {
-      assertAcceptedDecision(decision, acceptedDecisions);
-      acceptedDecisions.delete(decision);
-      return createTurnToolPolicy({
+      assertAcceptedDecision(decision, policySession.acceptedDecisions, usage);
+      policySession.acceptedDecisions.delete(decision);
+      return createTurnToolPolicyWithSession({
         registry: input.registry,
         audience: selection.audience,
         classification: selection.classification,
         budget,
         usage: recordToolCallUsage(usage, decision.tool),
-      });
+      }, policySession);
     },
   });
 }
@@ -103,12 +117,14 @@ export function createTurnToolPolicy(input: TurnToolPolicyInput): TurnToolPolicy
 function assertAcceptedDecision(
   decision: ToolCallBudgetDecision,
   acceptedDecisions: WeakSet<AcceptedToolCallBudgetDecision>,
+  usage: ToolCallUsage,
 ): asserts decision is AcceptedToolCallBudgetDecision {
   if (
     decision === null ||
     typeof decision !== "object" ||
     decision.ok !== true ||
-    !acceptedDecisions.has(decision)
+    !acceptedDecisions.has(decision) ||
+    decision.used !== usage[decision.cost_class]
   ) {
     throw new Error("recordAcceptedToolCall requires an accepted tool-call decision");
   }
