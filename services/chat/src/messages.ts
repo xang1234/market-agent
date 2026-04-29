@@ -3,12 +3,32 @@ import {
   type JsonValue,
 } from "../../observability/src/types.ts";
 import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
+import type {
+  ChatAssistantMessagePersistence,
+  ChatAssistantMessagePersistenceInput,
+} from "./coordinator.ts";
 
 export type ChatMessagePersistenceDb = {
   query<R extends Record<string, unknown> = Record<string, unknown>>(
     text: string,
     values?: unknown[],
   ): Promise<{ rows: R[] }>;
+};
+
+const CHAT_MESSAGE_TRANSACTION_CLIENT: unique symbol = Symbol("chat.messageTransactionClient");
+
+type ChatMessageTransactionClientBrand = {
+  readonly [CHAT_MESSAGE_TRANSACTION_CLIENT]: true;
+};
+
+export type ChatMessageTransactionClient = ChatMessagePersistenceDb & ChatMessageTransactionClientBrand;
+
+export type ChatMessagePoolClient = ChatMessagePersistenceDb & {
+  release(error?: Error): void;
+};
+
+export type ChatMessageClientPool = {
+  connect(): Promise<ChatMessagePoolClient>;
 };
 
 export type ChatRole = "user" | "assistant" | "tool";
@@ -31,6 +51,11 @@ export type PersistChatMessageAfterSnapshotSealInput = {
   sealSnapshot(): Promise<SnapshotSealResult>;
 };
 
+export type ChatMessagePersistenceFactoryInput = {
+  pool: ChatMessageClientPool;
+  sealSnapshot(input: ChatAssistantMessagePersistenceInput): Promise<SnapshotSealResult>;
+};
+
 export type PersistChatMessageAfterSnapshotSealResult =
   | {
       ok: true;
@@ -43,7 +68,21 @@ export type PersistChatMessageAfterSnapshotSealResult =
     };
 
 export async function persistChatMessageAfterSnapshotSeal(
-  db: ChatMessagePersistenceDb,
+  db: ChatMessageTransactionClient,
+  input: PersistChatMessageAfterSnapshotSealInput,
+): Promise<PersistChatMessageAfterSnapshotSealResult> {
+  assertChatMessageTransactionClient(db);
+
+  const seal = await input.sealSnapshot();
+  if (!seal.ok) {
+    return Object.freeze({ ok: false, seal });
+  }
+
+  return persistSealedChatMessage(db, input, seal);
+}
+
+export async function persistChatMessageAfterSnapshotSealWithPool(
+  pool: ChatMessageClientPool,
   input: PersistChatMessageAfterSnapshotSealInput,
 ): Promise<PersistChatMessageAfterSnapshotSealResult> {
   const seal = await input.sealSnapshot();
@@ -51,6 +90,67 @@ export async function persistChatMessageAfterSnapshotSeal(
     return Object.freeze({ ok: false, seal });
   }
 
+  const client = await pool.connect();
+  let releaseError: Error | undefined;
+  try {
+    return await persistSealedChatMessage(chatMessageTransactionClient(client), input, seal);
+  } catch (error) {
+    if (error instanceof Error && (error as { rollback_error?: unknown }).rollback_error !== undefined) {
+      releaseError = error;
+    }
+    throw error;
+  } finally {
+    client.release(releaseError);
+  }
+}
+
+export function createChatMessagePersistence(
+  input: ChatMessagePersistenceFactoryInput,
+): ChatAssistantMessagePersistence {
+  return async (message) => {
+    const result = await persistChatMessageAfterSnapshotSealWithPool(input.pool, {
+      thread_id: message.threadId,
+      role: message.role,
+      blocks: message.blocks as JsonValue,
+      content_hash: message.content_hash,
+      sealSnapshot: () => input.sealSnapshot(message),
+    });
+
+    if (!result.ok) {
+      throw new Error("snapshot seal failed; chat message was not persisted");
+    }
+
+    return {
+      snapshot_id: result.seal.snapshot.snapshot_id,
+      message_id: result.message.message_id,
+    };
+  };
+}
+
+export function chatMessageTransactionClient<T extends ChatMessagePersistenceDb>(
+  client: T,
+): T & ChatMessageTransactionClient {
+  if ((client as Partial<ChatMessageTransactionClientBrand>)[CHAT_MESSAGE_TRANSACTION_CLIENT] === true) {
+    return client as T & ChatMessageTransactionClient;
+  }
+  if (isPoolLike(client)) {
+    throw new Error(
+      "persistChatMessageAfterSnapshotSeal requires a pinned transaction client; use persistChatMessageAfterSnapshotSealWithPool for pools",
+    );
+  }
+  Object.defineProperty(client, CHAT_MESSAGE_TRANSACTION_CLIENT, {
+    value: true,
+    enumerable: false,
+    configurable: false,
+  });
+  return client as T & ChatMessageTransactionClient;
+}
+
+async function persistSealedChatMessage(
+  db: ChatMessageTransactionClient,
+  input: PersistChatMessageAfterSnapshotSealInput,
+  seal: SnapshotSealResult & { ok: true },
+): Promise<PersistChatMessageAfterSnapshotSealResult & { ok: true }> {
   const snapshotId = seal.snapshot.snapshot_id;
   await db.query("begin");
   try {
@@ -103,4 +203,19 @@ export async function persistChatMessageAfterSnapshotSeal(
     }
     throw error;
   }
+}
+
+function assertChatMessageTransactionClient(
+  db: ChatMessagePersistenceDb,
+): asserts db is ChatMessageTransactionClient {
+  if ((db as Partial<ChatMessageTransactionClientBrand>)[CHAT_MESSAGE_TRANSACTION_CLIENT] !== true) {
+    throw new Error("persistChatMessageAfterSnapshotSeal requires a pinned transaction client");
+  }
+}
+
+function isPoolLike(db: ChatMessagePersistenceDb): boolean {
+  const candidate = db as {
+    connect?: unknown;
+  };
+  return typeof candidate.connect === "function";
 }

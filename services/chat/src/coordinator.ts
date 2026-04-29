@@ -21,6 +21,24 @@ export type ChatTurnRunContext = ChatTurnInput & {
 
 export type ChatTurnRunner = (context: ChatTurnRunContext) => Promise<void> | void;
 
+export type ChatAssistantMessagePersistenceInput = {
+  threadId: string;
+  runId: string;
+  turnId: string;
+  role: "assistant";
+  blocks: ReadonlyArray<Record<string, unknown>>;
+  content_hash: string;
+};
+
+export type ChatAssistantMessagePersistenceResult = {
+  snapshot_id: string;
+  message_id: string;
+};
+
+export type ChatAssistantMessagePersistence = (
+  input: ChatAssistantMessagePersistenceInput,
+) => Promise<ChatAssistantMessagePersistenceResult>;
+
 export type ChatTurnHandle = {
   readonly input: ChatTurnInput;
   readonly completed: Promise<void>;
@@ -38,6 +56,7 @@ export type ChatCoordinator = {
 
 export type ChatCoordinatorOptions = {
   runner?: ChatTurnRunner;
+  persistAssistantMessage?: ChatAssistantMessagePersistence;
   completedTurnRetentionMs?: number;
   maxCompletedTurns?: number;
   completedTurnTombstoneRetentionMs?: number;
@@ -82,7 +101,8 @@ export class ChatTurnUnavailableError extends Error {
 export function createChatCoordinator(
   options: ChatCoordinatorOptions = {},
 ): ChatCoordinator {
-  const runner = options.runner ?? stubChatTurnRunner;
+  const persistAssistantMessage = options.persistAssistantMessage;
+  const runner = options.runner ?? ((context) => stubChatTurnRunner(context, persistAssistantMessage));
   const completedTurnRetentionMs = nonNegativeFiniteNumber(
     options.completedTurnRetentionMs ?? DEFAULT_COMPLETED_TURN_RETENTION_MS,
     "completedTurnRetentionMs",
@@ -329,7 +349,18 @@ class MutableChatTurnHandle implements ChatTurnHandle {
   }
 }
 
-function stubChatTurnRunner({ emit }: ChatTurnRunContext) {
+async function stubChatTurnRunner(
+  context: ChatTurnRunContext,
+  persistAssistantMessage?: ChatAssistantMessagePersistence,
+) {
+  const { emit } = context;
+  const assistantBlocks = Object.freeze([
+    Object.freeze({ type: "text", text: "Stub research stream ready." }),
+  ]);
+  const contentHash = "stub-block-1";
+  let snapshotId = "snapshot-1";
+  let messageId = "message-1";
+
   emit("turn.started", { stub: true });
   emit("tool.started", {
     stub: true,
@@ -344,12 +375,24 @@ function stubChatTurnRunner({ emit }: ChatTurnRunContext) {
   });
   emit("snapshot.staged", {
     stub: true,
-    snapshot_id: "snapshot-1",
+    snapshot_id: snapshotId,
     status: "staged",
   });
+  if (persistAssistantMessage) {
+    const persisted = await persistAssistantMessage({
+      threadId: context.threadId,
+      runId: context.runId,
+      turnId: context.turnId ?? context.runId,
+      role: "assistant",
+      blocks: assistantBlocks,
+      content_hash: contentHash,
+    });
+    snapshotId = persisted.snapshot_id;
+    messageId = persisted.message_id;
+  }
   emit("snapshot.sealed", {
     stub: true,
-    snapshot_id: "snapshot-1",
+    snapshot_id: snapshotId,
     status: "sealed",
   });
   emit("block.began", {
@@ -363,18 +406,18 @@ function stubChatTurnRunner({ emit }: ChatTurnRunContext) {
     delta: {
       segment: {
         type: "text",
-        text: "Stub research stream ready.",
+        text: assistantBlocks[0].text,
       },
     },
   });
   emit("block.completed", {
     stub: true,
     block_id: "block-1",
-    content_hash: "stub-block-1",
+    content_hash: contentHash,
   });
   emit("turn.completed", {
     stub: true,
-    message_id: "message-1",
+    message_id: messageId,
   });
 }
 

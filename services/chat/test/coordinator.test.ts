@@ -276,6 +276,57 @@ test("per-thread coordinator clones nested payloads before freezing retained eve
   );
 });
 
+test("default turn runner persists assistant message before snapshot.sealed", async () => {
+  const steps: string[] = [];
+  const coordinator = createChatCoordinator({
+    persistAssistantMessage: async ({ threadId, role, blocks, content_hash }) => {
+      steps.push(`persist:${threadId}:${role}:${content_hash}:${blocks.length}`);
+      return {
+        snapshot_id: "22222222-2222-4222-a222-222222222222",
+        message_id: "33333333-3333-4333-a333-333333333333",
+      };
+    },
+  });
+
+  const turn = coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1" });
+  await turn.completed;
+
+  assert.deepEqual(steps, ["persist:thread-1:assistant:stub-block-1:1"]);
+  assert.deepEqual(
+    turn.events.map((event) => event.type),
+    [
+      "turn.started",
+      "tool.started",
+      "tool.completed",
+      "snapshot.staged",
+      "snapshot.sealed",
+      "block.began",
+      "block.delta",
+      "block.completed",
+      "turn.completed",
+    ],
+  );
+  assert.equal(turn.events[4].snapshot_id, "22222222-2222-4222-a222-222222222222");
+  assert.equal(turn.events[8].message_id, "33333333-3333-4333-a333-333333333333");
+});
+
+test("default turn runner emits turn.error when assistant message persistence fails", async () => {
+  const coordinator = createChatCoordinator({
+    persistAssistantMessage: async () => {
+      throw new Error("snapshot seal failed");
+    },
+  });
+
+  const turn = coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1" });
+  await turn.completed;
+
+  assert.deepEqual(
+    turn.events.map((event) => event.type),
+    ["turn.started", "tool.started", "tool.completed", "snapshot.staged", "turn.error"],
+  );
+  assert.equal(turn.events[4].error_code, "Error");
+});
+
 type ChatTurnEventMutation = {
   type: string;
   seq: number;
