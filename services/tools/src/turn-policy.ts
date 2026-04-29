@@ -61,6 +61,7 @@ export function createTurnToolPolicy(input: TurnToolPolicyInput): TurnToolPolicy
   const budget = normalizeBudget(input.budget);
   const usage = normalizeUsage(input.usage);
   const acceptedDecisions = new WeakSet<AcceptedToolCallBudgetDecision>();
+  let reservedUsage = usage;
 
   return Object.freeze({
     ok: true,
@@ -76,11 +77,12 @@ export function createTurnToolPolicy(input: TurnToolPolicyInput): TurnToolPolicy
         audience: selection.audience,
         tool_name: toolCall.tool_name,
         arguments: toolCall.arguments,
-        usage,
+        usage: reservedUsage,
         budget,
       });
       if (decision.ok) {
         acceptedDecisions.add(decision);
+        reservedUsage = recordToolCallUsage(reservedUsage, decision.tool);
       }
       return decision;
     },

@@ -170,6 +170,28 @@ test("turn tool policy rejects cross-policy and replayed accepted decisions", ()
   );
 });
 
+test("turn tool policy reserves budget for accepted decisions before they are recorded", () => {
+  const registry = loadToolRegistry();
+  const policy = createTurnToolPolicy({
+    registry,
+    audience: "analyst",
+    classification: { bundle_id: "single_subject_analysis" },
+    budget: { low: 8, medium: 4, high: 2 },
+  });
+  assert.equal(policy.ok, true);
+
+  const first = policy.checkToolCall({ tool_name: "get_segment_facts" });
+  const second = policy.checkToolCall({ tool_name: "get_segment_facts" });
+  const third = policy.checkToolCall({ tool_name: "get_segment_facts" });
+
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.equal(third.ok, false);
+  assert.equal(third.reason, "budget_exceeded");
+  assert.equal(third.used, 2);
+  assert.equal(third.limit, 2);
+});
+
 test("turn tool policy keeps model-selected tools inside the system-selected bundle", () => {
   const registry = loadToolRegistry();
   const policy = createTurnToolPolicy({
