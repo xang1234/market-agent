@@ -1,5 +1,9 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
-import { createChatSseSequencer, stubSuccessEvents, type ChatSseEvent } from "./sse.ts";
+import {
+  createChatCoordinator,
+  type ChatCoordinator,
+} from "./coordinator.ts";
+import type { ChatSseEvent } from "./sse.ts";
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const INVALID_LAST_EVENT_ID = Symbol("INVALID_LAST_EVENT_ID");
@@ -12,8 +16,14 @@ type StreamRoute = {
 
 const INVALID_STREAM_ROUTE = Symbol("INVALID_STREAM_ROUTE");
 
-export function createChatServer(): Server {
-  return createServer((req, res) => {
+export type ChatServerOptions = {
+  coordinator?: ChatCoordinator;
+};
+
+export function createChatServer(options: ChatServerOptions = {}): Server {
+  const coordinator = options.coordinator ?? createChatCoordinator();
+
+  return createServer(async (req, res) => {
     const route = matchStreamRoute(req.method ?? "GET", req.url ?? "/");
 
     if (route === INVALID_STREAM_ROUTE) {
@@ -37,16 +47,30 @@ export function createChatServer(): Server {
       return;
     }
 
-    const sequencer = createChatSseSequencer({ threadId: route.threadId, runId: route.runId });
-    const events = stubSuccessEvents(sequencer);
-    if (resumeAfterSeq > sequencer.currentSeq()) {
+    const turn = coordinator.getOrCreateTurn({ threadId: route.threadId, runId: route.runId });
+    if (resumeAfterSeq > turn.currentSeq()) {
+      await turn.completed;
+    }
+
+    if (resumeAfterSeq > turn.currentSeq()) {
       respondJson(res, 400, { error: "'Last-Event-ID' is not available for this stream" });
       return;
     }
 
     writeSseHeaders(res);
-    for (const event of events.filter((event) => event.seq > resumeAfterSeq)) {
+    res.flushHeaders();
+
+    let lastWrittenSeq = resumeAfterSeq;
+    const writeIfNew = (event: ChatSseEvent) => {
+      if (event.seq <= lastWrittenSeq) {
+        return;
+      }
       writeEvent(res, event);
+      lastWrittenSeq = event.seq;
+    };
+    const unsubscribe = turn.subscribe(writeIfNew);
+    for (const event of turn.events) {
+      writeIfNew(event);
     }
 
     const heartbeat = setInterval(() => {
@@ -60,6 +84,7 @@ export function createChatServer(): Server {
       }
       cleanedUp = true;
       clearInterval(heartbeat);
+      unsubscribe();
     };
 
     req.on("close", cleanup);
