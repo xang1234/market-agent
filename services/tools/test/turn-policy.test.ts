@@ -59,6 +59,27 @@ test("createTurnToolPolicy forwards prompt prefix context into bundle selection"
     ),
     false,
   );
+
+  const decision = policy.checkToolCall({ tool_name: "get_claims" });
+  assert.equal(decision.ok, true);
+  const nextPolicy = policy.recordAcceptedToolCall(decision);
+  assert.equal(nextPolicy.ok, true);
+  assert.equal(
+    nextPolicy.selection.prompt_cache_prefix.user_turn,
+    "What changed in the latest filing?",
+  );
+  assert.equal(
+    nextPolicy.selection.prompt_cache_prefix.messages.some((message) =>
+      message.content.includes("Researching supplier risk"),
+    ),
+    true,
+  );
+  assert.equal(
+    nextPolicy.selection.prompt_cache_prefix.messages.some((message) =>
+      message.content.includes("latest filing"),
+    ),
+    false,
+  );
 });
 
 test("createTurnToolPolicy returns the selector rejection for unknown bundles", () => {

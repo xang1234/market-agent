@@ -214,7 +214,7 @@ export function buildPromptCachePrefix(
     "analyst",
     template.bundle_id,
     template.version,
-    promptCachePrefixHash({ cache_key: "", messages }),
+    promptCachePrefixHash({ messages }),
   ].join(":");
 
   return Object.freeze({
