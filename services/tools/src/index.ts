@@ -45,6 +45,15 @@ export type {
 } from "./budget-gate.ts";
 
 export {
+  createTurnToolPolicy,
+} from "./turn-policy.ts";
+export type {
+  TurnToolCallInput,
+  TurnToolPolicy,
+  TurnToolPolicyInput,
+} from "./turn-policy.ts";
+
+export {
   RAW_DOCUMENT_FIELD_NAMES,
   assertRegistryAudienceBoundary,
   authorizeToolCall,
