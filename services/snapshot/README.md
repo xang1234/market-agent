@@ -40,7 +40,10 @@ written to `verifier_fail_logs` with its deterministic `reason_code`.
 `sealSnapshot()` verifies a staged artifact and then writes the full manifest,
 including tool-call result hashes, to `snapshots` inside a single database
 transaction. If persistence fails after the transaction starts, the helper rolls
-back instead of leaving a partial seal.
+back instead of leaving a partial seal. Callers should prefer
+`sealSnapshotWithPool()` for pool-backed persistence; direct `sealSnapshot()`
+requires an already acquired client with `release()` so query-only pool wrappers
+cannot be branded as transaction-safe.
 
 ## Transform legality
 

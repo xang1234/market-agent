@@ -174,6 +174,20 @@ test("snapshotTransactionClient rejects query-plus-connect pool wrappers", () =>
   assert.deepEqual(queries, []);
 });
 
+test("snapshotTransactionClient rejects query-only pool wrappers before starting a transaction", () => {
+  const { db, queries } = recordingDb();
+  const queryOnlyWrapper = {
+    query: db.query.bind(db),
+  };
+
+  assert.throws(
+    () => snapshotTransactionClient(queryOnlyWrapper),
+    /requires an acquired transaction client/i,
+  );
+
+  assert.deepEqual(queries, []);
+});
+
 test("sealSnapshotWithPool pins the seal transaction to one acquired client", async () => {
   const { db: client, queries } = recordingDb();
   let connectCount = 0;
@@ -241,7 +255,11 @@ function validSealInput() {
 
 function recordingDb(options: { failOnSnapshotInsert?: boolean; failOnRollback?: boolean } = {}) {
   const queries: Array<{ text: string; values?: unknown[] }> = [];
-  const db: QueryExecutor = {
+  const db: QueryExecutor & { release(): void } = {
+    release() {
+      // Test clients model an acquired pool client; release behavior is asserted
+      // explicitly in sealSnapshotWithPool tests.
+    },
     async query<R extends Record<string, unknown> = Record<string, unknown>>(
       text: string,
       values?: unknown[],

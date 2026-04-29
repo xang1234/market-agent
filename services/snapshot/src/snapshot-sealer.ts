@@ -15,11 +15,11 @@ type SnapshotTransactionClientBrand = {
   readonly [SNAPSHOT_TRANSACTION_CLIENT]: true;
 };
 
-export type SnapshotTransactionClient = QueryExecutor & SnapshotTransactionClientBrand;
-
 export type SnapshotPoolClient = QueryExecutor & {
   release(error?: Error): void;
 };
+
+export type SnapshotTransactionClient = SnapshotPoolClient & SnapshotTransactionClientBrand;
 
 export type SnapshotClientPool = {
   connect(): Promise<SnapshotPoolClient>;
@@ -49,6 +49,9 @@ export function snapshotTransactionClient<T extends QueryExecutor>(
   }
   if (isPoolLike(client)) {
     throw new Error("sealSnapshot requires a pinned transaction client; use sealSnapshotWithPool for pools");
+  }
+  if (!isAcquiredClient(client)) {
+    throw new Error("sealSnapshot requires an acquired transaction client with release()");
   }
   Object.defineProperty(client, SNAPSHOT_TRANSACTION_CLIENT, {
     value: true,
@@ -209,6 +212,10 @@ function isPoolLike(db: QueryExecutor): boolean {
     connect?: unknown;
   };
   return typeof candidate.connect === "function";
+}
+
+function isAcquiredClient(db: QueryExecutor): db is SnapshotPoolClient {
+  return typeof (db as { release?: unknown }).release === "function";
 }
 
 function jsonParam(value: unknown): string {
