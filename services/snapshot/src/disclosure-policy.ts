@@ -680,8 +680,10 @@ function firstSeen(values: ReadonlyArray<string>): string[] {
 }
 
 function appendFirstSeen(target: string[], values: ReadonlyArray<string>): void {
+  const seen = new Set(target);
   for (const value of values) {
-    if (!target.includes(value)) {
+    if (!seen.has(value)) {
+      seen.add(value);
       target.push(value);
     }
   }

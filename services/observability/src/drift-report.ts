@@ -216,6 +216,7 @@ function runRef(run: GoldenEvalDriftRun): GoldenEvalDriftRunRef {
   });
 }
 
+// Indexed row columns are authoritative over duplicated payload fields when reconstructing drift inputs.
 function rowToDriftRun(row: EvalRunResultDriftRow): GoldenEvalDriftRun {
   return Object.freeze({
     eval_run_result_id: row.eval_run_result_id,

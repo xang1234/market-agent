@@ -182,6 +182,8 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - run: npm ci
+
       - run: npm test
 
   observability:

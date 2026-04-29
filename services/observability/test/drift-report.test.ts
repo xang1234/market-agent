@@ -161,7 +161,7 @@ test("readLatestGoldenEvalDriftReport compares the newest two runs for a suite",
   });
 
   assert.equal(queries.length, 1);
-  assert.match(queries[0].text, /from eval_run_results/);
+  assert.match(queries[0].text, /from eval_run_results/i);
   assert.match(
     queries[0].text,
     /order by created_at desc,\s+eval_run_result_id desc/i,
