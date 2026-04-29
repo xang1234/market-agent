@@ -41,3 +41,13 @@ written to `verifier_fail_logs` with its deterministic `reason_code`.
 including tool-call result hashes, to `snapshots` inside a single database
 transaction. If persistence fails after the transaction starts, the helper rolls
 back instead of leaving a partial seal.
+
+## Transform legality
+
+`checkSnapshotTransform()` enforces the in-snapshot boundary for interactive
+series transforms. A request must preserve the sealed subject set, basis, and
+normalization; end at or before the snapshot `as_of`; and match an explicitly
+listed transform in `allowed_transforms`. Series transforms are listed as
+`allowed_transforms.series[]` or `allowed_transforms.ranges[]` entries with an
+explicit `range` and `interval`; omitted intervals are rejected rather than
+treated as wildcards.
