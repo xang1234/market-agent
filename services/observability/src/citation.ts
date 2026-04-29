@@ -1,6 +1,6 @@
 import type { QueryExecutor } from "./types.ts";
 
-export type CitationRefKind = "fact" | "claim" | "event" | string;
+export type CitationRefKind = "fact" | "claim" | "event" | "document" | string;
 
 export type CitationLogInput = {
   snapshot_id: string;
@@ -20,6 +20,7 @@ export type CitationLogBlock = {
   kind: string;
   snapshot_id: string;
   source_refs?: ReadonlyArray<string>;
+  document_refs?: ReadonlyArray<string>;
   segments?: ReadonlyArray<unknown>;
   children?: ReadonlyArray<CitationLogBlock>;
   items?: ReadonlyArray<unknown>;
@@ -57,11 +58,42 @@ export async function writeCitationLogsForBlocks(
   db: QueryExecutor,
   blocks: ReadonlyArray<CitationLogBlock>,
 ): Promise<ReadonlyArray<CitationLogRow>> {
-  const rows: CitationLogRow[] = [];
-
-  for (const input of citationLogInputsForBlocks(blocks)) {
-    rows.push(await writeCitationLog(db, input));
+  const inputs = citationLogInputsForBlocks(blocks);
+  if (inputs.length === 0) {
+    return Object.freeze([]);
   }
+
+  const { rows } = await db.query<CitationLogRow>(
+    `with input_rows as (
+       select snapshot_id, block_id, ref_kind, ref_id, source_id, ord
+       from unnest($1::uuid[], $2::text[], $3::text[], $4::uuid[], $5::uuid[])
+         with ordinality as rows(snapshot_id, block_id, ref_kind, ref_id, source_id, ord)
+     ),
+     inserted as (
+       insert into citation_logs
+         (snapshot_id, block_id, ref_kind, ref_id, source_id)
+       select snapshot_id, block_id, ref_kind, ref_id, source_id
+       from input_rows
+       order by ord
+       returning citation_log_id, created_at, snapshot_id, block_id, ref_kind, ref_id, source_id
+     )
+     select inserted.citation_log_id, inserted.created_at
+     from inserted
+     join input_rows
+       on inserted.snapshot_id = input_rows.snapshot_id
+      and inserted.block_id = input_rows.block_id
+      and inserted.ref_kind = input_rows.ref_kind
+      and inserted.ref_id = input_rows.ref_id
+      and inserted.source_id is not distinct from input_rows.source_id
+     order by input_rows.ord`,
+    [
+      inputs.map((input) => input.snapshot_id),
+      inputs.map((input) => input.block_id),
+      inputs.map((input) => input.ref_kind),
+      inputs.map((input) => input.ref_id),
+      inputs.map((input) => input.source_id ?? null),
+    ],
+  );
 
   return Object.freeze(rows);
 }
@@ -185,6 +217,7 @@ function extractBlockRefs(
   pushArrayRefs(refs, "fact", block.fact_refs);
   pushArrayRefs(refs, "claim", block.claim_refs);
   pushArrayRefs(refs, "event", block.event_refs);
+  pushArrayRefs(refs, "document", block.document_refs);
 
   return Object.freeze(refs);
 }

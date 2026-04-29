@@ -37,6 +37,37 @@ test("interceptToolCall routes create_alert through a pending approval action", 
   assert.equal(Object.isFrozen(interception.pending_action), true);
 });
 
+test("interceptToolCall pending action id generation does not depend on localeCompare", () => {
+  const registry = loadToolRegistry();
+  const originalLocaleCompare = String.prototype.localeCompare;
+  String.prototype.localeCompare = function localeCompareMustNotBeCalled() {
+    throw new Error("localeCompare must not be used for pending action ids");
+  };
+
+  try {
+    const interception = interceptToolCall({
+      registry,
+      bundle_id: "alert_management",
+      audience: "analyst",
+      tool_name: "create_alert",
+      arguments: {
+        z_key: "last",
+        a_key: "first",
+      },
+      idempotency_key: "turn-1/tool-2",
+    });
+
+    assert.equal(interception.ok, true);
+    assert.equal(interception.action, "pending_approval");
+    assert.match(
+      interception.pending_action.pending_action_id,
+      /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+  } finally {
+    String.prototype.localeCompare = originalLocaleCompare;
+  }
+});
+
 test("interceptToolCall routes create_agent through a pending approval action", () => {
   const registry = loadToolRegistry();
 

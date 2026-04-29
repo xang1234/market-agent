@@ -79,11 +79,13 @@ tool payloads.
 
 `writeCitationLogsForBlocks` walks nested section children, rich-text ref
 segments, metric rows, revenue bars, segment donuts, and block-level
-`fact_refs`/`claim_refs`/`event_refs`. It also captures fact refs from
-analyst-consensus, price-target-range, and EPS-surprise blocks. Duplicate refs
-inside one block are deduplicated before insert. Block `source_refs` remain
-block-level provenance; the block walker leaves `citation_logs.source_id` null
-unless a direct `writeCitationLog` caller supplies a per-ref source mapping.
+`fact_refs`/`claim_refs`/`event_refs`/`document_refs`. It also captures fact
+refs from analyst-consensus, price-target-range, and EPS-surprise blocks.
+Duplicate refs inside one block are deduplicated before insert. Block
+`source_refs` remain block-level provenance; the block walker leaves
+`citation_logs.source_id` null unless a direct `writeCitationLog` caller
+supplies a per-ref source mapping. Block-derived citation rows are inserted with
+one SQL statement so a failed batch cannot partially persist.
 
 Golden evals:
 

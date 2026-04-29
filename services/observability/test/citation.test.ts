@@ -259,6 +259,91 @@ test("citationLogInputsForBlocks extracts consensus and estimate block refs", ()
   );
 });
 
+test("citationLogInputsForBlocks extracts document refs from blocks", () => {
+  const snapshot_id = randomUUID();
+  const claim_ref = randomUUID();
+  const document_ref = randomUUID();
+
+  const rows = citationLogInputsForBlocks([
+    {
+      id: "news",
+      kind: "news_cluster",
+      snapshot_id,
+      claim_refs: [claim_ref],
+      document_refs: [document_ref],
+    },
+  ]);
+
+  assert.deepEqual(rows, [
+    {
+      snapshot_id,
+      block_id: "news",
+      ref_kind: "claim",
+      ref_id: claim_ref,
+      source_id: null,
+    },
+    {
+      snapshot_id,
+      block_id: "news",
+      ref_kind: "document",
+      ref_id: document_ref,
+      source_id: null,
+    },
+  ]);
+});
+
+test("writeCitationLogsForBlocks writes extracted citation rows in one statement", async () => {
+  const queries: unknown[][] = [];
+  const db = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      assert.match(text, /insert into citation_logs/);
+      queries.push(values ?? []);
+      return {
+        rows: [
+          {
+            citation_log_id: randomUUID(),
+            created_at: new Date("2026-04-29T00:00:00.000Z"),
+          },
+          {
+            citation_log_id: randomUUID(),
+            created_at: new Date("2026-04-29T00:00:01.000Z"),
+          },
+        ] as R[],
+        command: "INSERT",
+        rowCount: 2,
+        oid: 0,
+        fields: [],
+      };
+    },
+  };
+  const snapshot_id = randomUUID();
+  const fact_id = randomUUID();
+  const claim_id = randomUUID();
+
+  const rows = await writeCitationLogsForBlocks(db, [
+    {
+      id: "block-1",
+      kind: "rich_text",
+      snapshot_id,
+      segments: [
+        { type: "ref", ref_kind: "fact", ref_id: fact_id },
+        { type: "ref", ref_kind: "claim", ref_id: claim_id },
+      ],
+    },
+  ]);
+
+  assert.equal(rows.length, 2);
+  assert.deepEqual(queries, [
+    [
+      [snapshot_id, snapshot_id],
+      ["block-1", "block-1"],
+      ["fact", "claim"],
+      [fact_id, claim_id],
+      [null, null],
+    ],
+  ]);
+});
+
 test("writeCitationLogsForBlocks writes every extracted citation row", async () => {
   const inserted: unknown[][] = [];
   const db = {
@@ -293,5 +378,7 @@ test("writeCitationLogsForBlocks writes every extracted citation row", async () 
   ]);
 
   assert.equal(rows.length, 1);
-  assert.deepEqual(inserted, [[snapshot_id, "block-1", "event", ref_id, null]]);
+  assert.deepEqual(inserted, [
+    [[snapshot_id], ["block-1"], ["event"], [ref_id], [null]],
+  ]);
 });
