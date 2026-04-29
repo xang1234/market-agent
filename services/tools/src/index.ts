@@ -48,6 +48,7 @@ export {
   createTurnToolPolicy,
 } from "./turn-policy.ts";
 export type {
+  AcceptedToolCallBudgetDecision,
   TurnToolCallInput,
   TurnToolPolicy,
   TurnToolPolicyInput,

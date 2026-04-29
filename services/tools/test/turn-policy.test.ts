@@ -5,7 +5,7 @@ import {
   createTurnToolPolicy,
 } from "../src/turn-policy.ts";
 import { DEFAULT_TOOL_CALL_BUDGET } from "../src/budget-gate.ts";
-import { loadToolRegistry } from "../src/registry.ts";
+import { loadToolRegistry, type ToolDefinition } from "../src/registry.ts";
 
 test("createTurnToolPolicy selects each registered bundle with a default budget", () => {
   const registry = loadToolRegistry();
@@ -63,7 +63,7 @@ test("turn tool policy stress-limits cost classes and returns an explicit partia
     if (i < 2) {
       assert.equal(decision.ok, true);
       assert.equal(decision.cost_class, "high");
-      policy = policy.recordAcceptedToolCall(decision.tool);
+      policy = policy.recordAcceptedToolCall(decision);
       continue;
     }
 
@@ -85,6 +85,45 @@ test("turn tool policy stress-limits cost classes and returns an explicit partia
   const lowCostDecision = policy.checkToolCall({ tool_name: "resolve_subjects" });
   assert.equal(lowCostDecision.ok, true);
   assert.equal(lowCostDecision.cost_class, "low");
+});
+
+test("turn tool policy records usage only from accepted budget decisions", () => {
+  const registry = loadToolRegistry();
+  const policy = createTurnToolPolicy({
+    registry,
+    audience: "analyst",
+    classification: { bundle_id: "single_subject_analysis" },
+  });
+  assert.equal(policy.ok, true);
+
+  const decision = policy.checkToolCall({ tool_name: "get_segment_facts" });
+  assert.equal(decision.ok, true);
+
+  const nextPolicy = policy.recordAcceptedToolCall(decision);
+  assert.equal(nextPolicy.ok, true);
+  assert.deepEqual(nextPolicy.usage, { low: 0, medium: 0, high: 1 });
+});
+
+test("turn tool policy rejects unverified usage progression inputs", () => {
+  const registry = loadToolRegistry();
+  const policy = createTurnToolPolicy({
+    registry,
+    audience: "analyst",
+    classification: { bundle_id: "single_subject_analysis" },
+  });
+  assert.equal(policy.ok, true);
+
+  assert.throws(
+    () => policy.recordAcceptedToolCall("low" as never),
+    /accepted tool-call decision/,
+  );
+  assert.throws(
+    () =>
+      policy.recordAcceptedToolCall(
+        registry.getTool("resolve_subjects") as ToolDefinition as never,
+      ),
+    /accepted tool-call decision/,
+  );
 });
 
 test("turn tool policy keeps model-selected tools inside the system-selected bundle", () => {

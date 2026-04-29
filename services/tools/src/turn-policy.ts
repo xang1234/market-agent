@@ -16,7 +16,6 @@ import type {
   JsonValue,
   ToolAudience,
   ToolCostClass,
-  ToolDefinition,
   ToolRegistry,
 } from "./registry.ts";
 
@@ -33,6 +32,8 @@ export type TurnToolCallInput = {
   arguments?: JsonValue;
 };
 
+export type AcceptedToolCallBudgetDecision = Extract<ToolCallBudgetDecision, { ok: true }>;
+
 export type TurnToolPolicy =
   | {
       ok: true;
@@ -42,7 +43,7 @@ export type TurnToolPolicy =
       budget: ToolCallBudget;
       usage: ToolCallUsage;
       checkToolCall(input: TurnToolCallInput): ToolCallBudgetDecision;
-      recordAcceptedToolCall(toolOrCostClass: ToolDefinition | ToolCostClass): TurnToolPolicy;
+      recordAcceptedToolCall(decision: AcceptedToolCallBudgetDecision): TurnToolPolicy;
     }
   | Extract<BundleSelection, { ok: false }>;
 
@@ -78,16 +79,25 @@ export function createTurnToolPolicy(input: TurnToolPolicyInput): TurnToolPolicy
         budget,
       });
     },
-    recordAcceptedToolCall(toolOrCostClass) {
+    recordAcceptedToolCall(decision) {
+      assertAcceptedDecision(decision);
       return createTurnToolPolicy({
         registry: input.registry,
         audience: selection.audience,
         classification: selection.classification,
         budget,
-        usage: recordToolCallUsage(usage, toolOrCostClass),
+        usage: recordToolCallUsage(usage, decision.tool),
       });
     },
   });
+}
+
+function assertAcceptedDecision(
+  decision: ToolCallBudgetDecision,
+): asserts decision is AcceptedToolCallBudgetDecision {
+  if (decision === null || typeof decision !== "object" || decision.ok !== true) {
+    throw new Error("recordAcceptedToolCall requires an accepted tool-call decision");
+  }
 }
 
 function normalizeBudget(budget: Partial<ToolCallBudget> = {}): ToolCallBudget {
