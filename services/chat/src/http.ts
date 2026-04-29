@@ -1,5 +1,6 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
 import {
+  ChatTurnInputMismatchError,
   ChatTurnUnavailableError,
   createChatCoordinator,
   type ChatAssistantMessagePersistence,
@@ -76,9 +77,11 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
       turnId,
       ...(route.subjectText ? { subjectText: route.subjectText } : {}),
     };
-    const turn = resumeAfterSeq > 0
-      ? coordinator.getTurn(turnInput)
-      : getOrCreateTurn(coordinator, turnInput);
+    const turn = getTurnForRoute(coordinator, turnInput, resumeAfterSeq > 0);
+    if (turn === INPUT_MISMATCH) {
+      respondJson(res, 409, { error: "turn input does not match the existing turn" });
+      return;
+    }
     if (turn == null || resumeAfterSeq > turn.currentSeq()) {
       respondJson(res, 400, { error: "'Last-Event-ID' is not available for this stream" });
       return;
@@ -122,15 +125,21 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
   });
 }
 
-function getOrCreateTurn(
+const INPUT_MISMATCH = Symbol("INPUT_MISMATCH");
+
+function getTurnForRoute(
   coordinator: ChatCoordinator,
-  input: { threadId: string; runId: string; turnId?: string },
-) {
+  input: { threadId: string; runId: string; turnId?: string; subjectText?: string },
+  resume: boolean,
+): ReturnType<ChatCoordinator["getTurn"]> | typeof INPUT_MISMATCH {
   try {
-    return coordinator.getOrCreateTurn(input);
+    return resume ? coordinator.getTurn(input) : coordinator.getOrCreateTurn(input);
   } catch (error) {
     if (error instanceof ChatTurnUnavailableError) {
       return null;
+    }
+    if (error instanceof ChatTurnInputMismatchError) {
+      return INPUT_MISMATCH;
     }
     throw error;
   }

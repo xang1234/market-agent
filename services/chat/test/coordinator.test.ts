@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  ChatTurnInputMismatchError,
   ChatTurnUnavailableError,
   createChatCoordinator,
   type ChatTurnRunContext,
@@ -268,13 +269,55 @@ test("per-thread coordinator clones nested payloads before freezing retained eve
   await turn.completed;
 
   assert.equal(delta.segment.text, "mutated-after-emit");
-  assert.deepEqual((turn.events[0].delta as typeof delta).segment, {
+  assert.deepEqual((turn.events[1].delta as typeof delta).segment, {
     type: "text",
     text: "original",
   });
   assert.deepEqual(
     turn.events.map((event) => event.type),
-    ["block.delta", "turn.completed"],
+    ["turn.started", "block.delta", "turn.completed"],
+  );
+});
+
+test("per-thread coordinator rejects turn reuse with changed subject input", async () => {
+  const coordinator = createChatCoordinator({
+    runner: ({ emit }) => {
+      emit("turn.completed", { message_id: "message-1" });
+    },
+  });
+
+  const original = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    subjectText: " AAPL ",
+  });
+  await original.completed;
+
+  assert.equal(
+    coordinator.getOrCreateTurn({
+      threadId: "thread-1",
+      runId: "run-1",
+      subjectText: "AAPL",
+    }),
+    original,
+  );
+  assert.throws(
+    () =>
+      coordinator.getOrCreateTurn({
+        threadId: "thread-1",
+        runId: "run-1",
+        subjectText: "GOOG",
+      }),
+    ChatTurnInputMismatchError,
+  );
+  assert.throws(
+    () =>
+      coordinator.getTurn({
+        threadId: "thread-1",
+        runId: "run-1",
+        subjectText: "GOOG",
+      }),
+    ChatTurnInputMismatchError,
   );
 });
 
@@ -416,12 +459,13 @@ test("subject pre-resolution passes hydrated context to custom runners without r
   });
   assert.equal(observedContext?.subjectPreResolution?.handoff.context.listing?.ticker, "AAPL");
   assert.deepEqual(turn.events.map((event) => event.type), [
+    "turn.started",
     "tool.started",
     "tool.completed",
     "turn.completed",
   ]);
-  assert.equal(turn.events[1].resolution_status, "resolved");
-  assert.equal((turn.events[1].handoff as Record<string, unknown>).display_label, "AAPL · XNAS — Apple Inc.");
+  assert.equal(turn.events[2].resolution_status, "resolved");
+  assert.equal((turn.events[2].handoff as Record<string, unknown>).display_label, "AAPL · XNAS — Apple Inc.");
 });
 
 test("subject pre-resolution emits resolved handoff before custom runner failures", async () => {
@@ -440,13 +484,14 @@ test("subject pre-resolution emits resolved handoff before custom runner failure
   await turn.completed;
 
   assert.deepEqual(turn.events.map((event) => event.type), [
+    "turn.started",
     "tool.started",
     "tool.completed",
     "turn.error",
   ]);
-  assert.equal(turn.events[1].resolution_status, "resolved");
-  assert.equal((turn.events[1].handoff as Record<string, unknown>).display_label, "AAPL · XNAS — Apple Inc.");
-  assert.equal(turn.events[2].message, "model failed before first emit");
+  assert.equal(turn.events[2].resolution_status, "resolved");
+  assert.equal((turn.events[2].handoff as Record<string, unknown>).display_label, "AAPL · XNAS — Apple Inc.");
+  assert.equal(turn.events[3].message, "model failed before first emit");
 });
 
 test("subject clarification turns use the injected renderer before persistence", async () => {

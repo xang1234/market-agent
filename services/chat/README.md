@@ -31,14 +31,16 @@ When the variable is omitted, the dev server keeps the stub-only stream path.
 
 `CHAT_SUBJECT_RESOLVER_MODULE` may be a package specifier, absolute path, file
 URL, or path relative to the process working directory. The module must export
-`preResolveSubject({ text, choice? })`. It may also export
+`preResolveSubject({ text, choice? })`, returning the `ChatSubjectPreResolution`
+shape used by the chat service. Modules that call the lower-level resolver can
+use `preResolveChatSubjectWithResolver(db, request)` from
+`services/chat/src/subjects.ts` to map resolver statuses such as `needs_choice`
+into chat statuses such as `needs_clarification`. The module may also export
 `renderSubjectClarification(input)` to customize the assistant clarification
-blocks and content hash used when the resolver returns `needs_choice` or
-`not_found`. `services/chat/src/subjects.ts` exposes
-`preResolveChatSubjectWithResolver(db, request)` for modules that should call the
-shared P0.3 `runSearchToSubjectFlow` resolver directly. When a stream request
-includes `?subject=GOOG` and the resolver returns `needs_choice`, the chat
-service emits a clarification message with the candidate list in the
+blocks and content hash used when the chat pre-resolution returns
+`needs_clarification` or `not_found`. When a stream request
+includes `?subject=GOOG` and chat pre-resolution returns `needs_clarification`,
+the chat service emits a clarification message with the candidate list in the
 `resolve_subjects` tool payload rather than hydrating a subject implicitly.
 
 ## Resume Retention

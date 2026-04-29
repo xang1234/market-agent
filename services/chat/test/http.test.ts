@@ -230,7 +230,6 @@ test("stream route writes an immediate turn.started event", async (t) => {
   assert.match(chunk, /"thread_id":"thread-123"/);
   assert.match(chunk, /"run_id":"run-456"/);
   assert.match(chunk, /"turn_id":"run-456"/);
-  assert.match(chunk, /"stub":true/);
 
   await reader.cancel();
 });
@@ -399,11 +398,49 @@ test("stream route fails closed when subject text is provided without a resolver
   );
 
   assert.equal(response.status, 200);
-  const [event] = await readSseEvents(response, 1);
+  const [, event] = await readSseEvents(response, 2);
 
   assert.equal(event.event, "turn.error");
   assert.equal(event.data.error_code, "Error");
   assert.equal(event.data.message, "subject pre-resolver is not configured");
+});
+
+test("stream route rejects an existing turn when subject input changes", async (t) => {
+  const base = await startServer(t, {
+    preResolveSubject: async ({ text }) => text === "AAPL"
+      ? resolvedAaplPreResolution()
+      : {
+          status: "needs_clarification",
+          input_text: text,
+          normalized_input: "GOOG",
+          candidates: [
+            {
+              subject_ref: { kind: "listing", id: "11111111-1111-4111-a111-111111111111" },
+              display_name: "GOOG (Class C)",
+              confidence: 0.55,
+            },
+            {
+              subject_ref: { kind: "listing", id: "22222222-2222-4222-a222-222222222222" },
+              display_name: "GOOGL (Class A)",
+              confidence: 0.45,
+            },
+          ],
+          message: "Which share class did you mean for GOOG: GOOG (Class C) or GOOGL (Class A)?",
+        },
+  });
+
+  const first = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-456&subject=AAPL`,
+  );
+  assert.equal(first.status, 200);
+  await readSseEvents(first, 9);
+
+  const response = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-456&subject=GOOG`,
+  );
+  assert.equal(response.status, 409);
+  const body = await response.json() as { error?: string };
+  assert.equal(body.error, "turn input does not match the existing turn");
 });
 
 test("stream route emits sequenced success-path coordinator events with correlation fields", async (t) => {

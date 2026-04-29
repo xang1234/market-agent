@@ -13,17 +13,26 @@ const forwardMigrationPath = join(
 );
 const schemaPath = join(import.meta.dirname, "..", "..", "spec", "finance_research_db_schema.sql");
 
-test("chat_messages requires snapshot_id in init migration and normative schema", () => {
-  for (const path of [initMigrationPath, schemaPath]) {
-    const sql = readFileSync(path, "utf8");
-    const chatMessages = sql.match(/create table chat_messages \((?<body>[\s\S]*?)\n\);/);
+test("chat_messages baseline keeps historical nullable snapshot_id while normative schema requires it", () => {
+  const initSql = readFileSync(initMigrationPath, "utf8");
+  const initChatMessages = initSql.match(/create table chat_messages \((?<body>[\s\S]*?)\n\);/);
+  assert.ok(initChatMessages?.groups?.body, "expected chat_messages table definition in init migration");
+  assert.match(
+    initChatMessages.groups.body,
+    /snapshot_id uuid references snapshots\(snapshot_id\)/,
+  );
+  assert.doesNotMatch(
+    initChatMessages.groups.body,
+    /snapshot_id uuid not null references snapshots\(snapshot_id\)/,
+  );
 
-    assert.ok(chatMessages?.groups?.body, `expected chat_messages table definition in ${path}`);
-    assert.match(
-      chatMessages.groups.body,
-      /snapshot_id uuid not null references snapshots\(snapshot_id\)/,
-    );
-  }
+  const schemaSql = readFileSync(schemaPath, "utf8");
+  const schemaChatMessages = schemaSql.match(/create table chat_messages \((?<body>[\s\S]*?)\n\);/);
+  assert.ok(schemaChatMessages?.groups?.body, "expected chat_messages table definition in normative schema");
+  assert.match(
+    schemaChatMessages.groups.body,
+    /snapshot_id uuid not null references snapshots\(snapshot_id\)/,
+  );
 });
 
 test("forward migration upgrades existing chat_messages snapshot_id to not null", () => {

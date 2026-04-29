@@ -47,7 +47,8 @@ npm test
 ```
 
 Notes:
-- `0001_init.up.sql` is an immutable snapshot of the current normative schema pack.
+- `0001_init.up.sql` is immutable migration history. Later migrations upgrade it
+  to the current normative schema in `spec/finance_research_db_schema.sql`.
 - `schema_migrations` tracks applied migration versions.
 - `down` rolls back one migration per invocation.
 - Seed files in `db/seed/*.sql` are applied in lexical order and are idempotent — rerunning does not duplicate rows.

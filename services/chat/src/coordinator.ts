@@ -127,6 +127,13 @@ export class ChatTurnUnavailableError extends Error {
   }
 }
 
+export class ChatTurnInputMismatchError extends Error {
+  constructor(message = "chat turn input does not match the existing turn") {
+    super(message);
+    this.name = "ChatTurnInputMismatchError";
+  }
+}
+
 export function createChatCoordinator(
   options: ChatCoordinatorOptions = {},
 ): ChatCoordinator {
@@ -213,6 +220,7 @@ export function createChatCoordinator(
       }
       const existing = turns.get(key)?.handle;
       if (existing) {
+        assertSameTurnInput(existing.input, normalizedInput);
         return existing;
       }
 
@@ -241,7 +249,12 @@ export function createChatCoordinator(
     },
     getTurn(input) {
       pruneCompletedTurns();
-      return turns.get(turnKey(normalizeTurnInput(input)))?.handle ?? null;
+      const normalizedInput = normalizeTurnInput(input);
+      const handle = turns.get(turnKey(normalizedInput))?.handle ?? null;
+      if (handle) {
+        assertSameTurnInput(handle.input, normalizedInput);
+      }
+      return handle;
     },
     stats() {
       pruneCompletedTurns();
@@ -262,14 +275,28 @@ export function createChatCoordinator(
 }
 
 function normalizeTurnInput(input: ChatTurnInput): NormalizedChatTurnInput {
+  const subjectText = nonEmptySubjectText(input.subjectText);
   return {
-    ...input,
+    threadId: input.threadId,
+    runId: input.runId,
     turnId: input.turnId ?? input.runId,
+    ...(subjectText ? { subjectText } : {}),
   };
 }
 
 function turnKey(input: NormalizedChatTurnInput): string {
   return JSON.stringify([input.threadId, input.runId, input.turnId]);
+}
+
+function assertSameTurnInput(existing: ChatTurnInput, incoming: ChatTurnInput) {
+  if (
+    existing.threadId !== incoming.threadId ||
+    existing.runId !== incoming.runId ||
+    existing.turnId !== incoming.turnId ||
+    existing.subjectText !== incoming.subjectText
+  ) {
+    throw new ChatTurnInputMismatchError();
+  }
 }
 
 class MutableChatTurnHandle implements ChatTurnHandle {
@@ -309,12 +336,20 @@ class MutableChatTurnHandle implements ChatTurnHandle {
       turnId: this.input.turnId,
     });
 
+    let startedEvent: ChatSseEvent | null = null;
     const emit: ChatTurnEmit = (type, payload = {}) => {
+      if (type === "turn.started" && startedEvent) {
+        return startedEvent;
+      }
       const event = sequencer.next(type, payload);
+      if (type === "turn.started") {
+        startedEvent = event;
+      }
       return this.append(event);
     };
 
     try {
+      emit("turn.started");
       await this.#runner({ ...this.input, emit });
     } catch (error) {
       emit("turn.error", {

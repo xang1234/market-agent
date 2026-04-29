@@ -465,6 +465,22 @@ paths:
           schema:
             type: string
             format: uuid
+        - in: query
+          name: turn_id
+          required: false
+          description: Optional client-stable turn id. When omitted, `run_id`
+            is used as the turn id.
+          schema:
+            type: string
+        - in: query
+          name: subject
+          required: false
+          description: Optional raw subject text to pre-resolve through the
+            resolver before the downstream chat runner executes. Ambiguous
+            subjects produce a clarification turn instead of implicit model
+            selection.
+          schema:
+            type: string
         - in: header
           name: Last-Event-ID
           required: false
@@ -521,8 +537,65 @@ paths:
                     id: 9
                     event: turn.completed
                     data: {"type":"turn.completed","seq":9,"thread_id":"...","run_id":"...","turn_id":"...","message_id":"..."}
+                resolved_subject:
+                  value: |
+                    id: 1
+                    event: turn.started
+                    data: {"type":"turn.started","seq":1,"thread_id":"...","run_id":"...","turn_id":"..."}
+
+                    id: 2
+                    event: tool.started
+                    data: {"type":"tool.started","seq":2,"thread_id":"...","run_id":"...","turn_id":"...","tool_call_id":"resolve-subjects-...","tool_name":"resolve_subjects"}
+
+                    id: 3
+                    event: tool.completed
+                    data: {"type":"tool.completed","seq":3,"thread_id":"...","run_id":"...","turn_id":"...","tool_call_id":"resolve-subjects-...","tool_name":"resolve_subjects","status":"ok","resolution_status":"resolved","subject_ref":{"kind":"listing","id":"..."},"display_labels":{"primary":"AAPL · XNAS — Apple Inc.","ticker":"AAPL","mic":"XNAS"},"context":{"listing":{"ticker":"AAPL","mic":"XNAS"}},"handoff":{"subject_ref":{"kind":"listing","id":"..."},"identity_level":"listing","display_label":"AAPL · XNAS — Apple Inc.","resolution_path":"auto_advanced","confidence":0.95}}
+                needs_clarification:
+                  value: |
+                    id: 1
+                    event: turn.started
+                    data: {"type":"turn.started","seq":1,"thread_id":"...","run_id":"...","turn_id":"..."}
+
+                    id: 2
+                    event: tool.started
+                    data: {"type":"tool.started","seq":2,"thread_id":"...","run_id":"...","turn_id":"...","tool_call_id":"resolve-subjects-...","tool_name":"resolve_subjects"}
+
+                    id: 3
+                    event: tool.completed
+                    data: {"type":"tool.completed","seq":3,"thread_id":"...","run_id":"...","turn_id":"...","tool_call_id":"resolve-subjects-...","tool_name":"resolve_subjects","status":"needs_clarification","resolution_status":"needs_clarification","normalized_input":"GOOG","ambiguity_axis":"multiple_listings","candidates":[{"subject_ref":{"kind":"listing","id":"..."},"display_name":"GOOG (Class C)","confidence":0.55},{"subject_ref":{"kind":"listing","id":"..."},"display_name":"GOOGL (Class A)","confidence":0.45}]}
+
+                    id: 9
+                    event: turn.completed
+                    data: {"type":"turn.completed","seq":9,"thread_id":"...","run_id":"...","turn_id":"...","message_id":"...","clarification":true}
+                not_found_subject:
+                  value: |
+                    id: 1
+                    event: turn.started
+                    data: {"type":"turn.started","seq":1,"thread_id":"...","run_id":"...","turn_id":"..."}
+
+                    id: 2
+                    event: tool.started
+                    data: {"type":"tool.started","seq":2,"thread_id":"...","run_id":"...","turn_id":"...","tool_call_id":"resolve-subjects-...","tool_name":"resolve_subjects"}
+
+                    id: 3
+                    event: tool.completed
+                    data: {"type":"tool.completed","seq":3,"thread_id":"...","run_id":"...","turn_id":"...","tool_call_id":"resolve-subjects-...","tool_name":"resolve_subjects","status":"not_found","resolution_status":"not_found","normalized_input":"NOTREAL","reason":"no_candidates"}
+
+                    id: 9
+                    event: turn.completed
+                    data: {"type":"turn.completed","seq":9,"thread_id":"...","run_id":"...","turn_id":"...","message_id":"...","clarification":true}
         '400':
           description: Missing run_id, malformed path, or malformed Last-Event-ID
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+        '409':
+          description: The requested thread/run/turn id already exists with
+            different immutable turn input, such as different subject text.
           content:
             application/json:
               schema:
