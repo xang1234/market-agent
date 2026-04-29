@@ -64,7 +64,14 @@ export async function sealSnapshot(
 ): Promise<SnapshotSealResult> {
   assertSnapshotTransactionClient(db);
 
-  const verification = await verifySnapshotSeal(input);
+  const verificationInput = {
+    ...input,
+    manifest: {
+      ...input.manifest,
+      allowed_transforms: input.manifest.allowed_transforms ?? null,
+    },
+  };
+  const verification = await verifySnapshotSeal(verificationInput, db);
   if (!verification.ok) {
     return Object.freeze({ ok: false, verification });
   }

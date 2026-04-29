@@ -12,6 +12,7 @@ import {
   SNAPSHOT_SUBJECT_KINDS,
 } from "./manifest-staging.ts";
 import { compileDisclosurePolicy, type RequiredDisclosure } from "./disclosure-policy.ts";
+import { validateSnapshotTransformManifest } from "./snapshot-transform.ts";
 
 export type SnapshotVerifierManifest = {
   subject_refs: ReadonlyArray<{ kind: SnapshotSubjectKind; id: string }>;
@@ -24,6 +25,7 @@ export type SnapshotVerifierManifest = {
   as_of: string;
   basis: SnapshotBasis;
   normalization: SnapshotNormalization;
+  allowed_transforms?: JsonValue;
 };
 
 export type VerifierFact = {
@@ -307,23 +309,46 @@ function normalizeManifest(manifest: SnapshotVerifierManifest): SnapshotVerifier
   assertArray<string>(manifest.document_refs ?? [], "verifySnapshotSeal.manifest.document_refs");
   assertArray<string>(manifest.source_ids, "verifySnapshotSeal.manifest.source_ids");
 
+  const subject_refs = Object.freeze(
+    manifest.subject_refs.map((subject, index) => {
+      if (subject === null || typeof subject !== "object") {
+        throw new Error(`verifySnapshotSeal.manifest.subject_refs[${index}]: must be an object`);
+      }
+      const kind = assertOneOf(
+        subject.kind,
+        SNAPSHOT_SUBJECT_KINDS,
+        `verifySnapshotSeal.manifest.subject_refs[${index}].kind`,
+      );
+      return Object.freeze({
+        kind,
+        id: assertUuidV4(subject.id, `verifySnapshotSeal.manifest.subject_refs[${index}].id`),
+      });
+    }),
+  );
+  const as_of = canonicalTimestamp(manifest.as_of, "verifySnapshotSeal.manifest.as_of");
+  const basis = assertOneOf(
+    manifest.basis,
+    SNAPSHOT_BASES,
+    "verifySnapshotSeal.manifest.basis",
+  );
+  const normalization = assertOneOf(
+    manifest.normalization,
+    SNAPSHOT_NORMALIZATIONS,
+    "verifySnapshotSeal.manifest.normalization",
+  );
+
+  if (manifest.allowed_transforms !== undefined) {
+    validateSnapshotTransformManifest({
+      subject_refs,
+      as_of,
+      basis,
+      normalization,
+      allowed_transforms: manifest.allowed_transforms,
+    });
+  }
+
   return Object.freeze({
-    subject_refs: Object.freeze(
-      manifest.subject_refs.map((subject, index) => {
-        if (subject === null || typeof subject !== "object") {
-          throw new Error(`verifySnapshotSeal.manifest.subject_refs[${index}]: must be an object`);
-        }
-        const kind = assertOneOf(
-          subject.kind,
-          SNAPSHOT_SUBJECT_KINDS,
-          `verifySnapshotSeal.manifest.subject_refs[${index}].kind`,
-        );
-        return Object.freeze({
-          kind,
-          id: assertUuidV4(subject.id, `verifySnapshotSeal.manifest.subject_refs[${index}].id`),
-        });
-      }),
-    ),
+    subject_refs,
     fact_refs: Object.freeze(
       manifest.fact_refs.map((ref, index) =>
         assertUuidV4(ref, `verifySnapshotSeal.manifest.fact_refs[${index}]`),
@@ -364,17 +389,9 @@ function normalizeManifest(manifest: SnapshotVerifierManifest): SnapshotVerifier
             }),
           ),
         }),
-    as_of: canonicalTimestamp(manifest.as_of, "verifySnapshotSeal.manifest.as_of"),
-    basis: assertOneOf(
-      manifest.basis,
-      SNAPSHOT_BASES,
-      "verifySnapshotSeal.manifest.basis",
-    ),
-    normalization: assertOneOf(
-      manifest.normalization,
-      SNAPSHOT_NORMALIZATIONS,
-      "verifySnapshotSeal.manifest.normalization",
-    ),
+    as_of,
+    basis,
+    normalization,
   });
 }
 

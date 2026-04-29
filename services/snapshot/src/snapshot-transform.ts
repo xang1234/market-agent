@@ -134,6 +134,10 @@ export function normalizeSnapshotTransformRequest(
   return normalizeRequest(request);
 }
 
+export function validateSnapshotTransformManifest(manifest: SnapshotTransformManifest): void {
+  normalizeManifest(manifest);
+}
+
 function normalizeManifest(manifest: SnapshotTransformManifest): NormalizedSnapshotTransformManifest {
   if (manifest === null || typeof manifest !== "object") {
     throw new Error("checkSnapshotTransform.manifest: must be an object");

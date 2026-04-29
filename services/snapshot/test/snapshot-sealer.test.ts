@@ -31,7 +31,15 @@ const manifest: SnapshotManifestDraft = Object.freeze({
   normalization: "raw",
   coverage_start: "2026-04-01T00:00:00.000Z",
   allowed_transforms: Object.freeze({
-    ranges: Object.freeze([{ start: "2026-04-01T00:00:00Z", end: "2026-04-29T00:00:00Z" }]),
+    series: Object.freeze([
+      Object.freeze({
+        range: Object.freeze({
+          start: "2026-04-01T00:00:00Z",
+          end: "2026-04-29T00:00:00Z",
+        }),
+        interval: "1d",
+      }),
+    ]),
   }),
   model_version: "snapshot-test-v1",
   parent_snapshot: null,
@@ -70,6 +78,55 @@ test("sealSnapshot rolls back when persistence fails after transaction start", a
     "begin",
     "insert into snapshots",
     "rollback",
+  ]);
+});
+
+test("sealSnapshot rejects malformed allowed_transforms before starting a transaction", async () => {
+  const { db, queries } = recordingDb();
+
+  const result = await sealSnapshot(snapshotTransactionClient(db), {
+    ...validSealInput(),
+    manifest: {
+      ...manifest,
+      allowed_transforms: { series: {} },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.verification.failures[0]?.reason_code, "invalid_verifier_input");
+  assert.deepEqual(queries.map((query) => normalizedSql(query.text)), [
+    "insert into verifier_fail_logs",
+  ]);
+});
+
+test("sealSnapshot rejects omitted allowed_transforms before starting a transaction", async () => {
+  const { db, queries } = recordingDb();
+  const { allowed_transforms: _omitted, ...manifestWithoutTransforms } = manifest;
+
+  const result = await sealSnapshot(snapshotTransactionClient(db), {
+    ...validSealInput(),
+    manifest: manifestWithoutTransforms as SnapshotManifestDraft,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.verification.failures[0]?.reason_code, "invalid_verifier_input");
+  assert.deepEqual(queries.map((query) => normalizedSql(query.text)), [
+    "insert into verifier_fail_logs",
+  ]);
+});
+
+test("sealSnapshot writes verifier failure logs for rejected seals", async () => {
+  const { db, queries } = recordingDb();
+
+  const result = await sealSnapshot(snapshotTransactionClient(db), {
+    ...validSealInput(),
+    documents: [],
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.verification.failures.some((failure) => failure.reason_code === "missing_document_ref"), true);
+  assert.deepEqual(queries.map((query) => normalizedSql(query.text)), [
+    "insert into verifier_fail_logs",
   ]);
 });
 
@@ -231,6 +288,10 @@ function recordingDb(options: { failOnSnapshotInsert?: boolean; failOnRollback?:
         };
       }
 
+      if (normalized === "insert into verifier_fail_logs") {
+        return { rows: [] as R[] };
+      }
+
       throw new Error(`unexpected query: ${text}`);
     },
   };
@@ -241,6 +302,7 @@ function normalizedSql(text: string): string {
   const compact = text.trim().replace(/\s+/g, " ").toLowerCase();
   if (compact === "begin" || compact === "commit" || compact === "rollback") return compact;
   if (compact.startsWith("insert into snapshots")) return "insert into snapshots";
+  if (compact.startsWith("insert into verifier_fail_logs")) return "insert into verifier_fail_logs";
   return compact;
 }
 
