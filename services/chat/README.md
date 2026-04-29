@@ -16,13 +16,14 @@ coordinator used by the current stub turn runner.
 
 ## Resume Retention
 
-SSE resume history is in-memory and intentionally bounded. Completed turn
-event history is retained for a short window and capped by count. When a
-completed turn is evicted, the coordinator keeps a bounded tombstone so a
-later stream request for the same turn returns an unavailable cursor response
-instead of rerunning tool calls or snapshot sealing. This is not a durable
-idempotency store; cross-process or post-expiry replay requires a future
-database-backed run ledger.
+SSE resume history is in-memory and intentionally bounded. By default,
+completed turn event history is retained for 5 minutes and capped at 1000
+completed turns. When a completed turn is evicted, the coordinator keeps a
+tombstone for 1 hour, capped at 10000 tombstones, so a later stream request
+for the same turn returns an unavailable cursor response instead of rerunning
+tool calls or snapshot sealing. This is not a durable idempotency store;
+cross-process or post-expiry replay requires a future database-backed run
+ledger.
 
 ## Tests
 

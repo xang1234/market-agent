@@ -14,6 +14,7 @@ const LAST_EVENT_ID_PATTERN = /^(0|[1-9][0-9]*)$/;
 type StreamRoute = {
   threadId: string;
   runId: string | null;
+  turnId: string | null;
 };
 
 type SseWritable = {
@@ -56,7 +57,11 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
       return;
     }
 
-    const turnInput = { threadId: route.threadId, runId: route.runId };
+    const turnInput = {
+      threadId: route.threadId,
+      runId: route.runId,
+      turnId: route.turnId ?? route.runId,
+    };
     const turn = resumeAfterSeq > 0
       ? coordinator.getTurn(turnInput)
       : getOrCreateTurn(coordinator, turnInput);
@@ -105,7 +110,7 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
 
 function getOrCreateTurn(
   coordinator: ChatCoordinator,
-  input: { threadId: string; runId: string },
+  input: { threadId: string; runId: string; turnId?: string },
 ) {
   try {
     return coordinator.getOrCreateTurn(input);
@@ -147,7 +152,8 @@ function matchStreamRoute(method: string, rawUrl: string): StreamRoute | typeof 
     return null;
   }
 
-  const runId = url.searchParams.get("run_id");
+  const runId = nonEmptyQueryParam(url.searchParams.get("run_id"));
+  const turnId = nonEmptyQueryParam(url.searchParams.get("turn_id"));
   let threadId: string;
   try {
     threadId = decodeURIComponent(match[1]);
@@ -156,8 +162,13 @@ function matchStreamRoute(method: string, rawUrl: string): StreamRoute | typeof 
   }
   return {
     threadId,
-    runId: runId && runId.trim() !== "" ? runId : null,
+    runId,
+    turnId,
   };
+}
+
+function nonEmptyQueryParam(value: string | null): string | null {
+  return value && value.trim() !== "" ? value : null;
 }
 
 function respondJson(res: ServerResponse, status: number, body: object) {
@@ -239,7 +250,7 @@ export function createSseFrameWriter(
     writeEvent(event: ChatSseEvent) {
       writeFrame(eventFrame(event));
     },
-    writeHeartbeat(route: { threadId: string; runId: string }) {
+    writeHeartbeat(route: { threadId: string; runId: string; turnId?: string | null }) {
       writeFrame(heartbeatFrame(route));
     },
     close,
@@ -250,11 +261,11 @@ function eventFrame(event: ChatSseEvent) {
   return `id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
 }
 
-function heartbeatFrame(route: { threadId: string; runId: string }) {
+function heartbeatFrame(route: { threadId: string; runId: string; turnId?: string | null }) {
   return `event: heartbeat\ndata: ${JSON.stringify({
     thread_id: route.threadId,
     run_id: route.runId,
-    turn_id: route.runId,
+    turn_id: route.turnId ?? route.runId,
     stub: true,
   })}\n\n`;
 }

@@ -159,6 +159,47 @@ test("per-thread coordinator exposes event history as a defensive copy", async (
   );
 });
 
+test("per-thread coordinator protects stored events from caller mutation", async () => {
+  const coordinator = createChatCoordinator({
+    runner: ({ emit }) => {
+      emit("turn.started", { stub: true });
+      emit("turn.completed", { message_id: "message-1" });
+    },
+  });
+  const turn = coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1" });
+  await turn.completed;
+
+  assert.throws(() => {
+    (turn.events[0] as { seq: number }).seq = 999;
+  });
+
+  assert.equal(turn.currentSeq(), 2);
+  assert.equal(turn.events[0].seq, 1);
+});
+
+test("per-thread coordinator shields later subscribers from event mutation", async () => {
+  const coordinator = createChatCoordinator({
+    runner: ({ emit }) => {
+      emit("turn.started", { stub: true });
+      emit("turn.completed", { message_id: "message-1" });
+    },
+  });
+  const turn = coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1" });
+  const observedSeqs: number[] = [];
+
+  turn.subscribe((event) => {
+    (event as { seq: number }).seq = 999;
+  });
+  turn.subscribe((event) => {
+    observedSeqs.push(event.seq);
+  });
+
+  await turn.completed;
+
+  assert.deepEqual(observedSeqs, [1, 2]);
+  assert.equal(turn.currentSeq(), 2);
+});
+
 type ChatTurnEventMutation = {
   type: string;
   seq: number;

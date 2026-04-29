@@ -231,6 +231,20 @@ test("stream route writes an immediate turn.started event", async (t) => {
   await reader.cancel();
 });
 
+test("stream route uses turn_id query parameter for event correlation", async (t) => {
+  const base = await startServer(t);
+
+  const response = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-456&turn_id=turn-789`,
+  );
+
+  assert.equal(response.status, 200);
+  const [event] = await readSseEvents(response, 1);
+
+  assert.equal(event.data.run_id, "run-456");
+  assert.equal(event.data.turn_id, "turn-789");
+});
+
 test("stream route emits sequenced success-path coordinator events with correlation fields", async (t) => {
   const base = await startServer(t);
 
@@ -330,6 +344,37 @@ test("stream route leaves heartbeat outside the resume cursor", async (t) => {
   assert.equal(heartbeat.id, null);
   assert.equal(heartbeat.event, "heartbeat");
   assert.equal(heartbeat.data.turn_id, "run-456");
+});
+
+test("stream route resumes independently for distinct turn_id values under one run", async (t) => {
+  const base = await startServer(t);
+
+  const first = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-456&turn_id=turn-a`,
+  );
+  assert.equal(first.status, 200);
+  await readSseEvents(first, 3);
+
+  const second = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-456&turn_id=turn-b`,
+  );
+  assert.equal(second.status, 200);
+  const secondEvents = await readSseEvents(second, 2);
+  assert.equal(secondEvents[0].id, "1");
+  assert.equal(secondEvents[0].data.turn_id, "turn-b");
+
+  const resumedFirst = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-456&turn_id=turn-a`,
+    {
+      headers: {
+        "Last-Event-ID": "3",
+      },
+    },
+  );
+  assert.equal(resumedFirst.status, 200);
+  const resumedEvents = await readSseEvents(resumedFirst, 1);
+  assert.equal(resumedEvents[0].id, "4");
+  assert.equal(resumedEvents[0].data.turn_id, "turn-a");
 });
 
 test("stream route rejects resume for evicted turn history without rerunning the turn", async (t) => {

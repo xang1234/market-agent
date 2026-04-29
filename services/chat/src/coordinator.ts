@@ -284,10 +284,11 @@ class MutableChatTurnHandle implements ChatTurnHandle {
   }
 
   private append(event: ChatSseEvent) {
-    this.#events.push(event);
+    const immutableEvent = deepFreeze(event);
+    this.#events.push(immutableEvent);
     for (const listener of [...this.#listeners]) {
       try {
-        listener(event);
+        listener(immutableEvent);
       } catch {
         this.#listeners.delete(listener);
       }
@@ -391,4 +392,21 @@ function nonNegativeFiniteNumber(value: number, label: string): number {
     throw new Error(`${label} must be a non-negative finite number`);
   }
   return value;
+}
+
+function deepFreeze<T>(value: T, seen = new Set<object>()): T {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+
+  if (seen.has(value)) {
+    return value;
+  }
+  seen.add(value);
+
+  for (const child of Object.values(value)) {
+    deepFreeze(child, seen);
+  }
+
+  return Object.freeze(value);
 }
