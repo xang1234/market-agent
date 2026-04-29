@@ -638,7 +638,7 @@ ChatMessage {
   message_id: UUID
   thread_id: UUID
   role: 'user' | 'assistant' | 'tool'
-  snapshot_id?: UUID
+  snapshot_id: UUID
   blocks: Block[]
   content_hash: string
   created_at: timestamp
