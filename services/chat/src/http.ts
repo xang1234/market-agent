@@ -4,6 +4,7 @@ import {
   createChatCoordinator,
   type ChatAssistantMessagePersistence,
   type ChatCoordinator,
+  type ChatSubjectClarificationRenderer,
 } from "./coordinator.ts";
 import type { ChatSseEvent } from "./sse.ts";
 import type { ChatSubjectPreResolver } from "./subjects.ts";
@@ -33,12 +34,14 @@ export type ChatServerOptions = {
   coordinator?: ChatCoordinator;
   persistAssistantMessage?: ChatAssistantMessagePersistence;
   preResolveSubject?: ChatSubjectPreResolver;
+  renderSubjectClarification?: ChatSubjectClarificationRenderer;
 };
 
 export function createChatServer(options: ChatServerOptions = {}): Server {
   const coordinator = options.coordinator ?? createChatCoordinator({
     persistAssistantMessage: options.persistAssistantMessage,
     preResolveSubject: options.preResolveSubject,
+    renderSubjectClarification: options.renderSubjectClarification,
   });
 
   return createServer(async (req, res) => {

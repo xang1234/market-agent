@@ -1,7 +1,10 @@
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import type { ChatAssistantMessagePersistence } from "./coordinator.ts";
+import type {
+  ChatAssistantMessagePersistence,
+  ChatSubjectClarificationRenderer,
+} from "./coordinator.ts";
 import type { ChatServerOptions } from "./http.ts";
 import type { ChatSubjectPreResolver } from "./subjects.ts";
 
@@ -32,6 +35,12 @@ export async function loadChatServerOptionsFromEnv(
     }
 
     options.preResolveSubject = module.preResolveSubject as ChatSubjectPreResolver;
+    if (module.renderSubjectClarification !== undefined) {
+      if (typeof module.renderSubjectClarification !== "function") {
+        throw new Error("CHAT_SUBJECT_RESOLVER_MODULE renderSubjectClarification export must be a function");
+      }
+      options.renderSubjectClarification = module.renderSubjectClarification as ChatSubjectClarificationRenderer;
+    }
   }
 
   return options;

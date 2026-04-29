@@ -29,6 +29,25 @@ export type ChatTurnRunContext = ChatTurnInput & {
 
 export type ChatTurnRunner = (context: ChatTurnRunContext) => Promise<void> | void;
 
+export type ChatSubjectClarificationRenderInput = {
+  threadId: string;
+  runId: string;
+  turnId: string;
+  preResolution: Exclude<ChatSubjectPreResolution, ChatResolvedSubjectPreResolution>;
+};
+
+export type ChatSubjectClarificationRenderResult = {
+  blocks: ReadonlyArray<Record<string, unknown>>;
+  content_hash: string;
+  text: string;
+  block_id?: string;
+  block_kind?: string;
+};
+
+export type ChatSubjectClarificationRenderer = (
+  input: ChatSubjectClarificationRenderInput,
+) => Promise<ChatSubjectClarificationRenderResult> | ChatSubjectClarificationRenderResult;
+
 export type ChatAssistantMessagePersistenceInput = {
   threadId: string;
   runId: string;
@@ -66,6 +85,7 @@ export type ChatCoordinatorOptions = {
   runner?: ChatTurnRunner;
   persistAssistantMessage?: ChatAssistantMessagePersistence;
   preResolveSubject?: ChatSubjectPreResolver;
+  renderSubjectClarification?: ChatSubjectClarificationRenderer;
   completedTurnRetentionMs?: number;
   maxCompletedTurns?: number;
   completedTurnTombstoneRetentionMs?: number;
@@ -118,6 +138,7 @@ export function createChatCoordinator(
   const runner = subjectAwareRunner(baseRunner, {
     persistAssistantMessage,
     preResolveSubject,
+    renderSubjectClarification: options.renderSubjectClarification,
   });
   const completedTurnRetentionMs = nonNegativeFiniteNumber(
     options.completedTurnRetentionMs ?? DEFAULT_COMPLETED_TURN_RETENTION_MS,
@@ -370,6 +391,7 @@ function subjectAwareRunner(
   options: {
     persistAssistantMessage?: ChatAssistantMessagePersistence;
     preResolveSubject?: ChatSubjectPreResolver;
+    renderSubjectClarification?: ChatSubjectClarificationRenderer;
   } = {},
 ): ChatTurnRunner {
   return async (context) => {
@@ -385,44 +407,71 @@ function subjectAwareRunner(
 
     const preResolution = await options.preResolveSubject({ text: subjectText });
     if (preResolution.status !== "resolved") {
-      await emitSubjectClarificationTurn(context, preResolution, options.persistAssistantMessage);
+      await emitSubjectClarificationTurn(context, preResolution, {
+        persistAssistantMessage: options.persistAssistantMessage,
+        renderSubjectClarification: options.renderSubjectClarification,
+      });
       return;
     }
 
     const { subjectText: _subjectText, ...resolvedContext } = context;
+    const toolCallId = subjectResolutionToolCallId(context);
+    let emittedResolution = false;
+    const emitWithSubjectResolution: ChatTurnEmit = (type, payload = {}) => {
+      if (!emittedResolution) {
+        emittedResolution = true;
+        if (type === "turn.started") {
+          const event = resolvedContext.emit(type, payload);
+          emitSubjectResolutionToolEvents(resolvedContext.emit, preResolution, toolCallId);
+          return event;
+        }
+        emitSubjectResolutionToolEvents(resolvedContext.emit, preResolution, toolCallId);
+      }
+      return resolvedContext.emit(type, payload);
+    };
+
     await runner({
       ...resolvedContext,
+      emit: emitWithSubjectResolution,
       subjectPreResolution: preResolution,
     });
+
+    if (!emittedResolution) {
+      emitSubjectResolutionToolEvents(resolvedContext.emit, preResolution, toolCallId);
+    }
   };
 }
 
 async function emitSubjectClarificationTurn(
   context: ChatTurnRunContext,
   preResolution: Exclude<ChatSubjectPreResolution, ChatResolvedSubjectPreResolution>,
-  persistAssistantMessage?: ChatAssistantMessagePersistence,
+  options: {
+    persistAssistantMessage?: ChatAssistantMessagePersistence;
+    renderSubjectClarification?: ChatSubjectClarificationRenderer;
+  } = {},
 ) {
   const { emit } = context;
-  const assistantBlocks = Object.freeze([
-    Object.freeze({ type: "text", text: preResolution.message }),
-  ]);
-  const contentHash = contentHashForText(preResolution.message);
-  let snapshotId = "snapshot-1";
-  let messageId = "message-1";
+  const turnId = context.turnId ?? context.runId;
+  const rendered = await renderSubjectClarification({
+    threadId: context.threadId,
+    runId: context.runId,
+    turnId,
+    preResolution,
+  }, options.renderSubjectClarification);
+  const assistantBlocks = rendered.blocks;
+  const contentHash = rendered.content_hash;
+  const blockId = rendered.block_id ?? `subject-clarification-${turnId}`;
+  let snapshotId = `subject-snapshot-${turnId}`;
+  let messageId = `subject-message-${turnId}`;
 
-  emit("turn.started", { stub: true });
-  emit("tool.started", {
-    stub: true,
-    tool_call_id: "tool-call-1",
-    tool_name: "resolve_subjects",
-  });
-  emit("tool.completed", subjectToolCompletedPayload(preResolution));
+  emit("turn.started", { subject_resolution: true });
+  emitSubjectResolutionToolEvents(emit, preResolution, subjectResolutionToolCallId(context));
 
-  if (persistAssistantMessage) {
-    const persisted = await persistAssistantMessage({
+  if (options.persistAssistantMessage) {
+    const persisted = await options.persistAssistantMessage({
       threadId: context.threadId,
       runId: context.runId,
-      turnId: context.turnId ?? context.runId,
+      turnId,
       role: "assistant",
       blocks: assistantBlocks,
       content_hash: contentHash,
@@ -431,40 +480,46 @@ async function emitSubjectClarificationTurn(
     messageId = persisted.message_id;
   }
   emit("snapshot.staged", {
-    stub: true,
     snapshot_id: snapshotId,
     status: "staged",
   });
   emit("snapshot.sealed", {
-    stub: true,
     snapshot_id: snapshotId,
     status: "sealed",
   });
   emit("block.began", {
-    stub: true,
-    block_id: "block-1",
-    kind: "rich_text",
+    block_id: blockId,
+    kind: rendered.block_kind ?? "rich_text",
   });
   emit("block.delta", {
-    stub: true,
-    block_id: "block-1",
+    block_id: blockId,
     delta: {
       segment: {
         type: "text",
-        text: assistantBlocks[0].text,
+        text: rendered.text,
       },
     },
   });
   emit("block.completed", {
-    stub: true,
-    block_id: "block-1",
+    block_id: blockId,
     content_hash: contentHash,
   });
   emit("turn.completed", {
-    stub: true,
     message_id: messageId,
     clarification: true,
   });
+}
+
+function emitSubjectResolutionToolEvents(
+  emit: ChatTurnEmit,
+  preResolution: ChatSubjectPreResolution,
+  toolCallId: string,
+) {
+  emit("tool.started", {
+    tool_call_id: toolCallId,
+    tool_name: "resolve_subjects",
+  });
+  emit("tool.completed", subjectToolCompletedPayload(preResolution, toolCallId));
 }
 
 async function stubChatTurnRunner(
@@ -479,14 +534,12 @@ async function stubChatTurnRunner(
   const preResolution = context.subjectPreResolution ?? null;
 
   emit("turn.started", { stub: true });
-  emit("tool.started", {
-    stub: true,
-    tool_call_id: "tool-call-1",
-    tool_name: "resolve_subjects",
-  });
-  if (preResolution) {
-    emit("tool.completed", subjectToolCompletedPayload(preResolution));
-  } else {
+  if (!preResolution) {
+    emit("tool.started", {
+      stub: true,
+      tool_call_id: "tool-call-1",
+      tool_name: "resolve_subjects",
+    });
     emit("tool.completed", {
       stub: true,
       tool_call_id: "tool-call-1",
@@ -556,10 +609,10 @@ async function stubChatTurnRunner(
 
 function subjectToolCompletedPayload(
   preResolution: ChatSubjectPreResolution,
+  toolCallId = "tool-call-1",
 ): Record<string, unknown> {
   const base = {
-    stub: true,
-    tool_call_id: "tool-call-1",
+    tool_call_id: toolCallId,
     tool_name: "resolve_subjects",
     status: preResolution.status === "resolved" ? "ok" : preResolution.status,
     resolution_status: preResolution.status,
@@ -594,12 +647,42 @@ function subjectToolCompletedPayload(
   };
 }
 
+function subjectResolutionToolCallId(context: ChatTurnInput): string {
+  return `resolve-subjects-${context.turnId ?? context.runId}`;
+}
+
 function nonEmptySubjectText(value: string | undefined): string | null {
   if (value === undefined) {
     return null;
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+async function renderSubjectClarification(
+  input: ChatSubjectClarificationRenderInput,
+  renderer?: ChatSubjectClarificationRenderer,
+): Promise<ChatSubjectClarificationRenderResult> {
+  const rendered = renderer ? await renderer(input) : defaultSubjectClarificationRenderer(input);
+  if (rendered.blocks.length === 0) {
+    throw new Error("subject clarification renderer must return at least one block");
+  }
+  return Object.freeze({
+    ...rendered,
+    blocks: Object.freeze([...rendered.blocks]),
+  });
+}
+
+function defaultSubjectClarificationRenderer(
+  input: ChatSubjectClarificationRenderInput,
+): ChatSubjectClarificationRenderResult {
+  return {
+    blocks: Object.freeze([
+      Object.freeze({ type: "text", text: input.preResolution.message }),
+    ]),
+    content_hash: contentHashForText(input.preResolution.message),
+    text: input.preResolution.message,
+  };
 }
 
 function contentHashForText(text: string): string {

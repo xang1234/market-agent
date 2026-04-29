@@ -415,7 +415,59 @@ test("subject pre-resolution passes hydrated context to custom runners without r
     id: "11111111-1111-4111-a111-111111111111",
   });
   assert.equal(observedContext?.subjectPreResolution?.handoff.context.listing?.ticker, "AAPL");
-  assert.deepEqual(turn.events.map((event) => event.type), ["turn.completed"]);
+  assert.deepEqual(turn.events.map((event) => event.type), [
+    "tool.started",
+    "tool.completed",
+    "turn.completed",
+  ]);
+  assert.equal(turn.events[1].resolution_status, "resolved");
+  assert.equal((turn.events[1].handoff as Record<string, unknown>).display_label, "AAPL · XNAS — Apple Inc.");
+});
+
+test("subject clarification turns use the injected renderer before persistence", async () => {
+  const persisted: string[] = [];
+  const coordinator = createChatCoordinator({
+    preResolveSubject: async ({ text }) => ({
+      status: "not_found",
+      input_text: text,
+      normalized_input: "NOTREAL",
+      reason: "no_candidates",
+      message: 'I could not resolve "NOTREAL" to a known subject.',
+    }),
+    renderSubjectClarification: ({ preResolution }) => ({
+      blocks: [{ type: "text", text: `Custom: ${preResolution.message}` }],
+      content_hash: "sha256:custom-clarification",
+      text: `Custom: ${preResolution.message}`,
+      block_id: "custom-block",
+    }),
+    persistAssistantMessage: async ({ blocks, content_hash }) => {
+      persisted.push(`${content_hash}:${blocks[0].text}`);
+      return {
+        snapshot_id: "22222222-2222-4222-a222-222222222222",
+        message_id: "33333333-3333-4333-a333-333333333333",
+      };
+    },
+    runner: ({ emit }) => {
+      emit("turn.completed", { message_id: "model-message" });
+    },
+  });
+
+  const turn = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    subjectText: "NOTREAL",
+  });
+  await turn.completed;
+
+  assert.deepEqual(persisted, [
+    'sha256:custom-clarification:Custom: I could not resolve "NOTREAL" to a known subject.',
+  ]);
+  assert.equal(turn.events[5].block_id, "custom-block");
+  assert.equal(
+    ((turn.events[6].delta as Record<string, unknown>).segment as Record<string, unknown>).text,
+    'Custom: I could not resolve "NOTREAL" to a known subject.',
+  );
+  assert.equal(turn.events[8].message_id, "33333333-3333-4333-a333-333333333333");
 });
 
 type ChatTurnEventMutation = {

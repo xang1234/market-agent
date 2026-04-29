@@ -73,6 +73,13 @@ test("runtime config loads subject pre-resolver from configured module", async (
         candidates: [],
         message: 'Which subject did you mean?'
       };
+    }
+    export function renderSubjectClarification({ preResolution }) {
+      return {
+        blocks: [{ type: 'text', text: preResolution.message }],
+        content_hash: 'sha256:clarification',
+        text: preResolution.message
+      };
     }`,
   );
 
@@ -87,5 +94,22 @@ test("runtime config loads subject pre-resolver from configured module", async (
     normalized_input: "GOOG",
     candidates: [],
     message: "Which subject did you mean?",
+  });
+  assert.equal(typeof options.renderSubjectClarification, "function");
+  assert.deepEqual(await options.renderSubjectClarification!({
+    threadId: "thread-1",
+    runId: "run-1",
+    turnId: "turn-1",
+    preResolution: {
+      status: "needs_clarification",
+      input_text: "GOOG",
+      normalized_input: "GOOG",
+      candidates: [],
+      message: "Which subject did you mean?",
+    },
+  }), {
+    blocks: [{ type: "text", text: "Which subject did you mean?" }],
+    content_hash: "sha256:clarification",
+    text: "Which subject did you mean?",
   });
 });
