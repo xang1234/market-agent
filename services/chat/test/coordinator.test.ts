@@ -45,3 +45,38 @@ test("per-thread coordinator serializes concurrent turns for the same thread", a
   assert.deepEqual(first.events.map((event) => event.type), ["turn.started", "turn.completed"]);
   assert.deepEqual(second.events.map((event) => event.type), ["turn.started", "turn.completed"]);
 });
+
+test("per-thread coordinator drops idle thread queues after completion", async () => {
+  const coordinator = createChatCoordinator({
+    runner: ({ emit }) => {
+      emit("turn.started", { stub: true });
+      emit("turn.completed", { message_id: "message-1" });
+    },
+  });
+
+  const turn = coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1" });
+  await turn.completed;
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.equal(coordinator.stats().queuedThreadCount, 0);
+});
+
+test("per-thread coordinator bounds completed turn history retention", async () => {
+  const completedRuns: string[] = [];
+  const coordinator = createChatCoordinator({
+    maxCompletedTurns: 1,
+    runner: ({ runId, emit }) => {
+      completedRuns.push(runId);
+      emit("turn.started", { stub: true });
+      emit("turn.completed", { message_id: `message-${runId}` });
+    },
+  });
+
+  await coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1" }).completed;
+  await coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-2" }).completed;
+
+  assert.equal(coordinator.stats().retainedTurnCount, 1);
+
+  await coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1" }).completed;
+  assert.deepEqual(completedRuns, ["run-1", "run-2", "run-1"]);
+});

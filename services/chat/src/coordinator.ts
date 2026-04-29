@@ -32,10 +32,20 @@ export type ChatTurnHandle = {
 
 export type ChatCoordinator = {
   getOrCreateTurn(input: ChatTurnInput): ChatTurnHandle;
+  stats(): ChatCoordinatorStats;
 };
 
 export type ChatCoordinatorOptions = {
   runner?: ChatTurnRunner;
+  completedTurnRetentionMs?: number;
+  maxCompletedTurns?: number;
+  now?: () => number;
+};
+
+export type ChatCoordinatorStats = {
+  queuedThreadCount: number;
+  retainedTurnCount: number;
+  completedTurnCount: number;
 };
 
 type EventCountWaiter = {
@@ -44,39 +54,93 @@ type EventCountWaiter = {
   reject(error: Error): void;
 };
 
+type TurnRecord = {
+  handle: MutableChatTurnHandle;
+  completedAt: number | null;
+};
+
+const DEFAULT_COMPLETED_TURN_RETENTION_MS = 5 * 60 * 1000;
+const DEFAULT_MAX_COMPLETED_TURNS = 1000;
+
 export function createChatCoordinator(
   options: ChatCoordinatorOptions = {},
 ): ChatCoordinator {
   const runner = options.runner ?? stubChatTurnRunner;
+  const completedTurnRetentionMs = nonNegativeFiniteNumber(
+    options.completedTurnRetentionMs ?? DEFAULT_COMPLETED_TURN_RETENTION_MS,
+    "completedTurnRetentionMs",
+  );
+  const maxCompletedTurns = nonNegativeInteger(
+    options.maxCompletedTurns ?? DEFAULT_MAX_COMPLETED_TURNS,
+    "maxCompletedTurns",
+  );
+  const now = options.now ?? Date.now;
   const threadQueues = new Map<string, Promise<void>>();
-  const turns = new Map<string, MutableChatTurnHandle>();
+  const turns = new Map<string, TurnRecord>();
+
+  const pruneCompletedTurns = () => {
+    const cutoff = now() - completedTurnRetentionMs;
+    for (const [key, record] of turns) {
+      if (record.completedAt !== null && record.completedAt < cutoff) {
+        turns.delete(key);
+      }
+    }
+
+    const completed = [...turns.entries()]
+      .filter((entry): entry is [string, TurnRecord & { completedAt: number }] => entry[1].completedAt !== null)
+      .sort((left, right) => left[1].completedAt - right[1].completedAt);
+
+    while (completed.length > maxCompletedTurns) {
+      const [oldestKey] = completed.shift()!;
+      turns.delete(oldestKey);
+    }
+  };
 
   return {
     getOrCreateTurn(input) {
+      pruneCompletedTurns();
       const key = turnKey(input);
-      const existing = turns.get(key);
+      const existing = turns.get(key)?.handle;
       if (existing) {
         return existing;
       }
 
       const handle = new MutableChatTurnHandle(input, runner);
-      turns.set(key, handle);
+      const record: TurnRecord = { handle, completedAt: null };
+      turns.set(key, record);
+      handle.completed.then(() => {
+        record.completedAt = now();
+        pruneCompletedTurns();
+      });
 
       const previous = threadQueues.get(input.threadId) ?? Promise.resolve();
       const queued = previous
         .catch(() => undefined)
         .then(() => handle.run());
 
-      threadQueues.set(
-        input.threadId,
-        queued.finally(() => {
-          if (threadQueues.get(input.threadId) === queued) {
-            threadQueues.delete(input.threadId);
-          }
-        }),
-      );
+      let queueEntry!: Promise<void>;
+      queueEntry = queued.finally(() => {
+        if (threadQueues.get(input.threadId) === queueEntry) {
+          threadQueues.delete(input.threadId);
+        }
+      });
+      threadQueues.set(input.threadId, queueEntry);
 
       return handle;
+    },
+    stats() {
+      pruneCompletedTurns();
+      let completedTurnCount = 0;
+      for (const record of turns.values()) {
+        if (record.completedAt !== null) {
+          completedTurnCount += 1;
+        }
+      }
+      return {
+        queuedThreadCount: threadQueues.size,
+        retainedTurnCount: turns.size,
+        completedTurnCount,
+      };
     },
   };
 }
@@ -255,4 +319,18 @@ function errorMessage(error: unknown): string {
     return error.message;
   }
   return "turn failed";
+}
+
+function nonNegativeInteger(value: number, label: string): number {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative integer`);
+  }
+  return value;
+}
+
+function nonNegativeFiniteNumber(value: number, label: string): number {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative finite number`);
+  }
+  return value;
 }
