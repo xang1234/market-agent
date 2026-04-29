@@ -226,7 +226,7 @@ class MutableChatTurnHandle implements ChatTurnHandle {
   }
 
   get events(): ReadonlyArray<ChatSseEvent> {
-    return this.#events;
+    return [...this.#events];
   }
 
   currentSeq(): number {
@@ -285,8 +285,12 @@ class MutableChatTurnHandle implements ChatTurnHandle {
 
   private append(event: ChatSseEvent) {
     this.#events.push(event);
-    for (const listener of this.#listeners) {
-      listener(event);
+    for (const listener of [...this.#listeners]) {
+      try {
+        listener(event);
+      } catch {
+        this.#listeners.delete(listener);
+      }
     }
     this.resolveReadyWaiters();
   }

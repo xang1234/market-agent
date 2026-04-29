@@ -1,9 +1,9 @@
 # Chat Service
 
-Tracking bead: `fra-6al.8.3` (Bootstrap SSE route stub for chat streaming).
+Tracking beads: `fra-u9l`, `fra-cty`, `fra-eom`.
 
-This package owns the stub chat streaming transport until the real thread
-coordinator lands in `fra-2fu.1`.
+This package owns the chat streaming transport and the in-process turn
+coordinator used by the current stub turn runner.
 
 ## Current scope
 
@@ -12,6 +12,17 @@ coordinator lands in `fra-2fu.1`.
 - emits sequenced coordinator SSE events with `id`, `seq`, and `turn_id`
 - resumes after `Last-Event-ID` by replaying only events with a higher sequence
 - emits periodic `heartbeat` control events
+- serializes turn execution per `thread_id`
+
+## Resume Retention
+
+SSE resume history is in-memory and intentionally bounded. Completed turn
+event history is retained for a short window and capped by count. When a
+completed turn is evicted, the coordinator keeps a bounded tombstone so a
+later stream request for the same turn returns an unavailable cursor response
+instead of rerunning tool calls or snapshot sealing. This is not a durable
+idempotency store; cross-process or post-expiry replay requires a future
+database-backed run ledger.
 
 ## Tests
 
