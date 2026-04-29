@@ -51,3 +51,13 @@ listed transform in `allowed_transforms`. Series transforms are listed as
 `allowed_transforms.series[]` or `allowed_transforms.ranges[]` entries with an
 explicit `range` and `interval`; omitted intervals are rejected rather than
 treated as wildcards.
+
+`snapshotTransformBoundaryResponse()` wraps the same legality check in the
+client-facing refresh envelope for transform endpoints. Rejections return
+`status: 409` with `{ error: "refresh_required", refresh_required: { reason } }`,
+where `reason` is one of `basis`, `normalization`, `peer_set`, `freshness`, or
+`transform`.
+
+`createSnapshotServer()` wires `POST /v1/snapshots/{snapshotId}/transform` to
+that boundary check with injected manifest loading and transform execution.
+Refresh-required requests are rejected before the executor runs.

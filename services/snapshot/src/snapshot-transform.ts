@@ -41,9 +41,27 @@ export type SnapshotTransformRejectionReason =
   | "requires_fresher_data"
   | "transform_not_allowed";
 
+export type SnapshotRefreshRequiredReason =
+  | "basis"
+  | "normalization"
+  | "peer_set"
+  | "freshness"
+  | "transform";
+
+export type SnapshotRefreshRequiredEnvelope = {
+  error: "refresh_required";
+  refresh_required: {
+    reason: SnapshotRefreshRequiredReason;
+  };
+};
+
 export type SnapshotTransformDecision =
   | { allowed: true; status: 200 }
   | { allowed: false; status: 409; reason: SnapshotTransformRejectionReason };
+
+export type SnapshotTransformBoundaryResponse =
+  | { allowed: true; status: 200 }
+  | { allowed: false; status: 409; body: SnapshotRefreshRequiredEnvelope };
 
 export type CheckSnapshotTransformInput = {
   manifest: SnapshotTransformManifest;
@@ -91,6 +109,29 @@ export function checkSnapshotTransform(
   }
 
   return Object.freeze({ allowed: true, status: 200 });
+}
+
+export function snapshotTransformBoundaryResponse(
+  input: CheckSnapshotTransformInput,
+): SnapshotTransformBoundaryResponse {
+  const decision = checkSnapshotTransform(input);
+  if (decision.allowed) return decision;
+  return Object.freeze({
+    allowed: false,
+    status: 409,
+    body: Object.freeze({
+      error: "refresh_required",
+      refresh_required: Object.freeze({
+        reason: refreshRequiredReason(decision.reason),
+      }),
+    }),
+  });
+}
+
+export function normalizeSnapshotTransformRequest(
+  request: SnapshotTransformRequest,
+): SnapshotTransformRequest {
+  return normalizeRequest(request);
 }
 
 function normalizeManifest(manifest: SnapshotTransformManifest): NormalizedSnapshotTransformManifest {
@@ -383,4 +424,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function deny(reason: SnapshotTransformRejectionReason): SnapshotTransformDecision {
   return Object.freeze({ allowed: false, status: 409, reason });
+}
+
+function refreshRequiredReason(
+  reason: SnapshotTransformRejectionReason,
+): SnapshotRefreshRequiredReason {
+  switch (reason) {
+    case "basis_change":
+      return "basis";
+    case "normalization_change":
+      return "normalization";
+    case "subject_set_change":
+      return "peer_set";
+    case "requires_fresher_data":
+      return "freshness";
+    case "transform_not_allowed":
+      return "transform";
+  }
+  const _exhaustive: never = reason;
+  throw new Error(`unsupported snapshot transform rejection reason: ${_exhaustive}`);
 }

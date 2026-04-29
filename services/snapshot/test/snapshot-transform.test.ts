@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { checkSnapshotTransform } from "../src/snapshot-transform.ts";
+import {
+  checkSnapshotTransform,
+  snapshotTransformBoundaryResponse,
+} from "../src/snapshot-transform.ts";
 import type { SnapshotSubjectRef } from "../src/manifest-staging.ts";
 
 const listingId = "00000000-0000-4000-8000-000000000001";
@@ -64,6 +67,89 @@ test("checkSnapshotTransform denies normalization and subject-set changes", () =
       }),
     }),
     { allowed: false, status: 409, reason: "subject_set_change" },
+  );
+});
+
+test("snapshotTransformBoundaryResponse returns refresh_required peer_set envelope for subject changes", () => {
+  assert.deepEqual(
+    snapshotTransformBoundaryResponse({
+      manifest: sealedManifest(),
+      request: validRequest({
+        subject_refs: [{ kind: "listing", id: "00000000-0000-4000-8000-000000000002" }],
+      }),
+    }),
+    {
+      allowed: false,
+      status: 409,
+      body: {
+        error: "refresh_required",
+        refresh_required: { reason: "peer_set" },
+      },
+    },
+  );
+});
+
+test("snapshotTransformBoundaryResponse maps refresh boundary dimensions into 409 envelopes", () => {
+  const cases = [
+    ["basis", validRequest({ basis: "unadjusted" })],
+    ["normalization", validRequest({ normalization: "pct_return" })],
+    [
+      "freshness",
+      validRequest({
+        range: {
+          start: "2026-04-01T00:00:00.000Z",
+          end: "2026-04-30T00:00:00.000Z",
+        },
+      }),
+    ],
+    [
+      "transform",
+      validRequest({
+        range: {
+          start: "2026-04-02T00:00:00.000Z",
+          end: "2026-04-29T00:00:00.000Z",
+        },
+      }),
+    ],
+  ] as const;
+
+  for (const [reason, request] of cases) {
+    assert.deepEqual(
+      snapshotTransformBoundaryResponse({
+        manifest: sealedManifest({
+          allowed_transforms: {
+            series: [
+              {
+                range: {
+                  start: "2026-04-01T00:00:00.000Z",
+                  end: "2026-04-30T00:00:00.000Z",
+                },
+                interval: "1d",
+              },
+            ],
+          },
+        }),
+        request,
+      }),
+      {
+        allowed: false,
+        status: 409,
+        body: {
+          error: "refresh_required",
+          refresh_required: { reason },
+        },
+      },
+    );
+  }
+});
+
+test("snapshotTransformBoundaryResponse passes through allowed transforms without an error body", () => {
+  assert.deepEqual(
+    snapshotTransformBoundaryResponse({
+      manifest: sealedManifest(),
+      request: validRequest(),
+    }),
+    { allowed: true, status: 200 },
   );
 });
 

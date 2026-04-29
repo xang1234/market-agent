@@ -361,6 +361,10 @@ paths:
                 additionalProperties: true
         '409':
           description: Transform requires refresh
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotRefreshRequiredError'
   /v1/chat/threads:
     get:
       tags: [Chat]
@@ -1062,6 +1066,20 @@ components:
         allowed_transforms:
           type: object
           additionalProperties: true
+    SnapshotRefreshRequiredError:
+      type: object
+      required: [error, refresh_required]
+      properties:
+        error:
+          type: string
+          const: refresh_required
+        refresh_required:
+          type: object
+          required: [reason]
+          properties:
+            reason:
+              type: string
+              enum: [basis, normalization, peer_set, freshness, transform]
     BlockEnvelope:
       type: object
       properties:
