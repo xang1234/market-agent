@@ -114,6 +114,29 @@ test("per-thread coordinator keeps distinct turn ids under the same run id separ
   assert.equal(second.events[0].turn_id, "turn-2");
 });
 
+test("per-thread coordinator normalizes omitted turn id to run id", async () => {
+  const startedRuns: string[] = [];
+  const coordinator = createChatCoordinator({
+    runner: ({ runId, emit }) => {
+      startedRuns.push(runId);
+      emit("turn.started", { stub: true });
+      emit("turn.completed", { message_id: `message-${runId}` });
+    },
+  });
+
+  const implicit = coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1" });
+  const explicit = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    turnId: "run-1",
+  });
+  await implicit.completed;
+
+  assert.equal(implicit, explicit);
+  assert.deepEqual(startedRuns, ["run-1"]);
+  assert.equal(implicit.events[0].turn_id, "run-1");
+});
+
 test("per-thread coordinator isolates subscriber failures from shared turn execution", async () => {
   const coordinator = createChatCoordinator({
     runner: ({ emit }) => {
@@ -198,6 +221,33 @@ test("per-thread coordinator shields later subscribers from event mutation", asy
 
   assert.deepEqual(observedSeqs, [1, 2]);
   assert.equal(turn.currentSeq(), 2);
+});
+
+test("per-thread coordinator clones nested payloads before freezing retained events", async () => {
+  const delta = { segment: { type: "text", text: "original" } };
+  const coordinator = createChatCoordinator({
+    runner: ({ emit }) => {
+      emit("block.delta", {
+        block_id: "block-1",
+        delta,
+      });
+      delta.segment.text = "mutated-after-emit";
+      emit("turn.completed", { message_id: "message-1" });
+    },
+  });
+
+  const turn = coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1" });
+  await turn.completed;
+
+  assert.equal(delta.segment.text, "mutated-after-emit");
+  assert.deepEqual((turn.events[0].delta as typeof delta).segment, {
+    type: "text",
+    text: "original",
+  });
+  assert.deepEqual(
+    turn.events.map((event) => event.type),
+    ["block.delta", "turn.completed"],
+  );
 });
 
 type ChatTurnEventMutation = {

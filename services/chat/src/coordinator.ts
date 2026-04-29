@@ -63,6 +63,10 @@ type TurnRecord = {
   completedAt: number | null;
 };
 
+type NormalizedChatTurnInput = ChatTurnInput & {
+  turnId: string;
+};
+
 const DEFAULT_COMPLETED_TURN_RETENTION_MS = 5 * 60 * 1000;
 const DEFAULT_MAX_COMPLETED_TURNS = 1000;
 const DEFAULT_COMPLETED_TURN_TOMBSTONE_RETENTION_MS = 60 * 60 * 1000;
@@ -145,7 +149,8 @@ export function createChatCoordinator(
   return {
     getOrCreateTurn(input) {
       pruneCompletedTurns();
-      const key = turnKey(input);
+      const normalizedInput = normalizeTurnInput(input);
+      const key = turnKey(normalizedInput);
       if (completedTurnTombstones.has(key)) {
         throw new ChatTurnUnavailableError();
       }
@@ -154,7 +159,7 @@ export function createChatCoordinator(
         return existing;
       }
 
-      const handle = new MutableChatTurnHandle(input, runner);
+      const handle = new MutableChatTurnHandle(normalizedInput, runner);
       const record: TurnRecord = { handle, completedAt: null };
       turns.set(key, record);
       handle.completed.then(() => {
@@ -162,24 +167,24 @@ export function createChatCoordinator(
         pruneCompletedTurns();
       });
 
-      const previous = threadQueues.get(input.threadId) ?? Promise.resolve();
+      const previous = threadQueues.get(normalizedInput.threadId) ?? Promise.resolve();
       const queued = previous
         .catch(() => undefined)
         .then(() => handle.run());
 
       let queueEntry!: Promise<void>;
       queueEntry = queued.finally(() => {
-        if (threadQueues.get(input.threadId) === queueEntry) {
-          threadQueues.delete(input.threadId);
+        if (threadQueues.get(normalizedInput.threadId) === queueEntry) {
+          threadQueues.delete(normalizedInput.threadId);
         }
       });
-      threadQueues.set(input.threadId, queueEntry);
+      threadQueues.set(normalizedInput.threadId, queueEntry);
 
       return handle;
     },
     getTurn(input) {
       pruneCompletedTurns();
-      return turns.get(turnKey(input))?.handle ?? null;
+      return turns.get(turnKey(normalizeTurnInput(input)))?.handle ?? null;
     },
     stats() {
       pruneCompletedTurns();
@@ -199,8 +204,15 @@ export function createChatCoordinator(
   };
 }
 
-function turnKey(input: ChatTurnInput): string {
-  return `${input.threadId}\0${input.runId}\0${input.turnId ?? ""}`;
+function normalizeTurnInput(input: ChatTurnInput): NormalizedChatTurnInput {
+  return {
+    ...input,
+    turnId: input.turnId ?? input.runId,
+  };
+}
+
+function turnKey(input: NormalizedChatTurnInput): string {
+  return `${input.threadId}\0${input.runId}\0${input.turnId}`;
 }
 
 class MutableChatTurnHandle implements ChatTurnHandle {
@@ -242,8 +254,7 @@ class MutableChatTurnHandle implements ChatTurnHandle {
 
     const emit: ChatTurnEmit = (type, payload = {}) => {
       const event = sequencer.next(type, payload);
-      this.append(event);
-      return event;
+      return this.append(event);
     };
 
     try {
@@ -283,8 +294,8 @@ class MutableChatTurnHandle implements ChatTurnHandle {
     };
   }
 
-  private append(event: ChatSseEvent) {
-    const immutableEvent = deepFreeze(event);
+  private append(event: ChatSseEvent): ChatSseEvent {
+    const immutableEvent = deepFreeze(cloneEvent(event));
     this.#events.push(immutableEvent);
     for (const listener of [...this.#listeners]) {
       try {
@@ -294,6 +305,7 @@ class MutableChatTurnHandle implements ChatTurnHandle {
       }
     }
     this.resolveReadyWaiters();
+    return immutableEvent;
   }
 
   private resolveReadyWaiters() {
@@ -392,6 +404,10 @@ function nonNegativeFiniteNumber(value: number, label: string): number {
     throw new Error(`${label} must be a non-negative finite number`);
   }
   return value;
+}
+
+function cloneEvent(event: ChatSseEvent): ChatSseEvent {
+  return structuredClone(event) as ChatSseEvent;
 }
 
 function deepFreeze<T>(value: T, seen = new Set<object>()): T {

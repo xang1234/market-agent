@@ -50,6 +50,8 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
       respondJson(res, 400, { error: "'run_id' is required" });
       return;
     }
+    const runId = route.runId;
+    const turnId = route.turnId ?? runId;
 
     const resumeAfterSeq = parseLastEventId(req.headers["last-event-id"]);
     if (resumeAfterSeq === INVALID_LAST_EVENT_ID) {
@@ -59,8 +61,8 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
 
     const turnInput = {
       threadId: route.threadId,
-      runId: route.runId,
-      turnId: route.turnId ?? route.runId,
+      runId,
+      turnId,
     };
     const turn = resumeAfterSeq > 0
       ? coordinator.getTurn(turnInput)
@@ -88,7 +90,7 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
     }
 
     const heartbeat = setInterval(() => {
-      writer.writeHeartbeat(route);
+      writer.writeHeartbeat({ threadId: route.threadId, runId, turnId });
     }, HEARTBEAT_INTERVAL_MS);
 
     let cleanedUp = false;
