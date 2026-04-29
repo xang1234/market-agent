@@ -21,11 +21,11 @@ type ChatMessageTransactionClientBrand = {
   readonly [CHAT_MESSAGE_TRANSACTION_CLIENT]: true;
 };
 
-export type ChatMessageTransactionClient = ChatMessagePersistenceDb & ChatMessageTransactionClientBrand;
-
 export type ChatMessagePoolClient = ChatMessagePersistenceDb & {
   release(error?: Error): void;
 };
+
+export type ChatMessageTransactionClient = ChatMessagePoolClient & ChatMessageTransactionClientBrand;
 
 export type ChatMessageClientPool = {
   connect(): Promise<ChatMessagePoolClient>;
@@ -138,6 +138,9 @@ export function chatMessageTransactionClient<T extends ChatMessagePersistenceDb>
       "persistChatMessageAfterSnapshotSeal requires a pinned transaction client; use persistChatMessageAfterSnapshotSealWithPool for pools",
     );
   }
+  if (!isAcquiredClient(client)) {
+    throw new Error("persistChatMessageAfterSnapshotSeal requires an acquired transaction client with release()");
+  }
   Object.defineProperty(client, CHAT_MESSAGE_TRANSACTION_CLIENT, {
     value: true,
     enumerable: false,
@@ -218,6 +221,10 @@ function isPoolLike(db: ChatMessagePersistenceDb): boolean {
     connect?: unknown;
   };
   return typeof candidate.connect === "function";
+}
+
+function isAcquiredClient(db: ChatMessagePersistenceDb): db is ChatMessagePoolClient {
+  return typeof (db as { release?: unknown }).release === "function";
 }
 
 function isVerifiedSeal(seal: SnapshotSealResult): seal is SnapshotSealResult & { ok: true } {

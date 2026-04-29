@@ -470,6 +470,9 @@ async function emitSubjectClarificationTurn(
 ) {
   const { emit } = context;
   const turnId = context.turnId ?? context.runId;
+  emit("turn.started", { subject_resolution: true });
+  emitSubjectResolutionToolEvents(emit, preResolution, subjectResolutionToolCallId(context));
+
   const rendered = await renderSubjectClarification({
     threadId: context.threadId,
     runId: context.runId,
@@ -481,9 +484,6 @@ async function emitSubjectClarificationTurn(
   const blockId = rendered.block_id ?? `subject-clarification-${turnId}`;
   let snapshotId = `subject-snapshot-${turnId}`;
   let messageId = `subject-message-${turnId}`;
-
-  emit("turn.started", { subject_resolution: true });
-  emitSubjectResolutionToolEvents(emit, preResolution, subjectResolutionToolCallId(context));
 
   if (options.persistAssistantMessage) {
     const persisted = await options.persistAssistantMessage({

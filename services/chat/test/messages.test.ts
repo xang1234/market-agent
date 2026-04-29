@@ -103,6 +103,19 @@ test("chat message persistence rejects pool-like executors before branding", () 
   );
 });
 
+test("chat message persistence rejects query-only pool wrappers before branding", () => {
+  const client = unpinnedRecordingDb();
+  const queryOnlyWrapper = {
+    query: client.query.bind(client),
+  };
+
+  assert.throws(
+    () => chatMessageTransactionClient(queryOnlyWrapper),
+    /requires an acquired transaction client/i,
+  );
+  assert.deepEqual(client.queries, []);
+});
+
 test("chat message persistence with pool pins insert transaction to one client", async () => {
   const steps: string[] = [];
   const client = recordingDb(steps);
@@ -274,6 +287,10 @@ function unpinnedRecordingDb(steps: string[] = []): ChatMessagePersistenceDb & {
   const queries: Array<{ text: string; values?: unknown[] }> = [];
   return {
     queries,
+    release() {
+      // Test clients model an acquired pool client; release behavior is asserted
+      // explicitly in pool-backed persistence tests.
+    },
     query: async (text, values) => {
       queries.push({ text, values });
       if (text === "begin") {

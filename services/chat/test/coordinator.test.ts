@@ -540,6 +540,40 @@ test("subject clarification turns use the injected renderer before persistence",
   assert.equal(turn.events[8].message_id, "33333333-3333-4333-a333-333333333333");
 });
 
+test("subject clarification emits resolver result before renderer failures", async () => {
+  const coordinator = createChatCoordinator({
+    preResolveSubject: async ({ text }) => ({
+      status: "not_found",
+      input_text: text,
+      normalized_input: "NOTREAL",
+      reason: "no_candidates",
+      message: 'I could not resolve "NOTREAL" to a known subject.',
+    }),
+    renderSubjectClarification: () => {
+      throw new Error("renderer failed");
+    },
+    runner: ({ emit }) => {
+      emit("turn.completed", { message_id: "model-message" });
+    },
+  });
+
+  const turn = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    subjectText: "NOTREAL",
+  });
+  await turn.completed;
+
+  assert.deepEqual(turn.events.map((event) => event.type), [
+    "turn.started",
+    "tool.started",
+    "tool.completed",
+    "turn.error",
+  ]);
+  assert.equal(turn.events[2].resolution_status, "not_found");
+  assert.equal(turn.events[3].message, "renderer failed");
+});
+
 type ChatTurnEventMutation = {
   type: string;
   seq: number;
