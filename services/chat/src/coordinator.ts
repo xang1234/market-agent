@@ -32,6 +32,7 @@ export type ChatTurnHandle = {
 
 export type ChatCoordinator = {
   getOrCreateTurn(input: ChatTurnInput): ChatTurnHandle;
+  getTurn(input: ChatTurnInput): ChatTurnHandle | null;
   stats(): ChatCoordinatorStats;
 };
 
@@ -39,6 +40,8 @@ export type ChatCoordinatorOptions = {
   runner?: ChatTurnRunner;
   completedTurnRetentionMs?: number;
   maxCompletedTurns?: number;
+  completedTurnTombstoneRetentionMs?: number;
+  maxCompletedTurnTombstones?: number;
   now?: () => number;
 };
 
@@ -46,6 +49,7 @@ export type ChatCoordinatorStats = {
   queuedThreadCount: number;
   retainedTurnCount: number;
   completedTurnCount: number;
+  completedTurnTombstoneCount: number;
 };
 
 type EventCountWaiter = {
@@ -61,6 +65,15 @@ type TurnRecord = {
 
 const DEFAULT_COMPLETED_TURN_RETENTION_MS = 5 * 60 * 1000;
 const DEFAULT_MAX_COMPLETED_TURNS = 1000;
+const DEFAULT_COMPLETED_TURN_TOMBSTONE_RETENTION_MS = 60 * 60 * 1000;
+const DEFAULT_MAX_COMPLETED_TURN_TOMBSTONES = 10000;
+
+export class ChatTurnUnavailableError extends Error {
+  constructor(message = "chat turn history is not available") {
+    super(message);
+    this.name = "ChatTurnUnavailableError";
+  }
+}
 
 export function createChatCoordinator(
   options: ChatCoordinatorOptions = {},
@@ -74,14 +87,46 @@ export function createChatCoordinator(
     options.maxCompletedTurns ?? DEFAULT_MAX_COMPLETED_TURNS,
     "maxCompletedTurns",
   );
+  const completedTurnTombstoneRetentionMs = nonNegativeFiniteNumber(
+    options.completedTurnTombstoneRetentionMs ?? DEFAULT_COMPLETED_TURN_TOMBSTONE_RETENTION_MS,
+    "completedTurnTombstoneRetentionMs",
+  );
+  const maxCompletedTurnTombstones = nonNegativeInteger(
+    options.maxCompletedTurnTombstones ?? DEFAULT_MAX_COMPLETED_TURN_TOMBSTONES,
+    "maxCompletedTurnTombstones",
+  );
   const now = options.now ?? Date.now;
   const threadQueues = new Map<string, Promise<void>>();
   const turns = new Map<string, TurnRecord>();
+  const completedTurnTombstones = new Map<string, number>();
+
+  const pruneCompletedTurnTombstones = (currentTime = now()) => {
+    const cutoff = currentTime - completedTurnTombstoneRetentionMs;
+    for (const [key, tombstonedAt] of completedTurnTombstones) {
+      if (tombstonedAt < cutoff) {
+        completedTurnTombstones.delete(key);
+      }
+    }
+
+    const tombstones = [...completedTurnTombstones.entries()].sort((left, right) => left[1] - right[1]);
+    while (tombstones.length > maxCompletedTurnTombstones) {
+      const [oldestKey] = tombstones.shift()!;
+      completedTurnTombstones.delete(oldestKey);
+    }
+  };
+
+  const rememberEvictedCompletedTurn = (key: string, currentTime = now()) => {
+    completedTurnTombstones.set(key, currentTime);
+    pruneCompletedTurnTombstones(currentTime);
+  };
 
   const pruneCompletedTurns = () => {
-    const cutoff = now() - completedTurnRetentionMs;
+    const currentTime = now();
+    pruneCompletedTurnTombstones(currentTime);
+    const cutoff = currentTime - completedTurnRetentionMs;
     for (const [key, record] of turns) {
       if (record.completedAt !== null && record.completedAt < cutoff) {
+        rememberEvictedCompletedTurn(key, currentTime);
         turns.delete(key);
       }
     }
@@ -92,6 +137,7 @@ export function createChatCoordinator(
 
     while (completed.length > maxCompletedTurns) {
       const [oldestKey] = completed.shift()!;
+      rememberEvictedCompletedTurn(oldestKey);
       turns.delete(oldestKey);
     }
   };
@@ -100,6 +146,9 @@ export function createChatCoordinator(
     getOrCreateTurn(input) {
       pruneCompletedTurns();
       const key = turnKey(input);
+      if (completedTurnTombstones.has(key)) {
+        throw new ChatTurnUnavailableError();
+      }
       const existing = turns.get(key)?.handle;
       if (existing) {
         return existing;
@@ -128,6 +177,10 @@ export function createChatCoordinator(
 
       return handle;
     },
+    getTurn(input) {
+      pruneCompletedTurns();
+      return turns.get(turnKey(input))?.handle ?? null;
+    },
     stats() {
       pruneCompletedTurns();
       let completedTurnCount = 0;
@@ -140,13 +193,14 @@ export function createChatCoordinator(
         queuedThreadCount: threadQueues.size,
         retainedTurnCount: turns.size,
         completedTurnCount,
+        completedTurnTombstoneCount: completedTurnTombstones.size,
       };
     },
   };
 }
 
 function turnKey(input: ChatTurnInput): string {
-  return `${input.threadId}\0${input.runId}`;
+  return `${input.threadId}\0${input.runId}\0${input.turnId ?? ""}`;
 }
 
 class MutableChatTurnHandle implements ChatTurnHandle {

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createChatCoordinator, type ChatTurnRunner } from "../src/coordinator.ts";
+import {
+  ChatTurnUnavailableError,
+  createChatCoordinator,
+  type ChatTurnRunner,
+} from "../src/coordinator.ts";
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -77,6 +81,35 @@ test("per-thread coordinator bounds completed turn history retention", async () 
 
   assert.equal(coordinator.stats().retainedTurnCount, 1);
 
-  await coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1" }).completed;
-  assert.deepEqual(completedRuns, ["run-1", "run-2", "run-1"]);
+  assert.throws(
+    () => coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1" }),
+    ChatTurnUnavailableError,
+  );
+  assert.equal(coordinator.stats().completedTurnTombstoneCount, 1);
+  assert.deepEqual(completedRuns, ["run-1", "run-2"]);
+});
+
+test("per-thread coordinator keeps distinct turn ids under the same run id separate", async () => {
+  const coordinator = createChatCoordinator({
+    runner: ({ emit, turnId }) => {
+      emit("turn.started", { label: turnId });
+      emit("turn.completed", { message_id: `message-${turnId}` });
+    },
+  });
+
+  const first = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    turnId: "turn-1",
+  });
+  const second = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    turnId: "turn-2",
+  });
+  await Promise.all([first.completed, second.completed]);
+
+  assert.notEqual(first, second);
+  assert.equal(first.events[0].turn_id, "turn-1");
+  assert.equal(second.events[0].turn_id, "turn-2");
 });

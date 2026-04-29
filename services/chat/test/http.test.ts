@@ -1,11 +1,16 @@
 import http from "node:http";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import type { AddressInfo } from "node:net";
 import test, { type TestContext } from "node:test";
-import { createChatServer } from "../src/http.ts";
+import { createChatCoordinator, type ChatTurnRunner } from "../src/coordinator.ts";
+import { createChatServer, createSseFrameWriter } from "../src/http.ts";
 
-async function startServer(t: TestContext): Promise<string> {
-  const server = createChatServer();
+async function startServer(
+  t: TestContext,
+  options: Parameters<typeof createChatServer>[0] = {},
+): Promise<string> {
+  const server = createChatServer(options);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const { port } = server.address() as AddressInfo;
@@ -44,6 +49,16 @@ type ParsedSseEvent = {
   data: Record<string, unknown>;
 };
 
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve;
+    reject = innerReject;
+  });
+  return { promise, resolve, reject };
+}
+
 function parseSseEvents(transcript: string): ParsedSseEvent[] {
   return transcript
     .split("\n\n")
@@ -81,6 +96,45 @@ async function readSseEvents(response: Response, expectedCount: number): Promise
   await reader.cancel();
   return events.slice(0, expectedCount);
 }
+
+test("SSE writer disconnects clients that exceed the pending frame cap", () => {
+  class SlowWritable extends EventEmitter {
+    readonly frames: string[] = [];
+    destroyedWith: Error | null = null;
+
+    write(frame: string) {
+      this.frames.push(frame);
+      return false;
+    }
+
+    destroy(error: Error) {
+      this.destroyedWith = error;
+      return this;
+    }
+  }
+
+  const writable = new SlowWritable();
+  const writer = createSseFrameWriter(writable, { maxPendingFrames: 1 });
+
+  writer.writeEvent({
+    type: "turn.started",
+    seq: 1,
+    thread_id: "thread-1",
+    run_id: "run-1",
+    turn_id: "run-1",
+  });
+  writer.writeEvent({
+    type: "turn.completed",
+    seq: 2,
+    thread_id: "thread-1",
+    run_id: "run-1",
+    turn_id: "run-1",
+  });
+  writer.writeHeartbeat({ threadId: "thread-1", runId: "run-1" });
+
+  assert.equal(writable.frames.length, 1);
+  assert.match(writable.destroyedWith?.message ?? "", /SSE client exceeded pending frame limit/);
+});
 
 test("SSE schema enumerates the ten coordinator event kinds", async () => {
   const { CHAT_SSE_EVENT_TYPES } = await import("../src/sse.ts");
@@ -255,6 +309,12 @@ test("stream route resumes strictly after Last-Event-ID", async (t) => {
 test("stream route leaves heartbeat outside the resume cursor", async (t) => {
   const base = await startServer(t);
 
+  const firstResponse = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-456`,
+  );
+  assert.equal(firstResponse.status, 200);
+  await readSseEvents(firstResponse, 9);
+
   const response = await fetch(
     `${base}/v1/chat/threads/thread-123/stream?run_id=run-456`,
     {
@@ -270,6 +330,82 @@ test("stream route leaves heartbeat outside the resume cursor", async (t) => {
   assert.equal(heartbeat.id, null);
   assert.equal(heartbeat.event, "heartbeat");
   assert.equal(heartbeat.data.turn_id, "run-456");
+});
+
+test("stream route rejects resume for evicted turn history without rerunning the turn", async (t) => {
+  const completedRuns: string[] = [];
+  const coordinator = createChatCoordinator({
+    maxCompletedTurns: 1,
+    runner: ({ runId, emit }) => {
+      completedRuns.push(runId);
+      emit("turn.started", { stub: true });
+      emit("turn.completed", { message_id: `message-${runId}` });
+    },
+  });
+  const base = await startServer(t, { coordinator });
+
+  const firstResponse = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-1`,
+  );
+  assert.equal(firstResponse.status, 200);
+  await readSseEvents(firstResponse, 2);
+
+  const secondResponse = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-2`,
+  );
+  assert.equal(secondResponse.status, 200);
+  await readSseEvents(secondResponse, 2);
+
+  const resume = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-1`,
+    {
+      headers: {
+        "Last-Event-ID": "1",
+      },
+    },
+  );
+  if (resume.status !== 400) {
+    await resume.body?.cancel();
+  }
+  assert.equal(resume.status, 400);
+  const body = await resume.json() as { error?: string };
+
+  assert.equal(body.error, "'Last-Event-ID' is not available for this stream");
+  assert.deepEqual(completedRuns, ["run-1", "run-2"]);
+});
+
+test("stream route rejects future Last-Event-ID without waiting for a running turn", async (t) => {
+  const releaseTurn = deferred();
+  const runner: ChatTurnRunner = async ({ emit }) => {
+    emit("turn.started", { stub: true });
+    await releaseTurn.promise;
+    emit("turn.completed", { message_id: "message-1" });
+  };
+  const base = await startServer(t, {
+    coordinator: createChatCoordinator({ runner }),
+  });
+
+  const initial = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-456`,
+  );
+  assert.equal(initial.status, 200);
+  await readSseEvents(initial, 1);
+
+  const response = await Promise.race([
+    fetch(`${base}/v1/chat/threads/thread-123/stream?run_id=run-456`, {
+      headers: {
+        "Last-Event-ID": "9",
+      },
+    }),
+    new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 100)),
+  ]);
+
+  releaseTurn.resolve();
+
+  assert.notEqual(response, "timeout");
+  assert.equal(response.status, 400);
+  const body = await response.json() as { error?: string };
+  assert.equal(body.error, "'Last-Event-ID' is not available for this stream");
 });
 
 test("stream route rejects Last-Event-ID beyond available coordinator history", async (t) => {
