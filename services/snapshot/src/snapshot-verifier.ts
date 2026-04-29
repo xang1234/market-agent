@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type {
   JsonObject,
   JsonValue,
@@ -112,6 +114,17 @@ export type VerifierToolAction = {
   pending_action_id?: string | null;
 };
 
+export type VerifierPendingAction = {
+  pending_action_id: string;
+  tool_name: string;
+  bundle_id: string;
+  audience: string;
+  arguments?: JsonValue;
+  approval_required: true;
+  read_only: false;
+  idempotency_key?: string;
+};
+
 export type SnapshotVerificationInput = {
   thread_id?: string | null;
   snapshot_id: string;
@@ -124,6 +137,7 @@ export type SnapshotVerificationInput = {
   sources?: ReadonlyArray<VerifierSource>;
   required_disclosures?: ReadonlyArray<RequiredDisclosure>;
   tool_actions?: ReadonlyArray<VerifierToolAction>;
+  pending_actions?: ReadonlyArray<VerifierPendingAction>;
 };
 
 export type SnapshotVerifierReasonCode =
@@ -260,7 +274,15 @@ async function invalidVerifierInputResult(
 type NormalizedInput = Required<
   Omit<
     SnapshotVerificationInput,
-    "thread_id" | "facts" | "claims" | "events" | "documents" | "sources" | "required_disclosures" | "tool_actions"
+    | "thread_id"
+    | "facts"
+    | "claims"
+    | "events"
+    | "documents"
+    | "sources"
+    | "required_disclosures"
+    | "tool_actions"
+    | "pending_actions"
   >
 > & {
   thread_id: string | null;
@@ -271,6 +293,7 @@ type NormalizedInput = Required<
   sources: ReadonlyArray<{ source_id: string }>;
   required_disclosures: ReadonlyArray<RequiredDisclosure>;
   tool_actions: ReadonlyArray<VerifierToolAction>;
+  pending_actions: ReadonlyArray<VerifierPendingAction>;
 };
 
 function normalizeInput(input: SnapshotVerificationInput): NormalizedInput {
@@ -317,6 +340,9 @@ function normalizeInput(input: SnapshotVerificationInput): NormalizedInput {
     required_disclosures: Object.freeze(requiredDisclosures),
     tool_actions: Object.freeze(
       (input.tool_actions ?? []).map((action, index) => normalizeToolAction(action, index)),
+    ),
+    pending_actions: Object.freeze(
+      (input.pending_actions ?? []).map((action, index) => normalizePendingAction(action, index)),
     ),
   });
 }
@@ -707,6 +733,61 @@ function normalizeToolAction(action: VerifierToolAction, index: number): Verifie
       ? {}
       : { pending_action_id: assertUuidV5(action.pending_action_id, `verifySnapshotSeal.tool_actions[${index}].pending_action_id`) }),
   });
+}
+
+function normalizePendingAction(action: VerifierPendingAction, index: number): VerifierPendingAction {
+  if (action === null || typeof action !== "object") {
+    throw new Error(`verifySnapshotSeal.pending_actions[${index}]: must be an object`);
+  }
+  const normalized = {
+    pending_action_id: assertUuidV5(
+      action.pending_action_id,
+      `verifySnapshotSeal.pending_actions[${index}].pending_action_id`,
+    ),
+    tool_name: assertNonEmptyString(
+      action.tool_name,
+      `verifySnapshotSeal.pending_actions[${index}].tool_name`,
+    ),
+    bundle_id: assertNonEmptyString(
+      action.bundle_id,
+      `verifySnapshotSeal.pending_actions[${index}].bundle_id`,
+    ),
+    audience: assertNonEmptyString(
+      action.audience,
+      `verifySnapshotSeal.pending_actions[${index}].audience`,
+    ),
+    ...(action.arguments === undefined
+      ? {}
+      : {
+          arguments: cloneJsonValue(
+            action.arguments,
+            `verifySnapshotSeal.pending_actions[${index}].arguments`,
+          ),
+        }),
+    approval_required: assertBoolean(
+      action.approval_required,
+      `verifySnapshotSeal.pending_actions[${index}].approval_required`,
+    ),
+    read_only: assertBoolean(
+      action.read_only,
+      `verifySnapshotSeal.pending_actions[${index}].read_only`,
+    ),
+    ...(action.idempotency_key === undefined
+      ? {}
+      : {
+          idempotency_key: assertNonEmptyString(
+            action.idempotency_key,
+            `verifySnapshotSeal.pending_actions[${index}].idempotency_key`,
+          ),
+        }),
+  };
+  if (normalized.approval_required !== true) {
+    throw new Error(`verifySnapshotSeal.pending_actions[${index}].approval_required: must be true`);
+  }
+  if (normalized.read_only !== false) {
+    throw new Error(`verifySnapshotSeal.pending_actions[${index}].read_only: must be false`);
+  }
+  return Object.freeze(normalized);
 }
 
 function verifyManifestRefs(
@@ -1474,22 +1555,45 @@ function verifyApprovals(
   input: NormalizedInput,
   addFailure: (reason: SnapshotVerifierReasonCode, details: JsonObject) => void,
 ): void {
+  const pendingActions = new Map(
+    input.pending_actions.map((action) => [action.pending_action_id, action]),
+  );
   for (const action of input.tool_actions) {
-    if (
-      !action.read_only &&
-      (action.approval_required === undefined ||
-        (action.approval_required === true &&
-          action.approved !== true &&
-          action.pending_action_id == null))
-    ) {
+    if (action.read_only) continue;
+
+    let pendingActionStatus: string | null = null;
+    if (action.approval_required === true && action.approved !== true) {
+      pendingActionStatus = verifiedPendingActionStatus(action, pendingActions);
+    }
+
+    if (action.approval_required === undefined || pendingActionStatus !== null) {
       addFailure("unapproved_side_effect", {
         tool_name: action.tool_name,
         tool_call_id: action.tool_call_id ?? null,
         approval_required: action.approval_required ?? null,
         pending_action_id: action.pending_action_id ?? null,
+        ...(pendingActionStatus === null ? {} : { pending_action_status: pendingActionStatus }),
       });
     }
   }
+}
+
+function verifiedPendingActionStatus(
+  action: VerifierToolAction,
+  pendingActions: ReadonlyMap<string, VerifierPendingAction>,
+): string | null {
+  if (action.pending_action_id == null) return "missing";
+
+  const pendingAction = pendingActions.get(action.pending_action_id);
+  if (pendingAction === undefined) return "missing";
+  if (pendingAction.tool_name !== action.tool_name) return "tool_mismatch";
+  if (pendingAction.approval_required !== true || pendingAction.read_only !== false) {
+    return "invalid_policy";
+  }
+  if (pendingActionId(pendingAction) !== pendingAction.pending_action_id) {
+    return "id_mismatch";
+  }
+  return null;
 }
 
 function factBindingsForBlock(block: VerifierBlock): ReadonlyArray<VerifierFactBinding> {
@@ -1628,6 +1732,11 @@ function cloneJsonObject(value: JsonObject, label: string): JsonObject {
   return Object.freeze(JSON.parse(stableJson(value)) as JsonObject);
 }
 
+function cloneJsonValue<T extends JsonValue>(value: T, label: string): T {
+  assertJsonValue(value, label, new Set<object>());
+  return Object.freeze(JSON.parse(stableJson(value)) as T);
+}
+
 function assertJsonValue(
   value: unknown,
   label: string,
@@ -1674,6 +1783,32 @@ function stableJson(value: JsonValue): string {
     .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`)
     .join(",")}}`;
+}
+
+function pendingActionId(action: VerifierPendingAction): string {
+  const seed: JsonObject = {
+    tool_name: action.tool_name,
+    bundle_id: action.bundle_id,
+    audience: action.audience,
+    arguments: action.arguments ?? null,
+    idempotency_key: action.idempotency_key ?? null,
+  };
+  const digest = createHash("sha256")
+    .update(stableJson(seed))
+    .digest("hex")
+    .slice(0, 32);
+  return deterministicUuid(digest);
+}
+
+function deterministicUuid(hex: string): string {
+  const chars = [...hex];
+  chars[12] = "5";
+  chars[16] = ((Number.parseInt(chars[16], 16) & 0x3) | 0x8).toString(16);
+  return `${chars.slice(0, 8).join("")}-${chars.slice(8, 12).join("")}-${chars
+    .slice(12, 16)
+    .join("")}-${chars.slice(16, 20).join("")}-${chars
+    .slice(20, 32)
+    .join("")}`;
 }
 
 function assertUuidV4(value: unknown, label: string): string {

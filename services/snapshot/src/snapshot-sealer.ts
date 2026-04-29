@@ -96,6 +96,7 @@ export async function sealSnapshot(
         extra_tool_call_ids: [...toolCallAudit.extra_tool_call_ids],
         duplicate_tool_call_ids: [...toolCallAudit.duplicate_tool_call_ids],
         missing_hash_tool_call_ids: [...toolCallAudit.missing_hash_tool_call_ids],
+        missing_provenance: toolCallAudit.missing_provenance,
       }),
     });
     await writeSealFailure(db, input, failure);

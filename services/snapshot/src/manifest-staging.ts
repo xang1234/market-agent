@@ -108,6 +108,7 @@ export type ToolCallLogAudit = {
   extra_tool_call_ids: ReadonlyArray<string>;
   duplicate_tool_call_ids: ReadonlyArray<string>;
   missing_hash_tool_call_ids: ReadonlyArray<string>;
+  missing_provenance: boolean;
 };
 
 export type ToolCallLogAuditOptions = {
@@ -257,7 +258,13 @@ export function stageSnapshotManifest(
 
 export async function auditManifestToolCallLog(
   db: QueryExecutor,
-  manifest: Pick<SnapshotManifestDraft, "tool_call_ids" | "tool_call_result_hashes">,
+  manifest: Pick<SnapshotManifestDraft, "tool_call_ids" | "tool_call_result_hashes"> &
+    Partial<
+      Pick<
+        SnapshotManifestDraft,
+        "fact_refs" | "claim_refs" | "event_refs" | "document_refs" | "series_specs" | "source_ids"
+      >
+    >,
   options: ToolCallLogAuditOptions = {},
 ): Promise<ToolCallLogAudit> {
   assertArray(
@@ -300,18 +307,21 @@ export async function auditManifestToolCallLog(
     ...duplicateHashToolCallIds,
   ]);
   const missingHashToolCallIds = uniqueToolCallIds.filter((toolCallId) => !expectedHashes.has(toolCallId));
+  const missingProvenance = uniqueToolCallIds.length === 0 && hasProvenanceBearingRefs(manifest);
 
   if (uniqueToolCallIds.length === 0) {
     return Object.freeze({
       ok:
         extraToolCallIds.length === 0 &&
         duplicateAuditToolCallIds.length === 0 &&
-        missingHashToolCallIds.length === 0,
+        missingHashToolCallIds.length === 0 &&
+        !missingProvenance,
       missing_tool_call_ids: Object.freeze([]),
       mismatched_tool_call_ids: Object.freeze([]),
       extra_tool_call_ids: Object.freeze(extraToolCallIds),
       duplicate_tool_call_ids: Object.freeze(duplicateAuditToolCallIds),
       missing_hash_tool_call_ids: Object.freeze(missingHashToolCallIds),
+      missing_provenance: missingProvenance,
     });
   }
 
@@ -360,7 +370,26 @@ export async function auditManifestToolCallLog(
     extra_tool_call_ids: Object.freeze(extraToolCallIds),
     duplicate_tool_call_ids: Object.freeze(duplicateAuditToolCallIds),
     missing_hash_tool_call_ids: Object.freeze(missingHashToolCallIds),
+    missing_provenance: false,
   });
+}
+
+function hasProvenanceBearingRefs(
+  manifest: Partial<
+    Pick<
+      SnapshotManifestDraft,
+      "fact_refs" | "claim_refs" | "event_refs" | "document_refs" | "series_specs" | "source_ids"
+    >
+  >,
+): boolean {
+  return [
+    manifest.fact_refs,
+    manifest.claim_refs,
+    manifest.event_refs,
+    manifest.document_refs,
+    manifest.series_specs,
+    manifest.source_ids,
+  ].some((refs) => Array.isArray(refs) && refs.length > 0);
 }
 
 function firstSeen(values: ReadonlyArray<string>): string[] {

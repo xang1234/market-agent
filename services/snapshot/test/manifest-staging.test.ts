@@ -176,6 +176,7 @@ test("auditManifestToolCallLog reports missing staged tool calls", async () => {
     extra_tool_call_ids: [],
     duplicate_tool_call_ids: [],
     missing_hash_tool_call_ids: [],
+    missing_provenance: false,
   });
   assert.match(queries[0].text, /tool_call_logs/);
   assert.deepEqual(queries[0].values, [
@@ -221,6 +222,7 @@ test("auditManifestToolCallLog scopes audit to successful thread and agent calls
     extra_tool_call_ids: [],
     duplicate_tool_call_ids: [],
     missing_hash_tool_call_ids: [],
+    missing_provenance: false,
   });
   assert.match(queries[0].text, /status = any\(\$2::text\[\]\)/);
   assert.match(queries[0].text, /thread_id = \$3::uuid/);
@@ -260,6 +262,7 @@ test("auditManifestToolCallLog reports missing result hash entries without throw
     extra_tool_call_ids: [],
     duplicate_tool_call_ids: [],
     missing_hash_tool_call_ids: [secondToolCallId],
+    missing_provenance: false,
   });
 });
 
@@ -302,6 +305,7 @@ test("auditManifestToolCallLog rejects refs whose contribution hash differs from
     extra_tool_call_ids: [],
     duplicate_tool_call_ids: [],
     missing_hash_tool_call_ids: [],
+    missing_provenance: false,
   });
   assert.match(queries[0].text, /result_hash/);
 });
@@ -339,6 +343,7 @@ test("auditManifestToolCallLog rejects extra and duplicate result hash entries",
     extra_tool_call_ids: [extraToolCallId],
     duplicate_tool_call_ids: [firstToolCallId],
     missing_hash_tool_call_ids: [],
+    missing_provenance: false,
   });
 });
 
@@ -389,5 +394,32 @@ test("auditManifestToolCallLog accepts full tool result hashes with embedded man
     extra_tool_call_ids: [],
     duplicate_tool_call_ids: [],
     missing_hash_tool_call_ids: [],
+    missing_provenance: false,
+  });
+});
+
+test("auditManifestToolCallLog rejects evidence refs without tool-call provenance", async () => {
+  const result = await auditManifestToolCallLog(
+    {
+      async query() {
+        throw new Error("tool_call_logs must not be queried without tool_call_ids");
+      },
+    },
+    {
+      tool_call_ids: [],
+      tool_call_result_hashes: [],
+      fact_refs: [firstFactId],
+      source_ids: [firstSourceId],
+    },
+  );
+
+  assert.deepEqual(result, {
+    ok: false,
+    missing_tool_call_ids: [],
+    mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [],
+    duplicate_tool_call_ids: [],
+    missing_hash_tool_call_ids: [],
+    missing_provenance: true,
   });
 });
