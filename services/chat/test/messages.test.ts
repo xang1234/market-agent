@@ -25,6 +25,23 @@ test("chat message persistence does not insert when snapshot sealing fails", asy
   assert.equal(db.queries.some((query) => query.text.includes("insert into chat_messages")), false);
 });
 
+test("chat message persistence does not insert when verification result is inconsistent", async () => {
+  const db = recordingDb();
+  const result = await persistChatMessageAfterSnapshotSeal(db, {
+    thread_id: "11111111-1111-4111-a111-111111111111",
+    role: "assistant",
+    blocks: [{ type: "text", text: "unverified answer" }],
+    content_hash: "sha256:unverified",
+    sealSnapshot: async () => ({
+      ...successfulSealResult(),
+      verification: { ok: false, failures: [] },
+    }),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(db.queries.some((query) => query.text.includes("insert into chat_messages")), false);
+});
+
 test("chat message persistence inserts only after snapshot sealing succeeds", async () => {
   const steps: string[] = [];
   const db = recordingDb(steps);
@@ -177,6 +194,33 @@ test("chat message persistence adapter rejects failed seals without inserting", 
     /snapshot seal failed/,
   );
   assert.equal(client.queries.some((query) => query.text.includes("insert into chat_messages")), false);
+});
+
+test("chat message persistence adapter rejects inconsistent verification without pool checkout", async () => {
+  const persist = createChatMessagePersistence({
+    pool: {
+      connect: async () => {
+        throw new Error("pool must not connect after inconsistent verification");
+      },
+    },
+    sealSnapshot: async () => ({
+      ...successfulSealResult(),
+      verification: { ok: false, failures: [] },
+    }),
+  });
+
+  await assert.rejects(
+    () =>
+      persist({
+        threadId: "11111111-1111-4111-a111-111111111111",
+        runId: "run-1",
+        turnId: "turn-1",
+        role: "assistant",
+        blocks: [{ type: "text", text: "unverified answer" }],
+        content_hash: "sha256:unverified",
+      }),
+    /snapshot seal failed/,
+  );
 });
 
 function successfulSealResult(): SnapshotSealResult {

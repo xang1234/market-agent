@@ -64,7 +64,7 @@ export type PersistChatMessageAfterSnapshotSealResult =
     }
   | {
       ok: false;
-      seal: SnapshotSealResult & { ok: false };
+      seal: SnapshotSealResult;
     };
 
 export async function persistChatMessageAfterSnapshotSeal(
@@ -74,7 +74,7 @@ export async function persistChatMessageAfterSnapshotSeal(
   assertChatMessageTransactionClient(db);
 
   const seal = await input.sealSnapshot();
-  if (!seal.ok) {
+  if (!isVerifiedSeal(seal)) {
     return Object.freeze({ ok: false, seal });
   }
 
@@ -86,7 +86,7 @@ export async function persistChatMessageAfterSnapshotSealWithPool(
   input: PersistChatMessageAfterSnapshotSealInput,
 ): Promise<PersistChatMessageAfterSnapshotSealResult> {
   const seal = await input.sealSnapshot();
-  if (!seal.ok) {
+  if (!isVerifiedSeal(seal)) {
     return Object.freeze({ ok: false, seal });
   }
 
@@ -218,4 +218,8 @@ function isPoolLike(db: ChatMessagePersistenceDb): boolean {
     connect?: unknown;
   };
   return typeof candidate.connect === "function";
+}
+
+function isVerifiedSeal(seal: SnapshotSealResult): seal is SnapshotSealResult & { ok: true } {
+  return seal.ok && seal.verification.ok;
 }

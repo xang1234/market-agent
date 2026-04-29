@@ -1,6 +1,6 @@
 # Chat Service
 
-Tracking beads: `fra-u9l`, `fra-cty`, `fra-eom`.
+Tracking beads: `fra-u9l`, `fra-cty`, `fra-eom`, `fra-d7t`.
 
 This package owns the chat streaming transport and the in-process turn
 coordinator used by the current stub turn runner.
@@ -13,6 +13,16 @@ coordinator used by the current stub turn runner.
 - resumes after `Last-Event-ID` by replaying only events with a higher sequence
 - emits periodic `heartbeat` control events
 - serializes turn execution per `thread_id`
+- can load a `persistAssistantMessage` hook from `CHAT_PERSISTENCE_MODULE`
+  so assistant messages are persisted only after snapshot sealing succeeds
+
+## Persistence Hook
+
+`CHAT_PERSISTENCE_MODULE` may be a package specifier, absolute path, file URL,
+or path relative to the process working directory. The module must export
+`persistAssistantMessage(input)`, which returns `{ snapshot_id, message_id }`
+only after a snapshot has sealed and the chat message row has been committed.
+When the variable is omitted, the dev server keeps the stub-only stream path.
 
 ## Resume Retention
 

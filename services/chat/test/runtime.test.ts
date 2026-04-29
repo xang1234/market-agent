@@ -34,3 +34,28 @@ test("runtime config loads assistant persistence from configured module", async 
     message_id: "message-1",
   });
 });
+
+test("runtime config resolves relative persistence modules from the process cwd", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "chat-runtime-relative-"));
+  await writeFile(
+    join(dir, "persistence.mjs"),
+    "export async function persistAssistantMessage() { return { snapshot_id: 'relative-snapshot', message_id: 'relative-message' }; }",
+  );
+
+  const options = await loadChatServerOptionsFromEnv({
+    CHAT_PERSISTENCE_MODULE: "./persistence.mjs",
+  }, dir);
+
+  assert.equal(typeof options.persistAssistantMessage, "function");
+  assert.deepEqual(await options.persistAssistantMessage!({
+    threadId: "thread-1",
+    runId: "run-1",
+    turnId: "turn-1",
+    role: "assistant",
+    blocks: [],
+    content_hash: "sha256:test",
+  }), {
+    snapshot_id: "relative-snapshot",
+    message_id: "relative-message",
+  });
+});
