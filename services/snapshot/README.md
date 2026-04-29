@@ -34,3 +34,10 @@ snapshot/as-of boundaries, and approval state for write-intent tools. If callers
 omit precompiled `required_disclosures`, the verifier derives them from the
 disclosure policy compiler. When passed a query executor, every failure is
 written to `verifier_fail_logs` with its deterministic `reason_code`.
+
+## Transactional sealing
+
+`sealSnapshot()` verifies a staged artifact and then writes the full manifest,
+including tool-call result hashes, to `snapshots` inside a single database
+transaction. If persistence fails after the transaction starts, the helper rolls
+back instead of leaving a partial seal.

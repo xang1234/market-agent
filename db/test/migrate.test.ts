@@ -18,6 +18,7 @@ import {
 
 const schemaPath = join(workspaceRoot, "spec", "finance_research_db_schema.sql");
 const initMigrationPath = join(dbRoot, "migrations", "0001_init.up.sql");
+const snapshotManifestMigrationPath = join(dbRoot, "migrations", "0005_snapshot_document_refs.up.sql");
 
 function loadExpectedTables() {
   return Array.from(
@@ -25,6 +26,18 @@ function loadExpectedTables() {
     (match) => match[1],
   ).sort();
 }
+
+test("snapshot manifest forward migration owns post-baseline snapshot columns", () => {
+  const initMigration = readFileSync(initMigrationPath, "utf8");
+  const forwardMigration = readFileSync(snapshotManifestMigrationPath, "utf8");
+  const schema = readFileSync(schemaPath, "utf8");
+
+  for (const column of ["document_refs", "tool_call_result_hashes"]) {
+    assert.doesNotMatch(initMigration, new RegExp(`\\b${column}\\b`));
+    assert.match(forwardMigration, new RegExp(`\\b${column}\\b`));
+    assert.match(schema, new RegExp(`\\b${column}\\b`));
+  }
+});
 
 test("migrate up applies pending migrations and records them in schema_migrations", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
@@ -49,10 +62,16 @@ test("migrate up applies pending migrations and records them in schema_migration
   });
 
   assert.equal(migrateResult.status, 0, migrateResult.stderr || migrateResult.stdout);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "4");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "5");
   assert.deepEqual(
     queryValue(containerName, "select version || ':' || name from schema_migrations order by version").split("\n"),
-    ["0001:init", "0002:issuer_aliases", "0003:default_manual_watchlist", "0004:agent_run_log"],
+    [
+      "0001:init",
+      "0002:issuer_aliases",
+      "0003:default_manual_watchlist",
+      "0004:agent_run_log",
+      "0005:snapshot_document_refs",
+    ],
   );
 
   const publicTables = queryValue(
@@ -100,6 +119,7 @@ test("migrate status reports all migrations as applied after migrate up", { time
   assert.match(statusResult.stdout, /0002\s+issuer_aliases\s+applied/);
   assert.match(statusResult.stdout, /0003\s+default_manual_watchlist\s+applied/);
   assert.match(statusResult.stdout, /0004\s+agent_run_log\s+applied/);
+  assert.match(statusResult.stdout, /0005\s+snapshot_document_refs\s+applied/);
 });
 
 test("migrate down rolls back the most recently applied migration", { timeout: 120000 }, async (t) => {
@@ -131,9 +151,13 @@ test("migrate down rolls back the most recently applied migration", { timeout: 1
   });
   assert.equal(downResult.status, 0, downResult.stderr || downResult.stdout);
 
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "3");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "4");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
+    "1",
+  );
+  assert.equal(
+    queryValue(containerName, "select count(*) from information_schema.columns where table_name = 'snapshots' and column_name in ('document_refs', 'tool_call_result_hashes')"),
     "0",
   );
   assert.equal(
@@ -657,7 +681,7 @@ test("migrate down rolls back schema changes when removing the migration record 
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /rejecting schema_migrations delete/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "4");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "5");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -709,6 +733,6 @@ test("migrate down fails when any applied migration is missing locally", { timeo
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /Applied migration 0000 is missing locally/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "5");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "6");
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
 });
