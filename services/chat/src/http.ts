@@ -1,4 +1,5 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
+import { createChatSseSequencer, stubSuccessEvents, type ChatSseEvent } from "./sse.ts";
 
 const HEARTBEAT_INTERVAL_MS = 250;
 
@@ -28,19 +29,20 @@ export function createChatServer(): Server {
       return;
     }
 
+    const sequencer = createChatSseSequencer({ threadId: route.threadId, runId: route.runId });
+
     writeSseHeaders(res);
-    writeEvent(res, "turn.started", {
-      thread_id: route.threadId,
-      run_id: route.runId,
-      stub: true,
-    });
+    for (const event of stubSuccessEvents(sequencer)) {
+      writeEvent(res, event);
+    }
 
     const heartbeat = setInterval(() => {
-      writeEvent(res, "heartbeat", {
-        thread_id: route.threadId,
-        run_id: route.runId,
-        stub: true,
-      });
+      writeEvent(
+        res,
+        sequencer.next("heartbeat", {
+          stub: true,
+        }),
+      );
     }, HEARTBEAT_INTERVAL_MS);
 
     let cleanedUp = false;
@@ -95,7 +97,8 @@ function writeSseHeaders(res: ServerResponse) {
   res.setHeader("connection", "keep-alive");
 }
 
-function writeEvent(res: ServerResponse, event: string, data: object) {
-  res.write(`event: ${event}\n`);
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
+function writeEvent(res: ServerResponse, event: ChatSseEvent) {
+  res.write(`id: ${event.seq}\n`);
+  res.write(`event: ${event.type}\n`);
+  res.write(`data: ${JSON.stringify(event)}\n\n`);
 }

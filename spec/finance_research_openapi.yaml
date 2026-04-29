@@ -446,7 +446,10 @@ paths:
     get:
       tags: [Chat]
       summary: SSE stream for a thread run
-      description: SSE chat streaming is a backend-mediated run transport.
+      description: SSE chat streaming is a backend-mediated run transport. Each
+        coordinator event uses the SSE `id` field as the monotonic sequence
+        number and repeats `seq`, `thread_id`, `run_id`, and `turn_id` in the
+        JSON payload. Block events also carry `block_id`.
       operationId: streamThread
       parameters:
         - in: path
@@ -471,20 +474,41 @@ paths:
               examples:
                 default:
                   value: |
+                    id: 1
                     event: turn.started
-                    data: {"run_id":"..."}
+                    data: {"type":"turn.started","seq":1,"thread_id":"...","run_id":"...","turn_id":"..."}
 
+                    id: 2
+                    event: tool.started
+                    data: {"type":"tool.started","seq":2,"thread_id":"...","run_id":"...","turn_id":"...","tool_call_id":"...","tool_name":"resolve_subjects"}
+
+                    id: 3
+                    event: tool.completed
+                    data: {"type":"tool.completed","seq":3,"thread_id":"...","run_id":"...","turn_id":"...","tool_call_id":"...","status":"ok"}
+
+                    id: 4
+                    event: snapshot.staged
+                    data: {"type":"snapshot.staged","seq":4,"thread_id":"...","run_id":"...","turn_id":"...","snapshot_id":"..."}
+
+                    id: 5
                     event: snapshot.sealed
-                    data: {"snapshot_id":"..."}
+                    data: {"type":"snapshot.sealed","seq":5,"thread_id":"...","run_id":"...","turn_id":"...","snapshot_id":"..."}
 
-                    event: block.added
-                    data: {"id":"b1","kind":"section"}
+                    id: 6
+                    event: block.began
+                    data: {"type":"block.began","seq":6,"thread_id":"...","run_id":"...","turn_id":"...","block_id":"b1","kind":"section"}
 
+                    id: 7
                     event: block.delta
-                    data: {"id":"b2","segment":{"type":"text","text":"Revenue grew "}}
+                    data: {"type":"block.delta","seq":7,"thread_id":"...","run_id":"...","turn_id":"...","block_id":"b1","delta":{"segment":{"type":"text","text":"Revenue grew "}}}
 
+                    id: 8
+                    event: block.completed
+                    data: {"type":"block.completed","seq":8,"thread_id":"...","run_id":"...","turn_id":"...","block_id":"b1"}
+
+                    id: 9
                     event: turn.completed
-                    data: {"message_id":"..."}
+                    data: {"type":"turn.completed","seq":9,"thread_id":"...","run_id":"...","turn_id":"...","message_id":"..."}
   /v1/analyze/templates:
     get:
       tags: [Analyze]

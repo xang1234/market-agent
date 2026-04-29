@@ -38,6 +38,67 @@ async function getRaw(base: string, path: string): Promise<{ status: number; bod
   });
 }
 
+type ParsedSseEvent = {
+  id: string | null;
+  event: string | null;
+  data: Record<string, unknown>;
+};
+
+function parseSseEvents(transcript: string): ParsedSseEvent[] {
+  return transcript
+    .split("\n\n")
+    .filter((block) => block.trim() !== "")
+    .map((block) => {
+      const event: ParsedSseEvent = { id: null, event: null, data: {} };
+      for (const line of block.split("\n")) {
+        if (line.startsWith("id: ")) {
+          event.id = line.slice("id: ".length);
+        } else if (line.startsWith("event: ")) {
+          event.event = line.slice("event: ".length);
+        } else if (line.startsWith("data: ")) {
+          event.data = JSON.parse(line.slice("data: ".length)) as Record<string, unknown>;
+        }
+      }
+      return event;
+    });
+}
+
+async function readSseEvents(response: Response, expectedCount: number): Promise<ParsedSseEvent[]> {
+  const reader = response.body?.getReader();
+  assert.ok(reader, "expected a readable stream body");
+
+  const decoder = new TextDecoder();
+  let transcript = "";
+  let events: ParsedSseEvent[] = [];
+
+  while (events.length < expectedCount) {
+    const next = await reader.read();
+    assert.equal(next.done, false, "expected the SSE stream to remain open");
+    transcript += decoder.decode(next.value, { stream: true });
+    events = parseSseEvents(transcript);
+  }
+
+  await reader.cancel();
+  return events.slice(0, expectedCount);
+}
+
+test("SSE schema enumerates the ten coordinator event kinds", async () => {
+  const { CHAT_SSE_EVENT_TYPES } = await import("../src/sse.ts");
+
+  assert.deepEqual([...CHAT_SSE_EVENT_TYPES], [
+    "turn.started",
+    "tool.started",
+    "tool.completed",
+    "snapshot.staged",
+    "snapshot.sealed",
+    "block.began",
+    "block.delta",
+    "block.completed",
+    "turn.completed",
+    "turn.error",
+  ]);
+});
+
 test("stream route returns 400 when run_id is missing", async (t) => {
   const base = await startServer(t);
 
@@ -105,12 +166,56 @@ test("stream route writes an immediate turn.started event", async (t) => {
   assert.equal(first.done, false);
 
   const chunk = new TextDecoder().decode(first.value);
+  assert.match(chunk, /id: 1/);
   assert.match(chunk, /event: turn\.started/);
+  assert.match(chunk, /"seq":1/);
   assert.match(chunk, /"thread_id":"thread-123"/);
   assert.match(chunk, /"run_id":"run-456"/);
+  assert.match(chunk, /"turn_id":"run-456"/);
   assert.match(chunk, /"stub":true/);
 
   await reader.cancel();
+});
+
+test("stream route emits sequenced success-path coordinator events with correlation fields", async (t) => {
+  const base = await startServer(t);
+
+  const response = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-456`,
+  );
+
+  assert.equal(response.status, 200);
+  const events = await readSseEvents(response, 9);
+
+  assert.deepEqual(events.map((event) => event.event), [
+    "turn.started",
+    "tool.started",
+    "tool.completed",
+    "snapshot.staged",
+    "snapshot.sealed",
+    "block.began",
+    "block.delta",
+    "block.completed",
+    "turn.completed",
+  ]);
+
+  for (const [index, event] of events.entries()) {
+    const seq = index + 1;
+    assert.equal(event.id, String(seq));
+    assert.equal(event.data.type, event.event);
+    assert.equal(event.data.seq, seq);
+    assert.equal(event.data.thread_id, "thread-123");
+    assert.equal(event.data.run_id, "run-456");
+    assert.equal(event.data.turn_id, "run-456");
+  }
+
+  assert.equal(events[1].data.tool_call_id, "tool-call-1");
+  assert.equal(events[2].data.tool_call_id, "tool-call-1");
+  assert.equal(events[3].data.snapshot_id, "snapshot-1");
+  assert.equal(events[4].data.snapshot_id, "snapshot-1");
+
+  const blockEvents = events.slice(5, 8);
+  assert.deepEqual(blockEvents.map((event) => event.data.block_id), ["block-1", "block-1", "block-1"]);
 });
 
 test("stream route stays open long enough to emit a heartbeat", async (t) => {
