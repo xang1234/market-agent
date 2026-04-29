@@ -6,18 +6,22 @@ import {
   stageSnapshotManifest,
   type SnapshotManifestDraft,
 } from "../src/manifest-staging.ts";
+import { hashJsonValue } from "../../observability/src/tool-call.ts";
 
 const listingId = "00000000-0000-4000-8000-000000000001";
 const firstFactId = "00000000-0000-4000-8000-000000000101";
 const secondFactId = "00000000-0000-4000-8000-000000000102";
 const claimId = "00000000-0000-4000-8000-000000000201";
 const eventId = "00000000-0000-4000-8000-000000000301";
+const documentId = "00000000-0000-4000-8000-000000000351";
 const firstSourceId = "00000000-0000-4000-8000-000000000401";
 const secondSourceId = "00000000-0000-4000-8000-000000000402";
 const firstToolCallId = "00000000-0000-4000-8000-000000000501";
 const secondToolCallId = "00000000-0000-4000-8000-000000000502";
 const threadId = "00000000-0000-4000-8000-000000000601";
 const agentId = "00000000-0000-4000-8000-000000000701";
+const fakeFirstHash = `sha256:${"1".repeat(64)}`;
+const fakeSecondHash = `sha256:${"2".repeat(64)}`;
 
 test("stageSnapshotManifest collects refs from tool-call outputs with audit ids", () => {
   const manifest = stageSnapshotManifest({
@@ -35,6 +39,7 @@ test("stageSnapshotManifest collects refs from tool-call outputs with audit ids"
         subject_refs: [{ kind: "listing", id: listingId }],
         fact_refs: [firstFactId, secondFactId],
         claim_refs: [claimId],
+        document_refs: [documentId],
         source_ids: [firstSourceId],
         series_specs: [
           {
@@ -60,11 +65,20 @@ test("stageSnapshotManifest collects refs from tool-call outputs with audit ids"
     ],
   });
 
-  assert.deepEqual(manifest, {
+  assert.deepEqual(manifest.tool_call_result_hashes.map((row) => row.tool_call_id), [
+    firstToolCallId,
+    secondToolCallId,
+  ]);
+  assert.match(manifest.tool_call_result_hashes[0].result_hash, /^sha256:[0-9a-f]{64}$/);
+  assert.match(manifest.tool_call_result_hashes[1].result_hash, /^sha256:[0-9a-f]{64}$/);
+
+  const { tool_call_result_hashes, ...rest } = manifest;
+  assert.deepEqual(rest, {
     subject_refs: [{ kind: "listing", id: listingId }],
     fact_refs: [firstFactId, secondFactId],
     claim_refs: [claimId],
     event_refs: [eventId],
+    document_refs: [documentId],
     series_specs: [
       {
         subject_ref: { kind: "listing", id: listingId },
@@ -83,7 +97,7 @@ test("stageSnapshotManifest collects refs from tool-call outputs with audit ids"
     },
     model_version: null,
     parent_snapshot: null,
-  } satisfies SnapshotManifestDraft);
+  } satisfies Omit<SnapshotManifestDraft, "tool_call_result_hashes">);
 });
 
 test("stageSnapshotManifest rejects referenced manifest content without a valid tool_call_id", () => {
@@ -137,7 +151,7 @@ test("auditManifestToolCallLog reports missing staged tool calls", async () => {
     ) {
       queries.push({ text, values });
       return {
-        rows: [{ tool_call_id: firstToolCallId }] as R[],
+        rows: [{ tool_call_id: firstToolCallId, result_hash: fakeFirstHash }] as R[],
         rowCount: 1,
         command: "SELECT",
         oid: 0,
@@ -148,11 +162,16 @@ test("auditManifestToolCallLog reports missing staged tool calls", async () => {
 
   const result = await auditManifestToolCallLog(db, {
     tool_call_ids: [firstToolCallId, secondToolCallId],
+    tool_call_result_hashes: [
+      { tool_call_id: firstToolCallId, result_hash: fakeFirstHash },
+      { tool_call_id: secondToolCallId, result_hash: fakeSecondHash },
+    ],
   });
 
   assert.deepEqual(result, {
     ok: false,
     missing_tool_call_ids: [secondToolCallId],
+    mismatched_tool_call_ids: [],
   });
   assert.match(queries[0].text, /tool_call_logs/);
   assert.deepEqual(queries[0].values, [
@@ -170,7 +189,7 @@ test("auditManifestToolCallLog scopes audit to successful thread and agent calls
     ) {
       queries.push({ text, values });
       return {
-        rows: [{ tool_call_id: firstToolCallId }] as R[],
+        rows: [{ tool_call_id: firstToolCallId, result_hash: fakeFirstHash }] as R[],
         rowCount: 1,
         command: "SELECT",
         oid: 0,
@@ -181,13 +200,20 @@ test("auditManifestToolCallLog scopes audit to successful thread and agent calls
 
   const result = await auditManifestToolCallLog(
     db,
-    { tool_call_ids: [firstToolCallId, secondToolCallId] },
+    {
+      tool_call_ids: [firstToolCallId, secondToolCallId],
+      tool_call_result_hashes: [
+        { tool_call_id: firstToolCallId, result_hash: fakeFirstHash },
+        { tool_call_id: secondToolCallId, result_hash: fakeSecondHash },
+      ],
+    },
     { thread_id: threadId, agent_id: agentId },
   );
 
   assert.deepEqual(result, {
     ok: false,
     missing_tool_call_ids: [secondToolCallId],
+    mismatched_tool_call_ids: [],
   });
   assert.match(queries[0].text, /status = any\(\$2::text\[\]\)/);
   assert.match(queries[0].text, /thread_id = \$3::uuid/);
@@ -198,4 +224,91 @@ test("auditManifestToolCallLog scopes audit to successful thread and agent calls
     threadId,
     agentId,
   ]);
+});
+
+test("auditManifestToolCallLog rejects refs whose contribution hash differs from the durable tool log", async () => {
+  const manifest = stageSnapshotManifest({
+    subject_refs: [{ kind: "listing", id: listingId }],
+    as_of: "2026-04-29T00:00:00Z",
+    basis: "reported",
+    normalization: "raw",
+    tool_calls: [{ tool_call_id: firstToolCallId, fact_refs: [firstFactId] }],
+  });
+  const queries: Array<{ text: string; values?: unknown[] }> = [];
+  const db = {
+    async query<R extends Record<string, unknown> = Record<string, unknown>>(
+      text: string,
+      values?: unknown[],
+    ) {
+      queries.push({ text, values });
+      return {
+        rows: [
+          {
+            tool_call_id: firstToolCallId,
+            result_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          },
+        ] as R[],
+        rowCount: 1,
+        command: "SELECT",
+        oid: 0,
+        fields: [],
+      };
+    },
+  };
+
+  const result = await auditManifestToolCallLog(db, manifest);
+
+  assert.deepEqual(result, {
+    ok: false,
+    missing_tool_call_ids: [],
+    mismatched_tool_call_ids: [firstToolCallId],
+  });
+  assert.match(queries[0].text, /result_hash/);
+});
+
+test("auditManifestToolCallLog accepts full tool result hashes with embedded manifest contribution", async () => {
+  const result = {
+    manifest_contribution: {
+      fact_refs: [firstFactId],
+      source_ids: [firstSourceId],
+    },
+    provider_request_id: "req-1",
+  };
+  const manifest = stageSnapshotManifest({
+    subject_refs: [{ kind: "listing", id: listingId }],
+    as_of: "2026-04-29T00:00:00Z",
+    basis: "reported",
+    normalization: "raw",
+    tool_calls: [
+      {
+        tool_call_id: firstToolCallId,
+        fact_refs: [firstFactId],
+        source_ids: [firstSourceId],
+        result,
+      },
+    ],
+  });
+  const db = {
+    async query<R extends Record<string, unknown>>() {
+      return {
+        rows: [
+          {
+            tool_call_id: firstToolCallId,
+            result_hash: hashJsonValue(result),
+          },
+        ] as R[],
+        rowCount: 1,
+        command: "SELECT",
+        oid: 0,
+        fields: [],
+      };
+    },
+  };
+
+  assert.equal(manifest.tool_call_result_hashes[0].result_hash, hashJsonValue(result));
+  assert.deepEqual(await auditManifestToolCallLog(db, manifest), {
+    ok: true,
+    missing_tool_call_ids: [],
+    mismatched_tool_call_ids: [],
+  });
 });

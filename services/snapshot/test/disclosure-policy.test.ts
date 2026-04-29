@@ -8,7 +8,7 @@ import {
 
 const snapshotId = "00000000-0000-4000-8000-000000000001";
 const listingId = "00000000-0000-4000-8000-000000000002";
-const delayedSeriesId = "series:00000000-0000-4000-8000-000000000003";
+const delayedSeriesId = "00000000-0000-4000-8000-000000000003";
 const delayedSourceId = "00000000-0000-4000-8000-000000000004";
 const candidateFactId = "00000000-0000-4000-8000-000000000005";
 const filingFactId = "00000000-0000-4000-8000-000000000006";
@@ -111,6 +111,25 @@ test("compileDisclosurePolicy falls back to manifest sources for series_specs wi
   ]);
 });
 
+test("compileDisclosurePolicy rejects source-less concrete manifest series specs", () => {
+  assert.throws(
+    () =>
+      compileDisclosurePolicy({
+        ...baseInput,
+        manifest: {
+          ...baseInput.manifest,
+          series_specs: [
+            {
+              series_ref: delayedSeriesId,
+              delay_class: "delayed_15m",
+            },
+          ],
+        },
+      }),
+    /source_id: required when series_ref is present/,
+  );
+});
+
 test("compileDisclosurePolicy is deterministic and orders required disclosures by policy", () => {
   const policy = compileDisclosurePolicy({
     ...baseInput,
@@ -202,6 +221,20 @@ test("compileDisclosurePolicy rejects malformed evidence refs", () => {
         ],
       }),
     /fact_id: must be a UUID v4/,
+  );
+
+  assert.throws(
+    () =>
+      compileDisclosurePolicy({
+        ...baseInput,
+        series: [
+          {
+            series_ref: "series:00000000-0000-4000-8000-000000000003",
+            freshness_class: "delayed_15m",
+          },
+        ],
+      }),
+    /series_ref: must be a UUID v4/,
   );
 });
 

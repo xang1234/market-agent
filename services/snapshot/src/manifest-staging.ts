@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export type JsonObject = { [key: string]: JsonValue };
 
 export type JsonValue =
@@ -56,9 +58,11 @@ export type SnapshotManifestDraft = {
   fact_refs: ReadonlyArray<string>;
   claim_refs: ReadonlyArray<string>;
   event_refs: ReadonlyArray<string>;
+  document_refs: ReadonlyArray<string>;
   series_specs: ReadonlyArray<JsonValue>;
   source_ids: ReadonlyArray<string>;
   tool_call_ids: ReadonlyArray<string>;
+  tool_call_result_hashes: ReadonlyArray<ToolCallResultHash>;
   as_of: string;
   basis: SnapshotBasis;
   normalization: SnapshotNormalization;
@@ -68,12 +72,19 @@ export type SnapshotManifestDraft = {
   parent_snapshot: string | null;
 };
 
+export type ToolCallResultHash = {
+  tool_call_id: string;
+  result_hash: string;
+};
+
 export type ToolCallManifestContribution = {
   tool_call_id: string;
+  result?: JsonValue;
   subject_refs?: ReadonlyArray<SnapshotSubjectRef>;
   fact_refs?: ReadonlyArray<string>;
   claim_refs?: ReadonlyArray<string>;
   event_refs?: ReadonlyArray<string>;
+  document_refs?: ReadonlyArray<string>;
   series_specs?: ReadonlyArray<JsonValue>;
   source_ids?: ReadonlyArray<string>;
 };
@@ -93,6 +104,7 @@ export type StageSnapshotManifestInput = {
 export type ToolCallLogAudit = {
   ok: boolean;
   missing_tool_call_ids: ReadonlyArray<string>;
+  mismatched_tool_call_ids: ReadonlyArray<string>;
 };
 
 export type ToolCallLogAuditOptions = {
@@ -107,6 +119,7 @@ const ISO_8601_WITH_OFFSET =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d{1,9})?(Z|([+-])(\d{2}):(\d{2}))$/;
 const UUID_V4 =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
+const SHA256_HASH = /^sha256:[0-9a-f]{64}$/;
 
 export function stageSnapshotManifest(
   input: StageSnapshotManifestInput,
@@ -122,8 +135,10 @@ export function stageSnapshotManifest(
   const fact_refs = new FirstSeenSet<string>((value) => value, assertUuidRef);
   const claim_refs = new FirstSeenSet<string>((value) => value, assertUuidRef);
   const event_refs = new FirstSeenSet<string>((value) => value, assertUuidRef);
+  const document_refs = new FirstSeenSet<string>((value) => value, assertUuidRef);
   const source_ids = new FirstSeenSet<string>((value) => value, assertUuidRef);
   const tool_call_ids = new FirstSeenSet<string>((value) => value, assertUuidRef);
+  const toolCallResultHashes = new Map<string, string>();
   const series_specs = new FirstSeenSet<JsonValue>(
     stableJson,
     (value, label) => deepFreezeJson(cloneJsonValue(value, label)),
@@ -140,10 +155,20 @@ export function stageSnapshotManifest(
       throw new Error(`stageSnapshotManifest.tool_calls[${index}]: must be an object`);
     }
 
-    tool_call_ids.add(
+    const toolCallId = assertUuidRef(
       toolCall.tool_call_id,
       `stageSnapshotManifest.tool_calls[${index}].tool_call_id`,
     );
+    tool_call_ids.add(toolCallId, `stageSnapshotManifest.tool_calls[${index}].tool_call_id`);
+    const contributionPayload = manifestContributionPayload(toolCall, index);
+    const resultHash = toolCallResultHash(toolCall, index, contributionPayload);
+    const existingHash = toolCallResultHashes.get(toolCallId);
+    if (existingHash !== undefined && existingHash !== resultHash) {
+      throw new Error(`stageSnapshotManifest.tool_calls[${index}].tool_call_id: duplicate contribution hash mismatch`);
+    }
+    if (existingHash === undefined) {
+      toolCallResultHashes.set(toolCallId, resultHash);
+    }
     addSubjectRefs(
       subject_refs,
       toolCall.subject_refs,
@@ -163,6 +188,11 @@ export function stageSnapshotManifest(
       event_refs,
       toolCall.event_refs,
       `stageSnapshotManifest.tool_calls[${index}].event_refs`,
+    );
+    addUuidRefs(
+      document_refs,
+      toolCall.document_refs,
+      `stageSnapshotManifest.tool_calls[${index}].document_refs`,
     );
     addUuidRefs(
       source_ids,
@@ -189,9 +219,15 @@ export function stageSnapshotManifest(
     fact_refs: Object.freeze(fact_refs.values()),
     claim_refs: Object.freeze(claim_refs.values()),
     event_refs: Object.freeze(event_refs.values()),
+    document_refs: Object.freeze(document_refs.values()),
     series_specs: Object.freeze(series_specs.values()),
     source_ids: Object.freeze(source_ids.values()),
     tool_call_ids: Object.freeze(tool_call_ids.values()),
+    tool_call_result_hashes: Object.freeze(
+      [...toolCallResultHashes.entries()].map(([tool_call_id, result_hash]) =>
+        Object.freeze({ tool_call_id, result_hash }),
+      ),
+    ),
     as_of: canonicalTimestamp(input.as_of, "stageSnapshotManifest.as_of"),
     basis: input.basis,
     normalization: input.normalization,
@@ -218,7 +254,7 @@ export function stageSnapshotManifest(
 
 export async function auditManifestToolCallLog(
   db: QueryExecutor,
-  manifest: Pick<SnapshotManifestDraft, "tool_call_ids">,
+  manifest: Pick<SnapshotManifestDraft, "tool_call_ids" | "tool_call_result_hashes">,
   options: ToolCallLogAuditOptions = {},
 ): Promise<ToolCallLogAudit> {
   assertArray(
@@ -228,11 +264,38 @@ export async function auditManifestToolCallLog(
   const toolCallIds = manifest.tool_call_ids.map((toolCallId, index) =>
     assertUuidRef(toolCallId, `auditManifestToolCallLog.tool_call_ids[${index}]`),
   );
+  assertArray(
+    manifest.tool_call_result_hashes,
+    "auditManifestToolCallLog.tool_call_result_hashes",
+  );
+  const expectedHashes = new Map<string, string>();
+  manifest.tool_call_result_hashes.forEach((item, index) => {
+    if (item === null || typeof item !== "object") {
+      throw new Error(`auditManifestToolCallLog.tool_call_result_hashes[${index}]: must be an object`);
+    }
+    const toolCallId = assertUuidRef(
+      item.tool_call_id,
+      `auditManifestToolCallLog.tool_call_result_hashes[${index}].tool_call_id`,
+    );
+    expectedHashes.set(
+      toolCallId,
+      assertResultHash(
+        item.result_hash,
+        `auditManifestToolCallLog.tool_call_result_hashes[${index}].result_hash`,
+      ),
+    );
+  });
+  for (const toolCallId of toolCallIds) {
+    if (!expectedHashes.has(toolCallId)) {
+      throw new Error(`auditManifestToolCallLog.tool_call_result_hashes: missing hash for ${toolCallId}`);
+    }
+  }
 
   if (toolCallIds.length === 0) {
     return Object.freeze({
       ok: true,
       missing_tool_call_ids: Object.freeze([]),
+      mismatched_tool_call_ids: Object.freeze([]),
     });
   }
 
@@ -255,18 +318,23 @@ export async function auditManifestToolCallLog(
     predicates.push(`agent_id = $${values.length}::uuid`);
   }
 
-  const { rows } = await db.query<{ tool_call_id: string }>(
-    `select tool_call_id::text as tool_call_id
+  const { rows } = await db.query<{ tool_call_id: string; result_hash: string | null }>(
+    `select tool_call_id::text as tool_call_id, result_hash
        from tool_call_logs
       where ${predicates.join(" and ")}`,
     values,
   );
-  const found = new Set(rows.map((row) => row.tool_call_id));
+  const found = new Map(rows.map((row) => [row.tool_call_id, row.result_hash]));
   const missing = toolCallIds.filter((toolCallId) => !found.has(toolCallId));
+  const mismatched = toolCallIds.filter((toolCallId) => {
+    if (!found.has(toolCallId)) return false;
+    return found.get(toolCallId) !== expectedHashes.get(toolCallId);
+  });
 
   return Object.freeze({
-    ok: missing.length === 0,
+    ok: missing.length === 0 && mismatched.length === 0,
     missing_tool_call_ids: Object.freeze(missing),
+    mismatched_tool_call_ids: Object.freeze(mismatched),
   });
 }
 
@@ -336,6 +404,107 @@ function addJsonValues(
   });
 }
 
+function manifestContributionPayload(
+  toolCall: ToolCallManifestContribution,
+  index: number,
+): JsonObject {
+  const payload: JsonObject = {};
+
+  if (toolCall.subject_refs !== undefined) {
+    assertArray<SnapshotSubjectRef>(
+      toolCall.subject_refs,
+      `stageSnapshotManifest.tool_calls[${index}].subject_refs`,
+    );
+    payload.subject_refs = toolCall.subject_refs.map((subjectRef, subjectIndex) =>
+      freezeSubjectRef(
+        subjectRef,
+        `stageSnapshotManifest.tool_calls[${index}].subject_refs[${subjectIndex}]`,
+      ),
+    );
+  }
+  if (toolCall.fact_refs !== undefined) {
+    payload.fact_refs = normalizedUuidArray(
+      toolCall.fact_refs,
+      `stageSnapshotManifest.tool_calls[${index}].fact_refs`,
+    );
+  }
+  if (toolCall.claim_refs !== undefined) {
+    payload.claim_refs = normalizedUuidArray(
+      toolCall.claim_refs,
+      `stageSnapshotManifest.tool_calls[${index}].claim_refs`,
+    );
+  }
+  if (toolCall.event_refs !== undefined) {
+    payload.event_refs = normalizedUuidArray(
+      toolCall.event_refs,
+      `stageSnapshotManifest.tool_calls[${index}].event_refs`,
+    );
+  }
+  if (toolCall.document_refs !== undefined) {
+    payload.document_refs = normalizedUuidArray(
+      toolCall.document_refs,
+      `stageSnapshotManifest.tool_calls[${index}].document_refs`,
+    );
+  }
+  if (toolCall.series_specs !== undefined) {
+    assertArray<JsonValue>(
+      toolCall.series_specs,
+      `stageSnapshotManifest.tool_calls[${index}].series_specs`,
+    );
+    payload.series_specs = toolCall.series_specs.map((value, valueIndex) =>
+      cloneJsonValue(
+        value,
+        `stageSnapshotManifest.tool_calls[${index}].series_specs[${valueIndex}]`,
+      ),
+    );
+  }
+  if (toolCall.source_ids !== undefined) {
+    payload.source_ids = normalizedUuidArray(
+      toolCall.source_ids,
+      `stageSnapshotManifest.tool_calls[${index}].source_ids`,
+    );
+  }
+
+  return payload;
+}
+
+function toolCallResultHash(
+  toolCall: ToolCallManifestContribution,
+  index: number,
+  contributionPayload: JsonObject,
+): string {
+  if (toolCall.result === undefined) {
+    return hashJsonValue(contributionPayload);
+  }
+
+  const result = cloneJsonValue(
+    toolCall.result,
+    `stageSnapshotManifest.tool_calls[${index}].result`,
+  );
+  if (!isJsonObject(result)) {
+    throw new Error(`stageSnapshotManifest.tool_calls[${index}].result: must be an object`);
+  }
+  const embeddedContribution = result.manifest_contribution;
+  assertJsonValue(
+    embeddedContribution,
+    `stageSnapshotManifest.tool_calls[${index}].result.manifest_contribution`,
+    new Set<object>(),
+  );
+  if (stableJson(embeddedContribution) !== stableJson(contributionPayload)) {
+    throw new Error(`stageSnapshotManifest.tool_calls[${index}].result.manifest_contribution: must match staged refs`);
+  }
+  return hashJsonValue(result);
+}
+
+function isJsonObject(value: JsonValue): value is JsonObject {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizedUuidArray(values: unknown, label: string): string[] {
+  assertArray<string>(values, label);
+  return values.map((value, index) => assertUuidRef(value, `${label}[${index}]`));
+}
+
 function freezeSubjectRef(
   value: SnapshotSubjectRef,
   label: string,
@@ -352,11 +521,18 @@ function freezeSubjectRef(
   });
 }
 
-function assertUuidRef(value: string, label: string): string {
+function assertUuidRef(value: unknown, label: string): string {
   if (typeof value !== "string" || !UUID_V4.test(value)) {
     throw new Error(`${label}: must be a UUID v4`);
   }
   return value.toLowerCase();
+}
+
+function assertResultHash(value: unknown, label: string): string {
+  if (typeof value !== "string" || !SHA256_HASH.test(value)) {
+    throw new Error(`${label}: must be a sha256 result hash`);
+  }
+  return value;
 }
 
 function optionalUuid(value: string | null | undefined, label: string): string | null {
@@ -487,6 +663,11 @@ function freezeAllowedStatuses(statuses: ReadonlyArray<string>): ReadonlyArray<s
 function cloneJsonValue(value: JsonValue, label: string): JsonValue {
   assertJsonValue(value, label, new Set<object>());
   return JSON.parse(stableJson(value)) as JsonValue;
+}
+
+function hashJsonValue(value: JsonValue): string {
+  assertJsonValue(value, "stageSnapshotManifest.tool_call_result_hash", new Set<object>());
+  return `sha256:${createHash("sha256").update(stableJson(value)).digest("hex")}`;
 }
 
 function assertJsonValue(

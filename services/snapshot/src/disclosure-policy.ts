@@ -451,17 +451,31 @@ function freezeManifestSeriesSpecs(
       if (!hasDisclosureSignal) {
         return [];
       }
+      const seriesRef =
+        spec.series_ref === undefined
+          ? undefined
+          : assertUuidV4(
+              spec.series_ref,
+              `compileDisclosurePolicy.manifest.series_specs[${index}].series_ref`,
+            );
+      if (spec.source_id == null && seriesRef !== undefined) {
+        throw new Error(
+          `compileDisclosurePolicy.manifest.series_specs[${index}].source_id: required when series_ref is present`,
+        );
+      }
+      const sourceRefs =
+        spec.source_id == null
+          ? Object.freeze([...fallbackSourceIds])
+          : Object.freeze([
+              assertUuidV4(
+                spec.source_id,
+                `compileDisclosurePolicy.manifest.series_specs[${index}].source_id`,
+              ),
+            ]);
 
       return [
         Object.freeze({
-          ...(spec.series_ref === undefined
-            ? {}
-            : {
-                series_ref: assertNonEmptyString(
-                  spec.series_ref,
-                  `compileDisclosurePolicy.manifest.series_specs[${index}].series_ref`,
-                ),
-              }),
+          ...(seriesRef === undefined ? {} : { series_ref: seriesRef }),
           ...(spec.freshness_class === undefined
             ? {}
             : {
@@ -497,16 +511,7 @@ function freezeManifestSeriesSpecs(
                   `compileDisclosurePolicy.manifest.series_specs[${index}].fx_converted`,
                 ),
               }),
-          ...(spec.source_id == null
-            ? { source_refs: Object.freeze([...fallbackSourceIds]) }
-            : {
-                source_refs: Object.freeze([
-                  assertUuidV4(
-                    spec.source_id,
-                    `compileDisclosurePolicy.manifest.series_specs[${index}].source_id`,
-                  ),
-                ]),
-              }),
+          source_refs: sourceRefs,
         }),
       ];
     }),
@@ -592,7 +597,7 @@ function freezeSeries(
       }
 
       return Object.freeze({
-        series_ref: assertNonEmptyString(
+        series_ref: assertUuidV4(
           value.series_ref,
           `compileDisclosurePolicy.series[${index}].series_ref`,
         ),
