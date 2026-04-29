@@ -361,6 +361,10 @@ paths:
                 additionalProperties: true
         '409':
           description: Transform requires refresh
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotRefreshRequiredError'
   /v1/chat/threads:
     get:
       tags: [Chat]
@@ -442,7 +446,11 @@ paths:
     get:
       tags: [Chat]
       summary: SSE stream for a thread run
-      description: SSE chat streaming is a backend-mediated run transport.
+      description: SSE chat streaming is a backend-mediated run transport. Each
+        coordinator event uses the SSE `id` field as the monotonic sequence
+        number and repeats `seq`, `thread_id`, `run_id`, and `turn_id` in the
+        JSON payload. Reconnects may send `Last-Event-ID` to resume strictly
+        after the last delivered sequence. Block events also carry `block_id`.
       operationId: streamThread
       parameters:
         - in: path
@@ -457,6 +465,17 @@ paths:
           schema:
             type: string
             format: uuid
+        - in: header
+          name: Last-Event-ID
+          required: false
+          description: Last received coordinator SSE `id`; the stream resumes
+            with events whose sequence is strictly greater. Values must be
+            non-negative safe decimal integers already available in the stream
+            history.
+          schema:
+            type: string
+            pattern: '^(0|[1-9][0-9]*)$'
+            maxLength: 16
       responses:
         '200':
           description: text/event-stream
@@ -467,20 +486,50 @@ paths:
               examples:
                 default:
                   value: |
+                    id: 1
                     event: turn.started
-                    data: {"run_id":"..."}
+                    data: {"type":"turn.started","seq":1,"thread_id":"...","run_id":"...","turn_id":"..."}
 
+                    id: 2
+                    event: tool.started
+                    data: {"type":"tool.started","seq":2,"thread_id":"...","run_id":"...","turn_id":"...","tool_call_id":"...","tool_name":"resolve_subjects"}
+
+                    id: 3
+                    event: tool.completed
+                    data: {"type":"tool.completed","seq":3,"thread_id":"...","run_id":"...","turn_id":"...","tool_call_id":"...","status":"ok"}
+
+                    id: 4
+                    event: snapshot.staged
+                    data: {"type":"snapshot.staged","seq":4,"thread_id":"...","run_id":"...","turn_id":"...","snapshot_id":"..."}
+
+                    id: 5
                     event: snapshot.sealed
-                    data: {"snapshot_id":"..."}
+                    data: {"type":"snapshot.sealed","seq":5,"thread_id":"...","run_id":"...","turn_id":"...","snapshot_id":"..."}
 
-                    event: block.added
-                    data: {"id":"b1","kind":"section"}
+                    id: 6
+                    event: block.began
+                    data: {"type":"block.began","seq":6,"thread_id":"...","run_id":"...","turn_id":"...","block_id":"b1","kind":"section"}
 
+                    id: 7
                     event: block.delta
-                    data: {"id":"b2","segment":{"type":"text","text":"Revenue grew "}}
+                    data: {"type":"block.delta","seq":7,"thread_id":"...","run_id":"...","turn_id":"...","block_id":"b1","delta":{"segment":{"type":"text","text":"Revenue grew "}}}
 
+                    id: 8
+                    event: block.completed
+                    data: {"type":"block.completed","seq":8,"thread_id":"...","run_id":"...","turn_id":"...","block_id":"b1"}
+
+                    id: 9
                     event: turn.completed
-                    data: {"message_id":"..."}
+                    data: {"type":"turn.completed","seq":9,"thread_id":"...","run_id":"...","turn_id":"...","message_id":"..."}
+        '400':
+          description: Missing run_id, malformed path, or malformed Last-Event-ID
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
   /v1/analyze/templates:
     get:
       tags: [Analyze]
@@ -1044,6 +1093,31 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SubjectRef'
+        fact_refs:
+          type: array
+          items:
+            type: string
+            format: uuid
+        claim_refs:
+          type: array
+          items:
+            type: string
+            format: uuid
+        event_refs:
+          type: array
+          items:
+            type: string
+            format: uuid
+        document_refs:
+          type: array
+          items:
+            type: string
+            format: uuid
+        series_specs:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
         as_of:
           type: string
           format: date-time
@@ -1059,9 +1133,39 @@ components:
           items:
             type: string
             format: uuid
+        tool_call_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        tool_call_result_hashes:
+          type: array
+          items:
+            type: object
+            required: [tool_call_id, result_hash]
+            properties:
+              tool_call_id:
+                type: string
+                format: uuid
+              result_hash:
+                type: string
         allowed_transforms:
           type: object
           additionalProperties: true
+    SnapshotRefreshRequiredError:
+      type: object
+      required: [error, refresh_required]
+      properties:
+        error:
+          type: string
+          const: refresh_required
+        refresh_required:
+          type: object
+          required: [reason]
+          properties:
+            reason:
+              type: string
+              enum: [basis, normalization, peer_set, freshness, transform]
     BlockEnvelope:
       type: object
       properties:
