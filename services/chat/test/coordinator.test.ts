@@ -453,7 +453,7 @@ test("subject pre-resolution short-circuits ambiguous subjects before custom run
   );
 });
 
-test("subject pre-resolution passes hydrated context to custom runners without raw subject text", async () => {
+test("subject pre-resolution passes hydrated context and subject text to custom runners", async () => {
   let observedContext: ChatTurnRunContext | null = null;
   const coordinator = createChatCoordinator({
     preResolveSubject: async () => resolvedAaplPreResolution(),
@@ -473,7 +473,7 @@ test("subject pre-resolution passes hydrated context to custom runners without r
   });
   await turn.completed;
 
-  assert.equal(observedContext?.subjectText, undefined);
+  assert.equal(observedContext?.subjectText, "AAPL");
   assert.equal(observedContext?.subjectPreResolution?.status, "resolved");
   assert.deepEqual(observedContext?.subjectPreResolution?.subject_ref, {
     kind: "listing",

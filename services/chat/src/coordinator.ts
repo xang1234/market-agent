@@ -456,12 +456,11 @@ function subjectAwareRunner(
       return;
     }
 
-    const { subjectText: _subjectText, ...resolvedContext } = context;
     const toolCallId = subjectResolutionToolCallId(context);
-    emitSubjectResolutionToolEvents(resolvedContext.emit, preResolution, toolCallId);
+    emitSubjectResolutionToolEvents(context.emit, preResolution, toolCallId);
 
     await runner({
-      ...resolvedContext,
+      ...context,
       subjectPreResolution: preResolution,
     });
   };
