@@ -124,6 +124,50 @@ test("turn tool policy rejects unverified usage progression inputs", () => {
       ),
     /accepted tool-call decision/,
   );
+  assert.throws(
+    () =>
+      policy.recordAcceptedToolCall({
+        ok: true,
+        action: "execute",
+        tool: registry.getTool("get_segment_facts") as ToolDefinition,
+        cost_class: "high",
+        used: 0,
+        limit: 2,
+        remaining: { low: 8, medium: 4, high: 1 },
+      } as never),
+    /accepted tool-call decision/,
+  );
+});
+
+test("turn tool policy rejects cross-policy and replayed accepted decisions", () => {
+  const registry = loadToolRegistry();
+  const firstPolicy = createTurnToolPolicy({
+    registry,
+    audience: "analyst",
+    classification: { bundle_id: "single_subject_analysis" },
+  });
+  const secondPolicy = createTurnToolPolicy({
+    registry,
+    audience: "analyst",
+    classification: { bundle_id: "quote_lookup" },
+  });
+  assert.equal(firstPolicy.ok, true);
+  assert.equal(secondPolicy.ok, true);
+
+  const decision = firstPolicy.checkToolCall({ tool_name: "get_segment_facts" });
+  assert.equal(decision.ok, true);
+
+  assert.throws(
+    () => secondPolicy.recordAcceptedToolCall(decision),
+    /accepted tool-call decision/,
+  );
+
+  const nextPolicy = firstPolicy.recordAcceptedToolCall(decision);
+  assert.equal(nextPolicy.ok, true);
+  assert.throws(
+    () => firstPolicy.recordAcceptedToolCall(decision),
+    /accepted tool-call decision/,
+  );
 });
 
 test("turn tool policy keeps model-selected tools inside the system-selected bundle", () => {

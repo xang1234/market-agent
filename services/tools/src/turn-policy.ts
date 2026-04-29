@@ -60,6 +60,7 @@ export function createTurnToolPolicy(input: TurnToolPolicyInput): TurnToolPolicy
 
   const budget = normalizeBudget(input.budget);
   const usage = normalizeUsage(input.usage);
+  const acceptedDecisions = new WeakSet<AcceptedToolCallBudgetDecision>();
 
   return Object.freeze({
     ok: true,
@@ -69,7 +70,7 @@ export function createTurnToolPolicy(input: TurnToolPolicyInput): TurnToolPolicy
     budget,
     usage,
     checkToolCall(toolCall) {
-      return checkToolCallBudget({
+      const decision = checkToolCallBudget({
         registry: input.registry,
         bundle_id: selection.bundle_id,
         audience: selection.audience,
@@ -78,9 +79,14 @@ export function createTurnToolPolicy(input: TurnToolPolicyInput): TurnToolPolicy
         usage,
         budget,
       });
+      if (decision.ok) {
+        acceptedDecisions.add(decision);
+      }
+      return decision;
     },
     recordAcceptedToolCall(decision) {
-      assertAcceptedDecision(decision);
+      assertAcceptedDecision(decision, acceptedDecisions);
+      acceptedDecisions.delete(decision);
       return createTurnToolPolicy({
         registry: input.registry,
         audience: selection.audience,
@@ -94,8 +100,14 @@ export function createTurnToolPolicy(input: TurnToolPolicyInput): TurnToolPolicy
 
 function assertAcceptedDecision(
   decision: ToolCallBudgetDecision,
+  acceptedDecisions: WeakSet<AcceptedToolCallBudgetDecision>,
 ): asserts decision is AcceptedToolCallBudgetDecision {
-  if (decision === null || typeof decision !== "object" || decision.ok !== true) {
+  if (
+    decision === null ||
+    typeof decision !== "object" ||
+    decision.ok !== true ||
+    !acceptedDecisions.has(decision)
+  ) {
     throw new Error("recordAcceptedToolCall requires an accepted tool-call decision");
   }
 }
