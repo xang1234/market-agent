@@ -479,7 +479,7 @@ create table chat_messages (
   message_id uuid primary key default gen_random_uuid(),
   thread_id uuid not null references chat_threads(thread_id) on delete cascade,
   role chat_role not null,
-  snapshot_id uuid references snapshots(snapshot_id),
+  snapshot_id uuid not null references snapshots(snapshot_id),
   blocks jsonb not null,
   content_hash text not null,
   created_at timestamptz not null default now()
