@@ -10,7 +10,8 @@ coordinator lands in `fra-2fu.1`.
 - `GET /v1/chat/threads/:threadId/stream`
 - validates `run_id`
 - emits sequenced coordinator SSE events with `id`, `seq`, and `turn_id`
-- emits periodic sequenced `heartbeat` events
+- resumes after `Last-Event-ID` by replaying only events with a higher sequence
+- emits periodic `heartbeat` control events
 
 ## Tests
 

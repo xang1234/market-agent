@@ -12,8 +12,7 @@ export const CHAT_SSE_EVENT_TYPES = [
 ] as const;
 
 export type ChatSseEventType = (typeof CHAT_SSE_EVENT_TYPES)[number];
-export type ChatSseControlEventType = "heartbeat";
-export type ChatSseWireEventType = ChatSseEventType | ChatSseControlEventType;
+export type ChatSseWireEventType = ChatSseEventType;
 
 export type ChatSseContext = {
   threadId: string;

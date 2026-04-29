@@ -218,6 +218,108 @@ test("stream route emits sequenced success-path coordinator events with correlat
   assert.deepEqual(blockEvents.map((event) => event.data.block_id), ["block-1", "block-1", "block-1"]);
 });
 
+test("stream route resumes strictly after Last-Event-ID", async (t) => {
+  const base = await startServer(t);
+
+  const firstResponse = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-456`,
+  );
+  assert.equal(firstResponse.status, 200);
+  const firstEvents = await readSseEvents(firstResponse, 4);
+  const lastDeliveredId = firstEvents.at(-1)?.id;
+  assert.equal(lastDeliveredId, "4");
+
+  const response = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-456`,
+    {
+      headers: {
+        "Last-Event-ID": lastDeliveredId,
+      },
+    },
+  );
+
+  assert.equal(response.status, 200);
+  const events = await readSseEvents(response, 5);
+
+  assert.deepEqual(events.map((event) => event.id), ["5", "6", "7", "8", "9"]);
+  assert.deepEqual(events.map((event) => event.event), [
+    "snapshot.sealed",
+    "block.began",
+    "block.delta",
+    "block.completed",
+    "turn.completed",
+  ]);
+  assert.equal(events.every((event) => Number(event.data.seq) > 4), true);
+});
+
+test("stream route leaves heartbeat outside the resume cursor", async (t) => {
+  const base = await startServer(t);
+
+  const response = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-456`,
+    {
+      headers: {
+        "Last-Event-ID": "9",
+      },
+    },
+  );
+
+  assert.equal(response.status, 200);
+  const [heartbeat] = await readSseEvents(response, 1);
+
+  assert.equal(heartbeat.id, null);
+  assert.equal(heartbeat.event, "heartbeat");
+  assert.equal(heartbeat.data.turn_id, "run-456");
+});
+
+test("stream route rejects Last-Event-ID beyond available coordinator history", async (t) => {
+  const base = await startServer(t);
+
+  for (const lastEventId of ["10", "9007199254740991"]) {
+    const response = await fetch(
+      `${base}/v1/chat/threads/thread-123/stream?run_id=run-456`,
+      {
+        headers: {
+          "Last-Event-ID": lastEventId,
+        },
+      },
+    );
+    const body = await response.json() as { error?: string };
+
+    assert.equal(response.status, 400, `expected ${lastEventId} to be rejected`);
+    assert.equal(body.error, "'Last-Event-ID' is not available for this stream");
+  }
+});
+
+test("stream route rejects malformed Last-Event-ID values", async (t) => {
+  const base = await startServer(t);
+
+  for (const lastEventId of [
+    "not-a-sequence",
+    "1e3",
+    "0x10",
+    "+4",
+    "4.0",
+    "-1",
+    "",
+    "9007199254740993",
+    "9".repeat(400),
+  ]) {
+    const response = await fetch(
+      `${base}/v1/chat/threads/thread-123/stream?run_id=run-456`,
+      {
+        headers: {
+          "Last-Event-ID": lastEventId,
+        },
+      },
+    );
+    const body = await response.json() as { error?: string };
+
+    assert.equal(response.status, 400, `expected ${JSON.stringify(lastEventId)} to be rejected`);
+    assert.equal(body.error, "'Last-Event-ID' must be a non-negative safe decimal integer");
+  }
+});
+
 test("stream route stays open long enough to emit a heartbeat", async (t) => {
   const base = await startServer(t);
 
