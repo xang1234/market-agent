@@ -18,6 +18,7 @@ const firstSourceId = "00000000-0000-4000-8000-000000000401";
 const secondSourceId = "00000000-0000-4000-8000-000000000402";
 const firstToolCallId = "00000000-0000-4000-8000-000000000501";
 const secondToolCallId = "00000000-0000-4000-8000-000000000502";
+const extraToolCallId = "00000000-0000-4000-8000-000000000503";
 const threadId = "00000000-0000-4000-8000-000000000601";
 const agentId = "00000000-0000-4000-8000-000000000701";
 const fakeFirstHash = `sha256:${"1".repeat(64)}`;
@@ -172,6 +173,8 @@ test("auditManifestToolCallLog reports missing staged tool calls", async () => {
     ok: false,
     missing_tool_call_ids: [secondToolCallId],
     mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [],
+    duplicate_tool_call_ids: [],
   });
   assert.match(queries[0].text, /tool_call_logs/);
   assert.deepEqual(queries[0].values, [
@@ -214,6 +217,8 @@ test("auditManifestToolCallLog scopes audit to successful thread and agent calls
     ok: false,
     missing_tool_call_ids: [secondToolCallId],
     mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [],
+    duplicate_tool_call_ids: [],
   });
   assert.match(queries[0].text, /status = any\(\$2::text\[\]\)/);
   assert.match(queries[0].text, /thread_id = \$3::uuid/);
@@ -262,8 +267,45 @@ test("auditManifestToolCallLog rejects refs whose contribution hash differs from
     ok: false,
     missing_tool_call_ids: [],
     mismatched_tool_call_ids: [firstToolCallId],
+    extra_tool_call_ids: [],
+    duplicate_tool_call_ids: [],
   });
   assert.match(queries[0].text, /result_hash/);
+});
+
+test("auditManifestToolCallLog rejects extra and duplicate result hash entries", async () => {
+  const db = {
+    async query<R extends Record<string, unknown>>() {
+      return {
+        rows: [
+          { tool_call_id: firstToolCallId, result_hash: fakeFirstHash },
+          { tool_call_id: secondToolCallId, result_hash: fakeSecondHash },
+        ] as R[],
+        rowCount: 2,
+        command: "SELECT",
+        oid: 0,
+        fields: [],
+      };
+    },
+  };
+
+  const result = await auditManifestToolCallLog(db, {
+    tool_call_ids: [firstToolCallId, secondToolCallId],
+    tool_call_result_hashes: [
+      { tool_call_id: firstToolCallId, result_hash: fakeFirstHash },
+      { tool_call_id: firstToolCallId, result_hash: fakeFirstHash },
+      { tool_call_id: secondToolCallId, result_hash: fakeSecondHash },
+      { tool_call_id: extraToolCallId, result_hash: `sha256:${"3".repeat(64)}` },
+    ],
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    missing_tool_call_ids: [],
+    mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [extraToolCallId],
+    duplicate_tool_call_ids: [firstToolCallId],
+  });
 });
 
 test("auditManifestToolCallLog accepts full tool result hashes with embedded manifest contribution", async () => {
@@ -310,5 +352,7 @@ test("auditManifestToolCallLog accepts full tool result hashes with embedded man
     ok: true,
     missing_tool_call_ids: [],
     mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [],
+    duplicate_tool_call_ids: [],
   });
 });

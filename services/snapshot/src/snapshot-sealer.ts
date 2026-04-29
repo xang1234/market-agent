@@ -93,6 +93,8 @@ export async function sealSnapshot(
       details: Object.freeze({
         missing_tool_call_ids: [...toolCallAudit.missing_tool_call_ids],
         mismatched_tool_call_ids: [...toolCallAudit.mismatched_tool_call_ids],
+        extra_tool_call_ids: [...toolCallAudit.extra_tool_call_ids],
+        duplicate_tool_call_ids: [...toolCallAudit.duplicate_tool_call_ids],
       }),
     });
     await writeSealFailure(db, input, failure);

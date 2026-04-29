@@ -13,6 +13,7 @@ const listingId = "00000000-0000-4000-8000-000000000002";
 const documentId = "00000000-0000-4000-8000-000000000003";
 const sourceId = "00000000-0000-4000-8000-000000000004";
 const toolCallId = "00000000-0000-4000-8000-000000000005";
+const extraToolCallId = "00000000-0000-4000-8000-000000000006";
 
 const manifest: SnapshotManifestDraft = Object.freeze({
   subject_refs: Object.freeze([{ kind: "listing", id: listingId }]),
@@ -77,6 +78,37 @@ test("sealSnapshot rejects missing tool-call audit rows before starting a transa
   assert.deepEqual(result.verification.failures[0]?.details, {
     missing_tool_call_ids: [toolCallId],
     mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [],
+    duplicate_tool_call_ids: [],
+  });
+  assert.deepEqual(queries.map((query) => normalizedSql(query.text)), [
+    "select from tool_call_logs",
+    "insert into verifier_fail_logs",
+  ]);
+});
+
+test("sealSnapshot rejects extra and duplicate tool-call result hashes before starting a transaction", async () => {
+  const { db, queries } = recordingDb();
+
+  const result = await sealSnapshot(snapshotTransactionClient(db), {
+    ...validSealInput(),
+    manifest: {
+      ...manifest,
+      tool_call_result_hashes: [
+        { tool_call_id: toolCallId, result_hash: `sha256:${"1".repeat(64)}` },
+        { tool_call_id: toolCallId, result_hash: `sha256:${"1".repeat(64)}` },
+        { tool_call_id: extraToolCallId, result_hash: `sha256:${"2".repeat(64)}` },
+      ],
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.verification.failures[0]?.reason_code, "tool_call_log_audit_failed");
+  assert.deepEqual(result.verification.failures[0]?.details, {
+    missing_tool_call_ids: [],
+    mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [extraToolCallId],
+    duplicate_tool_call_ids: [toolCallId],
   });
   assert.deepEqual(queries.map((query) => normalizedSql(query.text)), [
     "select from tool_call_logs",
