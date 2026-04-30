@@ -194,6 +194,21 @@ test("PATCH /v1/chat/threads/:id rejects body without 'title' field with 400", a
   assert.equal(response.status, 400);
 });
 
+test("PATCH /v1/chat/threads/:id rejects an entirely empty body with 400", async (t) => {
+  const { db } = fakeDb(() => {
+    throw new Error("query must not be called");
+  });
+  const base = await startServer(t, db);
+
+  // No Content-Length set; node-fetch sends a zero-byte body. The handler
+  // must reject it instead of letting an empty/null payload reach the repo.
+  const response = await fetch(`${base}/v1/chat/threads/${THREAD_ID}`, {
+    method: "PATCH",
+    headers: { "x-user-id": USER_ID },
+  });
+  assert.equal(response.status, 400);
+});
+
 test("PATCH /v1/chat/threads/:id returns 404 when no row matches the user", async (t) => {
   const { db } = fakeDb(() => []);
   const base = await startServer(t, db);

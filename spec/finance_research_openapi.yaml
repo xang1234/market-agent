@@ -443,8 +443,7 @@ paths:
               required: [title]
               properties:
                 title:
-                  type: string
-                  nullable: true
+                  type: ['string', 'null']
                   description: |
                     The new title. Pass `null` (or an empty/whitespace
                     string) to clear the title.
@@ -1539,20 +1538,17 @@ components:
           type: string
           format: uuid
         primary_subject_ref:
-          allOf:
+          oneOf:
             - $ref: '#/components/schemas/SubjectRef'
-          nullable: true
+            - type: 'null'
         title:
-          type: string
-          nullable: true
+          type: ['string', 'null']
         latest_snapshot_id:
-          type: string
+          type: ['string', 'null']
           format: uuid
-          nullable: true
         archived_at:
-          type: string
+          type: ['string', 'null']
           format: date-time
-          nullable: true
           description: When the thread was archived (soft-deleted), or null if active.
         created_at:
           type: string
