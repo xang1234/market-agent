@@ -84,6 +84,8 @@ export {
 } from './snapshotManifestContext.ts'
 
 export { BlockRegistryProvider, BlockView, SnapshotManifestProvider } from './BlockView.tsx'
+export { MemoizedBlockView } from './MemoizedBlockView.tsx'
+export { blockPropsAreEqual } from './blockMemoization.ts'
 export { createDefaultBlockRegistry } from './defaultBlockRegistry.ts'
 export { registerNarrativeBlockRenderers } from './registerNarrativeBlocks.ts'
 export { registerChartBlockRenderers } from './registerChartBlocks.ts'
