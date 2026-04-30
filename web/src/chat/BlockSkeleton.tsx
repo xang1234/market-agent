@@ -15,6 +15,9 @@ export function BlockSkeleton({ blockId, kind }: BlockSkeletonProps): ReactEleme
       data-testid={`block-skeleton-${blockId}`}
       data-block-kind={kind}
       data-block-status="pending"
+      role="status"
+      aria-busy="true"
+      aria-label={`Loading ${kind} block`}
       className={`${heightClass} animate-pulse rounded-md bg-neutral-100 dark:bg-neutral-800`}
     />
   )

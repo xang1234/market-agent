@@ -21,7 +21,7 @@ test('CHAT_SSE_EVENT_TYPES mirrors the backend CHAT_SSE_EVENT_TYPES exactly', ()
     'could not locate `export const CHAT_SSE_EVENT_TYPES = [...] as const` in backend sse.ts',
   )
 
-  const backendTypes = Array.from(match[1].matchAll(/["']([a-z.]+)["']/g))
+  const backendTypes = Array.from(match[1].matchAll(/["']([a-zA-Z0-9._]+)["']/g))
     .map((m) => m[1])
     .sort()
   assert.ok(

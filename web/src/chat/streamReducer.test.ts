@@ -207,6 +207,52 @@ test('turn.completed captures message_id; turn.error captures error', () => {
   assert.equal(state.error, 'rate_limited')
 })
 
+test('turn.completed clears blocks_by_id and block_order so memory does not grow between turns', () => {
+  // The parent uses completed_message_id to fetch the canonical sealed
+  // message and renders it via the standard MessageItem path; holding the
+  // streaming graph past completion would pin accumulated rich_text segments
+  // until the next turn.started.
+  let state: StreamState = INITIAL_STREAM_STATE
+  state = applyChatStreamEvent(state, event('block.began', 1, { block_id: 'b1', kind: 'rich_text' }))
+  state = applyChatStreamEvent(state, event('block.delta', 2, {
+    block_id: 'b1',
+    delta: { segment: { type: 'text', text: 'hello' } },
+  }))
+  state = applyChatStreamEvent(state, event('turn.completed', 3, { message_id: 'msg-1' }))
+
+  assert.equal(state.blocks_by_id.size, 0)
+  assert.deepEqual(state.block_order, [])
+  assert.equal(state.completed_message_id, 'msg-1')
+})
+
+test('turn.error mid-stream preserves partial blocks for the inline error notice', () => {
+  // The view surfaces the error inline alongside whatever blocks streamed so
+  // the user sees what arrived before the failure, not a blank slate.
+  let state: StreamState = INITIAL_STREAM_STATE
+  state = applyChatStreamEvent(state, event('block.began', 1, { block_id: 'b1', kind: 'rich_text' }))
+  state = applyChatStreamEvent(state, event('block.delta', 2, {
+    block_id: 'b1',
+    delta: { segment: { type: 'text', text: 'partial' } },
+  }))
+  state = applyChatStreamEvent(state, event('turn.error', 3, { error: 'upstream_500' }))
+
+  assert.equal(state.turn_status, 'error')
+  assert.equal(state.error, 'upstream_500')
+  assert.equal(state.blocks_by_id.size, 1)
+  assert.deepEqual(state.block_order, ['b1'])
+})
+
+test('turn.completed followed by turn.error flips status to error (terminal-after-terminal)', () => {
+  // Both are terminal events on the wire. The reducer takes the last word so
+  // an error that arrives after a completed signal isn't lost.
+  let state: StreamState = INITIAL_STREAM_STATE
+  state = applyChatStreamEvent(state, event('turn.completed', 1, { message_id: 'msg-1' }))
+  assert.equal(state.turn_status, 'completed')
+  state = applyChatStreamEvent(state, event('turn.error', 2, { error: 'late_failure' }))
+  assert.equal(state.turn_status, 'error')
+  assert.equal(state.error, 'late_failure')
+})
+
 test('tool.* and snapshot.* events return the same state reference', () => {
   let state: StreamState = INITIAL_STREAM_STATE
   state = applyChatStreamEvent(state, event('block.began', 1, { block_id: 'b1', kind: 'rich_text' }))
@@ -217,7 +263,10 @@ test('tool.* and snapshot.* events return the same state reference', () => {
   }
 })
 
-test('multi-block sequence preserves block_order and per-block segments', () => {
+test('multi-block sequence preserves block_order and per-block segments through to block.completed', () => {
+  // Validates the streaming graph at the moment all blocks have completed
+  // but before turn.completed clears the graph (the latter is asserted by
+  // the dedicated clear-on-completed test).
   let state: StreamState = INITIAL_STREAM_STATE
   state = applyChatStreamEvent(state, event('turn.started', 1))
   state = applyChatStreamEvent(state, event('block.began', 2, { block_id: 'b1', kind: 'rich_text' }))
@@ -232,7 +281,6 @@ test('multi-block sequence preserves block_order and per-block segments', () => 
   }))
   state = applyChatStreamEvent(state, event('block.completed', 6, { block_id: 'b1', content_hash: 'h1' }))
   state = applyChatStreamEvent(state, event('block.completed', 7, { block_id: 'b2', content_hash: 'h2' }))
-  state = applyChatStreamEvent(state, event('turn.completed', 8, { message_id: 'msg-1' }))
 
   assert.deepEqual(state.block_order, ['b1', 'b2'])
   const b1 = state.blocks_by_id.get('b1') as StreamingRichTextBlock
@@ -243,6 +291,9 @@ test('multi-block sequence preserves block_order and per-block segments', () => 
   ])
   const b2 = state.blocks_by_id.get('b2')
   assert.equal(b2?.status, 'completed')
+  assert.equal(state.turn_status, 'started')
+
+  state = applyChatStreamEvent(state, event('turn.completed', 8, { message_id: 'msg-1' }))
   assert.equal(state.turn_status, 'completed')
   assert.equal(state.completed_message_id, 'msg-1')
 })

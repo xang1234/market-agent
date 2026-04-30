@@ -1,4 +1,4 @@
-import type { RichTextSegment } from '../blocks/types.ts'
+import { REF_SEGMENT_KINDS, type RefSegmentKind, type RichTextSegment } from '../blocks/types.ts'
 import type { ChatSseEvent } from './sseEventTypes.ts'
 
 export type StreamingBlockStatus = 'pending' | 'streaming' | 'completed'
@@ -61,11 +61,17 @@ export function applyChatStreamEvent(state: StreamState, event: ChatSseEvent): S
       }
 
     case 'turn.completed':
+      // Drop the streaming block graph: the parent uses completed_message_id
+      // to fetch the canonical sealed message and renders it via the
+      // standard MessageItem path. Holding the streaming state would pin
+      // hundreds of KB of accumulated rich_text segments between turns.
       return {
-        ...state,
         turn_status: 'completed',
+        blocks_by_id: new Map(),
+        block_order: [],
         completed_message_id:
           typeof event.message_id === 'string' ? event.message_id : null,
+        error: null,
       }
 
     case 'turn.error':
@@ -161,14 +167,15 @@ function readSegment(deltaPayload: unknown): RichTextSegment | null {
   }
   if (
     candidate.type === 'ref' &&
-    (candidate.ref_kind === 'fact' ||
-      candidate.ref_kind === 'claim' ||
-      candidate.ref_kind === 'event') &&
+    typeof candidate.ref_kind === 'string' &&
+    (REF_SEGMENT_KINDS as readonly string[]).includes(candidate.ref_kind) &&
     typeof candidate.ref_id === 'string'
   ) {
+    // ref_kind is runtime-validated against REF_SEGMENT_KINDS above; TS can't
+    // narrow from an `includes` check on a typed-as-readonly-string array.
     const ref: RichTextSegment = {
       type: 'ref',
-      ref_kind: candidate.ref_kind,
+      ref_kind: candidate.ref_kind as RefSegmentKind,
       ref_id: candidate.ref_id,
     }
     if (typeof candidate.format === 'string') {

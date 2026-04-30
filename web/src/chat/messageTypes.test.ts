@@ -16,7 +16,7 @@ test('CHAT_ROLES mirrors the backend ChatRole union exactly', () => {
   const match = source.match(/export type ChatRole\s*=\s*([^;]+);/)
   assert.ok(match, 'could not locate `export type ChatRole = …;` in backend messages.ts')
 
-  const backendRoles = Array.from(match[1].matchAll(/["']([a-z_]+)["']/g))
+  const backendRoles = Array.from(match[1].matchAll(/["']([a-zA-Z0-9._]+)["']/g))
     .map((m) => m[1])
     .sort()
   // Fail loud if the regex matches nothing — silent zero-match would still
