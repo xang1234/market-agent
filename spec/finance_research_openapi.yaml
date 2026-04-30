@@ -410,7 +410,7 @@ paths:
                 primary_subject_ref:
                   $ref: '#/components/schemas/SubjectRef'
                 title:
-                  type: string
+                  type: ['string', 'null']
       responses:
         '201':
           description: Thread created
@@ -1538,7 +1538,12 @@ components:
           type: string
           format: uuid
         primary_subject_ref:
-          oneOf:
+          # anyOf rather than oneOf because openapi-typescript drops the null
+          # branch from a oneOf nullable $ref (issue #1215), silently producing
+          # a non-nullable type for codegen consumers. anyOf is semantically
+          # equivalent here — SubjectRef and null are disjoint — and is
+          # handled correctly by current openapi-typescript versions.
+          anyOf:
             - $ref: '#/components/schemas/SubjectRef'
             - type: 'null'
         title:

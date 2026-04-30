@@ -706,6 +706,18 @@ test("migrate down rolls back schema changes when removing the migration record 
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
   );
+  // Positive proof that the rollback was actually rejected: the most-recent
+  // migration's schema change must still be in place. If the runner
+  // accidentally executed the down DDL before hitting the trigger block, the
+  // schema_migrations row count alone wouldn't catch that — checking the
+  // latest migration's actual artifact does.
+  assert.equal(
+    queryValue(
+      containerName,
+      "select count(*) from information_schema.columns where table_name = 'chat_threads' and column_name = 'archived_at'",
+    ),
+    "1",
+  );
 });
 
 test("migrate down fails when any applied migration is missing locally", { timeout: 120000 }, async (t) => {
