@@ -39,6 +39,46 @@ timestamps, and required hash/blob metadata before querying. Parent document
 threading is accepted as metadata here; threaded-source behavior is covered by
 `fra-8la`.
 
+## Threaded sources
+
+Some sources have conversation structure: Reddit threads, earnings-call
+transcripts split into segments, and any other reply-shaped feed. Two columns
+on `documents` capture this:
+
+- `parent_document_id` — the immediate parent (the post you replied to, or
+  the transcript root for a segment). Always a UUID FK to `documents`.
+- `conversation_id` — a free-form string that groups every document in the
+  same thread regardless of depth. For Reddit, set this to the thread/post
+  id (e.g., `reddit:t3_xyz`); for transcripts, the call/event id.
+
+Use `parent_document_id` when you need to walk the immediate reply chain.
+Use `conversation_id` when you need every document in a thread without
+caring about depth (e.g., loading the full Reddit thread for claim
+extraction).
+
+```ts
+import {
+  getDocumentChildren,
+  getDocumentAncestors,
+  getDocumentThread,
+  getConversation,
+} from "evidence";
+
+await getDocumentChildren(db, parentId);   // direct replies, ordered by published_at
+await getDocumentAncestors(db, replyId);   // root → ... → replyId, inclusive
+await getDocumentThread(db, rootId);       // root + all descendants, depth-first
+await getConversation(db, "reddit:t3_xyz"); // every doc with this conversation_id
+```
+
+`getDocumentThread` and `getDocumentAncestors` use recursive CTEs so the
+traversal is one round-trip regardless of depth. The walk includes the input
+document itself, so a leaf doc returns `[self]` from both.
+
+**Cycles are prevented by insert order.** A new `document_id` is generated at
+insert time, so it cannot be its own parent. The repository never UPDATEs
+`parent_document_id` on existing rows. Don't add an UPDATE path that mutates
+this column without a separate cycle check.
+
 ## Object Store
 
 `MemoryObjectStore` is a content-addressed blob store: callers `put()` raw

@@ -15,7 +15,11 @@ export {
   DOCUMENT_KINDS,
   PARSE_STATUSES,
   createDocument,
+  getConversation,
   getDocument,
+  getDocumentAncestors,
+  getDocumentChildren,
+  getDocumentThread,
 } from "./document-repo.ts";
 export type {
   CreateDocumentResult,

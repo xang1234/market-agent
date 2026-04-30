@@ -62,7 +62,7 @@ test("migrate up applies pending migrations and records them in schema_migration
   });
 
   assert.equal(migrateResult.status, 0, migrateResult.stderr || migrateResult.stdout);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "6");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "7");
   assert.deepEqual(
     queryValue(containerName, "select version || ':' || name from schema_migrations order by version").split("\n"),
     [
@@ -72,6 +72,7 @@ test("migrate up applies pending migrations and records them in schema_migration
       "0004:agent_run_log",
       "0005:snapshot_document_refs",
       "0006:chat_messages_snapshot_not_null",
+      "0007:documents_parent_idx",
     ],
   );
 
@@ -122,6 +123,7 @@ test("migrate status reports all migrations as applied after migrate up", { time
   assert.match(statusResult.stdout, /0004\s+agent_run_log\s+applied/);
   assert.match(statusResult.stdout, /0005\s+snapshot_document_refs\s+applied/);
   assert.match(statusResult.stdout, /0006\s+chat_messages_snapshot_not_null\s+applied/);
+  assert.match(statusResult.stdout, /0007\s+documents_parent_idx\s+applied/);
 });
 
 test("migrate down rolls back the most recently applied migration", { timeout: 120000 }, async (t) => {
@@ -153,7 +155,7 @@ test("migrate down rolls back the most recently applied migration", { timeout: 1
   });
   assert.equal(downResult.status, 0, downResult.stderr || downResult.stdout);
 
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "5");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "6");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -683,7 +685,7 @@ test("migrate down rolls back schema changes when removing the migration record 
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /rejecting schema_migrations delete/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "6");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "7");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -735,6 +737,6 @@ test("migrate down fails when any applied migration is missing locally", { timeo
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /Applied migration 0000 is missing locally/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "7");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "8");
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
 });

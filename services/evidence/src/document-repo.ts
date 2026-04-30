@@ -161,6 +161,96 @@ export async function getDocument(
   return rows[0] ? documentRowFromDb(rows[0]) : null;
 }
 
+export async function getDocumentChildren(
+  db: QueryExecutor,
+  parentDocumentId: string,
+): Promise<readonly DocumentRow[]> {
+  assertUuidV4(parentDocumentId, "parent_document_id");
+
+  const { rows } = await db.query<DocumentDbRow>(
+    `select ${DOCUMENT_COLUMNS}
+       from documents
+      where parent_document_id = $1
+      order by published_at nulls last, document_id`,
+    [parentDocumentId],
+  );
+
+  return Object.freeze(rows.map(documentRowFromDb));
+}
+
+export async function getDocumentAncestors(
+  db: QueryExecutor,
+  documentId: string,
+): Promise<readonly DocumentRow[]> {
+  assertUuidV4(documentId, "document_id");
+
+  const { rows } = await db.query<DocumentDbRow & { depth: number }>(
+    `with recursive chain as (
+       select ${DOCUMENT_COLUMNS}, 0 as depth
+         from documents
+        where document_id = $1
+       union all
+       select ${prefixedDocumentColumns("d")}, c.depth + 1
+         from documents d
+         join chain c on c.parent_document_id = d.document_id
+     )
+     select ${DOCUMENT_COLUMNS}, depth
+       from chain
+      order by depth desc`,
+    [documentId],
+  );
+
+  return Object.freeze(rows.map(documentRowFromDb));
+}
+
+export async function getDocumentThread(
+  db: QueryExecutor,
+  rootDocumentId: string,
+): Promise<readonly DocumentRow[]> {
+  assertUuidV4(rootDocumentId, "document_id");
+
+  const { rows } = await db.query<DocumentDbRow & { depth: number }>(
+    `with recursive thread as (
+       select ${DOCUMENT_COLUMNS}, 0 as depth
+         from documents
+        where document_id = $1
+       union all
+       select ${prefixedDocumentColumns("d")}, t.depth + 1
+         from documents d
+         join thread t on d.parent_document_id = t.document_id
+     )
+     select ${DOCUMENT_COLUMNS}, depth
+       from thread
+      order by depth, published_at nulls last, document_id`,
+    [rootDocumentId],
+  );
+
+  return Object.freeze(rows.map(documentRowFromDb));
+}
+
+export async function getConversation(
+  db: QueryExecutor,
+  conversationId: string,
+): Promise<readonly DocumentRow[]> {
+  assertNonEmptyString(conversationId, "conversation_id");
+
+  const { rows } = await db.query<DocumentDbRow>(
+    `select ${DOCUMENT_COLUMNS}
+       from documents
+      where conversation_id = $1
+      order by published_at nulls last, document_id`,
+    [conversationId],
+  );
+
+  return Object.freeze(rows.map(documentRowFromDb));
+}
+
+function prefixedDocumentColumns(alias: string): string {
+  return DOCUMENT_COLUMNS.split(",")
+    .map((col) => `${alias}.${col.trim()}`)
+    .join(", ");
+}
+
 function normalizeDocumentInput(input: DocumentInput): Required<DocumentInput> {
   assertUuidV4(input.source_id, "source_id");
   assertOptionalNonEmptyString(input.provider_doc_id, "provider_doc_id");
