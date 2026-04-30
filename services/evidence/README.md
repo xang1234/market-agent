@@ -39,6 +39,35 @@ timestamps, and required hash/blob metadata before querying. Parent document
 threading is accepted as metadata here; threaded-source behavior is covered by
 `fra-8la`.
 
+## Object Store
+
+`MemoryObjectStore` is a content-addressed blob store: callers `put()` raw
+bytes and receive a `raw_blob_id` of the form `sha256:<64-hex>` that is the
+SHA-256 hash of the bytes. Re-putting identical bytes returns the same id with
+status `already_present`, so ingestion is naturally idempotent.
+
+The store exposes only `put`, `get`, and `has` — there is no update or delete.
+That keeps the "raw blobs are immutable" invariant from
+`fra-6j0.1` physically true: changing the bytes always changes the id, and the
+store has no API to overwrite a key. `put` and `get` defensively copy bytes at
+both ends so callers cannot mutate stored content through retained references.
+
+Typical composition with `DocumentRepo`:
+
+```ts
+const blob = await store.put(rawBytes);
+await createDocument(db, {
+  source_id,
+  kind,
+  content_hash: blob.blob.raw_blob_id, // or a separate canonical-form hash
+  raw_blob_id: blob.blob.raw_blob_id,
+});
+```
+
+A real R2/S3-compatible adapter that talks to remote object storage is tracked
+separately so ingestion (P3.2) can plug in a wire backend without changing
+the `ObjectStore` interface.
+
 ## Tests
 
 ```bash

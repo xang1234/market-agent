@@ -25,3 +25,16 @@ export type {
   ParseStatus,
 } from "./document-repo.ts";
 export type { QueryExecutor } from "./types.ts";
+
+export {
+  MemoryObjectStore,
+  RAW_BLOB_ID_PREFIX,
+  assertRawBlobId,
+  rawBlobIdFromBytes,
+} from "./object-store.ts";
+export type {
+  ObjectStore,
+  PutResult,
+  RawBlobMetadata,
+  StoredBlob,
+} from "./object-store.ts";
