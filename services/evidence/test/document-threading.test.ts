@@ -187,7 +187,10 @@ test("threading round-trip: build a Reddit-like thread and traverse it", { timeo
     ],
   );
 
-  // Full thread from root: 4 docs, depth-first ordering (root, depth1 in pub-time order, depth2)
+  // Full thread from root: 4 docs in level-order (BFS).
+  // Order is: root, then both depth-1 replies in published_at order, then depth-2.
+  // Notably this is NOT depth-first: replyB appears before replyA_nested even
+  // though replyA_nested is a child of replyA.
   const thread = await getDocumentThread(client, root.document.document_id);
   assert.deepEqual(
     thread.map((d) => d.document_id),
@@ -249,6 +252,61 @@ test("getDocumentChildren returns empty for a leaf document", { timeout: 120000 
     thread.map((d) => d.document_id),
     [standalone.document.document_id],
   );
+});
+
+test("createDocument keeps the original parent_document_id when the same content is re-ingested under a different parent", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for evidence repository integration coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-8la-threading-conflict");
+  const client = await connectedClient(t, databaseUrl);
+
+  const source = await createSource(client, {
+    provider: "reddit",
+    kind: "social_post",
+    trust_tier: "tertiary",
+    license_class: "public",
+    retrieved_at: "2026-04-29T00:00:00Z",
+  });
+
+  const parentA = await createDocument(client, {
+    source_id: source.source_id,
+    kind: "social_post",
+    content_hash: blobId("parent-a"),
+    raw_blob_id: blobId("parent-a"),
+  });
+  const parentB = await createDocument(client, {
+    source_id: source.source_id,
+    kind: "social_post",
+    content_hash: blobId("parent-b"),
+    raw_blob_id: blobId("parent-b"),
+  });
+
+  const firstIngest = await createDocument(client, {
+    source_id: source.source_id,
+    kind: "social_post",
+    parent_document_id: parentA.document.document_id,
+    content_hash: blobId("comment-cross-posted"),
+    raw_blob_id: blobId("comment-cross-posted"),
+  });
+  const secondIngest = await createDocument(client, {
+    source_id: source.source_id,
+    kind: "social_post",
+    parent_document_id: parentB.document.document_id,
+    content_hash: blobId("comment-cross-posted"),
+    raw_blob_id: blobId("comment-cross-posted"),
+  });
+
+  assert.equal(firstIngest.status, "created");
+  assert.equal(secondIngest.status, "already_present");
+  // Critical: the second ingest's parent is silently dropped; the row keeps
+  // its original parent. Pinned here so any future ON CONFLICT change is
+  // forced to update this assertion deliberately.
+  assert.equal(secondIngest.document.document_id, firstIngest.document.document_id);
+  assert.equal(secondIngest.document.parent_document_id, parentA.document.document_id);
+  assert.notEqual(secondIngest.document.parent_document_id, parentB.document.document_id);
 });
 
 test("createDocument rejects parent_document_id that does not exist (FK 23503)", { timeout: 120000 }, async (t) => {

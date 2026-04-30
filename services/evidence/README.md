@@ -74,10 +74,30 @@ await getConversation(db, "reddit:t3_xyz"); // every doc with this conversation_
 traversal is one round-trip regardless of depth. The walk includes the input
 document itself, so a leaf doc returns `[self]` from both.
 
+`getDocumentThread` returns rows in **level-order (BFS)**: the root, then all
+depth-1 docs in `published_at` order, then all depth-2 docs, and so on.
+Siblings are grouped together regardless of their parent. This is the right
+shape for "give me every document in the conversation so I can extract
+claims." It is **not** the right shape for nested-reply UI rendering, where
+you want each parent immediately followed by its descendants — a renderer
+should re-shape the flat result into a tree on the client side, or a future
+helper can add a path-column ordering if a true depth-first walk is needed.
+
 **Cycles are prevented by insert order.** A new `document_id` is generated at
 insert time, so it cannot be its own parent. The repository never UPDATEs
-`parent_document_id` on existing rows. Don't add an UPDATE path that mutates
-this column without a separate cycle check.
+`parent_document_id` on existing rows — the `ON CONFLICT` clause in
+`createDocument` only updates `content_hash` to itself (a no-op) and leaves
+`parent_document_id` immutable. Don't add an UPDATE path that mutates this
+column without a separate cycle check.
+
+**Re-ingestion silently keeps the original `parent_document_id`.** If
+`createDocument` is called with the same `(content_hash, raw_blob_id)` pair
+but a different `parent_document_id` (e.g., a Reddit comment cross-posted in
+two threads), the original parent is retained and the new one is discarded
+without error. The result has `status: "already_present"` and the returned
+`document.parent_document_id` is the *original* value — not what the caller
+just passed in. Callers that need to detect this should compare the returned
+`parent_document_id` to their input.
 
 ## Object Store
 

@@ -172,6 +172,13 @@ test("migrate down rolls back the most recently applied migration", { timeout: 1
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'issuer_aliases'"),
     "1",
   );
+  assert.equal(
+    queryValue(
+      containerName,
+      "select count(*) from pg_indexes where schemaname = 'public' and indexname in ('documents_parent_idx', 'documents_conversation_idx')",
+    ),
+    "0",
+  );
 });
 
 test("migrate down exits cleanly when nothing is applied", { timeout: 120000 }, async (t) => {
