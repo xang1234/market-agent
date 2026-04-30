@@ -30,9 +30,9 @@ export function VirtualizedMessageList({
 }: VirtualizedMessageListProps): ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
   const scrollRafRef = useRef<number | null>(null)
-  // Tailing intent captured from the last observed scroll position. New
-  // messages auto-scroll only when this was true, so a user who scrolled up
-  // keeps their position when content arrives.
+  // Captured at the last observed scroll position — read pre-update by the
+  // auto-tail effect because by effect-time el.scrollHeight already includes
+  // the new message and a fresh isAtBottom() would lie.
   const wasAtBottomRef = useRef(true)
   const lastMessageIdRef = useRef<string | null>(null)
   const [scrollTop, setScrollTop] = useState(0)
@@ -97,24 +97,19 @@ export function VirtualizedMessageList({
     })
   }, [])
 
-  // Auto-tail: when the last message changes and the user was at the bottom
-  // before the change, snap to the new bottom. Runs in useLayoutEffect so the
-  // scroll happens before the browser paints — no visible jump.
+  const scrollToBottom = useCallback(() => {
+    const el = containerRef.current
+    if (el !== null) el.scrollTop = el.scrollHeight
+  }, [])
+
+  // Pre-paint so the tail snap is invisible.
   useLayoutEffect(() => {
     const lastId = messages.length > 0 ? messages[messages.length - 1].message_id : null
     const lastChanged = lastId !== null && lastId !== lastMessageIdRef.current
     lastMessageIdRef.current = lastId
     if (!lastChanged || !wasAtBottomRef.current) return
-    const el = containerRef.current
-    if (el === null) return
-    el.scrollTop = el.scrollHeight
-  }, [messages])
-
-  const handleJumpToLatest = useCallback(() => {
-    const el = containerRef.current
-    if (el === null) return
-    el.scrollTop = el.scrollHeight
-  }, [])
+    scrollToBottom()
+  }, [messages, scrollToBottom])
 
   const visibleMessages = messages.slice(view.startIndex, view.endIndex + 1)
 
@@ -139,7 +134,7 @@ export function VirtualizedMessageList({
           ))}
         </div>
       </div>
-      {showJumpButton ? <JumpToLatestButton onClick={handleJumpToLatest} /> : null}
+      {showJumpButton ? <JumpToLatestButton onClick={scrollToBottom} /> : null}
     </div>
   )
 }
