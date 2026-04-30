@@ -24,11 +24,7 @@ export class ChatThreadValidationError extends Error {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Title cap matches the upper bound on UI input validation expectations and
-// keeps a single thread row well under typical Postgres TOAST thresholds.
-// Bumping this requires no schema change — the column is `text` — but
-// callers should be aware before lifting it that the chat list view assumes
-// titles fit on a single row.
+// UI input cap; column is `text` so bumping requires no schema change.
 const MAX_TITLE_LENGTH = 240;
 
 export type ChatThread = {

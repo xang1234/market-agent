@@ -1,8 +1,5 @@
 # Chat Service
 
-Tracking beads: `fra-u9l`, `fra-cty`, `fra-eom`, `fra-d7t`, `fra-siv`,
-`fra-2fu.1.1`.
-
 This package owns the chat streaming transport, the per-thread turn
 coordinator, and the thread-list CRUD surface used by the chat workspace.
 
@@ -21,7 +18,7 @@ coordinator, and the thread-list CRUD surface used by the chat workspace.
   turns instead of silently selecting a subject
 - thread CRUD per OpenAPI: list/create/title-update/archive (see below)
 
-## Thread CRUD (`fra-2fu.1.1`)
+## Thread CRUD
 
 Endpoints (all require an `x-user-id` UUID header; threads are user-scoped):
 
@@ -78,7 +75,7 @@ tool calls or snapshot sealing. This is not a durable idempotency store;
 cross-process or post-expiry replay requires a future database-backed run
 ledger.
 
-## SSE reconnect with `Last-Event-ID` (`fra-cty`)
+## SSE reconnect with `Last-Event-ID`
 
 A client can reconnect to a stream by setting the `Last-Event-ID` header to
 the highest sequence number it has already processed. The server replays only

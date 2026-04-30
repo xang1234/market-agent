@@ -15,6 +15,7 @@ import {
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
 const USER_ID_HEADER = "x-user-id";
 const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ROUTE_PREFIX = "/v1/chat/threads";
 
 class RequestBodyTooLargeError extends Error {
   constructor() {
@@ -32,7 +33,13 @@ export async function tryHandleThreadsRequest(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<boolean> {
-  const route = matchRoute(req.method ?? "GET", req.url ?? "/");
+  const rawUrl = req.url ?? "/";
+  // Fast-path: skip URL parsing for requests that can't possibly match.
+  // The SSE stream route under /v1/chat/threads/{id}/stream goes through here
+  // on every request when threadsDb is wired, so the early-return matters.
+  if (!rawUrl.startsWith(ROUTE_PREFIX)) return false;
+
+  const route = matchRoute(req.method ?? "GET", rawUrl);
   if (route == null) return false;
 
   try {
@@ -54,19 +61,12 @@ export async function tryHandleThreadsRequest(
         respond(res, 400, { error: "request body must be valid JSON" });
         return true;
       }
-      const input = parseCreateInput(body);
-      if (input === BAD_INPUT) {
-        respond(res, 400, { error: "request body must be an object" });
-        return true;
-      }
       try {
+        const input = parseCreateInput(body);
         const thread = await createThread(db, userId, input);
         respond(res, 201, thread);
       } catch (error) {
-        if (error instanceof ChatThreadValidationError) {
-          respond(res, 400, { error: error.message });
-          return true;
-        }
+        if (mapThreadError(res, error)) return true;
         throw error;
       }
       return true;
@@ -92,14 +92,7 @@ export async function tryHandleThreadsRequest(
         const thread = await updateThreadTitle(db, userId, route.threadId, { title: titleField });
         respond(res, 200, thread);
       } catch (error) {
-        if (error instanceof ChatThreadValidationError) {
-          respond(res, 400, { error: error.message });
-          return true;
-        }
-        if (error instanceof ChatThreadNotFoundError) {
-          respond(res, 404, { error: error.message });
-          return true;
-        }
+        if (mapThreadError(res, error)) return true;
         throw error;
       }
       return true;
@@ -111,14 +104,7 @@ export async function tryHandleThreadsRequest(
         res.statusCode = 204;
         res.end();
       } catch (error) {
-        if (error instanceof ChatThreadValidationError) {
-          respond(res, 400, { error: error.message });
-          return true;
-        }
-        if (error instanceof ChatThreadNotFoundError) {
-          respond(res, 404, { error: error.message });
-          return true;
-        }
+        if (mapThreadError(res, error)) return true;
         throw error;
       }
       return true;
@@ -136,6 +122,18 @@ export async function tryHandleThreadsRequest(
   }
 }
 
+function mapThreadError(res: ServerResponse, error: unknown): boolean {
+  if (error instanceof ChatThreadValidationError) {
+    respond(res, 400, { error: error.message });
+    return true;
+  }
+  if (error instanceof ChatThreadNotFoundError) {
+    respond(res, 404, { error: error.message });
+    return true;
+  }
+  return false;
+}
+
 type Route =
   | { action: "list"; includeArchived: boolean }
   | { action: "create" }
@@ -146,7 +144,7 @@ function matchRoute(method: string, rawUrl: string): Route | null {
   const url = new URL(rawUrl, "http://localhost");
   const { pathname } = url;
 
-  if (pathname === "/v1/chat/threads") {
+  if (pathname === ROUTE_PREFIX) {
     if (method === "GET") {
       return { action: "list", includeArchived: parseIncludeArchived(url) };
     }
@@ -177,7 +175,6 @@ function parseIncludeArchived(url: URL): boolean {
 }
 
 const BAD_JSON = Symbol("BAD_JSON");
-const BAD_INPUT = Symbol("BAD_INPUT");
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown | typeof BAD_JSON> {
   const text = await readBody(req);
@@ -189,20 +186,25 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown | typeof BAD_
   }
 }
 
-function parseCreateInput(body: unknown): CreateThreadInput | typeof BAD_INPUT {
+// Defers kind/id validation to the repo so the wire-format and value-format
+// error messages share one source.
+function parseCreateInput(body: unknown): CreateThreadInput {
   if (body === null || body === undefined) return {};
-  if (typeof body !== "object") return BAD_INPUT;
+  if (typeof body !== "object") {
+    throw new ChatThreadValidationError("request body must be an object");
+  }
   const obj = body as Record<string, unknown>;
   const input: CreateThreadInput = {};
   if (obj.title !== undefined) {
-    if (obj.title !== null && typeof obj.title !== "string") return BAD_INPUT;
+    if (obj.title !== null && typeof obj.title !== "string") {
+      throw new ChatThreadValidationError("title must be a string or null");
+    }
     input.title = obj.title;
   }
   if (obj.primary_subject_ref !== undefined) {
     if (typeof obj.primary_subject_ref !== "object" || obj.primary_subject_ref === null) {
-      return BAD_INPUT;
+      throw new ChatThreadValidationError("primary_subject_ref must be an object with kind and id");
     }
-    // Defer kind/id validation to the repo so error messages stay consistent.
     input.primary_subject_ref = obj.primary_subject_ref as CreateThreadInput["primary_subject_ref"];
   }
   return input;
