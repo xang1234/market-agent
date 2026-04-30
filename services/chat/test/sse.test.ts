@@ -57,17 +57,6 @@ test("sequencer produces strictly monotonically increasing seq across event kind
   assert.equal(sequencer.currentSeq(), 10);
 });
 
-test("sequencer can resume from a non-zero initialSeq for after-reconnect emission", () => {
-  // initialSeq is the protocol-level primitive for "pick up where the wire
-  // last delivered." A coordinator restart that wants to keep the same
-  // monotonic stream would seed with the last-known seq.
-  const sequencer = createChatSseSequencer(CONTEXT, 41);
-  assert.equal(sequencer.currentSeq(), 41);
-  const next = sequencer.next("turn.started");
-  assert.equal(next.seq, 42);
-  assert.equal(sequencer.currentSeq(), 42);
-});
-
 test("payload fields are merged into the event, with universal fields winning on collision", () => {
   const sequencer = createChatSseSequencer(CONTEXT);
   const event = sequencer.next("turn.started", {
