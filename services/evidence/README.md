@@ -55,14 +55,25 @@ both ends so callers cannot mutate stored content through retained references.
 Typical composition with `DocumentRepo`:
 
 ```ts
+// raw_blob_id is always the object-store id from store.put().
+// content_hash is a SEPARATE hash over the canonical (parsed/normalized)
+// form of the document. They are equal only when raw bytes already are the
+// canonical form (e.g., a plain-text upload). For HTML, PDF, and most
+// provider formats, they will diverge — content_hash is what dedupes
+// "the same press release served by two aggregators."
 const blob = await store.put(rawBytes);
+const canonicalContentHash = sha256OfCanonicalForm(rawBytes); // ingestion-defined
 await createDocument(db, {
   source_id,
   kind,
-  content_hash: blob.blob.raw_blob_id, // or a separate canonical-form hash
+  content_hash: canonicalContentHash,
   raw_blob_id: blob.blob.raw_blob_id,
 });
 ```
+
+`createDocument` now validates `raw_blob_id` against the same `sha256:<64-hex>`
+contract enforced by `MemoryObjectStore`, so callers cannot accidentally write
+a document row whose `raw_blob_id` could not be served back by the store.
 
 A real R2/S3-compatible adapter that talks to remote object storage is tracked
 separately so ingestion (P3.2) can plug in a wire backend without changing

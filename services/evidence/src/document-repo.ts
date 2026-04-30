@@ -1,3 +1,4 @@
+import { assertRawBlobId } from "./object-store.ts";
 import type { QueryExecutor } from "./types.ts";
 import {
   assertIso8601WithOffset,
@@ -175,7 +176,7 @@ function normalizeDocumentInput(input: DocumentInput): Required<DocumentInput> {
   }
   assertOptionalNonEmptyString(input.lang, "lang");
   assertNonEmptyString(input.content_hash, "content_hash");
-  assertNonEmptyString(input.raw_blob_id, "raw_blob_id");
+  assertRawBlobId(input.raw_blob_id);
   const parseStatus = input.parse_status ?? "pending";
   assertOneOf(parseStatus, PARSE_STATUSES, "parse_status");
 
