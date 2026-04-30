@@ -1,19 +1,51 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
-import { createChatSseSequencer, stubSuccessEvents, type ChatSseEvent } from "./sse.ts";
+import {
+  ChatTurnInputMismatchError,
+  ChatTurnUnavailableError,
+  createChatCoordinator,
+  type ChatAssistantMessagePersistence,
+  type ChatCoordinator,
+  type ChatSubjectClarificationRenderer,
+} from "./coordinator.ts";
+import type { ChatSseEvent } from "./sse.ts";
+import type { ChatSubjectPreResolver } from "./subjects.ts";
 
 const HEARTBEAT_INTERVAL_MS = 250;
+const MAX_PENDING_SSE_FRAMES = 100;
 const INVALID_LAST_EVENT_ID = Symbol("INVALID_LAST_EVENT_ID");
 const LAST_EVENT_ID_PATTERN = /^(0|[1-9][0-9]*)$/;
 
 type StreamRoute = {
   threadId: string;
   runId: string | null;
+  turnId: string | null;
+  subjectText: string | null;
+};
+
+type SseWritable = {
+  write(frame: string): boolean;
+  once(event: "drain", listener: () => void): unknown;
+  off(event: "drain", listener: () => void): unknown;
+  destroy(error?: Error): unknown;
 };
 
 const INVALID_STREAM_ROUTE = Symbol("INVALID_STREAM_ROUTE");
 
-export function createChatServer(): Server {
-  return createServer((req, res) => {
+export type ChatServerOptions = {
+  coordinator?: ChatCoordinator;
+  persistAssistantMessage?: ChatAssistantMessagePersistence;
+  preResolveSubject?: ChatSubjectPreResolver;
+  renderSubjectClarification?: ChatSubjectClarificationRenderer;
+};
+
+export function createChatServer(options: ChatServerOptions = {}): Server {
+  const coordinator = options.coordinator ?? createChatCoordinator({
+    persistAssistantMessage: options.persistAssistantMessage,
+    preResolveSubject: options.preResolveSubject,
+    renderSubjectClarification: options.renderSubjectClarification,
+  });
+
+  return createServer(async (req, res) => {
     const route = matchStreamRoute(req.method ?? "GET", req.url ?? "/");
 
     if (route === INVALID_STREAM_ROUTE) {
@@ -30,6 +62,8 @@ export function createChatServer(): Server {
       respondJson(res, 400, { error: "'run_id' is required" });
       return;
     }
+    const runId = route.runId;
+    const turnId = route.turnId ?? runId;
 
     const resumeAfterSeq = parseLastEventId(req.headers["last-event-id"]);
     if (resumeAfterSeq === INVALID_LAST_EVENT_ID) {
@@ -37,20 +71,45 @@ export function createChatServer(): Server {
       return;
     }
 
-    const sequencer = createChatSseSequencer({ threadId: route.threadId, runId: route.runId });
-    const events = stubSuccessEvents(sequencer);
-    if (resumeAfterSeq > sequencer.currentSeq()) {
+    const turnInput = {
+      threadId: route.threadId,
+      runId,
+      turnId,
+      ...(route.subjectText ? { subjectText: route.subjectText } : {}),
+    };
+    const turn = getTurnForRoute(coordinator, turnInput, resumeAfterSeq > 0);
+    if (turn === INPUT_MISMATCH) {
+      respondJson(res, 409, { error: "turn input does not match the existing turn" });
+      return;
+    }
+    if (turn == null && resumeAfterSeq === 0) {
+      respondJson(res, 400, { error: "turn history is not available" });
+      return;
+    }
+    if (turn == null || resumeAfterSeq > turn.currentSeq()) {
       respondJson(res, 400, { error: "'Last-Event-ID' is not available for this stream" });
       return;
     }
 
     writeSseHeaders(res);
-    for (const event of events.filter((event) => event.seq > resumeAfterSeq)) {
-      writeEvent(res, event);
+    res.flushHeaders();
+    const writer = createSseFrameWriter(res);
+
+    let lastWrittenSeq = resumeAfterSeq;
+    const writeIfNew = (event: ChatSseEvent) => {
+      if (event.seq <= lastWrittenSeq) {
+        return;
+      }
+      writer.writeEvent(event);
+      lastWrittenSeq = event.seq;
+    };
+    const unsubscribe = turn.subscribe(writeIfNew);
+    for (const event of turn.events) {
+      writeIfNew(event);
     }
 
     const heartbeat = setInterval(() => {
-      writeHeartbeat(res, route);
+      writer.writeHeartbeat({ threadId: route.threadId, runId, turnId });
     }, HEARTBEAT_INTERVAL_MS);
 
     let cleanedUp = false;
@@ -60,12 +119,34 @@ export function createChatServer(): Server {
       }
       cleanedUp = true;
       clearInterval(heartbeat);
+      unsubscribe();
+      writer.close();
     };
 
     req.on("close", cleanup);
     res.on("close", cleanup);
     res.on("error", cleanup);
   });
+}
+
+const INPUT_MISMATCH = Symbol("INPUT_MISMATCH");
+
+function getTurnForRoute(
+  coordinator: ChatCoordinator,
+  input: { threadId: string; runId: string; turnId?: string; subjectText?: string },
+  resume: boolean,
+): ReturnType<ChatCoordinator["getTurn"]> | typeof INPUT_MISMATCH {
+  try {
+    return resume ? coordinator.getTurn(input) : coordinator.getOrCreateTurn(input);
+  } catch (error) {
+    if (error instanceof ChatTurnUnavailableError) {
+      return null;
+    }
+    if (error instanceof ChatTurnInputMismatchError) {
+      return INPUT_MISMATCH;
+    }
+    throw error;
+  }
 }
 
 function parseLastEventId(value: string | string[] | undefined): number | typeof INVALID_LAST_EVENT_ID {
@@ -98,7 +179,9 @@ function matchStreamRoute(method: string, rawUrl: string): StreamRoute | typeof 
     return null;
   }
 
-  const runId = url.searchParams.get("run_id");
+  const runId = nonEmptyQueryParam(url.searchParams.get("run_id"));
+  const turnId = nonEmptyQueryParam(url.searchParams.get("turn_id"));
+  const subjectText = nonEmptyQueryParam(url.searchParams.get("subject"));
   let threadId: string;
   try {
     threadId = decodeURIComponent(match[1]);
@@ -107,8 +190,14 @@ function matchStreamRoute(method: string, rawUrl: string): StreamRoute | typeof 
   }
   return {
     threadId,
-    runId: runId && runId.trim() !== "" ? runId : null,
+    runId,
+    turnId,
+    subjectText,
   };
+}
+
+function nonEmptyQueryParam(value: string | null): string | null {
+  return value && value.trim() !== "" ? value : null;
 }
 
 function respondJson(res: ServerResponse, status: number, body: object) {
@@ -124,20 +213,88 @@ function writeSseHeaders(res: ServerResponse) {
   res.setHeader("connection", "keep-alive");
 }
 
-function writeEvent(res: ServerResponse, event: ChatSseEvent) {
-  res.write(`id: ${event.seq}\n`);
-  res.write(`event: ${event.type}\n`);
-  res.write(`data: ${JSON.stringify(event)}\n\n`);
+export function createSseFrameWriter(
+  writable: SseWritable,
+  options: { maxPendingFrames?: number } = {},
+) {
+  const maxPendingFrames = options.maxPendingFrames ?? MAX_PENDING_SSE_FRAMES;
+  const pendingFrames: string[] = [];
+  let waitingForDrain = false;
+  let closed = false;
+
+  const onDrain = () => {
+    waitingForDrain = false;
+    flush();
+  };
+
+  const close = () => {
+    closed = true;
+    if (waitingForDrain) {
+      writable.off("drain", onDrain);
+      waitingForDrain = false;
+    }
+    pendingFrames.length = 0;
+  };
+
+  const destroySlowClient = () => {
+    close();
+    writable.destroy(new Error("SSE client exceeded pending frame limit"));
+  };
+
+  const enqueue = (frame: string) => {
+    if (pendingFrames.length >= maxPendingFrames) {
+      destroySlowClient();
+      return;
+    }
+    pendingFrames.push(frame);
+  };
+
+  const writeFrame = (frame: string) => {
+    if (closed) {
+      return;
+    }
+
+    if (waitingForDrain) {
+      enqueue(frame);
+      return;
+    }
+
+    if (!writable.write(frame)) {
+      waitingForDrain = true;
+      writable.once("drain", onDrain);
+    }
+  };
+
+  const flush = () => {
+    while (!closed && !waitingForDrain && pendingFrames.length > 0) {
+      const frame = pendingFrames.shift()!;
+      if (!writable.write(frame)) {
+        waitingForDrain = true;
+        writable.once("drain", onDrain);
+      }
+    }
+  };
+
+  return {
+    writeEvent(event: ChatSseEvent) {
+      writeFrame(eventFrame(event));
+    },
+    writeHeartbeat(route: { threadId: string; runId: string; turnId?: string | null }) {
+      writeFrame(heartbeatFrame(route));
+    },
+    close,
+  };
 }
 
-function writeHeartbeat(res: ServerResponse, route: { threadId: string; runId: string }) {
-  res.write("event: heartbeat\n");
-  res.write(
-    `data: ${JSON.stringify({
-      thread_id: route.threadId,
-      run_id: route.runId,
-      turn_id: route.runId,
-      stub: true,
-    })}\n\n`,
-  );
+function eventFrame(event: ChatSseEvent) {
+  return `id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
+}
+
+function heartbeatFrame(route: { threadId: string; runId: string; turnId?: string | null }) {
+  return `event: heartbeat\ndata: ${JSON.stringify({
+    thread_id: route.threadId,
+    run_id: route.runId,
+    turn_id: route.turnId ?? route.runId,
+    stub: true,
+  })}\n\n`;
 }

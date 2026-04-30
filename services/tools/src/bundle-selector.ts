@@ -9,9 +9,12 @@ import { toolsForAudience } from "./audience-enforcement.ts";
 import {
   analystPromptTemplateForBundle,
   analystPromptTemplateBundleIds,
+  buildPromptCachePrefix,
   type AnalystPromptTemplate,
+  type PromptCacheFewShot,
   type PromptCachePrefix,
 } from "./prompt-templates.ts";
+import type { JsonValue } from "./registry.ts";
 
 export type PreResolveBundleClassification = {
   bundle_id: string;
@@ -22,6 +25,11 @@ export type BundleSelectionInput = {
   registry: ToolRegistry;
   audience: ToolAudience;
   classification: PreResolveBundleClassification;
+  response_schema?: JsonValue;
+  few_shots?: ReadonlyArray<PromptCacheFewShot>;
+  thread_summary?: string | null;
+  resolved_context?: JsonValue;
+  user_turn?: string;
 };
 
 export type BundleSelection =
@@ -80,18 +88,28 @@ export function selectToolBundle(input: BundleSelectionInput): BundleSelection {
     });
   }
 
+  const tools = toolsForAudience({
+    registry: input.registry,
+    bundle_id: bundle.bundle_id,
+    audience,
+  });
+
   return Object.freeze({
     ok: true,
     audience,
     bundle_id: bundle.bundle_id,
     bundle,
-    tools: toolsForAudience({
-      registry: input.registry,
-      bundle_id: bundle.bundle_id,
-      audience,
-    }),
+    tools,
     prompt_template: promptTemplate,
-    prompt_cache_prefix: promptTemplate.prompt_cache_prefix,
+    prompt_cache_prefix: buildPromptCachePrefix({
+      template: promptTemplate,
+      tools,
+      response_schema: input.response_schema ?? { schema_id: "finance_research_blocks/v1" },
+      few_shots: input.few_shots,
+      thread_summary: input.thread_summary,
+      resolved_context: input.resolved_context,
+      user_turn: input.user_turn,
+    }),
     classification,
   });
 }

@@ -16,7 +16,8 @@ const sourceId = "00000000-0000-4000-8000-000000000006";
 const threadId = "00000000-0000-4000-8000-000000000007";
 const actionId = "00000000-0000-4000-8000-000000000008";
 const missingId = "00000000-0000-4000-8000-000000000009";
-const pendingActionId = "00000000-0000-5000-8000-000000000010";
+const pendingActionId = "b72a1c82-bf7b-58ed-8b81-081ca8ec9948";
+const forgedPendingActionId = "00000000-0000-5000-8000-000000000010";
 const otherSubjectId = "00000000-0000-4000-8000-000000000011";
 const seriesRef = "00000000-0000-4000-8000-000000000012";
 const otherSeriesRef = "00000000-0000-4000-8000-000000000013";
@@ -25,6 +26,24 @@ const rangeFactId = "00000000-0000-4000-8000-000000000015";
 const ttmFactId = "00000000-0000-4000-8000-000000000016";
 const documentId = "00000000-0000-4000-8000-000000000017";
 const otherDocumentId = "00000000-0000-4000-8000-000000000018";
+const pendingActionArguments = {
+  subject_ref: {
+    kind: "issuer",
+    id: "70a0cc2e-e198-4b59-a5c9-9bd2da4a359b",
+  },
+  rule: { metric: "price", operator: ">", value: 250 },
+  channels: ["in_app"],
+} as const;
+const pendingAction = {
+  pending_action_id: pendingActionId,
+  tool_name: "create_alert",
+  bundle_id: "alert_management",
+  audience: "analyst",
+  arguments: pendingActionArguments,
+  approval_required: true,
+  read_only: false,
+  idempotency_key: "turn-1/tool-1",
+} as const;
 
 const baseInput = {
   thread_id: threadId,
@@ -1869,9 +1888,11 @@ test("verifySnapshotSeal accepts deterministic pending approval ids", async () =
     tool_actions: [
       {
         ...baseInput.tool_actions[0],
+        approved: false,
         pending_action_id: pendingActionId,
       },
     ],
+    pending_actions: [pendingAction],
   });
 
   assert.deepEqual(result, {
@@ -1880,7 +1901,7 @@ test("verifySnapshotSeal accepts deterministic pending approval ids", async () =
   });
 });
 
-test("verifySnapshotSeal allows write intents that do not require approval", async () => {
+test("verifySnapshotSeal rejects write intents with explicit approval_required false", async () => {
   const result = await verifySnapshotSeal({
     ...baseInput,
     tool_actions: [
@@ -1892,9 +1913,15 @@ test("verifySnapshotSeal allows write intents that do not require approval", asy
     ],
   });
 
-  assert.deepEqual(result, {
-    ok: true,
-    failures: [],
+  assert.deepEqual(
+    result.failures.map((failure) => failure.reason_code),
+    ["unapproved_side_effect"],
+  );
+  assert.deepEqual(result.failures[0].details, {
+    tool_name: "add_to_watchlist",
+    tool_call_id: null,
+    approval_required: false,
+    pending_action_id: null,
   });
 });
 
@@ -1989,6 +2016,57 @@ test("verifySnapshotSeal accepts aggregate disclosure blocks with stricter tiers
   });
 });
 
+test("verifySnapshotSeal accepts approval-required write intents resolved as pending actions", async () => {
+  const result = await verifySnapshotSeal({
+    ...baseInput,
+    tool_actions: [
+      {
+        tool_call_id: actionId,
+        tool_name: "create_alert",
+        read_only: false,
+        approval_required: true,
+        approved: false,
+        pending_action_id: pendingActionId,
+      },
+    ],
+    pending_actions: [pendingAction],
+  });
+
+  assert.deepEqual(result, {
+    ok: true,
+    failures: [],
+  });
+});
+
+test("verifySnapshotSeal rejects forged pending approval ids", async () => {
+  const result = await verifySnapshotSeal({
+    ...baseInput,
+    tool_actions: [
+      {
+        tool_call_id: actionId,
+        tool_name: "create_alert",
+        read_only: false,
+        approval_required: true,
+        approved: false,
+        pending_action_id: forgedPendingActionId,
+      },
+    ],
+    pending_actions: [pendingAction],
+  });
+
+  assert.deepEqual(
+    result.failures.map((failure) => failure.reason_code),
+    ["unapproved_side_effect"],
+  );
+  assert.deepEqual(result.failures[0].details, {
+    tool_name: "create_alert",
+    tool_call_id: actionId,
+    approval_required: true,
+    pending_action_id: forgedPendingActionId,
+    pending_action_status: "missing",
+  });
+});
+
 test("verifySnapshotSeal rejects write intents without approval metadata", async () => {
   const result = await verifySnapshotSeal({
     ...baseInput,
@@ -2009,5 +2087,33 @@ test("verifySnapshotSeal rejects write intents without approval metadata", async
     tool_call_id: null,
     approval_required: null,
     pending_action_id: null,
+  });
+});
+
+test("verifySnapshotSeal rejects unknown block kinds even when data_ref matches", async () => {
+  const result = await verifySnapshotSeal({
+    ...baseInput,
+    blocks: [
+      {
+        id: "unregistered",
+        kind: "made_up_block",
+        snapshot_id: snapshotId,
+        data_ref: { kind: "made_up_block", id: "made-up" },
+        source_refs: [sourceId],
+        as_of: "2026-04-29T00:00:00.000Z",
+      },
+      baseInput.blocks[1],
+    ],
+  });
+
+  assert.deepEqual(
+    result.failures.map((failure) => failure.reason_code),
+    ["invalid_block_binding"],
+  );
+  assert.deepEqual(result.failures[0].details, {
+    block_id: "unregistered",
+    field: "kind",
+    reason: "unknown_block_kind",
+    actual: "made_up_block",
   });
 });

@@ -6,44 +6,47 @@ import {
   sealSnapshotWithPool,
   snapshotTransactionClient,
 } from "../src/snapshot-sealer.ts";
-import type { QueryExecutor, SnapshotManifestDraft } from "../src/manifest-staging.ts";
+import {
+  stageSnapshotManifest,
+  type QueryExecutor,
+  type SnapshotManifestDraft,
+} from "../src/manifest-staging.ts";
 
 const snapshotId = "00000000-0000-4000-8000-000000000001";
 const listingId = "00000000-0000-4000-8000-000000000002";
 const documentId = "00000000-0000-4000-8000-000000000003";
 const sourceId = "00000000-0000-4000-8000-000000000004";
 const toolCallId = "00000000-0000-4000-8000-000000000005";
+const extraToolCallId = "00000000-0000-4000-8000-000000000006";
 
-const manifest: SnapshotManifestDraft = Object.freeze({
-  subject_refs: Object.freeze([{ kind: "listing", id: listingId }]),
-  fact_refs: Object.freeze([]),
-  claim_refs: Object.freeze([]),
-  event_refs: Object.freeze([]),
-  document_refs: Object.freeze([documentId]),
-  series_specs: Object.freeze([]),
-  source_ids: Object.freeze([sourceId]),
-  tool_call_ids: Object.freeze([toolCallId]),
-  tool_call_result_hashes: Object.freeze([
-    Object.freeze({ tool_call_id: toolCallId, result_hash: `sha256:${"1".repeat(64)}` }),
-  ]),
-  as_of: "2026-04-29T00:00:00.000Z",
+const manifest = stageSnapshotManifest({
+  subject_refs: [{ kind: "listing", id: listingId }],
   basis: "split_adjusted",
   normalization: "raw",
+  as_of: "2026-04-29T00:00:00.000Z",
   coverage_start: "2026-04-01T00:00:00.000Z",
-  allowed_transforms: Object.freeze({
-    series: Object.freeze([
-      Object.freeze({
-        range: Object.freeze({
+  allowed_transforms: {
+    series: [
+      {
+        range: {
           start: "2026-04-01T00:00:00Z",
           end: "2026-04-29T00:00:00Z",
-        }),
+        },
         interval: "1d",
-      }),
-    ]),
-  }),
+      },
+    ],
+  },
   model_version: "snapshot-test-v1",
   parent_snapshot: null,
+  tool_calls: [
+    {
+      tool_call_id: toolCallId,
+      document_refs: [documentId],
+      source_ids: [sourceId],
+    },
+  ],
 });
+const toolCallResultHash = manifest.tool_call_result_hashes[0].result_hash;
 
 test("sealSnapshot persists a verified snapshot inside one transaction", async () => {
   const { db, queries } = recordingDb();
@@ -53,16 +56,123 @@ test("sealSnapshot persists a verified snapshot inside one transaction", async (
   assert.equal(result.ok, true);
   assert.equal(result.snapshot.snapshot_id, snapshotId);
   assert.deepEqual(queries.map((query) => normalizedSql(query.text)), [
+    "select from tool_call_logs",
     "begin",
     "insert into snapshots",
     "commit",
   ]);
-  assert.match(queries[1].text, /\bdocument_refs\b/);
-  assert.match(queries[1].text, /\btool_call_result_hashes\b/);
-  assert.deepEqual(jsonValueAt(queries[1].values, 5), [documentId]);
-  assert.deepEqual(jsonValueAt(queries[1].values, 6), []);
-  assert.deepEqual(jsonValueAt(queries[1].values, 9), [
-    { tool_call_id: toolCallId, result_hash: `sha256:${"1".repeat(64)}` },
+  assert.match(queries[2].text, /\bdocument_refs\b/);
+  assert.match(queries[2].text, /\btool_call_result_hashes\b/);
+  assert.deepEqual(jsonValueAt(queries[2].values, 5), [documentId]);
+  assert.deepEqual(jsonValueAt(queries[2].values, 6), []);
+  assert.deepEqual(jsonValueAt(queries[2].values, 9), [
+    { tool_call_id: toolCallId, result_hash: toolCallResultHash },
+  ]);
+});
+
+test("sealSnapshot rejects missing tool-call audit rows before starting a transaction", async () => {
+  const { db, queries } = recordingDb({ toolCallRows: [] });
+
+  const result = await sealSnapshot(snapshotTransactionClient(db), validSealInput());
+
+  assert.equal(result.ok, false);
+  assert.equal(result.verification.failures[0]?.reason_code, "tool_call_log_audit_failed");
+  assert.deepEqual(result.verification.failures[0]?.details, {
+    missing_tool_call_ids: [toolCallId],
+    mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [],
+    duplicate_tool_call_ids: [],
+    missing_hash_tool_call_ids: [],
+    missing_provenance: false,
+  });
+  assert.deepEqual(queries.map((query) => normalizedSql(query.text)), [
+    "select from tool_call_logs",
+    "insert into verifier_fail_logs",
+  ]);
+});
+
+test("sealSnapshot rejects extra and duplicate tool-call result hashes before starting a transaction", async () => {
+  const { db, queries } = recordingDb();
+
+  const result = await sealSnapshot(snapshotTransactionClient(db), {
+    ...validSealInput(),
+    manifest: {
+      ...manifest,
+      tool_call_result_hashes: [
+        { tool_call_id: toolCallId, result_hash: toolCallResultHash },
+        { tool_call_id: toolCallId, result_hash: toolCallResultHash },
+        { tool_call_id: extraToolCallId, result_hash: `sha256:${"2".repeat(64)}` },
+      ],
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.verification.failures[0]?.reason_code, "tool_call_log_audit_failed");
+  assert.deepEqual(result.verification.failures[0]?.details, {
+    missing_tool_call_ids: [],
+    mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [extraToolCallId],
+    duplicate_tool_call_ids: [toolCallId],
+    missing_hash_tool_call_ids: [],
+    missing_provenance: false,
+  });
+  assert.deepEqual(queries.map((query) => normalizedSql(query.text)), [
+    "select from tool_call_logs",
+    "insert into verifier_fail_logs",
+  ]);
+});
+
+test("sealSnapshot rejects missing tool-call result hashes before starting a transaction", async () => {
+  const { db, queries } = recordingDb();
+
+  const result = await sealSnapshot(snapshotTransactionClient(db), {
+    ...validSealInput(),
+    manifest: {
+      ...manifest,
+      tool_call_result_hashes: [],
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.verification.failures[0]?.reason_code, "tool_call_log_audit_failed");
+  assert.deepEqual(result.verification.failures[0]?.details, {
+    missing_tool_call_ids: [],
+    mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [],
+    duplicate_tool_call_ids: [],
+    missing_hash_tool_call_ids: [toolCallId],
+    missing_provenance: false,
+  });
+  assert.deepEqual(queries.map((query) => normalizedSql(query.text)), [
+    "select from tool_call_logs",
+    "insert into verifier_fail_logs",
+  ]);
+});
+
+test("sealSnapshot rejects evidence refs without tool-call provenance before starting a transaction", async () => {
+  const { db, queries } = recordingDb();
+
+  const result = await sealSnapshot(snapshotTransactionClient(db), {
+    ...validSealInput(),
+    manifest: {
+      ...manifest,
+      tool_call_ids: [],
+      tool_call_result_hashes: [],
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.verification.failures[0]?.reason_code, "tool_call_log_audit_failed");
+  assert.deepEqual(result.verification.failures[0]?.details, {
+    missing_tool_call_ids: [],
+    mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [],
+    duplicate_tool_call_ids: [],
+    missing_hash_tool_call_ids: [],
+    missing_provenance: true,
+  });
+  assert.deepEqual(queries.map((query) => normalizedSql(query.text)), [
+    "insert into verifier_fail_logs",
   ]);
 });
 
@@ -75,6 +185,7 @@ test("sealSnapshot rolls back when persistence fails after transaction start", a
   );
 
   assert.deepEqual(queries.map((query) => normalizedSql(query.text)), [
+    "select from tool_call_logs",
     "begin",
     "insert into snapshots",
     "rollback",
@@ -174,6 +285,20 @@ test("snapshotTransactionClient rejects query-plus-connect pool wrappers", () =>
   assert.deepEqual(queries, []);
 });
 
+test("snapshotTransactionClient rejects query-only pool wrappers before starting a transaction", () => {
+  const { db, queries } = recordingDb();
+  const queryOnlyWrapper = {
+    query: db.query.bind(db),
+  };
+
+  assert.throws(
+    () => snapshotTransactionClient(queryOnlyWrapper),
+    /requires an acquired transaction client/i,
+  );
+
+  assert.deepEqual(queries, []);
+});
+
 test("sealSnapshotWithPool pins the seal transaction to one acquired client", async () => {
   const { db: client, queries } = recordingDb();
   let connectCount = 0;
@@ -198,6 +323,7 @@ test("sealSnapshotWithPool pins the seal transaction to one acquired client", as
   assert.equal(connectCount, 1);
   assert.equal(releaseCount, 1);
   assert.deepEqual(queries.map((query) => normalizedSql(query.text)), [
+    "select from tool_call_logs",
     "begin",
     "insert into snapshots",
     "commit",
@@ -239,9 +365,22 @@ function validSealInput() {
   };
 }
 
-function recordingDb(options: { failOnSnapshotInsert?: boolean; failOnRollback?: boolean } = {}) {
+function recordingDb(
+  options: {
+    failOnSnapshotInsert?: boolean;
+    failOnRollback?: boolean;
+    toolCallRows?: Array<{ tool_call_id: string; result_hash: string | null }>;
+  } = {},
+) {
   const queries: Array<{ text: string; values?: unknown[] }> = [];
-  const db: QueryExecutor = {
+  const toolCallRows = options.toolCallRows ?? [
+    { tool_call_id: toolCallId, result_hash: toolCallResultHash },
+  ];
+  const db: QueryExecutor & { release(): void } = {
+    release() {
+      // Test clients model an acquired pool client; release behavior is asserted
+      // explicitly in sealSnapshotWithPool tests.
+    },
     async query<R extends Record<string, unknown> = Record<string, unknown>>(
       text: string,
       values?: unknown[],
@@ -255,6 +394,10 @@ function recordingDb(options: { failOnSnapshotInsert?: boolean; failOnRollback?:
 
       if (["begin", "commit", "rollback"].includes(normalized)) {
         return { rows: [] as R[] };
+      }
+
+      if (normalized === "select from tool_call_logs") {
+        return { rows: toolCallRows as R[] };
       }
 
       if (normalized === "insert into snapshots") {
@@ -301,6 +444,9 @@ function recordingDb(options: { failOnSnapshotInsert?: boolean; failOnRollback?:
 function normalizedSql(text: string): string {
   const compact = text.trim().replace(/\s+/g, " ").toLowerCase();
   if (compact === "begin" || compact === "commit" || compact === "rollback") return compact;
+  if (compact.startsWith("select tool_call_id::text as tool_call_id, result_hash from tool_call_logs")) {
+    return "select from tool_call_logs";
+  }
   if (compact.startsWith("insert into snapshots")) return "insert into snapshots";
   if (compact.startsWith("insert into verifier_fail_logs")) return "insert into verifier_fail_logs";
   return compact;

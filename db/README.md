@@ -21,6 +21,17 @@ DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres npm run migr
 DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres npm run migrate -- down
 ```
 
+Before applying `0006_chat_messages_snapshot_not_null`, check for legacy
+message rows without sealed snapshots:
+
+```sql
+select count(*) from chat_messages where snapshot_id is null;
+```
+
+The migration intentionally fails if any such rows exist. Remediate by
+deleting unsealed message history or attaching each row to a valid sealed
+snapshot before rerunning `migrate -- up`.
+
 Seed reference data (metrics registry + minimal source registry):
 
 ```bash
@@ -36,7 +47,8 @@ npm test
 ```
 
 Notes:
-- `0001_init.up.sql` is an immutable snapshot of the current normative schema pack.
+- `0001_init.up.sql` is immutable migration history. Later migrations upgrade it
+  to the current normative schema in `spec/finance_research_db_schema.sql`.
 - `schema_migrations` tracks applied migration versions.
 - `down` rolls back one migration per invocation.
 - Seed files in `db/seed/*.sql` are applied in lexical order and are idempotent — rerunning does not duplicate rows.

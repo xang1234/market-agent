@@ -22,9 +22,21 @@ test("selectToolBundle selects every registered bundle from pre-resolve classifi
     assert.equal(selection.bundle_id, bundle_id);
     assert.equal(selection.bundle.bundle_id, bundle_id);
     assert.equal(selection.prompt_template.bundle_id, bundle_id);
-    assert.equal(
+    assert.match(
       selection.prompt_cache_prefix.cache_key,
-      `analyst:${bundle_id}:${selection.prompt_template.version}`,
+      new RegExp(`^analyst:${bundle_id}:${selection.prompt_template.version}:[0-9a-f]{64}$`),
+    );
+    assert.deepEqual(
+      selection.prompt_cache_prefix.messages.map((message) => message.name),
+      [
+        "tools",
+        "system",
+        "bundle_policy",
+        "response_schema",
+        "few_shots",
+        "thread_summary",
+        "resolved_context",
+      ],
     );
     assert.deepEqual(
       selection.tools.map((tool) => tool.name),
@@ -34,6 +46,42 @@ test("selectToolBundle selects every registered bundle from pre-resolve classifi
         .map((tool) => tool.name),
     );
   }
+});
+
+test("selectToolBundle builds stable production prompt prefixes across user turns", () => {
+  const registry = loadToolRegistry();
+
+  const userTurn = "What changed in the filing?";
+  const first = selectToolBundle({
+    registry,
+    audience: "analyst",
+    classification: classification("document_research"),
+    thread_summary: "Researching AAPL supplier risk.",
+    resolved_context: {
+      subjects: [{ kind: "listing", id: "00000000-0000-4000-8000-000000000001" }],
+    },
+    user_turn: userTurn,
+  });
+  const second = selectToolBundle({
+    registry,
+    audience: "analyst",
+    classification: classification("document_research"),
+    thread_summary: "Researching AAPL supplier risk.",
+    resolved_context: {
+      subjects: [{ kind: "listing", id: "00000000-0000-4000-8000-000000000001" }],
+    },
+    user_turn: "Now compare risk factors.",
+  });
+
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.equal(first.prompt_cache_prefix.cache_key, second.prompt_cache_prefix.cache_key);
+  assert.equal(first.prompt_cache_prefix.user_turn, "What changed in the filing?");
+  assert.equal(second.prompt_cache_prefix.user_turn, "Now compare risk factors.");
+  assert.equal(
+    first.prompt_cache_prefix.messages.some((message) => message.content === userTurn),
+    false,
+  );
 });
 
 test("selectToolBundle filters reader tools out of analyst bundle selections", () => {

@@ -13,11 +13,15 @@ export {
   analystPromptTemplateBundleIds,
   analystPromptTemplateForBundle,
   assertAnalystPromptTemplates,
+  buildPromptCachePrefix,
+  promptCachePrefixHash,
   validateAnalystPromptTemplates,
 } from "./prompt-templates.ts";
 export type {
   AnalystPromptTemplate,
   AnalystPromptTemplateValidation,
+  BuildPromptCachePrefixInput,
+  PromptCacheFewShot,
   PromptCachePrefix,
   PromptCachePrefixMessage,
 } from "./prompt-templates.ts";
@@ -43,6 +47,16 @@ export type {
   ToolCallBudgetDecision,
   ToolCallUsage,
 } from "./budget-gate.ts";
+
+export {
+  createTurnToolPolicy,
+} from "./turn-policy.ts";
+export type {
+  AcceptedToolCallBudgetDecision,
+  TurnToolCallInput,
+  TurnToolPolicy,
+  TurnToolPolicyInput,
+} from "./turn-policy.ts";
 
 export {
   RAW_DOCUMENT_FIELD_NAMES,

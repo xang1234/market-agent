@@ -1,7 +1,12 @@
-import type { QueryExecutor, SnapshotManifestDraft } from "./manifest-staging.ts";
+import {
+  auditManifestToolCallLog,
+  type QueryExecutor,
+  type SnapshotManifestDraft,
+} from "./manifest-staging.ts";
 import {
   type SnapshotVerificationInput,
   type SnapshotVerificationResult,
+  type SnapshotVerifierFailure,
   verifySnapshotSeal,
 } from "./snapshot-verifier.ts";
 
@@ -15,11 +20,11 @@ type SnapshotTransactionClientBrand = {
   readonly [SNAPSHOT_TRANSACTION_CLIENT]: true;
 };
 
-export type SnapshotTransactionClient = QueryExecutor & SnapshotTransactionClientBrand;
-
 export type SnapshotPoolClient = QueryExecutor & {
   release(error?: Error): void;
 };
+
+export type SnapshotTransactionClient = SnapshotPoolClient & SnapshotTransactionClientBrand;
 
 export type SnapshotClientPool = {
   connect(): Promise<SnapshotPoolClient>;
@@ -50,6 +55,9 @@ export function snapshotTransactionClient<T extends QueryExecutor>(
   if (isPoolLike(client)) {
     throw new Error("sealSnapshot requires a pinned transaction client; use sealSnapshotWithPool for pools");
   }
+  if (!isAcquiredClient(client)) {
+    throw new Error("sealSnapshot requires an acquired transaction client with release()");
+  }
   Object.defineProperty(client, SNAPSHOT_TRANSACTION_CLIENT, {
     value: true,
     enumerable: false,
@@ -74,6 +82,31 @@ export async function sealSnapshot(
   const verification = await verifySnapshotSeal(verificationInput, db);
   if (!verification.ok) {
     return Object.freeze({ ok: false, verification });
+  }
+
+  const toolCallAudit = await auditManifestToolCallLog(db, input.manifest, {
+    ...(input.thread_id == null ? {} : { thread_id: input.thread_id }),
+  });
+  if (!toolCallAudit.ok) {
+    const failure: SnapshotVerifierFailure = Object.freeze({
+      reason_code: "tool_call_log_audit_failed",
+      details: Object.freeze({
+        missing_tool_call_ids: [...toolCallAudit.missing_tool_call_ids],
+        mismatched_tool_call_ids: [...toolCallAudit.mismatched_tool_call_ids],
+        extra_tool_call_ids: [...toolCallAudit.extra_tool_call_ids],
+        duplicate_tool_call_ids: [...toolCallAudit.duplicate_tool_call_ids],
+        missing_hash_tool_call_ids: [...toolCallAudit.missing_hash_tool_call_ids],
+        missing_provenance: toolCallAudit.missing_provenance,
+      }),
+    });
+    await writeSealFailure(db, input, failure);
+    return Object.freeze({
+      ok: false,
+      verification: Object.freeze({
+        ok: false,
+        failures: Object.freeze([failure]),
+      }),
+    });
   }
 
   await db.query("begin");
@@ -209,6 +242,28 @@ function isPoolLike(db: QueryExecutor): boolean {
     connect?: unknown;
   };
   return typeof candidate.connect === "function";
+}
+
+function isAcquiredClient(db: QueryExecutor): db is SnapshotPoolClient {
+  return typeof (db as { release?: unknown }).release === "function";
+}
+
+async function writeSealFailure(
+  db: QueryExecutor,
+  input: SnapshotSealInput,
+  failure: SnapshotVerifierFailure,
+): Promise<void> {
+  await db.query(
+    `insert into verifier_fail_logs
+       (thread_id, snapshot_id, reason_code, details)
+     values ($1, $2, $3, $4::jsonb)`,
+    [
+      input.thread_id ?? null,
+      input.snapshot_id,
+      failure.reason_code,
+      JSON.stringify(failure.details),
+    ],
+  );
 }
 
 function jsonParam(value: unknown): string {

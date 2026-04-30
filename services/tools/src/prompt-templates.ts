@@ -1,16 +1,42 @@
+import { createHash } from "node:crypto";
+
+import type { JsonValue, ToolDefinition } from "./registry.ts";
 import type { ToolRegistry } from "./registry.ts";
 
 export const ANALYST_PROMPT_TEMPLATE_VERSION = "v1";
 
 export type PromptCachePrefixMessage = {
   role: "system";
-  name: "bundle_system" | "bundle_policy";
+  name:
+    | "tools"
+    | "system"
+    | "bundle_policy"
+    | "response_schema"
+    | "few_shots"
+    | "thread_summary"
+    | "resolved_context";
   content: string;
 };
 
 export type PromptCachePrefix = {
   cache_key: string;
   messages: ReadonlyArray<PromptCachePrefixMessage>;
+  user_turn?: string;
+};
+
+export type PromptCacheFewShot = {
+  name: string;
+  content: string;
+};
+
+export type BuildPromptCachePrefixInput = {
+  template: AnalystPromptTemplate;
+  tools: ReadonlyArray<ToolDefinition>;
+  response_schema: JsonValue;
+  few_shots?: ReadonlyArray<PromptCacheFewShot>;
+  thread_summary?: string | null;
+  resolved_context?: JsonValue;
+  user_turn?: string;
 };
 
 export type AnalystPromptTemplate = {
@@ -171,6 +197,41 @@ export function assertAnalystPromptTemplates(registry: ToolRegistry): void {
   );
 }
 
+export function buildPromptCachePrefix(
+  input: BuildPromptCachePrefixInput,
+): PromptCachePrefix {
+  const template = input.template;
+  const messages = Object.freeze([
+    prefixMessage("tools", canonicalJson(toolDescriptors(input.tools))),
+    prefixMessage("system", template.system_prompt),
+    prefixMessage("bundle_policy", template.policy_prompt),
+    prefixMessage("response_schema", canonicalJson(input.response_schema)),
+    prefixMessage("few_shots", canonicalJson(input.few_shots ?? [])),
+    prefixMessage("thread_summary", input.thread_summary ?? ""),
+    prefixMessage("resolved_context", canonicalJson(input.resolved_context ?? null)),
+  ]);
+  const cache_key = [
+    "analyst",
+    template.bundle_id,
+    template.version,
+    promptCachePrefixHash({ messages }),
+  ].join(":");
+
+  return Object.freeze({
+    cache_key,
+    messages,
+    ...(input.user_turn === undefined ? {} : { user_turn: input.user_turn }),
+  });
+}
+
+export function promptCachePrefixHash(
+  prefix: Pick<PromptCachePrefix, "messages">,
+): string {
+  return createHash("sha256")
+    .update(canonicalJson(prefix.messages))
+    .digest("hex");
+}
+
 function makeTemplate(input: {
   bundle_id: string;
   system: string;
@@ -181,7 +242,7 @@ function makeTemplate(input: {
   const messages = Object.freeze([
     Object.freeze({
       role: "system",
-      name: "bundle_system",
+      name: "system",
       content: systemPrompt,
     }),
     Object.freeze({
@@ -201,6 +262,53 @@ function makeTemplate(input: {
       messages,
     }),
   });
+}
+
+function prefixMessage(
+  name: PromptCachePrefixMessage["name"],
+  content: string,
+): PromptCachePrefixMessage {
+  return Object.freeze({
+    role: "system",
+    name,
+    content,
+  });
+}
+
+function toolDescriptors(tools: ReadonlyArray<ToolDefinition>): ReadonlyArray<JsonValue> {
+  return Object.freeze(
+    [...tools]
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        audience: tool.audience,
+        read_only: tool.read_only,
+        approval_required: tool.approval_required,
+        cost_class: tool.cost_class,
+        freshness_expectation: tool.freshness_expectation,
+        input_json_schema: tool.input_json_schema,
+        output_json_schema: tool.output_json_schema,
+        error_codes: tool.error_codes,
+      })),
+  );
+}
+
+function canonicalJson(value: JsonValue | ReadonlyArray<unknown>): string {
+  return stableJson(value);
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJson(item)).join(",")}]`;
+  }
+  return `{${Object.entries(value)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`)
+    .join(",")}}`;
 }
 
 function duplicateStrings(values: ReadonlyArray<string>): ReadonlyArray<string> {

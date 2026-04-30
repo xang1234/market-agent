@@ -10,6 +10,8 @@ export type JsonValue =
   | JsonValue[]
   | JsonObject;
 
+export const STAGED_SNAPSHOT_MANIFEST: unique symbol = Symbol("snapshot.stagedManifest");
+
 export type QueryExecutor = {
   query<R extends Record<string, unknown> = Record<string, unknown>>(
     text: string,
@@ -54,6 +56,7 @@ export const SNAPSHOT_NORMALIZATIONS = [
 export type SnapshotNormalization = (typeof SNAPSHOT_NORMALIZATIONS)[number];
 
 export type SnapshotManifestDraft = {
+  readonly [STAGED_SNAPSHOT_MANIFEST]?: true;
   subject_refs: ReadonlyArray<SnapshotSubjectRef>;
   fact_refs: ReadonlyArray<string>;
   claim_refs: ReadonlyArray<string>;
@@ -105,6 +108,10 @@ export type ToolCallLogAudit = {
   ok: boolean;
   missing_tool_call_ids: ReadonlyArray<string>;
   mismatched_tool_call_ids: ReadonlyArray<string>;
+  extra_tool_call_ids: ReadonlyArray<string>;
+  duplicate_tool_call_ids: ReadonlyArray<string>;
+  missing_hash_tool_call_ids: ReadonlyArray<string>;
+  missing_provenance: boolean;
 };
 
 export type ToolCallLogAuditOptions = {
@@ -215,6 +222,7 @@ export function stageSnapshotManifest(
   );
 
   return Object.freeze({
+    [STAGED_SNAPSHOT_MANIFEST]: true,
     subject_refs: Object.freeze(subject_refs.values()),
     fact_refs: Object.freeze(fact_refs.values()),
     claim_refs: Object.freeze(claim_refs.values()),
@@ -254,7 +262,13 @@ export function stageSnapshotManifest(
 
 export async function auditManifestToolCallLog(
   db: QueryExecutor,
-  manifest: Pick<SnapshotManifestDraft, "tool_call_ids" | "tool_call_result_hashes">,
+  manifest: Pick<SnapshotManifestDraft, "tool_call_ids" | "tool_call_result_hashes"> &
+    Partial<
+      Pick<
+        SnapshotManifestDraft,
+        "fact_refs" | "claim_refs" | "event_refs" | "document_refs" | "series_specs" | "source_ids"
+      >
+    >,
   options: ToolCallLogAuditOptions = {},
 ): Promise<ToolCallLogAudit> {
   assertArray(
@@ -264,11 +278,15 @@ export async function auditManifestToolCallLog(
   const toolCallIds = manifest.tool_call_ids.map((toolCallId, index) =>
     assertUuidRef(toolCallId, `auditManifestToolCallLog.tool_call_ids[${index}]`),
   );
+  const uniqueToolCallIds = firstSeen(toolCallIds);
+  const duplicateToolCallIds = duplicateValues(toolCallIds);
+  const toolCallIdSet = new Set(uniqueToolCallIds);
   assertArray(
     manifest.tool_call_result_hashes,
     "auditManifestToolCallLog.tool_call_result_hashes",
   );
   const expectedHashes = new Map<string, string>();
+  const hashToolCallIds: string[] = [];
   manifest.tool_call_result_hashes.forEach((item, index) => {
     if (item === null || typeof item !== "object") {
       throw new Error(`auditManifestToolCallLog.tool_call_result_hashes[${index}]: must be an object`);
@@ -277,6 +295,7 @@ export async function auditManifestToolCallLog(
       item.tool_call_id,
       `auditManifestToolCallLog.tool_call_result_hashes[${index}].tool_call_id`,
     );
+    hashToolCallIds.push(toolCallId);
     expectedHashes.set(
       toolCallId,
       assertResultHash(
@@ -285,24 +304,37 @@ export async function auditManifestToolCallLog(
       ),
     );
   });
-  for (const toolCallId of toolCallIds) {
-    if (!expectedHashes.has(toolCallId)) {
-      throw new Error(`auditManifestToolCallLog.tool_call_result_hashes: missing hash for ${toolCallId}`);
-    }
-  }
+  const duplicateHashToolCallIds = duplicateValues(hashToolCallIds);
+  const extraToolCallIds = firstSeen(hashToolCallIds.filter((toolCallId) => !toolCallIdSet.has(toolCallId)));
+  const duplicateAuditToolCallIds = firstSeen([
+    ...duplicateToolCallIds,
+    ...duplicateHashToolCallIds,
+  ]);
+  const missingHashToolCallIds = uniqueToolCallIds.filter((toolCallId) => !expectedHashes.has(toolCallId));
+  const missingProvenance =
+    hasProvenanceBearingRefs(manifest) &&
+    (uniqueToolCallIds.length === 0 || !isStagedSnapshotManifest(manifest));
 
-  if (toolCallIds.length === 0) {
+  if (uniqueToolCallIds.length === 0 || missingProvenance) {
     return Object.freeze({
-      ok: true,
+      ok:
+        extraToolCallIds.length === 0 &&
+        duplicateAuditToolCallIds.length === 0 &&
+        missingHashToolCallIds.length === 0 &&
+        !missingProvenance,
       missing_tool_call_ids: Object.freeze([]),
       mismatched_tool_call_ids: Object.freeze([]),
+      extra_tool_call_ids: Object.freeze(extraToolCallIds),
+      duplicate_tool_call_ids: Object.freeze(duplicateAuditToolCallIds),
+      missing_hash_tool_call_ids: Object.freeze(missingHashToolCallIds),
+      missing_provenance: missingProvenance,
     });
   }
 
   const allowedStatuses = freezeAllowedStatuses(
     options.allowed_statuses ?? DEFAULT_TOOL_CALL_AUDIT_STATUSES,
   );
-  const values: unknown[] = [toolCallIds, allowedStatuses];
+  const values: unknown[] = [uniqueToolCallIds, allowedStatuses];
   const predicates = [
     "tool_call_id = any($1::uuid[])",
     "status = any($2::text[])",
@@ -325,17 +357,76 @@ export async function auditManifestToolCallLog(
     values,
   );
   const found = new Map(rows.map((row) => [row.tool_call_id, row.result_hash]));
-  const missing = toolCallIds.filter((toolCallId) => !found.has(toolCallId));
-  const mismatched = toolCallIds.filter((toolCallId) => {
+  const missing = uniqueToolCallIds.filter((toolCallId) => !found.has(toolCallId));
+  const mismatched = uniqueToolCallIds.filter((toolCallId) => {
     if (!found.has(toolCallId)) return false;
+    if (!expectedHashes.has(toolCallId)) return false;
     return found.get(toolCallId) !== expectedHashes.get(toolCallId);
   });
 
   return Object.freeze({
-    ok: missing.length === 0 && mismatched.length === 0,
+    ok:
+      missing.length === 0 &&
+      mismatched.length === 0 &&
+      extraToolCallIds.length === 0 &&
+      duplicateAuditToolCallIds.length === 0 &&
+      missingHashToolCallIds.length === 0 &&
+      !missingProvenance,
     missing_tool_call_ids: Object.freeze(missing),
     mismatched_tool_call_ids: Object.freeze(mismatched),
+    extra_tool_call_ids: Object.freeze(extraToolCallIds),
+    duplicate_tool_call_ids: Object.freeze(duplicateAuditToolCallIds),
+    missing_hash_tool_call_ids: Object.freeze(missingHashToolCallIds),
+    missing_provenance: missingProvenance,
   });
+}
+
+function isStagedSnapshotManifest(
+  manifest: Pick<SnapshotManifestDraft, typeof STAGED_SNAPSHOT_MANIFEST>,
+): boolean {
+  return manifest[STAGED_SNAPSHOT_MANIFEST] === true;
+}
+
+function hasProvenanceBearingRefs(
+  manifest: Partial<
+    Pick<
+      SnapshotManifestDraft,
+      "fact_refs" | "claim_refs" | "event_refs" | "document_refs" | "series_specs" | "source_ids"
+    >
+  >,
+): boolean {
+  return [
+    manifest.fact_refs,
+    manifest.claim_refs,
+    manifest.event_refs,
+    manifest.document_refs,
+    manifest.series_specs,
+    manifest.source_ids,
+  ].some((refs) => Array.isArray(refs) && refs.length > 0);
+}
+
+function firstSeen(values: ReadonlyArray<string>): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (seen.has(value)) continue;
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
+}
+
+function duplicateValues(values: ReadonlyArray<string>): string[] {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const value of values) {
+    if (seen.has(value)) {
+      duplicates.add(value);
+      continue;
+    }
+    seen.add(value);
+  }
+  return [...duplicates];
 }
 
 class FirstSeenSet<T> {

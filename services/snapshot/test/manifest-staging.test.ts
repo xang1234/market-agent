@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  STAGED_SNAPSHOT_MANIFEST,
   auditManifestToolCallLog,
   stageSnapshotManifest,
   type SnapshotManifestDraft,
@@ -18,6 +19,7 @@ const firstSourceId = "00000000-0000-4000-8000-000000000401";
 const secondSourceId = "00000000-0000-4000-8000-000000000402";
 const firstToolCallId = "00000000-0000-4000-8000-000000000501";
 const secondToolCallId = "00000000-0000-4000-8000-000000000502";
+const extraToolCallId = "00000000-0000-4000-8000-000000000503";
 const threadId = "00000000-0000-4000-8000-000000000601";
 const agentId = "00000000-0000-4000-8000-000000000701";
 const fakeFirstHash = `sha256:${"1".repeat(64)}`;
@@ -72,7 +74,11 @@ test("stageSnapshotManifest collects refs from tool-call outputs with audit ids"
   assert.match(manifest.tool_call_result_hashes[0].result_hash, /^sha256:[0-9a-f]{64}$/);
   assert.match(manifest.tool_call_result_hashes[1].result_hash, /^sha256:[0-9a-f]{64}$/);
 
-  const { tool_call_result_hashes, ...rest } = manifest;
+  const {
+    [STAGED_SNAPSHOT_MANIFEST]: _staged,
+    tool_call_result_hashes,
+    ...rest
+  } = manifest;
   assert.deepEqual(rest, {
     subject_refs: [{ kind: "listing", id: listingId }],
     fact_refs: [firstFactId, secondFactId],
@@ -172,6 +178,10 @@ test("auditManifestToolCallLog reports missing staged tool calls", async () => {
     ok: false,
     missing_tool_call_ids: [secondToolCallId],
     mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [],
+    duplicate_tool_call_ids: [],
+    missing_hash_tool_call_ids: [],
+    missing_provenance: false,
   });
   assert.match(queries[0].text, /tool_call_logs/);
   assert.deepEqual(queries[0].values, [
@@ -214,6 +224,10 @@ test("auditManifestToolCallLog scopes audit to successful thread and agent calls
     ok: false,
     missing_tool_call_ids: [secondToolCallId],
     mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [],
+    duplicate_tool_call_ids: [],
+    missing_hash_tool_call_ids: [],
+    missing_provenance: false,
   });
   assert.match(queries[0].text, /status = any\(\$2::text\[\]\)/);
   assert.match(queries[0].text, /thread_id = \$3::uuid/);
@@ -224,6 +238,37 @@ test("auditManifestToolCallLog scopes audit to successful thread and agent calls
     threadId,
     agentId,
   ]);
+});
+
+test("auditManifestToolCallLog reports missing result hash entries without throwing", async () => {
+  const db = {
+    async query<R extends Record<string, unknown>>() {
+      return {
+        rows: [{ tool_call_id: firstToolCallId, result_hash: fakeFirstHash }] as R[],
+        rowCount: 1,
+        command: "SELECT",
+        oid: 0,
+        fields: [],
+      };
+    },
+  };
+
+  const result = await auditManifestToolCallLog(db, {
+    tool_call_ids: [firstToolCallId, secondToolCallId],
+    tool_call_result_hashes: [
+      { tool_call_id: firstToolCallId, result_hash: fakeFirstHash },
+    ],
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    missing_tool_call_ids: [secondToolCallId],
+    mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [],
+    duplicate_tool_call_ids: [],
+    missing_hash_tool_call_ids: [secondToolCallId],
+    missing_provenance: false,
+  });
 });
 
 test("auditManifestToolCallLog rejects refs whose contribution hash differs from the durable tool log", async () => {
@@ -262,8 +307,76 @@ test("auditManifestToolCallLog rejects refs whose contribution hash differs from
     ok: false,
     missing_tool_call_ids: [],
     mismatched_tool_call_ids: [firstToolCallId],
+    extra_tool_call_ids: [],
+    duplicate_tool_call_ids: [],
+    missing_hash_tool_call_ids: [],
+    missing_provenance: false,
   });
   assert.match(queries[0].text, /result_hash/);
+});
+
+test("auditManifestToolCallLog rejects extra and duplicate result hash entries", async () => {
+  const db = {
+    async query<R extends Record<string, unknown>>() {
+      return {
+        rows: [
+          { tool_call_id: firstToolCallId, result_hash: fakeFirstHash },
+          { tool_call_id: secondToolCallId, result_hash: fakeSecondHash },
+        ] as R[],
+        rowCount: 2,
+        command: "SELECT",
+        oid: 0,
+        fields: [],
+      };
+    },
+  };
+
+  const result = await auditManifestToolCallLog(db, {
+    tool_call_ids: [firstToolCallId, secondToolCallId],
+    tool_call_result_hashes: [
+      { tool_call_id: firstToolCallId, result_hash: fakeFirstHash },
+      { tool_call_id: firstToolCallId, result_hash: fakeFirstHash },
+      { tool_call_id: secondToolCallId, result_hash: fakeSecondHash },
+      { tool_call_id: extraToolCallId, result_hash: `sha256:${"3".repeat(64)}` },
+    ],
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    missing_tool_call_ids: [],
+    mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [extraToolCallId],
+    duplicate_tool_call_ids: [firstToolCallId],
+    missing_hash_tool_call_ids: [],
+    missing_provenance: false,
+  });
+});
+
+test("auditManifestToolCallLog rejects mixed-provenance refs on unmarked manifests", async () => {
+  const db = {
+    async query<R extends Record<string, unknown>>() {
+      throw new Error("tool_call_logs must not be queried for unmarked provenance-bearing manifests");
+    },
+  };
+
+  const result = await auditManifestToolCallLog(db, {
+    fact_refs: [firstFactId],
+    source_ids: [firstSourceId],
+    tool_call_ids: [firstToolCallId],
+    tool_call_result_hashes: [
+      { tool_call_id: firstToolCallId, result_hash: fakeFirstHash },
+    ],
+  });
+
+  assert.deepEqual(result, {
+    ok: false,
+    missing_tool_call_ids: [],
+    mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [],
+    duplicate_tool_call_ids: [],
+    missing_hash_tool_call_ids: [],
+    missing_provenance: true,
+  });
 });
 
 test("auditManifestToolCallLog accepts full tool result hashes with embedded manifest contribution", async () => {
@@ -310,5 +423,35 @@ test("auditManifestToolCallLog accepts full tool result hashes with embedded man
     ok: true,
     missing_tool_call_ids: [],
     mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [],
+    duplicate_tool_call_ids: [],
+    missing_hash_tool_call_ids: [],
+    missing_provenance: false,
+  });
+});
+
+test("auditManifestToolCallLog rejects evidence refs without tool-call provenance", async () => {
+  const result = await auditManifestToolCallLog(
+    {
+      async query() {
+        throw new Error("tool_call_logs must not be queried without tool_call_ids");
+      },
+    },
+    {
+      tool_call_ids: [],
+      tool_call_result_hashes: [],
+      fact_refs: [firstFactId],
+      source_ids: [firstSourceId],
+    },
+  );
+
+  assert.deepEqual(result, {
+    ok: false,
+    missing_tool_call_ids: [],
+    mismatched_tool_call_ids: [],
+    extra_tool_call_ids: [],
+    duplicate_tool_call_ids: [],
+    missing_hash_tool_call_ids: [],
+    missing_provenance: true,
   });
 });
