@@ -1,9 +1,10 @@
 # Chat Service
 
-Tracking beads: `fra-u9l`, `fra-cty`, `fra-eom`, `fra-d7t`, `fra-siv`.
+Tracking beads: `fra-u9l`, `fra-cty`, `fra-eom`, `fra-d7t`, `fra-siv`,
+`fra-2fu.1.1`.
 
-This package owns the chat streaming transport and the in-process turn
-coordinator used by the current stub turn runner.
+This package owns the chat streaming transport, the per-thread turn
+coordinator, and the thread-list CRUD surface used by the chat workspace.
 
 ## Current scope
 
@@ -18,6 +19,29 @@ coordinator used by the current stub turn runner.
 - can pre-resolve `subject` query text through a `preResolveSubject` hook before
   producing a response; ambiguous resolver envelopes surface as clarification
   turns instead of silently selecting a subject
+- thread CRUD per OpenAPI: list/create/title-update/archive (see below)
+
+## Thread CRUD (`fra-2fu.1.1`)
+
+Endpoints (all require an `x-user-id` UUID header; threads are user-scoped):
+
+- `GET    /v1/chat/threads` — caller's threads ordered by `updated_at desc`.
+  Active only by default; pass `?include_archived=true` to include archived
+  threads in the response.
+- `POST   /v1/chat/threads` — create a thread. Optional body:
+  `{ "title"?: string, "primary_subject_ref"?: { "kind": SubjectKind, "id": uuid } }`.
+- `PATCH  /v1/chat/threads/{threadId}` — update the thread title. Body:
+  `{ "title": string | null }`. Pass `null` (or whitespace) to clear.
+- `DELETE /v1/chat/threads/{threadId}` — soft-delete (archive). Stamps
+  `archived_at = now()` on first call; idempotent on repeat (the original
+  archive timestamp is preserved). The thread row stays in the table for
+  conversation history; the `chat_messages` foreign key is unaffected.
+
+Cross-user access always returns 404 (never 403) so existence of another
+user's thread is not leaked. Wire the DB by passing `threadsDb` to
+`createChatServer`, or set `CHAT_DATABASE_URL` (or `DATABASE_URL`) when
+running `npm run dev` — without a connection the CRUD routes are not
+mounted and other handlers (e.g., the SSE stream) are unaffected.
 
 ## Persistence Hook
 
@@ -61,3 +85,7 @@ cd services/chat
 npm test
 npm run dev
 ```
+
+Integration tests for the thread CRUD repository spin up an ephemeral
+Postgres via the shared `bootstrapDatabase` harness and are skipped when
+Docker is unavailable.

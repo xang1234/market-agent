@@ -368,8 +368,19 @@ paths:
   /v1/chat/threads:
     get:
       tags: [Chat]
-      summary: List chat threads
+      summary: List chat threads for the calling user
       operationId: listThreads
+      description: |
+        Returns the caller's threads ordered by `updated_at` descending. By
+        default archived threads are filtered out; pass `include_archived=true`
+        to receive them too.
+      parameters:
+        - in: query
+          name: include_archived
+          required: false
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
           description: Chat threads
@@ -377,17 +388,20 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [threads]
                 properties:
                   threads:
                     type: array
                     items:
                       $ref: '#/components/schemas/ChatThread'
+        '401':
+          description: Missing or malformed user credential
     post:
       tags: [Chat]
       summary: Create a thread
       operationId: createThread
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
@@ -404,6 +418,72 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChatThread'
+        '400':
+          description: Malformed request body
+        '401':
+          description: Missing or malformed user credential
+  /v1/chat/threads/{threadId}:
+    patch:
+      tags: [Chat]
+      summary: Update a thread's title
+      operationId: updateThreadTitle
+      parameters:
+        - in: path
+          name: threadId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title:
+                  type: string
+                  nullable: true
+                  description: |
+                    The new title. Pass `null` (or an empty/whitespace
+                    string) to clear the title.
+      responses:
+        '200':
+          description: Thread updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatThread'
+        '400':
+          description: Malformed request body
+        '401':
+          description: Missing or malformed user credential
+        '404':
+          description: Thread not found for the calling user
+    delete:
+      tags: [Chat]
+      summary: Archive a thread (soft-delete)
+      operationId: archiveThread
+      description: |
+        Sets `archived_at` to the current timestamp if not already archived;
+        otherwise leaves the original `archived_at` unchanged. Idempotent.
+      parameters:
+        - in: path
+          name: threadId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Thread archived
+        '400':
+          description: Malformed thread id
+        '401':
+          description: Missing or malformed user credential
+        '404':
+          description: Thread not found for the calling user
   /v1/chat/threads/{threadId}/messages:
     post:
       tags: [Chat]
@@ -1450,17 +1530,30 @@ components:
           $ref: '#/components/schemas/WatchlistMember'
     ChatThread:
       type: object
+      required: [thread_id, user_id, created_at, updated_at]
       properties:
         thread_id:
           type: string
           format: uuid
+        user_id:
+          type: string
+          format: uuid
         primary_subject_ref:
-          $ref: '#/components/schemas/SubjectRef'
+          allOf:
+            - $ref: '#/components/schemas/SubjectRef'
+          nullable: true
         title:
           type: string
+          nullable: true
         latest_snapshot_id:
           type: string
           format: uuid
+          nullable: true
+        archived_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the thread was archived (soft-deleted), or null if active.
         created_at:
           type: string
           format: date-time

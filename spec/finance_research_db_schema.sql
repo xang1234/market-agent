@@ -536,7 +536,8 @@ create table chat_threads (
   title text,
   latest_snapshot_id uuid references snapshots(snapshot_id),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  archived_at timestamptz
 );
 create index chat_threads_user_updated_idx on chat_threads(user_id, updated_at desc);
 
