@@ -9,7 +9,9 @@ import {
 type Cleanup = () => void | Promise<void>;
 type TestContextLike = { after(callback: Cleanup): void };
 
-const MINIO_IMAGE = "minio/minio:latest";
+// Pinned to a specific release for reproducibility across test runs over time.
+// Bump deliberately when MinIO upstream ships a relevant fix; do not float to :latest.
+const MINIO_IMAGE = "minio/minio:RELEASE.2025-09-07T16-13-09Z";
 const MINIO_USER = "minioadmin";
 const MINIO_PASSWORD = "minioadmin";
 
@@ -75,7 +77,6 @@ export async function bootstrapMinio(
 ): Promise<{ client: S3Client; bucket: string; endpoint: string }> {
   const containerName = createContainerName(testPrefix);
   const { hostPort } = startMinio(containerName);
-  t.after(() => stopMinio(containerName));
 
   const endpoint = `http://127.0.0.1:${hostPort}`;
   const client = new S3Client({
@@ -84,7 +85,13 @@ export async function bootstrapMinio(
     credentials: { accessKeyId: MINIO_USER, secretAccessKey: MINIO_PASSWORD },
     forcePathStyle: true,
   });
+
+  // node:test runs t.after() hooks in registration order (FIFO), not LIFO.
+  // Register client cleanup BEFORE container teardown so the SDK client is
+  // destroyed against a live endpoint, and any future bucket-cleanup hook
+  // added between these two also runs while the container still exists.
   t.after(() => client.destroy());
+  t.after(() => stopMinio(containerName));
 
   await waitForMinio(client);
 

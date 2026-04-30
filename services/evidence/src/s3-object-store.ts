@@ -134,8 +134,19 @@ function isNotFoundError(error: unknown): boolean {
   };
   if (candidate.name === "NotFound" || candidate.name === "NoSuchKey") return true;
   if (candidate.Code === "NotFound" || candidate.Code === "NoSuchKey") return true;
-  if (typeof candidate.$metadata === "object" && candidate.$metadata !== null) {
-    if (candidate.$metadata.httpStatusCode === 404) return true;
+  // Fallback ONLY when no error name is available. Some S3-compatible gateways
+  // (notably Cloudflare R2 in some configs) return HTTP 404 for AccessDenied at
+  // the object level — if we trusted httpStatusCode alone we'd silently mask
+  // those as "object missing." Trust a present name first; use status only when
+  // the SDK left us nothing else to go on.
+  if (
+    typeof candidate.name !== "string" &&
+    typeof candidate.Code !== "string" &&
+    typeof candidate.$metadata === "object" &&
+    candidate.$metadata !== null &&
+    candidate.$metadata.httpStatusCode === 404
+  ) {
+    return true;
   }
   return false;
 }

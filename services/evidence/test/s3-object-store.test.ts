@@ -234,3 +234,27 @@ test("isNotFoundError recognizes the legacy NoSuchKey error name (S3 GET 404)", 
 
   assert.equal(await store.get(HELLO_ID), null);
 });
+
+test("does NOT classify AccessDenied-with-status-404 as not-found (R2 gateway edge case)", async () => {
+  // Some S3-compatible gateways (notably Cloudflare R2) return HTTP 404 with
+  // an AccessDenied error name for object-level permission failures. If we
+  // trusted httpStatusCode alone we'd silently return null for misconfigured
+  // buckets. The error name takes precedence over the HTTP status.
+  const accessDeniedAs404 = Object.assign(new Error("Access denied"), {
+    name: "AccessDenied",
+    $metadata: { httpStatusCode: 404 },
+  });
+  const { client: getClient } = mockClient(async (command) => {
+    if (command instanceof GetObjectCommand) throw accessDeniedAs404;
+    throw new Error("unexpected command");
+  });
+  const getStore = new S3ObjectStore({ client: getClient, bucket: "blobs" });
+  await assert.rejects(getStore.get(HELLO_ID), /Access denied/);
+
+  const { client: hasClient } = mockClient(async (command) => {
+    if (command instanceof HeadObjectCommand) throw accessDeniedAs404;
+    throw new Error("unexpected command");
+  });
+  const hasStore = new S3ObjectStore({ client: hasClient, bucket: "blobs" });
+  await assert.rejects(hasStore.has(HELLO_ID), /Access denied/);
+});

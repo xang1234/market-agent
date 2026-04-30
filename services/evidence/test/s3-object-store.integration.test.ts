@@ -81,10 +81,21 @@ test("keyPrefix namespaces objects under the configured path in the bucket", { t
 
   await store.put(payload);
 
-  // Object should exist at the prefixed key, not the bare sha256 key
+  // Object should exist at the prefixed key, not the bare sha256 key.
+  // Verify the bare-key probe specifically returns a 404 — a bare assert.rejects
+  // would also pass on AccessDenied or any other error, masking a real config bug.
   await client.send(new HeadObjectCommand({ Bucket: bucket, Key: `prod/blobs/sha256/${hex}` }));
   await assert.rejects(
     client.send(new HeadObjectCommand({ Bucket: bucket, Key: `sha256/${hex}` })),
+    (err: unknown) => {
+      assert.ok(err instanceof Error, `expected an Error, got: ${String(err)}`);
+      const e = err as Error & { $metadata?: { httpStatusCode?: number } };
+      assert.ok(
+        e.name === "NotFound" || e.name === "NoSuchKey" || e.$metadata?.httpStatusCode === 404,
+        `expected a 404 NotFound/NoSuchKey, got: name=${e.name} status=${e.$metadata?.httpStatusCode}`,
+      );
+      return true;
+    },
   );
 
   // get works through the same prefixed store
