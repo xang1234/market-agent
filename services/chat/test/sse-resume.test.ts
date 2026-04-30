@@ -55,6 +55,15 @@ function parseSseEvents(transcript: string): ParsedSseEvent[] {
 // accumulate `expectedCount` total non-heartbeat events. Returns the raw
 // event list (filters heartbeats — they fire on idle streams and would
 // otherwise inflate event counts when we wait through a gap).
+//
+// Assumes the stream stays open and eventually produces at least
+// `expectedCount` non-heartbeat events. If the runner can error after
+// emitting fewer events while the server keeps the stream open (e.g., via
+// the heartbeat interval), this loop blocks on reader.read() until the
+// outer test timeout fires — masking the real failure as a generic
+// "test timed out". For tests where the runner can fail, race this
+// against the turn handle's `completed` promise and assert on the failure
+// path explicitly.
 async function drainNonHeartbeats(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   decoder: TextDecoder,
@@ -151,13 +160,15 @@ test("reconnect resumes from missed sequence emitted while the client was discon
   clientDisconnected.resolve();
 
   // Wait for the during-disconnect events to actually land in coordinator
-  // history before reconnecting. Without this barrier the resume could race
-  // ahead of the emissions and we'd be testing the wrong invariant.
-  // We poll the coordinator's stored event sequence indirectly by reconnecting
-  // with `Last-Event-ID: 3` and checking that the resume response's first
-  // events have id >= 4. The coordinator's emit() is synchronous after the
-  // gate releases, so by the time we reach this fetch the events are in
-  // history.
+  // history before reconnecting. The runner is suspended on `await
+  // clientDisconnected.promise`; resolving it queues the runner's
+  // continuation as a microtask, and the three subsequent `emit()` calls
+  // run synchronously inside that continuation. 20ms is a comfortable
+  // bound for the event loop to drain that microtask queue. A more
+  // deterministic barrier would require exposing a 6-event gate from the
+  // turn handle (e.g., `turn.waitForEventCount(6)`); the helper exists
+  // (`MutableChatTurnHandle.waitForEventCount`) but is not surfaced via
+  // the coordinator interface.
   await new Promise((resolve) => setTimeout(resolve, 20));
 
   // Phase 2: reconnect and read the three during-disconnect events that were
@@ -327,8 +338,16 @@ test("reconnect across a wall-clock gap with no new emissions delivers nothing u
   });
   assert.equal(resumed.status, 200);
 
-  // Schedule the runner's final event after we have started reading. The
-  // resume must remain open and deliver event 4 once it lands.
+  // Schedule the runner's final event. Either delivery path is correct:
+  //   (a) live — the timer fires AFTER the resumed connection has subscribed,
+  //       and event 4 streams directly through the live subscriber, OR
+  //   (b) replay — the timer fires BEFORE the subscription completes; event 4
+  //       lands in turn history first, and the http handler's history-replay
+  //       loop (`for (const event of turn.events) writeIfNew(event)` in
+  //       services/chat/src/http.ts) delivers it on subscribe.
+  // The test exercises whichever path the timing produces. A regression that
+  // dropped the history-replay loop could make this test flaky on loaded
+  // CI even though the assertions don't pin which path delivered event 4.
   setTimeout(() => releaseEnd.resolve(), 20);
 
   const { events: final, reader: finalReader } = await readDataEventsWithReader(resumed, 1);
