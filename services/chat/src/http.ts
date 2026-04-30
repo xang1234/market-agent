@@ -9,6 +9,8 @@ import {
 } from "./coordinator.ts";
 import type { ChatSseEvent } from "./sse.ts";
 import type { ChatSubjectPreResolver } from "./subjects.ts";
+import { tryHandleThreadsRequest } from "./threads-http.ts";
+import type { ChatThreadsDb } from "./threads-repo.ts";
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const MAX_PENDING_SSE_FRAMES = 100;
@@ -36,6 +38,7 @@ export type ChatServerOptions = {
   persistAssistantMessage?: ChatAssistantMessagePersistence;
   preResolveSubject?: ChatSubjectPreResolver;
   renderSubjectClarification?: ChatSubjectClarificationRenderer;
+  threadsDb?: ChatThreadsDb;
 };
 
 export function createChatServer(options: ChatServerOptions = {}): Server {
@@ -44,8 +47,13 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
     preResolveSubject: options.preResolveSubject,
     renderSubjectClarification: options.renderSubjectClarification,
   });
+  const threadsDb = options.threadsDb;
 
   return createServer(async (req, res) => {
+    if (threadsDb && (await tryHandleThreadsRequest(threadsDb, req, res))) {
+      return;
+    }
+
     const route = matchStreamRoute(req.method ?? "GET", req.url ?? "/");
 
     if (route === INVALID_STREAM_ROUTE) {

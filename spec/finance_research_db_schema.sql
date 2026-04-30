@@ -258,6 +258,8 @@ create table documents (
 create unique index documents_content_hash_idx on documents(content_hash, raw_blob_id);
 create index documents_source_idx on documents(source_id);
 create index documents_published_idx on documents(published_at desc);
+create index documents_parent_idx on documents(parent_document_id) where parent_document_id is not null;
+create index documents_conversation_idx on documents(conversation_id) where conversation_id is not null;
 
 create table mentions (
   mention_id uuid primary key default gen_random_uuid(),
@@ -534,7 +536,8 @@ create table chat_threads (
   title text,
   latest_snapshot_id uuid references snapshots(snapshot_id),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  archived_at timestamptz
 );
 create index chat_threads_user_updated_idx on chat_threads(user_id, updated_at desc);
 

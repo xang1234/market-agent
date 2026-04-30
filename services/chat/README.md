@@ -1,9 +1,7 @@
 # Chat Service
 
-Tracking beads: `fra-u9l`, `fra-cty`, `fra-eom`, `fra-d7t`, `fra-siv`.
-
-This package owns the chat streaming transport and the in-process turn
-coordinator used by the current stub turn runner.
+This package owns the chat streaming transport, the per-thread turn
+coordinator, and the thread-list CRUD surface used by the chat workspace.
 
 ## Current scope
 
@@ -18,6 +16,29 @@ coordinator used by the current stub turn runner.
 - can pre-resolve `subject` query text through a `preResolveSubject` hook before
   producing a response; ambiguous resolver envelopes surface as clarification
   turns instead of silently selecting a subject
+- thread CRUD per OpenAPI: list/create/title-update/archive (see below)
+
+## Thread CRUD
+
+Endpoints (all require an `x-user-id` UUID header; threads are user-scoped):
+
+- `GET    /v1/chat/threads` — caller's threads ordered by `updated_at desc`.
+  Active only by default; pass `?include_archived=true` to include archived
+  threads in the response.
+- `POST   /v1/chat/threads` — create a thread. Optional body:
+  `{ "title"?: string, "primary_subject_ref"?: { "kind": SubjectKind, "id": uuid } }`.
+- `PATCH  /v1/chat/threads/{threadId}` — update the thread title. Body:
+  `{ "title": string | null }`. Pass `null` (or whitespace) to clear.
+- `DELETE /v1/chat/threads/{threadId}` — soft-delete (archive). Stamps
+  `archived_at = now()` on first call; idempotent on repeat (the original
+  archive timestamp is preserved). The thread row stays in the table for
+  conversation history; the `chat_messages` foreign key is unaffected.
+
+Cross-user access always returns 404 (never 403) so existence of another
+user's thread is not leaked. Wire the DB by passing `threadsDb` to
+`createChatServer`, or set `CHAT_DATABASE_URL` (or `DATABASE_URL`) when
+running `npm run dev` — without a connection the CRUD routes are not
+mounted and other handlers (e.g., the SSE stream) are unaffected.
 
 ## Persistence Hook
 
@@ -54,6 +75,28 @@ tool calls or snapshot sealing. This is not a durable idempotency store;
 cross-process or post-expiry replay requires a future database-backed run
 ledger.
 
+## SSE reconnect with `Last-Event-ID`
+
+A client can reconnect to a stream by setting the `Last-Event-ID` header to
+the highest sequence number it has already processed. The server replays only
+events whose sequence is strictly greater. The contract held in
+`test/sse-resume.test.ts` is:
+
+- A mid-stream client disconnect does **not** abort the turn — the runner
+  continues executing and emissions accumulate in coordinator history while
+  no client is subscribed.
+- A reconnect with `Last-Event-ID: N` immediately replays every event that
+  landed in history with `seq > N`, then continues live as the runner
+  produces more.
+- Resume across a wall-clock gap works as long as the turn is still
+  retained per the bounds above; once evicted, the request returns a 4xx
+  with an `unavailable` cursor message rather than silently rerunning the
+  turn.
+
+Malformed and out-of-range `Last-Event-ID` values are rejected per the
+contract in `test/http.test.ts` ("rejects malformed Last-Event-ID values"
+and "rejects Last-Event-ID beyond available coordinator history").
+
 ## Tests
 
 ```bash
@@ -61,3 +104,7 @@ cd services/chat
 npm test
 npm run dev
 ```
+
+Integration tests for the thread CRUD repository spin up an ephemeral
+Postgres via the shared `bootstrapDatabase` harness and are skipped when
+Docker is unavailable.

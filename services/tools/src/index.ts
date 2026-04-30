@@ -59,6 +59,18 @@ export type {
 } from "./turn-policy.ts";
 
 export {
+  FAST_PATH_DETECTOR_VERSION,
+  FAST_PATH_QUOTE_BUNDLE_ID,
+  FAST_PATH_QUOTE_TOOL_NAME,
+  detectFastPath,
+} from "./fast-path.ts";
+export type {
+  DetectFastPathInput,
+  FastPathDecision,
+  FastPathRejectionReason,
+} from "./fast-path.ts";
+
+export {
   RAW_DOCUMENT_FIELD_NAMES,
   assertRegistryAudienceBoundary,
   authorizeToolCall,

@@ -15,7 +15,11 @@ export {
   DOCUMENT_KINDS,
   PARSE_STATUSES,
   createDocument,
+  getConversation,
   getDocument,
+  getDocumentAncestors,
+  getDocumentChildren,
+  getDocumentThread,
 } from "./document-repo.ts";
 export type {
   CreateDocumentResult,
@@ -25,3 +29,19 @@ export type {
   ParseStatus,
 } from "./document-repo.ts";
 export type { QueryExecutor } from "./types.ts";
+
+export {
+  MemoryObjectStore,
+  RAW_BLOB_ID_PREFIX,
+  assertRawBlobId,
+  rawBlobIdFromBytes,
+} from "./object-store.ts";
+export type {
+  ObjectStore,
+  PutResult,
+  RawBlobMetadata,
+  StoredBlob,
+} from "./object-store.ts";
+
+export { S3ObjectStore } from "./s3-object-store.ts";
+export type { S3ObjectStoreConfig } from "./s3-object-store.ts";

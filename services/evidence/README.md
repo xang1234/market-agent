@@ -39,6 +39,140 @@ timestamps, and required hash/blob metadata before querying. Parent document
 threading is accepted as metadata here; threaded-source behavior is covered by
 `fra-8la`.
 
+## Threaded sources
+
+Some sources have conversation structure: Reddit threads, earnings-call
+transcripts split into segments, and any other reply-shaped feed. Two columns
+on `documents` capture this:
+
+- `parent_document_id` — the immediate parent (the post you replied to, or
+  the transcript root for a segment). Always a UUID FK to `documents`.
+- `conversation_id` — a free-form string that groups every document in the
+  same thread regardless of depth. For Reddit, set this to the thread/post
+  id (e.g., `reddit:t3_xyz`); for transcripts, the call/event id.
+
+Use `parent_document_id` when you need to walk the immediate reply chain.
+Use `conversation_id` when you need every document in a thread without
+caring about depth (e.g., loading the full Reddit thread for claim
+extraction).
+
+```ts
+import {
+  getDocumentChildren,
+  getDocumentAncestors,
+  getDocumentThread,
+  getConversation,
+} from "evidence";
+
+await getDocumentChildren(db, parentId);   // direct replies, ordered by published_at (excludes parent)
+await getDocumentAncestors(db, replyId);   // root → ... → replyId, inclusive (includes replyId)
+await getDocumentThread(db, rootId);       // root + all descendants, level-order/BFS (includes root)
+await getConversation(db, "reddit:t3_xyz"); // every doc with this conversation_id
+```
+
+`getDocumentThread` and `getDocumentAncestors` use recursive CTEs so the
+traversal is one round-trip regardless of depth. **Self-inclusion is
+asymmetric**: `getDocumentAncestors` and `getDocumentThread` include the
+queried document in their results (a leaf doc returns `[self]` from both),
+while `getDocumentChildren` does not. A caller stitching ancestors + children
+into a single breadcrumb has to dedupe the queried node.
+
+`getDocumentThread` returns rows in **level-order (BFS)**: the root, then all
+depth-1 docs in `published_at` order, then all depth-2 docs, and so on.
+Siblings are grouped together regardless of their parent. This is the right
+shape for "give me every document in the conversation so I can extract
+claims." It is **not** the right shape for nested-reply UI rendering, where
+you want each parent immediately followed by its descendants — a renderer
+should re-shape the flat result into a tree on the client side, or a future
+helper can add a path-column ordering if a true depth-first walk is needed.
+
+**Cycles are prevented by insert order.** A new `document_id` is generated at
+insert time, so it cannot be its own parent. The repository never UPDATEs
+`parent_document_id` on existing rows — the `ON CONFLICT` clause in
+`createDocument` only updates `content_hash` to itself (a no-op) and leaves
+`parent_document_id` immutable. Don't add an UPDATE path that mutates this
+column without a separate cycle check.
+
+**Re-ingestion silently keeps the original `parent_document_id`.** If
+`createDocument` is called with the same `(content_hash, raw_blob_id)` pair
+but a different `parent_document_id` (e.g., a Reddit comment cross-posted in
+two threads), the original parent is retained and the new one is discarded
+without error. The result has `status: "already_present"` and the returned
+`document.parent_document_id` is the *original* value — not what the caller
+just passed in. Callers that need to detect this should compare the returned
+`parent_document_id` to their input.
+
+## Object Store
+
+`MemoryObjectStore` is a content-addressed blob store: callers `put()` raw
+bytes and receive a `raw_blob_id` of the form `sha256:<64-hex>` that is the
+SHA-256 hash of the bytes. Re-putting identical bytes returns the same id with
+status `already_present`, so ingestion is naturally idempotent.
+
+The store exposes only `put`, `get`, and `has` — there is no update or delete.
+That keeps the "raw blobs are immutable" invariant from
+`fra-6j0.1` physically true: changing the bytes always changes the id, and the
+store has no API to overwrite a key. `put` and `get` defensively copy bytes at
+both ends so callers cannot mutate stored content through retained references.
+
+Typical composition with `DocumentRepo`:
+
+```ts
+// raw_blob_id is always the object-store id from store.put().
+// content_hash is a SEPARATE hash over the canonical (parsed/normalized)
+// form of the document. They are equal only when raw bytes already are the
+// canonical form (e.g., a plain-text upload). For HTML, PDF, and most
+// provider formats, they will diverge — content_hash is what dedupes
+// "the same press release served by two aggregators."
+const blob = await store.put(rawBytes);
+const canonicalContentHash = sha256OfCanonicalForm(rawBytes); // ingestion-defined
+await createDocument(db, {
+  source_id,
+  kind,
+  content_hash: canonicalContentHash,
+  raw_blob_id: blob.blob.raw_blob_id,
+});
+```
+
+`createDocument` now validates `raw_blob_id` against the same `sha256:<64-hex>`
+contract enforced by `MemoryObjectStore`, so callers cannot accidentally write
+a document row whose `raw_blob_id` could not be served back by the store.
+
+`S3ObjectStore` is the wire adapter that satisfies the same `ObjectStore`
+interface against any S3-compatible API (Cloudflare R2, AWS S3, MinIO):
+
+```ts
+import { S3Client } from "@aws-sdk/client-s3";
+import { S3ObjectStore } from "evidence";
+
+const client = new S3Client({
+  endpoint: process.env.S3_ENDPOINT,           // omit for AWS S3 default
+  region: process.env.S3_REGION,
+  credentials: {
+    accessKeyId: process.env.S3_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
+  },
+  forcePathStyle: process.env.S3_FORCE_PATH_STYLE === "true", // required for MinIO
+});
+const store = new S3ObjectStore({ client, bucket: process.env.S3_BUCKET!, keyPrefix: "prod" });
+```
+
+Keys are namespaced as `{keyPrefix?}/sha256/{hex}` — the algorithm prefix
+keeps the bucket layout future-proof if other hash families are ever added.
+`put` does a `HEAD` first and short-circuits to `already_present` on hit;
+otherwise it uploads with `ChecksumSHA256` set so the server rejects any
+body whose bytes don't match the declared digest. `get` and `has` translate
+404 into `null`/`false`; non-404 errors propagate.
+
+Switch backends in ingestion code by reading `BLOB_STORE_BACKEND` from the
+environment (`memory` or `s3`); see `.env.dev.example` for the full list of
+S3 vars and the matching MinIO service in `docker-compose.dev.yml`.
+
+Integration coverage uses the shared `bootstrapMinio` helper in
+`services/evidence/test/docker-minio.ts`, which spins an ephemeral MinIO
+container per test (gated on Docker availability), creates a fresh bucket,
+and tears down afterward.
+
 ## Tests
 
 ```bash

@@ -37,8 +37,8 @@ const BLOCK_EVENT_TYPES = new Set<ChatSseWireEventType>([
 const TOOL_EVENT_TYPES = new Set<ChatSseWireEventType>(["tool.started", "tool.completed"]);
 const SNAPSHOT_EVENT_TYPES = new Set<ChatSseWireEventType>(["snapshot.staged", "snapshot.sealed"]);
 
-export function createChatSseSequencer(context: ChatSseContext, initialSeq = 0) {
-  let seq = initialSeq;
+export function createChatSseSequencer(context: ChatSseContext) {
+  let seq = 0;
 
   return {
     next(type: ChatSseWireEventType, payload: Record<string, unknown> = {}): ChatSseEvent {
