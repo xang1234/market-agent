@@ -67,14 +67,11 @@ const router = createBrowserRouter(
   ),
 )
 
-// One BlockRegistry instance for the whole app: chat, Analyze, Home, and
-// findings all consume it via BlockRegistryProvider so the same block kind
-// renders identically across surfaces. Module-scope construction means every
-// re-render of <App /> reuses the same registry — no Context churn.
+// Module scope: stable registry identity across <App /> re-renders.
 const blockRegistry = createDefaultBlockRegistry()
 
-// ThemeProvider sits at the top so the `dark` class toggle on <html> stays
-// coherent across route changes and auth transitions.
+// ThemeProvider stays at the layout level so the `dark` class toggle on <html>
+// stays coherent across route changes and auth transitions.
 export function App() {
   return (
     <BlockRegistryProvider registry={blockRegistry}>
