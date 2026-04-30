@@ -242,6 +242,33 @@ test('turn.error mid-stream preserves partial blocks for the inline error notice
   assert.deepEqual(state.block_order, ['b1'])
 })
 
+test('block.delta after block.completed is a no-op (sealed block stays sealed)', () => {
+  // A late delta arriving after the seal would otherwise silently undo the
+  // completed status and append more content to a "finalized" block.
+  let state: StreamState = INITIAL_STREAM_STATE
+  state = applyChatStreamEvent(state, event('block.began', 1, { block_id: 'b1', kind: 'rich_text' }))
+  state = applyChatStreamEvent(state, event('block.delta', 2, {
+    block_id: 'b1',
+    delta: { segment: { type: 'text', text: 'in flight' } },
+  }))
+  state = applyChatStreamEvent(state, event('block.completed', 3, { block_id: 'b1', content_hash: 'h1' }))
+  const after_late = applyChatStreamEvent(state, event('block.delta', 4, {
+    block_id: 'b1',
+    delta: { segment: { type: 'text', text: ' too late' } },
+  }))
+  assert.equal(after_late, state, 'late delta after completed must return same state reference')
+})
+
+test('events with empty or whitespace-only block_id are no-ops (matches backend assertNonEmptyString)', () => {
+  for (const block_id of ['', '   ', '\t\n']) {
+    const after = applyChatStreamEvent(
+      INITIAL_STREAM_STATE,
+      event('block.began', 1, { block_id, kind: 'rich_text' }),
+    )
+    assert.equal(after, INITIAL_STREAM_STATE, `block_id="${block_id}" must be rejected`)
+  }
+})
+
 test('turn.completed followed by turn.error flips status to error (terminal-after-terminal)', () => {
   // Both are terminal events on the wire. The reducer takes the last word so
   // an error that arrives after a completed signal isn't lost.

@@ -18,9 +18,6 @@ export type StreamingOpaqueBlock = {
 
 export type StreamingBlock = StreamingRichTextBlock | StreamingOpaqueBlock
 
-// Type guard: TS can't auto-narrow on `kind === 'rich_text'` because
-// StreamingOpaqueBlock.kind is `string` (any string is assignable, including
-// the literal 'rich_text').
 export function isStreamingRichText(block: StreamingBlock): block is StreamingRichTextBlock {
   return block.kind === 'rich_text'
 }
@@ -127,6 +124,9 @@ function applyBlockDelta(state: StreamState, event: ChatSseEvent): StreamState {
   // resume logic upstream, not papered over here.
   if (existing === undefined) return state
   if (!isStreamingRichText(existing)) return state
+  // A late delta after block.completed would silently undo the seal —
+  // ignore. Out-of-order delivery is a wire-level concern, not a render one.
+  if (existing.status === 'completed') return state
 
   const segment = readSegment(event.delta)
   if (segment === null) return state
@@ -154,7 +154,9 @@ function applyBlockCompleted(state: StreamState, event: ChatSseEvent): StreamSta
 }
 
 function readString(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 function readSegment(deltaPayload: unknown): RichTextSegment | null {
