@@ -5,6 +5,7 @@ import {
   Route,
   RouterProvider,
 } from 'react-router-dom'
+import { BlockRegistryProvider, createDefaultBlockRegistry } from './blocks'
 import { AuthProvider } from './shell/AuthContext'
 import type { RouteHandle } from './shell/routeHandle'
 import { ThemeProvider } from './shell/ThemeProvider'
@@ -66,14 +67,22 @@ const router = createBrowserRouter(
   ),
 )
 
+// One BlockRegistry instance for the whole app: chat, Analyze, Home, and
+// findings all consume it via BlockRegistryProvider so the same block kind
+// renders identically across surfaces. Module-scope construction means every
+// re-render of <App /> reuses the same registry — no Context churn.
+const blockRegistry = createDefaultBlockRegistry()
+
 // ThemeProvider sits at the top so the `dark` class toggle on <html> stays
 // coherent across route changes and auth transitions.
 export function App() {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <RouterProvider router={router} />
-      </AuthProvider>
-    </ThemeProvider>
+    <BlockRegistryProvider registry={blockRegistry}>
+      <ThemeProvider>
+        <AuthProvider>
+          <RouterProvider router={router} />
+        </AuthProvider>
+      </ThemeProvider>
+    </BlockRegistryProvider>
   )
 }
