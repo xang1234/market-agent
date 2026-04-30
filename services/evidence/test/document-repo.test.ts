@@ -312,3 +312,47 @@ test("double ingest of the same content returns the existing document row", { ti
   assert.equal(second.document.document_id, first.document.document_id);
   assert.equal(second.document.source_id, firstSource.source_id);
 });
+
+test("documents with the same content_hash but different raw_blob_id are NOT a conflict", { timeout: 120000 }, async (t) => {
+  // Pins the (content_hash, raw_blob_id) unique-index semantics.
+  // Realistic case: the same canonical text ingested from two formats
+  // (e.g., HTML + PDF of the same press release). Same content_hash by
+  // design, different raw_blob_id because the wire bytes differ. Both
+  // rows should persist — a regression that broadened the unique index
+  // to just content_hash would cause this test to fail.
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for evidence repository integration coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-131-document-repo-canonical");
+  const client = await connectedClient(t, databaseUrl);
+  const source = await createSource(client, {
+    provider: "newswire",
+    kind: "press_release",
+    trust_tier: "secondary",
+    license_class: "licensed",
+    retrieved_at: "2026-04-29T00:00:00Z",
+  });
+
+  const sharedCanonicalHash = blobId("canonical-press-release");
+  const htmlBlobId = blobId("html-bytes");
+  const pdfBlobId = blobId("pdf-bytes");
+
+  const fromHtml = await createDocument(client, {
+    source_id: source.source_id,
+    kind: "article",
+    content_hash: sharedCanonicalHash,
+    raw_blob_id: htmlBlobId,
+  });
+  const fromPdf = await createDocument(client, {
+    source_id: source.source_id,
+    kind: "article",
+    content_hash: sharedCanonicalHash,
+    raw_blob_id: pdfBlobId,
+  });
+
+  assert.equal(fromHtml.status, "created");
+  assert.equal(fromPdf.status, "created");
+  assert.notEqual(fromHtml.document.document_id, fromPdf.document.document_id);
+});

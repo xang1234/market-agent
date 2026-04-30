@@ -64,15 +64,18 @@ import {
   getConversation,
 } from "evidence";
 
-await getDocumentChildren(db, parentId);   // direct replies, ordered by published_at
-await getDocumentAncestors(db, replyId);   // root → ... → replyId, inclusive
-await getDocumentThread(db, rootId);       // root + all descendants, depth-first
+await getDocumentChildren(db, parentId);   // direct replies, ordered by published_at (excludes parent)
+await getDocumentAncestors(db, replyId);   // root → ... → replyId, inclusive (includes replyId)
+await getDocumentThread(db, rootId);       // root + all descendants, level-order/BFS (includes root)
 await getConversation(db, "reddit:t3_xyz"); // every doc with this conversation_id
 ```
 
 `getDocumentThread` and `getDocumentAncestors` use recursive CTEs so the
-traversal is one round-trip regardless of depth. The walk includes the input
-document itself, so a leaf doc returns `[self]` from both.
+traversal is one round-trip regardless of depth. **Self-inclusion is
+asymmetric**: `getDocumentAncestors` and `getDocumentThread` include the
+queried document in their results (a leaf doc returns `[self]` from both),
+while `getDocumentChildren` does not. A caller stitching ancestors + children
+into a single breadcrumb has to dedupe the queried node.
 
 `getDocumentThread` returns rows in **level-order (BFS)**: the root, then all
 depth-1 docs in `published_at` order, then all depth-2 docs, and so on.
@@ -136,8 +139,10 @@ contract enforced by `MemoryObjectStore`, so callers cannot accidentally write
 a document row whose `raw_blob_id` could not be served back by the store.
 
 A real R2/S3-compatible adapter that talks to remote object storage is tracked
-separately so ingestion (P3.2) can plug in a wire backend without changing
-the `ObjectStore` interface.
+separately (bead `fra-ujp`) so ingestion (P3.2) can plug in a wire backend
+without changing the `ObjectStore` interface. When that adapter lands it
+should live in this same package as `services/evidence/src/s3-object-store.ts`
+and be exported from `index.ts` alongside `MemoryObjectStore`.
 
 ## Tests
 
