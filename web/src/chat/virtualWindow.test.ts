@@ -85,9 +85,8 @@ test('computeVirtualWindow handles variable-height items via cumulative measurem
 })
 
 test('computeVirtualWindow rendered window stays bounded by viewport+overscan, not by total items', () => {
-  // Core perf invariant: the number of rendered items must be O(viewport),
-  // independent of total list size. This is what gives the 60fps contract
-  // for 1000-message threads — only ~10-20 components ever mount at once.
+  // The 60fps contract for 1000-message threads relies on this: only the
+  // visible window + overscan ever mounts, regardless of total length.
   const fewHeights = new Array(50).fill(200)
   const manyHeights = new Array(10000).fill(200)
   const sharedInput = { scrollTop: 4000, viewportHeight: 800, overscan: 4 }
@@ -103,10 +102,8 @@ test('computeVirtualWindow rendered window stays bounded by viewport+overscan, n
 })
 
 test('computeVirtualWindow is fast enough for the 60fps contract on 1000-item threads', () => {
-  // The 60fps budget is 16.67ms per frame. Windowing should be a tiny slice
-  // of that — assert it stays well under at the 1k scale (the bead's contract
-  // size). Allowing 5ms total for 100 invocations is generous (~50µs each)
-  // and leaves headroom for the React render pass.
+  // 60fps budget is 16.67ms/frame. 50ms for 100 calls = ~500µs each, leaving
+  // ample headroom for the React render pass that consumes the result.
   const itemHeights = new Array(1000).fill(200)
   const totalHeight = itemHeights.length * 200
   const start = performance.now()
@@ -124,10 +121,6 @@ test('computeVirtualWindow is fast enough for the 60fps contract on 1000-item th
 })
 
 test('computeVirtualWindow clamps a negative scrollTop to 0 instead of returning an invalid window', () => {
-  // iOS rubber-band scrolling can momentarily report negative scrollTop.
-  // Without clamping, the linear scan would set firstVisible=total (no item's
-  // bottom > negative scrollTop reached the break) and produce a degenerate
-  // window. The clamp keeps the head visible during overscroll.
   const itemHeights = new Array(10).fill(100)
   const result = computeVirtualWindow({
     itemHeights,

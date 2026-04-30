@@ -14,10 +14,6 @@ function MessageItemInner({ message, onMeasure }: MessageItemProps): ReactElemen
   useLayoutEffect(() => {
     const el = ref.current
     if (el === null) return
-    // ResizeObserver fires on initial observe with the current size, so we
-    // get the first measurement without a separate read. Subsequent fires
-    // come on layout-affecting changes (font load, image decode, content
-    // streaming).
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0]
       if (entry === undefined) return
@@ -42,10 +38,6 @@ function MessageItemInner({ message, onMeasure }: MessageItemProps): ReactElemen
   )
 }
 
-// Bails out when both the message reference and the onMeasure callback are
-// stable. The parent uses content_hash as the React key, so a message-content
-// change unmounts/remounts this component instead of relying on memo bailout
-// for content equality.
 export const MessageItem = memo(
   MessageItemInner,
   (prev, next) => prev.message === next.message && prev.onMeasure === next.onMeasure,

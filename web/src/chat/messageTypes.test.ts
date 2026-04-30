@@ -10,18 +10,21 @@ const CHAT_DIR = dirname(fileURLToPath(import.meta.url))
 const BACKEND_MESSAGES_PATH = join(CHAT_DIR, '../../../services/chat/src/messages.ts')
 
 test('CHAT_ROLES mirrors the backend ChatRole union exactly', () => {
-  // Backend is the source of truth (services/chat/src/messages.ts:34). Static
-  // text scan keeps the mirror honest without pulling backend tsconfig into
-  // the web build. If the backend adds a role the wire payload may carry it
-  // before the frontend can render it — fail loud here so the gap is caught
-  // in CI rather than at runtime.
+  // Static text scan because node:test --experimental-strip-types cannot pull
+  // the backend tsconfig into the web build.
   const source = readFileSync(BACKEND_MESSAGES_PATH, 'utf-8')
   const match = source.match(/export type ChatRole\s*=\s*([^;]+);/)
   assert.ok(match, 'could not locate `export type ChatRole = …;` in backend messages.ts')
 
-  const backendRoles = Array.from(match[1].matchAll(/"([a-z_]+)"/g))
+  const backendRoles = Array.from(match[1].matchAll(/["']([a-z_]+)["']/g))
     .map((m) => m[1])
     .sort()
+  // Fail loud if the regex matches nothing — silent zero-match would still
+  // pass deepEqual against an empty CHAT_ROLES, hiding both drifts.
+  assert.ok(
+    backendRoles.length > 0,
+    'backend ChatRole regex matched zero roles — quote/syntax drift',
+  )
 
   assert.deepEqual(
     [...CHAT_ROLES].sort(),

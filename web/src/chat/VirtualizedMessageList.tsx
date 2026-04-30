@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -38,7 +39,7 @@ export function VirtualizedMessageList({
     [messages, measuredHeights, estimatedItemHeight],
   )
 
-  const window = useMemo(
+  const view = useMemo(
     () => computeVirtualWindow({ itemHeights, scrollTop, viewportHeight, overscan }),
     [itemHeights, scrollTop, viewportHeight, overscan],
   )
@@ -54,10 +55,19 @@ export function VirtualizedMessageList({
     return () => observer.disconnect()
   }, [])
 
+  // Cancel any pending scroll-rAF on unmount: a fired callback would call
+  // setScrollTop on an unmounted component, which React warns about and is a
+  // (small) leak.
+  useEffect(() => {
+    return () => {
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current)
+      }
+    }
+  }, [])
+
   const handleScroll = useCallback(() => {
     // Coalesce scroll events into one state update per animation frame.
-    // Without this, fast-scroll fires onScroll dozens of times per frame and
-    // each setScrollTop schedules a re-render — defeats the 60fps target.
     if (scrollRafRef.current !== null) return
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = null
@@ -69,8 +79,8 @@ export function VirtualizedMessageList({
 
   const handleItemMeasure = useCallback((messageId: string, height: number) => {
     setMeasuredHeights((prev) => {
-      // Same-reference no-op guard: prevents a render cascade when ResizeObserver
-      // fires with an unchanged height (font swap, scroll-induced repaint).
+      // Same-reference no-op guard so React's setState bails out when
+      // ResizeObserver fires with an unchanged height.
       if (prev.get(messageId) === height) return prev
       const next = new Map(prev)
       next.set(messageId, height)
@@ -78,7 +88,7 @@ export function VirtualizedMessageList({
     })
   }, [])
 
-  const visibleMessages = messages.slice(window.startIndex, window.endIndex + 1)
+  const visibleMessages = messages.slice(view.startIndex, view.endIndex + 1)
 
   return (
     <div
@@ -88,7 +98,7 @@ export function VirtualizedMessageList({
       className="flex-1 overflow-auto"
     >
       <div
-        style={{ paddingTop: window.paddingTop, paddingBottom: window.paddingBottom }}
+        style={{ paddingTop: view.paddingTop, paddingBottom: view.paddingBottom }}
         data-testid="virtualized-message-list-content"
       >
         {visibleMessages.map((message) => (
