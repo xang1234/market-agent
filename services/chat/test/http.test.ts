@@ -617,6 +617,41 @@ test("stream route rejects resume for evicted turn history without rerunning the
   assert.deepEqual(completedRuns, ["run-1", "run-2"]);
 });
 
+test("stream route reports unavailable history for fresh request to evicted turn", async (t) => {
+  const completedRuns: string[] = [];
+  const coordinator = createChatCoordinator({
+    maxCompletedTurns: 1,
+    runner: ({ runId, emit }) => {
+      completedRuns.push(runId);
+      emit("turn.started", { stub: true });
+      emit("turn.completed", { message_id: `message-${runId}` });
+    },
+  });
+  const base = await startServer(t, { coordinator });
+
+  const firstResponse = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-1`,
+  );
+  assert.equal(firstResponse.status, 200);
+  await readSseEvents(firstResponse, 2);
+
+  const secondResponse = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-2`,
+  );
+  assert.equal(secondResponse.status, 200);
+  await readSseEvents(secondResponse, 2);
+
+  const fresh = await fetch(`${base}/v1/chat/threads/thread-123/stream?run_id=run-1`);
+  if (fresh.status !== 400) {
+    await fresh.body?.cancel();
+  }
+  assert.equal(fresh.status, 400);
+  const body = await fresh.json() as { error?: string };
+
+  assert.equal(body.error, "turn history is not available");
+  assert.deepEqual(completedRuns, ["run-1", "run-2"]);
+});
+
 test("stream route rejects future Last-Event-ID without waiting for a running turn", async (t) => {
   const releaseTurn = deferred();
   const runner: ChatTurnRunner = async ({ emit }) => {

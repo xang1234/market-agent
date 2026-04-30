@@ -82,6 +82,10 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
       respondJson(res, 409, { error: "turn input does not match the existing turn" });
       return;
     }
+    if (turn == null && resumeAfterSeq === 0) {
+      respondJson(res, 400, { error: "turn history is not available" });
+      return;
+    }
     if (turn == null || resumeAfterSeq > turn.currentSeq()) {
       respondJson(res, 400, { error: "'Last-Event-ID' is not available for this stream" });
       return;
