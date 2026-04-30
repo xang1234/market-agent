@@ -42,3 +42,6 @@ export type {
   RawBlobMetadata,
   StoredBlob,
 } from "./object-store.ts";
+
+export { S3ObjectStore } from "./s3-object-store.ts";
+export type { S3ObjectStoreConfig } from "./s3-object-store.ts";

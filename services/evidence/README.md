@@ -138,11 +138,40 @@ await createDocument(db, {
 contract enforced by `MemoryObjectStore`, so callers cannot accidentally write
 a document row whose `raw_blob_id` could not be served back by the store.
 
-A real R2/S3-compatible adapter that talks to remote object storage is tracked
-separately (bead `fra-ujp`) so ingestion (P3.2) can plug in a wire backend
-without changing the `ObjectStore` interface. When that adapter lands it
-should live in this same package as `services/evidence/src/s3-object-store.ts`
-and be exported from `index.ts` alongside `MemoryObjectStore`.
+`S3ObjectStore` is the wire adapter that satisfies the same `ObjectStore`
+interface against any S3-compatible API (Cloudflare R2, AWS S3, MinIO):
+
+```ts
+import { S3Client } from "@aws-sdk/client-s3";
+import { S3ObjectStore } from "evidence";
+
+const client = new S3Client({
+  endpoint: process.env.S3_ENDPOINT,           // omit for AWS S3 default
+  region: process.env.S3_REGION,
+  credentials: {
+    accessKeyId: process.env.S3_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
+  },
+  forcePathStyle: process.env.S3_FORCE_PATH_STYLE === "true", // required for MinIO
+});
+const store = new S3ObjectStore({ client, bucket: process.env.S3_BUCKET!, keyPrefix: "prod" });
+```
+
+Keys are namespaced as `{keyPrefix?}/sha256/{hex}` — the algorithm prefix
+keeps the bucket layout future-proof if other hash families are ever added.
+`put` does a `HEAD` first and short-circuits to `already_present` on hit;
+otherwise it uploads with `ChecksumSHA256` set so the server rejects any
+body whose bytes don't match the declared digest. `get` and `has` translate
+404 into `null`/`false`; non-404 errors propagate.
+
+Switch backends in ingestion code by reading `BLOB_STORE_BACKEND` from the
+environment (`memory` or `s3`); see `.env.dev.example` for the full list of
+S3 vars and the matching MinIO service in `docker-compose.dev.yml`.
+
+Integration coverage uses the shared `bootstrapMinio` helper in
+`services/evidence/test/docker-minio.ts`, which spins an ephemeral MinIO
+container per test (gated on Docker availability), creates a fresh bucket,
+and tears down afterward.
 
 ## Tests
 
