@@ -10,7 +10,10 @@ import {
 import { loadToolRegistry } from "../src/registry.ts";
 
 test("detectFastPath matches the canonical 'AAPL price' contract under 100ms", () => {
-  const decision = detectFastPath({ user_turn: "AAPL price" });
+  const decision = detectFastPath({
+    user_turn: "AAPL price",
+    resolved_subject_count: 1,
+  });
 
   assert.equal(decision.ok, true);
   assert.equal(decision.kind, "quote_only");
@@ -35,7 +38,7 @@ test("detectFastPath matches common quote-only natural-language phrasings", () =
     "GOOG quote please",
     "current MSFT price",
   ]) {
-    const decision = detectFastPath({ user_turn });
+    const decision = detectFastPath({ user_turn, resolved_subject_count: 1 });
     assert.equal(decision.ok, true, `expected match for: ${user_turn}`);
   }
 });
@@ -51,7 +54,7 @@ test("detectFastPath rejects analytical signals that imply more than a quote", (
   ];
 
   for (const { user_turn, signal } of cases) {
-    const decision = detectFastPath({ user_turn });
+    const decision = detectFastPath({ user_turn, resolved_subject_count: 1 });
     assert.equal(decision.ok, false, `expected rejection for: ${user_turn}`);
     assert.equal(decision.reason, "analytical_signal");
     assert.equal(decision.detail, signal);
@@ -71,10 +74,87 @@ test("detectFastPath rejects analyst-opinion phrasings that look quote-shaped bu
     "AAPL fair price",
     "AAPL analyst price",
   ]) {
-    const decision = detectFastPath({ user_turn });
+    const decision = detectFastPath({ user_turn, resolved_subject_count: 1 });
     assert.equal(decision.ok, false, `expected rejection for: ${user_turn}`);
     assert.equal(decision.reason, "analytical_signal");
     assert.equal(decision.detail, "analyst_opinion");
+  }
+});
+
+test("detectFastPath rejects session-qualified phrasings that get_quote cannot session-discriminate", () => {
+  // get_quote returns last-trade only; routing pre/post-market, intraday,
+  // OHLC, or bid/ask requests silently returns wrong-session data.
+  for (const user_turn of [
+    "AAPL premarket price",
+    "AAPL pre-market price",
+    "AAPL afterhours price",
+    "AAPL after-hours price",
+    "AAPL intraday price",
+    "AAPL opening price",
+    "AAPL closing price",
+    "AAPL bid price",
+    "AAPL ask price",
+    "AAPL price high",
+  ]) {
+    const decision = detectFastPath({ user_turn, resolved_subject_count: 1 });
+    assert.equal(decision.ok, false, `expected rejection for: ${user_turn}`);
+    assert.equal(decision.reason, "analytical_signal");
+    assert.equal(decision.detail, "session_qualifier");
+  }
+});
+
+test("detectFastPath rejects derivative-instrument phrasings that need an options/futures tool surface", () => {
+  for (const user_turn of [
+    "AAPL call option price",
+    "AAPL put price",
+    "AAPL options price",
+    "AAPL strike price",
+    "AAPL futures price",
+    "ES futures price",
+  ]) {
+    const decision = detectFastPath({ user_turn, resolved_subject_count: 1 });
+    assert.equal(decision.ok, false, `expected rejection for: ${user_turn}`);
+    assert.equal(decision.reason, "analytical_signal");
+    assert.equal(decision.detail, "derivative_instrument");
+  }
+});
+
+test("detectFastPath rejects non-equity instrument phrasings that get_quote (equity-scoped) would mishandle", () => {
+  for (const user_turn of [
+    "BTC price",
+    "bitcoin price",
+    "ETH price",
+    "ethereum price",
+    "gold price",
+    "oil price",
+    "WTI crude price",
+  ]) {
+    const decision = detectFastPath({ user_turn, resolved_subject_count: 1 });
+    assert.equal(decision.ok, false, `expected rejection for: ${user_turn}`);
+    assert.equal(decision.reason, "analytical_signal");
+    assert.equal(decision.detail, "non_equity_instrument");
+  }
+});
+
+test("detectFastPath rejects actionable-intent phrasings (alerts, screening) that need different tools", () => {
+  // Inputs chosen so no earlier signal pattern fires first; the actionable
+  // intent is the discriminating reason. Note that some realistic queries
+  // like "screen low price stocks" trip the session_qualifier signal on
+  // `low` first — that's still a rejection (correct), just a different
+  // category. The contract this test pins is that actionable_intent IS a
+  // dedicated signal class.
+  for (const user_turn of [
+    "alert me on AAPL price",
+    "AAPL price alert",
+    "screen by price",
+    "scan AAPL price",
+    "AAPL price above 200",
+    "AAPL price below 150",
+  ]) {
+    const decision = detectFastPath({ user_turn, resolved_subject_count: 1 });
+    assert.equal(decision.ok, false, `expected rejection for: ${user_turn}`);
+    assert.equal(decision.reason, "analytical_signal");
+    assert.equal(decision.detail, "actionable_intent");
   }
 });
 
@@ -85,7 +165,7 @@ test("detectFastPath rejects requests with no quote intent", () => {
     "Apple supplier risk",
     "MSFT segment revenue",
   ]) {
-    const decision = detectFastPath({ user_turn });
+    const decision = detectFastPath({ user_turn, resolved_subject_count: 1 });
     assert.equal(decision.ok, false, `expected rejection for: ${user_turn}`);
     assert.equal(decision.reason, "no_quote_intent");
   }
@@ -93,26 +173,39 @@ test("detectFastPath rejects requests with no quote intent", () => {
 
 test("detectFastPath rejects empty or whitespace-only user turns", () => {
   for (const user_turn of ["", "   ", "\n\t"]) {
-    const decision = detectFastPath({ user_turn });
+    const decision = detectFastPath({ user_turn, resolved_subject_count: 1 });
     assert.equal(decision.ok, false);
     assert.equal(decision.reason, "missing_user_turn");
   }
 });
 
-test("detectFastPath rejects long or multi-clause requests via length and token caps", () => {
+test("detectFastPath rejects long, many-token, and realistic multi-clause requests", () => {
   const tooLong = "AAPL price " + "x".repeat(80);
   const tooManyTokens = "give me the the the the the the the the AAPL price";
 
-  const longDecision = detectFastPath({ user_turn: tooLong });
+  const longDecision = detectFastPath({ user_turn: tooLong, resolved_subject_count: 1 });
   assert.equal(longDecision.ok, false);
   assert.equal(longDecision.reason, "too_many_characters");
 
-  const manyTokensDecision = detectFastPath({ user_turn: tooManyTokens });
+  const manyTokensDecision = detectFastPath({
+    user_turn: tooManyTokens,
+    resolved_subject_count: 1,
+  });
   assert.equal(manyTokensDecision.ok, false);
   assert.equal(manyTokensDecision.reason, "too_many_tokens");
+
+  // Realistic multi-clause: a quote-shaped lead clause with a temporal
+  // follow-on. This must NOT slip through — it should hit either the token
+  // cap or the temporal_range signal, depending on which gate fires first.
+  const multiClause = "AAPL price and 52-week high yesterday";
+  const multiClauseDecision = detectFastPath({
+    user_turn: multiClause,
+    resolved_subject_count: 1,
+  });
+  assert.equal(multiClauseDecision.ok, false, `expected rejection for: ${multiClause}`);
 });
 
-test("detectFastPath requires exactly one resolved subject when subject count is provided", () => {
+test("detectFastPath requires resolved_subject_count to be exactly 1", () => {
   for (const subject_count of [0, 2, 5]) {
     const decision = detectFastPath({
       user_turn: "AAPL price",
@@ -128,9 +221,6 @@ test("detectFastPath requires exactly one resolved subject when subject count is
     resolved_subject_count: 1,
   });
   assert.equal(ok.ok, true);
-
-  const undeterminedSubjectCount = detectFastPath({ user_turn: "AAPL price" });
-  assert.equal(undeterminedSubjectCount.ok, true);
 });
 
 test("detectFastPath records heuristic_ms via the injected clock for instrumentation contracts", () => {
@@ -140,7 +230,11 @@ test("detectFastPath records heuristic_ms via the injected clock for instrumenta
     return clockCalls === 1 ? 1000 : 1003.5;
   };
 
-  const decision = detectFastPath({ user_turn: "AAPL price", now: fakeNow });
+  const decision = detectFastPath({
+    user_turn: "AAPL price",
+    resolved_subject_count: 1,
+    now: fakeNow,
+  });
 
   assert.equal(decision.ok, true);
   assert.equal(decision.heuristic_ms, 3.5);

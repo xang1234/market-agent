@@ -24,6 +24,11 @@ const ANALYTICAL_SIGNAL_PATTERNS: ReadonlyArray<{
       /\b(?:earnings|filing|filings|report|news|analysis|summary|outlook|forecast|risk|growth|estimate|estimates|consensus)\b/i,
     signal: "analytical_topic",
   },
+  // `target` intentionally over-rejects: it blocks "AAPL price target" (an
+  // analyst-coverage request) at the cost of also rejecting "Target price"
+  // (NYSE: TGT). False-negative is preferred over silently routing analyst
+  // requests to a quote tool. Do not relax without the integration layer
+  // supplying disambiguating subject metadata.
   {
     pattern:
       /\b(?:target|rating|upgrade|downgrade|valuation|fair|buy|sell|hold|overweight|underweight|pt|analyst)\b/i,
@@ -35,6 +40,36 @@ const ANALYTICAL_SIGNAL_PATTERNS: ReadonlyArray<{
     signal: "performance_metric",
   },
   { pattern: /%/, signal: "percent_sign" },
+  // Session qualifiers: get_quote returns last-trade and cannot
+  // session-discriminate. Routing pre/post-market, intraday, OHLC, or
+  // bid/ask requests to it silently returns last-trade and is wrong.
+  {
+    pattern:
+      /\b(?:premarket|pre-market|afterhours|after-hours|intraday|opening|closing|open|close|bid|ask|high|low|volume|vwap)\b/i,
+    signal: "session_qualifier",
+  },
+  // Derivative-instrument signals: get_quote is equity-quote scoped; options
+  // and futures need a different tool surface entirely.
+  {
+    pattern:
+      /\b(?:call|calls|put|puts|option|options|strike|future|futures|expiry|expiration)\b/i,
+    signal: "derivative_instrument",
+  },
+  // Non-equity instrument cues: BTC/ETH/gold/oil/etc. Conservative keyword
+  // list; the structurally correct gate is subject-class metadata supplied
+  // by the upstream subject-extraction stage at integration time.
+  {
+    pattern:
+      /\b(?:bitcoin|ethereum|btc|eth|crypto|forex|fx|gold|silver|oil|crude|wti|brent|natgas)\b/i,
+    signal: "non_equity_instrument",
+  },
+  // Actionable intents map to side-effect tools (alerts) or different bundle
+  // surfaces (screening), not get_quote.
+  {
+    pattern:
+      /\b(?:alert|alerts|notify|notification|screen|screener|scan|under|above|below|between)\b/i,
+    signal: "actionable_intent",
+  },
 ];
 
 const MAX_TOKEN_COUNT = 8;
@@ -42,7 +77,19 @@ const MAX_CHARACTER_COUNT = 80;
 
 export type DetectFastPathInput = {
   user_turn: string;
-  resolved_subject_count?: number;
+  /**
+   * Number of subjects already resolved by the upstream subject-extraction
+   * stage. Required: callers must complete subject extraction before fast-path
+   * detection so multi-subject requests cannot silently slip through. Pass
+   * `0` when subject extraction returned no subjects.
+   */
+  resolved_subject_count: number;
+  /**
+   * Optional clock injection for deterministic instrumentation tests.
+   * Must be monotonic (e.g., `performance.now()`); a non-monotonic clock
+   * (e.g., `Date.now()`) can produce negative deltas across system clock
+   * adjustments, which the implementation clamps to 0 silently.
+   */
   now?: () => number;
 };
 
@@ -136,10 +183,7 @@ function evaluate(input: DetectFastPathInput): FastPathInnerDecision {
     }
   }
 
-  if (
-    input.resolved_subject_count !== undefined &&
-    input.resolved_subject_count !== 1
-  ) {
+  if (input.resolved_subject_count !== 1) {
     return {
       ok: false,
       reason: "subject_count_mismatch",
