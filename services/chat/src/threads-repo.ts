@@ -185,6 +185,13 @@ function rowToChatThread(row: ChatThreadRow): ChatThread {
     row.primary_subject_kind != null && row.primary_subject_id != null
       ? { kind: row.primary_subject_kind, id: row.primary_subject_id }
       : null;
+  const createdAt = toIsoString(row.created_at);
+  const updatedAt = toIsoString(row.updated_at);
+  if (createdAt == null || updatedAt == null) {
+    throw new Error(
+      `rowToChatThread: thread ${row.thread_id} has null created_at/updated_at`,
+    );
+  }
   return {
     thread_id: row.thread_id,
     user_id: row.user_id,
@@ -192,8 +199,8 @@ function rowToChatThread(row: ChatThreadRow): ChatThread {
     title: row.title,
     latest_snapshot_id: row.latest_snapshot_id,
     archived_at: toIsoString(row.archived_at),
-    created_at: toIsoString(row.created_at) ?? "",
-    updated_at: toIsoString(row.updated_at) ?? "",
+    created_at: createdAt,
+    updated_at: updatedAt,
   };
 }
 

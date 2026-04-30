@@ -113,7 +113,14 @@ export async function tryHandleThreadsRequest(
     return false;
   } catch (error) {
     if (error instanceof RequestBodyTooLargeError) {
-      if (!res.headersSent) respond(res, 413, { error: error.message });
+      // Drain any remaining request bytes and force-close the keep-alive
+      // connection. readBody() threw mid-iteration, leaving unread bytes in
+      // the socket buffer that would corrupt the next pipelined request.
+      req.resume();
+      if (!res.headersSent) {
+        res.setHeader("connection", "close");
+        respond(res, 413, { error: error.message });
+      }
       return true;
     }
     console.error("chat threads request failed", error);

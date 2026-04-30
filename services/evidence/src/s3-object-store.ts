@@ -94,6 +94,15 @@ export class S3ObjectStore implements ObjectStore {
     }
     const body = await response.Body.transformToByteArray();
     const bytes = body instanceof Uint8Array ? body : new Uint8Array(body);
+    // Re-verify the content-address invariant on read. A corrupted or
+    // tampered S3 object would otherwise propagate as if it were the
+    // requested blob, silently breaking downstream evidence integrity.
+    const observedRawBlobId = rawBlobIdFromBytes(bytes);
+    if (observedRawBlobId !== rawBlobId) {
+      throw new Error(
+        `S3ObjectStore.get: object ${key} failed SHA-256 verification (expected ${rawBlobId}, observed ${observedRawBlobId})`,
+      );
+    }
     return Object.freeze({
       raw_blob_id: rawBlobId,
       size: bytes.byteLength,

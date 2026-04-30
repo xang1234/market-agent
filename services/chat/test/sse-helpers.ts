@@ -20,8 +20,14 @@ export function deferred<T = void>() {
 }
 
 export function parseSseEvents(transcript: string): ParsedSseEvent[] {
-  return transcript
-    .split("\n\n")
+  // SSE frames terminate with a blank line ("\n\n"). When the transcript
+  // ends mid-frame (chunked reads in resume tests), the trailing block has
+  // no terminator and may contain a partial `data:` line that fails JSON
+  // parsing. Drop it instead of throwing.
+  const blocks = transcript.split("\n\n");
+  const completeBlocks = transcript.endsWith("\n\n") ? blocks : blocks.slice(0, -1);
+
+  return completeBlocks
     .filter((block) => block.trim() !== "")
     .map((block) => {
       const event: ParsedSseEvent = { id: null, event: null, data: {} };
