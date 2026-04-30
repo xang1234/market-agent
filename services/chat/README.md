@@ -78,6 +78,28 @@ tool calls or snapshot sealing. This is not a durable idempotency store;
 cross-process or post-expiry replay requires a future database-backed run
 ledger.
 
+## SSE reconnect with `Last-Event-ID` (`fra-cty`)
+
+A client can reconnect to a stream by setting the `Last-Event-ID` header to
+the highest sequence number it has already processed. The server replays only
+events whose sequence is strictly greater. The contract held in
+`test/sse-resume.test.ts` is:
+
+- A mid-stream client disconnect does **not** abort the turn — the runner
+  continues executing and emissions accumulate in coordinator history while
+  no client is subscribed.
+- A reconnect with `Last-Event-ID: N` immediately replays every event that
+  landed in history with `seq > N`, then continues live as the runner
+  produces more.
+- Resume across a wall-clock gap works as long as the turn is still
+  retained per the bounds above; once evicted, the request returns a 4xx
+  with an `unavailable` cursor message rather than silently rerunning the
+  turn.
+
+Malformed and out-of-range `Last-Event-ID` values are rejected per the
+contract in `test/http.test.ts` ("rejects malformed Last-Event-ID values"
+and "rejects Last-Event-ID beyond available coordinator history").
+
 ## Tests
 
 ```bash
