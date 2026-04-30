@@ -17,12 +17,14 @@ test("detectFastPath matches the canonical 'AAPL price' contract under 100ms", (
   assert.equal(decision.bundle_id, FAST_PATH_QUOTE_BUNDLE_ID);
   assert.equal(decision.tool_name, FAST_PATH_QUOTE_TOOL_NAME);
   assert.equal(decision.detected_intent, "quote");
+  assert.equal(decision.classification.bundle_id, FAST_PATH_QUOTE_BUNDLE_ID);
   assert.equal(decision.detector_version, FAST_PATH_DETECTOR_VERSION);
   assert.ok(
-    decision.detection_ms < 100,
-    `detection_ms must be < 100ms, got ${decision.detection_ms}`,
+    decision.heuristic_ms < 100,
+    `heuristic_ms must be < 100ms, got ${decision.heuristic_ms}`,
   );
   assert.equal(Object.isFrozen(decision), true);
+  assert.equal(Object.isFrozen(decision.classification), true);
 });
 
 test("detectFastPath matches common quote-only natural-language phrasings", () => {
@@ -53,6 +55,26 @@ test("detectFastPath rejects analytical signals that imply more than a quote", (
     assert.equal(decision.ok, false, `expected rejection for: ${user_turn}`);
     assert.equal(decision.reason, "analytical_signal");
     assert.equal(decision.detail, signal);
+  }
+});
+
+test("detectFastPath rejects analyst-opinion phrasings that look quote-shaped but want analyst coverage", () => {
+  // These are short, structurally-similar inputs where the user is asking
+  // for analyst output (price targets, ratings, rec) — not a live quote.
+  // Routing them to get_quote silently returns the wrong answer.
+  for (const user_turn of [
+    "AAPL price target",
+    "AAPL price target 200",
+    "TSLA buy price",
+    "MSFT sell price",
+    "AAPL price rating",
+    "AAPL fair price",
+    "AAPL analyst price",
+  ]) {
+    const decision = detectFastPath({ user_turn });
+    assert.equal(decision.ok, false, `expected rejection for: ${user_turn}`);
+    assert.equal(decision.reason, "analytical_signal");
+    assert.equal(decision.detail, "analyst_opinion");
   }
 });
 
@@ -111,7 +133,7 @@ test("detectFastPath requires exactly one resolved subject when subject count is
   assert.equal(undeterminedSubjectCount.ok, true);
 });
 
-test("detectFastPath records detection_ms via the injected clock for instrumentation contracts", () => {
+test("detectFastPath records heuristic_ms via the injected clock for instrumentation contracts", () => {
   let clockCalls = 0;
   const fakeNow = () => {
     clockCalls += 1;
@@ -121,7 +143,7 @@ test("detectFastPath records detection_ms via the injected clock for instrumenta
   const decision = detectFastPath({ user_turn: "AAPL price", now: fakeNow });
 
   assert.equal(decision.ok, true);
-  assert.equal(decision.detection_ms, 3.5);
+  assert.equal(decision.heuristic_ms, 3.5);
   assert.equal(clockCalls, 2);
 });
 

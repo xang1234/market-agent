@@ -26,6 +26,11 @@ const ANALYTICAL_SIGNAL_PATTERNS: ReadonlyArray<{
   },
   {
     pattern:
+      /\b(?:target|rating|upgrade|downgrade|valuation|fair|buy|sell|hold|overweight|underweight|pt|analyst)\b/i,
+    signal: "analyst_opinion",
+  },
+  {
+    pattern:
       /\b(?:change|delta|gain|loss|return|returns|percent|percentage|moved|move|movement|decline|drop|surge)\b/i,
     signal: "performance_metric",
   },
@@ -49,6 +54,20 @@ export type FastPathRejectionReason =
   | "analytical_signal"
   | "subject_count_mismatch";
 
+/**
+ * Result of `detectFastPath`.
+ *
+ * On `ok: true`, the caller MUST bypass `selectToolBundle` /
+ * `createTurnToolPolicy` entirely and dispatch `tool_name` directly against
+ * `bundle_id`. Routing the success variant through the standard turn-policy
+ * pipeline reintroduces the analyst loop and defeats the purpose of the
+ * short-circuit.
+ *
+ * `heuristic_ms` measures only the deterministic detector itself (regex /
+ * length checks). It is NOT end-to-end fast-path latency: the caller is
+ * responsible for measuring the eventual `get_quote` call and assembly to
+ * verify the <100ms turnaround contract.
+ */
 export type FastPathDecision =
   | {
       ok: true;
@@ -56,41 +75,34 @@ export type FastPathDecision =
       bundle_id: typeof FAST_PATH_QUOTE_BUNDLE_ID;
       tool_name: typeof FAST_PATH_QUOTE_TOOL_NAME;
       detected_intent: "quote";
+      classification: { bundle_id: typeof FAST_PATH_QUOTE_BUNDLE_ID; reason: string };
       detector_version: string;
-      detection_ms: number;
+      heuristic_ms: number;
       reason: string;
     }
   | {
       ok: false;
       detector_version: string;
-      detection_ms: number;
+      heuristic_ms: number;
       reason: FastPathRejectionReason;
       detail?: string;
     };
-
-type FastPathInnerDecision =
-  | Omit<Extract<FastPathDecision, { ok: true }>, "detector_version" | "detection_ms">
-  | Omit<Extract<FastPathDecision, { ok: false }>, "detector_version" | "detection_ms">;
 
 export function detectFastPath(input: DetectFastPathInput): FastPathDecision {
   const now = input.now ?? defaultNow;
   const startedAt = now();
   const inner = evaluate(input);
-  const detection_ms = Math.max(0, now() - startedAt);
-
-  if (inner.ok) {
-    return Object.freeze({
-      ...inner,
-      detector_version: FAST_PATH_DETECTOR_VERSION,
-      detection_ms,
-    });
-  }
+  const heuristic_ms = Math.max(0, now() - startedAt);
   return Object.freeze({
     ...inner,
     detector_version: FAST_PATH_DETECTOR_VERSION,
-    detection_ms,
-  });
+    heuristic_ms,
+  } as FastPathDecision);
 }
+
+type FastPathInnerDecision =
+  | Omit<Extract<FastPathDecision, { ok: true }>, "detector_version" | "heuristic_ms">
+  | Omit<Extract<FastPathDecision, { ok: false }>, "detector_version" | "heuristic_ms">;
 
 function evaluate(input: DetectFastPathInput): FastPathInnerDecision {
   const text = typeof input.user_turn === "string" ? input.user_turn.trim() : "";
@@ -135,13 +147,18 @@ function evaluate(input: DetectFastPathInput): FastPathInnerDecision {
     };
   }
 
+  const reason = "quote-only intent matched without analytical signals";
   return {
     ok: true,
     kind: "quote_only",
     bundle_id: FAST_PATH_QUOTE_BUNDLE_ID,
     tool_name: FAST_PATH_QUOTE_TOOL_NAME,
     detected_intent: "quote",
-    reason: "quote-only intent matched without analytical signals",
+    classification: Object.freeze({
+      bundle_id: FAST_PATH_QUOTE_BUNDLE_ID,
+      reason,
+    }),
+    reason,
   };
 }
 
