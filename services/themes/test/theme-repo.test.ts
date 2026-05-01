@@ -174,9 +174,34 @@ test("listThemes returns a frozen array ordered by name (delegated to the DB ORD
   });
 });
 
-test("addThemeMembership inserts when the (theme, subject) row is absent and returns status created", async () => {
-  // First call: select-before-insert returns empty rows; second call: the
-  // insert returns the new row. Tracks the two-step idempotency pattern.
+test("addThemeMembership issues a single ON CONFLICT insert when the (theme, subject) row is absent and returns status created", async () => {
+  // Hot path: one round trip. The insert uses
+  // `on conflict (theme_id, subject_kind, subject_id) do nothing returning ...`
+  // backed by the schema's unique constraint. A returned row means we won the
+  // race; no select fallback is issued.
+  const { db, queries } = fakeDb(() => [membershipRow()]);
+  const result = await addThemeMembership(db, {
+    theme_id: THEME_ID,
+    subject_ref: { kind: "issuer", id: ISSUER_ID },
+  });
+  assert.equal(result.status, "created");
+  assert.equal(result.membership.theme_id, THEME_ID);
+  assert.deepEqual(result.membership.subject_ref, { kind: "issuer", id: ISSUER_ID });
+  assert.equal(queries.length, 1, "create path must be a single round trip");
+  assert.equal(queries[0].text.includes("insert into theme_memberships"), true);
+  assert.equal(
+    queries[0].text.includes("on conflict (theme_id, subject_kind, subject_id) do nothing"),
+    true,
+    "insert must use the unique-constraint conflict target so concurrent adds collapse to one row",
+  );
+});
+
+test("addThemeMembership returns already_present and re-reads the existing row when the insert hits the unique constraint", async () => {
+  // Conflict path: the insert returns 0 rows because of `on conflict do
+  // nothing`; the repo falls back to a select to fetch the row that already
+  // owns the (theme, subject) slot. The select deliberately ignores the
+  // active window — re-adding a (theme, subject) whose previous membership
+  // expired returns the expired row rather than minting a new one.
   let call = 0;
   const { db, queries } = fakeDb(() => {
     call += 1;
@@ -186,24 +211,27 @@ test("addThemeMembership inserts when the (theme, subject) row is absent and ret
     theme_id: THEME_ID,
     subject_ref: { kind: "issuer", id: ISSUER_ID },
   });
-  assert.equal(result.status, "created");
-  assert.equal(result.membership.theme_id, THEME_ID);
-  assert.deepEqual(result.membership.subject_ref, { kind: "issuer", id: ISSUER_ID });
-  assert.equal(queries.length, 2);
-  assert.equal(queries[0].text.includes("select"), true);
-  assert.equal(queries[1].text.includes("insert into theme_memberships"), true);
+  assert.equal(result.status, "already_present");
+  assert.equal(queries.length, 2, "conflict path: failed insert + select fallback");
+  assert.equal(queries[0].text.includes("insert into theme_memberships"), true);
+  assert.equal(queries[1].text.includes("from theme_memberships"), true);
+  assert.equal(queries[1].text.includes("where theme_id ="), true);
 });
 
-test("addThemeMembership returns already_present without inserting when the (theme, subject) row exists", async () => {
-  // Idempotency: re-adding a member must not produce a duplicate row. Critical
-  // for inferred memberships that may be re-evaluated repeatedly.
-  const { db, queries } = fakeDb(() => [membershipRow()]);
-  const result = await addThemeMembership(db, {
-    theme_id: THEME_ID,
-    subject_ref: { kind: "issuer", id: ISSUER_ID },
-  });
-  assert.equal(result.status, "already_present");
-  assert.equal(queries.length, 1, "must short-circuit without an insert when the row exists");
+test("addThemeMembership throws when the conflict-fallback select cannot find the row (loud over silent)", async () => {
+  // The conflict path means another writer beat us to the slot; the
+  // immediately-following select must return that row. If it doesn't, we're
+  // in an unexpected state (cascade delete between insert and select, schema
+  // drift removing the constraint, etc.) and the only safe response is a
+  // loud throw.
+  const { db } = fakeDb(() => []);
+  await assert.rejects(
+    addThemeMembership(db, {
+      theme_id: THEME_ID,
+      subject_ref: { kind: "issuer", id: ISSUER_ID },
+    }),
+    (err: Error) => /conflicted but existing row not found/i.test(err.message),
+  );
 });
 
 test("listMembersByTheme throws if pg returns rationale_claim_ids with non-string elements (loud over silent)", async () => {
@@ -222,11 +250,7 @@ test("addThemeMembership preserves rationale_claim_ids verbatim — provenance m
   // Losing or reordering ids would break the explainability contract for
   // invariant downstream of P3.5.
   const ids = [CLAIM_ID, `${CLAIM_ID.slice(0, -1)}4`];
-  let call = 0;
-  const { db, queries } = fakeDb(() => {
-    call += 1;
-    return call === 1 ? [] : [membershipRow({ rationale_claim_ids: ids })];
-  });
+  const { db, queries } = fakeDb(() => [membershipRow({ rationale_claim_ids: ids })]);
   const result = await addThemeMembership(db, {
     theme_id: THEME_ID,
     subject_ref: { kind: "issuer", id: ISSUER_ID },
@@ -234,18 +258,14 @@ test("addThemeMembership preserves rationale_claim_ids verbatim — provenance m
   });
   assert.deepEqual([...result.membership.rationale_claim_ids], ids);
   // Insert call serialised the array for the jsonb cast.
-  assert.equal(queries[1].values?.[4], JSON.stringify(ids));
+  assert.equal(queries[0].values?.[4], JSON.stringify(ids));
 });
 
 test("addThemeMembership accepts a numeric score and returns it as a number even when pg returns a string", async () => {
   // pg numeric columns deserialise as strings by default; the repo coerces
   // back to number so callers don't need to remember to parseFloat at every
   // call site.
-  let call = 0;
-  const { db } = fakeDb(() => {
-    call += 1;
-    return call === 1 ? [] : [membershipRow({ score: "0.875" })];
-  });
+  const { db } = fakeDb(() => [membershipRow({ score: "0.875" })]);
   const result = await addThemeMembership(db, {
     theme_id: THEME_ID,
     subject_ref: { kind: "issuer", id: ISSUER_ID },
@@ -283,11 +303,7 @@ test("addThemeMembership accepts every SubjectRef.kind, including theme and macr
   // is a member of the "AI" macro_topic), so the validator must not block
   // theme/macro_topic kinds.
   for (const kind of ["theme", "macro_topic", "portfolio", "screen"] as const) {
-    let call = 0;
-    const { db } = fakeDb(() => {
-      call += 1;
-      return call === 1 ? [] : [membershipRow({ subject_kind: kind })];
-    });
+    const { db } = fakeDb(() => [membershipRow({ subject_kind: kind })]);
     const result = await addThemeMembership(db, {
       theme_id: THEME_ID,
       subject_ref: { kind, id: ISSUER_ID },
@@ -380,6 +396,42 @@ test("listThemesBySubject returns a frozen page for the cross-tagging UI lookup"
     assert.equal(queries[0].values?.[0], "issuer");
     assert.equal(queries[0].values?.[1], ISSUER_ID);
   });
+});
+
+test("theme_memberships drift-tests against the spec SQL: unique (theme_id, subject_kind, subject_id) is required for ON CONFLICT idempotency", () => {
+  // The repo's addThemeMembership relies on this unique constraint as the
+  // conflict target. If a future schema edit drops or renames the columns,
+  // the ON CONFLICT clause silently stops being idempotent and the race that
+  // fra-4ut closed is back. Read the spec and assert the triple verbatim.
+  const workspaceRoot = join(import.meta.dirname, "..", "..", "..");
+  const schemaSource = readFileSync(join(workspaceRoot, "spec", "finance_research_db_schema.sql"), "utf8");
+  const tableMatch = schemaSource.match(/create table theme_memberships \(([\s\S]*?)\);/);
+  assert.ok(tableMatch, "expected create table theme_memberships in spec/finance_research_db_schema.sql");
+  assert.match(
+    tableMatch[1],
+    /unique \(theme_id, subject_kind, subject_id\)/,
+    "theme_memberships must declare unique (theme_id, subject_kind, subject_id) as the ON CONFLICT target",
+  );
+});
+
+test("theme_memberships drift-tests against the spec SQL: covering indexes match the listMembersByTheme/listThemesBySubject ORDER BY", () => {
+  // The list paths sort by `score desc nulls last, effective_at asc` after
+  // filtering on theme_id (or subject_kind+subject_id). A covering index on
+  // those columns lets pg deliver pre-sorted rows; without it, a popular
+  // theme triggers an in-memory sort on every read. Drop these indexes and
+  // the chat pre-resolve hot path silently regresses — assert their shape.
+  const workspaceRoot = join(import.meta.dirname, "..", "..", "..");
+  const schemaSource = readFileSync(join(workspaceRoot, "spec", "finance_research_db_schema.sql"), "utf8");
+  assert.match(
+    schemaSource,
+    /create index \w+\s+on theme_memberships\(theme_id, score desc nulls last, effective_at asc\)/,
+    "missing covering index on (theme_id, score desc nulls last, effective_at asc)",
+  );
+  assert.match(
+    schemaSource,
+    /create index \w+\s+on theme_memberships\(subject_kind, subject_id, score desc nulls last, effective_at asc\)/,
+    "missing covering index on (subject_kind, subject_id, score desc nulls last, effective_at asc)",
+  );
 });
 
 test("THEME_MEMBERSHIP_MODES drift-tests against the spec SQL CHECK constraint on themes.membership_mode", () => {

@@ -175,44 +175,29 @@ function membershipActiveWindowPredicate(asOfBindIndex: number): string {
   return `effective_at <= ${bind} and (expires_at is null or expires_at > ${bind})`;
 }
 
-// Adds a (theme, subject) row. Idempotent at (theme_id, subject_kind, subject_id):
-// duplicate adds re-read the existing row instead of creating a second
-// membership. The select-before-insert deliberately ignores the active
-// window — re-adding a (theme, subject) whose previous membership has
-// expired returns status: 'already_present' against the expired row rather
-// than minting a fresh one. Inferred-membership re-evaluation (fra-vme)
-// that wants resurrect-on-expire semantics must explicitly remove the
-// expired row first.
+// Adds a (theme, subject) row. Idempotent at (theme_id, subject_kind, subject_id)
+// via the schema's unique constraint: the insert uses ON CONFLICT DO NOTHING
+// RETURNING, so two concurrent writers collapse to one row instead of
+// duplicating. The hot path (create) is one round trip; the conflict path
+// adds a select to fetch the row that already owns the slot.
 //
-// Race acknowledgement: the schema lacks a unique constraint on this triple
-// (tracked as fra-4ut to add the index + switch to ON CONFLICT DO NOTHING
-// RETURNING, mirroring services/watchlists/src/queries.ts:79). Until then,
-// two concurrent adds may both pass the select and both insert, producing
-// duplicates. Callers that require strict idempotency must serialize on a
-// transaction client.
+// The conflict-fallback select deliberately ignores the active window —
+// re-adding a (theme, subject) whose previous membership has expired returns
+// status: 'already_present' against the expired row rather than minting a
+// fresh one. Inferred-membership re-evaluation (fra-vme) that wants
+// resurrect-on-expire semantics must explicitly remove the expired row
+// first.
 export async function addThemeMembership(
   db: QueryExecutor,
   input: ThemeMembershipInput,
 ): Promise<{ status: "created" | "already_present"; membership: ThemeMembershipRow }> {
   validateThemeMembershipInput(input);
 
-  const existing = await db.query<ThemeMembershipDbRow>(
-    `select ${MEMBERSHIP_SELECT_COLUMNS}
-       from theme_memberships
-      where theme_id = $1::uuid and subject_kind = $2::subject_kind and subject_id = $3::uuid`,
-    [input.theme_id, input.subject_ref.kind, input.subject_ref.id],
-  );
-  if (existing.rows.length > 0) {
-    return Object.freeze({
-      status: "already_present" as const,
-      membership: themeMembershipRowFromDb(existing.rows[0]),
-    });
-  }
-
-  const { rows } = await db.query<ThemeMembershipDbRow>(
+  const insert = await db.query<ThemeMembershipDbRow>(
     `insert into theme_memberships
        (theme_id, subject_kind, subject_id, score, rationale_claim_ids, effective_at, expires_at)
      values ($1::uuid, $2::subject_kind, $3::uuid, $4, $5::jsonb, coalesce($6::timestamptz, now()), $7::timestamptz)
+     on conflict (theme_id, subject_kind, subject_id) do nothing
      returning ${MEMBERSHIP_SELECT_COLUMNS}`,
     [
       input.theme_id,
@@ -224,9 +209,25 @@ export async function addThemeMembership(
       input.expires_at ?? null,
     ],
   );
+  if (insert.rows.length === 1) {
+    return Object.freeze({
+      status: "created" as const,
+      membership: themeMembershipRowFromDb(insert.rows[0]),
+    });
+  }
+
+  const existing = await db.query<ThemeMembershipDbRow>(
+    `select ${MEMBERSHIP_SELECT_COLUMNS}
+       from theme_memberships
+      where theme_id = $1::uuid and subject_kind = $2::subject_kind and subject_id = $3::uuid`,
+    [input.theme_id, input.subject_ref.kind, input.subject_ref.id],
+  );
+  if (existing.rows.length === 0) {
+    throw new Error("addThemeMembership conflicted but existing row not found");
+  }
   return Object.freeze({
-    status: "created" as const,
-    membership: themeMembershipRowFromDb(rows[0]),
+    status: "already_present" as const,
+    membership: themeMembershipRowFromDb(existing.rows[0]),
   });
 }
 

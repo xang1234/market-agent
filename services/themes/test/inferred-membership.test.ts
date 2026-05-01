@@ -343,8 +343,11 @@ test("computeInferredThemeCandidates throws if any rationale_claim_id is not a n
 // ---- applyInferredThemeMembership --------------------------------------
 
 // Routes addThemeMembership through the same fakeDb. The first SQL is the
-// inferred-candidate query; subsequent calls are the select-then-insert
-// dance from addThemeMembership.
+// inferred-candidate query; per candidate, the insert-with-ON-CONFLICT fires
+// first and a fallback select fires only when the insert returns zero rows
+// (the conflict path). insertResponses[i] = rows returned by the i-th insert
+// (length 0 forces the fallback); existingResponses[i] = rows returned by
+// the i-th fallback select.
 function applyResponder(
   candidateRows: unknown[],
   existingResponses: Array<unknown[]>,
@@ -405,13 +408,16 @@ test("applyInferredThemeMembership persists each candidate and returns added/alr
       impact_signals: 0,
     },
   ];
-  // First subject: not present → insert returns the new row.
-  // Second subject: already present → existing row is returned, no insert.
-  const existingResponses: unknown[][] = [
+  // First subject: insert wins → returns the new row, no fallback select.
+  // Second subject: insert hits the conflict → returns 0 rows, fallback
+  // select returns the row that already owns the (theme, subject) slot.
+  const insertResponses: unknown[][] = [
+    [membershipDbRow({ subject_id: ISSUER_A, score: 2, rationale_claim_ids: [CLAIM_A, CLAIM_B] })],
     [],
+  ];
+  const existingResponses: unknown[][] = [
     [membershipDbRow({ subject_kind: "instrument", subject_id: ISSUER_B })],
   ];
-  const insertResponses: unknown[][] = [[membershipDbRow({ subject_id: ISSUER_A, score: 2, rationale_claim_ids: [CLAIM_A, CLAIM_B] })]];
 
   const { db, queries } = fakeDb(applyResponder(candidateRows, existingResponses, insertResponses));
   const result = await applyInferredThemeMembership(db, inferredTheme({ cluster_ids: [CLUSTER_ID_A] }));
@@ -490,7 +496,8 @@ test("applyInferredThemeMembership preserves rationale on inserts so explainabil
     },
   ];
   const insertResponses: unknown[][] = [[membershipDbRow({})]];
-  const { db, queries } = fakeDb(applyResponder(candidateRows, [[]], insertResponses));
+  // The insert wins (returns 1 row); no fallback select is issued.
+  const { db, queries } = fakeDb(applyResponder(candidateRows, [], insertResponses));
   await applyInferredThemeMembership(db, inferredTheme({ cluster_ids: [CLUSTER_ID_A] }));
   const insert = queries.find((q) => q.text.includes("insert into theme_memberships"));
   assert.equal(insert?.values?.[4], JSON.stringify([CLAIM_A]));

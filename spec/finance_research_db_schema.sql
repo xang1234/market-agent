@@ -182,10 +182,16 @@ create table theme_memberships (
   score numeric,
   rationale_claim_ids jsonb not null default '[]'::jsonb,
   effective_at timestamptz not null default now(),
-  expires_at timestamptz
+  expires_at timestamptz,
+  unique (theme_id, subject_kind, subject_id)
 );
-create index theme_memberships_subject_idx on theme_memberships(subject_kind, subject_id);
-create index theme_memberships_theme_idx on theme_memberships(theme_id);
+-- Covering indexes for the list ORDER BY (score desc nulls last, effective_at asc).
+-- The leading column also satisfies the WHERE filter, so a separate single-column
+-- index would be redundant.
+create index theme_memberships_theme_score_idx
+  on theme_memberships(theme_id, score desc nulls last, effective_at asc);
+create index theme_memberships_subject_score_idx
+  on theme_memberships(subject_kind, subject_id, score desc nulls last, effective_at asc);
 
 create table portfolios (
   portfolio_id uuid primary key default gen_random_uuid(),
