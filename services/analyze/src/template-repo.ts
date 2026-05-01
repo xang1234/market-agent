@@ -113,7 +113,7 @@ export async function getAnalyzeTemplate(
   db: QueryExecutor,
   templateId: string,
 ): Promise<AnalyzeTemplateRow | null> {
-  assertNonEmptyString(templateId, "template_id");
+  assertUuidString(templateId, "template_id");
   const { rows } = await db.query<AnalyzeTemplateDbRow>(
     `select ${SELECT_COLUMNS}
        from analyze_templates
@@ -129,7 +129,7 @@ export async function listAnalyzeTemplatesByUser(
   db: QueryExecutor,
   userId: string,
 ): Promise<ReadonlyArray<AnalyzeTemplateRow>> {
-  assertNonEmptyString(userId, "user_id");
+  assertUuidString(userId, "user_id");
   const { rows } = await db.query<AnalyzeTemplateDbRow>(
     `select ${SELECT_COLUMNS}
        from analyze_templates
@@ -149,7 +149,7 @@ export async function updateAnalyzeTemplate(
   templateId: string,
   patch: AnalyzeTemplateUpdate,
 ): Promise<AnalyzeTemplateRow> {
-  assertNonEmptyString(templateId, "template_id");
+  assertUuidString(templateId, "template_id");
   validateUpdatePatch(patch);
   const { rows } = await db.query<AnalyzeTemplateDbRow>(
     `update analyze_templates
@@ -183,7 +183,7 @@ export async function deleteAnalyzeTemplate(
   db: QueryExecutor,
   templateId: string,
 ): Promise<void> {
-  assertNonEmptyString(templateId, "template_id");
+  assertUuidString(templateId, "template_id");
   const result = await db.query(
     `delete from analyze_templates where template_id = $1::uuid`,
     [templateId],
@@ -194,7 +194,7 @@ export async function deleteAnalyzeTemplate(
 }
 
 function validateCreateInput(input: AnalyzeTemplateInput): void {
-  assertNonEmptyString(input.user_id, "user_id");
+  assertUuidString(input.user_id, "user_id");
   assertNonEmptyString(input.name, "name");
   assertNonEmptyString(input.prompt_template, "prompt_template");
   if (input.source_categories !== undefined) {
@@ -205,8 +205,27 @@ function validateCreateInput(input: AnalyzeTemplateInput): void {
   }
 }
 
+// Mutable AnalyzeTemplate fields the SQL update path actually applies.
+// validateUpdatePatch rejects any other key so a typo'd field doesn't
+// pass the "non-empty patch" gate and mint a phantom version bump.
+const ALLOWED_PATCH_KEYS: ReadonlySet<keyof AnalyzeTemplateUpdate> = new Set([
+  "name",
+  "prompt_template",
+  "source_categories",
+  "added_subject_refs",
+  "block_layout_hint",
+  "peer_policy",
+  "disclosure_policy",
+]);
+
 function validateUpdatePatch(patch: AnalyzeTemplateUpdate): void {
   const keys = Object.keys(patch).filter((k) => (patch as Record<string, unknown>)[k] !== undefined);
+  const unknownKeys = keys.filter((k) => !ALLOWED_PATCH_KEYS.has(k as keyof AnalyzeTemplateUpdate));
+  if (unknownKeys.length > 0) {
+    throw new AnalyzeTemplateValidationError(
+      `patch contains unknown field(s): ${unknownKeys.join(", ")}`,
+    );
+  }
   if (keys.length === 0) {
     throw new AnalyzeTemplateValidationError(
       "patch must contain at least one mutable field — empty updates would mint a phantom version bump",
@@ -248,6 +267,18 @@ function assertSubjectRefArray(
 function assertNonEmptyString(value: unknown, label: string): asserts value is string {
   if (typeof value !== "string" || value.length === 0) {
     throw new AnalyzeTemplateValidationError(`${label}: must be a non-empty string`);
+  }
+}
+
+// RFC 4122 UUID shape (versions 1-5). Catches malformed IDs before the
+// SQL ::uuid cast surfaces them as raw Postgres errors that callers
+// can't pattern-match on.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function assertUuidString(value: unknown, label: string): asserts value is string {
+  assertNonEmptyString(value, label);
+  if (!UUID_RE.test(value)) {
+    throw new AnalyzeTemplateValidationError(`${label}: must be a UUID`);
   }
 }
 

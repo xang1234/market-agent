@@ -442,3 +442,23 @@ test('applyBlockLayoutHint with a hint of zero sections puts every block into th
     ['a', 'b'],
   )
 })
+
+test('applyBlockLayoutHint throws BlockLayoutHintError on duplicate block.id values', () => {
+  // The Set/Map indexes inside applyBlockLayoutHint would otherwise
+  // silently collapse duplicate-id blocks to the last occurrence,
+  // dropping one copy from both the section walk and the residual
+  // bucket with no signal. React keys assume the same uniqueness
+  // invariant, so failing closed at this boundary surfaces a real
+  // upstream bug instead of papering over it.
+  assert.throws(
+    () =>
+      applyBlockLayoutHint({
+        blocks: [richText('dup', 'first'), richText('dup', 'second')],
+        hint: parseBlockLayoutHint({ sections: [{ id: 'overview', block_ids: ['dup'] }] }),
+        snapshot_id: SNAPSHOT_ID,
+        as_of: AS_OF,
+      }),
+    (err: unknown) =>
+      err instanceof BlockLayoutHintError && /duplicate block id "dup"/.test(err.message),
+  )
+})

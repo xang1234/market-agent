@@ -802,3 +802,97 @@ test("migrate down fails when any applied migration is missing locally", { timeo
   assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "11");
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
 });
+
+test("migrate up applies 0009 cleanly even when legacy duplicate theme_memberships rows exist", { timeout: 120000 }, async (t) => {
+  // Regression: the prior 0009 migration added the unique constraint
+  // directly, which would hard-fail on any environment where the
+  // race-induced duplicates the constraint is meant to prevent had
+  // already happened. The migration now dedupes legacy duplicates
+  // before adding the constraint; this test pins that behavior.
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for db migration integration coverage");
+    return;
+  }
+
+  const containerName = createContainerName("fra-6al-7-2");
+  const password = "postgres";
+  const hostPort = startPostgres(containerName, password);
+  const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
+
+  registerLifoCleanup(t, () => stopPostgres(containerName));
+
+  await waitForPostgres(containerName, databaseUrl);
+
+  // Apply through 0010, then roll back 0010 and 0009 so we land on
+  // the schema as it existed before this migration (no unique
+  // constraint on theme_memberships).
+  const upResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
+    cwd: dbRoot,
+    env: { DATABASE_URL: databaseUrl },
+  });
+  assert.equal(upResult.status, 0, upResult.stderr || upResult.stdout);
+  for (let i = 0; i < 2; i++) {
+    const downResult = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], {
+      cwd: dbRoot,
+      env: { DATABASE_URL: databaseUrl },
+    });
+    assert.equal(downResult.status, 0, downResult.stderr || downResult.stdout);
+  }
+  assert.equal(
+    queryValue(
+      containerName,
+      "select count(*) from pg_constraint where conname = 'theme_memberships_theme_subject_unique'",
+    ),
+    "0",
+    "precondition: 0009's unique constraint must be absent before we seed duplicates",
+  );
+
+  // Seed two duplicate (theme_id, subject_kind, subject_id) rows.
+  const client = await connectedClient(t, databaseUrl);
+  const themeIns = await client.query<{ theme_id: string }>(
+    `insert into themes (name, membership_mode, active_from)
+     values ('dedupe-test', 'manual', now())
+     returning theme_id::text as theme_id`,
+  );
+  const themeId = themeIns.rows[0].theme_id;
+  const subjectId = "11111111-1111-4111-8111-111111111111";
+  await client.query(
+    `insert into theme_memberships (theme_id, subject_kind, subject_id, score)
+     values ($1::uuid, 'issuer'::subject_kind, $2::uuid, 0.5),
+            ($1::uuid, 'issuer'::subject_kind, $2::uuid, 0.7)`,
+    [themeId, subjectId],
+  );
+  assert.equal(
+    queryValue(
+      containerName,
+      `select count(*) from theme_memberships where theme_id = '${themeId}' and subject_kind = 'issuer' and subject_id = '${subjectId}'`,
+    ),
+    "2",
+    "precondition: two duplicate rows must exist before re-applying 0009",
+  );
+
+  // Re-apply migrations. 0009's dedupe must collapse the duplicates
+  // before the unique constraint is added; otherwise the alter table
+  // hard-fails.
+  const reupResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
+    cwd: dbRoot,
+    env: { DATABASE_URL: databaseUrl },
+  });
+  assert.equal(reupResult.status, 0, reupResult.stderr || reupResult.stdout);
+  assert.equal(
+    queryValue(
+      containerName,
+      `select count(*) from theme_memberships where theme_id = '${themeId}' and subject_kind = 'issuer' and subject_id = '${subjectId}'`,
+    ),
+    "1",
+    "0009 dedupe must collapse duplicates to a single row per (theme_id, subject_kind, subject_id)",
+  );
+  assert.equal(
+    queryValue(
+      containerName,
+      "select count(*) from pg_constraint where conname = 'theme_memberships_theme_subject_unique'",
+    ),
+    "1",
+    "0009 must successfully add the unique constraint after dedupe",
+  );
+});

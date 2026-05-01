@@ -21,7 +21,19 @@ test("assertSubjectRef accepts every SubjectKind from the spec union", () => {
 });
 
 test("assertSubjectRef rejects malformed shapes with a labeled error", () => {
-  for (const malformed of [null, "not_an_object", {}, { kind: "issuer" }, { kind: "not_a_kind", id: "x" }, { kind: "issuer", id: "" }]) {
+  for (const malformed of [
+    null,
+    "not_an_object",
+    {},
+    { kind: "issuer" },
+    { kind: "not_a_kind", id: "x" },
+    { kind: "issuer", id: "" },
+    // Whitespace-only ids must be rejected at the boundary too —
+    // otherwise " " trickles through to downstream SQL casts and
+    // string equality checks that won't surface a useful error.
+    { kind: "issuer", id: "   " },
+    { kind: "issuer", id: "\t\n" },
+  ]) {
     assert.throws(
       () => assertSubjectRef(malformed, "ref"),
       (err: Error) => /^ref(\.kind|\.id)?:/.test(err.message),

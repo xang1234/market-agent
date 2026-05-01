@@ -126,11 +126,23 @@ export function applyBlockLayoutHint(input: ApplyBlockLayoutHintInput): Readonly
     return Object.freeze([...input.blocks])
   }
 
+  // Validate block.id uniqueness up front. The Set/Map indexes below
+  // would otherwise silently collapse duplicates — one copy would
+  // disappear from both the section walk and the residual bucket with
+  // no signal. React keys assume the same invariant; if it's broken
+  // here it's already broken for the renderer, so failing closed at
+  // this boundary surfaces it loud and early.
+  const seenBlockIds = new Set<string>()
+  for (const block of input.blocks) {
+    if (seenBlockIds.has(block.id)) {
+      throw new BlockLayoutHintError(`duplicate block id "${block.id}" in input.blocks`)
+    }
+    seenBlockIds.add(block.id)
+  }
+
   // Mutable index of remaining blocks keyed by id; sections claim from
   // here and the residual fallback collects whatever is left in original
-  // declaration order. Assumes block.id is unique across input.blocks
-  // (the same invariant React keys rely on); duplicates would silently
-  // collapse to the last occurrence here.
+  // declaration order.
   const remainingIds = new Set(input.blocks.map((b) => b.id))
   const blocksById = new Map(input.blocks.map((b) => [b.id, b]))
 

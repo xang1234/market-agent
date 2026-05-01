@@ -113,6 +113,20 @@ test("createAnalyzeTemplate rejects an empty user_id", async () => {
   assert.equal(queries.length, 0);
 });
 
+test("createAnalyzeTemplate rejects a malformed user_id before the SQL ::uuid cast", async () => {
+  // Without UUID validation here, the malformed id falls through to
+  // Postgres and surfaces as a raw cast error rather than as the
+  // typed AnalyzeTemplateValidationError that callers (UI form
+  // validation, integration tests) pattern-match on.
+  const { db, queries } = fakeDb(() => []);
+  await assert.rejects(
+    createAnalyzeTemplate(db, { ...baseInput, user_id: "not-a-uuid" }),
+    (err: Error) =>
+      err instanceof AnalyzeTemplateValidationError && /user_id.*UUID/.test(err.message),
+  );
+  assert.equal(queries.length, 0, "validation must fail before any SQL is sent");
+});
+
 test("createAnalyzeTemplate rejects an empty prompt_template — a no-op template would silently produce empty memos", async () => {
   const { db } = fakeDb(() => []);
   await assert.rejects(
@@ -273,6 +287,21 @@ test("updateAnalyzeTemplate rejects an empty patch — silent no-ops are a footg
     updateAnalyzeTemplate(db, TEMPLATE_ID, {} as AnalyzeTemplateUpdate),
     (err: Error) =>
       err instanceof AnalyzeTemplateValidationError && /at least one/i.test(err.message),
+  );
+  assert.equal(queries.length, 0);
+});
+
+test("updateAnalyzeTemplate rejects unknown patch keys — typo'd field names must not mint phantom version bumps", async () => {
+  // Because validateUpdatePatch counts any defined own-property as
+  // "non-empty", an unknown field like { typo: "x" } would previously
+  // pass the empty-patch check, hit the SQL update (which only
+  // applies known columns), and silently bump version with no real
+  // change. Fail closed at the validator.
+  const { db, queries } = fakeDb(() => []);
+  await assert.rejects(
+    updateAnalyzeTemplate(db, TEMPLATE_ID, { typo: "x" } as unknown as AnalyzeTemplateUpdate),
+    (err: Error) =>
+      err instanceof AnalyzeTemplateValidationError && /unknown field.*typo/.test(err.message),
   );
   assert.equal(queries.length, 0);
 });

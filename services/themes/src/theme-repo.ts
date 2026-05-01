@@ -271,6 +271,7 @@ export async function listMembersByTheme(
   options: ListMembershipOptions = {},
 ): Promise<MembershipPage> {
   assertNonEmptyString(themeId, "theme_id");
+  if (options.asOf !== undefined) assertValidTimestamp(options.asOf, "asOf");
   const limit = resolvePageSize(options.limit);
   const asOf = options.asOf ?? new Date().toISOString();
   const { rows } = await db.query<ThemeMembershipDbRow>(
@@ -294,6 +295,7 @@ export async function listThemesBySubject(
   options: ListMembershipOptions = {},
 ): Promise<MembershipPage> {
   assertSubjectRef(subjectRef, "subject_ref");
+  if (options.asOf !== undefined) assertValidTimestamp(options.asOf, "asOf");
   const limit = resolvePageSize(options.limit);
   const asOf = options.asOf ?? new Date().toISOString();
   const { rows } = await db.query<ThemeMembershipDbRow>(
@@ -340,6 +342,8 @@ function validateThemeInput(input: ThemeInput): void {
       `membership_mode: must be one of ${THEME_MEMBERSHIP_MODES.join(", ")}`,
     );
   }
+  if (input.active_from != null) assertValidTimestamp(input.active_from, "active_from");
+  if (input.active_to != null) assertValidTimestamp(input.active_to, "active_to");
   if (input.active_from != null && input.active_to != null) {
     if (Date.parse(input.active_to) <= Date.parse(input.active_from)) {
       throw new ThemeValidationError("active_to: must be strictly after active_from");
@@ -363,10 +367,23 @@ function validateThemeMembershipInput(input: ThemeMembershipInput): void {
       }
     });
   }
+  if (input.effective_at != null) assertValidTimestamp(input.effective_at, "effective_at");
+  if (input.expires_at != null) assertValidTimestamp(input.expires_at, "expires_at");
   if (input.expires_at != null && input.effective_at != null) {
     if (Date.parse(input.expires_at) <= Date.parse(input.effective_at)) {
       throw new ThemeValidationError("expires_at: must be strictly after effective_at");
     }
+  }
+}
+
+// Reject malformed timestamp strings before they hit ::timestamptz casts
+// in SQL — Date.parse returns NaN on garbage, which would otherwise make
+// the active-window predicate match nothing and return an empty page
+// instead of surfacing the bug. Use the same posture as the other
+// validators here: typed ThemeValidationError at the boundary.
+function assertValidTimestamp(value: string, label: string): void {
+  if (typeof value !== "string" || value.length === 0 || Number.isNaN(Date.parse(value))) {
+    throw new ThemeValidationError(`${label}: must be a valid ISO timestamp`);
   }
 }
 
@@ -396,14 +413,17 @@ function themeRowFromDb(row: ThemeDbRow | undefined): ThemeRow {
 
 function themeMembershipRowFromDb(row: ThemeMembershipDbRow | undefined): ThemeMembershipRow {
   if (!row) throw new Error("theme_memberships insert/select did not return a row");
-  // Shallow freeze for parity with themeRowFromDb. The caller-visible nested
-  // structures (subject_ref, rationale_claim_ids) are themselves freshly
-  // constructed here so they can't be mutated through any external
-  // reference; deep-freezing them on top would be redundant.
+  // Deep-freeze the structured nested fields. Freshly constructing them
+  // here doesn't stop a caller from mutating the result —
+  // `result.subject_ref.kind = "evil"` works on a plain object literal
+  // even when the outer object is frozen. The repo owns the shape of
+  // both subject_ref and rationale_claim_ids, so freezing them here is
+  // the right boundary; only opaque caller-controlled JSON
+  // (themeRowFromDb's membership_spec) is left mutable.
   return Object.freeze({
     theme_membership_id: row.theme_membership_id,
     theme_id: row.theme_id,
-    subject_ref: { kind: row.subject_kind, id: row.subject_id },
+    subject_ref: Object.freeze({ kind: row.subject_kind, id: row.subject_id }),
     score: row.score === null ? null : Number(row.score),
     rationale_claim_ids: rationaleClaimIds(row.rationale_claim_ids),
     effective_at: isoString(row.effective_at),
@@ -429,7 +449,10 @@ function rationaleClaimIds(value: unknown): ReadonlyArray<string> {
       "theme_memberships.rationale_claim_ids: expected array of non-empty strings",
     );
   }
-  return value as ReadonlyArray<string>;
+  // Defensive copy + freeze so callers can't mutate the parsed array
+  // back onto the underlying repo result (and, transitively, onto any
+  // memoization the caller layered on top).
+  return Object.freeze([...value]) as ReadonlyArray<string>;
 }
 
 function isoString(value: Date | string): string {

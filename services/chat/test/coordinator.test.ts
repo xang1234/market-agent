@@ -691,6 +691,24 @@ test("stub runner surfaces bundle_id on turn.started for no-subject turns and on
   assert.equal(completedEvent.bundle_id, "theme_research");
 });
 
+test("subject-aware runner emits bundle_id on turn.started before any tool events", async () => {
+  // Regression: tool events emitted before turn.started used to trigger
+  // an auto-fabricated empty turn.started, which left SSE consumers
+  // without a bundle_id at setup time. The subject-aware runner must
+  // emit turn.started WITH bundle_id explicitly before the subject
+  // resolution tool events fire.
+  const themed = createChatCoordinator({ preResolveSubject: async () => resolvedThemePreResolution() });
+  const turn = themed.getOrCreateTurn({ threadId: "t", runId: "r", subjectText: "AI Chips" });
+  await turn.completed;
+  const firstStarted = turn.events.find((e) => e.type === "turn.started")!;
+  assert.equal(firstStarted.bundle_id, "theme_research");
+  // turn.started must be the first event on the wire — tool events
+  // come after.
+  const firstEvent = turn.events[0];
+  assert.equal(firstEvent.type, "turn.started");
+  assert.equal(firstEvent.bundle_id, "theme_research");
+});
+
 type ChatTurnEventMutation = {
   type: string;
   seq: number;

@@ -31,7 +31,7 @@ export function assertSubjectRef(value: unknown, label: string): asserts value i
   if (typeof ref.kind !== "string" || !(SUBJECT_KINDS as ReadonlyArray<string>).includes(ref.kind)) {
     throw new Error(`${label}.kind: must be one of ${SUBJECT_KINDS.join(", ")}`);
   }
-  if (typeof ref.id !== "string" || ref.id.length === 0) {
+  if (typeof ref.id !== "string" || ref.id.trim().length === 0) {
     throw new Error(`${label}.id: must be a non-empty string`);
   }
 }

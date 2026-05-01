@@ -468,13 +468,22 @@ function subjectAwareRunner(
       return;
     }
 
+    const bundleId = chooseBundleIdForSubjectKind(preResolution.subject_ref.kind);
+    // Emit turn.started with the resolved bundle_id BEFORE any tool
+    // events. The runner's emit wrapper auto-fabricates an empty
+    // turn.started on the first non-turn.started emit; if we let the
+    // tool events fire first, that auto-fabricated event would land
+    // on the SSE stream without a bundle_id, breaking consumers that
+    // key setup off turn.started.
+    context.emit("turn.started", { bundle_id: bundleId });
+
     const toolCallId = subjectResolutionToolCallId(context);
     emitSubjectResolutionToolEvents(context.emit, preResolution, toolCallId);
 
     await runner({
       ...context,
       subjectPreResolution: preResolution,
-      bundleId: chooseBundleIdForSubjectKind(preResolution.subject_ref.kind),
+      bundleId,
     });
   };
 }

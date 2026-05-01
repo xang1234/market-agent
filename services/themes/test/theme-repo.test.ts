@@ -234,6 +234,30 @@ test("addThemeMembership throws when the conflict-fallback select cannot find th
   );
 });
 
+test("themeMembershipRowFromDb deep-freezes nested subject_ref and rationale_claim_ids", async () => {
+  // The outer freeze on the result row doesn't stop a caller from
+  // mutating the nested structures (`row.subject_ref.kind = "evil"`
+  // works on a plain object literal even when the outer is frozen).
+  // The repo owns the shape of both fields, so we freeze them too.
+  const { db } = fakeDb(() => [
+    membershipRow({ rationale_claim_ids: [CLAIM_ID] }),
+  ]);
+  const page = await listMembersByTheme(db, THEME_ID);
+  const row = page.rows[0];
+  assert.throws(
+    () => {
+      (row.subject_ref as { kind: string }).kind = "macro_topic";
+    },
+    /Cannot assign to read only property|object is not extensible|read[- ]?only/i,
+  );
+  assert.throws(
+    () => {
+      (row.rationale_claim_ids as string[]).push("new-claim-id");
+    },
+    /Cannot add property|object is not extensible|frozen/i,
+  );
+});
+
 test("listMembersByTheme throws if pg returns rationale_claim_ids with non-string elements (loud over silent)", async () => {
   // A wire-format break that yielded numbers would otherwise lie to
   // ReadonlyArray<string> consumers and surface deep in the explainability
@@ -338,6 +362,20 @@ test("listMembersByTheme defaults asOf to now() when the caller omits it", async
   const after = new Date().toISOString();
   const captured = queries[0].values?.[1] as string;
   assert.ok(captured >= before && captured <= after, `expected default asOf ${captured} between ${before} and ${after}`);
+});
+
+test("listMembersByTheme rejects a malformed asOf string before the SQL ::timestamptz cast", async () => {
+  // Without validation here the bad string falls through to Postgres
+  // and the active-window predicate either errors out as a raw cast
+  // failure or silently matches nothing — both surface as "the page
+  // is mysteriously empty" instead of as a typed ThemeValidationError
+  // that callers can pattern-match on.
+  const { db, queries } = fakeDb(() => []);
+  await assert.rejects(
+    listMembersByTheme(db, THEME_ID, { asOf: "not-a-date" }),
+    (err: Error) => err instanceof ThemeValidationError && /asOf/.test(err.message),
+  );
+  assert.equal(queries.length, 0, "validation must fail before any SQL is sent");
 });
 
 test("listMembersByTheme caps the page at DEFAULT_MEMBERSHIP_PAGE_SIZE and reports truncation", async () => {
