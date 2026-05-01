@@ -493,6 +493,23 @@ create table analyze_templates (
   updated_at timestamptz not null default now()
 );
 
+-- Each analyze_template_runs row is a sealed memo: the snapshot anchors
+-- the evidence, blocks holds the rendered Block[] payload, and
+-- template_version is pinned at run time so editing the template later
+-- does not rewrite history. snapshot_id intentionally lacks ON DELETE
+-- CASCADE (mirrors chat_messages): deleting a referenced snapshot must
+-- fail loudly, not silently orphan the memo.
+create table analyze_template_runs (
+  run_id uuid primary key default gen_random_uuid(),
+  template_id uuid not null references analyze_templates(template_id) on delete cascade,
+  template_version integer not null,
+  snapshot_id uuid not null references snapshots(snapshot_id),
+  blocks jsonb not null,
+  created_at timestamptz not null default now()
+);
+create index analyze_template_runs_template_created_idx
+  on analyze_template_runs(template_id, created_at desc);
+
 create table agents (
   agent_id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(user_id) on delete cascade,

@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { Client } from "pg";
+import { Client, Pool } from "pg";
 
 export const workspaceRoot = join(import.meta.dirname, "..", "..");
 export const dbRoot = join(workspaceRoot, "db");
@@ -226,6 +226,24 @@ export async function applySchemaWithRetry(
 
   assert.notEqual(lastResult, null);
   assert.equal(lastResult.status, 0, lastResult.stderr || lastResult.stdout);
+}
+
+// Open a pg pool against `databaseUrl` and register teardown. For tests
+// that exercise pool-shaped APIs (anything that requires `release()` on
+// the client). Default `max` mirrors the lightweight client tests; raise
+// it via the option if a test needs more parallelism.
+export async function connectedPool(
+  t: TestContext,
+  databaseUrl: string,
+  options: { max?: number } = {},
+): Promise<Pool> {
+  const pool = new Pool({ connectionString: databaseUrl, max: options.max ?? 4 });
+  pool.on("error", (err: Error & { code?: string }) => {
+    if (err.code && TEARDOWN_DISCONNECT_CODES.has(err.code)) return;
+    console.error("unexpected pg pool error", err);
+  });
+  registerLifoCleanup(t, () => pool.end().catch(() => {}));
+  return pool;
 }
 
 // Open a pg client against `databaseUrl`, wait for connect, and register
