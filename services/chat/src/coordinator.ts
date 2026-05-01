@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { DEFAULT_BUNDLE_ID, chooseBundleIdForSubjectKind } from "./bundle-routing.ts";
 import {
   createChatSseSequencer,
   type ChatSseEvent,
@@ -24,6 +25,12 @@ export type ChatTurnEmit = (
 
 export type ChatTurnRunContext = ChatTurnInput & {
   subjectPreResolution?: ChatResolvedSubjectPreResolution;
+  // Analyst prompt-template bundle selected for this turn. Derived from the
+  // resolved subject's kind via chooseBundleIdForSubjectKind; falls back to
+  // DEFAULT_BUNDLE_ID when no subject was provided. Same routing function
+  // for ticker, theme, screen, and macro subjects — no per-kind branch
+  // (fra-95e contract).
+  bundleId: string;
   emit: ChatTurnEmit;
 };
 
@@ -357,7 +364,10 @@ class MutableChatTurnHandle implements ChatTurnHandle {
     };
 
     try {
-      await this.#runner({ ...this.input, emit });
+      // bundleId is a placeholder here — subjectAwareRunner (always the
+      // outermost wrapper, see createChatCoordinator) overwrites it on
+      // every path before invoking the inner runner.
+      await this.#runner({ ...this.input, emit, bundleId: DEFAULT_BUNDLE_ID });
     } catch (error) {
       emit("turn.error", {
         error_code: errorCode(error),
@@ -439,7 +449,9 @@ function subjectAwareRunner(
   return async (context) => {
     const subjectText = nonEmptySubjectText(context.subjectText);
     if (!subjectText) {
-      await runner(context);
+      // No subject yet (brand-new thread or follow-up turn without a subject
+      // change) — route to the default analyst bundle.
+      await runner({ ...context, bundleId: DEFAULT_BUNDLE_ID });
       return;
     }
 
@@ -456,12 +468,22 @@ function subjectAwareRunner(
       return;
     }
 
+    const bundleId = chooseBundleIdForSubjectKind(preResolution.subject_ref.kind);
+    // Emit turn.started with the resolved bundle_id BEFORE any tool
+    // events. The runner's emit wrapper auto-fabricates an empty
+    // turn.started on the first non-turn.started emit; if we let the
+    // tool events fire first, that auto-fabricated event would land
+    // on the SSE stream without a bundle_id, breaking consumers that
+    // key setup off turn.started.
+    context.emit("turn.started", { bundle_id: bundleId });
+
     const toolCallId = subjectResolutionToolCallId(context);
     emitSubjectResolutionToolEvents(context.emit, preResolution, toolCallId);
 
     await runner({
       ...context,
       subjectPreResolution: preResolution,
+      bundleId,
     });
   };
 }
@@ -558,7 +580,9 @@ async function stubChatTurnRunner(
   const preResolution = context.subjectPreResolution ?? null;
 
   if (!preResolution) {
-    emit("turn.started", { stub: true });
+    // No subject path — surface the bundle id on turn.started so SSE
+    // consumers see which analyst bundle drove the turn.
+    emit("turn.started", { stub: true, bundle_id: context.bundleId });
     emit("tool.started", {
       stub: true,
       tool_call_id: "tool-call-1",
@@ -626,6 +650,7 @@ async function stubChatTurnRunner(
   emit("turn.completed", {
     stub: true,
     message_id: messageId,
+    bundle_id: context.bundleId,
     ...(preResolution?.status === "resolved" ? { subject_ref: preResolution.subject_ref } : {}),
     ...(preResolution !== null && preResolution.status !== "resolved" ? { clarification: true } : {}),
   });

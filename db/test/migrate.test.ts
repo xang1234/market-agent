@@ -62,7 +62,7 @@ test("migrate up applies pending migrations and records them in schema_migration
   });
 
   assert.equal(migrateResult.status, 0, migrateResult.stderr || migrateResult.stdout);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "8");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "10");
   assert.deepEqual(
     queryValue(containerName, "select version || ':' || name from schema_migrations order by version").split("\n"),
     [
@@ -74,6 +74,8 @@ test("migrate up applies pending migrations and records them in schema_migration
       "0006:chat_messages_snapshot_not_null",
       "0007:documents_parent_idx",
       "0008:chat_threads_archived_at",
+      "0009:theme_memberships_unique",
+      "0010:analyze_template_runs",
     ],
   );
 
@@ -126,6 +128,8 @@ test("migrate status reports all migrations as applied after migrate up", { time
   assert.match(statusResult.stdout, /0006\s+chat_messages_snapshot_not_null\s+applied/);
   assert.match(statusResult.stdout, /0007\s+documents_parent_idx\s+applied/);
   assert.match(statusResult.stdout, /0008\s+chat_threads_archived_at\s+applied/);
+  assert.match(statusResult.stdout, /0009\s+theme_memberships_unique\s+applied/);
+  assert.match(statusResult.stdout, /0010\s+analyze_template_runs\s+applied/);
 });
 
 test("migrate down rolls back the most recently applied migration", { timeout: 120000 }, async (t) => {
@@ -157,7 +161,7 @@ test("migrate down rolls back the most recently applied migration", { timeout: 1
   });
   assert.equal(downResult.status, 0, downResult.stderr || downResult.stdout);
 
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "7");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "9");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -186,7 +190,35 @@ test("migrate down rolls back the most recently applied migration", { timeout: 1
       containerName,
       "select count(*) from information_schema.columns where table_name = 'chat_threads' and column_name = 'archived_at'",
     ),
+    "1",
+    "0008's archived_at column must remain — only 0010 should have been rolled back",
+  );
+  // 0009's effects must remain — only 0010 was rolled back.
+  assert.equal(
+    queryValue(
+      containerName,
+      "select count(*) from pg_constraint where conname = 'theme_memberships_theme_subject_unique'",
+    ),
+    "1",
+    "0009's unique constraint must remain — only 0010 should have been rolled back",
+  );
+  // 0010-specific assertions: analyze_template_runs table and its index
+  // must be gone after the rollback.
+  assert.equal(
+    queryValue(
+      containerName,
+      "select count(*) from pg_tables where schemaname = 'public' and tablename = 'analyze_template_runs'",
+    ),
     "0",
+    "analyze_template_runs table added by 0010.up must be removed by 0010.down",
+  );
+  assert.equal(
+    queryValue(
+      containerName,
+      "select count(*) from pg_indexes where schemaname = 'public' and indexname = 'analyze_template_runs_template_created_idx'",
+    ),
+    "0",
+    "analyze_template_runs index added by 0010.up must be removed by 0010.down",
   );
 });
 
@@ -701,7 +733,7 @@ test("migrate down rolls back schema changes when removing the migration record 
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /rejecting schema_migrations delete/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "8");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "10");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -710,11 +742,13 @@ test("migrate down rolls back schema changes when removing the migration record 
   // migration's schema change must still be in place. If the runner
   // accidentally executed the down DDL before hitting the trigger block, the
   // schema_migrations row count alone wouldn't catch that — checking the
-  // latest migration's actual artifact does.
+  // latest migration's actual artifact does. 0010 added analyze_template_runs;
+  // the down would drop it, so its presence is independent proof the down
+  // DDL did not execute.
   assert.equal(
     queryValue(
       containerName,
-      "select count(*) from information_schema.columns where table_name = 'chat_threads' and column_name = 'archived_at'",
+      "select count(*) from pg_tables where schemaname = 'public' and tablename = 'analyze_template_runs'",
     ),
     "1",
   );
@@ -765,6 +799,100 @@ test("migrate down fails when any applied migration is missing locally", { timeo
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /Applied migration 0000 is missing locally/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "9");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "11");
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
+});
+
+test("migrate up applies 0009 cleanly even when legacy duplicate theme_memberships rows exist", { timeout: 120000 }, async (t) => {
+  // Regression: the prior 0009 migration added the unique constraint
+  // directly, which would hard-fail on any environment where the
+  // race-induced duplicates the constraint is meant to prevent had
+  // already happened. The migration now dedupes legacy duplicates
+  // before adding the constraint; this test pins that behavior.
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for db migration integration coverage");
+    return;
+  }
+
+  const containerName = createContainerName("fra-6al-7-2");
+  const password = "postgres";
+  const hostPort = startPostgres(containerName, password);
+  const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
+
+  registerLifoCleanup(t, () => stopPostgres(containerName));
+
+  await waitForPostgres(containerName, databaseUrl);
+
+  // Apply through 0010, then roll back 0010 and 0009 so we land on
+  // the schema as it existed before this migration (no unique
+  // constraint on theme_memberships).
+  const upResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
+    cwd: dbRoot,
+    env: { DATABASE_URL: databaseUrl },
+  });
+  assert.equal(upResult.status, 0, upResult.stderr || upResult.stdout);
+  for (let i = 0; i < 2; i++) {
+    const downResult = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], {
+      cwd: dbRoot,
+      env: { DATABASE_URL: databaseUrl },
+    });
+    assert.equal(downResult.status, 0, downResult.stderr || downResult.stdout);
+  }
+  assert.equal(
+    queryValue(
+      containerName,
+      "select count(*) from pg_constraint where conname = 'theme_memberships_theme_subject_unique'",
+    ),
+    "0",
+    "precondition: 0009's unique constraint must be absent before we seed duplicates",
+  );
+
+  // Seed two duplicate (theme_id, subject_kind, subject_id) rows.
+  const client = await connectedClient(t, databaseUrl);
+  const themeIns = await client.query<{ theme_id: string }>(
+    `insert into themes (name, membership_mode, active_from)
+     values ('dedupe-test', 'manual', now())
+     returning theme_id::text as theme_id`,
+  );
+  const themeId = themeIns.rows[0].theme_id;
+  const subjectId = "11111111-1111-4111-8111-111111111111";
+  await client.query(
+    `insert into theme_memberships (theme_id, subject_kind, subject_id, score)
+     values ($1::uuid, 'issuer'::subject_kind, $2::uuid, 0.5),
+            ($1::uuid, 'issuer'::subject_kind, $2::uuid, 0.7)`,
+    [themeId, subjectId],
+  );
+  assert.equal(
+    queryValue(
+      containerName,
+      `select count(*) from theme_memberships where theme_id = '${themeId}' and subject_kind = 'issuer' and subject_id = '${subjectId}'`,
+    ),
+    "2",
+    "precondition: two duplicate rows must exist before re-applying 0009",
+  );
+
+  // Re-apply migrations. 0009's dedupe must collapse the duplicates
+  // before the unique constraint is added; otherwise the alter table
+  // hard-fails.
+  const reupResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
+    cwd: dbRoot,
+    env: { DATABASE_URL: databaseUrl },
+  });
+  assert.equal(reupResult.status, 0, reupResult.stderr || reupResult.stdout);
+  assert.equal(
+    queryValue(
+      containerName,
+      `select count(*) from theme_memberships where theme_id = '${themeId}' and subject_kind = 'issuer' and subject_id = '${subjectId}'`,
+    ),
+    "1",
+    "0009 dedupe must collapse duplicates to a single row per (theme_id, subject_kind, subject_id)",
+  );
+  assert.equal(
+    queryValue(
+      containerName,
+      "select count(*) from pg_constraint where conname = 'theme_memberships_theme_subject_unique'",
+    ),
+    "1",
+    "0009 must successfully add the unique constraint after dedupe",
+  );
 });

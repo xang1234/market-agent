@@ -76,6 +76,14 @@ export type { BlockRegistry, BlockRenderer, BlockRendererProps } from './Registr
 export { validateBlock } from './BlockValidator.ts'
 export type { BlockValidationError, BlockValidationResult } from './BlockValidator.ts'
 
+export {
+  BlockLayoutHintError,
+  RESIDUAL_SECTION_ID,
+  applyBlockLayoutHint,
+  parseBlockLayoutHint,
+} from './layoutHint.ts'
+export type { BlockLayoutHint, BlockLayoutHintSection } from './layoutHint.ts'
+
 export { createSnapshotManifest, resolveRefSegment } from './snapshotManifest.ts'
 export type { ResolvedRefSegment, SnapshotManifest } from './snapshotManifest.ts'
 

@@ -182,10 +182,16 @@ create table theme_memberships (
   score numeric,
   rationale_claim_ids jsonb not null default '[]'::jsonb,
   effective_at timestamptz not null default now(),
-  expires_at timestamptz
+  expires_at timestamptz,
+  unique (theme_id, subject_kind, subject_id)
 );
-create index theme_memberships_subject_idx on theme_memberships(subject_kind, subject_id);
-create index theme_memberships_theme_idx on theme_memberships(theme_id);
+-- Covering indexes for the list ORDER BY (score desc nulls last, effective_at asc).
+-- The leading column also satisfies the WHERE filter, so a separate single-column
+-- index would be redundant.
+create index theme_memberships_theme_score_idx
+  on theme_memberships(theme_id, score desc nulls last, effective_at asc);
+create index theme_memberships_subject_score_idx
+  on theme_memberships(subject_kind, subject_id, score desc nulls last, effective_at asc);
 
 create table portfolios (
   portfolio_id uuid primary key default gen_random_uuid(),
@@ -486,6 +492,23 @@ create table analyze_templates (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Each analyze_template_runs row is a sealed memo: the snapshot anchors
+-- the evidence, blocks holds the rendered Block[] payload, and
+-- template_version is pinned at run time so editing the template later
+-- does not rewrite history. snapshot_id intentionally lacks ON DELETE
+-- CASCADE (mirrors chat_messages): deleting a referenced snapshot must
+-- fail loudly, not silently orphan the memo.
+create table analyze_template_runs (
+  run_id uuid primary key default gen_random_uuid(),
+  template_id uuid not null references analyze_templates(template_id) on delete cascade,
+  template_version integer not null,
+  snapshot_id uuid not null references snapshots(snapshot_id),
+  blocks jsonb not null,
+  created_at timestamptz not null default now()
+);
+create index analyze_template_runs_template_created_idx
+  on analyze_template_runs(template_id, created_at desc);
 
 create table agents (
   agent_id uuid primary key default gen_random_uuid(),

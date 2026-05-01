@@ -237,6 +237,10 @@ function assertSnapshotTransactionClient(db: QueryExecutor): asserts db is Snaps
   }
 }
 
+// fra-asy: this misclassifies acquired pg.PoolClients (they inherit
+// .connect from pg.Client AND have .release), so callers using the
+// *WithPool variant correctly hit the wrong error. Fixed in
+// services/analyze/src/template-runner.ts; consolidate when fra-asy lands.
 function isPoolLike(db: QueryExecutor): boolean {
   const candidate = db as {
     connect?: unknown;
