@@ -156,6 +156,10 @@ test("golden template: quarterly earnings memo maps to expected bundles", () => 
     "document_research",
   ]);
   assert.deepEqual(new Set(result.bundle_ids), expected);
+  // Pin order too — golden snapshots are the cache key for prompt
+  // prefixes downstream, so a future change to the sort would
+  // silently invalidate cached prompts in production.
+  assert.deepEqual([...result.bundle_ids], [...expected].sort());
 });
 
 test("golden template: competitive snapshot maps to expected bundles", () => {
@@ -173,4 +177,5 @@ test("golden template: competitive snapshot maps to expected bundles", () => {
     "segment_deep_dive",
   ]);
   assert.deepEqual(new Set(result.bundle_ids), expected);
+  assert.deepEqual([...result.bundle_ids], [...expected].sort());
 });

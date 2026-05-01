@@ -11,6 +11,17 @@
 // The mapping is declarative + auditable: SOURCE_CATEGORY_BUNDLES is
 // the single source of truth and is exported so any caller (tests,
 // admin tools, the analyze UI) can render or audit the table directly.
+//
+// Scope note — policies are intentionally NOT layered here:
+// - Per-tool policies (audience boundary, approval, budget, turn
+//   limits) live in services/tools/{audience-enforcement,budget-gate,
+//   turn-policy}.ts and apply after a bundle is selected.
+// - Per-template policies (peer_policy, disclosure_policy) live as
+//   AnalyzeTemplate columns and are owned by services/analyze/src/
+//   template-repo.ts (fra-ast).
+// Adding a third "category-level policy" surface would duplicate one
+// of those layers. fra-oc8 owns the bundle mapping; the existing
+// modules own the policy surfaces.
 
 // The umbrella bundle that owns the analyze prompt template + few-shots
 // (see services/tools/src/prompt-templates.ts). Every analyze run
@@ -22,6 +33,13 @@ export const ANALYZE_BASE_BUNDLE_ID = "analyze_template_run";
 // Keep the bundle ids in sync with spec/finance_research_tool_registry.json
 // — the drift test in test/source-category-mapping.test.ts catches
 // mismatches at test time.
+//
+// Per-row rationale for the non-obvious entries:
+// - prices spans quote_lookup (fast-path latest quote) AND
+//   single_subject_analysis (historical / performance series).
+// - transcripts ride document_research alongside news; both flow
+//   through the evidence/claims pipeline rather than the SEC filings
+//   index that filing_research wraps.
 export const SOURCE_CATEGORY_BUNDLES = Object.freeze({
   company_profile: Object.freeze(["quote_lookup", "single_subject_analysis"]),
   financials_annual: Object.freeze(["single_subject_analysis"]),
@@ -53,6 +71,20 @@ export type MapSourceCategoriesInput = {
   categories: ReadonlyArray<string>;
 };
 
+// bundle_ids contains ANALYZE_BASE_BUNDLE_ID plus every bundle named
+// by any of the input categories, deduped and sorted.
+//
+// Consumption contract for orchestrators wiring this in:
+// - ANALYZE_BASE_BUNDLE_ID is the prompt-template owner. Pass it to
+//   services/tools/src/bundle-selector.ts:selectToolBundle to pick up
+//   the analyze prompt, few-shots, and prompt cache prefix.
+// - The remaining bundle_ids are tool-availability hints — their
+//   tools (resolved via registry.toolsForBundle) form the union of
+//   analyst-callable tools for the run. The orchestrator must NOT
+//   call selectToolBundle for each one; only one bundle owns the
+//   prompt template per turn.
+// - Per-tool policy (audience, approval, budget) is enforced by
+//   services/tools/* on the resolved tool list, not here.
 export type SourceCategoryMappingResult = {
   bundle_ids: ReadonlyArray<string>;
 };
