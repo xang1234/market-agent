@@ -60,6 +60,7 @@ export {
   PERF_NORMALIZATIONS,
   REF_SEGMENT_KINDS,
   RESEARCH_EVIDENCE_BLOCK_KINDS,
+  STREAMING_DATA_REF_KIND,
   SUBJECT_KINDS,
   TRUST_PROVENANCE_BLOCK_KINDS,
   X_AXIS_TYPES,
@@ -84,6 +85,9 @@ export {
 } from './snapshotManifestContext.ts'
 
 export { BlockRegistryProvider, BlockView, SnapshotManifestProvider } from './BlockView.tsx'
+export { MemoizedBlockView } from './MemoizedBlockView.tsx'
+export { blockPropsAreEqual } from './blockMemoization.ts'
+export { createDefaultBlockRegistry } from './defaultBlockRegistry.ts'
 export { registerNarrativeBlockRenderers } from './registerNarrativeBlocks.ts'
 export { registerChartBlockRenderers } from './registerChartBlocks.ts'
 export { registerResearchEvidenceBlockRenderers } from './registerResearchEvidenceBlocks.ts'

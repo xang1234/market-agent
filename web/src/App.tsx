@@ -5,6 +5,7 @@ import {
   Route,
   RouterProvider,
 } from 'react-router-dom'
+import { BlockRegistryProvider, createDefaultBlockRegistry } from './blocks'
 import { AuthProvider } from './shell/AuthContext'
 import type { RouteHandle } from './shell/routeHandle'
 import { ThemeProvider } from './shell/ThemeProvider'
@@ -66,14 +67,19 @@ const router = createBrowserRouter(
   ),
 )
 
-// ThemeProvider sits at the top so the `dark` class toggle on <html> stays
-// coherent across route changes and auth transitions.
+// Module scope: stable registry identity across <App /> re-renders.
+const blockRegistry = createDefaultBlockRegistry()
+
+// ThemeProvider stays at the layout level so the `dark` class toggle on <html>
+// stays coherent across route changes and auth transitions.
 export function App() {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <RouterProvider router={router} />
-      </AuthProvider>
-    </ThemeProvider>
+    <BlockRegistryProvider registry={blockRegistry}>
+      <ThemeProvider>
+        <AuthProvider>
+          <RouterProvider router={router} />
+        </AuthProvider>
+      </ThemeProvider>
+    </BlockRegistryProvider>
   )
 }
