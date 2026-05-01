@@ -98,6 +98,9 @@ async function seedFixture(client: Client, options: { confidence?: number } = {}
     );
   await insertImpact(claimSupportA, ISSUER_X, "positive");
   await insertImpact(claimSupportB, ISSUER_Z, "negative");
+  // Trap row: issuer_W gets a positive impact, but only via the contradicting
+  // claim. The support-only filter must exclude it; if the SQL ever drops
+  // `relation = 'support'`, issuer_W appears and the happy-path test fails.
   await insertImpact(claimContradicting, ISSUER_W, "positive");
 
   const clusterId = (
@@ -170,9 +173,16 @@ test(
     const [first, second, third] = candidates;
 
     // issuer_X: most claims (A and B), via 2 arg rows + 1 impact row.
+    // Order-sensitive comparison: the SQL produces rationale_claim_ids via
+    // `array_agg(distinct claim_id::text order by claim_id::text)`, so a
+    // regression that drops the `order by` would silently break the
+    // documented ascending-id contract.
     assert.deepEqual(first.subject_ref, { kind: "issuer", id: ISSUER_X });
     assert.equal(first.score, 2);
-    assert.deepEqual([...first.rationale_claim_ids].sort(), [fixture.claimSupportA, fixture.claimSupportB].sort());
+    assert.deepEqual(
+      [...first.rationale_claim_ids],
+      [fixture.claimSupportA, fixture.claimSupportB].sort(),
+    );
     assert.equal(first.signals.claim_arguments, 2);
     assert.equal(first.signals.entity_impacts, 1);
 
@@ -279,8 +289,10 @@ test(
     );
     assert.equal(persisted.rows.length, 3);
     const xRow = persisted.rows.find((r) => r.subject_id === ISSUER_X)!;
+    // Order-sensitive: the candidate's rationale_claim_ids was sorted ascending
+    // by the compute SQL and must round-trip through theme_memberships unchanged.
     assert.deepEqual(
-      [...xRow.rationale_claim_ids].sort(),
+      [...xRow.rationale_claim_ids],
       [fixture.claimSupportA, fixture.claimSupportB].sort(),
       "issuer_X's persisted rationale must point back to the supporting claims",
     );
