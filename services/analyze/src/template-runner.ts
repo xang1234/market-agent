@@ -37,13 +37,6 @@ export type AnalyzeTemplateRunClientPool = {
   connect(): Promise<AnalyzeTemplateRunPoolClient>;
 };
 
-export class AnalyzeTemplateRunNotFoundError extends Error {
-  constructor(message = "analyze template run not found") {
-    super(message);
-    this.name = "AnalyzeTemplateRunNotFoundError";
-  }
-}
-
 export class AnalyzeTemplateRunPersistenceError extends Error {
   constructor(message: string) {
     super(message);
@@ -56,7 +49,9 @@ export type AnalyzeTemplateRunRow = {
   template_id: string;
   template_version: number;
   snapshot_id: string;
-  blocks: JsonValue;
+  // Stored as jsonb; deserialized as a JSON array. Per-element shape
+  // matches Block[] but is enforced at the renderer, not here.
+  blocks: ReadonlyArray<JsonValue>;
   created_at: string;
 };
 
@@ -65,7 +60,7 @@ type AnalyzeTemplateRunDbRow = {
   template_id: string;
   template_version: number | string;
   snapshot_id: string;
-  blocks: JsonValue;
+  blocks: unknown;
   created_at: Date | string;
 };
 
@@ -76,10 +71,11 @@ export type PersistAnalyzeTemplateRunInput = {
   // when they kicked off the run, so a later edit to the template doesn't
   // rewrite this run's history.
   template_version: number;
-  // The rendered memo. Block[] per the BlockRegistry contract; we don't
-  // assert the per-element shape here (that's the renderer's job — fra-i7z),
-  // only that the top level is an array.
-  blocks: JsonValue;
+  // The rendered memo. Block[] per the BlockRegistry contract — typed as
+  // an array at compile time, with per-element shape left to the renderer
+  // (fra-i7z). The runtime check at validatePersistInput is belt-and-braces
+  // for callers who reach in via `as any`.
+  blocks: ReadonlyArray<JsonValue>;
   // Caller-supplied seal callback. The persistence layer doesn't stage
   // manifests or call sealSnapshot directly so unit tests can drive this
   // path without dragging in the verifier or the snapshots table.
@@ -108,8 +104,11 @@ export async function persistAnalyzeTemplateRunAfterSnapshotSeal(
   db: AnalyzeTemplateRunTransactionClient,
   input: PersistAnalyzeTemplateRunInput,
 ): Promise<PersistAnalyzeTemplateRunResult> {
-  assertAnalyzeTemplateRunTransactionClient(db);
+  // Validate before the brand check: input shape errors are fully
+  // user-controlled, brand mismatches are environmental. Catching the
+  // user-controlled bug first gives the more actionable message.
   validatePersistInput(input);
+  assertAnalyzeTemplateRunTransactionClient(db);
 
   const seal = await input.sealSnapshot();
   if (!isVerifiedSeal(seal)) {
@@ -143,8 +142,15 @@ export async function persistAnalyzeTemplateRunAfterSnapshotSealWithPool(
       seal,
     );
   } catch (error) {
-    if (error !== null && typeof error === "object" && "rollback_error" in error) {
-      releaseError = error as Error;
+    // Mirrors services/chat/src/messages.ts and snapshot-sealer.ts: when
+    // the rollback path attached a rollback_error onto the original error,
+    // hand the connection back to the pool as broken so it gets evicted
+    // instead of returning a poisoned client to the next caller.
+    if (
+      error instanceof Error &&
+      (error as { rollback_error?: unknown }).rollback_error !== undefined
+    ) {
+      releaseError = error;
     }
     throw error;
   } finally {
@@ -226,7 +232,10 @@ async function persistSealedAnalyzeTemplateRun(
         input.template_id,
         input.template_version,
         snapshotId,
-        serializeJsonValue(input.blocks),
+        // ReadonlyArray<JsonValue> is structurally a JsonValue (a JSON array)
+        // for serialization purposes, but the JsonValue alias spells the
+        // array branch as mutable. Cast at the boundary.
+        serializeJsonValue(input.blocks as JsonValue),
       ],
     );
     const row = rows[0];
@@ -261,6 +270,8 @@ function validatePersistInput(input: PersistAnalyzeTemplateRunInput): void {
       `template_version: must be a positive integer (got ${input.template_version})`,
     );
   }
+  // Type system says ReadonlyArray<JsonValue>; this catches callers who
+  // reach in via `as any` or pass a plain object.
   if (!Array.isArray(input.blocks)) {
     throw new AnalyzeTemplateRunPersistenceError(
       "blocks: must be an array (memo Block[] per the BlockRegistry contract)",
@@ -317,7 +328,20 @@ function rowFromDb(row: AnalyzeTemplateRunDbRow): AnalyzeTemplateRunRow {
     template_version:
       typeof row.template_version === "string" ? Number(row.template_version) : row.template_version,
     snapshot_id: row.snapshot_id,
-    blocks: row.blocks,
+    blocks: parseBlocks(row.blocks),
     created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
   });
+}
+
+function parseBlocks(value: unknown): ReadonlyArray<JsonValue> {
+  // pg returns jsonb columns parsed; the column is typed Block[]. A
+  // wire-format break that yielded a bare object would silently leak past
+  // ReadonlyArray<JsonValue> consumers and surface deep in the renderer.
+  // Same posture as services/themes/src/theme-repo.ts:rationaleClaimIds.
+  if (!Array.isArray(value)) {
+    throw new Error(
+      "analyze_template_runs.blocks: expected jsonb array, got " + typeof value,
+    );
+  }
+  return Object.freeze([...value]) as ReadonlyArray<JsonValue>;
 }

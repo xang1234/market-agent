@@ -6,7 +6,6 @@ import test from "node:test";
 import type { JsonValue } from "../../observability/src/types.ts";
 import type { SnapshotSealResult, SealedSnapshot } from "../../snapshot/src/snapshot-sealer.ts";
 import {
-  AnalyzeTemplateRunNotFoundError,
   AnalyzeTemplateRunPersistenceError,
   analyzeTemplateRunTransactionClient,
   getAnalyzeTemplateRun,
@@ -348,16 +347,26 @@ test("listAnalyzeTemplateRunsByTemplate rejects an empty template_id", async () 
   );
 });
 
-// ---------- AnalyzeTemplateRunNotFoundError typed export -----------------
-
-test("AnalyzeTemplateRunNotFoundError is exported and instanceof-checkable for downstream callers", () => {
-  // Symmetry with AnalyzeTemplateNotFoundError. The runner doesn't itself
-  // throw NotFound for read paths (it returns null) but the error class is
-  // exported so a coordinator-shaped caller that wants throw semantics can
-  // reuse it without inventing a parallel type.
-  const err = new AnalyzeTemplateRunNotFoundError();
-  assert.ok(err instanceof AnalyzeTemplateRunNotFoundError);
-  assert.ok(err instanceof Error);
+test("analyzeTemplateRunTransactionClient brands and accepts a real PoolClient shape (.connect inherited from Client + .release added by pool)", () => {
+  // Positive companion to the rejection tests: a pg.PoolClient acquired
+  // from pool.connect() has BOTH .connect (inherited from pg.Client) AND
+  // .release (added by the pool). The brand must accept it. Without this
+  // test, a regression that "consolidates" the discrimination back to the
+  // sibling style (services/snapshot/src/snapshot-sealer.ts:240-244 — see
+  // fra-asy) would slip past the rejection tests above.
+  const acquired = {
+    async query<R>() {
+      return { rows: [] as R[] };
+    },
+    async connect() {
+      return null;
+    },
+    release() {},
+  } as unknown as AnalyzeTemplateRunPersistenceDb;
+  const branded = analyzeTemplateRunTransactionClient(acquired);
+  assert.equal(branded, acquired, "the brand must mutate-and-return the same instance");
+  // Re-branding is a no-op (idempotent).
+  assert.equal(analyzeTemplateRunTransactionClient(acquired), acquired);
 });
 
 // ---------- spec drift ---------------------------------------------------
