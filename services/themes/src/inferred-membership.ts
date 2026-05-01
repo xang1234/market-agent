@@ -1,11 +1,6 @@
-import type { JsonValue, QueryExecutor } from "../../observability/src/types.ts";
+import type { QueryExecutor } from "../../observability/src/types.ts";
 import type { SubjectKind, SubjectRef } from "../../resolver/src/subject-ref.ts";
-import {
-  ThemeValidationError,
-  addThemeMembership,
-  type ThemeMembershipRow,
-  type ThemeRow,
-} from "./theme-repo.ts";
+import { addThemeMembership, type ThemeRow } from "./theme-repo.ts";
 
 // Mirrors the impact_direction enum in spec/finance_research_db_schema.sql:40.
 export const IMPACT_DIRECTIONS = ["positive", "negative", "mixed", "unknown"] as const;
@@ -25,13 +20,17 @@ export class InferredMembershipError extends Error {
 // contract for inferred themes.
 //
 // cluster_ids — claim_clusters that scope which claims count as evidence.
-//   Only claim_cluster_members.relation = 'support' are followed; contradictions
-//   never pull a subject in (a subject contradicting an AI-Chips claim is not
-//   thereby an AI-Chips member).
+//   Only claim_cluster_members.relation = 'support' is followed (hardcoded by
+//   design — a subject contradicting an AI-Chips claim is not thereby an
+//   AI-Chips member). If a future use case needs contradiction-driven
+//   themes, extend this type with an explicit `relations` field rather than
+//   flipping the default.
 // min_confidence — optional floor on claims.confidence (0..1).
-// impact_directions — optional filter on entity_impacts.direction. When set,
-//   entity-impact links are constrained to these directions; claim_arguments
-//   links are unaffected (they have no direction).
+// impact_directions — optional filter on entity_impacts.direction. When
+//   omitted, ALL directions including 'unknown' contribute; pass an explicit
+//   ['positive', 'negative', 'mixed'] to exclude unknown-direction impacts.
+//   When set, entity-impact links are constrained to these directions;
+//   claim_arguments links are unaffected (they have no direction).
 export type InferredMembershipSpec = {
   cluster_ids: ReadonlyArray<string>;
   min_confidence?: number;
@@ -47,11 +46,15 @@ export type InferredCandidate = {
   // Stored on theme_memberships.score so callers can rank inferred members
   // without re-running the inference query.
   score: number;
-  // Diagnostic breakdown: how many of the contributing rows came from
-  // claim_arguments vs entity_impacts. The same claim can contribute to
-  // both buckets when a claim names a subject as an argument *and* tags it
-  // with an entity_impact, so signals.claim_arguments + signals.entity_impacts
-  // is generally >= score.
+  // Compute-time-only diagnostic breakdown: how many of the contributing
+  // rows came from claim_arguments vs entity_impacts. NOT persisted on
+  // theme_memberships — the rationale_claim_ids array is the persistent
+  // explainability anchor. The same claim can contribute to both buckets
+  // when it names a subject as an argument *and* tags it with an
+  // entity_impact, so signals.claim_arguments + signals.entity_impacts is
+  // generally >= score. Useful for inspection/debugging; if a future
+  // requirement needs the breakdown to survive a round-trip, extend the
+  // theme_memberships schema with a provenance jsonb column.
   signals: { claim_arguments: number; entity_impacts: number };
 };
 
@@ -61,7 +64,10 @@ export type ApplyInferredMembershipResult = {
   candidates: ReadonlyArray<InferredCandidate>;
 };
 
-// Validates and narrows an opaque membership_spec value.
+// Validates and narrows an opaque membership_spec value. Optional fields
+// accept both `undefined` and `null` as "absent" — JSON serialisers commonly
+// emit `null` for omitted optional fields, and the persisted jsonb shape may
+// have either form.
 export function parseInferredMembershipSpec(
   value: unknown,
   label = "membership_spec",
@@ -82,6 +88,9 @@ export function parseInferredMembershipSpec(
       throw new InferredMembershipError(`${label}.cluster_ids[${index}]: must be a UUID string`);
     }
   });
+  if (new Set(rawClusterIds).size !== rawClusterIds.length) {
+    throw new InferredMembershipError(`${label}.cluster_ids: must contain unique UUIDs`);
+  }
 
   let minConfidence: number | undefined;
   if (spec.min_confidence !== undefined && spec.min_confidence !== null) {
@@ -112,6 +121,9 @@ export function parseInferredMembershipSpec(
         );
       }
     });
+    if (new Set(spec.impact_directions).size !== spec.impact_directions.length) {
+      throw new InferredMembershipError(`${label}.impact_directions: must contain unique values`);
+    }
     impactDirections = Object.freeze([...(spec.impact_directions as ReadonlyArray<ImpactDirection>)]);
   }
 
@@ -145,6 +157,8 @@ export async function computeInferredThemeCandidates(
   // (claim_arguments, entity_impacts) are unioned before grouping so a
   // subject mentioned by both kinds of signal still aggregates to a single
   // row with a single rationale list.
+  // Stub-tested in inferred-membership.test.ts; live SQL coverage against a
+  // real pg instance is tracked in fra-fp7.
   const { rows } = await db.query<InferredCandidateDbRow>(
     `with cluster_claims as (
        select distinct cm.claim_id
@@ -189,19 +203,48 @@ export async function computeInferredThemeCandidates(
   return Object.freeze(rows.map(inferredCandidateFromDb));
 }
 
+// Sanity cap on per-apply candidate count. A theme with broad cluster
+// coverage could otherwise issue tens of thousands of round-trips through
+// addThemeMembership. Callers that legitimately need a higher cap can pass
+// `maxCandidates` explicitly. The exception surfaces the count so the caller
+// can decide whether to tighten the spec or accept the larger batch.
+export const DEFAULT_INFERRED_APPLY_MAX_CANDIDATES = 1000;
+
+export type ApplyInferredMembershipOptions = {
+  maxCandidates?: number;
+};
+
 // Persists computed candidates as theme_memberships rows. Calls
 // addThemeMembership per candidate, which is idempotent at
 // (theme_id, subject_kind, subject_id) — re-running is safe and existing
-// memberships are reported back as `alreadyPresent`. The known gap (rationale
-// is not refreshed for already-present memberships) is documented on
-// addThemeMembership; a full reconciler that expires stale rows and refreshes
-// rationale is a follow-up beyond fra-vme's "inspect rationale chain"
-// verification scope.
+// memberships are reported back as `alreadyPresent`.
+//
+// Known gaps (out of scope for fra-vme's "inspect rationale chain"
+// verification, tracked separately):
+// - rationale_claim_ids on already-present memberships is not refreshed
+//   (documented on addThemeMembership in theme-repo.ts).
+// - The per-candidate loop does NOT wrap itself in a transaction; pass a
+//   pg.Client obtained via `await pool.connect()` followed by
+//   `client.query("begin")` if atomicity is required (the QueryExecutor
+//   surface accepts a Client). A partial failure mid-loop otherwise leaves
+//   the DB half-applied with no built-in rollback.
 export async function applyInferredThemeMembership(
   db: QueryExecutor,
   theme: ThemeRow,
+  options: ApplyInferredMembershipOptions = {},
 ): Promise<ApplyInferredMembershipResult> {
+  const maxCandidates = options.maxCandidates ?? DEFAULT_INFERRED_APPLY_MAX_CANDIDATES;
+  if (!Number.isInteger(maxCandidates) || maxCandidates <= 0) {
+    throw new InferredMembershipError(
+      `applyInferredThemeMembership: maxCandidates must be a positive integer (got ${maxCandidates})`,
+    );
+  }
   const candidates = await computeInferredThemeCandidates(db, theme);
+  if (candidates.length > maxCandidates) {
+    throw new InferredMembershipError(
+      `applyInferredThemeMembership: theme ${theme.theme_id} matched ${candidates.length} candidates, exceeding the ${maxCandidates} per-apply cap; tighten the spec or raise maxCandidates explicitly`,
+    );
+  }
   let added = 0;
   let alreadyPresent = 0;
   for (const candidate of candidates) {
@@ -251,6 +294,3 @@ function inferredCandidateFromDb(row: InferredCandidateDbRow): InferredCandidate
   });
 }
 
-// Re-export for the addThemeMembership return shape consumers may want to
-// disambiguate inferred-apply errors from validation errors at higher layers.
-export { ThemeValidationError, type JsonValue, type ThemeMembershipRow };
