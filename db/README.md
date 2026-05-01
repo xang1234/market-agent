@@ -32,6 +32,21 @@ The migration intentionally fails if any such rows exist. Remediate by
 deleting unsealed message history or attaching each row to a valid sealed
 snapshot before rerunning `migrate -- up`.
 
+Before applying `0009_theme_memberships_unique`, check for duplicate
+`(theme_id, subject_kind, subject_id)` rows in `theme_memberships`:
+
+```sql
+select theme_id, subject_kind, subject_id, count(*)
+  from theme_memberships
+ group by theme_id, subject_kind, subject_id
+having count(*) > 1;
+```
+
+The migration adds a unique constraint over that triple and will fail if
+any duplicates exist. Remediate by keeping the most recent row per group
+(typically by `effective_at desc`, then `theme_membership_id desc` as a
+tiebreaker) and deleting the rest before rerunning `migrate -- up`.
+
 Seed reference data (metrics registry + minimal source registry):
 
 ```bash
