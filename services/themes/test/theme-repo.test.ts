@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { QueryResult } from "pg";
@@ -204,6 +206,17 @@ test("addThemeMembership returns already_present without inserting when the (the
   assert.equal(queries.length, 1, "must short-circuit without an insert when the row exists");
 });
 
+test("listMembersByTheme throws if pg returns rationale_claim_ids with non-string elements (loud over silent)", async () => {
+  // A wire-format break that yielded numbers would otherwise lie to
+  // ReadonlyArray<string> consumers and surface deep in the explainability
+  // chain. Throw at the boundary instead.
+  const { db } = fakeDb(() => [membershipRow({ rationale_claim_ids: [123, 456] })]);
+  await assert.rejects(
+    listMembersByTheme(db, THEME_ID),
+    (err: Error) => /rationale_claim_ids: expected array of non-empty strings/.test(err.message),
+  );
+});
+
 test("addThemeMembership preserves rationale_claim_ids verbatim — provenance must survive the round trip", async () => {
   // Inferred memberships carry rationale pointing back to the source claims.
   // Losing or reordering ids would break the explainability contract for
@@ -327,6 +340,18 @@ test("listMembersByTheme caps the page at DEFAULT_MEMBERSHIP_PAGE_SIZE and repor
   assert.equal(queries[0].values?.[2], DEFAULT_MEMBERSHIP_PAGE_SIZE + 1);
 });
 
+test("listMembersByTheme reports truncated=false at exactly DEFAULT_MEMBERSHIP_PAGE_SIZE rows (boundary)", async () => {
+  // Boundary check on the `rows.length > limit` branch in makeMembershipPage.
+  // An off-by-one (>= vs >) would mis-flag a full-but-not-overflowing page.
+  const exact = Array.from({ length: DEFAULT_MEMBERSHIP_PAGE_SIZE }, (_, i) =>
+    membershipRow({ theme_membership_id: `00000000-0000-4000-8000-${String(i).padStart(12, "0")}` }),
+  );
+  const { db } = fakeDb(() => exact);
+  const page = await listMembersByTheme(db, THEME_ID);
+  assert.equal(page.rows.length, DEFAULT_MEMBERSHIP_PAGE_SIZE);
+  assert.equal(page.truncated, false, "page must not be flagged truncated when row count equals the limit");
+});
+
 test("listMembersByTheme caps an explicit limit at MAX_MEMBERSHIP_PAGE_SIZE", async () => {
   const { db, queries } = fakeDb(() => []);
   await listMembersByTheme(db, THEME_ID, { limit: MAX_MEMBERSHIP_PAGE_SIZE * 10 });
@@ -357,8 +382,22 @@ test("listThemesBySubject returns a frozen page for the cross-tagging UI lookup"
   });
 });
 
-test("THEME_MEMBERSHIP_MODES exports the three modes the schema CHECK constraint enforces", () => {
-  // Drift test against the spec — the schema's check constraint on themes.membership_mode
-  // is the source of truth; the TS union must mirror it exactly.
-  assert.deepEqual([...THEME_MEMBERSHIP_MODES].sort(), ["inferred", "manual", "rule_based"]);
+test("THEME_MEMBERSHIP_MODES drift-tests against the spec SQL CHECK constraint on themes.membership_mode", () => {
+  // The earlier version self-validated against the same literals it was
+  // testing — useless. This reads the actual SQL and parses the CHECK
+  // constraint values so a schema change produces a failing test before it
+  // can ship past the TS union.
+  const workspaceRoot = join(import.meta.dirname, "..", "..", "..");
+  const schemaSource = readFileSync(join(workspaceRoot, "spec", "finance_research_db_schema.sql"), "utf8");
+  const checkMatch = schemaSource.match(
+    /create table themes[\s\S]*?membership_mode text not null check \(membership_mode in \(([^)]+)\)\)/,
+  );
+  assert.ok(checkMatch, "expected themes.membership_mode CHECK constraint in spec/finance_research_db_schema.sql");
+  const specModes = [...checkMatch[1].matchAll(/'([^']+)'/g)].map((m) => m[1]).sort();
+  const tsModes = [...THEME_MEMBERSHIP_MODES].sort();
+  assert.deepEqual(
+    tsModes,
+    specModes,
+    `TS THEME_MEMBERSHIP_MODES must mirror SQL CHECK — spec: [${specModes.join(", ")}], ts: [${tsModes.join(", ")}]`,
+  );
 });

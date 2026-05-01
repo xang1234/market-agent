@@ -35,7 +35,7 @@ export class ThemeValidationError extends Error {
 
 export type ThemeInput = {
   name: string;
-  description?: string | null;
+  description?: string;
   membership_mode: ThemeMembershipMode;
   membership_spec?: JsonValue | null;
   active_from?: string | null;
@@ -167,19 +167,29 @@ const MEMBERSHIP_SELECT_COLUMNS = `theme_membership_id::text as theme_membership
        effective_at,
        expires_at`;
 
-const MEMBERSHIP_ACTIVE_WINDOW_PREDICATE = `effective_at <= $X::timestamptz
-       and (expires_at is null or expires_at > $X::timestamptz)`;
+// Builds the half-open active-window predicate against a single bind index.
+// (Not a string template + .replace — that approach silently misfires if a
+// future predicate ever needs more than one placeholder.)
+function membershipActiveWindowPredicate(asOfBindIndex: number): string {
+  const bind = `$${asOfBindIndex}::timestamptz`;
+  return `effective_at <= ${bind} and (expires_at is null or expires_at > ${bind})`;
+}
 
 // Adds a (theme, subject) row. Idempotent at (theme_id, subject_kind, subject_id):
 // duplicate adds re-read the existing row instead of creating a second
-// membership.
+// membership. The select-before-insert deliberately ignores the active
+// window — re-adding a (theme, subject) whose previous membership has
+// expired returns status: 'already_present' against the expired row rather
+// than minting a fresh one. Inferred-membership re-evaluation (fra-vme)
+// that wants resurrect-on-expire semantics must explicitly remove the
+// expired row first.
 //
 // Race acknowledgement: the schema lacks a unique constraint on this triple
-// (tracked as a follow-up to add the index + switch to ON CONFLICT DO
-// NOTHING RETURNING, mirroring services/watchlists/src/queries.ts:79). Until
-// then, two concurrent adds may both pass the select and both insert,
-// producing duplicates. Callers that require strict idempotency must
-// serialize on a transaction client.
+// (tracked as fra-4ut to add the index + switch to ON CONFLICT DO NOTHING
+// RETURNING, mirroring services/watchlists/src/queries.ts:79). Until then,
+// two concurrent adds may both pass the select and both insert, producing
+// duplicates. Callers that require strict idempotency must serialize on a
+// transaction client.
 export async function addThemeMembership(
   db: QueryExecutor,
   input: ThemeMembershipInput,
@@ -266,7 +276,7 @@ export async function listMembersByTheme(
     `select ${MEMBERSHIP_SELECT_COLUMNS}
        from theme_memberships
       where theme_id = $1::uuid
-        and ${MEMBERSHIP_ACTIVE_WINDOW_PREDICATE.replace(/\$X/g, "$2")}
+        and ${membershipActiveWindowPredicate(2)}
       order by score desc nulls last, effective_at asc
       limit $3`,
     [themeId, asOf, limit + 1],
@@ -290,7 +300,7 @@ export async function listThemesBySubject(
        from theme_memberships
       where subject_kind = $1::subject_kind
         and subject_id = $2::uuid
-        and ${MEMBERSHIP_ACTIVE_WINDOW_PREDICATE.replace(/\$X/g, "$3")}
+        and ${membershipActiveWindowPredicate(3)}
       order by score desc nulls last, effective_at asc
       limit $4`,
     [subjectRef.kind, subjectRef.id, asOf, limit + 1],
@@ -321,8 +331,8 @@ function makeMembershipPage(
 
 function validateThemeInput(input: ThemeInput): void {
   assertNonEmptyString(input.name, "name");
-  if (input.description != null && typeof input.description !== "string") {
-    throw new ThemeValidationError("description: must be a string or null");
+  if (input.description !== undefined && typeof input.description !== "string") {
+    throw new ThemeValidationError("description: must be a string when provided");
   }
   if (!THEME_MEMBERSHIP_MODES.includes(input.membership_mode)) {
     throw new ThemeValidationError(
@@ -401,12 +411,24 @@ function themeMembershipRowFromDb(row: ThemeMembershipDbRow | undefined): ThemeM
 }
 
 function rationaleClaimIds(value: unknown): ReadonlyArray<string> {
-  // pg returns jsonb columns parsed; an array is the expected shape. Throw on
-  // anything else so a wire-format break can't silently drop provenance —
-  // rationale_claim_ids is the explainability anchor for inferred memberships
-  // and a silent [] would be worse than a loud crash.
-  if (Array.isArray(value)) return value as ReadonlyArray<string>;
-  throw new Error("theme_memberships.rationale_claim_ids: expected jsonb array, got " + typeof value);
+  // pg returns jsonb columns parsed; an array of strings is the expected
+  // shape. Throw on anything else (or on a wrong element type) so a
+  // wire-format break can't silently drop provenance — rationale_claim_ids
+  // is the explainability anchor for inferred memberships and a silent fall
+  // through would be worse than a loud crash. Element-type check defends
+  // against a future schema/transport change that would yield numbers or
+  // nested objects.
+  if (!Array.isArray(value)) {
+    throw new Error(
+      "theme_memberships.rationale_claim_ids: expected jsonb array, got " + typeof value,
+    );
+  }
+  if (!value.every((v) => typeof v === "string" && v.length > 0)) {
+    throw new Error(
+      "theme_memberships.rationale_claim_ids: expected array of non-empty strings",
+    );
+  }
+  return value as ReadonlyArray<string>;
 }
 
 function isoString(value: Date | string): string {
