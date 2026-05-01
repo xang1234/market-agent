@@ -255,9 +255,19 @@ function serializeOptionalJson(value: JsonValue | null | undefined): string | nu
   return value === undefined || value === null ? null : JSON.stringify(value);
 }
 
-// COALESCE-driven update: undefined means "skip"; explicit null means "clear
-// to NULL". Without this distinction, callers couldn't blank an optional
-// jsonb column once set.
+// COALESCE-driven patch: `undefined` is the "skip" signal — we bind SQL
+// NULL, COALESCE falls through, the column keeps its current value.
+//
+// Explicit `null` overwrites the column with the JSON null literal
+// (`'null'::jsonb`), NOT SQL NULL. The two are distinct in pg
+// (`where col is null` excludes JSON-null rows, `where col = 'null'::jsonb`
+// matches them), but the row parser surfaces JSON null back as JS `null`,
+// so callers see `block_layout_hint: null` either way.
+//
+// Clearing an already-set jsonb column back to SQL NULL is intentionally
+// out of scope for this CRUD surface — the orchestrator's reuse paths
+// don't need it. If a future caller does, add a separate clear helper or
+// a per-column "include" flag rather than overloading patch null.
 function serializePatchJson(
   patch: AnalyzeTemplateUpdate,
   key: "block_layout_hint" | "peer_policy" | "disclosure_policy",

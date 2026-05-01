@@ -116,6 +116,47 @@ test(
 );
 
 test(
+  "analyze_templates: patching block_layout_hint to null overwrites the column with the JSON null literal, not SQL NULL (documented contract)",
+  { skip: !dockerAvailable() },
+  async (t) => {
+    // The contract on serializePatchJson: undefined skips the column,
+    // explicit null overwrites with the JSON null *literal* (`'null'::jsonb`),
+    // NOT SQL NULL. The two are distinguishable in pg even though both
+    // surface as JS `null` through rowFromDb. Pin the actual stored value
+    // so a future "fix" that turns null into SQL NULL trips this test.
+    const { databaseUrl } = await bootstrapDatabase(t, "analyze-template-jsonnull");
+    const client = await connectedClient(t, databaseUrl);
+    const userId = await seedUser(client, "jsonnull@example.com");
+
+    const created = await createAnalyzeTemplate(client, {
+      user_id: userId,
+      name: "with hint",
+      prompt_template: "irrelevant",
+      block_layout_hint: { sections: ["overview"] },
+    });
+
+    const patched = await updateAnalyzeTemplate(client, created.template_id, {
+      block_layout_hint: null,
+    });
+    assert.equal(patched.block_layout_hint, null, "row parser surfaces JSON null as JS null");
+
+    // Direct DB inspection: the column is JSON-null, NOT SQL NULL.
+    const { rows } = await client.query<{
+      is_sql_null: boolean;
+      is_json_null: boolean;
+    }>(
+      `select block_layout_hint is null as is_sql_null,
+              block_layout_hint = 'null'::jsonb as is_json_null
+         from analyze_templates
+        where template_id = $1::uuid`,
+      [created.template_id],
+    );
+    assert.equal(rows[0].is_sql_null, false, "patching to null must NOT clear to SQL NULL");
+    assert.equal(rows[0].is_json_null, true, "patching to null must store the JSON null literal");
+  },
+);
+
+test(
   "analyze_templates: cascade delete from users wipes a user's templates (fra-ast)",
   { skip: !dockerAvailable() },
   async (t) => {
