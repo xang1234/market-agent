@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  BundleRoutingError,
   DEFAULT_BUNDLE_ID,
   chooseBundleIdForSubjectKind,
 } from "../src/bundle-routing.ts";
@@ -32,21 +31,25 @@ test("chooseBundleIdForSubjectKind routes a screen subject to the screener bundl
   assert.equal(chooseBundleIdForSubjectKind("screen"), "screener");
 });
 
-test("chooseBundleIdForSubjectKind returns DEFAULT_BUNDLE_ID for null (no primary subject yet)", () => {
+test("chooseBundleIdForSubjectKind returns DEFAULT_BUNDLE_ID for null and undefined (no primary subject yet)", () => {
   // Threads can exist without a primary_subject_kind (a brand-new thread
   // before its first message). The router must produce a bundle id rather
-  // than throw, so the default-template path is well-defined.
+  // than throw, so the default-template path is well-defined. Both null
+  // (the column value) and undefined (the natural shape of
+  // `thread.primary_subject_ref?.kind`) collapse to the default.
   assert.equal(chooseBundleIdForSubjectKind(null), DEFAULT_BUNDLE_ID);
+  assert.equal(chooseBundleIdForSubjectKind(undefined), DEFAULT_BUNDLE_ID);
 });
 
 test("chooseBundleIdForSubjectKind throws BundleRoutingError on an unknown subject_kind so wire-format breaks fail loudly", () => {
   // Defense-in-depth: the SubjectKind type would normally rule this out,
   // but pg can return strings outside the enum if the schema and TS union
   // drift. A loud throw at the boundary is preferable to silently routing
-  // every thread to the default bundle.
+  // every thread to the default bundle. Use an object matcher so a
+  // future predicate-shape regression cannot silently pass.
   assert.throws(
     () => chooseBundleIdForSubjectKind("not_a_kind" as never),
-    (err: Error) => err instanceof BundleRoutingError && /subject_kind: must be one of/.test(err.message),
+    { name: "BundleRoutingError", message: /subject_kind: must be one of/ },
   );
 });
 

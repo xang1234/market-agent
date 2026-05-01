@@ -35,8 +35,11 @@ const BUNDLE_BY_SUBJECT_KIND: Readonly<Record<SubjectKind, string>> = Object.fre
 // prompt-template catalog.
 export const DEFAULT_BUNDLE_ID = "single_subject_analysis";
 
-export function chooseBundleIdForSubjectKind(kind: SubjectKind | null): string {
-  if (kind === null) return DEFAULT_BUNDLE_ID;
+// Accepts undefined as well as null so callers can pass `thread.primary_subject_ref?.kind`
+// directly without an explicit `?? null` — both mean "no primary subject yet" and route to
+// DEFAULT_BUNDLE_ID. Stringly-typed inputs that are not a known SubjectKind still throw.
+export function chooseBundleIdForSubjectKind(kind: SubjectKind | null | undefined): string {
+  if (kind == null) return DEFAULT_BUNDLE_ID;
   if (!(SUBJECT_KINDS as ReadonlyArray<string>).includes(kind)) {
     throw new BundleRoutingError(
       `subject_kind: must be one of ${SUBJECT_KINDS.join(", ")} (got ${JSON.stringify(kind)})`,
