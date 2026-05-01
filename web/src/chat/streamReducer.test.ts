@@ -225,6 +225,27 @@ test('turn.completed clears blocks_by_id and block_order so memory does not grow
   assert.equal(state.completed_message_id, 'msg-1')
 })
 
+test('turn.completed without a message_id flips to error and preserves the streaming graph (does not silently delete the assistant response)', () => {
+  // Without a real message_id, the parent has nothing to fetch. Clearing
+  // blocks_by_id would unmount StreamingTurnView and the user would see the
+  // assistant response disappear with no recovery path. Instead, treat the
+  // missing-id case as a stream error and keep the in-flight blocks visible.
+  let state: StreamState = INITIAL_STREAM_STATE
+  state = applyChatStreamEvent(state, event('block.began', 1, { block_id: 'b1', kind: 'rich_text' }))
+  state = applyChatStreamEvent(state, event('block.delta', 2, {
+    block_id: 'b1',
+    delta: { segment: { type: 'text', text: 'partial' } },
+  }))
+  for (const malformed of [{}, { message_id: '' }, { message_id: '   ' }, { message_id: 42 }]) {
+    const after = applyChatStreamEvent(state, event('turn.completed', 3, malformed))
+    assert.equal(after.turn_status, 'error', `${JSON.stringify(malformed)}: expected error status`)
+    assert.equal(after.completed_message_id, null)
+    assert.equal(after.blocks_by_id.size, 1, `${JSON.stringify(malformed)}: streaming graph must stay visible`)
+    assert.deepEqual(after.block_order, ['b1'])
+    assert.match(after.error ?? '', /message_id/)
+  }
+})
+
 test('turn.error mid-stream preserves partial blocks for the inline error notice', () => {
   // The view surfaces the error inline alongside whatever blocks streamed so
   // the user sees what arrived before the failure, not a blank slate.

@@ -66,24 +66,38 @@ test('parseBlockSnapshotTransformResponse extracts the reason from a 409 refresh
   }
 })
 
-test('parseBlockSnapshotTransformResponse falls back to transform-reason for malformed/unknown responses', () => {
-  // A defensive default: if the server returns something we don't recognise,
-  // we still surface an explicit refresh prompt rather than silently
-  // pretending the transform was allowed.
+test('parseBlockSnapshotTransformResponse maps unexpected statuses (401/403/5xx) to unexpected_error, not refresh_required', () => {
+  // Conflating auth failures or server outages with snapshot refresh would
+  // route users to the wrong recovery flow. Reserve refresh_required for
+  // the validated 409 envelope only.
   assert.deepEqual(
     parseBlockSnapshotTransformResponse({ status: 500, body: 'oops' }),
-    { state: 'refresh_required', reason: 'transform' },
+    { state: 'unexpected_error', status: 500, body: 'oops' },
   )
   assert.deepEqual(
+    parseBlockSnapshotTransformResponse({ status: 401, body: { error: 'unauthorized' } }),
+    { state: 'unexpected_error', status: 401, body: { error: 'unauthorized' } },
+  )
+})
+
+test('parseBlockSnapshotTransformResponse maps a 409 with a malformed envelope to unexpected_error', () => {
+  // 409 alone isn't enough — only the validated refresh_required envelope
+  // should produce a refresh prompt. A 409 with a bogus body is a wire-format
+  // break, not a snapshot rejection.
+  assert.deepEqual(
     parseBlockSnapshotTransformResponse({ status: 409, body: null }),
-    { state: 'refresh_required', reason: 'transform' },
+    { state: 'unexpected_error', status: 409, body: null },
   )
   assert.deepEqual(
     parseBlockSnapshotTransformResponse({
       status: 409,
       body: { error: 'refresh_required', refresh_required: { reason: 'made_up_reason' } },
     }),
-    { state: 'refresh_required', reason: 'transform' },
+    {
+      state: 'unexpected_error',
+      status: 409,
+      body: { error: 'refresh_required', refresh_required: { reason: 'made_up_reason' } },
+    },
   )
 })
 

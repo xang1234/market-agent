@@ -127,7 +127,7 @@ export function VirtualizedMessageList({
         >
           {visibleMessages.map((message) => (
             <MessageItem
-              key={message.content_hash}
+              key={message.message_id}
               message={message}
               onMeasure={handleItemMeasure}
             />

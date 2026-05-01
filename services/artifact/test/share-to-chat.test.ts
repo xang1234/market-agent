@@ -203,6 +203,60 @@ test("shareArtifactToChat returns a defensive copy — mutating the source after
   assert.equal(result.blocks[0].kind, "perf_comparison");
 });
 
+test("shareArtifactToChat converts a structuredClone failure (unsupported value) into invalid_block_shape rather than throwing", () => {
+  // structuredClone throws DOMException on functions/symbols. The result
+  // contract promises rejections, not unhandled exceptions — wrap and
+  // convert.
+  const blockWithFunction = {
+    id: PERF_BLOCK_ID,
+    kind: "perf_comparison",
+    snapshot_id: ANALYZE_SNAPSHOT,
+    data_ref: { kind: "x", id: "y" },
+    source_refs: [],
+    as_of: "2026-04-29T00:00:00.000Z",
+    bad_field: () => "definitely not JSON",
+  } as unknown as ShareableArtifactBlock;
+  const result = shareArtifactToChat({
+    sources: [
+      Object.freeze({
+        source_kind: "memo",
+        origin_snapshot_id: ANALYZE_SNAPSHOT,
+        blocks: [blockWithFunction],
+      }),
+    ],
+  });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.rejections[0].reason, "invalid_block_shape");
+});
+
+test("shareArtifactToChat converts a cyclic nested object into invalid_block_shape rather than recursing forever", () => {
+  // structuredClone preserves cycles, but a deepFreeze without a visited-set
+  // would recurse forever. The visited-set throws on cycles; the caller's
+  // try/catch turns that into a normal rejection.
+  const cyclic: Record<string, unknown> = {
+    id: PERF_BLOCK_ID,
+    kind: "perf_comparison",
+    snapshot_id: ANALYZE_SNAPSHOT,
+    data_ref: { kind: "x", id: "y" },
+    source_refs: [],
+    as_of: "2026-04-29T00:00:00.000Z",
+  };
+  cyclic.self = cyclic;
+  const result = shareArtifactToChat({
+    sources: [
+      Object.freeze({
+        source_kind: "memo",
+        origin_snapshot_id: ANALYZE_SNAPSHOT,
+        blocks: [cyclic as unknown as ShareableArtifactBlock],
+      }),
+    ],
+  });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.rejections[0].reason, "invalid_block_shape");
+});
+
 test("shareArtifactToChat collects all rejections rather than failing on the first", () => {
   const result = shareArtifactToChat({
     sources: [

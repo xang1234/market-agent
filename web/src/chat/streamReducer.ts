@@ -57,19 +57,25 @@ export function applyChatStreamEvent(state: StreamState, event: ChatSseEvent): S
         error: null,
       }
 
-    case 'turn.completed':
-      // Drop the streaming block graph: the parent uses completed_message_id
-      // to fetch the canonical sealed message and renders it via the
-      // standard MessageItem path. Holding the streaming state would pin
-      // hundreds of KB of accumulated rich_text segments between turns.
+    case 'turn.completed': {
+      // Only drop the streaming block graph when we actually have a sealed
+      // message_id for the parent to fetch. Without it, clearing the blocks
+      // would unmount StreamingTurnView and the assistant response would
+      // visibly disappear with nothing left to render. Treat the missing-id
+      // case as a stream error so the UI keeps the in-flight content
+      // visible and surfaces the wire-level break.
+      const completedId = readString(event.message_id)
+      if (completedId === null) {
+        return { ...state, turn_status: 'error', error: 'turn.completed missing message_id' }
+      }
       return {
         turn_status: 'completed',
         blocks_by_id: new Map(),
         block_order: [],
-        completed_message_id:
-          typeof event.message_id === 'string' ? event.message_id : null,
+        completed_message_id: completedId,
         error: null,
       }
+    }
 
     case 'turn.error':
       return {

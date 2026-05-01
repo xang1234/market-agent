@@ -84,7 +84,17 @@ export function shareArtifactToChat(input: ShareToChatInput): ShareToChatResult 
         rejections.push(reject("origin_snapshot_mismatch", sourceIndex, blockIndex));
         return;
       }
-      blocks.push(deepFreezeBlock(block));
+      // isShareableBlock only checks the three top-level required strings.
+      // Nested data may still violate the JsonObject contract (functions /
+      // symbols make structuredClone throw a DOMException; cycles outside the
+      // visited-set guard in deepFreezeJson would blow the stack). Convert
+      // either failure mode into a rejection so the result type's promise
+      // holds end-to-end.
+      try {
+        blocks.push(deepFreezeBlock(block));
+      } catch {
+        rejections.push(reject("invalid_block_shape", sourceIndex, blockIndex));
+      }
     });
   });
 
@@ -133,16 +143,25 @@ function isNonEmptyString(value: unknown): value is string {
 // through the source artifact's reference. Shallow Object.freeze leaves
 // nested arrays (e.g. source_refs) and objects (e.g. data_ref.params)
 // mutable, defeating the immutability the handoff promises consumers.
+//
+// Throws on inputs that violate the JsonObject contract (unsupported value
+// types, cycles deeper than the visited-set guard) — the caller wraps this
+// in try/catch so the failure becomes invalid_block_shape rather than an
+// unhandled exception.
 function deepFreezeBlock(block: ShareableArtifactBlock): ShareableArtifactBlock {
-  return deepFreezeJson(structuredClone(block)) as ShareableArtifactBlock;
+  return deepFreezeJson(structuredClone(block), new WeakSet()) as ShareableArtifactBlock;
 }
 
-function deepFreezeJson<T extends JsonValue>(value: T): T {
+function deepFreezeJson<T extends JsonValue>(value: T, visited: WeakSet<object>): T {
   if (value === null || typeof value !== "object") return value;
+  if (visited.has(value)) {
+    throw new Error("deepFreezeJson: cyclic reference is not a valid JsonValue");
+  }
+  visited.add(value);
   if (Array.isArray(value)) {
-    value.forEach((item) => deepFreezeJson(item));
+    value.forEach((item) => deepFreezeJson(item, visited));
   } else {
-    Object.values(value as JsonObject).forEach((item) => deepFreezeJson(item));
+    Object.values(value as JsonObject).forEach((item) => deepFreezeJson(item, visited));
   }
   return Object.freeze(value);
 }

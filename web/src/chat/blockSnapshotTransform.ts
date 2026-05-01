@@ -39,7 +39,12 @@ export function buildBlockSnapshotTransformUrl(input: { snapshot_id: string }): 
 export type ParsedBlockSnapshotTransformResponse =
   | { state: 'allowed' }
   | { state: 'refresh_required'; reason: SnapshotRefreshRequiredReason }
+  | { state: 'unexpected_error'; status: number; body: unknown }
 
+// Reserve refresh_required for the validated 409 envelope. 401/403/5xx and
+// malformed responses get their own state so consumers can route to the
+// right recovery flow (sign-in prompt, retry with backoff, status page)
+// instead of misleading the user with a snapshot refresh.
 export function parseBlockSnapshotTransformResponse(input: {
   status: number
   body: unknown
@@ -48,9 +53,7 @@ export function parseBlockSnapshotTransformResponse(input: {
   if (input.status === 409 && isRefreshRequiredEnvelope(input.body)) {
     return { state: 'refresh_required', reason: input.body.refresh_required.reason }
   }
-  // Unknown response: surface as a generic refresh prompt so the user sees
-  // an explicit hand-off rather than stale visuals (invariant I8).
-  return { state: 'refresh_required', reason: 'transform' }
+  return { state: 'unexpected_error', status: input.status, body: input.body }
 }
 
 function isRefreshRequiredEnvelope(value: unknown): value is {
