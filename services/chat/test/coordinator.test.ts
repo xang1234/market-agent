@@ -596,10 +596,132 @@ test("subject clarification emits resolver result before renderer failures", asy
   assert.equal(turn.events[3].message, "renderer failed");
 });
 
+test("bundleId is single_subject_analysis when the resolved subject is a ticker (fra-95e contract)", async () => {
+  let observedContext: ChatTurnRunContext | null = null;
+  const coordinator = createChatCoordinator({
+    preResolveSubject: async () => resolvedAaplPreResolution(),
+    runner: (context) => {
+      observedContext = context;
+      context.emit("turn.completed", { message_id: "m" });
+    },
+  });
+  const turn = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    subjectText: "AAPL",
+  });
+  await turn.completed;
+  assert.equal(observedContext?.bundleId, "single_subject_analysis");
+});
+
+test("bundleId is theme_research when the resolved subject is a theme (fra-95e contract)", async () => {
+  let observedContext: ChatTurnRunContext | null = null;
+  const coordinator = createChatCoordinator({
+    preResolveSubject: async () => resolvedThemePreResolution(),
+    runner: (context) => {
+      observedContext = context;
+      context.emit("turn.completed", { message_id: "m" });
+    },
+  });
+  const turn = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    subjectText: "AI Chips Alpha",
+  });
+  await turn.completed;
+  assert.equal(observedContext?.bundleId, "theme_research");
+});
+
+test("bundleId falls back to DEFAULT_BUNDLE_ID when the turn has no subjectText (brand-new thread)", async () => {
+  let observedContext: ChatTurnRunContext | null = null;
+  const coordinator = createChatCoordinator({
+    runner: (context) => {
+      observedContext = context;
+      context.emit("turn.completed", { message_id: "m" });
+    },
+  });
+  const turn = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+  });
+  await turn.completed;
+  assert.equal(observedContext?.bundleId, "single_subject_analysis");
+});
+
+test("ticker chat and theme chat traverse the same coordinator path — only the bundleId differs", async () => {
+  // The fra-95e structural contract: there are no per-kind branches in the
+  // coordinator. Two turns that differ only in the resolved subject's kind
+  // must produce the same event sequence (modulo the bundle id and
+  // subject_ref payload fields).
+  const tickerEvents: string[] = [];
+  const themeEvents: string[] = [];
+  const ticker = createChatCoordinator({
+    preResolveSubject: async () => resolvedAaplPreResolution(),
+  });
+  const theme = createChatCoordinator({
+    preResolveSubject: async () => resolvedThemePreResolution(),
+  });
+  const tickerTurn = ticker.getOrCreateTurn({ threadId: "t", runId: "r", subjectText: "AAPL" });
+  const themeTurn = theme.getOrCreateTurn({ threadId: "t", runId: "r", subjectText: "AI Chips" });
+  await Promise.all([tickerTurn.completed, themeTurn.completed]);
+  for (const event of tickerTurn.events) tickerEvents.push(event.type);
+  for (const event of themeTurn.events) themeEvents.push(event.type);
+  assert.deepEqual(tickerEvents, themeEvents, "ticker and theme must traverse identical event sequences");
+  // The bundle id is the only kind-dependent payload at the coordinator level.
+  const tickerCompleted = tickerTurn.events.at(-1)!;
+  const themeCompleted = themeTurn.events.at(-1)!;
+  assert.equal(tickerCompleted.bundle_id, "single_subject_analysis");
+  assert.equal(themeCompleted.bundle_id, "theme_research");
+});
+
+test("stub runner surfaces bundle_id on turn.started for no-subject turns and on turn.completed for resolved turns", async () => {
+  // SSE consumers should be able to discover which analyst bundle drove a
+  // turn without reading the thread row.
+  const noSubject = createChatCoordinator();
+  const noSubjectTurn = noSubject.getOrCreateTurn({ threadId: "t", runId: "r" });
+  await noSubjectTurn.completed;
+  const startedEvent = noSubjectTurn.events.find((e) => e.type === "turn.started")!;
+  assert.equal(startedEvent.bundle_id, "single_subject_analysis");
+
+  const themed = createChatCoordinator({ preResolveSubject: async () => resolvedThemePreResolution() });
+  const themedTurn = themed.getOrCreateTurn({ threadId: "t", runId: "r", subjectText: "AI Chips" });
+  await themedTurn.completed;
+  const completedEvent = themedTurn.events.at(-1)!;
+  assert.equal(completedEvent.type, "turn.completed");
+  assert.equal(completedEvent.bundle_id, "theme_research");
+});
+
 type ChatTurnEventMutation = {
   type: string;
   seq: number;
 };
+
+function resolvedThemePreResolution(): ChatResolvedSubjectPreResolution {
+  const subjectRef = {
+    kind: "theme" as const,
+    id: "44444444-4444-4444-a444-444444444444",
+  };
+  return {
+    status: "resolved",
+    input_text: "AI Chips Alpha",
+    normalized_input: "ai chips alpha",
+    subject_ref: subjectRef,
+    identity_level: "theme",
+    display_label: "AI Chips Alpha",
+    resolution_path: "exact_name",
+    confidence: 0.99,
+    handoff: {
+      subject_ref: subjectRef,
+      identity_level: "theme",
+      display_label: "AI Chips Alpha",
+      display_labels: { primary: "AI Chips Alpha" },
+      normalized_input: "ai chips alpha",
+      resolution_path: "exact_name",
+      confidence: 0.99,
+      context: {},
+    },
+  };
+}
 
 function resolvedAaplPreResolution(): ChatResolvedSubjectPreResolution {
   const subjectRef = {
