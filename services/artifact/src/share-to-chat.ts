@@ -9,6 +9,10 @@ export type ShareableArtifactBlock = JsonObject & {
 export const SHAREABLE_ARTIFACT_SOURCE_KINDS = ["memo", "finding", "block"] as const;
 export type ShareableArtifactSourceKind = (typeof SHAREABLE_ARTIFACT_SOURCE_KINDS)[number];
 
+// source_kind is currently a caller-side discriminator only — the handoff
+// itself just copies blocks. P6.4 (export & share policy) will read it to
+// route per-kind entitlement filters; until then, validation only enforces
+// it's one of the legal values via the union.
 export type ShareableArtifactSource = {
   source_kind: ShareableArtifactSourceKind;
   origin_snapshot_id: string;
@@ -46,7 +50,10 @@ export type ShareToChatResult =
 // Handoff is a copy: each block keeps its origin snapshot_id so transforms
 // route to the same sealed manifest (invariant I5). The chat row's own
 // snapshot_id stays distinct — adding an artifact does NOT advance the
-// thread's latest snapshot.
+// thread's latest snapshot. That second contract is enforced at the chat
+// persistence layer (services/chat/src/messages.ts), not here; this function
+// only produces the blocks payload, leaving the caller responsible for not
+// advancing latest_snapshot_id when writing an add-only message.
 export function shareArtifactToChat(input: ShareToChatInput): ShareToChatResult {
   if (input.sources.length === 0) {
     return Object.freeze({
@@ -85,6 +92,8 @@ export function shareArtifactToChat(input: ShareToChatInput): ShareToChatResult 
     return Object.freeze({ ok: false, rejections: Object.freeze(rejections) });
   }
 
+  // Dedupe in source order — callers can rely on the first appearance of a
+  // snapshot id determining its position in the result.
   const originSnapshotIds = Object.freeze([
     ...new Set(input.sources.map((source) => source.origin_snapshot_id)),
   ]);
@@ -106,7 +115,7 @@ function reject(
   );
 }
 
-function isShareableBlock(value: JsonValue): value is ShareableArtifactBlock {
+function isShareableBlock(value: unknown): value is ShareableArtifactBlock {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const obj = value as JsonObject;
   return (

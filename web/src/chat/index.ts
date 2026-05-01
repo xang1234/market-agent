@@ -36,3 +36,18 @@ export type { ChatStreamSubscribe } from './useChatStream.ts'
 export { BlockSkeleton } from './BlockSkeleton.tsx'
 export { StreamingBlockView } from './StreamingBlockView.tsx'
 export { StreamingTurnView } from './StreamingTurnView.tsx'
+
+export {
+  SNAPSHOT_REFRESH_REQUIRED_REASONS,
+  buildBlockSnapshotTransformUrl,
+  parseBlockSnapshotTransformResponse,
+} from './blockSnapshotTransform.ts'
+export type {
+  BlockSnapshotTransformRequest,
+  ParsedBlockSnapshotTransformResponse,
+  SnapshotRefreshRequiredReason,
+} from './blockSnapshotTransform.ts'
+
+export { snapshotRefreshPromptCopy } from './snapshotRefreshPromptCopy.ts'
+
+export { SnapshotRefreshPrompt } from './SnapshotRefreshPrompt.tsx'

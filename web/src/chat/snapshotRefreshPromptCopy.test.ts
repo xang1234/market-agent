@@ -14,11 +14,16 @@ test('snapshotRefreshPromptCopy returns a non-empty user-facing string for every
   }
 })
 
-test('snapshotRefreshPromptCopy distinguishes peer_set from freshness so users know what to expect', () => {
-  // The two reasons demand different mental models from the user:
-  // peer_set means "you changed the comparison set", freshness means "the
-  // saved snapshot is too old". Same copy would defeat the explicit prompt.
-  const peerSet = snapshotRefreshPromptCopy('peer_set')
-  const freshness = snapshotRefreshPromptCopy('freshness')
-  assert.notEqual(peerSet, freshness)
+test('snapshotRefreshPromptCopy returns a distinct string for every reason so users can tell what changed', () => {
+  // Each reason demands a different mental model from the user (peer_set =
+  // "you changed the comparison set", freshness = "the saved snapshot is
+  // too old", etc.). A single shared copy across reasons would defeat the
+  // explicit prompt that invariant I8 requires. Pin all-pairs distinctness
+  // to catch any future copy-paste collapse.
+  const copies = SNAPSHOT_REFRESH_REQUIRED_REASONS.map(snapshotRefreshPromptCopy)
+  assert.equal(
+    new Set(copies).size,
+    SNAPSHOT_REFRESH_REQUIRED_REASONS.length,
+    `expected one distinct copy per reason; got: ${JSON.stringify(copies)}`,
+  )
 })

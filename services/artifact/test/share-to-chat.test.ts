@@ -45,7 +45,8 @@ test("shareArtifactToChat preserves the origin snapshot_id on every block (invar
 
 test("shareArtifactToChat keeps each source's origin snapshot intact when sharing from multiple sources", () => {
   // Two artifacts from two different snapshots — each block must carry its
-  // own origin id, not be collapsed to a single shared snapshot.
+  // own origin id, not be collapsed to a single shared snapshot. Order
+  // follows source order: the dedupe contract is "first appearance wins".
   const result = shareArtifactToChat({
     sources: [
       memoSource([block({ id: PERF_BLOCK_ID, snapshot_id: ANALYZE_SNAPSHOT })]),
@@ -60,7 +61,27 @@ test("shareArtifactToChat keeps each source's origin snapshot intact when sharin
   if (!result.ok) return;
   assert.equal(result.blocks[0].snapshot_id, ANALYZE_SNAPSHOT);
   assert.equal(result.blocks[1].snapshot_id, FINDING_SNAPSHOT);
-  assert.deepEqual([...result.origin_snapshot_ids].sort(), [ANALYZE_SNAPSHOT, FINDING_SNAPSHOT].sort());
+  assert.deepEqual(result.origin_snapshot_ids, [ANALYZE_SNAPSHOT, FINDING_SNAPSHOT]);
+});
+
+test("shareArtifactToChat dedupes origin_snapshot_ids in source order when the same snapshot appears twice", () => {
+  // Two memo references to the same snapshot — the snapshot id appears once,
+  // and ordering is stable on first appearance. Lock the contract so a
+  // future implementation switch (e.g. to a sorted set) is intentional.
+  const result = shareArtifactToChat({
+    sources: [
+      Object.freeze({
+        source_kind: "finding",
+        origin_snapshot_id: FINDING_SNAPSHOT,
+        blocks: [block({ id: RICH_BLOCK_ID, kind: "finding_card", snapshot_id: FINDING_SNAPSHOT })],
+      }),
+      memoSource([block({ id: PERF_BLOCK_ID, snapshot_id: ANALYZE_SNAPSHOT })]),
+      memoSource([block({ id: `${PERF_BLOCK_ID}-2`, snapshot_id: ANALYZE_SNAPSHOT })]),
+    ],
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.origin_snapshot_ids, [FINDING_SNAPSHOT, ANALYZE_SNAPSHOT]);
 });
 
 test("shareArtifactToChat rejects when a block's snapshot_id disagrees with its source", () => {
