@@ -265,9 +265,12 @@ function serializeOptionalJson(value: JsonValue | null | undefined): string | nu
 // so callers see `block_layout_hint: null` either way.
 //
 // Clearing an already-set jsonb column back to SQL NULL is intentionally
-// out of scope for this CRUD surface — the orchestrator's reuse paths
-// don't need it. If a future caller does, add a separate clear helper or
-// a per-column "include" flag rather than overloading patch null.
+// out of scope for this CRUD surface. The orchestrator's reuse paths read
+// these columns via JSON parse: SQL NULL, JSON null, and missing keys all
+// surface as "no hint" / "no policy" upstream, so the SQL-vs-JSON-null
+// distinction buys nothing today. If a future caller actually needs SQL
+// NULL semantics, add a separate clear helper or a per-column "include"
+// flag rather than overloading patch null.
 function serializePatchJson(
   patch: AnalyzeTemplateUpdate,
   key: "block_layout_hint" | "peer_policy" | "disclosure_policy",
