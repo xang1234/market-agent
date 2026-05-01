@@ -78,6 +78,7 @@ export type { BlockValidationError, BlockValidationResult } from './BlockValidat
 
 export {
   BlockLayoutHintError,
+  RESIDUAL_SECTION_ID,
   applyBlockLayoutHint,
   parseBlockLayoutHint,
 } from './layoutHint.ts'

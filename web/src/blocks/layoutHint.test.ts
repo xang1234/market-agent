@@ -295,7 +295,7 @@ test('applyBlockLayoutHint nests child sections under a parent section, ordering
   assert.equal((q1.children[2] as SectionBlock).id, 'section:margin')
 })
 
-test('applyBlockLayoutHint walks the hint depth-first so a child section claims a block before its parent at a later sibling could', () => {
+test('applyBlockLayoutHint walks the hint depth-first so an earlier section\'s child claims a block before a later sibling section can', () => {
   // The hint is read in declaration order, and "first claim wins" applies
   // across the whole tree (depth-first). A child of section A can grab a
   // block that section B (declared after A) also lists, leaving B empty

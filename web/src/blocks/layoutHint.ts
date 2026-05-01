@@ -37,7 +37,12 @@ export class BlockLayoutHintError extends Error {
   }
 }
 
-const RESIDUAL_SECTION_ID = '__residual__'
+// Hint id for the trailing fallback section that collects any blocks
+// the hint walk did not claim. Exported so downstream code (renderers,
+// e2e tests, screenshot diff tooling) can detect the residual section
+// and treat it differently than authored sections — its presence
+// signals that the template's hint did not enumerate every block.
+export const RESIDUAL_SECTION_ID = '__residual__'
 
 export function parseBlockLayoutHint(value: unknown): BlockLayoutHint | null {
   if (value === null || value === undefined) return null
@@ -114,13 +119,18 @@ type ApplyBlockLayoutHintInput = {
 
 export function applyBlockLayoutHint(input: ApplyBlockLayoutHintInput): ReadonlyArray<Block> {
   if (input.hint === null) {
-    // No hint = pass-through. Don't synthesize any sections.
-    return input.blocks
+    // No hint = pass-through. Don't synthesize any sections. Freeze a
+    // copy so callers see the same immutability guarantee as the
+    // hinted path — otherwise mutations to the result would silently
+    // succeed in one branch and throw in the other.
+    return Object.freeze([...input.blocks])
   }
 
   // Mutable index of remaining blocks keyed by id; sections claim from
   // here and the residual fallback collects whatever is left in original
-  // declaration order.
+  // declaration order. Assumes block.id is unique across input.blocks
+  // (the same invariant React keys rely on); duplicates would silently
+  // collapse to the last occurrence here.
   const remainingIds = new Set(input.blocks.map((b) => b.id))
   const blocksById = new Map(input.blocks.map((b) => [b.id, b]))
 
@@ -188,9 +198,12 @@ function synthesizeSection(
   asOf: string,
   collapsible: boolean | undefined,
 ): SectionBlock {
-  return Object.freeze({
+  // Bind to the SectionBlock type before freezing so future fields
+  // added to SectionBlock surface as a compile error here, instead of
+  // being silently accepted by an `as` cast.
+  const block: SectionBlock = {
     id: `section:${hintId}`,
-    kind: 'section' as const,
+    kind: 'section',
     snapshot_id: snapshotId,
     // Sections are layout containers, not data anchors; mark with the
     // streaming sentinel so the manifest resolver doesn't try to resolve
@@ -202,7 +215,8 @@ function synthesizeSection(
     ...(title !== undefined ? { title } : {}),
     children: Object.freeze([...children]),
     ...(collapsible !== undefined ? { collapsible } : {}),
-  }) as SectionBlock
+  }
+  return Object.freeze(block)
 }
 
 function dedupeSourceRefs(children: ReadonlyArray<Block>): ReadonlyArray<string> {
