@@ -18,6 +18,14 @@ test("permissive license class 'licensed' → store_blob: true", () => {
   assert.deepEqual(policy, { store_blob: true });
 });
 
+test("permissive license class 'free' → store_blob: true (freely-accessible secondary content like news articles)", () => {
+  // 'free' is distinct from 'public': public connotes government/regulatory
+  // primary data; free is secondary content the publisher allows
+  // unrestricted access to. Both are storable; trust_tier differs.
+  const policy = decideStoragePolicy("free");
+  assert.deepEqual(policy, { store_blob: true });
+});
+
 test("permissive license class 'user_private' → store_blob: true (visibility is enforced via user_id, not retention)", () => {
   // user uploads MUST be stored — they're often the user's only copy of
   // the content. Visibility scoping (only the uploader sees the doc) is

@@ -16,6 +16,7 @@ export const DOCUMENT_KINDS = Object.freeze([
   "social_post",
   "thread",
   "upload",
+  "press_release",
 ] as const);
 
 export const PARSE_STATUSES = Object.freeze([

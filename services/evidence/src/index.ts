@@ -66,6 +66,21 @@ export type {
 } from "./ingest.ts";
 
 export {
+  NEWS_ARTICLE_ALLOWED_TRUST_TIERS,
+  PRESS_RELEASE_ALLOWED_TRUST_TIERS,
+  TRANSCRIPT_ALLOWED_TRUST_TIERS,
+  canonicalizeNewsUrl,
+  ingestEarningsTranscript,
+  ingestNewsArticle,
+  ingestPressRelease,
+} from "./news-ingest.ts";
+export type {
+  IngestEarningsTranscriptInput,
+  IngestNewsArticleInput,
+  IngestPressReleaseInput,
+} from "./news-ingest.ts";
+
+export {
   USER_UPLOAD_LICENSE_CLASS,
   USER_UPLOAD_PROVIDER,
   getUserUploadDocument,

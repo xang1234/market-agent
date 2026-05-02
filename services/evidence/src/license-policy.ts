@@ -10,6 +10,12 @@ export const PERMISSIVE_LICENSE_CLASSES: ReadonlyArray<string> = Object.freeze([
   // copy) but only visible to the uploader. Visibility is enforced via
   // sources.user_id at the query layer, not here.
   "user_private",
+  // free: freely-accessible secondary content (news articles, blog posts).
+  // Distinct from "public" (which connotes government/regulatory open
+  // data) — both are storable, but the trust-tier and downstream
+  // promotion rules differ. The seed in db/seed/sources.sql already
+  // uses this class for tertiary news providers.
+  "free",
 ]);
 
 export const EPHEMERAL_LICENSE_CLASSES: ReadonlyArray<string> = Object.freeze([

@@ -28,7 +28,7 @@ create type source_kind as enum (
 );
 
 create type trust_tier as enum ('primary', 'secondary', 'tertiary', 'user');
-create type document_kind as enum ('filing', 'transcript', 'article', 'research_note', 'social_post', 'thread', 'upload');
+create type document_kind as enum ('filing', 'transcript', 'article', 'research_note', 'social_post', 'thread', 'upload', 'press_release');
 create type parse_status as enum ('pending', 'parsed', 'failed', 'superseded');
 create type fact_method as enum ('reported', 'derived', 'estimated', 'vendor', 'extracted');
 create type verification_status as enum ('authoritative', 'candidate', 'corroborated', 'disputed');
