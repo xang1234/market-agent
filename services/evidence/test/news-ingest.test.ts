@@ -3,9 +3,12 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
 import {
-  PRESS_RELEASE_ALLOWED_TRUST_TIERS,
-  TRANSCRIPT_ALLOWED_TRUST_TIERS,
+  NEWS_ARTICLE_ALLOWED_LICENSE_CLASSES,
   NEWS_ARTICLE_ALLOWED_TRUST_TIERS,
+  PRESS_RELEASE_ALLOWED_LICENSE_CLASSES,
+  PRESS_RELEASE_ALLOWED_TRUST_TIERS,
+  TRANSCRIPT_ALLOWED_LICENSE_CLASSES,
+  TRANSCRIPT_ALLOWED_TRUST_TIERS,
   canonicalizeNewsUrl,
   ingestEarningsTranscript,
   ingestNewsArticle,
@@ -441,6 +444,302 @@ test("exported allowed-trust-tier sets match the spec § 5.2 mapping (frozen and
   assert.equal(Object.isFrozen(PRESS_RELEASE_ALLOWED_TRUST_TIERS), true);
   assert.equal(Object.isFrozen(TRANSCRIPT_ALLOWED_TRUST_TIERS), true);
   assert.equal(Object.isFrozen(NEWS_ARTICLE_ALLOWED_TRUST_TIERS), true);
+});
+
+// ---- exported allowed-license-class sets -----------------------------------
+
+test("exported allowed-license-class sets pin spec § 5.2 license classes per kind (frozen)", () => {
+  // Why these contents:
+  //   - press_release: 'public' is the canonical case; 'free' covers
+  //     aggregators that don't gate the wire content.
+  //   - transcript: 'licensed' (Seeking Alpha etc.) is the default;
+  //     'public' covers issuer-posted transcripts; 'ephemeral' covers
+  //     paywalled scrapes we cannot store.
+  //   - article: 'free' is the default; 'licensed' for paywalled outlets;
+  //     'ephemeral' for paywalled scrapes.
+  // Anything outside these is a spec violation routed through the API
+  // boundary rather than the storage policy layer.
+  assert.deepEqual([...PRESS_RELEASE_ALLOWED_LICENSE_CLASSES], ["public", "free"]);
+  assert.deepEqual(
+    [...TRANSCRIPT_ALLOWED_LICENSE_CLASSES],
+    ["licensed", "public", "ephemeral"],
+  );
+  assert.deepEqual(
+    [...NEWS_ARTICLE_ALLOWED_LICENSE_CLASSES],
+    ["free", "licensed", "ephemeral"],
+  );
+  assert.equal(Object.isFrozen(PRESS_RELEASE_ALLOWED_LICENSE_CLASSES), true);
+  assert.equal(Object.isFrozen(TRANSCRIPT_ALLOWED_LICENSE_CLASSES), true);
+  assert.equal(Object.isFrozen(NEWS_ARTICLE_ALLOWED_LICENSE_CLASSES), true);
+});
+
+// ---- license-class allow-list enforcement (review Important #2/#5) ---------
+
+test("ingestPressRelease rejects license_class outside the press-release allow-list before any side-effects", async () => {
+  // 'licensed' and 'user_private' would silently route a press release
+  // into the wrong storage policy if accepted. Fail at the API boundary.
+  const { db, queries } = recordingDb();
+  const objectStore = new RecordingObjectStore();
+
+  for (const bad of ["licensed", "user_private", "ephemeral", "made_up"]) {
+    await assert.rejects(
+      ingestPressRelease(
+        { db, objectStore },
+        {
+          bytes: new TextEncoder().encode("x"),
+          provider: "businesswire",
+          canonicalUrl: "https://www.businesswire.com/x",
+          publisher: "Apple, Inc.",
+          publishedAt: "2026-05-03T13:30:00Z",
+          licenseClass: bad,
+        },
+      ),
+      /license_class.*one of/,
+      `license_class="${bad}" must be rejected for press_release`,
+    );
+  }
+  assert.equal(queries.length, 0);
+  assert.equal(objectStore.putCalls, 0);
+});
+
+test("ingestEarningsTranscript rejects license_class outside the transcript allow-list before any side-effects", async () => {
+  const { db, queries } = recordingDb();
+  const objectStore = new RecordingObjectStore();
+
+  for (const bad of ["free", "user_private", "made_up"]) {
+    await assert.rejects(
+      ingestEarningsTranscript(
+        { db, objectStore },
+        {
+          bytes: new TextEncoder().encode("x"),
+          provider: "seeking_alpha",
+          canonicalUrl: "https://seekingalpha.com/x",
+          publisher: "Seeking Alpha",
+          publishedAt: "2026-05-03T13:30:00Z",
+          fiscalPeriod: "2026Q1",
+          issuer: "Apple, Inc.",
+          licenseClass: bad,
+        },
+      ),
+      /license_class.*one of/,
+      `license_class="${bad}" must be rejected for transcript`,
+    );
+  }
+  assert.equal(queries.length, 0);
+  assert.equal(objectStore.putCalls, 0);
+});
+
+test("ingestNewsArticle rejects license_class outside the article allow-list before any side-effects", async () => {
+  const { db, queries } = recordingDb();
+  const objectStore = new RecordingObjectStore();
+
+  for (const bad of ["public", "user_private", "made_up"]) {
+    await assert.rejects(
+      ingestNewsArticle(
+        { db, objectStore },
+        {
+          bytes: new TextEncoder().encode("x"),
+          provider: "reuters",
+          canonicalUrl: "https://www.reuters.com/x",
+          publisher: "Reuters",
+          publishedAt: "2026-05-03T13:30:00Z",
+          title: "x",
+          licenseClass: bad,
+        },
+      ),
+      /license_class.*one of/,
+      `license_class="${bad}" must be rejected for article`,
+    );
+  }
+  assert.equal(queries.length, 0);
+  assert.equal(objectStore.putCalls, 0);
+});
+
+// ---- transcript license_class issuer heuristic (review Important #1) -------
+
+test("ingestEarningsTranscript defaults license_class='public' for issuer_/ir_ providers (issuer's own posted transcript)", async () => {
+  // Mirrors the press-release trust_tier issuer heuristic. An issuer
+  // posting their own transcript on their IR site is 'public', not
+  // 'licensed' — defaulting to 'licensed' would route it through the
+  // wrong storage policy bucket downstream.
+  const { db } = recordingDb();
+  const result = await ingestEarningsTranscript(
+    { db, objectStore: new RecordingObjectStore() },
+    {
+      bytes: new TextEncoder().encode("transcript"),
+      provider: "issuer_ir",
+      canonicalUrl: "https://investor.apple.com/transcripts/q1-2026",
+      publisher: "Apple, Inc.",
+      publishedAt: "2026-05-03T13:30:00Z",
+      fiscalPeriod: "2026Q1",
+      issuer: "Apple, Inc.",
+    },
+  );
+
+  assert.equal(result.source.license_class, "public");
+});
+
+test("ingestEarningsTranscript defaults license_class='licensed' for non-issuer providers (default-licensed wire)", async () => {
+  // Counter-test: the issuer heuristic must not over-fire. A
+  // seeking_alpha transcript stays 'licensed' by default.
+  const { db } = recordingDb();
+  const result = await ingestEarningsTranscript(
+    { db, objectStore: new RecordingObjectStore() },
+    {
+      bytes: new TextEncoder().encode("transcript"),
+      provider: "seeking_alpha",
+      canonicalUrl: "https://seekingalpha.com/x",
+      publisher: "Seeking Alpha",
+      publishedAt: "2026-05-03T13:30:00Z",
+      fiscalPeriod: "2026Q1",
+      issuer: "Apple, Inc.",
+    },
+  );
+
+  assert.equal(result.source.license_class, "licensed");
+});
+
+// ---- canonicalUrl boundary check (review Important #3) ---------------------
+
+test("ingestPressRelease rejects empty/missing canonicalUrl before any side-effects", async () => {
+  // canonicalizeNewsUrl throws on empty/non-URL input, but the throw
+  // happens after createSource fires off if validation is stitched in
+  // the wrong order. Pin both that empty rejects AND that no SQL ran.
+  const { db, queries } = recordingDb();
+  const objectStore = new RecordingObjectStore();
+
+  await assert.rejects(
+    ingestPressRelease(
+      { db, objectStore },
+      {
+        bytes: new TextEncoder().encode("x"),
+        provider: "businesswire",
+        canonicalUrl: "",
+        publisher: "Apple, Inc.",
+        publishedAt: "2026-05-03T13:30:00Z",
+      },
+    ),
+    /canonical_url: must be a non-empty string/,
+  );
+  assert.equal(queries.length, 0);
+  assert.equal(objectStore.putCalls, 0);
+});
+
+test("ingestEarningsTranscript rejects empty canonicalUrl before any side-effects", async () => {
+  const { db, queries } = recordingDb();
+  const objectStore = new RecordingObjectStore();
+
+  await assert.rejects(
+    ingestEarningsTranscript(
+      { db, objectStore },
+      {
+        bytes: new TextEncoder().encode("x"),
+        provider: "seeking_alpha",
+        canonicalUrl: "",
+        publisher: "Seeking Alpha",
+        publishedAt: "2026-05-03T13:30:00Z",
+        fiscalPeriod: "2026Q1",
+        issuer: "Apple, Inc.",
+      },
+    ),
+    /canonical_url: must be a non-empty string/,
+  );
+  assert.equal(queries.length, 0);
+  assert.equal(objectStore.putCalls, 0);
+});
+
+test("ingestNewsArticle rejects empty canonicalUrl before any side-effects", async () => {
+  const { db, queries } = recordingDb();
+  const objectStore = new RecordingObjectStore();
+
+  await assert.rejects(
+    ingestNewsArticle(
+      { db, objectStore },
+      {
+        bytes: new TextEncoder().encode("x"),
+        provider: "reuters",
+        canonicalUrl: "",
+        publisher: "Reuters",
+        publishedAt: "2026-05-03T13:30:00Z",
+        title: "x",
+      },
+    ),
+    /canonical_url: must be a non-empty string/,
+  );
+  assert.equal(queries.length, 0);
+  assert.equal(objectStore.putCalls, 0);
+});
+
+// ---- optional-string boundary checks (review Important #4) -----------------
+
+test("ingestPressRelease rejects empty/whitespace providerDocId before any side-effects", async () => {
+  // Optional strings, when supplied, must be non-empty — empty defeats
+  // the (provider, provider_doc_id) provenance lookup later.
+  const { db, queries } = recordingDb();
+  const objectStore = new RecordingObjectStore();
+
+  await assert.rejects(
+    ingestPressRelease(
+      { db, objectStore },
+      {
+        bytes: new TextEncoder().encode("x"),
+        provider: "businesswire",
+        canonicalUrl: "https://www.businesswire.com/x",
+        publisher: "Apple, Inc.",
+        publishedAt: "2026-05-03T13:30:00Z",
+        providerDocId: "   ",
+      },
+    ),
+    /provider_doc_id: must be a non-empty string/,
+  );
+  assert.equal(queries.length, 0);
+  assert.equal(objectStore.putCalls, 0);
+});
+
+test("ingestNewsArticle rejects empty/whitespace author before any side-effects", async () => {
+  const { db, queries } = recordingDb();
+  const objectStore = new RecordingObjectStore();
+
+  await assert.rejects(
+    ingestNewsArticle(
+      { db, objectStore },
+      {
+        bytes: new TextEncoder().encode("x"),
+        provider: "reuters",
+        canonicalUrl: "https://www.reuters.com/x",
+        publisher: "Reuters",
+        publishedAt: "2026-05-03T13:30:00Z",
+        title: "x",
+        author: "  ",
+      },
+    ),
+    /author: must be a non-empty string/,
+  );
+  assert.equal(queries.length, 0);
+  assert.equal(objectStore.putCalls, 0);
+});
+
+// ---- press release author symmetry (review Minor #7) -----------------------
+
+test("ingestPressRelease stamps document.author=publisher (mirrors transcript orchestrator's author handling)", async () => {
+  // Press releases attribute to the issuing organisation, not a person.
+  // The transcript orchestrator already stamps author=publisher; doing
+  // the same here keeps the documents.author column populated for press
+  // releases instead of leaving it null and forcing downstream readers
+  // to fall back to source.publisher (which doesn't exist as a column).
+  const { db } = recordingDb();
+  const result = await ingestPressRelease(
+    { db, objectStore: new RecordingObjectStore() },
+    {
+      bytes: new TextEncoder().encode("<html>release</html>"),
+      provider: "businesswire",
+      canonicalUrl: "https://www.businesswire.com/x",
+      publisher: "Apple, Inc.",
+      publishedAt: "2026-05-03T13:30:00Z",
+    },
+  );
+
+  assert.equal(result.ingest.document.author, "Apple, Inc.");
 });
 
 test("ingestPressRelease emits the sha256 content_hash actually derived from the bytes (dedupe key invariant)", async () => {

@@ -21,6 +21,7 @@ import {
   assertNonEmptyBytes,
   assertNonEmptyString,
   assertOneOf,
+  assertOptionalNonEmptyString,
 } from "./validators.ts";
 
 // Spec § 5.2 mappings — the kind-specific subset of trust tiers the
@@ -39,9 +40,30 @@ export const NEWS_ARTICLE_ALLOWED_TRUST_TIERS: ReadonlyArray<TrustTier> = Object
   "tertiary",
 ]);
 
-// Provider-string substrings that mark "this is the issuer's own
-// newsroom" — the orchestrator defaults trust_tier to "primary" when
-// the press-release provider matches. Caller can always override.
+// Per-kind license_class allow-lists. Anything outside these is rejected
+// at the API boundary so the storage-policy layer (fra-0sa) only ever
+// sees license classes it actually knows how to route. Order matches
+// the "default first" convention so a future reader can spot the
+// orchestrator's default by reading the first element.
+export const PRESS_RELEASE_ALLOWED_LICENSE_CLASSES: ReadonlyArray<string> = Object.freeze([
+  "public",
+  "free",
+]);
+export const TRANSCRIPT_ALLOWED_LICENSE_CLASSES: ReadonlyArray<string> = Object.freeze([
+  "licensed",
+  "public",
+  "ephemeral",
+]);
+export const NEWS_ARTICLE_ALLOWED_LICENSE_CLASSES: ReadonlyArray<string> = Object.freeze([
+  "free",
+  "licensed",
+  "ephemeral",
+]);
+
+// Prefix-matching regexes for provider strings that mark "this is the
+// issuer's own newsroom" — the orchestrators default trust_tier and
+// transcript license_class accordingly when a press-release/transcript
+// provider matches. Caller can always override.
 const ISSUER_PROVIDER_PATTERNS = [/^issuer_/, /^ir_/];
 
 // ---- canonicalizeNewsUrl ---------------------------------------------------
@@ -130,12 +152,17 @@ export async function ingestPressRelease(
   assertNonEmptyBytes(input.bytes, "bytes");
   assertNonEmptyString(input.provider, "provider");
   assertNonEmptyString(input.publisher, "publisher");
+  assertNonEmptyString(input.canonicalUrl, "canonical_url");
+  assertOptionalNonEmptyString(input.title, "title");
+  assertOptionalNonEmptyString(input.providerDocId, "provider_doc_id");
   assertIso8601WithOffset(input.publishedAt, "published_at");
 
   const trustTier = input.trustTier ?? defaultPressReleaseTrustTier(input.provider);
   assertOneOf(trustTier, PRESS_RELEASE_ALLOWED_TRUST_TIERS, "trust_tier");
 
   const licenseClass = input.licenseClass ?? "public";
+  assertOneOf(licenseClass, PRESS_RELEASE_ALLOWED_LICENSE_CLASSES, "license_class");
+
   const canonicalUrl = canonicalizeNewsUrl(input.canonicalUrl);
 
   return persistKindedSource(deps, {
@@ -147,6 +174,7 @@ export async function ingestPressRelease(
     bytes: input.bytes,
     document: {
       title: input.title ?? input.publisher,
+      author: input.publisher,
       provider_doc_id: input.providerDocId,
       published_at: input.publishedAt,
     },
@@ -155,9 +183,18 @@ export async function ingestPressRelease(
 }
 
 function defaultPressReleaseTrustTier(provider: string): TrustTier {
-  return ISSUER_PROVIDER_PATTERNS.some((pattern) => pattern.test(provider))
-    ? "primary"
-    : "secondary";
+  return isIssuerProvider(provider) ? "primary" : "secondary";
+}
+
+function defaultTranscriptLicenseClass(provider: string): string {
+  // Mirrors defaultPressReleaseTrustTier's issuer heuristic. An issuer
+  // posting their own transcript on their IR site is 'public', not
+  // 'licensed' (which is for paid wires like seeking_alpha).
+  return isIssuerProvider(provider) ? "public" : "licensed";
+}
+
+function isIssuerProvider(provider: string): boolean {
+  return ISSUER_PROVIDER_PATTERNS.some((pattern) => pattern.test(provider));
 }
 
 // ---- ingestEarningsTranscript ----------------------------------------------
@@ -187,12 +224,16 @@ export async function ingestEarningsTranscript(
   assertNonEmptyString(input.publisher, "publisher");
   assertNonEmptyString(input.issuer, "issuer");
   assertNonEmptyString(input.fiscalPeriod, "fiscal_period");
+  assertNonEmptyString(input.canonicalUrl, "canonical_url");
+  assertOptionalNonEmptyString(input.providerDocId, "provider_doc_id");
   assertIso8601WithOffset(input.publishedAt, "published_at");
 
   const trustTier = input.trustTier ?? "secondary";
   assertOneOf(trustTier, TRANSCRIPT_ALLOWED_TRUST_TIERS, "trust_tier");
 
-  const licenseClass = input.licenseClass ?? "licensed";
+  const licenseClass = input.licenseClass ?? defaultTranscriptLicenseClass(input.provider);
+  assertOneOf(licenseClass, TRANSCRIPT_ALLOWED_LICENSE_CLASSES, "license_class");
+
   const canonicalUrl = canonicalizeNewsUrl(input.canonicalUrl);
 
   return persistKindedSource(deps, {
@@ -236,12 +277,17 @@ export async function ingestNewsArticle(
   assertNonEmptyString(input.provider, "provider");
   assertNonEmptyString(input.publisher, "publisher");
   assertNonEmptyString(input.title, "title");
+  assertNonEmptyString(input.canonicalUrl, "canonical_url");
+  assertOptionalNonEmptyString(input.author, "author");
+  assertOptionalNonEmptyString(input.providerDocId, "provider_doc_id");
   assertIso8601WithOffset(input.publishedAt, "published_at");
 
   const trustTier = input.trustTier ?? "tertiary";
   assertOneOf(trustTier, NEWS_ARTICLE_ALLOWED_TRUST_TIERS, "trust_tier");
 
   const licenseClass = input.licenseClass ?? "free";
+  assertOneOf(licenseClass, NEWS_ARTICLE_ALLOWED_LICENSE_CLASSES, "license_class");
+
   const canonicalUrl = canonicalizeNewsUrl(input.canonicalUrl);
 
   return persistKindedSource(deps, {
