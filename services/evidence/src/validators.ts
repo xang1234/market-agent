@@ -29,9 +29,13 @@ export function assertIso8601WithOffset(value: unknown, label: string): asserts 
 }
 
 export function assertUuidV4(value: unknown, label: string): asserts value is string {
-  if (typeof value !== "string" || !UUID_V4.test(value)) {
+  if (!isUuidV4(value)) {
     throw new Error(`${label}: must be a UUID v4`);
   }
+}
+
+export function isUuidV4(value: unknown): value is string {
+  return typeof value === "string" && UUID_V4.test(value);
 }
 
 export function assertOneOf<T extends string>(

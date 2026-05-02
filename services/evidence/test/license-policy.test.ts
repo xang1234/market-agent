@@ -6,15 +6,7 @@ import {
   PERMISSIVE_LICENSE_CLASSES,
   EPHEMERAL_LICENSE_CLASSES,
   decideStoragePolicy,
-  isKnownLicenseClass,
 } from "../src/license-policy.ts";
-
-// fra-0sa: License-class policy is the gate that decides whether a
-// document's raw bytes get persisted to the object store. The policy is
-// fail-closed for unknown classes — silently treating an uncategorized
-// license as either "store everything" or "store nothing" is a legal
-// liability either way; throwing forces the developer to make the call
-// explicitly.
 
 test("permissive license class 'public' → store_blob: true", () => {
   const policy = decideStoragePolicy("public");
@@ -73,13 +65,3 @@ test("PERMISSIVE_LICENSE_CLASSES and EPHEMERAL_LICENSE_CLASSES are disjoint", ()
   }
 });
 
-test("isKnownLicenseClass returns true for permissive and ephemeral entries, false otherwise", () => {
-  for (const cls of PERMISSIVE_LICENSE_CLASSES) {
-    assert.equal(isKnownLicenseClass(cls), true, `permissive "${cls}" should be known`);
-  }
-  for (const cls of EPHEMERAL_LICENSE_CLASSES) {
-    assert.equal(isKnownLicenseClass(cls), true, `ephemeral "${cls}" should be known`);
-  }
-  assert.equal(isKnownLicenseClass("totally_made_up"), false);
-  assert.equal(isKnownLicenseClass(""), false);
-});

@@ -1,12 +1,7 @@
-// fra-0sa: License-class policy gates whether a document's raw bytes
-// land in the object store.
-//
-// The spec models `Source.license_class` as a free-form string so
-// providers can emit project-specific labels. This module is the single
-// source of truth that turns those labels into a storage decision. It
-// is intentionally fail-closed: an uncategorized license throws rather
-// than falling through to either branch — silent misclassification of
-// restricted content as storeable is the mistake we cannot recover from.
+// Fail-closed by design: an uncategorized license throws rather than
+// silently falling through to either branch. Quiet misclassification of
+// restricted content as storeable is the failure mode we cannot recover
+// from.
 
 export const PERMISSIVE_LICENSE_CLASSES: ReadonlyArray<string> = Object.freeze([
   "public",
@@ -38,12 +33,5 @@ export function decideStoragePolicy(license_class: string): StoragePolicy {
   throw new LicensePolicyError(
     `unknown license_class "${license_class}"; ` +
       `add it to PERMISSIVE_LICENSE_CLASSES or EPHEMERAL_LICENSE_CLASSES in license-policy.ts`,
-  );
-}
-
-export function isKnownLicenseClass(license_class: string): boolean {
-  return (
-    PERMISSIVE_LICENSE_CLASSES.includes(license_class) ||
-    EPHEMERAL_LICENSE_CLASSES.includes(license_class)
   );
 }

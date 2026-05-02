@@ -7,17 +7,6 @@ import {
 } from "./object-store.ts";
 import type { QueryExecutor } from "./types.ts";
 
-// fra-0sa: ingestDocument is the license-aware entry point that
-// downstream fetchers (X, Reddit, EDGAR, transcripts, ...) call once
-// they have raw bytes. It computes the content hash, consults the
-// license policy, conditionally puts to the object store, and then
-// inserts the documents row.
-//
-// The content_hash is ALWAYS derived from bytes (even on the ephemeral
-// path) so the documents.unique(content_hash, raw_blob_id) dedupe still
-// works and so that future code that computes a hash ahead of ingest
-// (to look up an existing row) gets the same value either way.
-
 export type IngestDocumentDeps = {
   db: QueryExecutor;
   objectStore: ObjectStore;
@@ -43,10 +32,12 @@ export async function ingestDocument(
   deps: IngestDocumentDeps,
   input: IngestDocumentInput,
 ): Promise<IngestDocumentResult> {
-  // Decide first, before doing any storage or db work — fail-closed for
+  // Decide first, before any storage or db work — fail-closed for
   // unknown license classes leaves no partial state behind.
   const policy = decideStoragePolicy(input.source.license_class);
 
+  // Always derived from bytes, even on the ephemeral path, so the
+  // documents.unique(content_hash, raw_blob_id) dedupe stays meaningful.
   const content_hash = rawBlobIdFromBytes(input.bytes);
 
   let raw_blob_id: string;

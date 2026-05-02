@@ -116,10 +116,6 @@ test("returned bytes are isolated from internal storage (mutating the result doe
   assert.deepEqual(Array.from(second.bytes), Array.from(HELLO));
 });
 
-// fra-0sa: ephemeral raw_blob_id sentinel — encodes "deliberately not
-// stored" for documents whose license_class forbids raw blob retention.
-// The sentinel format is `ephemeral:<source_uuid>` so debugging tools
-// can map an ephemeral document back to the source that produced it.
 test("ephemeralRawBlobIdForSource returns the 'ephemeral:<source_id>' sentinel", () => {
   assert.equal(
     ephemeralRawBlobIdForSource(SAMPLE_SOURCE_ID),

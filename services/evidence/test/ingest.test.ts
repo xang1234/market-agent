@@ -6,34 +6,16 @@ import { ingestDocument } from "../src/ingest.ts";
 import { LicensePolicyError } from "../src/license-policy.ts";
 import {
   EPHEMERAL_RAW_BLOB_ID_PREFIX,
-  MemoryObjectStore,
-  type ObjectStore,
-  type PutResult,
-  type StoredBlob,
   ephemeralRawBlobIdForSource,
   rawBlobIdFromBytes,
 } from "../src/object-store.ts";
 import type { QueryExecutor } from "../src/types.ts";
+import { RecordingObjectStore } from "./recording-object-store.ts";
 
 const SOURCE_ID = "11111111-1111-4111-a111-111111111111";
 const DOCUMENT_ID = "22222222-2222-4222-a222-222222222222";
 const TWEET_BYTES = new TextEncoder().encode("$AAPL crushes Q1 — bullish setup");
 const TWEET_HASH = `sha256:${createHash("sha256").update(TWEET_BYTES).digest("hex")}`;
-
-class RecordingObjectStore implements ObjectStore {
-  putCalls = 0;
-  readonly inner = new MemoryObjectStore();
-  async put(bytes: Uint8Array): Promise<PutResult> {
-    this.putCalls += 1;
-    return this.inner.put(bytes);
-  }
-  async get(rawBlobId: string): Promise<StoredBlob | null> {
-    return this.inner.get(rawBlobId);
-  }
-  async has(rawBlobId: string): Promise<boolean> {
-    return this.inner.has(rawBlobId);
-  }
-}
 
 function recordingDb() {
   const queries: Array<{ text: string; values?: unknown[] }> = [];
@@ -72,10 +54,6 @@ function recordingDb() {
   return { db, queries };
 }
 
-// fra-0sa: Permissive license — blob is stored, raw_blob_id is the
-// content-derived sha256 hash. This is the "everything works as before
-// fra-0sa" path; if it breaks, license gating broke the existing
-// non-restrictive ingest flow.
 test("permissive license_class 'public' stores the blob and uses the sha256 raw_blob_id", async () => {
   const { db, queries } = recordingDb();
   const objectStore = new RecordingObjectStore();
@@ -98,8 +76,6 @@ test("permissive license_class 'public' stores the blob and uses the sha256 raw_
   assert.match(queries[0]?.text ?? "", /insert into documents/);
 });
 
-// fra-0sa BEAD VERIFICATION: "Ingest with restrictive license; no blob
-// written." This is the headline assertion of the bead.
 test("ephemeral license_class 'ephemeral' skips blob storage and uses the ephemeral sentinel raw_blob_id", async () => {
   const { db, queries } = recordingDb();
   const objectStore = new RecordingObjectStore();

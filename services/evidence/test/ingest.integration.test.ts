@@ -2,45 +2,20 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { ingestDocument } from "../src/ingest.ts";
-import {
-  EPHEMERAL_RAW_BLOB_ID_PREFIX,
-  MemoryObjectStore,
-  type ObjectStore,
-  type PutResult,
-  type StoredBlob,
-} from "../src/object-store.ts";
+import { EPHEMERAL_RAW_BLOB_ID_PREFIX } from "../src/object-store.ts";
 import { createSource } from "../src/source-repo.ts";
 import {
   bootstrapDatabase,
   connectedClient,
   dockerAvailable,
 } from "../../../db/test/docker-pg.ts";
+import { RecordingObjectStore } from "./recording-object-store.ts";
 
-class RecordingObjectStore implements ObjectStore {
-  putCalls = 0;
-  readonly inner = new MemoryObjectStore();
-  async put(bytes: Uint8Array): Promise<PutResult> {
-    this.putCalls += 1;
-    return this.inner.put(bytes);
-  }
-  async get(rawBlobId: string): Promise<StoredBlob | null> {
-    return this.inner.get(rawBlobId);
-  }
-  async has(rawBlobId: string): Promise<boolean> {
-    return this.inner.has(rawBlobId);
-  }
-}
-
-// fra-0sa BEAD VERIFICATION (end-to-end): "Ingest with restrictive
-// license; no blob written."
-//
-// The unit test in ingest.test.ts proves the orchestrator's branching;
-// this test proves the documents row actually persists with the
-// ephemeral sentinel against real Postgres (the schema kept
-// raw_blob_id NOT NULL — the sentinel must satisfy that constraint
-// without falling foul of any check or unique index).
+// End-to-end against real Postgres: documents row must persist with
+// the ephemeral sentinel as raw_blob_id (NOT NULL, no unique-index
+// collision) while the object store stays untouched.
 test(
-  "end-to-end: tweet with license_class='ephemeral' lands a documents row but no blob (fra-0sa)",
+  "end-to-end: tweet with license_class='ephemeral' lands a documents row but no blob",
   { skip: !dockerAvailable() },
   async (t) => {
     const { databaseUrl } = await bootstrapDatabase(t, "ingest-fra-0sa");

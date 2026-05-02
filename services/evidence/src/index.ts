@@ -55,7 +55,6 @@ export {
   LicensePolicyError,
   PERMISSIVE_LICENSE_CLASSES,
   decideStoragePolicy,
-  isKnownLicenseClass,
 } from "./license-policy.ts";
 export type { StoragePolicy } from "./license-policy.ts";
 
