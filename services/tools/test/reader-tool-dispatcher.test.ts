@@ -453,12 +453,39 @@ test("dispatch propagates non-ReaderToolError throws (programmer bugs surface, n
   );
 });
 
-// ---- handler output validation ---------------------------------------------
+// ---- I4 invariant: registry static-audit gate at construction ---------------
 
-test("dispatch returns INVALID_ARGUMENT when handler output omits items", async () => {
-  // Defensive against handler bugs — a handler returning the wrong
-  // shape would corrupt the wire contract. Catch and route through
-  // tool_error rather than letting a malformed payload reach the caller.
+// ---- ReaderToolError code validation (review Important #2) -----------------
+
+test("ReaderToolError refuses construction with an undeclared error code (no contract leaks)", () => {
+  // Without the runtime check, a misspelled or invented code would
+  // flow straight onto the wire because the dispatcher trusts
+  // error.code from a thrown ReaderToolError. The constructor is the
+  // single chokepoint where we can prove every emitted code is one
+  // of the registry's declared error_codes.
+  assert.throws(
+    () => new ReaderToolError("BANANA" as never, "should not construct"),
+    /ReaderToolError.*BANANA.*not.*declared/i,
+  );
+});
+
+test("ReaderToolError accepts every declared error code (no false positives)", () => {
+  // Counter-test: the constructor's allow-list must include every
+  // entry of READER_TOOL_ERROR_CODES.
+  for (const code of READER_TOOL_ERROR_CODES) {
+    assert.doesNotThrow(() => new ReaderToolError(code, "ok"));
+  }
+});
+
+// ---- handler-output bug bubbles (review Important #3) ----------------------
+
+test("dispatch propagates handler-output-shape failures as throws (server bug, not client error_code)", async () => {
+  // A handler returning the wrong output shape is a programmer bug,
+  // structurally identical to the TypeError path: translating it to
+  // INVALID_ARGUMENT (a client-blameable code) hides the root cause
+  // from observability and conflates "client sent bad input" with
+  // "server returned bad output". Bubble it instead — observability
+  // sees the real failure, callers don't get a misleading code.
   const registry = loadToolRegistry();
   const dispatcher = createReaderToolDispatcher({
     registry,
@@ -471,21 +498,19 @@ test("dispatch returns INVALID_ARGUMENT when handler output omits items", async 
     }),
   });
 
-  const result = await dispatcher.dispatch({
-    bundle_id: "document_research",
-    audience: "reader",
-    tool_name: "classify_sentiment",
-    arguments: { document_id: SAMPLE_DOC_UUID },
-  });
-
-  assert.equal(result.ok, false);
-  if (result.ok === false && result.kind === "tool_error") {
-    assert.equal(result.error_code, "INVALID_ARGUMENT");
-    assert.match(result.message, /items/);
-  }
+  await assert.rejects(
+    () =>
+      dispatcher.dispatch({
+        bundle_id: "document_research",
+        audience: "reader",
+        tool_name: "classify_sentiment",
+        arguments: { document_id: SAMPLE_DOC_UUID },
+      }),
+    /handler output.*items/,
+  );
 });
 
-test("dispatch returns INVALID_ARGUMENT when handler output source_ids contains non-UUIDs", async () => {
+test("dispatch bubbles handler-output source_ids non-UUID failures as throws (defense in depth, not error_code)", async () => {
   const registry = loadToolRegistry();
   const dispatcher = createReaderToolDispatcher({
     registry,
@@ -497,18 +522,16 @@ test("dispatch returns INVALID_ARGUMENT when handler output source_ids contains 
     }),
   });
 
-  const result = await dispatcher.dispatch({
-    bundle_id: "document_research",
-    audience: "reader",
-    tool_name: "classify_sentiment",
-    arguments: { document_id: SAMPLE_DOC_UUID },
-  });
-
-  assert.equal(result.ok, false);
-  if (result.ok === false && result.kind === "tool_error") {
-    assert.equal(result.error_code, "INVALID_ARGUMENT");
-    assert.match(result.message, /source_ids/);
-  }
+  await assert.rejects(
+    () =>
+      dispatcher.dispatch({
+        bundle_id: "document_research",
+        audience: "reader",
+        tool_name: "classify_sentiment",
+        arguments: { document_id: SAMPLE_DOC_UUID },
+      }),
+    /handler output.*source_ids/,
+  );
 });
 
 // ---- I4 invariant: registry static-audit gate at construction ---------------

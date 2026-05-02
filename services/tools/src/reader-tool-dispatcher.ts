@@ -8,10 +8,18 @@
 //   3. Validates the input shape (document_id is a UUID) before invoking
 //      the handler.
 //   4. Narrows handler-thrown ReaderToolErrors into the registry's
-//      declared error_codes; lets unexpected throws bubble (they are
-//      programmer bugs, not domain errors).
-//   5. Validates the handler's output shape (items: array of objects;
-//      source_ids: array of UUIDs) before returning to the caller.
+//      declared error_codes; lets unexpected throws (programmer bugs,
+//      handler-output-shape failures) bubble unmodified so observability
+//      records them as bugs, not as domain errors with a misleading
+//      client-blameable error_code.
+//
+// Input contract narrowing: the registry's input_json_schema declares
+// `additionalProperties: true` for all five tools, but parseReaderToolInput
+// forwards only the contract's named fields (document_id, schema_hint).
+// Extras are dropped silently — handlers don't see them today. Downstream
+// beads (fra-6j0.3 / fra-6j0.4) that want extras (model_hint, temperature,
+// etc.) must extend ReaderToolInput here AND add the field to handler
+// signatures, both of which require an explicit edit here.
 //
 // Handlers themselves live in services/evidence/src/reader/* — the
 // dispatcher is intentionally agnostic to where extraction happens.
@@ -57,6 +65,16 @@ export type ReaderToolErrorCode = (typeof READER_TOOL_ERROR_CODES)[number];
 export class ReaderToolError extends Error {
   readonly code: ReaderToolErrorCode;
   constructor(code: ReaderToolErrorCode, message: string) {
+    // Validate at construction so a misspelled or invented code cannot
+    // leak onto the wire — the dispatcher trusts error.code from any
+    // ReaderToolError thrown by a handler. The constructor is the
+    // single chokepoint where every emitted code is provably one of
+    // READER_TOOL_ERROR_CODES (matches each tool's registry contract).
+    if (!READER_TOOL_ERROR_CODES.includes(code)) {
+      throw new Error(
+        `ReaderToolError: code "${code}" is not declared in READER_TOOL_ERROR_CODES (${[...READER_TOOL_ERROR_CODES].join(", ")})`,
+      );
+    }
     super(`${code}: ${message}`);
     this.name = "ReaderToolError";
     this.code = code;
@@ -125,6 +143,8 @@ export type CreateReaderToolDispatcherInput = {
   handlers: ReaderToolHandlerMap;
 };
 
+// Same regex as services/evidence/src/validators.ts — duplicated by the
+// codebase's per-service-decoupled-validators convention. Keep in sync.
 const UUID_V4 =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
 
@@ -228,16 +248,17 @@ export function createReaderToolDispatcher(
         throw error;
       }
 
-      // Gate 4: output shape (defends the wire contract from handler bugs).
-      const validated = validateReaderToolOutput(raw);
-      if (validated.kind === "error") {
-        return toolError(call.tool_name, validated.code, validated.message);
-      }
+      // Gate 4: output shape (defends the wire contract from handler
+      // bugs). Failures here are programmer bugs, not domain errors —
+      // bubbled like the non-ReaderToolError throw above so observability
+      // sees them as bugs rather than as a misleading INVALID_ARGUMENT
+      // response that a caller couldn't act on.
+      const validated = assertValidReaderToolOutput(raw);
 
       return Object.freeze({
         ok: true,
         tool_name: call.tool_name,
-        result: validated.output,
+        result: validated,
       });
     },
   });
@@ -300,61 +321,34 @@ function parseReaderToolInput(args: JsonValue): ParseInputResult {
   return { kind: "ok", input: { document_id, schema_hint } };
 }
 
-type ValidateOutputResult =
-  | { kind: "ok"; output: ReaderToolOutput }
-  | { kind: "error"; code: ReaderToolErrorCode; message: string };
-
-function validateReaderToolOutput(output: unknown): ValidateOutputResult {
+function assertValidReaderToolOutput(output: unknown): ReaderToolOutput {
   if (output === null || typeof output !== "object" || Array.isArray(output)) {
-    return {
-      kind: "error",
-      code: "INVALID_ARGUMENT",
-      message: "handler output: must be an object",
-    };
+    throw new Error("handler output: must be an object");
   }
 
   const record = output as { [key: string]: unknown };
   const items = record.items;
   if (!Array.isArray(items)) {
-    return {
-      kind: "error",
-      code: "INVALID_ARGUMENT",
-      message: "handler output.items: must be an array",
-    };
+    throw new Error("handler output.items: must be an array");
   }
   for (const [i, item] of items.entries()) {
     if (item === null || typeof item !== "object" || Array.isArray(item)) {
-      return {
-        kind: "error",
-        code: "INVALID_ARGUMENT",
-        message: `handler output.items[${i}]: must be a JSON object`,
-      };
+      throw new Error(`handler output.items[${i}]: must be a JSON object`);
     }
   }
 
   const source_ids = record.source_ids;
   if (!Array.isArray(source_ids)) {
-    return {
-      kind: "error",
-      code: "INVALID_ARGUMENT",
-      message: "handler output.source_ids: must be an array",
-    };
+    throw new Error("handler output.source_ids: must be an array");
   }
   for (const [i, id] of source_ids.entries()) {
     if (typeof id !== "string" || !UUID_V4.test(id)) {
-      return {
-        kind: "error",
-        code: "INVALID_ARGUMENT",
-        message: `handler output.source_ids[${i}]: must be a UUID v4`,
-      };
+      throw new Error(`handler output.source_ids[${i}]: must be a UUID v4`);
     }
   }
 
-  return {
-    kind: "ok",
-    output: Object.freeze({
-      items: Object.freeze([...items]) as ReadonlyArray<JsonObject>,
-      source_ids: Object.freeze([...source_ids]) as ReadonlyArray<string>,
-    }),
-  };
+  return Object.freeze({
+    items: Object.freeze([...items]) as ReadonlyArray<JsonObject>,
+    source_ids: Object.freeze([...source_ids]) as ReadonlyArray<string>,
+  });
 }
