@@ -64,3 +64,25 @@ export type {
   IngestDocumentInput,
   IngestDocumentResult,
 } from "./ingest.ts";
+
+export {
+  SEC_EDGAR_DEFAULT_RATE_LIMIT,
+  SEC_EDGAR_DEFAULT_USER_AGENT_ENV,
+  SecEdgarClient,
+  SecEdgarFetchError,
+  SecEdgarRateLimitError,
+  TokenBucketRateLimiter,
+  filingArchiveUrl,
+  filingIndexUrl,
+  ingestSecFiling,
+} from "./sec-edgar.ts";
+export type {
+  FetchFilingInput,
+  FetchFilingResult,
+  IngestSecFilingDeps,
+  IngestSecFilingInput,
+  IngestSecFilingResult,
+  RateLimiter,
+  SecEdgarClientConfig,
+  TokenBucketRateLimiterConfig,
+} from "./sec-edgar.ts";
