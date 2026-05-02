@@ -3,6 +3,18 @@ import { createHash } from "node:crypto";
 export const RAW_BLOB_ID_PREFIX = "sha256:";
 const RAW_BLOB_ID_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
+// fra-0sa: Sentinel raw_blob_id for documents whose license_class
+// forbids raw blob retention. Encoding the source uuid lets debugging
+// tools map the ephemeral document back to its source row without a
+// secondary index. The storage layer (put/get/has) refuses this format
+// — only the documents-table ingest path accepts it.
+export const EPHEMERAL_RAW_BLOB_ID_PREFIX = "ephemeral:";
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EPHEMERAL_RAW_BLOB_ID_PATTERN = new RegExp(
+  `^${EPHEMERAL_RAW_BLOB_ID_PREFIX}[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`,
+  "i",
+);
+
 export type RawBlobMetadata = Readonly<{
   raw_blob_id: string;
   size: number;
@@ -34,6 +46,31 @@ export function assertRawBlobId(
 ): asserts value is string {
   if (typeof value !== "string" || !RAW_BLOB_ID_PATTERN.test(value)) {
     throw new Error(`${label}: must match ${RAW_BLOB_ID_PREFIX}<64 lowercase hex chars>`);
+  }
+}
+
+export function ephemeralRawBlobIdForSource(sourceId: string): string {
+  if (typeof sourceId !== "string" || !UUID_PATTERN.test(sourceId)) {
+    throw new Error("ephemeralRawBlobIdForSource: source_id must be a uuid");
+  }
+  return `${EPHEMERAL_RAW_BLOB_ID_PREFIX}${sourceId}`;
+}
+
+export function isEphemeralRawBlobId(value: unknown): value is string {
+  return typeof value === "string" && EPHEMERAL_RAW_BLOB_ID_PATTERN.test(value);
+}
+
+export function assertRawBlobIdOrEphemeral(
+  value: unknown,
+  label = "raw_blob_id",
+): asserts value is string {
+  if (
+    typeof value !== "string" ||
+    (!RAW_BLOB_ID_PATTERN.test(value) && !EPHEMERAL_RAW_BLOB_ID_PATTERN.test(value))
+  ) {
+    throw new Error(
+      `${label}: must match ${RAW_BLOB_ID_PREFIX}<64 lowercase hex chars> or ${EPHEMERAL_RAW_BLOB_ID_PREFIX}<source_uuid>`,
+    );
   }
 }
 

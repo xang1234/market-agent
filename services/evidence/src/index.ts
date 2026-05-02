@@ -31,9 +31,13 @@ export type {
 export type { QueryExecutor } from "./types.ts";
 
 export {
+  EPHEMERAL_RAW_BLOB_ID_PREFIX,
   MemoryObjectStore,
   RAW_BLOB_ID_PREFIX,
   assertRawBlobId,
+  assertRawBlobIdOrEphemeral,
+  ephemeralRawBlobIdForSource,
+  isEphemeralRawBlobId,
   rawBlobIdFromBytes,
 } from "./object-store.ts";
 export type {
@@ -45,3 +49,19 @@ export type {
 
 export { S3ObjectStore } from "./s3-object-store.ts";
 export type { S3ObjectStoreConfig } from "./s3-object-store.ts";
+
+export {
+  EPHEMERAL_LICENSE_CLASSES,
+  LicensePolicyError,
+  PERMISSIVE_LICENSE_CLASSES,
+  decideStoragePolicy,
+  isKnownLicenseClass,
+} from "./license-policy.ts";
+export type { StoragePolicy } from "./license-policy.ts";
+
+export { ingestDocument } from "./ingest.ts";
+export type {
+  IngestDocumentDeps,
+  IngestDocumentInput,
+  IngestDocumentResult,
+} from "./ingest.ts";
