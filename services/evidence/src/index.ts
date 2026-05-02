@@ -66,6 +66,19 @@ export type {
 } from "./ingest.ts";
 
 export {
+  USER_UPLOAD_LICENSE_CLASS,
+  USER_UPLOAD_PROVIDER,
+  getUserUploadDocument,
+  ingestUserUpload,
+  listUserUploadDocuments,
+} from "./user-uploads.ts";
+export type {
+  IngestUserUploadDeps,
+  IngestUserUploadInput,
+  IngestUserUploadResult,
+} from "./user-uploads.ts";
+
+export {
   SEC_EDGAR_DEFAULT_RATE_LIMIT,
   SEC_EDGAR_DEFAULT_REQUEST_TIMEOUT_MS,
   SEC_EDGAR_DEFAULT_USER_AGENT_ENV,

@@ -6,6 +6,10 @@
 export const PERMISSIVE_LICENSE_CLASSES: ReadonlyArray<string> = Object.freeze([
   "public",
   "licensed",
+  // user_private: a user's own upload — must be stored (often their only
+  // copy) but only visible to the uploader. Visibility is enforced via
+  // sources.user_id at the query layer, not here.
+  "user_private",
 ]);
 
 export const EPHEMERAL_LICENSE_CLASSES: ReadonlyArray<string> = Object.freeze([

@@ -36,6 +36,7 @@ export type SourceInput = {
   license_class: string;
   retrieved_at: string;
   content_hash?: string | null;
+  user_id?: string | null;
 };
 
 export type SourceRow = {
@@ -47,6 +48,7 @@ export type SourceRow = {
   license_class: string;
   retrieved_at: string;
   content_hash: string | null;
+  user_id: string | null;
   created_at: string;
 };
 
@@ -59,6 +61,7 @@ type SourceDbRow = {
   license_class: string;
   retrieved_at: Date | string;
   content_hash: string | null;
+  user_id: string | null;
   created_at: Date | string;
 };
 
@@ -70,8 +73,8 @@ export async function createSource(
 
   const { rows } = await db.query<SourceDbRow>(
     `insert into sources
-       (provider, kind, canonical_url, trust_tier, license_class, retrieved_at, content_hash)
-     values ($1, $2, $3, $4, $5, $6, $7)
+       (provider, kind, canonical_url, trust_tier, license_class, retrieved_at, content_hash, user_id)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)
      returning source_id,
                provider,
                kind,
@@ -80,6 +83,7 @@ export async function createSource(
                license_class,
                retrieved_at,
                content_hash,
+               user_id,
                created_at`,
     [
       input.provider,
@@ -89,6 +93,7 @@ export async function createSource(
       input.license_class,
       input.retrieved_at,
       input.content_hash ?? null,
+      input.user_id ?? null,
     ],
   );
 
@@ -110,6 +115,7 @@ export async function getSource(
             license_class,
             retrieved_at,
             content_hash,
+            user_id,
             created_at
        from sources
       where source_id = $1`,
@@ -127,6 +133,9 @@ function validateSourceInput(input: SourceInput): void {
   assertNonEmptyString(input.license_class, "license_class");
   assertIso8601WithOffset(input.retrieved_at, "retrieved_at");
   assertOptionalNonEmptyString(input.content_hash, "content_hash");
+  if (input.user_id != null) {
+    assertUuidV4(input.user_id, "user_id");
+  }
 }
 
 function sourceRowFromDb(row: SourceDbRow | undefined): SourceRow {
@@ -143,6 +152,7 @@ function sourceRowFromDb(row: SourceDbRow | undefined): SourceRow {
     license_class: row.license_class,
     retrieved_at: isoString(row.retrieved_at),
     content_hash: row.content_hash,
+    user_id: row.user_id,
     created_at: isoString(row.created_at),
   });
 }

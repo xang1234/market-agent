@@ -30,6 +30,7 @@ test("createSource inserts trust tier and license class metadata", async () => {
             license_class: "public",
             retrieved_at: new Date("2026-04-29T00:00:00.000Z"),
             content_hash: "sha256:abc123",
+            user_id: null,
             created_at: new Date("2026-04-29T00:00:01.000Z"),
           },
         ] as R[],
@@ -60,6 +61,7 @@ test("createSource inserts trust tier and license class metadata", async () => {
     "public",
     "2026-04-29T00:00:00Z",
     "sha256:abc123",
+    null,
   ]);
   assert.deepEqual(row, {
     source_id: sourceId,
@@ -70,8 +72,79 @@ test("createSource inserts trust tier and license class metadata", async () => {
     license_class: "public",
     retrieved_at: "2026-04-29T00:00:00.000Z",
     content_hash: "sha256:abc123",
+    user_id: null,
     created_at: "2026-04-29T00:00:01.000Z",
   });
+});
+
+test("createSource carries user_id through to the insert and back on the returned row", async () => {
+  // user_id is what makes a source user-scoped — the documents that point
+  // at this source inherit visibility through the source FK.
+  const userId = "12345678-1234-4234-a234-123456789012";
+  const queries: Array<{ text: string; values?: unknown[] }> = [];
+  const db: QueryExecutor = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      queries.push({ text, values });
+      return {
+        rows: [
+          {
+            source_id: "00000000-0000-4000-8000-000000000002",
+            provider: "user_upload",
+            kind: "upload",
+            canonical_url: null,
+            trust_tier: "user",
+            license_class: "user_private",
+            retrieved_at: new Date("2026-05-02T00:00:00.000Z"),
+            content_hash: null,
+            user_id: userId,
+            created_at: new Date("2026-05-02T00:00:01.000Z"),
+          },
+        ] as R[],
+        command: "INSERT",
+        rowCount: 1,
+        oid: 0,
+        fields: [],
+      };
+    },
+  };
+
+  const row = await createSource(db, {
+    provider: "user_upload",
+    kind: "upload",
+    trust_tier: "user",
+    license_class: "user_private",
+    retrieved_at: "2026-05-02T00:00:00Z",
+    user_id: userId,
+  });
+
+  assert.equal(queries[0].values?.[7], userId, "user_id must be the 8th positional parameter");
+  assert.equal(row.user_id, userId);
+});
+
+test("createSource rejects malformed user_id before querying", async () => {
+  // user_id is a UUIDv4. A typo here can't reach the DB or it would fail
+  // with a cryptic FK error — surface it as a validation error instead.
+  let queryCalls = 0;
+  const db: QueryExecutor = {
+    async query() {
+      queryCalls += 1;
+      throw new Error("query should not run");
+    },
+  };
+
+  await assert.rejects(
+    createSource(db, {
+      provider: "user_upload",
+      kind: "upload",
+      trust_tier: "user",
+      license_class: "user_private",
+      retrieved_at: "2026-05-02T00:00:00Z",
+      user_id: "not-a-uuid",
+    }),
+    /user_id: must be a UUID v4/,
+  );
+
+  assert.equal(queryCalls, 0);
 });
 
 test("createSource rejects malformed source metadata before querying", async () => {

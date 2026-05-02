@@ -18,6 +18,14 @@ test("permissive license class 'licensed' → store_blob: true", () => {
   assert.deepEqual(policy, { store_blob: true });
 });
 
+test("permissive license class 'user_private' → store_blob: true (visibility is enforced via user_id, not retention)", () => {
+  // user uploads MUST be stored — they're often the user's only copy of
+  // the content. Visibility scoping (only the uploader sees the doc) is
+  // enforced by the user_id column on sources, not by license_class.
+  const policy = decideStoragePolicy("user_private");
+  assert.deepEqual(policy, { store_blob: true });
+});
+
 test("ephemeral license class 'ephemeral' → store_blob: false with reason", () => {
   const policy = decideStoragePolicy("ephemeral");
   assert.deepEqual(policy, { store_blob: false, reason: "ephemeral_license" });

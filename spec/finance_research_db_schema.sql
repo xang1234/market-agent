@@ -239,9 +239,11 @@ create table sources (
   license_class text not null,
   retrieved_at timestamptz not null,
   content_hash text,
+  user_id uuid references users(user_id) on delete cascade,
   created_at timestamptz not null default now()
 );
 create index sources_provider_kind_idx on sources(provider, kind);
+create index sources_user_id_idx on sources(user_id) where user_id is not null;
 
 create table documents (
   document_id uuid primary key default gen_random_uuid(),
