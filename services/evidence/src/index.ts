@@ -90,6 +90,9 @@ export {
   ingestUserUpload,
   listUserUploadDocuments,
 } from "./user-uploads.ts";
+
+export { createEvidenceReaderToolHandlers } from "./reader/extract-tools.ts";
+export type { EvidenceReaderToolDeps } from "./reader/extract-tools.ts";
 export type {
   IngestUserUploadDeps,
   IngestUserUploadInput,
