@@ -4,16 +4,17 @@ import assert from "node:assert/strict";
 import {
   SEC_EDGAR_DEFAULT_RATE_LIMIT,
   SEC_EDGAR_DEFAULT_USER_AGENT_ENV,
+  SEC_FORM_CODES,
   SecEdgarClient,
   SecEdgarFetchError,
   SecEdgarRateLimitError,
+  SecEdgarTimeoutError,
   TokenBucketRateLimiter,
   filingArchiveUrl,
   filingIndexUrl,
   ingestSecFiling,
 } from "../src/sec-edgar.ts";
 import { MemoryObjectStore } from "../src/object-store.ts";
-import { createSource } from "../src/source-repo.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { RecordingObjectStore } from "./recording-object-store.ts";
 
@@ -28,8 +29,6 @@ function fixedClock(): { now: () => number; advance: (ms: number) => void } {
     },
   };
 }
-
-// ---- TokenBucketRateLimiter ------------------------------------------------
 
 test("TokenBucketRateLimiter allows burst up to capacity without waiting", async () => {
   const clock = fixedClock();
@@ -66,6 +65,37 @@ test("TokenBucketRateLimiter blocks the (capacity+1)-th request until refill", a
   assert.ok(waited > 0, "must have waited for refill");
   assert.ok(waited <= 334, `waited ${waited}ms but refill is ~333ms`);
   assert.equal(sleeps.length, 1, "must have slept exactly once");
+});
+
+test("TokenBucketRateLimiter serializes concurrent acquires so capacity isn't burst past", async () => {
+  // Without serialization, N callers reading an empty bucket simultaneously
+  // would all sleep waitMs, all wake, all decrement — leaving tokens at
+  // -(N-1) and firing N requests in one window. That's exactly the burst
+  // the SEC rate limit forbids, so the limiter must serialize internally.
+  const clock = fixedClock();
+  const sleeps: number[] = [];
+  const limiter = new TokenBucketRateLimiter({
+    capacity: 1,
+    refillPerSecond: 4,
+    now: clock.now,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      clock.advance(ms);
+    },
+  });
+
+  const results = await Promise.all([
+    limiter.acquire(),
+    limiter.acquire(),
+    limiter.acquire(),
+    limiter.acquire(),
+  ]);
+
+  assert.equal(results[0], 0, "first acquire takes the only token without waiting");
+  assert.ok(results[1] > 0, "second concurrent acquire must wait for refill");
+  assert.ok(results[2] > 0, "third concurrent acquire must wait for refill");
+  assert.ok(results[3] > 0, "fourth concurrent acquire must wait for refill");
+  assert.equal(sleeps.length, 3, "exactly 3 sleeps for the 3 wait-required acquires");
 });
 
 test("TokenBucketRateLimiter refills proportionally to elapsed time", async () => {
@@ -360,7 +390,60 @@ test("SecEdgarClient.fromEnv reads the User-Agent from SEC_EDGAR_USER_AGENT and 
   }
 });
 
-// ---- ingestSecFiling -------------------------------------------------------
+test("SecEdgarClient.fetchFiling aborts on the configured timeout and throws SecEdgarTimeoutError", async () => {
+  // Without an abort, a hung SEC connection would freeze the orchestrator
+  // indefinitely — the test pins that the timeout fires and surfaces a
+  // distinct error class so callers can classify operational vs HTTP failure.
+  const client = new SecEdgarClient({
+    userAgent: VALID_USER_AGENT,
+    requestTimeoutMs: 25,
+    fetch: async (_url, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("aborted", "AbortError"));
+        });
+      }),
+  });
+
+  await assert.rejects(
+    client.fetchFiling({
+      cik: 320193,
+      accession_number: "0000320193-23-000106",
+      document: "doc.htm",
+    }),
+    SecEdgarTimeoutError,
+  );
+});
+
+test("SecEdgarClient constructor rejects nonsensical requestTimeoutMs", () => {
+  for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.throws(
+      () =>
+        new SecEdgarClient({
+          userAgent: VALID_USER_AGENT,
+          requestTimeoutMs: bad,
+          fetch: async () => new Response("", { status: 200 }),
+        }),
+      /requestTimeoutMs/,
+      `requestTimeoutMs=${String(bad)} should be rejected`,
+    );
+  }
+});
+
+test("SEC_FORM_CODES is the closed set the adapter accepts (typo guard at the API boundary)", () => {
+  // If a downstream caller passes form: "10K" (no dash) or form: "" the
+  // assertOneOf in ingestSecFiling refuses it. Pinning the canonical set
+  // also forces a deliberate edit when adding new forms — the codebase
+  // pattern (SOURCE_KINDS, TRUST_TIERS) is exactly this.
+  assert.ok(SEC_FORM_CODES.includes("10-K"));
+  assert.ok(SEC_FORM_CODES.includes("10-Q"));
+  assert.ok(SEC_FORM_CODES.includes("8-K"));
+  assert.ok(SEC_FORM_CODES.length >= 3);
+  // Frozen so a downstream module can't push("garbage") to bypass the gate.
+  assert.equal(Object.isFrozen(SEC_FORM_CODES), true);
+});
+
+
 
 const SOURCE_ID = "33333333-3333-4333-a333-333333333333";
 const DOCUMENT_ID = "44444444-4444-4444-a444-444444444444";
@@ -512,25 +595,70 @@ test("ingestSecFiling propagates a SecEdgarFetchError without writing source or 
   assert.equal(objectStore.putCalls, 0);
 });
 
-test("ingestSecFiling end-to-end against the real source-repo (createSource path)", async () => {
-  // Light integration: uses the actual createSource so a regression in
-  // SourceInput shape (trust_tier/license_class typos) breaks here, not
+test("ingestSecFiling rejects an unknown form code before fetching or writing", async () => {
+  // The form union exists to catch typos at the API boundary. An
+  // unknown form must not silently store a documents row with a junk
+  // title — and crucially, must not consume a SEC rate-limit token
+  // either, so the validation runs before fetchFiling.
+  const { db, queries } = recordingDb();
+  const objectStore = new RecordingObjectStore();
+  let fetchCalls = 0;
+  const client = new SecEdgarClient({
+    userAgent: VALID_USER_AGENT,
+    fetch: async () => {
+      fetchCalls += 1;
+      return new Response("body", { status: 200 });
+    },
+  });
+
+  await assert.rejects(
+    ingestSecFiling(
+      { db, objectStore, secClient: client },
+      {
+        cik: 320193,
+        accession_number: "0000320193-23-000106",
+        document: "doc.htm",
+        // intentional: not in SEC_FORM_CODES
+        form: "10K" as never,
+      },
+    ),
+    /ingestSecFiling.form/,
+  );
+
+  assert.equal(fetchCalls, 0, "must not consume a rate-limit token on bad form");
+  assert.equal(queries.length, 0, "must not insert source/document on bad form");
+  assert.equal(objectStore.putCalls, 0);
+});
+
+test("ingestSecFiling end-to-end through real createSource (regression guard for SourceInput shape)", async () => {
+  // Uses the real createSource (not the recordingDb shortcut) so a
+  // regression in trust_tier/license_class spelling breaks here, not
   // only at db time.
   const calls: string[] = [];
   const db: QueryExecutor = {
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       calls.push(text);
       if (/insert into sources/.test(text)) {
-        const row = await createSourceCapture(values);
         return {
-          rows: [row] as R[],
+          rows: [
+            {
+              source_id: SOURCE_ID,
+              provider: values?.[0],
+              kind: values?.[1],
+              canonical_url: values?.[2],
+              trust_tier: values?.[3],
+              license_class: values?.[4],
+              retrieved_at: new Date(values?.[5] as string),
+              content_hash: values?.[6],
+              created_at: new Date("2026-05-02T00:00:00.000Z"),
+            },
+          ] as R[],
           command: "INSERT",
           rowCount: 1,
           oid: 0,
           fields: [],
         };
       }
-      // documents insert
       return {
         rows: [
           {
@@ -541,7 +669,7 @@ test("ingestSecFiling end-to-end against the real source-repo (createSource path
             kind: values?.[2] ?? "filing",
             parent_document_id: null,
             conversation_id: null,
-            title: null,
+            title: values?.[5] ?? null,
             author: null,
             published_at: null,
             lang: null,
@@ -564,26 +692,9 @@ test("ingestSecFiling end-to-end against the real source-repo (createSource path
   const client = new SecEdgarClient({
     userAgent: VALID_USER_AGENT,
     fetch: async () =>
-      new Response("body", {
-        status: 200,
-        headers: { "content-type": "text/html" },
-      }),
+      new Response("body", { status: 200, headers: { "content-type": "text/html" } }),
   });
 
-  // createSource in the real source-repo runs validateSourceInput, which
-  // rejects bad trust_tier/license_class — so this round-trip exercises
-  // the real validator for the SEC ingestSecFiling output.
-  const source = await createSource(db, {
-    provider: "sec_edgar",
-    kind: "filing",
-    canonical_url: "https://www.sec.gov/Archives/edgar/data/320193/.../doc.htm",
-    trust_tier: "primary",
-    license_class: "public",
-    retrieved_at: "2026-05-02T00:00:00Z",
-  });
-  assert.equal(source.provider, "sec_edgar");
-
-  // Now full ingest path with the same db (sources + documents inserts).
   const result = await ingestSecFiling(
     { db, objectStore, secClient: client },
     {
@@ -593,20 +704,9 @@ test("ingestSecFiling end-to-end against the real source-repo (createSource path
       form: "10-K",
     },
   );
-  assert.equal(result.source.provider, "sec_edgar");
-  assert.equal(calls.length, 3, "createSource + ingestSecFiling's source insert + documents insert");
-});
 
-async function createSourceCapture(values: unknown[] | undefined) {
-  return {
-    source_id: SOURCE_ID,
-    provider: values?.[0],
-    kind: values?.[1],
-    canonical_url: values?.[2],
-    trust_tier: values?.[3],
-    license_class: values?.[4],
-    retrieved_at: new Date(values?.[5] as string),
-    content_hash: values?.[6],
-    created_at: new Date("2026-05-02T00:00:00.000Z"),
-  };
-}
+  assert.equal(result.source.provider, "sec_edgar");
+  assert.equal(result.source.trust_tier, "primary");
+  assert.equal(result.source.license_class, "public");
+  assert.equal(calls.length, 2, "exactly one sources insert + one documents insert");
+});

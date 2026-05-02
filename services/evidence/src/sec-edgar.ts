@@ -11,6 +11,7 @@ import { ingestDocument, type IngestDocumentResult } from "./ingest.ts";
 import type { ObjectStore } from "./object-store.ts";
 import { createSource, type SourceRow } from "./source-repo.ts";
 import type { QueryExecutor } from "./types.ts";
+import { assertOneOf, assertPositiveInteger } from "./validators.ts";
 
 // SEC Fair Access ceiling: 10 requests/second per IP.
 const SEC_RATE_LIMIT_CEILING = 10;
@@ -24,7 +25,22 @@ export const SEC_EDGAR_DEFAULT_RATE_LIMIT = Object.freeze({
 
 export const SEC_EDGAR_DEFAULT_USER_AGENT_ENV = "SEC_EDGAR_USER_AGENT";
 
-// ---- Errors ---------------------------------------------------------------
+// Default 30s wall-clock cap on a single SEC fetch. Without it, a slow or
+// stalled connection would hang the whole ingest orchestrator.
+export const SEC_EDGAR_DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+// SEC form codes this adapter accepts. The closed set acts as a typo
+// guard at the API boundary; new forms require an explicit add here so
+// downstream tooling that branches on form-kind keeps a complete map.
+export const SEC_FORM_CODES = Object.freeze([
+  "10-K",
+  "10-Q",
+  "8-K",
+  "20-F",
+  "6-K",
+  "40-F",
+] as const);
+export type SecFormCode = (typeof SEC_FORM_CODES)[number];
 
 export class SecEdgarFetchError extends Error {
   readonly status: number;
@@ -44,7 +60,12 @@ export class SecEdgarRateLimitError extends SecEdgarFetchError {
   }
 }
 
-// ---- Token-bucket rate limiter --------------------------------------------
+export class SecEdgarTimeoutError extends SecEdgarFetchError {
+  constructor(url: string, timeoutMs: number) {
+    super(0, url, `SEC EDGAR fetch timed out after ${timeoutMs}ms: ${url}`);
+    this.name = "SecEdgarTimeoutError";
+  }
+}
 
 export type TokenBucketRateLimiterConfig = {
   capacity: number;
@@ -60,6 +81,12 @@ export interface RateLimiter {
 export class TokenBucketRateLimiter implements RateLimiter {
   private tokens: number;
   private lastRefillMs: number;
+  // Tail-promise queue: every acquire chains onto the prior one so two
+  // concurrent callers can't both observe an empty bucket, both sleep,
+  // and both decrement past zero. Without serialization the limiter
+  // would silently allow bursts of N when only 1 token is available —
+  // exactly the behavior the SEC ceiling forbids.
+  private chain: Promise<unknown> = Promise.resolve();
   private readonly capacity: number;
   private readonly refillPerSecond: number;
   private readonly now: () => number;
@@ -85,7 +112,13 @@ export class TokenBucketRateLimiter implements RateLimiter {
     this.lastRefillMs = this.now();
   }
 
-  async acquire(): Promise<number> {
+  acquire(): Promise<number> {
+    const next = this.chain.then(() => this.acquireOne());
+    this.chain = next.catch(() => undefined);
+    return next;
+  }
+
+  private async acquireOne(): Promise<number> {
     this.refill();
     if (this.tokens >= 1) {
       this.tokens -= 1;
@@ -114,8 +147,8 @@ function defaultSleep(ms: number): Promise<void> {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-// ---- URL builders ---------------------------------------------------------
-
+// Mirrors the regex in services/fundamentals/src/sec-edgar.ts; intentionally
+// duplicated to keep evidence and fundamentals decoupled.
 const ACCESSION_PATTERN = /^\d{10}-\d{2}-\d{6}$/;
 // Filename whitelist guards against path traversal ("../") and any
 // caller-supplied subpaths that could redirect the fetch elsewhere on
@@ -128,27 +161,22 @@ export function filingArchiveUrl(input: {
   accession_number: string;
   document: string;
 }): string {
-  assertCik(input.cik, "filingArchiveUrl.cik");
-  assertAccession(input.accession_number, "filingArchiveUrl.accession_number");
   assertSafeDocumentName(input.document, "filingArchiveUrl.document");
-  const accnNoDashes = input.accession_number.replace(/-/g, "");
-  return `https://www.sec.gov/Archives/edgar/data/${input.cik}/${accnNoDashes}/${input.document}`;
+  return `${archiveBasePath(input.cik, input.accession_number, "filingArchiveUrl")}/${input.document}`;
 }
 
 export function filingIndexUrl(input: {
   cik: number;
   accession_number: string;
 }): string {
-  assertCik(input.cik, "filingIndexUrl.cik");
-  assertAccession(input.accession_number, "filingIndexUrl.accession_number");
-  const accnNoDashes = input.accession_number.replace(/-/g, "");
-  return `https://www.sec.gov/Archives/edgar/data/${input.cik}/${accnNoDashes}/${input.accession_number}-index.htm`;
+  return `${archiveBasePath(input.cik, input.accession_number, "filingIndexUrl")}/${input.accession_number}-index.htm`;
 }
 
-function assertCik(value: unknown, label: string): asserts value is number {
-  if (!Number.isInteger(value) || (value as number) <= 0) {
-    throw new Error(`${label}: must be a positive integer; received ${String(value)}`);
-  }
+function archiveBasePath(cik: number, accession_number: string, label: string): string {
+  assertPositiveInteger(cik, `${label}.cik`);
+  assertAccession(accession_number, `${label}.accession_number`);
+  const accnNoDashes = accession_number.replace(/-/g, "");
+  return `https://www.sec.gov/Archives/edgar/data/${cik}/${accnNoDashes}`;
 }
 
 function assertAccession(value: unknown, label: string): asserts value is string {
@@ -163,15 +191,14 @@ function assertSafeDocumentName(value: unknown, label: string): asserts value is
   }
 }
 
-// ---- HTTP client ----------------------------------------------------------
-
-type FetchLike = (url: string, init?: { headers?: Record<string, string> }) => Promise<Response>;
+type FetchLike = (url: string, init?: { headers?: Record<string, string>; signal?: AbortSignal }) => Promise<Response>;
 
 export type SecEdgarClientConfig = {
   userAgent: string;
   fetch?: FetchLike;
   rateLimiter?: RateLimiter;
   now?: () => number;
+  requestTimeoutMs?: number;
 };
 
 export type FetchFilingInput = {
@@ -192,6 +219,7 @@ export class SecEdgarClient {
   private readonly fetchImpl: FetchLike;
   private readonly rateLimiter: RateLimiter;
   private readonly now: () => number;
+  private readonly requestTimeoutMs: number;
 
   constructor(config: SecEdgarClientConfig) {
     if (typeof config.userAgent !== "string" || config.userAgent.trim().length === 0) {
@@ -199,15 +227,18 @@ export class SecEdgarClient {
         'SecEdgarClient: userAgent must be a non-empty string (SEC Fair Access requires identifying contact info, e.g. "Market-Agent/0.1 (ops@example.com)")',
       );
     }
+    if (
+      config.requestTimeoutMs !== undefined &&
+      (!Number.isFinite(config.requestTimeoutMs) || config.requestTimeoutMs <= 0)
+    ) {
+      throw new Error("SecEdgarClient: requestTimeoutMs must be a positive number");
+    }
     this.userAgent = config.userAgent;
     this.fetchImpl = config.fetch ?? (globalThis.fetch.bind(globalThis) as FetchLike);
     this.rateLimiter =
-      config.rateLimiter ??
-      new TokenBucketRateLimiter({
-        capacity: SEC_EDGAR_DEFAULT_RATE_LIMIT.capacity,
-        refillPerSecond: SEC_EDGAR_DEFAULT_RATE_LIMIT.refillPerSecond,
-      });
+      config.rateLimiter ?? new TokenBucketRateLimiter({ ...SEC_EDGAR_DEFAULT_RATE_LIMIT });
     this.now = config.now ?? Date.now;
+    this.requestTimeoutMs = config.requestTimeoutMs ?? SEC_EDGAR_DEFAULT_REQUEST_TIMEOUT_MS;
   }
 
   static fromEnv(envName: string = SEC_EDGAR_DEFAULT_USER_AGENT_ENV): SecEdgarClient {
@@ -223,12 +254,25 @@ export class SecEdgarClient {
   async fetchFiling(input: FetchFilingInput): Promise<FetchFilingResult> {
     const url = filingArchiveUrl(input);
     await this.rateLimiter.acquire();
-    const response = await this.fetchImpl(url, {
-      headers: {
-        "User-Agent": this.userAgent,
-        Accept: "*/*",
-      },
-    });
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, {
+        headers: {
+          "User-Agent": this.userAgent,
+          Accept: "*/*",
+        },
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (controller.signal.aborted) {
+        throw new SecEdgarTimeoutError(url, this.requestTimeoutMs);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
     if (response.status === 429) {
       throw new SecEdgarRateLimitError(url, `SEC EDGAR rate-limited request: ${url}`);
     }
@@ -249,8 +293,6 @@ export class SecEdgarClient {
   }
 }
 
-// ---- Orchestrator ---------------------------------------------------------
-
 export type IngestSecFilingDeps = {
   db: QueryExecutor;
   objectStore: ObjectStore;
@@ -261,10 +303,9 @@ export type IngestSecFilingInput = {
   cik: number;
   accession_number: string;
   document: string;
-  // SEC form code, e.g. "10-K", "10-Q", "8-K". Stored as the document
-  // title so downstream tooling can route on form-kind without a
-  // round-trip to EDGAR's filing index.
-  form: string;
+  // Stored as the document title so downstream tooling can route on
+  // form-kind without a round-trip to EDGAR's filing index.
+  form: SecFormCode;
 };
 
 export type IngestSecFilingResult = {
@@ -276,6 +317,7 @@ export async function ingestSecFiling(
   deps: IngestSecFilingDeps,
   input: IngestSecFilingInput,
 ): Promise<IngestSecFilingResult> {
+  assertOneOf(input.form, SEC_FORM_CODES, "ingestSecFiling.form");
   // Fetch first — fail-closed semantics: a 404/5xx must not leave a
   // half-attributed source row pointing at content we never retrieved.
   const fetched = await deps.secClient.fetchFiling({

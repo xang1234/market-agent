@@ -48,6 +48,12 @@ export function assertOneOf<T extends string>(
   }
 }
 
+export function assertPositiveInteger(value: unknown, label: string): asserts value is number {
+  if (!Number.isInteger(value) || (value as number) <= 0) {
+    throw new Error(`${label}: must be a positive integer; received ${String(value)}`);
+  }
+}
+
 function isValidTimestampMatch(match: RegExpExecArray): boolean {
   const year = Number(match[1]);
   const month = Number(match[2]);

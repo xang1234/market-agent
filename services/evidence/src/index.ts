@@ -67,10 +67,13 @@ export type {
 
 export {
   SEC_EDGAR_DEFAULT_RATE_LIMIT,
+  SEC_EDGAR_DEFAULT_REQUEST_TIMEOUT_MS,
   SEC_EDGAR_DEFAULT_USER_AGENT_ENV,
+  SEC_FORM_CODES,
   SecEdgarClient,
   SecEdgarFetchError,
   SecEdgarRateLimitError,
+  SecEdgarTimeoutError,
   TokenBucketRateLimiter,
   filingArchiveUrl,
   filingIndexUrl,
@@ -84,5 +87,6 @@ export type {
   IngestSecFilingResult,
   RateLimiter,
   SecEdgarClientConfig,
+  SecFormCode,
   TokenBucketRateLimiterConfig,
 } from "./sec-edgar.ts";
