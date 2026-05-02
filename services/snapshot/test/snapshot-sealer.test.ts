@@ -253,13 +253,20 @@ test("sealSnapshot rejects unmarked executors before starting a transaction", as
 });
 
 test("snapshotTransactionClient rejects pool-like executors before starting a transaction", () => {
-  const { db, queries } = recordingDb();
-  const poolLike = Object.assign(db, {
+  // Real pg.Pool shape: has .query and .connect but NO .release. (The
+  // recordingDb fixture happens to expose .release for the acquired-client
+  // tests, so we build a fresh pool-shape here instead of borrowing it.)
+  const queries: Array<{ text: string }> = [];
+  const poolLike = {
     totalCount: 0,
+    async query(text: string) {
+      queries.push({ text });
+      return { rows: [] };
+    },
     async connect() {
       throw new Error("sealSnapshot must not acquire clients itself");
     },
-  });
+  };
 
   assert.throws(
     () => snapshotTransactionClient(poolLike),
@@ -270,12 +277,17 @@ test("snapshotTransactionClient rejects pool-like executors before starting a tr
 });
 
 test("snapshotTransactionClient rejects query-plus-connect pool wrappers", () => {
-  const { db, queries } = recordingDb();
-  const poolWrapper = Object.assign(db, {
+  // Minimal pool-shape wrapper: .query + .connect, no .release.
+  const queries: Array<{ text: string }> = [];
+  const poolWrapper = {
+    async query(text: string) {
+      queries.push({ text });
+      return { rows: [] };
+    },
     async connect() {
       throw new Error("sealSnapshot must not acquire clients through wrapper pools");
     },
-  });
+  };
 
   assert.throws(
     () => snapshotTransactionClient(poolWrapper),
@@ -297,6 +309,22 @@ test("snapshotTransactionClient rejects query-only pool wrappers before starting
   );
 
   assert.deepEqual(queries, []);
+});
+
+// fra-asy: pg.PoolClient inherits .connect from pg.Client AND adds
+// .release. The brand check must distinguish Pool (.connect, no .release)
+// from PoolClient (both); otherwise sealSnapshotWithPool callers using
+// the API correctly get rejected as if they passed a raw pool.
+test("snapshotTransactionClient accepts an acquired pg.PoolClient (.connect inherited from Client + .release added by Pool)", () => {
+  const { db } = recordingDb();
+  const acquiredPoolClient = Object.assign(db, {
+    connect() {
+      throw new Error("acquired pool client .connect must not be called by sealSnapshot");
+    },
+    release() {},
+  });
+
+  assert.doesNotThrow(() => snapshotTransactionClient(acquiredPoolClient));
 });
 
 test("sealSnapshotWithPool pins the seal transaction to one acquired client", async () => {

@@ -237,15 +237,15 @@ function assertSnapshotTransactionClient(db: QueryExecutor): asserts db is Snaps
   }
 }
 
-// fra-asy: this misclassifies acquired pg.PoolClients (they inherit
-// .connect from pg.Client AND have .release), so callers using the
-// *WithPool variant correctly hit the wrong error. Fixed in
-// services/analyze/src/template-runner.ts; consolidate when fra-asy lands.
+// A pg.Pool exposes .connect() but not .release(). A pg.PoolClient inherits
+// .connect() from pg.Client AND adds .release() — so we can't distinguish
+// "pool" from "acquired client" on .connect() alone. The acquired client
+// is the one with .release(); anything else with .connect() is a pool.
 function isPoolLike(db: QueryExecutor): boolean {
-  const candidate = db as {
-    connect?: unknown;
-  };
-  return typeof candidate.connect === "function";
+  return (
+    typeof (db as { connect?: unknown }).connect === "function" &&
+    typeof (db as { release?: unknown }).release !== "function"
+  );
 }
 
 function isAcquiredClient(db: QueryExecutor): db is SnapshotPoolClient {

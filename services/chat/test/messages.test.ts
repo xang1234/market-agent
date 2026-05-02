@@ -103,6 +103,22 @@ test("chat message persistence rejects pool-like executors before branding", () 
   );
 });
 
+// fra-asy: pg.PoolClient inherits .connect from pg.Client AND adds
+// .release. The brand check must distinguish Pool (.connect, no .release)
+// from PoolClient (both); otherwise persistChatMessageAfterSnapshotSealWithPool
+// callers using the API correctly get rejected as if they passed a raw pool.
+test("chat message persistence accepts an acquired pg.PoolClient (.connect inherited from Client + .release added by Pool)", () => {
+  assert.doesNotThrow(() =>
+    chatMessageTransactionClient({
+      query: async () => ({ rows: [] }),
+      connect: async () => {
+        throw new Error("acquired pool client .connect must not be called by chat message persistence");
+      },
+      release: () => {},
+    }),
+  );
+});
+
 test("chat message persistence rejects query-only pool wrappers before branding", () => {
   const client = unpinnedRecordingDb();
   const queryOnlyWrapper = {
