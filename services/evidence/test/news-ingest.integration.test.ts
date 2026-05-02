@@ -176,10 +176,11 @@ test(
 
     assert.equal(result.ingest.status, "ephemeral");
     assert.match(result.ingest.raw_blob_id, /^ephemeral:/);
-    assert.equal(
-      await objectStore.has(result.ingest.raw_blob_id).catch(() => false),
-      false,
-      "ephemeral path must NOT store the blob",
-    );
+    // Don't ask the object-store about the ephemeral sentinel — has() refuses
+    // non-sha256 ids by design (see object-store.test.ts), so a wrapped
+    // catch(() => false) would always succeed regardless of whether a blob
+    // was stored. The status === "ephemeral" + sentinel-prefixed
+    // raw_blob_id assertions above already pin the no-store contract;
+    // a positive proof would require enumerating the store's contents.
   },
 );

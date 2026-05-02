@@ -15,7 +15,7 @@ import { ingestDocument, type IngestDocumentResult } from "./ingest.ts";
 import type { ObjectStore } from "./object-store.ts";
 import { createSource, type SourceRow } from "./source-repo.ts";
 import type { QueryExecutor } from "./types.ts";
-import { assertUuidV4 } from "./validators.ts";
+import { assertNonEmptyBytes, assertUuidV4 } from "./validators.ts";
 
 export const USER_UPLOAD_PROVIDER = "user_upload";
 export const USER_UPLOAD_LICENSE_CLASS = "user_private";
@@ -45,9 +45,7 @@ export async function ingestUserUpload(
   input: IngestUserUploadInput,
 ): Promise<IngestUserUploadResult> {
   assertUuidV4(input.userId, "user_id");
-  if (!(input.bytes instanceof Uint8Array) || input.bytes.byteLength === 0) {
-    throw new Error("bytes: must be non-empty Uint8Array");
-  }
+  assertNonEmptyBytes(input.bytes, "bytes");
 
   const retrievedAt = input.retrievedAt ?? new Date().toISOString();
   const source = await createSource(deps.db, {

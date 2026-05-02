@@ -10,13 +10,18 @@ import { type DocumentInput } from "./document-repo.ts";
 import { ingestDocument, type IngestDocumentResult } from "./ingest.ts";
 import type { ObjectStore } from "./object-store.ts";
 import {
-  TRUST_TIERS,
   createSource,
+  type SourceKind,
   type SourceRow,
   type TrustTier,
 } from "./source-repo.ts";
 import type { QueryExecutor } from "./types.ts";
-import { assertIso8601WithOffset, assertNonEmptyString } from "./validators.ts";
+import {
+  assertIso8601WithOffset,
+  assertNonEmptyBytes,
+  assertNonEmptyString,
+  assertOneOf,
+} from "./validators.ts";
 
 // Spec § 5.2 mappings — the kind-specific subset of trust tiers the
 // orchestrator accepts. Anything outside these (e.g., trust_tier="user"
@@ -108,6 +113,10 @@ export type IngestPressReleaseInput = {
   canonicalUrl: string;
   publisher: string;
   publishedAt: string;
+  // Optional headline; falls back to publisher because press releases
+  // don't always have a separable title in the wire payload (the
+  // publisher attribution is what users scan in lists).
+  title?: string;
   providerDocId?: string;
   trustTier?: TrustTier;
   licenseClass?: string;
@@ -118,27 +127,26 @@ export async function ingestPressRelease(
   deps: IngestDeps,
   input: IngestPressReleaseInput,
 ): Promise<IngestResult> {
-  validateBytes(input.bytes);
+  assertNonEmptyBytes(input.bytes, "bytes");
   assertNonEmptyString(input.provider, "provider");
   assertNonEmptyString(input.publisher, "publisher");
   assertIso8601WithOffset(input.publishedAt, "published_at");
 
   const trustTier = input.trustTier ?? defaultPressReleaseTrustTier(input.provider);
-  assertOneOfFrozen(trustTier, PRESS_RELEASE_ALLOWED_TRUST_TIERS, "trust_tier");
+  assertOneOf(trustTier, PRESS_RELEASE_ALLOWED_TRUST_TIERS, "trust_tier");
 
   const licenseClass = input.licenseClass ?? "public";
   const canonicalUrl = canonicalizeNewsUrl(input.canonicalUrl);
 
   return persistKindedSource(deps, {
     provider: input.provider,
-    sourceKind: "press_release",
-    documentKind: "press_release",
+    kind: "press_release",
     canonicalUrl,
     trustTier,
     licenseClass,
     bytes: input.bytes,
     document: {
-      title: input.publisher,
+      title: input.title ?? input.publisher,
       provider_doc_id: input.providerDocId,
       published_at: input.publishedAt,
     },
@@ -174,7 +182,7 @@ export async function ingestEarningsTranscript(
   deps: IngestDeps,
   input: IngestEarningsTranscriptInput,
 ): Promise<IngestResult> {
-  validateBytes(input.bytes);
+  assertNonEmptyBytes(input.bytes, "bytes");
   assertNonEmptyString(input.provider, "provider");
   assertNonEmptyString(input.publisher, "publisher");
   assertNonEmptyString(input.issuer, "issuer");
@@ -182,15 +190,14 @@ export async function ingestEarningsTranscript(
   assertIso8601WithOffset(input.publishedAt, "published_at");
 
   const trustTier = input.trustTier ?? "secondary";
-  assertOneOfFrozen(trustTier, TRANSCRIPT_ALLOWED_TRUST_TIERS, "trust_tier");
+  assertOneOf(trustTier, TRANSCRIPT_ALLOWED_TRUST_TIERS, "trust_tier");
 
   const licenseClass = input.licenseClass ?? "licensed";
   const canonicalUrl = canonicalizeNewsUrl(input.canonicalUrl);
 
   return persistKindedSource(deps, {
     provider: input.provider,
-    sourceKind: "transcript",
-    documentKind: "transcript",
+    kind: "transcript",
     canonicalUrl,
     trustTier,
     licenseClass,
@@ -225,22 +232,21 @@ export async function ingestNewsArticle(
   deps: IngestDeps,
   input: IngestNewsArticleInput,
 ): Promise<IngestResult> {
-  validateBytes(input.bytes);
+  assertNonEmptyBytes(input.bytes, "bytes");
   assertNonEmptyString(input.provider, "provider");
   assertNonEmptyString(input.publisher, "publisher");
   assertNonEmptyString(input.title, "title");
   assertIso8601WithOffset(input.publishedAt, "published_at");
 
   const trustTier = input.trustTier ?? "tertiary";
-  assertOneOfFrozen(trustTier, NEWS_ARTICLE_ALLOWED_TRUST_TIERS, "trust_tier");
+  assertOneOf(trustTier, NEWS_ARTICLE_ALLOWED_TRUST_TIERS, "trust_tier");
 
   const licenseClass = input.licenseClass ?? "free";
   const canonicalUrl = canonicalizeNewsUrl(input.canonicalUrl);
 
   return persistKindedSource(deps, {
     provider: input.provider,
-    sourceKind: "article",
-    documentKind: "article",
+    kind: "article",
     canonicalUrl,
     trustTier,
     licenseClass,
@@ -255,12 +261,14 @@ export async function ingestNewsArticle(
   });
 }
 
-// ---- shared persistence helper --------------------------------------------
+// The kinds these orchestrators use both as source_kind and document_kind.
+// Kept narrow (not the full SourceKind union) so adding a new ingest kind
+// requires an explicit edit here.
+type NewsIngestKind = Extract<SourceKind, "press_release" | "transcript" | "article">;
 
 type PersistInput = {
   provider: string;
-  sourceKind: "press_release" | "transcript" | "article";
-  documentKind: DocumentInput["kind"];
+  kind: NewsIngestKind;
   canonicalUrl: string;
   trustTier: TrustTier;
   licenseClass: string;
@@ -275,7 +283,7 @@ async function persistKindedSource(
 ): Promise<IngestResult> {
   const source = await createSource(deps.db, {
     provider: input.provider,
-    kind: input.sourceKind,
+    kind: input.kind,
     canonical_url: input.canonicalUrl,
     trust_tier: input.trustTier,
     license_class: input.licenseClass,
@@ -287,25 +295,9 @@ async function persistKindedSource(
     {
       source: { source_id: source.source_id, license_class: source.license_class },
       bytes: input.bytes,
-      document: { ...input.document, kind: input.documentKind },
+      document: { ...input.document, kind: input.kind },
     },
   );
 
   return Object.freeze({ source, ingest });
-}
-
-function validateBytes(bytes: unknown): asserts bytes is Uint8Array {
-  if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0) {
-    throw new Error("bytes: must be non-empty Uint8Array");
-  }
-}
-
-function assertOneOfFrozen<T extends string>(
-  value: unknown,
-  allowed: ReadonlyArray<T>,
-  label: string,
-): asserts value is T {
-  if (typeof value !== "string" || !allowed.includes(value as T)) {
-    throw new Error(`${label}: must be one of ${allowed.join(", ")}`);
-  }
 }

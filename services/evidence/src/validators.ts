@@ -54,6 +54,12 @@ export function assertPositiveInteger(value: unknown, label: string): asserts va
   }
 }
 
+export function assertNonEmptyBytes(value: unknown, label: string): asserts value is Uint8Array {
+  if (!(value instanceof Uint8Array) || value.byteLength === 0) {
+    throw new Error(`${label}: must be non-empty Uint8Array`);
+  }
+}
+
 function isValidTimestampMatch(match: RegExpExecArray): boolean {
   const year = Number(match[1]);
   const month = Number(match[2]);

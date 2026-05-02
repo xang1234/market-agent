@@ -163,7 +163,7 @@ test("ingestPressRelease writes a source (kind=press_release) and a document wit
   assert.equal(queries[0]?.values?.[2], "https://www.businesswire.com/news/home/123");
 });
 
-test("ingestPressRelease sets trust_tier=primary when the provider matches issuer_/ir_/issuerpr-/* (issuer's own newsroom)", async () => {
+test("ingestPressRelease sets trust_tier=primary when the provider starts with issuer_ or ir_ (issuer's own newsroom)", async () => {
   // Issuer's own press release is a primary source; an aggregator's
   // copy of the same release is secondary. The orchestrator's default
   // is provider-string-driven; callers can override but the default
@@ -443,20 +443,28 @@ test("exported allowed-trust-tier sets match the spec § 5.2 mapping (frozen and
   assert.equal(Object.isFrozen(NEWS_ARTICLE_ALLOWED_TRUST_TIERS), true);
 });
 
-// ---- content_hash discipline -----------------------------------------------
-
-test("all three orchestrators produce sha256 content_hash from bytes (dedupe key invariant)", () => {
-  // Cheap pin: the sha256 hash flows through documents.content_hash
-  // unchanged from the helper that fra-0sa established. If a future
-  // refactor swaps hashing algorithms here, the dedupe contract that
-  // documents.unique(content_hash, raw_blob_id) relies on would silently
-  // break — this test catches that by computing the expected hash
-  // directly and asserting the orchestrator's output matches.
-  const bytes = new TextEncoder().encode("test body");
+test("ingestPressRelease emits the sha256 content_hash actually derived from the bytes (dedupe key invariant)", async () => {
+  // Replaces a previously-tautological test that only checked
+  // crypto.createHash output. The behavioral assertion is: the value
+  // flowing into documents.content_hash equals sha256(bytes). If a
+  // future refactor swaps hashing algorithms here, dedupe (which keys
+  // on content_hash) silently breaks — this catches it.
+  const { db, queries } = recordingDb();
+  const bytes = new TextEncoder().encode("press release body for hash check");
   const expected = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
-  // This isn't a behavioral test of the orchestrator (those run via
-  // recordingDb above) — it's a sanity pin on the hash format the
-  // ingest layer produces. The recordingDb tests assert the value
-  // flows through; this asserts the value is what it should be.
-  assert.match(expected, /^sha256:[0-9a-f]{64}$/);
+
+  const result = await ingestPressRelease(
+    { db, objectStore: new RecordingObjectStore() },
+    {
+      bytes,
+      provider: "businesswire",
+      canonicalUrl: "https://www.businesswire.com/news/x",
+      publisher: "Apple, Inc.",
+      publishedAt: "2026-05-03T13:30:00Z",
+    },
+  );
+
+  assert.equal(result.ingest.document.content_hash, expected);
+  // documents insert is queries[1]; content_hash is values[9] per createDocument.
+  assert.equal(queries[1]?.values?.[9], expected);
 });
