@@ -101,9 +101,9 @@ test("ingestUserUpload writes a user-scoped source (provider, kind, trust_tier, 
   // sources insert: user_id is the 8th positional parameter.
   assert.match(queries[0].text, /insert into sources/);
   assert.equal(queries[0].values?.[7], USER_A);
-  // documents insert: title flows through as values[5] (per createDocument shape).
-  assert.match(queries[1].text, /insert into documents/);
-  assert.equal(queries[1].values?.[5], "Q1 research notes.pdf");
+  const documentsInsert = queries.find((query) => /insert into documents/i.test(query.text));
+  assert.match(documentsInsert?.text ?? "", /insert into documents/);
+  assert.equal(documentsInsert?.values?.[5], "Q1 research notes.pdf");
 });
 
 test("ingestUserUpload rejects an unset/malformed userId before touching db or object store", async () => {

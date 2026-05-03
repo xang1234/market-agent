@@ -25,6 +25,7 @@ export type ObjectStore = {
   put(bytes: Uint8Array): Promise<PutResult>;
   get(rawBlobId: string): Promise<StoredBlob | null>;
   has(rawBlobId: string): Promise<boolean>;
+  delete(rawBlobId: string): Promise<boolean>;
 };
 
 export function rawBlobIdFromBytes(bytes: Uint8Array): string {
@@ -111,5 +112,10 @@ export class MemoryObjectStore implements ObjectStore {
   async has(rawBlobId: string): Promise<boolean> {
     assertRawBlobId(rawBlobId);
     return this.#blobs.has(rawBlobId);
+  }
+
+  async delete(rawBlobId: string): Promise<boolean> {
+    assertRawBlobId(rawBlobId);
+    return this.#blobs.delete(rawBlobId);
   }
 }

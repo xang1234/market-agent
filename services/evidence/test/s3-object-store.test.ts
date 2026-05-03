@@ -6,13 +6,14 @@ import {
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
+  DeleteObjectCommand,
   type S3Client,
 } from "@aws-sdk/client-s3";
 
 import { RAW_BLOB_ID_PREFIX } from "../src/object-store.ts";
 import { S3ObjectStore } from "../src/s3-object-store.ts";
 
-type SentCommand = HeadObjectCommand | GetObjectCommand | PutObjectCommand;
+type SentCommand = HeadObjectCommand | GetObjectCommand | PutObjectCommand | DeleteObjectCommand;
 type Handler = (command: SentCommand) => Promise<unknown>;
 
 function mockClient(handler: Handler): { client: S3Client; sent: SentCommand[] } {
@@ -219,6 +220,59 @@ test("has rethrows non-404 HEAD errors (e.g., AccessDenied)", async () => {
   const store = new S3ObjectStore({ client, bucket: "blobs" });
 
   await assert.rejects(store.has(HELLO_ID), /Access Denied/);
+});
+
+test("delete HEADs first, deletes on hit, and returns true", async () => {
+  const { client, sent } = mockClient(async (command) => {
+    if (command instanceof HeadObjectCommand) return {};
+    if (command instanceof DeleteObjectCommand) return {};
+    throw new Error("unexpected command");
+  });
+  const store = new S3ObjectStore({ client, bucket: "blobs" });
+
+  assert.equal(await store.delete(HELLO_ID), true);
+  assert.equal(sent.length, 2);
+  assert.ok(sent[0] instanceof HeadObjectCommand);
+  assert.equal(sent[0].input.Key, HELLO_KEY);
+  assert.ok(sent[1] instanceof DeleteObjectCommand);
+  assert.equal(sent[1].input.Bucket, "blobs");
+  assert.equal(sent[1].input.Key, HELLO_KEY);
+});
+
+test("delete returns false on missing object and skips DeleteObject", async () => {
+  const { client, sent } = mockClient(async (command) => {
+    if (command instanceof HeadObjectCommand) throw notFound();
+    throw new Error("Delete should not be called");
+  });
+  const store = new S3ObjectStore({ client, bucket: "blobs" });
+
+  assert.equal(await store.delete(HELLO_ID), false);
+  assert.equal(sent.length, 1);
+  assert.ok(sent[0] instanceof HeadObjectCommand);
+});
+
+test("delete rejects malformed ids before any S3 call", async () => {
+  const { client, sent } = mockClient(async () => {
+    throw new Error("send must not be called");
+  });
+  const store = new S3ObjectStore({ client, bucket: "blobs" });
+
+  await assert.rejects(store.delete("not-a-blob-id"), /sha256:/);
+  assert.equal(sent.length, 0);
+});
+
+test("delete rethrows non-404 errors", async () => {
+  const accessDenied = Object.assign(new Error("Access Denied"), {
+    name: "AccessDenied",
+    $metadata: { httpStatusCode: 403 },
+  });
+  const { client } = mockClient(async (command) => {
+    if (command instanceof HeadObjectCommand) throw accessDenied;
+    throw new Error("Delete should not be called");
+  });
+  const store = new S3ObjectStore({ client, bucket: "blobs" });
+
+  await assert.rejects(store.delete(HELLO_ID), /Access Denied/);
 });
 
 test("isNotFoundError recognizes the legacy NoSuchKey error name (S3 GET 404)", async () => {

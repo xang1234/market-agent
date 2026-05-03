@@ -93,7 +93,7 @@ async function seedFixture(client: Client, options: { confidence?: number } = {}
   const insertImpact = async (claimId: string, subjectId: string, direction: string) =>
     client.query(
       `insert into entity_impacts (claim_id, subject_kind, subject_id, direction, channel, horizon, confidence)
-       values ($1::uuid, 'issuer', $2::uuid, $3::impact_direction, 'fundamentals', 'near_term', $4)`,
+       values ($1::uuid, 'issuer', $2::uuid, $3::impact_direction, 'balance_sheet', 'near_term', $4)`,
       [claimId, subjectId, direction, confidence],
     );
   await insertImpact(claimSupportA, ISSUER_X, "positive");

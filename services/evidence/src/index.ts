@@ -1,4 +1,87 @@
 export {
+  CLAIM_ARGUMENT_ROLES,
+  createClaimArgument,
+  listClaimArgumentsForClaim,
+} from "./claim-argument-repo.ts";
+export type {
+  ClaimArgumentInput,
+  ClaimArgumentRole,
+  ClaimArgumentRow,
+} from "./claim-argument-repo.ts";
+
+export {
+  CLAIM_CLUSTER_MEMBER_RELATIONS,
+  addClaimClusterMember,
+  buildClaimCanonicalSignature,
+  getClaimClusterBySignature,
+  upsertClaimCluster,
+} from "./claim-cluster-repo.ts";
+export type {
+  AddClaimClusterMemberResult,
+  ClaimCanonicalSignatureInput,
+  ClaimClusterInput,
+  ClaimClusterMemberInput,
+  ClaimClusterMemberRelation,
+  ClaimClusterMemberRow,
+  ClaimClusterRow,
+} from "./claim-cluster-repo.ts";
+
+export {
+  createClaimEvidence,
+  listClaimEvidenceForClaim,
+} from "./claim-evidence-repo.ts";
+export type {
+  ClaimEvidenceInput,
+  ClaimEvidenceRow,
+} from "./claim-evidence-repo.ts";
+
+export {
+  EVENT_STATUSES,
+  EVENT_TYPES,
+  createEvent,
+  createEventSubject,
+  listEventSubjectsForEvent,
+} from "./event-repo.ts";
+export type {
+  EventInput,
+  EventRow,
+  EventStatus,
+  EventSubjectInput,
+  EventSubjectRow,
+  EventType,
+} from "./event-repo.ts";
+
+export {
+  CLAIM_MODALITIES,
+  CLAIM_POLARITIES,
+  CLAIM_STATUSES,
+  createClaim,
+  listClaimsForDocument,
+} from "./claim-repo.ts";
+export type {
+  ClaimInput,
+  ClaimModality,
+  ClaimPolarity,
+  ClaimRow,
+  ClaimStatus,
+} from "./claim-repo.ts";
+
+export {
+  ENTITY_IMPACT_CHANNELS,
+  IMPACT_DIRECTIONS,
+  IMPACT_HORIZONS,
+  createEntityImpact,
+  listEntityImpactsForClaim,
+} from "./entity-impact-repo.ts";
+export type {
+  EntityImpactChannel,
+  EntityImpactInput,
+  EntityImpactRow,
+  ImpactDirection,
+  ImpactHorizon,
+} from "./entity-impact-repo.ts";
+
+export {
   SOURCE_KINDS,
   TRUST_TIERS,
   createSource,
@@ -62,6 +145,25 @@ export type {
   StoredBlob,
 } from "./object-store.ts";
 
+export {
+  createObjectBlobGcWorker,
+  deleteUserAndQueueObjectBlobs,
+  deleteUserAndQueueObjectBlobsWithPool,
+  objectBlobGcTransactionClient,
+  runObjectBlobGcBatch,
+  runObjectBlobGcBatchWithPool,
+} from "./blob-gc-repo.ts";
+export type {
+  DeleteUserBlobQueueResult,
+  ObjectBlobGcBatchOptions,
+  ObjectBlobGcBatchResult,
+  ObjectBlobGcClientPool,
+  ObjectBlobGcPoolClient,
+  ObjectBlobGcTransactionClient,
+  ObjectBlobGcWorker,
+  ObjectBlobGcWorkerConfig,
+} from "./blob-gc-repo.ts";
+
 export { S3ObjectStore } from "./s3-object-store.ts";
 export type { S3ObjectStoreConfig } from "./s3-object-store.ts";
 
@@ -73,10 +175,15 @@ export {
 } from "./license-policy.ts";
 export type { StoragePolicy } from "./license-policy.ts";
 
-export { ingestDocument } from "./ingest.ts";
+export {
+  ingestDocument,
+  ingestDocumentWithPool,
+} from "./ingest.ts";
 export type {
+  IngestDocumentClientPool,
   IngestDocumentDeps,
   IngestDocumentInput,
+  IngestDocumentPoolClient,
   IngestDocumentResult,
 } from "./ingest.ts";
 

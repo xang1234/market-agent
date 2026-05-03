@@ -269,6 +269,25 @@ create index documents_published_idx on documents(published_at desc);
 create index documents_parent_idx on documents(parent_document_id) where parent_document_id is not null;
 create index documents_conversation_idx on documents(conversation_id) where conversation_id is not null;
 
+create table object_blob_gc_queue (
+  raw_blob_id text primary key check (raw_blob_id ~ '^sha256:[0-9a-f]{64}$'),
+  reason text not null check (reason in ('user_erasure')),
+  source_user_id uuid references users(user_id) on delete set null,
+  queued_at timestamptz not null default now(),
+  next_attempt_at timestamptz not null default now(),
+  last_checked_at timestamptz,
+  deleted_at timestamptz,
+  attempts integer not null default 0 check (attempts >= 0),
+  last_error text,
+  updated_at timestamptz not null default now()
+);
+create index object_blob_gc_queue_pending_idx
+  on object_blob_gc_queue(next_attempt_at, queued_at, raw_blob_id)
+  where deleted_at is null;
+create index object_blob_gc_queue_source_user_idx
+  on object_blob_gc_queue(source_user_id)
+  where source_user_id is not null;
+
 create table mentions (
   mention_id uuid primary key default gen_random_uuid(),
   document_id uuid not null references documents(document_id) on delete cascade,
@@ -321,7 +340,7 @@ create table entity_impacts (
   subject_kind subject_kind not null,
   subject_id uuid not null,
   direction impact_direction not null,
-  channel text not null,
+  channel text not null check (channel in ('demand', 'pricing', 'supply_chain', 'regulation', 'competition', 'balance_sheet', 'sentiment')),
   horizon impact_horizon not null,
   confidence numeric not null check (confidence >= 0 and confidence <= 1),
   created_at timestamptz not null default now()
