@@ -29,9 +29,13 @@ export function assertIso8601WithOffset(value: unknown, label: string): asserts 
 }
 
 export function assertUuidV4(value: unknown, label: string): asserts value is string {
-  if (typeof value !== "string" || !UUID_V4.test(value)) {
+  if (!isUuidV4(value)) {
     throw new Error(`${label}: must be a UUID v4`);
   }
+}
+
+export function isUuidV4(value: unknown): value is string {
+  return typeof value === "string" && UUID_V4.test(value);
 }
 
 export function assertOneOf<T extends string>(
@@ -41,6 +45,18 @@ export function assertOneOf<T extends string>(
 ): asserts value is T {
   if (typeof value !== "string" || !allowed.includes(value as T)) {
     throw new Error(`${label}: must be one of ${allowed.join(", ")}`);
+  }
+}
+
+export function assertPositiveInteger(value: unknown, label: string): asserts value is number {
+  if (!Number.isInteger(value) || (value as number) <= 0) {
+    throw new Error(`${label}: must be a positive integer; received ${String(value)}`);
+  }
+}
+
+export function assertNonEmptyBytes(value: unknown, label: string): asserts value is Uint8Array {
+  if (!(value instanceof Uint8Array) || value.byteLength === 0) {
+    throw new Error(`${label}: must be non-empty Uint8Array`);
   }
 }
 

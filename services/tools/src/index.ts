@@ -78,6 +78,28 @@ export {
   toolsForAudience,
   validateRegistryAudienceBoundary,
 } from "./audience-enforcement.ts";
+
+export {
+  READER_EXTRACTION_TOOL_NAMES,
+  READER_TOOL_ERROR_CODES,
+  ReaderToolError,
+  createReaderToolDispatcher,
+} from "./reader-tool-dispatcher.ts";
+export type {
+  CreateReaderToolDispatcherInput,
+  DispatchAuthorizationRejection,
+  DispatchInput,
+  DispatchResult,
+  DispatchSuccess,
+  DispatchToolError,
+  ReaderExtractionToolName,
+  ReaderToolDispatcher,
+  ReaderToolErrorCode,
+  ReaderToolHandler,
+  ReaderToolHandlerMap,
+  ReaderToolInput,
+  ReaderToolOutput,
+} from "./reader-tool-dispatcher.ts";
 export type {
   AudienceBoundaryViolation,
   AuthorizeToolCallInput,

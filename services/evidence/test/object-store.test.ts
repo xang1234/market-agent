@@ -3,11 +3,17 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
 import {
+  EPHEMERAL_RAW_BLOB_ID_PREFIX,
   MemoryObjectStore,
   RAW_BLOB_ID_PREFIX,
   assertRawBlobId,
+  assertRawBlobIdOrEphemeral,
+  ephemeralRawBlobIdForSource,
+  isEphemeralRawBlobId,
   rawBlobIdFromBytes,
 } from "../src/object-store.ts";
+
+const SAMPLE_SOURCE_ID = "11111111-1111-4111-a111-111111111111";
 
 const HELLO = new TextEncoder().encode("hello");
 const HELLO_HEX = createHash("sha256").update(HELLO).digest("hex");
@@ -108,6 +114,47 @@ test("returned bytes are isolated from internal storage (mutating the result doe
   const second = await store.get(id);
   assert.ok(second);
   assert.deepEqual(Array.from(second.bytes), Array.from(HELLO));
+});
+
+test("ephemeralRawBlobIdForSource returns the 'ephemeral:<source_id>' sentinel", () => {
+  assert.equal(
+    ephemeralRawBlobIdForSource(SAMPLE_SOURCE_ID),
+    `${EPHEMERAL_RAW_BLOB_ID_PREFIX}${SAMPLE_SOURCE_ID}`,
+  );
+});
+
+test("ephemeralRawBlobIdForSource rejects non-uuid inputs (sentinel must round-trip to a real source)", () => {
+  assert.throws(() => ephemeralRawBlobIdForSource("not-a-uuid"), /uuid/i);
+  assert.throws(() => ephemeralRawBlobIdForSource(""), /uuid/i);
+});
+
+test("isEphemeralRawBlobId distinguishes the sentinel from sha256 ids and arbitrary strings", () => {
+  assert.equal(isEphemeralRawBlobId(ephemeralRawBlobIdForSource(SAMPLE_SOURCE_ID)), true);
+  assert.equal(isEphemeralRawBlobId(HELLO_ID), false);
+  assert.equal(isEphemeralRawBlobId("ephemeral:not-a-uuid"), false);
+  assert.equal(isEphemeralRawBlobId(""), false);
+  assert.equal(isEphemeralRawBlobId("ephemeral:"), false);
+});
+
+test("assertRawBlobIdOrEphemeral accepts both sha256 ids and the ephemeral sentinel", () => {
+  assertRawBlobIdOrEphemeral(HELLO_ID);
+  assertRawBlobIdOrEphemeral(ephemeralRawBlobIdForSource(SAMPLE_SOURCE_ID));
+});
+
+test("assertRawBlobIdOrEphemeral rejects malformed ephemeral sentinels", () => {
+  assert.throws(() => assertRawBlobIdOrEphemeral("ephemeral:not-a-uuid"), /sha256:|ephemeral:/);
+  assert.throws(() => assertRawBlobIdOrEphemeral("ephemeral:"), /sha256:|ephemeral:/);
+});
+
+test("MemoryObjectStore.get/has refuse the ephemeral sentinel (storage layer never touches it)", async () => {
+  // Defensive: the object-store contract is for sha256-addressed bytes
+  // only. If a caller ever tries to fetch an ephemeral document from
+  // storage, that's a bug — surface it loud rather than silently
+  // returning null/false and masking the design break.
+  const store = new MemoryObjectStore();
+  const sentinel = ephemeralRawBlobIdForSource(SAMPLE_SOURCE_ID);
+  await assert.rejects(store.get(sentinel), /sha256:/);
+  await assert.rejects(store.has(sentinel), /sha256:/);
 });
 
 test("different content produces different ids and is stored independently", async () => {

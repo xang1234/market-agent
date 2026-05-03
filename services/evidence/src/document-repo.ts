@@ -1,4 +1,4 @@
-import { assertRawBlobId } from "./object-store.ts";
+import { assertRawBlobIdOrEphemeral } from "./object-store.ts";
 import type { QueryExecutor } from "./types.ts";
 import {
   assertIso8601WithOffset,
@@ -16,6 +16,7 @@ export const DOCUMENT_KINDS = Object.freeze([
   "social_post",
   "thread",
   "upload",
+  "press_release",
 ] as const);
 
 export const PARSE_STATUSES = Object.freeze([
@@ -266,7 +267,7 @@ function normalizeDocumentInput(input: DocumentInput): Required<DocumentInput> {
   }
   assertOptionalNonEmptyString(input.lang, "lang");
   assertNonEmptyString(input.content_hash, "content_hash");
-  assertRawBlobId(input.raw_blob_id);
+  assertRawBlobIdOrEphemeral(input.raw_blob_id);
   const parseStatus = input.parse_status ?? "pending";
   assertOneOf(parseStatus, PARSE_STATUSES, "parse_status");
 

@@ -62,7 +62,7 @@ test("migrate up applies pending migrations and records them in schema_migration
   });
 
   assert.equal(migrateResult.status, 0, migrateResult.stderr || migrateResult.stdout);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "10");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "12");
   assert.deepEqual(
     queryValue(containerName, "select version || ':' || name from schema_migrations order by version").split("\n"),
     [
@@ -76,6 +76,8 @@ test("migrate up applies pending migrations and records them in schema_migration
       "0008:chat_threads_archived_at",
       "0009:theme_memberships_unique",
       "0010:analyze_template_runs",
+      "0011:sources_user_id",
+      "0012:document_kind_press_release",
     ],
   );
 
@@ -130,6 +132,8 @@ test("migrate status reports all migrations as applied after migrate up", { time
   assert.match(statusResult.stdout, /0008\s+chat_threads_archived_at\s+applied/);
   assert.match(statusResult.stdout, /0009\s+theme_memberships_unique\s+applied/);
   assert.match(statusResult.stdout, /0010\s+analyze_template_runs\s+applied/);
+  assert.match(statusResult.stdout, /0011\s+sources_user_id\s+applied/);
+  assert.match(statusResult.stdout, /0012\s+document_kind_press_release\s+applied/);
 });
 
 test("migrate down rolls back the most recently applied migration", { timeout: 120000 }, async (t) => {
@@ -161,7 +165,7 @@ test("migrate down rolls back the most recently applied migration", { timeout: 1
   });
   assert.equal(downResult.status, 0, downResult.stderr || downResult.stdout);
 
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "9");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "11");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -191,34 +195,44 @@ test("migrate down rolls back the most recently applied migration", { timeout: 1
       "select count(*) from information_schema.columns where table_name = 'chat_threads' and column_name = 'archived_at'",
     ),
     "1",
-    "0008's archived_at column must remain — only 0010 should have been rolled back",
+    "0008's archived_at column must remain — only 0012 should have been rolled back",
   );
-  // 0009's effects must remain — only 0010 was rolled back.
+  // 0009's effects must remain — only 0012 was rolled back.
   assert.equal(
     queryValue(
       containerName,
       "select count(*) from pg_constraint where conname = 'theme_memberships_theme_subject_unique'",
     ),
     "1",
-    "0009's unique constraint must remain — only 0010 should have been rolled back",
+    "0009's unique constraint must remain — only 0012 should have been rolled back",
   );
-  // 0010-specific assertions: analyze_template_runs table and its index
-  // must be gone after the rollback.
+  // 0010's effects must remain — only 0012 was rolled back.
   assert.equal(
     queryValue(
       containerName,
       "select count(*) from pg_tables where schemaname = 'public' and tablename = 'analyze_template_runs'",
     ),
-    "0",
-    "analyze_template_runs table added by 0010.up must be removed by 0010.down",
+    "1",
+    "0010's analyze_template_runs table must remain — only 0012 should have been rolled back",
   );
+  // 0011's effects must remain — only 0012 was rolled back.
   assert.equal(
     queryValue(
       containerName,
-      "select count(*) from pg_indexes where schemaname = 'public' and indexname = 'analyze_template_runs_template_created_idx'",
+      "select count(*) from information_schema.columns where table_name = 'sources' and column_name = 'user_id'",
+    ),
+    "1",
+    "0011's sources.user_id column must remain — only 0012 should have been rolled back",
+  );
+  // 0012-specific assertion: 'press_release' must be gone from
+  // document_kind enum after the rollback.
+  assert.equal(
+    queryValue(
+      containerName,
+      "select count(*) from pg_enum e join pg_type t on t.oid = e.enumtypid where t.typname = 'document_kind' and e.enumlabel = 'press_release'",
     ),
     "0",
-    "analyze_template_runs index added by 0010.up must be removed by 0010.down",
+    "press_release enum value added by 0012.up must be removed by 0012.down",
   );
 });
 
@@ -733,7 +747,7 @@ test("migrate down rolls back schema changes when removing the migration record 
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /rejecting schema_migrations delete/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "10");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "12");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -742,13 +756,13 @@ test("migrate down rolls back schema changes when removing the migration record 
   // migration's schema change must still be in place. If the runner
   // accidentally executed the down DDL before hitting the trigger block, the
   // schema_migrations row count alone wouldn't catch that — checking the
-  // latest migration's actual artifact does. 0010 added analyze_template_runs;
-  // the down would drop it, so its presence is independent proof the down
-  // DDL did not execute.
+  // latest migration's actual artifact does. 0012 added 'press_release' to
+  // document_kind; the down would remove it, so its presence is independent
+  // proof the down DDL did not execute.
   assert.equal(
     queryValue(
       containerName,
-      "select count(*) from pg_tables where schemaname = 'public' and tablename = 'analyze_template_runs'",
+      "select count(*) from pg_enum e join pg_type t on t.oid = e.enumtypid where t.typname = 'document_kind' and e.enumlabel = 'press_release'",
     ),
     "1",
   );
@@ -799,7 +813,7 @@ test("migrate down fails when any applied migration is missing locally", { timeo
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /Applied migration 0000 is missing locally/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "11");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "13");
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
 });
 
@@ -823,15 +837,18 @@ test("migrate up applies 0009 cleanly even when legacy duplicate theme_membershi
 
   await waitForPostgres(containerName, databaseUrl);
 
-  // Apply through 0010, then roll back 0010 and 0009 so we land on
-  // the schema as it existed before this migration (no unique
-  // constraint on theme_memberships).
+  // Apply all migrations, then roll back through 0009 so we land on the
+  // schema as it existed before that migration (no unique constraint on
+  // theme_memberships). Loop count is total_applied - 8 (rollback through
+  // and including 0009) so this stays correct as new migrations land.
   const upResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
     cwd: dbRoot,
     env: { DATABASE_URL: databaseUrl },
   });
   assert.equal(upResult.status, 0, upResult.stderr || upResult.stdout);
-  for (let i = 0; i < 2; i++) {
+  const totalApplied = Number(queryValue(containerName, "select count(*) from schema_migrations"));
+  const rollbackCount = totalApplied - 8;
+  for (let i = 0; i < rollbackCount; i++) {
     const downResult = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], {
       cwd: dbRoot,
       env: { DATABASE_URL: databaseUrl },

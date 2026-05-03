@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
 
+import { assertUuidV4, isUuidV4 } from "./validators.ts";
+
 export const RAW_BLOB_ID_PREFIX = "sha256:";
 const RAW_BLOB_ID_PATTERN = /^sha256:[0-9a-f]{64}$/;
+
+// Sentinel raw_blob_id for documents whose license_class forbids raw
+// blob retention. The storage layer (put/get/has) refuses this format —
+// only the documents-table ingest path accepts it.
+export const EPHEMERAL_RAW_BLOB_ID_PREFIX = "ephemeral:";
 
 export type RawBlobMetadata = Readonly<{
   raw_blob_id: string;
@@ -28,6 +35,8 @@ export function rawBlobIdFromBytes(bytes: Uint8Array): string {
   return `${RAW_BLOB_ID_PREFIX}${hex}`;
 }
 
+export const contentHashFromBytes = rawBlobIdFromBytes;
+
 export function assertRawBlobId(
   value: unknown,
   label = "raw_blob_id",
@@ -35,6 +44,31 @@ export function assertRawBlobId(
   if (typeof value !== "string" || !RAW_BLOB_ID_PATTERN.test(value)) {
     throw new Error(`${label}: must match ${RAW_BLOB_ID_PREFIX}<64 lowercase hex chars>`);
   }
+}
+
+export function ephemeralRawBlobIdForSource(sourceId: string): string {
+  assertUuidV4(sourceId, "source_id");
+  return `${EPHEMERAL_RAW_BLOB_ID_PREFIX}${sourceId}`;
+}
+
+export function isEphemeralRawBlobId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.startsWith(EPHEMERAL_RAW_BLOB_ID_PREFIX) &&
+    isUuidV4(value.slice(EPHEMERAL_RAW_BLOB_ID_PREFIX.length))
+  );
+}
+
+export function assertRawBlobIdOrEphemeral(
+  value: unknown,
+  label = "raw_blob_id",
+): asserts value is string {
+  if (typeof value === "string" && (RAW_BLOB_ID_PATTERN.test(value) || isEphemeralRawBlobId(value))) {
+    return;
+  }
+  throw new Error(
+    `${label}: must match ${RAW_BLOB_ID_PREFIX}<64 lowercase hex chars> or ${EPHEMERAL_RAW_BLOB_ID_PREFIX}<source_uuid_v4>`,
+  );
 }
 
 export class MemoryObjectStore implements ObjectStore {
