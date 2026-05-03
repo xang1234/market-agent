@@ -19,6 +19,7 @@ import {
 const schemaPath = join(workspaceRoot, "spec", "finance_research_db_schema.sql");
 const initMigrationPath = join(dbRoot, "migrations", "0001_init.up.sql");
 const snapshotManifestMigrationPath = join(dbRoot, "migrations", "0005_snapshot_document_refs.up.sql");
+const evidenceBundleMigrationPath = join(dbRoot, "migrations", "0017_evidence_bundles.up.sql");
 
 function loadExpectedTables() {
   return Array.from(
@@ -36,6 +37,18 @@ test("snapshot manifest forward migration owns post-baseline snapshot columns", 
     assert.doesNotMatch(initMigration, new RegExp(`\\b${column}\\b`));
     assert.match(forwardMigration, new RegExp(`\\b${column}\\b`));
     assert.match(schema, new RegExp(`\\b${column}\\b`));
+  }
+});
+
+test("evidence bundle schema blocks direct updates and deletes", () => {
+  const forwardMigration = readFileSync(evidenceBundleMigrationPath, "utf8");
+  const schema = readFileSync(schemaPath, "utf8");
+
+  for (const sql of [forwardMigration, schema]) {
+    assert.match(sql, /create function prevent_evidence_bundle_modification\(\) returns trigger/i);
+    assert.match(sql, /raise exception 'evidence_bundles are immutable/i);
+    assert.match(sql, /create trigger evidence_bundles_immutable/i);
+    assert.match(sql, /before update or delete on evidence_bundles/i);
   }
 });
 
@@ -62,7 +75,7 @@ test("migrate up applies pending migrations and records them in schema_migration
   });
 
   assert.equal(migrateResult.status, 0, migrateResult.stderr || migrateResult.stdout);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "16");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "17");
   assert.deepEqual(
     queryValue(containerName, "select version || ':' || name from schema_migrations order by version").split("\n"),
     [
@@ -82,6 +95,7 @@ test("migrate up applies pending migrations and records them in schema_migration
       "0014:entity_impacts_channel_constraint",
       "0015:object_blob_gc_queue",
       "0016:fact_review_queue",
+      "0017:evidence_bundles",
     ],
   );
 
@@ -95,6 +109,55 @@ test("migrate up applies pending migrations and records them in schema_migration
     .sort();
 
   assert.deepEqual(publicTables, loadExpectedTables());
+
+  const bundleId = "00000000-0000-0000-0000-000000000001";
+  const bundlePayload = `{"bundle_id":"${bundleId}","documents":[],"evidence":[]}`;
+  const insertBundleResult = run("docker", [
+    "exec",
+    containerName,
+    "psql",
+    "-U",
+    "postgres",
+    "-d",
+    "postgres",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-c",
+    `insert into evidence_bundles (bundle_id, bundle) values ('${bundleId}', '${bundlePayload}'::jsonb)`,
+  ]);
+  assert.equal(insertBundleResult.status, 0, insertBundleResult.stderr || insertBundleResult.stdout);
+
+  const updateBundleResult = run("docker", [
+    "exec",
+    containerName,
+    "psql",
+    "-U",
+    "postgres",
+    "-d",
+    "postgres",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-c",
+    `update evidence_bundles set bundle = jsonb_set(bundle, '{documents}', '[]'::jsonb) where bundle_id = '${bundleId}'`,
+  ]);
+  assert.notEqual(updateBundleResult.status, 0);
+  assert.match(updateBundleResult.stderr || updateBundleResult.stdout, /evidence_bundles are immutable/);
+
+  const deleteBundleResult = run("docker", [
+    "exec",
+    containerName,
+    "psql",
+    "-U",
+    "postgres",
+    "-d",
+    "postgres",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-c",
+    `delete from evidence_bundles where bundle_id = '${bundleId}'`,
+  ]);
+  assert.notEqual(deleteBundleResult.status, 0);
+  assert.match(deleteBundleResult.stderr || deleteBundleResult.stdout, /evidence_bundles are immutable/);
 });
 
 test("migrate status reports all migrations as applied after migrate up", { timeout: 120000 }, async (t) => {
@@ -142,6 +205,7 @@ test("migrate status reports all migrations as applied after migrate up", { time
   assert.match(statusResult.stdout, /0014\s+entity_impacts_channel_constraint\s+applied/);
   assert.match(statusResult.stdout, /0015\s+object_blob_gc_queue\s+applied/);
   assert.match(statusResult.stdout, /0016\s+fact_review_queue\s+applied/);
+  assert.match(statusResult.stdout, /0017\s+evidence_bundles\s+applied/);
 });
 
 test("migrate down rolls back the most recently applied migration", { timeout: 120000 }, async (t) => {
@@ -768,7 +832,7 @@ test("migrate down rolls back schema changes when removing the migration record 
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /rejecting schema_migrations delete/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "16");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "17");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -777,13 +841,13 @@ test("migrate down rolls back schema changes when removing the migration record 
   // migration's schema change must still be in place. If the runner
   // accidentally executed the down DDL before hitting the trigger block, the
   // schema_migrations row count alone wouldn't catch that — checking the
-  // latest migration's actual artifact does. 0016 added the fact review queue;
-  // the down would remove it, so its presence is
+  // latest migration's actual artifact does. 0017 added evidence bundles;
+  // the down would remove them, so their presence is
   // independent proof the down DDL did not execute.
   assert.equal(
     queryValue(
       containerName,
-      "select count(*) from pg_tables where schemaname = 'public' and tablename = 'fact_review_queue'",
+      "select count(*) from pg_tables where schemaname = 'public' and tablename = 'evidence_bundles'",
     ),
     "1",
   );
@@ -834,7 +898,7 @@ test("migrate down fails when any applied migration is missing locally", { timeo
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /Applied migration 0000 is missing locally/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "17");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "18");
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
 });
 

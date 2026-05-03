@@ -75,6 +75,19 @@ export type {
 } from "./claim-evidence-repo.ts";
 
 export {
+  assembleEvidenceBundle,
+  buildEvidenceBundle,
+  getEvidenceBundle,
+} from "./evidence-bundle-repo.ts";
+export type {
+  AssembledEvidenceBundle,
+  EvidenceBundle,
+  EvidenceBundleDocument,
+  EvidenceBundleEvidence,
+  EvidenceBundleInput,
+} from "./evidence-bundle-repo.ts";
+
+export {
   EVENT_STATUSES,
   EVENT_TYPES,
   createEvent,

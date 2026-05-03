@@ -464,6 +464,24 @@ create index fact_review_queue_status_created_idx on fact_review_queue(status, c
 create index fact_review_queue_source_idx on fact_review_queue(source_id) where source_id is not null;
 create index fact_review_queue_metric_idx on fact_review_queue(metric_id) where metric_id is not null;
 
+create table evidence_bundles (
+  bundle_id uuid primary key,
+  bundle jsonb not null,
+  created_at timestamptz not null default now()
+);
+
+create function prevent_evidence_bundle_modification() returns trigger
+language plpgsql
+as $$
+begin
+  raise exception 'evidence_bundles are immutable and cannot be modified or deleted';
+end;
+$$;
+
+create trigger evidence_bundles_immutable
+before update or delete on evidence_bundles
+for each row execute function prevent_evidence_bundle_modification();
+
 create table computations (
   computation_id uuid primary key default gen_random_uuid(),
   formula_id text not null,
