@@ -1,4 +1,19 @@
 export {
+  CLAIM_MODALITIES,
+  CLAIM_POLARITIES,
+  CLAIM_STATUSES,
+  createClaim,
+  listClaimsForDocument,
+} from "./claim-repo.ts";
+export type {
+  ClaimInput,
+  ClaimModality,
+  ClaimPolarity,
+  ClaimRow,
+  ClaimStatus,
+} from "./claim-repo.ts";
+
+export {
   SOURCE_KINDS,
   TRUST_TIERS,
   createSource,
