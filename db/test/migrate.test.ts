@@ -161,11 +161,16 @@ test("migrate down rolls back the most recently applied migration", { timeout: 1
   });
   assert.equal(upResult.status, 0, upResult.stderr || upResult.stdout);
 
-  const downResult = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], {
-    cwd: dbRoot,
-    env: { DATABASE_URL: databaseUrl },
-  });
-  assert.equal(downResult.status, 0, downResult.stderr || downResult.stdout);
+  const totalApplied = Number(queryValue(containerName, "select count(*) from schema_migrations"));
+  const rollbackCount = totalApplied - 12;
+  assert.equal(rollbackCount > 0, true, "precondition: 0013 or newer migrations must be applied before rollback");
+  for (let i = 0; i < rollbackCount; i += 1) {
+    const downResult = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], {
+      cwd: dbRoot,
+      env: { DATABASE_URL: databaseUrl },
+    });
+    assert.equal(downResult.status, 0, downResult.stderr || downResult.stdout);
+  }
 
   assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "12");
   assert.equal(

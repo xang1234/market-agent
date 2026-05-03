@@ -78,6 +78,12 @@ function makeStubHandler(deps: EvidenceReaderToolDeps): ReaderToolHandler {
 
 function makeExtractMentionsHandler(deps: EvidenceReaderToolDeps): ReaderToolHandler {
   return async (input) => {
+    const hasExtractor = Boolean(deps.extractMentionCandidates);
+    const hasResolver = Boolean(deps.resolveMention);
+    if (hasExtractor !== hasResolver) {
+      throw new Error("extract_mentions requires both extractMentionCandidates and resolveMention to be configured");
+    }
+
     const document = await getDocument(deps.db, input.document_id);
     if (!document) {
       throw new ReaderToolError(
@@ -89,22 +95,25 @@ function makeExtractMentionsHandler(deps: EvidenceReaderToolDeps): ReaderToolHan
     let skipped: readonly SkippedMention[] = [];
     if (deps.extractMentionCandidates && deps.resolveMention) {
       const candidates = await deps.extractMentionCandidates(document);
-      const linked = await linkDocumentMentions({
-        db: deps.db,
-        document_id: document.document_id,
-        candidates,
-        resolveMention: deps.resolveMention,
+      const linked = await withTransaction(deps.db, async () => {
+        const linkedMentions = await linkDocumentMentions({
+          db: deps.db,
+          document_id: document.document_id,
+          candidates,
+          resolveMention: deps.resolveMention!,
+        });
+        await deleteMentionsForDocumentExcept(
+          deps.db,
+          document.document_id,
+          linkedMentions.mentions.map((mention) => ({
+            subject_kind: mention.subject_ref.kind,
+            subject_id: mention.subject_ref.id,
+            prominence: mention.prominence,
+          })),
+        );
+        return linkedMentions;
       });
       skipped = linked.skipped;
-      await deleteMentionsForDocumentExcept(
-        deps.db,
-        document.document_id,
-        linked.mentions.map((mention) => ({
-          subject_kind: mention.subject_ref.kind,
-          subject_id: mention.subject_ref.id,
-          prominence: mention.prominence,
-        })),
-      );
     }
     const mentions = deps.extractMentionCandidates && deps.resolveMention
       ? await listMentionsForDocument(deps.db, document.document_id)
@@ -115,6 +124,18 @@ function makeExtractMentionsHandler(deps: EvidenceReaderToolDeps): ReaderToolHan
       source_ids: [document.source_id],
     };
   };
+}
+
+async function withTransaction<T>(db: QueryExecutor, action: () => Promise<T>): Promise<T> {
+  await db.query("begin");
+  try {
+    const result = await action();
+    await db.query("commit");
+    return result;
+  } catch (error) {
+    await db.query("rollback");
+    throw error;
+  }
 }
 
 function mentionToToolItem(mention: MentionRow) {
