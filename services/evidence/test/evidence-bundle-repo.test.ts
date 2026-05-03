@@ -149,20 +149,63 @@ test("buildEvidenceBundle derives the same bundle_id from canonical content", as
 
 test("getEvidenceBundle resolves a deterministic bundle_id and returns the same payload", async () => {
   const rows = [bundleRow({ claim_id: CLAIM_A, document_id: DOCUMENT_A, confidence: "0.95" })];
-  const built = await buildEvidenceBundle(recordingDb(rows).db, { claim_ids: [CLAIM_A] });
+  const build = recordingDb(rows);
+  const built = await buildEvidenceBundle(build.db, { claim_ids: [CLAIM_A] });
 
-  const fetched = await getEvidenceBundle(recordingDb(rows).db, built.bundle_id);
+  const fetch = recordingDb([{ bundle: built }]);
+  const fetched = await getEvidenceBundle(fetch.db, built.bundle_id);
 
   assert.deepEqual(fetched, built);
+  assert.equal(build.queries.some((query) => /insert into evidence_bundles/i.test(query.text)), true);
+  assert.match(fetch.queries[0]!.text, /from evidence_bundles/i);
+  assert.deepEqual(fetch.queries[0]!.values, [built.bundle_id]);
+});
+
+test("buildEvidenceBundle persists the immutable bundle payload under the deterministic id", async () => {
+  const { db, queries } = recordingDb([bundleRow({ claim_id: CLAIM_A, document_id: DOCUMENT_A })]);
+
+  const built = await buildEvidenceBundle(db, { claim_ids: [CLAIM_A] });
+
+  const insert = queries.find((query) => /insert into evidence_bundles/i.test(query.text));
+  assert.ok(insert);
+  assert.deepEqual(insert.values, [built.bundle_id, JSON.stringify(built)]);
+});
+
+test("EvidenceBundle locators are deeply immutable after build and fetch", async () => {
+  const rows = [
+    bundleRow({
+      locator: { kind: "nested", ranges: [{ offset_start: 10, offset_end: 20 }] },
+    }),
+  ];
+  const built = await buildEvidenceBundle(recordingDb(rows).db, { claim_ids: [CLAIM_A] });
+  const fetched = await getEvidenceBundle(recordingDb([{ bundle: built }]).db, built.bundle_id);
+
+  const builtRange = (built.evidence[0]!.locator.ranges as Array<Record<string, unknown>>)[0]!;
+  const fetchedRange = (fetched.evidence[0]!.locator.ranges as Array<Record<string, unknown>>)[0]!;
+
+  assert.throws(() => {
+    builtRange.offset_start = 99;
+  }, TypeError);
+  assert.throws(() => {
+    fetchedRange.offset_start = 99;
+  }, TypeError);
 });
 
 test("getEvidenceBundle rejects non-bundle ids before querying", async () => {
   const { db, queries } = recordingDb([]);
 
   await assert.rejects(() => getEvidenceBundle(db, "not-a-uuid"), /bundle_id/);
-  await assert.rejects(() => getEvidenceBundle(db, DOCUMENT_A), /bundle_id/);
 
   assert.equal(queries.length, 0);
+});
+
+test("getEvidenceBundle reports missing persisted bundles", async () => {
+  const { db, queries } = recordingDb([]);
+
+  await assert.rejects(() => getEvidenceBundle(db, DOCUMENT_A), /not found/);
+
+  assert.match(queries[0]!.text, /from evidence_bundles/i);
+  assert.deepEqual(queries[0]!.values, [DOCUMENT_A]);
 });
 
 function bundleRow(overrides: Record<string, unknown> = {}) {

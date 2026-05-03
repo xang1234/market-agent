@@ -59,7 +59,9 @@ type EvidenceBundleDbRow = {
   trust_tier: TrustTier;
 };
 
-const builtBundles = new Map<string, EvidenceBundle>();
+type StoredEvidenceBundleDbRow = {
+  bundle: EvidenceBundle | string;
+};
 
 export async function assembleEvidenceBundle(
   db: QueryExecutor,
@@ -108,23 +110,38 @@ export async function buildEvidenceBundle(
   input: EvidenceBundleInput,
 ): Promise<EvidenceBundle> {
   const assembled = await assembleEvidenceBundle(db, input);
-  const bundle = Object.freeze({
+  const bundle = evidenceBundleFromJson({
     bundle_id: bundleIdForContent(assembled),
     documents: assembled.documents,
     evidence: assembled.evidence,
   });
-  builtBundles.set(bundle.bundle_id, bundle);
+  await db.query(
+    `insert into evidence_bundles
+       (bundle_id, bundle)
+     values ($1::uuid, $2::jsonb)
+     on conflict (bundle_id) do nothing`,
+    [bundle.bundle_id, JSON.stringify(bundle)],
+  );
   return bundle;
 }
 
 export async function getEvidenceBundle(
-  _db: QueryExecutor,
+  db: QueryExecutor,
   bundleId: string,
 ): Promise<EvidenceBundle> {
   assertUuidV4(bundleId, "bundle_id");
-  const bundle = builtBundles.get(bundleId);
-  if (!bundle) {
-    throw new Error("bundle_id: evidence bundle was not built in this process");
+  const { rows } = await db.query<StoredEvidenceBundleDbRow>(
+    `select bundle
+       from evidence_bundles
+      where bundle_id = $1`,
+    [bundleId],
+  );
+  if (rows.length !== 1) {
+    throw new Error("bundle_id: evidence bundle was not found");
+  }
+  const bundle = evidenceBundleFromJson(rows[0]!.bundle);
+  if (bundle.bundle_id !== bundleId) {
+    throw new Error("bundle_id: stored bundle payload does not match requested id");
   }
   return bundle;
 }
@@ -198,7 +215,7 @@ function evidenceFromRow(row: EvidenceBundleDbRow): EvidenceBundleEvidence & { c
 function parseLocator(value: Record<string, unknown> | string): Record<string, unknown> {
   const parsed: unknown = typeof value === "string" ? JSON.parse(value) : value;
   assertLocator(parsed, "locator");
-  return parsed;
+  return deepFreezeJson(parsed) as Record<string, unknown>;
 }
 
 function assertLocator(value: unknown, label: string): asserts value is Record<string, unknown> {
@@ -255,7 +272,7 @@ function omitEvidenceSortKey(evidence: EvidenceBundleEvidence & { claim_evidence
   return Object.freeze({
     claim_id: evidence.claim_id,
     document_id: evidence.document_id,
-    locator: evidence.locator,
+    locator: deepFreezeJson(evidence.locator) as Readonly<Record<string, unknown>>,
     excerpt_hash: evidence.excerpt_hash,
     confidence: evidence.confidence,
   });
@@ -288,6 +305,95 @@ function sortJson(value: unknown): unknown {
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([key, child]) => [key, sortJson(child)]),
     );
+  }
+  return value;
+}
+
+function evidenceBundleFromJson(value: EvidenceBundle | string): EvidenceBundle {
+  const parsed: unknown = typeof value === "string" ? JSON.parse(value) : value;
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("bundle: must be an object");
+  }
+  const record = parsed as Record<string, unknown>;
+  assertUuidV4(record.bundle_id, "bundle.bundle_id");
+  if (!Array.isArray(record.documents)) {
+    throw new Error("bundle.documents: must be an array");
+  }
+  if (!Array.isArray(record.evidence)) {
+    throw new Error("bundle.evidence: must be an array");
+  }
+
+  const documents = record.documents.map((document, index) => evidenceBundleDocumentFromJson(document, index));
+  const evidence = record.evidence.map((entry, index) => evidenceBundleEvidenceFromJson(entry, index));
+  return deepFreezeJson({
+    bundle_id: record.bundle_id,
+    documents,
+    evidence,
+  }) as EvidenceBundle;
+}
+
+function evidenceBundleDocumentFromJson(value: unknown, index: number): EvidenceBundleDocument {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`bundle.documents[${index}]: must be an object`);
+  }
+  const record = value as Record<string, unknown>;
+  assertUuidV4(record.document_id, `bundle.documents[${index}].document_id`);
+  assertOptionalString(record.title, `bundle.documents[${index}].title`);
+  assertOptionalString(record.author, `bundle.documents[${index}].author`);
+  assertOptionalString(record.published_at, `bundle.documents[${index}].published_at`);
+  assertOptionalString(record.canonical_url, `bundle.documents[${index}].canonical_url`);
+  if (record.source === null || typeof record.source !== "object" || Array.isArray(record.source)) {
+    throw new Error(`bundle.documents[${index}].source: must be an object`);
+  }
+  const source = record.source as Record<string, unknown>;
+  assertOneOf(source.trust_tier, TRUST_TIERS, `bundle.documents[${index}].source.trust_tier`);
+
+  return {
+    document_id: record.document_id,
+    title: record.title,
+    author: record.author,
+    published_at: record.published_at,
+    canonical_url: record.canonical_url,
+    source: { trust_tier: source.trust_tier },
+  };
+}
+
+function evidenceBundleEvidenceFromJson(value: unknown, index: number): EvidenceBundleEvidence {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`bundle.evidence[${index}]: must be an object`);
+  }
+  const record = value as Record<string, unknown>;
+  assertUuidV4(record.claim_id, `bundle.evidence[${index}].claim_id`);
+  assertUuidV4(record.document_id, `bundle.evidence[${index}].document_id`);
+  assertLocator(record.locator, `bundle.evidence[${index}].locator`);
+  assertOptionalString(record.excerpt_hash, `bundle.evidence[${index}].excerpt_hash`);
+  assertConfidence(record.confidence, `bundle.evidence[${index}].confidence`);
+
+  return {
+    claim_id: record.claim_id,
+    document_id: record.document_id,
+    locator: deepFreezeJson(record.locator) as Readonly<Record<string, unknown>>,
+    excerpt_hash: record.excerpt_hash,
+    confidence: record.confidence,
+  };
+}
+
+function assertOptionalString(value: unknown, label: string): asserts value is string | null {
+  if (value !== null && typeof value !== "string") {
+    throw new Error(`${label}: must be a string or null`);
+  }
+}
+
+function deepFreezeJson(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    for (const item of value) deepFreezeJson(item);
+    return Object.freeze(value);
+  }
+  if (value !== null && typeof value === "object") {
+    for (const child of Object.values(value as Record<string, unknown>)) {
+      deepFreezeJson(child);
+    }
+    return Object.freeze(value);
   }
   return value;
 }
