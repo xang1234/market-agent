@@ -767,3 +767,82 @@ test("ingestPressRelease emits the sha256 content_hash actually derived from the
   // documents insert is queries[1]; content_hash is values[9] per createDocument.
   assert.equal(queries[1]?.values?.[9], expected);
 });
+
+test("ingestPressRelease normalizes retrievedAt before writing the source row", async () => {
+  const { db, queries } = recordingDb();
+
+  await ingestPressRelease(
+    { db, objectStore: new RecordingObjectStore() },
+    {
+      bytes: new TextEncoder().encode("release"),
+      provider: "businesswire",
+      canonicalUrl: "https://www.businesswire.com/news/x",
+      publisher: "Apple, Inc.",
+      publishedAt: "2026-05-03T13:30:00Z",
+      retrievedAt: "2026-05-03T21:30:00+08:00",
+    },
+  );
+
+  assert.equal(queries[0]?.values?.[5], "2026-05-03T13:30:00.000Z");
+});
+
+test("ingestNewsArticle deletes the created source when document ingest fails", async () => {
+  const queries: Array<{ text: string; values?: unknown[] }> = [];
+  const db: QueryExecutor = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      queries.push({ text, values });
+      if (/insert into sources/.test(text)) {
+        return {
+          rows: [
+            {
+              source_id: SOURCE_ID,
+              provider: values?.[0],
+              kind: values?.[1],
+              canonical_url: values?.[2],
+              trust_tier: values?.[3],
+              license_class: values?.[4],
+              retrieved_at: new Date(values?.[5] as string),
+              content_hash: values?.[6],
+              user_id: values?.[7],
+              created_at: new Date("2026-05-03T00:00:00.000Z"),
+            },
+          ] as R[],
+          command: "INSERT",
+          rowCount: 1,
+          oid: 0,
+          fields: [],
+        };
+      }
+      if (/delete from sources/.test(text)) {
+        return {
+          rows: [] as R[],
+          command: "DELETE",
+          rowCount: 1,
+          oid: 0,
+          fields: [],
+        };
+      }
+      throw new Error("documents insert failed");
+    },
+  };
+  const objectStore = new RecordingObjectStore();
+
+  await assert.rejects(
+    ingestNewsArticle(
+      { db, objectStore },
+      {
+        bytes: new TextEncoder().encode("article"),
+        provider: "reuters",
+        canonicalUrl: "https://www.reuters.com/x",
+        publisher: "Reuters",
+        publishedAt: "2026-05-03T13:30:00Z",
+        title: "x",
+      },
+    ),
+    /documents insert failed/,
+  );
+
+  assert.match(queries[0]?.text ?? "", /insert into sources/);
+  assert.match(queries[2]?.text ?? "", /delete from sources/);
+  assert.deepEqual(queries[2]?.values, [SOURCE_ID]);
+});

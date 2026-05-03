@@ -125,6 +125,11 @@ export async function getSource(
   return rows[0] ? sourceRowFromDb(rows[0]) : null;
 }
 
+export async function deleteSource(db: QueryExecutor, sourceId: string): Promise<void> {
+  assertUuidV4(sourceId, "source_id");
+  await db.query(`delete from sources where source_id = $1`, [sourceId]);
+}
+
 function validateSourceInput(input: SourceInput): void {
   assertNonEmptyString(input.provider, "provider");
   assertOneOf(input.kind, SOURCE_KINDS, "kind");

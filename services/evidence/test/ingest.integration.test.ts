@@ -118,5 +118,22 @@ test(
     assert.match(result.raw_blob_id, /^sha256:[0-9a-f]{64}$/);
     assert.equal(objectStore.putCalls, 1);
     assert.equal(await objectStore.has(result.raw_blob_id), true, "blob is retrievable from object store after permissive ingest");
+
+    const { rows } = await client.query<{
+      raw_blob_id: string;
+      content_hash: string;
+      kind: string;
+      provider_doc_id: string;
+    }>(
+      `select raw_blob_id, content_hash, kind, provider_doc_id
+         from documents
+        where document_id = $1::uuid`,
+      [result.document.document_id],
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].raw_blob_id, result.raw_blob_id);
+    assert.equal(rows[0].kind, "social_post");
+    assert.equal(rows[0].provider_doc_id, "reddit:t3_abc");
+    assert.match(rows[0].content_hash, /^sha256:[0-9a-f]{64}$/);
   },
 );

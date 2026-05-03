@@ -35,6 +35,8 @@ export function rawBlobIdFromBytes(bytes: Uint8Array): string {
   return `${RAW_BLOB_ID_PREFIX}${hex}`;
 }
 
+export const contentHashFromBytes = rawBlobIdFromBytes;
+
 export function assertRawBlobId(
   value: unknown,
   label = "raw_blob_id",

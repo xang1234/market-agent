@@ -9,7 +9,7 @@
 
 import { ingestDocument, type IngestDocumentResult } from "./ingest.ts";
 import type { ObjectStore } from "./object-store.ts";
-import { createSource, type SourceRow } from "./source-repo.ts";
+import { createSource, deleteSource, type SourceRow } from "./source-repo.ts";
 import type { QueryExecutor } from "./types.ts";
 import { assertOneOf, assertPositiveInteger } from "./validators.ts";
 
@@ -101,8 +101,14 @@ export class TokenBucketRateLimiter implements RateLimiter {
         `TokenBucketRateLimiter: capacity must be <= ${SEC_RATE_LIMIT_CEILING} (SEC Fair Access ceiling)`,
       );
     }
-    if (typeof config.refillPerSecond !== "number" || config.refillPerSecond <= 0) {
-      throw new Error("TokenBucketRateLimiter: refillPerSecond must be > 0");
+    if (
+      typeof config.refillPerSecond !== "number" ||
+      config.refillPerSecond <= 0 ||
+      config.refillPerSecond > SEC_RATE_LIMIT_CEILING
+    ) {
+      throw new Error(
+        `TokenBucketRateLimiter: refillPerSecond must be > 0 and <= ${SEC_RATE_LIMIT_CEILING} (SEC Fair Access ceiling)`,
+      );
     }
     this.capacity = config.capacity;
     this.refillPerSecond = config.refillPerSecond;
@@ -154,7 +160,7 @@ const ACCESSION_PATTERN = /^\d{10}-\d{2}-\d{6}$/;
 // caller-supplied subpaths that could redirect the fetch elsewhere on
 // sec.gov. The URL builder is the one chokepoint both the client and
 // any future helpers go through, so refusing here is sufficient.
-const SAFE_DOC_NAME_PATTERN = /^[A-Za-z0-9._-]+$/;
+const SAFE_DOC_NAME_PATTERN = /^(?!\.{1,2}$)[A-Za-z0-9._-]+$/;
 
 export function filingArchiveUrl(input: {
   cik: number;
@@ -257,6 +263,7 @@ export class SecEdgarClient {
     const controller = new AbortController();
     const timeoutHandle = setTimeout(() => controller.abort(), this.requestTimeoutMs);
     let response: Response;
+    let buffer: Uint8Array;
     try {
       response = await this.fetchImpl(url, {
         headers: {
@@ -265,6 +272,17 @@ export class SecEdgarClient {
         },
         signal: controller.signal,
       });
+      if (response.status === 429) {
+        throw new SecEdgarRateLimitError(url, `SEC EDGAR rate-limited request: ${url}`);
+      }
+      if (!response.ok) {
+        throw new SecEdgarFetchError(
+          response.status,
+          url,
+          `SEC EDGAR fetch failed (${response.status}): ${url}`,
+        );
+      }
+      buffer = new Uint8Array(await response.arrayBuffer());
     } catch (err) {
       if (controller.signal.aborted) {
         throw new SecEdgarTimeoutError(url, this.requestTimeoutMs);
@@ -273,17 +291,6 @@ export class SecEdgarClient {
     } finally {
       clearTimeout(timeoutHandle);
     }
-    if (response.status === 429) {
-      throw new SecEdgarRateLimitError(url, `SEC EDGAR rate-limited request: ${url}`);
-    }
-    if (!response.ok) {
-      throw new SecEdgarFetchError(
-        response.status,
-        url,
-        `SEC EDGAR fetch failed (${response.status}): ${url}`,
-      );
-    }
-    const buffer = new Uint8Array(await response.arrayBuffer());
     return {
       bytes: buffer,
       contentType: response.headers.get("content-type"),
@@ -335,18 +342,39 @@ export async function ingestSecFiling(
     retrieved_at: fetched.retrievedAt,
   });
 
-  const ingest = await ingestDocument(
-    { db: deps.db, objectStore: deps.objectStore },
-    {
-      source: { source_id: source.source_id, license_class: source.license_class },
-      bytes: fetched.bytes,
-      document: {
-        kind: "filing",
-        provider_doc_id: input.accession_number,
-        title: input.form,
+  let ingest: IngestDocumentResult;
+  try {
+    ingest = await ingestDocument(
+      { db: deps.db, objectStore: deps.objectStore },
+      {
+        source: { source_id: source.source_id, license_class: source.license_class },
+        bytes: fetched.bytes,
+        document: {
+          kind: "filing",
+          provider_doc_id: input.accession_number,
+          title: input.form,
+        },
       },
-    },
-  );
+    );
+  } catch (err) {
+    await cleanupSourceAfterFailedIngest(deps.db, source.source_id, err);
+  }
 
   return Object.freeze({ source, ingest });
+}
+
+async function cleanupSourceAfterFailedIngest(
+  db: QueryExecutor,
+  sourceId: string,
+  ingestError: unknown,
+): Promise<never> {
+  try {
+    await deleteSource(db, sourceId);
+  } catch (cleanupError) {
+    throw new AggregateError(
+      [ingestError, cleanupError],
+      `ingest failed and source cleanup failed for ${sourceId}`,
+    );
+  }
+  throw ingestError;
 }

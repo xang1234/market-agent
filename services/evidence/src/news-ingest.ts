@@ -11,6 +11,7 @@ import { ingestDocument, type IngestDocumentResult } from "./ingest.ts";
 import type { ObjectStore } from "./object-store.ts";
 import {
   createSource,
+  deleteSource,
   type SourceKind,
   type SourceRow,
   type TrustTier,
@@ -327,23 +328,53 @@ async function persistKindedSource(
   deps: IngestDeps,
   input: PersistInput,
 ): Promise<IngestResult> {
+  const retrievedAt = normalizeRetrievedAt(input.retrievedAt);
   const source = await createSource(deps.db, {
     provider: input.provider,
     kind: input.kind,
     canonical_url: input.canonicalUrl,
     trust_tier: input.trustTier,
     license_class: input.licenseClass,
-    retrieved_at: input.retrievedAt ?? new Date().toISOString(),
+    retrieved_at: retrievedAt,
   });
 
-  const ingest = await ingestDocument(
-    { db: deps.db, objectStore: deps.objectStore },
-    {
-      source: { source_id: source.source_id, license_class: source.license_class },
-      bytes: input.bytes,
-      document: { ...input.document, kind: input.kind },
-    },
-  );
+  let ingest: IngestDocumentResult;
+  try {
+    ingest = await ingestDocument(
+      { db: deps.db, objectStore: deps.objectStore },
+      {
+        source: { source_id: source.source_id, license_class: source.license_class },
+        bytes: input.bytes,
+        document: { ...input.document, kind: input.kind },
+      },
+    );
+  } catch (err) {
+    await cleanupSourceAfterFailedIngest(deps.db, source.source_id, err);
+  }
 
   return Object.freeze({ source, ingest });
+}
+
+function normalizeRetrievedAt(retrievedAt: string | undefined): string {
+  if (retrievedAt === undefined) {
+    return new Date().toISOString();
+  }
+  assertIso8601WithOffset(retrievedAt, "retrieved_at");
+  return new Date(retrievedAt).toISOString();
+}
+
+async function cleanupSourceAfterFailedIngest(
+  db: QueryExecutor,
+  sourceId: string,
+  ingestError: unknown,
+): Promise<never> {
+  try {
+    await deleteSource(db, sourceId);
+  } catch (cleanupError) {
+    throw new AggregateError(
+      [ingestError, cleanupError],
+      `ingest failed and source cleanup failed for ${sourceId}`,
+    );
+  }
+  throw ingestError;
 }

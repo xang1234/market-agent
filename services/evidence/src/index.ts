@@ -2,6 +2,7 @@ export {
   SOURCE_KINDS,
   TRUST_TIERS,
   createSource,
+  deleteSource,
   getSource,
 } from "./source-repo.ts";
 export type {
@@ -36,6 +37,7 @@ export {
   RAW_BLOB_ID_PREFIX,
   assertRawBlobId,
   assertRawBlobIdOrEphemeral,
+  contentHashFromBytes,
   ephemeralRawBlobIdForSource,
   isEphemeralRawBlobId,
   rawBlobIdFromBytes,
@@ -90,14 +92,14 @@ export {
   ingestUserUpload,
   listUserUploadDocuments,
 } from "./user-uploads.ts";
-
-export { createEvidenceReaderToolHandlers } from "./reader/extract-tools.ts";
-export type { EvidenceReaderToolDeps } from "./reader/extract-tools.ts";
 export type {
   IngestUserUploadDeps,
   IngestUserUploadInput,
   IngestUserUploadResult,
 } from "./user-uploads.ts";
+
+export { createEvidenceReaderToolHandlers } from "./reader/extract-tools.ts";
+export type { EvidenceReaderToolDeps } from "./reader/extract-tools.ts";
 
 export {
   SEC_EDGAR_DEFAULT_RATE_LIMIT,

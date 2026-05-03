@@ -2,8 +2,8 @@ import { createDocument, type DocumentInput, type DocumentRow } from "./document
 import { decideStoragePolicy, type StoragePolicy } from "./license-policy.ts";
 import {
   type ObjectStore,
+  contentHashFromBytes,
   ephemeralRawBlobIdForSource,
-  rawBlobIdFromBytes,
 } from "./object-store.ts";
 import type { QueryExecutor } from "./types.ts";
 
@@ -38,7 +38,7 @@ export async function ingestDocument(
 
   // Always derived from bytes, even on the ephemeral path, so the
   // documents.unique(content_hash, raw_blob_id) dedupe stays meaningful.
-  const content_hash = rawBlobIdFromBytes(input.bytes);
+  const content_hash = contentHashFromBytes(input.bytes);
 
   let raw_blob_id: string;
   if (policy.store_blob) {

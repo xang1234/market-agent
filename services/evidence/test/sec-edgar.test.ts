@@ -147,6 +147,15 @@ test("TokenBucketRateLimiter rejects nonsensical config (defends the SEC ceiling
       }),
     /refillPerSecond must be > 0/,
   );
+  assert.throws(
+    () =>
+      new TokenBucketRateLimiter({
+        capacity: 1,
+        refillPerSecond: 100,
+        now: () => 0,
+      }),
+    /refillPerSecond must be > 0 and <= 10/,
+  );
 });
 
 test("SEC_EDGAR_DEFAULT_RATE_LIMIT is set conservatively below SEC's 10 req/sec ceiling", () => {
@@ -224,6 +233,17 @@ test("filingArchiveUrl rejects path-traversal in document filename", () => {
       }),
     /document/,
   );
+  for (const document of [".", ".."]) {
+    assert.throws(
+      () =>
+        filingArchiveUrl({
+          cik: 320193,
+          accession_number: "0000320193-23-000106",
+          document,
+        }),
+      /document/,
+    );
+  }
 });
 
 test("filingIndexUrl points at the per-accession index document", () => {
@@ -415,6 +435,35 @@ test("SecEdgarClient.fetchFiling aborts on the configured timeout and throws Sec
   );
 });
 
+test("SecEdgarClient.fetchFiling keeps the timeout active while reading the body", async () => {
+  const client = new SecEdgarClient({
+    userAgent: VALID_USER_AGENT,
+    requestTimeoutMs: 25,
+    fetch: async (_url, init) =>
+      ({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        arrayBuffer: () =>
+          new Promise<ArrayBuffer>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("aborted", "AbortError"));
+            });
+            setTimeout(() => reject(new Error("body read was not aborted")), 75);
+          }),
+      }) as Response,
+  });
+
+  await assert.rejects(
+    client.fetchFiling({
+      cik: 320193,
+      accession_number: "0000320193-23-000106",
+      document: "doc.htm",
+    }),
+    SecEdgarTimeoutError,
+  );
+});
+
 test("SecEdgarClient constructor rejects nonsensical requestTimeoutMs", () => {
   for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
     assert.throws(
@@ -454,6 +503,15 @@ function recordingDb() {
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       queries.push({ text, values });
       // sources insert returns the source row; documents insert returns the document row.
+      if (/delete from sources/.test(text)) {
+        return {
+          rows: [] as R[],
+          command: "DELETE",
+          rowCount: 1,
+          oid: 0,
+          fields: [],
+        };
+      }
       const isSourceInsert = /insert into sources/.test(text);
       const row = isSourceInsert
         ? {
@@ -593,6 +651,41 @@ test("ingestSecFiling propagates a SecEdgarFetchError without writing source or 
 
   assert.equal(queries.length, 0, "no source or documents row should have been written");
   assert.equal(objectStore.putCalls, 0);
+});
+
+test("ingestSecFiling deletes the created source when document ingest fails", async () => {
+  const { db, queries } = recordingDb();
+  const objectStore = new RecordingObjectStore();
+  const client = new SecEdgarClient({
+    userAgent: VALID_USER_AGENT,
+    fetch: async () => new Response("body", { status: 200 }),
+  });
+  const failingDb: QueryExecutor = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      if (/insert into documents/.test(text)) {
+        queries.push({ text, values });
+        throw new Error("documents insert failed");
+      }
+      return db.query<R>(text, values);
+    },
+  };
+
+  await assert.rejects(
+    ingestSecFiling(
+      { db: failingDb, objectStore, secClient: client },
+      {
+        cik: 320193,
+        accession_number: "0000320193-23-000106",
+        document: "doc.htm",
+        form: "10-K",
+      },
+    ),
+    /documents insert failed/,
+  );
+
+  assert.match(queries[0]?.text ?? "", /insert into sources/);
+  assert.match(queries[2]?.text ?? "", /delete from sources/);
+  assert.deepEqual(queries[2]?.values, [SOURCE_ID]);
 });
 
 test("ingestSecFiling rejects an unknown form code before fetching or writing", async () => {
