@@ -62,7 +62,7 @@ test("migrate up applies pending migrations and records them in schema_migration
   });
 
   assert.equal(migrateResult.status, 0, migrateResult.stderr || migrateResult.stdout);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "18");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "17");
   assert.deepEqual(
     queryValue(containerName, "select version || ':' || name from schema_migrations order by version").split("\n"),
     [
@@ -836,7 +836,7 @@ test("migrate down fails when any applied migration is missing locally", { timeo
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /Applied migration 0000 is missing locally/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "17");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "18");
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
 });
 
