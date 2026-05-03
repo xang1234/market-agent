@@ -16,11 +16,29 @@ const DOCUMENT_B = "55555555-5555-4555-8555-555555555555";
 
 type Query = { text: string; values?: unknown[] };
 
-function recordingDb(rows: Record<string, unknown>[]) {
+function recordingDb(rows: Record<string, unknown>[], storedBundleRows: Record<string, unknown>[] = []) {
   const queries: Query[] = [];
   const db: QueryExecutor = {
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       queries.push({ text, values });
+      if (/insert into evidence_bundles/i.test(text)) {
+        return {
+          rows: storedBundleRows as R[],
+          command: "INSERT",
+          rowCount: storedBundleRows.length,
+          oid: 0,
+          fields: [],
+        };
+      }
+      if (/from evidence_bundles/i.test(text)) {
+        return {
+          rows: storedBundleRows as R[],
+          command: "SELECT",
+          rowCount: storedBundleRows.length,
+          oid: 0,
+          fields: [],
+        };
+      }
       return {
         rows: rows as R[],
         command: "SELECT",
@@ -152,7 +170,7 @@ test("getEvidenceBundle resolves a deterministic bundle_id and returns the same 
   const build = recordingDb(rows);
   const built = await buildEvidenceBundle(build.db, { claim_ids: [CLAIM_A] });
 
-  const fetch = recordingDb([{ bundle: built }]);
+  const fetch = recordingDb([], [{ bundle: built }]);
   const fetched = await getEvidenceBundle(fetch.db, built.bundle_id);
 
   assert.deepEqual(fetched, built);
@@ -171,6 +189,20 @@ test("buildEvidenceBundle persists the immutable bundle payload under the determ
   assert.deepEqual(insert.values, [built.bundle_id, JSON.stringify(built)]);
 });
 
+test("buildEvidenceBundle rejects a conflicting stored payload for the same bundle_id", async () => {
+  const rows = [bundleRow({ claim_id: CLAIM_A, document_id: DOCUMENT_A })];
+  const built = await buildEvidenceBundle(recordingDb(rows).db, { claim_ids: [CLAIM_A] });
+  const conflicting = {
+    ...built,
+    evidence: [{ ...built.evidence[0]!, confidence: 0.01 }],
+  };
+
+  await assert.rejects(
+    () => buildEvidenceBundle(recordingDb(rows, [{ bundle: conflicting }]).db, { claim_ids: [CLAIM_A] }),
+    /stored bundle payload does not match canonical content/,
+  );
+});
+
 test("EvidenceBundle locators are deeply immutable after build and fetch", async () => {
   const rows = [
     bundleRow({
@@ -178,7 +210,7 @@ test("EvidenceBundle locators are deeply immutable after build and fetch", async
     }),
   ];
   const built = await buildEvidenceBundle(recordingDb(rows).db, { claim_ids: [CLAIM_A] });
-  const fetched = await getEvidenceBundle(recordingDb([{ bundle: built }]).db, built.bundle_id);
+  const fetched = await getEvidenceBundle(recordingDb([], [{ bundle: built }]).db, built.bundle_id);
 
   const builtRange = (built.evidence[0]!.locator.ranges as Array<Record<string, unknown>>)[0]!;
   const fetchedRange = (fetched.evidence[0]!.locator.ranges as Array<Record<string, unknown>>)[0]!;
@@ -189,6 +221,20 @@ test("EvidenceBundle locators are deeply immutable after build and fetch", async
   assert.throws(() => {
     fetchedRange.offset_start = 99;
   }, TypeError);
+});
+
+test("getEvidenceBundle rejects stored payloads whose content no longer matches bundle_id", async () => {
+  const rows = [bundleRow({ claim_id: CLAIM_A, document_id: DOCUMENT_A, confidence: "0.95" })];
+  const built = await buildEvidenceBundle(recordingDb(rows).db, { claim_ids: [CLAIM_A] });
+  const tampered = {
+    ...built,
+    evidence: [{ ...built.evidence[0]!, confidence: 0.01 }],
+  };
+
+  await assert.rejects(
+    () => getEvidenceBundle(recordingDb([], [{ bundle: tampered }]).db, built.bundle_id),
+    /stored bundle payload does not match canonical content/,
+  );
 });
 
 test("getEvidenceBundle rejects non-bundle ids before querying", async () => {

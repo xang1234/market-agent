@@ -115,13 +115,18 @@ export async function buildEvidenceBundle(
     documents: assembled.documents,
     evidence: assembled.evidence,
   });
-  await db.query(
+  const { rows } = await db.query<StoredEvidenceBundleDbRow>(
     `insert into evidence_bundles
        (bundle_id, bundle)
      values ($1::uuid, $2::jsonb)
-     on conflict (bundle_id) do nothing`,
+     on conflict (bundle_id) do update
+       set bundle = evidence_bundles.bundle
+     returning bundle`,
     [bundle.bundle_id, JSON.stringify(bundle)],
   );
+  if (rows[0]) {
+    assertStoredBundleMatchesCanonicalContent(evidenceBundleFromJson(rows[0].bundle), bundle.bundle_id);
+  }
   return bundle;
 }
 
@@ -140,9 +145,7 @@ export async function getEvidenceBundle(
     throw new Error("bundle_id: evidence bundle was not found");
   }
   const bundle = evidenceBundleFromJson(rows[0]!.bundle);
-  if (bundle.bundle_id !== bundleId) {
-    throw new Error("bundle_id: stored bundle payload does not match requested id");
-  }
+  assertStoredBundleMatchesCanonicalContent(bundle, bundleId);
   return bundle;
 }
 
@@ -330,6 +333,19 @@ function evidenceBundleFromJson(value: EvidenceBundle | string): EvidenceBundle 
     documents,
     evidence,
   }) as EvidenceBundle;
+}
+
+function assertStoredBundleMatchesCanonicalContent(bundle: EvidenceBundle, expectedBundleId: string): void {
+  if (bundle.bundle_id !== expectedBundleId) {
+    throw new Error("bundle_id: stored bundle payload does not match requested id");
+  }
+  const canonicalBundleId = bundleIdForContent({
+    documents: bundle.documents,
+    evidence: bundle.evidence,
+  });
+  if (canonicalBundleId !== bundle.bundle_id) {
+    throw new Error("bundle_id: stored bundle payload does not match canonical content");
+  }
 }
 
 function evidenceBundleDocumentFromJson(value: unknown, index: number): EvidenceBundleDocument {
