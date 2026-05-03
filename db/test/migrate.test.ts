@@ -62,7 +62,7 @@ test("migrate up applies pending migrations and records them in schema_migration
   });
 
   assert.equal(migrateResult.status, 0, migrateResult.stderr || migrateResult.stdout);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "14");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "15");
   assert.deepEqual(
     queryValue(containerName, "select version || ':' || name from schema_migrations order by version").split("\n"),
     [
@@ -80,6 +80,7 @@ test("migrate up applies pending migrations and records them in schema_migration
       "0012:document_kind_press_release",
       "0013:mentions_unique",
       "0014:entity_impacts_channel_constraint",
+      "0015:object_blob_gc_queue",
     ],
   );
 
@@ -137,6 +138,8 @@ test("migrate status reports all migrations as applied after migrate up", { time
   assert.match(statusResult.stdout, /0011\s+sources_user_id\s+applied/);
   assert.match(statusResult.stdout, /0012\s+document_kind_press_release\s+applied/);
   assert.match(statusResult.stdout, /0013\s+mentions_unique\s+applied/);
+  assert.match(statusResult.stdout, /0014\s+entity_impacts_channel_constraint\s+applied/);
+  assert.match(statusResult.stdout, /0015\s+object_blob_gc_queue\s+applied/);
 });
 
 test("migrate down rolls back the most recently applied migration", { timeout: 120000 }, async (t) => {
@@ -763,7 +766,7 @@ test("migrate down rolls back schema changes when removing the migration record 
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /rejecting schema_migrations delete/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "14");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "15");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -772,13 +775,13 @@ test("migrate down rolls back schema changes when removing the migration record 
   // migration's schema change must still be in place. If the runner
   // accidentally executed the down DDL before hitting the trigger block, the
   // schema_migrations row count alone wouldn't catch that — checking the
-  // latest migration's actual artifact does. 0014 added the entity impacts
-  // channel constraint; the down would remove it, so its presence is
+  // latest migration's actual artifact does. 0015 added the object-blob GC
+  // queue; the down would remove it, so its presence is
   // independent proof the down DDL did not execute.
   assert.equal(
     queryValue(
       containerName,
-      "select count(*) from pg_constraint where conname = 'entity_impacts_channel_check'",
+      "select count(*) from pg_tables where schemaname = 'public' and tablename = 'object_blob_gc_queue'",
     ),
     "1",
   );
@@ -829,7 +832,7 @@ test("migrate down fails when any applied migration is missing locally", { timeo
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /Applied migration 0000 is missing locally/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "15");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "16");
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
 });
 
@@ -951,17 +954,16 @@ test("migrate up applies 0013 cleanly when legacy duplicate mentions rows exist"
   });
   assert.equal(upResult.status, 0, upResult.stderr || upResult.stdout);
 
-  const downResult = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], {
-    cwd: dbRoot,
-    env: { DATABASE_URL: databaseUrl },
-  });
-  assert.equal(downResult.status, 0, downResult.stderr || downResult.stdout);
-
-  const downTo0012Result = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], {
-    cwd: dbRoot,
-    env: { DATABASE_URL: databaseUrl },
-  });
-  assert.equal(downTo0012Result.status, 0, downTo0012Result.stderr || downTo0012Result.stdout);
+  const appliedCount = Number(queryValue(containerName, "select count(*) from schema_migrations"));
+  const rollbackCount = appliedCount - 12;
+  assert.equal(rollbackCount > 0, true, "precondition: 0013 or newer migrations must be applied before rollback");
+  for (let i = 0; i < rollbackCount; i += 1) {
+    const downResult = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], {
+      cwd: dbRoot,
+      env: { DATABASE_URL: databaseUrl },
+    });
+    assert.equal(downResult.status, 0, downResult.stderr || downResult.stdout);
+  }
 
   assert.equal(
     queryValue(

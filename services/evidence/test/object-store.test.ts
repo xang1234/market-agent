@@ -92,6 +92,21 @@ test("MemoryObjectStore.has reflects put state", async () => {
   assert.equal(await store.has(HELLO_ID), true);
 });
 
+test("MemoryObjectStore.delete removes a stored blob and is idempotent", async () => {
+  const store = new MemoryObjectStore();
+  await store.put(HELLO);
+
+  assert.equal(await store.delete(HELLO_ID), true);
+  assert.equal(await store.has(HELLO_ID), false);
+  assert.equal(await store.get(HELLO_ID), null);
+  assert.equal(await store.delete(HELLO_ID), false);
+});
+
+test("MemoryObjectStore.delete rejects malformed ids before lookup", async () => {
+  const store = new MemoryObjectStore();
+  await assert.rejects(store.delete("not-a-blob-id"), /sha256:/);
+});
+
 test("stored bytes are isolated from the input buffer (mutating the input does not change storage)", async () => {
   const store = new MemoryObjectStore();
   const buffer = new Uint8Array([1, 2, 3, 4]);

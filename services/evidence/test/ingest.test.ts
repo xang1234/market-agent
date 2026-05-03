@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
-import { ingestDocument } from "../src/ingest.ts";
+import { ingestDocument, ingestDocumentWithPool } from "../src/ingest.ts";
 import { LicensePolicyError } from "../src/license-policy.ts";
 import {
   EPHEMERAL_RAW_BLOB_ID_PREFIX,
@@ -22,6 +22,15 @@ function recordingDb() {
   const db: QueryExecutor = {
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       queries.push({ text, values });
+      if (/from sources/i.test(text) && /for key share/i.test(text)) {
+        return {
+          rows: [{ source_id: values?.[0] }] as R[],
+          command: "SELECT",
+          rowCount: 1,
+          oid: 0,
+          fields: [],
+        };
+      }
       return {
         rows: [
           {
@@ -54,6 +63,23 @@ function recordingDb() {
   return { db, queries };
 }
 
+function recordingPool() {
+  const { db, queries } = recordingDb();
+  let released = false;
+  return {
+    pool: {
+      connect: async () => ({
+        ...db,
+        release() {
+          released = true;
+        },
+      }),
+    },
+    queries,
+    released: () => released,
+  };
+}
+
 test("permissive license_class 'public' stores the blob and uses the sha256 raw_blob_id", async () => {
   const { db, queries } = recordingDb();
   const objectStore = new RecordingObjectStore();
@@ -73,7 +99,14 @@ test("permissive license_class 'public' stores the blob and uses the sha256 raw_
   assert.equal(result.document.content_hash, TWEET_HASH);
   assert.equal(objectStore.putCalls, 1, "permissive path must call objectStore.put exactly once");
   assert.equal(await objectStore.has(TWEET_HASH), true, "blob must be retrievable after permissive ingest");
-  assert.match(queries[0]?.text ?? "", /insert into documents/);
+  assert.match(queries[0]?.text ?? "", /^begin$/i);
+  assert.match(queries[1]?.text ?? "", /pg_advisory_xact_lock/);
+  assert.equal(queries[1]?.values?.[0], TWEET_HASH);
+  assert.match(queries[2]?.text ?? "", /from sources/i);
+  assert.match(queries[2]?.text ?? "", /for key share/i);
+  assert.equal(queries[2]?.values?.[0], SOURCE_ID);
+  assert.match(queries.find((query) => /insert into documents/i.test(query.text))?.text ?? "", /insert into documents/);
+  assert.match(queries.at(-1)?.text ?? "", /^commit$/i);
 });
 
 test("ephemeral license_class 'ephemeral' skips blob storage and uses the ephemeral sentinel raw_blob_id", async () => {
@@ -120,6 +153,195 @@ test("unknown license_class throws LicensePolicyError before touching object sto
 
   assert.equal(objectStore.putCalls, 0);
   assert.equal(queries.length, 0);
+});
+
+test("ingestDocumentWithPool acquires one client for stored blob transaction", async () => {
+  const { pool, queries, released } = recordingPool();
+  const objectStore = new RecordingObjectStore();
+
+  const result = await ingestDocumentWithPool(
+    pool,
+    objectStore,
+    {
+      source: { source_id: SOURCE_ID, license_class: "public" },
+      bytes: TWEET_BYTES,
+      document: { kind: "social_post" },
+    },
+  );
+
+  assert.equal(result.raw_blob_id, TWEET_HASH);
+  assert.equal(released(), true);
+  assert.match(queries[0]?.text ?? "", /^begin$/i);
+  assert.match(queries.at(-1)?.text ?? "", /^commit$/i);
+});
+
+test("ingestDocument locks the source before writing stored bytes", async () => {
+  const { db, queries } = recordingDb();
+  const objectStore = new RecordingObjectStore();
+  let putCallIndex = -1;
+  const originalPut = objectStore.put.bind(objectStore);
+  objectStore.put = async (bytes) => {
+    putCallIndex = queries.length;
+    return originalPut(bytes);
+  };
+
+  await ingestDocument(
+    { db, objectStore },
+    {
+      source: { source_id: SOURCE_ID, license_class: "public" },
+      bytes: TWEET_BYTES,
+      document: { kind: "social_post" },
+    },
+  );
+
+  const sourceLockIndex = queries.findIndex((query) => /from sources/i.test(query.text) && /for key share/i.test(query.text));
+  const documentInsertIndex = queries.findIndex((query) => /insert into documents/i.test(query.text));
+  assert.equal(sourceLockIndex >= 0, true);
+  assert.equal(sourceLockIndex < putCallIndex, true);
+  assert.equal(putCallIndex <= documentInsertIndex, true);
+});
+
+test("ingestDocument fails before objectStore.put when the source row cannot be locked", async () => {
+  const { db, queries } = recordingDb();
+  const missingSourceDb: QueryExecutor = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      if (/from sources/i.test(text) && /for key share/i.test(text)) {
+        queries.push({ text, values });
+        return { rows: [], command: "SELECT", rowCount: 0, oid: 0, fields: [] } as never;
+      }
+      return db.query<R>(text, values);
+    },
+  };
+  const objectStore = new RecordingObjectStore();
+
+  await assert.rejects(
+    ingestDocument(
+      { db: missingSourceDb, objectStore },
+      {
+        source: { source_id: SOURCE_ID, license_class: "public" },
+        bytes: TWEET_BYTES,
+        document: { kind: "social_post" },
+      },
+    ),
+    /source does not exist or is being erased/,
+  );
+  assert.equal(objectStore.putCalls, 0);
+  assert.equal(queries.some((query) => /insert into documents/i.test(query.text)), false);
+  assert.match(queries.at(-1)?.text ?? "", /^rollback$/i);
+});
+
+test("ingestDocument deletes a newly-created blob when document creation fails", async () => {
+  const { db, queries } = recordingDb();
+  const failingDb: QueryExecutor = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      if (/insert into documents/i.test(text)) {
+        queries.push({ text, values });
+        throw new Error("documents insert failed");
+      }
+      return db.query<R>(text, values);
+    },
+  };
+  const objectStore = new RecordingObjectStore();
+
+  await assert.rejects(
+    ingestDocument(
+      { db: failingDb, objectStore },
+      {
+        source: { source_id: SOURCE_ID, license_class: "public" },
+        bytes: TWEET_BYTES,
+        document: { kind: "social_post" },
+      },
+    ),
+    /documents insert failed/,
+  );
+
+  assert.equal(objectStore.putCalls, 1);
+  assert.equal(objectStore.deleteCalls, 1);
+  assert.deepEqual(objectStore.deletedRawBlobIds, [TWEET_HASH]);
+  assert.equal(await objectStore.has(TWEET_HASH), false);
+  assert.match(queries.at(-1)?.text ?? "", /^rollback$/i);
+});
+
+test("ingestDocument does not delete a pre-existing blob when document creation fails", async () => {
+  const { db } = recordingDb();
+  const failingDb: QueryExecutor = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      if (/insert into documents/i.test(text)) {
+        throw new Error("documents insert failed");
+      }
+      return db.query<R>(text, values);
+    },
+  };
+  const objectStore = new RecordingObjectStore();
+  await objectStore.put(TWEET_BYTES);
+
+  await assert.rejects(
+    ingestDocument(
+      { db: failingDb, objectStore },
+      {
+        source: { source_id: SOURCE_ID, license_class: "public" },
+        bytes: TWEET_BYTES,
+        document: { kind: "social_post" },
+      },
+    ),
+    /documents insert failed/,
+  );
+
+  assert.equal(objectStore.putCalls, 2);
+  assert.equal(objectStore.deleteCalls, 0);
+  assert.equal(await objectStore.has(TWEET_HASH), true);
+});
+
+test("ingestDocument does not delete a new blob when commit outcome is uncertain", async () => {
+  const { db, queries } = recordingDb();
+  const commitFailsDb: QueryExecutor = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      if (/^commit$/i.test(text)) {
+        queries.push({ text, values });
+        throw new Error("commit connection lost");
+      }
+      return db.query<R>(text, values);
+    },
+  };
+  const objectStore = new RecordingObjectStore();
+
+  await assert.rejects(
+    ingestDocument(
+      { db: commitFailsDb, objectStore },
+      {
+        source: { source_id: SOURCE_ID, license_class: "public" },
+        bytes: TWEET_BYTES,
+        document: { kind: "social_post" },
+      },
+    ),
+    /commit connection lost/,
+  );
+
+  assert.equal(objectStore.putCalls, 1);
+  assert.equal(objectStore.deleteCalls, 0);
+  assert.equal(await objectStore.has(TWEET_HASH), true);
+  assert.match(queries.at(-1)?.text ?? "", /^commit$/i);
+  assert.equal(queries.some((query) => /^rollback$/i.test(query.text)), false);
+});
+
+test("ingestDocument rejects pg.Pool-like deps for stored blob transactions", async () => {
+  const { db, queries } = recordingDb();
+  const poolLike = Object.assign(db, { connect: async () => db, totalCount: 1, idleCount: 1 });
+  const objectStore = new RecordingObjectStore();
+
+  await assert.rejects(
+    ingestDocument(
+      { db: poolLike, objectStore },
+      {
+        source: { source_id: SOURCE_ID, license_class: "public" },
+        bytes: TWEET_BYTES,
+        document: { kind: "social_post" },
+      },
+    ),
+    /pinned database client/,
+  );
+  assert.equal(queries.length, 0);
+  assert.equal(objectStore.putCalls, 0);
 });
 
 test("content_hash is derived from bytes regardless of storage policy (same bytes ⇒ same hash)", async () => {
@@ -176,7 +398,7 @@ test("ingestDocument propagates DocumentInput fields (title, author, kind, conve
     },
   );
 
-  const values = queries[0]?.values ?? [];
+  const values = queries.find((query) => /insert into documents/i.test(query.text))?.values ?? [];
   assert.equal(values[0], SOURCE_ID);
   assert.equal(values[1], "reddit:t3_xyz", "provider_doc_id must propagate");
   assert.equal(values[2], "social_post", "kind must propagate");

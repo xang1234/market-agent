@@ -145,6 +145,25 @@ export type {
   StoredBlob,
 } from "./object-store.ts";
 
+export {
+  createObjectBlobGcWorker,
+  deleteUserAndQueueObjectBlobs,
+  deleteUserAndQueueObjectBlobsWithPool,
+  objectBlobGcTransactionClient,
+  runObjectBlobGcBatch,
+  runObjectBlobGcBatchWithPool,
+} from "./blob-gc-repo.ts";
+export type {
+  DeleteUserBlobQueueResult,
+  ObjectBlobGcBatchOptions,
+  ObjectBlobGcBatchResult,
+  ObjectBlobGcClientPool,
+  ObjectBlobGcPoolClient,
+  ObjectBlobGcTransactionClient,
+  ObjectBlobGcWorker,
+  ObjectBlobGcWorkerConfig,
+} from "./blob-gc-repo.ts";
+
 export { S3ObjectStore } from "./s3-object-store.ts";
 export type { S3ObjectStoreConfig } from "./s3-object-store.ts";
 
@@ -156,10 +175,15 @@ export {
 } from "./license-policy.ts";
 export type { StoragePolicy } from "./license-policy.ts";
 
-export { ingestDocument } from "./ingest.ts";
+export {
+  ingestDocument,
+  ingestDocumentWithPool,
+} from "./ingest.ts";
 export type {
+  IngestDocumentClientPool,
   IngestDocumentDeps,
   IngestDocumentInput,
+  IngestDocumentPoolClient,
   IngestDocumentResult,
 } from "./ingest.ts";
 

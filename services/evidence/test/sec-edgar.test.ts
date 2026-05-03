@@ -599,7 +599,7 @@ test("ingestSecFiling creates a primary/public source and ingests the document w
   assert.equal(await objectStore.has(result.ingest.raw_blob_id), true);
 
   assert.match(queries[0]?.text ?? "", /insert into sources/);
-  assert.match(queries[1]?.text ?? "", /insert into documents/);
+  assert.match(queries.find((query) => /insert into documents/i.test(query.text))?.text ?? "", /insert into documents/);
 });
 
 test("ingestSecFiling sets provider_doc_id to the accession number for downstream dedupe", async () => {
@@ -622,8 +622,8 @@ test("ingestSecFiling sets provider_doc_id to the accession number for downstrea
     },
   );
 
-  // documents insert is queries[1]; provider_doc_id is values[1] in createDocument.
-  assert.equal(queries[1]?.values?.[1], "0000320193-23-000106");
+  const documentsInsert = queries.find((query) => /insert into documents/i.test(query.text));
+  assert.equal(documentsInsert?.values?.[1], "0000320193-23-000106");
 });
 
 test("ingestSecFiling propagates a SecEdgarFetchError without writing source or document", async () => {
@@ -683,9 +683,10 @@ test("ingestSecFiling deletes the created source when document ingest fails", as
     /documents insert failed/,
   );
 
+  const sourceDelete = queries.find((query) => /delete from sources/i.test(query.text));
   assert.match(queries[0]?.text ?? "", /insert into sources/);
-  assert.match(queries[2]?.text ?? "", /delete from sources/);
-  assert.deepEqual(queries[2]?.values, [SOURCE_ID]);
+  assert.match(sourceDelete?.text ?? "", /delete from sources/);
+  assert.deepEqual(sourceDelete?.values, [SOURCE_ID]);
 });
 
 test("ingestSecFiling rejects an unknown form code before fetching or writing", async () => {
@@ -801,5 +802,5 @@ test("ingestSecFiling end-to-end through real createSource (regression guard for
   assert.equal(result.source.provider, "sec_edgar");
   assert.equal(result.source.trust_tier, "primary");
   assert.equal(result.source.license_class, "public");
-  assert.equal(calls.length, 2, "exactly one sources insert + one documents insert");
+  assert.equal(calls.filter((text) => /insert into (sources|documents)/i.test(text)).length, 2);
 });

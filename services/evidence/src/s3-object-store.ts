@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
@@ -113,6 +114,18 @@ export class S3ObjectStore implements ObjectStore {
   async has(rawBlobId: string): Promise<boolean> {
     assertRawBlobId(rawBlobId);
     return this.#headExists(this.#keyFor(rawBlobId));
+  }
+
+  async delete(rawBlobId: string): Promise<boolean> {
+    assertRawBlobId(rawBlobId);
+    const key = this.#keyFor(rawBlobId);
+    if (!(await this.#headExists(key))) {
+      return false;
+    }
+    await this.#client.send(
+      new DeleteObjectCommand({ Bucket: this.#bucket, Key: key }),
+    );
+    return true;
   }
 
   async #headExists(key: string): Promise<boolean> {

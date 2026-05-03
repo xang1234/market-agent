@@ -764,8 +764,8 @@ test("ingestPressRelease emits the sha256 content_hash actually derived from the
   );
 
   assert.equal(result.ingest.document.content_hash, expected);
-  // documents insert is queries[1]; content_hash is values[9] per createDocument.
-  assert.equal(queries[1]?.values?.[9], expected);
+  const documentsInsert = queries.find((query) => /insert into documents/i.test(query.text));
+  assert.equal(documentsInsert?.values?.[9], expected);
 });
 
 test("ingestPressRelease normalizes retrievedAt before writing the source row", async () => {
