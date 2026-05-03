@@ -1,4 +1,15 @@
 export {
+  CLAIM_ARGUMENT_ROLES,
+  createClaimArgument,
+  listClaimArgumentsForClaim,
+} from "./claim-argument-repo.ts";
+export type {
+  ClaimArgumentInput,
+  ClaimArgumentRole,
+  ClaimArgumentRow,
+} from "./claim-argument-repo.ts";
+
+export {
   CLAIM_MODALITIES,
   CLAIM_POLARITIES,
   CLAIM_STATUSES,
