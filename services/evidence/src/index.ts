@@ -27,6 +27,31 @@ export type {
 } from "./claim-cluster-repo.ts";
 
 export {
+  createClaimEvidence,
+  listClaimEvidenceForClaim,
+} from "./claim-evidence-repo.ts";
+export type {
+  ClaimEvidenceInput,
+  ClaimEvidenceRow,
+} from "./claim-evidence-repo.ts";
+
+export {
+  EVENT_STATUSES,
+  EVENT_TYPES,
+  createEvent,
+  createEventSubject,
+  listEventSubjectsForEvent,
+} from "./event-repo.ts";
+export type {
+  EventInput,
+  EventRow,
+  EventStatus,
+  EventSubjectInput,
+  EventSubjectRow,
+  EventType,
+} from "./event-repo.ts";
+
+export {
   CLAIM_MODALITIES,
   CLAIM_POLARITIES,
   CLAIM_STATUSES,
