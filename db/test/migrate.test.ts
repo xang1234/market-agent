@@ -62,7 +62,7 @@ test("migrate up applies pending migrations and records them in schema_migration
   });
 
   assert.equal(migrateResult.status, 0, migrateResult.stderr || migrateResult.stdout);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "15");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "16");
   assert.deepEqual(
     queryValue(containerName, "select version || ':' || name from schema_migrations order by version").split("\n"),
     [
@@ -81,6 +81,7 @@ test("migrate up applies pending migrations and records them in schema_migration
       "0013:mentions_unique",
       "0014:entity_impacts_channel_constraint",
       "0015:object_blob_gc_queue",
+      "0016:fact_review_queue",
     ],
   );
 
@@ -140,6 +141,7 @@ test("migrate status reports all migrations as applied after migrate up", { time
   assert.match(statusResult.stdout, /0013\s+mentions_unique\s+applied/);
   assert.match(statusResult.stdout, /0014\s+entity_impacts_channel_constraint\s+applied/);
   assert.match(statusResult.stdout, /0015\s+object_blob_gc_queue\s+applied/);
+  assert.match(statusResult.stdout, /0016\s+fact_review_queue\s+applied/);
 });
 
 test("migrate down rolls back the most recently applied migration", { timeout: 120000 }, async (t) => {
@@ -766,7 +768,7 @@ test("migrate down rolls back schema changes when removing the migration record 
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /rejecting schema_migrations delete/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "15");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "16");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -775,13 +777,13 @@ test("migrate down rolls back schema changes when removing the migration record 
   // migration's schema change must still be in place. If the runner
   // accidentally executed the down DDL before hitting the trigger block, the
   // schema_migrations row count alone wouldn't catch that — checking the
-  // latest migration's actual artifact does. 0015 added the object-blob GC
-  // queue; the down would remove it, so its presence is
+  // latest migration's actual artifact does. 0016 added the fact review queue;
+  // the down would remove it, so its presence is
   // independent proof the down DDL did not execute.
   assert.equal(
     queryValue(
       containerName,
-      "select count(*) from pg_tables where schemaname = 'public' and tablename = 'object_blob_gc_queue'",
+      "select count(*) from pg_tables where schemaname = 'public' and tablename = 'fact_review_queue'",
     ),
     "1",
   );
@@ -832,7 +834,7 @@ test("migrate down fails when any applied migration is missing locally", { timeo
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /Applied migration 0000 is missing locally/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "16");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "17");
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
 });
 

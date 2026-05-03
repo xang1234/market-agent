@@ -1,4 +1,43 @@
 export {
+  COVERAGE_LEVELS,
+  FACT_METHODS,
+  FACT_PERIOD_KINDS,
+  FACT_REVIEW_STATUSES,
+  FACT_SUBJECT_KINDS,
+  FRESHNESS_CLASSES,
+  createFact,
+  queueFactReview,
+  supersedeFact,
+  supersedeFactWithPool,
+} from "./fact-repo.ts";
+export type {
+  CoverageLevel,
+  FactClientPool,
+  FactInput,
+  FactMethod,
+  FactPoolClient,
+  FactPeriodKind,
+  FactReviewQueueRow,
+  FactReviewStatus,
+  FactRow,
+  FactSubjectKind,
+  FreshnessClass,
+  QueueFactReviewInput,
+  SupersedeFactResult,
+} from "./fact-repo.ts";
+
+export {
+  PROMOTION_REVIEW_CONFIDENCE_THRESHOLD,
+  PROMOTION_VERIFICATION_STATUSES,
+  decideCandidateFactPromotion,
+} from "./promotion-rules.ts";
+export type {
+  CandidateFactPromotionDecision,
+  CandidateFactPromotionInput,
+  PromotionVerificationStatus,
+} from "./promotion-rules.ts";
+
+export {
   CLAIM_ARGUMENT_ROLES,
   createClaimArgument,
   listClaimArgumentsForClaim,
