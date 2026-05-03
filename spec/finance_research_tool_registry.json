@@ -3761,8 +3761,8 @@
         "theme_research",
         "agent_management"
       ],
-      "description": "Extract subject mentions from a raw document.",
-      "read_only": true,
+      "description": "Extract subject mentions from a raw document and persist canonical mention rows.",
+      "read_only": false,
       "approval_required": false,
       "cost_class": "medium",
       "freshness_expectation": "varies",
