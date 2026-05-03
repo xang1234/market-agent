@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { assembleEvidenceBundle } from "../src/evidence-bundle-repo.ts";
+import {
+  assembleEvidenceBundle,
+  buildEvidenceBundle,
+  getEvidenceBundle,
+} from "../src/evidence-bundle-repo.ts";
 import type { QueryExecutor } from "../src/types.ts";
 
 const CLAIM_A = "11111111-1111-4111-a111-111111111111";
@@ -126,6 +130,37 @@ test("assembleEvidenceBundle rejects empty or invalid inputs before querying", a
   await assert.rejects(() => assembleEvidenceBundle(db, {}), /claim_ids or event_ids/);
   await assert.rejects(() => assembleEvidenceBundle(db, { claim_ids: ["not-a-uuid"] }), /claim_ids\[0\]/);
   await assert.rejects(() => assembleEvidenceBundle(db, { event_ids: ["not-a-uuid"] }), /event_ids\[0\]/);
+
+  assert.equal(queries.length, 0);
+});
+
+test("buildEvidenceBundle derives the same bundle_id from canonical content", async () => {
+  const rows = [
+    bundleRow({ claim_id: CLAIM_B, document_id: DOCUMENT_B, confidence: "0.80" }),
+    bundleRow({ claim_id: CLAIM_A, document_id: DOCUMENT_A, confidence: "0.95" }),
+  ];
+  const first = await buildEvidenceBundle(recordingDb(rows).db, { claim_ids: [CLAIM_B, CLAIM_A] });
+  const second = await buildEvidenceBundle(recordingDb([...rows].reverse()).db, { claim_ids: [CLAIM_A, CLAIM_B] });
+
+  assert.match(first.bundle_id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(second.bundle_id, first.bundle_id);
+  assert.deepEqual(second, first);
+});
+
+test("getEvidenceBundle resolves a deterministic bundle_id and returns the same payload", async () => {
+  const rows = [bundleRow({ claim_id: CLAIM_A, document_id: DOCUMENT_A, confidence: "0.95" })];
+  const built = await buildEvidenceBundle(recordingDb(rows).db, { claim_ids: [CLAIM_A] });
+
+  const fetched = await getEvidenceBundle(recordingDb(rows).db, built.bundle_id);
+
+  assert.deepEqual(fetched, built);
+});
+
+test("getEvidenceBundle rejects non-bundle ids before querying", async () => {
+  const { db, queries } = recordingDb([]);
+
+  await assert.rejects(() => getEvidenceBundle(db, "not-a-uuid"), /bundle_id/);
+  await assert.rejects(() => getEvidenceBundle(db, DOCUMENT_A), /bundle_id/);
 
   assert.equal(queries.length, 0);
 });

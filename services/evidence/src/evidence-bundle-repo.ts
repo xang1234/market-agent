@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { TrustTier } from "./source-repo.ts";
 import { TRUST_TIERS } from "./source-repo.ts";
 import type { QueryExecutor } from "./types.ts";
@@ -37,6 +39,12 @@ export type AssembledEvidenceBundle = Readonly<{
   evidence: readonly EvidenceBundleEvidence[];
 }>;
 
+export type EvidenceBundle = Readonly<{
+  bundle_id: string;
+  documents: readonly EvidenceBundleDocument[];
+  evidence: readonly EvidenceBundleEvidence[];
+}>;
+
 type EvidenceBundleDbRow = {
   claim_evidence_id: string;
   claim_id: string;
@@ -50,6 +58,8 @@ type EvidenceBundleDbRow = {
   canonical_url: string | null;
   trust_tier: TrustTier;
 };
+
+const builtBundles = new Map<string, EvidenceBundle>();
 
 export async function assembleEvidenceBundle(
   db: QueryExecutor,
@@ -91,6 +101,32 @@ export async function assembleEvidenceBundle(
   );
 
   return bundleFromRows(rows);
+}
+
+export async function buildEvidenceBundle(
+  db: QueryExecutor,
+  input: EvidenceBundleInput,
+): Promise<EvidenceBundle> {
+  const assembled = await assembleEvidenceBundle(db, input);
+  const bundle = Object.freeze({
+    bundle_id: bundleIdForContent(assembled),
+    documents: assembled.documents,
+    evidence: assembled.evidence,
+  });
+  builtBundles.set(bundle.bundle_id, bundle);
+  return bundle;
+}
+
+export async function getEvidenceBundle(
+  _db: QueryExecutor,
+  bundleId: string,
+): Promise<EvidenceBundle> {
+  assertUuidV4(bundleId, "bundle_id");
+  const bundle = builtBundles.get(bundleId);
+  if (!bundle) {
+    throw new Error("bundle_id: evidence bundle was not built in this process");
+  }
+  return bundle;
 }
 
 function normalizeEvidenceBundleInput(input: EvidenceBundleInput): Required<EvidenceBundleInput> {
@@ -228,4 +264,30 @@ function omitEvidenceSortKey(evidence: EvidenceBundleEvidence & { claim_evidence
 function nullableIsoString(value: Date | string | null): string | null {
   if (value == null) return null;
   return value instanceof Date ? value.toISOString() : value;
+}
+
+function bundleIdForContent(bundle: AssembledEvidenceBundle): string {
+  const hash = createHash("sha256").update(stableJson(bundle)).digest();
+  hash[6] = (hash[6] & 0x0f) | 0x40;
+  hash[8] = (hash[8] & 0x3f) | 0x80;
+  const hex = hash.subarray(0, 16).toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(sortJson(value));
+}
+
+function sortJson(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortJson);
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, child]) => [key, sortJson(child)]),
+    );
+  }
+  return value;
 }
