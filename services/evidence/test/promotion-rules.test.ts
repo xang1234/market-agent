@@ -85,4 +85,34 @@ test("promotion rules route low-confidence extractions to reviewer queue", () =>
     verification_status: "candidate",
     reason: "below_review_confidence_threshold",
   });
+
+  assert.deepEqual(
+    decide({
+      source_kind: "upload",
+      extraction_confidence: PROMOTION_REVIEW_CONFIDENCE_THRESHOLD - 0.01,
+      user_scoped: true,
+    }),
+    {
+      action: "queue_review",
+      verification_status: "candidate",
+      reason: "below_review_confidence_threshold",
+    },
+  );
+});
+
+test("promotion rules reject non-promotable sources before low-confidence review routing", () => {
+  assert.deepEqual(decide({ source_kind: "social_post", extraction_confidence: 0.1 }), {
+    action: "reject",
+    reason: "social_source_never_promotes_fact",
+  });
+
+  assert.deepEqual(decide({ source_kind: "internal", extraction_confidence: 0.1 }), {
+    action: "reject",
+    reason: "internal_source_not_promotable",
+  });
+
+  assert.deepEqual(decide({ source_kind: "upload", extraction_confidence: 0.1, user_scoped: false }), {
+    action: "reject",
+    reason: "user_upload_requires_user_scope",
+  });
 });

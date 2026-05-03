@@ -102,6 +102,14 @@ export type FactReviewQueueRow = Readonly<{
   updated_at: string;
 }>;
 
+export type FactPoolClient = QueryExecutor & {
+  release(destroy?: boolean): void;
+};
+
+export type FactClientPool = Readonly<{
+  connect(): Promise<FactPoolClient>;
+}>;
+
 type CreateFactOptions = Readonly<{ supersedes?: string | null }>;
 type FactDbRow = Omit<FactRow, "value_num" | "scale" | "confidence" | "created_at" | "updated_at" | "invalidated_at"> & {
   value_num: number | string | null;
@@ -237,6 +245,9 @@ export async function supersedeFact(
   supersededFactId: string,
   input: FactInput,
 ): Promise<SupersedeFactResult> {
+  if (isPoolLike(db)) {
+    throw new Error("supersedeFact requires a pinned transaction client; use supersedeFactWithPool for pools");
+  }
   assertUuidV4(supersededFactId, "superseded_fact_id");
 
   await db.query("begin");
@@ -265,11 +276,31 @@ export async function supersedeFact(
   }
 }
 
+export async function supersedeFactWithPool(
+  pool: FactClientPool,
+  supersededFactId: string,
+  input: FactInput,
+): Promise<SupersedeFactResult> {
+  const client = await pool.connect();
+  let destroyClient = false;
+  try {
+    return await supersedeFact(client, supersededFactId, input);
+  } catch (error) {
+    destroyClient = true;
+    throw error;
+  } finally {
+    client.release(destroyClient);
+  }
+}
+
 export async function queueFactReview(
   db: QueryExecutor,
   input: QueueFactReviewInput,
 ): Promise<FactReviewQueueRow> {
-  const normalized = normalizeFactInput(input.candidate);
+  const normalized = {
+    ...normalizeFactInput(input.candidate),
+    verification_status: "candidate" as const,
+  };
   assertNonEmptyString(input.reason, "reason");
   if (input.source_id != null) assertUuidV4(input.source_id, "source_id");
   if (input.metric_id != null) assertUuidV4(input.metric_id, "metric_id");
@@ -433,9 +464,28 @@ function factReviewQueueRowFromDb(row: FactReviewQueueDbRow | undefined): FactRe
 
 function assertOptionalDate(value: unknown, label: string): asserts value is string | null | undefined {
   if (value == null) return;
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(`${value}T00:00:00Z`))) {
+  if (typeof value !== "string" || !isIsoCalendarDate(value)) {
     throw new Error(`${label}: must be an ISO date YYYY-MM-DD`);
   }
+}
+
+function isIsoCalendarDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!Number.isInteger(year) || month < 1 || month > 12) return false;
+  return day >= 1 && day <= daysInMonth(year, month);
+}
+
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) return isLeapYear(year) ? 29 : 28;
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
 }
 
 function assertOptionalFactValue(value: unknown, label: string): asserts value is number | null | undefined {
@@ -463,6 +513,10 @@ function assertStringArray(value: unknown, label: string): asserts value is read
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || item.trim().length === 0)) {
     throw new Error(`${label}: must be an array of non-empty strings`);
   }
+}
+
+function isPoolLike(value: QueryExecutor): boolean {
+  return typeof (value as Partial<FactClientPool>).connect === "function";
 }
 
 function nullableIsoString(value: Date | string | null): string | null {

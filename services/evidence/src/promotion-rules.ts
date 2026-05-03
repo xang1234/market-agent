@@ -63,6 +63,27 @@ export function decideCandidateFactPromotion(
   const reviewThreshold = input.review_confidence_threshold ?? PROMOTION_REVIEW_CONFIDENCE_THRESHOLD;
   assertConfidence(reviewThreshold, "review_confidence_threshold");
 
+  switch (input.source_kind) {
+    case "social_post":
+      return Object.freeze({
+        action: "reject" as const,
+        reason: "social_source_never_promotes_fact" as const,
+      });
+    case "upload":
+      if (!input.user_scoped) {
+        return Object.freeze({
+          action: "reject" as const,
+          reason: "user_upload_requires_user_scope" as const,
+        });
+      }
+      break;
+    case "internal":
+      return Object.freeze({
+        action: "reject" as const,
+        reason: "internal_source_not_promotable" as const,
+      });
+  }
+
   if (input.extraction_confidence < reviewThreshold) {
     return Object.freeze({
       action: "queue_review" as const,
@@ -121,26 +142,11 @@ export function decideCandidateFactPromotion(
             verification_status: "candidate" as const,
             reason: "secondary_source_not_canonical_without_corroboration" as const,
           });
-    case "social_post":
-      return Object.freeze({
-        action: "reject" as const,
-        reason: "social_source_never_promotes_fact" as const,
-      });
     case "upload":
-      return input.user_scoped
-        ? Object.freeze({
-            action: "keep_candidate" as const,
-            verification_status: "candidate" as const,
-            reason: "user_upload_candidate_user_scoped_only" as const,
-          })
-        : Object.freeze({
-            action: "reject" as const,
-            reason: "user_upload_requires_user_scope" as const,
-          });
-    case "internal":
       return Object.freeze({
-        action: "reject" as const,
-        reason: "internal_source_not_promotable" as const,
+        action: "keep_candidate" as const,
+        verification_status: "candidate" as const,
+        reason: "user_upload_candidate_user_scoped_only" as const,
       });
   }
 }

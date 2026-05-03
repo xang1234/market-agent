@@ -8,11 +8,14 @@ export {
   createFact,
   queueFactReview,
   supersedeFact,
+  supersedeFactWithPool,
 } from "./fact-repo.ts";
 export type {
   CoverageLevel,
+  FactClientPool,
   FactInput,
   FactMethod,
+  FactPoolClient,
   FactPeriodKind,
   FactReviewQueueRow,
   FactReviewStatus,

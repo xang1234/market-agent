@@ -5,6 +5,7 @@ import {
   createFact,
   queueFactReview,
   supersedeFact,
+  supersedeFactWithPool,
   type FactInput,
 } from "../src/fact-repo.ts";
 import type { QueryExecutor } from "../src/types.ts";
@@ -20,6 +21,7 @@ const QUEUE_ID = "66666666-6666-4666-8666-666666666666";
 
 class FakeDb implements QueryExecutor {
   readonly queries: Query[] = [];
+  readonly releaseArgs: boolean[] = [];
 
   async query<R extends Record<string, unknown> = Record<string, unknown>>(text: string, values?: unknown[]) {
     this.queries.push({ text, values });
@@ -60,6 +62,10 @@ class FakeDb implements QueryExecutor {
       } as never;
     }
     return { rows: [], rowCount: 0 } as never;
+  }
+
+  release(destroy = false): void {
+    this.releaseArgs.push(destroy);
   }
 }
 
@@ -111,6 +117,62 @@ test("queueFactReview persists low-confidence candidate facts for reviewer workf
   assert.deepEqual(row.candidate, candidate);
   assert.equal(row.reason, "below_review_confidence_threshold");
   assert.match(db.queries[0].text, /insert into fact_review_queue/i);
+});
+
+test("queueFactReview serializes queued facts as candidate status", async () => {
+  const db = new FakeDb();
+
+  const row = await queueFactReview(db, {
+    candidate: factInput({ value_num: 88.8, verification_status: "authoritative" }),
+    reason: "below_review_confidence_threshold",
+    confidence: 0.61,
+    threshold: 0.7,
+  });
+
+  assert.equal(row.candidate.verification_status, "candidate");
+});
+
+test("createFact rejects impossible calendar dates before querying", async () => {
+  const db = new FakeDb();
+
+  await assert.rejects(
+    createFact(db, factInput({ period_end: "2026-02-31" })),
+    /period_end: must be an ISO date YYYY-MM-DD/,
+  );
+
+  assert.equal(db.queries.length, 0);
+});
+
+test("supersedeFact rejects pool-like clients before opening a transaction", async () => {
+  const db = new FakeDb() as FakeDb & { connect(): Promise<FakeDb> };
+  db.connect = async () => db;
+
+  await assert.rejects(
+    supersedeFact(db, FACT_ID, factInput({ value_num: 120.0 })),
+    /requires a pinned transaction client/,
+  );
+
+  assert.equal(db.queries.length, 0);
+});
+
+test("supersedeFactWithPool pins and releases one client", async () => {
+  const client = new FakeDb();
+
+  const result = await supersedeFactWithPool({ connect: async () => client }, FACT_ID, factInput({ value_num: 120.0 }));
+
+  assert.equal(result.new_fact.fact_id, NEW_FACT_ID);
+  assert.deepEqual(client.releaseArgs, [false]);
+});
+
+test("supersedeFactWithPool destroys clients after errors", async () => {
+  const client = new FakeDb();
+
+  await assert.rejects(
+    supersedeFactWithPool({ connect: async () => client }, "not-a-uuid", factInput({ value_num: 120.0 })),
+    /superseded_fact_id/,
+  );
+
+  assert.deepEqual(client.releaseArgs, [true]);
 });
 
 function factInput(overrides: Partial<FactInput> = {}): FactInput {
