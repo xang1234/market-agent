@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { validateBlock } from './BlockValidator.ts'
-import { ALL_BLOCK_FIXTURES, richTextFixture, sourcesFixture } from './fixtures.ts'
+import { ALL_BLOCK_FIXTURES, newsClusterFixture, richTextFixture, sourcesFixture } from './fixtures.ts'
 
 test('validateBlock accepts every canonical fixture', () => {
   for (const block of ALL_BLOCK_FIXTURES) {
@@ -72,6 +72,38 @@ test('validateBlock rejects a block whose kind-specific required field is missin
   delete block.segments
   const result = validateBlock(block)
   assert.equal(result.valid, false)
+})
+
+test('validateBlock rejects news_cluster blocks without supporting document refs', () => {
+  const block: Record<string, unknown> = { ...newsClusterFixture }
+  delete block.document_refs
+  const result = validateBlock(block)
+  assert.equal(result.valid, false)
+})
+
+test('validateBlock rejects news_cluster blocks with empty evidence refs', () => {
+  assert.equal(validateBlock({ ...newsClusterFixture, claim_refs: [] }).valid, false)
+  assert.equal(validateBlock({ ...newsClusterFixture, document_refs: [] }).valid, false)
+})
+
+test('validateBlock accepts cache-safe allowed transforms on interactive series blocks', () => {
+  const result = validateBlock({
+    ...newsClusterFixture,
+    interactive: {
+      allowed_transforms: {
+        series: [
+          {
+            range: {
+              start: '2026-04-01T00:00:00.000Z',
+              end: '2026-05-01T00:00:00.000Z',
+            },
+            interval: '1d',
+          },
+        ],
+      },
+    },
+  })
+  assert.equal(result.valid, true)
 })
 
 test('validateBlock rejects entirely malformed input (string, number, null)', () => {

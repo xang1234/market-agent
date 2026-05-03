@@ -233,7 +233,7 @@ test('filings_list fixture has form names, ISO filed_at timestamps, and at least
   assert.ok(withPeriod, 'at least one item carries a period to exercise the optional path')
 })
 
-test('news_cluster fixture has a non-empty headline and at least one claim ref', () => {
+test('news_cluster fixture has a non-empty headline and evidence refs', () => {
   assertBaseBlockShape(newsClusterFixture, 'news_cluster')
   assert.match(newsClusterFixture.cluster_id, UUID_PATTERN)
   assert.ok(newsClusterFixture.headline.length > 0)
@@ -241,7 +241,10 @@ test('news_cluster fixture has a non-empty headline and at least one claim ref',
   for (const ref of newsClusterFixture.claim_refs) {
     assert.match(ref, UUID_PATTERN)
   }
-  assert.ok(newsClusterFixture.document_refs && newsClusterFixture.document_refs.length > 0)
+  assert.ok(newsClusterFixture.document_refs.length > 0)
+  for (const ref of newsClusterFixture.document_refs) {
+    assert.match(ref, UUID_PATTERN)
+  }
 })
 
 test('finding_card fixture carries a recognized severity and at least one subject ref', () => {

@@ -105,6 +105,24 @@
             "type": "string"
           }
         },
+        "allowed_transforms": {
+          "type": "object",
+          "properties": {
+            "series": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AllowedSeriesTransform"
+              }
+            },
+            "ranges": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AllowedSeriesTransform"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
         "range_end_max": {
           "type": "string"
         },
@@ -113,6 +131,24 @@
         },
         "collapsible": {
           "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "AllowedSeriesTransform": {
+      "type": "object",
+      "required": [
+        "range",
+        "interval"
+      ],
+      "properties": {
+        "range": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "interval": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -812,12 +848,14 @@
             },
             "claim_refs": {
               "type": "array",
+              "minItems": 1,
               "items": {
                 "$ref": "#/$defs/UUID"
               }
             },
             "document_refs": {
               "type": "array",
+              "minItems": 1,
               "items": {
                 "$ref": "#/$defs/UUID"
               }
@@ -826,7 +864,8 @@
           "required": [
             "cluster_id",
             "headline",
-            "claim_refs"
+            "claim_refs",
+            "document_refs"
           ]
         }
       ],

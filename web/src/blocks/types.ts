@@ -58,10 +58,23 @@ export type InteractiveSpec = {
   ranges?: ReadonlyArray<string>
   intervals?: ReadonlyArray<string>
   sort_fields?: ReadonlyArray<string>
+  allowed_transforms?: AllowedTransforms
   range_end_max?: string
   hover_details?: boolean
   collapsible?: boolean
 }
+
+export type AllowedTransformRange = Readonly<Record<string, unknown>>
+
+export type AllowedSeriesTransform = Readonly<{
+  range: AllowedTransformRange
+  interval: string
+}>
+
+export type AllowedTransforms = Readonly<{
+  series?: ReadonlyArray<AllowedSeriesTransform>
+  ranges?: ReadonlyArray<AllowedSeriesTransform>
+}>
 
 export type BaseBlock = {
   id: string
@@ -265,7 +278,7 @@ export type NewsClusterBlock = BaseBlock & {
   cluster_id: string
   headline: string
   claim_refs: ReadonlyArray<string>
-  document_refs?: ReadonlyArray<string>
+  document_refs: ReadonlyArray<string>
 }
 
 export type FindingCardBlock = BaseBlock & {

@@ -1,117 +1,75 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  CLAIM_STANCES,
   EVIDENCE_SOURCE_KINDS,
   loadSignalsFixture,
   sourceKindLabel,
-  stanceLabel,
   totalEvidenceCount,
 } from './signals.ts'
 
-const APPLE_ISSUER_ID = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaa1'
-const NVDA_ISSUER_ID = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaa5'
+const APPLE_ISSUER_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1'
+const NVDA_ISSUER_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa5'
 
-test('loadSignalsFixture returns a deterministic envelope for the same issuer id', () => {
+test('loadSignalsFixture returns a deterministic block envelope for the same issuer id', () => {
   const a = loadSignalsFixture(APPLE_ISSUER_ID)
   const b = loadSignalsFixture(APPLE_ISSUER_ID)
-  assert.deepEqual(a.sentiment_trend.points, b.sentiment_trend.points)
-  assert.deepEqual(a.claim_clusters.clusters, b.claim_clusters.clusters)
+  assert.deepEqual(a.blocks, b.blocks)
 })
 
 test('loadSignalsFixture varies by issuer so different subjects render distinct surfaces', () => {
   const apple = loadSignalsFixture(APPLE_ISSUER_ID)
   const nvda = loadSignalsFixture(NVDA_ISSUER_ID)
-  assert.notDeepEqual(apple.sentiment_trend.points, nvda.sentiment_trend.points)
-  // The rotation embeds a per-issuer offset into each cluster_id's `-cluster-N`
-  // suffix. Stripping the issuer prefix lets us compare the rotation result
-  // directly — if two issuers hashed to the same offset, this sequence would
-  // match (and the cross-issuer divergence guarantee would be defeated).
-  const rotationIndex = (id: string) => id.split('-cluster-').at(-1)
-  const appleRotation = apple.claim_clusters.clusters.map((c) => rotationIndex(c.cluster_id))
-  const nvdaRotation = nvda.claim_clusters.clusters.map((c) => rotationIndex(c.cluster_id))
-  assert.notDeepEqual(appleRotation, nvdaRotation)
+  assert.notDeepEqual(apple.sentiment_trend.series, nvda.sentiment_trend.series)
+  assert.notDeepEqual(apple.news_clusters.map((cluster) => cluster.cluster_id), nvda.news_clusters.map((cluster) => cluster.cluster_id))
 })
 
-test('sentiment trend block carries BaseBlock provenance fields', () => {
+test('sentiment trend block carries BaseBlock provenance and chronological series points', () => {
   const env = loadSignalsFixture(APPLE_ISSUER_ID)
   const trend = env.sentiment_trend
   assert.equal(trend.kind, 'sentiment_trend')
-  assert.equal(trend.subject.id, APPLE_ISSUER_ID)
-  assert.equal(trend.window_days, 30)
-  assert.equal(trend.points.length, 30)
+  assert.equal(trend.series.length, 1)
+  assert.equal(trend.series[0]!.points.length, 30)
   assert.ok(trend.id.length > 0)
   assert.ok(trend.snapshot_id.length > 0)
-  assert.ok(trend.data_ref.length > 0)
+  assert.ok(trend.data_ref.id.length > 0)
   assert.ok(trend.source_refs.length > 0)
   assert.ok(trend.as_of.length > 0)
-})
 
-test('sentiment scores stay inside [-1, 1] and mention counts stay non-negative', () => {
-  const env = loadSignalsFixture(APPLE_ISSUER_ID)
-  for (const point of env.sentiment_trend.points) {
-    assert.ok(point.sentiment_score >= -1 && point.sentiment_score <= 1)
-    assert.ok(point.mention_count >= 0)
-    assert.match(point.date, /^\d{4}-\d{2}-\d{2}$/)
-  }
-})
-
-test('sentiment trend points are ordered oldest-first so a left-to-right chart reads chronologically', () => {
-  const env = loadSignalsFixture(APPLE_ISSUER_ID)
-  const points = env.sentiment_trend.points
+  const points = trend.series[0]!.points
   for (let i = 1; i < points.length; i++) {
-    assert.ok(points[i - 1].date <= points[i].date, `expected ascending dates at index ${i}`)
+    assert.ok(String(points[i - 1]!.x) <= String(points[i]!.x), `expected ascending dates at index ${i}`)
+  }
+  for (const point of points) {
+    assert.ok(point.y >= -1 && point.y <= 1)
   }
 })
 
-test('claim clusters cover every defined stance category in the source-agnostic enum', () => {
+test('mention volume carries non-negative integer counts across source series', () => {
   const env = loadSignalsFixture(APPLE_ISSUER_ID)
-  const seenStances = new Set(env.claim_clusters.clusters.map((c) => c.stance))
-  for (const stance of CLAIM_STANCES) {
-    assert.ok(seenStances.has(stance), `expected at least one ${stance} cluster`)
-  }
-})
-
-test('claim clusters carry source diversity across community / news / filing', () => {
-  const env = loadSignalsFixture(APPLE_ISSUER_ID)
-  for (const cluster of env.claim_clusters.clusters) {
-    for (const kind of EVIDENCE_SOURCE_KINDS) {
-      assert.ok(
-        Number.isInteger(cluster.evidence_mix[kind]),
-        `expected integer count for ${kind}`,
-      )
-      assert.ok(cluster.evidence_mix[kind] >= 0)
+  assert.equal(env.mention_volume.kind, 'mention_volume')
+  assert.equal(env.mention_volume.series.length, 2)
+  for (const series of env.mention_volume.series) {
+    for (const point of series.points) {
+      assert.ok(Number.isInteger(point.y))
+      assert.ok(point.y >= 0)
     }
-    assert.ok(
-      totalEvidenceCount(cluster.evidence_mix) > 0,
-      'each cluster should cite at least one piece of evidence',
-    )
   }
 })
 
-test('claim clusters are ordered most-recently-observed first', () => {
+test('news clusters are evidence-bound with claim and document refs', () => {
   const env = loadSignalsFixture(APPLE_ISSUER_ID)
-  const clusters = env.claim_clusters.clusters
-  for (let i = 1; i < clusters.length; i++) {
-    assert.ok(
-      clusters[i - 1].last_observed >= clusters[i].last_observed,
-      `expected newest-first at index ${i}`,
-    )
+  assert.ok(env.news_clusters.length > 0)
+  for (const cluster of env.news_clusters) {
+    assert.equal(cluster.kind, 'news_cluster')
+    assert.ok(cluster.claim_refs.length > 0)
+    assert.ok(cluster.document_refs.length > 0)
+    assert.ok(cluster.source_refs.length > 0)
   }
 })
 
-test('first_observed precedes or equals last_observed for every cluster', () => {
-  const env = loadSignalsFixture(APPLE_ISSUER_ID)
-  for (const cluster of env.claim_clusters.clusters) {
-    assert.ok(cluster.first_observed <= cluster.last_observed)
-  }
-})
-
-test('stanceLabel and sourceKindLabel cover every enum value', () => {
-  for (const stance of CLAIM_STANCES) {
-    assert.ok(stanceLabel(stance).length > 0)
-  }
+test('sourceKindLabel and totalEvidenceCount cover every source enum value', () => {
   for (const kind of EVIDENCE_SOURCE_KINDS) {
     assert.ok(sourceKindLabel(kind).length > 0)
   }
+  assert.equal(totalEvidenceCount({ community: 2, news: 3, filing: 5 }), 10)
 })
