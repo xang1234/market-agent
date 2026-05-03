@@ -32,6 +32,19 @@ export type {
 export type { QueryExecutor } from "./types.ts";
 
 export {
+  MENTION_PROMINENCES,
+  createMention,
+  deleteMentionsForDocumentExcept,
+  listMentionsForDocument,
+} from "./mention-repo.ts";
+export type {
+  MentionIdentity,
+  MentionInput,
+  MentionProminence,
+  MentionRow,
+} from "./mention-repo.ts";
+
+export {
   EPHEMERAL_RAW_BLOB_ID_PREFIX,
   MemoryObjectStore,
   RAW_BLOB_ID_PREFIX,
@@ -100,6 +113,15 @@ export type {
 
 export { createEvidenceReaderToolHandlers } from "./reader/extract-tools.ts";
 export type { EvidenceReaderToolDeps } from "./reader/extract-tools.ts";
+export { linkDocumentMentions } from "./reader/entity-linker.ts";
+export type {
+  DetectedMentionCandidate,
+  LinkDocumentMentionsResult,
+  ResolveMention,
+  SkippedMention,
+} from "./reader/entity-linker.ts";
+export { classifyMentionProminence } from "./reader/mention-prominence.ts";
+export type { MentionProminenceSections } from "./reader/mention-prominence.ts";
 
 export {
   SEC_EDGAR_DEFAULT_RATE_LIMIT,

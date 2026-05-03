@@ -62,7 +62,7 @@ test("migrate up applies pending migrations and records them in schema_migration
   });
 
   assert.equal(migrateResult.status, 0, migrateResult.stderr || migrateResult.stdout);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "12");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "13");
   assert.deepEqual(
     queryValue(containerName, "select version || ':' || name from schema_migrations order by version").split("\n"),
     [
@@ -78,6 +78,7 @@ test("migrate up applies pending migrations and records them in schema_migration
       "0010:analyze_template_runs",
       "0011:sources_user_id",
       "0012:document_kind_press_release",
+      "0013:mentions_unique",
     ],
   );
 
@@ -134,6 +135,7 @@ test("migrate status reports all migrations as applied after migrate up", { time
   assert.match(statusResult.stdout, /0010\s+analyze_template_runs\s+applied/);
   assert.match(statusResult.stdout, /0011\s+sources_user_id\s+applied/);
   assert.match(statusResult.stdout, /0012\s+document_kind_press_release\s+applied/);
+  assert.match(statusResult.stdout, /0013\s+mentions_unique\s+applied/);
 });
 
 test("migrate down rolls back the most recently applied migration", { timeout: 120000 }, async (t) => {
@@ -165,7 +167,7 @@ test("migrate down rolls back the most recently applied migration", { timeout: 1
   });
   assert.equal(downResult.status, 0, downResult.stderr || downResult.stdout);
 
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "11");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "12");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -195,44 +197,52 @@ test("migrate down rolls back the most recently applied migration", { timeout: 1
       "select count(*) from information_schema.columns where table_name = 'chat_threads' and column_name = 'archived_at'",
     ),
     "1",
-    "0008's archived_at column must remain — only 0012 should have been rolled back",
+    "0008's archived_at column must remain — only 0013 should have been rolled back",
   );
-  // 0009's effects must remain — only 0012 was rolled back.
+  // 0009's effects must remain — only 0013 was rolled back.
   assert.equal(
     queryValue(
       containerName,
       "select count(*) from pg_constraint where conname = 'theme_memberships_theme_subject_unique'",
     ),
     "1",
-    "0009's unique constraint must remain — only 0012 should have been rolled back",
+    "0009's unique constraint must remain — only 0013 should have been rolled back",
   );
-  // 0010's effects must remain — only 0012 was rolled back.
+  // 0010's effects must remain — only 0013 was rolled back.
   assert.equal(
     queryValue(
       containerName,
       "select count(*) from pg_tables where schemaname = 'public' and tablename = 'analyze_template_runs'",
     ),
     "1",
-    "0010's analyze_template_runs table must remain — only 0012 should have been rolled back",
+    "0010's analyze_template_runs table must remain — only 0013 should have been rolled back",
   );
-  // 0011's effects must remain — only 0012 was rolled back.
+  // 0011's effects must remain — only 0013 was rolled back.
   assert.equal(
     queryValue(
       containerName,
       "select count(*) from information_schema.columns where table_name = 'sources' and column_name = 'user_id'",
     ),
     "1",
-    "0011's sources.user_id column must remain — only 0012 should have been rolled back",
+    "0011's sources.user_id column must remain — only 0013 should have been rolled back",
   );
-  // 0012-specific assertion: 'press_release' must be gone from
-  // document_kind enum after the rollback.
+  // 0012's effects must remain — only 0013 was rolled back.
   assert.equal(
     queryValue(
       containerName,
       "select count(*) from pg_enum e join pg_type t on t.oid = e.enumtypid where t.typname = 'document_kind' and e.enumlabel = 'press_release'",
     ),
+    "1",
+    "press_release enum value added by 0012.up must remain — only 0013 should have been rolled back",
+  );
+  // 0013-specific assertion: mention dedupe index must be gone after rollback.
+  assert.equal(
+    queryValue(
+      containerName,
+      "select count(*) from pg_indexes where schemaname = 'public' and indexname = 'mentions_document_subject_prominence_idx'",
+    ),
     "0",
-    "press_release enum value added by 0012.up must be removed by 0012.down",
+    "mentions unique index added by 0013.up must be removed by 0013.down",
   );
 });
 
@@ -747,7 +757,7 @@ test("migrate down rolls back schema changes when removing the migration record 
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /rejecting schema_migrations delete/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "12");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "13");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -756,13 +766,13 @@ test("migrate down rolls back schema changes when removing the migration record 
   // migration's schema change must still be in place. If the runner
   // accidentally executed the down DDL before hitting the trigger block, the
   // schema_migrations row count alone wouldn't catch that — checking the
-  // latest migration's actual artifact does. 0012 added 'press_release' to
-  // document_kind; the down would remove it, so its presence is independent
-  // proof the down DDL did not execute.
+  // latest migration's actual artifact does. 0013 added the mentions unique
+  // index; the down would remove it, so its presence is independent proof the
+  // down DDL did not execute.
   assert.equal(
     queryValue(
       containerName,
-      "select count(*) from pg_enum e join pg_type t on t.oid = e.enumtypid where t.typname = 'document_kind' and e.enumlabel = 'press_release'",
+      "select count(*) from pg_indexes where schemaname = 'public' and indexname = 'mentions_document_subject_prominence_idx'",
     ),
     "1",
   );
@@ -813,7 +823,7 @@ test("migrate down fails when any applied migration is missing locally", { timeo
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /Applied migration 0000 is missing locally/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "13");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "14");
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
 });
 
@@ -911,5 +921,103 @@ test("migrate up applies 0009 cleanly even when legacy duplicate theme_membershi
     ),
     "1",
     "0009 must successfully add the unique constraint after dedupe",
+  );
+});
+
+test("migrate up applies 0013 cleanly when legacy duplicate mentions rows exist", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for db migration integration coverage");
+    return;
+  }
+
+  const containerName = createContainerName("fra-6j0-3");
+  const password = "postgres";
+  const hostPort = startPostgres(containerName, password);
+  const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${hostPort}/postgres`;
+
+  registerLifoCleanup(t, () => stopPostgres(containerName));
+
+  await waitForPostgres(containerName, databaseUrl);
+
+  const upResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
+    cwd: dbRoot,
+    env: { DATABASE_URL: databaseUrl },
+  });
+  assert.equal(upResult.status, 0, upResult.stderr || upResult.stdout);
+
+  const downResult = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], {
+    cwd: dbRoot,
+    env: { DATABASE_URL: databaseUrl },
+  });
+  assert.equal(downResult.status, 0, downResult.stderr || downResult.stdout);
+  assert.equal(
+    queryValue(
+      containerName,
+      "select count(*) from pg_indexes where schemaname = 'public' and indexname = 'mentions_document_subject_prominence_idx'",
+    ),
+    "0",
+    "precondition: 0013's unique index must be absent before we seed duplicates",
+  );
+
+  const seedResult = run("docker", [
+    "exec",
+    containerName,
+    "psql",
+    "-U",
+    "postgres",
+    "-d",
+    "postgres",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-c",
+    `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at)
+     values ('11111111-1111-4111-a111-111111111111', 'test', 'article', 'tertiary', 'public', now());
+     insert into documents (document_id, source_id, kind, content_hash, raw_blob_id)
+     values (
+       '22222222-2222-4222-a222-222222222222',
+       '11111111-1111-4111-a111-111111111111',
+       'article',
+       'sha256:mentions-dedupe',
+       'sha256:0000000000000000000000000000000000000000000000000000000000000000'
+     );
+     insert into mentions (mention_id, document_id, subject_kind, subject_id, prominence, mention_count, confidence)
+     values
+       ('33333333-3333-4333-a333-333333333331', '22222222-2222-4222-a222-222222222222', 'issuer', '44444444-4444-4444-a444-444444444444', 'headline', 2, 0.4),
+       ('33333333-3333-4333-a333-333333333332', '22222222-2222-4222-a222-222222222222', 'issuer', '44444444-4444-4444-a444-444444444444', 'headline', 5, 0.9),
+       ('33333333-3333-4333-a333-333333333333', '22222222-2222-4222-a222-222222222222', 'issuer', '44444444-4444-4444-a444-444444444444', 'body', 7, 0.6);`,
+  ]);
+  assert.equal(seedResult.status, 0, seedResult.stderr || seedResult.stdout);
+  assert.equal(
+    queryValue(containerName, "select count(*) from mentions where prominence = 'headline'"),
+    "2",
+    "precondition: duplicate headline mention rows must exist before re-applying 0013",
+  );
+
+  const reupResult = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], {
+    cwd: dbRoot,
+    env: { DATABASE_URL: databaseUrl },
+  });
+  assert.equal(reupResult.status, 0, reupResult.stderr || reupResult.stdout);
+
+  assert.equal(
+    queryValue(containerName, "select count(*) from mentions"),
+    "2",
+    "0013 dedupe must keep one row per (document_id, subject_kind, subject_id, prominence)",
+  );
+  assert.equal(
+    queryValue(
+      containerName,
+      "select mention_count || '|' || confidence from mentions where prominence = 'headline'",
+    ),
+    "7|0.9",
+    "0013 dedupe must preserve aggregate mention_count and strongest confidence",
+  );
+  assert.equal(
+    queryValue(
+      containerName,
+      "select count(*) from pg_indexes where schemaname = 'public' and indexname = 'mentions_document_subject_prominence_idx'",
+    ),
+    "1",
+    "0013 must successfully add the unique index after dedupe",
   );
 });

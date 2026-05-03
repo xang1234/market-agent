@@ -1,0 +1,1 @@
+drop index if exists mentions_document_subject_prominence_idx;

@@ -194,3 +194,249 @@ test("dispatcher + handler factory: analyst attempting an extract tool is reject
   }
   assert.equal(queries.length, 0, "analyst-rejected dispatch must not touch the DB");
 });
+
+test("extract_mentions persists resolved candidates and returns mention items", async () => {
+  const document = fakeDocumentRow();
+  const mentionId = "22222222-2222-4222-a222-222222222222";
+  const issuerId = "33333333-3333-4333-a333-333333333333";
+  const queries: Array<{ text: string; values?: unknown[] }> = [];
+  const insertedMentions: Record<string, unknown>[] = [];
+  const db: QueryExecutor = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      queries.push({ text, values });
+      if (/from documents/.test(text)) {
+        return {
+          rows: [document] as unknown as R[],
+          command: "SELECT",
+          rowCount: 1,
+          oid: 0,
+          fields: [],
+        };
+      }
+      if (/delete from mentions/.test(text)) {
+        return { rows: [] as R[], command: "DELETE", rowCount: 0, oid: 0, fields: [] };
+      }
+      if (/from mentions/.test(text)) {
+        return {
+          rows: insertedMentions as R[],
+          command: "SELECT",
+          rowCount: insertedMentions.length,
+          oid: 0,
+          fields: [],
+        };
+      }
+      const row = {
+        mention_id: mentionId,
+        document_id: SAMPLE_DOC_UUID,
+        subject_kind: values?.[1],
+        subject_id: values?.[2],
+        prominence: values?.[3],
+        mention_count: values?.[4],
+        confidence: values?.[5],
+        created_at: new Date("2026-05-03T00:00:00.000Z"),
+      };
+      insertedMentions.push(row);
+      return {
+        rows: [row] as R[],
+        command: "INSERT",
+        rowCount: 1,
+        oid: 0,
+        fields: [],
+      };
+    },
+  };
+  const handlers = createEvidenceReaderToolHandlers({
+    db,
+    extractMentionCandidates: async (doc) => {
+      assert.equal(doc.document_id, SAMPLE_DOC_UUID);
+      return [
+        {
+          text: "Apple",
+          prominence: "headline",
+          mention_count: 2,
+          confidence: 0.8,
+        },
+      ];
+    },
+    resolveMention: async (text) => {
+      assert.equal(text, "Apple");
+      return {
+        outcome: "resolved",
+        subject_ref: { kind: "issuer", id: issuerId },
+        display_name: "Apple Inc.",
+        confidence: 0.95,
+        canonical_kind: "issuer",
+      };
+    },
+  });
+
+  const out = await handlers.extract_mentions({ document_id: SAMPLE_DOC_UUID });
+
+  assert.deepEqual([...out.source_ids], [SAMPLE_SOURCE_UUID]);
+  assert.deepEqual(out.items, [
+    {
+      mention_id: mentionId,
+      document_id: SAMPLE_DOC_UUID,
+      subject_ref: { kind: "issuer", id: issuerId },
+      prominence: "headline",
+      mention_count: 2,
+      confidence: 0.8,
+    },
+  ]);
+  assert.equal(queries.filter((query) => /insert into mentions/.test(query.text)).length, 1);
+});
+
+test("extract_mentions reruns extraction and does not return stale stored mentions", async () => {
+  const existingMentionId = "22222222-2222-4222-a222-222222222222";
+  const newMentionId = "44444444-4444-4444-a444-444444444444";
+  const existingIssuerId = "33333333-3333-4333-a333-333333333333";
+  const newListingId = "55555555-5555-4555-a555-555555555555";
+  let storedMentions: Record<string, unknown>[] = [
+    {
+      mention_id: existingMentionId,
+      document_id: SAMPLE_DOC_UUID,
+      subject_kind: "issuer",
+      subject_id: existingIssuerId,
+      prominence: "headline",
+      mention_count: 1,
+      confidence: 0.7,
+      created_at: new Date("2026-05-03T00:00:00.000Z"),
+    },
+  ];
+  const queries: Array<{ text: string; values?: unknown[] }> = [];
+  let extractorCalls = 0;
+  const db: QueryExecutor = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      queries.push({ text, values });
+      if (/from documents/.test(text)) {
+        return {
+          rows: [fakeDocumentRow()] as unknown as R[],
+          command: "SELECT",
+          rowCount: 1,
+          oid: 0,
+          fields: [],
+        };
+      }
+      if (/delete from mentions/.test(text)) {
+        storedMentions = storedMentions.filter((mention) => mention.mention_id === newMentionId);
+        return { rows: [] as R[], command: "DELETE", rowCount: 1, oid: 0, fields: [] };
+      }
+      if (/from mentions/.test(text)) {
+        const rows = storedMentions;
+        return { rows: rows as R[], command: "SELECT", rowCount: rows.length, oid: 0, fields: [] };
+      }
+      const row = {
+        mention_id: newMentionId,
+        document_id: SAMPLE_DOC_UUID,
+        subject_kind: values?.[1],
+        subject_id: values?.[2],
+        prominence: values?.[3],
+        mention_count: values?.[4],
+        confidence: values?.[5],
+        created_at: new Date("2026-05-03T00:00:00.000Z"),
+      };
+      storedMentions.push(row);
+      return {
+        rows: [row] as R[],
+        command: "INSERT",
+        rowCount: 1,
+        oid: 0,
+        fields: [],
+      };
+    },
+  };
+  const handlers = createEvidenceReaderToolHandlers({
+    db,
+    extractMentionCandidates: async () => {
+      extractorCalls += 1;
+      return [{ text: "AAPL", prominence: "body", mention_count: 1, confidence: 0.8 }];
+    },
+    resolveMention: async () => ({
+      outcome: "resolved",
+      subject_ref: { kind: "listing", id: newListingId },
+      display_name: "AAPL",
+      confidence: 0.9,
+      canonical_kind: "listing",
+    }),
+  });
+
+  const out = await handlers.extract_mentions({ document_id: SAMPLE_DOC_UUID });
+
+  assert.equal(extractorCalls, 1);
+  assert.equal(queries.filter((query) => /insert into mentions/.test(query.text)).length, 1);
+  assert.equal(queries.filter((query) => /delete from mentions/.test(query.text)).length, 1);
+  assert.deepEqual(out.items.map((item) => item.mention_id), [newMentionId]);
+});
+
+test("extract_mentions returns skipped ambiguous candidates as observable items", async () => {
+  const queries: Array<{ text: string; values?: unknown[] }> = [];
+  const db: QueryExecutor = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      queries.push({ text, values });
+      if (/from documents/.test(text)) {
+        return {
+          rows: [fakeDocumentRow()] as unknown as R[],
+          command: "SELECT",
+          rowCount: 1,
+          oid: 0,
+          fields: [],
+        };
+      }
+      if (/delete from mentions/.test(text)) {
+        return { rows: [] as R[], command: "DELETE", rowCount: 0, oid: 0, fields: [] };
+      }
+      if (/from mentions/.test(text)) {
+        return { rows: [] as R[], command: "SELECT", rowCount: 0, oid: 0, fields: [] };
+      }
+      throw new Error("skipped candidate must not insert a mention row");
+    },
+  };
+  const handlers = createEvidenceReaderToolHandlers({
+    db,
+    extractMentionCandidates: async () => [
+      { text: "Apple", prominence: "headline", mention_count: 1, confidence: 0.8 },
+    ],
+    resolveMention: async () => ({
+      outcome: "ambiguous",
+      ambiguity_axis: "issuer_vs_listing",
+      candidates: [
+        {
+          subject_ref: { kind: "issuer", id: "33333333-3333-4333-a333-333333333333" },
+          display_name: "Apple Inc.",
+          confidence: 0.8,
+        },
+        {
+          subject_ref: { kind: "listing", id: "55555555-5555-4555-a555-555555555555" },
+          display_name: "AAPL",
+          confidence: 0.7,
+        },
+      ],
+    }),
+  });
+
+  const out = await handlers.extract_mentions({ document_id: SAMPLE_DOC_UUID });
+
+  assert.deepEqual(out.items, [
+    {
+      item_type: "skipped_mention",
+      text: "Apple",
+      reason: "ambiguous",
+      resolver_envelope: {
+        outcome: "ambiguous",
+        ambiguity_axis: "issuer_vs_listing",
+        candidates: [
+          {
+            subject_ref: { kind: "issuer", id: "33333333-3333-4333-a333-333333333333" },
+            display_name: "Apple Inc.",
+            confidence: 0.8,
+          },
+          {
+            subject_ref: { kind: "listing", id: "55555555-5555-4555-a555-555555555555" },
+            display_name: "AAPL",
+            confidence: 0.7,
+          },
+        ],
+      },
+    },
+  ]);
+});

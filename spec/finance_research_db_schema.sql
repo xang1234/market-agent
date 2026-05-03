@@ -281,6 +281,8 @@ create table mentions (
 );
 create index mentions_subject_idx on mentions(subject_kind, subject_id);
 create index mentions_document_idx on mentions(document_id);
+create unique index mentions_document_subject_prominence_idx
+  on mentions(document_id, subject_kind, subject_id, prominence);
 
 create table claims (
   claim_id uuid primary key default gen_random_uuid(),
