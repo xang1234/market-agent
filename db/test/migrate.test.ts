@@ -206,43 +206,43 @@ test("migrate down rolls back the most recently applied migration", { timeout: 1
       "select count(*) from information_schema.columns where table_name = 'chat_threads' and column_name = 'archived_at'",
     ),
     "1",
-    "0008's archived_at column must remain — only 0013 should have been rolled back",
+    "0008's archived_at column must remain — only 0013 and newer should have been rolled back",
   );
-  // 0009's effects must remain — only 0013 was rolled back.
+  // 0009's effects must remain — only 0013 and newer were rolled back.
   assert.equal(
     queryValue(
       containerName,
       "select count(*) from pg_constraint where conname = 'theme_memberships_theme_subject_unique'",
     ),
     "1",
-    "0009's unique constraint must remain — only 0013 should have been rolled back",
+    "0009's unique constraint must remain — only 0013 and newer should have been rolled back",
   );
-  // 0010's effects must remain — only 0013 was rolled back.
+  // 0010's effects must remain — only 0013 and newer were rolled back.
   assert.equal(
     queryValue(
       containerName,
       "select count(*) from pg_tables where schemaname = 'public' and tablename = 'analyze_template_runs'",
     ),
     "1",
-    "0010's analyze_template_runs table must remain — only 0013 should have been rolled back",
+    "0010's analyze_template_runs table must remain — only 0013 and newer should have been rolled back",
   );
-  // 0011's effects must remain — only 0013 was rolled back.
+  // 0011's effects must remain — only 0013 and newer were rolled back.
   assert.equal(
     queryValue(
       containerName,
       "select count(*) from information_schema.columns where table_name = 'sources' and column_name = 'user_id'",
     ),
     "1",
-    "0011's sources.user_id column must remain — only 0013 should have been rolled back",
+    "0011's sources.user_id column must remain — only 0013 and newer should have been rolled back",
   );
-  // 0012's effects must remain — only 0013 was rolled back.
+  // 0012's effects must remain — only 0013 and newer were rolled back.
   assert.equal(
     queryValue(
       containerName,
       "select count(*) from pg_enum e join pg_type t on t.oid = e.enumtypid where t.typname = 'document_kind' and e.enumlabel = 'press_release'",
     ),
     "1",
-    "press_release enum value added by 0012.up must remain — only 0013 should have been rolled back",
+    "press_release enum value added by 0012.up must remain — only 0013 and newer should have been rolled back",
   );
   // 0013-specific assertion: mention dedupe index must be gone after rollback.
   assert.equal(

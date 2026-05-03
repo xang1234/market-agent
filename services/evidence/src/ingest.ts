@@ -15,7 +15,7 @@ export type IngestDocumentDeps = {
 };
 
 export type IngestDocumentPoolClient = QueryExecutor & {
-  release(error?: Error): void;
+  release(destroy?: boolean): void;
 };
 
 export type IngestDocumentClientPool = {
@@ -79,10 +79,14 @@ export async function ingestDocumentWithPool(
   input: IngestDocumentInput,
 ): Promise<IngestDocumentResult> {
   const client = await pool.connect();
+  let destroyClient = false;
   try {
     return await ingestDocument({ db: client, objectStore }, input);
+  } catch (error) {
+    destroyClient = true;
+    throw error;
   } finally {
-    client.release();
+    client.release(destroyClient);
   }
 }
 

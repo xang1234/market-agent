@@ -29,6 +29,7 @@ class FakeDb implements QueryExecutor {
   readonly referenced = new Set<string>();
   readonly deferred = new Set<string>();
   readonly deletedQueueRows = new Set<string>();
+  readonly releaseArgs: boolean[] = [];
   released = false;
 
   async query<R extends Record<string, unknown> = Record<string, unknown>>(
@@ -78,7 +79,8 @@ class FakeDb implements QueryExecutor {
     return { rows: [], rowCount: 0 } as never;
   }
 
-  release(): void {
+  release(destroy = false): void {
+    this.releaseArgs.push(destroy);
     this.released = true;
   }
 }
@@ -194,7 +196,27 @@ test("pool helpers acquire one client and release it", async () => {
 
   assert.equal(queueClient.released, true);
   assert.equal(gcClient.released, true);
+  assert.deepEqual(queueClient.releaseArgs, [false]);
+  assert.deepEqual(gcClient.releaseArgs, [false]);
   assert.deepEqual(objectStore.deleted, [STORED_BLOB_ID]);
+});
+
+test("pool helpers destroy clients after errors", async () => {
+  const queueClient = new FakeDb();
+  const gcClient = new FakeDb();
+  const objectStore = new RecordingDeleteObjectStore();
+
+  await assert.rejects(
+    deleteUserAndQueueObjectBlobsWithPool({ connect: async () => queueClient }, "not-a-uuid"),
+    /user_id/,
+  );
+  await assert.rejects(
+    runObjectBlobGcBatchWithPool({ connect: async () => gcClient }, objectStore, { limit: 0 }),
+    /limit/,
+  );
+
+  assert.deepEqual(queueClient.releaseArgs, [true]);
+  assert.deepEqual(gcClient.releaseArgs, [true]);
 });
 
 test("runObjectBlobGcBatch defers referenced blobs so later unreferenced blobs can be collected", async () => {

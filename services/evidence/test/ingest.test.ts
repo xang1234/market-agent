@@ -66,17 +66,20 @@ function recordingDb() {
 function recordingPool() {
   const { db, queries } = recordingDb();
   let released = false;
+  const releaseArgs: boolean[] = [];
   return {
     pool: {
       connect: async () => ({
         ...db,
-        release() {
+        release(destroy = false) {
+          releaseArgs.push(destroy);
           released = true;
         },
       }),
     },
     queries,
     released: () => released,
+    releaseArgs: () => releaseArgs,
   };
 }
 
@@ -156,7 +159,7 @@ test("unknown license_class throws LicensePolicyError before touching object sto
 });
 
 test("ingestDocumentWithPool acquires one client for stored blob transaction", async () => {
-  const { pool, queries, released } = recordingPool();
+  const { pool, queries, released, releaseArgs } = recordingPool();
   const objectStore = new RecordingObjectStore();
 
   const result = await ingestDocumentWithPool(
@@ -171,8 +174,32 @@ test("ingestDocumentWithPool acquires one client for stored blob transaction", a
 
   assert.equal(result.raw_blob_id, TWEET_HASH);
   assert.equal(released(), true);
+  assert.deepEqual(releaseArgs(), [false]);
   assert.match(queries[0]?.text ?? "", /^begin$/i);
   assert.match(queries.at(-1)?.text ?? "", /^commit$/i);
+});
+
+test("ingestDocumentWithPool destroys the client after ingest errors", async () => {
+  const { pool, queries, released, releaseArgs } = recordingPool();
+  const objectStore = new RecordingObjectStore();
+
+  await assert.rejects(
+    ingestDocumentWithPool(
+      pool,
+      objectStore,
+      {
+        source: { source_id: SOURCE_ID, license_class: "publik" },
+        bytes: TWEET_BYTES,
+        document: { kind: "social_post" },
+      },
+    ),
+    (err: unknown) => err instanceof LicensePolicyError && /unknown license_class "publik"/.test(err.message),
+  );
+
+  assert.equal(released(), true);
+  assert.deepEqual(releaseArgs(), [true]);
+  assert.equal(objectStore.putCalls, 0);
+  assert.equal(queries.length, 0);
 });
 
 test("ingestDocument locks the source before writing stored bytes", async () => {

@@ -11,7 +11,7 @@ type ObjectBlobGcTransactionClientBrand = {
 };
 
 export type ObjectBlobGcPoolClient = QueryExecutor & {
-  release(error?: Error): void;
+  release(destroy?: boolean): void;
 };
 
 export type ObjectBlobGcTransactionClient = ObjectBlobGcPoolClient & ObjectBlobGcTransactionClientBrand;
@@ -121,10 +121,14 @@ export async function deleteUserAndQueueObjectBlobsWithPool(
   userId: string,
 ): Promise<DeleteUserBlobQueueResult> {
   const client = await pool.connect();
+  let destroyClient = false;
   try {
     return await deleteUserAndQueueObjectBlobs(objectBlobGcTransactionClient(client), userId);
+  } catch (error) {
+    destroyClient = true;
+    throw error;
   } finally {
-    client.release();
+    client.release(destroyClient);
   }
 }
 
@@ -215,10 +219,14 @@ export async function runObjectBlobGcBatchWithPool(
   options: ObjectBlobGcBatchOptions = {},
 ): Promise<ObjectBlobGcBatchResult> {
   const client = await pool.connect();
+  let destroyClient = false;
   try {
     return await runObjectBlobGcBatch(objectBlobGcTransactionClient(client), objectStore, options);
+  } catch (error) {
+    destroyClient = true;
+    throw error;
   } finally {
-    client.release();
+    client.release(destroyClient);
   }
 }
 
