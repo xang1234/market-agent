@@ -23,9 +23,9 @@ function recordingDb(rows: Record<string, unknown>[], storedBundleRows: Record<s
       queries.push({ text, values });
       if (/insert into evidence_bundles/i.test(text)) {
         return {
-          rows: storedBundleRows as R[],
+          rows: (storedBundleRows.length > 0 ? [] : [{ bundle: JSON.parse(String(values?.[1])) }]) as R[],
           command: "INSERT",
-          rowCount: storedBundleRows.length,
+          rowCount: storedBundleRows.length > 0 ? 0 : 1,
           oid: 0,
           fields: [],
         };
@@ -186,6 +186,7 @@ test("buildEvidenceBundle persists the immutable bundle payload under the determ
 
   const insert = queries.find((query) => /insert into evidence_bundles/i.test(query.text));
   assert.ok(insert);
+  assert.doesNotMatch(insert.text, /do update/i);
   assert.deepEqual(insert.values, [built.bundle_id, JSON.stringify(built)]);
 });
 

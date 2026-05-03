@@ -115,18 +115,28 @@ export async function buildEvidenceBundle(
     documents: assembled.documents,
     evidence: assembled.evidence,
   });
-  const { rows } = await db.query<StoredEvidenceBundleDbRow>(
+  const insertResult = await db.query<StoredEvidenceBundleDbRow>(
     `insert into evidence_bundles
        (bundle_id, bundle)
      values ($1::uuid, $2::jsonb)
-     on conflict (bundle_id) do update
-       set bundle = evidence_bundles.bundle
+     on conflict (bundle_id) do nothing
      returning bundle`,
     [bundle.bundle_id, JSON.stringify(bundle)],
   );
-  if (rows[0]) {
-    assertStoredBundleMatchesCanonicalContent(evidenceBundleFromJson(rows[0].bundle), bundle.bundle_id);
+  let persistedBundle = insertResult.rows[0]?.bundle;
+  if (!persistedBundle) {
+    const selectResult = await db.query<StoredEvidenceBundleDbRow>(
+      `select bundle
+         from evidence_bundles
+        where bundle_id = $1`,
+      [bundle.bundle_id],
+    );
+    if (selectResult.rows.length !== 1) {
+      throw new Error("bundle_id: evidence bundle was not persisted");
+    }
+    persistedBundle = selectResult.rows[0]!.bundle;
   }
+  assertStoredBundleMatchesCanonicalContent(evidenceBundleFromJson(persistedBundle), bundle.bundle_id);
   return bundle;
 }
 

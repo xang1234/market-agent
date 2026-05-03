@@ -19,6 +19,7 @@ import {
 const schemaPath = join(workspaceRoot, "spec", "finance_research_db_schema.sql");
 const initMigrationPath = join(dbRoot, "migrations", "0001_init.up.sql");
 const snapshotManifestMigrationPath = join(dbRoot, "migrations", "0005_snapshot_document_refs.up.sql");
+const evidenceBundleMigrationPath = join(dbRoot, "migrations", "0017_evidence_bundles.up.sql");
 
 function loadExpectedTables() {
   return Array.from(
@@ -36,6 +37,18 @@ test("snapshot manifest forward migration owns post-baseline snapshot columns", 
     assert.doesNotMatch(initMigration, new RegExp(`\\b${column}\\b`));
     assert.match(forwardMigration, new RegExp(`\\b${column}\\b`));
     assert.match(schema, new RegExp(`\\b${column}\\b`));
+  }
+});
+
+test("evidence bundle schema blocks direct updates and deletes", () => {
+  const forwardMigration = readFileSync(evidenceBundleMigrationPath, "utf8");
+  const schema = readFileSync(schemaPath, "utf8");
+
+  for (const sql of [forwardMigration, schema]) {
+    assert.match(sql, /create function prevent_evidence_bundle_modification\(\) returns trigger/i);
+    assert.match(sql, /raise exception 'evidence_bundles are immutable/i);
+    assert.match(sql, /create trigger evidence_bundles_immutable/i);
+    assert.match(sql, /before update or delete on evidence_bundles/i);
   }
 });
 
@@ -96,6 +109,55 @@ test("migrate up applies pending migrations and records them in schema_migration
     .sort();
 
   assert.deepEqual(publicTables, loadExpectedTables());
+
+  const bundleId = "00000000-0000-0000-0000-000000000001";
+  const bundlePayload = `{"bundle_id":"${bundleId}","documents":[],"evidence":[]}`;
+  const insertBundleResult = run("docker", [
+    "exec",
+    containerName,
+    "psql",
+    "-U",
+    "postgres",
+    "-d",
+    "postgres",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-c",
+    `insert into evidence_bundles (bundle_id, bundle) values ('${bundleId}', '${bundlePayload}'::jsonb)`,
+  ]);
+  assert.equal(insertBundleResult.status, 0, insertBundleResult.stderr || insertBundleResult.stdout);
+
+  const updateBundleResult = run("docker", [
+    "exec",
+    containerName,
+    "psql",
+    "-U",
+    "postgres",
+    "-d",
+    "postgres",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-c",
+    `update evidence_bundles set bundle = jsonb_set(bundle, '{documents}', '[]'::jsonb) where bundle_id = '${bundleId}'`,
+  ]);
+  assert.notEqual(updateBundleResult.status, 0);
+  assert.match(updateBundleResult.stderr || updateBundleResult.stdout, /evidence_bundles are immutable/);
+
+  const deleteBundleResult = run("docker", [
+    "exec",
+    containerName,
+    "psql",
+    "-U",
+    "postgres",
+    "-d",
+    "postgres",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-c",
+    `delete from evidence_bundles where bundle_id = '${bundleId}'`,
+  ]);
+  assert.notEqual(deleteBundleResult.status, 0);
+  assert.match(deleteBundleResult.stderr || deleteBundleResult.stdout, /evidence_bundles are immutable/);
 });
 
 test("migrate status reports all migrations as applied after migrate up", { timeout: 120000 }, async (t) => {

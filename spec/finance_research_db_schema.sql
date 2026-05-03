@@ -470,6 +470,18 @@ create table evidence_bundles (
   created_at timestamptz not null default now()
 );
 
+create function prevent_evidence_bundle_modification() returns trigger
+language plpgsql
+as $$
+begin
+  raise exception 'evidence_bundles are immutable and cannot be modified or deleted';
+end;
+$$;
+
+create trigger evidence_bundles_immutable
+before update or delete on evidence_bundles
+for each row execute function prevent_evidence_bundle_modification();
+
 create table computations (
   computation_id uuid primary key default gen_random_uuid(),
   formula_id text not null,
