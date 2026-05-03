@@ -2,7 +2,7 @@ create table fact_review_queue (
   review_id uuid primary key default gen_random_uuid(),
   candidate jsonb not null,
   reason text not null,
-  source_id uuid references sources(source_id),
+  source_id uuid references sources(source_id) on delete set null,
   metric_id uuid references metrics(metric_id),
   confidence numeric not null check (confidence >= 0 and confidence <= 1),
   threshold numeric not null check (threshold >= 0 and threshold <= 1),

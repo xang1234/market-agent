@@ -111,6 +111,7 @@ export type FactClientPool = Readonly<{
 }>;
 
 type CreateFactOptions = Readonly<{ supersedes?: string | null }>;
+type NormalizedFactInput = Required<FactInput>;
 type FactDbRow = Omit<FactRow, "value_num" | "scale" | "confidence" | "created_at" | "updated_at" | "invalidated_at"> & {
   value_num: number | string | null;
   scale: number | string;
@@ -252,7 +253,14 @@ export async function supersedeFact(
 
   await db.query("begin");
   try {
-    const newFact = await createFact(db, input, { supersedes: supersededFactId });
+    const normalized = normalizeFactInput(input);
+    const existingFact = await lockSupersededFact(db, supersededFactId);
+    assertFactIdentityMatches(existingFact, normalized);
+    if (existingFact.superseded_by != null) {
+      throw new Error("supersedeFact: superseded fact is already superseded");
+    }
+
+    const newFact = await createFact(db, normalized, { supersedes: supersededFactId });
     const { rows } = await db.query<FactDbRow>(
       `update facts
           set superseded_by = $2,
@@ -302,8 +310,8 @@ export async function queueFactReview(
     verification_status: "candidate" as const,
   };
   assertNonEmptyString(input.reason, "reason");
-  if (input.source_id != null) assertUuidV4(input.source_id, "source_id");
-  if (input.metric_id != null) assertUuidV4(input.metric_id, "metric_id");
+  assertQueuedColumnMatchesCandidate(input.source_id, normalized.source_id, "source_id");
+  assertQueuedColumnMatchesCandidate(input.metric_id, normalized.metric_id, "metric_id");
   assertConfidence(input.confidence, "confidence");
   assertConfidence(input.threshold, "threshold");
 
@@ -324,8 +332,8 @@ export async function queueFactReview(
     [
       normalized,
       input.reason,
-      input.source_id ?? normalized.source_id,
-      input.metric_id ?? normalized.metric_id,
+      normalized.source_id,
+      normalized.metric_id,
       input.confidence,
       input.threshold,
     ],
@@ -334,7 +342,58 @@ export async function queueFactReview(
   return factReviewQueueRowFromDb(rows[0]);
 }
 
-function normalizeFactInput(input: FactInput): Required<FactInput> {
+async function lockSupersededFact(db: QueryExecutor, supersededFactId: string): Promise<FactRow> {
+  const { rows } = await db.query<FactDbRow>(
+    `select ${FACT_COLUMNS}
+       from facts
+      where fact_id = $1
+      for update`,
+    [supersededFactId],
+  );
+  if (rows.length !== 1) {
+    throw new Error("supersedeFact: superseded fact was not found");
+  }
+  return factRowFromDb(rows[0]);
+}
+
+function assertFactIdentityMatches(existing: FactRow, input: NormalizedFactInput): void {
+  const identityMatches =
+    existing.subject_kind === input.subject_kind &&
+    existing.subject_id === input.subject_id &&
+    existing.metric_id === input.metric_id &&
+    existing.period_kind === input.period_kind &&
+    sameNullableText(existing.period_start, input.period_start) &&
+    sameNullableText(existing.period_end, input.period_end) &&
+    existing.fiscal_year === input.fiscal_year &&
+    existing.fiscal_period === input.fiscal_period &&
+    existing.unit === input.unit &&
+    existing.currency === input.currency &&
+    existing.definition_version === input.definition_version;
+
+  if (!identityMatches) {
+    throw new Error("supersedeFact: input identity does not match superseded fact");
+  }
+}
+
+function assertQueuedColumnMatchesCandidate(override: string | null | undefined, candidateValue: string, label: string): void {
+  if (override == null) return;
+  assertUuidV4(override, label);
+  if (override !== candidateValue) {
+    throw new Error(`${label}: must match candidate.${label}`);
+  }
+}
+
+function sameNullableText(left: string | Date | null, right: string | null): boolean {
+  return nullableIsoDateText(left) === right;
+}
+
+function nullableIsoDateText(value: string | Date | null): string | null {
+  if (value == null) return null;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return value;
+}
+
+function normalizeFactInput(input: FactInput): NormalizedFactInput {
   assertOneOf(input.subject_kind, FACT_SUBJECT_KINDS, "subject_kind");
   assertUuidV4(input.subject_id, "subject_id");
   assertUuidV4(input.metric_id, "metric_id");

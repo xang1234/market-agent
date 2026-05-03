@@ -16,16 +16,25 @@ const FACT_ID = "11111111-1111-4111-a111-111111111111";
 const NEW_FACT_ID = "22222222-2222-4222-a222-222222222222";
 const SUBJECT_ID = "33333333-3333-4333-a333-333333333333";
 const METRIC_ID = "44444444-4444-4444-8444-444444444444";
+const OTHER_METRIC_ID = "77777777-7777-4777-8777-777777777777";
 const SOURCE_ID = "55555555-5555-4555-8555-555555555555";
+const OTHER_SOURCE_ID = "88888888-8888-4888-8888-888888888888";
 const QUEUE_ID = "66666666-6666-4666-8666-666666666666";
 
 class FakeDb implements QueryExecutor {
   readonly queries: Query[] = [];
   readonly releaseArgs: boolean[] = [];
+  existingFactOverrides: Record<string, unknown> = {};
 
   async query<R extends Record<string, unknown> = Record<string, unknown>>(text: string, values?: unknown[]) {
     this.queries.push({ text, values });
 
+    if (/select\s+fact_id,/i.test(text) && /from facts/i.test(text) && /for update/i.test(text)) {
+      return {
+        rows: [factRow({ fact_id: values?.[0], ...this.existingFactOverrides })],
+        rowCount: 1,
+      } as never;
+    }
     if (/insert into facts/i.test(text)) {
       return {
         rows: [
@@ -92,11 +101,28 @@ test("supersedeFact creates a new fact and links the old fact without overwritin
   assert.equal(result.superseded_fact.value_num, 100);
   assert.equal(result.superseded_fact.superseded_by, NEW_FACT_ID);
   assert.match(db.queries[0].text, /^begin$/i);
+  assert.match(db.queries[1].text, /from facts/i);
+  assert.match(db.queries[1].text, /for update/i);
   assert.match(db.queries.at(-1)?.text ?? "", /^commit$/i);
   const update = db.queries.find((query) => /update facts/i.test(query.text))!;
   assert.match(update.text, /set superseded_by = \$2/i);
   const updateSetClause = update.text.slice(update.text.indexOf("set"), update.text.indexOf("where"));
   assert.doesNotMatch(updateSetClause, /value_num|value_text|unit|confidence|verification_status/i);
+});
+
+test("supersedeFact rejects replacements for a different fact identity before inserting", async () => {
+  const db = new FakeDb();
+  db.existingFactOverrides = { metric_id: OTHER_METRIC_ID };
+
+  await assert.rejects(
+    supersedeFact(db, FACT_ID, factInput({ value_num: 120.0 })),
+    /input identity does not match superseded fact/,
+  );
+
+  assert.match(db.queries[0].text, /^begin$/i);
+  assert.match(db.queries[1].text, /for update/i);
+  assert.match(db.queries.at(-1)?.text ?? "", /^rollback$/i);
+  assert.equal(db.queries.some((query) => /insert into facts/i.test(query.text)), false);
 });
 
 test("queueFactReview persists low-confidence candidate facts for reviewer workflow", async () => {
@@ -117,6 +143,39 @@ test("queueFactReview persists low-confidence candidate facts for reviewer workf
   assert.deepEqual(row.candidate, candidate);
   assert.equal(row.reason, "below_review_confidence_threshold");
   assert.match(db.queries[0].text, /insert into fact_review_queue/i);
+});
+
+test("queueFactReview rejects indexed column overrides that differ from candidate payload", async () => {
+  const db = new FakeDb();
+
+  await assert.rejects(
+    queueFactReview(db, {
+      candidate: factInput({ value_num: 99.9, verification_status: "candidate" }),
+      reason: "below_review_confidence_threshold",
+      source_id: OTHER_SOURCE_ID,
+      confidence: 0.61,
+      threshold: 0.7,
+    }),
+    /source_id: must match candidate\.source_id/,
+  );
+
+  assert.equal(db.queries.length, 0);
+});
+
+test("queueFactReview derives indexed columns from candidate payload", async () => {
+  const db = new FakeDb();
+
+  await queueFactReview(db, {
+    candidate: factInput({ value_num: 99.9, verification_status: "candidate" }),
+    reason: "below_review_confidence_threshold",
+    source_id: SOURCE_ID,
+    metric_id: METRIC_ID,
+    confidence: 0.61,
+    threshold: 0.7,
+  });
+
+  assert.equal(db.queries[0].values?.[2], SOURCE_ID);
+  assert.equal(db.queries[0].values?.[3], METRIC_ID);
 });
 
 test("queueFactReview serializes queued facts as candidate status", async () => {
