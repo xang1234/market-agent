@@ -10,6 +10,23 @@ export type {
 } from "./claim-argument-repo.ts";
 
 export {
+  CLAIM_CLUSTER_MEMBER_RELATIONS,
+  addClaimClusterMember,
+  buildClaimCanonicalSignature,
+  getClaimClusterBySignature,
+  upsertClaimCluster,
+} from "./claim-cluster-repo.ts";
+export type {
+  AddClaimClusterMemberResult,
+  ClaimCanonicalSignatureInput,
+  ClaimClusterInput,
+  ClaimClusterMemberInput,
+  ClaimClusterMemberRelation,
+  ClaimClusterMemberRow,
+  ClaimClusterRow,
+} from "./claim-cluster-repo.ts";
+
+export {
   CLAIM_MODALITIES,
   CLAIM_POLARITIES,
   CLAIM_STATUSES,
