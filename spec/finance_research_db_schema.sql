@@ -321,7 +321,7 @@ create table entity_impacts (
   subject_kind subject_kind not null,
   subject_id uuid not null,
   direction impact_direction not null,
-  channel text not null,
+  channel text not null check (channel in ('demand', 'pricing', 'supply_chain', 'regulation', 'competition', 'balance_sheet', 'sentiment')),
   horizon impact_horizon not null,
   confidence numeric not null check (confidence >= 0 and confidence <= 1),
   created_at timestamptz not null default now()

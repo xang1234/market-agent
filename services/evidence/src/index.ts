@@ -25,6 +25,21 @@ export type {
 } from "./claim-repo.ts";
 
 export {
+  ENTITY_IMPACT_CHANNELS,
+  IMPACT_DIRECTIONS,
+  IMPACT_HORIZONS,
+  createEntityImpact,
+  listEntityImpactsForClaim,
+} from "./entity-impact-repo.ts";
+export type {
+  EntityImpactChannel,
+  EntityImpactInput,
+  EntityImpactRow,
+  ImpactDirection,
+  ImpactHorizon,
+} from "./entity-impact-repo.ts";
+
+export {
   SOURCE_KINDS,
   TRUST_TIERS,
   createSource,
