@@ -1,4 +1,43 @@
 export {
+  FINDING_SEVERITIES,
+  SCORING_IMPACT_CHANNELS,
+  SCORING_IMPACT_DIRECTIONS,
+  SCORING_IMPACT_HORIZONS,
+  SCORING_TRUST_TIERS,
+  SeverityScoringValidationError,
+  scoreFindingSeverity,
+} from "./severity-scorer.ts";
+export type {
+  FindingSeverity,
+  ScoringImpactChannel,
+  ScoringImpactDirection,
+  ScoringImpactHorizon,
+  ScoringTrustTier,
+  SeverityScoreComponents,
+  SeverityScoringInput,
+  SeverityScoringResult,
+} from "./severity-scorer.ts";
+
+export {
+  FindingSummaryBlockValidationError,
+  buildFindingSummaryBlocks,
+} from "./finding-summary-blocks.ts";
+export type {
+  FindingCardBlock,
+  FindingSummaryBlocksInput,
+} from "./finding-summary-blocks.ts";
+
+export {
+  FindingGenerationValidationError,
+  generateFinding,
+} from "./finding-generator.ts";
+export type {
+  FindingRow,
+  FindingSnapshotManifest,
+  GenerateFindingInput,
+} from "./finding-generator.ts";
+
+export {
   CreateAgentApprovalError,
   applyApprovedCreateAgent,
   approveCreateAgentAction,
