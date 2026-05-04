@@ -50,6 +50,17 @@ export type {
 } from "./alert-rule-compiler.ts";
 
 export {
+  AlertEvaluationError,
+  evaluateAgentAlerts,
+} from "./alert-evaluator.ts";
+export type {
+  AlertFiredRow,
+  AlertFiredStatus,
+  EvaluateAgentAlertsInput,
+  EvaluateAgentAlertsResult,
+} from "./alert-evaluator.ts";
+
+export {
   AgentRunStateError,
   claimAgentRun,
   completeAgentRun,
