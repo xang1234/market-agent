@@ -150,6 +150,7 @@ export {
   AgentValidationError,
   assertAgentInput,
   assertAgentUniverse,
+  appendAgentAlertRule,
   createAgent,
   disableAgent,
   getAgent,

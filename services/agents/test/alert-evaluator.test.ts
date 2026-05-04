@@ -124,6 +124,40 @@ test("evaluateAgentAlerts does not write firing rows when predicates do not matc
   assert.deepEqual(result.fired, []);
 });
 
+test("evaluateAgentAlerts rejects findings that belong to a different agent", async () => {
+  const db = fakeDb(() => {
+    throw new Error("mixed-agent findings must be rejected before SQL");
+  });
+
+  await assert.rejects(
+    evaluateAgentAlerts(db, {
+      agent_id: AGENT_ID,
+      run_id: RUN_ID,
+      alert_rules: [
+        {
+          rule_id: "critical-margin-risk",
+          severity_at_least: "high",
+          channels: ["email"],
+        },
+      ],
+      findings: [
+        {
+          finding_id: FINDING_ID,
+          agent_id: "77777777-7777-4777-8777-777777777777",
+          snapshot_id: "66666666-6666-4666-8666-666666666666",
+          subject_refs: [{ kind: "issuer", id: AGENT_ID }],
+          claim_cluster_ids: [],
+          severity: "critical",
+          headline: "Margin risk widened after supplier warning",
+          summary_blocks: [],
+          created_at: "2026-05-04T00:00:00.000Z",
+        },
+      ],
+    }),
+    /findings\[0\]\.agent_id must match agent_id/,
+  );
+});
+
 function fakeDb(
   handler: (text: string, values?: unknown[]) => ReadonlyArray<Record<string, unknown>>,
 ): QueryExecutor {

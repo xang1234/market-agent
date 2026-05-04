@@ -84,3 +84,26 @@ test("compileAlertRule rejects unknown operators and private/raw fields", () => 
     AlertRuleValidationError,
   );
 });
+
+test("compileAlertRule requires at least one predicate or subject scope", () => {
+  assert.throws(
+    () =>
+      compileAlertRule({
+        rule_id: "too-broad",
+        channels: ["email"],
+      }),
+    /must include at least one predicate or subject scope/,
+  );
+});
+
+test("compileAlertRule rejects duplicate channels", () => {
+  assert.throws(
+    () =>
+      compileAlertRule({
+        rule_id: "duplicate-channel",
+        severity_at_least: "high",
+        channels: ["email", "email"],
+      }),
+    /channels must not contain duplicate "email"/,
+  );
+});

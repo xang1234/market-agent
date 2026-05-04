@@ -82,7 +82,6 @@ test("applyApprovedCreateAlert appends the compiled alert rule after approval", 
     channels: ["email"],
   };
   const { db, queries } = fakeDb((text) => {
-    if (/select/.test(text)) return [agentRow()];
     if (/update agents/.test(text)) return [agentRow([expectedRule])];
     return [];
   });
@@ -101,10 +100,42 @@ test("applyApprovedCreateAlert appends the compiled alert rule after approval", 
   );
 
   assert.deepEqual(agent.alert_rules, [expectedRule]);
-  assert.match(queries[0].text, /select/);
-  assert.match(queries[1].text, /update agents/);
-  assert.equal(queries[1].values?.[0], AGENT_ID);
-  assert.deepEqual(JSON.parse(String(queries[1].values?.[7])), [expectedRule]);
+  assert.equal(queries.length, 1);
+  assert.match(queries[0].text, /update agents/);
+  assert.match(queries[0].text, /jsonb_array_elements/);
+  assert.equal(queries[0].values?.[0], AGENT_ID);
+  assert.equal(queries[0].values?.[1], "critical-margin-risk");
+  assert.deepEqual(JSON.parse(String(queries[0].values?.[2])), [expectedRule]);
+});
+
+test("applyApprovedCreateAlert is idempotent for an already-applied rule id", async () => {
+  const expectedRule = {
+    rule_id: "critical-margin-risk",
+    subject: { kind: "issuer", id: ISSUER_ID },
+    severity_at_least: "high",
+    headline_contains: "margin risk",
+    channels: ["email"],
+  };
+  const { db, queries } = fakeDb((text) => {
+    assert.match(text, /jsonb_array_elements/);
+    return [agentRow([expectedRule])];
+  });
+  const intent = createAlertApprovalIntent({
+    registry: loadToolRegistry(),
+    input,
+    idempotency_key: "turn-9/tool-1",
+  });
+
+  const action = approveCreateAlertAction(intent.pending_action, {
+    approved_by_user_id: USER_ID,
+    approved_at: FIXED_NOW,
+  });
+  const first = await applyApprovedCreateAlert(db, action);
+  const second = await applyApprovedCreateAlert(db, action);
+
+  assert.deepEqual(first.alert_rules, [expectedRule]);
+  assert.deepEqual(second.alert_rules, [expectedRule]);
+  assert.equal(queries.length, 2);
 });
 
 test("createAlertApprovalIntent rejects invalid declarative rules before minting a pending action", () => {

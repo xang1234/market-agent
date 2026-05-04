@@ -166,6 +166,14 @@ function assertAlertRule(value: unknown): asserts value is AlertRule {
   if (rule.claim_cluster_id_in !== undefined) {
     assertUuidArray(rule.claim_cluster_id_in, "claim_cluster_id_in");
   }
+  if (
+    rule.subject === undefined &&
+    rule.severity_at_least === undefined &&
+    rule.headline_contains === undefined &&
+    rule.claim_cluster_id_in === undefined
+  ) {
+    throw new AlertRuleValidationError("alert rule must include at least one predicate or subject scope");
+  }
   assertChannelArray(rule.channels, "channels");
 }
 
@@ -192,7 +200,14 @@ function assertChannelArray(value: unknown, label: string): asserts value is Rea
   if (!Array.isArray(value) || value.length === 0) {
     throw new AlertRuleValidationError(`${label} must be a non-empty array`);
   }
-  value.forEach((channel, index) => assertNonEmptyString(channel, `${label}[${index}]`));
+  const seen = new Set<string>();
+  value.forEach((channel, index) => {
+    assertNonEmptyString(channel, `${label}[${index}]`);
+    if (seen.has(channel)) {
+      throw new AlertRuleValidationError(`${label} must not contain duplicate "${channel}"`);
+    }
+    seen.add(channel);
+  });
 }
 
 function assertUuidArray(value: unknown, label: string): asserts value is ReadonlyArray<string> {

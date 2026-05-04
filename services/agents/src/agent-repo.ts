@@ -212,6 +212,34 @@ export async function updateAgent(
   return rowFromDb(rows[0]);
 }
 
+export async function appendAgentAlertRule(
+  db: QueryExecutor,
+  agentId: string,
+  ruleId: string,
+  rule: JsonValue,
+): Promise<AgentRow> {
+  assertUuidString(agentId, "agent_id");
+  assertNonEmptyString(ruleId, "rule_id");
+  const { rows } = await db.query<AgentDbRow>(
+    `update agents
+        set alert_rules = case
+              when exists (
+                select 1
+                  from jsonb_array_elements(alert_rules) as existing_rule
+                 where existing_rule->>'rule_id' = $2
+              )
+              then alert_rules
+              else alert_rules || $3::jsonb
+            end,
+            updated_at = now()
+      where agent_id = $1::uuid
+      returning ${SELECT_COLUMNS}`,
+    [agentId, ruleId, JSON.stringify([rule])],
+  );
+  if (rows.length === 0) throw new AgentNotFoundError();
+  return rowFromDb(rows[0]);
+}
+
 export async function disableAgent(db: QueryExecutor, agentId: string): Promise<AgentRow> {
   assertUuidString(agentId, "agent_id");
   const { rows } = await db.query<AgentDbRow>(

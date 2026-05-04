@@ -343,6 +343,10 @@
       "input_json_schema": {
         "type": "object",
         "properties": {
+          "agent_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "subject_ref": {
             "type": "object",
             "properties": {
@@ -4136,13 +4140,12 @@
           }
         },
         "required": [
+          "agent_id",
           "subject_ref",
           "rule",
           "channels"
         ],
-        "additionalProperties": {
-          "$ref": "#/$defs/analyst_safe_json_value"
-        },
+        "additionalProperties": false,
         "propertyNames": {
           "not": {
             "enum": [

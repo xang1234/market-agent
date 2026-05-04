@@ -6,8 +6,7 @@ import {
 import type { ToolRegistry } from "../../tools/src/registry.ts";
 import type { JsonObject, JsonValue } from "../../observability/src/types.ts";
 import {
-  getAgent,
-  updateAgent,
+  appendAgentAlertRule,
   type AgentRow,
   type QueryExecutor,
 } from "./agent-repo.ts";
@@ -120,16 +119,7 @@ export async function applyApprovedCreateAlert(
   assertApprovedCreateAlertAction(pendingAction);
   const input = pendingAction.arguments as unknown as CreateAlertInput;
   const compiled = compileCreateAlertRule(input);
-  const agent = await getAgent(db, input.agent_id);
-  if (!agent) {
-    throw new CreateAlertApprovalError("agent not found");
-  }
-  if (!Array.isArray(agent.alert_rules)) {
-    throw new CreateAlertApprovalError("agent alert_rules must be an array");
-  }
-  return updateAgent(db, input.agent_id, {
-    alert_rules: [...agent.alert_rules, compiled] as unknown as JsonValue,
-  });
+  return appendAgentAlertRule(db, input.agent_id, compiled.rule_id, compiled as unknown as JsonValue);
 }
 
 function assertCreateAlertInput(input: CreateAlertInput): void {

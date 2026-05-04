@@ -75,6 +75,11 @@ export async function evaluateAgentAlerts(
   if (!Array.isArray(input.findings)) {
     throw new AlertEvaluationError("findings must be an array");
   }
+  input.findings.forEach((finding, index) => {
+    if (finding.agent_id !== input.agent_id) {
+      throw new AlertEvaluationError(`findings[${index}].agent_id must match agent_id`);
+    }
+  });
 
   const compiledRules = input.alert_rules.map((rule) => compileAlertRule(rule));
   const fired: AlertFiredRow[] = [];

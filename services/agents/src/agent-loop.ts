@@ -1,5 +1,10 @@
-import type { JsonValue } from "../../observability/src/types.ts";
+import type { JsonObject, JsonValue } from "../../observability/src/types.ts";
 import type { QueryExecutor } from "./agent-repo.ts";
+import {
+  evaluateAgentAlerts,
+  type EvaluateAgentAlertsResult,
+} from "./alert-evaluator.ts";
+import type { FindingRow } from "./finding-generator.ts";
 import {
   advanceWatermarksWithSideEffectsWithPool,
   type AgentWatermarkClientPool,
@@ -31,6 +36,12 @@ export type AgentLoopStages<
   analyze(context: Pick<AgentLoopStageContext<Deltas, Evidence, Clusters, Analysis>, "agent_id" | "current_watermarks" | "deltas" | "evidence" | "clusters">): Promise<Analysis>;
   nextWatermarks(context: AgentLoopStageContext<Deltas, Evidence, Clusters, Analysis>): Promise<JsonValue>;
   applySideEffects(context: AgentLoopStageContext<Deltas, Evidence, Clusters, Analysis> & { tx: QueryExecutor }): Promise<JsonValue>;
+  alertFindings?(
+    context: AgentLoopStageContext<Deltas, Evidence, Clusters, Analysis> & {
+      tx: QueryExecutor;
+      outputs_summary: JsonValue;
+    },
+  ): Promise<ReadonlyArray<FindingRow>>;
 };
 
 export type RunAgentLoopInput<
@@ -41,6 +52,8 @@ export type RunAgentLoopInput<
 > = {
   pool: AgentWatermarkClientPool;
   agent_id: string;
+  run_id?: string;
+  alert_rules?: ReadonlyArray<unknown>;
   current_watermarks: JsonValue;
   stages: AgentLoopStages<Deltas, Evidence, Clusters, Analysis>;
 };
@@ -96,11 +109,47 @@ export async function runAgentLoop<
     next_watermarks: nextWatermarks,
     applySideEffects: async (tx) => {
       outputsSummary = await input.stages.applySideEffects({ ...context, tx });
+      if (input.run_id && input.alert_rules && input.alert_rules.length > 0 && input.stages.alertFindings) {
+        const alertResult = await evaluateAgentAlerts(tx, {
+          agent_id: input.agent_id,
+          run_id: input.run_id,
+          alert_rules: input.alert_rules,
+          findings: await input.stages.alertFindings({
+            ...context,
+            tx,
+            outputs_summary: outputsSummary,
+          }),
+        });
+        outputsSummary = withAlertSummary(outputsSummary, alertResult);
+      }
     },
   });
 
   return Object.freeze({
     outputs_summary: outputsSummary,
     next_watermarks: nextWatermarks,
+  });
+}
+
+function withAlertSummary(
+  outputsSummary: JsonValue,
+  alertResult: EvaluateAgentAlertsResult,
+): JsonValue {
+  const alerts = {
+    evaluated_rules: alertResult.evaluated_rules,
+    evaluated_findings: alertResult.evaluated_findings,
+    fired: alertResult.fired.length,
+  } satisfies JsonObject;
+
+  if (outputsSummary !== null && typeof outputsSummary === "object" && !Array.isArray(outputsSummary)) {
+    return Object.freeze({
+      ...outputsSummary,
+      alerts,
+    });
+  }
+
+  return Object.freeze({
+    outputs_summary: outputsSummary,
+    alerts,
   });
 }
