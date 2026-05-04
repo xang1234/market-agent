@@ -24,6 +24,17 @@ test("loadToolRegistry reads the default finance research registry", () => {
   assert.equal(createAlert.approval_required, true);
   assert.equal(createAlert.cost_class, "low");
   assert.equal(createAlert.freshness_expectation, "varies");
+  assert.deepEqual(createAlert.input_json_schema.properties.agent_id, {
+    type: "string",
+    format: "uuid",
+  });
+  assert.deepEqual(createAlert.input_json_schema.required, [
+    "agent_id",
+    "subject_ref",
+    "rule",
+    "channels",
+  ]);
+  assert.equal(createAlert.input_json_schema.additionalProperties, false);
 
   assert.deepEqual(
     registry.toolsForBundle("alert_management").map((tool) => tool.name),
