@@ -10,7 +10,7 @@
 
 ---
 
-### Task 1: Severity Scorer (`fra-3de`)
+## Task 1: Severity Scorer (`fra-3de`)
 
 **Files:**
 - Create: `services/agents/src/severity-scorer.ts`
@@ -23,7 +23,7 @@
 - [x] Verify focused tests pass.
 - [x] Close `fra-3de`.
 
-### Task 2: Summary Blocks (`fra-n6a`)
+## Task 2: Summary Blocks (`fra-n6a`)
 
 **Files:**
 - Create: `services/agents/src/finding-summary-blocks.ts`
@@ -36,7 +36,7 @@
 - [x] Verify focused tests pass.
 - [x] Close `fra-n6a`.
 
-### Task 3: Finding Generator (`fra-ios`)
+## Task 3: Finding Generator (`fra-ios`)
 
 **Files:**
 - Create: `services/agents/src/finding-generator.ts`
@@ -49,7 +49,7 @@
 - [x] Verify focused tests pass.
 - [x] Close `fra-ios`.
 
-### Task 4: Parent Verification And Landing
+## Task 4: Parent Verification And Landing
 
 **Files:**
 - Modify: bead metadata only.

@@ -7,7 +7,7 @@ import {
 } from "./alert-rule-compiler.ts";
 import type { FindingRow } from "./finding-generator.ts";
 
-export type AlertFiredStatus = "pending_notification";
+export type AlertFiredStatus = "pending_notification" | "notified" | "failed" | "acknowledged";
 
 export type AlertFiredRow = {
   alert_fired_id: string;

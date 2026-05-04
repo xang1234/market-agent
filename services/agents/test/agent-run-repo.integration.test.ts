@@ -16,17 +16,21 @@ const AGENT_ID = "22222222-2222-4222-8222-222222222222";
 const WORKSPACE_ROOT = join(import.meta.dirname, "..", "..", "..");
 const DB_ROOT = join(WORKSPACE_ROOT, "db");
 
-function run(command: string, args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
+function run(
+  command: string,
+  args: string[],
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; timeout?: number } = {},
+) {
   return spawnSync(command, args, {
     cwd: options.cwd ?? WORKSPACE_ROOT,
     encoding: "utf8",
     env: { ...process.env, ...options.env },
-    timeout: 5000,
+    timeout: options.timeout,
   });
 }
 
 function dockerAvailable(): boolean {
-  return run("docker", ["version", "--format", "{{.Server.Version}}"]).status === 0;
+  return run("docker", ["version", "--format", "{{.Server.Version}}"], { timeout: 5000 }).status === 0;
 }
 
 function containerName(prefix: string): string {
@@ -34,7 +38,7 @@ function containerName(prefix: string): string {
 }
 
 function stopPostgres(name: string): void {
-  run("docker", ["rm", "--force", name]);
+  run("docker", ["rm", "--force", name], { timeout: 5000 });
 }
 
 function startPostgres(name: string): string | null {
@@ -49,9 +53,9 @@ function startPostgres(name: string): string | null {
     "-p",
     "127.0.0.1::5432",
     "postgres:15",
-  ]);
+  ], { timeout: 5000 });
   if (result.status !== 0) return null;
-  const port = run("docker", ["port", name, "5432/tcp"]);
+  const port = run("docker", ["port", name, "5432/tcp"], { timeout: 5000 });
   assert.equal(port.status, 0, port.stderr || port.stdout);
   const match = port.stdout.trim().match(/:(\d+)$/);
   assert.ok(match, `expected docker port output to include a host port, got: ${port.stdout}`);
@@ -60,7 +64,7 @@ function startPostgres(name: string): string | null {
 
 async function waitForPostgres(name: string, databaseUrl: string): Promise<void> {
   for (let attempt = 0; attempt < 60; attempt += 1) {
-    const ready = run("docker", ["exec", name, "pg_isready", "-U", "postgres"]);
+    const ready = run("docker", ["exec", name, "pg_isready", "-U", "postgres"], { timeout: 5000 });
     if (ready.status === 0) {
       const pool = new Pool({ connectionString: databaseUrl, max: 1 });
       try {

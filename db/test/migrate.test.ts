@@ -60,7 +60,7 @@ test("agent run claim schema enforces one running row per agent", () => {
 
   for (const sql of [forwardMigration, schema]) {
     assert.match(sql, /claim_expires_at timestamptz/i);
-    assert.match(sql, /create unique index agent_run_logs_one_running_per_agent_idx/i);
+    assert.match(sql, /create unique index(?: if not exists)? agent_run_logs_one_running_per_agent_idx/i);
     assert.match(sql, /where agent_id is not null/i);
     assert.match(sql, /status = 'running'/i);
     assert.match(sql, /ended_at is null/i);
@@ -77,7 +77,9 @@ test("alerts fired schema records trigger provenance before notification deliver
     assert.match(sql, /finding_id uuid not null references findings\(finding_id\)/i);
     assert.match(sql, /trigger_refs jsonb not null/i);
     assert.match(sql, /status text not null default 'pending_notification'/i);
+    assert.match(sql, /status in \('pending_notification', 'notified', 'failed', 'acknowledged'\)/i);
     assert.match(sql, /unique \(agent_id, run_id, rule_id, finding_id\)/i);
+    assert.match(sql, /create index alerts_fired_finding_idx on alerts_fired\(finding_id\)/i);
   }
 });
 

@@ -110,7 +110,7 @@ test("runAgentLoop executes injectable stages in order and advances watermarks a
 });
 
 test("runAgentLoop rolls back and does not advance watermarks when side effects fail", async () => {
-  const { pool, queries } = fakePool();
+  const { pool, queries, released } = fakePool();
 
   await assert.rejects(
     runAgentLoop({
@@ -132,6 +132,8 @@ test("runAgentLoop rolls back and does not advance watermarks when side effects 
   );
 
   assert.deepEqual(queries.map((query) => query.text), ["begin", "rollback"]);
+  assert.equal(released.length, 1, "client must be released after rollback");
+  assert.equal(released[0], undefined);
 });
 
 test("runAgentLoop evaluates alert rules inside the side-effect transaction after findings are available", async () => {

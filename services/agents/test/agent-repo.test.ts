@@ -11,6 +11,7 @@ import {
   updateAgent,
   type AgentInput,
   type AgentUpdate,
+  type QueryExecutor,
 } from "../src/agent-repo.ts";
 
 const AGENT_ID = "11111111-1111-4111-8111-111111111111";
@@ -39,13 +40,6 @@ function fakeDb(
     },
   };
 }
-
-type QueryExecutor = {
-  query<R extends Record<string, unknown> = Record<string, unknown>>(
-    text: string,
-    values?: unknown[],
-  ): Promise<QueryResult<R>>;
-};
 
 function agentRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {

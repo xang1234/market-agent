@@ -134,9 +134,9 @@ function assertGenerateFindingInput(input: GenerateFindingInput): void {
   }
   input.subject_refs.forEach((ref, index) => {
     try {
-      assertSubjectRef(ref);
+      assertSubjectRef(ref, `subject_refs[${index}]`);
     } catch (error) {
-      throw new FindingGenerationValidationError(`subject_refs[${index}] ${(error as Error).message}`);
+      throw new FindingGenerationValidationError((error as Error).message);
     }
   });
   if (!Array.isArray(input.claim_cluster_ids)) {

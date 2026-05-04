@@ -49,3 +49,10 @@ test("nextDueAt advances interval schedules and returns null for event schedules
   );
   assert.equal(nextDueAt(compileAgentCadence("on-filing"), lastRun), null);
 });
+
+test("nextDueAt rejects invalid lastRunAt values", () => {
+  assert.throws(
+    () => nextDueAt(compileAgentCadence("hourly"), "invalid-date"),
+    CadenceValidationError,
+  );
+});

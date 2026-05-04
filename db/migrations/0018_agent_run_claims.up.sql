@@ -6,7 +6,7 @@ update agent_run_logs
  where status = 'running'
    and ended_at is null;
 
-create unique index agent_run_logs_one_running_per_agent_idx
+create unique index if not exists agent_run_logs_one_running_per_agent_idx
   on agent_run_logs(agent_id)
   where agent_id is not null
     and status = 'running'

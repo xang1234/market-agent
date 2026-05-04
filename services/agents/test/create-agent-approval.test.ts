@@ -130,22 +130,21 @@ test("applyApprovedCreateAgent creates an enabled agent from the approved pendin
   assert.equal(queries[0].values?.[9], true);
 });
 
-test("applyApprovedCreateAgent rejects pending actions for the wrong tool", async () => {
-  const { db, queries } = fakeDb(() => []);
+test("approveCreateAgentAction rejects a pending action for the wrong tool", () => {
   const intent = createAgentApprovalIntent({
     registry: loadToolRegistry(),
     input,
     idempotency_key: "turn-5/tool-1",
   });
 
-  await assert.rejects(
-    applyApprovedCreateAgent(db, {
-      ...intent.pending_action,
-      tool_name: "create_alert",
-    }),
+  assert.throws(
+    () =>
+      approveCreateAgentAction(
+        { ...intent.pending_action, tool_name: "create_alert" },
+        { approved_by_user_id: USER_ID, approved_at: FIXED_NOW },
+      ),
     /create_agent/,
   );
-  assert.equal(queries.length, 0);
 });
 
 test("applyApprovedCreateAgent rejects a raw pending action that has not been approved", async () => {

@@ -76,10 +76,10 @@ function assertFindingSummaryBlocksInput(input: FindingSummaryBlocksInput): void
   assertDateTimeString(input.as_of, "as_of");
   input.subject_refs?.forEach((subjectRef, index) => {
     try {
-      assertSubjectRef(subjectRef);
+      assertSubjectRef(subjectRef, `subject_refs[${index}]`);
     } catch (error) {
       throw new FindingSummaryBlockValidationError(
-        `subject_refs[${index}] ${(error as Error).message}`,
+        (error as Error).message,
       );
     }
   });

@@ -273,8 +273,10 @@ function validateAgentUpdate(patch: AgentUpdate): void {
   }
   if (patch.name !== undefined) assertNonEmptyString(patch.name, "name");
   if (patch.thesis !== undefined) assertNonEmptyString(patch.thesis, "thesis");
-  if (patch.cadence !== undefined) assertNonEmptyString(patch.cadence, "cadence");
-  if (patch.cadence !== undefined) assertSupportedCadence(patch.cadence);
+  if (patch.cadence !== undefined) {
+    assertNonEmptyString(patch.cadence, "cadence");
+    assertSupportedCadence(patch.cadence);
+  }
   if (patch.universe !== undefined) assertAgentUniverse(patch.universe, "universe");
   if (patch.prompt_template !== undefined && patch.prompt_template !== null) {
     assertNonEmptyString(patch.prompt_template, "prompt_template");

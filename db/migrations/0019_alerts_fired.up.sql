@@ -11,8 +11,9 @@ create table alerts_fired (
   unique (agent_id, run_id, rule_id, finding_id),
   constraint alerts_fired_channels_array_chk check (jsonb_typeof(channels) = 'array'),
   constraint alerts_fired_trigger_refs_array_chk check (jsonb_typeof(trigger_refs) = 'array'),
-  constraint alerts_fired_status_chk check (status in ('pending_notification'))
+  constraint alerts_fired_status_chk check (status in ('pending_notification', 'notified', 'failed', 'acknowledged'))
 );
 
 create index alerts_fired_agent_fired_idx on alerts_fired(agent_id, fired_at desc);
 create index alerts_fired_run_idx on alerts_fired(run_id);
+create index alerts_fired_finding_idx on alerts_fired(finding_id);
