@@ -61,6 +61,20 @@ export type {
 } from "./alert-evaluator.ts";
 
 export {
+  CreateAlertApprovalError,
+  applyApprovedCreateAlert,
+  approveCreateAlertAction,
+  createAlertApprovalIntent,
+} from "./create-alert-approval.ts";
+export type {
+  ApprovedCreateAlertAction,
+  CreateAlertApprovalConfirmation,
+  CreateAlertApprovalIntent,
+  CreateAlertApprovalIntentInput,
+  CreateAlertInput,
+} from "./create-alert-approval.ts";
+
+export {
   AgentRunStateError,
   claimAgentRun,
   completeAgentRun,
