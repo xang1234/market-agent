@@ -38,6 +38,37 @@ export type {
 } from "./finding-generator.ts";
 
 export {
+  claimAgentRun,
+  completeAgentRun,
+  failAgentRun,
+} from "./agent-run-repo.ts";
+export type {
+  AgentRunClaim,
+  AgentRunRow,
+  AgentRunStatus,
+} from "./agent-run-repo.ts";
+
+export {
+  AgentRunMessageValidationError,
+  handleAgentRunMessage,
+} from "./queue-runner.ts";
+export type {
+  AgentRunMessage,
+  AgentRunMessageResult,
+  HandleAgentRunMessageInput,
+} from "./queue-runner.ts";
+
+export {
+  runAgentLoop,
+} from "./agent-loop.ts";
+export type {
+  AgentLoopResult,
+  AgentLoopStageContext,
+  AgentLoopStages,
+  RunAgentLoopInput,
+} from "./agent-loop.ts";
+
+export {
   CreateAgentApprovalError,
   applyApprovedCreateAgent,
   approveCreateAgentAction,
