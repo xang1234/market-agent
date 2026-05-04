@@ -685,6 +685,12 @@ create table agent_run_logs (
   inputs_watermark jsonb,
   outputs_summary jsonb,
   status text not null default 'running',
-  error text
+  error text,
+  claim_expires_at timestamptz
 );
 create index agent_run_logs_agent_started_idx on agent_run_logs(agent_id, started_at desc);
+create unique index agent_run_logs_one_running_per_agent_idx
+  on agent_run_logs(agent_id)
+  where agent_id is not null
+    and status = 'running'
+    and ended_at is null;

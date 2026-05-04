@@ -38,6 +38,7 @@ export type {
 } from "./finding-generator.ts";
 
 export {
+  AgentRunStateError,
   claimAgentRun,
   completeAgentRun,
   failAgentRun,

@@ -3,6 +3,10 @@ import test from "node:test";
 import type { QueryResult } from "pg";
 
 import {
+  AgentRunStateError,
+  completeAgentRun,
+} from "../src/agent-run-repo.ts";
+import {
   AgentRunMessageValidationError,
   handleAgentRunMessage,
 } from "../src/queue-runner.ts";
@@ -40,6 +44,10 @@ function fakeDb(
       },
     },
   };
+}
+
+function uniqueViolation(): Error & { code: string } {
+  return Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" });
 }
 
 test("handleAgentRunMessage claims a new run, executes once, and completes the run log", async () => {
@@ -92,7 +100,7 @@ test("handleAgentRunMessage claims a new run, executes once, and completes the r
   assert.equal(result.status, "completed");
   assert.equal(result.run_id, RUN_ID);
   assert.equal(executions, 1);
-  assert.match(queries[0].text, /status = 'running'/);
+  assert.match(queries[0].text, /claim_expires_at <= now\(\)/);
   assert.match(queries[1].text, /insert into agent_run_logs/);
   assert.match(queries.at(-1)?.text ?? "", /update agent_run_logs/);
   assert.equal(queries.at(-1)?.values?.[1], JSON.stringify({ findings: 1 }));
@@ -120,7 +128,7 @@ test("handleAgentRunMessage short-circuits duplicate run_id before side effects"
       return [];
     }
     if (/insert into agent_run_logs/.test(text)) {
-      return [];
+      throw uniqueViolation();
     }
     return [];
   });
@@ -136,7 +144,7 @@ test("handleAgentRunMessage short-circuits duplicate run_id before side effects"
   assert.equal(result.status, "duplicate");
   assert.equal(result.run_id, RUN_ID);
   assert.equal(executions, 0);
-  assert.equal(queries.length, 3);
+  assert.match(queries.at(-1)?.text ?? "", /where agent_run_log_id = \$1::uuid/);
 });
 
 test("handleAgentRunMessage short-circuits duplicate run_id while the original run is still running", async () => {
@@ -161,7 +169,7 @@ test("handleAgentRunMessage short-circuits duplicate run_id while the original r
       return [];
     }
     if (/insert into agent_run_logs/.test(text)) {
-      return [];
+      throw uniqueViolation();
     }
     return [];
   });
@@ -197,6 +205,22 @@ test("handleAgentRunMessage rejects malformed ids before SQL", async () => {
     (error: Error) =>
       error instanceof AgentRunMessageValidationError && /agent_id/.test(error.message),
   );
+  await assert.rejects(
+    handleAgentRunMessage(db, {
+      message: null,
+      execute: async () => ({ findings: 1 }),
+    }),
+    (error: Error) =>
+      error instanceof AgentRunMessageValidationError && /message.*object/.test(error.message),
+  );
+  await assert.rejects(
+    handleAgentRunMessage(db, {
+      message: { run_id: RUN_ID, agent_id: AGENT_ID, enqueued_at: "today" },
+      execute: async () => ({ findings: 1 }),
+    }),
+    (error: Error) =>
+      error instanceof AgentRunMessageValidationError && /enqueued_at/.test(error.message),
+  );
 
   assert.equal(queries.length, 0);
 });
@@ -205,6 +229,9 @@ test("handleAgentRunMessage skips a new run when another run is active for the s
   let executions = 0;
   const { db, queries } = fakeDb((text) => {
     if (text.trimStart().startsWith("select")) {
+      if (/where agent_run_log_id = \$1::uuid/.test(text)) {
+        return [];
+      }
       return [
         {
           agent_run_log_id: RUN_ID,
@@ -218,6 +245,9 @@ test("handleAgentRunMessage skips a new run when another run is active for the s
           error: null,
         },
       ];
+    }
+    if (/insert into agent_run_logs/.test(text)) {
+      throw uniqueViolation();
     }
     return [];
   });
@@ -233,8 +263,13 @@ test("handleAgentRunMessage skips a new run when another run is active for the s
   assert.equal(result.status, "skipped_concurrency_limit");
   assert.equal(result.run_id, RUN_ID_2);
   assert.equal(executions, 0);
-  assert.equal(queries.length, 1);
-  assert.match(queries[0].text, /status = 'running'/);
+  assert.ok(
+    queries.some(
+      (query) =>
+        /agent_id = \$1::uuid/.test(query.text) &&
+        /status = 'running'/.test(query.text),
+    ),
+  );
 });
 
 test("handleAgentRunMessage allows different agents to run independently", async () => {
@@ -286,4 +321,17 @@ test("handleAgentRunMessage allows different agents to run independently", async
 
   assert.equal(result.status, "completed");
   assert.equal(executions, 1);
+});
+
+test("completeAgentRun rejects terminal or missing rows with a domain error", async () => {
+  const { db } = fakeDb((text) => {
+    assert.match(text, /status = 'running'/);
+    return [];
+  });
+
+  await assert.rejects(
+    completeAgentRun(db, { run_id: RUN_ID, outputs_summary: { findings: 1 } }),
+    (error: Error) =>
+      error instanceof AgentRunStateError && /cannot be completed/.test(error.message),
+  );
 });
