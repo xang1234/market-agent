@@ -38,6 +38,18 @@ export type {
 } from "./finding-generator.ts";
 
 export {
+  AlertRuleValidationError,
+  compileAlertRule,
+} from "./alert-rule-compiler.ts";
+export type {
+  AlertFindingInput,
+  AlertRule,
+  AlertRuleEvaluation,
+  AlertTriggerRef,
+  CompiledAlertRule,
+} from "./alert-rule-compiler.ts";
+
+export {
   AgentRunStateError,
   claimAgentRun,
   completeAgentRun,
