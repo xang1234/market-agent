@@ -343,10 +343,6 @@
       "input_json_schema": {
         "type": "object",
         "properties": {
-          "agent_id": {
-            "type": "string",
-            "format": "uuid"
-          },
           "subject_ref": {
             "type": "object",
             "properties": {
@@ -817,6 +813,10 @@
       "input_json_schema": {
         "type": "object",
         "properties": {
+          "agent_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "subject_ref": {
             "type": "object",
             "properties": {
@@ -4085,6 +4085,10 @@
       "input_json_schema": {
         "type": "object",
         "properties": {
+          "agent_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "subject_ref": {
             "type": "object",
             "properties": {
