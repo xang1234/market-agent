@@ -22,6 +22,7 @@ const snapshotManifestMigrationPath = join(dbRoot, "migrations", "0005_snapshot_
 const evidenceBundleMigrationPath = join(dbRoot, "migrations", "0017_evidence_bundles.up.sql");
 const agentRunClaimsMigrationPath = join(dbRoot, "migrations", "0018_agent_run_claims.up.sql");
 const alertsFiredMigrationPath = join(dbRoot, "migrations", "0019_alerts_fired.up.sql");
+const notificationDeliveryMigrationPath = join(dbRoot, "migrations", "0020_notification_delivery.up.sql");
 
 function loadExpectedTables() {
   return Array.from(
@@ -83,6 +84,24 @@ test("alerts fired schema records trigger provenance before notification deliver
   }
 });
 
+test("notification delivery schema records preferences and delivery attempts", () => {
+  const forwardMigration = readFileSync(notificationDeliveryMigrationPath, "utf8");
+  const schema = readFileSync(schemaPath, "utf8");
+
+  for (const sql of [forwardMigration, schema]) {
+    assert.match(sql, /create table notification_preferences/i);
+    assert.match(sql, /user_id uuid not null references users\(user_id\)/i);
+    assert.match(sql, /agent_id uuid references agents\(agent_id\)/i);
+    assert.match(sql, /channel text not null/i);
+    assert.match(sql, /digest_cadence text not null default 'immediate'/i);
+    assert.match(sql, /create table notification_deliveries/i);
+    assert.match(sql, /alert_fired_id uuid references alerts_fired\(alert_fired_id\)/i);
+    assert.match(sql, /status text not null/i);
+    assert.match(sql, /blocked_fact_ids jsonb not null default '\[\]'::jsonb/i);
+    assert.match(sql, /create index notification_deliveries_user_channel_idx/i);
+  }
+});
+
 test("migrate up applies pending migrations and records them in schema_migrations", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for db migration integration coverage");
@@ -106,7 +125,7 @@ test("migrate up applies pending migrations and records them in schema_migration
   });
 
   assert.equal(migrateResult.status, 0, migrateResult.stderr || migrateResult.stdout);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "19");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "20");
   assert.deepEqual(
     queryValue(containerName, "select version || ':' || name from schema_migrations order by version").split("\n"),
     [
@@ -129,6 +148,7 @@ test("migrate up applies pending migrations and records them in schema_migration
       "0017:evidence_bundles",
       "0018:agent_run_claims",
       "0019:alerts_fired",
+      "0020:notification_delivery",
     ],
   );
 
@@ -241,6 +261,7 @@ test("migrate status reports all migrations as applied after migrate up", { time
   assert.match(statusResult.stdout, /0017\s+evidence_bundles\s+applied/);
   assert.match(statusResult.stdout, /0018\s+agent_run_claims\s+applied/);
   assert.match(statusResult.stdout, /0019\s+alerts_fired\s+applied/);
+  assert.match(statusResult.stdout, /0020\s+notification_delivery\s+applied/);
 });
 
 test("migrate down rolls back the most recently applied migration", { timeout: 120000 }, async (t) => {
@@ -867,7 +888,7 @@ test("migrate down rolls back schema changes when removing the migration record 
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /rejecting schema_migrations delete/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "19");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "20");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -876,13 +897,13 @@ test("migrate down rolls back schema changes when removing the migration record 
   // migration's schema change must still be in place. If the runner
   // accidentally executed the down DDL before hitting the trigger block, the
   // schema_migrations row count alone wouldn't catch that — checking the
-  // latest migration's actual artifact does. 0019 added the alerts_fired
+  // latest migration's actual artifact does. 0020 added the notification_deliveries
   // table; the down would remove it, so its presence is
   // independent proof the down DDL did not execute.
   assert.equal(
     queryValue(
       containerName,
-      "select count(*) from pg_tables where schemaname = 'public' and tablename = 'alerts_fired'",
+      "select count(*) from pg_tables where schemaname = 'public' and tablename = 'notification_deliveries'",
     ),
     "1",
   );
@@ -933,7 +954,7 @@ test("migrate down fails when any applied migration is missing locally", { timeo
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /Applied migration 0000 is missing locally/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "20");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "21");
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
 });
 
