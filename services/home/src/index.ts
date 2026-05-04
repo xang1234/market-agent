@@ -1,6 +1,8 @@
 export {
+  DEFAULT_HOME_FINDING_CANDIDATE_LIMIT,
   DEFAULT_HOME_FINDING_LIMIT,
   HomeFindingFeedError,
+  MAX_HOME_FINDING_CANDIDATE_LIMIT,
   MAX_HOME_FINDING_LIMIT,
   listHomeFindingCards,
 } from "./finding-feed-repo.ts";

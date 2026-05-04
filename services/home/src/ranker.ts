@@ -48,7 +48,7 @@ export function rankHomeCards(
   cards: ReadonlyArray<HomeFindingCard>,
   options: HomeRankingOptions = {},
 ): HomeFindingCard[] {
-  const weights = options.weights ?? DEFAULT_HOME_RANKING_WEIGHTS;
+  const weights = normalizeWeights(options.weights);
   const now = resolveNow(options.now);
   const scored = cards.map((card) => ({
     card,
@@ -63,7 +63,7 @@ export function scoreHomeCard(
   card: HomeFindingCard,
   options: HomeRankingOptions = {},
 ): HomeCardScore {
-  const weights = options.weights ?? DEFAULT_HOME_RANKING_WEIGHTS;
+  const weights = normalizeWeights(options.weights);
   const now = resolveNow(options.now);
   const components = {
     recency: recencyScore(card.created_at, now, weights.recency_half_life_hours),
@@ -124,6 +124,28 @@ function resolveNow(now: string | Date | undefined): Date {
   const resolved = now === undefined ? new Date() : new Date(now);
   if (Number.isNaN(resolved.getTime())) throw new Error("now must be a valid date");
   return resolved;
+}
+
+function normalizeWeights(weights: HomeRankingWeights | undefined): HomeRankingWeights {
+  const resolved = weights ?? DEFAULT_HOME_RANKING_WEIGHTS;
+  assertNonNegativeFinite(resolved.recency, "weights.recency");
+  assertNonNegativeFinite(resolved.severity, "weights.severity");
+  assertNonNegativeFinite(resolved.affinity, "weights.affinity");
+  assertPositiveFinite(resolved.recency_half_life_hours, "weights.recency_half_life_hours");
+  assertNonNegativeFinite(resolved.critical_override_margin, "weights.critical_override_margin");
+  return resolved;
+}
+
+function assertNonNegativeFinite(value: number, label: string): void {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${label} must be a finite non-negative number`);
+  }
+}
+
+function assertPositiveFinite(value: number, label: string): void {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${label} must be a finite positive number`);
+  }
 }
 
 function clamp01(value: number): number {

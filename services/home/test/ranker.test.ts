@@ -157,3 +157,28 @@ test("tie-breakers are deterministic", () => {
 
   assert.deepEqual(ranked.map((item) => item.home_card_id), ["a-card", "b-card"]);
 });
+
+test("rankHomeCards rejects invalid ranking weights", () => {
+  assert.throws(
+    () => rankHomeCards(
+      [
+        card({
+          home_card_id: "bad-config",
+          severity: "medium",
+          created_at: BASE_TIME,
+        }),
+      ],
+      {
+        now: BASE_TIME,
+        weights: {
+          recency: Number.NaN,
+          severity: 0,
+          affinity: 0,
+          recency_half_life_hours: 24,
+          critical_override_margin: 0.5,
+        },
+      },
+    ),
+    /weights.recency must be a finite non-negative number/,
+  );
+});

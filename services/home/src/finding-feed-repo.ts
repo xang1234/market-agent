@@ -10,10 +10,13 @@ import {
 
 export const DEFAULT_HOME_FINDING_LIMIT = 100;
 export const MAX_HOME_FINDING_LIMIT = 500;
+export const DEFAULT_HOME_FINDING_CANDIDATE_LIMIT = 500;
+export const MAX_HOME_FINDING_CANDIDATE_LIMIT = 2_000;
 
 export type ListHomeFindingCardsRequest = {
   user_id: string;
   limit?: number;
+  candidate_limit?: number;
 };
 
 type FindingFeedRow = {
@@ -35,6 +38,16 @@ type Group = {
   support_counts: number[];
 };
 
+const SUBJECT_KINDS = new Set([
+  "issuer",
+  "instrument",
+  "listing",
+  "theme",
+  "macro_topic",
+  "portfolio",
+  "screen",
+]);
+
 const SEVERITY_RANK: Record<HomeFindingSeverity, number> = {
   low: 1,
   medium: 2,
@@ -55,6 +68,7 @@ export async function listHomeFindingCards(
 ): Promise<ReadonlyArray<HomeFindingCard>> {
   assertUuid(request.user_id, "user_id");
   const limit = resolveLimit(request.limit);
+  const candidateLimit = resolveCandidateLimit(request.candidate_limit, limit);
   const result = await db.query<FindingFeedRow>(
     `select f.finding_id::text as finding_id,
             f.agent_id::text as agent_id,
@@ -80,10 +94,10 @@ export async function listHomeFindingCards(
         and a.enabled = true
       order by f.created_at desc, f.finding_id asc
       limit $2`,
-    [request.user_id, limit],
+    [request.user_id, candidateLimit],
   );
 
-  return Object.freeze(cardsFromRows(result.rows));
+  return Object.freeze(cardsFromRows(result.rows).slice(0, limit));
 }
 
 function cardsFromRows(rows: ReadonlyArray<FindingFeedRow>): HomeFindingCard[] {
@@ -116,9 +130,10 @@ function cardFromGroup(group: Group): HomeFindingCard {
   const agentIds = sortedUnique(findings.map((finding) => finding.agent_id));
   const findingIds = sortedUnique(findings.map((finding) => finding.finding_id));
   const claimClusterIds = sortedUnique(findings.flatMap((finding) => finding.claim_cluster_ids));
-  const supportCount = group.support_counts.length === 0
-    ? findings.length
-    : Math.max(...group.support_counts);
+  if (claimClusterIds.length > 0 && group.support_counts.length === 0) {
+    throw new HomeFindingFeedError(`missing claim cluster aggregate for ${group.dedupe_key}`);
+  }
+  const supportCount = group.support_counts.length === 0 ? findings.length : Math.max(...group.support_counts);
 
   return deepFreeze({
     home_card_id: group.dedupe_key,
@@ -176,6 +191,22 @@ function resolveLimit(limit: number | undefined): number {
   return Math.min(limit, MAX_HOME_FINDING_LIMIT);
 }
 
+function resolveCandidateLimit(candidateLimit: number | undefined, finalLimit: number): number {
+  if (candidateLimit !== undefined) {
+    if (!Number.isInteger(candidateLimit) || candidateLimit <= 0) {
+      throw new HomeFindingFeedError("candidate_limit must be a positive integer");
+    }
+    if (candidateLimit < finalLimit) {
+      throw new HomeFindingFeedError("candidate_limit must be >= limit");
+    }
+    return Math.min(candidateLimit, MAX_HOME_FINDING_CANDIDATE_LIMIT);
+  }
+  return Math.min(
+    Math.max(DEFAULT_HOME_FINDING_CANDIDATE_LIMIT, finalLimit * 10),
+    MAX_HOME_FINDING_CANDIDATE_LIMIT,
+  );
+}
+
 function parseSubjectRefs(value: unknown): ReadonlyArray<SubjectRef> {
   if (!Array.isArray(value)) throw new HomeFindingFeedError("subject_refs must be an array");
   return Object.freeze(value.map((item, index) => {
@@ -186,13 +217,51 @@ function parseSubjectRefs(value: unknown): ReadonlyArray<SubjectRef> {
     if (typeof ref.kind !== "string" || typeof ref.id !== "string") {
       throw new HomeFindingFeedError(`subject_refs[${index}] must contain kind and id`);
     }
+    if (!SUBJECT_KINDS.has(ref.kind)) {
+      throw new HomeFindingFeedError(`subject_refs[${index}].kind must be a supported subject kind`);
+    }
+    assertUuid(ref.id, `subject_refs[${index}].id`);
     return Object.freeze({ kind: ref.kind as SubjectRef["kind"], id: ref.id });
   }));
 }
 
 function parseSummaryBlocks(value: unknown): ReadonlyArray<FindingCardBlock> {
   if (!Array.isArray(value)) throw new HomeFindingFeedError("summary_blocks must be an array");
-  return Object.freeze(value.map((block) => cloneJsonObject(block) as FindingCardBlock));
+  return Object.freeze(value.map((block, index) => {
+    assertFindingCardBlock(block, index);
+    return cloneJsonObject(block) as FindingCardBlock;
+  }));
+}
+
+function assertFindingCardBlock(value: unknown, index: number): asserts value is FindingCardBlock {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new HomeFindingFeedError(`summary_blocks[${index}] must be an object`);
+  }
+  const block = value as Record<string, unknown>;
+  assertNonEmptyString(block.id, `summary_blocks[${index}].id`);
+  if (block.kind !== "finding_card") {
+    throw new HomeFindingFeedError(`summary_blocks[${index}].kind must be finding_card`);
+  }
+  assertUuid(block.snapshot_id, `summary_blocks[${index}].snapshot_id`);
+  if (typeof block.data_ref !== "object" || block.data_ref === null || Array.isArray(block.data_ref)) {
+    throw new HomeFindingFeedError(`summary_blocks[${index}].data_ref must be an object`);
+  }
+  const dataRef = block.data_ref as Record<string, unknown>;
+  if (dataRef.kind !== "finding_card") {
+    throw new HomeFindingFeedError(`summary_blocks[${index}].data_ref.kind must be finding_card`);
+  }
+  assertUuid(dataRef.id, `summary_blocks[${index}].data_ref.id`);
+  if (!Array.isArray(block.source_refs)) {
+    throw new HomeFindingFeedError(`summary_blocks[${index}].source_refs must be an array`);
+  }
+  block.source_refs.forEach((sourceRef, sourceIndex) =>
+    assertUuid(sourceRef, `summary_blocks[${index}].source_refs[${sourceIndex}]`),
+  );
+  toIso(assertNonEmptyString(block.as_of, `summary_blocks[${index}].as_of`));
+  assertUuid(block.finding_id, `summary_blocks[${index}].finding_id`);
+  assertNonEmptyString(block.headline, `summary_blocks[${index}].headline`);
+  assertSeverity(block.severity);
+  if (block.subject_refs !== undefined) parseSubjectRefs(block.subject_refs);
 }
 
 function parseUuidArray(value: unknown, field: string): ReadonlyArray<string> {
