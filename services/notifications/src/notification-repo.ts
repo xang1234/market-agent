@@ -11,6 +11,8 @@ export type NotificationDeliveryStatus =
   | "batched"
   | "failed";
 
+export type AlertNotificationTerminalStatus = "notified" | "failed";
+
 export type DigestCadence = "immediate" | "hourly" | "daily" | "weekly";
 
 export type PendingAlertNotification = Readonly<{
@@ -94,12 +96,32 @@ export async function listPendingAlertNotifications(
             af.channels,
             f.headline,
             f.summary_blocks,
-            coalesce(f.summary_blocks #> '{0,fact_refs}', '[]'::jsonb) as fact_refs,
+            coalesce(
+              jsonb_agg(
+                jsonb_build_object(
+                  'fact_id', facts.fact_id::text,
+                  'entitlement_channels', facts.entitlement_channels
+                )
+                order by facts.fact_id
+              ) filter (where facts.fact_id is not null),
+              '[]'::jsonb
+            ) as fact_refs,
             af.fired_at
        from alerts_fired af
        join agents a on a.agent_id = af.agent_id
        join findings f on f.finding_id = af.finding_id
+       join snapshots s on s.snapshot_id = f.snapshot_id
+       left join lateral jsonb_array_elements_text(s.fact_refs) snapshot_fact_refs(fact_id) on true
+       left join facts on facts.fact_id = snapshot_fact_refs.fact_id::uuid
       where af.status = 'pending_notification'
+      group by af.alert_fired_id,
+               a.user_id,
+               af.agent_id,
+               af.finding_id,
+               af.channels,
+               f.headline,
+               f.summary_blocks,
+               af.fired_at
       order by af.fired_at asc, af.alert_fired_id asc
       limit $1`,
     [options.limit],
@@ -139,6 +161,13 @@ export async function recordNotificationDelivery(
     `insert into notification_deliveries
        (alert_fired_id, user_id, agent_id, channel, status, payload, blocked_fact_ids, provider_message_id)
      values ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::jsonb, $7::jsonb, $8)
+     on conflict (alert_fired_id, channel)
+     where alert_fired_id is not null
+     do update set status = excluded.status,
+                   payload = excluded.payload,
+                   blocked_fact_ids = excluded.blocked_fact_ids,
+                   provider_message_id = excluded.provider_message_id,
+                   attempted_at = now()
      returning notification_delivery_id::text as notification_delivery_id,
                alert_fired_id::text as alert_fired_id,
                user_id::text as user_id,
@@ -162,6 +191,19 @@ export async function recordNotificationDelivery(
   );
 
   return deliveryFromDb(rows[0]);
+}
+
+export async function updateAlertNotificationStatus(
+  db: QueryExecutor,
+  input: { alert_fired_id: string; status: AlertNotificationTerminalStatus },
+): Promise<void> {
+  assertUuidString(input.alert_fired_id, "alert_fired_id");
+  await db.query(
+    `update alerts_fired
+        set status = $1
+      where alert_fired_id = $2::uuid`,
+    [input.status, input.alert_fired_id],
+  );
 }
 
 function pendingAlertFromDb(row: PendingAlertDbRow): PendingAlertNotification {

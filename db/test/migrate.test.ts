@@ -93,12 +93,18 @@ test("notification delivery schema records preferences and delivery attempts", (
     assert.match(sql, /user_id uuid not null references users\(user_id\)/i);
     assert.match(sql, /agent_id uuid references agents\(agent_id\)/i);
     assert.match(sql, /channel text not null/i);
+    assert.match(sql, /enabled boolean not null default false/i);
     assert.match(sql, /digest_cadence text not null default 'immediate'/i);
+    assert.match(sql, /notification_preferences_global_unique_idx/i);
+    assert.match(sql, /where agent_id is null/i);
+    assert.match(sql, /notification_preferences_agent_unique_idx/i);
+    assert.match(sql, /where agent_id is not null/i);
     assert.match(sql, /create table notification_deliveries/i);
     assert.match(sql, /alert_fired_id uuid references alerts_fired\(alert_fired_id\)/i);
     assert.match(sql, /status text not null/i);
     assert.match(sql, /blocked_fact_ids jsonb not null default '\[\]'::jsonb/i);
     assert.match(sql, /create index notification_deliveries_user_channel_idx/i);
+    assert.match(sql, /notification_deliveries_alert_channel_idx/i);
   }
 });
 

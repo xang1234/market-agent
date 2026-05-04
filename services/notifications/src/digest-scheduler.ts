@@ -1,6 +1,11 @@
-import { filterFactsForChannel } from "./entitlement-gate.ts";
+import {
+  filterFactsForChannel,
+  NotificationEntitlementError,
+} from "./entitlement-gate.ts";
 import {
   recordNotificationDelivery,
+  updateAlertNotificationStatus,
+  type DigestCadence,
   type NotificationDeliveryRow,
   type NotificationPreferenceRow,
   type PendingAlertNotification,
@@ -33,6 +38,7 @@ export type DigestAdapter = (payload: DigestPayload) => Promise<DigestAdapterRes
 export type DigestOptions = Readonly<{
   channel: NotificationChannel;
   maxPerUserChannel: number;
+  dueCadences: readonly DigestCadence[];
 }>;
 
 export type SkippedDigestPreferenceResult = Readonly<{
@@ -51,49 +57,118 @@ export async function dispatchNotificationDigest(
 ): Promise<readonly DispatchNotificationDigestResult[]> {
   assertPositiveInteger(options.maxPerUserChannel, "maxPerUserChannel");
 
-  const preference = preferences.find((row) => row.channel === options.channel);
-  if (preference?.enabled === false || (options.channel === "sms" && preference?.enabled !== true)) {
+  const preference = [...preferences].reverse().find((row) => row.channel === options.channel);
+  if (
+    preference?.enabled === false ||
+    (preference !== undefined && !options.dueCadences.includes(preference.digest_cadence)) ||
+    (options.channel === "sms" && preference?.enabled !== true)
+  ) {
     return Object.freeze(alerts.map(() => Object.freeze({ channel: options.channel, status: "skipped_preference" })));
   }
 
   const eligible = alerts.filter((alert) => alert.channels.includes(options.channel));
-  const included = eligible.slice(0, options.maxPerUserChannel);
-  const throttled = eligible.slice(options.maxPerUserChannel);
   const results: DispatchNotificationDigestResult[] = [];
 
-  if (included.length > 0) {
-    const payload = digestPayload(included, options.channel);
-    const providerResult = await adapter(payload);
+  for (const group of groupByUser(eligible)) {
+    const allowed: PendingAlertNotification[] = [];
+    for (const alert of group) {
+      try {
+        filterFactsForChannel(alert.fact_refs, options.channel);
+        allowed.push(alert);
+      } catch (error) {
+        if (!(error instanceof NotificationEntitlementError)) throw error;
+        results.push(
+          await recordNotificationDelivery(db, {
+            alert_fired_id: alert.alert_fired_id,
+            user_id: alert.user_id,
+            agent_id: alert.agent_id,
+            channel: options.channel,
+            status: "blocked_entitlement",
+            payload: digestPayloadUnchecked([alert], options.channel),
+            blocked_fact_ids: error.blocked_fact_ids,
+          }),
+        );
+        await updateAlertNotificationStatus(db, { alert_fired_id: alert.alert_fired_id, status: "failed" });
+      }
+    }
 
-    for (const alert of included) {
+    const included = allowed.slice(0, options.maxPerUserChannel);
+    const throttled = allowed.slice(options.maxPerUserChannel);
+
+    if (included.length > 0) {
+      const payload = digestPayload(included, options.channel);
+      let providerResult: DigestAdapterResult;
+      try {
+        providerResult = await adapter(payload);
+      } catch (error) {
+        for (const alert of included) {
+          results.push(
+            await recordNotificationDelivery(db, {
+              alert_fired_id: alert.alert_fired_id,
+              user_id: alert.user_id,
+              agent_id: alert.agent_id,
+              channel: options.channel,
+              status: "failed",
+              payload: failurePayload([alert], options.channel, error),
+            }),
+          );
+          await updateAlertNotificationStatus(db, { alert_fired_id: alert.alert_fired_id, status: "failed" });
+        }
+        continue;
+      }
+
+      for (const alert of included) {
+        results.push(
+          await recordNotificationDelivery(db, {
+            alert_fired_id: alert.alert_fired_id,
+            user_id: alert.user_id,
+            agent_id: alert.agent_id,
+            channel: options.channel,
+            status: "batched",
+            payload,
+            provider_message_id: providerResult.provider_message_id ?? null,
+          }),
+        );
+        await updateAlertNotificationStatus(db, { alert_fired_id: alert.alert_fired_id, status: "notified" });
+      }
+    }
+
+    for (const alert of throttled) {
       results.push(
         await recordNotificationDelivery(db, {
           alert_fired_id: alert.alert_fired_id,
           user_id: alert.user_id,
           agent_id: alert.agent_id,
           channel: options.channel,
-          status: "batched",
-          payload,
-          provider_message_id: providerResult.provider_message_id ?? null,
+          status: "throttled",
+          payload: digestPayload([alert], options.channel),
         }),
       );
     }
   }
 
-  for (const alert of throttled) {
-    results.push(
-      await recordNotificationDelivery(db, {
-        alert_fired_id: alert.alert_fired_id,
-        user_id: alert.user_id,
-        agent_id: alert.agent_id,
-        channel: options.channel,
-        status: "throttled",
-        payload: digestPayload([alert], options.channel),
-      }),
-    );
-  }
-
   return Object.freeze(results);
+}
+
+function failurePayload(
+  alerts: readonly PendingAlertNotification[],
+  channel: NotificationChannel,
+  error: unknown,
+): DigestPayload & { error: string } {
+  return Object.freeze({
+    ...digestPayloadUnchecked(alerts, channel),
+    error: error instanceof Error ? error.message : String(error),
+  });
+}
+
+function groupByUser(alerts: readonly PendingAlertNotification[]): readonly PendingAlertNotification[][] {
+  const groups = new Map<string, PendingAlertNotification[]>();
+  for (const alert of alerts) {
+    const group = groups.get(alert.user_id) ?? [];
+    group.push(alert);
+    groups.set(alert.user_id, group);
+  }
+  return Object.freeze([...groups.values()]);
 }
 
 function digestPayload(alerts: readonly PendingAlertNotification[], channel: NotificationChannel): DigestPayload {
@@ -114,6 +189,27 @@ function digestPayload(alerts: readonly PendingAlertNotification[], channel: Not
           fired_at: alert.fired_at,
         });
       }),
+    ),
+  });
+}
+
+function digestPayloadUnchecked(alerts: readonly PendingAlertNotification[], channel: NotificationChannel): DigestPayload {
+  const [first] = alerts;
+  if (!first) throw new Error("digest payload requires at least one alert");
+
+  return Object.freeze({
+    user_id: first.user_id,
+    channel,
+    items: Object.freeze(
+      alerts.map((alert) =>
+        Object.freeze({
+          alert_fired_id: alert.alert_fired_id,
+          finding_id: alert.finding_id,
+          headline: alert.headline,
+          fact_ids: Object.freeze(alert.fact_refs.map((fact) => fact.fact_id)),
+          fired_at: alert.fired_at,
+        }),
+      ),
     ),
   });
 }

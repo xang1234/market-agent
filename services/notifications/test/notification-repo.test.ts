@@ -49,6 +49,9 @@ test("listPendingAlertNotifications joins fired alerts to agents and findings", 
   assert.match(queries[0].text, /from alerts_fired/i);
   assert.match(queries[0].text, /join agents/i);
   assert.match(queries[0].text, /join findings/i);
+  assert.match(queries[0].text, /join snapshots/i);
+  assert.match(queries[0].text, /join facts/i);
+  assert.doesNotMatch(queries[0].text, /summary_blocks #>/i);
   assert.deepEqual(queries[0].values, [10]);
 });
 

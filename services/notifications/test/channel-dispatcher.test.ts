@@ -44,6 +44,9 @@ function fakeDb() {
   const db: QueryExecutor = {
     async query<T>(text: string, values: readonly unknown[] = []) {
       queries.push({ text, values });
+      if (/update alerts_fired/i.test(text)) {
+        return { rows: [] as T[] };
+      }
       return {
         rows: [
           {
@@ -92,10 +95,12 @@ test("dispatchAlertNotification records blocked_entitlement and skips email adap
   assert.equal(result[0].status, "blocked_entitlement");
   assert.equal((result[0] as NotificationDeliveryRow).blocked_fact_ids[0], FACT_ID);
   assert.match(queries[0].text, /insert into notification_deliveries/i);
+  assert.match(queries.at(-1)?.text ?? "", /update alerts_fired/i);
+  assert.deepEqual(queries.at(-1)?.values, ["failed", ALERT_ID]);
 });
 
 test("dispatchAlertNotification delivers push-entitled facts to web push adapter", async () => {
-  const { db } = fakeDb();
+  const { db, queries } = fakeDb();
   const calls: unknown[] = [];
 
   const result = await dispatchAlertNotification(
@@ -113,6 +118,7 @@ test("dispatchAlertNotification delivers push-entitled facts to web push adapter
   assert.equal(calls.length, 1);
   assert.equal(result[0].status, "delivered");
   assert.equal((result[0] as NotificationDeliveryRow).provider_message_id, "push-1");
+  assert.deepEqual(queries.at(-1)?.values, ["notified", ALERT_ID]);
 });
 
 test("dispatchAlertNotification returns skipped_preference for disabled sms without provider call", async () => {
@@ -134,4 +140,32 @@ test("dispatchAlertNotification returns skipped_preference for disabled sms with
   assert.equal(calls.length, 0);
   assert.equal(result[0].status, "skipped_preference");
   assert.equal(queries.length, 0);
+});
+
+test("dispatchAlertNotification records failed delivery when an adapter throws and continues later channels", async () => {
+  const { db, queries } = fakeDb();
+  const webPushCalls: unknown[] = [];
+
+  const result = await dispatchAlertNotification(
+    db,
+    alert({ channels: Object.freeze(["email", "web_push"]) }),
+    [preference("email"), preference("web_push")],
+    {
+      email: async () => {
+        throw new Error("provider timeout");
+      },
+      web_push: async (payload) => {
+        webPushCalls.push(payload);
+        return { provider_message_id: "push-1" };
+      },
+    },
+  );
+
+  assert.equal(webPushCalls.length, 1);
+  assert.deepEqual(
+    result.map((row) => row.status),
+    ["failed", "delivered"],
+  );
+  assert.match(JSON.stringify((result[0] as NotificationDeliveryRow).payload), /provider timeout/);
+  assert.deepEqual(queries.at(-1)?.values, ["failed", ALERT_ID]);
 });

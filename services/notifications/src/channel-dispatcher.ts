@@ -4,6 +4,7 @@ import {
 } from "./entitlement-gate.ts";
 import {
   recordNotificationDelivery,
+  updateAlertNotificationStatus,
   type NotificationDeliveryRow,
   type NotificationPreferenceRow,
   type PendingAlertNotification,
@@ -70,7 +71,22 @@ export async function dispatchAlertNotification(
         continue;
       }
 
-      const providerResult = await adapter(deliveryPayload(alert, entitledFacts.map((fact) => fact.fact_id)));
+      let providerResult: NotificationAdapterResult;
+      try {
+        providerResult = await adapter(deliveryPayload(alert, entitledFacts.map((fact) => fact.fact_id)));
+      } catch (error) {
+        results.push(
+          await recordNotificationDelivery(db, {
+            alert_fired_id: alert.alert_fired_id,
+            user_id: alert.user_id,
+            agent_id: alert.agent_id,
+            channel,
+            status: "failed",
+            payload: failurePayload(alert, error),
+          }),
+        );
+        continue;
+      }
       results.push(
         await recordNotificationDelivery(db, {
           alert_fired_id: alert.alert_fired_id,
@@ -98,6 +114,12 @@ export async function dispatchAlertNotification(
     }
   }
 
+  if (results.some((result) => result.status === "failed" || result.status === "blocked_entitlement")) {
+    await updateAlertNotificationStatus(db, { alert_fired_id: alert.alert_fired_id, status: "failed" });
+  } else if (results.some((result) => result.status === "delivered")) {
+    await updateAlertNotificationStatus(db, { alert_fired_id: alert.alert_fired_id, status: "notified" });
+  }
+
   return Object.freeze(results);
 }
 
@@ -109,5 +131,12 @@ function deliveryPayload(alert: PendingAlertNotification, factIds: readonly stri
     summary_blocks: alert.summary_blocks,
     fact_ids: Object.freeze([...factIds]),
     fired_at: alert.fired_at,
+  });
+}
+
+function failurePayload(alert: PendingAlertNotification, error: unknown): NotificationPayload & { error: string } {
+  return Object.freeze({
+    ...deliveryPayload(alert, []),
+    error: error instanceof Error ? error.message : String(error),
   });
 }
