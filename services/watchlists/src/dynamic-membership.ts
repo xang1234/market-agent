@@ -28,11 +28,11 @@ export type DynamicWatchlistMembership = {
 export type DynamicWatchlistDeps = {
   db: QueryExecutor;
   screens?: {
-    find(screenId: string): Promise<unknown> | unknown;
+    find(screenId: string, userId: string): Promise<unknown> | unknown;
   };
   executeScreen?: (screen: unknown) => Promise<{ rows: ReadonlyArray<ScreenRow> }> | { rows: ReadonlyArray<ScreenRow> };
   agents?: {
-    get(agentId: string): Promise<AgentLike | undefined> | AgentLike | undefined;
+    get(agentId: string, userId: string): Promise<AgentLike | undefined> | AgentLike | undefined;
   };
   now?: () => Date;
 };
@@ -40,7 +40,6 @@ export type DynamicWatchlistDeps = {
 export type ResolveDynamicWatchlistMembersRequest = {
   user_id: string;
   watchlist_id: string;
-  limit?: number;
 };
 
 type WatchlistRow = {
@@ -56,6 +55,7 @@ type ScreenRow = {
 
 type AgentLike = {
   agent_id: string;
+  user_id?: string;
   universe: AgentUniverseLike;
 };
 
@@ -79,14 +79,15 @@ export async function resolveDynamicWatchlistMembers(
 ): Promise<DynamicWatchlistMembership> {
   const watchlist = await getWatchlist(deps.db, request);
   const source = sourceFor(watchlist.mode, watchlist.membership_spec);
-  const members = await resolveMembersForSource(deps, source, request, new Set());
+  const derivedAt = (deps.now?.() ?? new Date()).toISOString();
+  const members = await resolveMembersForSource(deps, source, request, derivedAt, new Set());
 
   return Object.freeze({
     watchlist_id: watchlist.watchlist_id,
     user_id: watchlist.user_id,
     source,
     freshness: Object.freeze({
-      derived_at: (deps.now?.() ?? new Date()).toISOString(),
+      derived_at: derivedAt,
       strategy: freshnessStrategy(source.mode),
       cost_hint: costHint(source.mode),
     }),
@@ -114,6 +115,7 @@ async function resolveMembersForSource(
   deps: DynamicWatchlistDeps,
   source: DynamicMembershipSource,
   request: ResolveDynamicWatchlistMembersRequest,
+  asOf: string,
   visitedAgents: Set<string>,
 ): Promise<DynamicWatchlistMember[]> {
   if (source.mode === "manual") {
@@ -135,8 +137,10 @@ async function resolveMembersForSource(
         deps.db,
         `select subject_kind, subject_id, subject_ref
            from theme_memberships
-          where theme_id = $1`,
-        [requiredSourceId(source, "theme_id")],
+          where theme_id = $1
+            and effective_at <= $2::timestamptz
+            and (expires_at is null or expires_at > $2::timestamptz)`,
+        [requiredSourceId(source, "theme_id"), asOf],
       ),
     );
   }
@@ -159,7 +163,7 @@ async function resolveMembersForSource(
       throw new Error("dynamic watchlist screen mode requires screens and executeScreen deps");
     }
     const screenId = requiredSourceId(source, "screen_id");
-    const screen = await deps.screens.find(screenId);
+    const screen = await deps.screens.find(screenId, request.user_id);
     if (!screen) throw new Error(`screen '${screenId}' not found`);
     const response = await deps.executeScreen(screen);
     return rowsToMembers(
@@ -176,9 +180,12 @@ async function resolveMembersForSource(
       throw new Error(`agent universe cycle detected at '${agentId}'`);
     }
     visitedAgents.add(agentId);
-    const agent = await deps.agents.get(agentId);
+    const agent = await deps.agents.get(agentId, request.user_id);
     if (!agent) throw new Error(`agent '${agentId}' not found`);
-    const subjectRefs = await resolveAgentUniverse(deps, agent.universe, request, visitedAgents);
+    if (agent.user_id !== undefined && agent.user_id !== request.user_id) {
+      throw new Error(`agent '${agentId}' does not belong to user '${request.user_id}'`);
+    }
+    const subjectRefs = await resolveAgentUniverse(deps, agent.universe, request, asOf, visitedAgents);
     return rowsToMembers(source, subjectRefs);
   }
   source.mode satisfies never;
@@ -189,11 +196,12 @@ async function resolveAgentUniverse(
   deps: DynamicWatchlistDeps,
   universe: AgentUniverseLike,
   request: ResolveDynamicWatchlistMembersRequest,
+  asOf: string,
   visitedAgents: Set<string>,
 ): Promise<SubjectRef[]> {
   if (universe.mode === "static") return [...universe.subject_refs];
   const nestedSource = sourceFor(universe.mode, universe);
-  const nestedMembers = await resolveMembersForSource(deps, nestedSource, request, visitedAgents);
+  const nestedMembers = await resolveMembersForSource(deps, nestedSource, request, asOf, visitedAgents);
   return nestedMembers.map((member) => member.subject_ref);
 }
 

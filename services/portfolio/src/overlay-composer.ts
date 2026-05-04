@@ -16,9 +16,12 @@ export function composePortfolioOverlayRows<TBase extends OverlayBaseRow>(
   baseRows: ReadonlyArray<TBase>,
   overlayInputs: ReadonlyArray<SubjectOverlayInputs>,
 ): PortfolioOverlayRow<TBase>[] {
-  const overlaysBySubject = new Map<string, ReadonlyArray<OverlayContribution>>();
+  const overlaysBySubject = new Map<string, OverlayContribution[]>();
   for (const input of overlayInputs) {
-    overlaysBySubject.set(subjectKey(input.subject_ref), input.contributions);
+    const key = subjectKey(input.subject_ref);
+    const contributions = overlaysBySubject.get(key) ?? [];
+    contributions.push(...input.contributions);
+    overlaysBySubject.set(key, contributions);
   }
 
   return baseRows.map((base) => ({

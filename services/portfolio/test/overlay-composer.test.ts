@@ -100,6 +100,49 @@ test("keeps watchlist state distinct from closed holding state", () => {
   assert.equal(rows[0].portfolio_contributions[0].held_state, "closed");
 });
 
+test("accumulates contributions when overlay inputs repeat the same subject", () => {
+  const rows = composePortfolioOverlayRows(
+    [{ subject_ref: { kind: "instrument", id: "AAPL" } }],
+    [
+      {
+        subject_ref: { kind: "instrument", id: "AAPL" },
+        contributions: [
+          {
+            portfolio_id: "portfolio-a",
+            portfolio_name: "A",
+            base_currency: "USD",
+            quantity: 1,
+            cost_basis: null,
+            held_state: "open",
+            opened_at: null,
+            closed_at: null,
+          },
+        ],
+      },
+      {
+        subject_ref: { kind: "instrument", id: "AAPL" },
+        contributions: [
+          {
+            portfolio_id: "portfolio-b",
+            portfolio_name: "B",
+            base_currency: "EUR",
+            quantity: 2,
+            cost_basis: null,
+            held_state: "open",
+            opened_at: null,
+            closed_at: null,
+          },
+        ],
+      },
+    ],
+  );
+
+  assert.deepEqual(
+    rows[0].portfolio_contributions.map((contribution) => contribution.portfolio_id),
+    ["portfolio-a", "portfolio-b"],
+  );
+});
+
 test("returns base rows without holdings and preserves base row order", () => {
   const rows = composePortfolioOverlayRows(
     [
