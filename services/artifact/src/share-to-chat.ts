@@ -1,4 +1,6 @@
 import type { JsonObject, JsonValue } from "../../observability/src/types.ts";
+import { listFactsForEgress } from "../../evidence/src/fact-repo.ts";
+import type { QueryExecutor } from "../../evidence/src/types.ts";
 
 export type ShareableArtifactBlock = JsonObject & {
   id: string;
@@ -21,6 +23,9 @@ export type ShareableArtifactSource = {
 
 export type ShareToChatInput = {
   sources: ReadonlyArray<ShareableArtifactSource>;
+  egress: {
+    db: QueryExecutor;
+  };
 };
 
 export type ShareToChatRejectionReason =
@@ -54,7 +59,7 @@ export type ShareToChatResult =
 // persistence layer (services/chat/src/messages.ts), not here; this function
 // only produces the blocks payload, leaving the caller responsible for not
 // advancing latest_snapshot_id when writing an add-only message.
-export function shareArtifactToChat(input: ShareToChatInput): ShareToChatResult {
+export async function shareArtifactToChat(input: ShareToChatInput): Promise<ShareToChatResult> {
   if (input.sources.length === 0) {
     return Object.freeze({
       ok: false,
@@ -102,6 +107,11 @@ export function shareArtifactToChat(input: ShareToChatInput): ShareToChatResult 
     return Object.freeze({ ok: false, rejections: Object.freeze(rejections) });
   }
 
+  await listFactsForEgress(input.egress.db, {
+    fact_ids: factIdsForEgress(blocks),
+    channel: "export",
+  });
+
   // Dedupe in source order — callers can rely on the first appearance of a
   // snapshot id determining its position in the result.
   const originSnapshotIds = Object.freeze([
@@ -137,6 +147,36 @@ function isShareableBlock(value: unknown): value is ShareableArtifactBlock {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
+}
+
+function factIdsForEgress(blocks: ReadonlyArray<ShareableArtifactBlock>): ReadonlyArray<string> {
+  const factIds = new Set<string>();
+  for (const block of blocks) {
+    collectFactIds(block, factIds);
+  }
+  return Object.freeze([...factIds]);
+}
+
+function collectFactIds(value: unknown, factIds: Set<string>): void {
+  if (value === null || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectFactIds(item, factIds));
+    return;
+  }
+
+  const obj = value as Record<string, unknown>;
+  if (obj.ref_kind === "fact" && isNonEmptyString(obj.ref_id)) {
+    factIds.add(obj.ref_id);
+  }
+  if (isNonEmptyString(obj.fact_id)) {
+    factIds.add(obj.fact_id);
+  }
+  if (Array.isArray(obj.fact_refs)) {
+    obj.fact_refs.forEach((factId) => {
+      if (isNonEmptyString(factId)) factIds.add(factId);
+    });
+  }
+  Object.values(obj).forEach((item) => collectFactIds(item, factIds));
 }
 
 // Deep-clone + recursively freeze so the returned block can't be mutated
