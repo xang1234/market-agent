@@ -4,60 +4,72 @@ import { Link } from 'react-router-dom'
 import { BlockView } from '../blocks'
 import { webDevFlags } from '../devFlags'
 import {
-  HOME_DEV_ACTIVITIES,
-  HOME_DEV_FEED,
+  EMPTY_HOME_FEED,
   homeFindingCardLinkState,
-  pinnedScreensFromSavedScreens,
+  loadHomeFeed,
   rateLimitActivityStream,
   type HomeAgentSummary,
+  type HomeFeed,
+  type HomeFinding,
   type HomeMarketPulseItem,
   type HomePinnedScreen,
   type HomeRunActivity,
   type HomeWatchlistMover,
 } from '../home/homeFeed'
-import { listSavedScreens } from '../screener/savedScreens'
 import { useAuth } from '../shell/useAuth'
 import { useRightRail } from '../shell/useRightRail'
 import { signedTextClass } from '../symbol/signedColor'
+
+const EMPTY_HOME_ACTIVITIES: ReadonlyArray<HomeRunActivity> = []
 
 // Home is a findings-first surface. This bead (P0.1.1) only needs the
 // scaffolded page — actual Home-feed work is P4.4.
 export function HomePage() {
   const { setContent } = useRightRail()
   const { session } = useAuth()
-  const sessionUserId = session?.userId
-  const [pinnedScreensState, setPinnedScreensState] = useState<{
-    userId: string
-    screens: ReadonlyArray<HomePinnedScreen>
-  } | null>(null)
-  const pinnedScreens =
-    pinnedScreensState !== null && pinnedScreensState.userId === sessionUserId
-      ? pinnedScreensState.screens
-      : []
+  const sessionUserId = session?.userId ?? null
+  const [homeState, setHomeState] = useState<{
+    userId: string | null
+    feed: HomeFeed
+    activities: ReadonlyArray<HomeRunActivity>
+  }>(() => ({
+    userId: null,
+    feed: EMPTY_HOME_FEED,
+    activities: [],
+  }))
+  const feed = homeState.userId === sessionUserId ? homeState.feed : EMPTY_HOME_FEED
+  const activities =
+    homeState.userId === sessionUserId ? homeState.activities : EMPTY_HOME_ACTIVITIES
 
   useEffect(() => {
     setContent(
-      <HomeActivityRail activities={rateLimitActivityStream(HOME_DEV_ACTIVITIES, { perAgentLimit: 2 })} />,
+      <HomeActivityRail activities={rateLimitActivityStream(activities, { perAgentLimit: 2 })} />,
     )
     return () => setContent(null)
-  }, [setContent])
+  }, [activities, setContent])
 
   useEffect(() => {
-    if (!sessionUserId) {
-      return
-    }
     const controller = new AbortController()
-    listSavedScreens({ userId: sessionUserId, signal: controller.signal })
-      .then((screens) => {
+    loadHomeFeed({
+      userId: sessionUserId,
+      signal: controller.signal,
+      allowDevFallback: webDevFlags.showDevBanner,
+    })
+      .then((loaded) => {
         if (controller.signal.aborted) return
-        setPinnedScreensState({
+        setHomeState({
           userId: sessionUserId,
-          screens: pinnedScreensFromSavedScreens(screens),
+          feed: loaded.feed,
+          activities: loaded.activities,
         })
       })
       .catch(() => {
         if (controller.signal.aborted) return
-        setPinnedScreensState({ userId: sessionUserId, screens: [] })
+        setHomeState({
+          userId: sessionUserId,
+          feed: EMPTY_HOME_FEED,
+          activities: [],
+        })
       })
     return () => controller.abort()
   }, [sessionUserId])
@@ -82,23 +94,23 @@ export function HomePage() {
           Findings
         </h2>
         <div className="grid gap-3 lg:grid-cols-2">
-          {HOME_DEV_FEED.findings.map((finding) => (
+          {feed.findings.map((finding) => (
             <HomeFindingCard key={finding.block.id} finding={finding} />
           ))}
         </div>
       </section>
 
       <div className="grid gap-4 xl:grid-cols-4">
-        <MarketPulse items={HOME_DEV_FEED.marketPulse} />
-        <WatchlistMovers movers={HOME_DEV_FEED.watchlistMovers} />
-        <AgentSummaries agents={HOME_DEV_FEED.agentSummaries} />
-        <PinnedScreens screens={pinnedScreens} signedIn={sessionUserId != null} />
+        <MarketPulse items={feed.marketPulse} />
+        <WatchlistMovers movers={feed.watchlistMovers} />
+        <AgentSummaries agents={feed.agentSummaries} />
+        <PinnedScreens screens={feed.pinnedScreens} signedIn={sessionUserId != null} />
       </div>
     </div>
   )
 }
 
-function HomeFindingCard({ finding }: { finding: (typeof HOME_DEV_FEED.findings)[number] }) {
+function HomeFindingCard({ finding }: { finding: HomeFinding }) {
   const link = homeFindingCardLinkState(finding.destination)
   const content = <BlockView block={finding.block} />
   if (!link.linked) {

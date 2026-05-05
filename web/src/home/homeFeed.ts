@@ -1,7 +1,12 @@
 import { analyzePathForSubject, type AnalyzeIntent } from '../analyze/analyzeEntry.ts'
 import type { FindingCardBlock, SubjectRef } from '../blocks/types.ts'
-import type { ScreenSubject } from '../screener/savedScreens.ts'
+import { listSavedScreens, type ScreenSubject } from '../screener/savedScreens.ts'
+import { fetchQuoteSnapshot, formatQuotePrice, type QuoteSnapshot } from '../symbol/quote.ts'
 import { subjectRouteParam, symbolDetailPathForSubject } from '../symbol/search.ts'
+import {
+  listManualWatchlistMembers,
+  type WatchlistMember,
+} from '../watchlists/membership.ts'
 
 export type HomeCardDestination =
   | { kind: 'symbol'; subject_ref: SubjectRef; tab?: 'overview' | 'financials' | 'earnings' | 'holders' | 'signals' }
@@ -62,12 +67,60 @@ export type HomeFeed = {
   pinnedScreens: ReadonlyArray<HomePinnedScreen>
 }
 
+export type HomeFeedLoaderDeps = {
+  listFindings?: HomeUserScopedLoader<HomeFinding>
+  listMarketPulse?: HomeUserScopedLoader<HomeMarketPulseItem>
+  listAgentSummaries?: HomeUserScopedLoader<HomeAgentSummary>
+  listRunActivities?: HomeUserScopedLoader<HomeRunActivity>
+  listSavedScreens?: HomeUserScopedLoader<ScreenSubject>
+  listManualWatchlistMembers?: HomeUserScopedLoader<WatchlistMember>
+  fetchQuoteSnapshot?: (
+    listingId: string,
+    init?: { signal?: AbortSignal },
+  ) => Promise<QuoteSnapshot>
+}
+
+export type HomeFeedLoaderArgs = {
+  userId: string | null
+  signal?: AbortSignal
+  deps?: HomeFeedLoaderDeps
+  allowDevFallback?: boolean
+  fallbackFeed?: HomeFeed
+  fallbackActivities?: ReadonlyArray<HomeRunActivity>
+  watchlistMoverLimit?: number
+}
+
+export type LoadedHomeFeed = {
+  feed: HomeFeed
+  activities: ReadonlyArray<HomeRunActivity>
+  usedDevFallback: boolean
+}
+
+type HomeUserScopedLoader<T> = (args: {
+  userId: string
+  signal?: AbortSignal
+}) => Promise<ReadonlyArray<T>>
+
 export type HomeSectionSummary = {
   findings: number
   marketPulse: number
   watchlistMovers: number
   agentSummaries: number
   pinnedScreens: number
+}
+
+export const EMPTY_HOME_FEED: HomeFeed = {
+  findings: [],
+  marketPulse: [],
+  watchlistMovers: [],
+  agentSummaries: [],
+  pinnedScreens: [],
+}
+
+const DEFAULT_HOME_FEED_DEPS: HomeFeedLoaderDeps = {
+  listSavedScreens,
+  listManualWatchlistMembers,
+  fetchQuoteSnapshot,
 }
 
 export function homeCardPath(destination: HomeCardDestination): string | null {
@@ -113,6 +166,131 @@ export function pinnedScreensFromSavedScreens(
   }))
 }
 
+export function watchlistMoversFromQuoteSnapshots(
+  quotes: ReadonlyArray<QuoteSnapshot>,
+  options: { limit: number },
+): HomeWatchlistMover[] {
+  return quotes
+    .map((quote) => ({
+      subject_ref: quote.subject_ref,
+      label: quote.listing.ticker,
+      price: formatQuotePrice(quote.latest_price, quote.currency),
+      movePercent: quote.percent_move,
+      asOf: quote.as_of,
+    }))
+    .sort((a, b) => Math.abs(b.movePercent) - Math.abs(a.movePercent))
+    .slice(0, options.limit)
+}
+
+export async function loadHomeFeed(args: HomeFeedLoaderArgs): Promise<LoadedHomeFeed> {
+  const deps = { ...DEFAULT_HOME_FEED_DEPS, ...args.deps }
+  const fallbackFeed = args.allowDevFallback
+    ? (args.fallbackFeed ?? HOME_DEV_FEED_FIXTURE)
+    : EMPTY_HOME_FEED
+  const fallbackActivities = args.allowDevFallback
+    ? (args.fallbackActivities ?? HOME_DEV_ACTIVITIES_FIXTURE)
+    : []
+
+  const [findings, marketPulse, agentSummaries, activities, pinnedScreens, watchlistMovers] =
+    await Promise.all([
+      loadUserSlice(args, deps.listFindings, fallbackFeed.findings),
+      loadUserSlice(args, deps.listMarketPulse, fallbackFeed.marketPulse),
+      loadUserSlice(args, deps.listAgentSummaries, fallbackFeed.agentSummaries),
+      loadUserSlice(args, deps.listRunActivities, fallbackActivities),
+      loadPinnedScreens(args, deps, fallbackFeed.pinnedScreens),
+      loadWatchlistMovers(args, deps, fallbackFeed.watchlistMovers),
+    ])
+
+  return {
+    feed: {
+      findings,
+      marketPulse,
+      watchlistMovers,
+      agentSummaries,
+      pinnedScreens,
+    },
+    activities,
+    usedDevFallback: Boolean(args.allowDevFallback) && (
+      findings === fallbackFeed.findings ||
+      marketPulse === fallbackFeed.marketPulse ||
+      agentSummaries === fallbackFeed.agentSummaries ||
+      activities === fallbackActivities ||
+      pinnedScreens === fallbackFeed.pinnedScreens ||
+      watchlistMovers === fallbackFeed.watchlistMovers
+    ),
+  }
+}
+
+async function loadUserSlice<T>(
+  args: HomeFeedLoaderArgs,
+  loader: HomeUserScopedLoader<T> | undefined,
+  fallback: ReadonlyArray<T>,
+): Promise<ReadonlyArray<T>> {
+  if (!args.userId || !loader) return fallback
+  try {
+    return await loader({ userId: args.userId, signal: args.signal })
+  } catch {
+    return fallback
+  }
+}
+
+async function loadPinnedScreens(
+  args: HomeFeedLoaderArgs,
+  deps: HomeFeedLoaderDeps,
+  fallback: ReadonlyArray<HomePinnedScreen>,
+): Promise<ReadonlyArray<HomePinnedScreen>> {
+  if (!args.userId || !deps.listSavedScreens) return args.userId ? fallback : []
+  try {
+    return pinnedScreensFromSavedScreens(
+      await deps.listSavedScreens({ userId: args.userId, signal: args.signal }),
+    )
+  } catch {
+    return fallback
+  }
+}
+
+async function loadWatchlistMovers(
+  args: HomeFeedLoaderArgs,
+  deps: HomeFeedLoaderDeps,
+  fallback: ReadonlyArray<HomeWatchlistMover>,
+): Promise<ReadonlyArray<HomeWatchlistMover>> {
+  if (!args.userId || !deps.listManualWatchlistMembers || !deps.fetchQuoteSnapshot) {
+    return args.userId ? fallback : []
+  }
+
+  try {
+    const members = await deps.listManualWatchlistMembers({
+      userId: args.userId,
+      signal: args.signal,
+    })
+    const quotes = await Promise.all(
+      members
+        .filter((member) => member.subject_ref.kind === 'listing')
+        .map((member) =>
+          loadWatchlistQuote(member, deps.fetchQuoteSnapshot!, args.signal),
+        ),
+    )
+    return watchlistMoversFromQuoteSnapshots(
+      quotes.filter((quote): quote is QuoteSnapshot => quote !== null),
+      { limit: args.watchlistMoverLimit ?? 5 },
+    )
+  } catch {
+    return fallback
+  }
+}
+
+async function loadWatchlistQuote(
+  member: WatchlistMember,
+  fetcher: NonNullable<HomeFeedLoaderDeps['fetchQuoteSnapshot']>,
+  signal: AbortSignal | undefined,
+): Promise<QuoteSnapshot | null> {
+  try {
+    return await fetcher(member.subject_ref.id, { signal })
+  } catch {
+    return null
+  }
+}
+
 export function rateLimitActivityStream(
   events: ReadonlyArray<HomeRunActivity>,
   options: { perAgentLimit: number },
@@ -128,7 +306,7 @@ export function rateLimitActivityStream(
     })
 }
 
-export const HOME_DEV_FEED: HomeFeed = {
+export const HOME_DEV_FEED_FIXTURE: HomeFeed = {
   findings: [
     {
       block: {
@@ -197,7 +375,7 @@ export const HOME_DEV_FEED: HomeFeed = {
   pinnedScreens: [],
 }
 
-export const HOME_DEV_ACTIVITIES: ReadonlyArray<HomeRunActivity> = [
+export const HOME_DEV_ACTIVITIES_FIXTURE: ReadonlyArray<HomeRunActivity> = [
   {
     run_activity_id: 'act-4',
     agent_id: 'agent-risk',
