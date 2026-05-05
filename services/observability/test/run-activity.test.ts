@@ -84,6 +84,17 @@ test("writeRunActivity rejects invalid stage before hitting the database", async
   );
 })
 
+test("writeRunActivity throws a clear error when insert returns no row", async () => {
+  const db: QueryExecutor = {
+    query: async () => ({ rows: [], rowCount: 0, command: "INSERT", oid: 0, fields: [] }) as never,
+  };
+
+  await assert.rejects(
+    () => writeRunActivity(db, input()),
+    /run activity insert returned no row/,
+  );
+});
+
 function input(): RunActivityInput {
   return {
     agent_id: AGENT_ID,

@@ -262,6 +262,7 @@ test("GET /v1/screener/screens/:id returns 404 for unknown id", async () => {
   await withServer({}, async (baseUrl) => {
     const r = await fetch(
       `${baseUrl}/v1/screener/screens/aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa`,
+      { headers: withUser() },
     );
     assert.equal(r.status, 404);
   });
@@ -286,13 +287,14 @@ test("DELETE /v1/screener/screens/:id removes the screen and returns 204", async
 
     const del = await fetch(
       `${baseUrl}/v1/screener/screens/${created.screen.screen_id}`,
-      { method: "DELETE" },
+      { method: "DELETE", headers: withUser() },
     );
     assert.equal(del.status, 204);
 
     // Subsequent GET → 404.
     const get = await fetch(
       `${baseUrl}/v1/screener/screens/${created.screen.screen_id}`,
+      { headers: withUser() },
     );
     assert.equal(get.status, 404);
 
@@ -300,9 +302,54 @@ test("DELETE /v1/screener/screens/:id removes the screen and returns 204", async
     // a confusing 204 on a no-op).
     const del2 = await fetch(
       `${baseUrl}/v1/screener/screens/${created.screen.screen_id}`,
-      { method: "DELETE" },
+      { method: "DELETE", headers: withUser() },
     );
     assert.equal(del2.status, 404);
+  });
+});
+
+test("saved-screen detail, replay, delete, and replace are scoped to the requesting user", async () => {
+  await withServer({}, async (baseUrl) => {
+    const created = (await (
+      await fetch(`${baseUrl}/v1/screener/screens`, {
+        method: "POST",
+        headers: { ...withUser(USER_A), "content-type": "application/json" },
+        body: JSON.stringify({ name: "alice private", definition: baseQuery() }),
+      })
+    ).json()) as { screen: ScreenSubject };
+    const screenUrl = `${baseUrl}/v1/screener/screens/${created.screen.screen_id}`;
+
+    const bobGet = await fetch(screenUrl, { headers: withUser(USER_B) });
+    assert.equal(bobGet.status, 404);
+
+    const bobReplay = await fetch(`${screenUrl}/replay`, {
+      method: "POST",
+      headers: withUser(USER_B),
+    });
+    assert.equal(bobReplay.status, 404);
+
+    const bobDelete = await fetch(screenUrl, {
+      method: "DELETE",
+      headers: withUser(USER_B),
+    });
+    assert.equal(bobDelete.status, 404);
+
+    const bobReplace = await fetch(`${baseUrl}/v1/screener/screens`, {
+      method: "POST",
+      headers: { ...withUser(USER_B), "content-type": "application/json" },
+      body: JSON.stringify({
+        screen_id: created.screen.screen_id,
+        name: "bob takeover",
+        definition: baseQuery(),
+      }),
+    });
+    assert.equal(bobReplace.status, 404);
+
+    const aliceGet = await fetch(screenUrl, { headers: withUser(USER_A) });
+    assert.equal(aliceGet.status, 200);
+    const body = (await aliceGet.json()) as { screen: ScreenSubject };
+    assert.equal(body.screen.name, "alice private");
+    assert.equal(body.screen.user_id, USER_A);
   });
 });
 
@@ -325,7 +372,7 @@ test("POST /v1/screener/screens/:id/replay yields fresh execution (verification 
     const firstReplay = (await (
       await fetch(
         `${baseUrl}/v1/screener/screens/${created.screen.screen_id}/replay`,
-        { method: "POST" },
+        { method: "POST", headers: withUser() },
       )
     ).json()) as ScreenerResponse;
     assert.equal(firstReplay.as_of, "2026-04-22T15:30:00.000Z");
@@ -338,7 +385,7 @@ test("POST /v1/screener/screens/:id/replay yields fresh execution (verification 
     const secondReplay = (await (
       await fetch(
         `${baseUrl}/v1/screener/screens/${created.screen.screen_id}/replay`,
-        { method: "POST" },
+        { method: "POST", headers: withUser() },
       )
     ).json()) as ScreenerResponse;
     assert.equal(secondReplay.as_of, "2026-04-30T10:00:00.000Z");
@@ -355,7 +402,7 @@ test("POST /v1/screener/screens/:id/replay returns 404 for an unknown screen", a
   await withServer({}, async (baseUrl) => {
     const r = await fetch(
       `${baseUrl}/v1/screener/screens/aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa/replay`,
-      { method: "POST" },
+      { method: "POST", headers: withUser() },
     );
     assert.equal(r.status, 404);
   });

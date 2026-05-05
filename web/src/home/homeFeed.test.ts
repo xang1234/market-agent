@@ -8,6 +8,7 @@ import {
   homeFindingCardLinkState,
   rateLimitActivityStream,
   summarizeHomeSections,
+  pinnedScreensFromSavedScreens,
   type HomeFeed,
   type HomeRunActivity,
 } from './homeFeed.ts'
@@ -29,6 +30,34 @@ test('homeCardPath routes symbol and analyze destinations from canonical Subject
   assert.equal(
     homeCardPath({ kind: 'analyze', subject_ref: AAPL, intent: 'memo' }),
     analyzePathForSubject(AAPL, 'memo'),
+  )
+})
+
+test('pinnedScreensFromSavedScreens projects user-scoped saved screens for Home', () => {
+  assert.deepEqual(
+    pinnedScreensFromSavedScreens([
+      {
+        screen_id: '33333333-3333-4333-9333-333333333333',
+        user_id: 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa',
+        name: 'Large-cap tech',
+        definition: {
+          universe: [],
+          market: [],
+          fundamentals: [],
+          sort: [{ field: 'market_cap', direction: 'desc' }],
+          page: { limit: 50 },
+        },
+        created_at: '2026-05-04T01:00:00.000Z',
+        updated_at: '2026-05-05T01:00:00.000Z',
+      },
+    ]),
+    [
+      {
+        screen_id: '33333333-3333-4333-9333-333333333333',
+        name: 'Large-cap tech',
+        updated_at: '2026-05-05T01:00:00.000Z',
+      },
+    ],
   )
 })
 

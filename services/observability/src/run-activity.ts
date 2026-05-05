@@ -65,7 +65,11 @@ export async function writeRunActivity(
       input.ts ?? null,
     ],
   );
-  return rows[0];
+  const row = rows[0];
+  if (!row) {
+    throw new Error("run activity insert returned no row");
+  }
+  return row;
 }
 
 export function createRunActivitySseEvent(

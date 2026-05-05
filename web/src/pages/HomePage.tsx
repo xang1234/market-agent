@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { BlockView } from '../blocks'
@@ -7,6 +7,7 @@ import {
   HOME_DEV_ACTIVITIES,
   HOME_DEV_FEED,
   homeFindingCardLinkState,
+  pinnedScreensFromSavedScreens,
   rateLimitActivityStream,
   type HomeAgentSummary,
   type HomeMarketPulseItem,
@@ -14,6 +15,8 @@ import {
   type HomeRunActivity,
   type HomeWatchlistMover,
 } from '../home/homeFeed'
+import { listSavedScreens } from '../screener/savedScreens'
+import { useAuth } from '../shell/useAuth'
 import { useRightRail } from '../shell/useRightRail'
 import { signedTextClass } from '../symbol/signedColor'
 
@@ -21,6 +24,16 @@ import { signedTextClass } from '../symbol/signedColor'
 // scaffolded page — actual Home-feed work is P4.4.
 export function HomePage() {
   const { setContent } = useRightRail()
+  const { session } = useAuth()
+  const sessionUserId = session?.userId
+  const [pinnedScreensState, setPinnedScreensState] = useState<{
+    userId: string
+    screens: ReadonlyArray<HomePinnedScreen>
+  } | null>(null)
+  const pinnedScreens =
+    pinnedScreensState !== null && pinnedScreensState.userId === sessionUserId
+      ? pinnedScreensState.screens
+      : []
 
   useEffect(() => {
     setContent(
@@ -28,6 +41,26 @@ export function HomePage() {
     )
     return () => setContent(null)
   }, [setContent])
+
+  useEffect(() => {
+    if (!sessionUserId) {
+      return
+    }
+    const controller = new AbortController()
+    listSavedScreens({ userId: sessionUserId, signal: controller.signal })
+      .then((screens) => {
+        if (controller.signal.aborted) return
+        setPinnedScreensState({
+          userId: sessionUserId,
+          screens: pinnedScreensFromSavedScreens(screens),
+        })
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return
+        setPinnedScreensState({ userId: sessionUserId, screens: [] })
+      })
+    return () => controller.abort()
+  }, [sessionUserId])
 
   return (
     <div className="flex flex-1 flex-col gap-6 overflow-auto p-8">
@@ -59,7 +92,7 @@ export function HomePage() {
         <MarketPulse items={HOME_DEV_FEED.marketPulse} />
         <WatchlistMovers movers={HOME_DEV_FEED.watchlistMovers} />
         <AgentSummaries agents={HOME_DEV_FEED.agentSummaries} />
-        <PinnedScreens screens={HOME_DEV_FEED.pinnedScreens} />
+        <PinnedScreens screens={pinnedScreens} signedIn={sessionUserId != null} />
       </div>
     </div>
   )
@@ -144,11 +177,15 @@ function AgentSummaries({ agents }: { agents: ReadonlyArray<HomeAgentSummary> })
   )
 }
 
-function PinnedScreens({ screens }: { screens: ReadonlyArray<HomePinnedScreen> }) {
+function PinnedScreens({ screens, signedIn }: { screens: ReadonlyArray<HomePinnedScreen>; signedIn: boolean }) {
   return (
     <HomePanel title="Pinned Screens">
       <div className="flex flex-col gap-2">
-        {screens.map((screen) => (
+        {!signedIn ? (
+          <p className="text-xs leading-5 text-neutral-500 dark:text-neutral-400">Sign in to view saved screens.</p>
+        ) : screens.length === 0 ? (
+          <p className="text-xs leading-5 text-neutral-500 dark:text-neutral-400">No pinned screens yet.</p>
+        ) : screens.map((screen) => (
           <div key={screen.screen_id} className="rounded border border-neutral-200 px-3 py-2 dark:border-neutral-800">
             <div className="text-sm font-medium">{screen.name}</div>
             <div className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">Updated {formatTime(screen.updated_at)}</div>

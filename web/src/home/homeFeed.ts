@@ -1,5 +1,6 @@
 import { analyzePathForSubject, type AnalyzeIntent } from '../analyze/analyzeEntry.ts'
 import type { FindingCardBlock, SubjectRef } from '../blocks/types.ts'
+import type { ScreenSubject } from '../screener/savedScreens.ts'
 import { subjectRouteParam, symbolDetailPathForSubject } from '../symbol/search.ts'
 
 export type HomeCardDestination =
@@ -102,6 +103,16 @@ export function summarizeHomeSections(feed: HomeFeed): HomeSectionSummary {
   }
 }
 
+export function pinnedScreensFromSavedScreens(
+  screens: ReadonlyArray<ScreenSubject>,
+): HomePinnedScreen[] {
+  return screens.map((screen) => ({
+    screen_id: screen.screen_id,
+    name: screen.name,
+    updated_at: screen.updated_at,
+  }))
+}
+
 export function rateLimitActivityStream(
   events: ReadonlyArray<HomeRunActivity>,
   options: { perAgentLimit: number },
@@ -183,10 +194,7 @@ export const HOME_DEV_FEED: HomeFeed = {
     { agent_id: 'agent-earnings', name: 'Earnings watcher', status: 'running', summary: 'Reading 10-Q updates and guidance deltas.' },
     { agent_id: 'agent-risk', name: 'Risk monitor', status: 'attention', summary: 'Found two high-severity supply-chain claims.' },
   ],
-  pinnedScreens: [
-    { screen_id: '44444444-4444-4444-9444-444444444444', name: 'Large-cap tech', updated_at: '2026-05-05T01:00:00.000Z' },
-    { screen_id: '55555555-5555-4555-9555-555555555555', name: 'Margin expansion candidates', updated_at: '2026-05-04T22:30:00.000Z' },
-  ],
+  pinnedScreens: [],
 }
 
 export const HOME_DEV_ACTIVITIES: ReadonlyArray<HomeRunActivity> = [
