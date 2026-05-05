@@ -85,7 +85,7 @@ If `quoteProvider` returns no quote for a requested ref, that row is omitted wit
 - Returns 200 with the `HomeSummary` envelope.
 - Maps `HomeFindingFeedError` and validation errors to 400; UUID-shape errors on `user_id` to 401 (header parsing); everything else propagates as 500. No partial-success body.
 
-The dev composition root in `services/home/src/dev.ts` listens on `HOME_PORT` (default 4334) using a `pg.Pool` for DB access, an empty quote provider, and an empty saved-screens provider. The Vite dev server proxies `/v1/home/*` to that origin (configurable via `HOME_ORIGIN`).
+The dev composition root in `services/home/src/dev.ts` listens on `HOME_PORT` (default 4334) using a `pg.Pool` for DB access, a live quote provider (`createLiveQuoteProvider`) pointed at `MARKET_ORIGIN`, and an empty saved-screens provider. The live quote provider issues real HTTP requests to the market service with a 5s timeout. The Vite dev server proxies `/v1/home/*` to that origin (configurable via `HOME_ORIGIN`).
 
 Adding more routes (e.g. per-section endpoints) is a future bead. A single summary route satisfies the verification contract without entangling the handler layer with section-specific paging concerns this bead doesn't need.
 
@@ -124,7 +124,7 @@ Per-section service tests (no real DB / quote provider / repo):
 HTTP tests:
 
 - Missing `x-user-id` → 401.
-- Bad UUID → 400.
+- Bad UUID → 401.
 - Happy path → 200 with the envelope shape.
 
 Frontend tests:
