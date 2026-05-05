@@ -1,45 +1,55 @@
 import { useEffect, useState } from 'react'
-import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { BlockView } from '../blocks'
+
 import { webDevFlags } from '../devFlags'
+import { homeCardPath } from '../home/deepLinks.ts'
 import {
-  EMPTY_HOME_FEED,
-  homeFindingCardLinkState,
-  loadHomeFeed,
-  rateLimitActivityStream,
-  type HomeAgentSummary,
-  type HomeFeed,
-  type HomeFinding,
-  type HomeMarketPulseItem,
-  type HomePinnedScreen,
-  type HomeRunActivity,
-  type HomeWatchlistMover,
-} from '../home/homeFeed'
-import { useAuth } from '../shell/useAuth'
+  fetchHomeSummary,
+  type HomeAgentSummaryRow,
+  type HomeFindingCardSummary,
+  type HomeQuoteRow,
+  type HomeSavedScreenRow,
+  type HomeSummary,
+  type HomeWatchlistMovers,
+} from '../home/summaryClient.ts'
+import {
+  agentLastRunLabel,
+  agentSummaryHeadline,
+  formatChangePercent,
+  formatPrice,
+  quoteDirection,
+  savedScreenSubtitle,
+  watchlistMoversEmptyState,
+} from '../home/summaryView.ts'
+import { useAuth } from '../shell/useAuth.ts'
 import { useRightRail } from '../shell/useRightRail'
-import { signedTextClass } from '../symbol/signedColor'
+
+type HomeRunActivityStage = 'reading' | 'investigating' | 'found' | 'dismissed'
+
+type HomeRunActivity = {
+  run_activity_id: string
+  agent_id: string
+  stage: HomeRunActivityStage
+  summary: string
+  ts: string
+}
 
 const EMPTY_HOME_ACTIVITIES: ReadonlyArray<HomeRunActivity> = []
 
-// Home is a findings-first surface. This bead (P0.1.1) only needs the
-// scaffolded page — actual Home-feed work is P4.4.
+export type LoadState =
+  | { kind: 'loading' }
+  | { kind: 'error'; message: string }
+  | { kind: 'ready'; summary: HomeSummary }
+
 export function HomePage() {
   const { setContent } = useRightRail()
   const { session } = useAuth()
-  const sessionUserId = session?.userId ?? null
-  const [homeState, setHomeState] = useState<{
+  const userId = session?.userId ?? null
+  const [activityState, setActivityState] = useState<{
     userId: string | null
-    feed: HomeFeed
     activities: ReadonlyArray<HomeRunActivity>
-  }>(() => ({
-    userId: null,
-    feed: EMPTY_HOME_FEED,
-    activities: [],
-  }))
-  const feed = homeState.userId === sessionUserId ? homeState.feed : EMPTY_HOME_FEED
-  const activities =
-    homeState.userId === sessionUserId ? homeState.activities : EMPTY_HOME_ACTIVITIES
+  }>(() => ({ userId: null, activities: [] }))
+  const activities = activityState.userId === userId ? activityState.activities : EMPTY_HOME_ACTIVITIES
 
   useEffect(() => {
     setContent(
@@ -49,93 +59,338 @@ export function HomePage() {
   }, [activities, setContent])
 
   useEffect(() => {
-    const controller = new AbortController()
-    loadHomeFeed({
-      userId: sessionUserId,
-      signal: controller.signal,
-      allowDevFallback: webDevFlags.showDevBanner,
-    })
-      .then((loaded) => {
-        if (controller.signal.aborted) return
-        setHomeState((current) => ({
-          userId: sessionUserId,
-          feed: loaded.feed,
-          activities: mergeActivities(
-            loaded.activities,
-            current.userId === sessionUserId ? current.activities : [],
-          ),
-        }))
-      })
-      .catch(() => {
-        if (controller.signal.aborted) return
-        setHomeState({
-          userId: sessionUserId,
-          feed: EMPTY_HOME_FEED,
-          activities: [],
-        })
-      })
-    return () => controller.abort()
-  }, [sessionUserId])
-
-  useEffect(() => {
-    if (sessionUserId === null) return
+    if (userId === null) return
 
     const controller = new AbortController()
     void consumeRunActivityStream({
       signal: controller.signal,
-      userId: sessionUserId,
+      userId,
       onActivity: (activity) => {
-        setHomeState((current) => {
-          const base =
-            current.userId === sessionUserId
-              ? current
-              : { userId: sessionUserId, feed: EMPTY_HOME_FEED, activities: [] }
-          return {
-            ...base,
-            activities: mergeActivities([activity], base.activities),
-          }
-        })
+        setActivityState((current) => ({
+          userId,
+          activities: mergeActivities(
+            [activity],
+            current.userId === userId ? current.activities : [],
+          ),
+        }))
       },
     }).catch(() => {
-      // The next Home render or session change will establish a fresh stream.
+      // A route revisit or session change will establish a fresh stream.
     })
     return () => controller.abort()
-  }, [sessionUserId])
+  }, [userId])
 
   return (
     <div className="flex flex-1 flex-col gap-6 overflow-auto p-8">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+      <header>
         <h1 className="text-2xl font-semibold">Home</h1>
         <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-          Cross-agent findings, market pulse, watchlist movers, agent summaries, and pinned screens.
+          Cross-agent findings, market pulse, watchlist movers, agent summaries, pinned screens.
         </p>
-        </div>
       </header>
       {webDevFlags.showDevBanner ? (
         <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
           Dev banner flag is enabled. Placeholder services are expected in the local stack.
         </div>
       ) : null}
-      <section aria-labelledby="home-findings-heading" className="flex flex-col gap-3">
-        <h2 id="home-findings-heading" className="text-sm font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-          Findings
-        </h2>
-        <div className="grid gap-3 lg:grid-cols-2">
-          {feed.findings.map((finding) => (
-            <HomeFindingCard key={finding.block.id} finding={finding} />
-          ))}
-        </div>
-      </section>
+      {userId === null ? (
+        <SignInHint />
+      ) : (
+        // Keyed on userId so that switching users discards the previous user's
+        // ready/error state synchronously instead of leaving it visible until
+        // the new fetch resolves.
+        <UserHomeContent key={userId} userId={userId} />
+      )}
+    </div>
+  )
+}
 
-      <div className="grid gap-4 xl:grid-cols-4">
-        <MarketPulse items={feed.marketPulse} />
-        <WatchlistMovers movers={feed.watchlistMovers} />
-        <AgentSummaries agents={feed.agentSummaries} />
-        <PinnedScreens screens={feed.pinnedScreens} signedIn={sessionUserId != null} />
+export function UserHomeContent({
+  userId,
+  fetchImpl,
+}: {
+  userId: string
+  fetchImpl?: typeof fetch
+}) {
+  const [state, setState] = useState<LoadState>({ kind: 'loading' })
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchHomeSummary({ userId, signal: controller.signal, fetchImpl })
+      .then((summary) => {
+        if (controller.signal.aborted) return
+        setState({ kind: 'ready', summary })
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return
+        setState({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
+      })
+    return () => controller.abort()
+  }, [userId, fetchImpl])
+
+  return <UserHomeView state={state} />
+}
+
+export function UserHomeView({ state }: { state: LoadState }) {
+  if (state.kind === 'loading') return <LoadingHint />
+  if (state.kind === 'error') return <ErrorHint message={state.message} />
+  return <SummaryView summary={state.summary} />
+}
+
+function SignInHint() {
+  return (
+    <Section title="Sign in to load Home">
+      <p className="text-sm text-neutral-500 dark:text-neutral-400">
+        Home loads cross-agent findings and market sections for the signed-in user.
+      </p>
+    </Section>
+  )
+}
+
+function LoadingHint() {
+  return (
+    <Section title="Loading Home...">
+      <p className="text-sm text-neutral-500 dark:text-neutral-400">Fetching your latest findings and market sections.</p>
+    </Section>
+  )
+}
+
+function ErrorHint({ message }: { message: string }) {
+  return (
+    <Section title="Home is unavailable">
+      <p className="text-sm text-rose-600 dark:text-rose-300">{message}</p>
+    </Section>
+  )
+}
+
+function SummaryView({ summary }: { summary: HomeSummary }) {
+  return (
+    <div className="flex flex-col gap-6">
+      <FindingsSection cards={summary.findings.cards} />
+      <MarketPulseSection rows={summary.market_pulse.rows} omittedCount={summary.market_pulse.omitted.length} />
+      <WatchlistMoversSection movers={summary.watchlist_movers} />
+      <AgentSummariesSection rows={summary.agent_summaries.rows} windowHours={summary.agent_summaries.window_hours} />
+      <SavedScreensSection rows={summary.saved_screens.rows} />
+    </div>
+  )
+}
+
+function FindingsSection({ cards }: { cards: ReadonlyArray<HomeFindingCardSummary> }) {
+  return (
+    <Section title="Findings">
+      {cards.length === 0 ? (
+        <EmptyHint>No findings yet from your active agents.</EmptyHint>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {cards.map((card) => (
+            <li key={card.home_card_id}>
+              <FindingRow card={card} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
+  )
+}
+
+const FINDING_ROW_BASE =
+  'block rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900'
+const FINDING_ROW_LINKED = `${FINDING_ROW_BASE} hover:border-neutral-300 dark:hover:border-neutral-700`
+
+function FindingRow({ card }: { card: HomeFindingCardSummary }) {
+  const path = homeCardPath(card.destination)
+  const body = (
+    <div className="flex flex-col">
+      <span className="text-sm font-medium">{card.headline}</span>
+      <span className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+        {card.severity} · {card.support_count} sources · {card.created_at}
+      </span>
+    </div>
+  )
+  if (path === null) return <div className={FINDING_ROW_BASE}>{body}</div>
+  return (
+    <Link to={path} className={FINDING_ROW_LINKED}>
+      {body}
+    </Link>
+  )
+}
+
+function MarketPulseSection({
+  rows,
+  omittedCount,
+}: {
+  rows: ReadonlyArray<HomeQuoteRow>
+  omittedCount: number
+}) {
+  return (
+    <Section title="Market pulse">
+      {rows.length === 0 ? (
+        <EmptyHint>Market pulse is not configured for this environment.</EmptyHint>
+      ) : (
+        <ul className="grid grid-cols-2 gap-3 md:grid-cols-3">
+          {rows.map((row) => (
+            <li key={row.listing.id}>
+              <QuoteCell row={row} />
+            </li>
+          ))}
+        </ul>
+      )}
+      {omittedCount > 0 ? <FootnoteHint>{omittedCount} subjects had no quote.</FootnoteHint> : null}
+    </Section>
+  )
+}
+
+function WatchlistMoversSection({ movers }: { movers: HomeWatchlistMovers }) {
+  return (
+    <Section title="Watchlist movers">
+      <WatchlistMoversBody movers={movers} />
+      {movers.omitted.length > 0 ? <FootnoteHint>{movers.omitted.length} listings had no quote.</FootnoteHint> : null}
+    </Section>
+  )
+}
+
+function WatchlistMoversBody({ movers }: { movers: HomeWatchlistMovers }) {
+  const empty = watchlistMoversEmptyState(movers.reason)
+  if (empty !== null) return <EmptyHint>{empty}</EmptyHint>
+  if (movers.rows.length === 0) return <EmptyHint>No quotable listings in your watchlist.</EmptyHint>
+  return (
+    <ul className="flex flex-col gap-2">
+      {movers.rows.map((row) => (
+        <li key={row.listing.id}>
+          <QuoteCell row={row} />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function QuoteCell({ row }: { row: HomeQuoteRow }) {
+  const direction = quoteDirection(row)
+  const tone =
+    direction === 'up'
+      ? 'text-emerald-600 dark:text-emerald-300'
+      : direction === 'down'
+        ? 'text-rose-600 dark:text-rose-300'
+        : 'text-neutral-500 dark:text-neutral-400'
+  return (
+    <div className="rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-sm font-medium">
+          {row.ticker}
+          <span className="ml-1 text-xs font-normal text-neutral-400 dark:text-neutral-500">{row.mic}</span>
+        </span>
+        <span className={`text-sm font-semibold ${tone}`}>{formatChangePercent(row.change_pct)}</span>
+      </div>
+      <div className="mt-1 flex items-baseline justify-between gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+        <span>{formatPrice(row.price, row.currency)}</span>
+        <span className="uppercase">{row.delay_class.replace('_', ' ')}</span>
       </div>
     </div>
   )
+}
+
+function AgentSummariesSection({
+  rows,
+  windowHours,
+}: {
+  rows: ReadonlyArray<HomeAgentSummaryRow>
+  windowHours: number
+}) {
+  return (
+    <Section title="Agent summaries" subtitle={`Last ${windowHours}h`}>
+      {rows.length === 0 ? (
+        <EmptyHint>No agents enabled for this user.</EmptyHint>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {rows.map((row) => (
+            <li key={row.agent_id} className="rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-sm font-medium">{row.name}</span>
+                <span className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">{agentLastRunLabel(row)}</span>
+              </div>
+              <div className="mt-1 text-sm text-neutral-700 dark:text-neutral-200">{agentSummaryHeadline(row)}</div>
+              <div className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                {row.finding_counts.total} total · {row.finding_counts.high_or_critical} high+ · {row.finding_counts.critical} critical
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
+  )
+}
+
+function SavedScreensSection({ rows }: { rows: ReadonlyArray<HomeSavedScreenRow> }) {
+  return (
+    <Section title="Pinned screens">
+      {rows.length === 0 ? (
+        <EmptyHint>No saved screens yet.</EmptyHint>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {rows.map((row) => (
+            <li
+              key={row.screen_id}
+              className="rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
+            >
+              <div className="text-sm font-medium">{row.name}</div>
+              <div className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{savedScreenSubtitle(row)}</div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
+  )
+}
+
+function HomeActivityRail({ activities }: { activities: ReadonlyArray<HomeRunActivity> }) {
+  return (
+    <div className="flex h-full flex-col">
+      <div className="border-b border-neutral-200 px-4 py-3 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+        Activity
+      </div>
+      <div className="flex flex-col gap-3 overflow-auto p-4">
+        {activities.length === 0 ? (
+          <p className="text-xs leading-5 text-neutral-500 dark:text-neutral-400">No recent activity.</p>
+        ) : (
+          activities.map((activity) => (
+            <div key={activity.run_activity_id} className="rounded border border-neutral-200 p-3 dark:border-neutral-800">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">{activity.stage}</span>
+                <span className="text-xs text-neutral-500 dark:text-neutral-400">{formatActivityTime(activity.ts)}</span>
+              </div>
+              <p className="mt-2 text-sm leading-5 text-neutral-800 dark:text-neutral-200">{activity.summary}</p>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">{title}</h2>
+        {subtitle !== undefined ? (
+          <span className="text-xs uppercase tracking-wide text-neutral-400 dark:text-neutral-500">{subtitle}</span>
+        ) : null}
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function EmptyHint({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-md border border-neutral-200 bg-white p-4 text-sm text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400">
+      {children}
+    </div>
+  )
+}
+
+function FootnoteHint({ children }: { children: React.ReactNode }) {
+  return <p className="mt-2 text-xs text-neutral-400 dark:text-neutral-500">{children}</p>
 }
 
 async function consumeRunActivityStream({
@@ -207,148 +462,6 @@ function parseRunActivityData(data: string): HomeRunActivity | null {
   }
 }
 
-function HomeFindingCard({ finding }: { finding: HomeFinding }) {
-  const link = homeFindingCardLinkState(finding.destination)
-  const content = <BlockView block={finding.block} />
-  if (!link.linked) {
-    return (
-      <div className="opacity-85" aria-disabled="true">
-        {content}
-      </div>
-    )
-  }
-  return (
-    <Link to={link.to} className="block transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-100">
-      {content}
-    </Link>
-  )
-}
-
-function MarketPulse({ items }: { items: ReadonlyArray<HomeMarketPulseItem> }) {
-  return (
-    <HomePanel title="Market Pulse">
-      <div className="flex flex-col divide-y divide-neutral-200 dark:divide-neutral-800">
-        {items.map((item) => (
-          <div key={item.label} className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0">
-            <div>
-              <div className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{item.label}</div>
-              <div className="text-xs text-neutral-500 dark:text-neutral-400">{formatTime(item.asOf)}</div>
-            </div>
-            <div className="text-right">
-              <div className="text-sm tabular-nums">{item.value}</div>
-              <div className={`text-xs tabular-nums ${signedTextClass(item.movePercent)}`}>{formatMove(item.movePercent)}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </HomePanel>
-  )
-}
-
-function WatchlistMovers({ movers }: { movers: ReadonlyArray<HomeWatchlistMover> }) {
-  return (
-    <HomePanel title="Watchlist Movers">
-      <div className="flex flex-col divide-y divide-neutral-200 dark:divide-neutral-800">
-        {movers.map((mover) => (
-          <Link key={`${mover.subject_ref.kind}:${mover.subject_ref.id}`} to={`/symbol/${encodeURIComponent(`${mover.subject_ref.kind}:${mover.subject_ref.id}`)}/overview`} className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0 hover:text-neutral-900 dark:hover:text-neutral-50">
-            <div>
-              <div className="text-sm font-medium">{mover.label}</div>
-              <div className="text-xs text-neutral-500 dark:text-neutral-400">{formatTime(mover.asOf)}</div>
-            </div>
-            <div className="text-right">
-              <div className="text-sm tabular-nums">{mover.price}</div>
-              <div className={`text-xs tabular-nums ${signedTextClass(mover.movePercent)}`}>{formatMove(mover.movePercent)}</div>
-            </div>
-          </Link>
-        ))}
-      </div>
-    </HomePanel>
-  )
-}
-
-function AgentSummaries({ agents }: { agents: ReadonlyArray<HomeAgentSummary> }) {
-  return (
-    <HomePanel title="Agent Summaries">
-      <div className="flex flex-col gap-3">
-        {agents.map((agent) => (
-          <div key={agent.agent_id} className="flex flex-col gap-1">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-medium">{agent.name}</span>
-              <span className="rounded border border-neutral-200 px-1.5 py-0.5 text-[11px] uppercase text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
-                {agent.status}
-              </span>
-            </div>
-            <p className="text-xs leading-5 text-neutral-600 dark:text-neutral-300">{agent.summary}</p>
-          </div>
-        ))}
-      </div>
-    </HomePanel>
-  )
-}
-
-function PinnedScreens({ screens, signedIn }: { screens: ReadonlyArray<HomePinnedScreen>; signedIn: boolean }) {
-  return (
-    <HomePanel title="Pinned Screens">
-      <div className="flex flex-col gap-2">
-        {!signedIn ? (
-          <p className="text-xs leading-5 text-neutral-500 dark:text-neutral-400">Sign in to view saved screens.</p>
-        ) : screens.length === 0 ? (
-          <p className="text-xs leading-5 text-neutral-500 dark:text-neutral-400">No pinned screens yet.</p>
-        ) : screens.map((screen) => (
-          <div key={screen.screen_id} className="rounded border border-neutral-200 px-3 py-2 dark:border-neutral-800">
-            <div className="text-sm font-medium">{screen.name}</div>
-            <div className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">Updated {formatTime(screen.updated_at)}</div>
-          </div>
-        ))}
-      </div>
-    </HomePanel>
-  )
-}
-
-function HomeActivityRail({ activities }: { activities: ReadonlyArray<HomeRunActivity> }) {
-  return (
-    <div className="flex h-full flex-col">
-      <div className="border-b border-neutral-200 px-4 py-3 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
-        Activity
-      </div>
-      <div className="flex flex-col gap-3 overflow-auto p-4">
-        {activities.map((activity) => (
-          <div key={activity.run_activity_id} className="rounded border border-neutral-200 p-3 dark:border-neutral-800">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">{activity.stage}</span>
-              <span className="text-xs text-neutral-500 dark:text-neutral-400">{formatTime(activity.ts)}</span>
-            </div>
-            <p className="mt-2 text-sm leading-5 text-neutral-800 dark:text-neutral-200">{activity.summary}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function HomePanel({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="rounded-md border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
-      <h2 className="mb-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">{title}</h2>
-      {children}
-    </section>
-  )
-}
-
-function formatMove(value: number): string {
-  if (Object.is(value, -0) || value === 0) return '0.00%'
-  return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`
-}
-
-function formatTime(value: string): string {
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(new Date(value))
-}
-
 function mergeActivities(
   incoming: ReadonlyArray<HomeRunActivity>,
   current: ReadonlyArray<HomeRunActivity>,
@@ -358,4 +471,28 @@ function mergeActivities(
     byId.set(activity.run_activity_id, activity)
   }
   return [...byId.values()].sort((a, b) => b.ts.localeCompare(a.ts)).slice(0, 100)
+}
+
+function rateLimitActivityStream(
+  activities: ReadonlyArray<HomeRunActivity>,
+  options: { perAgentLimit: number },
+): ReadonlyArray<HomeRunActivity> {
+  const perAgentCounts = new Map<string, number>()
+  const limited: HomeRunActivity[] = []
+  for (const activity of activities) {
+    const count = perAgentCounts.get(activity.agent_id) ?? 0
+    if (count >= options.perAgentLimit) continue
+    perAgentCounts.set(activity.agent_id, count + 1)
+    limited.push(activity)
+  }
+  return limited
+}
+
+function formatActivityTime(value: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(value))
 }

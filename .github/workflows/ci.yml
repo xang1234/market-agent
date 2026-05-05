@@ -78,6 +78,26 @@ jobs:
 
       - run: npm test
 
+  home:
+    name: home (tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/home
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: services/home/package-lock.json
+
+      - run: npm ci
+
+      - run: npm test
+
   resolver:
     name: resolver (integration tests)
     runs-on: ubuntu-latest
