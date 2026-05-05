@@ -69,4 +69,17 @@ export type {
   AgentRunLogCompleteRow,
 } from "./agent-run.ts";
 
+export {
+  RUN_ACTIVITY_STAGES,
+  createRunActivitySseEvent,
+  writeRunActivity,
+} from "./run-activity.ts";
+export type {
+  RunActivityInput,
+  RunActivityRow,
+  RunActivitySseEvent,
+  RunActivityStage,
+  SubjectRefJson,
+} from "./run-activity.ts";
+
 export type { JsonValue, QueryExecutor } from "./types.ts";

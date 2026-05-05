@@ -10,6 +10,8 @@ import type { ScreenerQuery } from "../src/query.ts";
 const SCREEN_A = "11111111-1111-4111-a111-111111111111";
 const SCREEN_B = "22222222-2222-4222-a222-222222222222";
 const SCREEN_C = "33333333-3333-4333-a333-333333333333";
+const USER_A = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+const USER_B = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
 
 function query(): ScreenerQuery {
   return {
@@ -21,9 +23,10 @@ function query(): ScreenerQuery {
   };
 }
 
-function makeScreen(id: string, name: string, ts: string) {
+function makeScreen(id: string, name: string, ts: string, user_id = USER_A) {
   return persistScreen({
     screen_id: id,
+    user_id,
     name,
     definition: query(),
     created_at: ts,
@@ -46,6 +49,7 @@ test("save with an existing screen_id replaces and returns 'replaced' status", a
   const v1 = makeScreen(SCREEN_A, "v1", "2026-04-22T10:00:00.000Z");
   const v2 = persistScreen({
     screen_id: SCREEN_A,
+    user_id: USER_A,
     name: "v2",
     definition: query(),
     created_at: "2026-04-22T10:00:00.000Z",
@@ -75,7 +79,7 @@ test("list returns saved screens sorted by updated_at desc (freshest first)", as
   await repo.save(makeScreen(SCREEN_A, "old", "2026-04-20T00:00:00.000Z"));
   await repo.save(makeScreen(SCREEN_B, "newest", "2026-04-25T00:00:00.000Z"));
   await repo.save(makeScreen(SCREEN_C, "middle", "2026-04-22T00:00:00.000Z"));
-  const items = await repo.list();
+  const items = await repo.listForUser(USER_A);
   assert.deepEqual(
     items.map((s) => s.name),
     ["newest", "middle", "old"],
@@ -85,7 +89,7 @@ test("list returns saved screens sorted by updated_at desc (freshest first)", as
 test("list returns a frozen array (caller cannot mutate)", async () => {
   const repo = createInMemoryScreenRepository();
   await repo.save(makeScreen(SCREEN_A, "x", "2026-04-22T00:00:00.000Z"));
-  const items = await repo.list();
+  const items = await repo.listForUser(USER_A);
   assert.throws(() => (items as unknown as unknown[]).push("foo"));
 });
 
@@ -120,5 +124,21 @@ test("createInMemoryScreenRepository rejects duplicate screen_ids in the seed", 
   assert.throws(
     () => createInMemoryScreenRepository(seed),
     /duplicate screen_id/,
+  );
+});
+
+test("listForUser returns only screens owned by the requested user", async () => {
+  const repo = createInMemoryScreenRepository();
+  await repo.save(makeScreen(SCREEN_A, "alice old", "2026-04-20T00:00:00.000Z", USER_A));
+  await repo.save(makeScreen(SCREEN_B, "bob", "2026-04-25T00:00:00.000Z", USER_B));
+  await repo.save(makeScreen(SCREEN_C, "alice new", "2026-04-26T00:00:00.000Z", USER_A));
+
+  assert.deepEqual(
+    (await repo.listForUser(USER_A)).map((screen) => screen.name),
+    ["alice new", "alice old"],
+  );
+  assert.deepEqual(
+    (await repo.listForUser(USER_B)).map((screen) => screen.name),
+    ["bob"],
   );
 });

@@ -55,7 +55,7 @@ export function createScreenerServer(deps: ScreenerServerDeps): Server {
           await handleSaveScreen(req, res, deps, clock);
           return;
         case "list_screens":
-          await handleListScreens(res, deps);
+          await handleListScreens(req, res, deps);
           return;
         case "get_screen":
           await handleGetScreen(res, deps, route.screen_id);
@@ -160,6 +160,11 @@ async function handleSaveScreen(
     return;
   }
   const raw = body.value as Record<string, unknown>;
+  const user_id = readUserId(req);
+  if (!user_id) {
+    respond(res, 401, { error: "x-user-id header is required" });
+    return;
+  }
   const screen_id =
     typeof raw.screen_id === "string" ? raw.screen_id : randomUUID();
   const now = clock().toISOString();
@@ -174,6 +179,7 @@ async function handleSaveScreen(
   try {
     screen = persistScreen({
       screen_id,
+      user_id,
       name: raw.name as string,
       definition: raw.definition as ScreenerQuery,
       created_at,
@@ -192,10 +198,16 @@ async function handleSaveScreen(
 }
 
 async function handleListScreens(
+  req: IncomingMessage,
   res: ServerResponse,
   deps: ScreenerServerDeps,
 ): Promise<void> {
-  const screens = await deps.screens.list();
+  const user_id = readUserId(req);
+  if (!user_id) {
+    respond(res, 401, { error: "x-user-id header is required" });
+    return;
+  }
+  const screens = await deps.screens.listForUser(user_id);
   respond(res, 200, { screens });
 }
 
@@ -245,6 +257,12 @@ function respond(res: ServerResponse, status: number, body: object) {
   res.statusCode = status;
   res.setHeader("content-type", "application/json");
   res.end(JSON.stringify(body));
+}
+
+function readUserId(req: IncomingMessage): string | null {
+  const value = req.headers["x-user-id"];
+  const user_id = Array.isArray(value) ? value[0] : value;
+  return typeof user_id === "string" && isUuidV4(user_id) ? user_id : null;
 }
 
 type JsonBodyResult =

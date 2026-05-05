@@ -16,7 +16,7 @@ import { assertUuid } from "./validators.ts";
 export type ScreenRepository = {
   save(screen: ScreenSubject): Promise<ScreenSaveResult>;
   find(screen_id: string): Promise<ScreenSubject | null>;
-  list(): Promise<ReadonlyArray<ScreenSubject>>;
+  listForUser(user_id: string): Promise<ReadonlyArray<ScreenSubject>>;
   delete(screen_id: string): Promise<void>;
 };
 
@@ -61,10 +61,13 @@ export function createInMemoryScreenRepository(
       assertUuid(screen_id, "find.screen_id");
       return byId.get(screen_id) ?? null;
     },
-    async list() {
+    async listForUser(user_id) {
+      assertUuid(user_id, "listForUser.user_id");
       // Freshest first. ISO-8601 UTC compares correctly as plain strings.
       return Object.freeze(
-        [...byId.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
+        [...byId.values()]
+          .filter((screen) => screen.user_id === user_id)
+          .sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
       );
     },
     async delete(screen_id) {

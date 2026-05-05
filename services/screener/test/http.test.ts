@@ -10,6 +10,12 @@ import type { ScreenerResponse } from "../src/result.ts";
 import type { ScreenSubject } from "../src/screen-subject.ts";
 
 const FIXED_NOW = new Date("2026-04-22T15:30:00.000Z");
+const USER_A = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+const USER_B = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+
+function withUser(userId = USER_A): HeadersInit {
+  return { "x-user-id": userId };
+}
 
 async function withServer<T>(
   overrides: Partial<ScreenerServerDeps> = {},
@@ -56,7 +62,7 @@ test("POST /v1/screener/search runs a valid query and returns a typed response",
   await withServer({}, async (baseUrl) => {
     const r = await fetch(`${baseUrl}/v1/screener/search`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { ...withUser(), "content-type": "application/json" },
       body: JSON.stringify(baseQuery()),
     });
     assert.equal(r.status, 200);
@@ -114,13 +120,14 @@ test("POST /v1/screener/screens creates a saved screen and returns 201 with serv
   await withServer({}, async (baseUrl) => {
     const r = await fetch(`${baseUrl}/v1/screener/screens`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { ...withUser(), "content-type": "application/json" },
       body: JSON.stringify({ name: "Large-cap tech", definition: baseQuery() }),
     });
     assert.equal(r.status, 201);
     const body = (await r.json()) as { status: string; screen: ScreenSubject };
     assert.equal(body.status, "created");
     assert.equal(body.screen.name, "Large-cap tech");
+    assert.equal(body.screen.user_id, USER_A);
     assert.match(body.screen.screen_id, /^[0-9a-f-]{36}$/);
     assert.equal(body.screen.created_at, FIXED_NOW.toISOString());
     assert.equal(body.screen.updated_at, FIXED_NOW.toISOString());
@@ -131,7 +138,7 @@ test("POST /v1/screener/screens rejects an invalid query definition with 400", a
   await withServer({}, async (baseUrl) => {
     const r = await fetch(`${baseUrl}/v1/screener/screens`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { ...withUser(), "content-type": "application/json" },
       body: JSON.stringify({
         name: "broken",
         definition: { ...baseQuery(), sort: [] },
@@ -149,7 +156,7 @@ test("POST /v1/screener/screens with the same screen_id replaces and returns 200
   await withServer({}, async (baseUrl) => {
     const first = await fetch(`${baseUrl}/v1/screener/screens`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { ...withUser(), "content-type": "application/json" },
       body: JSON.stringify({ name: "v1", definition: baseQuery() }),
     });
     const created = (await first.json()) as { screen: ScreenSubject };
@@ -157,7 +164,7 @@ test("POST /v1/screener/screens with the same screen_id replaces and returns 200
 
     const second = await fetch(`${baseUrl}/v1/screener/screens`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { ...withUser(), "content-type": "application/json" },
       body: JSON.stringify({
         screen_id,
         name: "v2",
@@ -183,7 +190,7 @@ test("POST /v1/screener/screens replace preserves original created_at even when 
     const created = (await (
       await fetch(`${baseUrl}/v1/screener/screens`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { ...withUser(), "content-type": "application/json" },
         body: JSON.stringify({ name: "v1", definition: baseQuery() }),
       })
     ).json()) as { screen: ScreenSubject };
@@ -193,7 +200,7 @@ test("POST /v1/screener/screens replace preserves original created_at even when 
     const replaced = (await (
       await fetch(`${baseUrl}/v1/screener/screens`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { ...withUser(), "content-type": "application/json" },
         // Deliberately omit created_at — the server must look up the
         // existing record and preserve it rather than defaulting to now.
         body: JSON.stringify({
@@ -214,18 +221,40 @@ test("GET /v1/screener/screens lists saved screens", async () => {
   await withServer({}, async (baseUrl) => {
     await fetch(`${baseUrl}/v1/screener/screens`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { ...withUser(), "content-type": "application/json" },
       body: JSON.stringify({ name: "first", definition: baseQuery() }),
     });
     await fetch(`${baseUrl}/v1/screener/screens`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { ...withUser(), "content-type": "application/json" },
       body: JSON.stringify({ name: "second", definition: baseQuery() }),
     });
-    const r = await fetch(`${baseUrl}/v1/screener/screens`);
+    const r = await fetch(`${baseUrl}/v1/screener/screens`, { headers: withUser() });
     assert.equal(r.status, 200);
     const body = (await r.json()) as { screens: ScreenSubject[] };
     assert.equal(body.screens.length, 2);
+  });
+});
+
+test("GET /v1/screener/screens lists only the requesting user's saved screens", async () => {
+  await withServer({}, async (baseUrl) => {
+    await fetch(`${baseUrl}/v1/screener/screens`, {
+      method: "POST",
+      headers: { ...withUser(USER_A), "content-type": "application/json" },
+      body: JSON.stringify({ name: "alice", definition: baseQuery() }),
+    });
+    await fetch(`${baseUrl}/v1/screener/screens`, {
+      method: "POST",
+      headers: { ...withUser(USER_B), "content-type": "application/json" },
+      body: JSON.stringify({ name: "bob", definition: baseQuery() }),
+    });
+
+    const r = await fetch(`${baseUrl}/v1/screener/screens`, {
+      headers: withUser(USER_A),
+    });
+    assert.equal(r.status, 200);
+    const body = (await r.json()) as { screens: ScreenSubject[] };
+    assert.deepEqual(body.screens.map((screen) => screen.name), ["alice"]);
   });
 });
 
@@ -250,7 +279,7 @@ test("DELETE /v1/screener/screens/:id removes the screen and returns 204", async
     const created = (await (
       await fetch(`${baseUrl}/v1/screener/screens`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { ...withUser(), "content-type": "application/json" },
         body: JSON.stringify({ name: "doomed", definition: baseQuery() }),
       })
     ).json()) as { screen: ScreenSubject };
@@ -288,7 +317,7 @@ test("POST /v1/screener/screens/:id/replay yields fresh execution (verification 
     const created = (await (
       await fetch(`${baseUrl}/v1/screener/screens`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { ...withUser(), "content-type": "application/json" },
         body: JSON.stringify({ name: "replayable", definition: baseQuery() }),
       })
     ).json()) as { screen: ScreenSubject };
