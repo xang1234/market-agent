@@ -186,3 +186,19 @@ test("rankHomeCards rejects invalid ranking weights", () => {
     /weights.recency must be a finite non-negative number/,
   );
 });
+
+test("rankHomeCards rejects invalid Date instances for now", () => {
+  assert.throws(
+    () => rankHomeCards(
+      [
+        card({
+          home_card_id: "bad-now",
+          severity: "medium",
+          created_at: BASE_TIME,
+        }),
+      ],
+      { now: new Date("not a date") },
+    ),
+    /now must be a valid date/,
+  );
+});

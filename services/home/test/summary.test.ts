@@ -87,7 +87,7 @@ test("getHomeSummary composes findings + four secondary sections", async () => {
         },
       } as ScreenSubject,
     ]),
-    pulse_subjects: [],
+    pulseSubjects: [],
   }, {
     user_id: USER_ID,
     now: "2026-05-05T12:00:00.000Z",
@@ -131,4 +131,23 @@ test("getHomeSummary defaults generated_at to wall clock when no `now` is suppli
   const after = new Date().toISOString();
   assert.ok(summary.generated_at >= before);
   assert.ok(summary.generated_at <= after);
+});
+
+test("getHomeSummary rejects invalid now values before querying sections", async () => {
+  const db = fakeDb([
+    () => {
+      throw new Error("should not query");
+    },
+  ]);
+
+  await assert.rejects(
+    () => getHomeSummary(db, {
+      quoteProvider: emptyQuoteProvider(),
+      listSavedScreens: staticSavedScreens([]),
+    }, {
+      user_id: USER_ID,
+      now: "not a date",
+    }),
+    /now must be a valid date/,
+  );
 });

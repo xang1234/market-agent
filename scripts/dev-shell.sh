@@ -13,9 +13,11 @@ source "$ENV_FILE"
 set +a
 
 # Defaults for variables that may be missing from an older .env.dev so `set -u`
-# expansion below doesn't abort. Keep in sync with .env.dev.example.
+# expansion below doesn't abort, and so child processes receive them.
+# Keep in sync with .env.dev.example.
 : "${HOME_PORT:=4334}"
 : "${HOME_PULSE_LISTINGS:=}"
+export HOME_PORT HOME_PULSE_LISTINGS
 
 DEV_DIR="$ROOT/.dev"
 LOG_DIR="$DEV_DIR/logs"

@@ -280,3 +280,28 @@ test("agent watchlists reject agent rows owned by another user", async () => {
     /does not belong to user/,
   );
 });
+
+test("dynamic watchlists reject malformed JSON membership specs with a stable error", async () => {
+  const db = new FakeDb();
+  db.watchlists.set(WATCHLIST_ID, {
+    watchlist_id: WATCHLIST_ID,
+    user_id: USER_ID,
+    mode: "screen",
+    membership_spec: "{",
+  });
+
+  await assert.rejects(
+    () => resolveDynamicWatchlistMembers(
+      {
+        db,
+        screens: { find: async () => undefined },
+        executeScreen: async () => ({ rows: [] }),
+      },
+      {
+        user_id: USER_ID,
+        watchlist_id: WATCHLIST_ID,
+      },
+    ),
+    /watchlist membership_spec must be an object/,
+  );
+});

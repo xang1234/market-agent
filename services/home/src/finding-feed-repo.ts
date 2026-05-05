@@ -182,7 +182,7 @@ function findingFromRow(row: FindingFeedRow): HomeFinding {
     severity,
     headline: assertNonEmptyString(row.headline, "headline").trim(),
     summary_blocks: parseSummaryBlocks(row.summary_blocks),
-    created_at: toIso(row.created_at),
+    created_at: toIso(row.created_at, "created_at"),
   });
 }
 
@@ -338,7 +338,7 @@ function assertFindingCardBlock(value: unknown, index: number): asserts value is
   block.source_refs.forEach((sourceRef, sourceIndex) =>
     assertUuid(sourceRef, `summary_blocks[${index}].source_refs[${sourceIndex}]`),
   );
-  toIso(assertNonEmptyString(block.as_of, `summary_blocks[${index}].as_of`));
+  toIso(assertNonEmptyString(block.as_of, `summary_blocks[${index}].as_of`), `summary_blocks[${index}].as_of`);
   assertUuid(block.finding_id, `summary_blocks[${index}].finding_id`);
   assertNonEmptyString(block.headline, `summary_blocks[${index}].headline`);
   assertSeverity(block.severity);
@@ -374,10 +374,10 @@ function assertNonEmptyString(value: unknown, field: string): string {
   return value;
 }
 
-function toIso(value: Date | string): string {
+function toIso(value: Date | string, field: string): string {
   const iso = value instanceof Date ? value.toISOString() : value;
   if (Number.isNaN(Date.parse(iso))) {
-    throw new HomeFindingFeedError("created_at must be an ISO date-time string");
+    throw new HomeFindingFeedError(`${field} must be an ISO date-time string`);
   }
   return iso;
 }

@@ -49,7 +49,8 @@ type AgentSummaryRow = {
 
 type RankedAgent = {
   row: HomeAgentSummaryRow;
-  agent_created_at: string;
+  agent_created_at_epoch: number;
+  last_run_ended_at_epoch: number | null;
 };
 
 export async function getHomeAgentSummaries(
@@ -79,6 +80,8 @@ export async function getHomeAgentSummaries(
             lhf.severity as latest_hc_severity,
             lhf.created_at as latest_hc_created_at
        from agents a
+  -- lr intentionally reads the latest agent_run_logs row without the findings
+  -- cutoff so Home can show last-run recency; fc and lhf below are windowed.
   left join lateral (
             select agent_run_log_id, status, started_at, ended_at, duration_ms, error
               from agent_run_logs
@@ -118,9 +121,13 @@ export async function getHomeAgentSummaries(
 }
 
 function toRanked(row: AgentSummaryRow): RankedAgent {
+  const mapped = toRow(row);
+  const agentCreatedAt = toIso(row.agent_created_at, "agents.created_at");
+  const lastRunEndedAt = mapped.last_run?.ended_at ?? null;
   return {
-    row: toRow(row),
-    agent_created_at: toIso(row.agent_created_at, "agents.created_at"),
+    row: mapped,
+    agent_created_at_epoch: toEpoch(agentCreatedAt, "agents.created_at"),
+    last_run_ended_at_epoch: lastRunEndedAt === null ? null : toEpoch(lastRunEndedAt, "agent_run_logs.ended_at"),
   };
 }
 
@@ -131,13 +138,14 @@ function toRow(row: AgentSummaryRow): HomeAgentSummaryRow {
     high_or_critical: assertNonNegativeInt(row.finding_hc, "finding_hc"),
     critical: assertNonNegativeInt(row.finding_critical, "finding_critical"),
   };
-  if (typeof row.name !== "string" || row.name.trim() === "") {
+  const name = typeof row.name === "string" ? row.name.trim() : "";
+  if (name === "") {
     throw new HomeFindingFeedError("agents.name must be a non-empty string");
   }
   assertUuid(row.agent_id, "agent_id");
   return Object.freeze({
     agent_id: row.agent_id,
-    name: row.name.trim(),
+    name,
     enabled: true,
     last_run: lastRun,
     finding_counts: Object.freeze(counts),
@@ -195,11 +203,11 @@ function orderAgentSummaries(a: RankedAgent, b: RankedAgent): number {
   if (aEnded !== bEnded) {
     if (aEnded === null) return 1;
     if (bEnded === null) return -1;
-    const diff = Date.parse(bEnded) - Date.parse(aEnded);
+    const diff = (b.last_run_ended_at_epoch ?? 0) - (a.last_run_ended_at_epoch ?? 0);
     if (diff !== 0) return diff;
   }
 
-  const created = Date.parse(b.agent_created_at) - Date.parse(a.agent_created_at);
+  const created = b.agent_created_at_epoch - a.agent_created_at_epoch;
   if (created !== 0) return created;
 
   return a.row.agent_id < b.row.agent_id ? -1 : a.row.agent_id > b.row.agent_id ? 1 : 0;
@@ -242,4 +250,12 @@ function toIso(value: Date | string, field: string): string {
     throw new HomeFindingFeedError(`${field} must be an ISO date-time string`);
   }
   return iso;
+}
+
+function toEpoch(value: string, field: string): number {
+  const epoch = Date.parse(value);
+  if (Number.isNaN(epoch)) {
+    throw new HomeFindingFeedError(`${field} must be an ISO date-time string`);
+  }
+  return epoch;
 }

@@ -33,7 +33,7 @@ async function startServer() {
   const server = createHomeServer(fakeDb(), {
     quoteProvider: emptyQuoteProvider(),
     listSavedScreens: emptySavedScreens,
-    pulse_subjects: [],
+    pulseSubjects: [],
   });
   server.listen(0);
   await once(server, "listening");
@@ -117,7 +117,7 @@ test("GET /v1/home/summary maps section throws to 500", async () => {
   const server = createHomeServer(throwingDb, {
     quoteProvider: emptyQuoteProvider(),
     listSavedScreens: emptySavedScreens,
-    pulse_subjects: [],
+    pulseSubjects: [],
   });
   server.listen(0);
   await once(server, "listening");

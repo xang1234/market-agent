@@ -2,12 +2,9 @@ import { Pool } from "pg";
 
 import type { ListingSubjectRef } from "../../market/src/subject-ref.ts";
 
+import { createLiveQuoteProvider } from "./dev-quote-provider.ts";
 import { createHomeServer } from "./http.ts";
-import type {
-  HomeQuoteProvider,
-  HomeQuoteResult,
-  HomeSavedScreensProvider,
-} from "./secondary-types.ts";
+import type { HomeSavedScreensProvider } from "./secondary-types.ts";
 
 const host = process.env.HOME_HOST ?? "127.0.0.1";
 const port = Number(process.env.HOME_PORT ?? "4334");
@@ -27,39 +24,8 @@ const pulseSubjects: ReadonlyArray<ListingSubjectRef> = pulseRaw
 
 const pool = new Pool({ connectionString: databaseUrl });
 
-// Live quote provider: fans out to GET /v1/market/quote/:listing_id and
-// returns NormalizedQuote + listing_context per ref. A 404, an unavailable
-// envelope, or any non-2xx for a single ref drops that ref silently — the
-// home layer surfaces it via the `omitted` sidecar.
-const liveQuoteProvider: HomeQuoteProvider = async (
-  refs: ReadonlyArray<ListingSubjectRef>,
-): Promise<ReadonlyArray<HomeQuoteResult>> => {
-  if (refs.length === 0) return [];
-  const settled = await Promise.allSettled(
-    refs.map(async (ref) => {
-      const url = new URL("/v1/market/quote", marketOrigin);
-      url.searchParams.set("subject_kind", "listing");
-      url.searchParams.set("subject_id", ref.id);
-      const response = await fetch(url);
-      if (!response.ok) {
-        void response.body?.cancel();
-        return null;
-      }
-      const body = (await response.json()) as Partial<HomeQuoteResult> & {
-        unavailable?: unknown;
-      };
-      if (body.unavailable !== undefined || !body.quote || !body.listing_context) {
-        return null;
-      }
-      return { quote: body.quote, listing_context: body.listing_context } as HomeQuoteResult;
-    }),
-  );
-  const results: HomeQuoteResult[] = [];
-  for (const entry of settled) {
-    if (entry.status === "fulfilled" && entry.value !== null) results.push(entry.value);
-  }
-  return results;
-};
+// Drops per-ref failures/timeouts silently; Home exposes missing quotes via `omitted`.
+const liveQuoteProvider = createLiveQuoteProvider(marketOrigin);
 
 // Dev saved-screens provider: returns []. The screener service is not yet
 // user-aware (its repo is global; ScreenSubject has no user_id). Returning []
@@ -70,7 +36,7 @@ const devListSavedScreens: HomeSavedScreensProvider = async (_user_id) => [];
 const server = createHomeServer(pool, {
   quoteProvider: liveQuoteProvider,
   listSavedScreens: devListSavedScreens,
-  pulse_subjects: pulseSubjects,
+  pulseSubjects,
 });
 
 server.listen(port, host, () => {

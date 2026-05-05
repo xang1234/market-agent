@@ -121,7 +121,7 @@ export type HomeSectionsDeps = {
   // adapts whatever scoping mechanism the screener exposes today (or returns
   // [] until the screener gains a user_id column) and Home stays correct.
   listSavedScreens: HomeSavedScreensProvider;
-  pulse_subjects?: ReadonlyArray<ListingSubjectRef>;
+  pulseSubjects?: ReadonlyArray<ListingSubjectRef>;
 };
 
 export const DEFAULT_HOME_PULSE_SUBJECTS: ReadonlyArray<ListingSubjectRef> = Object.freeze([]);

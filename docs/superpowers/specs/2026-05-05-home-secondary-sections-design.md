@@ -100,7 +100,7 @@ New types in `services/home/src/types.ts` (or split into `secondary-sections.ts`
 - `HomeSummary`
 - `HomeQuoteProvider` — `(refs: ReadonlyArray<ListingSubjectRef>) => Promise<ReadonlyArray<NormalizedQuote>>`
 - `HomeSavedScreensProvider` — `(user_id: string) => Promise<ReadonlyArray<ScreenSubject>>`
-- `HomeSectionsDeps` — `{ quoteProvider, listSavedScreens, pulse_subjects? }`
+- `HomeSectionsDeps` — `{ quoteProvider, listSavedScreens, pulseSubjects? }`
 
 `ListingSubjectRef` and `NormalizedQuote` are imported from `services/market` rather than re-declared.
 

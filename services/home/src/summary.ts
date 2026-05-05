@@ -1,4 +1,4 @@
-import { listHomeFindingCards } from "./finding-feed-repo.ts";
+import { HomeFindingFeedError, listHomeFindingCards } from "./finding-feed-repo.ts";
 import { rankHomeCards } from "./ranker.ts";
 import { getHomeAgentSummaries } from "./agent-summaries.ts";
 import { getHomeMarketPulse } from "./market-pulse.ts";
@@ -26,7 +26,7 @@ export async function getHomeSummary(
   const [findingCards, market_pulse, watchlist_movers, agent_summaries, saved_screens] = await Promise.all([
     listHomeFindingCards(db, { user_id: request.user_id, limit: request.finding_limit }),
     getHomeMarketPulse({
-      pulse_subjects: deps.pulse_subjects,
+      pulse_subjects: deps.pulseSubjects,
       quoteProvider: deps.quoteProvider,
     }),
     getHomeWatchlistMovers(db, {
@@ -60,9 +60,9 @@ export async function getHomeSummary(
 
 function resolveNow(value: string | Date | undefined): string {
   if (value === undefined) return new Date().toISOString();
-  if (value instanceof Date) return value.toISOString();
-  if (Number.isNaN(Date.parse(value))) {
-    throw new Error("getHomeSummary: now must be a valid date");
+  const resolved = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(resolved.getTime())) {
+    throw new HomeFindingFeedError("now must be a valid date");
   }
-  return new Date(value).toISOString();
+  return resolved.toISOString();
 }

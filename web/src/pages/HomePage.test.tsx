@@ -37,10 +37,71 @@ function fakeFetchFail(status: number): typeof fetch {
     })
 }
 
-function fakeFetchHanging(): { fetch: typeof fetch; resolve: (response: Response) => void } {
-  let resolve!: (response: Response) => void
-  const pending = new Promise<Response>((r) => (resolve = r))
-  return { fetch: async () => pending, resolve }
+function fakeFetchHanging(): { fetch: typeof fetch; resolve: (response: Response) => void; readonly signal?: AbortSignal } {
+  let resolvePending: ((response: Response) => void) | undefined
+  let seenSignal: AbortSignal | undefined
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    seenSignal = init?.signal ?? undefined
+    if (seenSignal?.aborted) throw abortError()
+    return new Promise<Response>((resolveResponse, rejectResponse) => {
+      let settled = false
+      const onAbort = () => {
+        if (settled) return
+        settled = true
+        rejectResponse(abortError())
+      }
+      seenSignal?.addEventListener('abort', onAbort, { once: true })
+      resolvePending = (response) => {
+        if (settled) return
+        settled = true
+        seenSignal?.removeEventListener('abort', onAbort)
+        resolveResponse(response)
+      }
+    })
+  }
+  return {
+    fetch: fetchImpl,
+    resolve: (response) => {
+      if (!resolvePending) throw new Error('hanging fetch has not started')
+      resolvePending(response)
+    },
+    get signal() {
+      return seenSignal
+    },
+  }
+}
+
+function abortError(): Error {
+  const error = new Error('Aborted')
+  error.name = 'AbortError'
+  return error
+}
+
+function installDomGlobals(domWindow: Window): () => void {
+  const globals = globalThis as unknown as {
+    IS_REACT_ACT_ENVIRONMENT?: boolean
+    document?: Document
+    window?: Window
+  }
+  const hadActEnv = Object.prototype.hasOwnProperty.call(globals, 'IS_REACT_ACT_ENVIRONMENT')
+  const hadDocument = Object.prototype.hasOwnProperty.call(globals, 'document')
+  const hadWindow = Object.prototype.hasOwnProperty.call(globals, 'window')
+  const previousActEnv = globals.IS_REACT_ACT_ENVIRONMENT
+  const previousDocument = globals.document
+  const previousWindow = globals.window
+
+  globals.IS_REACT_ACT_ENVIRONMENT = true
+  globals.document = domWindow.document
+  globals.window = domWindow
+
+  return () => {
+    if (hadActEnv) globals.IS_REACT_ACT_ENVIRONMENT = previousActEnv
+    else delete globals.IS_REACT_ACT_ENVIRONMENT
+    if (hadDocument) globals.document = previousDocument
+    else delete globals.document
+    if (hadWindow) globals.window = previousWindow
+    else delete globals.window
+  }
 }
 
 test('UserHomeView renders the loading hint when state.kind is loading', () => {
@@ -67,11 +128,7 @@ test('UserHomeContent fetches the summary on mount and renders ready state', asy
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
   const document = dom.window.document
   const container = document.getElementById('root')!
-  // React 19's IS_REACT_ACT_ENVIRONMENT must be set so act() flushes useEffect
-  // synchronously the way it does in DOM-backed test renderers.
-  ;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-  ;(globalThis as unknown as { document: Document }).document = document
-  ;(globalThis as unknown as { window: Window }).window = dom.window as unknown as Window
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
   try {
     const root = createRoot(container)
     await act(async () => {
@@ -82,8 +139,7 @@ test('UserHomeContent fetches the summary on mount and renders ready state', asy
     assert.match(html, /Watchlist movers/)
     await act(async () => root.unmount())
   } finally {
-    delete (globalThis as unknown as { document?: Document }).document
-    delete (globalThis as unknown as { window?: Window }).window
+    restoreGlobals()
   }
 })
 
@@ -91,9 +147,7 @@ test('UserHomeContent renders the error state when fetch returns non-200', async
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
   const document = dom.window.document
   const container = document.getElementById('root')!
-  ;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-  ;(globalThis as unknown as { document: Document }).document = document
-  ;(globalThis as unknown as { window: Window }).window = dom.window as unknown as Window
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
   try {
     const root = createRoot(container)
     await act(async () => {
@@ -104,8 +158,7 @@ test('UserHomeContent renders the error state when fetch returns non-200', async
     assert.match(html, /HTTP 500/)
     await act(async () => root.unmount())
   } finally {
-    delete (globalThis as unknown as { document?: Document }).document
-    delete (globalThis as unknown as { window?: Window }).window
+    restoreGlobals()
   }
 })
 
@@ -113,9 +166,7 @@ test('UserHomeContent ignores a stale fetch resolution that lands after an abort
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
   const document = dom.window.document
   const container = document.getElementById('root')!
-  ;(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-  ;(globalThis as unknown as { document: Document }).document = document
-  ;(globalThis as unknown as { window: Window }).window = dom.window as unknown as Window
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
   try {
     const hanging = fakeFetchHanging()
     const root = createRoot(container)
@@ -130,6 +181,7 @@ test('UserHomeContent ignores a stale fetch resolution that lands after an abort
     await act(async () => {
       root.render(<UserHomeContent userId={USER_ID_B} fetchImpl={fakeFetchOk(EMPTY_SUMMARY)} />)
     })
+    assert.equal(hanging.signal?.aborted, true)
     assert.match(container.innerHTML, /Findings/)
 
     // Late-resolving A-fetch must NOT overwrite B's ready state.
@@ -146,7 +198,6 @@ test('UserHomeContent ignores a stale fetch resolution that lands after an abort
 
     await act(async () => root.unmount())
   } finally {
-    delete (globalThis as unknown as { document?: Document }).document
-    delete (globalThis as unknown as { window?: Window }).window
+    restoreGlobals()
   }
 })

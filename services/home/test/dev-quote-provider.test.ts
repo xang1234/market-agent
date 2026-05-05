@@ -1,11 +1,10 @@
 // Pins the live quote provider's contract with services/market: requests
 // MUST hit GET /v1/market/quote?subject_kind=listing&subject_id=<uuid>.
 //
-// We can't import services/home/src/dev.ts directly (it constructs a pg.Pool
-// at module load and listens on a port), so this test re-implements the
-// adapter the same way and exercises the wire format. If the production
-// adapter and this stub drift, dev quotes silently disappear; the assertion
-// below is the canary.
+// We don't import services/home/src/dev.ts directly because it constructs a
+// pg.Pool at module load and listens on a port; the quote-provider adapter is
+// extracted so this test exercises the production wire format without booting
+// the dev server.
 
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
@@ -15,40 +14,10 @@ import test from "node:test";
 
 import type { ListingSubjectRef } from "../../market/src/subject-ref.ts";
 
-import type { HomeQuoteProvider, HomeQuoteResult } from "../src/secondary-types.ts";
+import { createLiveQuoteProvider } from "../src/dev-quote-provider.ts";
 
 const LISTING = "11111111-1111-4111-a111-111111111111";
 const SOURCE = "99999999-9999-4999-a999-999999999999";
-
-function buildLiveQuoteProvider(marketOrigin: string): HomeQuoteProvider {
-  return async (refs) => {
-    if (refs.length === 0) return [];
-    const settled = await Promise.allSettled(
-      refs.map(async (ref) => {
-        const url = new URL("/v1/market/quote", marketOrigin);
-        url.searchParams.set("subject_kind", "listing");
-        url.searchParams.set("subject_id", ref.id);
-        const response = await fetch(url);
-        if (!response.ok) {
-          void response.body?.cancel();
-          return null;
-        }
-        const body = (await response.json()) as Partial<HomeQuoteResult> & {
-          unavailable?: unknown;
-        };
-        if (body.unavailable !== undefined || !body.quote || !body.listing_context) {
-          return null;
-        }
-        return { quote: body.quote, listing_context: body.listing_context } as HomeQuoteResult;
-      }),
-    );
-    const results: HomeQuoteResult[] = [];
-    for (const entry of settled) {
-      if (entry.status === "fulfilled" && entry.value !== null) results.push(entry.value);
-    }
-    return results;
-  };
-}
 
 function quoteResponse(listing: ListingSubjectRef) {
   return {
@@ -108,7 +77,7 @@ async function startStubMarket(): Promise<{
 test("live quote provider hits /v1/market/quote with subject_kind+subject_id query params", async () => {
   const market = await startStubMarket();
   try {
-    const provider = buildLiveQuoteProvider(market.origin);
+    const provider = createLiveQuoteProvider(market.origin);
     const results = await provider([{ kind: "listing", id: LISTING }]);
     assert.equal(results.length, 1);
     assert.equal(results[0].listing_context.ticker, "AAPL");
@@ -132,7 +101,7 @@ test("live quote provider drops refs whose market response is non-2xx", async ()
   await once(server, "listening");
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
-    const provider = buildLiveQuoteProvider(origin);
+    const provider = createLiveQuoteProvider(origin);
     const results = await provider([{ kind: "listing", id: LISTING }]);
     assert.deepEqual(results, []);
   } finally {
@@ -150,7 +119,23 @@ test("live quote provider drops refs whose market response carries an unavailabl
   await once(server, "listening");
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
-    const provider = buildLiveQuoteProvider(origin);
+    const provider = createLiveQuoteProvider(origin);
+    const results = await provider([{ kind: "listing", id: LISTING }]);
+    assert.deepEqual(results, []);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  }
+});
+
+test("live quote provider drops refs whose market request times out", async () => {
+  const server = createServer((_req, _res) => {
+    // Leave the response open until the provider aborts the request.
+  });
+  server.listen(0);
+  await once(server, "listening");
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const provider = createLiveQuoteProvider(origin, { timeoutMs: 25 });
     const results = await provider([{ kind: "listing", id: LISTING }]);
     assert.deepEqual(results, []);
   } finally {

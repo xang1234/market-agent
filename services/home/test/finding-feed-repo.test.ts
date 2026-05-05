@@ -340,6 +340,23 @@ test("listHomeFindingCards rejects invalid subject kinds and malformed summary b
     ),
     /summary_blocks\[0\] must be an object/,
   );
+
+  await assert.rejects(
+    () => listHomeFindingCards(
+      fakeDb([
+        findingRow({
+          summary_blocks: [
+            {
+              ...(findingRow({}).summary_blocks as Array<Record<string, unknown>>)[0],
+              as_of: "not a date",
+            },
+          ],
+        }),
+      ]).db,
+      { user_id: USER_ID },
+    ),
+    /summary_blocks\[0\]\.as_of must be an ISO date-time string/,
+  );
 });
 
 test("listHomeFindingCards rejects clustered findings missing their cluster aggregate row", async () => {

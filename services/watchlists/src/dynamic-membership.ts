@@ -267,7 +267,14 @@ function sourceFor(mode: string, spec: unknown): DynamicMembershipSource {
 
 function parseSpec(spec: unknown): Record<string, unknown> {
   if (typeof spec === "string") {
-    const parsed: unknown = JSON.parse(spec);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(spec);
+    } catch (error) {
+      throw new Error(
+        `watchlist membership_spec must be an object: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>;
     }
@@ -309,5 +316,5 @@ function costHint(mode: DynamicWatchlistMode): DynamicWatchlistMembership["fresh
 }
 
 function subjectKey(subjectRef: SubjectRef): string {
-  return `${subjectRef.kind}:${subjectRef.id}`;
+  return JSON.stringify([subjectRef.kind, subjectRef.id]);
 }

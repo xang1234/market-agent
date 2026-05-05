@@ -120,8 +120,7 @@ function severityScore(severity: HomeFindingSeverity): number {
 }
 
 function resolveNow(now: string | Date | undefined): Date {
-  if (now instanceof Date) return now;
-  const resolved = now === undefined ? new Date() : new Date(now);
+  const resolved = now instanceof Date ? now : now === undefined ? new Date() : new Date(now);
   if (Number.isNaN(resolved.getTime())) throw new Error("now must be a valid date");
   return resolved;
 }
