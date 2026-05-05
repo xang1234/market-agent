@@ -1,16 +1,20 @@
-import { createServer, type Server, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
   ChatTurnInputMismatchError,
   ChatTurnUnavailableError,
   createChatCoordinator,
   type ChatAssistantMessagePersistence,
   type ChatCoordinator,
+  type ChatRunActivityReporter,
   type ChatSubjectClarificationRenderer,
 } from "./coordinator.ts";
-import type { ChatSseEvent } from "./sse.ts";
 import type { ChatSubjectPreResolver } from "./subjects.ts";
 import { tryHandleThreadsRequest } from "./threads-http.ts";
 import type { ChatThreadsDb } from "./threads-repo.ts";
+import {
+  createRunActivityHub,
+  type RunActivityHub,
+} from "../../observability/src/run-activity.ts";
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const MAX_PENDING_SSE_FRAMES = 100;
@@ -31,6 +35,11 @@ type SseWritable = {
   destroy(error?: Error): unknown;
 };
 
+type SseFrameEvent = {
+  type: string;
+  seq: number;
+} & Record<string, unknown>;
+
 const INVALID_STREAM_ROUTE = Symbol("INVALID_STREAM_ROUTE");
 
 export type ChatServerOptions = {
@@ -38,19 +47,28 @@ export type ChatServerOptions = {
   persistAssistantMessage?: ChatAssistantMessagePersistence;
   preResolveSubject?: ChatSubjectPreResolver;
   renderSubjectClarification?: ChatSubjectClarificationRenderer;
+  runActivity?: ChatRunActivityReporter;
+  runActivityHub?: RunActivityHub;
   threadsDb?: ChatThreadsDb;
 };
 
 export function createChatServer(options: ChatServerOptions = {}): Server {
+  const runActivityHub = options.runActivityHub ?? createRunActivityHub();
   const coordinator = options.coordinator ?? createChatCoordinator({
     persistAssistantMessage: options.persistAssistantMessage,
     preResolveSubject: options.preResolveSubject,
     renderSubjectClarification: options.renderSubjectClarification,
+    runActivity: options.runActivity,
   });
   const threadsDb = options.threadsDb;
 
   return createServer(async (req, res) => {
     if (threadsDb && (await tryHandleThreadsRequest(threadsDb, req, res))) {
+      return;
+    }
+
+    if (matchRunActivityStreamRoute(req.method ?? "GET", req.url ?? "/")) {
+      handleRunActivityStreamRequest(runActivityHub, req, res);
       return;
     }
 
@@ -137,6 +155,58 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
   });
 }
 
+function handleRunActivityStreamRequest(
+  hub: RunActivityHub,
+  req: IncomingMessage,
+  res: ServerResponse,
+) {
+  const resumeAfterSeq = parseLastEventId(req.headers["last-event-id"]);
+  if (resumeAfterSeq === INVALID_LAST_EVENT_ID) {
+    respondJson(res, 400, { error: "'Last-Event-ID' must be a non-negative safe decimal integer" });
+    return;
+  }
+  if (resumeAfterSeq > hub.currentSeq()) {
+    respondJson(res, 400, { error: "'Last-Event-ID' is not available for this stream" });
+    return;
+  }
+
+  writeSseHeaders(res);
+  res.flushHeaders();
+  const writer = createSseFrameWriter(res);
+
+  let lastWrittenSeq = resumeAfterSeq;
+  const writeIfNew = (event: SseFrameEvent) => {
+    if (event.seq <= lastWrittenSeq) {
+      return;
+    }
+    writer.writeEvent(event);
+    lastWrittenSeq = event.seq;
+  };
+  const unsubscribe = hub.subscribe(writeIfNew);
+  for (const event of hub.events) {
+    writeIfNew(event);
+  }
+
+  const heartbeat = setInterval(() => {
+    writer.writeHeartbeat({ stream: "run-activities" });
+  }, HEARTBEAT_INTERVAL_MS);
+
+  let cleanedUp = false;
+  const cleanup = () => {
+    if (cleanedUp) {
+      return;
+    }
+    cleanedUp = true;
+    clearInterval(heartbeat);
+    unsubscribe();
+    writer.close();
+  };
+
+  req.on("close", cleanup);
+  res.on("close", cleanup);
+  res.on("error", cleanup);
+}
+
 const INPUT_MISMATCH = Symbol("INPUT_MISMATCH");
 
 function getTurnForRoute(
@@ -202,6 +272,14 @@ function matchStreamRoute(method: string, rawUrl: string): StreamRoute | typeof 
     turnId,
     subjectText,
   };
+}
+
+function matchRunActivityStreamRoute(method: string, rawUrl: string): boolean {
+  if (method !== "GET") {
+    return false;
+  }
+  const url = new URL(rawUrl, "http://localhost");
+  return url.pathname === "/v1/run-activities/stream";
 }
 
 function nonEmptyQueryParam(value: string | null): string | null {
@@ -284,21 +362,26 @@ export function createSseFrameWriter(
   };
 
   return {
-    writeEvent(event: ChatSseEvent) {
+    writeEvent(event: SseFrameEvent) {
       writeFrame(eventFrame(event));
     },
-    writeHeartbeat(route: { threadId: string; runId: string; turnId?: string | null }) {
+    writeHeartbeat(route: { threadId: string; runId: string; turnId?: string | null } | { stream: string }) {
       writeFrame(heartbeatFrame(route));
     },
     close,
   };
 }
 
-function eventFrame(event: ChatSseEvent) {
+function eventFrame(event: SseFrameEvent) {
   return `id: ${event.seq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
 }
 
-function heartbeatFrame(route: { threadId: string; runId: string; turnId?: string | null }) {
+function heartbeatFrame(route: { threadId: string; runId: string; turnId?: string | null } | { stream: string }) {
+  if ("stream" in route) {
+    return `event: heartbeat\ndata: ${JSON.stringify({
+      stream: route.stream,
+    })}\n\n`;
+  }
   return `event: heartbeat\ndata: ${JSON.stringify({
     thread_id: route.threadId,
     run_id: route.runId,

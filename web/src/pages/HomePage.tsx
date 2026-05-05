@@ -57,11 +57,14 @@ export function HomePage() {
     })
       .then((loaded) => {
         if (controller.signal.aborted) return
-        setHomeState({
+        setHomeState((current) => ({
           userId: sessionUserId,
           feed: loaded.feed,
-          activities: loaded.activities,
-        })
+          activities: mergeActivities(
+            loaded.activities,
+            current.userId === sessionUserId ? current.activities : [],
+          ),
+        }))
       })
       .catch(() => {
         if (controller.signal.aborted) return
@@ -72,6 +75,29 @@ export function HomePage() {
         })
       })
     return () => controller.abort()
+  }, [sessionUserId])
+
+  useEffect(() => {
+    const source = new EventSource('/v1/run-activities/stream')
+    const onRunActivity = (event: MessageEvent) => {
+      const activity = parseRunActivityEvent(event)
+      if (activity === null) return
+      setHomeState((current) => {
+        const base =
+          current.userId === sessionUserId
+            ? current
+            : { userId: sessionUserId, feed: EMPTY_HOME_FEED, activities: [] }
+        return {
+          ...base,
+          activities: mergeActivities([activity], base.activities),
+        }
+      })
+    }
+    source.addEventListener('run_activity', onRunActivity)
+    return () => {
+      source.removeEventListener('run_activity', onRunActivity)
+      source.close()
+    }
   }, [sessionUserId])
 
   return (
@@ -250,4 +276,24 @@ function formatTime(value: string): string {
     hour: 'numeric',
     minute: '2-digit',
   }).format(new Date(value))
+}
+
+function parseRunActivityEvent(event: MessageEvent): HomeRunActivity | null {
+  try {
+    const parsed = JSON.parse(event.data as string) as { activity?: HomeRunActivity }
+    return parsed.activity ?? null
+  } catch {
+    return null
+  }
+}
+
+function mergeActivities(
+  incoming: ReadonlyArray<HomeRunActivity>,
+  current: ReadonlyArray<HomeRunActivity>,
+): ReadonlyArray<HomeRunActivity> {
+  const byId = new Map<string, HomeRunActivity>()
+  for (const activity of [...incoming, ...current]) {
+    byId.set(activity.run_activity_id, activity)
+  }
+  return [...byId.values()].sort((a, b) => b.ts.localeCompare(a.ts)).slice(0, 100)
 }

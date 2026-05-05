@@ -5,6 +5,11 @@ import type { AddressInfo } from "node:net";
 import test, { type TestContext } from "node:test";
 import { createChatCoordinator, type ChatTurnRunner } from "../src/coordinator.ts";
 import { createChatServer, createSseFrameWriter } from "../src/http.ts";
+import {
+  createRunActivityHub,
+  type RunActivityInput,
+  type RunActivityRow,
+} from "../../observability/src/run-activity.ts";
 import type {
   ChatNotFoundSubjectPreResolution,
   ChatResolvedSubjectPreResolution,
@@ -232,6 +237,76 @@ test("stream route writes an immediate turn.started event", async (t) => {
   assert.match(chunk, /"turn_id":"run-456"/);
 
   await reader.cancel();
+});
+
+test("run activity stream replays retained events after Last-Event-ID", async (t) => {
+  const hub = createRunActivityHub();
+  hub.publish(runActivityRow({ stage: "reading", summary: "Reading filings" }, 1));
+  hub.publish(runActivityRow({ stage: "found", summary: "Found update" }, 2));
+  const base = await startServer(t, { runActivityHub: hub });
+
+  const response = await fetch(`${base}/v1/run-activities/stream`, {
+    headers: { "Last-Event-ID": "1" },
+  });
+
+  assert.equal(response.status, 200);
+  const [event] = await readSseEvents(response, 1);
+  assert.equal(event.id, "2");
+  assert.equal(event.event, "run_activity");
+  assert.equal((event.data.activity as { stage?: string }).stage, "found");
+});
+
+test("run activity stream receives activity emitted from the live chat runner lifecycle", async (t) => {
+  const hub = createRunActivityHub();
+  const reported: RunActivityInput[] = [];
+  const runner: ChatTurnRunner = ({ emit }) => {
+    emit("turn.started", {
+      subject_ref: { kind: "listing", id: "22222222-2222-4222-8222-222222222222" },
+    });
+    emit("tool.started", {
+      tool_call_id: "tool-live",
+      tool_name: "scan_filings",
+    });
+    emit("turn.completed", {
+      message_id: "message-live",
+    });
+  };
+  const base = await startServer(t, {
+    coordinator: createChatCoordinator({
+      runner,
+      runActivity: {
+        agentId: "11111111-1111-4111-8111-111111111111",
+        report: async (input) => {
+          reported.push(input);
+          hub.publish(runActivityRow(input, reported.length));
+        },
+      },
+    }),
+    runActivityHub: hub,
+  });
+
+  const activityResponse = await fetch(`${base}/v1/run-activities/stream`);
+  assert.equal(activityResponse.status, 200);
+
+  const chatResponse = await fetch(`${base}/v1/chat/threads/thread-live/stream?run_id=run-live`);
+  assert.equal(chatResponse.status, 200);
+
+  const activityEvents = await readSseEvents(activityResponse, 3);
+  await chatResponse.body?.cancel();
+
+  assert.deepEqual(
+    activityEvents.map((event) => (event.data.activity as { stage?: string }).stage),
+    ["reading", "investigating", "found"],
+  );
+  assert.deepEqual(reported.map((input) => input.agent_id), [
+    "11111111-1111-4111-8111-111111111111",
+    "11111111-1111-4111-8111-111111111111",
+    "11111111-1111-4111-8111-111111111111",
+  ]);
+  assert.deepEqual(reported[0].subject_refs, [
+    { kind: "listing", id: "22222222-2222-4222-8222-222222222222" },
+  ]);
+  assert.equal(reported[1].summary, "Running scan_filings.");
 });
 
 test("stream route uses turn_id query parameter for event correlation", async (t) => {
@@ -804,5 +879,21 @@ function resolvedAaplPreResolution(): ChatResolvedSubjectPreResolution {
         },
       },
     },
+  };
+}
+
+function runActivityRow(
+  input: Partial<RunActivityInput>,
+  sequence: number,
+): RunActivityRow {
+  const id = String(sequence).padStart(12, "0");
+  return {
+    run_activity_id: `aaaaaaaa-aaaa-4aaa-8aaa-${id}`,
+    agent_id: input.agent_id ?? "11111111-1111-4111-8111-111111111111",
+    stage: input.stage ?? "reading",
+    subject_refs: input.subject_refs ?? [],
+    source_refs: input.source_refs ?? [],
+    summary: input.summary ?? "Reading filings",
+    ts: input.ts ?? new Date(`2026-05-05T10:00:0${sequence}.000Z`),
   };
 }

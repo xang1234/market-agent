@@ -71,10 +71,13 @@ export type {
 
 export {
   RUN_ACTIVITY_STAGES,
+  createRunActivityHub,
   createRunActivitySseEvent,
+  writeAndPublishRunActivity,
   writeRunActivity,
 } from "./run-activity.ts";
 export type {
+  RunActivityHub,
   RunActivityInput,
   RunActivityRow,
   RunActivitySseEvent,

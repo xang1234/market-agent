@@ -47,6 +47,13 @@ export type RunActivitySseEvent = {
   };
 };
 
+export type RunActivityHub = {
+  readonly events: ReadonlyArray<RunActivitySseEvent>;
+  currentSeq(): number;
+  publish(activity: RunActivityRow): RunActivitySseEvent;
+  subscribe(listener: (event: RunActivitySseEvent) => void): () => void;
+};
+
 export async function writeRunActivity(
   db: QueryExecutor,
   input: RunActivityInput,
@@ -70,6 +77,58 @@ export async function writeRunActivity(
     throw new Error("run activity insert returned no row");
   }
   return row;
+}
+
+export function createRunActivityHub(
+  options: { maxRetainedEvents?: number } = {},
+): RunActivityHub {
+  const maxRetainedEvents = options.maxRetainedEvents ?? 1000;
+  if (!Number.isInteger(maxRetainedEvents) || maxRetainedEvents < 1) {
+    throw new Error("run activity hub maxRetainedEvents must be a positive integer");
+  }
+
+  let seq = 0;
+  const events: RunActivitySseEvent[] = [];
+  const listeners = new Set<(event: RunActivitySseEvent) => void>();
+
+  return {
+    get events() {
+      return [...events];
+    },
+    currentSeq() {
+      return seq;
+    },
+    publish(activity) {
+      seq += 1;
+      const event = deepFreeze(createRunActivitySseEvent(activity, seq));
+      events.push(event);
+      while (events.length > maxRetainedEvents) {
+        events.shift();
+      }
+      for (const listener of [...listeners]) {
+        try {
+          listener(event);
+        } catch {
+          listeners.delete(listener);
+        }
+      }
+      return event;
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+}
+
+export async function writeAndPublishRunActivity(
+  db: QueryExecutor,
+  hub: RunActivityHub,
+  input: RunActivityInput,
+): Promise<RunActivitySseEvent> {
+  return hub.publish(await writeRunActivity(db, input));
 }
 
 export function createRunActivitySseEvent(
@@ -113,4 +172,21 @@ function assertNonEmptyString(value: unknown, label: string): asserts value is s
   if (typeof value !== "string" || value.trim() === "") {
     throw new Error(`run activity ${label} is required`);
   }
+}
+
+function deepFreeze<T>(value: T, seen = new Set<object>()): T {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+
+  if (seen.has(value)) {
+    return value;
+  }
+  seen.add(value);
+
+  for (const child of Object.values(value)) {
+    deepFreeze(child, seen);
+  }
+
+  return Object.freeze(value);
 }

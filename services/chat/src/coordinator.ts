@@ -10,6 +10,11 @@ import type {
   ChatSubjectPreResolution,
   ChatSubjectPreResolver,
 } from "./subjects.ts";
+import type {
+  RunActivityInput,
+  RunActivityStage,
+  SubjectRefJson,
+} from "../../observability/src/run-activity.ts";
 
 export type ChatTurnInput = {
   threadId: string;
@@ -35,6 +40,11 @@ export type ChatTurnRunContext = ChatTurnInput & {
 };
 
 export type ChatTurnRunner = (context: ChatTurnRunContext) => Promise<void> | void;
+
+export type ChatRunActivityReporter = {
+  agentId: string;
+  report(input: RunActivityInput): Promise<void> | void;
+};
 
 export type ChatSubjectClarificationRenderInput = {
   threadId: string;
@@ -93,6 +103,7 @@ export type ChatCoordinatorOptions = {
   persistAssistantMessage?: ChatAssistantMessagePersistence;
   preResolveSubject?: ChatSubjectPreResolver;
   renderSubjectClarification?: ChatSubjectClarificationRenderer;
+  runActivity?: ChatRunActivityReporter;
   completedTurnRetentionMs?: number;
   maxCompletedTurns?: number;
   completedTurnTombstoneRetentionMs?: number;
@@ -149,11 +160,11 @@ export function createChatCoordinator(
   const baseRunner = options.runner ?? ((context) =>
     stubChatTurnRunner(context, persistAssistantMessage)
   );
-  const runner = subjectAwareRunner(baseRunner, {
+  const runner = runActivityReportingRunner(subjectAwareRunner(baseRunner, {
     persistAssistantMessage,
     preResolveSubject,
     renderSubjectClarification: options.renderSubjectClarification,
-  });
+  }), options.runActivity);
   const completedTurnRetentionMs = nonNegativeFiniteNumber(
     options.completedTurnRetentionMs ?? DEFAULT_COMPLETED_TURN_RETENTION_MS,
     "completedTurnRetentionMs",
@@ -279,6 +290,107 @@ export function createChatCoordinator(
       };
     },
   };
+}
+
+function runActivityReportingRunner(
+  runner: ChatTurnRunner,
+  reporter: ChatRunActivityReporter | undefined,
+): ChatTurnRunner {
+  if (!reporter) return runner;
+
+  return async (context) => {
+    const pendingReports: Promise<void>[] = [];
+    const report = (
+      stage: RunActivityStage,
+      summary: string,
+      payload: Record<string, unknown>,
+    ) => {
+      try {
+        const result = reporter.report({
+          agent_id: reporter.agentId,
+          stage,
+          subject_refs: subjectRefsFromPayload(context, payload),
+          source_refs: sourceRefsFromPayload(payload),
+          summary,
+        });
+        if (result && typeof result.then === "function") {
+          pendingReports.push(result.catch(() => undefined));
+        }
+      } catch {
+        // Run activity is user-facing telemetry; reporter failures must not
+        // fail the chat turn itself.
+      }
+    };
+    const emit: ChatTurnEmit = (type, payload = {}) => {
+      const event = context.emit(type, payload);
+      switch (type) {
+        case "turn.started":
+          report("reading", "Reading run inputs.", payload);
+          break;
+        case "tool.started":
+          report("investigating", `Running ${toolNameFromPayload(payload)}.`, payload);
+          break;
+        case "turn.completed":
+          report("found", "Completed run output.", payload);
+          break;
+        case "turn.error":
+          report("dismissed", "Dismissed failed run output.", payload);
+          break;
+        default:
+          break;
+      }
+      return event;
+    };
+
+    try {
+      await runner({ ...context, emit });
+    } catch (error) {
+      report("dismissed", "Dismissed failed run output.", {});
+      throw error;
+    } finally {
+      await Promise.allSettled(pendingReports);
+    }
+  };
+}
+
+function toolNameFromPayload(payload: Record<string, unknown>): string {
+  return typeof payload.tool_name === "string" && payload.tool_name.trim() !== ""
+    ? payload.tool_name
+    : "tool";
+}
+
+function sourceRefsFromPayload(payload: Record<string, unknown>): string[] {
+  const sourceRefs = payload.source_refs;
+  if (!Array.isArray(sourceRefs)) return [];
+  return sourceRefs.filter((sourceRef): sourceRef is string =>
+    typeof sourceRef === "string" && sourceRef.trim() !== ""
+  );
+}
+
+function subjectRefsFromPayload(
+  context: ChatTurnRunContext,
+  payload: Record<string, unknown>,
+): SubjectRefJson[] {
+  const payloadSubjectRefs = payload.subject_refs;
+  if (Array.isArray(payloadSubjectRefs)) {
+    return payloadSubjectRefs.filter(isSubjectRefJson);
+  }
+  if (isSubjectRefJson(payload.subject_ref)) {
+    return [payload.subject_ref];
+  }
+  const preResolution = context.subjectPreResolution;
+  return preResolution?.status === "resolved" ? [preResolution.subject_ref] : [];
+}
+
+function isSubjectRefJson(value: unknown): value is SubjectRefJson {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof (value as { kind?: unknown }).kind === "string" &&
+    typeof (value as { id?: unknown }).id === "string" &&
+    (value as { kind: string }).kind.trim() !== "" &&
+    (value as { id: string }).id.trim() !== ""
+  );
 }
 
 function normalizeTurnInput(input: ChatTurnInput): NormalizedChatTurnInput {
