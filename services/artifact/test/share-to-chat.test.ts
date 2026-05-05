@@ -179,6 +179,73 @@ test("shareArtifactToChat does not allow callers to downgrade share egress to ap
   assert.deepEqual(db.queries[0].values, [[FACT_ID], "export"]);
 });
 
+test("shareArtifactToChat strips watchlist and held badge state from shared blocks", async () => {
+  const result = await share({
+    sources: [
+      memoSource([
+        block({
+          id: PERF_BLOCK_ID,
+          snapshot_id: ANALYZE_SNAPSHOT,
+          subject_ref: { kind: "listing", id: SUBJECT_ID },
+          watchlist_state: "watchlisted",
+          watchlisted: true,
+          held: true,
+          held_state: "open",
+          headline: "Revenue beat",
+        } as never),
+      ]),
+    ],
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.blocks[0].headline, "Revenue beat");
+  assert.deepEqual(result.blocks[0].subject_ref, { kind: "listing", id: SUBJECT_ID });
+  assert.equal("watchlist_state" in result.blocks[0], false);
+  assert.equal("watchlisted" in result.blocks[0], false);
+  assert.equal("held" in result.blocks[0], false);
+  assert.equal("held_state" in result.blocks[0], false);
+});
+
+test("shareArtifactToChat strips portfolio contribution quantities from shared blocks", async () => {
+  const result = await share({
+    sources: [
+      memoSource([
+        block({
+          id: PERF_BLOCK_ID,
+          snapshot_id: ANALYZE_SNAPSHOT,
+          rows: [
+            {
+              subject_ref: { kind: "listing", id: SUBJECT_ID },
+              display_name: "Apple",
+              portfolio_contributions: [
+                {
+                  portfolio_id: "77777777-7777-4777-8777-777777777777",
+                  portfolio_name: "Core",
+                  base_currency: "USD",
+                  quantity: 100,
+                  cost_basis: 17500,
+                  held_state: "open",
+                  opened_at: "2026-01-01T00:00:00.000Z",
+                  closed_at: null,
+                },
+              ],
+            },
+          ],
+        } as never),
+      ]),
+    ],
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const row = (result.blocks[0].rows as Array<Record<string, unknown>>)[0];
+  assert.equal(row.display_name, "Apple");
+  assert.equal("portfolio_contributions" in row, false);
+  assert.equal(JSON.stringify(result.blocks[0]).includes("17500"), false);
+  assert.equal(JSON.stringify(result.blocks[0]).includes("77777777-7777-4777-8777-777777777777"), false);
+});
+
 test("shareArtifactToChat preserves the origin snapshot_id on every block (invariant I5)", async () => {
   const result = await share({
     sources: [memoSource([block({ id: PERF_BLOCK_ID, snapshot_id: ANALYZE_SNAPSHOT })])],

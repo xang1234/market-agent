@@ -52,6 +52,32 @@ export type ShareToChatResult =
       rejections: ReadonlyArray<ShareToChatRejection>;
     };
 
+const PRIVATE_SHARE_STATE_KEYS = new Set([
+  "watchlist_state",
+  "watchlisted",
+  "is_watchlisted",
+  "isWatchlisted",
+  "watchlist_id",
+  "watchlist_member_id",
+  "held",
+  "held_state",
+  "is_held",
+  "isHeld",
+  "portfolio_contributions",
+  "portfolioContributions",
+  "portfolio_holding_id",
+]);
+
+const PORTFOLIO_HOLDING_CONTEXT_KEYS = new Set([
+  "portfolio_id",
+  "portfolio_name",
+  "base_currency",
+  "quantity",
+  "cost_basis",
+  "opened_at",
+  "closed_at",
+]);
+
 // Handoff is a copy: each block keeps its origin snapshot_id so transforms
 // route to the same sealed manifest (invariant I5). The chat row's own
 // snapshot_id stays distinct — adding an artifact does NOT advance the
@@ -189,7 +215,8 @@ function collectFactIds(value: unknown, factIds: Set<string>): void {
 // in try/catch so the failure becomes invalid_block_shape rather than an
 // unhandled exception.
 function deepFreezeBlock(block: ShareableArtifactBlock): ShareableArtifactBlock {
-  return deepFreezeJson(structuredClone(block), new WeakSet()) as ShareableArtifactBlock;
+  const cloned = structuredClone(block);
+  return deepFreezeJson(stripPrivateShareState(cloned, new WeakSet()), new WeakSet()) as ShareableArtifactBlock;
 }
 
 function deepFreezeJson<T extends JsonValue>(value: T, visited: WeakSet<object>): T {
@@ -204,4 +231,35 @@ function deepFreezeJson<T extends JsonValue>(value: T, visited: WeakSet<object>)
     Object.values(value as JsonObject).forEach((item) => deepFreezeJson(item, visited));
   }
   return Object.freeze(value);
+}
+
+function stripPrivateShareState(value: JsonValue, visited: WeakSet<object>): JsonValue {
+  if (value === null || typeof value !== "object") return value;
+  if (visited.has(value)) {
+    throw new Error("stripPrivateShareState: cyclic reference is not a valid JsonValue");
+  }
+  visited.add(value);
+
+  if (Array.isArray(value)) {
+    return value.map((item) => stripPrivateShareState(item, visited)) as JsonValue;
+  }
+
+  const record = value as JsonObject;
+  const out: Record<string, JsonValue> = {};
+  const dropPortfolioHoldingContext = hasPortfolioHoldingContext(record);
+  for (const [key, item] of Object.entries(record)) {
+    if (PRIVATE_SHARE_STATE_KEYS.has(key)) continue;
+    if (dropPortfolioHoldingContext && PORTFOLIO_HOLDING_CONTEXT_KEYS.has(key)) continue;
+    out[key] = stripPrivateShareState(item, visited);
+  }
+  return out;
+}
+
+function hasPortfolioHoldingContext(record: JsonObject): boolean {
+  return (
+    Object.hasOwn(record, "portfolio_id") ||
+    Object.hasOwn(record, "portfolio_holding_id") ||
+    Object.hasOwn(record, "held_state") ||
+    Object.hasOwn(record, "cost_basis")
+  );
 }
