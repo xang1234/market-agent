@@ -36,6 +36,7 @@ export type ScreenSubjectRef = {
 
 export type ScreenSubject = {
   screen_id: UUID;
+  user_id: UUID;
   name: string;
   definition: ScreenerQuery;
   created_at: string;
@@ -49,6 +50,7 @@ export const SCREEN_NAME_MAX_LENGTH = 200;
 
 export type PersistScreenInput = {
   screen_id: UUID;
+  user_id: UUID;
   name: string;
   definition: ScreenerQuery;
   created_at: string;
@@ -62,6 +64,7 @@ export function persistScreen(input: PersistScreenInput): ScreenSubject {
     throw new Error("persistScreen: must be an object");
   }
   assertUuid(input.screen_id, "persistScreen.screen_id");
+  assertUuid(input.user_id, "persistScreen.user_id");
   assertScreenName(input.name, "persistScreen.name");
   const definition = normalizedScreenerQuery(input.definition);
   assertIso8601Utc(input.created_at, "persistScreen.created_at");
@@ -71,6 +74,7 @@ export function persistScreen(input: PersistScreenInput): ScreenSubject {
 
   return Object.freeze({
     screen_id: input.screen_id,
+    user_id: input.user_id,
     name: input.name,
     definition,
     created_at: input.created_at,
@@ -110,10 +114,12 @@ export function assertScreenSubjectContract(
   const raw = value as Record<string, unknown>;
   const screen_id = raw.screen_id;
   const name = raw.name;
+  const user_id = raw.user_id;
   const definition = raw.definition;
   const created_at = raw.created_at;
   const updated_at = raw.updated_at;
   assertUuid(screen_id, "screenSubject.screen_id");
+  assertUuid(user_id, "screenSubject.user_id");
   assertScreenName(name, "screenSubject.name");
   assertScreenerQueryContract(definition);
   assertIso8601Utc(created_at, "screenSubject.created_at");

@@ -11,6 +11,14 @@ export default defineConfig({
         target: process.env.RESOLVER_ORIGIN ?? 'http://127.0.0.1:4311',
         changeOrigin: true,
       },
+      '/v1/chat': {
+        target: process.env.CHAT_ORIGIN ?? 'http://127.0.0.1:4310',
+        changeOrigin: true,
+      },
+      '/v1/run-activities': {
+        target: process.env.CHAT_ORIGIN ?? 'http://127.0.0.1:4310',
+        changeOrigin: true,
+      },
       '/v1/watchlists': {
         target: process.env.WATCHLISTS_ORIGIN ?? 'http://127.0.0.1:4313',
         changeOrigin: true,

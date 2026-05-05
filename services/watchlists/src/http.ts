@@ -10,10 +10,13 @@ import {
   type WatchlistMember,
 } from "./queries.ts";
 import { isSubjectRef, SUBJECT_KINDS, type SubjectKind, type SubjectRef } from "./subject-ref.ts";
+import {
+  authenticatedUserRequiredMessage,
+  readAuthenticatedUserId,
+  type RequestAuthConfig,
+} from "../../shared/src/request-auth.ts";
 
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
-const USER_ID_HEADER = "x-user-id";
-const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 class RequestBodyTooLargeError extends Error {
   constructor() {
@@ -24,12 +27,15 @@ class RequestBodyTooLargeError extends Error {
 export type ListMembersResponse = { members: WatchlistMember[] };
 export type AddMemberResponse = { status: "created" | "already_present"; member: WatchlistMember };
 
-export function createWatchlistsServer(db: QueryExecutor): Server {
+export function createWatchlistsServer(
+  db: QueryExecutor,
+  options: { auth?: RequestAuthConfig } = {},
+): Server {
   return createServer(async (req, res) => {
     try {
-      const userId = readUserId(req);
+      const userId = readAuthenticatedUserId(req, options.auth);
       if (!userId) {
-        respond(res, 401, { error: `'${USER_ID_HEADER}' header is required` });
+        respond(res, 401, { error: authenticatedUserRequiredMessage(options.auth) });
         return;
       }
 
@@ -124,14 +130,6 @@ function matchRoute(method: string, rawUrl: string): Route | null {
   }
 
   return null;
-}
-
-function readUserId(req: IncomingMessage): string | null {
-  const raw = req.headers[USER_ID_HEADER];
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return USER_ID_PATTERN.test(trimmed) ? trimmed : null;
 }
 
 function extractSubjectRef(body: unknown): SubjectRef | null {

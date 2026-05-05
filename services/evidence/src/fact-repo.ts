@@ -23,6 +23,7 @@ export const FACT_METHODS = Object.freeze(["reported", "derived", "estimated", "
 export const FRESHNESS_CLASSES = Object.freeze(["real_time", "delayed_15m", "eod", "filing_time", "stale"] as const);
 export const COVERAGE_LEVELS = Object.freeze(["full", "partial", "sparse", "unavailable"] as const);
 export const FACT_REVIEW_STATUSES = Object.freeze(["queued", "reviewed", "dismissed"] as const);
+export const FACT_ENTITLEMENT_CHANNELS = Object.freeze(["app", "export", "email", "push"] as const);
 
 export type FactSubjectKind = (typeof FACT_SUBJECT_KINDS)[number];
 export type FactPeriodKind = (typeof FACT_PERIOD_KINDS)[number];
@@ -30,6 +31,7 @@ export type FactMethod = (typeof FACT_METHODS)[number];
 export type FreshnessClass = (typeof FRESHNESS_CLASSES)[number];
 export type CoverageLevel = (typeof COVERAGE_LEVELS)[number];
 export type FactReviewStatus = (typeof FACT_REVIEW_STATUSES)[number];
+export type FactEntitlementChannel = (typeof FACT_ENTITLEMENT_CHANNELS)[number];
 
 export type FactInput = Readonly<{
   subject_kind: FactSubjectKind;
@@ -101,6 +103,23 @@ export type FactReviewQueueRow = Readonly<{
   created_at: string;
   updated_at: string;
 }>;
+
+export type ListFactsForEgressInput = Readonly<{
+  fact_ids: readonly string[];
+  channel: FactEntitlementChannel;
+}>;
+
+export class FactEgressEntitlementError extends Error {
+  readonly channel: FactEntitlementChannel;
+  readonly denied_fact_ids: readonly string[];
+
+  constructor(channel: FactEntitlementChannel, deniedFactIds: readonly string[]) {
+    super(`facts are not entitled for ${channel}: ${deniedFactIds.join(", ")}`);
+    this.name = "FactEgressEntitlementError";
+    this.channel = channel;
+    this.denied_fact_ids = Object.freeze([...deniedFactIds]);
+  }
+}
 
 export type FactPoolClient = QueryExecutor & {
   release(destroy?: boolean): void;
@@ -342,6 +361,37 @@ export async function queueFactReview(
   return factReviewQueueRowFromDb(rows[0]);
 }
 
+export async function listFactsForEgress(
+  db: QueryExecutor,
+  input: ListFactsForEgressInput,
+): Promise<ReadonlyArray<FactRow>> {
+  assertOneOf(input.channel, FACT_ENTITLEMENT_CHANNELS, "channel");
+  if (!Array.isArray(input.fact_ids)) {
+    throw new Error("fact_ids: must be an array");
+  }
+  const factIds = [...input.fact_ids];
+  for (const factId of factIds) {
+    assertUuidV4(factId, "fact_ids");
+  }
+  if (factIds.length === 0) return Object.freeze([]);
+
+  const { rows } = await db.query<FactDbRow>(
+    `select ${FACT_COLUMNS}
+       from facts
+      where fact_id = any($1::uuid[])
+        and entitlement_channels ? $2
+      order by array_position($1::uuid[], fact_id)`,
+    [factIds, input.channel],
+  );
+  const facts = Object.freeze(rows.map(factRowFromDb));
+  const returned = new Set(facts.map((fact) => fact.fact_id));
+  const denied = factIds.filter((factId) => !returned.has(factId));
+  if (denied.length > 0) {
+    throw new FactEgressEntitlementError(input.channel, denied);
+  }
+  return facts;
+}
+
 async function lockSupersededFact(db: QueryExecutor, supersededFactId: string): Promise<FactRow> {
   const { rows } = await db.query<FactDbRow>(
     `select ${FACT_COLUMNS}
@@ -426,7 +476,7 @@ function normalizeFactInput(input: FactInput): NormalizedFactInput {
   assertOneOf(input.verification_status, PROMOTION_VERIFICATION_STATUSES, "verification_status");
   assertOneOf(input.freshness_class, FRESHNESS_CLASSES, "freshness_class");
   assertOneOf(input.coverage_level, COVERAGE_LEVELS, "coverage_level");
-  assertStringArray(input.entitlement_channels ?? ["app"], "entitlement_channels");
+  assertEntitlementChannels(input.entitlement_channels ?? ["app"]);
   assertConfidence(input.confidence, "confidence");
   if (input.ingestion_batch_id != null) assertUuidV4(input.ingestion_batch_id, "ingestion_batch_id");
 
@@ -571,6 +621,16 @@ function assertFiniteNumber(value: unknown, label: string): asserts value is num
 function assertStringArray(value: unknown, label: string): asserts value is readonly string[] {
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || item.trim().length === 0)) {
     throw new Error(`${label}: must be an array of non-empty strings`);
+  }
+}
+
+function assertEntitlementChannels(value: unknown): asserts value is readonly FactEntitlementChannel[] {
+  assertStringArray(value, "entitlement_channels");
+  if (value.length === 0) {
+    throw new Error("entitlement_channels: must not be empty");
+  }
+  for (const channel of value) {
+    assertOneOf(channel, FACT_ENTITLEMENT_CHANNELS, "entitlement_channels");
   }
 }
 

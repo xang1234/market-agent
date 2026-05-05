@@ -15,6 +15,7 @@ import {
 import { normalizedScreenerResponse } from "../src/result.ts";
 
 const SCREEN_ID = "11111111-1111-4111-a111-111111111111";
+const USER_ID = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
 const APPLE_ISSUER_ID = "22222222-2222-4222-a222-222222222222";
 const CREATED_AT = "2026-04-22T15:30:00.000Z";
 const UPDATED_AT = "2026-04-23T09:00:00.000Z";
@@ -33,6 +34,7 @@ function validQuery(overrides: Partial<ScreenerQuery> = {}): ScreenerQuery {
 function validInput(overrides: Partial<Parameters<typeof persistScreen>[0]> = {}) {
   return {
     screen_id: SCREEN_ID,
+    user_id: USER_ID,
     name: "US large-cap common stocks",
     definition: validQuery(),
     created_at: CREATED_AT,
@@ -47,6 +49,7 @@ test("persistScreen accepts a fully bound input and freezes the result", () => {
   assert.equal(Object.isFrozen(screen), true);
   assert.equal(Object.isFrozen(screen.definition), true);
   assert.equal(screen.screen_id, SCREEN_ID);
+  assert.equal(screen.user_id, USER_ID);
   assert.equal(screen.name, "US large-cap common stocks");
   assert.equal(screen.created_at, CREATED_AT);
   assert.equal(screen.updated_at, UPDATED_AT);
@@ -70,6 +73,10 @@ test("persistScreen does NOT carry rows / as_of / total_count fields", () => {
 });
 
 test("persistScreen rejects bad screen_id, bad timestamps, empty name", () => {
+  assert.throws(
+    () => persistScreen(validInput({ user_id: "not-a-uuid" })),
+    /user_id/,
+  );
   assert.throws(
     () => persistScreen(validInput({ screen_id: "not-a-uuid" })),
     /screen_id/,
@@ -259,6 +266,7 @@ test("replayScreen rejects null / non-object input but trusts the typed contract
   // rejects a bogus hand-built definition at the boundary.
   const bogus = {
     screen_id: SCREEN_ID,
+    user_id: USER_ID,
     name: "bogus",
     definition: { ...validQuery(), sort: [] } as unknown as ScreenerQuery,
     created_at: CREATED_AT,
@@ -296,6 +304,7 @@ test("assertScreenSubjectContract validates untrusted cross-boundary input", () 
     () =>
       assertScreenSubjectContract({
         screen_id: SCREEN_ID,
+        user_id: USER_ID,
         name: "x",
         definition: validQuery(),
         created_at: CREATED_AT,

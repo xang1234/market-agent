@@ -27,9 +27,13 @@ import {
   type SubjectOverlayInputs,
 } from "./overlays.ts";
 import { isUuidV4 } from "./validators.ts";
+import {
+  authenticatedUserRequiredMessage,
+  readAuthenticatedUserId,
+  type RequestAuthConfig,
+} from "../../shared/src/request-auth.ts";
 
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
-const USER_ID_HEADER = "x-user-id";
 
 class RequestBodyTooLargeError extends Error {
   constructor() {
@@ -44,12 +48,15 @@ export type ListHoldingsResponse = { holdings: PortfolioHolding[] };
 export type CreateHoldingResponse = { holding: PortfolioHolding };
 export type OverlayInputsResponse = { overlays: SubjectOverlayInputs[] };
 
-export function createPortfolioServer(db: QueryExecutor): Server {
+export function createPortfolioServer(
+  db: QueryExecutor,
+  options: { auth?: RequestAuthConfig } = {},
+): Server {
   return createServer(async (req, res) => {
     try {
-      const userId = readUserId(req);
+      const userId = readAuthenticatedUserId(req, options.auth);
       if (!userId) {
-        respond(res, 401, { error: `'${USER_ID_HEADER}' header is required` });
+        respond(res, 401, { error: authenticatedUserRequiredMessage(options.auth) });
         return;
       }
 
@@ -193,14 +200,6 @@ function matchRoute(method: string, rawUrl: string): Route | null {
   }
 
   return null;
-}
-
-function readUserId(req: IncomingMessage): string | null {
-  const raw = req.headers[USER_ID_HEADER];
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return isUuidV4(trimmed) ? trimmed : null;
 }
 
 // Reads, parses, and contract-validates a JSON body in one shot. Responds 400

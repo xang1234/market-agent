@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import type { Client } from "pg";
 import { bootstrapDatabase, connectedClient, dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
 import { createWatchlistsServer } from "../src/http.ts";
+import { signTrustedUserId, type RequestAuthConfig } from "../../shared/src/request-auth.ts";
 
 // bootstrapDatabase applies the base schema pack only; 0003 adds the
 // trigger + unique index that provision the implicit default manual
@@ -20,8 +21,12 @@ async function applyDefaultManualWatchlistMigration(client: Client): Promise<voi
   await client.query(defaultManualWatchlistMigrationSql);
 }
 
-async function startServer(t: TestContext, db: Parameters<typeof createWatchlistsServer>[0]): Promise<string> {
-  const server = createWatchlistsServer(db);
+async function startServer(
+  t: TestContext,
+  db: Parameters<typeof createWatchlistsServer>[0],
+  options: { auth?: RequestAuthConfig } = {},
+): Promise<string> {
+  const server = createWatchlistsServer(db, { auth: options.auth });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const { port } = server.address() as AddressInfo;
@@ -30,6 +35,7 @@ async function startServer(t: TestContext, db: Parameters<typeof createWatchlist
 
 const APPLE_LISTING = { kind: "listing", id: "11111111-1111-4111-a111-111111111111" } as const;
 const MSFT_LISTING = { kind: "listing", id: "22222222-2222-4222-a222-222222222222" } as const;
+const TRUSTED_PROXY_SECRET = "watchlists-test-secret";
 
 async function seedUser(client: Client, email: string): Promise<string> {
   const result = await client.query<{ user_id: string }>(
@@ -93,6 +99,66 @@ test("server: GET /v1/watchlists/default/members returns empty list for fresh us
   const res = await fetch(`${base}/v1/watchlists/default/members`, withUser(userId));
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { members: [] });
+});
+
+test("server: trusted-proxy auth scopes watchlists from server-derived identity, not x-user-id", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for watchlists coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-6-1");
+  const client = await connectedClient(t, databaseUrl);
+  await applyDefaultManualWatchlistMigration(client);
+  const userA = await seedUser(client, "trusted-a@example.test");
+  const userB = await seedUser(client, "trusted-b@example.test");
+  const base = await startServer(t, client, {
+    auth: { mode: "trusted_proxy", trustedProxySecret: TRUSTED_PROXY_SECRET },
+  });
+
+  const add = await fetch(`${base}/v1/watchlists/default/members`, {
+    method: "POST",
+    headers: {
+      "x-authenticated-user-id": userA,
+      "x-authenticated-user-signature": signTrustedUserId(userA, TRUSTED_PROXY_SECRET),
+      "x-user-id": userB,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ subject_ref: APPLE_LISTING }),
+  });
+  assert.equal(add.status, 201);
+
+  const listB = await fetch(`${base}/v1/watchlists/default/members`, {
+    headers: {
+      "x-authenticated-user-id": userB,
+      "x-authenticated-user-signature": signTrustedUserId(userB, TRUSTED_PROXY_SECRET),
+      "x-user-id": userA,
+    },
+  });
+  assert.equal(listB.status, 200);
+  assert.deepEqual(await listB.json(), { members: [] });
+
+  const unsignedAdd = await fetch(`${base}/v1/watchlists/default/members`, {
+    method: "POST",
+    headers: {
+      "x-authenticated-user-id": userA,
+      "x-user-id": userB,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ subject_ref: APPLE_LISTING }),
+  });
+  assert.equal(unsignedAdd.status, 401);
+
+  const invalidAdd = await fetch(`${base}/v1/watchlists/default/members`, {
+    method: "POST",
+    headers: {
+      "x-authenticated-user-id": userA,
+      "x-authenticated-user-signature": "0".repeat(64),
+      "x-user-id": userB,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ subject_ref: APPLE_LISTING }),
+  });
+  assert.equal(invalidAdd.status, 401);
 });
 
 test("server: POST adds a member, GET returns it, idempotent on repeat", { timeout: 120000 }, async (t) => {

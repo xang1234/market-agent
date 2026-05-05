@@ -24,6 +24,23 @@ import {
 import { useAuth } from '../shell/useAuth.ts'
 import { useRightRail } from '../shell/useRightRail'
 
+type HomeRunActivityStage = 'reading' | 'investigating' | 'found' | 'dismissed'
+
+type HomeRunActivity = {
+  run_activity_id: string
+  agent_id: string
+  stage: HomeRunActivityStage
+  summary: string
+  ts: string
+}
+
+type ParsedRunActivity = {
+  seq: number
+  activity: HomeRunActivity
+}
+
+const EMPTY_HOME_ACTIVITIES: ReadonlyArray<HomeRunActivity> = []
+
 export type LoadState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
@@ -33,15 +50,46 @@ export function HomePage() {
   const { setContent } = useRightRail()
   const { session } = useAuth()
   const userId = session?.userId ?? null
+  const [activityState, setActivityState] = useState<{
+    userId: string | null
+    lastSeq: number | null
+    activities: ReadonlyArray<HomeRunActivity>
+  }>(() => ({ userId: null, lastSeq: null, activities: [] }))
+  const activities = activityState.userId === userId ? activityState.activities : EMPTY_HOME_ACTIVITIES
 
   useEffect(() => {
     setContent(
-      <div className="border-b border-neutral-200 px-4 py-3 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
-        Home rail (P4.5 activity stream)
-      </div>,
+      <HomeActivityRail activities={rateLimitActivityStream(activities, { perAgentLimit: 2 })} />,
     )
     return () => setContent(null)
-  }, [setContent])
+  }, [activities, setContent])
+
+  useEffect(() => {
+    if (userId === null) return
+
+    const controller = new AbortController()
+    let lastEventId: number | null = null
+    void consumeRunActivityStreamWithRetry({
+      signal: controller.signal,
+      userId,
+      lastEventId: () => lastEventId,
+      resetLastEventId: () => {
+        lastEventId = null
+      },
+      onEvent: (event) => {
+        lastEventId = event.seq
+        setActivityState((current) => ({
+          userId,
+          lastSeq: event.seq,
+          activities: mergeActivities(
+            [event.activity],
+            current.userId === userId ? current.activities : [],
+          ),
+        }))
+      },
+    })
+    return () => controller.abort()
+  }, [userId])
 
   return (
     <div className="flex flex-1 flex-col gap-6 overflow-auto p-8">
@@ -112,7 +160,7 @@ function SignInHint() {
 
 function LoadingHint() {
   return (
-    <Section title="Loading Home…">
+    <Section title="Loading Home...">
       <p className="text-sm text-neutral-500 dark:text-neutral-400">Fetching your latest findings and market sections.</p>
     </Section>
   )
@@ -305,6 +353,31 @@ function SavedScreensSection({ rows }: { rows: ReadonlyArray<HomeSavedScreenRow>
   )
 }
 
+function HomeActivityRail({ activities }: { activities: ReadonlyArray<HomeRunActivity> }) {
+  return (
+    <div className="flex h-full flex-col">
+      <div className="border-b border-neutral-200 px-4 py-3 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+        Activity
+      </div>
+      <div className="flex flex-col gap-3 overflow-auto p-4">
+        {activities.length === 0 ? (
+          <p className="text-xs leading-5 text-neutral-500 dark:text-neutral-400">No recent activity.</p>
+        ) : (
+          activities.map((activity) => (
+            <div key={activity.run_activity_id} className="rounded border border-neutral-200 p-3 dark:border-neutral-800">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">{activity.stage}</span>
+                <span className="text-xs text-neutral-500 dark:text-neutral-400">{formatActivityTime(activity.ts)}</span>
+              </div>
+              <p className="mt-2 text-sm leading-5 text-neutral-800 dark:text-neutral-200">{activity.summary}</p>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
 function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
     <section>
@@ -329,4 +402,186 @@ function EmptyHint({ children }: { children: React.ReactNode }) {
 
 function FootnoteHint({ children }: { children: React.ReactNode }) {
   return <p className="mt-2 text-xs text-neutral-400 dark:text-neutral-500">{children}</p>
+}
+
+async function consumeRunActivityStream({
+  signal,
+  userId,
+  lastEventId,
+  onEvent,
+}: {
+  signal: AbortSignal
+  userId: string
+  lastEventId: number | null
+  onEvent(event: ParsedRunActivity): void
+}) {
+  const headers: Record<string, string> = { 'x-user-id': userId }
+  if (lastEventId !== null) headers['Last-Event-ID'] = String(lastEventId)
+  const response = await fetch('/v1/run-activities/stream', {
+    credentials: 'same-origin',
+    headers,
+    signal,
+  })
+  if (!response.ok || response.body === null) {
+    throw new RunActivityStreamError(response.status)
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  try {
+    while (!signal.aborted) {
+      const next = await reader.read()
+      if (next.done) break
+      buffer += decoder.decode(next.value, { stream: true })
+
+      let boundary = buffer.indexOf('\n\n')
+      while (boundary >= 0) {
+        const block = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+        const event = parseRunActivitySseBlock(block)
+        if (event !== null) {
+          onEvent(event)
+        }
+        boundary = buffer.indexOf('\n\n')
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined)
+  }
+}
+
+async function consumeRunActivityStreamWithRetry({
+  signal,
+  userId,
+  lastEventId,
+  resetLastEventId,
+  onEvent,
+}: {
+  signal: AbortSignal
+  userId: string
+  lastEventId: () => number | null
+  resetLastEventId: () => void
+  onEvent(event: ParsedRunActivity): void
+}) {
+  let retryCount = 0
+  while (!signal.aborted) {
+    try {
+      await consumeRunActivityStream({
+        signal,
+        userId,
+        lastEventId: lastEventId(),
+        onEvent,
+      })
+      retryCount = 0
+    } catch (error) {
+      if (signal.aborted) return
+      if (error instanceof RunActivityStreamError && error.status === 400) {
+        resetLastEventId()
+      }
+      retryCount += 1
+    }
+    if (signal.aborted) return
+    await sleepForRetry(retryDelayMs(retryCount), signal)
+  }
+}
+
+function parseRunActivitySseBlock(block: string): ParsedRunActivity | null {
+  let eventName: string | null = null
+  let eventId: string | null = null
+  const data: string[] = []
+  for (const line of block.split('\n')) {
+    if (line.startsWith('id: ')) {
+      eventId = line.slice('id: '.length)
+    } else if (line.startsWith('event: ')) {
+      eventName = line.slice('event: '.length)
+    } else if (line.startsWith('data: ')) {
+      data.push(line.slice('data: '.length))
+    }
+  }
+  if (eventName !== 'run_activity' || data.length === 0) {
+    return null
+  }
+  const parsed = parseRunActivityData(data.join('\n'))
+  if (parsed === null) return null
+  const seq = parseSseSeq(eventId) ?? parseSseSeq(parsed.seq)
+  return seq === null ? null : { seq, activity: parsed.activity }
+}
+
+function parseRunActivityData(data: string): { seq?: unknown; activity: HomeRunActivity } | null {
+  try {
+    const parsed = JSON.parse(data) as { seq?: unknown; activity?: HomeRunActivity }
+    return parsed.activity ? { seq: parsed.seq, activity: parsed.activity } : null
+  } catch {
+    return null
+  }
+}
+
+function parseSseSeq(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value >= 0 ? value : null
+  }
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) return null
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) ? parsed : null
+}
+
+function retryDelayMs(retryCount: number): number {
+  return Math.min(500 * 2 ** Math.max(0, retryCount - 1), 5_000)
+}
+
+function sleepForRetry(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve()
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(resolve, ms)
+    signal.addEventListener('abort', () => {
+      window.clearTimeout(timeout)
+      resolve()
+    }, { once: true })
+  })
+}
+
+class RunActivityStreamError extends Error {
+  readonly status: number
+
+  constructor(status: number) {
+    super(`run activity stream failed with HTTP ${status}`)
+    this.status = status
+  }
+}
+
+function mergeActivities(
+  incoming: ReadonlyArray<HomeRunActivity>,
+  current: ReadonlyArray<HomeRunActivity>,
+): ReadonlyArray<HomeRunActivity> {
+  const byId = new Map<string, HomeRunActivity>()
+  for (const activity of [...incoming, ...current]) {
+    byId.set(activity.run_activity_id, activity)
+  }
+  return [...byId.values()].sort((a, b) => b.ts.localeCompare(a.ts)).slice(0, 100)
+}
+
+function rateLimitActivityStream(
+  activities: ReadonlyArray<HomeRunActivity>,
+  options: { perAgentLimit: number },
+): ReadonlyArray<HomeRunActivity> {
+  const perAgentCounts = new Map<string, number>()
+  const limited: HomeRunActivity[] = []
+  for (const activity of activities) {
+    const count = perAgentCounts.get(activity.agent_id) ?? 0
+    if (count >= options.perAgentLimit) continue
+    perAgentCounts.set(activity.agent_id, count + 1)
+    limited.push(activity)
+  }
+  return limited
+}
+
+function formatActivityTime(value: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(value))
 }

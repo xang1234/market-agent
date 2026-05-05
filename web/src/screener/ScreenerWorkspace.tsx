@@ -62,6 +62,7 @@ export function ScreenerWorkspace() {
   const navigate = useNavigate()
   const { session } = useAuth()
   const requestProtectedAction = useRequestProtectedAction()
+  const sessionUserId = session?.userId
   const [draft, setDraft] = useState<QueryDraft>(() => createDefaultQueryDraft())
   const [response, setResponse] = useState<ScreenerResponse | null>(null)
   // Status starts as 'loading' because the mount effect kicks off the
@@ -72,7 +73,12 @@ export function ScreenerWorkspace() {
   const [status, setStatus] = useState<Status>('loading')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [screenName, setScreenName] = useState('')
-  const [savedScreens, setSavedScreens] = useState<ScreenSubject[]>([])
+  const [savedScreensState, setSavedScreensState] = useState<{
+    userId: string | undefined
+    screens: ScreenSubject[]
+  }>(() => ({ userId: undefined, screens: [] }))
+  const savedScreens =
+    savedScreensState.userId === sessionUserId ? savedScreensState.screens : []
   const [savedMessage, setSavedMessage] = useState<string | null>(null)
 
   // Each run gets a fresh AbortController so an in-flight fetch is
@@ -115,7 +121,7 @@ export function ScreenerWorkspace() {
     // Mount-only: draft here is the initial useState value and never
     // re-fires this effect — refinements run through `runSearch`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [session?.userId])
 
   // Synchronous setStatus is fine here — this runs in an event
   // handler, not an effect, so react-hooks/set-state-in-effect doesn't
@@ -148,31 +154,31 @@ export function ScreenerWorkspace() {
   // (matching `useManualWatchlist`) keeps setState off the synchronous
   // effect-body path, satisfying react-hooks/set-state-in-effect.
   useEffect(() => {
-    if (session == null) return
+    if (sessionUserId == null) return
     const controller = new AbortController()
-    listSavedScreens({ signal: controller.signal })
+    listSavedScreens({ userId: sessionUserId, signal: controller.signal })
       .then((screens) => {
         if (controller.signal.aborted) return
-        setSavedScreens(screens)
+        setSavedScreensState({ userId: sessionUserId, screens })
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return
         setSavedMessage(savedErrorMessage(err))
       })
     return () => controller.abort()
-  }, [session])
+  }, [sessionUserId])
 
   // Refreshes the list from event-handler contexts (post-save resume
   // and post-delete failure). Async/await is fine here — we're not in
   // an effect body.
   const refreshSavedScreens = useCallback(async () => {
     try {
-      const screens = await listSavedScreens()
-      setSavedScreens(screens)
+      const screens = await listSavedScreens({ userId: sessionUserId })
+      setSavedScreensState({ userId: sessionUserId, screens })
     } catch (err) {
       setSavedMessage(savedErrorMessage(err))
     }
-  }, [])
+  }, [sessionUserId])
 
   // Resumes the SaveScreen action that the auth interrupt deferred.
   // The action's payload carries the original name + definition the
@@ -181,16 +187,21 @@ export function ScreenerWorkspace() {
   // current screen definition" verification.
   useResumedProtectedAction(ProtectedActionType.SaveScreen, async (action) => {
     try {
-      const result = await saveScreen(action.payload)
+      const result = await saveScreen({ ...action.payload, userId: sessionUserId })
       setSavedMessage(null)
       setScreenName('')
       // The POST response already carries the canonical screen, so
       // splice it in locally instead of round-tripping a list GET.
       // Newest-first matches the server's `updated_at` desc order.
-      setSavedScreens((current) => [
-        result.screen,
-        ...current.filter((s) => s.screen_id !== result.screen.screen_id),
-      ])
+      setSavedScreensState((current) => ({
+        userId: sessionUserId,
+        screens: [
+          result.screen,
+          ...(current.userId === sessionUserId ? current.screens : []).filter(
+            (s) => s.screen_id !== result.screen.screen_id,
+          ),
+        ],
+      }))
     } catch (err) {
       setSavedMessage(savedErrorMessage(err))
     }
@@ -230,9 +241,15 @@ export function ScreenerWorkspace() {
     // not need the auth interrupt. On failure we re-fetch instead of
     // restoring a captured snapshot so concurrent Deletes on different
     // rows don't trample each other's state.
-    setSavedScreens((current) => current.filter((s) => s.screen_id !== screen.screen_id))
+    setSavedScreensState((current) => ({
+      userId: sessionUserId,
+      screens:
+        current.userId === sessionUserId
+          ? current.screens.filter((s) => s.screen_id !== screen.screen_id)
+          : [],
+    }))
     try {
-      await deleteSavedScreen({ screen_id: screen.screen_id })
+      await deleteSavedScreen({ screen_id: screen.screen_id, userId: sessionUserId })
     } catch (err) {
       setSavedMessage(savedErrorMessage(err))
       void refreshSavedScreens()
@@ -756,4 +773,3 @@ function formatRowCells(row: ScreenerResultRow): { row: ScreenerResultRow; cells
     cells: { lastPrice, changePct, changeClass, volume, marketCap, peRatio },
   }
 }
-

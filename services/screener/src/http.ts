@@ -21,11 +21,17 @@ import {
   type ScreenSubject,
 } from "./screen-subject.ts";
 import { isUuidV4 } from "./validators.ts";
+import {
+  authenticatedUserRequiredMessage,
+  readAuthenticatedUserId,
+  type RequestAuthConfig,
+} from "../../shared/src/request-auth.ts";
 
 export type ScreenerServerDeps = {
   candidates: ScreenerCandidateRepository;
   screens: ScreenRepository;
   clock?: () => Date;
+  auth?: RequestAuthConfig;
 };
 
 const MAX_REQUEST_BODY_BYTES = 64 * 1024;
@@ -55,16 +61,16 @@ export function createScreenerServer(deps: ScreenerServerDeps): Server {
           await handleSaveScreen(req, res, deps, clock);
           return;
         case "list_screens":
-          await handleListScreens(res, deps);
+          await handleListScreens(req, res, deps);
           return;
         case "get_screen":
-          await handleGetScreen(res, deps, route.screen_id);
+          await handleGetScreen(req, res, deps, route.screen_id);
           return;
         case "delete_screen":
-          await handleDeleteScreen(res, deps, route.screen_id);
+          await handleDeleteScreen(req, res, deps, route.screen_id);
           return;
         case "replay_screen":
-          await handleReplayScreen(res, deps, clock, route.screen_id);
+          await handleReplayScreen(req, res, deps, clock, route.screen_id);
           return;
         default: {
           const _exhaustive: never = route;
@@ -150,6 +156,12 @@ async function handleSaveScreen(
   deps: ScreenerServerDeps,
   clock: () => Date,
 ): Promise<void> {
+  const user_id = readAuthenticatedUserId(req, deps.auth);
+  if (!user_id) {
+    respond(res, 401, { error: authenticatedUserRequiredMessage(deps.auth) });
+    return;
+  }
+
   const body = await readJsonBody(req, MAX_REQUEST_BODY_BYTES);
   if (body.kind === "error") {
     respond(res, body.status, { error: body.error });
@@ -167,6 +179,10 @@ async function handleSaveScreen(
   // from the existing record on replace; updated_at is always bumped to `now`
   // so neither can be spoofed by the client.
   const existing = isUuidV4(screen_id) ? await deps.screens.find(screen_id) : null;
+  if (existing && existing.user_id !== user_id) {
+    respond(res, 404, { error: `screen not found: ${screen_id}` });
+    return;
+  }
   const created_at = existing?.created_at ?? now;
   const updated_at = now;
 
@@ -174,6 +190,7 @@ async function handleSaveScreen(
   try {
     screen = persistScreen({
       screen_id,
+      user_id,
       name: raw.name as string,
       definition: raw.definition as ScreenerQuery,
       created_at,
@@ -192,44 +209,73 @@ async function handleSaveScreen(
 }
 
 async function handleListScreens(
+  req: IncomingMessage,
   res: ServerResponse,
   deps: ScreenerServerDeps,
 ): Promise<void> {
-  const screens = await deps.screens.list();
+  const user_id = readAuthenticatedUserId(req, deps.auth);
+  if (!user_id) {
+    respond(res, 401, { error: authenticatedUserRequiredMessage(deps.auth) });
+    return;
+  }
+  const screens = await deps.screens.listForUser(user_id);
   respond(res, 200, { screens });
 }
 
 async function handleGetScreen(
+  req: IncomingMessage,
   res: ServerResponse,
   deps: ScreenerServerDeps,
   screen_id: string,
 ): Promise<void> {
-  const screen = await loadScreenOrThrow(deps, screen_id);
+  const screen = await loadScreenForUserOrThrow(req, res, deps, screen_id);
+  if (!screen) return;
   respond(res, 200, { screen });
 }
 
 async function handleDeleteScreen(
+  req: IncomingMessage,
   res: ServerResponse,
   deps: ScreenerServerDeps,
   screen_id: string,
 ): Promise<void> {
+  const screen = await loadScreenForUserOrThrow(req, res, deps, screen_id);
+  if (!screen) return;
   await deps.screens.delete(screen_id);
   res.statusCode = 204;
   res.end();
 }
 
 async function handleReplayScreen(
+  req: IncomingMessage,
   res: ServerResponse,
   deps: ScreenerServerDeps,
   clock: () => Date,
   screen_id: string,
 ): Promise<void> {
-  const screen = await loadScreenOrThrow(deps, screen_id);
+  const screen = await loadScreenForUserOrThrow(req, res, deps, screen_id);
+  if (!screen) return;
   const response = executeScreenerQuery(
     { candidates: deps.candidates, clock },
     replayScreen(screen),
   );
   respond(res, 200, response);
+}
+
+async function loadScreenForUserOrThrow(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: ScreenerServerDeps,
+  screen_id: string,
+): Promise<ScreenSubject | null> {
+  const user_id = readAuthenticatedUserId(req, deps.auth);
+  if (!user_id) {
+    respond(res, 401, { error: authenticatedUserRequiredMessage(deps.auth) });
+    return null;
+  }
+  const screen = await loadScreenOrThrow(deps, screen_id);
+  if (screen.user_id !== user_id) throw new ScreenNotFoundError(screen_id);
+  return screen;
 }
 
 async function loadScreenOrThrow(

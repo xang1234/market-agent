@@ -599,6 +599,7 @@ create index findings_agent_created_idx on findings(agent_id, created_at desc);
 
 create table run_activities (
   run_activity_id uuid primary key default gen_random_uuid(),
+  user_id uuid references users(user_id) on delete cascade,
   agent_id uuid not null references agents(agent_id) on delete cascade,
   stage activity_stage not null,
   subject_refs jsonb not null,
@@ -607,6 +608,7 @@ create table run_activities (
   ts timestamptz not null default now()
 );
 create index run_activities_agent_ts_idx on run_activities(agent_id, ts desc);
+create index run_activities_user_ts_idx on run_activities(user_id, ts desc) where user_id is not null;
 
 create table chat_threads (
   thread_id uuid primary key default gen_random_uuid(),
