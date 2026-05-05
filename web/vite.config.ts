@@ -31,6 +31,10 @@ export default defineConfig({
         target: process.env.PORTFOLIO_ORIGIN ?? 'http://127.0.0.1:4333',
         changeOrigin: true,
       },
+      '/v1/home': {
+        target: process.env.HOME_ORIGIN ?? 'http://127.0.0.1:4334',
+        changeOrigin: true,
+      },
     },
   },
 })

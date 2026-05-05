@@ -12,7 +12,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "sync:schema": "node -e \"require('node:fs').copyFileSync('../spec/finance_research_block_schema.json', 'src/blocks/blockSchema.json')\"",
-    "test": "node --experimental-strip-types --test src/**/*.test.ts",
+    "test": "TSX_TSCONFIG_PATH=tsconfig.app.json node --import tsx --test 'src/**/*.test.ts' 'src/**/*.test.tsx'",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -25,6 +25,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.4",
     "@tailwindcss/vite": "^4.2.4",
+    "@types/jsdom": "^28.0.1",
     "@types/node": "^24.12.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -33,7 +34,9 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.5.0",
+    "jsdom": "^29.1.1",
     "tailwindcss": "^4.2.4",
+    "tsx": "^4.21.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2",
     "vite": "^8.0.9"
