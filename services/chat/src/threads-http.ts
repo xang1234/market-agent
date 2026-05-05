@@ -11,10 +11,13 @@ import {
   type ChatThreadsDb,
   type CreateThreadInput,
 } from "./threads-repo.ts";
+import {
+  authenticatedUserRequiredMessage,
+  readAuthenticatedUserId,
+  type RequestAuthConfig,
+} from "../../shared/src/request-auth.ts";
 
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
-const USER_ID_HEADER = "x-user-id";
-const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ROUTE_PREFIX = "/v1/chat/threads";
 
 class RequestBodyTooLargeError extends Error {
@@ -32,6 +35,7 @@ export async function tryHandleThreadsRequest(
   db: ChatThreadsDb,
   req: IncomingMessage,
   res: ServerResponse,
+  auth?: RequestAuthConfig,
 ): Promise<boolean> {
   const rawUrl = req.url ?? "/";
   // Fast-path: skip URL parsing for requests that can't possibly match.
@@ -43,9 +47,9 @@ export async function tryHandleThreadsRequest(
   if (route == null) return false;
 
   try {
-    const userId = readUserId(req);
+    const userId = readAuthenticatedUserId(req, auth);
     if (!userId) {
-      respond(res, 401, { error: `'${USER_ID_HEADER}' header is required` });
+      respond(res, 401, { error: authenticatedUserRequiredMessage(auth) });
       return true;
     }
 
@@ -215,14 +219,6 @@ function parseCreateInput(body: unknown): CreateThreadInput {
     input.primary_subject_ref = obj.primary_subject_ref as CreateThreadInput["primary_subject_ref"];
   }
   return input;
-}
-
-function readUserId(req: IncomingMessage): string | null {
-  const raw = req.headers[USER_ID_HEADER];
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return USER_ID_PATTERN.test(trimmed) ? trimmed : null;
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {

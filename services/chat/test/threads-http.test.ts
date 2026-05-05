@@ -2,6 +2,7 @@ import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 
 import type { ChatThreadsDb } from "../src/threads-repo.ts";
+import type { RequestAuthConfig } from "../../shared/src/request-auth.ts";
 import { startChatTestServer } from "./sse-helpers.ts";
 import {
   buildRow,
@@ -11,8 +12,14 @@ import {
   USER_ID,
 } from "./threads-fixtures.ts";
 
-function startServer(t: TestContext, db: ChatThreadsDb): Promise<string> {
-  return startChatTestServer(t, { threadsDb: db });
+const USER_B = "55555555-5555-4555-8555-555555555555";
+
+function startServer(
+  t: TestContext,
+  db: ChatThreadsDb,
+  options: { auth?: RequestAuthConfig } = {},
+): Promise<string> {
+  return startChatTestServer(t, { threadsDb: db, auth: options.auth });
 }
 
 test("GET /v1/chat/threads returns 401 without an x-user-id header", async (t) => {
@@ -54,6 +61,23 @@ test("GET /v1/chat/threads returns scoped active threads in updated_at desc orde
   assert.equal(body.threads[0].thread_id, THREAD_ID);
   assert.equal(body.threads[0].title, "alpha");
   assert.match(queries[0].text, /and archived_at is null/);
+  assert.deepEqual(queries[0].values, [USER_ID]);
+});
+
+test("trusted-proxy auth scopes chat threads from server-derived identity, not x-user-id", async (t) => {
+  const { db, queries } = fakeDb(() => [
+    buildRow({ thread_id: THREAD_ID, title: "trusted" }),
+  ]);
+  const base = await startServer(t, db, { auth: { mode: "trusted_proxy" } });
+
+  const response = await fetch(`${base}/v1/chat/threads`, {
+    headers: {
+      "x-authenticated-user-id": USER_ID,
+      "x-user-id": USER_B,
+    },
+  });
+
+  assert.equal(response.status, 200);
   assert.deepEqual(queries[0].values, [USER_ID]);
 });
 

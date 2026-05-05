@@ -15,6 +15,7 @@ import {
   createRunActivityHub,
   type RunActivityHub,
 } from "../../observability/src/run-activity.ts";
+import type { RequestAuthConfig } from "../../shared/src/request-auth.ts";
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const MAX_PENDING_SSE_FRAMES = 100;
@@ -49,6 +50,7 @@ export type ChatServerOptions = {
   renderSubjectClarification?: ChatSubjectClarificationRenderer;
   runActivity?: ChatRunActivityReporter;
   runActivityHub?: RunActivityHub;
+  auth?: RequestAuthConfig;
   threadsDb?: ChatThreadsDb;
 };
 
@@ -63,7 +65,7 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
   const threadsDb = options.threadsDb;
 
   return createServer(async (req, res) => {
-    if (threadsDb && (await tryHandleThreadsRequest(threadsDb, req, res))) {
+    if (threadsDb && (await tryHandleThreadsRequest(threadsDb, req, res, options.auth))) {
       return;
     }
 

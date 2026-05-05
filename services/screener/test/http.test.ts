@@ -27,6 +27,7 @@ async function withServer<T>(
       createInMemoryCandidateRepository(DEV_SCREENER_CANDIDATES),
     screens: overrides.screens ?? createInMemoryScreenRepository(),
     clock: overrides.clock ?? (() => FIXED_NOW),
+    auth: overrides.auth,
   };
   const server = createScreenerServer(deps);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -131,6 +132,24 @@ test("POST /v1/screener/screens creates a saved screen and returns 201 with serv
     assert.match(body.screen.screen_id, /^[0-9a-f-]{36}$/);
     assert.equal(body.screen.created_at, FIXED_NOW.toISOString());
     assert.equal(body.screen.updated_at, FIXED_NOW.toISOString());
+  });
+});
+
+test("trusted-proxy auth stamps saved screens from server-derived identity, not x-user-id", async () => {
+  await withServer({ auth: { mode: "trusted_proxy" } }, async (baseUrl) => {
+    const r = await fetch(`${baseUrl}/v1/screener/screens`, {
+      method: "POST",
+      headers: {
+        "x-authenticated-user-id": USER_A,
+        "x-user-id": USER_B,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ name: "Trusted screen", definition: baseQuery() }),
+    });
+
+    assert.equal(r.status, 201);
+    const body = (await r.json()) as { screen: ScreenSubject };
+    assert.equal(body.screen.user_id, USER_A);
   });
 });
 

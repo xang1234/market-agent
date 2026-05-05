@@ -45,6 +45,41 @@ test("server: GET /v1/portfolios is empty for a fresh user", { timeout: 120000 }
   assert.deepEqual(await res.json(), { portfolios: [] });
 });
 
+test("server: trusted-proxy auth scopes portfolios from server-derived identity, not x-user-id", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for portfolio coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-cw0-9-1");
+  const client = await connectedClient(t, databaseUrl);
+  const userA = await seedUser(client, "trusted-a@example.test");
+  const userB = await seedUser(client, "trusted-b@example.test");
+  const base = await startServer(t, client, { auth: { mode: "trusted_proxy" } });
+
+  const create = await fetch(`${base}/v1/portfolios`, {
+    method: "POST",
+    headers: {
+      "x-authenticated-user-id": userA,
+      "x-user-id": userB,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ name: "Trusted", base_currency: "USD" }),
+  });
+
+  assert.equal(create.status, 201);
+  const createBody = (await create.json()) as { portfolio: { user_id: string } };
+  assert.equal(createBody.portfolio.user_id, userA);
+
+  const listB = await fetch(`${base}/v1/portfolios`, {
+    headers: {
+      "x-authenticated-user-id": userB,
+      "x-user-id": userA,
+    },
+  });
+  assert.equal(listB.status, 200);
+  assert.deepEqual(await listB.json(), { portfolios: [] });
+});
+
 test("server: POST creates a portfolio with required base_currency", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for portfolio coverage");

@@ -21,11 +21,17 @@ import {
   type ScreenSubject,
 } from "./screen-subject.ts";
 import { isUuidV4 } from "./validators.ts";
+import {
+  authenticatedUserRequiredMessage,
+  readAuthenticatedUserId,
+  type RequestAuthConfig,
+} from "../../shared/src/request-auth.ts";
 
 export type ScreenerServerDeps = {
   candidates: ScreenerCandidateRepository;
   screens: ScreenRepository;
   clock?: () => Date;
+  auth?: RequestAuthConfig;
 };
 
 const MAX_REQUEST_BODY_BYTES = 64 * 1024;
@@ -160,9 +166,9 @@ async function handleSaveScreen(
     return;
   }
   const raw = body.value as Record<string, unknown>;
-  const user_id = readUserId(req);
+  const user_id = readAuthenticatedUserId(req, deps.auth);
   if (!user_id) {
-    respond(res, 401, { error: "x-user-id header is required" });
+    respond(res, 401, { error: authenticatedUserRequiredMessage(deps.auth) });
     return;
   }
   const screen_id =
@@ -206,9 +212,9 @@ async function handleListScreens(
   res: ServerResponse,
   deps: ScreenerServerDeps,
 ): Promise<void> {
-  const user_id = readUserId(req);
+  const user_id = readAuthenticatedUserId(req, deps.auth);
   if (!user_id) {
-    respond(res, 401, { error: "x-user-id header is required" });
+    respond(res, 401, { error: authenticatedUserRequiredMessage(deps.auth) });
     return;
   }
   const screens = await deps.screens.listForUser(user_id);
@@ -261,9 +267,9 @@ async function loadScreenForUserOrThrow(
   deps: ScreenerServerDeps,
   screen_id: string,
 ): Promise<ScreenSubject | null> {
-  const user_id = readUserId(req);
+  const user_id = readAuthenticatedUserId(req, deps.auth);
   if (!user_id) {
-    respond(res, 401, { error: "x-user-id header is required" });
+    respond(res, 401, { error: authenticatedUserRequiredMessage(deps.auth) });
     return null;
   }
   const screen = await loadScreenOrThrow(deps, screen_id);
@@ -284,12 +290,6 @@ function respond(res: ServerResponse, status: number, body: object) {
   res.statusCode = status;
   res.setHeader("content-type", "application/json");
   res.end(JSON.stringify(body));
-}
-
-function readUserId(req: IncomingMessage): string | null {
-  const value = req.headers["x-user-id"];
-  const user_id = Array.isArray(value) ? value[0] : value;
-  return typeof user_id === "string" && isUuidV4(user_id) ? user_id : null;
 }
 
 type JsonBodyResult =

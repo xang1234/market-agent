@@ -2,12 +2,14 @@ import type { TestContext } from "node:test";
 import type { AddressInfo } from "node:net";
 import type { Client } from "pg";
 import { createPortfolioServer } from "../src/http.ts";
+import type { RequestAuthConfig } from "../../shared/src/request-auth.ts";
 
 export async function startServer(
   t: TestContext,
   db: Parameters<typeof createPortfolioServer>[0],
+  options: { auth?: RequestAuthConfig } = {},
 ): Promise<string> {
-  const server = createPortfolioServer(db);
+  const server = createPortfolioServer(db, { auth: options.auth });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const { port } = server.address() as AddressInfo;
