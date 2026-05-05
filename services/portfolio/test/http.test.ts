@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { seedUser, startServer, withUser } from "./helpers.ts";
+import { signTrustedUserId } from "../../shared/src/request-auth.ts";
+
+const TRUSTED_PROXY_SECRET = "portfolio-test-secret";
 
 test("server: missing x-user-id header returns 401", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
@@ -54,12 +57,15 @@ test("server: trusted-proxy auth scopes portfolios from server-derived identity,
   const client = await connectedClient(t, databaseUrl);
   const userA = await seedUser(client, "trusted-a@example.test");
   const userB = await seedUser(client, "trusted-b@example.test");
-  const base = await startServer(t, client, { auth: { mode: "trusted_proxy" } });
+  const base = await startServer(t, client, {
+    auth: { mode: "trusted_proxy", trustedProxySecret: TRUSTED_PROXY_SECRET },
+  });
 
   const create = await fetch(`${base}/v1/portfolios`, {
     method: "POST",
     headers: {
       "x-authenticated-user-id": userA,
+      "x-authenticated-user-signature": signTrustedUserId(userA, TRUSTED_PROXY_SECRET),
       "x-user-id": userB,
       "content-type": "application/json",
     },
@@ -73,6 +79,7 @@ test("server: trusted-proxy auth scopes portfolios from server-derived identity,
   const listB = await fetch(`${base}/v1/portfolios`, {
     headers: {
       "x-authenticated-user-id": userB,
+      "x-authenticated-user-signature": signTrustedUserId(userB, TRUSTED_PROXY_SECRET),
       "x-user-id": userA,
     },
   });

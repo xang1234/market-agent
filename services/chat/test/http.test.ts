@@ -15,6 +15,9 @@ import type {
   ChatResolvedSubjectPreResolution,
 } from "../src/subjects.ts";
 
+const USER_ID = "44444444-4444-4444-8444-444444444444";
+const USER_B = "55555555-5555-4555-8555-555555555555";
+
 async function startServer(
   t: TestContext,
   options: Parameters<typeof createChatServer>[0] = {},
@@ -241,12 +244,12 @@ test("stream route writes an immediate turn.started event", async (t) => {
 
 test("run activity stream replays retained events after Last-Event-ID", async (t) => {
   const hub = createRunActivityHub();
-  hub.publish(runActivityRow({ stage: "reading", summary: "Reading filings" }, 1));
-  hub.publish(runActivityRow({ stage: "found", summary: "Found update" }, 2));
+  hub.publish(runActivityRow({ stage: "reading", summary: "Reading filings" }, 1), { userId: USER_ID });
+  hub.publish(runActivityRow({ stage: "found", summary: "Found update" }, 2), { userId: USER_ID });
   const base = await startServer(t, { runActivityHub: hub });
 
   const response = await fetch(`${base}/v1/run-activities/stream`, {
-    headers: { "Last-Event-ID": "1" },
+    headers: { "Last-Event-ID": "1", "x-user-id": USER_ID },
   });
 
   assert.equal(response.status, 200);
@@ -254,6 +257,29 @@ test("run activity stream replays retained events after Last-Event-ID", async (t
   assert.equal(event.id, "2");
   assert.equal(event.event, "run_activity");
   assert.equal((event.data.activity as { stage?: string }).stage, "found");
+});
+
+test("run activity stream requires an authenticated user", async (t) => {
+  const base = await startServer(t, { runActivityHub: createRunActivityHub() });
+
+  const response = await fetch(`${base}/v1/run-activities/stream`);
+
+  assert.equal(response.status, 401);
+});
+
+test("run activity stream only replays the authenticated user's events", async (t) => {
+  const hub = createRunActivityHub();
+  hub.publish(runActivityRow({ stage: "reading", summary: "User A" }, 1), { userId: USER_ID });
+  hub.publish(runActivityRow({ stage: "found", summary: "User B" }, 2), { userId: USER_B });
+  const base = await startServer(t, { runActivityHub: hub });
+
+  const response = await fetch(`${base}/v1/run-activities/stream`, {
+    headers: { "x-user-id": USER_ID },
+  });
+
+  assert.equal(response.status, 200);
+  const [event] = await readSseEvents(response, 1);
+  assert.equal((event.data.activity as { summary?: string }).summary, "User A");
 });
 
 test("run activity stream receives activity emitted from the live chat runner lifecycle", async (t) => {
@@ -276,19 +302,23 @@ test("run activity stream receives activity emitted from the live chat runner li
       runner,
       runActivity: {
         agentId: "11111111-1111-4111-8111-111111111111",
-        report: async (input) => {
+        report: async (input, scope) => {
           reported.push(input);
-          hub.publish(runActivityRow(input, reported.length));
+          hub.publish(runActivityRow(input, reported.length), scope);
         },
       },
     }),
     runActivityHub: hub,
   });
 
-  const activityResponse = await fetch(`${base}/v1/run-activities/stream`);
+  const activityResponse = await fetch(`${base}/v1/run-activities/stream`, {
+    headers: { "x-user-id": USER_ID },
+  });
   assert.equal(activityResponse.status, 200);
 
-  const chatResponse = await fetch(`${base}/v1/chat/threads/thread-live/stream?run_id=run-live`);
+  const chatResponse = await fetch(`${base}/v1/chat/threads/thread-live/stream?run_id=run-live`, {
+    headers: { "x-user-id": USER_ID },
+  });
   assert.equal(chatResponse.status, 200);
 
   const activityEvents = await readSseEvents(activityResponse, 3);

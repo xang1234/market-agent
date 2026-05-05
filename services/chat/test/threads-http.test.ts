@@ -2,7 +2,7 @@ import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 
 import type { ChatThreadsDb } from "../src/threads-repo.ts";
-import type { RequestAuthConfig } from "../../shared/src/request-auth.ts";
+import { signTrustedUserId, type RequestAuthConfig } from "../../shared/src/request-auth.ts";
 import { startChatTestServer } from "./sse-helpers.ts";
 import {
   buildRow,
@@ -13,6 +13,7 @@ import {
 } from "./threads-fixtures.ts";
 
 const USER_B = "55555555-5555-4555-8555-555555555555";
+const TRUSTED_PROXY_SECRET = "thread-test-secret";
 
 function startServer(
   t: TestContext,
@@ -68,17 +69,35 @@ test("trusted-proxy auth scopes chat threads from server-derived identity, not x
   const { db, queries } = fakeDb(() => [
     buildRow({ thread_id: THREAD_ID, title: "trusted" }),
   ]);
-  const base = await startServer(t, db, { auth: { mode: "trusted_proxy" } });
+  const base = await startServer(t, db, {
+    auth: { mode: "trusted_proxy", trustedProxySecret: TRUSTED_PROXY_SECRET },
+  });
 
   const response = await fetch(`${base}/v1/chat/threads`, {
     headers: {
       "x-authenticated-user-id": USER_ID,
+      "x-authenticated-user-signature": signTrustedUserId(USER_ID, TRUSTED_PROXY_SECRET),
       "x-user-id": USER_B,
     },
   });
 
   assert.equal(response.status, 200);
   assert.deepEqual(queries[0].values, [USER_ID]);
+});
+
+test("trusted-proxy auth rejects unsigned server-derived identity headers", async (t) => {
+  const { db } = fakeDb(() => {
+    throw new Error("query must not be called");
+  });
+  const base = await startServer(t, db, {
+    auth: { mode: "trusted_proxy", trustedProxySecret: TRUSTED_PROXY_SECRET },
+  });
+
+  const response = await fetch(`${base}/v1/chat/threads`, {
+    headers: { "x-authenticated-user-id": USER_ID },
+  });
+
+  assert.equal(response.status, 401);
 });
 
 test("GET /v1/chat/threads?include_archived=true drops the archived filter", async (t) => {

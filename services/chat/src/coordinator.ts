@@ -12,6 +12,7 @@ import type {
 } from "./subjects.ts";
 import type {
   RunActivityInput,
+  RunActivityScope,
   RunActivityStage,
   SubjectRefJson,
 } from "../../observability/src/run-activity.ts";
@@ -21,6 +22,7 @@ export type ChatTurnInput = {
   runId: string;
   turnId?: string;
   subjectText?: string;
+  userId?: string;
 };
 
 export type ChatTurnEmit = (
@@ -43,7 +45,8 @@ export type ChatTurnRunner = (context: ChatTurnRunContext) => Promise<void> | vo
 
 export type ChatRunActivityReporter = {
   agentId: string;
-  report(input: RunActivityInput): Promise<void> | void;
+  report(input: RunActivityInput, scope: RunActivityScope): Promise<void> | void;
+  onError?: (error: unknown, input: RunActivityInput, scope: RunActivityScope) => void;
 };
 
 export type ChatSubjectClarificationRenderInput = {
@@ -300,25 +303,31 @@ function runActivityReportingRunner(
 
   return async (context) => {
     const pendingReports: Promise<void>[] = [];
+    const scope = context.userId ? { userId: context.userId } : null;
     const report = (
       stage: RunActivityStage,
       summary: string,
       payload: Record<string, unknown>,
     ) => {
+      if (!scope) return;
+      const input = {
+        agent_id: reporter.agentId,
+        stage,
+        subject_refs: subjectRefsFromPayload(context, payload),
+        source_refs: sourceRefsFromPayload(payload),
+        summary,
+      };
       try {
-        const result = reporter.report({
-          agent_id: reporter.agentId,
-          stage,
-          subject_refs: subjectRefsFromPayload(context, payload),
-          source_refs: sourceRefsFromPayload(payload),
-          summary,
-        });
+        const result = reporter.report(input, scope);
         if (result && typeof result.then === "function") {
-          pendingReports.push(result.catch(() => undefined));
+          pendingReports.push(result.catch((error) => {
+            reporter.onError?.(error, input, scope);
+          }));
         }
-      } catch {
+      } catch (error) {
         // Run activity is user-facing telemetry; reporter failures must not
         // fail the chat turn itself.
+        reporter.onError?.(error, input, scope);
       }
     };
     const emit: ChatTurnEmit = (type, payload = {}) => {
@@ -400,11 +409,12 @@ function normalizeTurnInput(input: ChatTurnInput): NormalizedChatTurnInput {
     runId: input.runId,
     turnId: input.turnId ?? input.runId,
     ...(subjectText ? { subjectText } : {}),
+    ...(input.userId ? { userId: input.userId } : {}),
   };
 }
 
 function turnKey(input: NormalizedChatTurnInput): string {
-  return JSON.stringify([input.threadId, input.runId, input.turnId]);
+  return JSON.stringify([input.userId ?? null, input.threadId, input.runId, input.turnId]);
 }
 
 function assertSameTurnInput(existing: ChatTurnInput, incoming: ChatTurnInput) {
@@ -412,7 +422,8 @@ function assertSameTurnInput(existing: ChatTurnInput, incoming: ChatTurnInput) {
     existing.threadId !== incoming.threadId ||
     existing.runId !== incoming.runId ||
     existing.turnId !== incoming.turnId ||
-    existing.subjectText !== incoming.subjectText
+    existing.subjectText !== incoming.subjectText ||
+    existing.userId !== incoming.userId
   ) {
     throw new ChatTurnInputMismatchError();
   }

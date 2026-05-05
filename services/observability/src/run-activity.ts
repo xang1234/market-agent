@@ -47,11 +47,15 @@ export type RunActivitySseEvent = {
   };
 };
 
+export type RunActivityScope = {
+  userId: string;
+};
+
 export type RunActivityHub = {
-  readonly events: ReadonlyArray<RunActivitySseEvent>;
   currentSeq(): number;
-  publish(activity: RunActivityRow): RunActivitySseEvent;
-  subscribe(listener: (event: RunActivitySseEvent) => void): () => void;
+  eventsForUser(userId: string): ReadonlyArray<RunActivitySseEvent>;
+  publish(activity: RunActivityRow, scope: RunActivityScope): RunActivitySseEvent;
+  subscribe(userId: string, listener: (event: RunActivitySseEvent) => void): () => void;
 };
 
 export async function writeRunActivity(
@@ -88,36 +92,43 @@ export function createRunActivityHub(
   }
 
   let seq = 0;
-  const events: RunActivitySseEvent[] = [];
-  const listeners = new Set<(event: RunActivitySseEvent) => void>();
+  const events: Array<{ userId: string; event: RunActivitySseEvent }> = [];
+  const listeners = new Set<{ userId: string; listener: (event: RunActivitySseEvent) => void }>();
 
   return {
-    get events() {
-      return [...events];
-    },
     currentSeq() {
       return seq;
     },
-    publish(activity) {
+    eventsForUser(userId) {
+      assertUserId(userId);
+      return events
+        .filter((entry) => entry.userId === userId)
+        .map((entry) => entry.event);
+    },
+    publish(activity, scope) {
+      assertUserId(scope.userId);
       seq += 1;
       const event = deepFreeze(createRunActivitySseEvent(activity, seq));
-      events.push(event);
+      events.push({ userId: scope.userId, event });
       while (events.length > maxRetainedEvents) {
         events.shift();
       }
-      for (const listener of [...listeners]) {
+      for (const entry of [...listeners]) {
+        if (entry.userId !== scope.userId) continue;
         try {
-          listener(event);
+          entry.listener(event);
         } catch {
-          listeners.delete(listener);
+          listeners.delete(entry);
         }
       }
       return event;
     },
-    subscribe(listener) {
-      listeners.add(listener);
+    subscribe(userId, listener) {
+      assertUserId(userId);
+      const entry = { userId, listener };
+      listeners.add(entry);
       return () => {
-        listeners.delete(listener);
+        listeners.delete(entry);
       };
     },
   };
@@ -127,8 +138,9 @@ export async function writeAndPublishRunActivity(
   db: QueryExecutor,
   hub: RunActivityHub,
   input: RunActivityInput,
+  scope: RunActivityScope,
 ): Promise<RunActivitySseEvent> {
-  return hub.publish(await writeRunActivity(db, input));
+  return hub.publish(await writeRunActivity(db, input), scope);
 }
 
 export function createRunActivitySseEvent(
@@ -172,6 +184,10 @@ function assertNonEmptyString(value: unknown, label: string): asserts value is s
   if (typeof value !== "string" || value.trim() === "") {
     throw new Error(`run activity ${label} is required`);
   }
+}
+
+function assertUserId(value: unknown): asserts value is string {
+  assertNonEmptyString(value, "user_id");
 }
 
 function deepFreeze<T>(value: T, seen = new Set<object>()): T {

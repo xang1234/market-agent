@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import type { Client } from "pg";
 import { bootstrapDatabase, connectedClient, dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
 import { createWatchlistsServer } from "../src/http.ts";
-import type { RequestAuthConfig } from "../../shared/src/request-auth.ts";
+import { signTrustedUserId, type RequestAuthConfig } from "../../shared/src/request-auth.ts";
 
 // bootstrapDatabase applies the base schema pack only; 0003 adds the
 // trigger + unique index that provision the implicit default manual
@@ -35,6 +35,7 @@ async function startServer(
 
 const APPLE_LISTING = { kind: "listing", id: "11111111-1111-4111-a111-111111111111" } as const;
 const MSFT_LISTING = { kind: "listing", id: "22222222-2222-4222-a222-222222222222" } as const;
+const TRUSTED_PROXY_SECRET = "watchlists-test-secret";
 
 async function seedUser(client: Client, email: string): Promise<string> {
   const result = await client.query<{ user_id: string }>(
@@ -110,12 +111,15 @@ test("server: trusted-proxy auth scopes watchlists from server-derived identity,
   await applyDefaultManualWatchlistMigration(client);
   const userA = await seedUser(client, "trusted-a@example.test");
   const userB = await seedUser(client, "trusted-b@example.test");
-  const base = await startServer(t, client, { auth: { mode: "trusted_proxy" } });
+  const base = await startServer(t, client, {
+    auth: { mode: "trusted_proxy", trustedProxySecret: TRUSTED_PROXY_SECRET },
+  });
 
   const add = await fetch(`${base}/v1/watchlists/default/members`, {
     method: "POST",
     headers: {
       "x-authenticated-user-id": userA,
+      "x-authenticated-user-signature": signTrustedUserId(userA, TRUSTED_PROXY_SECRET),
       "x-user-id": userB,
       "content-type": "application/json",
     },
@@ -126,6 +130,7 @@ test("server: trusted-proxy auth scopes watchlists from server-derived identity,
   const listB = await fetch(`${base}/v1/watchlists/default/members`, {
     headers: {
       "x-authenticated-user-id": userB,
+      "x-authenticated-user-signature": signTrustedUserId(userB, TRUSTED_PROXY_SECRET),
       "x-user-id": userA,
     },
   });

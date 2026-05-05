@@ -8,10 +8,12 @@ import { createInMemoryScreenRepository } from "../src/screen-repository.ts";
 import type { ScreenerQuery } from "../src/query.ts";
 import type { ScreenerResponse } from "../src/result.ts";
 import type { ScreenSubject } from "../src/screen-subject.ts";
+import { signTrustedUserId } from "../../shared/src/request-auth.ts";
 
 const FIXED_NOW = new Date("2026-04-22T15:30:00.000Z");
 const USER_A = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
 const USER_B = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+const TRUSTED_PROXY_SECRET = "screener-test-secret";
 
 function withUser(userId = USER_A): HeadersInit {
   return { "x-user-id": userId };
@@ -136,11 +138,14 @@ test("POST /v1/screener/screens creates a saved screen and returns 201 with serv
 });
 
 test("trusted-proxy auth stamps saved screens from server-derived identity, not x-user-id", async () => {
-  await withServer({ auth: { mode: "trusted_proxy" } }, async (baseUrl) => {
+  await withServer({
+    auth: { mode: "trusted_proxy", trustedProxySecret: TRUSTED_PROXY_SECRET },
+  }, async (baseUrl) => {
     const r = await fetch(`${baseUrl}/v1/screener/screens`, {
       method: "POST",
       headers: {
         "x-authenticated-user-id": USER_A,
+        "x-authenticated-user-signature": signTrustedUserId(USER_A, TRUSTED_PROXY_SECRET),
         "x-user-id": USER_B,
         "content-type": "application/json",
       },

@@ -13,9 +13,14 @@ import { tryHandleThreadsRequest } from "./threads-http.ts";
 import type { ChatThreadsDb } from "./threads-repo.ts";
 import {
   createRunActivityHub,
+  type RunActivitySseEvent,
   type RunActivityHub,
 } from "../../observability/src/run-activity.ts";
-import type { RequestAuthConfig } from "../../shared/src/request-auth.ts";
+import {
+  authenticatedUserRequiredMessage,
+  readAuthenticatedUserId,
+  type RequestAuthConfig,
+} from "../../shared/src/request-auth.ts";
 
 const HEARTBEAT_INTERVAL_MS = 250;
 const MAX_PENDING_SSE_FRAMES = 100;
@@ -70,7 +75,7 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
     }
 
     if (matchRunActivityStreamRoute(req.method ?? "GET", req.url ?? "/")) {
-      handleRunActivityStreamRequest(runActivityHub, req, res);
+      handleRunActivityStreamRequest(runActivityHub, req, res, options.auth);
       return;
     }
 
@@ -92,6 +97,11 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
     }
     const runId = route.runId;
     const turnId = route.turnId ?? runId;
+    const userId = readAuthenticatedUserId(req, options.auth);
+    if (options.runActivity && userId === null) {
+      respondJson(res, 401, { error: authenticatedUserRequiredMessage(options.auth) });
+      return;
+    }
 
     const resumeAfterSeq = parseLastEventId(req.headers["last-event-id"]);
     if (resumeAfterSeq === INVALID_LAST_EVENT_ID) {
@@ -104,6 +114,7 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
       runId,
       turnId,
       ...(route.subjectText ? { subjectText: route.subjectText } : {}),
+      ...(userId ? { userId } : {}),
     };
     const turn = getTurnForRoute(coordinator, turnInput, resumeAfterSeq > 0);
     if (turn === INPUT_MISMATCH) {
@@ -161,7 +172,14 @@ function handleRunActivityStreamRequest(
   hub: RunActivityHub,
   req: IncomingMessage,
   res: ServerResponse,
+  auth: RequestAuthConfig = {},
 ) {
+  const userId = readAuthenticatedUserId(req, auth);
+  if (userId === null) {
+    respondJson(res, 401, { error: authenticatedUserRequiredMessage(auth) });
+    return;
+  }
+
   const resumeAfterSeq = parseLastEventId(req.headers["last-event-id"]);
   if (resumeAfterSeq === INVALID_LAST_EVENT_ID) {
     respondJson(res, 400, { error: "'Last-Event-ID' must be a non-negative safe decimal integer" });
@@ -184,8 +202,20 @@ function handleRunActivityStreamRequest(
     writer.writeEvent(event);
     lastWrittenSeq = event.seq;
   };
-  const unsubscribe = hub.subscribe(writeIfNew);
-  for (const event of hub.events) {
+  const pendingLiveEvents: RunActivitySseEvent[] = [];
+  let replaying = true;
+  const unsubscribe = hub.subscribe(userId, (event) => {
+    if (replaying) {
+      pendingLiveEvents.push(event);
+      return;
+    }
+    writeIfNew(event);
+  });
+  for (const event of hub.eventsForUser(userId)) {
+    writeIfNew(event);
+  }
+  replaying = false;
+  for (const event of pendingLiveEvents.sort((left, right) => left.seq - right.seq)) {
     writeIfNew(event);
   }
 

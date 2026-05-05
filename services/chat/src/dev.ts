@@ -21,8 +21,11 @@ const server = createChatServer({
     ? {
         runActivity: {
           agentId: runActivityAgentId,
-          report: async (input) => {
-            await writeAndPublishRunActivity(pool, runActivityHub, input);
+          report: async (input, scope) => {
+            await writeAndPublishRunActivity(pool, runActivityHub, input, scope);
+          },
+          onError: (error) => {
+            console.error("failed to publish run activity", error);
           },
         },
       }

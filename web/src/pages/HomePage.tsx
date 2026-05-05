@@ -78,26 +78,28 @@ export function HomePage() {
   }, [sessionUserId])
 
   useEffect(() => {
-    const source = new EventSource('/v1/run-activities/stream')
-    const onRunActivity = (event: MessageEvent) => {
-      const activity = parseRunActivityEvent(event)
-      if (activity === null) return
-      setHomeState((current) => {
-        const base =
-          current.userId === sessionUserId
-            ? current
-            : { userId: sessionUserId, feed: EMPTY_HOME_FEED, activities: [] }
-        return {
-          ...base,
-          activities: mergeActivities([activity], base.activities),
-        }
-      })
-    }
-    source.addEventListener('run_activity', onRunActivity)
-    return () => {
-      source.removeEventListener('run_activity', onRunActivity)
-      source.close()
-    }
+    if (sessionUserId === null) return
+
+    const controller = new AbortController()
+    void consumeRunActivityStream({
+      signal: controller.signal,
+      userId: sessionUserId,
+      onActivity: (activity) => {
+        setHomeState((current) => {
+          const base =
+            current.userId === sessionUserId
+              ? current
+              : { userId: sessionUserId, feed: EMPTY_HOME_FEED, activities: [] }
+          return {
+            ...base,
+            activities: mergeActivities([activity], base.activities),
+          }
+        })
+      },
+    }).catch(() => {
+      // The next Home render or session change will establish a fresh stream.
+    })
+    return () => controller.abort()
   }, [sessionUserId])
 
   return (
@@ -134,6 +136,75 @@ export function HomePage() {
       </div>
     </div>
   )
+}
+
+async function consumeRunActivityStream({
+  signal,
+  userId,
+  onActivity,
+}: {
+  signal: AbortSignal
+  userId: string
+  onActivity(activity: HomeRunActivity): void
+}) {
+  const response = await fetch('/v1/run-activities/stream', {
+    credentials: 'same-origin',
+    headers: { 'x-user-id': userId },
+    signal,
+  })
+  if (!response.ok || response.body === null) {
+    return
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  try {
+    while (!signal.aborted) {
+      const next = await reader.read()
+      if (next.done) break
+      buffer += decoder.decode(next.value, { stream: true })
+
+      let boundary = buffer.indexOf('\n\n')
+      while (boundary >= 0) {
+        const block = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+        const activity = parseRunActivitySseBlock(block)
+        if (activity !== null) {
+          onActivity(activity)
+        }
+        boundary = buffer.indexOf('\n\n')
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined)
+  }
+}
+
+function parseRunActivitySseBlock(block: string): HomeRunActivity | null {
+  let eventName: string | null = null
+  const data: string[] = []
+  for (const line of block.split('\n')) {
+    if (line.startsWith('event: ')) {
+      eventName = line.slice('event: '.length)
+    } else if (line.startsWith('data: ')) {
+      data.push(line.slice('data: '.length))
+    }
+  }
+  if (eventName !== 'run_activity' || data.length === 0) {
+    return null
+  }
+  return parseRunActivityData(data.join('\n'))
+}
+
+function parseRunActivityData(data: string): HomeRunActivity | null {
+  try {
+    const parsed = JSON.parse(data) as { activity?: HomeRunActivity }
+    return parsed.activity ?? null
+  } catch {
+    return null
+  }
 }
 
 function HomeFindingCard({ finding }: { finding: HomeFinding }) {
@@ -276,15 +347,6 @@ function formatTime(value: string): string {
     hour: 'numeric',
     minute: '2-digit',
   }).format(new Date(value))
-}
-
-function parseRunActivityEvent(event: MessageEvent): HomeRunActivity | null {
-  try {
-    const parsed = JSON.parse(event.data as string) as { activity?: HomeRunActivity }
-    return parsed.activity ?? null
-  } catch {
-    return null
-  }
 }
 
 function mergeActivities(
