@@ -38,6 +38,10 @@ function card(overrides: Partial<HomeFindingCard> & {
     finding_ids: [finding.finding_id],
     claim_cluster_ids: [],
     user_affinity: overrides.user_affinity ?? 0,
+    destination: overrides.destination ?? {
+      kind: "none",
+      reason: "test_fixture",
+    },
   };
 }
 

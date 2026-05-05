@@ -208,6 +208,62 @@ test("listHomeFindingCards preserves explicit symbol earnings destinations", asy
   });
 });
 
+test("listHomeFindingCards preserves explicit none destination reasons", async () => {
+  const { db } = fakeDb([
+    findingRow({
+      preferred_surface: {
+        kind: "none",
+        reason: "no_canonical_route",
+      },
+    }),
+  ]);
+
+  const cards = await listHomeFindingCards(db, { user_id: USER_ID });
+
+  assert.deepEqual(cards[0].destination, {
+    kind: "none",
+    reason: "no_canonical_route",
+  });
+});
+
+test("listHomeFindingCards uses the primary finding destination for grouped cards", async () => {
+  const olderLowSubjectRef = { kind: "listing", id: "55555555-5555-4555-a555-555555555551" };
+  const newerHighSubjectRef = { kind: "listing", id: "55555555-5555-4555-a555-555555555552" };
+  const { db } = fakeDb([
+    findingRow({
+      finding_id: "22222222-2222-4222-a222-222222222271",
+      severity: "low",
+      headline: "Latest low-severity detail",
+      created_at: "2026-05-05T03:00:00.000Z",
+      preferred_surface: {
+        kind: "symbol",
+        subject_ref: olderLowSubjectRef,
+        tab: "overview",
+      },
+    }),
+    findingRow({
+      finding_id: "22222222-2222-4222-a222-222222222272",
+      severity: "high",
+      headline: "Older high-severity earnings detail",
+      created_at: "2026-05-05T02:00:00.000Z",
+      preferred_surface: {
+        kind: "symbol",
+        subject_ref: newerHighSubjectRef,
+        tab: "earnings",
+      },
+    }),
+  ]);
+
+  const cards = await listHomeFindingCards(db, { user_id: USER_ID });
+
+  assert.equal(cards[0].primary_finding.finding_id, "22222222-2222-4222-a222-222222222272");
+  assert.deepEqual(cards[0].destination, {
+    kind: "symbol",
+    subject_ref: newerHighSubjectRef,
+    tab: "earnings",
+  });
+});
+
 test("listHomeFindingCards rejects invalid destination metadata", async () => {
   const { db } = fakeDb([
     findingRow({

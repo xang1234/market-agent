@@ -40,9 +40,13 @@ type FindingFeedRow = {
 
 type Group = {
   dedupe_key: string;
-  findings: HomeFinding[];
+  entries: FindingFeedEntry[];
   support_counts: number[];
-  destinations: HomeCardDestination[];
+};
+
+type FindingFeedEntry = {
+  finding: HomeFinding;
+  destination: HomeCardDestination;
 };
 
 const SUBJECT_KINDS = new Set([
@@ -115,13 +119,15 @@ function cardsFromRows(rows: ReadonlyArray<FindingFeedRow>): HomeFindingCard[] {
     const dedupe_key = dedupeKey(finding);
     let group = groups.get(dedupe_key);
     if (!group) {
-      group = { dedupe_key, findings: [], support_counts: [], destinations: [] };
+      group = { dedupe_key, entries: [], support_counts: [] };
       groups.set(dedupe_key, group);
     }
-    group.findings.push(finding);
+    group.entries.push({
+      finding,
+      destination: parseHomeCardDestination(row.preferred_surface),
+    });
     const supportCount = nullableCount(row.cluster_support_count);
     if (supportCount !== null) group.support_counts.push(supportCount);
-    group.destinations.push(parseHomeCardDestination(row.preferred_surface));
   }
 
   return [...groups.values()]
@@ -134,8 +140,10 @@ function cardsFromRows(rows: ReadonlyArray<FindingFeedRow>): HomeFindingCard[] {
 }
 
 function cardFromGroup(group: Group): HomeFindingCard {
-  const findings = [...group.findings].sort(comparePrimaryFinding);
-  const primary = findings[0];
+  const entries = [...group.entries].sort((a, b) => comparePrimaryFinding(a.finding, b.finding));
+  const primaryEntry = entries[0];
+  const primary = primaryEntry.finding;
+  const findings = entries.map((entry) => entry.finding);
   const agentIds = sortedUnique(findings.map((finding) => finding.agent_id));
   const findingIds = sortedUnique(findings.map((finding) => finding.finding_id));
   const claimClusterIds = sortedUnique(findings.flatMap((finding) => finding.claim_cluster_ids));
@@ -159,10 +167,7 @@ function cardFromGroup(group: Group): HomeFindingCard {
     finding_ids: findingIds,
     claim_cluster_ids: claimClusterIds,
     user_affinity: 0,
-    destination: group.destinations.find((destination) => destination.kind !== "none") ?? {
-      kind: "none",
-      reason: "missing_destination",
-    },
+    destination: primaryEntry.destination,
   });
 }
 
