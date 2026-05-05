@@ -23,6 +23,7 @@ export const FACT_METHODS = Object.freeze(["reported", "derived", "estimated", "
 export const FRESHNESS_CLASSES = Object.freeze(["real_time", "delayed_15m", "eod", "filing_time", "stale"] as const);
 export const COVERAGE_LEVELS = Object.freeze(["full", "partial", "sparse", "unavailable"] as const);
 export const FACT_REVIEW_STATUSES = Object.freeze(["queued", "reviewed", "dismissed"] as const);
+export const FACT_REVIEW_ACTIONS = Object.freeze(["approved", "rejected", "edited"] as const);
 export const FACT_ENTITLEMENT_CHANNELS = Object.freeze(["app", "export", "email", "push"] as const);
 
 export type FactSubjectKind = (typeof FACT_SUBJECT_KINDS)[number];
@@ -31,6 +32,7 @@ export type FactMethod = (typeof FACT_METHODS)[number];
 export type FreshnessClass = (typeof FRESHNESS_CLASSES)[number];
 export type CoverageLevel = (typeof COVERAGE_LEVELS)[number];
 export type FactReviewStatus = (typeof FACT_REVIEW_STATUSES)[number];
+export type FactReviewAction = (typeof FACT_REVIEW_ACTIONS)[number];
 export type FactEntitlementChannel = (typeof FACT_ENTITLEMENT_CHANNELS)[number];
 
 export type FactInput = Readonly<{
@@ -102,7 +104,91 @@ export type FactReviewQueueRow = Readonly<{
   status: FactReviewStatus;
   created_at: string;
   updated_at: string;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  fact_id: string | null;
 }>;
+
+export type FactReviewActionRow = Readonly<{
+  action_id: string;
+  review_id: string;
+  action: FactReviewAction;
+  reviewer_id: string;
+  notes: string | null;
+  candidate_before: FactInput;
+  candidate_after: FactInput | null;
+  fact_id: string | null;
+  created_at: string;
+}>;
+
+export type ListFactReviewQueueInput = Readonly<{
+  status?: FactReviewStatus;
+  limit?: number;
+}>;
+
+export type ListStaleFactReviewQueueInput = Readonly<{
+  now: string;
+  stale_after_seconds: number;
+  limit?: number;
+}>;
+
+export type StaleFactReviewQueueRow = FactReviewQueueRow & Readonly<{
+  age_seconds: number;
+  stale_after_seconds: number;
+}>;
+
+export type ApproveFactReviewInput = Readonly<{
+  review_id: string;
+  reviewer_id: string;
+  notes?: string | null;
+  candidate?: FactInput;
+  reviewed_at?: string;
+  throughput_limit?: FactReviewThroughputLimit;
+}>;
+
+export type ApproveFactReviewResult = Readonly<{
+  review: FactReviewQueueRow;
+  fact: FactRow;
+  action: FactReviewActionRow;
+}>;
+
+export type RejectFactReviewInput = Readonly<{
+  review_id: string;
+  reviewer_id: string;
+  notes?: string | null;
+  reviewed_at?: string;
+  throughput_limit?: FactReviewThroughputLimit;
+}>;
+
+export type EditFactReviewCandidateInput = Readonly<{
+  review_id: string;
+  reviewer_id: string;
+  candidate: FactInput;
+  notes?: string | null;
+  reviewed_at?: string;
+  throughput_limit?: FactReviewThroughputLimit;
+}>;
+
+export type FactReviewThroughputLimit = Readonly<{
+  max_actions: number;
+  window_seconds: number;
+}>;
+
+export class FactReviewThroughputExceededError extends Error {
+  readonly reviewer_id: string;
+  readonly max_actions: number;
+  readonly window_seconds: number;
+
+  constructor(input: { reviewer_id: string; max_actions: number; window_seconds: number }) {
+    super(
+      `reviewer throughput limit exceeded: ${input.max_actions} actions per ${input.window_seconds} seconds`,
+    );
+    this.name = "FactReviewThroughputExceededError";
+    this.reviewer_id = input.reviewer_id;
+    this.max_actions = input.max_actions;
+    this.window_seconds = input.window_seconds;
+  }
+}
 
 export type ListFactsForEgressInput = Readonly<{
   fact_ids: readonly string[];
@@ -142,11 +228,22 @@ type FactDbRow = Omit<FactRow, "value_num" | "scale" | "confidence" | "created_a
   created_at: Date | string;
   updated_at: Date | string;
 };
-type FactReviewQueueDbRow = Omit<FactReviewQueueRow, "confidence" | "threshold" | "created_at" | "updated_at"> & {
+type FactReviewQueueDbRow = Omit<
+  FactReviewQueueRow,
+  "confidence" | "threshold" | "created_at" | "updated_at" | "reviewed_at"
+> & {
   confidence: number | string;
   threshold: number | string;
   created_at: Date | string;
   updated_at: Date | string;
+  reviewed_at: Date | string | null;
+};
+type StaleFactReviewQueueDbRow = FactReviewQueueDbRow & {
+  age_seconds: number | string;
+  stale_after_seconds: number | string;
+};
+type FactReviewActionDbRow = Omit<FactReviewActionRow, "created_at"> & {
+  created_at: Date | string;
 };
 
 const FACT_COLUMNS = `fact_id,
@@ -182,6 +279,30 @@ const FACT_COLUMNS = `fact_id,
                ingestion_batch_id,
                created_at,
                updated_at`;
+
+const FACT_REVIEW_QUEUE_COLUMNS = `review_id,
+               candidate,
+               reason,
+               source_id,
+               metric_id,
+               confidence,
+               threshold,
+               status,
+               created_at,
+               updated_at,
+               reviewed_by,
+               reviewed_at,
+               fact_id`;
+
+const FACT_REVIEW_ACTION_COLUMNS = `action_id,
+               review_id,
+               action,
+               reviewer_id,
+               notes,
+               candidate_before,
+               candidate_after,
+               fact_id,
+               created_at`;
 
 export async function createFact(
   db: QueryExecutor,
@@ -347,7 +468,10 @@ export async function queueFactReview(
                threshold,
                status,
                created_at,
-               updated_at`,
+               updated_at,
+               reviewed_by,
+               reviewed_at,
+               fact_id`,
     [
       normalized,
       input.reason,
@@ -359,6 +483,203 @@ export async function queueFactReview(
   );
 
   return factReviewQueueRowFromDb(rows[0]);
+}
+
+export async function listFactReviewQueue(
+  db: QueryExecutor,
+  input: ListFactReviewQueueInput = {},
+): Promise<ReadonlyArray<FactReviewQueueRow>> {
+  const limit = input.limit ?? 50;
+  assertPositiveIntegerInRange(limit, "limit", 1, 100);
+
+  if (input.status != null) {
+    assertOneOf(input.status, FACT_REVIEW_STATUSES, "status");
+    const { rows } = await db.query<FactReviewQueueDbRow>(
+      `select ${FACT_REVIEW_QUEUE_COLUMNS}
+         from fact_review_queue
+        where status = $1
+        order by created_at asc, review_id asc
+        limit $2`,
+      [input.status, limit],
+    );
+    return Object.freeze(rows.map(factReviewQueueRowFromDb));
+  }
+
+  const { rows } = await db.query<FactReviewQueueDbRow>(
+    `select ${FACT_REVIEW_QUEUE_COLUMNS}
+       from fact_review_queue
+      order by created_at asc, review_id asc
+      limit $1`,
+    [limit],
+  );
+  return Object.freeze(rows.map(factReviewQueueRowFromDb));
+}
+
+export async function listStaleFactReviewQueueItems(
+  db: QueryExecutor,
+  input: ListStaleFactReviewQueueInput,
+): Promise<ReadonlyArray<StaleFactReviewQueueRow>> {
+  assertIso8601WithOffset(input.now, "now");
+  assertPositiveIntegerInRange(input.stale_after_seconds, "stale_after_seconds", 1, 30 * 24 * 60 * 60);
+  const limit = input.limit ?? 50;
+  assertPositiveIntegerInRange(limit, "limit", 1, 100);
+
+  const { rows } = await db.query<StaleFactReviewQueueDbRow>(
+    `select ${FACT_REVIEW_QUEUE_COLUMNS},
+            extract(epoch from ($1::timestamptz - created_at))::int as age_seconds,
+            $2::int as stale_after_seconds
+       from fact_review_queue
+      where status = 'queued'
+        and created_at <= $1::timestamptz - ($2 * interval '1 second')
+      order by created_at asc, review_id asc
+      limit $3`,
+    [input.now, input.stale_after_seconds, limit],
+  );
+  return Object.freeze(rows.map(staleFactReviewQueueRowFromDb));
+}
+
+export async function approveFactReview(
+  db: QueryExecutor,
+  input: ApproveFactReviewInput,
+): Promise<ApproveFactReviewResult> {
+  assertReviewActionInput(input.review_id, input.reviewer_id, input.reviewed_at);
+  const notes = normalizeOptionalNotes(input.notes);
+  const reviewedAt = input.reviewed_at ?? new Date().toISOString();
+  if (isPoolLike(db)) {
+    throw new Error("approveFactReview requires a pinned transaction client");
+  }
+
+  await db.query("begin");
+  try {
+    const locked = await lockQueuedFactReview(db, input.review_id);
+    await assertReviewerThroughputAvailable(db, input.reviewer_id, input.throughput_limit);
+    const candidateBefore = normalizeReviewCandidate(locked.candidate);
+    const candidateAfter = input.candidate == null ? candidateBefore : normalizeReviewCandidate(input.candidate);
+    const fact = await createFact(db, {
+      ...candidateAfter,
+      verification_status: "authoritative",
+      quality_flags: [
+        ...candidateAfter.quality_flags,
+        reviewProvenanceFlag({
+          action: "approved",
+          review_id: input.review_id,
+          reviewer_id: input.reviewer_id,
+          reviewed_at: reviewedAt,
+        }),
+      ],
+    });
+    const review = await updateFactReviewAsApproved(
+      db,
+      input.review_id,
+      candidateAfter,
+      input.reviewer_id,
+      reviewedAt,
+      fact.fact_id,
+    );
+    const action = await insertFactReviewAction(db, {
+      review_id: input.review_id,
+      action: "approved",
+      reviewer_id: input.reviewer_id,
+      notes,
+      candidate_before: candidateBefore,
+      candidate_after: candidateAfter,
+      fact_id: fact.fact_id,
+    });
+    await db.query("commit");
+    return Object.freeze({ review, fact, action });
+  } catch (error) {
+    await db.query("rollback");
+    throw error;
+  }
+}
+
+export async function approveFactReviewWithPool(
+  pool: FactClientPool,
+  input: ApproveFactReviewInput,
+): Promise<ApproveFactReviewResult> {
+  return withFactReviewClient(pool, (client) => approveFactReview(client, input));
+}
+
+export async function rejectFactReview(
+  db: QueryExecutor,
+  input: RejectFactReviewInput,
+): Promise<FactReviewQueueRow> {
+  assertReviewActionInput(input.review_id, input.reviewer_id, input.reviewed_at);
+  const notes = normalizeOptionalNotes(input.notes);
+  const reviewedAt = input.reviewed_at ?? new Date().toISOString();
+  if (isPoolLike(db)) {
+    throw new Error("rejectFactReview requires a pinned transaction client");
+  }
+
+  await db.query("begin");
+  try {
+    const locked = await lockQueuedFactReview(db, input.review_id);
+    await assertReviewerThroughputAvailable(db, input.reviewer_id, input.throughput_limit);
+    const candidateBefore = normalizeReviewCandidate(locked.candidate);
+    const review = await updateFactReviewAsRejected(db, input.review_id, input.reviewer_id, reviewedAt);
+    await insertFactReviewAction(db, {
+      review_id: input.review_id,
+      action: "rejected",
+      reviewer_id: input.reviewer_id,
+      notes,
+      candidate_before: candidateBefore,
+      candidate_after: null,
+      fact_id: null,
+    });
+    await db.query("commit");
+    return review;
+  } catch (error) {
+    await db.query("rollback");
+    throw error;
+  }
+}
+
+export async function rejectFactReviewWithPool(
+  pool: FactClientPool,
+  input: RejectFactReviewInput,
+): Promise<FactReviewQueueRow> {
+  return withFactReviewClient(pool, (client) => rejectFactReview(client, input));
+}
+
+export async function editFactReviewCandidate(
+  db: QueryExecutor,
+  input: EditFactReviewCandidateInput,
+): Promise<FactReviewQueueRow> {
+  assertReviewActionInput(input.review_id, input.reviewer_id, input.reviewed_at);
+  const notes = normalizeOptionalNotes(input.notes);
+  if (isPoolLike(db)) {
+    throw new Error("editFactReviewCandidate requires a pinned transaction client");
+  }
+
+  await db.query("begin");
+  try {
+    const locked = await lockQueuedFactReview(db, input.review_id);
+    await assertReviewerThroughputAvailable(db, input.reviewer_id, input.throughput_limit);
+    const candidateBefore = normalizeReviewCandidate(locked.candidate);
+    const candidateAfter = normalizeReviewCandidate(input.candidate);
+    const review = await updateFactReviewCandidate(db, input.review_id, candidateAfter);
+    await insertFactReviewAction(db, {
+      review_id: input.review_id,
+      action: "edited",
+      reviewer_id: input.reviewer_id,
+      notes,
+      candidate_before: candidateBefore,
+      candidate_after: candidateAfter,
+      fact_id: null,
+    });
+    await db.query("commit");
+    return review;
+  } catch (error) {
+    await db.query("rollback");
+    throw error;
+  }
+}
+
+export async function editFactReviewCandidateWithPool(
+  pool: FactClientPool,
+  input: EditFactReviewCandidateInput,
+): Promise<FactReviewQueueRow> {
+  return withFactReviewClient(pool, (client) => editFactReviewCandidate(client, input));
 }
 
 export async function listFactsForEgress(
@@ -390,6 +711,163 @@ export async function listFactsForEgress(
     throw new FactEgressEntitlementError(input.channel, denied);
   }
   return facts;
+}
+
+async function withFactReviewClient<T>(
+  pool: FactClientPool,
+  action: (client: FactPoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  let destroyClient = false;
+  try {
+    return await action(client);
+  } catch (error) {
+    destroyClient = true;
+    throw error;
+  } finally {
+    client.release(destroyClient);
+  }
+}
+
+async function lockQueuedFactReview(db: QueryExecutor, reviewId: string): Promise<FactReviewQueueRow> {
+  const { rows } = await db.query<FactReviewQueueDbRow>(
+    `select ${FACT_REVIEW_QUEUE_COLUMNS}
+       from fact_review_queue
+      where review_id = $1
+        and status = 'queued'
+      for update`,
+    [reviewId],
+  );
+  if (rows.length !== 1) {
+    throw new Error("fact review queue item was not found or is no longer queued");
+  }
+  return factReviewQueueRowFromDb(rows[0]);
+}
+
+async function updateFactReviewAsApproved(
+  db: QueryExecutor,
+  reviewId: string,
+  candidate: NormalizedFactInput,
+  reviewerId: string,
+  reviewedAt: string,
+  factId: string,
+): Promise<FactReviewQueueRow> {
+  const { rows } = await db.query<FactReviewQueueDbRow>(
+    `update fact_review_queue
+        set status = 'reviewed',
+            candidate = $2::jsonb,
+            reviewed_by = $3,
+            reviewed_at = $4,
+            fact_id = $5,
+            updated_at = now()
+      where review_id = $1
+        and status = 'queued'
+      returning ${FACT_REVIEW_QUEUE_COLUMNS}`,
+    [reviewId, candidate, reviewerId, reviewedAt, factId],
+  );
+  if (rows.length !== 1) {
+    throw new Error("fact review queue item was not found or is no longer queued");
+  }
+  return factReviewQueueRowFromDb(rows[0]);
+}
+
+async function updateFactReviewAsRejected(
+  db: QueryExecutor,
+  reviewId: string,
+  reviewerId: string,
+  reviewedAt: string,
+): Promise<FactReviewQueueRow> {
+  const { rows } = await db.query<FactReviewQueueDbRow>(
+    `update fact_review_queue
+        set status = 'dismissed',
+            reviewed_by = $2,
+            reviewed_at = $3,
+            updated_at = now()
+      where review_id = $1
+        and status = 'queued'
+      returning ${FACT_REVIEW_QUEUE_COLUMNS}`,
+    [reviewId, reviewerId, reviewedAt],
+  );
+  if (rows.length !== 1) {
+    throw new Error("fact review queue item was not found or is no longer queued");
+  }
+  return factReviewQueueRowFromDb(rows[0]);
+}
+
+async function updateFactReviewCandidate(
+  db: QueryExecutor,
+  reviewId: string,
+  candidate: NormalizedFactInput,
+): Promise<FactReviewQueueRow> {
+  const { rows } = await db.query<FactReviewQueueDbRow>(
+    `update fact_review_queue
+        set candidate = $2::jsonb,
+            source_id = $3,
+            metric_id = $4,
+            confidence = $5,
+            updated_at = now()
+      where review_id = $1
+        and status = 'queued'
+      returning ${FACT_REVIEW_QUEUE_COLUMNS}`,
+    [reviewId, candidate, candidate.source_id, candidate.metric_id, candidate.confidence],
+  );
+  if (rows.length !== 1) {
+    throw new Error("fact review queue item was not found or is no longer queued");
+  }
+  return factReviewQueueRowFromDb(rows[0]);
+}
+
+async function insertFactReviewAction(
+  db: QueryExecutor,
+  input: Omit<FactReviewActionRow, "action_id" | "created_at">,
+): Promise<FactReviewActionRow> {
+  const { rows } = await db.query<FactReviewActionDbRow>(
+    `insert into fact_review_actions
+       (review_id,
+        action,
+        reviewer_id,
+        notes,
+        candidate_before,
+        candidate_after,
+        fact_id)
+     values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
+     returning ${FACT_REVIEW_ACTION_COLUMNS}`,
+    [
+      input.review_id,
+      input.action,
+      input.reviewer_id,
+      input.notes,
+      input.candidate_before,
+      input.candidate_after,
+      input.fact_id,
+    ],
+  );
+  return factReviewActionRowFromDb(rows[0]);
+}
+
+async function assertReviewerThroughputAvailable(
+  db: QueryExecutor,
+  reviewerId: string,
+  limit: FactReviewThroughputLimit | undefined,
+): Promise<void> {
+  if (limit == null) return;
+  assertPositiveIntegerInRange(limit.max_actions, "throughput_limit.max_actions", 1, 1_000);
+  assertPositiveIntegerInRange(limit.window_seconds, "throughput_limit.window_seconds", 1, 30 * 24 * 60 * 60);
+  const { rows } = await db.query<{ action_count: number | string }>(
+    `select count(*)::int as action_count
+       from fact_review_actions
+      where reviewer_id = $1
+        and created_at >= now() - ($2 * interval '1 second')`,
+    [reviewerId, limit.window_seconds],
+  );
+  const actionCount = Number(rows[0]?.action_count ?? 0);
+  if (actionCount >= limit.max_actions) {
+    throw new FactReviewThroughputExceededError({
+      reviewer_id: reviewerId,
+      max_actions: limit.max_actions,
+      window_seconds: limit.window_seconds,
+    });
+  }
 }
 
 async function lockSupersededFact(db: QueryExecutor, supersededFactId: string): Promise<FactRow> {
@@ -431,6 +909,40 @@ function assertQueuedColumnMatchesCandidate(override: string | null | undefined,
   if (override !== candidateValue) {
     throw new Error(`${label}: must match candidate.${label}`);
   }
+}
+
+function assertReviewActionInput(reviewId: string, reviewerId: string, reviewedAt: string | undefined): void {
+  assertUuidV4(reviewId, "review_id");
+  assertNonEmptyString(reviewerId, "reviewer_id");
+  if (reviewedAt != null) assertIso8601WithOffset(reviewedAt, "reviewed_at");
+}
+
+function normalizeOptionalNotes(notes: string | null | undefined): string | null {
+  if (notes == null) return null;
+  assertOptionalNonEmptyString(notes, "notes");
+  return notes;
+}
+
+function normalizeReviewCandidate(input: FactInput): NormalizedFactInput {
+  return {
+    ...normalizeFactInput(input),
+    verification_status: "candidate" as const,
+  };
+}
+
+function reviewProvenanceFlag(input: {
+  action: "approved";
+  review_id: string;
+  reviewer_id: string;
+  reviewed_at: string;
+}): Readonly<Record<string, string>> {
+  return Object.freeze({
+    kind: "manual_review",
+    action: input.action,
+    review_id: input.review_id,
+    reviewer_id: input.reviewer_id,
+    reviewed_at: input.reviewed_at,
+  });
 }
 
 function sameNullableText(left: string | Date | null, right: string | null): boolean {
@@ -554,7 +1066,7 @@ function factRowFromDb(row: FactDbRow | undefined): FactRow {
 
 function factReviewQueueRowFromDb(row: FactReviewQueueDbRow | undefined): FactReviewQueueRow {
   if (!row) {
-    throw new Error("fact review queue insert did not return a row");
+    throw new Error("fact review queue operation did not return a row");
   }
   assertOneOf(row.status, FACT_REVIEW_STATUSES, "status");
   return Object.freeze({
@@ -568,6 +1080,38 @@ function factReviewQueueRowFromDb(row: FactReviewQueueDbRow | undefined): FactRe
     status: row.status,
     created_at: isoString(row.created_at),
     updated_at: isoString(row.updated_at),
+    reviewed_by: row.reviewed_by,
+    reviewed_at: nullableIsoString(row.reviewed_at),
+    fact_id: row.fact_id,
+  });
+}
+
+function factReviewActionRowFromDb(row: FactReviewActionDbRow | undefined): FactReviewActionRow {
+  if (!row) {
+    throw new Error("fact review action insert did not return a row");
+  }
+  assertOneOf(row.action, FACT_REVIEW_ACTIONS, "action");
+  return Object.freeze({
+    action_id: row.action_id,
+    review_id: row.review_id,
+    action: row.action,
+    reviewer_id: row.reviewer_id,
+    notes: row.notes,
+    candidate_before: row.candidate_before,
+    candidate_after: row.candidate_after,
+    fact_id: row.fact_id,
+    created_at: isoString(row.created_at),
+  });
+}
+
+function staleFactReviewQueueRowFromDb(row: StaleFactReviewQueueDbRow | undefined): StaleFactReviewQueueRow {
+  if (!row) {
+    throw new Error("stale fact review queue operation did not return a row");
+  }
+  return Object.freeze({
+    ...factReviewQueueRowFromDb(row),
+    age_seconds: Number(row.age_seconds),
+    stale_after_seconds: Number(row.stale_after_seconds),
   });
 }
 
@@ -612,6 +1156,12 @@ function assertConfidence(value: unknown, label: string): asserts value is numbe
   if (value < 0 || value > 1) throw new Error(`${label}: must be in [0, 1]`);
 }
 
+function assertPositiveIntegerInRange(value: unknown, label: string, min: number, max: number): asserts value is number {
+  if (!Number.isInteger(value) || (value as number) < min || (value as number) > max) {
+    throw new Error(`${label}: must be an integer between ${min} and ${max}`);
+  }
+}
+
 function assertFiniteNumber(value: unknown, label: string): asserts value is number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new Error(`${label}: must be a finite number`);
@@ -635,7 +1185,10 @@ function assertEntitlementChannels(value: unknown): asserts value is readonly Fa
 }
 
 function isPoolLike(value: QueryExecutor): boolean {
-  return typeof (value as Partial<FactClientPool>).connect === "function";
+  return (
+    typeof (value as Partial<FactClientPool>).connect === "function" &&
+    typeof (value as Partial<FactPoolClient>).release !== "function"
+  );
 }
 
 function nullableIsoString(value: Date | string | null): string | null {
