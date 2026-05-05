@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import {
   createFact,
+  FactEgressEntitlementError,
+  listFactsForEgress,
   queueFactReview,
   supersedeFact,
   supersedeFactWithPool,
@@ -25,6 +27,7 @@ class FakeDb implements QueryExecutor {
   readonly queries: Query[] = [];
   readonly releaseArgs: boolean[] = [];
   existingFactOverrides: Record<string, unknown> = {};
+  egressRows: Record<string, unknown>[] = [];
 
   async query<R extends Record<string, unknown> = Record<string, unknown>>(text: string, values?: unknown[]) {
     this.queries.push({ text, values });
@@ -34,6 +37,9 @@ class FakeDb implements QueryExecutor {
         rows: [factRow({ fact_id: values?.[0], ...this.existingFactOverrides })],
         rowCount: 1,
       } as never;
+    }
+    if (/select\s+fact_id,/i.test(text) && /from facts/i.test(text) && /entitlement_channels \? \$2/i.test(text)) {
+      return { rows: this.egressRows, rowCount: this.egressRows.length } as never;
     }
     if (/insert into facts/i.test(text)) {
       return {
@@ -189,6 +195,47 @@ test("queueFactReview serializes queued facts as candidate status", async () => 
   });
 
   assert.equal(row.candidate.verification_status, "candidate");
+});
+
+test("listFactsForEgress returns facts whose entitlement includes the requested channel", async () => {
+  const db = new FakeDb();
+  db.egressRows = [factRow({ fact_id: FACT_ID, entitlement_channels: ["app", "export"] })];
+
+  const rows = await listFactsForEgress(db, {
+    fact_ids: [FACT_ID],
+    channel: "export",
+  });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].fact_id, FACT_ID);
+  assert.deepEqual(rows[0].entitlement_channels, ["app", "export"]);
+  assert.match(db.queries[0].text, /entitlement_channels \? \$2/);
+  assert.deepEqual(db.queries[0].values, [[FACT_ID], "export"]);
+});
+
+test("listFactsForEgress blocks app-only facts from export", async () => {
+  const db = new FakeDb();
+
+  await assert.rejects(
+    () => listFactsForEgress(db, { fact_ids: [FACT_ID], channel: "export" }),
+    (error) =>
+      error instanceof FactEgressEntitlementError &&
+      error.channel === "export" &&
+      error.denied_fact_ids.includes(FACT_ID),
+  );
+
+  assert.match(db.queries[0].text, /entitlement_channels \? \$2/);
+});
+
+test("createFact rejects unknown entitlement channels before querying", async () => {
+  const db = new FakeDb();
+
+  await assert.rejects(
+    () => createFact(db, factInput({ entitlement_channels: ["app", "webhook"] })),
+    /entitlement_channels/,
+  );
+
+  assert.equal(db.queries.length, 0);
 });
 
 test("createFact rejects impossible calendar dates before querying", async () => {
