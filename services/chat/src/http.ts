@@ -185,7 +185,7 @@ function handleRunActivityStreamRequest(
     respondJson(res, 400, { error: "'Last-Event-ID' must be a non-negative safe decimal integer" });
     return;
   }
-  if (resumeAfterSeq > hub.currentSeq()) {
+  if (!hub.isSeqAvailableForUser(userId, resumeAfterSeq)) {
     respondJson(res, 400, { error: "'Last-Event-ID' is not available for this stream" });
     return;
   }

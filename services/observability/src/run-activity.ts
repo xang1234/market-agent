@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { serializeJsonValue, type JsonValue, type QueryExecutor } from "./types.ts";
 
 export const RUN_ACTIVITY_STAGES = [
@@ -15,6 +17,7 @@ export type SubjectRefJson = {
 };
 
 export type RunActivityInput = {
+  user_id?: string | null;
   agent_id: string;
   stage: RunActivityStage;
   subject_refs: ReadonlyArray<SubjectRefJson>;
@@ -25,6 +28,7 @@ export type RunActivityInput = {
 
 export type RunActivityRow = {
   run_activity_id: string;
+  user_id: string | null;
   agent_id: string;
   stage: RunActivityStage;
   subject_refs: ReadonlyArray<SubjectRefJson>;
@@ -38,6 +42,7 @@ export type RunActivitySseEvent = {
   seq: number;
   activity: {
     run_activity_id: string;
+    user_id: string | null;
     agent_id: string;
     stage: RunActivityStage;
     subject_refs: ReadonlyArray<SubjectRefJson>;
@@ -54,6 +59,7 @@ export type RunActivityScope = {
 export type RunActivityHub = {
   currentSeq(): number;
   eventsForUser(userId: string): ReadonlyArray<RunActivitySseEvent>;
+  isSeqAvailableForUser(userId: string, seq: number): boolean;
   publish(activity: RunActivityRow, scope: RunActivityScope): RunActivitySseEvent;
   subscribe(userId: string, listener: (event: RunActivitySseEvent) => void): () => void;
 };
@@ -64,10 +70,11 @@ export async function writeRunActivity(
 ): Promise<RunActivityRow> {
   assertRunActivityInput(input);
   const { rows } = await db.query<RunActivityRow>(
-    `insert into run_activities (agent_id, stage, subject_refs, source_refs, summary, ts)
-     values ($1, $2, $3::jsonb, $4::jsonb, $5, coalesce($6::timestamptz, now()))
-     returning run_activity_id, agent_id, stage, subject_refs, source_refs, summary, ts`,
+    `insert into run_activities (user_id, agent_id, stage, subject_refs, source_refs, summary, ts)
+     values ($1::uuid, $2, $3, $4::jsonb, $5::jsonb, $6, coalesce($7::timestamptz, now()))
+     returning run_activity_id, user_id, agent_id, stage, subject_refs, source_refs, summary, ts`,
     [
+      input.user_id ?? null,
       input.agent_id,
       input.stage,
       serializeJsonValue(input.subject_refs as JsonValue),
@@ -105,6 +112,13 @@ export function createRunActivityHub(
         .filter((entry) => entry.userId === userId)
         .map((entry) => entry.event);
     },
+    isSeqAvailableForUser(userId, requestedSeq) {
+      assertUserId(userId);
+      if (!Number.isSafeInteger(requestedSeq) || requestedSeq < 0) return false;
+      if (requestedSeq === 0) return true;
+      if (requestedSeq > seq) return false;
+      return events.some((entry) => entry.userId === userId && entry.event.seq === requestedSeq);
+    },
     publish(activity, scope) {
       assertUserId(scope.userId);
       seq += 1;
@@ -140,7 +154,27 @@ export async function writeAndPublishRunActivity(
   input: RunActivityInput,
   scope: RunActivityScope,
 ): Promise<RunActivitySseEvent> {
-  return hub.publish(await writeRunActivity(db, input), scope);
+  return hub.publish(await writeRunActivity(db, { ...input, user_id: input.user_id ?? scope.userId }), scope);
+}
+
+export function createLiveRunActivity(
+  input: RunActivityInput,
+  scope: RunActivityScope,
+  options: { runActivityId?: string; ts?: Date } = {},
+): RunActivityRow {
+  const scopedInput = { ...input, user_id: input.user_id ?? scope.userId };
+  assertRunActivityInput(scopedInput);
+  assertUserId(scope.userId);
+  return {
+    run_activity_id: options.runActivityId ?? randomUUID(),
+    user_id: scopedInput.user_id ?? null,
+    agent_id: scopedInput.agent_id,
+    stage: scopedInput.stage,
+    subject_refs: scopedInput.subject_refs,
+    source_refs: scopedInput.source_refs ?? [],
+    summary: scopedInput.summary,
+    ts: options.ts ?? scopedInput.ts ?? new Date(),
+  };
 }
 
 export function createRunActivitySseEvent(
@@ -163,6 +197,9 @@ export function createRunActivitySseEvent(
 function assertRunActivityInput(input: RunActivityInput): void {
   if (!RUN_ACTIVITY_STAGES.includes(input.stage)) {
     throw new Error(`run activity stage is invalid: ${input.stage}`);
+  }
+  if (input.user_id != null) {
+    assertUserId(input.user_id);
   }
   assertNonEmptyString(input.agent_id, "agent_id");
   assertNonEmptyString(input.summary, "summary");

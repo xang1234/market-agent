@@ -282,6 +282,28 @@ test("run activity stream only replays the authenticated user's events", async (
   assert.equal((event.data.activity as { summary?: string }).summary, "User A");
 });
 
+test("run activity stream rejects Last-Event-ID outside the authenticated user's retained stream", async (t) => {
+  const hub = createRunActivityHub({ maxRetainedEvents: 2 });
+  hub.publish(runActivityRow({ stage: "reading", summary: "User A evicted" }, 1), { userId: USER_ID });
+  hub.publish(runActivityRow({ stage: "found", summary: "User B retained" }, 2), { userId: USER_B });
+  hub.publish(runActivityRow({ stage: "found", summary: "User A retained" }, 3), { userId: USER_ID });
+  const base = await startServer(t, { runActivityHub: hub });
+
+  const evictedResponse = await fetch(`${base}/v1/run-activities/stream`, {
+    headers: { "Last-Event-ID": "1", "x-user-id": USER_ID },
+  });
+  assert.equal(evictedResponse.status, 400);
+  assert.equal(
+    ((await evictedResponse.json()) as { error?: string }).error,
+    "'Last-Event-ID' is not available for this stream",
+  );
+
+  const otherUserResponse = await fetch(`${base}/v1/run-activities/stream`, {
+    headers: { "Last-Event-ID": "2", "x-user-id": USER_ID },
+  });
+  assert.equal(otherUserResponse.status, 400);
+});
+
 test("run activity stream receives activity emitted from the live chat runner lifecycle", async (t) => {
   const hub = createRunActivityHub();
   const reported: RunActivityInput[] = [];
@@ -919,6 +941,7 @@ function runActivityRow(
   const id = String(sequence).padStart(12, "0");
   return {
     run_activity_id: `aaaaaaaa-aaaa-4aaa-8aaa-${id}`,
+    user_id: input.user_id ?? null,
     agent_id: input.agent_id ?? "11111111-1111-4111-8111-111111111111",
     stage: input.stage ?? "reading",
     subject_refs: input.subject_refs ?? [],

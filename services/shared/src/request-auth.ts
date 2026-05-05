@@ -61,9 +61,14 @@ export function resolveAuthMode(config: RequestAuthConfig = {}): RequestAuthMode
   if (config.mode) return config.mode;
   const env = config.env ?? process.env;
   const explicit = env.MA_AUTH_MODE?.trim().toLowerCase();
-  if (explicit === "trusted_proxy" || explicit === "production") return "trusted_proxy";
-  if (explicit === "dev_user_header" || explicit === "dev" || explicit === "test") {
-    return "dev_user_header";
+  if (explicit !== undefined && explicit !== "") {
+    if (explicit === "trusted_proxy" || explicit === "production") return "trusted_proxy";
+    if (explicit === "dev_user_header" || explicit === "dev" || explicit === "test") {
+      return "dev_user_header";
+    }
+    throw new Error(
+      `unrecognized MA_AUTH_MODE '${env.MA_AUTH_MODE}'; expected trusted_proxy, production, dev_user_header, dev, or test`,
+    );
   }
   return env.NODE_ENV === "production" ? "trusted_proxy" : "dev_user_header";
 }

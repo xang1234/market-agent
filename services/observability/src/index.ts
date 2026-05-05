@@ -71,6 +71,7 @@ export type {
 
 export {
   RUN_ACTIVITY_STAGES,
+  createLiveRunActivity,
   createRunActivityHub,
   createRunActivitySseEvent,
   writeAndPublishRunActivity,

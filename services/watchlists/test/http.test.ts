@@ -136,6 +136,29 @@ test("server: trusted-proxy auth scopes watchlists from server-derived identity,
   });
   assert.equal(listB.status, 200);
   assert.deepEqual(await listB.json(), { members: [] });
+
+  const unsignedAdd = await fetch(`${base}/v1/watchlists/default/members`, {
+    method: "POST",
+    headers: {
+      "x-authenticated-user-id": userA,
+      "x-user-id": userB,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ subject_ref: APPLE_LISTING }),
+  });
+  assert.equal(unsignedAdd.status, 401);
+
+  const invalidAdd = await fetch(`${base}/v1/watchlists/default/members`, {
+    method: "POST",
+    headers: {
+      "x-authenticated-user-id": userA,
+      "x-authenticated-user-signature": "0".repeat(64),
+      "x-user-id": userB,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ subject_ref: APPLE_LISTING }),
+  });
+  assert.equal(invalidAdd.status, 401);
 });
 
 test("server: POST adds a member, GET returns it, idempotent on repeat", { timeout: 120000 }, async (t) => {

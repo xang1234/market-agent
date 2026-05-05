@@ -34,6 +34,11 @@ type HomeRunActivity = {
   ts: string
 }
 
+type ParsedRunActivity = {
+  seq: number
+  activity: HomeRunActivity
+}
+
 const EMPTY_HOME_ACTIVITIES: ReadonlyArray<HomeRunActivity> = []
 
 export type LoadState =
@@ -47,8 +52,9 @@ export function HomePage() {
   const userId = session?.userId ?? null
   const [activityState, setActivityState] = useState<{
     userId: string | null
+    lastSeq: number | null
     activities: ReadonlyArray<HomeRunActivity>
-  }>(() => ({ userId: null, activities: [] }))
+  }>(() => ({ userId: null, lastSeq: null, activities: [] }))
   const activities = activityState.userId === userId ? activityState.activities : EMPTY_HOME_ACTIVITIES
 
   useEffect(() => {
@@ -62,20 +68,25 @@ export function HomePage() {
     if (userId === null) return
 
     const controller = new AbortController()
-    void consumeRunActivityStream({
+    let lastEventId: number | null = null
+    void consumeRunActivityStreamWithRetry({
       signal: controller.signal,
       userId,
-      onActivity: (activity) => {
+      lastEventId: () => lastEventId,
+      resetLastEventId: () => {
+        lastEventId = null
+      },
+      onEvent: (event) => {
+        lastEventId = event.seq
         setActivityState((current) => ({
           userId,
+          lastSeq: event.seq,
           activities: mergeActivities(
-            [activity],
+            [event.activity],
             current.userId === userId ? current.activities : [],
           ),
         }))
       },
-    }).catch(() => {
-      // A route revisit or session change will establish a fresh stream.
     })
     return () => controller.abort()
   }, [userId])
@@ -396,19 +407,23 @@ function FootnoteHint({ children }: { children: React.ReactNode }) {
 async function consumeRunActivityStream({
   signal,
   userId,
-  onActivity,
+  lastEventId,
+  onEvent,
 }: {
   signal: AbortSignal
   userId: string
-  onActivity(activity: HomeRunActivity): void
+  lastEventId: number | null
+  onEvent(event: ParsedRunActivity): void
 }) {
+  const headers: Record<string, string> = { 'x-user-id': userId }
+  if (lastEventId !== null) headers['Last-Event-ID'] = String(lastEventId)
   const response = await fetch('/v1/run-activities/stream', {
     credentials: 'same-origin',
-    headers: { 'x-user-id': userId },
+    headers,
     signal,
   })
   if (!response.ok || response.body === null) {
-    return
+    throw new RunActivityStreamError(response.status)
   }
 
   const reader = response.body.getReader()
@@ -425,9 +440,9 @@ async function consumeRunActivityStream({
       while (boundary >= 0) {
         const block = buffer.slice(0, boundary)
         buffer = buffer.slice(boundary + 2)
-        const activity = parseRunActivitySseBlock(block)
-        if (activity !== null) {
-          onActivity(activity)
+        const event = parseRunActivitySseBlock(block)
+        if (event !== null) {
+          onEvent(event)
         }
         boundary = buffer.indexOf('\n\n')
       }
@@ -437,11 +452,49 @@ async function consumeRunActivityStream({
   }
 }
 
-function parseRunActivitySseBlock(block: string): HomeRunActivity | null {
+async function consumeRunActivityStreamWithRetry({
+  signal,
+  userId,
+  lastEventId,
+  resetLastEventId,
+  onEvent,
+}: {
+  signal: AbortSignal
+  userId: string
+  lastEventId: () => number | null
+  resetLastEventId: () => void
+  onEvent(event: ParsedRunActivity): void
+}) {
+  let retryCount = 0
+  while (!signal.aborted) {
+    try {
+      await consumeRunActivityStream({
+        signal,
+        userId,
+        lastEventId: lastEventId(),
+        onEvent,
+      })
+      retryCount = 0
+    } catch (error) {
+      if (signal.aborted) return
+      if (error instanceof RunActivityStreamError && error.status === 400) {
+        resetLastEventId()
+      }
+      retryCount += 1
+    }
+    if (signal.aborted) return
+    await sleepForRetry(retryDelayMs(retryCount), signal)
+  }
+}
+
+function parseRunActivitySseBlock(block: string): ParsedRunActivity | null {
   let eventName: string | null = null
+  let eventId: string | null = null
   const data: string[] = []
   for (const line of block.split('\n')) {
-    if (line.startsWith('event: ')) {
+    if (line.startsWith('id: ')) {
+      eventId = line.slice('id: '.length)
+    } else if (line.startsWith('event: ')) {
       eventName = line.slice('event: '.length)
     } else if (line.startsWith('data: ')) {
       data.push(line.slice('data: '.length))
@@ -450,15 +503,51 @@ function parseRunActivitySseBlock(block: string): HomeRunActivity | null {
   if (eventName !== 'run_activity' || data.length === 0) {
     return null
   }
-  return parseRunActivityData(data.join('\n'))
+  const parsed = parseRunActivityData(data.join('\n'))
+  if (parsed === null) return null
+  const seq = parseSseSeq(eventId) ?? parseSseSeq(parsed.seq)
+  return seq === null ? null : { seq, activity: parsed.activity }
 }
 
-function parseRunActivityData(data: string): HomeRunActivity | null {
+function parseRunActivityData(data: string): { seq?: unknown; activity: HomeRunActivity } | null {
   try {
-    const parsed = JSON.parse(data) as { activity?: HomeRunActivity }
-    return parsed.activity ?? null
+    const parsed = JSON.parse(data) as { seq?: unknown; activity?: HomeRunActivity }
+    return parsed.activity ? { seq: parsed.seq, activity: parsed.activity } : null
   } catch {
     return null
+  }
+}
+
+function parseSseSeq(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value >= 0 ? value : null
+  }
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) return null
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) ? parsed : null
+}
+
+function retryDelayMs(retryCount: number): number {
+  return Math.min(500 * 2 ** Math.max(0, retryCount - 1), 5_000)
+}
+
+function sleepForRetry(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve()
+  return new Promise((resolve) => {
+    const timeout = window.setTimeout(resolve, ms)
+    signal.addEventListener('abort', () => {
+      window.clearTimeout(timeout)
+      resolve()
+    }, { once: true })
+  })
+}
+
+class RunActivityStreamError extends Error {
+  readonly status: number
+
+  constructor(status: number) {
+    super(`run activity stream failed with HTTP ${status}`)
+    this.status = status
   }
 }
 

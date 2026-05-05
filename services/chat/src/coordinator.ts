@@ -302,7 +302,6 @@ function runActivityReportingRunner(
   if (!reporter) return runner;
 
   return async (context) => {
-    const pendingReports: Promise<void>[] = [];
     const scope = context.userId ? { userId: context.userId } : null;
     const report = (
       stage: RunActivityStage,
@@ -320,9 +319,9 @@ function runActivityReportingRunner(
       try {
         const result = reporter.report(input, scope);
         if (result && typeof result.then === "function") {
-          pendingReports.push(result.catch((error) => {
+          result.catch((error) => {
             reporter.onError?.(error, input, scope);
-          }));
+          });
         }
       } catch (error) {
         // Run activity is user-facing telemetry; reporter failures must not
@@ -356,8 +355,6 @@ function runActivityReportingRunner(
     } catch (error) {
       report("dismissed", "Dismissed failed run output.", {});
       throw error;
-    } finally {
-      await Promise.allSettled(pendingReports);
     }
   };
 }

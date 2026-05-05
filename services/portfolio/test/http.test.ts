@@ -85,6 +85,26 @@ test("server: trusted-proxy auth scopes portfolios from server-derived identity,
   });
   assert.equal(listB.status, 200);
   assert.deepEqual(await listB.json(), { portfolios: [] });
+
+  const unsignedCreate = await fetch(`${base}/v1/portfolios`, {
+    method: "POST",
+    headers: {
+      "x-authenticated-user-id": userA,
+      "x-user-id": userB,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ name: "Unsigned", base_currency: "USD" }),
+  });
+  assert.equal(unsignedCreate.status, 401);
+
+  const invalidList = await fetch(`${base}/v1/portfolios`, {
+    headers: {
+      "x-authenticated-user-id": userB,
+      "x-authenticated-user-signature": "0".repeat(64),
+      "x-user-id": userA,
+    },
+  });
+  assert.equal(invalidList.status, 401);
 });
 
 test("server: POST creates a portfolio with required base_currency", { timeout: 120000 }, async (t) => {

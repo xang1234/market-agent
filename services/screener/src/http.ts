@@ -156,6 +156,12 @@ async function handleSaveScreen(
   deps: ScreenerServerDeps,
   clock: () => Date,
 ): Promise<void> {
+  const user_id = readAuthenticatedUserId(req, deps.auth);
+  if (!user_id) {
+    respond(res, 401, { error: authenticatedUserRequiredMessage(deps.auth) });
+    return;
+  }
+
   const body = await readJsonBody(req, MAX_REQUEST_BODY_BYTES);
   if (body.kind === "error") {
     respond(res, body.status, { error: body.error });
@@ -166,11 +172,6 @@ async function handleSaveScreen(
     return;
   }
   const raw = body.value as Record<string, unknown>;
-  const user_id = readAuthenticatedUserId(req, deps.auth);
-  if (!user_id) {
-    respond(res, 401, { error: authenticatedUserRequiredMessage(deps.auth) });
-    return;
-  }
   const screen_id =
     typeof raw.screen_id === "string" ? raw.screen_id : randomUUID();
   const now = clock().toISOString();
