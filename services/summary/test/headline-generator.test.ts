@@ -39,6 +39,21 @@ test("generateFindingHeadline falls back deterministically from cluster claim", 
   assert.equal(headline, "Margin Pressure Widened as Freight Costs Rose Unexpectedly");
 });
 
+test("generateFindingHeadline fallback preserves acronym casing", async () => {
+  const headline = await generateFindingHeadline({
+    snapshot: SNAPSHOT,
+    claimCluster: {
+      cluster_id: "55555555-5555-4555-8555-555555555555",
+      claim: "IFRS EPS growth accelerated after pricing improved.",
+    },
+    model: async () => {
+      throw new Error("model unavailable");
+    },
+  });
+
+  assert.equal(headline, "IFRS EPS Growth Accelerated After Pricing Improved");
+});
+
 test("generateHomeCardHeadline prefers finding context and applies the same cap", async () => {
   const headline = await generateHomeCardHeadline({
     finding: {

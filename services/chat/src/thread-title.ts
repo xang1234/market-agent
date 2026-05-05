@@ -24,7 +24,7 @@ export function createThreadTitleGenerationJob(
           and thread_id = $2::uuid`,
       [job.userId, job.threadId],
     );
-    if (existing.rows[0]?.title != null) return;
+    if (!existing.rows[0] || existing.rows[0].title != null) return;
 
     const title = await generateThreadTitle({
       userIntent: job.userIntent,

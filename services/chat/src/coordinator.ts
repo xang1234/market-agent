@@ -396,6 +396,7 @@ function threadTitleGenerationRunner(
   return async (context) => {
     const assistantTextParts: string[] = [];
     let completed = false;
+    let clarification = false;
     const emit: ChatTurnEmit = (type, payload = {}) => {
       if (type === "block.delta") {
         const text = textFromBlockDeltaPayload(payload);
@@ -403,6 +404,7 @@ function threadTitleGenerationRunner(
       }
       if (type === "turn.completed") {
         completed = true;
+        clarification = payload.clarification === true;
       }
       return context.emit(type, payload);
     };
@@ -410,7 +412,7 @@ function threadTitleGenerationRunner(
     await runner({ ...context, emit });
 
     const assistantText = assistantTextParts.join("").trim();
-    if (!completed || assistantText.length === 0) return;
+    if (!completed || clarification || assistantText.length === 0) return;
 
     const input: ChatThreadTitleGenerationInput = {
       threadId: context.threadId,

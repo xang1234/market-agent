@@ -3,7 +3,7 @@ import { Pool } from "pg";
 import { createEvidenceReviewServer } from "./review-http.ts";
 
 const host = process.env.EVIDENCE_HOST ?? "127.0.0.1";
-const port = Number(process.env.EVIDENCE_PORT ?? "4335");
+const port = parsePort(process.env.EVIDENCE_PORT ?? "4335");
 const databaseUrl = process.env.DATABASE_URL;
 
 if (!databaseUrl) {
@@ -23,4 +23,12 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       pool.end().finally(() => process.exit(0));
     });
   });
+}
+
+function parsePort(value: string): number {
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error(`EVIDENCE_PORT must be an integer in [1, 65535]; received ${JSON.stringify(value)}`);
+  }
+  return port;
 }

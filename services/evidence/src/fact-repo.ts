@@ -853,6 +853,7 @@ async function assertReviewerThroughputAvailable(
   if (limit == null) return;
   assertPositiveIntegerInRange(limit.max_actions, "throughput_limit.max_actions", 1, 1_000);
   assertPositiveIntegerInRange(limit.window_seconds, "throughput_limit.window_seconds", 1, 30 * 24 * 60 * 60);
+  await db.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [reviewerId]);
   const { rows } = await db.query<{ action_count: number | string }>(
     `select count(*)::int as action_count
        from fact_review_actions

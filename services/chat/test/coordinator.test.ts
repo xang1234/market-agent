@@ -134,6 +134,38 @@ test("per-thread coordinator schedules thread title generation after first assis
   ]);
 });
 
+test("per-thread coordinator skips thread title generation for clarification turns", async () => {
+  const generated: unknown[] = [];
+  const coordinator = createChatCoordinator({
+    generateThreadTitle: async (input) => {
+      generated.push(input);
+    },
+    runner: ({ emit }) => {
+      emit("block.delta", {
+        block_id: "block-1",
+        delta: {
+          segment: {
+            type: "text",
+            text: "Which share class did you mean?",
+          },
+        },
+      });
+      emit("turn.completed", { message_id: "message-1", clarification: true });
+    },
+  });
+
+  const turn = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    userId: "user-1",
+    userIntent: "GOOG",
+  });
+  await turn.completed;
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(generated, []);
+});
+
 test("per-thread coordinator bounds completed turn history retention", async () => {
   const completedRuns: string[] = [];
   const coordinator = createChatCoordinator({

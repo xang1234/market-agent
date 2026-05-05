@@ -3,6 +3,20 @@ alter table fact_review_queue
   add column reviewed_at timestamptz,
   add column fact_id uuid references facts(fact_id);
 
+alter table fact_review_queue
+  add constraint fact_review_queue_review_metadata_chk check (
+    (
+      status = 'queued'
+      and reviewed_by is null
+      and reviewed_at is null
+    ) or (
+      status in ('reviewed', 'dismissed')
+      and reviewed_by is not null
+      and length(btrim(reviewed_by)) > 0
+      and reviewed_at is not null
+    )
+  );
+
 create table fact_review_actions (
   action_id uuid primary key default gen_random_uuid(),
   review_id uuid not null references fact_review_queue(review_id),

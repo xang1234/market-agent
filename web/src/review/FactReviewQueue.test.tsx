@@ -225,8 +225,67 @@ test('FactReviewQueue surfaces async action failures to the operator', async () 
   }
 })
 
+test('FactReviewQueue keeps each in-flight row disabled independently', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
+  let resolveFirst: (() => void) | null = null
+  let resolveSecond: (() => void) | null = null
+  const secondItem: FactReviewQueueItem = {
+    ...ITEM,
+    review_id: '77777777-7777-4777-8777-777777777777',
+    candidate: { ...ITEM.candidate, value_num: 88.8 },
+  }
+
+  try {
+    const container = dom.window.document.getElementById('root')!
+    const root = createRoot(container)
+    await act(async () => {
+      root.render(
+        <FactReviewQueue
+          items={[ITEM, secondItem]}
+          onApprove={(action) =>
+            new Promise<void>((resolve) => {
+              if (action.review_id === ITEM.review_id) resolveFirst = resolve
+              else resolveSecond = resolve
+            })
+          }
+          onEdit={() => undefined}
+          onReject={() => undefined}
+        />,
+      )
+    })
+
+    const approveButtons = getButtons(container, 'Approve')
+    await act(async () => {
+      approveButtons[0]!.click()
+    })
+    assert.equal(approveButtons[0]!.disabled, true)
+    assert.equal(approveButtons[1]!.disabled, false)
+
+    await act(async () => {
+      approveButtons[1]!.click()
+    })
+    assert.equal(approveButtons[0]!.disabled, true)
+    assert.equal(approveButtons[1]!.disabled, true)
+
+    await act(async () => {
+      resolveFirst?.()
+      resolveSecond?.()
+    })
+    await act(async () => root.unmount())
+  } finally {
+    restoreGlobals()
+  }
+})
+
 function getButton(container: Element, label: string): HTMLButtonElement {
   const button = [...container.querySelectorAll('button')].find((candidate) => candidate.textContent === label)
   if (!button || button.tagName !== 'BUTTON') throw new Error(`button not found: ${label}`)
   return button
+}
+
+function getButtons(container: Element, label: string): HTMLButtonElement[] {
+  return [...container.querySelectorAll('button')].filter(
+    (candidate): candidate is HTMLButtonElement => candidate.tagName === 'BUTTON' && candidate.textContent === label,
+  )
 }

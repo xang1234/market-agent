@@ -85,6 +85,7 @@ test("mapStatementLine carries through all StatementLine fields plus metric_id",
   assert.equal(mapped.currency, "USD");
   assert.equal(mapped.scale, 1_000_000);
   assert.equal(mapped.coverage_level, "full");
+  assert.equal(mapped.canonical_source_class, "gaap");
   assert.equal(mapped.metric_id, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0003");
 });
 

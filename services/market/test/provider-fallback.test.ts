@@ -239,3 +239,58 @@ test("fallback adapter returns sanitized unavailable envelope when every provide
   assert.equal(outcome.detail, "all fallback providers failed");
   assert.equal(events[0].reason, "provider threw");
 });
+
+test("fallback adapter stops when a thrown provider error is non-retryable", async () => {
+  const events: ProviderAuditEvent[] = [];
+  let fallbackCalls = 0;
+  const primary: MarketDataAdapter = {
+    providerName: "primary",
+    sourceId: FIXTURE_SOURCE_ID,
+    async getQuote() {
+      const error = new Error("primary: unauthorized") as Error & { status: number };
+      error.status = 401;
+      throw error;
+    },
+    async getBars() {
+      throw new Error("not used");
+    },
+  };
+  const fallback: MarketDataAdapter = {
+    providerName: "fallback",
+    sourceId: FALLBACK_SOURCE_ID,
+    async getQuote() {
+      fallbackCalls++;
+      return available(
+        normalizedQuote({
+          listing: aaplListing,
+          price: 189,
+          prev_close: 187,
+          session_state: "regular",
+          as_of: "2026-04-22T20:00:00.000Z",
+          delay_class: "delayed_15m",
+          currency: "USD",
+          source_id: FALLBACK_SOURCE_ID,
+        }),
+      );
+    },
+    async getBars() {
+      throw new Error("not used");
+    },
+  };
+
+  const adapter = createFallbackMarketDataAdapter({
+    providerName: "market-fallback",
+    adapters: [primary, fallback],
+    onAuditEvent: (event) => events.push(event),
+    clock: () => new Date("2026-04-22T20:00:00.000Z"),
+  });
+
+  const outcome = await adapter.getQuote({ listing: aaplListing });
+
+  assert.equal(outcome.outcome, "unavailable");
+  if (outcome.outcome !== "unavailable") return;
+  assert.equal(outcome.reason, "provider_error");
+  assert.equal(outcome.retryable, false);
+  assert.equal(fallbackCalls, 0);
+  assert.equal(events[0].fallbackEligible, false);
+});

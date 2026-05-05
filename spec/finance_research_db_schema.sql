@@ -461,7 +461,19 @@ create table fact_review_queue (
   updated_at timestamptz not null default now(),
   reviewed_by text,
   reviewed_at timestamptz,
-  fact_id uuid references facts(fact_id)
+  fact_id uuid references facts(fact_id),
+  constraint fact_review_queue_review_metadata_chk check (
+    (
+      status = 'queued'
+      and reviewed_by is null
+      and reviewed_at is null
+    ) or (
+      status in ('reviewed', 'dismissed')
+      and reviewed_by is not null
+      and length(btrim(reviewed_by)) > 0
+      and reviewed_at is not null
+    )
+  )
 );
 create index fact_review_queue_status_created_idx on fact_review_queue(status, created_at);
 create index fact_review_queue_source_idx on fact_review_queue(source_id) where source_id is not null;

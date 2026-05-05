@@ -61,6 +61,10 @@ test('approveFactReview POSTs candidate edits and notes', async () => {
 
   assert.equal(requests[0].input, `/v1/evidence/fact-review-queue/${REVIEW_ID}/approve`)
   assert.equal(requests[0].init?.method, 'POST')
+  assert.deepEqual(requests[0].init?.headers, {
+    'content-type': 'application/json',
+    'x-user-id': REVIEWER_ID,
+  })
   assert.deepEqual(JSON.parse(String(requests[0].init?.body)), {
     candidate: { value_num: 101.25 },
     notes: 'verified',

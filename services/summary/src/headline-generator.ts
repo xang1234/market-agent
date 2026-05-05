@@ -101,6 +101,7 @@ function toTitleCase(value: string): string {
   return value
     .split(/\s+/u)
     .map((word, index) => {
+      if (/[A-Z]/u.test(word)) return word;
       const lower = word.toLowerCase();
       if (index > 0 && SMALL_WORDS.has(lower)) return lower;
       const match = lower.match(/^([^a-z0-9]*)([a-z0-9])(.*)$/u);

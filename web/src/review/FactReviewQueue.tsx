@@ -38,11 +38,13 @@ type DraftState = {
   notes: string
 }
 
+type PendingReviewIds = Record<string, true>
+
 export function FactReviewQueue({ items, onApprove, onEdit, onReject }: FactReviewQueueProps) {
   const initialDrafts = useMemo(() => buildInitialDrafts(items), [items])
   const [validationErrors, setValidationErrors] = useState<Record<string, string | null>>({})
   const [actionErrors, setActionErrors] = useState<Record<string, string | null>>({})
-  const [pendingReviewId, setPendingReviewId] = useState<string | null>(null)
+  const [pendingReviewIds, setPendingReviewIds] = useState<PendingReviewIds>({})
 
   if (items.length === 0) {
     return (
@@ -66,7 +68,7 @@ export function FactReviewQueue({ items, onApprove, onEdit, onReject }: FactRevi
           const draft = initialDrafts[item.review_id]!
           const validationError = validationErrors[item.review_id] ?? null
           const actionError = actionErrors[item.review_id] ?? null
-          const isPending = pendingReviewId === item.review_id
+          const isPending = pendingReviewIds[item.review_id] === true
           const isStale = item.age_seconds != null && item.stale_after_seconds != null && item.age_seconds >= item.stale_after_seconds
           return (
             <li
@@ -99,7 +101,7 @@ export function FactReviewQueue({ items, onApprove, onEdit, onReject }: FactRevi
                       void submitCandidateAction(item.review_id, readDraft(event.currentTarget), onEdit, {
                         setValidationErrors,
                         setActionErrors,
-                        setPendingReviewId,
+                        setPendingReviewIds,
                       })
                     }
                   >
@@ -113,7 +115,7 @@ export function FactReviewQueue({ items, onApprove, onEdit, onReject }: FactRevi
                       void submitCandidateAction(item.review_id, readDraft(event.currentTarget), onApprove, {
                         setValidationErrors,
                         setActionErrors,
-                        setPendingReviewId,
+                        setPendingReviewIds,
                       })
                     }
                   >
@@ -126,7 +128,7 @@ export function FactReviewQueue({ items, onApprove, onEdit, onReject }: FactRevi
                     onClick={(event) =>
                       void submitRejectAction(item.review_id, readDraft(event.currentTarget), onReject, {
                         setActionErrors,
-                        setPendingReviewId,
+                        setPendingReviewIds,
                       })
                     }
                   >
@@ -187,7 +189,7 @@ async function submitCandidateAction(
   state: {
     setValidationErrors: (updater: (errors: Record<string, string | null>) => Record<string, string | null>) => void
     setActionErrors: (updater: (errors: Record<string, string | null>) => Record<string, string | null>) => void
-    setPendingReviewId: (reviewId: string | null) => void
+    setPendingReviewIds: (updater: (pending: PendingReviewIds) => PendingReviewIds) => void
   },
 ) {
   const parsed = parseCandidateJson(draft.candidateJson)
@@ -195,7 +197,7 @@ async function submitCandidateAction(
     state.setValidationErrors((errors) => ({ ...errors, [reviewId]: parsed.error }))
     return
   }
-  state.setPendingReviewId(reviewId)
+  state.setPendingReviewIds((pending) => ({ ...pending, [reviewId]: true }))
   state.setValidationErrors((errors) => ({ ...errors, [reviewId]: null }))
   state.setActionErrors((errors) => ({ ...errors, [reviewId]: null }))
   try {
@@ -210,7 +212,7 @@ async function submitCandidateAction(
       [reviewId]: error instanceof Error ? error.message : String(error),
     }))
   } finally {
-    state.setPendingReviewId(null)
+    state.setPendingReviewIds((pending) => withoutPendingReviewId(pending, reviewId))
   }
 }
 
@@ -230,10 +232,10 @@ async function submitRejectAction(
   callback: (action: FactReviewQueueRejectAction) => void | Promise<void>,
   state: {
     setActionErrors: (updater: (errors: Record<string, string | null>) => Record<string, string | null>) => void
-    setPendingReviewId: (reviewId: string | null) => void
+    setPendingReviewIds: (updater: (pending: PendingReviewIds) => PendingReviewIds) => void
   },
 ) {
-  state.setPendingReviewId(reviewId)
+  state.setPendingReviewIds((pending) => ({ ...pending, [reviewId]: true }))
   state.setActionErrors((errors) => ({ ...errors, [reviewId]: null }))
   try {
     await callback({
@@ -246,8 +248,14 @@ async function submitRejectAction(
       [reviewId]: error instanceof Error ? error.message : String(error),
     }))
   } finally {
-    state.setPendingReviewId(null)
+    state.setPendingReviewIds((pending) => withoutPendingReviewId(pending, reviewId))
   }
+}
+
+function withoutPendingReviewId(pending: PendingReviewIds, reviewId: string): PendingReviewIds {
+  const next = { ...pending }
+  delete next[reviewId]
+  return next
 }
 
 function parseCandidateJson(value: string): { ok: true; candidate: FactReviewCandidate } | { ok: false; error: string } {

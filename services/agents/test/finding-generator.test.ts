@@ -136,6 +136,34 @@ test("generateFinding can generate the persisted headline from snapshot and clai
   assert.equal(queries[0].values?.[6], "Apple Demand Improves in China");
 });
 
+test("generateFinding treats blank headline as missing when generation inputs are provided", async () => {
+  const { db, queries } = fakeDb((_text, values) => [
+    {
+      finding_id: FINDING_ID,
+      agent_id: values?.[1],
+      snapshot_id: values?.[2],
+      subject_refs: JSON.parse(values?.[3] as string),
+      claim_cluster_ids: JSON.parse(values?.[4] as string),
+      severity: values?.[5],
+      headline: values?.[6],
+      summary_blocks: JSON.parse(values?.[7] as string),
+      created_at: CREATED_AT,
+    },
+  ]);
+
+  const row = await generateFinding(
+    db,
+    validInput({
+      headline: "   ",
+      headline_model: async () => "Generated Demand Headline",
+      headline_claim: "Demand improved after channel checks.",
+    }),
+  );
+
+  assert.equal(row.headline, "Generated Demand Headline");
+  assert.equal(queries[0].values?.[6], "Generated Demand Headline");
+});
+
 test("generateFinding rejects invalid input before issuing SQL", async () => {
   const { db, queries } = fakeDb(() => []);
 
@@ -146,7 +174,7 @@ test("generateFinding rejects invalid input before issuing SQL", async () => {
   );
 
   await assert.rejects(
-    generateFinding(db, validInput({ headline: "" })),
+    generateFinding(db, validInput({ headline: "", headline_model: undefined, headline_claim: undefined })),
     (error: Error) =>
       error instanceof FindingGenerationValidationError && /headline/.test(error.message),
   );

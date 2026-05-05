@@ -77,3 +77,29 @@ test("thread title generation job does not call the model when a title already e
 
   assert.equal(modelCalls, 0);
 });
+
+test("thread title generation job does not call the model when the thread row is missing", async () => {
+  let modelCalls = 0;
+  const db: ChatThreadsDb = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+  const job = createThreadTitleGenerationJob({
+    db,
+    model: async () => {
+      modelCalls++;
+      return "Generated title";
+    },
+  });
+
+  await job({
+    threadId: THREAD_ID,
+    runId: "run-1",
+    turnId: "turn-1",
+    userId: USER_ID,
+    assistantText: "Apple shares rallied after earnings.",
+  });
+
+  assert.equal(modelCalls, 0);
+});

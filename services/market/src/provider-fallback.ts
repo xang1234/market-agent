@@ -96,17 +96,28 @@ async function firstAvailable<T extends NormalizedQuote | NormalizedBars>(input:
       });
       if (isAvailable(outcome) || !fallbackEligible) return outcome;
       lastOutcome = outcome;
-    } catch {
+    } catch (error) {
+      const fallbackEligible = thrownErrorFallbackEligible(error);
       input.onAuditEvent?.({
         providerName: adapter.providerName,
         sourceId: adapter.sourceId,
         operation: input.operation,
         result: "threw",
-        fallbackEligible: true,
+        fallbackEligible,
         latencyMs: Date.now() - started,
         observedAt: input.clock().toISOString(),
         reason: "provider threw",
       });
+      if (!fallbackEligible) {
+        return unavailable({
+          reason: "provider_error",
+          listing: input.listing,
+          source_id: adapter.sourceId,
+          as_of: input.clock().toISOString(),
+          retryable: false,
+          detail: "provider threw",
+        });
+      }
     }
   }
 
@@ -119,4 +130,20 @@ async function firstAvailable<T extends NormalizedQuote | NormalizedBars>(input:
     retryable: true,
     detail: "all fallback providers failed",
   });
+}
+
+function thrownErrorFallbackEligible(error?: unknown): boolean {
+  if (hasBooleanProperty(error, "retryable")) return error.retryable;
+  if (hasNumberProperty(error, "status")) {
+    return error.status === 429 || (error.status >= 500 && error.status < 600);
+  }
+  return true;
+}
+
+function hasBooleanProperty<K extends string>(value: unknown, key: K): value is Record<K, boolean> {
+  return value !== null && typeof value === "object" && typeof (value as Record<K, unknown>)[key] === "boolean";
+}
+
+function hasNumberProperty<K extends string>(value: unknown, key: K): value is Record<K, number> {
+  return value !== null && typeof value === "object" && Number.isInteger((value as Record<K, unknown>)[key]);
 }

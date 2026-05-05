@@ -194,6 +194,42 @@ test("POST approve returns 429 when reviewer throughput is capped", async (t) =>
   assert.equal(db.queries.some((query) => /insert into facts/i.test(query.text)), false);
 });
 
+test("POST approve returns 400 for invalid candidate fields", async (t) => {
+  const db = new FakeReviewDb();
+  const base = await startServer(t, db);
+
+  const response = await fetch(`${base}/v1/evidence/fact-review-queue/${REVIEW_ID}/approve`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-id": REVIEWER_ID,
+    },
+    body: JSON.stringify({ candidate: { ...factInput(), confidence: 2 } }),
+  });
+  const body = (await response.json()) as { error: string };
+
+  assert.equal(response.status, 400);
+  assert.match(body.error, /confidence: must be in \[0, 1\]/);
+});
+
+test("POST approve returns 400 when review id is malformed", async (t) => {
+  const db = new FakeReviewDb();
+  const base = await startServer(t, db);
+
+  const response = await fetch(`${base}/v1/evidence/fact-review-queue/not-a-uuid/approve`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-id": REVIEWER_ID,
+    },
+    body: "{}",
+  });
+  const body = (await response.json()) as { error: string };
+
+  assert.equal(response.status, 400);
+  assert.match(body.error, /review_id: must be a UUID v4/);
+});
+
 function factInput(overrides: Partial<FactInput> = {}): FactInput {
   return {
     subject_kind: "issuer",

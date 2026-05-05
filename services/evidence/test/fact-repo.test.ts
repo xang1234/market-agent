@@ -380,6 +380,7 @@ test("approveFactReview enforces the reviewer throughput cap before promotion", 
 
   assert.equal(db.queries.some((query) => /insert into facts/i.test(query.text)), false);
   assert.equal(db.queries.some((query) => /insert into fact_review_actions/i.test(query.text)), false);
+  assert.ok(db.queries.some((query) => /pg_advisory_xact_lock/i.test(query.text)));
   assert.match(db.queries.at(-1)?.text ?? "", /^rollback$/i);
 });
 

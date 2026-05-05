@@ -186,7 +186,7 @@ async function resolveFindingHeadline(input: GenerateFindingInput): Promise<stri
 }
 
 function assertHeadlineInput(input: GenerateFindingInput): void {
-  if (input.headline !== undefined) {
+  if (input.headline !== undefined && input.headline.trim() !== "") {
     assertNonEmptyString(input.headline, "headline");
     return;
   }

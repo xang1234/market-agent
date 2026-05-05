@@ -21,7 +21,6 @@ export function ReviewPage() {
 
   const refresh = useCallback(async () => {
     if (reviewerId === null) return
-    setState({ kind: 'loading' })
     try {
       const items = await fetchFactReviewQueue({ reviewerId })
       setState({ kind: 'ready', items })
@@ -31,8 +30,19 @@ export function ReviewPage() {
   }, [reviewerId])
 
   useEffect(() => {
-    void refresh()
-  }, [refresh])
+    if (reviewerId === null) return
+    let cancelled = false
+    fetchFactReviewQueue({ reviewerId })
+      .then((items) => {
+        if (!cancelled) setState({ kind: 'ready', items })
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setState({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [reviewerId])
 
   const approve = useCallback(
     async (action: FactReviewQueueAction) => {

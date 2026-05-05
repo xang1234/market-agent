@@ -37,6 +37,13 @@ class RequestBodyTooLargeError extends Error {
   }
 }
 
+class ClientRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ClientRequestError";
+  }
+}
+
 export function createEvidenceReviewServer(
   db: EvidenceReviewServerDb,
   options: { auth?: RequestAuthConfig; clock?: () => Date } = {},
@@ -159,7 +166,7 @@ function matchRoute(method: string, rawUrl: string): Route | null {
   } catch {
     return null;
   }
-  assertUuidV4(reviewId, "review_id");
+  assertClientValidation(() => assertUuidV4(reviewId, "review_id"));
 
   if (method === "POST" && actionMatch[2] === "approve") return { action: "approve", review_id: reviewId };
   if (method === "POST" && actionMatch[2] === "reject") return { action: "reject", review_id: reviewId };
@@ -171,7 +178,7 @@ function optionalPositiveInteger(value: string | null, label: string): number | 
   if (value == null || value.trim().length === 0) return null;
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${label}: must be a positive integer`);
+    throw new ClientRequestError(`${label}: must be a positive integer`);
   }
   return parsed;
 }
@@ -180,7 +187,7 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
   const raw = await readBody(req);
   const parsed = raw.trim().length === 0 ? {} : JSON.parse(raw);
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("request body must be a JSON object");
+    throw new ClientRequestError("request body must be a JSON object");
   }
   return parsed as Record<string, unknown>;
 }
@@ -200,7 +207,7 @@ async function readBody(req: IncomingMessage): Promise<string> {
 
 function optionalNotes(body: Record<string, unknown>): string | null {
   if (body.notes == null) return null;
-  assertNonEmptyString(body.notes, "notes");
+  assertClientValidation(() => assertNonEmptyString(body.notes, "notes"));
   return body.notes;
 }
 
@@ -210,23 +217,82 @@ function optionalCandidate(body: Record<string, unknown>): FactInput | undefined
 }
 
 function requiredCandidate(body: Record<string, unknown>): FactInput {
-  if (body.candidate == null) throw new Error("candidate is required");
+  if (body.candidate == null) throw new ClientRequestError("candidate is required");
   return candidateFromBody(body.candidate);
 }
 
 function candidateFromBody(value: unknown): FactInput {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("candidate must be a JSON object");
+    throw new ClientRequestError("candidate must be a JSON object");
   }
   return value as FactInput;
 }
 
 function isClientError(error: Error): boolean {
   return (
-    /must be|is required|not found|no longer queued|review_id|candidate|notes|limit|stale_after_seconds/.test(error.message) ||
-    error.message.includes("JSON object")
+    error instanceof ClientRequestError ||
+    error.message === "fact review queue item was not found or is no longer queued" ||
+    isValidationErrorMessage(error.message)
   );
 }
+
+function assertClientValidation(assertion: () => void): void {
+  try {
+    assertion();
+  } catch (error) {
+    if (error instanceof Error) throw new ClientRequestError(error.message);
+    throw error;
+  }
+}
+
+function isValidationErrorMessage(message: string): boolean {
+  return (
+    FACT_INPUT_VALIDATION_LABELS.some((label) => message.startsWith(`${label}: `)) ||
+    FACT_INPUT_VALIDATION_MESSAGES.has(message)
+  );
+}
+
+const FACT_INPUT_VALIDATION_LABELS = Object.freeze([
+  "adjustment_basis",
+  "as_of",
+  "confidence",
+  "coverage_level",
+  "currency",
+  "definition_version",
+  "entitlement_channels",
+  "fiscal_period",
+  "fiscal_year",
+  "freshness_class",
+  "ingestion_batch_id",
+  "limit",
+  "method",
+  "metric_id",
+  "notes",
+  "observed_at",
+  "period_end",
+  "period_kind",
+  "period_start",
+  "review_id",
+  "reviewed_at",
+  "reviewer_id",
+  "scale",
+  "source_id",
+  "stale_after_seconds",
+  "subject_id",
+  "subject_kind",
+  "unit",
+  "value_num",
+  "value_text",
+  "verification_status",
+] as const);
+
+const FACT_INPUT_VALIDATION_MESSAGES = new Set([
+  "candidate is required",
+  "candidate must be a JSON object",
+  "entitlement_channels: must not be empty",
+  "fact value: value_num or value_text is required",
+  "request body must be a JSON object",
+]);
 
 function respond(res: ServerResponse, status: number, body: object) {
   res.statusCode = status;
