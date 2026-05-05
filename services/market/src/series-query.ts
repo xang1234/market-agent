@@ -96,6 +96,37 @@ export type SeriesCacheIdentity = NormalizedSeriesQuery & {
   freshness_boundary: string;
 };
 
+export type SeriesCacheAuditResult = "hit" | "miss";
+
+export type SeriesCacheAuditEvent = {
+  cacheName: string;
+  result: SeriesCacheAuditResult;
+  identity: SeriesCacheIdentity;
+  observedAt: string;
+};
+
+export type SeriesCacheAuditBucket = {
+  value: string;
+  total: number;
+  hits: number;
+  misses: number;
+  hitRate: number;
+};
+
+export type SeriesCacheAuditDashboard = {
+  total: number;
+  hits: number;
+  misses: number;
+  hitRate: number;
+  byDimension: {
+    interval: ReadonlyArray<SeriesCacheAuditBucket>;
+    basis: ReadonlyArray<SeriesCacheAuditBucket>;
+    normalization: ReadonlyArray<SeriesCacheAuditBucket>;
+    freshnessBoundary: ReadonlyArray<SeriesCacheAuditBucket>;
+    subjectSet: ReadonlyArray<SeriesCacheAuditBucket>;
+  };
+};
+
 export type SeriesAllowedTransform = {
   range: BarRange;
   interval: BarInterval;
@@ -199,6 +230,27 @@ export function seriesCacheKey(
 ): string {
   const identity = seriesCacheIdentity(input, freshness_boundary);
   return `${SERIES_CACHE_KEY_VERSION}:${JSON.stringify(identity)}`;
+}
+
+export function buildSeriesCacheAuditDashboard(
+  events: ReadonlyArray<SeriesCacheAuditEvent>,
+): SeriesCacheAuditDashboard {
+  const totals = countCacheEvents(events);
+  return Object.freeze({
+    ...totals,
+    byDimension: Object.freeze({
+      interval: bucketBy(events, (event) => event.identity.interval),
+      basis: bucketBy(events, (event) => event.identity.basis),
+      normalization: bucketBy(events, (event) => event.identity.normalization),
+      freshnessBoundary: bucketBy(
+        events,
+        (event) => event.identity.freshness_boundary,
+      ),
+      subjectSet: bucketBy(events, (event) =>
+        event.identity.subject_refs.map((ref) => ref.id).join(","),
+      ),
+    }),
+  });
 }
 
 export function seriesTransformReuseDecision(
@@ -312,6 +364,46 @@ function assertSubjectRefs(
     }
     seen.add(id);
   }
+}
+
+function countCacheEvents(
+  events: ReadonlyArray<Pick<SeriesCacheAuditEvent, "result">>,
+): Omit<SeriesCacheAuditBucket, "value"> {
+  let hits = 0;
+  let misses = 0;
+  for (const event of events) {
+    if (event.result === "hit") hits++;
+    else misses++;
+  }
+  const total = hits + misses;
+  return Object.freeze({
+    total,
+    hits,
+    misses,
+    hitRate: total === 0 ? 0 : hits / total,
+  });
+}
+
+function bucketBy(
+  events: ReadonlyArray<SeriesCacheAuditEvent>,
+  keyFor: (event: SeriesCacheAuditEvent) => string,
+): ReadonlyArray<SeriesCacheAuditBucket> {
+  const groups = new Map<string, SeriesCacheAuditEvent[]>();
+  for (const event of events) {
+    const key = keyFor(event);
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(event);
+    else groups.set(key, [event]);
+  }
+
+  const buckets = Array.from(groups.entries()).map(([value, group]) =>
+    Object.freeze({
+      value,
+      ...countCacheEvents(group),
+    }),
+  );
+  buckets.sort((a, b) => b.total - a.total || a.value.localeCompare(b.value));
+  return Object.freeze(buckets);
 }
 
 function freezeSubjectRefs(

@@ -1,6 +1,7 @@
 import { Pool } from "pg";
 import { createChatServer } from "./http.ts";
 import { loadChatServerOptionsFromEnv } from "./runtime.ts";
+import { createThreadTitleGenerationJob } from "./thread-title.ts";
 import {
   createLiveRunActivity,
   createRunActivityHub,
@@ -11,9 +12,20 @@ const host = process.env.CHAT_HOST ?? "127.0.0.1";
 const port = Number(process.env.CHAT_PORT ?? "4310");
 const databaseUrl = process.env.CHAT_DATABASE_URL ?? process.env.DATABASE_URL;
 const runActivityAgentId = process.env.CHAT_RUN_ACTIVITY_AGENT_ID;
+const threadTitleModelModule = process.env.CHAT_THREAD_TITLE_MODEL_MODULE;
 
 const baseOptions = await loadChatServerOptionsFromEnv();
 const pool = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null;
+if (pool && !baseOptions.generateThreadTitle && threadTitleModelModule) {
+  const module = await import(threadTitleModelModule);
+  if (typeof module.model !== "function") {
+    throw new Error("CHAT_THREAD_TITLE_MODEL_MODULE must export model");
+  }
+  baseOptions.generateThreadTitle = createThreadTitleGenerationJob({
+    db: pool,
+    model: module.model,
+  });
+}
 const runActivityHub = createRunActivityHub();
 const server = createChatServer({
   ...baseOptions,

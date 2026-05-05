@@ -114,3 +114,31 @@ test("runtime config loads subject pre-resolver from configured module", async (
     text: "Which subject did you mean?",
   });
 });
+
+test("runtime config loads thread title generator from configured module", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "chat-runtime-title-"));
+  const modulePath = join(dir, "title.mjs");
+  await writeFile(
+    modulePath,
+    "export async function generateThreadTitle(input) { globalThis.__titleInput = input; }",
+  );
+
+  const options = await loadChatServerOptionsFromEnv({
+    CHAT_THREAD_TITLE_MODULE: pathToFileURL(modulePath).href,
+  });
+
+  assert.equal(typeof options.generateThreadTitle, "function");
+  await options.generateThreadTitle!({
+    threadId: "thread-1",
+    runId: "run-1",
+    turnId: "turn-1",
+    assistantText: "Assistant text",
+  });
+  assert.deepEqual((globalThis as { __titleInput?: unknown }).__titleInput, {
+    threadId: "thread-1",
+    runId: "run-1",
+    turnId: "turn-1",
+    assistantText: "Assistant text",
+  });
+  delete (globalThis as { __titleInput?: unknown }).__titleInput;
+});

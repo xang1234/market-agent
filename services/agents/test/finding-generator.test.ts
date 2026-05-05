@@ -108,6 +108,34 @@ test("generateFinding scores, builds summary blocks, and inserts a snapshot-boun
   assert.equal(queries[0].values?.[5], "high");
 });
 
+test("generateFinding can generate the persisted headline from snapshot and claim cluster context", async () => {
+  const { db, queries } = fakeDb((_text, values) => [
+    {
+      finding_id: FINDING_ID,
+      agent_id: values?.[1],
+      snapshot_id: values?.[2],
+      subject_refs: JSON.parse(values?.[3] as string),
+      claim_cluster_ids: JSON.parse(values?.[4] as string),
+      severity: values?.[5],
+      headline: values?.[6],
+      summary_blocks: JSON.parse(values?.[7] as string),
+      created_at: CREATED_AT,
+    },
+  ]);
+
+  const row = await generateFinding(
+    db,
+    validInput({
+      headline: undefined,
+      headline_model: async () => "Apple Demand Improves in China",
+      headline_claim: "Apple demand improved in China after channel checks.",
+    } as Partial<GenerateFindingInput>),
+  );
+
+  assert.equal(row.headline, "Apple Demand Improves in China");
+  assert.equal(queries[0].values?.[6], "Apple Demand Improves in China");
+});
+
 test("generateFinding rejects invalid input before issuing SQL", async () => {
   const { db, queries } = fakeDb(() => []);
 
@@ -170,6 +198,27 @@ test("generateFinding rejects source refs and as_of values outside the sealed sn
     (error: Error) =>
       error instanceof FindingGenerationValidationError &&
       /snapshot_manifest\.snapshot_id.*match/.test(error.message),
+  );
+
+  assert.equal(queries.length, 0);
+});
+
+test("generateFinding requires a claim cluster when generating a headline", async () => {
+  const { db, queries } = fakeDb(() => []);
+
+  await assert.rejects(
+    generateFinding(
+      db,
+      validInput({
+        headline: undefined,
+        headline_model: async () => "Generated headline",
+        headline_claim: "Claim text",
+        claim_cluster_ids: [],
+      } as Partial<GenerateFindingInput>),
+    ),
+    (error: Error) =>
+      error instanceof FindingGenerationValidationError &&
+      /claim_cluster_ids must contain at least one id/.test(error.message),
   );
 
   assert.equal(queries.length, 0);

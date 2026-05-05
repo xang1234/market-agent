@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import {
   createMarketServer,
   type GetQuoteResponse,
+  type GetCacheAuditResponse,
   type GetSeriesResponse,
   type MarketServerDeps,
 } from "../src/http.ts";
@@ -359,4 +360,19 @@ test("POST /v1/market/series surfaces adapter failures as per-listing unavailabl
   assert.equal(outcome.outcome, "unavailable");
   if (outcome.outcome !== "unavailable") return;
   assert.equal(outcome.reason, "provider_error");
+});
+
+test("GET /v1/market/cache-audit reports runtime series cache identity events", async (t) => {
+  const url = await startServer(t, buildDeps());
+  const series = await postSeries(url, validSeriesQuery());
+  assert.equal(series.status, 200);
+
+  const res = await fetch(`${url}/v1/market/cache-audit`);
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as GetCacheAuditResponse;
+
+  assert.equal(body.dashboard.total, 1);
+  assert.equal(body.dashboard.misses, 1);
+  assert.equal(body.dashboard.byDimension.interval[0].value, "1d");
+  assert.equal(body.dashboard.byDimension.basis[0].value, "split_and_div_adjusted");
 });
