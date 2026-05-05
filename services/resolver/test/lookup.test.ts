@@ -138,6 +138,44 @@ test("case-insensitive ISIN and LEI lookups", { timeout: 120000 }, async (t) => 
   assert.equal(leiLower.subject_ref.id, apple.issuer_id);
 });
 
+test("non-US ISIN lookup resolves the instrument and LEI lookup resolves the issuer", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver lookup coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-b5q-non-us");
+  const client = await connectedClient(t, databaseUrl);
+  const issuer = await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name, lei, domicile, sector, industry)
+     values ($1, $2, $3, $4, $5)
+     returning issuer_id`,
+    ["Unilever PLC", "213800WAVVOPS85N2205", "GB", "Consumer Defensive", "Household Products"],
+  );
+  const instrument = await client.query<{ instrument_id: string }>(
+    `insert into instruments (issuer_id, asset_type, share_class, isin)
+     values ($1, 'common_stock', null, $2)
+     returning instrument_id`,
+    [issuer.rows[0].issuer_id, "GB00B10RZP78"],
+  );
+  await client.query(
+    `insert into listings (instrument_id, mic, ticker, trading_currency, timezone)
+     values ($1, 'XLON', 'ULVR', 'GBP', 'Europe/London')`,
+    [instrument.rows[0].instrument_id],
+  );
+
+  const byIsin = await resolveByIsin(client, "gb00b10rzp78");
+  const byLei = await resolveByLei(client, "213800wavvops85n2205");
+
+  assert.ok(isResolved(byIsin));
+  assert.ok(isResolved(byLei));
+  assert.equal(byIsin.subject_ref.kind, "instrument");
+  assert.equal(byIsin.subject_ref.id, instrument.rows[0].instrument_id);
+  assert.equal(await traceIssuerFromInstrument(client, byIsin.subject_ref.id), issuer.rows[0].issuer_id);
+  assert.equal(byLei.subject_ref.kind, "issuer");
+  assert.equal(byLei.subject_ref.id, issuer.rows[0].issuer_id);
+});
+
 test("mixed-case stored ISIN and LEI resolve from normalized input", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for resolver lookup coverage");

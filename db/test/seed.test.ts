@@ -65,6 +65,17 @@ test("seed populates metrics and sources with the expected registry", { timeout:
     );
   }
 
+  for (const ifrsMetric of ["ifrs.revenue", "ifrs.profit_loss", "ifrs.eps_diluted"]) {
+    assert.equal(
+      queryValue(
+        containerName,
+        `select count(*) from metrics where metric_key = '${ifrsMetric}' and canonical_source_class = 'ifrs'`,
+      ),
+      "1",
+      `expected IFRS metric ${ifrsMetric} to be present exactly once`,
+    );
+  }
+
   assert.equal(
     queryValue(containerName, "select count(*) from sources where provider = 'sec_edgar' and kind = 'filing'"),
     "1",

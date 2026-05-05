@@ -42,9 +42,11 @@ backing row in `Fact`/`Computation`, violating I1.
 
 `createMetricRegistry(definitions[])` builds an immutable registry that
 rejects duplicate keys and duplicate ids. `mapStatement(registry, s)`
-returns the same statement with `metric_id` attached to every line, plus
-a unit-class compatibility check (e.g., a `currency` line cannot map to
-a `shares` metric).
+returns the same statement with `metric_id` and `canonical_source_class`
+attached to every line, plus a unit-class compatibility check (e.g., a
+`currency` line cannot map to a `shares` metric). Callers can pass
+`{ canonical_source_class: "ifrs" }` to require IFRS metric definitions
+and fail fast instead of silently mapping IFRS statements onto GAAP rows.
 
 ## SEC EDGAR primary-source anchor
 
