@@ -16,9 +16,12 @@ export type { HomeCardScore, HomeRankingOptions, HomeRankingWeights } from "./ra
 
 export type {
   FindingCardBlock,
+  HomeAnalyzeIntent,
+  HomeCardDestination,
   HomeFinding,
   HomeFindingCard,
   HomeFindingSeverity,
+  HomeSymbolTab,
   QueryExecutor,
   SubjectRef,
 } from "./types.ts";

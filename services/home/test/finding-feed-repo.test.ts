@@ -37,6 +37,7 @@ function findingRow(overrides: Record<string, unknown>) {
     ],
     created_at: "2026-05-05T00:00:00.000Z",
     cluster_support_count: 3,
+    preferred_surface: null,
     ...overrides,
   };
 }
@@ -180,6 +181,48 @@ test("listHomeFindingCards keeps unclustered findings as singleton cards", async
   assert.equal(cards[0].dedupe_key, "finding:22222222-2222-4222-a222-222222222299");
   assert.equal(cards[0].support_count, 1);
   assert.equal(cards[0].contributing_finding_count, 1);
+  assert.deepEqual(cards[0].destination, {
+    kind: "none",
+    reason: "missing_destination",
+  });
+});
+
+test("listHomeFindingCards preserves explicit symbol earnings destinations", async () => {
+  const subject_ref = { kind: "listing", id: "55555555-5555-4555-a555-555555555555" };
+  const { db } = fakeDb([
+    findingRow({
+      preferred_surface: {
+        kind: "symbol",
+        subject_ref,
+        tab: "earnings",
+      },
+    }),
+  ]);
+
+  const cards = await listHomeFindingCards(db, { user_id: USER_ID });
+
+  assert.deepEqual(cards[0].destination, {
+    kind: "symbol",
+    subject_ref,
+    tab: "earnings",
+  });
+});
+
+test("listHomeFindingCards rejects invalid destination metadata", async () => {
+  const { db } = fakeDb([
+    findingRow({
+      preferred_surface: {
+        kind: "symbol",
+        subject_ref: { kind: "listing", id: "55555555-5555-4555-a555-555555555555" },
+        tab: "not-a-tab",
+      },
+    }),
+  ]);
+
+  await assert.rejects(
+    () => listHomeFindingCards(db, { user_id: USER_ID }),
+    /preferred_surface.tab must be a supported symbol tab/,
+  );
 });
 
 test("listHomeFindingCards rejects malformed JSON row values loudly", async () => {

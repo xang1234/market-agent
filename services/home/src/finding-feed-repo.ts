@@ -1,9 +1,14 @@
 import {
+  HOME_ANALYZE_INTENTS,
   HOME_FINDING_SEVERITIES,
+  HOME_SYMBOL_TABS,
   type FindingCardBlock,
+  type HomeAnalyzeIntent,
+  type HomeCardDestination,
   type HomeFinding,
   type HomeFindingCard,
   type HomeFindingSeverity,
+  type HomeSymbolTab,
   type QueryExecutor,
   type SubjectRef,
 } from "./types.ts";
@@ -30,12 +35,14 @@ type FindingFeedRow = {
   summary_blocks: unknown;
   created_at: Date | string;
   cluster_support_count: number | string | null;
+  preferred_surface: unknown;
 };
 
 type Group = {
   dedupe_key: string;
   findings: HomeFinding[];
   support_counts: number[];
+  destinations: HomeCardDestination[];
 };
 
 const SUBJECT_KINDS = new Set([
@@ -79,7 +86,8 @@ export async function listHomeFindingCards(
             f.headline,
             f.summary_blocks,
             f.created_at,
-            cc.support_count as cluster_support_count
+            cc.support_count as cluster_support_count,
+            null::jsonb as preferred_surface
        from findings f
        join agents a
          on a.agent_id = f.agent_id
@@ -107,12 +115,13 @@ function cardsFromRows(rows: ReadonlyArray<FindingFeedRow>): HomeFindingCard[] {
     const dedupe_key = dedupeKey(finding);
     let group = groups.get(dedupe_key);
     if (!group) {
-      group = { dedupe_key, findings: [], support_counts: [] };
+      group = { dedupe_key, findings: [], support_counts: [], destinations: [] };
       groups.set(dedupe_key, group);
     }
     group.findings.push(finding);
     const supportCount = nullableCount(row.cluster_support_count);
     if (supportCount !== null) group.support_counts.push(supportCount);
+    group.destinations.push(parseHomeCardDestination(row.preferred_surface));
   }
 
   return [...groups.values()]
@@ -150,6 +159,10 @@ function cardFromGroup(group: Group): HomeFindingCard {
     finding_ids: findingIds,
     claim_cluster_ids: claimClusterIds,
     user_affinity: 0,
+    destination: group.destinations.find((destination) => destination.kind !== "none") ?? {
+      kind: "none",
+      reason: "missing_destination",
+    },
   });
 }
 
@@ -223,6 +236,69 @@ function parseSubjectRefs(value: unknown): ReadonlyArray<SubjectRef> {
     assertUuid(ref.id, `subject_refs[${index}].id`);
     return Object.freeze({ kind: ref.kind as SubjectRef["kind"], id: ref.id });
   }));
+}
+
+function parseSubjectRef(value: unknown, field: string): SubjectRef {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new HomeFindingFeedError(`${field} must be an object`);
+  }
+  const ref = value as Record<string, unknown>;
+  if (typeof ref.kind !== "string" || typeof ref.id !== "string") {
+    throw new HomeFindingFeedError(`${field} must contain kind and id`);
+  }
+  if (!SUBJECT_KINDS.has(ref.kind)) {
+    throw new HomeFindingFeedError(`${field}.kind must be a supported subject kind`);
+  }
+  assertUuid(ref.id, `${field}.id`);
+  return Object.freeze({ kind: ref.kind as SubjectRef["kind"], id: ref.id });
+}
+
+function parseHomeCardDestination(value: unknown): HomeCardDestination {
+  if (value === null || value === undefined) {
+    return { kind: "none", reason: "missing_destination" };
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new HomeFindingFeedError("preferred_surface must be an object");
+  }
+  const destination = value as Record<string, unknown>;
+  if (destination.kind === "symbol") {
+    const tab = parseSymbolTab(destination.tab);
+    const subject_ref = parseSubjectRef(destination.subject_ref, "preferred_surface.subject_ref");
+    return { kind: "symbol", subject_ref, tab };
+  }
+  if (destination.kind === "theme") {
+    const subject_ref = parseSubjectRef(destination.subject_ref, "preferred_surface.subject_ref");
+    if (subject_ref.kind !== "theme") {
+      throw new HomeFindingFeedError("preferred_surface.subject_ref.kind must be theme");
+    }
+    return { kind: "theme", subject_ref };
+  }
+  if (destination.kind === "analyze") {
+    const intent = parseAnalyzeIntent(destination.intent);
+    const subject_ref = parseSubjectRef(destination.subject_ref, "preferred_surface.subject_ref");
+    return { kind: "analyze", subject_ref, intent };
+  }
+  if (destination.kind === "none") {
+    return {
+      kind: "none",
+      reason: assertNonEmptyString(destination.reason, "preferred_surface.reason").trim(),
+    };
+  }
+  throw new HomeFindingFeedError("preferred_surface.kind must be symbol, theme, analyze, or none");
+}
+
+function parseSymbolTab(value: unknown): HomeSymbolTab {
+  if (!HOME_SYMBOL_TABS.includes(value as HomeSymbolTab)) {
+    throw new HomeFindingFeedError("preferred_surface.tab must be a supported symbol tab");
+  }
+  return value as HomeSymbolTab;
+}
+
+function parseAnalyzeIntent(value: unknown): HomeAnalyzeIntent {
+  if (!HOME_ANALYZE_INTENTS.includes(value as HomeAnalyzeIntent)) {
+    throw new HomeFindingFeedError("preferred_surface.intent must be a supported Analyze intent");
+  }
+  return value as HomeAnalyzeIntent;
 }
 
 function parseSummaryBlocks(value: unknown): ReadonlyArray<FindingCardBlock> {
