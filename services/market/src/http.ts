@@ -8,6 +8,7 @@ import {
   assertSeriesQueryContract,
   buildSeriesCacheAuditDashboard,
   seriesCacheIdentity,
+  seriesCacheKey,
   type NormalizedSeriesQuery,
   type SeriesCacheAuditDashboard,
   type SeriesCacheAuditEvent,
@@ -22,6 +23,8 @@ export type MarketServerDeps = {
   // (e.g., basis mismatch, missing listing). Defaults to wall-clock; tests
   // pin a fixed clock for deterministic envelopes.
   clock?: () => Date;
+  seriesCacheAuditMaxEvents?: number;
+  seriesCacheMaxEntries?: number;
 };
 
 // HTTP shape for /v1/market/quote — the spec NormalizedQuote (provider-neutral
@@ -56,10 +59,17 @@ export type GetCacheAuditResponse = {
 };
 
 const MAX_SERIES_BODY_BYTES = 64 * 1024;
+const DEFAULT_SERIES_CACHE_AUDIT_MAX_EVENTS = 1_000;
+const DEFAULT_SERIES_CACHE_MAX_ENTRIES = 256;
 
 export function createMarketServer(deps: MarketServerDeps): Server {
   const clock = deps.clock ?? (() => new Date());
+  const seriesCacheAuditMaxEvents =
+    deps.seriesCacheAuditMaxEvents ?? DEFAULT_SERIES_CACHE_AUDIT_MAX_EVENTS;
+  const seriesCacheMaxEntries =
+    deps.seriesCacheMaxEntries ?? DEFAULT_SERIES_CACHE_MAX_ENTRIES;
   const seriesCacheAuditEvents: SeriesCacheAuditEvent[] = [];
+  const seriesResponseCache = new Map<string, GetSeriesResponse>();
 
   return createServer(async (req, res) => {
     try {
@@ -124,11 +134,28 @@ export function createMarketServer(deps: MarketServerDeps): Server {
             });
             return;
           }
-          seriesCacheAuditEvents.push({
+          const observedAt = clock().toISOString();
+          const freshnessBoundary = seriesCacheFreshnessBoundary(query);
+          const identity = seriesCacheIdentity(query, freshnessBoundary);
+          const cacheKey = seriesCacheKey(query, freshnessBoundary);
+          const cachedResponse = seriesResponseCache.get(cacheKey);
+          if (cachedResponse) {
+            promoteSeriesResponse(seriesResponseCache, cacheKey, cachedResponse);
+            recordSeriesCacheAuditEvent(seriesCacheAuditEvents, seriesCacheAuditMaxEvents, {
+              cacheName: "series",
+              result: "hit",
+              identity,
+              observedAt,
+            });
+            respond(res, 200, cachedResponse);
+            return;
+          }
+
+          recordSeriesCacheAuditEvent(seriesCacheAuditEvents, seriesCacheAuditMaxEvents, {
             cacheName: "series",
             result: "miss",
-            identity: seriesCacheIdentity(query, clock().toISOString()),
-            observedAt: clock().toISOString(),
+            identity,
+            observedAt,
           });
 
           const results = await Promise.all(
@@ -137,6 +164,9 @@ export function createMarketServer(deps: MarketServerDeps): Server {
             ),
           );
           const response: GetSeriesResponse = { query, results };
+          if (!seriesResponseHasRetryableUnavailable(response)) {
+            rememberSeriesResponse(seriesResponseCache, seriesCacheMaxEntries, cacheKey, response);
+          }
           respond(res, 200, response);
           return;
         }
@@ -158,6 +188,52 @@ export function createMarketServer(deps: MarketServerDeps): Server {
       if (!res.headersSent) respond(res, 502, { error: "upstream market data unavailable" });
     }
   });
+}
+
+function seriesCacheFreshnessBoundary(query: NormalizedSeriesQuery): string {
+  return query.range.end;
+}
+
+function recordSeriesCacheAuditEvent(
+  events: SeriesCacheAuditEvent[],
+  maxEvents: number,
+  event: SeriesCacheAuditEvent,
+): void {
+  if (maxEvents <= 0) return;
+  events.push(event);
+  const overflow = events.length - maxEvents;
+  if (overflow > 0) events.splice(0, overflow);
+}
+
+function rememberSeriesResponse(
+  cache: Map<string, GetSeriesResponse>,
+  maxEntries: number,
+  key: string,
+  response: GetSeriesResponse,
+): void {
+  if (maxEntries <= 0) return;
+  if (cache.has(key)) cache.delete(key);
+  cache.set(key, response);
+  while (cache.size > maxEntries) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey === undefined) break;
+    cache.delete(oldestKey);
+  }
+}
+
+function promoteSeriesResponse(
+  cache: Map<string, GetSeriesResponse>,
+  key: string,
+  response: GetSeriesResponse,
+): void {
+  cache.delete(key);
+  cache.set(key, response);
+}
+
+function seriesResponseHasRetryableUnavailable(response: GetSeriesResponse): boolean {
+  return response.results.some((entry) =>
+    !isAvailable(entry.outcome) && entry.outcome.retryable,
+  );
 }
 
 type Route =

@@ -1,11 +1,13 @@
 # Watchlists
 
-Tracking bead: `fra-6al.6.1` (P0.4b default manual watchlist + membership CRUD).
+Tracking beads: `fra-6al.6.1` (P0.4b default manual watchlist + membership
+CRUD) and `fra-wlc` (named watchlist list-management CRUD).
 
-This service owns the HTTP surface for the implicit default manual watchlist.
-Each user has exactly one manual watchlist — provisioned on user insert by the
-`0003_default_manual_watchlist` migration trigger. This bead does **not**
-cover create/rename/delete list endpoints; that work is tracked in `fra-wlc`.
+This service owns the HTTP surface for user watchlists. Each user gets one
+implicit default manual watchlist provisioned on user insert by the
+`0003_default_manual_watchlist` migration trigger. Users may also create
+additional named lists; the default is identified by `is_default` and cannot
+be deleted.
 
 ## Endpoints
 
@@ -13,6 +15,11 @@ All requests require `x-user-id` (UUID v4). Authentication is stubbed at this
 phase; `fra-6al.6.3` will wire the real inline auth interrupt.
 
 - `GET /v1/watchlists/default/members` → `{ members: [{ subject_ref, created_at }] }`
+- `GET /v1/watchlists` → `{ watchlists: [...] }` with the default list first
+- `POST /v1/watchlists` with `{ name, mode, membership_spec? }` → created list
+- `PATCH /v1/watchlists/{watchlist_id}` with `{ name }` → renamed list
+- `DELETE /v1/watchlists/{watchlist_id}` → `204` for non-default lists
+  - `409` when attempting to delete the implicit default list
 - `POST /v1/watchlists/default/members` with `{ subject_ref: { kind, id } }`
   - `201 { status: "created", member }` on first add
   - `200 { status: "already_present", member }` on idempotent repeat

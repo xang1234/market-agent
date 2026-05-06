@@ -33,14 +33,21 @@ import {
 } from "../mention-repo.ts";
 import type { QueryExecutor } from "../types.ts";
 import {
+  isEphemeralRawBlobId,
+  type ObjectStore,
+} from "../object-store.ts";
+import {
   linkDocumentMentions,
   type DetectedMentionCandidate,
   type ResolveMention,
   type SkippedMention,
 } from "./entity-linker.ts";
+import { extractNonGaapReconciliations } from "./non-gaap-reconciliation-extractor.ts";
+import { extractXbrlExtensionSegments } from "./xbrl-segment-extractor.ts";
 
 export type EvidenceReaderToolDeps = {
   db: QueryExecutor;
+  objectStore?: ObjectStore;
   extractMentionCandidates?: (document: DocumentRow) => Promise<readonly DetectedMentionCandidate[]>;
   resolveMention?: ResolveMention;
 };
@@ -54,6 +61,8 @@ export function createEvidenceReaderToolHandlers(
   for (const name of READER_EXTRACTION_TOOL_NAMES) {
     handlers[name] = name === "extract_mentions"
       ? makeExtractMentionsHandler(deps)
+      : name === "extract_candidate_facts"
+        ? makeExtractCandidateFactsHandler(deps)
       : makeStubHandler(deps);
   }
   return handlers;
@@ -126,6 +135,66 @@ function makeExtractMentionsHandler(deps: EvidenceReaderToolDeps): ReaderToolHan
   };
 }
 
+function makeExtractCandidateFactsHandler(deps: EvidenceReaderToolDeps): ReaderToolHandler {
+  return async (input) => {
+    const document = await getDocument(deps.db, input.document_id);
+    if (!document) {
+      throw new ReaderToolError(
+        "NOT_FOUND",
+        `document_id "${input.document_id}" not found`,
+      );
+    }
+
+    if (!deps.objectStore || document.kind !== "filing") {
+      return {
+        items: [],
+        source_ids: [document.source_id],
+      };
+    }
+    if (isEphemeralRawBlobId(document.raw_blob_id)) {
+      throw new ReaderToolError(
+        "POLICY_BLOCKED",
+        `document_id "${input.document_id}" has no retained raw filing bytes`,
+      );
+    }
+
+    let blob;
+    try {
+      blob = await deps.objectStore.get(document.raw_blob_id);
+    } catch (error) {
+      throw new ReaderToolError(
+        "UPSTREAM_UNAVAILABLE",
+        `raw_blob_id "${document.raw_blob_id}" could not be read from object store: ${errorMessage(error)}`,
+      );
+    }
+    if (!blob) {
+      throw new ReaderToolError(
+        "UPSTREAM_UNAVAILABLE",
+        `raw_blob_id "${document.raw_blob_id}" not found in object store`,
+      );
+    }
+
+    const text = new TextDecoder().decode(blob.bytes);
+    const asOf = new Date().toISOString();
+    const extractedXbrl = extractXbrlExtensionSegments({
+      xbrl: text,
+      source_id: document.source_id,
+      as_of: asOf,
+      definition_as_of: documentDefinitionAsOf(document),
+    });
+    const extractedNonGaap = extractNonGaapReconciliations({
+      html: text,
+      source_id: document.source_id,
+      as_of: asOf,
+    });
+
+    return {
+      items: [...extractedXbrl.items, ...extractedNonGaap.items],
+      source_ids: [document.source_id],
+    };
+  };
+}
+
 async function withTransaction<T>(db: QueryExecutor, action: () => Promise<T>): Promise<T> {
   await db.query("begin");
   try {
@@ -156,4 +225,17 @@ function skippedMentionToToolItem(skipped: SkippedMention) {
     reason: skipped.reason,
     resolver_envelope: skipped.envelope,
   };
+}
+
+function documentDefinitionAsOf(document: DocumentRow): string | undefined {
+  if (!document.published_at) return undefined;
+  const publishedAt: unknown = document.published_at;
+  if (publishedAt instanceof Date) {
+    return publishedAt.toISOString().slice(0, 10);
+  }
+  return String(publishedAt).slice(0, 10);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

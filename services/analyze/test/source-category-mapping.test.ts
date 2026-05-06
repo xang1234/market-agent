@@ -25,26 +25,22 @@ test("mapSourceCategoriesToBundles maps a single category to its declared bundle
   const result = mapSourceCategoriesToBundles({
     categories: ["financials_quarterly"],
   });
-  // financials_quarterly maps to single_subject_analysis. The base
-  // bundle is always present too.
-  assert.ok(result.bundle_ids.includes("single_subject_analysis"));
+  assert.ok(result.bundle_ids.includes("financials_analysis"));
   assert.ok(result.bundle_ids.includes(ANALYZE_BASE_BUNDLE_ID));
 });
 
-test("mapSourceCategoriesToBundles deduplicates bundle ids when two categories share a bundle", () => {
-  // financials_quarterly and estimates both map to
-  // single_subject_analysis. The mapping should return a single
-  // single_subject_analysis entry, not two.
+test("mapSourceCategoriesToBundles preserves distinct analysis granularity for focused sources", () => {
   const result = mapSourceCategoriesToBundles({
-    categories: ["financials_quarterly", "estimates"],
+    categories: ["financials_quarterly", "estimates", "holders"],
   });
-  const occurrences = result.bundle_ids.filter(
-    (id) => id === "single_subject_analysis",
-  ).length;
-  assert.equal(
-    occurrences,
-    1,
-    "single_subject_analysis must appear exactly once across two categories that share it",
+  assert.deepEqual(
+    new Set(result.bundle_ids),
+    new Set([
+      ANALYZE_BASE_BUNDLE_ID,
+      "financials_analysis",
+      "estimates_analysis",
+      "ownership_analysis",
+    ]),
   );
 });
 
@@ -141,6 +137,23 @@ test("every bundle id named in SOURCE_CATEGORY_BUNDLES exists in the tool regist
   }
 });
 
+test("focused financial source categories do not all collapse to the broad single-subject bundle", () => {
+  const focusedCategories = [
+    "financials_annual",
+    "financials_quarterly",
+    "estimates",
+    "holders",
+  ] as const;
+  const focusedBundleSets = focusedCategories.map((category) =>
+    SOURCE_CATEGORY_BUNDLES[category].join(","),
+  );
+  assert.notEqual(
+    new Set(focusedBundleSets).size,
+    1,
+    "financials, estimates, and holders need auditable bundle granularity",
+  );
+});
+
 test("golden template: quarterly earnings memo maps to expected bundles", () => {
   // The bead's verification: "Golden templates map to expected
   // bundles." A "Quarterly earnings memo" (per fra-7vn.2 description)
@@ -152,7 +165,8 @@ test("golden template: quarterly earnings memo maps to expected bundles", () => 
   });
   const expected = new Set([
     ANALYZE_BASE_BUNDLE_ID,
-    "single_subject_analysis",
+    "financials_analysis",
+    "estimates_analysis",
     "document_research",
   ]);
   assert.deepEqual(new Set(result.bundle_ids), expected);

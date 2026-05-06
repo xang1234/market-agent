@@ -40,17 +40,16 @@ export const ANALYZE_BASE_BUNDLE_ID = "analyze_template_run";
 // - transcripts ride document_research alongside news; both flow
 //   through the evidence/claims pipeline rather than the SEC filings
 //   index that filing_research wraps.
-// - financials_annual, financials_quarterly, estimates, and holders
-//   all converge on single_subject_analysis. This is intentional at
-//   the mapping layer; whether the within-bundle tool list is rich
-//   enough to honor each category's distinct intent is a downstream
-//   orchestrator-wiring concern tracked by fra-t6r.
+// - financials, estimates, and holders use narrower analysis bundles
+//   so the orchestrator can audit which category unlocked statement,
+//   consensus, or ownership tools instead of treating all three as a
+//   generic single-subject request.
 export const SOURCE_CATEGORY_BUNDLES = Object.freeze({
   company_profile: Object.freeze(["quote_lookup", "single_subject_analysis"]),
-  financials_annual: Object.freeze(["single_subject_analysis"]),
-  financials_quarterly: Object.freeze(["single_subject_analysis"]),
-  estimates: Object.freeze(["single_subject_analysis"]),
-  holders: Object.freeze(["single_subject_analysis"]),
+  financials_annual: Object.freeze(["financials_analysis"]),
+  financials_quarterly: Object.freeze(["financials_analysis"]),
+  estimates: Object.freeze(["estimates_analysis"]),
+  holders: Object.freeze(["ownership_analysis"]),
   prices: Object.freeze(["quote_lookup", "single_subject_analysis"]),
   segments: Object.freeze(["segment_deep_dive"]),
   peers: Object.freeze(["peer_comparison"]),

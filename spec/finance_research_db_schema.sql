@@ -556,10 +556,13 @@ create table watchlists (
   user_id uuid not null references users(user_id) on delete cascade,
   name text not null,
   mode watchlist_mode not null,
+  is_default boolean not null default false,
   membership_spec jsonb,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint watchlists_default_manual_mode_chk check (not is_default or mode = 'manual')
 );
+create unique index watchlists_default_per_user_idx on watchlists(user_id) where is_default;
 
 create table watchlist_members (
   watchlist_member_id uuid primary key default gen_random_uuid(),

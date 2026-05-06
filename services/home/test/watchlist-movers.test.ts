@@ -106,6 +106,7 @@ test("getHomeWatchlistMovers issues a single round-trip query that filters to li
     quoteProvider: provider([quote(LISTING_A, 110, 100)]),
   });
   assert.equal(calls.length, 1);
+  assert.match(calls[0].text, /is_default/i);
   assert.match(calls[0].text, /watchlist_members/i);
   assert.match(calls[0].text, /subject_kind = 'listing'/i);
 });

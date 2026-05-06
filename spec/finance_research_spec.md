@@ -188,7 +188,8 @@ Watchlists support `manual`, `screen`, `agent`, `theme`, and `portfolio` modes. 
 
 - The product starts from one implicit default manual watchlist as the baseline saved-subject model.
 - The manual baseline CRUD floor is membership-only: view current members, add a resolved subject, and remove a saved subject.
-- This bead does not define create-list, rename-list, delete-list, sharing, reordering, or multiple manual lists.
+- Named manual watchlists extend the baseline: users can list watchlists, create a named list, rename it, and delete non-default lists. The implicit default is flagged as `is_default` and cannot be deleted.
+- Sharing and custom reordering remain out of scope for the baseline list-management surface.
 - The persisted membership unit is canonical subject identity rather than raw ticker strings or stored quote payloads.
 - Membership is idempotent at the subject level, so adding the same canonical subject twice does not create duplicates.
 - Manual watchlist rows hydrate quote context on read from saved canonical subject identity rather than storing quote payloads in membership records.

@@ -29,6 +29,7 @@ const CLAIM_ID = "33333333-3333-4333-8333-333333333333";
 const FIXED_NOW = "2026-04-29T12:00:00.000Z";
 
 type Captured = { text: string; values?: unknown[] };
+type InvalidJsonCase = { name: string; value: unknown; pattern: RegExp };
 
 function fakeDb(
   responder: (text: string, values?: unknown[]) => unknown[],
@@ -80,6 +81,20 @@ function membershipRow(overrides: Partial<Record<string, unknown>> = {}): Record
     expires_at: null,
     ...overrides,
   };
+}
+
+function invalidJsonCases(): InvalidJsonCase[] {
+  const circular: Record<string, unknown> = {};
+  circular.self = circular;
+  return [
+    { name: "bigint", value: { value: 1n }, pattern: /bigint/ },
+    { name: "non-finite number", value: { value: Number.NaN }, pattern: /non-finite number/ },
+    { name: "circular reference", value: circular, pattern: /circular reference/ },
+    { name: "non-plain object", value: { value: new Map() }, pattern: /non-plain object/ },
+    { name: "function", value: { value: () => undefined }, pattern: /unsupported function/ },
+    { name: "symbol", value: { value: Symbol("bad") }, pattern: /unsupported symbol/ },
+    { name: "undefined", value: { value: undefined }, pattern: /unsupported undefined/ },
+  ];
 }
 
 test("createTheme inserts and returns a frozen row with the membership_mode preserved", () => {
@@ -145,6 +160,22 @@ test("createTheme serialises membership_spec as JSON for the jsonb column", () =
     assert.equal(queries[0].values?.[3], JSON.stringify(spec));
     assert.deepEqual(row.membership_spec, spec);
   });
+});
+
+test("createTheme rejects invalid membership_spec JSON before binding jsonb", async () => {
+  for (const { name, value, pattern } of invalidJsonCases()) {
+    const { db, queries } = fakeDb(() => []);
+    await assert.rejects(
+      createTheme(db, {
+        name: `bad ${name}`,
+        membership_mode: "rule_based",
+        membership_spec: value as JsonValue,
+      }),
+      (err: Error) => err instanceof TypeError && pattern.test(err.message),
+      `expected ${name} to be rejected by centralized JSON serialization`,
+    );
+    assert.equal(queries.length, 0, `${name} must fail before any query`);
+  }
 });
 
 test("getTheme returns null when the theme does not exist (no row found)", () => {

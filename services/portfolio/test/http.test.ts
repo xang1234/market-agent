@@ -5,6 +5,7 @@ import { seedUser, startServer, withUser } from "./helpers.ts";
 import { signTrustedUserId } from "../../shared/src/request-auth.ts";
 
 const TRUSTED_PROXY_SECRET = "portfolio-test-secret";
+const EXPIRED_TRUSTED_PROXY_ISSUED_AT = new Date("2026-04-01T00:00:00.000Z");
 
 test("server: missing x-user-id header returns 401", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
@@ -105,6 +106,20 @@ test("server: trusted-proxy auth scopes portfolios from server-derived identity,
     },
   });
   assert.equal(invalidList.status, 401);
+
+  const expiredCreate = await fetch(`${base}/v1/portfolios`, {
+    method: "POST",
+    headers: {
+      "x-authenticated-user-id": userA,
+      "x-authenticated-user-signature": signTrustedUserId(userA, TRUSTED_PROXY_SECRET, {
+        issuedAt: EXPIRED_TRUSTED_PROXY_ISSUED_AT,
+      }),
+      "x-user-id": userB,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ name: "Expired", base_currency: "USD" }),
+  });
+  assert.equal(expiredCreate.status, 401);
 });
 
 test("server: POST creates a portfolio with required base_currency", { timeout: 120000 }, async (t) => {

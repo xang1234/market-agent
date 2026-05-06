@@ -18,11 +18,13 @@ import {
 
 const schemaPath = join(workspaceRoot, "spec", "finance_research_db_schema.sql");
 const initMigrationPath = join(dbRoot, "migrations", "0001_init.up.sql");
+const defaultManualWatchlistMigrationPath = join(dbRoot, "migrations", "0003_default_manual_watchlist.up.sql");
 const snapshotManifestMigrationPath = join(dbRoot, "migrations", "0005_snapshot_document_refs.up.sql");
 const evidenceBundleMigrationPath = join(dbRoot, "migrations", "0017_evidence_bundles.up.sql");
 const agentRunClaimsMigrationPath = join(dbRoot, "migrations", "0018_agent_run_claims.up.sql");
 const alertsFiredMigrationPath = join(dbRoot, "migrations", "0019_alerts_fired.up.sql");
 const factReviewActionsMigrationPath = join(dbRoot, "migrations", "0021_fact_review_actions.up.sql");
+const watchlistListManagementMigrationPath = join(dbRoot, "migrations", "0022_watchlist_list_management.up.sql");
 
 function loadExpectedTables() {
   return Array.from(
@@ -41,6 +43,18 @@ test("snapshot manifest forward migration owns post-baseline snapshot columns", 
     assert.match(forwardMigration, new RegExp(`\\b${column}\\b`));
     assert.match(schema, new RegExp(`\\b${column}\\b`));
   }
+});
+
+test("watchlist list-management migration is append-only after default manual baseline", () => {
+  const defaultManualMigration = readFileSync(defaultManualWatchlistMigrationPath, "utf8");
+  const listManagementMigration = readFileSync(watchlistListManagementMigrationPath, "utf8");
+  const schema = readFileSync(schemaPath, "utf8");
+
+  assert.doesNotMatch(defaultManualMigration, /\bis_default\b/);
+  assert.match(listManagementMigration, /add column if not exists is_default/);
+  assert.match(listManagementMigration, /drop index if exists watchlists_default_manual_per_user_idx/);
+  assert.match(listManagementMigration, /create unique index if not exists watchlists_default_per_user_idx/);
+  assert.match(schema, /is_default boolean not null default false/);
 });
 
 test("evidence bundle schema blocks direct updates and deletes", () => {
@@ -126,7 +140,7 @@ test("migrate up applies pending migrations and records them in schema_migration
   });
 
   assert.equal(migrateResult.status, 0, migrateResult.stderr || migrateResult.stdout);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "21");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "22");
   assert.deepEqual(
     queryValue(containerName, "select version || ':' || name from schema_migrations order by version").split("\n"),
     [
@@ -151,6 +165,7 @@ test("migrate up applies pending migrations and records them in schema_migration
       "0019:alerts_fired",
       "0020:run_activities_user_id",
       "0021:fact_review_actions",
+      "0022:watchlist_list_management",
     ],
   );
 
@@ -265,6 +280,7 @@ test("migrate status reports all migrations as applied after migrate up", { time
   assert.match(statusResult.stdout, /0019\s+alerts_fired\s+applied/);
   assert.match(statusResult.stdout, /0020\s+run_activities_user_id\s+applied/);
   assert.match(statusResult.stdout, /0021\s+fact_review_actions\s+applied/);
+  assert.match(statusResult.stdout, /0022\s+watchlist_list_management\s+applied/);
 });
 
 test("migrate down rolls back the most recently applied migration", { timeout: 120000 }, async (t) => {
@@ -641,40 +657,44 @@ test("migrate up provisions the implicit default manual watchlist on user insert
   });
   assert.equal(upResult.status, 0, upResult.stderr || upResult.stdout);
 
-  // Backfill: the existing user now has exactly one manual watchlist named 'Watchlist'.
+  // Backfill: the existing user now has exactly one default manual watchlist named 'Watchlist'.
   assert.equal(
-    queryValue(containerName, `select count(*) from watchlists where user_id = '${preMigrationUserId}' and mode = 'manual' and name = 'Watchlist'`),
+    queryValue(containerName, `select count(*) from watchlists where user_id = '${preMigrationUserId}' and mode = 'manual' and is_default and name = 'Watchlist'`),
     "1",
   );
 
-  // Trigger: inserting a fresh user auto-creates one manual watchlist.
+  // Trigger: inserting a fresh user auto-creates one default manual watchlist.
   const postMigrationUser = await client.query<{ user_id: string }>(
     `insert into users (email) values ($1) returning user_id`,
     ["post-migration@example.test"],
   );
   const postMigrationUserId = postMigrationUser.rows[0].user_id;
   assert.equal(
-    queryValue(containerName, `select count(*) from watchlists where user_id = '${postMigrationUserId}' and mode = 'manual'`),
+    queryValue(containerName, `select count(*) from watchlists where user_id = '${postMigrationUserId}' and mode = 'manual' and is_default`),
     "1",
   );
 
-  // Invariant: the unique partial index rejects a second manual watchlist for the same user.
+  // fra-wlc invariant: multiple manual lists are allowed, but only one default.
+  await client.query(
+    `insert into watchlists (user_id, name, mode) values ($1, $2, 'manual')`,
+    [postMigrationUserId, "Second Manual"],
+  );
   await assert.rejects(
     client.query(
-      `insert into watchlists (user_id, name, mode) values ($1, $2, 'manual')`,
-      [postMigrationUserId, "Second Manual"],
+      `insert into watchlists (user_id, name, mode, is_default) values ($1, $2, 'manual', true)`,
+      [postMigrationUserId, "Second Default"],
     ),
-    /watchlists_default_manual_per_user_idx|duplicate key/i,
+    /watchlists_default_per_user_idx|duplicate key/i,
   );
 
-  // Non-manual modes are not constrained by the partial index.
+  // Non-default modes are not constrained by the partial index.
   await client.query(
     `insert into watchlists (user_id, name, mode) values ($1, $2, 'screen')`,
     [postMigrationUserId, "Screen Derivation"],
   );
   assert.equal(
     queryValue(containerName, `select count(*) from watchlists where user_id = '${postMigrationUserId}'`),
-    "2",
+    "3",
   );
 });
 
@@ -891,7 +911,7 @@ test("migrate down rolls back schema changes when removing the migration record 
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /rejecting schema_migrations delete/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "21");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "22");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -900,13 +920,13 @@ test("migrate down rolls back schema changes when removing the migration record 
   // migration's schema change must still be in place. If the runner
   // accidentally executed the down DDL before hitting the trigger block, the
   // schema_migrations row count alone wouldn't catch that — checking the
-  // latest migration's actual artifact does. 0021 added the
-  // fact_review_actions table; the down would remove it, so its presence is
-  // independent proof the down DDL did not execute.
+  // latest migration's actual artifact does. 0022 added watchlists.is_default;
+  // the down would remove it, so its presence is independent proof the down
+  // DDL did not execute.
   assert.equal(
     queryValue(
       containerName,
-      "select count(*) from pg_tables where schemaname = 'public' and tablename = 'fact_review_actions'",
+      "select count(*) from information_schema.columns where table_name = 'watchlists' and column_name = 'is_default'",
     ),
     "1",
   );
@@ -957,7 +977,7 @@ test("migrate down fails when any applied migration is missing locally", { timeo
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /Applied migration 0000 is missing locally/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "22");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "23");
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
 });
 
