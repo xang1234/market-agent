@@ -974,6 +974,49 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Agent'
+  /v1/agents/{agentId}:
+    patch:
+      tags: [Agents]
+      summary: Update an agent
+      operationId: updateAgent
+      parameters:
+        - in: path
+          name: agentId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentPatch'
+      responses:
+        '200':
+          description: Updated agent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '404':
+          description: Agent not found
+    delete:
+      tags: [Agents]
+      summary: Delete an agent
+      operationId: deleteAgent
+      parameters:
+        - in: path
+          name: agentId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Agent deleted
+        '404':
+          description: Agent not found
   /v1/agents/{agentId}/runs:
     post:
       tags: [Agents]
@@ -1042,6 +1085,21 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/RunActivity'
+  /v1/home/healthz:
+    get:
+      tags: [Home]
+      summary: Home service health check
+      operationId: getHomeHealthz
+      description: Internal service health endpoint; client UI should use /v1/home/summary for Home data.
+      x-internal: true
+      responses:
+        '200':
+          description: Home service health status
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /v1/home/summary:
     get:
       tags: [Home]
@@ -1898,6 +1956,18 @@ components:
           items:
             type: object
             additionalProperties: true
+    AgentPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+        thesis:
+          type: string
+        cadence:
+          type: string
+        enabled:
+          type: boolean
     Agent:
       allOf:
         - $ref: '#/components/schemas/AgentInput'

@@ -8,6 +8,7 @@ const OPENAPI_PATH = join(REPO_ROOT, "spec", "finance_research_openapi.yaml");
 
 const FRONTEND_V1_ROUTES = [
   "/v1/agents",
+  "/v1/agents/{agentId}",
   "/v1/agents/{agentId}/runs",
   "/v1/analyze/runs",
   "/v1/analyze/templates",
@@ -49,7 +50,16 @@ const IMPLEMENTED_SERVICE_V1_ROUTES = [
   "/v1/dev/placeholders",
   "/v1/dev/services",
   "/v1/evidence/healthz",
+  "/v1/home/healthz",
   "/v1/market/cache-audit",
+] as const;
+
+const FRONTEND_V1_OPERATIONS = [
+  ["get", "/v1/agents"],
+  ["post", "/v1/agents"],
+  ["patch", "/v1/agents/{agentId}"],
+  ["delete", "/v1/agents/{agentId}"],
+  ["post", "/v1/agents/{agentId}/runs"],
 ] as const;
 
 test("OpenAPI includes every frontend /v1 route", async () => {
@@ -69,6 +79,15 @@ test("OpenAPI route inventory documents implemented service /v1 routes", async (
   }
 });
 
+test("OpenAPI includes frontend-used HTTP methods for mutable agent routes", async () => {
+  const spec = await readFile(OPENAPI_PATH, "utf8");
+
+  assert.deepEqual(
+    FRONTEND_V1_OPERATIONS.filter(([method, route]) => !openApiRouteMethods(spec, route).has(method)),
+    [],
+  );
+});
+
 test("OpenAPI no longer exposes the retired home feed route", async () => {
   const routes = await openApiRoutes();
 
@@ -84,4 +103,16 @@ async function openApiRoutes(): Promise<ReadonlySet<string>> {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function openApiRouteMethods(spec: string, route: string): ReadonlySet<string> {
+  const routeHeader = `  ${route}:`;
+  const start = spec.indexOf(routeHeader);
+  if (start === -1) return new Set();
+
+  const nextRoute = spec.slice(start + routeHeader.length).search(/\n  \/v1\//);
+  const section = spec.slice(start, nextRoute === -1 ? spec.length : start + routeHeader.length + nextRoute);
+  return new Set(
+    [...section.matchAll(/^    (get|post|patch|delete|put):$/gm)].map((match) => match[1]),
+  );
 }
