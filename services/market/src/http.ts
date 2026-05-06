@@ -135,8 +135,9 @@ export function createMarketServer(deps: MarketServerDeps): Server {
             return;
           }
           const observedAt = clock().toISOString();
-          const identity = seriesCacheIdentity(query, observedAt);
-          const cacheKey = seriesCacheKey(query, observedAt);
+          const freshnessBoundary = seriesCacheFreshnessBoundary(query);
+          const identity = seriesCacheIdentity(query, freshnessBoundary);
+          const cacheKey = seriesCacheKey(query, freshnessBoundary);
           const cachedResponse = seriesResponseCache.get(cacheKey);
           if (cachedResponse) {
             recordSeriesCacheAuditEvent(seriesCacheAuditEvents, seriesCacheAuditMaxEvents, {
@@ -184,6 +185,10 @@ export function createMarketServer(deps: MarketServerDeps): Server {
       if (!res.headersSent) respond(res, 502, { error: "upstream market data unavailable" });
     }
   });
+}
+
+function seriesCacheFreshnessBoundary(query: NormalizedSeriesQuery): string {
+  return query.range.end;
 }
 
 function recordSeriesCacheAuditEvent(

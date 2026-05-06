@@ -14,6 +14,7 @@ import {
 
 const USER_B = "55555555-5555-4555-8555-555555555555";
 const TRUSTED_PROXY_SECRET = "thread-test-secret";
+const TRUSTED_PROXY_NOW = new Date("2026-05-06T00:00:00.000Z");
 
 function startServer(
   t: TestContext,
@@ -98,6 +99,34 @@ test("trusted-proxy auth rejects unsigned server-derived identity headers", asyn
   });
 
   assert.equal(response.status, 401);
+});
+
+test("trusted-proxy auth rejects expired and tampered server-derived signatures", async (t) => {
+  const { db } = fakeDb(() => {
+    throw new Error("query must not be called");
+  });
+  const base = await startServer(t, db, {
+    auth: {
+      mode: "trusted_proxy",
+      trustedProxySecret: TRUSTED_PROXY_SECRET,
+      trustedProxyClock: () => TRUSTED_PROXY_NOW,
+    },
+  });
+  const fresh = signTrustedUserId(USER_ID, TRUSTED_PROXY_SECRET, { issuedAt: TRUSTED_PROXY_NOW });
+  const tamperedTimestamp = fresh.replace(":1778025600000:", ":1778022000000:");
+  const expired = signTrustedUserId(USER_ID, TRUSTED_PROXY_SECRET, {
+    issuedAt: new Date("2026-05-05T23:54:00.000Z"),
+  });
+
+  for (const signature of [tamperedTimestamp, expired]) {
+    const response = await fetch(`${base}/v1/chat/threads`, {
+      headers: {
+        "x-authenticated-user-id": USER_ID,
+        "x-authenticated-user-signature": signature,
+      },
+    });
+    assert.equal(response.status, 401);
+  }
 });
 
 test("GET /v1/chat/threads?include_archived=true drops the archived filter", async (t) => {

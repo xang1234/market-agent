@@ -14,6 +14,7 @@ const FIXED_NOW = new Date("2026-04-22T15:30:00.000Z");
 const USER_A = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
 const USER_B = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
 const TRUSTED_PROXY_SECRET = "screener-test-secret";
+const TRUSTED_PROXY_NOW = new Date("2026-05-06T00:00:00.000Z");
 
 function withUser(userId = USER_A): HeadersInit {
   return { "x-user-id": userId };
@@ -155,6 +156,35 @@ test("trusted-proxy auth stamps saved screens from server-derived identity, not 
     assert.equal(r.status, 201);
     const body = (await r.json()) as { screen: ScreenSubject };
     assert.equal(body.screen.user_id, USER_A);
+  });
+});
+
+test("trusted-proxy auth rejects expired and tampered signatures at the endpoint", async () => {
+  await withServer({
+    auth: {
+      mode: "trusted_proxy",
+      trustedProxySecret: TRUSTED_PROXY_SECRET,
+      trustedProxyClock: () => TRUSTED_PROXY_NOW,
+    },
+  }, async (baseUrl) => {
+    const fresh = signTrustedUserId(USER_A, TRUSTED_PROXY_SECRET, { issuedAt: TRUSTED_PROXY_NOW });
+    const tamperedTimestamp = fresh.replace(":1778025600000:", ":1778022000000:");
+    const expired = signTrustedUserId(USER_A, TRUSTED_PROXY_SECRET, {
+      issuedAt: new Date("2026-05-05T23:54:00.000Z"),
+    });
+
+    for (const signature of [tamperedTimestamp, expired]) {
+      const r = await fetch(`${baseUrl}/v1/screener/screens`, {
+        method: "POST",
+        headers: {
+          "x-authenticated-user-id": USER_A,
+          "x-authenticated-user-signature": signature,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ name: "Rejected screen", definition: baseQuery() }),
+      });
+      assert.equal(r.status, 401);
+    }
   });
 });
 

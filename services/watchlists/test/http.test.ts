@@ -36,6 +36,7 @@ async function startServer(
 const APPLE_LISTING = { kind: "listing", id: "11111111-1111-4111-a111-111111111111" } as const;
 const MSFT_LISTING = { kind: "listing", id: "22222222-2222-4222-a222-222222222222" } as const;
 const TRUSTED_PROXY_SECRET = "watchlists-test-secret";
+const EXPIRED_TRUSTED_PROXY_ISSUED_AT = new Date("2000-01-01T00:00:00.000Z");
 
 async function seedUser(client: Client, email: string): Promise<string> {
   const result = await client.query<{ user_id: string }>(
@@ -159,6 +160,20 @@ test("server: trusted-proxy auth scopes watchlists from server-derived identity,
     body: JSON.stringify({ subject_ref: APPLE_LISTING }),
   });
   assert.equal(invalidAdd.status, 401);
+
+  const expiredAdd = await fetch(`${base}/v1/watchlists/default/members`, {
+    method: "POST",
+    headers: {
+      "x-authenticated-user-id": userA,
+      "x-authenticated-user-signature": signTrustedUserId(userA, TRUSTED_PROXY_SECRET, {
+        issuedAt: EXPIRED_TRUSTED_PROXY_ISSUED_AT,
+      }),
+      "x-user-id": userB,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ subject_ref: MSFT_LISTING }),
+  });
+  assert.equal(expiredAdd.status, 401);
 });
 
 test("server: POST adds a member, GET returns it, idempotent on repeat", { timeout: 120000 }, async (t) => {

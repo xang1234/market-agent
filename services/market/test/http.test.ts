@@ -379,6 +379,7 @@ test("GET /v1/market/cache-audit reports runtime series cache identity events", 
 
 test("GET /v1/market/cache-audit reports hits only when the series response cache is reused", async (t) => {
   const deps = buildDeps();
+  let nowMs = FIXED_NOW.getTime();
   let getBarsCalls = 0;
   const adapter = {
     ...deps.adapter,
@@ -387,7 +388,15 @@ test("GET /v1/market/cache-audit reports hits only when the series response cach
       return deps.adapter.getBars(...args);
     },
   };
-  const url = await startServer(t, { ...deps, adapter });
+  const url = await startServer(t, {
+    ...deps,
+    adapter,
+    clock: () => {
+      const now = new Date(nowMs);
+      nowMs += 60_000;
+      return now;
+    },
+  });
   const query = validSeriesQuery();
 
   assert.equal((await postSeries(url, query)).status, 200);

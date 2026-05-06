@@ -167,16 +167,17 @@ function makeExtractCandidateFactsHandler(deps: EvidenceReaderToolDeps): ReaderT
     }
 
     const text = new TextDecoder().decode(blob.bytes);
+    const asOf = new Date().toISOString();
     const extractedXbrl = extractXbrlExtensionSegments({
       xbrl: text,
       source_id: document.source_id,
-      as_of: new Date().toISOString(),
+      as_of: asOf,
       definition_as_of: documentDefinitionAsOf(document),
     });
     const extractedNonGaap = extractNonGaapReconciliations({
       html: text,
       source_id: document.source_id,
-      as_of: new Date().toISOString(),
+      as_of: asOf,
     });
 
     return {
