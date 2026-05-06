@@ -129,6 +129,18 @@ test("listHomeFindingCards collapses three findings sharing a cluster into one c
   ]);
 });
 
+test("listHomeFindingCards normalizes Home card headline through headline generator", async () => {
+  const { db } = fakeDb([
+    findingRow({
+      headline: "  Demand improved\nextra raw claim text  ",
+    }),
+  ]);
+
+  const cards = await listHomeFindingCards(db, { user_id: USER_ID });
+
+  assert.equal(cards[0].headline, "Demand improved");
+});
+
 test("listHomeFindingCards scopes SQL to enabled agents for one user", async () => {
   const { db, calls } = fakeDb([]);
 

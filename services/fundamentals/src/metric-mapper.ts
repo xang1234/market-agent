@@ -113,11 +113,16 @@ export type MetricRegistry = {
 
 export type MappedStatementLine = StatementLine & {
   metric_id: string;
+  canonical_source_class: CanonicalSourceClass;
 };
 
 export type MappedStatement = Omit<NormalizedStatement, "lines"> & {
   lines: ReadonlyArray<MappedStatementLine>;
 };
+
+export type MetricMappingOptions = Readonly<{
+  canonical_source_class?: CanonicalSourceClass;
+}>;
 
 export function createMetricRegistry(
   definitions: ReadonlyArray<MetricDefinition>,
@@ -146,11 +151,20 @@ export function createMetricRegistry(
 export function resolveMetric(
   registry: MetricRegistry,
   metric_key: string,
+  options: MetricMappingOptions = {},
 ): MetricDefinition {
   const def = registry.byKey.get(metric_key);
   if (!def) {
     throw new Error(
       `metric-mapper: unknown metric_key "${metric_key}" — not registered`,
+    );
+  }
+  if (
+    options.canonical_source_class !== undefined &&
+    def.canonical_source_class !== options.canonical_source_class
+  ) {
+    throw new Error(
+      `metric-mapper: metric_key="${metric_key}" canonical_source_class "${def.canonical_source_class}" does not match required "${options.canonical_source_class}"`,
     );
   }
   return def;
@@ -159,31 +173,38 @@ export function resolveMetric(
 export function mapStatementLine(
   registry: MetricRegistry,
   line: StatementLine,
+  options: MetricMappingOptions = {},
 ): MappedStatementLine {
-  const def = resolveMetric(registry, line.metric_key);
+  const def = resolveMetric(registry, line.metric_key, options);
   const allowed = COMPATIBLE_LINE_UNITS[def.unit_class];
   if (!allowed.includes(line.unit)) {
     throw new Error(
       `metric-mapper: line metric_key="${line.metric_key}" unit "${line.unit}" not compatible with metric.unit_class "${def.unit_class}" (allowed: ${allowed.join(", ")})`,
     );
   }
-  return Object.freeze({ ...line, metric_id: def.metric_id });
+  return Object.freeze({
+    ...line,
+    metric_id: def.metric_id,
+    canonical_source_class: def.canonical_source_class,
+  });
 }
 
 export function mapStatementLines(
   registry: MetricRegistry,
   lines: ReadonlyArray<StatementLine>,
+  options: MetricMappingOptions = {},
 ): ReadonlyArray<MappedStatementLine> {
-  return Object.freeze(lines.map((l) => mapStatementLine(registry, l)));
+  return Object.freeze(lines.map((l) => mapStatementLine(registry, l, options)));
 }
 
 export function mapStatement(
   registry: MetricRegistry,
   statement: NormalizedStatement,
+  options: MetricMappingOptions = {},
 ): MappedStatement {
   return Object.freeze({
     ...statement,
-    lines: mapStatementLines(registry, statement.lines),
+    lines: mapStatementLines(registry, statement.lines, options),
   });
 }
 

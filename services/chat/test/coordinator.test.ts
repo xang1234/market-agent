@@ -90,6 +90,82 @@ test("per-thread coordinator drops idle thread queues after completion", async (
   assert.equal(coordinator.stats().queuedThreadCount, 0);
 });
 
+test("per-thread coordinator schedules thread title generation after first assistant exchange", async () => {
+  const generated: unknown[] = [];
+  const titleJobFinished = deferred();
+  const coordinator = createChatCoordinator({
+    generateThreadTitle: async (input) => {
+      generated.push(input);
+      titleJobFinished.resolve();
+    },
+    runner: ({ emit }) => {
+      emit("turn.started", { stub: true });
+      emit("block.delta", {
+        block_id: "block-1",
+        delta: {
+          segment: {
+            type: "text",
+            text: "Apple shares rallied after earnings.",
+          },
+        },
+      });
+      emit("turn.completed", { message_id: "message-1" });
+    },
+  });
+
+  const turn = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    userId: "user-1",
+    userIntent: "what happened to Apple after earnings?",
+  });
+  await turn.completed;
+  await titleJobFinished.promise;
+
+  assert.deepEqual(generated, [
+    {
+      threadId: "thread-1",
+      runId: "run-1",
+      turnId: "run-1",
+      userId: "user-1",
+      userIntent: "what happened to Apple after earnings?",
+      assistantText: "Apple shares rallied after earnings.",
+    },
+  ]);
+});
+
+test("per-thread coordinator skips thread title generation for clarification turns", async () => {
+  const generated: unknown[] = [];
+  const coordinator = createChatCoordinator({
+    generateThreadTitle: async (input) => {
+      generated.push(input);
+    },
+    runner: ({ emit }) => {
+      emit("block.delta", {
+        block_id: "block-1",
+        delta: {
+          segment: {
+            type: "text",
+            text: "Which share class did you mean?",
+          },
+        },
+      });
+      emit("turn.completed", { message_id: "message-1", clarification: true });
+    },
+  });
+
+  const turn = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    userId: "user-1",
+    userIntent: "GOOG",
+  });
+  await turn.completed;
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(generated, []);
+});
+
 test("per-thread coordinator bounds completed turn history retention", async () => {
   const completedRuns: string[] = [];
   const coordinator = createChatCoordinator({

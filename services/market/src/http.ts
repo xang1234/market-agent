@@ -6,7 +6,11 @@ import { ListingNotFoundError, type ListingRepository, type ListingRecord } from
 import type { NormalizedQuote } from "./quote.ts";
 import {
   assertSeriesQueryContract,
+  buildSeriesCacheAuditDashboard,
+  seriesCacheIdentity,
   type NormalizedSeriesQuery,
+  type SeriesCacheAuditDashboard,
+  type SeriesCacheAuditEvent,
 } from "./series-query.ts";
 import type { ListingSubjectRef } from "./subject-ref.ts";
 import { isUuidV4 } from "./validators.ts";
@@ -47,10 +51,15 @@ export type GetSeriesResponse = {
   results: ReadonlyArray<SeriesResultEntry>;
 };
 
+export type GetCacheAuditResponse = {
+  dashboard: SeriesCacheAuditDashboard;
+};
+
 const MAX_SERIES_BODY_BYTES = 64 * 1024;
 
 export function createMarketServer(deps: MarketServerDeps): Server {
   const clock = deps.clock ?? (() => new Date());
+  const seriesCacheAuditEvents: SeriesCacheAuditEvent[] = [];
 
   return createServer(async (req, res) => {
     try {
@@ -63,6 +72,11 @@ export function createMarketServer(deps: MarketServerDeps): Server {
       switch (route.action) {
         case "healthz":
           respond(res, 200, { status: "ok", service: "market" });
+          return;
+        case "get_cache_audit":
+          respond(res, 200, {
+            dashboard: buildSeriesCacheAuditDashboard(seriesCacheAuditEvents),
+          } satisfies GetCacheAuditResponse);
           return;
         case "get_quote": {
           const record = await deps.listings.find(route.subject_id);
@@ -110,6 +124,12 @@ export function createMarketServer(deps: MarketServerDeps): Server {
             });
             return;
           }
+          seriesCacheAuditEvents.push({
+            cacheName: "series",
+            result: "miss",
+            identity: seriesCacheIdentity(query, clock().toISOString()),
+            observedAt: clock().toISOString(),
+          });
 
           const results = await Promise.all(
             query.subject_refs.map((listing) =>
@@ -142,6 +162,7 @@ export function createMarketServer(deps: MarketServerDeps): Server {
 
 type Route =
   | { action: "healthz" }
+  | { action: "get_cache_audit" }
   | { action: "get_quote"; subject_id: string }
   | { action: "get_series" };
 
@@ -150,6 +171,7 @@ function matchRoute(method: string, rawUrl: string): Route | null {
   const { pathname, searchParams } = url;
 
   if (method === "GET" && pathname === "/healthz") return { action: "healthz" };
+  if (method === "GET" && pathname === "/v1/market/cache-audit") return { action: "get_cache_audit" };
 
   if (method === "GET" && pathname === "/v1/market/quote") {
     const subjectKind = searchParams.get("subject_kind");

@@ -8,6 +8,7 @@ import { ANALYZE_PATH } from '../analyze/analyzeEntry'
 const PRIMARY_WORKSPACES = [
   { to: '/home', label: 'Home' },
   { to: '/agents', label: 'Agents' },
+  { to: '/review', label: 'Review' },
   { to: '/chat', label: 'Chat' },
   { to: '/screener', label: 'Screener' },
   { to: ANALYZE_PATH, label: 'Analyze' },

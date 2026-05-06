@@ -69,3 +69,11 @@ export type MarketDataAdapter = {
   getQuote(request: QuoteRequest): Promise<MarketDataOutcome<NormalizedQuote>>;
   getBars(request: BarsRequest): Promise<MarketDataOutcome<NormalizedBars>>;
 };
+
+export {
+  createFallbackMarketDataAdapter,
+  type FallbackMarketDataAdapterOptions,
+  type ProviderAuditEvent,
+  type ProviderAuditOperation,
+  type ProviderAuditResult,
+} from "./provider-fallback.ts";

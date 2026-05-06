@@ -12,6 +12,7 @@ import {
   type QueryExecutor,
   type SubjectRef,
 } from "./types.ts";
+import { homeCardHeadlineFromFinding } from "../../summary/src/headline-generator.ts";
 
 export const DEFAULT_HOME_FINDING_LIMIT = 100;
 export const MAX_HOME_FINDING_LIMIT = 500;
@@ -159,7 +160,12 @@ function cardFromGroup(group: Group): HomeFindingCard {
     support_count: supportCount,
     contributing_finding_count: findings.length,
     severity: primary.severity,
-    headline: primary.headline,
+    headline: homeCardHeadlineFromFinding({
+      finding: {
+        headline: primary.headline,
+        severity: primary.severity,
+      },
+    }),
     subject_refs: primary.subject_refs.map((ref) => ({ ...ref })),
     summary_blocks: primary.summary_blocks.map((block) => cloneJsonObject(block)),
     created_at: primary.created_at,

@@ -25,6 +25,7 @@ function moneyLine(metric_key: string, value_num: number, currency = "USD"): Map
   return {
     metric_key,
     metric_id: METRIC_ID[metric_key],
+    canonical_source_class: "gaap",
     value_num,
     unit: "currency",
     scale: 1,
@@ -37,6 +38,7 @@ function epsLine(metric_key: string, value_num: number, currency = "USD"): Mappe
   return {
     metric_key,
     metric_id: METRIC_ID[metric_key],
+    canonical_source_class: "gaap",
     value_num,
     unit: "currency_per_share",
     scale: 1,

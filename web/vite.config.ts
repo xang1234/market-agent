@@ -43,6 +43,10 @@ export default defineConfig({
         target: process.env.HOME_ORIGIN ?? 'http://127.0.0.1:4334',
         changeOrigin: true,
       },
+      '/v1/evidence': {
+        target: process.env.EVIDENCE_ORIGIN ?? 'http://127.0.0.1:4335',
+        changeOrigin: true,
+      },
     },
   },
 })

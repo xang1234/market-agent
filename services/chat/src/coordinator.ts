@@ -22,6 +22,7 @@ export type ChatTurnInput = {
   runId: string;
   turnId?: string;
   subjectText?: string;
+  userIntent?: string;
   userId?: string;
 };
 
@@ -48,6 +49,19 @@ export type ChatRunActivityReporter = {
   report(input: RunActivityInput, scope: RunActivityScope): Promise<void> | void;
   onError?: (error: unknown, input: RunActivityInput, scope: RunActivityScope) => void;
 };
+
+export type ChatThreadTitleGenerationInput = {
+  threadId: string;
+  runId: string;
+  turnId: string;
+  userId?: string;
+  userIntent?: string;
+  assistantText: string;
+};
+
+export type ChatThreadTitleGenerator = (
+  input: ChatThreadTitleGenerationInput,
+) => Promise<void> | void;
 
 export type ChatSubjectClarificationRenderInput = {
   threadId: string;
@@ -107,6 +121,11 @@ export type ChatCoordinatorOptions = {
   preResolveSubject?: ChatSubjectPreResolver;
   renderSubjectClarification?: ChatSubjectClarificationRenderer;
   runActivity?: ChatRunActivityReporter;
+  generateThreadTitle?: ChatThreadTitleGenerator;
+  onThreadTitleGenerationError?: (
+    error: unknown,
+    input: ChatThreadTitleGenerationInput,
+  ) => void;
   completedTurnRetentionMs?: number;
   maxCompletedTurns?: number;
   completedTurnTombstoneRetentionMs?: number;
@@ -163,11 +182,14 @@ export function createChatCoordinator(
   const baseRunner = options.runner ?? ((context) =>
     stubChatTurnRunner(context, persistAssistantMessage)
   );
-  const runner = runActivityReportingRunner(subjectAwareRunner(baseRunner, {
+  const runner = threadTitleGenerationRunner(runActivityReportingRunner(subjectAwareRunner(baseRunner, {
     persistAssistantMessage,
     preResolveSubject,
     renderSubjectClarification: options.renderSubjectClarification,
-  }), options.runActivity);
+  }), options.runActivity), {
+    generateThreadTitle: options.generateThreadTitle,
+    onThreadTitleGenerationError: options.onThreadTitleGenerationError,
+  });
   const completedTurnRetentionMs = nonNegativeFiniteNumber(
     options.completedTurnRetentionMs ?? DEFAULT_COMPLETED_TURN_RETENTION_MS,
     "completedTurnRetentionMs",
@@ -359,6 +381,70 @@ function runActivityReportingRunner(
   };
 }
 
+function threadTitleGenerationRunner(
+  runner: ChatTurnRunner,
+  options: {
+    generateThreadTitle?: ChatThreadTitleGenerator;
+    onThreadTitleGenerationError?: (
+      error: unknown,
+      input: ChatThreadTitleGenerationInput,
+    ) => void;
+  },
+): ChatTurnRunner {
+  if (!options.generateThreadTitle) return runner;
+
+  return async (context) => {
+    const assistantTextParts: string[] = [];
+    let completed = false;
+    let clarification = false;
+    const emit: ChatTurnEmit = (type, payload = {}) => {
+      if (type === "block.delta") {
+        const text = textFromBlockDeltaPayload(payload);
+        if (text) assistantTextParts.push(text);
+      }
+      if (type === "turn.completed") {
+        completed = true;
+        clarification = payload.clarification === true;
+      }
+      return context.emit(type, payload);
+    };
+
+    await runner({ ...context, emit });
+
+    const assistantText = assistantTextParts.join("").trim();
+    if (!completed || clarification || assistantText.length === 0) return;
+
+    const input: ChatThreadTitleGenerationInput = {
+      threadId: context.threadId,
+      runId: context.runId,
+      turnId: context.turnId ?? context.runId,
+      ...(context.userId ? { userId: context.userId } : {}),
+      ...(context.userIntent ? { userIntent: context.userIntent } : {}),
+      assistantText,
+    };
+
+    try {
+      const result = options.generateThreadTitle(input);
+      if (result && typeof result.then === "function") {
+        result.catch((error) => {
+          options.onThreadTitleGenerationError?.(error, input);
+        });
+      }
+    } catch (error) {
+      options.onThreadTitleGenerationError?.(error, input);
+    }
+  };
+}
+
+function textFromBlockDeltaPayload(payload: Record<string, unknown>): string | null {
+  const delta = payload.delta;
+  if (delta === null || typeof delta !== "object") return null;
+  const segment = (delta as { segment?: unknown }).segment;
+  if (segment === null || typeof segment !== "object") return null;
+  const text = (segment as { text?: unknown }).text;
+  return typeof text === "string" ? text : null;
+}
+
 function toolNameFromPayload(payload: Record<string, unknown>): string {
   return typeof payload.tool_name === "string" && payload.tool_name.trim() !== ""
     ? payload.tool_name
@@ -401,11 +487,13 @@ function isSubjectRefJson(value: unknown): value is SubjectRefJson {
 
 function normalizeTurnInput(input: ChatTurnInput): NormalizedChatTurnInput {
   const subjectText = nonEmptySubjectText(input.subjectText);
+  const userIntent = nonEmptySubjectText(input.userIntent);
   return {
     threadId: input.threadId,
     runId: input.runId,
     turnId: input.turnId ?? input.runId,
     ...(subjectText ? { subjectText } : {}),
+    ...(userIntent ? { userIntent } : {}),
     ...(input.userId ? { userId: input.userId } : {}),
   };
 }
@@ -420,6 +508,7 @@ function assertSameTurnInput(existing: ChatTurnInput, incoming: ChatTurnInput) {
     existing.runId !== incoming.runId ||
     existing.turnId !== incoming.turnId ||
     existing.subjectText !== incoming.subjectText ||
+    existing.userIntent !== incoming.userIntent ||
     existing.userId !== incoming.userId
   ) {
     throw new ChatTurnInputMismatchError();

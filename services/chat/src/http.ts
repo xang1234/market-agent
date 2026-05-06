@@ -7,6 +7,7 @@ import {
   type ChatCoordinator,
   type ChatRunActivityReporter,
   type ChatSubjectClarificationRenderer,
+  type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
 import type { ChatSubjectPreResolver } from "./subjects.ts";
 import { tryHandleThreadsRequest } from "./threads-http.ts";
@@ -54,6 +55,8 @@ export type ChatServerOptions = {
   preResolveSubject?: ChatSubjectPreResolver;
   renderSubjectClarification?: ChatSubjectClarificationRenderer;
   runActivity?: ChatRunActivityReporter;
+  generateThreadTitle?: ChatThreadTitleGenerator;
+  onThreadTitleGenerationError?: Parameters<typeof createChatCoordinator>[0]["onThreadTitleGenerationError"];
   runActivityHub?: RunActivityHub;
   auth?: RequestAuthConfig;
   threadsDb?: ChatThreadsDb;
@@ -66,6 +69,8 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
     preResolveSubject: options.preResolveSubject,
     renderSubjectClarification: options.renderSubjectClarification,
     runActivity: options.runActivity,
+    generateThreadTitle: options.generateThreadTitle,
+    onThreadTitleGenerationError: options.onThreadTitleGenerationError,
   });
   const threadsDb = options.threadsDb;
 

@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import type {
   ChatAssistantMessagePersistence,
   ChatSubjectClarificationRenderer,
+  ChatThreadTitleGenerator,
 } from "./coordinator.ts";
 import type { ChatServerOptions } from "./http.ts";
 import type { ChatSubjectPreResolver } from "./subjects.ts";
@@ -11,6 +12,7 @@ import type { ChatSubjectPreResolver } from "./subjects.ts";
 export type ChatRuntimeEnv = {
   CHAT_PERSISTENCE_MODULE?: string;
   CHAT_SUBJECT_RESOLVER_MODULE?: string;
+  CHAT_THREAD_TITLE_MODULE?: string;
 };
 
 export async function loadChatServerOptionsFromEnv(
@@ -41,6 +43,15 @@ export async function loadChatServerOptionsFromEnv(
       }
       options.renderSubjectClarification = module.renderSubjectClarification as ChatSubjectClarificationRenderer;
     }
+  }
+
+  if (env.CHAT_THREAD_TITLE_MODULE != null && env.CHAT_THREAD_TITLE_MODULE.trim() !== "") {
+    const module = await import(moduleSpecifier(env.CHAT_THREAD_TITLE_MODULE, cwd));
+    if (typeof module.generateThreadTitle !== "function") {
+      throw new Error("CHAT_THREAD_TITLE_MODULE must export generateThreadTitle");
+    }
+
+    options.generateThreadTitle = module.generateThreadTitle as ChatThreadTitleGenerator;
   }
 
   return options;

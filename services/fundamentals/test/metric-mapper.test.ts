@@ -85,6 +85,7 @@ test("mapStatementLine carries through all StatementLine fields plus metric_id",
   assert.equal(mapped.currency, "USD");
   assert.equal(mapped.scale, 1_000_000);
   assert.equal(mapped.coverage_level, "full");
+  assert.equal(mapped.canonical_source_class, "gaap");
   assert.equal(mapped.metric_id, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0003");
 });
 
@@ -147,6 +148,84 @@ test("mapStatementLine accepts compatible-but-not-equal line.unit (e.g. currency
   };
   const sharesMapped = mapStatementLine(registry, sharesLine);
   assert.equal(sharesMapped.metric_id, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaa0013");
+});
+
+test("mapStatement can require IFRS metric definitions and carries the source class on mapped lines", () => {
+  const registry = createMetricRegistry([
+    {
+      metric_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbb0001",
+      metric_key: "ifrs.revenue",
+      display_name: "IFRS Revenue",
+      unit_class: "currency",
+      aggregation: "sum",
+      interpretation: "higher_is_better",
+      canonical_source_class: "ifrs",
+      definition_version: 1,
+      notes: "Revenue recognized under IFRS.",
+    },
+    {
+      metric_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbb000f",
+      metric_key: "ifrs.profit_loss",
+      display_name: "IFRS Profit/Loss",
+      unit_class: "currency",
+      aggregation: "sum",
+      interpretation: "higher_is_better",
+      canonical_source_class: "ifrs",
+      definition_version: 1,
+      notes: "Profit or loss for the period under IFRS.",
+    },
+  ]);
+  const statement = normalizedStatement({
+    ...aaplFy2024IncomeStatementInput(),
+    reporting_currency: "EUR",
+    lines: [
+      {
+        metric_key: "ifrs.revenue",
+        value_num: 87_654,
+        unit: "currency",
+        currency: "EUR",
+        scale: 1_000_000,
+        coverage_level: "full",
+      },
+      {
+        metric_key: "ifrs.profit_loss",
+        value_num: 12_345,
+        unit: "currency",
+        currency: "EUR",
+        scale: 1_000_000,
+        coverage_level: "full",
+      },
+    ],
+  });
+
+  const mapped = mapStatement(registry, statement, { canonical_source_class: "ifrs" });
+
+  assert.equal(mapped.lines[0].metric_id, "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbb0001");
+  assert.equal(mapped.lines[0].canonical_source_class, "ifrs");
+  assert.equal(mapped.lines[1].metric_id, "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbb000f");
+  assert.equal(mapped.lines[1].canonical_source_class, "ifrs");
+});
+
+test("mapStatement rejects GAAP metric definitions when IFRS mapping is requested", () => {
+  const registry = aaplIncomeMetricRegistry();
+  const statement = normalizedStatement({
+    ...aaplFy2024IncomeStatementInput(),
+    lines: [
+      {
+        metric_key: "net_income",
+        value_num: 12_345,
+        unit: "currency",
+        currency: "USD",
+        scale: 1_000_000,
+        coverage_level: "full",
+      },
+    ],
+  });
+
+  assert.throws(
+    () => mapStatement(registry, statement, { canonical_source_class: "ifrs" }),
+    /metric_key="net_income" canonical_source_class "gaap" does not match required "ifrs"/,
+  );
 });
 
 test("mapStatementLines fails the whole batch if any line is unmapped", () => {

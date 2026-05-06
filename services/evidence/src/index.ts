@@ -3,32 +3,52 @@ export {
   FACT_ENTITLEMENT_CHANNELS,
   FACT_METHODS,
   FACT_PERIOD_KINDS,
+  FACT_REVIEW_ACTIONS,
   FACT_REVIEW_STATUSES,
   FACT_SUBJECT_KINDS,
   FRESHNESS_CLASSES,
   FactEgressEntitlementError,
+  FactReviewThroughputExceededError,
+  approveFactReview,
+  approveFactReviewWithPool,
   createFact,
+  editFactReviewCandidate,
+  editFactReviewCandidateWithPool,
   listFactsForEgress,
+  listFactReviewQueue,
+  listStaleFactReviewQueueItems,
   queueFactReview,
+  rejectFactReview,
+  rejectFactReviewWithPool,
   supersedeFact,
   supersedeFactWithPool,
 } from "./fact-repo.ts";
 export type {
+  ApproveFactReviewInput,
+  ApproveFactReviewResult,
   CoverageLevel,
+  EditFactReviewCandidateInput,
   FactClientPool,
   FactInput,
   FactEntitlementChannel,
   FactMethod,
   FactPoolClient,
   FactPeriodKind,
+  FactReviewAction,
+  FactReviewActionRow,
   FactReviewQueueRow,
   FactReviewStatus,
+  FactReviewThroughputLimit,
   FactRow,
   FactSubjectKind,
   FreshnessClass,
+  ListFactReviewQueueInput,
   ListFactsForEgressInput,
+  ListStaleFactReviewQueueInput,
   QueueFactReviewInput,
+  RejectFactReviewInput,
   SupersedeFactResult,
+  StaleFactReviewQueueRow,
 } from "./fact-repo.ts";
 
 export {
@@ -170,6 +190,9 @@ export type {
   ParseStatus,
 } from "./document-repo.ts";
 export type { QueryExecutor } from "./types.ts";
+
+export { createEvidenceReviewServer } from "./review-http.ts";
+export type { EvidenceReviewServerDb } from "./review-http.ts";
 
 export {
   MENTION_PROMINENCES,

@@ -3,6 +3,10 @@ import { assertSubjectRef, type SubjectRef } from "../../resolver/src/subject-re
 import type { JsonValue } from "../../observability/src/types.ts";
 import type { QueryExecutor } from "./agent-repo.ts";
 import {
+  generateFindingHeadline,
+  type HeadlineModel,
+} from "../../summary/src/headline-generator.ts";
+import {
   buildFindingSummaryBlocks,
   type FindingCardBlock,
 } from "./finding-summary-blocks.ts";
@@ -20,7 +24,9 @@ export type GenerateFindingInput = {
   snapshot_manifest: FindingSnapshotManifest;
   subject_refs: ReadonlyArray<SubjectRef>;
   claim_cluster_ids: ReadonlyArray<string>;
-  headline: string;
+  headline?: string;
+  headline_model?: HeadlineModel;
+  headline_claim?: string;
   severity_input: SeverityScoringInput;
   source_refs: ReadonlyArray<string>;
 };
@@ -78,11 +84,12 @@ export async function generateFinding(
 ): Promise<FindingRow> {
   assertGenerateFindingInput(input);
   const findingId = input.finding_id ?? randomUUID();
+  const headline = await resolveFindingHeadline(input);
   const scored = scoreFindingSeverity(input.severity_input);
   const summaryBlocks = buildFindingSummaryBlocks({
     finding_id: findingId,
     snapshot_id: input.snapshot_id,
-    headline: input.headline,
+    headline,
     severity: scored.severity,
     subject_refs: input.subject_refs,
     source_refs: input.source_refs,
@@ -101,7 +108,7 @@ export async function generateFinding(
       JSON.stringify(input.subject_refs),
       JSON.stringify(input.claim_cluster_ids),
       scored.severity,
-      input.headline.trim(),
+      headline,
       JSON.stringify(summaryBlocks),
     ],
   );
@@ -143,7 +150,7 @@ function assertGenerateFindingInput(input: GenerateFindingInput): void {
     throw new FindingGenerationValidationError("claim_cluster_ids must be an array");
   }
   input.claim_cluster_ids.forEach((id, index) => assertUuidString(id, `claim_cluster_ids[${index}]`));
-  assertNonEmptyString(input.headline, "headline");
+  assertHeadlineInput(input);
   if (!Array.isArray(input.source_refs)) {
     throw new FindingGenerationValidationError("source_refs must be an array");
   }
@@ -154,6 +161,44 @@ function assertGenerateFindingInput(input: GenerateFindingInput): void {
       throw new FindingGenerationValidationError(`source_refs[${index}] must exist in snapshot_manifest.source_ids`);
     }
   });
+}
+
+async function resolveFindingHeadline(input: GenerateFindingInput): Promise<string> {
+  if (typeof input.headline === "string" && input.headline.trim() !== "") {
+    return input.headline.trim();
+  }
+  if (input.headline_model === undefined || input.headline_claim === undefined) {
+    throw new FindingGenerationValidationError(
+      "headline must be a non-empty string unless headline_model and headline_claim are provided",
+    );
+  }
+  return generateFindingHeadline({
+    snapshot: {
+      snapshot_id: input.snapshot_manifest.snapshot_id,
+      as_of: input.snapshot_manifest.as_of,
+    },
+    claimCluster: {
+      cluster_id: input.claim_cluster_ids[0],
+      claim: input.headline_claim,
+    },
+    model: input.headline_model,
+  });
+}
+
+function assertHeadlineInput(input: GenerateFindingInput): void {
+  if (input.headline !== undefined && input.headline.trim() !== "") {
+    assertNonEmptyString(input.headline, "headline");
+    return;
+  }
+  if (typeof input.headline_model !== "function") {
+    throw new FindingGenerationValidationError("headline_model must be provided when headline is omitted");
+  }
+  assertNonEmptyString(input.headline_claim, "headline_claim");
+  if (input.claim_cluster_ids.length === 0) {
+    throw new FindingGenerationValidationError(
+      "claim_cluster_ids must contain at least one id when generating a headline",
+    );
+  }
 }
 
 function assertUuidString(value: unknown, field: string): asserts value is string {

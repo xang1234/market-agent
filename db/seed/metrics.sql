@@ -17,6 +17,10 @@ insert into metrics (metric_key, display_name, unit_class, aggregation, interpre
   ('eps_diluted',           'EPS (Diluted)',              'currency', 'derived',      'higher_is_better', 'gaap',    1, 'Net income per diluted share.'),
   ('shares_outstanding_basic',   'Shares Outstanding (Basic)',   'count', 'avg',           'neutral',     'gaap',    1, 'Basic weighted-average shares outstanding.'),
   ('shares_outstanding_diluted', 'Shares Outstanding (Diluted)', 'count', 'avg',           'neutral',     'gaap',    1, 'Diluted weighted-average shares outstanding.'),
+  ('ifrs.revenue',         'IFRS Revenue',              'currency', 'sum',          'higher_is_better', 'ifrs',    1, 'Revenue recognized under IFRS; kept distinct from GAAP revenue.'),
+  ('ifrs.profit_loss',     'IFRS Profit/Loss',          'currency', 'sum',          'higher_is_better', 'ifrs',    1, 'Profit or loss for the period under IFRS; kept distinct from GAAP net income.'),
+  ('ifrs.eps_basic',       'IFRS EPS (Basic)',          'currency', 'derived',      'higher_is_better', 'ifrs',    1, 'Basic earnings per share under IFRS.'),
+  ('ifrs.eps_diluted',     'IFRS EPS (Diluted)',        'currency', 'derived',      'higher_is_better', 'ifrs',    1, 'Diluted earnings per share under IFRS.'),
 
   -- Balance sheet
   ('total_assets',          'Total Assets',               'currency', 'point_in_time', 'neutral',         'gaap',    1, 'Total assets at period end.'),

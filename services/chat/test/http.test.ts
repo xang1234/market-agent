@@ -242,6 +242,35 @@ test("stream route writes an immediate turn.started event", async (t) => {
   await reader.cancel();
 });
 
+test("stream route schedules configured thread title generation from real server path", async (t) => {
+  const generated: unknown[] = [];
+  const titleDone = deferred();
+  const base = await startServer(t, {
+    generateThreadTitle: async (input) => {
+      generated.push(input);
+      titleDone.resolve();
+    },
+  });
+
+  const response = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-456`,
+    { headers: { "x-user-id": USER_ID } },
+  );
+  assert.equal(response.status, 200);
+  await readSseEvents(response, 9);
+  await titleDone.promise;
+
+  assert.deepEqual(generated, [
+    {
+      threadId: "thread-123",
+      runId: "run-456",
+      turnId: "run-456",
+      userId: USER_ID,
+      assistantText: "Stub research stream ready.",
+    },
+  ]);
+});
+
 test("run activity stream replays retained events after Last-Event-ID", async (t) => {
   const hub = createRunActivityHub();
   hub.publish(runActivityRow({ stage: "reading", summary: "Reading filings" }, 1), { userId: USER_ID });
