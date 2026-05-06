@@ -70,55 +70,47 @@ export function createChatSseEvent(
   };
 }
 
-export function stubSuccessEvents(
+export function sampleSuccessEvents(
   sequencer: ReturnType<typeof createChatSseSequencer>,
 ): ChatSseEvent[] {
   return [
-    sequencer.next("turn.started", { stub: true }),
+    sequencer.next("turn.started", { bundle_id: "single_subject_analysis" }),
     sequencer.next("tool.started", {
-      stub: true,
-      tool_call_id: "tool-call-1",
-      tool_name: "resolve_subjects",
+      tool_call_id: "compose-analyst-blocks",
+      tool_name: "compose_analyst_blocks",
     }),
     sequencer.next("tool.completed", {
-      stub: true,
-      tool_call_id: "tool-call-1",
-      tool_name: "resolve_subjects",
+      tool_call_id: "compose-analyst-blocks",
+      tool_name: "compose_analyst_blocks",
       status: "ok",
     }),
     sequencer.next("snapshot.staged", {
-      stub: true,
-      snapshot_id: "snapshot-1",
+      snapshot_id: "00000000-0000-4000-8000-000000000001",
       status: "staged",
     }),
     sequencer.next("snapshot.sealed", {
-      stub: true,
-      snapshot_id: "snapshot-1",
+      snapshot_id: "00000000-0000-4000-8000-000000000001",
       status: "sealed",
     }),
     sequencer.next("block.began", {
-      stub: true,
-      block_id: "block-1",
+      block_id: "00000000-0000-4000-8000-000000000002",
       kind: "rich_text",
     }),
     sequencer.next("block.delta", {
-      stub: true,
-      block_id: "block-1",
+      block_id: "00000000-0000-4000-8000-000000000002",
       delta: {
         segment: {
           type: "text",
-          text: "Stub research stream ready.",
+          text: "Research stream ready.",
         },
       },
     }),
     sequencer.next("block.completed", {
-      stub: true,
-      block_id: "block-1",
-      content_hash: "stub-block-1",
+      block_id: "00000000-0000-4000-8000-000000000002",
+      content_hash: "sha256:sample",
     }),
     sequencer.next("turn.completed", {
-      stub: true,
-      message_id: "message-1",
+      message_id: "00000000-0000-4000-8000-000000000003",
     }),
   ];
 }

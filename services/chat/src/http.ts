@@ -423,6 +423,5 @@ function heartbeatFrame(route: { threadId: string; runId: string; turnId?: strin
     thread_id: route.threadId,
     run_id: route.runId,
     turn_id: route.turnId ?? route.runId,
-    stub: true,
   })}\n\n`;
 }

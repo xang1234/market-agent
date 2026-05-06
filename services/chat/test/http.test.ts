@@ -266,7 +266,7 @@ test("stream route schedules configured thread title generation from real server
       runId: "run-456",
       turnId: "run-456",
       userId: USER_ID,
-      assistantText: "Stub research stream ready.",
+      assistantText: "Start a research thread. I will use the single_subject_analysis bundle and return typed research blocks pinned to a snapshot.",
     },
   ]);
 });
@@ -631,13 +631,14 @@ test("stream route emits sequenced success-path coordinator events with correlat
     assert.equal(event.data.turn_id, "run-456");
   }
 
-  assert.equal(events[1].data.tool_call_id, "tool-call-1");
-  assert.equal(events[2].data.tool_call_id, "tool-call-1");
-  assert.equal(events[3].data.snapshot_id, "snapshot-1");
-  assert.equal(events[4].data.snapshot_id, "snapshot-1");
+  assert.equal(events[1].data.tool_call_id, "compose-analyst-blocks");
+  assert.equal(events[2].data.tool_call_id, "compose-analyst-blocks");
+  assert.match(String(events[3].data.snapshot_id), /^[0-9a-f-]{36}$/);
+  assert.equal(events[4].data.snapshot_id, events[3].data.snapshot_id);
 
   const blockEvents = events.slice(5, 8);
-  assert.deepEqual(blockEvents.map((event) => event.data.block_id), ["block-1", "block-1", "block-1"]);
+  assert.equal(blockEvents[0].data.block_id, blockEvents[1].data.block_id);
+  assert.equal(blockEvents[1].data.block_id, blockEvents[2].data.block_id);
 });
 
 test("stream route resumes strictly after Last-Event-ID", async (t) => {

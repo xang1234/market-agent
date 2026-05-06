@@ -5,7 +5,7 @@ import {
   CHAT_SSE_EVENT_TYPES,
   createChatSseEvent,
   createChatSseSequencer,
-  stubSuccessEvents,
+  sampleSuccessEvents,
   type ChatSseEventType,
 } from "../src/sse.ts";
 
@@ -131,11 +131,11 @@ test("createChatSseEvent rejects non-positive or non-integer seq values", () => 
   }
 });
 
-test("stubSuccessEvents returns the nine canonical success-path events with monotonic seq and required correlation fields", () => {
-  // turn.error is intentionally absent from the success-path stub — that is
+test("sampleSuccessEvents returns the nine canonical success-path events with monotonic seq and required correlation fields", () => {
+  // turn.error is intentionally absent from the success-path sample — that is
   // the only one of the ten kinds reserved for the failure path.
   const sequencer = createChatSseSequencer(CONTEXT);
-  const events = stubSuccessEvents(sequencer);
+  const events = sampleSuccessEvents(sequencer);
 
   assert.deepEqual(events.map((e) => e.type), [
     "turn.started",
