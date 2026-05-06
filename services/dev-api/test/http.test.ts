@@ -286,20 +286,21 @@ test("service Analyze adapter writes blocks with the sealed snapshot id", async 
   assert.deepEqual(insertedBlocks, run.blocks);
 });
 
-test("POST /v1/artifacts/share-to-chat persists Analyze blocks as a durable chat message", async (t) => {
+test("POST /v1/analyze/runs/:id/share-to-chat loads stored Analyze blocks and creates a durable chat message", async (t) => {
   const userId = "00000000-0000-4000-8000-000000000001";
   const threadId = "11111111-1111-4111-8111-111111111111";
   const snapshotId = "22222222-2222-4222-8222-222222222222";
+  const runId = "44444444-4444-4444-8444-444444444444";
   const block = {
     id: "33333333-3333-4333-8333-333333333333",
     kind: "rich_text",
     snapshot_id: snapshotId,
-    data_ref: { kind: "analyze_run", id: "44444444-4444-4444-8444-444444444444" },
+    data_ref: { kind: "analyze_run", id: runId },
     source_refs: [],
     as_of: "2026-05-06T00:00:00.000Z",
     segments: [{ type: "text", text: "Durable imported memo" }],
   };
-  const db = fakeArtifactShareDb({ userId, threadId });
+  const db = fakeArtifactShareDb({ userId, threadId, runId, snapshotId, blocks: [block] });
   const adapters = createServiceDevApiAdapters({
     db,
     async sealAnalyzeSnapshot() {
@@ -308,37 +309,57 @@ test("POST /v1/artifacts/share-to-chat persists Analyze blocks as a durable chat
   });
   const base = await startServer(t, {}, { adapters });
 
-  const response = await fetch(`${base}/v1/artifacts/share-to-chat`, {
+  const response = await fetch(`${base}/v1/analyze/runs/${runId}/share-to-chat`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-user-id": userId,
     },
     body: JSON.stringify({
-      thread_id: threadId,
-      source_kind: "memo",
-      origin_snapshot_id: snapshotId,
-      analyze_run_id: "44444444-4444-4444-8444-444444444444",
-      blocks: [block],
+      title: "Server-owned memo",
+      origin_snapshot_id: "99999999-9999-4999-8999-999999999999",
+      blocks: [
+        {
+          id: "client-forged",
+          kind: "rich_text",
+          snapshot_id: "99999999-9999-4999-8999-999999999999",
+        },
+      ],
     }),
   });
   const body = await response.json() as {
+    thread?: { thread_id?: string; title?: string | null };
     message?: { snapshot_id?: string; blocks?: unknown[] };
     origin_snapshot_ids?: string[];
   };
 
   assert.equal(response.status, 201);
+  assert.equal(body.thread?.thread_id, threadId);
+  assert.equal(body.thread?.title, "Server-owned memo");
   assert.equal(body.message?.snapshot_id, snapshotId);
-  assert.deepEqual(body.message?.blocks, [block]);
+  assert.equal((body.message?.blocks?.[0] as { id?: string }).id, block.id);
+  assert.equal(((body.message?.blocks?.[0] as { data_ref?: { params?: Record<string, unknown> } }).data_ref?.params?.analyze_run_id), runId);
+  assert.equal(JSON.stringify(body.message?.blocks).includes("client-forged"), false);
   assert.deepEqual(body.origin_snapshot_ids, [snapshotId]);
-  assert.equal(db.queries.some((query) => query.text.includes("latest_snapshot_id")), false);
+  assert.equal(db.queries.some((query) => query.text.includes("update chat_threads")), false);
+  assert.ok(db.queries.some((query) => query.text.includes("insert into chat_threads")));
 });
 
-test("POST /v1/artifacts/share-to-chat rejects blocks outside the origin snapshot", async (t) => {
+test("POST /v1/analyze/runs/:id/share-to-chat rejects stored blocks outside the origin snapshot with details", async (t) => {
   const userId = "00000000-0000-4000-8000-000000000001";
+  const runId = "44444444-4444-4444-8444-444444444444";
   const db = fakeArtifactShareDb({
     userId,
     threadId: "11111111-1111-4111-8111-111111111111",
+    runId,
+    snapshotId: "22222222-2222-4222-8222-222222222222",
+    blocks: [
+      {
+        id: "33333333-3333-4333-8333-333333333333",
+        kind: "rich_text",
+        snapshot_id: "55555555-5555-4555-8555-555555555555",
+      },
+    ],
   });
   const adapters = createServiceDevApiAdapters({
     db,
@@ -348,30 +369,58 @@ test("POST /v1/artifacts/share-to-chat rejects blocks outside the origin snapsho
   });
   const base = await startServer(t, {}, { adapters });
 
-  const response = await fetch(`${base}/v1/artifacts/share-to-chat`, {
+  const response = await fetch(`${base}/v1/analyze/runs/${runId}/share-to-chat`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-user-id": userId,
     },
-    body: JSON.stringify({
-      thread_id: "11111111-1111-4111-8111-111111111111",
-      source_kind: "memo",
-      origin_snapshot_id: "22222222-2222-4222-8222-222222222222",
-      blocks: [
-        {
-          id: "33333333-3333-4333-8333-333333333333",
-          kind: "rich_text",
-          snapshot_id: "55555555-5555-4555-8555-555555555555",
-        },
-      ],
-    }),
+    body: JSON.stringify({ title: "Rejected memo" }),
   });
-  const body = await response.json() as Record<string, unknown>;
+  const body = await response.json() as { error?: string; details?: Array<{ reason?: string }> };
 
   assert.equal(response.status, 422);
   assert.equal(body.error, "artifact share rejected");
+  assert.equal(body.details?.[0]?.reason, "origin_snapshot_mismatch");
   assert.equal(db.queries.some((query) => query.text.includes("insert into chat_messages")), false);
+  assert.equal(db.queries.some((query) => query.text.includes("insert into chat_threads")), false);
+});
+
+test("POST /v1/analyze/runs/:id/share-to-chat rejects runs owned by another user", async (t) => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const runId = "44444444-4444-4444-8444-444444444444";
+  const db = fakeArtifactShareDb({
+    userId: "00000000-0000-4000-8000-000000000002",
+    threadId: "11111111-1111-4111-8111-111111111111",
+    runId,
+    snapshotId: "22222222-2222-4222-8222-222222222222",
+    blocks: [
+      {
+        id: "33333333-3333-4333-8333-333333333333",
+        kind: "rich_text",
+        snapshot_id: "22222222-2222-4222-8222-222222222222",
+      },
+    ],
+  });
+  const adapters = createServiceDevApiAdapters({
+    db,
+    async sealAnalyzeSnapshot() {
+      throw new Error("analyze seal is not used by artifact share");
+    },
+  });
+  const base = await startServer(t, {}, { adapters });
+
+  const response = await fetch(`${base}/v1/analyze/runs/${runId}/share-to-chat`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-id": userId,
+    },
+    body: JSON.stringify({ title: "Wrong owner" }),
+  });
+
+  assert.equal(response.status, 404);
+  assert.equal(db.queries.some((query) => query.text.includes("insert into chat_threads")), false);
 });
 
 test("GET /v1/agents requires an authenticated user", async (t) => {
@@ -477,18 +526,80 @@ function fakeAnalyzeDb(input: {
 function fakeArtifactShareDb(input: {
   userId: string;
   threadId: string;
+  runId: string;
+  snapshotId: string;
+  blocks: unknown[];
 }) {
   const queries: Array<{ text: string; values?: unknown[] }> = [];
-  return {
+  const db = {
     queries,
     async connect() {
-      return this;
+      return db;
     },
     release() {
       // No-op test pool client.
     },
     async query(text: string, values?: unknown[]) {
       queries.push({ text, values });
+      if (text === "begin" || text === "commit" || text === "rollback") {
+        return { rows: [], rowCount: null };
+      }
+      if (text.includes("from analyze_template_runs")) {
+        return {
+          rows: values?.[0] === input.runId
+            ? [
+                {
+                  run_id: input.runId,
+                  template_id: "77777777-7777-4777-8777-777777777777",
+                  template_version: 3,
+                  snapshot_id: input.snapshotId,
+                  blocks: input.blocks,
+                  created_at: "2026-05-06T00:00:00.000Z",
+                },
+              ]
+            : [],
+          rowCount: null,
+        };
+      }
+      if (text.includes("from analyze_templates")) {
+        return {
+          rows: [
+            {
+              template_id: "77777777-7777-4777-8777-777777777777",
+              user_id: input.userId,
+              name: "Earnings quality",
+              prompt_template: "Review earnings quality",
+              source_categories: ["filings"],
+              added_subject_refs: [],
+              block_layout_hint: null,
+              peer_policy: null,
+              disclosure_policy: null,
+              version: 3,
+              created_at: "2026-05-06T00:00:00.000Z",
+              updated_at: "2026-05-06T00:00:00.000Z",
+            },
+          ],
+          rowCount: null,
+        };
+      }
+      if (text.includes("insert into chat_threads")) {
+        return {
+          rows: [
+            {
+              thread_id: input.threadId,
+              user_id: values?.[0],
+              primary_subject_kind: values?.[1],
+              primary_subject_id: values?.[2],
+              title: values?.[3],
+              latest_snapshot_id: null,
+              archived_at: null,
+              created_at: "2026-05-06T00:00:00.000Z",
+              updated_at: "2026-05-06T00:00:00.000Z",
+            },
+          ],
+          rowCount: 1,
+        };
+      }
       if (text.includes("from chat_threads")) {
         return {
           rows: values?.[0] === input.threadId && values?.[1] === input.userId ? [{ owned: true }] : [],
@@ -514,4 +625,5 @@ function fakeArtifactShareDb(input: {
       throw new Error(`unexpected query: ${text}`);
     },
   };
+  return db;
 }

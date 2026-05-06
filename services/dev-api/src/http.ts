@@ -2,8 +2,10 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 import { createHash, randomUUID } from "node:crypto";
 import {
   getAnalyzeTemplate,
+  getAnalyzeTemplateRun,
   listAnalyzeTemplatesByUser,
   persistAnalyzeTemplateRunAfterSnapshotSealWithPool,
+  type AnalyzeTemplateRunRow,
   type AnalyzeTemplateRunClientPool,
 } from "../../analyze/src/index.ts";
 import {
@@ -19,17 +21,21 @@ import {
   type QueryExecutor,
 } from "../../agents/src/index.ts";
 import {
-  SHAREABLE_ARTIFACT_SOURCE_KINDS,
   shareArtifactToChat,
   type ShareableArtifactBlock,
-  type ShareableArtifactSourceKind,
 } from "../../artifact/src/index.ts";
 import {
   persistImportedArtifactMessage,
   type ChatMessagePersistenceDb,
   type ChatMessageRow,
 } from "../../chat/src/messages.ts";
+import {
+  createThread,
+  type ChatThread,
+  type ChatThreadsDb,
+} from "../../chat/src/threads-repo.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
+import type { SubjectRef } from "../../resolver/src/subject-ref.ts";
 import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
 import { readDevFlags } from "../../shared/src/devFlags.ts";
 
@@ -70,6 +76,7 @@ type DevAnalyzeTemplate = {
 };
 
 type DevArtifactShareResult = {
+  thread: ChatThread;
   message: ChatMessageRow;
   origin_snapshot_ids: ReadonlyArray<string>;
 };
@@ -83,6 +90,11 @@ export type DevApiAnalyzeAdapter = {
     userId: string;
     body: Record<string, unknown>;
   }): Promise<DevAnalyzeRun>;
+  shareRunToChat(input: {
+    userId: string;
+    runId: string;
+    body: Record<string, unknown>;
+  }): Promise<DevArtifactShareResult>;
 };
 
 export type DevApiAgentsAdapter = {
@@ -103,17 +115,9 @@ export type DevApiAgentsAdapter = {
   run(input: { userId: string; agentId: string }): Promise<DevAgentRun | null>;
 };
 
-export type DevApiArtifactAdapter = {
-  shareToChat(input: {
-    userId: string;
-    body: Record<string, unknown>;
-  }): Promise<DevArtifactShareResult>;
-};
-
 export type DevApiAdapters = {
   analyze: DevApiAnalyzeAdapter;
   agents: DevApiAgentsAdapter;
-  artifact: DevApiArtifactAdapter;
 };
 
 export type DevApiServerOptions = {
@@ -189,7 +193,8 @@ export function createDevApiServer(
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/v1/artifacts/share-to-chat") {
+    const analyzeShareMatch = url.pathname.match(/^\/v1\/analyze\/runs\/([^/]+)\/share-to-chat$/);
+    if (req.method === "POST" && analyzeShareMatch) {
       const userId = readUserIdHeader(req.headers["x-user-id"]);
       if (userId === null) {
         respondJson(res, 401, { error: "x-user-id header is required" });
@@ -205,7 +210,11 @@ export function createDevApiServer(
         respondJson(res, 503, { error: "durable artifact adapter is not configured" });
         return;
       }
-      respondJson(res, 201, await adapters.artifact.shareToChat({ userId, body: input }));
+      respondJson(res, 201, await adapters.analyze.shareRunToChat({
+        userId,
+        runId: decodeURIComponent(analyzeShareMatch[1]),
+        body: input,
+      }));
       return;
     }
 
@@ -319,7 +328,10 @@ export function createDevApiServer(
         return;
       }
       if (error instanceof DevApiHttpError) {
-        respondJson(res, error.status, { error: error.message });
+        respondJson(res, error.status, {
+          error: error.message,
+          ...(error.details === undefined ? {} : { details: error.details }),
+        });
         return;
       }
       respondJson(res, 500, { error: error instanceof Error ? error.message : "internal server error" });
@@ -377,6 +389,47 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
         analyzeRuns.unshift(run);
         analyzeRunOwners.set(run.run_id, userId);
         return run;
+      },
+      async shareRunToChat({ userId, runId, body }) {
+        const run = analyzeRuns.find((candidate) => candidate.run_id === runId);
+        if (!run || runOwner(run.run_id) !== userId) {
+          throw new DevApiHttpError(404, "analyze run not found");
+        }
+        const thread = fixtureThread({
+          userId,
+          title: nonEmptyString(body.title) ?? "Research memo",
+          primarySubjectRef: readOptionalSubjectRef(body.primary_subject_ref),
+        });
+        const blocks = enrichAnalyzeRunBlocks(run.blocks, run);
+        const shared = await shareArtifactToChat({
+          sources: [
+            {
+              source_kind: "memo",
+              origin_snapshot_id: run.snapshot_id,
+              blocks,
+            },
+          ],
+          egress: {
+            db: emptyEgressDb(),
+            listFactsForEgress: async (_db, input) =>
+              input.fact_ids.map((factId) => ({ fact_id: factId }) as never),
+          },
+        });
+        if (!shared.ok) throw new DevApiHttpError(422, "artifact share rejected", shared.rejections);
+        const sharedBlocks = shared.blocks as JsonValue;
+        return {
+          thread,
+          message: {
+            message_id: stableUuid(`artifact-message:${thread.thread_id}:${contentHash(sharedBlocks)}`),
+            thread_id: thread.thread_id,
+            role: "assistant",
+            snapshot_id: shared.origin_snapshot_ids[0] ?? run.snapshot_id,
+            blocks: sharedBlocks,
+            content_hash: contentHash(sharedBlocks),
+            created_at: new Date().toISOString(),
+          },
+          origin_snapshot_ids: shared.origin_snapshot_ids,
+        };
       },
     },
     agents: {
@@ -439,46 +492,11 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
         return run;
       },
     },
-    artifact: {
-      async shareToChat({ body }) {
-        const threadId = requireNonEmpty(body.thread_id, "thread_id");
-        const sourceKind = readShareSourceKind(body.source_kind);
-        const originSnapshotId = requireNonEmpty(body.origin_snapshot_id, "origin_snapshot_id");
-        const blocks = readShareBlocks(body.blocks);
-        const shared = await shareArtifactToChat({
-          sources: [
-            {
-              source_kind: sourceKind,
-              origin_snapshot_id: originSnapshotId,
-              blocks,
-            },
-          ],
-          egress: {
-            db: emptyEgressDb(),
-            listFactsForEgress: async (_db, input) =>
-              input.fact_ids.map((factId) => ({ fact_id: factId }) as never),
-          },
-        });
-        if (!shared.ok) throw new DevApiHttpError(422, "artifact share rejected");
-        return {
-          message: {
-            message_id: stableUuid(`artifact-message:${threadId}:${contentHash(shared.blocks as JsonValue)}`),
-            thread_id: threadId,
-            role: "assistant",
-            snapshot_id: shared.origin_snapshot_ids[0] ?? originSnapshotId,
-            blocks: shared.blocks as JsonValue,
-            content_hash: contentHash(shared.blocks as JsonValue),
-            created_at: new Date().toISOString(),
-          },
-          origin_snapshot_ids: shared.origin_snapshot_ids,
-        };
-      },
-    },
   };
 }
 
 export type DevApiServiceAdapterDeps = {
-  db: QueryExecutor & AnalyzeTemplateRunClientPool & ChatMessagePersistenceDb;
+  db: QueryExecutor & AnalyzeTemplateRunClientPool & ChatMessagePersistenceDb & ChatThreadsDb;
   sealAnalyzeSnapshot(input: {
     snapshotId: string;
     userId: string;
@@ -570,6 +588,63 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
           created_at: persisted.run.created_at,
         };
       },
+      async shareRunToChat({ userId, runId, body }) {
+        const run = await getAnalyzeTemplateRun(deps.db, runId);
+        if (run === null) throw new DevApiHttpError(404, "analyze run not found");
+        const template = await getAnalyzeTemplate(deps.db, run.template_id);
+        if (template === null || template.user_id !== userId) {
+          throw new DevApiHttpError(404, "analyze run not found");
+        }
+        const blocks = enrichAnalyzeRunBlocks(run.blocks, run);
+        const shared = await shareArtifactToChat({
+          sources: [
+            {
+              source_kind: "memo",
+              origin_snapshot_id: run.snapshot_id,
+              blocks,
+            },
+          ],
+          egress: { db: deps.db },
+        });
+        if (!shared.ok) throw new DevApiHttpError(422, "artifact share rejected", shared.rejections);
+        const snapshotId = shared.origin_snapshot_ids[0];
+        if (snapshotId === undefined) throw new DevApiHttpError(422, "artifact share rejected");
+
+        const client = await deps.db.connect();
+        try {
+          await client.query("begin");
+          const thread = await createThread(client, userId, {
+            title: nonEmptyString(body.title) ?? "Research memo",
+            primary_subject_ref: readOptionalSubjectRef(body.primary_subject_ref) ?? undefined,
+          });
+          const message = await persistImportedArtifactMessage(client, {
+            thread_id: thread.thread_id,
+            user_id: userId,
+            role: "assistant",
+            snapshot_id: snapshotId,
+            blocks: shared.blocks as JsonValue,
+            content_hash: contentHash(shared.blocks as JsonValue),
+          });
+          if (message === null) throw new DevApiHttpError(404, "chat thread not found");
+          await client.query("commit");
+          return {
+            thread,
+            message,
+            origin_snapshot_ids: shared.origin_snapshot_ids,
+          };
+        } catch (error) {
+          try {
+            await client.query("rollback");
+          } catch (rollbackError) {
+            if (error !== null && typeof error === "object") {
+              (error as { rollback_error?: unknown }).rollback_error = rollbackError;
+            }
+          }
+          throw error;
+        } finally {
+          client.release();
+        }
+      },
     },
     agents: {
       async list({ userId }) {
@@ -628,50 +703,18 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
         }));
       },
     },
-    artifact: {
-      async shareToChat({ userId, body }) {
-        const threadId = requireNonEmpty(body.thread_id, "thread_id");
-        const sourceKind = readShareSourceKind(body.source_kind);
-        const originSnapshotId = requireNonEmpty(body.origin_snapshot_id, "origin_snapshot_id");
-        const blocks = readShareBlocks(body.blocks);
-        const shared = await shareArtifactToChat({
-          sources: [
-            {
-              source_kind: sourceKind,
-              origin_snapshot_id: originSnapshotId,
-              blocks,
-            },
-          ],
-          egress: { db: deps.db },
-        });
-        if (!shared.ok) throw new DevApiHttpError(422, "artifact share rejected");
-        const snapshotId = shared.origin_snapshot_ids[0];
-        if (snapshotId === undefined) throw new DevApiHttpError(422, "artifact share rejected");
-        const message = await persistImportedArtifactMessage(deps.db, {
-          thread_id: threadId,
-          user_id: userId,
-          role: "assistant",
-          snapshot_id: snapshotId,
-          blocks: shared.blocks as JsonValue,
-          content_hash: contentHash(shared.blocks as JsonValue),
-        });
-        if (message === null) throw new DevApiHttpError(404, "chat thread not found");
-        return {
-          message,
-          origin_snapshot_ids: shared.origin_snapshot_ids,
-        };
-      },
-    },
   };
 }
 
 class DevApiHttpError extends Error {
   readonly status: number;
+  readonly details: unknown;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, details?: unknown) {
     super(message);
     this.name = "DevApiHttpError";
     this.status = status;
+    this.details = details;
   }
 }
 
@@ -681,21 +724,72 @@ function requireNonEmpty(value: unknown, label: string): string {
   return text;
 }
 
-function readShareSourceKind(value: unknown): ShareableArtifactSourceKind {
-  const sourceKind = requireNonEmpty(value, "source_kind");
-  if (!SHAREABLE_ARTIFACT_SOURCE_KINDS.includes(sourceKind as ShareableArtifactSourceKind)) {
-    throw new DevApiHttpError(400, "source_kind is invalid");
-  }
-  return sourceKind as ShareableArtifactSourceKind;
-}
-
-function readShareBlocks(value: unknown): ShareableArtifactBlock[] {
-  if (!Array.isArray(value)) throw new DevApiHttpError(400, "blocks is required");
-  return value as ShareableArtifactBlock[];
-}
-
 function contentHash(value: JsonValue): string {
   return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+}
+
+function readOptionalSubjectRef(value: unknown): SubjectRef | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new DevApiHttpError(400, "primary_subject_ref is invalid");
+  }
+  const candidate = value as Partial<SubjectRef>;
+  if (typeof candidate.kind !== "string" || typeof candidate.id !== "string") {
+    throw new DevApiHttpError(400, "primary_subject_ref is invalid");
+  }
+  return { kind: candidate.kind as SubjectRef["kind"], id: candidate.id };
+}
+
+function enrichAnalyzeRunBlocks(
+  blocks: ReadonlyArray<Record<string, unknown> | JsonValue>,
+  run: Pick<AnalyzeTemplateRunRow | DevAnalyzeRun, "run_id" | "template_id" | "template_version" | "snapshot_id" | "created_at">,
+): ShareableArtifactBlock[] {
+  return blocks.map((block) => {
+    if (block === null || typeof block !== "object" || Array.isArray(block)) {
+      return block as ShareableArtifactBlock;
+    }
+    const record = block as Record<string, JsonValue>;
+    const dataRef = record.data_ref;
+    const dataRefRecord = dataRef !== null && typeof dataRef === "object" && !Array.isArray(dataRef)
+      ? dataRef as Record<string, JsonValue>
+      : { kind: "analyze_run", id: run.run_id };
+    const params = dataRefRecord.params;
+    const paramsRecord = params !== null && typeof params === "object" && !Array.isArray(params)
+      ? params as Record<string, JsonValue>
+      : {};
+    return {
+      ...record,
+      data_ref: {
+        ...dataRefRecord,
+        params: {
+          ...paramsRecord,
+          analyze_run_id: run.run_id,
+          analyze_template_id: run.template_id,
+          analyze_template_version: run.template_version,
+          analyze_run_created_at: run.created_at,
+          origin_snapshot_id: run.snapshot_id,
+        },
+      },
+    } as ShareableArtifactBlock;
+  });
+}
+
+function fixtureThread(input: {
+  userId: string;
+  title: string | null;
+  primarySubjectRef: SubjectRef | null;
+}): ChatThread {
+  const now = new Date().toISOString();
+  return {
+    thread_id: stableUuid(`thread:${input.userId}:${input.title ?? ""}:${now}`),
+    user_id: input.userId,
+    title: input.title,
+    primary_subject_ref: input.primarySubjectRef,
+    latest_snapshot_id: null,
+    archived_at: null,
+    created_at: now,
+    updated_at: now,
+  };
 }
 
 function emptyEgressDb(): QueryExecutor {

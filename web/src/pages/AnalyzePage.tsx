@@ -20,12 +20,6 @@ type AnalyzeTemplate = {
   version: number
 }
 
-type ChatThread = {
-  thread_id: string
-  title: string | null
-  updated_at: string
-}
-
 const DEFAULT_TEMPLATES: ReadonlyArray<AnalyzeTemplate> = [
   {
     template_id: 'earnings-quality',
@@ -149,31 +143,18 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
     }
     const run = memoRun ?? (await generateMemo())
     if (!run) return
-    setStatus('Creating chat thread')
     const titleSubject = subject ? subjectDisplayName(subject) : 'Research memo'
     try {
-      const response = await fetch('/v1/chat/threads', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-user-id': session.userId,
-        },
-        body: JSON.stringify({
-          title: `${selectedTemplate.name} - ${titleSubject}`,
-          primary_subject_ref: subject?.subject_ref ?? undefined,
-        }),
-      })
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const thread = (await response.json()) as ChatThread
       setStatus('Persisting memo in chat')
-      await shareAnalyzeRunToChat({
+      const result = await shareAnalyzeRunToChat({
         userId: session.userId,
-        threadId: thread.thread_id,
         sourceKind: 'memo',
         run,
+        title: `${selectedTemplate.name} - ${titleSubject}`,
+        primarySubjectRef: subject?.subject_ref ?? null,
       })
       setStatus(`Added memo ${run.run_id} to chat`)
-      navigate(`/chat/${thread.thread_id}`)
+      navigate(`/chat/${result.thread.thread_id}`)
     } catch (caught) {
       setStatus(`Add to chat failed: ${caught instanceof Error ? caught.message : String(caught)}`)
     }

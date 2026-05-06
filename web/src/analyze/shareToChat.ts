@@ -9,25 +9,33 @@ export type AnalyzeRun = {
   created_at: string
 }
 
+export type AnalyzeRunShareResult = {
+  thread: {
+    thread_id: string
+    title: string | null
+    updated_at: string
+  }
+}
+
 export async function shareAnalyzeRunToChat(input: {
   userId: string
-  threadId: string
   sourceKind: 'memo'
   run: AnalyzeRun
-}): Promise<void> {
-  const response = await fetch('/v1/artifacts/share-to-chat', {
+  title: string
+  primarySubjectRef?: unknown
+}): Promise<AnalyzeRunShareResult> {
+  const response = await fetch(`/v1/analyze/runs/${encodeURIComponent(input.run.run_id)}/share-to-chat`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       'x-user-id': input.userId,
     },
     body: JSON.stringify({
-      thread_id: input.threadId,
       source_kind: input.sourceKind,
-      origin_snapshot_id: input.run.snapshot_id,
-      analyze_run_id: input.run.run_id,
-      blocks: input.run.blocks,
+      title: input.title,
+      primary_subject_ref: input.primarySubjectRef ?? null,
     }),
   })
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return (await response.json()) as AnalyzeRunShareResult
 }

@@ -226,13 +226,20 @@ test('Analyze Add-to-chat shares run blocks through the durable artifact endpoin
   try {
     globalThis.fetch = async (input, init) => {
       calls.push({ input: String(input), init })
-      return new Response(JSON.stringify({ ok: true }), { status: 201, headers: { 'content-type': 'application/json' } })
+      return new Response(JSON.stringify({
+        thread: {
+          thread_id: 'thread-123',
+          title: 'Earnings quality - Research memo',
+          updated_at: '2026-05-06T00:00:00.000Z',
+        },
+      }), { status: 201, headers: { 'content-type': 'application/json' } })
     }
 
-    await shareAnalyzeRunToChat({
+    const result = await shareAnalyzeRunToChat({
       userId: USER_ID,
-      threadId: 'thread-123',
       sourceKind: 'memo',
+      title: 'Earnings quality - Research memo',
+      primarySubjectRef: null,
       run: {
         run_id: 'run-123',
         template_id: 'earnings-quality',
@@ -243,16 +250,15 @@ test('Analyze Add-to-chat shares run blocks through the durable artifact endpoin
       },
     })
 
+    assert.equal(result.thread.thread_id, 'thread-123')
     assert.equal(calls.length, 1)
-    assert.equal(calls[0].input, '/v1/artifacts/share-to-chat')
+    assert.equal(calls[0].input, '/v1/analyze/runs/run-123/share-to-chat')
     assert.equal(calls[0].init?.method, 'POST')
     assert.equal((calls[0].init?.headers as Record<string, string>)['x-user-id'], USER_ID)
     assert.deepEqual(JSON.parse(String(calls[0].init?.body)), {
-      thread_id: 'thread-123',
       source_kind: 'memo',
-      origin_snapshot_id: SNAPSHOT_ID,
-      analyze_run_id: 'run-123',
-      blocks: [IMPORTED_MEMO_BLOCK],
+      title: 'Earnings quality - Research memo',
+      primary_subject_ref: null,
     })
   } finally {
     globalThis.fetch = originalFetch
