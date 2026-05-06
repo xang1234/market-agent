@@ -1,4 +1,9 @@
-import type { JsonValue, QueryExecutor } from "../../observability/src/types.ts";
+import {
+  serializeJsonValue,
+  serializeNullableJsonValue,
+  type JsonValue,
+  type QueryExecutor,
+} from "../../observability/src/types.ts";
 import type { SubjectKind, SubjectRef } from "../../resolver/src/subject-ref.ts";
 import { assertSubjectRef } from "../../resolver/src/subject-ref.ts";
 
@@ -84,7 +89,7 @@ export async function createTheme(db: QueryExecutor, input: ThemeInput): Promise
       input.name,
       input.description ?? null,
       input.membership_mode,
-      input.membership_spec === undefined ? null : JSON.stringify(input.membership_spec),
+      serializeNullableJsonValue(input.membership_spec),
       input.active_from ?? null,
       input.active_to ?? null,
     ],
@@ -204,7 +209,7 @@ export async function addThemeMembership(
       input.subject_ref.kind,
       input.subject_ref.id,
       input.score ?? null,
-      JSON.stringify(input.rationale_claim_ids ?? []),
+      serializeJsonValue([...(input.rationale_claim_ids ?? [])]),
       input.effective_at ?? null,
       input.expires_at ?? null,
     ],

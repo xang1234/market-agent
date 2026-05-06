@@ -30,7 +30,7 @@ test("analyst prompt templates cover every registered bundle exactly once", () =
     extra_bundle_ids: [],
     duplicate_bundle_ids: [],
   });
-  assert.equal(ANALYST_PROMPT_TEMPLATES.length, 11);
+  assert.equal(ANALYST_PROMPT_TEMPLATES.length, 14);
 });
 
 test("each analyst prompt template carries system and policy prompts in the cache prefix", () => {

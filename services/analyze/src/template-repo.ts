@@ -1,4 +1,9 @@
-import type { JsonValue, QueryExecutor } from "../../observability/src/types.ts";
+import {
+  serializeJsonValue,
+  serializeNullableJsonValue,
+  type JsonValue,
+  type QueryExecutor,
+} from "../../observability/src/types.ts";
 import type { SubjectRef } from "../../resolver/src/subject-ref.ts";
 import { assertSubjectRef } from "../../resolver/src/subject-ref.ts";
 
@@ -99,11 +104,11 @@ export async function createAnalyzeTemplate(
       input.user_id,
       input.name,
       input.prompt_template,
-      JSON.stringify(input.source_categories ?? []),
-      JSON.stringify(input.added_subject_refs ?? []),
-      serializeOptionalJson(input.block_layout_hint),
-      serializeOptionalJson(input.peer_policy),
-      serializeOptionalJson(input.disclosure_policy),
+      serializeJsonValue([...(input.source_categories ?? [])]),
+      serializeJsonValue((input.added_subject_refs ?? []).map((ref) => ({ ...ref }))),
+      serializeNullableJsonValue(input.block_layout_hint),
+      serializeNullableJsonValue(input.peer_policy),
+      serializeNullableJsonValue(input.disclosure_policy),
     ],
   );
   return rowFromDb(rows[0]);
@@ -168,8 +173,12 @@ export async function updateAnalyzeTemplate(
       templateId,
       patch.name ?? null,
       patch.prompt_template ?? null,
-      patch.source_categories === undefined ? null : JSON.stringify(patch.source_categories),
-      patch.added_subject_refs === undefined ? null : JSON.stringify(patch.added_subject_refs),
+      patch.source_categories === undefined
+        ? null
+        : serializeJsonValue([...patch.source_categories]),
+      patch.added_subject_refs === undefined
+        ? null
+        : serializeJsonValue(patch.added_subject_refs.map((ref) => ({ ...ref }))),
       serializePatchJson(patch, "block_layout_hint"),
       serializePatchJson(patch, "peer_policy"),
       serializePatchJson(patch, "disclosure_policy"),
@@ -282,10 +291,6 @@ function assertUuidString(value: unknown, label: string): asserts value is strin
   }
 }
 
-function serializeOptionalJson(value: JsonValue | null | undefined): string | null {
-  return value === undefined || value === null ? null : JSON.stringify(value);
-}
-
 // COALESCE-driven patch: `undefined` is the "skip" signal — we bind SQL
 // NULL, COALESCE falls through, the column keeps its current value.
 //
@@ -308,8 +313,7 @@ function serializePatchJson(
 ): string | null {
   const value = patch[key];
   if (value === undefined) return null;
-  if (value === null) return JSON.stringify(null);
-  return JSON.stringify(value);
+  return serializeJsonValue(value);
 }
 
 function rowFromDb(row: AnalyzeTemplateDbRow | undefined): AnalyzeTemplateRow {

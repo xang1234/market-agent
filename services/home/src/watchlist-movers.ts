@@ -41,7 +41,7 @@ export async function getHomeWatchlistMovers(
     `with default_wl as (
        select watchlist_id
          from watchlists
-        where user_id = $1::uuid and mode = 'manual'
+        where user_id = $1::uuid and mode = 'manual' and is_default
         limit 1
      )
      select wm.subject_id::text as subject_id,

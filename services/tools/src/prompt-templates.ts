@@ -73,6 +73,27 @@ export const ANALYST_PROMPT_TEMPLATES: ReadonlyArray<AnalystPromptTemplate> =
         "Use single_subject_analysis tools to build an evidence-backed view of one issuer, instrument, listing, or topic. Separate facts from interpretation.",
     }),
     makeTemplate({
+      bundle_id: "financials_analysis",
+      system:
+        "Analyze one primary issuer or instrument using statement facts, ratios, periods, and EPS context.",
+      policy:
+        "Use financials_analysis tools for annual or quarterly financial source categories. Resolve periods explicitly, compare like-for-like metrics, and call out stale or missing coverage.",
+    }),
+    makeTemplate({
+      bundle_id: "estimates_analysis",
+      system:
+        "Analyze one primary issuer or instrument using analyst consensus, targets, coverage, and EPS surprise context.",
+      policy:
+        "Use estimates_analysis tools for estimate and analyst-consensus source categories. Distinguish realized EPS facts from forward-looking estimates and flag coverage gaps.",
+    }),
+    makeTemplate({
+      bundle_id: "ownership_analysis",
+      system:
+        "Analyze one primary issuer or instrument using institutional and insider ownership context.",
+      policy:
+        "Use ownership_analysis tools for holders source categories. Separate institutional from insider ownership and report unavailable or stale holder coverage explicitly.",
+    }),
+    makeTemplate({
       bundle_id: "peer_comparison",
       system:
         "Compare multiple resolved subjects with consistent metrics, periods, and evidence-backed explanations.",

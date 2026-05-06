@@ -19,6 +19,18 @@
       "description": "Single issuer/instrument/theme analysis"
     },
     {
+      "bundle_id": "financials_analysis",
+      "description": "Issuer financial statement, ratio, and EPS analysis"
+    },
+    {
+      "bundle_id": "estimates_analysis",
+      "description": "Analyst consensus, target, and EPS estimate analysis"
+    },
+    {
+      "bundle_id": "ownership_analysis",
+      "description": "Institutional and insider ownership analysis"
+    },
+    {
       "bundle_id": "peer_comparison",
       "description": "Peer performance and metrics comparison"
     },
@@ -62,6 +74,9 @@
       "bundles": [
         "quote_lookup",
         "single_subject_analysis",
+        "financials_analysis",
+        "estimates_analysis",
+        "ownership_analysis",
         "peer_comparison",
         "theme_research",
         "segment_deep_dive",
@@ -168,6 +183,8 @@
       "audience": "analyst",
       "bundles": [
         "single_subject_analysis",
+        "financials_analysis",
+        "estimates_analysis",
         "peer_comparison",
         "theme_research",
         "segment_deep_dive",
@@ -945,6 +962,7 @@
       "audience": "analyst",
       "bundles": [
         "single_subject_analysis",
+        "financials_analysis",
         "peer_comparison",
         "segment_deep_dive",
         "analyze_template_run"
@@ -1112,6 +1130,7 @@
       "audience": "analyst",
       "bundles": [
         "single_subject_analysis",
+        "financials_analysis",
         "peer_comparison",
         "analyze_template_run"
       ],
@@ -1428,6 +1447,7 @@
       "audience": "analyst",
       "bundles": [
         "single_subject_analysis",
+        "estimates_analysis",
         "peer_comparison",
         "analyze_template_run"
       ],
@@ -1593,6 +1613,8 @@
       "audience": "analyst",
       "bundles": [
         "single_subject_analysis",
+        "financials_analysis",
+        "estimates_analysis",
         "analyze_template_run"
       ],
       "description": "Return estimate versus actual EPS facts by quarter.",
@@ -1732,6 +1754,7 @@
       "audience": "analyst",
       "bundles": [
         "single_subject_analysis",
+        "ownership_analysis",
         "analyze_template_run"
       ],
       "description": "Return institutional or insider holder information.",
@@ -3094,6 +3117,9 @@
       "audience": "analyst",
       "bundles": [
         "single_subject_analysis",
+        "financials_analysis",
+        "estimates_analysis",
+        "ownership_analysis",
         "peer_comparison",
         "analyze_template_run"
       ],

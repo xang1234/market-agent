@@ -866,8 +866,9 @@ paths:
       summary: Create watchlist
       operationId: createWatchlist
       description: |
-        Out of scope for P0.4b (fra-6al.6) baseline; list-management CRUD
-        beyond the implicit default manual list is tracked in fra-wlc.
+        Creates a named, user-owned watchlist. The implicit default manual
+        watchlist is still system-provisioned and cannot be deleted through
+        this surface.
       requestBody:
         required: true
         content:
@@ -881,6 +882,58 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Watchlist'
+  /v1/watchlists/{watchlist_id}:
+    patch:
+      tags: [Watchlists]
+      summary: Rename watchlist
+      operationId: renameWatchlist
+      parameters:
+        - name: watchlist_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Renamed watchlist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Watchlist'
+        '404':
+          description: Watchlist not found for this user
+    delete:
+      tags: [Watchlists]
+      summary: Delete watchlist
+      operationId: deleteWatchlist
+      description: |
+        Deletes a non-default watchlist. Member rows cascade with the deleted
+        list. Deleting the implicit default manual watchlist returns 409.
+      parameters:
+        - name: watchlist_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Watchlist deleted
+        '409':
+          description: Cannot delete the implicit default watchlist
+        '404':
+          description: Watchlist not found for this user
   /v1/watchlists/default/members:
     get:
       tags: [Watchlists]
@@ -1499,10 +1552,13 @@ components:
       allOf:
         - $ref: '#/components/schemas/WatchlistInput'
         - type: object
+          required: [watchlist_id, is_default, created_at, updated_at]
           properties:
             watchlist_id:
               type: string
               format: uuid
+            is_default:
+              type: boolean
             created_at:
               type: string
               format: date-time

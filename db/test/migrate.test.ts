@@ -311,7 +311,7 @@ test("migrate down rolls back the most recently applied migration", { timeout: 1
     "2",
   );
   assert.equal(
-    queryValue(containerName, "select count(*) from pg_indexes where schemaname = 'public' and indexname = 'watchlists_default_manual_per_user_idx'"),
+    queryValue(containerName, "select count(*) from pg_indexes where schemaname = 'public' and indexname = 'watchlists_default_per_user_idx'"),
     "1",
   );
   assert.equal(
@@ -641,40 +641,44 @@ test("migrate up provisions the implicit default manual watchlist on user insert
   });
   assert.equal(upResult.status, 0, upResult.stderr || upResult.stdout);
 
-  // Backfill: the existing user now has exactly one manual watchlist named 'Watchlist'.
+  // Backfill: the existing user now has exactly one default manual watchlist named 'Watchlist'.
   assert.equal(
-    queryValue(containerName, `select count(*) from watchlists where user_id = '${preMigrationUserId}' and mode = 'manual' and name = 'Watchlist'`),
+    queryValue(containerName, `select count(*) from watchlists where user_id = '${preMigrationUserId}' and mode = 'manual' and is_default and name = 'Watchlist'`),
     "1",
   );
 
-  // Trigger: inserting a fresh user auto-creates one manual watchlist.
+  // Trigger: inserting a fresh user auto-creates one default manual watchlist.
   const postMigrationUser = await client.query<{ user_id: string }>(
     `insert into users (email) values ($1) returning user_id`,
     ["post-migration@example.test"],
   );
   const postMigrationUserId = postMigrationUser.rows[0].user_id;
   assert.equal(
-    queryValue(containerName, `select count(*) from watchlists where user_id = '${postMigrationUserId}' and mode = 'manual'`),
+    queryValue(containerName, `select count(*) from watchlists where user_id = '${postMigrationUserId}' and mode = 'manual' and is_default`),
     "1",
   );
 
-  // Invariant: the unique partial index rejects a second manual watchlist for the same user.
+  // fra-wlc invariant: multiple manual lists are allowed, but only one default.
+  await client.query(
+    `insert into watchlists (user_id, name, mode) values ($1, $2, 'manual')`,
+    [postMigrationUserId, "Second Manual"],
+  );
   await assert.rejects(
     client.query(
-      `insert into watchlists (user_id, name, mode) values ($1, $2, 'manual')`,
-      [postMigrationUserId, "Second Manual"],
+      `insert into watchlists (user_id, name, mode, is_default) values ($1, $2, 'manual', true)`,
+      [postMigrationUserId, "Second Default"],
     ),
-    /watchlists_default_manual_per_user_idx|duplicate key/i,
+    /watchlists_default_per_user_idx|duplicate key/i,
   );
 
-  // Non-manual modes are not constrained by the partial index.
+  // Non-default modes are not constrained by the partial index.
   await client.query(
     `insert into watchlists (user_id, name, mode) values ($1, $2, 'screen')`,
     [postMigrationUserId, "Screen Derivation"],
   );
   assert.equal(
     queryValue(containerName, `select count(*) from watchlists where user_id = '${postMigrationUserId}'`),
-    "2",
+    "3",
   );
 });
 

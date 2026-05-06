@@ -306,3 +306,9 @@
 {"id":"int-dacfde52","kind":"field_change","created_at":"2026-05-06T01:34:20.191197Z","actor":"David Ten","issue_id":"fra-en8","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-96468542","kind":"field_change","created_at":"2026-05-06T01:34:30.681217Z","actor":"David Ten","issue_id":"fra-e6d","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
 {"id":"int-cd77c3af","kind":"field_change","created_at":"2026-05-06T01:36:26.933299Z","actor":"David Ten","issue_id":"fra-e6d","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-77dbe8f6","kind":"field_change","created_at":"2026-05-06T05:03:08.288124Z","actor":"David Ten","issue_id":"fra-t6r","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
+{"id":"int-a58c0b4b","kind":"field_change","created_at":"2026-05-06T05:14:11.84276Z","actor":"David Ten","issue_id":"fra-t6r","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-dbff7648","kind":"field_change","created_at":"2026-05-06T05:14:28.74941Z","actor":"David Ten","issue_id":"fra-qen","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
+{"id":"int-5ff710f6","kind":"field_change","created_at":"2026-05-06T05:16:56.315295Z","actor":"David Ten","issue_id":"fra-qen","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-67b58292","kind":"field_change","created_at":"2026-05-06T05:17:13.130216Z","actor":"David Ten","issue_id":"fra-wlc","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
+{"id":"int-66e0cc2b","kind":"field_change","created_at":"2026-05-06T05:28:40.51693Z","actor":"David Ten","issue_id":"fra-wlc","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}

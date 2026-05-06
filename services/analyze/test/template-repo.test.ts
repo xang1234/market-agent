@@ -24,6 +24,7 @@ const ISSUER_ID = "33333333-3333-4333-8333-333333333333";
 const FIXED_NOW = "2026-05-01T12:00:00.000Z";
 
 type Captured = { text: string; values?: unknown[] };
+type InvalidJsonCase = { name: string; value: unknown; pattern: RegExp };
 
 function fakeDb(
   responder: (text: string, values?: unknown[]) => unknown[],
@@ -64,6 +65,20 @@ function templateRow(overrides: Partial<Record<string, unknown>> = {}): Record<s
     updated_at: FIXED_NOW,
     ...overrides,
   };
+}
+
+function invalidJsonCases(): InvalidJsonCase[] {
+  const circular: Record<string, unknown> = {};
+  circular.self = circular;
+  return [
+    { name: "bigint", value: { value: 1n }, pattern: /bigint/ },
+    { name: "non-finite number", value: { value: Number.POSITIVE_INFINITY }, pattern: /non-finite number/ },
+    { name: "circular reference", value: circular, pattern: /circular reference/ },
+    { name: "non-plain object", value: { value: new Set() }, pattern: /non-plain object/ },
+    { name: "function", value: { value: () => undefined }, pattern: /unsupported function/ },
+    { name: "symbol", value: { value: Symbol("bad") }, pattern: /unsupported symbol/ },
+    { name: "undefined", value: { value: undefined }, pattern: /unsupported undefined/ },
+  ];
 }
 
 const baseInput: AnalyzeTemplateInput = {
@@ -213,6 +228,28 @@ test("createAnalyzeTemplate serialises optional jsonb fields and stores added_su
   assert.deepEqual(row.block_layout_hint, layoutHint);
 });
 
+test("createAnalyzeTemplate rejects invalid optional jsonb fields before binding them", async () => {
+  const jsonbKeys = [
+    "block_layout_hint",
+    "peer_policy",
+    "disclosure_policy",
+  ] as const;
+  for (const key of jsonbKeys) {
+    for (const { name, value, pattern } of invalidJsonCases()) {
+      const { db, queries } = fakeDb(() => []);
+      await assert.rejects(
+        createAnalyzeTemplate(db, {
+          ...baseInput,
+          [key]: value as JsonValue,
+        }),
+        (err: Error) => err instanceof TypeError && pattern.test(err.message),
+        `expected ${key} ${name} to be rejected by centralized JSON serialization`,
+      );
+      assert.equal(queries.length, 0, `${key} ${name} must fail before any query`);
+    }
+  }
+});
+
 test("getAnalyzeTemplate returns null when the row does not exist", async () => {
   const { db } = fakeDb(() => []);
   const row = await getAnalyzeTemplate(db, TEMPLATE_ID);
@@ -349,6 +386,27 @@ test("updateAnalyzeTemplate uses COALESCE so omitted fields keep their previous 
     /coalesce\(/i.test(queries[0].text) || !/=\s*\$\d+/.test(queries[0].text.replace(/where[\s\S]+/i, "")),
     "update must preserve omitted columns (typically via COALESCE on each optional bind)",
   );
+});
+
+test("updateAnalyzeTemplate rejects invalid optional jsonb fields before binding them", async () => {
+  const jsonbKeys = [
+    "block_layout_hint",
+    "peer_policy",
+    "disclosure_policy",
+  ] as const;
+  for (const key of jsonbKeys) {
+    for (const { name, value, pattern } of invalidJsonCases()) {
+      const { db, queries } = fakeDb(() => []);
+      await assert.rejects(
+        updateAnalyzeTemplate(db, TEMPLATE_ID, {
+          [key]: value as JsonValue,
+        }),
+        (err: Error) => err instanceof TypeError && pattern.test(err.message),
+        `expected ${key} patch ${name} to be rejected by centralized JSON serialization`,
+      );
+      assert.equal(queries.length, 0, `${key} patch ${name} must fail before any query`);
+    }
+  }
 });
 
 test("deleteAnalyzeTemplate throws AnalyzeTemplateNotFoundError when the row is missing", async () => {

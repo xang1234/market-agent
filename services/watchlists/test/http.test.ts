@@ -358,7 +358,7 @@ test("server: members from one user are isolated from another user", { timeout: 
   assert.equal(bobList.members.length, 0);
 });
 
-test("server: unknown path returns 404", { timeout: 120000 }, async (t) => {
+test("server: GET /v1/watchlists lists the implicit default watchlist", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for watchlists coverage");
     return;
@@ -370,5 +370,9 @@ test("server: unknown path returns 404", { timeout: 120000 }, async (t) => {
   const base = await startServer(t, client);
 
   const res = await fetch(`${base}/v1/watchlists`, withUser(userId));
-  assert.equal(res.status, 404);
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as { watchlists: Array<{ name: string; is_default: boolean }> };
+  assert.equal(body.watchlists.length, 1);
+  assert.equal(body.watchlists[0].name, "Watchlist");
+  assert.equal(body.watchlists[0].is_default, true);
 });
