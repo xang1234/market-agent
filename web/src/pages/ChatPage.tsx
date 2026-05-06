@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useReducer, useState, type FormEvent } from 'react'
-import { Link, Outlet, useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useMemo, useReducer, useState, type FormEvent } from 'react'
+import { Link, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
 
+import { BlockView, type Block } from '../blocks'
 import { INITIAL_STREAM_STATE, applyChatStreamEvent } from '../chat/streamReducer.ts'
 import { StreamingTurnView } from '../chat/StreamingTurnView.tsx'
 import type { ChatSseEvent } from '../chat/sseEventTypes.ts'
@@ -16,6 +17,12 @@ type ThreadListState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; threads: ReadonlyArray<ChatThread> }
+
+type ImportedAnalyzeMemo = {
+  run_id: string
+  snapshot_id: string
+  blocks: ReadonlyArray<Block>
+}
 
 export function ChatLayout() {
   const { session } = useAuth()
@@ -106,50 +113,49 @@ export function ChatEmptyState() {
 export function ChatThreadView() {
   const { session } = useAuth()
   const { threadId = '' } = useParams<{ threadId: string }>()
+  const location = useLocation()
+  const importedMemo = readImportedAnalyzeMemo(location.state)
   const [prompt, setPrompt] = useState('')
   const [transcript, setTranscript] = useState<ReadonlyArray<{ role: 'user'; text: string }>>([])
   const [state, dispatch] = useReducer(applyChatStreamEvent, INITIAL_STREAM_STATE)
   const [streamError, setStreamError] = useState<string | null>(null)
 
-  const submitPrompt = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      const text = prompt.trim()
-      if (!session || text.length === 0) return
+  const submitPrompt = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const text = prompt.trim()
+    if (!session || text.length === 0) return
 
-      setTranscript((current) => [...current, { role: 'user', text }])
-      setPrompt('')
-      setStreamError(null)
-      const runId = makeRunId()
-      const params = new URLSearchParams({ run_id: runId, turn_id: runId, subject: text })
-      const source = new EventSource(`/v1/chat/threads/${encodeURIComponent(threadId)}/stream?${params}`)
-      source.onmessage = (event) => {
-        dispatch(JSON.parse(event.data) as ChatSseEvent)
-      }
-      for (const type of [
-        'turn.started',
-        'tool.started',
-        'tool.completed',
-        'snapshot.staged',
-        'snapshot.sealed',
-        'block.began',
-        'block.delta',
-        'block.completed',
-        'turn.completed',
-        'turn.error',
-      ] as const) {
-        source.addEventListener(type, (event) => {
-          dispatch(JSON.parse((event as MessageEvent).data) as ChatSseEvent)
-          if (type === 'turn.completed' || type === 'turn.error') source.close()
-        })
-      }
-      source.onerror = () => {
-        setStreamError('The analyst stream disconnected.')
-        source.close()
-      }
-    },
-    [prompt, session, threadId],
-  )
+    setTranscript((current) => [...current, { role: 'user', text }])
+    setPrompt('')
+    setStreamError(null)
+    const runId = makeRunId()
+    const params = new URLSearchParams({ run_id: runId, turn_id: runId, user_intent: text })
+    const source = new EventSource(`/v1/chat/threads/${encodeURIComponent(threadId)}/stream?${params}`)
+    source.onmessage = (event) => {
+      dispatch(JSON.parse(event.data) as ChatSseEvent)
+    }
+    for (const type of [
+      'turn.started',
+      'tool.started',
+      'tool.completed',
+      'snapshot.staged',
+      'snapshot.sealed',
+      'block.began',
+      'block.delta',
+      'block.completed',
+      'turn.completed',
+      'turn.error',
+    ] as const) {
+      source.addEventListener(type, (event) => {
+        dispatch(JSON.parse((event as MessageEvent).data) as ChatSseEvent)
+        if (type === 'turn.completed' || type === 'turn.error') source.close()
+      })
+    }
+    source.onerror = () => {
+      setStreamError('The analyst stream disconnected.')
+      source.close()
+    }
+  }
 
   return (
     <div data-testid="chat-thread" className="flex min-h-full flex-col">
@@ -160,6 +166,19 @@ export function ChatThreadView() {
         <p className="mt-1 font-mono text-xs text-neutral-500 dark:text-neutral-400">{threadId}</p>
       </section>
       <div className="flex flex-1 flex-col gap-3 p-6">
+        {importedMemo ? (
+          <section className="rounded-md border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Imported analyze memo</h3>
+              <span className="font-mono text-xs text-neutral-500 dark:text-neutral-400">
+                {importedMemo.run_id}
+              </span>
+            </div>
+            <div className="flex flex-col gap-3">
+              {importedMemo.blocks.map((block) => <BlockView key={block.id} block={block} />)}
+            </div>
+          </section>
+        ) : null}
         {transcript.map((message, index) => (
           <div
             key={`${message.text}-${index}`}
@@ -194,6 +213,25 @@ export function ChatThreadView() {
       </form>
     </div>
   )
+}
+
+function readImportedAnalyzeMemo(state: unknown): ImportedAnalyzeMemo | null {
+  if (typeof state !== 'object' || state === null) return null
+  const importedMemo = (state as { importedMemo?: unknown }).importedMemo
+  if (typeof importedMemo !== 'object' || importedMemo === null) return null
+  const candidate = importedMemo as Partial<ImportedAnalyzeMemo>
+  if (
+    typeof candidate.run_id !== 'string'
+    || typeof candidate.snapshot_id !== 'string'
+    || !Array.isArray(candidate.blocks)
+  ) {
+    return null
+  }
+  return {
+    run_id: candidate.run_id,
+    snapshot_id: candidate.snapshot_id,
+    blocks: candidate.blocks,
+  }
 }
 
 function ThreadList({ userId }: { userId: string }) {

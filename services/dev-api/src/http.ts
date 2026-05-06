@@ -20,12 +20,22 @@ type DevAgentRun = {
   error: string | null;
 };
 
+type DevAnalyzeRun = {
+  run_id: string;
+  template_id: string;
+  template_version: number;
+  snapshot_id: string;
+  blocks: ReadonlyArray<Record<string, unknown>>;
+  created_at: string;
+};
+
 export function createDevApiServer(
   env: Record<string, string | undefined> = process.env,
 ): Server {
   const flags = readDevFlags(env);
   const agents = new Map<string, DevAgent>();
   const runs: DevAgentRun[] = [];
+  const analyzeRuns: DevAnalyzeRun[] = [];
   const seedAgent = {
     agent_id: "11111111-1111-4111-8111-111111111111",
     user_id: "00000000-0000-4000-8000-000000000001",
@@ -86,20 +96,68 @@ export function createDevApiServer(
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/v1/analyze/runs") {
+      const body = await readJson(req).catch(() => BAD_JSON);
+      if (body === BAD_JSON) {
+        respondJson(res, 400, { error: "request body must be valid JSON" });
+        return;
+      }
+      const input = typeof body === "object" && body !== null ? body as Record<string, unknown> : {};
+      const runId = stableUuid(`analyze-run:${analyzeRuns.length}:${String(input.template_id ?? "")}`);
+      const snapshotId = stableUuid(`analyze-snapshot:${runId}`);
+      const instructions = nonEmptyString(input.instructions) ?? "Assess the selected subject using the chosen sources.";
+      const sourceCategories = Array.isArray(input.source_categories)
+        ? input.source_categories.filter((category): category is string => typeof category === "string" && category.trim() !== "")
+        : [];
+      const run: DevAnalyzeRun = {
+        run_id: runId,
+        template_id: nonEmptyString(input.template_id) ?? "earnings-quality",
+        template_version: 1,
+        snapshot_id: snapshotId,
+        blocks: [
+          richTextBlock({
+            id: stableUuid(`analyze-block:${runId}`),
+            snapshotId,
+            title: "Analyze memo",
+            text: `${instructions} Sources: ${sourceCategories.length > 0 ? sourceCategories.join(", ") : "default evidence set"}.`,
+          }),
+        ],
+        created_at: new Date().toISOString(),
+      };
+      analyzeRuns.unshift(run);
+      respondJson(res, 201, run);
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/v1/agents") {
-      const userId = req.headers["x-user-id"];
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (userId === null) {
+        respondJson(res, 401, { error: "x-user-id header is required" });
+        return;
+      }
+      const visibleAgentIds = new Set(
+        [...agents.values()]
+          .filter((agent) => agent.user_id === userId)
+          .map((agent) => agent.agent_id),
+      );
       respondJson(res, 200, {
-        agents: [...agents.values()].filter((agent) => typeof userId !== "string" || agent.user_id === userId),
-        runs,
+        agents: [...agents.values()].filter((agent) => agent.user_id === userId),
+        runs: runs.filter((run) => visibleAgentIds.has(run.agent_id)),
       });
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/v1/agents") {
-      const userId = typeof req.headers["x-user-id"] === "string"
-        ? req.headers["x-user-id"]
-        : seedAgent.user_id;
-      const body = await readJson(req);
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (userId === null) {
+        respondJson(res, 401, { error: "x-user-id header is required" });
+        return;
+      }
+      const body = await readJson(req).catch(() => BAD_JSON);
+      if (body === BAD_JSON) {
+        respondJson(res, 400, { error: "request body must be valid JSON" });
+        return;
+      }
       const input = typeof body === "object" && body !== null ? body as Record<string, unknown> : {};
       const agent: DevAgent = {
         agent_id: stableUuid(`agent:${userId}:${String(input.name ?? "")}:${agents.size}`),
@@ -115,19 +173,75 @@ export function createDevApiServer(
       return;
     }
 
+    const agentMatch = url.pathname.match(/^\/v1\/agents\/([^/]+)$/);
+    if (agentMatch && req.method === "PATCH") {
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (userId === null) {
+        respondJson(res, 401, { error: "x-user-id header is required" });
+        return;
+      }
+      const agentId = decodeURIComponent(agentMatch[1]);
+      const existing = agents.get(agentId);
+      if (!existing || existing.user_id !== userId) {
+        respondJson(res, 404, { error: "agent not found" });
+        return;
+      }
+      const body = await readJson(req).catch(() => BAD_JSON);
+      if (body === BAD_JSON) {
+        respondJson(res, 400, { error: "request body must be valid JSON" });
+        return;
+      }
+      const input = typeof body === "object" && body !== null ? body as Record<string, unknown> : {};
+      const next: DevAgent = {
+        ...existing,
+        enabled: typeof input.enabled === "boolean" ? input.enabled : existing.enabled,
+        name: nonEmptyString(input.name) ?? existing.name,
+        thesis: nonEmptyString(input.thesis) ?? existing.thesis,
+        cadence: nonEmptyString(input.cadence) ?? existing.cadence,
+        updated_at: new Date().toISOString(),
+      };
+      agents.set(agentId, next);
+      respondJson(res, 200, next);
+      return;
+    }
+
+    if (agentMatch && req.method === "DELETE") {
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (userId === null) {
+        respondJson(res, 401, { error: "x-user-id header is required" });
+        return;
+      }
+      const agentId = decodeURIComponent(agentMatch[1]);
+      const existing = agents.get(agentId);
+      if (!existing || existing.user_id !== userId) {
+        respondJson(res, 404, { error: "agent not found" });
+        return;
+      }
+      agents.delete(agentId);
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+
     const runMatch = url.pathname.match(/^\/v1\/agents\/([^/]+)\/runs$/);
     if (req.method === "POST" && runMatch) {
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (userId === null) {
+        respondJson(res, 401, { error: "x-user-id header is required" });
+        return;
+      }
       const agentId = decodeURIComponent(runMatch[1]);
-      if (!agents.has(agentId)) {
+      const agent = agents.get(agentId);
+      if (!agent || agent.user_id !== userId) {
         respondJson(res, 404, { error: "agent not found" });
         return;
       }
       const run: DevAgentRun = {
         agent_run_log_id: stableUuid(`run:${agentId}:${runs.length}`),
         agent_id: agentId,
-        status: "running",
+        status: "completed",
         started_at: new Date().toISOString(),
-        ended_at: null,
+        ended_at: new Date().toISOString(),
         error: null,
       };
       runs.unshift(run);
@@ -145,6 +259,8 @@ function respondJson(res: ServerResponse, status: number, body: object) {
   res.end(JSON.stringify(body));
 }
 
+const BAD_JSON = Symbol("BAD_JSON");
+
 async function readJson(req: AsyncIterable<Uint8Array | string>): Promise<unknown> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
@@ -159,6 +275,11 @@ function nonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
+function readUserIdHeader(value: string | string[] | undefined): string | null {
+  if (typeof value !== "string") return null;
+  return nonEmptyString(value);
+}
+
 function stableUuid(seed: string): string {
   let hash = 0;
   for (let index = 0; index < seed.length; index += 1) {
@@ -168,17 +289,35 @@ function stableUuid(seed: string): string {
   return `00000000-0000-4000-8000-${suffix}`;
 }
 
+function richTextBlock(input: {
+  id: string;
+  snapshotId: string;
+  title: string;
+  text: string;
+}): Record<string, unknown> {
+  return {
+    id: input.id,
+    kind: "rich_text",
+    snapshot_id: input.snapshotId,
+    data_ref: { kind: "analyze_run", id: input.id },
+    source_refs: [],
+    as_of: new Date(0).toISOString(),
+    title: input.title,
+    segments: [{ type: "text", text: input.text }],
+  };
+}
+
 function serviceCatalog(env: Record<string, string | undefined>) {
   return [
-    { name: "chat", status: "proxied", origin: env.CHAT_ORIGIN ?? "http://127.0.0.1:4310" },
-    { name: "resolver", status: "proxied", origin: env.RESOLVER_ORIGIN ?? "http://127.0.0.1:4311" },
-    { name: "watchlists", status: "proxied", origin: env.WATCHLISTS_ORIGIN ?? "http://127.0.0.1:4313" },
-    { name: "market", status: "proxied", origin: env.MARKET_ORIGIN ?? "http://127.0.0.1:4321" },
-    { name: "fundamentals", status: "proxied", origin: env.FUNDAMENTALS_ORIGIN ?? "http://127.0.0.1:4322" },
-    { name: "screener", status: "proxied", origin: env.SCREENER_ORIGIN ?? "http://127.0.0.1:4323" },
-    { name: "portfolio", status: "proxied", origin: env.PORTFOLIO_ORIGIN ?? "http://127.0.0.1:4333" },
-    { name: "home", status: "proxied", origin: env.HOME_ORIGIN ?? "http://127.0.0.1:4334" },
-    { name: "evidence", status: "proxied", origin: env.EVIDENCE_ORIGIN ?? "http://127.0.0.1:4335" },
+    { name: "chat", status: "vite_proxy", origin: env.CHAT_ORIGIN ?? "http://127.0.0.1:4310" },
+    { name: "resolver", status: "vite_proxy", origin: env.RESOLVER_ORIGIN ?? "http://127.0.0.1:4311" },
+    { name: "watchlists", status: "vite_proxy", origin: env.WATCHLISTS_ORIGIN ?? "http://127.0.0.1:4313" },
+    { name: "market", status: "vite_proxy", origin: env.MARKET_ORIGIN ?? "http://127.0.0.1:4321" },
+    { name: "fundamentals", status: "vite_proxy", origin: env.FUNDAMENTALS_ORIGIN ?? "http://127.0.0.1:4322" },
+    { name: "screener", status: "vite_proxy", origin: env.SCREENER_ORIGIN ?? "http://127.0.0.1:4323" },
+    { name: "portfolio", status: "vite_proxy", origin: env.PORTFOLIO_ORIGIN ?? "http://127.0.0.1:4333" },
+    { name: "home", status: "vite_proxy", origin: env.HOME_ORIGIN ?? "http://127.0.0.1:4334" },
+    { name: "evidence", status: "vite_proxy", origin: env.EVIDENCE_ORIGIN ?? "http://127.0.0.1:4335" },
     { name: "analyze", status: "bff", origin: env.DEV_API_ORIGIN ?? "http://127.0.0.1:4312" },
     { name: "agents", status: "bff", origin: env.DEV_API_ORIGIN ?? "http://127.0.0.1:4312" },
     { name: "artifact", status: "library", note: "shared through service callers; no standalone dev HTTP server" },

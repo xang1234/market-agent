@@ -39,6 +39,7 @@ export function AgentsPage() {
   const [thesis, setThesis] = useState('')
   const [cadence, setCadence] = useState('daily')
   const [activity, setActivity] = useState('Idle')
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!session) return
@@ -52,10 +53,14 @@ export function AgentsPage() {
         return (await response.json()) as { agents?: AgentRow[]; runs?: AgentRunRow[] }
       })
       .then((body) => {
+        setLoadError(null)
         if (body?.agents) setAgents(body.agents)
         if (body?.runs) setRuns(body.runs)
       })
-      .catch(() => undefined)
+      .catch((caught) => {
+        if (controller.signal.aborted) return
+        setLoadError(caught instanceof Error ? caught.message : String(caught))
+      })
     return () => controller.abort()
   }, [session])
 
@@ -89,6 +94,42 @@ export function AgentsPage() {
     }
   }
 
+  const updateAgent = async (agentId: string, patch: Partial<Pick<AgentRow, 'enabled' | 'name' | 'thesis' | 'cadence'>>) => {
+    if (!session) return
+    setActivity('Updating agent')
+    const response = await fetch(`/v1/agents/${encodeURIComponent(agentId)}`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        'x-user-id': session.userId,
+      },
+      body: JSON.stringify(patch),
+    })
+    if (response.ok) {
+      const updated = (await response.json()) as AgentRow
+      setAgents((current) => current.map((agent) => (agent.agent_id === updated.agent_id ? updated : agent)))
+      setActivity('Agent updated')
+    } else {
+      setActivity(`Update failed: HTTP ${response.status}`)
+    }
+  }
+
+  const deleteAgent = async (agentId: string) => {
+    if (!session) return
+    setActivity('Deleting agent')
+    const response = await fetch(`/v1/agents/${encodeURIComponent(agentId)}`, {
+      method: 'DELETE',
+      headers: { 'x-user-id': session.userId },
+    })
+    if (response.ok) {
+      setAgents((current) => current.filter((agent) => agent.agent_id !== agentId))
+      setRuns((current) => current.filter((run) => run.agent_id !== agentId))
+      setActivity('Agent deleted')
+    } else {
+      setActivity(`Delete failed: HTTP ${response.status}`)
+    }
+  }
+
   const runAgent = async (agentId: string) => {
     if (!session) return
     setActivity('Starting run')
@@ -99,7 +140,7 @@ export function AgentsPage() {
     if (response.ok) {
       const run = (await response.json()) as AgentRunRow
       setRuns((current) => [run, ...current])
-      setActivity('Run queued')
+      setActivity(run.status === 'completed' ? 'Run completed' : 'Run queued')
     } else {
       setActivity(`Run failed: HTTP ${response.status}`)
     }
@@ -152,6 +193,9 @@ export function AgentsPage() {
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
             <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Agents</h2>
+            {loadError ? (
+              <p className="mt-3 text-sm text-rose-600 dark:text-rose-300">Load failed: {loadError}</p>
+            ) : null}
             <ul className="mt-4 flex flex-col gap-3">
               {agents.map((agent) => (
                 <li key={agent.agent_id} className="rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
@@ -163,13 +207,29 @@ export function AgentsPage() {
                         {agent.enabled ? 'enabled' : 'disabled'} · {agent.cadence}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => void runAgent(agent.agent_id)}
-                      className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium dark:border-neutral-700"
-                    >
-                      Run
-                    </button>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void runAgent(agent.agent_id)}
+                        className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium dark:border-neutral-700"
+                      >
+                        Run
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void updateAgent(agent.agent_id, { enabled: !agent.enabled })}
+                        className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium dark:border-neutral-700"
+                      >
+                        {agent.enabled ? 'Disable' : 'Enable'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void deleteAgent(agent.agent_id)}
+                        className="rounded-md border border-rose-300 px-3 py-1.5 text-xs font-medium text-rose-700 dark:border-rose-700 dark:text-rose-200"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 </li>
               ))}

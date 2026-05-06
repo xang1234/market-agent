@@ -271,6 +271,26 @@ test("stream route schedules configured thread title generation from real server
   ]);
 });
 
+test("stream route passes user_intent without invoking subject pre-resolution", async (t) => {
+  const base = await startServer(t, {
+    preResolveSubject: async () => {
+      throw new Error("user_intent must not be routed through subject resolution");
+    },
+  });
+
+  const response = await fetch(
+    `${base}/v1/chat/threads/thread-123/stream?run_id=run-456&user_intent=${encodeURIComponent("Review AAPL earnings quality")}`,
+  );
+  assert.equal(response.status, 200);
+  const events = await readSseEvents(response, 9);
+
+  assert.equal(events.at(-1)?.event, "turn.completed");
+  assert.match(
+    JSON.stringify(events),
+    /Review AAPL earnings quality/,
+  );
+});
+
 test("run activity stream replays retained events after Last-Event-ID", async (t) => {
   const hub = createRunActivityHub();
   hub.publish(runActivityRow({ stage: "reading", summary: "Reading filings" }, 1), { userId: USER_ID });
