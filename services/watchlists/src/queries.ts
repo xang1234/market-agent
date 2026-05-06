@@ -273,6 +273,17 @@ function validateWatchlistInput(input: WatchlistInput): void {
   if (!WATCHLIST_MODES.includes(input.mode)) {
     throw new WatchlistValidationError(`mode: must be one of ${WATCHLIST_MODES.join(", ")}`);
   }
+  if (input.mode !== "manual") {
+    const spec = input.membership_spec;
+    const requiredKey = `${input.mode}_id`;
+    if (typeof spec !== "object" || spec === null || Array.isArray(spec)) {
+      throw new WatchlistValidationError(`membership_spec.${requiredKey}: must be a non-empty string`);
+    }
+    const value = spec[requiredKey];
+    if (typeof value !== "string" || value.length === 0) {
+      throw new WatchlistValidationError(`membership_spec.${requiredKey}: must be a non-empty string`);
+    }
+  }
 }
 
 function assertWatchlistName(value: string): string {

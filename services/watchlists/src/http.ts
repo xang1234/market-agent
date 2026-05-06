@@ -27,6 +27,7 @@ import {
 } from "../../shared/src/request-auth.ts";
 
 const MAX_REQUEST_BODY_BYTES = 16 * 1024;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 class RequestBodyTooLargeError extends Error {
   constructor() {
@@ -36,7 +37,8 @@ class RequestBodyTooLargeError extends Error {
 
 export type ListMembersResponse = { members: WatchlistMember[] };
 export type AddMemberResponse = { status: "created" | "already_present"; member: WatchlistMember };
-export type ListWatchlistsResponse = { watchlists: ReadonlyArray<WatchlistRow> };
+export type WatchlistResponse = Omit<WatchlistRow, "user_id">;
+export type ListWatchlistsResponse = { watchlists: ReadonlyArray<WatchlistResponse> };
 
 export function createWatchlistsServer(
   db: QueryExecutor,
@@ -58,7 +60,9 @@ export function createWatchlistsServer(
 
       if (route.action === "list_watchlists") {
         const watchlists = await listWatchlists(db, userId);
-        respond(res, 200, { watchlists } satisfies ListWatchlistsResponse);
+        respond(res, 200, {
+          watchlists: watchlists.map(watchlistResponse),
+        } satisfies ListWatchlistsResponse);
         return;
       }
 
@@ -71,7 +75,7 @@ export function createWatchlistsServer(
           return;
         }
         const watchlist = await createWatchlist(db, userId, input);
-        respond(res, 201, watchlist);
+        respond(res, 201, watchlistResponse(watchlist));
         return;
       }
 
@@ -84,7 +88,7 @@ export function createWatchlistsServer(
           return;
         }
         const watchlist = await renameWatchlist(db, userId, route.watchlist_id, name);
-        respond(res, 200, watchlist);
+        respond(res, 200, watchlistResponse(watchlist));
         return;
       }
 
@@ -178,7 +182,9 @@ function matchRoute(method: string, rawUrl: string): Route | null {
     } catch {
       return null;
     }
-    if (watchlistId.length === 0 || watchlistId === "default") return null;
+    if (watchlistId.length === 0 || watchlistId === "default" || !UUID_RE.test(watchlistId)) {
+      return null;
+    }
     if (method === "PATCH") return { action: "rename_watchlist", watchlist_id: watchlistId };
     if (method === "DELETE") return { action: "delete_watchlist", watchlist_id: watchlistId };
     return null;
@@ -206,6 +212,18 @@ function matchRoute(method: string, rawUrl: string): Route | null {
   }
 
   return null;
+}
+
+function watchlistResponse(row: WatchlistRow): WatchlistResponse {
+  return {
+    watchlist_id: row.watchlist_id,
+    name: row.name,
+    mode: row.mode,
+    is_default: row.is_default,
+    membership_spec: row.membership_spec,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
 }
 
 function extractSubjectRef(body: unknown): SubjectRef | null {

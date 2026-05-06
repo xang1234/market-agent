@@ -5,6 +5,7 @@ import type { QueryResult } from "pg";
 import {
   DefaultWatchlistDeleteError,
   WatchlistNotFoundError,
+  WatchlistValidationError,
   createWatchlist,
   deleteWatchlist,
   listWatchlists,
@@ -90,6 +91,28 @@ test("createWatchlist creates a named manual non-default list for the user", asy
   assert.equal(queries[0].values?.[1], "Semis");
   assert.equal(queries[0].values?.[2], "manual");
   assert.equal(queries[0].values?.[4], false);
+});
+
+test("createWatchlist validates dynamic mode membership_spec before inserting", async () => {
+  for (const [mode, key] of [
+    ["screen", "screen_id"],
+    ["agent", "agent_id"],
+    ["theme", "theme_id"],
+    ["portfolio", "portfolio_id"],
+  ] as const) {
+    const { db, queries } = fakeDb(() => []);
+    await assert.rejects(
+      createWatchlist(db, USER_ID, {
+        name: `${mode} list`,
+        mode,
+        membership_spec: null,
+      }),
+      (err: Error) =>
+        err instanceof WatchlistValidationError &&
+        err.message === `membership_spec.${key}: must be a non-empty string`,
+    );
+    assert.equal(queries.length, 0);
+  }
 });
 
 test("renameWatchlist scopes by user and returns the renamed row", async () => {

@@ -18,11 +18,13 @@ import {
 
 const schemaPath = join(workspaceRoot, "spec", "finance_research_db_schema.sql");
 const initMigrationPath = join(dbRoot, "migrations", "0001_init.up.sql");
+const defaultManualWatchlistMigrationPath = join(dbRoot, "migrations", "0003_default_manual_watchlist.up.sql");
 const snapshotManifestMigrationPath = join(dbRoot, "migrations", "0005_snapshot_document_refs.up.sql");
 const evidenceBundleMigrationPath = join(dbRoot, "migrations", "0017_evidence_bundles.up.sql");
 const agentRunClaimsMigrationPath = join(dbRoot, "migrations", "0018_agent_run_claims.up.sql");
 const alertsFiredMigrationPath = join(dbRoot, "migrations", "0019_alerts_fired.up.sql");
 const factReviewActionsMigrationPath = join(dbRoot, "migrations", "0021_fact_review_actions.up.sql");
+const watchlistListManagementMigrationPath = join(dbRoot, "migrations", "0022_watchlist_list_management.up.sql");
 
 function loadExpectedTables() {
   return Array.from(
@@ -41,6 +43,18 @@ test("snapshot manifest forward migration owns post-baseline snapshot columns", 
     assert.match(forwardMigration, new RegExp(`\\b${column}\\b`));
     assert.match(schema, new RegExp(`\\b${column}\\b`));
   }
+});
+
+test("watchlist list-management migration is append-only after default manual baseline", () => {
+  const defaultManualMigration = readFileSync(defaultManualWatchlistMigrationPath, "utf8");
+  const listManagementMigration = readFileSync(watchlistListManagementMigrationPath, "utf8");
+  const schema = readFileSync(schemaPath, "utf8");
+
+  assert.doesNotMatch(defaultManualMigration, /\bis_default\b/);
+  assert.match(listManagementMigration, /add column if not exists is_default/);
+  assert.match(listManagementMigration, /drop index if exists watchlists_default_manual_per_user_idx/);
+  assert.match(listManagementMigration, /create unique index if not exists watchlists_default_per_user_idx/);
+  assert.match(schema, /is_default boolean not null default false/);
 });
 
 test("evidence bundle schema blocks direct updates and deletes", () => {
@@ -151,6 +165,7 @@ test("migrate up applies pending migrations and records them in schema_migration
       "0019:alerts_fired",
       "0020:run_activities_user_id",
       "0021:fact_review_actions",
+      "0022:watchlist_list_management",
     ],
   );
 
@@ -265,6 +280,7 @@ test("migrate status reports all migrations as applied after migrate up", { time
   assert.match(statusResult.stdout, /0019\s+alerts_fired\s+applied/);
   assert.match(statusResult.stdout, /0020\s+run_activities_user_id\s+applied/);
   assert.match(statusResult.stdout, /0021\s+fact_review_actions\s+applied/);
+  assert.match(statusResult.stdout, /0022\s+watchlist_list_management\s+applied/);
 });
 
 test("migrate down rolls back the most recently applied migration", { timeout: 120000 }, async (t) => {
@@ -311,7 +327,7 @@ test("migrate down rolls back the most recently applied migration", { timeout: 1
     "2",
   );
   assert.equal(
-    queryValue(containerName, "select count(*) from pg_indexes where schemaname = 'public' and indexname = 'watchlists_default_per_user_idx'"),
+    queryValue(containerName, "select count(*) from pg_indexes where schemaname = 'public' and indexname = 'watchlists_default_manual_per_user_idx'"),
     "1",
   );
   assert.equal(
@@ -904,13 +920,13 @@ test("migrate down rolls back schema changes when removing the migration record 
   // migration's schema change must still be in place. If the runner
   // accidentally executed the down DDL before hitting the trigger block, the
   // schema_migrations row count alone wouldn't catch that — checking the
-  // latest migration's actual artifact does. 0021 added the
-  // fact_review_actions table; the down would remove it, so its presence is
-  // independent proof the down DDL did not execute.
+  // latest migration's actual artifact does. 0022 added watchlists.is_default;
+  // the down would remove it, so its presence is independent proof the down
+  // DDL did not execute.
   assert.equal(
     queryValue(
       containerName,
-      "select count(*) from pg_tables where schemaname = 'public' and tablename = 'fact_review_actions'",
+      "select count(*) from information_schema.columns where table_name = 'watchlists' and column_name = 'is_default'",
     ),
     "1",
   );

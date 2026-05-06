@@ -137,12 +137,15 @@ test("HTTP list-management CRUD handles named manual lists and protects the defa
 
   const listA = await fetch(`${base}/v1/watchlists`, withUser());
   assert.equal(listA.status, 200);
-  const listABody = (await listA.json()) as { watchlists: Array<{ watchlist_id: string; is_default: boolean }> };
+  const listABody = (await listA.json()) as {
+    watchlists: Array<{ watchlist_id: string; is_default: boolean; user_id?: string }>;
+  };
   assert.deepEqual(
     listABody.watchlists.map((row) => row.watchlist_id),
     [DEFAULT_WATCHLIST_ID, NAMED_WATCHLIST_ID],
   );
   assert.equal(listABody.watchlists[0].is_default, true);
+  assert.equal("user_id" in listABody.watchlists[0], false);
 
   const create = await fetch(
     `${base}/v1/watchlists`,
@@ -153,10 +156,16 @@ test("HTTP list-management CRUD handles named manual lists and protects the defa
     }),
   );
   assert.equal(create.status, 201);
-  const created = (await create.json()) as { watchlist_id: string; name: string; is_default: boolean };
+  const created = (await create.json()) as {
+    watchlist_id: string;
+    name: string;
+    is_default: boolean;
+    user_id?: string;
+  };
   assert.equal(created.watchlist_id, CREATED_WATCHLIST_ID);
   assert.equal(created.name, "Semis");
   assert.equal(created.is_default, false);
+  assert.equal("user_id" in created, false);
 
   const rename = await fetch(
     `${base}/v1/watchlists/${CREATED_WATCHLIST_ID}`,
@@ -180,4 +189,54 @@ test("HTTP list-management CRUD handles named manual lists and protects the defa
     withUser({ method: "DELETE" }),
   );
   assert.equal(deleteDefault.status, 409);
+});
+
+test("HTTP watchlist CRUD rejects malformed ids and invalid dynamic specs before SQL", async (t) => {
+  const db = new MemoryWatchlistsDb();
+  const base = await startServer(t, db);
+
+  const malformedRename = await fetch(
+    `${base}/v1/watchlists/not-a-uuid`,
+    withUser({
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Bad" }),
+    }),
+  );
+  assert.equal(malformedRename.status, 404);
+
+  const invalidDynamic = await fetch(
+    `${base}/v1/watchlists`,
+    withUser({
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Broken Screen", mode: "screen" }),
+    }),
+  );
+  assert.equal(invalidDynamic.status, 400);
+  assert.deepEqual(await invalidDynamic.json(), {
+    error: "membership_spec.screen_id: must be a non-empty string",
+  });
+});
+
+test("HTTP watchlist CRUD scopes rename and delete by authenticated user", async (t) => {
+  const db = new MemoryWatchlistsDb();
+  const base = await startServer(t, db);
+  const otherUser = "55555555-5555-4555-a555-555555555555";
+
+  const rename = await fetch(`${base}/v1/watchlists/${NAMED_WATCHLIST_ID}`, {
+    method: "PATCH",
+    headers: {
+      "x-user-id": otherUser,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ name: "Stolen" }),
+  });
+  assert.equal(rename.status, 404);
+
+  const deleteRes = await fetch(`${base}/v1/watchlists/${NAMED_WATCHLIST_ID}`, {
+    method: "DELETE",
+    headers: { "x-user-id": otherUser },
+  });
+  assert.equal(deleteRes.status, 404);
 });
