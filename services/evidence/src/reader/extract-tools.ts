@@ -158,7 +158,15 @@ function makeExtractCandidateFactsHandler(deps: EvidenceReaderToolDeps): ReaderT
       );
     }
 
-    const blob = await deps.objectStore.get(document.raw_blob_id);
+    let blob;
+    try {
+      blob = await deps.objectStore.get(document.raw_blob_id);
+    } catch (error) {
+      throw new ReaderToolError(
+        "UPSTREAM_UNAVAILABLE",
+        `raw_blob_id "${document.raw_blob_id}" could not be read from object store: ${errorMessage(error)}`,
+      );
+    }
     if (!blob) {
       throw new ReaderToolError(
         "UPSTREAM_UNAVAILABLE",
@@ -226,4 +234,8 @@ function documentDefinitionAsOf(document: DocumentRow): string | undefined {
     return publishedAt.toISOString().slice(0, 10);
   }
   return String(publishedAt).slice(0, 10);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

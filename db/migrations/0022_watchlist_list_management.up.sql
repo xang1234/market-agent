@@ -1,5 +1,9 @@
 alter table watchlists add column if not exists is_default boolean not null default false;
 
+alter table watchlists drop constraint if exists watchlists_default_manual_mode_chk;
+alter table watchlists add constraint watchlists_default_manual_mode_chk
+  check (not is_default or mode = 'manual');
+
 with existing_default as (
   select distinct on (user_id) watchlist_id
     from watchlists

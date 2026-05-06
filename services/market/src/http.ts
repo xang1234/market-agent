@@ -140,6 +140,7 @@ export function createMarketServer(deps: MarketServerDeps): Server {
           const cacheKey = seriesCacheKey(query, freshnessBoundary);
           const cachedResponse = seriesResponseCache.get(cacheKey);
           if (cachedResponse) {
+            promoteSeriesResponse(seriesResponseCache, cacheKey, cachedResponse);
             recordSeriesCacheAuditEvent(seriesCacheAuditEvents, seriesCacheAuditMaxEvents, {
               cacheName: "series",
               result: "hit",
@@ -163,7 +164,9 @@ export function createMarketServer(deps: MarketServerDeps): Server {
             ),
           );
           const response: GetSeriesResponse = { query, results };
-          rememberSeriesResponse(seriesResponseCache, seriesCacheMaxEntries, cacheKey, response);
+          if (!seriesResponseHasRetryableUnavailable(response)) {
+            rememberSeriesResponse(seriesResponseCache, seriesCacheMaxEntries, cacheKey, response);
+          }
           respond(res, 200, response);
           return;
         }
@@ -216,6 +219,21 @@ function rememberSeriesResponse(
     if (oldestKey === undefined) break;
     cache.delete(oldestKey);
   }
+}
+
+function promoteSeriesResponse(
+  cache: Map<string, GetSeriesResponse>,
+  key: string,
+  response: GetSeriesResponse,
+): void {
+  cache.delete(key);
+  cache.set(key, response);
+}
+
+function seriesResponseHasRetryableUnavailable(response: GetSeriesResponse): boolean {
+  return response.results.some((entry) =>
+    !isAvailable(entry.outcome) && entry.outcome.retryable,
+  );
 }
 
 type Route =

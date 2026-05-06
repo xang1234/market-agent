@@ -83,3 +83,46 @@ test("extractNonGaapReconciliations extracts each numeric period column", () => 
     ],
   );
 });
+
+test("extractNonGaapReconciliations preserves empty table cells so period columns do not shift", () => {
+  const result = extractNonGaapReconciliations({
+    html: `
+      <table>
+        <tr><th></th><th>2024</th><th>2023</th></tr>
+        <tr><td>GAAP net income</td><td>$93,736</td><td>$96,995</td></tr>
+        <tr><td>Legal settlement expense</td><td>500</td><td></td></tr>
+        <tr><td>Non-GAAP net income</td><td>$94,236</td><td>$96,995</td></tr>
+      </table>`,
+    source_id: SAMPLE_SOURCE_UUID,
+    as_of: "2026-05-06T00:00:00.000Z",
+  });
+
+  assert.equal(result.items.length, 2);
+  assert.deepEqual(
+    result.items.map((item) => ({
+      period_label: item.period_label,
+      adjustments: item.adjustments.map((adjustment) => adjustment.value_num),
+    })),
+    [
+      { period_label: "2024", adjustments: [500] },
+      { period_label: "2023", adjustments: [] },
+    ],
+  );
+});
+
+test("extractNonGaapReconciliations recognizes non GAAP spelling variants", () => {
+  const result = extractNonGaapReconciliations({
+    html: `
+      <table>
+        <tr><th>GAAP to non GAAP reconciliation</th><th>2024</th></tr>
+        <tr><td>GAAP operating income</td><td>$114,301</td></tr>
+        <tr><td>Stock-based compensation expense</td><td>12,400</td></tr>
+        <tr><td>Non GAAP operating income</td><td>$126,701</td></tr>
+      </table>`,
+    source_id: SAMPLE_SOURCE_UUID,
+    as_of: "2026-05-06T00:00:00.000Z",
+  });
+
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0]!.non_gaap.label, "Non GAAP operating income");
+});

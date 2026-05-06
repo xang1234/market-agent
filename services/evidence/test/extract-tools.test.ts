@@ -722,3 +722,47 @@ test("extract_candidate_facts includes non-GAAP reconciliations with GAAP mappin
   assert.equal(reconciliation.gaap?.label, "GAAP net income");
   assert.equal(reconciliation.non_gaap?.label, "Non-GAAP net income");
 });
+
+test("extract_candidate_facts maps object-store read failures to UPSTREAM_UNAVAILABLE", async () => {
+  const db: QueryExecutor = {
+    async query<R extends Record<string, unknown>>(text: string) {
+      if (/from documents/.test(text)) {
+        return {
+          rows: [{
+            ...fakeDocumentRow(),
+            kind: "filing",
+            raw_blob_id: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          }] as unknown as R[],
+          command: "SELECT",
+          rowCount: 1,
+          oid: 0,
+          fields: [],
+        };
+      }
+      throw new Error(`unexpected query: ${text}`);
+    },
+  };
+  const objectStore = {
+    async put() {
+      throw new Error("not used");
+    },
+    async get() {
+      throw new Error("object store unavailable");
+    },
+    async has() {
+      return false;
+    },
+    async delete() {
+      return false;
+    },
+  };
+  const handlers = createEvidenceReaderToolHandlers({ db, objectStore });
+
+  await assert.rejects(
+    () => handlers.extract_candidate_facts({ document_id: SAMPLE_DOC_UUID }),
+    (error: Error) =>
+      error instanceof ReaderToolError &&
+      error.code === "UPSTREAM_UNAVAILABLE" &&
+      /object store unavailable/.test(error.message),
+  );
+});

@@ -104,11 +104,14 @@ export async function createAnalyzeTemplate(
       input.user_id,
       input.name,
       input.prompt_template,
-      serializeJsonValue([...(input.source_categories ?? [])]),
-      serializeJsonValue((input.added_subject_refs ?? []).map((ref) => ({ ...ref }))),
-      serializeNullableJsonValue(input.block_layout_hint),
-      serializeNullableJsonValue(input.peer_policy),
-      serializeNullableJsonValue(input.disclosure_policy),
+      serializeTemplateJson([...(input.source_categories ?? [])], "source_categories"),
+      serializeTemplateJson(
+        (input.added_subject_refs ?? []).map((ref) => ({ ...ref })),
+        "added_subject_refs",
+      ),
+      serializeNullableTemplateJson(input.block_layout_hint, "block_layout_hint"),
+      serializeNullableTemplateJson(input.peer_policy, "peer_policy"),
+      serializeNullableTemplateJson(input.disclosure_policy, "disclosure_policy"),
     ],
   );
   return rowFromDb(rows[0]);
@@ -175,10 +178,13 @@ export async function updateAnalyzeTemplate(
       patch.prompt_template ?? null,
       patch.source_categories === undefined
         ? null
-        : serializeJsonValue([...patch.source_categories]),
+        : serializeTemplateJson([...patch.source_categories], "source_categories"),
       patch.added_subject_refs === undefined
         ? null
-        : serializeJsonValue(patch.added_subject_refs.map((ref) => ({ ...ref }))),
+        : serializeTemplateJson(
+          patch.added_subject_refs.map((ref) => ({ ...ref })),
+          "added_subject_refs",
+        ),
       serializePatchJson(patch, "block_layout_hint"),
       serializePatchJson(patch, "peer_policy"),
       serializePatchJson(patch, "disclosure_policy"),
@@ -313,7 +319,27 @@ function serializePatchJson(
 ): string | null {
   const value = patch[key];
   if (value === undefined) return null;
-  return serializeJsonValue(value);
+  return serializeTemplateJson(value, key);
+}
+
+function serializeTemplateJson(value: JsonValue, label: string): string {
+  try {
+    return serializeJsonValue(value);
+  } catch (error) {
+    throw new AnalyzeTemplateValidationError(`${label}: ${errorMessage(error)}`);
+  }
+}
+
+function serializeNullableTemplateJson(value: JsonValue | null | undefined, label: string): string | null {
+  try {
+    return serializeNullableJsonValue(value);
+  } catch (error) {
+    throw new AnalyzeTemplateValidationError(`${label}: ${errorMessage(error)}`);
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function rowFromDb(row: AnalyzeTemplateDbRow | undefined): AnalyzeTemplateRow {

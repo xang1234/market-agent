@@ -911,6 +911,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Watchlist'
+        '400':
+          description: Malformed watchlist_id or invalid name
+        '401':
+          description: Missing or malformed user credential
         '404':
           description: Watchlist not found for this user
     delete:
@@ -930,6 +934,10 @@ paths:
       responses:
         '204':
           description: Watchlist deleted
+        '400':
+          description: Malformed watchlist_id
+        '401':
+          description: Missing or malformed user credential
         '409':
           description: Cannot delete the implicit default watchlist
         '404':

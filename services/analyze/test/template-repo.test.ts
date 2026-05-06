@@ -242,7 +242,7 @@ test("createAnalyzeTemplate rejects invalid optional jsonb fields before binding
           ...baseInput,
           [key]: value as JsonValue,
         }),
-        (err: Error) => err instanceof TypeError && pattern.test(err.message),
+        (err: Error) => err instanceof AnalyzeTemplateValidationError && pattern.test(err.message),
         `expected ${key} ${name} to be rejected by centralized JSON serialization`,
       );
       assert.equal(queries.length, 0, `${key} ${name} must fail before any query`);
@@ -401,7 +401,7 @@ test("updateAnalyzeTemplate rejects invalid optional jsonb fields before binding
         updateAnalyzeTemplate(db, TEMPLATE_ID, {
           [key]: value as JsonValue,
         }),
-        (err: Error) => err instanceof TypeError && pattern.test(err.message),
+        (err: Error) => err instanceof AnalyzeTemplateValidationError && pattern.test(err.message),
         `expected ${key} patch ${name} to be rejected by centralized JSON serialization`,
       );
       assert.equal(queries.length, 0, `${key} patch ${name} must fail before any query`);

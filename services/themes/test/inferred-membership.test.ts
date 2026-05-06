@@ -593,3 +593,36 @@ test("applyInferredThemeMembershipWithPool rolls back and releases the client wh
   assert.equal(releaseErrors.length, 1);
   assert.equal(releaseErrors[0], undefined);
 });
+
+test("applyInferredThemeMembershipWithPool releases the client with the begin error when transaction start fails", async () => {
+  const beginError = new Error("begin failed");
+  const queries: Captured[] = [];
+  const releaseErrors: unknown[] = [];
+  const pool = {
+    async connect() {
+      return {
+        async query<R extends Record<string, unknown> = Record<string, unknown>>(
+          text: string,
+          values?: unknown[],
+        ): Promise<QueryResult<R>> {
+          queries.push({ text, values });
+          if (text.trim().toLowerCase() === "begin") {
+            throw beginError;
+          }
+          return { rows: [] as R[], rowCount: 0, command: "", oid: 0, fields: [] };
+        },
+        release(error?: unknown) {
+          releaseErrors.push(error);
+        },
+      };
+    },
+  };
+
+  await assert.rejects(
+    () => applyInferredThemeMembershipWithPool(pool, inferredTheme({ cluster_ids: [CLUSTER_ID_A] })),
+    /begin failed/,
+  );
+
+  assert.deepEqual(queries.map((q) => q.text.trim().toLowerCase()), ["begin"]);
+  assert.deepEqual(releaseErrors, [beginError]);
+});

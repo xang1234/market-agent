@@ -5,7 +5,7 @@ import { seedUser, startServer, withUser } from "./helpers.ts";
 import { signTrustedUserId } from "../../shared/src/request-auth.ts";
 
 const TRUSTED_PROXY_SECRET = "portfolio-test-secret";
-const EXPIRED_TRUSTED_PROXY_ISSUED_AT = new Date("2000-01-01T00:00:00.000Z");
+const EXPIRED_TRUSTED_PROXY_ISSUED_AT = new Date("2026-04-01T00:00:00.000Z");
 
 test("server: missing x-user-id header returns 401", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {

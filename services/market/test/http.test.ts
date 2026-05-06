@@ -362,6 +362,31 @@ test("POST /v1/market/series surfaces adapter failures as per-listing unavailabl
   assert.equal(outcome.reason, "provider_error");
 });
 
+test("POST /v1/market/series does not cache retryable unavailable outcomes", async (t) => {
+  const listings = createInMemoryListingRepository(DEV_LISTINGS);
+  let getBarsCalls = 0;
+  const adapter = {
+    ...buildDeps().adapter,
+    sourceId: DEV_POLYGON_SOURCE_ID,
+    async getBars() {
+      getBarsCalls += 1;
+      throw new Error("polygon: synthetic upstream failure");
+    },
+  };
+  const url = await startServer(t, { adapter, listings, clock: () => FIXED_NOW });
+  const query = validSeriesQuery();
+
+  assert.equal((await postSeries(url, query)).status, 200);
+  assert.equal((await postSeries(url, query)).status, 200);
+
+  const audit = await fetch(`${url}/v1/market/cache-audit`);
+  assert.equal(audit.status, 200);
+  const body = (await audit.json()) as GetCacheAuditResponse;
+  assert.equal(getBarsCalls, 2);
+  assert.equal(body.dashboard.misses, 2);
+  assert.equal(body.dashboard.hits, 0);
+});
+
 test("GET /v1/market/cache-audit reports runtime series cache identity events", async (t) => {
   const url = await startServer(t, buildDeps());
   const series = await postSeries(url, validSeriesQuery());

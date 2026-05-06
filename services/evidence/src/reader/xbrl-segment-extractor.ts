@@ -140,10 +140,11 @@ export function extractXbrlExtensionSegments(
   const items: XbrlExtractionItem[] = [];
 
   for (const fact of facts) {
-    if (fact.value_num === null) continue;
+    if (fact.value_num === null || fact.unit_ref === undefined) continue;
     const context = contexts.get(fact.context_ref);
     if (!context || context.period_end === null) continue;
-    const unit = fact.unit_ref ? units.get(fact.unit_ref) : undefined;
+    const unit = units.get(fact.unit_ref);
+    if (!unit) continue;
     const isExtensionConcept = isExtensionQName(fact.concept);
     for (const dimension of context.dimensions) {
       const definitionKey = `${dimension.axis.name}::${dimension.member.name}::${fallbackDefinitionAsOf}`;
@@ -284,17 +285,19 @@ function parseFacts(xbrl: string): XbrlFact[] {
 
 function parseInlineFacts(xbrl: string): XbrlFact[] {
   const facts: XbrlFact[] = [];
-  const inlinePattern = /<[\w.-]*:?non(?:Fraction|Numeric)\b([^>]*)>([\s\S]*?)<\/[\w.-]*:?non(?:Fraction|Numeric)>/gi;
+  const inlinePattern = /<[\w.-]*:?nonFraction\b([^>]*)>([\s\S]*?)<\/[\w.-]*:?nonFraction>/gi;
   for (const match of xbrl.matchAll(inlinePattern)) {
     const attrs = parseAttributes(match[1] ?? "");
-    if (!attrs.name || !attrs.contextRef) continue;
+    if (!attrs.name || !attrs.contextRef || !attrs.unitRef) continue;
+    const value_num = numericText(match[2] ?? "", scaleMultiplier(attrs.scale), attrs.sign);
+    if (value_num === null) continue;
     facts.push(freezeFact({
       concept: parseQName(attrs.name),
       context_ref: attrs.contextRef,
       unit_ref: attrs.unitRef,
       scale: scaleMultiplier(attrs.scale),
       decimals: attrs.decimals,
-      value_num: numericText(match[2] ?? "", scaleMultiplier(attrs.scale), attrs.sign),
+      value_num,
     }));
   }
   return facts;
@@ -314,14 +317,16 @@ function parseRegularFacts(xbrl: string): XbrlFact[] {
       continue;
     }
     const attrs = parseAttributes(match[2] ?? "");
-    if (!attrs.contextRef) continue;
+    if (!attrs.contextRef || !attrs.unitRef) continue;
+    const value_num = numericText(match[3] ?? "", scaleMultiplier(attrs.scale));
+    if (value_num === null) continue;
     facts.push(freezeFact({
       concept: parseQName(tagName),
       context_ref: attrs.contextRef,
       unit_ref: attrs.unitRef,
       scale: scaleMultiplier(attrs.scale),
       decimals: attrs.decimals,
-      value_num: numericText(match[3] ?? "", scaleMultiplier(attrs.scale)),
+      value_num,
     }));
   }
   return facts;

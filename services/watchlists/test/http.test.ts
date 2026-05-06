@@ -8,17 +8,21 @@ import { bootstrapDatabase, connectedClient, dockerAvailable, workspaceRoot } fr
 import { createWatchlistsServer } from "../src/http.ts";
 import { signTrustedUserId, type RequestAuthConfig } from "../../shared/src/request-auth.ts";
 
-// bootstrapDatabase applies the base schema pack only; 0003 adds the
-// trigger + unique index that provision the implicit default manual
-// watchlist. Apply it explicitly so these service tests exercise the
-// same DB state the migration produces.
+// bootstrapDatabase applies the base schema pack only; these migrations add
+// and mark the implicit default manual watchlist. Apply them explicitly so
+// these service tests exercise the same DB state the migrations produce.
 const defaultManualWatchlistMigrationSql = readFileSync(
   join(workspaceRoot, "db", "migrations", "0003_default_manual_watchlist.up.sql"),
+  "utf8",
+);
+const watchlistListManagementMigrationSql = readFileSync(
+  join(workspaceRoot, "db", "migrations", "0022_watchlist_list_management.up.sql"),
   "utf8",
 );
 
 async function applyDefaultManualWatchlistMigration(client: Client): Promise<void> {
   await client.query(defaultManualWatchlistMigrationSql);
+  await client.query(watchlistListManagementMigrationSql);
 }
 
 async function startServer(
@@ -375,4 +379,18 @@ test("server: GET /v1/watchlists lists the implicit default watchlist", { timeou
   assert.equal(body.watchlists.length, 1);
   assert.equal(body.watchlists[0].name, "Watchlist");
   assert.equal(body.watchlists[0].is_default, true);
+});
+
+test("server: unknown route returns 404", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for watchlists coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-6-1");
+  const client = await connectedClient(t, databaseUrl);
+  const userId = await seedUser(client, "unknown-route@example.test");
+  const base = await startServer(t, client);
+
+  const res = await fetch(`${base}/v1/watchlists/default/memberz`, withUser(userId));
+  assert.equal(res.status, 404);
 });

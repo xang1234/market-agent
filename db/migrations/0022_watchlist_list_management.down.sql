@@ -1,9 +1,12 @@
 -- Rolling back fra-wlc returns to the P0.4b invariant of one manual
 -- watchlist per user. Non-default manual lists cannot be represented there,
--- so they are removed before restoring the old unique index.
+-- so they are removed before restoring the old unique index. Dynamic lists
+-- remain but lose their explicit is_default marker.
 delete from watchlists
  where mode = 'manual'
    and is_default = false;
+
+alter table watchlists drop constraint if exists watchlists_default_manual_mode_chk;
 
 drop index if exists watchlists_default_per_user_idx;
 

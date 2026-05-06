@@ -45,6 +45,9 @@ type GaapAnchor = {
   adjustments: NonGaapAdjustment[];
 };
 
+const NON_GAAP_PATTERN = /\bnon(?:[\s\u00a0]|[-\u2010-\u2015])*gaap\b/i;
+const GAAP_PATTERN = /\bgaap\b/i;
+
 export function extractNonGaapReconciliations(
   input: ExtractNonGaapReconciliationsInput,
 ): ExtractNonGaapReconciliationsResult {
@@ -55,7 +58,7 @@ export function extractNonGaapReconciliations(
   const items: NonGaapReconciliationItem[] = [];
   for (const table of parseTables(input.html)) {
     const tableText = table.flatMap((row) => row.cells).join(" ");
-    if (!/\bnon-gaap\b/i.test(tableText) || !/\bgaap\b/i.test(tableText)) continue;
+    if (!NON_GAAP_PATTERN.test(tableText) || !GAAP_PATTERN.test(tableText)) continue;
 
     const periodLabels = readPeriodLabels(table);
     const anchors = new Map<number, GaapAnchor>();
@@ -127,8 +130,7 @@ function parseTables(html: string): ReadonlyArray<ReadonlyArray<TableRow>> {
       const cells: string[] = [];
       const cellPattern = /<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi;
       for (const cellMatch of (rowMatch[1] ?? "").matchAll(cellPattern)) {
-        const cell = textContent(cellMatch[1] ?? "");
-        if (cell.length > 0) cells.push(cell);
+        cells.push(textContent(cellMatch[1] ?? ""));
       }
       if (cells.length > 0) rows.push(Object.freeze({ cells: Object.freeze(cells) }));
     }
@@ -146,7 +148,6 @@ function readPeriodLabels(table: ReadonlyArray<TableRow>): Map<number, string> {
         labels.set(column, cell);
       }
     }
-    if (labels.size > 0) return labels;
   }
   return labels;
 }
@@ -161,17 +162,17 @@ function valuesByColumn(row: TableRow): ReadonlyArray<readonly [number, ParsedVa
 }
 
 function isGaapLabel(label: string): boolean {
-  return /\bgaap\b/i.test(label) && !/\bnon-gaap\b/i.test(label);
+  return GAAP_PATTERN.test(label) && !NON_GAAP_PATTERN.test(label);
 }
 
 function isNonGaapLabel(label: string): boolean {
-  return /\bnon-gaap\b/i.test(label);
+  return NON_GAAP_PATTERN.test(label);
 }
 
 function measureKeyFromLabel(label: string): string {
   const normalized = label
-    .replace(/\bnon-gaap\b/gi, "")
-    .replace(/\bgaap\b/gi, "")
+    .replace(NON_GAAP_PATTERN, "")
+    .replace(GAAP_PATTERN, "")
     .replace(/\badjusted\b/gi, "")
     .replace(/\([^)]*\)/g, "")
     .trim()

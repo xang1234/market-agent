@@ -278,23 +278,27 @@ export async function applyInferredThemeMembershipWithPool(
 ): Promise<ApplyInferredMembershipResult> {
   const client = await pool.connect();
   let releaseError: Error | undefined;
+  let transactionStarted = false;
   try {
     await client.query("begin");
-    try {
-      const result = await applyInferredThemeMembership(client, theme, options);
-      await client.query("commit");
-      return result;
-    } catch (error) {
-      try {
-        await client.query("rollback");
-      } catch (rollbackError) {
-        if (error instanceof Error) {
-          (error as { rollback_error?: unknown }).rollback_error = rollbackError;
-          releaseError = error;
-        }
-      }
+    transactionStarted = true;
+    const result = await applyInferredThemeMembership(client, theme, options);
+    await client.query("commit");
+    return result;
+  } catch (error) {
+    if (!transactionStarted) {
+      if (error instanceof Error) releaseError = error;
       throw error;
     }
+    try {
+      await client.query("rollback");
+    } catch (rollbackError) {
+      if (error instanceof Error) {
+        (error as { rollback_error?: unknown }).rollback_error = rollbackError;
+        releaseError = error;
+      }
+    }
+    throw error;
   } finally {
     client.release(releaseError);
   }

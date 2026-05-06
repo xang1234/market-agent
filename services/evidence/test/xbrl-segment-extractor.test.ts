@@ -145,3 +145,33 @@ test("extractXbrlExtensionSegments honors Inline XBRL sign attributes", () => {
   assert.ok(operatingLoss);
   assert.equal(operatingLoss.value_num, -1_234_000_000);
 });
+
+test("extractXbrlExtensionSegments ignores non-numeric or unitless facts", () => {
+  const result = extractXbrlExtensionSegments({
+    xbrl: `
+      <html xmlns:ix="http://www.xbrl.org/2013/inlineXBRL"
+            xmlns:xbrli="http://www.xbrl.org/2003/instance"
+            xmlns:xbrldi="http://xbrl.org/2006/xbrldi"
+            xmlns:iso4217="http://www.xbrl.org/2003/iso4217"
+            xmlns:us-gaap="http://fasb.org/us-gaap/2024"
+            xmlns:aapl="http://www.apple.com/20240928">
+        <xbrli:context id="C_AAPL_SERVICES_2024">
+          <xbrli:entity>
+            <xbrli:segment>
+              <xbrldi:explicitMember dimension="srt:ProductOrServiceAxis">aapl:ServicesMember</xbrldi:explicitMember>
+            </xbrli:segment>
+          </xbrli:entity>
+          <xbrli:period><xbrli:instant>2024-09-28</xbrli:instant></xbrli:period>
+        </xbrli:context>
+        <xbrli:unit id="usd"><xbrli:measure>iso4217:USD</xbrli:measure></xbrli:unit>
+        <ix:nonNumeric name="aapl:FiscalYearLabel" contextRef="C_AAPL_SERVICES_2024">2024</ix:nonNumeric>
+        <ix:nonFraction name="aapl:UnitlessMetric" contextRef="C_AAPL_SERVICES_2024">123</ix:nonFraction>
+        <ix:nonFraction name="aapl:MissingUnitMetric" contextRef="C_AAPL_SERVICES_2024" unitRef="missing">456</ix:nonFraction>
+      </html>`,
+    source_id: SAMPLE_SOURCE_UUID,
+    as_of: "2026-05-06T00:00:00.000Z",
+    definition_as_of: "2024-11-01",
+  });
+
+  assert.deepEqual(result.items, []);
+});

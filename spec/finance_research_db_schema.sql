@@ -559,7 +559,8 @@ create table watchlists (
   is_default boolean not null default false,
   membership_spec jsonb,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint watchlists_default_manual_mode_chk check (not is_default or mode = 'manual')
 );
 create unique index watchlists_default_per_user_idx on watchlists(user_id) where is_default;
 
