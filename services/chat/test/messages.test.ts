@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   chatMessageTransactionClient,
   createChatMessagePersistence,
+  listChatMessagesForThread,
   persistChatMessageAfterSnapshotSeal,
   persistChatMessageAfterSnapshotSealWithPool,
   type ChatMessageClientPool,
@@ -236,6 +237,56 @@ test("chat message persistence adapter rejects inconsistent verification without
   );
 });
 
+test("listChatMessagesForThread returns ordered messages for an owned thread", async () => {
+  const db = messageListDb((text) => {
+    if (text.includes("from chat_threads")) return [{ owned: true }];
+    if (text.includes("from chat_messages")) {
+      return [
+        {
+          message_id: "33333333-3333-4333-a333-333333333333",
+          thread_id: "11111111-1111-4111-a111-111111111111",
+          role: "assistant",
+          snapshot_id: "22222222-2222-4222-a222-222222222222",
+          blocks: [{ id: "block-1", kind: "rich_text" }],
+          content_hash: "sha256:abc",
+          created_at: "2026-05-06T00:00:00.000Z",
+        },
+      ];
+    }
+    throw new Error(`unexpected query: ${text}`);
+  });
+
+  const result = await listChatMessagesForThread(db, {
+    thread_id: "11111111-1111-4111-a111-111111111111",
+    user_id: "00000000-0000-4000-8000-000000000001",
+  });
+
+  assert.ok(result);
+  assert.equal(result.messages.length, 1);
+  assert.equal(result.messages[0].message_id, "33333333-3333-4333-a333-333333333333");
+  assert.deepEqual(result.messages[0].blocks, [{ id: "block-1", kind: "rich_text" }]);
+  assert.match(db.queries[1].text, /order by m\.created_at asc, m\.message_id asc/);
+  assert.deepEqual(db.queries[0].values, [
+    "11111111-1111-4111-a111-111111111111",
+    "00000000-0000-4000-8000-000000000001",
+  ]);
+});
+
+test("listChatMessagesForThread returns null and does not read messages for wrong-user threads", async () => {
+  const db = messageListDb((text) => {
+    if (text.includes("from chat_threads")) return [];
+    throw new Error(`unexpected query: ${text}`);
+  });
+
+  const result = await listChatMessagesForThread(db, {
+    thread_id: "11111111-1111-4111-a111-111111111111",
+    user_id: "00000000-0000-4000-8000-000000000002",
+  });
+
+  assert.equal(result, null);
+  assert.equal(db.queries.length, 1);
+});
+
 function successfulSealResult(): SnapshotSealResult {
   return {
     ok: true,
@@ -323,6 +374,19 @@ function unpinnedRecordingDb(steps: string[] = []): ChatMessagePersistenceDb & {
         return { rows: [] };
       }
       throw new Error(`Unexpected query: ${text}`);
+    },
+  };
+}
+
+function messageListDb(
+  responder: (text: string, values?: unknown[]) => Record<string, unknown>[],
+): ChatMessagePersistenceDb & { queries: Array<{ text: string; values?: unknown[] }> } {
+  const queries: Array<{ text: string; values?: unknown[] }> = [];
+  return {
+    queries,
+    async query(text, values) {
+      queries.push({ text, values });
+      return { rows: responder(text, values) };
     },
   };
 }

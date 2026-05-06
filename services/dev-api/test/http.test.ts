@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
 import test, { type TestContext } from "node:test";
-import { createDevApiServer } from "../src/http.ts";
+import { createDevApiServer, createFixtureDevApiAdapters } from "../src/http.ts";
 
 async function startServer(
   t: TestContext,
   env: Record<string, string | undefined> = {},
+  options: Parameters<typeof createDevApiServer>[1] = { adapters: createFixtureDevApiAdapters() },
 ): Promise<string> {
-  const server = createDevApiServer(env);
+  const server = createDevApiServer(env, options);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const { port } = server.address() as AddressInfo;
@@ -175,6 +176,60 @@ test("agent routes are scoped to the authenticated user", async (t) => {
     headers: { "x-user-id": userB },
   });
   assert.equal(deleteB.status, 404);
+});
+
+test("Analyze and Agents BFF routes use durable adapters instead of server-local state", async (t) => {
+  const adapters = createFixtureDevApiAdapters();
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const headers = {
+    "content-type": "application/json",
+    "x-user-id": userId,
+  };
+  const firstBase = await startServer(t, {}, { adapters });
+
+  const created = await fetch(`${firstBase}/v1/agents`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ name: "Durable monitor", thesis: "Track restarts", cadence: "daily" }),
+  });
+  const agent = await created.json() as { agent_id: string };
+  assert.equal(created.status, 201);
+
+  const run = await fetch(`${firstBase}/v1/agents/${agent.agent_id}/runs`, {
+    method: "POST",
+    headers: { "x-user-id": userId },
+  });
+  assert.equal(run.status, 201);
+
+  const analyzeRun = await fetch(`${firstBase}/v1/analyze/runs`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      template_id: "earnings-quality",
+      instructions: "Persist this memo",
+      source_categories: ["filings"],
+    }),
+  });
+  assert.equal(analyzeRun.status, 201);
+
+  const secondBase = await startServer(t, {}, { adapters });
+  const persistedAgents = await fetch(`${secondBase}/v1/agents`, {
+    headers: { "x-user-id": userId },
+  });
+  const persistedAgentsBody = await persistedAgents.json() as {
+    agents?: Array<{ agent_id: string; name: string }>;
+    runs?: Array<{ agent_id: string; status: string }>;
+  };
+  assert.equal(persistedAgents.status, 200);
+  assert.ok(persistedAgentsBody.agents?.some((persisted) => persisted.agent_id === agent.agent_id));
+  assert.ok(persistedAgentsBody.runs?.some((persisted) => persisted.agent_id === agent.agent_id));
+
+  const persistedTemplates = await fetch(`${secondBase}/v1/analyze/templates`, {
+    headers: { "x-user-id": userId },
+  });
+  const persistedTemplatesBody = await persistedTemplates.json() as { runs?: Array<{ template_id: string }> };
+  assert.equal(persistedTemplates.status, 200);
+  assert.ok(persistedTemplatesBody.runs?.some((persisted) => persisted.template_id === "earnings-quality"));
 });
 
 test("GET /v1/agents requires an authenticated user", async (t) => {

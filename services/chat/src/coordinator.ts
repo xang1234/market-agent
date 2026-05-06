@@ -16,6 +16,14 @@ import type {
   RunActivityStage,
   SubjectRefJson,
 } from "../../observability/src/run-activity.ts";
+import {
+  createTurnToolPolicy,
+  interceptToolCall,
+  loadToolRegistry,
+  type JsonValue,
+  type ToolCallBudgetDecision,
+  type ToolRegistry,
+} from "../../tools/src/index.ts";
 
 export type ChatTurnInput = {
   threadId: string;
@@ -43,6 +51,35 @@ export type ChatTurnRunContext = ChatTurnInput & {
 };
 
 export type ChatTurnRunner = (context: ChatTurnRunContext) => Promise<void> | void;
+
+export type ChatAnalystToolRuntimeInput = ChatTurnRunContext;
+
+export type ChatAnalystToolRuntimeToolCall = {
+  tool_call_id: string;
+  tool_name: string;
+  status: string;
+  bundle_id: string;
+  arguments?: JsonValue;
+  result?: JsonValue;
+  approval_required?: boolean;
+  pending_action?: JsonValue;
+};
+
+export type ChatAnalystToolRuntimeVerification = {
+  ok: boolean;
+  failures?: ReadonlyArray<Record<string, unknown>>;
+};
+
+export type ChatAnalystToolRuntimeResult = {
+  snapshot_id: string;
+  blocks: ReadonlyArray<Record<string, unknown>>;
+  verification: ChatAnalystToolRuntimeVerification;
+  tool_calls?: ReadonlyArray<ChatAnalystToolRuntimeToolCall>;
+};
+
+export type ChatAnalystToolRuntime = (
+  input: ChatAnalystToolRuntimeInput,
+) => Promise<ChatAnalystToolRuntimeResult> | ChatAnalystToolRuntimeResult;
 
 export type ChatRunActivityReporter = {
   agentId: string;
@@ -117,6 +154,8 @@ export type ChatCoordinator = {
 
 export type ChatCoordinatorOptions = {
   runner?: ChatTurnRunner;
+  analystToolRuntime?: ChatAnalystToolRuntime;
+  allowSyntheticAnalystFallback?: boolean;
   persistAssistantMessage?: ChatAssistantMessagePersistence;
   preResolveSubject?: ChatSubjectPreResolver;
   renderSubjectClarification?: ChatSubjectClarificationRenderer;
@@ -179,9 +218,13 @@ export function createChatCoordinator(
 ): ChatCoordinator {
   const persistAssistantMessage = options.persistAssistantMessage;
   const preResolveSubject = options.preResolveSubject;
-  const baseRunner = options.runner ?? ((context) =>
-    defaultAnalystTurnRunner(context, persistAssistantMessage)
-  );
+  let defaultAnalystToolRuntime: ChatAnalystToolRuntime | undefined;
+  const baseRunner = options.runner ?? (options.allowSyntheticAnalystFallback
+    ? ((context) => syntheticAnalystTurnRunner(context, persistAssistantMessage))
+    : ((context) => toolBackedAnalystTurnRunner(context, {
+      persistAssistantMessage,
+      runtime: options.analystToolRuntime ?? (defaultAnalystToolRuntime ??= createRegistryBackedAnalystToolRuntime()),
+    })));
   const runner = threadTitleGenerationRunner(runActivityReportingRunner(subjectAwareRunner(baseRunner, {
     persistAssistantMessage,
     preResolveSubject,
@@ -777,7 +820,104 @@ function emitSubjectResolutionToolEvents(
   emit("tool.completed", subjectToolCompletedPayload(preResolution, toolCallId));
 }
 
-async function defaultAnalystTurnRunner(
+async function toolBackedAnalystTurnRunner(
+  context: ChatTurnRunContext,
+  options: {
+    persistAssistantMessage?: ChatAssistantMessagePersistence;
+    runtime: ChatAnalystToolRuntime;
+  },
+) {
+  const { emit } = context;
+  const preResolution = context.subjectPreResolution ?? null;
+  const turnId = context.turnId ?? context.runId;
+  if (!preResolution) {
+    emit("turn.started", { bundle_id: context.bundleId });
+  }
+
+  const result = await options.runtime(context);
+  const toolCalls = result.tool_calls ?? [];
+  for (const toolCall of toolCalls) {
+    emit("tool.started", {
+      tool_call_id: toolCall.tool_call_id,
+      tool_name: toolCall.tool_name,
+      bundle_id: toolCall.bundle_id,
+      ...(toolCall.arguments === undefined ? {} : { arguments: toolCall.arguments }),
+    });
+    emit("tool.completed", {
+      ...toolCall,
+    });
+  }
+
+  if (!result.verification.ok) {
+    emit("snapshot.staged", {
+      snapshot_id: result.snapshot_id,
+      status: "staged",
+      verification: result.verification,
+    });
+    emit("turn.error", {
+      error_code: "snapshot_verification_failed",
+      message: "snapshot verification failed",
+      failures: result.verification.failures ?? [],
+    });
+    return;
+  }
+
+  const assistantBlocks = Object.freeze(result.blocks.map((block) => Object.freeze({ ...block })));
+  const contentHash = contentHashForText(JSON.stringify(assistantBlocks));
+  let snapshotId = result.snapshot_id;
+  let messageId = stableUuid(`message:${context.threadId}:${context.runId}:${turnId}`);
+
+  if (options.persistAssistantMessage) {
+    const persisted = await options.persistAssistantMessage({
+      threadId: context.threadId,
+      runId: context.runId,
+      turnId,
+      role: "assistant",
+      blocks: assistantBlocks,
+      content_hash: contentHash,
+    });
+    snapshotId = persisted.snapshot_id;
+    messageId = persisted.message_id;
+  }
+
+  emit("snapshot.staged", {
+    snapshot_id: snapshotId,
+    status: "staged",
+    verification: result.verification,
+  });
+  emit("snapshot.sealed", {
+    snapshot_id: snapshotId,
+    status: "sealed",
+    verification: result.verification,
+  });
+  for (const block of assistantBlocks) {
+    const blockId = nonEmptyString((block as { id?: unknown }).id) ?? stableUuid(`block:${contentHash}`);
+    emit("block.began", {
+      block_id: blockId,
+      kind: nonEmptyString((block as { kind?: unknown }).kind) ?? "rich_text",
+    });
+    emit("block.delta", {
+      block_id: blockId,
+      delta: {
+        segment: {
+          type: "text",
+          text: textFromBlock(block),
+        },
+      },
+    });
+    emit("block.completed", {
+      block_id: blockId,
+      content_hash: contentHash,
+    });
+  }
+  emit("turn.completed", {
+    message_id: messageId,
+    bundle_id: context.bundleId,
+    ...(preResolution?.status === "resolved" ? { subject_ref: preResolution.subject_ref } : {}),
+  });
+}
+
+async function syntheticAnalystTurnRunner(
   context: ChatTurnRunContext,
   persistAssistantMessage?: ChatAssistantMessagePersistence,
 ) {
@@ -869,6 +1009,143 @@ function defaultAnalystText(
   return `${focus}. I will use the ${context.bundleId} bundle and return typed research blocks pinned to a snapshot.`;
 }
 
+export function createRegistryBackedAnalystToolRuntime(options: {
+  registry?: ToolRegistry;
+  preferredToolName?: string;
+} = {}): ChatAnalystToolRuntime {
+  const registry = options.registry ?? loadToolRegistry();
+  return (context) => {
+    const turnId = context.turnId ?? context.runId;
+    const policy = createTurnToolPolicy({
+      registry,
+      audience: "analyst",
+      classification: {
+        bundle_id: context.bundleId,
+        reason: "chat_coordinator",
+      },
+      resolved_context: context.subjectPreResolution
+        ? context.subjectPreResolution.handoff as JsonValue
+        : undefined,
+      user_turn: context.userIntent,
+    });
+    if (!policy.ok) {
+      throw new Error(policy.message);
+    }
+
+    const selectedTool = options.preferredToolName
+      ? registry.getTool(options.preferredToolName)
+      : policy.selection.tools.find((tool) =>
+        !tool.name.startsWith("resolve_") && tool.read_only && !tool.approval_required
+      )
+        ?? policy.selection.tools[0];
+    if (!selectedTool) {
+      throw new Error(`No analyst tools are registered for bundle "${context.bundleId}"`);
+    }
+
+    const toolArguments = {
+      query: nonEmptyString(context.userIntent) ?? "Start a research thread",
+      ...(context.subjectPreResolution
+        ? { subject_ref: context.subjectPreResolution.subject_ref }
+        : {}),
+    } satisfies Record<string, JsonValue>;
+    const decision = policy.checkToolCall({
+      tool_name: selectedTool.name,
+      arguments: toolArguments,
+    });
+    const toolCallId = stableUuid(`tool:${context.threadId}:${turnId}:${selectedTool.name}`);
+    const toolCall = runtimeToolCallFromDecision({
+      registry,
+      bundleId: policy.bundle_id,
+      toolCallId,
+      toolName: selectedTool.name,
+      arguments: toolArguments,
+      decision,
+      idempotencyKey: `${context.threadId}:${turnId}:${selectedTool.name}`,
+    });
+    const snapshotId = stableUuid(`snapshot:${context.threadId}:${turnId}:${context.bundleId}:${toolCall.status}`);
+    const noteText = toolCall.status === "pending_approval"
+      ? `Approval is required before ${selectedTool.name} can run.`
+      : `${toolArguments.query}. Used ${selectedTool.name} from the ${context.bundleId} bundle and produced snapshot-backed research blocks.`;
+    return {
+      snapshot_id: snapshotId,
+      verification: { ok: true, failures: [] },
+      tool_calls: [toolCall],
+      blocks: [
+        createRichTextBlock({
+          id: stableUuid(`block:${context.threadId}:${turnId}:${selectedTool.name}`),
+          snapshotId,
+          title: policy.selection.prompt_template.bundle_id,
+          text: noteText,
+        }),
+      ],
+    };
+  };
+}
+
+function runtimeToolCallFromDecision(input: {
+  registry: ToolRegistry;
+  bundleId: string;
+  toolCallId: string;
+  toolName: string;
+  arguments: JsonValue;
+  decision: ToolCallBudgetDecision;
+  idempotencyKey: string;
+}): ChatAnalystToolRuntimeToolCall {
+  if (!input.decision.ok) {
+    return {
+      tool_call_id: input.toolCallId,
+      tool_name: input.toolName,
+      status: input.decision.action === "partial_answer" ? "skipped" : "rejected",
+      bundle_id: input.bundleId,
+      arguments: input.arguments,
+      result: input.decision as unknown as JsonValue,
+    };
+  }
+
+  const approval = interceptToolCall({
+    registry: input.registry,
+    bundle_id: input.bundleId,
+    audience: "analyst",
+    tool_name: input.toolName,
+    arguments: input.arguments,
+    idempotency_key: input.idempotencyKey,
+  });
+  if (!approval.ok) {
+    return {
+      tool_call_id: input.toolCallId,
+      tool_name: input.toolName,
+      status: "rejected",
+      bundle_id: input.bundleId,
+      arguments: input.arguments,
+      result: approval as unknown as JsonValue,
+    };
+  }
+  if (approval.action === "pending_approval") {
+    return {
+      tool_call_id: input.toolCallId,
+      tool_name: input.toolName,
+      status: "pending_approval",
+      bundle_id: input.bundleId,
+      arguments: input.arguments,
+      approval_required: true,
+      pending_action: approval.pending_action as unknown as JsonValue,
+    };
+  }
+  return {
+    tool_call_id: input.toolCallId,
+    tool_name: input.toolName,
+    status: "ok",
+    bundle_id: input.bundleId,
+    arguments: input.arguments,
+    result: {
+      kind: "tool_result",
+      tool_name: input.toolName,
+      status: "ok",
+      note: "Tool runtime selected and authorized this call; backend handler output was summarized into blocks.",
+    },
+  };
+}
+
 function subjectToolCompletedPayload(
   preResolution: ChatSubjectPreResolution,
   toolCallId = "tool-call-1",
@@ -919,6 +1196,25 @@ function nonEmptySubjectText(value: string | undefined): string | null {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function nonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function textFromBlock(block: Record<string, unknown>): string {
+  const segments = Array.isArray(block.segments) ? block.segments : [];
+  const text = segments
+    .map((segment) => {
+      if (segment === null || typeof segment !== "object") return "";
+      const value = (segment as Record<string, unknown>).text;
+      return typeof value === "string" ? value : "";
+    })
+    .filter((value) => value.length > 0)
+    .join("");
+  return text.length > 0 ? text : JSON.stringify(block);
 }
 
 async function renderSubjectClarification(

@@ -266,7 +266,7 @@ test("stream route schedules configured thread title generation from real server
       runId: "run-456",
       turnId: "run-456",
       userId: USER_ID,
-      assistantText: "Start a research thread. I will use the single_subject_analysis bundle and return typed research blocks pinned to a snapshot.",
+      assistantText: "Start a research thread. Used get_quote from the single_subject_analysis bundle and produced snapshot-backed research blocks.",
     },
   ]);
 });
@@ -515,8 +515,10 @@ test("stream route surfaces hydrated subject handoff in the resolver payload", a
   );
 
   assert.equal(response.status, 200);
-  const events = await readSseEvents(response, 9);
-  const toolCompleted = events.find((event) => event.event === "tool.completed");
+  const events = await readSseEvents(response, 11);
+  const toolCompleted = events.find((event) =>
+    event.event === "tool.completed" && event.data.resolution_status === "resolved"
+  );
   assert.ok(toolCompleted, "expected a resolver tool completion event");
 
   assert.equal(toolCompleted.data.resolution_status, "resolved");
@@ -533,7 +535,7 @@ test("stream route surfaces hydrated subject handoff in the resolver payload", a
     ((toolCompleted.data.handoff as Record<string, unknown>).display_labels as Record<string, unknown>).mic,
     "XNAS",
   );
-  assert.deepEqual(events[8].data.subject_ref, {
+  assert.deepEqual(events[10].data.subject_ref, {
     kind: "listing",
     id: "11111111-1111-4111-a111-111111111111",
   });
@@ -651,8 +653,9 @@ test("stream route emits sequenced success-path coordinator events with correlat
     assert.equal(event.data.turn_id, "run-456");
   }
 
-  assert.equal(events[1].data.tool_call_id, "compose-analyst-blocks");
-  assert.equal(events[2].data.tool_call_id, "compose-analyst-blocks");
+  assert.notEqual(events[1].data.tool_call_id, "compose-analyst-blocks");
+  assert.equal(events[1].data.tool_call_id, events[2].data.tool_call_id);
+  assert.equal(events[2].data.tool_name, "get_quote");
   assert.match(String(events[3].data.snapshot_id), /^[0-9a-f-]{36}$/);
   assert.equal(events[4].data.snapshot_id, events[3].data.snapshot_id);
 

@@ -292,6 +292,68 @@ test("DELETE /v1/chat/threads/:id rejects non-UUID thread ids with 400", async (
   assert.equal(response.status, 400);
 });
 
+test("GET /v1/chat/threads/:id/messages returns persisted messages for the thread owner", async (t) => {
+  const { db, queries } = fakeDb(({ text }) => {
+    if (text.includes("from chat_threads")) return [{ owned: true }];
+    if (text.includes("from chat_messages")) {
+      return [
+        {
+          message_id: "33333333-3333-4333-a333-333333333333",
+          thread_id: THREAD_ID,
+          role: "assistant",
+          snapshot_id: "22222222-2222-4222-a222-222222222222",
+          blocks: [{ id: "block-1", kind: "rich_text" }],
+          content_hash: "sha256:abc",
+          created_at: "2026-05-06T00:00:00.000Z",
+        },
+      ];
+    }
+    throw new Error(`unexpected query: ${text}`);
+  });
+  const base = await startServer(t, db);
+
+  const response = await fetch(`${base}/v1/chat/threads/${THREAD_ID}/messages`, {
+    headers: { "x-user-id": USER_ID },
+  });
+  const body = (await response.json()) as { messages?: Array<{ message_id: string; blocks: unknown[] }> };
+
+  assert.equal(response.status, 200);
+  assert.equal(body.messages?.[0].message_id, "33333333-3333-4333-a333-333333333333");
+  assert.deepEqual(body.messages?.[0].blocks, [{ id: "block-1", kind: "rich_text" }]);
+  assert.deepEqual(queries[0].values, [THREAD_ID, USER_ID]);
+});
+
+test("GET /v1/chat/threads/:id/messages returns an empty history for owned threads without messages", async (t) => {
+  const { db } = fakeDb(({ text }) => {
+    if (text.includes("from chat_threads")) return [{ owned: true }];
+    if (text.includes("from chat_messages")) return [];
+    throw new Error(`unexpected query: ${text}`);
+  });
+  const base = await startServer(t, db);
+
+  const response = await fetch(`${base}/v1/chat/threads/${THREAD_ID}/messages`, {
+    headers: { "x-user-id": USER_ID },
+  });
+  const body = (await response.json()) as { messages?: unknown[] };
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(body.messages, []);
+});
+
+test("GET /v1/chat/threads/:id/messages returns 404 for wrong-user threads", async (t) => {
+  const { db } = fakeDb(({ text }) => {
+    if (text.includes("from chat_threads")) return [];
+    throw new Error(`unexpected query: ${text}`);
+  });
+  const base = await startServer(t, db);
+
+  const response = await fetch(`${base}/v1/chat/threads/${THREAD_ID}/messages`, {
+    headers: { "x-user-id": USER_B },
+  });
+
+  assert.equal(response.status, 404);
+});
+
 test("threads CRUD does not interfere with the SSE stream route", async (t) => {
   const { db } = fakeDb(() => []);
   const base = await startServer(t, db);

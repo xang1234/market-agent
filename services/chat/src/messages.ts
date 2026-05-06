@@ -43,6 +43,10 @@ export type ChatMessageRow = {
   created_at: string;
 };
 
+export type ChatThreadMessagesResult = {
+  messages: ChatMessageRow[];
+};
+
 export type PersistChatMessageAfterSnapshotSealInput = {
   thread_id: string;
   role: ChatRole;
@@ -124,6 +128,38 @@ export function createChatMessagePersistence(
       snapshot_id: result.seal.snapshot.snapshot_id,
       message_id: result.message.message_id,
     };
+  };
+}
+
+export async function listChatMessagesForThread(
+  db: ChatMessagePersistenceDb,
+  input: { thread_id: string; user_id: string },
+): Promise<ChatThreadMessagesResult | null> {
+  const owner = await db.query<{ owned: boolean }>(
+    `select true as owned
+       from chat_threads
+      where thread_id = $1::uuid
+        and user_id = $2::uuid
+      limit 1`,
+    [input.thread_id, input.user_id],
+  );
+  if (owner.rows.length === 0) return null;
+
+  const { rows } = await db.query<ChatMessageRow>(
+    `select m.message_id::text as message_id,
+            m.thread_id::text as thread_id,
+            m.role,
+            m.snapshot_id::text as snapshot_id,
+            m.blocks,
+            m.content_hash,
+            m.created_at::text as created_at
+       from chat_messages m
+      where m.thread_id = $1::uuid
+      order by m.created_at asc, m.message_id asc`,
+    [input.thread_id],
+  );
+  return {
+    messages: rows.map((row) => Object.freeze({ ...row })),
   };
 }
 

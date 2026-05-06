@@ -24,6 +24,21 @@ type ImportedAnalyzeMemo = {
   blocks: ReadonlyArray<Block>
 }
 
+type PersistedChatMessage = {
+  message_id: string
+  thread_id: string
+  role: 'user' | 'assistant' | 'tool'
+  snapshot_id: string
+  blocks: ReadonlyArray<Block>
+  content_hash: string
+  created_at: string
+}
+
+type MessageHistoryState =
+  | { kind: 'idle' | 'loading' }
+  | { kind: 'error'; message: string }
+  | { kind: 'ready'; messages: ReadonlyArray<PersistedChatMessage> }
+
 export function ChatLayout() {
   const { session } = useAuth()
   const userId = session?.userId ?? ''
@@ -117,8 +132,31 @@ export function ChatThreadView() {
   const importedMemo = readImportedAnalyzeMemo(location.state)
   const [prompt, setPrompt] = useState('')
   const [transcript, setTranscript] = useState<ReadonlyArray<{ role: 'user'; text: string }>>([])
+  const [history, setHistory] = useState<MessageHistoryState>({ kind: 'idle' })
   const [state, dispatch] = useReducer(applyChatStreamEvent, INITIAL_STREAM_STATE)
   const [streamError, setStreamError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!session || !threadId) return
+    const controller = new AbortController()
+    setHistory({ kind: 'loading' })
+    fetch(`/v1/chat/threads/${encodeURIComponent(threadId)}/messages`, {
+      headers: { 'x-user-id': session.userId },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        return (await response.json()) as { messages?: PersistedChatMessage[] }
+      })
+      .then((body) => {
+        setHistory({ kind: 'ready', messages: body.messages ?? [] })
+      })
+      .catch((caught) => {
+        if (controller.signal.aborted) return
+        setHistory({ kind: 'error', message: caught instanceof Error ? caught.message : String(caught) })
+      })
+    return () => controller.abort()
+  }, [session, threadId])
 
   const submitPrompt = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -166,6 +204,15 @@ export function ChatThreadView() {
         <p className="mt-1 font-mono text-xs text-neutral-500 dark:text-neutral-400">{threadId}</p>
       </section>
       <div className="flex flex-1 flex-col gap-3 p-6">
+        {history.kind === 'loading' ? (
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading message history.</p>
+        ) : null}
+        {history.kind === 'error' ? (
+          <p className="text-sm text-rose-600 dark:text-rose-300">Message history unavailable: {history.message}</p>
+        ) : null}
+        {history.kind === 'ready' ? (
+          <PersistedMessageHistory messages={history.messages} />
+        ) : null}
         {importedMemo ? (
           <section className="rounded-md border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -213,6 +260,48 @@ export function ChatThreadView() {
       </form>
     </div>
   )
+}
+
+function PersistedMessageHistory({ messages }: { messages: ReadonlyArray<PersistedChatMessage> }) {
+  if (messages.length === 0) return null
+  return (
+    <section className="flex flex-col gap-3" aria-label="Persisted message history">
+      {messages.map((message) => (
+        <article
+          key={message.message_id}
+          className="rounded-md border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
+        >
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold capitalize text-neutral-900 dark:text-neutral-100">
+              {message.role}
+            </h3>
+            <span className="font-mono text-xs text-neutral-500 dark:text-neutral-400">
+              {new Date(message.created_at).toLocaleString()}
+            </span>
+          </div>
+          {message.role === 'assistant' ? (
+            <div className="flex flex-col gap-3">
+              {message.blocks.map((block) => (
+                <BlockView key={`${message.message_id}-${block.id}`} block={block} />
+              ))}
+            </div>
+          ) : (
+            <pre className="whitespace-pre-wrap text-sm text-neutral-700 dark:text-neutral-200">
+              {message.blocks.map((block) => blockText(block)).join('\n')}
+            </pre>
+          )}
+        </article>
+      ))}
+    </section>
+  )
+}
+
+function blockText(block: Block): string {
+  const segments = 'segments' in block && Array.isArray(block.segments) ? block.segments : []
+  const text = segments
+    .map((segment) => (typeof segment === 'object' && segment !== null && 'text' in segment ? String(segment.text) : ''))
+    .join('')
+  return text || JSON.stringify(block)
 }
 
 function readImportedAnalyzeMemo(state: unknown): ImportedAnalyzeMemo | null {
