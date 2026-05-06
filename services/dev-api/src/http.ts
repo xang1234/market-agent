@@ -4,17 +4,23 @@ import {
   getAnalyzeTemplate,
   getAnalyzeTemplateRun,
   listAnalyzeTemplatesByUser,
+  mapSourceCategoriesToBundles,
   persistAnalyzeTemplateRunAfterSnapshotSealWithPool,
+  SourceCategoryMappingError,
   type AnalyzeTemplateRunRow,
   type AnalyzeTemplateRunClientPool,
+  type AnalyzeTemplateRow,
 } from "../../analyze/src/index.ts";
 import {
   claimAgentRun,
   completeAgentRun,
   createAgent,
+  failAgentRun,
   getAgent,
   listAgentsByUser,
+  runAgentLoop,
   updateAgent,
+  type AgentLoopStages,
   type AgentRow,
   type AgentRunRow,
   type AgentUniverse,
@@ -34,6 +40,7 @@ import {
   type ChatThread,
   type ChatThreadsDb,
 } from "../../chat/src/threads-repo.ts";
+import { writeRunActivity } from "../../observability/src/run-activity.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
 import type { SubjectRef } from "../../resolver/src/subject-ref.ts";
 import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
@@ -119,6 +126,31 @@ export type DevApiAdapters = {
   analyze: DevApiAnalyzeAdapter;
   agents: DevApiAgentsAdapter;
 };
+
+export type DevApiAnalyzeWorkflowInput = {
+  userId: string;
+  template: AnalyzeTemplateRow;
+  body: Record<string, unknown>;
+  snapshotId: string;
+  instructions: string;
+  sourceCategories: ReadonlyArray<string>;
+  bundleIds: ReadonlyArray<string>;
+  subjectRefs: ReadonlyArray<SubjectRef>;
+};
+
+export type DevApiAnalyzeWorkflowResult = {
+  blocks: ReadonlyArray<Record<string, unknown>>;
+};
+
+export type DevApiAgentLoopStageFactoryInput = {
+  userId: string;
+  runId: string;
+  agent: AgentRow;
+};
+
+export type DevApiAgentLoopStageFactory = (
+  input: DevApiAgentLoopStageFactoryInput,
+) => AgentLoopStages;
 
 export type DevApiServerOptions = {
   adapters?: DevApiAdapters;
@@ -497,6 +529,10 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
 
 export type DevApiServiceAdapterDeps = {
   db: QueryExecutor & AnalyzeTemplateRunClientPool & ChatMessagePersistenceDb & ChatThreadsDb;
+  runAnalyzeWorkflow?(
+    input: DevApiAnalyzeWorkflowInput,
+  ): Promise<DevApiAnalyzeWorkflowResult> | DevApiAnalyzeWorkflowResult;
+  createAgentLoopStages?: DevApiAgentLoopStageFactory;
   sealAnalyzeSnapshot(input: {
     snapshotId: string;
     userId: string;
@@ -533,16 +569,28 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
         if (template === null || template.user_id !== userId) {
           throw new DevApiHttpError(404, "analyze template not found");
         }
-        const blockId = randomUUID();
         const snapshotId = randomUUID();
-        const blocks = [
-          richTextBlock({
-            id: blockId,
-            snapshotId,
-            title: template.name,
-            text: nonEmptyString(body.instructions) ?? template.prompt_template,
-          }),
-        ];
+        const sourceCategories = readAnalyzeSourceCategories(body.source_categories, template.source_categories);
+        const bundleIds = analyzeBundleIds(sourceCategories);
+        const subjectRefs = analyzeSubjectRefs({
+          primary: readOptionalSubjectRef(body.subject_ref ?? body.primary_subject_ref),
+          added: template.added_subject_refs,
+        });
+        const instructions = nonEmptyString(body.instructions) ?? template.prompt_template;
+        if (!deps.runAnalyzeWorkflow) {
+          throw new DevApiHttpError(503, "durable analyze workflow is not configured");
+        }
+        const rendered = await deps.runAnalyzeWorkflow({
+          userId,
+          template,
+          body,
+          snapshotId,
+          instructions,
+          sourceCategories,
+          bundleIds,
+          subjectRefs,
+        });
+        const blocks = Object.freeze(rendered.blocks.map((block) => Object.freeze({ ...block })));
         const persisted = await persistAnalyzeTemplateRunAfterSnapshotSealWithPool(deps.db, {
           template_id: template.template_id,
           template_version: template.version,
@@ -697,10 +745,36 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
           inputs_watermark: { trigger: "manual" },
         });
         if (!claimed.claimed) return toDevAgentRun(claimed.row);
-        return toDevAgentRun(await completeAgentRun(deps.db, {
-          run_id: runId,
-          outputs_summary: { trigger: "manual", status: "completed" },
-        }));
+        try {
+          const loopResult = await runAgentLoop({
+            pool: deps.db,
+            agent_id: agentId,
+            run_id: runId,
+            current_watermarks: existing.watermarks,
+            alert_rules: Array.isArray(existing.alert_rules) ? existing.alert_rules : [],
+            stages: (deps.createAgentLoopStages ?? defaultAgentLoopStages)({
+              userId,
+              runId,
+              agent: existing,
+            }),
+          });
+          return toDevAgentRun(await completeAgentRun(deps.db, {
+            run_id: runId,
+            outputs_summary: {
+              trigger: "manual",
+              status: "completed",
+              ...jsonObjectOrEmpty(loopResult.outputs_summary),
+              next_watermarks: loopResult.next_watermarks,
+            },
+          }));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return toDevAgentRun(await failAgentRun(deps.db, {
+            run_id: runId,
+            error: message,
+            outputs_summary: { trigger: "manual", status: "failed" },
+          }));
+        }
       },
     },
   };
@@ -726,6 +800,47 @@ function requireNonEmpty(value: unknown, label: string): string {
 
 function contentHash(value: JsonValue): string {
   return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+}
+
+function readAnalyzeSourceCategories(
+  value: unknown,
+  fallback: ReadonlyArray<string>,
+): ReadonlyArray<string> {
+  if (value === undefined || value === null) return [...fallback];
+  if (!Array.isArray(value)) {
+    throw new DevApiHttpError(400, "source_categories must be an array");
+  }
+  const categories = value.map((category, index) => {
+    const text = nonEmptyString(category);
+    if (text === null) throw new DevApiHttpError(400, `source_categories[${index}] must be a non-empty string`);
+    return text;
+  });
+  return categories.length > 0 ? categories : [...fallback];
+}
+
+function analyzeBundleIds(sourceCategories: ReadonlyArray<string>): ReadonlyArray<string> {
+  try {
+    return mapSourceCategoriesToBundles({ categories: sourceCategories }).bundle_ids;
+  } catch (error) {
+    if (error instanceof SourceCategoryMappingError) {
+      throw new DevApiHttpError(400, error.message);
+    }
+    throw error;
+  }
+}
+
+function analyzeSubjectRefs(input: {
+  primary: SubjectRef | null;
+  added: ReadonlyArray<SubjectRef>;
+}): ReadonlyArray<SubjectRef> {
+  const byKey = new Map<string, SubjectRef>();
+  for (const ref of [
+    ...(input.primary ? [input.primary] : []),
+    ...input.added,
+  ]) {
+    byKey.set(`${ref.kind}:${ref.id}`, { kind: ref.kind, id: ref.id });
+  }
+  return Object.freeze([...byKey.values()]);
 }
 
 function readOptionalSubjectRef(value: unknown): SubjectRef | null {
@@ -803,6 +918,87 @@ function emptyEgressDb(): QueryExecutor {
 function readUniverse(value: unknown): AgentUniverse {
   if (value !== null && typeof value === "object") return value as AgentUniverse;
   return { mode: "static", subject_refs: [] };
+}
+
+function defaultAgentLoopStages(
+  input: DevApiAgentLoopStageFactoryInput,
+): AgentLoopStages {
+  const subjectRefs = subjectRefsFromUniverse(input.agent.universe);
+  return {
+    readDeltas: async () => ({
+      trigger: "manual",
+      watermarks: input.agent.watermarks,
+      universe: input.agent.universe as unknown as JsonValue,
+    }),
+    extractEvidence: async ({ deltas }) => ({
+      deltas: deltas as JsonValue,
+      source_policy: input.agent.source_policy,
+      subject_refs: subjectRefs as unknown as JsonValue,
+    }),
+    clusterEvidence: async ({ evidence }) => ({
+      evidence: evidence as JsonValue,
+      claim_clusters: [],
+    }),
+    analyze: async ({ clusters }) => ({
+      clusters: clusters as JsonValue,
+      findings: [],
+    }),
+    nextWatermarks: async ({ current_watermarks }) => ({
+      ...jsonObjectOrEmpty(current_watermarks),
+      last_manual_run_at: new Date().toISOString(),
+    }),
+    applySideEffects: async ({ tx }) => {
+      await writeRunActivity(tx, {
+        user_id: input.userId,
+        agent_id: input.agent.agent_id,
+        stage: "reading",
+        subject_refs: subjectRefs,
+        summary: `Read ${input.agent.name} watermarks for a manual run.`,
+      });
+      await writeRunActivity(tx, {
+        user_id: input.userId,
+        agent_id: input.agent.agent_id,
+        stage: "investigating",
+        subject_refs: subjectRefs,
+        summary: `Investigated ${input.agent.name} configured universe.`,
+      });
+      await writeRunActivity(tx, {
+        user_id: input.userId,
+        agent_id: input.agent.agent_id,
+        stage: "found",
+        subject_refs: subjectRefs,
+        summary: `Completed ${input.agent.name} run with no generated findings.`,
+      });
+      return { findings: 0, activities: 3 };
+    },
+    alertFindings: async () => [],
+  };
+}
+
+function subjectRefsFromUniverse(universe: AgentUniverse): ReadonlyArray<{ kind: string; id: string }> {
+  if (universe.mode === "static") {
+    return Object.freeze(universe.subject_refs.map((ref) => ({ kind: ref.kind, id: ref.id })));
+  }
+  return Object.freeze([{ kind: universe.mode, id: universeId(universe) }]);
+}
+
+function universeId(universe: Exclude<AgentUniverse, { mode: "static" }>): string {
+  switch (universe.mode) {
+    case "screen":
+      return universe.screen_id;
+    case "theme":
+      return universe.theme_id;
+    case "portfolio":
+      return universe.portfolio_id;
+    case "agent":
+      return universe.agent_id;
+  }
+}
+
+function jsonObjectOrEmpty(value: JsonValue | null | undefined): Record<string, JsonValue> {
+  return value !== null && value !== undefined && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
 }
 
 async function listAnalyzeRunsForTemplate(

@@ -239,14 +239,41 @@ test("Analyze and Agents BFF routes use durable adapters instead of server-local
 test("service Analyze adapter writes blocks with the sealed snapshot id", async () => {
   const userId = "00000000-0000-4000-8000-000000000001";
   const templateId = "11111111-1111-4111-8111-111111111111";
+  const primarySubject = { kind: "listing", id: "22222222-2222-4222-8222-222222222222" } as const;
+  const addedSubject = { kind: "issuer", id: "33333333-3333-4333-8333-333333333333" } as const;
   const insertedBlocks: unknown[] = [];
+  let workflowInput: Parameters<NonNullable<Parameters<typeof createServiceDevApiAdapters>[0]["runAnalyzeWorkflow"]>>[0] | null = null;
   const db = fakeAnalyzeDb({
     userId,
     templateId,
+    addedSubjectRefs: [addedSubject],
     insertedBlocks,
   });
   const adapters = createServiceDevApiAdapters({
     db,
+    async runAnalyzeWorkflow(input) {
+      workflowInput = input;
+      return {
+        blocks: [
+          {
+            id: "44444444-4444-4444-8444-444444444444",
+            kind: "rich_text",
+            snapshot_id: input.snapshotId,
+            data_ref: {
+              kind: "analyze_run",
+              id: input.template.template_id,
+              params: {
+                bundle_ids: input.bundleIds,
+                subject_refs: input.subjectRefs,
+              },
+            },
+            source_refs: [],
+            as_of: "2026-05-06T00:00:00.000Z",
+            segments: [{ type: "text", text: "Workflow-rendered memo" }],
+          },
+        ],
+      };
+    },
     async sealAnalyzeSnapshot(input) {
       assert.equal(input.snapshotId, (input.blocks[0] as { snapshot_id?: string }).snapshot_id);
       return {
@@ -278,12 +305,239 @@ test("service Analyze adapter writes blocks with the sealed snapshot id", async 
 
   const run = await adapters.analyze.createRun({
     userId,
-    body: { template_id: templateId, instructions: "Use sealed snapshot" },
+    body: {
+      template_id: templateId,
+      instructions: "Use sealed snapshot",
+      source_categories: ["filings", "news"],
+      subject_ref: primarySubject,
+    },
   });
 
+  assert.ok(workflowInput);
+  assert.deepEqual(workflowInput.sourceCategories, ["filings", "news"]);
+  assert.deepEqual(workflowInput.subjectRefs, [primarySubject, addedSubject]);
+  assert.ok(workflowInput.bundleIds.includes("analyze_template_run"));
+  assert.ok(workflowInput.bundleIds.includes("filing_research"));
+  assert.ok(workflowInput.bundleIds.includes("document_research"));
   assert.notEqual(run.snapshot_id, "pending");
   assert.equal((run.blocks[0] as { snapshot_id?: string }).snapshot_id, run.snapshot_id);
+  assert.equal(JSON.stringify(run.blocks).includes("Use sealed snapshot"), false);
   assert.deepEqual(insertedBlocks, run.blocks);
+});
+
+test("service Agent adapter runs the durable loop and writes activity before completion", async () => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const agentId = "11111111-1111-4111-8111-111111111111";
+  const db = fakeAgentLoopDb({ userId, agentId });
+  const adapters = createServiceDevApiAdapters({
+    db,
+    async sealAnalyzeSnapshot() {
+      throw new Error("analyze seal is not used by agent runs");
+    },
+  });
+
+  const run = await adapters.agents.run({ userId, agentId });
+
+  assert.equal(run?.agent_id, agentId);
+  assert.equal(run?.status, "completed");
+  assert.ok(db.queries.some((query) => query.text.includes("insert into run_activities")));
+  assert.ok(db.queries.some((query) => query.text.includes("update agents") && query.text.includes("watermarks")));
+  assert.ok(db.queries.some((query) => query.text.includes("update agent_run_logs") && query.text.includes("status = 'completed'")));
+  const completeQueryIndex = db.queries.findIndex((query) =>
+    query.text.includes("update agent_run_logs") && query.text.includes("status = 'completed'")
+  );
+  const activityQueryIndex = db.queries.findIndex((query) => query.text.includes("insert into run_activities"));
+  assert.ok(activityQueryIndex > -1);
+  assert.ok(completeQueryIndex > activityQueryIndex);
+});
+
+test("service Agent adapter lets durable loop stages create findings and evaluate alerts", async () => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const agentId = "11111111-1111-4111-8111-111111111111";
+  const findingId = "44444444-4444-4444-8444-444444444444";
+  const db = fakeAgentLoopDb({
+    userId,
+    agentId,
+    alertRules: [
+      {
+        rule_id: "margin-risk",
+        severity_at_least: "high",
+        headline_contains: "margin risk",
+        channels: ["email"],
+      },
+    ],
+  });
+  const finding = {
+    finding_id: findingId,
+    agent_id: agentId,
+    snapshot_id: "55555555-5555-4555-8555-555555555555",
+    subject_refs: [{ kind: "issuer", id: "22222222-2222-4222-8222-222222222222" }],
+    claim_cluster_ids: [],
+    severity: "critical",
+    headline: "Margin risk widened after supplier warning",
+    summary_blocks: [],
+    created_at: "2026-05-06T00:00:00.000Z",
+  };
+  const adapters = createServiceDevApiAdapters({
+    db,
+    createAgentLoopStages() {
+      return {
+        readDeltas: async () => ({ cursor: "old" }),
+        extractEvidence: async () => ({ docs: 1 }),
+        clusterEvidence: async () => ({ clusters: 1 }),
+        analyze: async () => ({ findings: [finding] }),
+        nextWatermarks: async () => ({ cursor: "new" }),
+        applySideEffects: async ({ tx, analysis }) => {
+          await tx.query("insert into findings (finding_id, agent_id, headline) values ($1, $2, $3)", [
+            analysis.findings[0].finding_id,
+            analysis.findings[0].agent_id,
+            analysis.findings[0].headline,
+          ]);
+          await tx.query("insert into run_activities (agent_id, stage, summary) values ($1, $2, $3)", [
+            agentId,
+            "found",
+            "Created one finding",
+          ]);
+          return { findings: analysis.findings.length };
+        },
+        alertFindings: async ({ analysis }) => analysis.findings,
+      };
+    },
+    async sealAnalyzeSnapshot() {
+      throw new Error("analyze seal is not used by agent runs");
+    },
+  });
+
+  const run = await adapters.agents.run({ userId, agentId });
+  const completed = db.queries.find((query) =>
+    query.text.includes("update agent_run_logs") && query.text.includes("status = 'completed'")
+  );
+
+  assert.equal(run?.status, "completed");
+  assert.deepEqual(JSON.parse(String(completed?.values?.[1])), {
+    trigger: "manual",
+    status: "completed",
+    findings: 1,
+    alerts: { evaluated_rules: 1, evaluated_findings: 1, fired: 1 },
+    next_watermarks: { cursor: "new" },
+  });
+  assert.ok(db.queries.some((query) => query.text.includes("insert into findings")));
+  assert.ok(db.queries.some((query) => query.text.includes("insert into run_activities")));
+  assert.ok(db.queries.some((query) => query.text.includes("insert into alerts_fired")));
+});
+
+test("service Analyze adapter rejects unknown source categories before persistence", async () => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const templateId = "11111111-1111-4111-8111-111111111111";
+  const insertedBlocks: unknown[] = [];
+  let workflowCalls = 0;
+  const adapters = createServiceDevApiAdapters({
+    db: fakeAnalyzeDb({ userId, templateId, insertedBlocks }),
+    runAnalyzeWorkflow() {
+      workflowCalls += 1;
+      return { blocks: [] };
+    },
+    async sealAnalyzeSnapshot() {
+      throw new Error("invalid source categories should not seal a snapshot");
+    },
+  });
+
+  await assert.rejects(
+    adapters.analyze.createRun({
+      userId,
+      body: { template_id: templateId, source_categories: ["filings", "unknown-feed"] },
+    }),
+    /unknown source category/,
+  );
+  assert.equal(workflowCalls, 0);
+  assert.deepEqual(insertedBlocks, []);
+});
+
+test("POST /v1/analyze/runs maps unknown source categories to 400", async (t) => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const templateId = "11111111-1111-4111-8111-111111111111";
+  const adapters = createServiceDevApiAdapters({
+    db: fakeAnalyzeDb({ userId, templateId, insertedBlocks: [] }),
+    async sealAnalyzeSnapshot() {
+      throw new Error("invalid source categories should not seal a snapshot");
+    },
+  });
+  const base = await startServer(t, {}, { adapters });
+
+  const response = await fetch(`${base}/v1/analyze/runs`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-id": userId,
+    },
+    body: JSON.stringify({
+      template_id: templateId,
+      source_categories: ["unknown-feed"],
+    }),
+  });
+  const body = await response.json() as { error?: string };
+
+  assert.equal(response.status, 400);
+  assert.match(body.error ?? "", /unknown source category/);
+});
+
+test("POST /v1/analyze/runs rejects durable adapter without workflow renderer", async (t) => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const templateId = "11111111-1111-4111-8111-111111111111";
+  const adapters = createServiceDevApiAdapters({
+    db: fakeAnalyzeDb({ userId, templateId, insertedBlocks: [] }),
+    async sealAnalyzeSnapshot() {
+      throw new Error("missing workflow should not seal a snapshot");
+    },
+  });
+  const base = await startServer(t, {}, { adapters });
+
+  const response = await fetch(`${base}/v1/analyze/runs`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-id": userId,
+    },
+    body: JSON.stringify({
+      template_id: templateId,
+      source_categories: ["filings"],
+    }),
+  });
+  const body = await response.json() as { error?: string };
+
+  assert.equal(response.status, 503);
+  assert.equal(body.error, "durable analyze workflow is not configured");
+});
+
+test("service Agent adapter marks the run failed when the durable loop fails", async () => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const agentId = "11111111-1111-4111-8111-111111111111";
+  const db = fakeAgentLoopDb({ userId, agentId });
+  const adapters = createServiceDevApiAdapters({
+    db,
+    createAgentLoopStages() {
+      return {
+        readDeltas: async () => {
+          throw new Error("evidence reader unavailable");
+        },
+        extractEvidence: async () => ({}),
+        clusterEvidence: async () => ({}),
+        analyze: async () => ({}),
+        nextWatermarks: async () => ({}),
+        applySideEffects: async () => ({}),
+      };
+    },
+    async sealAnalyzeSnapshot() {
+      throw new Error("analyze seal is not used by agent runs");
+    },
+  });
+
+  const run = await adapters.agents.run({ userId, agentId });
+
+  assert.equal(run?.status, "failed");
+  assert.equal(run?.error, "evidence reader unavailable");
+  assert.ok(db.queries.some((query) => query.text.includes("status = 'failed'")));
+  assert.equal(db.queries.some((query) => query.text.includes("insert into run_activities")), false);
 });
 
 test("POST /v1/analyze/runs/:id/share-to-chat loads stored Analyze blocks and creates a durable chat message", async (t) => {
@@ -464,6 +718,7 @@ test("GET /v1/dev/services documents local BFF routing and intentional exclusion
 function fakeAnalyzeDb(input: {
   userId: string;
   templateId: string;
+  addedSubjectRefs?: unknown[];
   insertedBlocks: unknown[];
 }) {
   const client = {
@@ -480,7 +735,7 @@ function fakeAnalyzeDb(input: {
               name: "Earnings quality",
               prompt_template: "Review earnings quality",
               source_categories: ["filings"],
-              added_subject_refs: [],
+              added_subject_refs: input.addedSubjectRefs ?? [],
               block_layout_hint: null,
               peer_policy: null,
               disclosure_policy: null,
@@ -521,6 +776,168 @@ function fakeAnalyzeDb(input: {
     },
     query: client.query,
   };
+}
+
+function fakeAgentLoopDb(input: {
+  userId: string;
+  agentId: string;
+  alertRules?: unknown[];
+}) {
+  const queries: Array<{ text: string; values?: unknown[] }> = [];
+  const runIdFromInsert = () => queries.find((query) => query.text.includes("insert into agent_run_logs"))?.values?.[0] as string;
+  const agentRow = {
+    agent_id: input.agentId,
+    user_id: input.userId,
+    name: "Durable loop monitor",
+    thesis: "Track source-backed changes",
+    universe: { mode: "static", subject_refs: [{ kind: "issuer", id: "22222222-2222-4222-8222-222222222222" }] },
+    source_policy: null,
+    cadence: "daily",
+    prompt_template: null,
+    alert_rules: input.alertRules ?? [],
+    watermarks: { cursor: "old" },
+    enabled: true,
+    created_at: "2026-05-06T00:00:00.000Z",
+    updated_at: "2026-05-06T00:00:00.000Z",
+  };
+  const db = {
+    queries,
+    async connect() {
+      return db;
+    },
+    release() {
+      // No-op test pool client.
+    },
+    async query(text: string, values?: unknown[]) {
+      queries.push({ text, values });
+      if (text === "begin" || text === "commit" || text === "rollback") {
+        return { rows: [], rowCount: null };
+      }
+      if (text.includes("claim_expires_at <= now()")) {
+        return { rows: [], rowCount: 0 };
+      }
+      if (text.includes("from agents") && text.includes("where agent_id")) {
+        return { rows: values?.[0] === input.agentId ? [agentRow] : [], rowCount: null };
+      }
+      if (text.includes("insert into agent_run_logs")) {
+        return {
+          rows: [
+            {
+              agent_run_log_id: values?.[0],
+              agent_id: values?.[1],
+              started_at: "2026-05-06T00:00:00.000Z",
+              ended_at: null,
+              duration_ms: null,
+              inputs_watermark: values?.[2] === null ? null : JSON.parse(String(values?.[2])),
+              outputs_summary: null,
+              status: "running",
+              error: null,
+              claim_expires_at: values?.[3],
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+      if (text.includes("insert into run_activities")) {
+        if (values?.length === 3) {
+          return {
+            rows: [
+              {
+                run_activity_id: "33333333-3333-4333-8333-333333333333",
+                user_id: input.userId,
+                agent_id: values[0],
+                stage: values[1],
+                subject_refs: [],
+                source_refs: [],
+                summary: values[2],
+                ts: "2026-05-06T00:00:00.000Z",
+              },
+            ],
+            rowCount: 1,
+          };
+        }
+        return {
+          rows: [
+            {
+              run_activity_id: "33333333-3333-4333-8333-333333333333",
+              user_id: values?.[0],
+              agent_id: values?.[1],
+              stage: values?.[2],
+              subject_refs: JSON.parse(String(values?.[3])),
+              source_refs: JSON.parse(String(values?.[4])),
+              summary: values?.[5],
+              ts: "2026-05-06T00:00:00.000Z",
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+      if (text.includes("insert into findings")) {
+        return { rows: [], rowCount: 1 };
+      }
+      if (text.includes("insert into alerts_fired")) {
+        return {
+          rows: [
+            {
+              alert_fired_id: "66666666-6666-4666-8666-666666666666",
+              agent_id: input.agentId,
+              run_id: runIdFromInsert(),
+              rule_id: values?.[2],
+              finding_id: values?.[3],
+              channels: JSON.parse(String(values?.[4])),
+              trigger_refs: JSON.parse(String(values?.[5])),
+              status: "pending_notification",
+              fired_at: "2026-05-06T00:00:00.000Z",
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+      if (text.includes("update agents") && text.includes("watermarks")) {
+        return { rows: [], rowCount: 1 };
+      }
+      if (text.includes("update agent_run_logs") && text.includes("status = 'completed'")) {
+        return {
+          rows: [
+            {
+              agent_run_log_id: values?.[0] ?? runIdFromInsert(),
+              agent_id: input.agentId,
+              started_at: "2026-05-06T00:00:00.000Z",
+              ended_at: "2026-05-06T00:00:01.000Z",
+              duration_ms: 1000,
+              inputs_watermark: { trigger: "manual" },
+              outputs_summary: JSON.parse(String(values?.[1])),
+              status: "completed",
+              error: null,
+              claim_expires_at: null,
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+      if (text.includes("update agent_run_logs") && text.includes("status = 'failed'")) {
+        return {
+          rows: [
+            {
+              agent_run_log_id: values?.[0] ?? runIdFromInsert(),
+              agent_id: input.agentId,
+              started_at: "2026-05-06T00:00:00.000Z",
+              ended_at: "2026-05-06T00:00:01.000Z",
+              duration_ms: 1000,
+              inputs_watermark: { trigger: "manual" },
+              outputs_summary: JSON.parse(String(values?.[1])),
+              status: "failed",
+              error: values?.[2],
+              claim_expires_at: null,
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+      throw new Error(`unexpected query: ${text}`);
+    },
+  };
+  return db;
 }
 
 function fakeArtifactShareDb(input: {

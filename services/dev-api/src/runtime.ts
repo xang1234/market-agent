@@ -30,12 +30,20 @@ export async function createDevApiAdaptersFromEnv(
   if (typeof module.sealAnalyzeSnapshot !== "function") {
     throw new Error("DEV_API_ANALYZE_SEAL_MODULE must export sealAnalyzeSnapshot");
   }
+  if (module.runAnalyzeWorkflow !== undefined && typeof module.runAnalyzeWorkflow !== "function") {
+    throw new Error("DEV_API_ANALYZE_SEAL_MODULE runAnalyzeWorkflow export must be a function");
+  }
+  if (module.createAgentLoopStages !== undefined && typeof module.createAgentLoopStages !== "function") {
+    throw new Error("DEV_API_ANALYZE_SEAL_MODULE createAgentLoopStages export must be a function");
+  }
 
   const { Pool } = await import("pg");
   const pool = new Pool({ connectionString: databaseUrl });
   return createServiceDevApiAdapters({
     db: pool,
     sealAnalyzeSnapshot: module.sealAnalyzeSnapshot as DevApiServiceAdapterDeps["sealAnalyzeSnapshot"],
+    runAnalyzeWorkflow: module.runAnalyzeWorkflow as DevApiServiceAdapterDeps["runAnalyzeWorkflow"],
+    createAgentLoopStages: module.createAgentLoopStages as DevApiServiceAdapterDeps["createAgentLoopStages"],
   });
 }
 
