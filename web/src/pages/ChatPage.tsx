@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useReducer, useState, type FormEvent } from 'react'
-import { Link, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link, Outlet, useNavigate, useParams } from 'react-router-dom'
 
 import { BlockView, type Block } from '../blocks'
+import { openChatTurnStream } from '../chat/openChatTurnStream.ts'
 import { INITIAL_STREAM_STATE, applyChatStreamEvent } from '../chat/streamReducer.ts'
 import { StreamingTurnView } from '../chat/StreamingTurnView.tsx'
-import type { ChatSseEvent } from '../chat/sseEventTypes.ts'
 import { useAuth } from '../shell/useAuth.ts'
 
 type ChatThread = {
@@ -17,12 +17,6 @@ type ThreadListState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; threads: ReadonlyArray<ChatThread> }
-
-type ImportedAnalyzeMemo = {
-  run_id: string
-  snapshot_id: string
-  blocks: ReadonlyArray<Block>
-}
 
 type PersistedChatMessage = {
   message_id: string
@@ -38,12 +32,6 @@ type MessageHistoryState =
   | { kind: 'idle' | 'loading' }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; messages: ReadonlyArray<PersistedChatMessage> }
-
-type ChatTurnStreamCallbacks = {
-  onEvent(event: ChatSseEvent): void
-  onCompleted(): void
-  onError(): void
-}
 
 export function ChatLayout() {
   const { session } = useAuth()
@@ -134,8 +122,6 @@ export function ChatEmptyState() {
 export function ChatThreadView() {
   const { session } = useAuth()
   const { threadId = '' } = useParams<{ threadId: string }>()
-  const location = useLocation()
-  const importedMemo = readImportedAnalyzeMemo(location.state)
   const [prompt, setPrompt] = useState('')
   const [transcript, setTranscript] = useState<ReadonlyArray<{ role: 'user'; text: string }>>([])
   const [history, setHistory] = useState<MessageHistoryState>({ kind: 'idle' })
@@ -146,7 +132,6 @@ export function ChatThreadView() {
   useEffect(() => {
     if (!session || !threadId) return
     const controller = new AbortController()
-    setHistory({ kind: 'loading' })
     fetch(`/v1/chat/threads/${encodeURIComponent(threadId)}/messages`, {
       headers: { 'x-user-id': session.userId },
       signal: controller.signal,
@@ -203,19 +188,6 @@ export function ChatThreadView() {
         ) : null}
         {history.kind === 'ready' ? (
           <PersistedMessageHistory messages={history.messages} />
-        ) : null}
-        {importedMemo ? (
-          <section className="rounded-md border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Imported analyze memo</h3>
-              <span className="font-mono text-xs text-neutral-500 dark:text-neutral-400">
-                {importedMemo.run_id}
-              </span>
-            </div>
-            <div className="flex flex-col gap-3">
-              {importedMemo.blocks.map((block) => <BlockView key={block.id} block={block} />)}
-            </div>
-          </section>
         ) : null}
         {transcript.map((message, index) => (
           <div
@@ -295,25 +267,6 @@ function blockText(block: Block): string {
   return text || JSON.stringify(block)
 }
 
-function readImportedAnalyzeMemo(state: unknown): ImportedAnalyzeMemo | null {
-  if (typeof state !== 'object' || state === null) return null
-  const importedMemo = (state as { importedMemo?: unknown }).importedMemo
-  if (typeof importedMemo !== 'object' || importedMemo === null) return null
-  const candidate = importedMemo as Partial<ImportedAnalyzeMemo>
-  if (
-    typeof candidate.run_id !== 'string'
-    || typeof candidate.snapshot_id !== 'string'
-    || !Array.isArray(candidate.blocks)
-  ) {
-    return null
-  }
-  return {
-    run_id: candidate.run_id,
-    snapshot_id: candidate.snapshot_id,
-    blocks: candidate.blocks,
-  }
-}
-
 function ThreadList({ userId }: { userId: string }) {
   const [state, setState] = useState<ThreadListState>({ kind: 'loading' })
 
@@ -379,52 +332,4 @@ function ThreadList({ userId }: { userId: string }) {
 function makeRunId(): string {
   if ('randomUUID' in crypto) return crypto.randomUUID()
   return `00000000-0000-4000-8000-${Math.floor(Math.random() * 1e12).toString().padStart(12, '0')}`
-}
-
-export function openChatTurnStream(
-  input: {
-    threadId: string
-    runId: string
-    userIntent: string
-    userId: string
-  },
-  callbacks: ChatTurnStreamCallbacks,
-  EventSourceCtor: typeof EventSource = EventSource,
-): EventSource {
-  const params = new URLSearchParams({
-    run_id: input.runId,
-    turn_id: input.runId,
-    user_intent: input.userIntent,
-    user_id: input.userId,
-  })
-  const source = new EventSourceCtor(`/v1/chat/threads/${encodeURIComponent(input.threadId)}/stream?${params}`)
-  source.onmessage = (event) => {
-    callbacks.onEvent(JSON.parse(event.data) as ChatSseEvent)
-  }
-  for (const type of [
-    'turn.started',
-    'tool.started',
-    'tool.completed',
-    'snapshot.staged',
-    'snapshot.sealed',
-    'block.began',
-    'block.delta',
-    'block.completed',
-    'turn.completed',
-    'turn.error',
-  ] as const) {
-    source.addEventListener(type, (event) => {
-      callbacks.onEvent(JSON.parse((event as MessageEvent).data) as ChatSseEvent)
-      if (type === 'turn.completed') {
-        callbacks.onCompleted()
-        source.close()
-      }
-      if (type === 'turn.error') source.close()
-    })
-  }
-  source.onerror = () => {
-    callbacks.onError()
-    source.close()
-  }
-  return source
 }

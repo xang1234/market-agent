@@ -286,6 +286,94 @@ test("service Analyze adapter writes blocks with the sealed snapshot id", async 
   assert.deepEqual(insertedBlocks, run.blocks);
 });
 
+test("POST /v1/artifacts/share-to-chat persists Analyze blocks as a durable chat message", async (t) => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const threadId = "11111111-1111-4111-8111-111111111111";
+  const snapshotId = "22222222-2222-4222-8222-222222222222";
+  const block = {
+    id: "33333333-3333-4333-8333-333333333333",
+    kind: "rich_text",
+    snapshot_id: snapshotId,
+    data_ref: { kind: "analyze_run", id: "44444444-4444-4444-8444-444444444444" },
+    source_refs: [],
+    as_of: "2026-05-06T00:00:00.000Z",
+    segments: [{ type: "text", text: "Durable imported memo" }],
+  };
+  const db = fakeArtifactShareDb({ userId, threadId });
+  const adapters = createServiceDevApiAdapters({
+    db,
+    async sealAnalyzeSnapshot() {
+      throw new Error("analyze seal is not used by artifact share");
+    },
+  });
+  const base = await startServer(t, {}, { adapters });
+
+  const response = await fetch(`${base}/v1/artifacts/share-to-chat`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-id": userId,
+    },
+    body: JSON.stringify({
+      thread_id: threadId,
+      source_kind: "memo",
+      origin_snapshot_id: snapshotId,
+      analyze_run_id: "44444444-4444-4444-8444-444444444444",
+      blocks: [block],
+    }),
+  });
+  const body = await response.json() as {
+    message?: { snapshot_id?: string; blocks?: unknown[] };
+    origin_snapshot_ids?: string[];
+  };
+
+  assert.equal(response.status, 201);
+  assert.equal(body.message?.snapshot_id, snapshotId);
+  assert.deepEqual(body.message?.blocks, [block]);
+  assert.deepEqual(body.origin_snapshot_ids, [snapshotId]);
+  assert.equal(db.queries.some((query) => query.text.includes("latest_snapshot_id")), false);
+});
+
+test("POST /v1/artifacts/share-to-chat rejects blocks outside the origin snapshot", async (t) => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const db = fakeArtifactShareDb({
+    userId,
+    threadId: "11111111-1111-4111-8111-111111111111",
+  });
+  const adapters = createServiceDevApiAdapters({
+    db,
+    async sealAnalyzeSnapshot() {
+      throw new Error("analyze seal is not used by artifact share");
+    },
+  });
+  const base = await startServer(t, {}, { adapters });
+
+  const response = await fetch(`${base}/v1/artifacts/share-to-chat`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-id": userId,
+    },
+    body: JSON.stringify({
+      thread_id: "11111111-1111-4111-8111-111111111111",
+      source_kind: "memo",
+      origin_snapshot_id: "22222222-2222-4222-8222-222222222222",
+      blocks: [
+        {
+          id: "33333333-3333-4333-8333-333333333333",
+          kind: "rich_text",
+          snapshot_id: "55555555-5555-4555-8555-555555555555",
+        },
+      ],
+    }),
+  });
+  const body = await response.json() as Record<string, unknown>;
+
+  assert.equal(response.status, 422);
+  assert.equal(body.error, "artifact share rejected");
+  assert.equal(db.queries.some((query) => query.text.includes("insert into chat_messages")), false);
+});
+
 test("GET /v1/agents requires an authenticated user", async (t) => {
   const base = await startServer(t);
 
@@ -321,7 +409,7 @@ test("GET /v1/dev/services documents local BFF routing and intentional exclusion
 
   assert.equal(response.status, 200);
   assert.ok(body.services?.some((service) => service.name === "chat" && service.status === "vite_proxy"));
-  assert.ok(body.services?.some((service) => service.name === "artifact" && service.status === "library"));
+  assert.ok(body.services?.some((service) => service.name === "artifact" && service.status === "bff_durable_adapter"));
 });
 
 function fakeAnalyzeDb(input: {
@@ -383,5 +471,47 @@ function fakeAnalyzeDb(input: {
       return client;
     },
     query: client.query,
+  };
+}
+
+function fakeArtifactShareDb(input: {
+  userId: string;
+  threadId: string;
+}) {
+  const queries: Array<{ text: string; values?: unknown[] }> = [];
+  return {
+    queries,
+    async connect() {
+      return this;
+    },
+    release() {
+      // No-op test pool client.
+    },
+    async query(text: string, values?: unknown[]) {
+      queries.push({ text, values });
+      if (text.includes("from chat_threads")) {
+        return {
+          rows: values?.[0] === input.threadId && values?.[1] === input.userId ? [{ owned: true }] : [],
+          rowCount: null,
+        };
+      }
+      if (text.includes("insert into chat_messages")) {
+        return {
+          rows: [
+            {
+              message_id: "66666666-6666-4666-8666-666666666666",
+              thread_id: values?.[0],
+              role: values?.[2],
+              snapshot_id: values?.[3],
+              blocks: JSON.parse(String(values?.[4])),
+              content_hash: values?.[5],
+              created_at: "2026-05-06T00:00:00.000Z",
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+      throw new Error(`unexpected query: ${text}`);
+    },
   };
 }

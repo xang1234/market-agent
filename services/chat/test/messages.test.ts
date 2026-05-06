@@ -4,6 +4,7 @@ import {
   chatMessageTransactionClient,
   createChatMessagePersistence,
   listChatMessagesForThread,
+  persistImportedArtifactMessage,
   persistChatMessageAfterSnapshotSeal,
   persistChatMessageAfterSnapshotSealWithPool,
   type ChatMessageClientPool,
@@ -287,6 +288,65 @@ test("listChatMessagesForThread returns null and does not read messages for wron
   assert.equal(db.queries.length, 1);
 });
 
+test("persistImportedArtifactMessage inserts an add-only assistant message for an owned thread", async () => {
+  const db = importedMessageDb((text, values) => {
+    if (text.includes("from chat_threads")) return [{ owned: true }];
+    if (text.includes("insert into chat_messages")) {
+      return [
+        {
+          message_id: "33333333-3333-4333-a333-333333333333",
+          thread_id: values?.[0],
+          role: values?.[2],
+          snapshot_id: values?.[3],
+          blocks: JSON.parse(String(values?.[4])),
+          content_hash: values?.[5],
+          created_at: "2026-05-06T00:00:00.000Z",
+        },
+      ];
+    }
+    throw new Error(`unexpected query: ${text}`);
+  });
+
+  const result = await persistImportedArtifactMessage(db, {
+    thread_id: "11111111-1111-4111-a111-111111111111",
+    user_id: "00000000-0000-4000-8000-000000000001",
+    role: "assistant",
+    snapshot_id: "22222222-2222-4222-a222-222222222222",
+    blocks: [{ id: "block-1", kind: "rich_text", snapshot_id: "22222222-2222-4222-a222-222222222222" }],
+    content_hash: "sha256:imported",
+  });
+
+  assert.ok(result);
+  assert.equal(result.snapshot_id, "22222222-2222-4222-a222-222222222222");
+  assert.deepEqual(result.blocks, [
+    { id: "block-1", kind: "rich_text", snapshot_id: "22222222-2222-4222-a222-222222222222" },
+  ]);
+  assert.equal(db.queries.some((query) => query.text.includes("latest_snapshot_id")), false);
+  assert.deepEqual(db.queries[0].values, [
+    "11111111-1111-4111-a111-111111111111",
+    "00000000-0000-4000-8000-000000000001",
+  ]);
+});
+
+test("persistImportedArtifactMessage returns null and does not insert for wrong-user threads", async () => {
+  const db = importedMessageDb((text) => {
+    if (text.includes("from chat_threads")) return [];
+    throw new Error(`unexpected query: ${text}`);
+  });
+
+  const result = await persistImportedArtifactMessage(db, {
+    thread_id: "11111111-1111-4111-a111-111111111111",
+    user_id: "00000000-0000-4000-8000-000000000002",
+    role: "assistant",
+    snapshot_id: "22222222-2222-4222-a222-222222222222",
+    blocks: [{ id: "block-1", kind: "rich_text", snapshot_id: "22222222-2222-4222-a222-222222222222" }],
+    content_hash: "sha256:imported",
+  });
+
+  assert.equal(result, null);
+  assert.equal(db.queries.length, 1);
+});
+
 function successfulSealResult(): SnapshotSealResult {
   return {
     ok: true,
@@ -379,6 +439,19 @@ function unpinnedRecordingDb(steps: string[] = []): ChatMessagePersistenceDb & {
 }
 
 function messageListDb(
+  responder: (text: string, values?: unknown[]) => Record<string, unknown>[],
+): ChatMessagePersistenceDb & { queries: Array<{ text: string; values?: unknown[] }> } {
+  const queries: Array<{ text: string; values?: unknown[] }> = [];
+  return {
+    queries,
+    async query(text, values) {
+      queries.push({ text, values });
+      return { rows: responder(text, values) };
+    },
+  };
+}
+
+function importedMessageDb(
   responder: (text: string, values?: unknown[]) => Record<string, unknown>[],
 ): ChatMessagePersistenceDb & { queries: Array<{ text: string; values?: unknown[] }> } {
   const queries: Array<{ text: string; values?: unknown[] }> = [];

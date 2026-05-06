@@ -1,5 +1,5 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   getAnalyzeTemplate,
   listAnalyzeTemplatesByUser,
@@ -18,6 +18,17 @@ import {
   type AgentUniverse,
   type QueryExecutor,
 } from "../../agents/src/index.ts";
+import {
+  SHAREABLE_ARTIFACT_SOURCE_KINDS,
+  shareArtifactToChat,
+  type ShareableArtifactBlock,
+  type ShareableArtifactSourceKind,
+} from "../../artifact/src/index.ts";
+import {
+  persistImportedArtifactMessage,
+  type ChatMessagePersistenceDb,
+  type ChatMessageRow,
+} from "../../chat/src/messages.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
 import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
 import { readDevFlags } from "../../shared/src/devFlags.ts";
@@ -58,6 +69,11 @@ type DevAnalyzeTemplate = {
   version: number;
 };
 
+type DevArtifactShareResult = {
+  message: ChatMessageRow;
+  origin_snapshot_ids: ReadonlyArray<string>;
+};
+
 export type DevApiAnalyzeAdapter = {
   listTemplates(input: { userId: string }): Promise<{
     templates: DevAnalyzeTemplate[];
@@ -87,9 +103,17 @@ export type DevApiAgentsAdapter = {
   run(input: { userId: string; agentId: string }): Promise<DevAgentRun | null>;
 };
 
+export type DevApiArtifactAdapter = {
+  shareToChat(input: {
+    userId: string;
+    body: Record<string, unknown>;
+  }): Promise<DevArtifactShareResult>;
+};
+
 export type DevApiAdapters = {
   analyze: DevApiAnalyzeAdapter;
   agents: DevApiAgentsAdapter;
+  artifact: DevApiArtifactAdapter;
 };
 
 export type DevApiServerOptions = {
@@ -162,6 +186,26 @@ export function createDevApiServer(
       }
       const input = typeof body === "object" && body !== null ? body as Record<string, unknown> : {};
       respondJson(res, 201, await adapters.analyze.createRun({ userId, body: input }));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/artifacts/share-to-chat") {
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (userId === null) {
+        respondJson(res, 401, { error: "x-user-id header is required" });
+        return;
+      }
+      const body = await readJson(req).catch(() => BAD_JSON);
+      if (body === BAD_JSON) {
+        respondJson(res, 400, { error: "request body must be valid JSON" });
+        return;
+      }
+      const input = typeof body === "object" && body !== null ? body as Record<string, unknown> : {};
+      if (!adapters) {
+        respondJson(res, 503, { error: "durable artifact adapter is not configured" });
+        return;
+      }
+      respondJson(res, 201, await adapters.artifact.shareToChat({ userId, body: input }));
       return;
     }
 
@@ -395,11 +439,46 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
         return run;
       },
     },
+    artifact: {
+      async shareToChat({ body }) {
+        const threadId = requireNonEmpty(body.thread_id, "thread_id");
+        const sourceKind = readShareSourceKind(body.source_kind);
+        const originSnapshotId = requireNonEmpty(body.origin_snapshot_id, "origin_snapshot_id");
+        const blocks = readShareBlocks(body.blocks);
+        const shared = await shareArtifactToChat({
+          sources: [
+            {
+              source_kind: sourceKind,
+              origin_snapshot_id: originSnapshotId,
+              blocks,
+            },
+          ],
+          egress: {
+            db: emptyEgressDb(),
+            listFactsForEgress: async (_db, input) =>
+              input.fact_ids.map((factId) => ({ fact_id: factId }) as never),
+          },
+        });
+        if (!shared.ok) throw new DevApiHttpError(422, "artifact share rejected");
+        return {
+          message: {
+            message_id: stableUuid(`artifact-message:${threadId}:${contentHash(shared.blocks as JsonValue)}`),
+            thread_id: threadId,
+            role: "assistant",
+            snapshot_id: shared.origin_snapshot_ids[0] ?? originSnapshotId,
+            blocks: shared.blocks as JsonValue,
+            content_hash: contentHash(shared.blocks as JsonValue),
+            created_at: new Date().toISOString(),
+          },
+          origin_snapshot_ids: shared.origin_snapshot_ids,
+        };
+      },
+    },
   };
 }
 
 export type DevApiServiceAdapterDeps = {
-  db: QueryExecutor & AnalyzeTemplateRunClientPool;
+  db: QueryExecutor & AnalyzeTemplateRunClientPool & ChatMessagePersistenceDb;
   sealAnalyzeSnapshot(input: {
     snapshotId: string;
     userId: string;
@@ -549,6 +628,40 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
         }));
       },
     },
+    artifact: {
+      async shareToChat({ userId, body }) {
+        const threadId = requireNonEmpty(body.thread_id, "thread_id");
+        const sourceKind = readShareSourceKind(body.source_kind);
+        const originSnapshotId = requireNonEmpty(body.origin_snapshot_id, "origin_snapshot_id");
+        const blocks = readShareBlocks(body.blocks);
+        const shared = await shareArtifactToChat({
+          sources: [
+            {
+              source_kind: sourceKind,
+              origin_snapshot_id: originSnapshotId,
+              blocks,
+            },
+          ],
+          egress: { db: deps.db },
+        });
+        if (!shared.ok) throw new DevApiHttpError(422, "artifact share rejected");
+        const snapshotId = shared.origin_snapshot_ids[0];
+        if (snapshotId === undefined) throw new DevApiHttpError(422, "artifact share rejected");
+        const message = await persistImportedArtifactMessage(deps.db, {
+          thread_id: threadId,
+          user_id: userId,
+          role: "assistant",
+          snapshot_id: snapshotId,
+          blocks: shared.blocks as JsonValue,
+          content_hash: contentHash(shared.blocks as JsonValue),
+        });
+        if (message === null) throw new DevApiHttpError(404, "chat thread not found");
+        return {
+          message,
+          origin_snapshot_ids: shared.origin_snapshot_ids,
+        };
+      },
+    },
   };
 }
 
@@ -566,6 +679,31 @@ function requireNonEmpty(value: unknown, label: string): string {
   const text = nonEmptyString(value);
   if (text === null) throw new DevApiHttpError(400, `${label} is required`);
   return text;
+}
+
+function readShareSourceKind(value: unknown): ShareableArtifactSourceKind {
+  const sourceKind = requireNonEmpty(value, "source_kind");
+  if (!SHAREABLE_ARTIFACT_SOURCE_KINDS.includes(sourceKind as ShareableArtifactSourceKind)) {
+    throw new DevApiHttpError(400, "source_kind is invalid");
+  }
+  return sourceKind as ShareableArtifactSourceKind;
+}
+
+function readShareBlocks(value: unknown): ShareableArtifactBlock[] {
+  if (!Array.isArray(value)) throw new DevApiHttpError(400, "blocks is required");
+  return value as ShareableArtifactBlock[];
+}
+
+function contentHash(value: JsonValue): string {
+  return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+}
+
+function emptyEgressDb(): QueryExecutor {
+  return {
+    async query() {
+      return { rows: [], rowCount: 0 };
+    },
+  };
 }
 
 function readUniverse(value: unknown): AgentUniverse {
@@ -730,7 +868,7 @@ function serviceCatalog(env: Record<string, string | undefined>, hasAdapters: bo
     { name: "evidence", status: "vite_proxy", origin: env.EVIDENCE_ORIGIN ?? "http://127.0.0.1:4335" },
     { name: "analyze", status: bffStatus, origin: env.DEV_API_ORIGIN ?? "http://127.0.0.1:4312" },
     { name: "agents", status: bffStatus, origin: env.DEV_API_ORIGIN ?? "http://127.0.0.1:4312" },
-    { name: "artifact", status: "library", note: "shared through service callers; no standalone dev HTTP server" },
+    { name: "artifact", status: bffStatus, origin: env.DEV_API_ORIGIN ?? "http://127.0.0.1:4312", note: "share-to-chat is exposed through dev-api; no standalone dev HTTP server" },
     { name: "snapshot", status: "library", note: "used by chat/analyze persistence paths; no standalone dev HTTP server" },
     { name: "tools", status: "library", note: "analyst tool registry package; no standalone dev HTTP server" },
     { name: "observability", status: "library", note: "run activity primitives exposed through chat/home routes" },

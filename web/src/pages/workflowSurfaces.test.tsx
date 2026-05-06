@@ -9,8 +9,10 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 import { AgentsPage } from './AgentsPage.tsx'
 import { AnalyzePage } from './AnalyzePage.tsx'
-import { ChatEmptyState, ChatLayout, ChatThreadView, openChatTurnStream } from './ChatPage.tsx'
+import { ChatEmptyState, ChatLayout, ChatThreadView } from './ChatPage.tsx'
+import { shareAnalyzeRunToChat } from '../analyze/shareToChat.ts'
 import { BlockRegistryProvider, createDefaultBlockRegistry, type Block } from '../blocks'
+import { openChatTurnStream } from '../chat/openChatTurnStream.ts'
 import type { ChatSseEvent } from '../chat/sseEventTypes.ts'
 import { AuthContext } from '../shell/authTypes.ts'
 
@@ -77,7 +79,7 @@ test('Chat thread route renders message stream and composer workflow copy', () =
   assert.doesNotMatch(html, /ships with P2\.1/i)
 })
 
-test('Chat thread route renders an imported Analyze memo handoff', () => {
+test('Chat thread route does not render imported Analyze memo from Router state', () => {
   const html = renderWithAuth(
     <BlockRegistryProvider registry={createDefaultBlockRegistry()}>
       <MemoryRouter
@@ -101,8 +103,8 @@ test('Chat thread route renders an imported Analyze memo handoff', () => {
     </BlockRegistryProvider>,
   )
 
-  assert.match(html, /Imported analyze memo/)
-  assert.match(html, /Imported memo content/)
+  assert.doesNotMatch(html, /Imported analyze memo/)
+  assert.doesNotMatch(html, /Imported memo content/)
 })
 
 test('Chat thread route loads persisted assistant Block[] messages on direct navigation', async () => {
@@ -216,6 +218,45 @@ test('Analyze surface renders template controls, source controls, memo canvas, a
   assert.match(html, /Generate memo/)
   assert.match(html, /Add to chat/)
   assert.doesNotMatch(html, /ships with P4\.2/i)
+})
+
+test('Analyze Add-to-chat shares run blocks through the durable artifact endpoint', async () => {
+  const originalFetch = globalThis.fetch
+  const calls: Array<{ input: string; init?: RequestInit }> = []
+  try {
+    globalThis.fetch = async (input, init) => {
+      calls.push({ input: String(input), init })
+      return new Response(JSON.stringify({ ok: true }), { status: 201, headers: { 'content-type': 'application/json' } })
+    }
+
+    await shareAnalyzeRunToChat({
+      userId: USER_ID,
+      threadId: 'thread-123',
+      sourceKind: 'memo',
+      run: {
+        run_id: 'run-123',
+        template_id: 'earnings-quality',
+        template_version: 1,
+        snapshot_id: SNAPSHOT_ID,
+        blocks: [IMPORTED_MEMO_BLOCK],
+        created_at: '2026-05-06T00:00:00.000Z',
+      },
+    })
+
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].input, '/v1/artifacts/share-to-chat')
+    assert.equal(calls[0].init?.method, 'POST')
+    assert.equal((calls[0].init?.headers as Record<string, string>)['x-user-id'], USER_ID)
+    assert.deepEqual(JSON.parse(String(calls[0].init?.body)), {
+      thread_id: 'thread-123',
+      source_kind: 'memo',
+      origin_snapshot_id: SNAPSHOT_ID,
+      analyze_run_id: 'run-123',
+      blocks: [IMPORTED_MEMO_BLOCK],
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('Agents surface renders CRUD controls, run history, and activity status', () => {

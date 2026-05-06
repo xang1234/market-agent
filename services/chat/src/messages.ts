@@ -55,6 +55,15 @@ export type PersistChatMessageAfterSnapshotSealInput = {
   sealSnapshot(): Promise<SnapshotSealResult>;
 };
 
+export type PersistImportedArtifactMessageInput = {
+  thread_id: string;
+  user_id: string;
+  role: Extract<ChatRole, "assistant">;
+  snapshot_id: string;
+  blocks: JsonValue;
+  content_hash: string;
+};
+
 export type ChatMessagePersistenceFactoryInput = {
   pool: ChatMessageClientPool;
   sealSnapshot(input: ChatAssistantMessagePersistenceInput): Promise<SnapshotSealResult>;
@@ -161,6 +170,48 @@ export async function listChatMessagesForThread(
   return {
     messages: rows.map((row) => Object.freeze({ ...row })),
   };
+}
+
+export async function persistImportedArtifactMessage(
+  db: ChatMessagePersistenceDb,
+  input: PersistImportedArtifactMessageInput,
+): Promise<ChatMessageRow | null> {
+  const owner = await db.query<{ owned: boolean }>(
+    `select true as owned
+       from chat_threads
+      where thread_id = $1::uuid
+        and user_id = $2::uuid
+      limit 1`,
+    [input.thread_id, input.user_id],
+  );
+  if (owner.rows.length === 0) return null;
+
+  const { rows } = await db.query<ChatMessageRow>(
+    `insert into chat_messages
+       (thread_id, role, snapshot_id, blocks, content_hash)
+     values ($1::uuid, $3::chat_role, $4::uuid, $5::jsonb, $6)
+     returning
+       message_id::text as message_id,
+       thread_id::text as thread_id,
+       role,
+       snapshot_id::text as snapshot_id,
+       blocks,
+       content_hash,
+       created_at::text as created_at`,
+    [
+      input.thread_id,
+      input.user_id,
+      input.role,
+      input.snapshot_id,
+      serializeJsonValue(input.blocks),
+      input.content_hash,
+    ],
+  );
+  const message = rows[0];
+  if (message === undefined) {
+    throw new Error("persistImportedArtifactMessage: chat message insert returned no row");
+  }
+  return Object.freeze({ ...message });
 }
 
 export function chatMessageTransactionClient<T extends ChatMessagePersistenceDb>(
