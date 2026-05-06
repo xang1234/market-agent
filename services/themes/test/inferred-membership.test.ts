@@ -10,6 +10,7 @@ import {
   IMPACT_DIRECTIONS,
   InferredMembershipError,
   applyInferredThemeMembership,
+  applyInferredThemeMembershipWithPool,
   computeInferredThemeCandidates,
   parseInferredMembershipSpec,
 } from "../src/inferred-membership.ts";
@@ -501,4 +502,94 @@ test("applyInferredThemeMembership preserves rationale on inserts so explainabil
   await applyInferredThemeMembership(db, inferredTheme({ cluster_ids: [CLUSTER_ID_A] }));
   const insert = queries.find((q) => q.text.includes("insert into theme_memberships"));
   assert.equal(insert?.values?.[4], JSON.stringify([CLAIM_A]));
+});
+
+test("applyInferredThemeMembershipWithPool wraps the existing apply path in one transaction", async () => {
+  const candidateRows = [
+    {
+      subject_kind: "issuer",
+      subject_id: ISSUER_A,
+      rationale_claim_ids: [CLAIM_A],
+      distinct_claim_count: 1,
+      arg_signals: 1,
+      impact_signals: 0,
+    },
+  ];
+  const { db: client, queries } = fakeDb(applyResponder(candidateRows, [], [[membershipDbRow({})]]));
+  let releaseCalls = 0;
+  const pool = {
+    async connect() {
+      return {
+        query: client.query.bind(client),
+        release() {
+          releaseCalls += 1;
+        },
+      };
+    },
+  };
+
+  const result = await applyInferredThemeMembershipWithPool(
+    pool,
+    inferredTheme({ cluster_ids: [CLUSTER_ID_A] }),
+  );
+
+  assert.equal(result.added, 1);
+  assert.deepEqual(
+    queries.map((q) => q.text.trim().toLowerCase()).filter((text) => ["begin", "commit", "rollback"].includes(text)),
+    ["begin", "commit"],
+  );
+  assert.equal(releaseCalls, 1);
+});
+
+test("applyInferredThemeMembershipWithPool rolls back and releases the client when apply fails", async () => {
+  const candidateRows = [
+    {
+      subject_kind: "issuer",
+      subject_id: ISSUER_A,
+      rationale_claim_ids: [CLAIM_A],
+      distinct_claim_count: 1,
+      arg_signals: 1,
+      impact_signals: 0,
+    },
+  ];
+  const queries: Captured[] = [];
+  const releaseErrors: unknown[] = [];
+  const pool = {
+    async connect() {
+      return {
+        async query<R extends Record<string, unknown> = Record<string, unknown>>(
+          text: string,
+          values?: unknown[],
+        ): Promise<QueryResult<R>> {
+          queries.push({ text, values });
+          if (text.trim().toLowerCase() === "begin") {
+            return { rows: [] as R[], rowCount: 0, command: "", oid: 0, fields: [] };
+          }
+          if (text.trim().toLowerCase() === "rollback") {
+            return { rows: [] as R[], rowCount: 0, command: "", oid: 0, fields: [] };
+          }
+          if (text.includes("claim_cluster_members")) {
+            return { rows: candidateRows as R[], rowCount: 1, command: "", oid: 0, fields: [] };
+          }
+          if (text.includes("insert into theme_memberships")) {
+            throw new Error("insert failed");
+          }
+          return { rows: [] as R[], rowCount: 0, command: "", oid: 0, fields: [] };
+        },
+        release(error?: unknown) {
+          releaseErrors.push(error);
+        },
+      };
+    },
+  };
+
+  await assert.rejects(
+    () => applyInferredThemeMembershipWithPool(pool, inferredTheme({ cluster_ids: [CLUSTER_ID_A] })),
+    /insert failed/,
+  );
+
+  assert.equal(queries.some((q) => q.text.trim().toLowerCase() === "rollback"), true);
+  assert.equal(queries.some((q) => q.text.trim().toLowerCase() === "commit"), false);
+  assert.equal(releaseErrors.length, 1);
+  assert.equal(releaseErrors[0], undefined);
 });

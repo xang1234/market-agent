@@ -214,6 +214,14 @@ export type ApplyInferredMembershipOptions = {
   maxCandidates?: number;
 };
 
+export type ThemeMembershipPoolClient = QueryExecutor & {
+  release(error?: Error): void;
+};
+
+export type ThemeMembershipClientPool = {
+  connect(): Promise<ThemeMembershipPoolClient>;
+};
+
 // Persists computed candidates as theme_memberships rows. Calls
 // addThemeMembership per candidate, which is idempotent at
 // (theme_id, subject_kind, subject_id) — re-running is safe and existing
@@ -263,6 +271,35 @@ export async function applyInferredThemeMembership(
   return Object.freeze({ added, alreadyPresent, candidates });
 }
 
+export async function applyInferredThemeMembershipWithPool(
+  pool: ThemeMembershipClientPool,
+  theme: ThemeRow,
+  options: ApplyInferredMembershipOptions = {},
+): Promise<ApplyInferredMembershipResult> {
+  const client = await pool.connect();
+  let releaseError: Error | undefined;
+  try {
+    await client.query("begin");
+    try {
+      const result = await applyInferredThemeMembership(client, theme, options);
+      await client.query("commit");
+      return result;
+    } catch (error) {
+      try {
+        await client.query("rollback");
+      } catch (rollbackError) {
+        if (error instanceof Error) {
+          (error as { rollback_error?: unknown }).rollback_error = rollbackError;
+          releaseError = error;
+        }
+      }
+      throw error;
+    }
+  } finally {
+    client.release(releaseError);
+  }
+}
+
 type InferredCandidateDbRow = {
   subject_kind: SubjectKind;
   subject_id: string;
@@ -293,4 +330,3 @@ function inferredCandidateFromDb(row: InferredCandidateDbRow): InferredCandidate
     }),
   });
 }
-

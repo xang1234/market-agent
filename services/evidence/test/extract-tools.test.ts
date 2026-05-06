@@ -9,6 +9,7 @@ import {
 import { loadToolRegistry } from "../../tools/src/registry.ts";
 
 import { createEvidenceReaderToolHandlers } from "../src/reader/extract-tools.ts";
+import { MemoryObjectStore, rawBlobIdFromBytes } from "../src/object-store.ts";
 import type { QueryExecutor } from "../src/types.ts";
 
 const SAMPLE_DOC_UUID = "70a0cc2e-e198-4b59-a5c9-9bd2da4a359b";
@@ -607,4 +608,117 @@ test("extract_mentions returns skipped ambiguous candidates as observable items"
       },
     },
   ]);
+});
+
+test("extract_candidate_facts loads filing XBRL bytes and returns segment plus extension facts", async () => {
+  const xbrl = `
+    <html xmlns:ix="http://www.xbrl.org/2013/inlineXBRL"
+          xmlns:xbrli="http://www.xbrl.org/2003/instance"
+          xmlns:xbrldi="http://xbrl.org/2006/xbrldi"
+          xmlns:iso4217="http://www.xbrl.org/2003/iso4217"
+          xmlns:us-gaap="http://fasb.org/us-gaap/2024"
+          xmlns:srt="http://fasb.org/srt/2024"
+          xmlns:aapl="http://www.apple.com/20240928">
+      <xbrli:context id="C_AAPL_IPHONE_2024">
+        <xbrli:entity>
+          <xbrli:segment>
+            <xbrldi:explicitMember dimension="srt:ProductOrServiceAxis">aapl:IPhoneMember</xbrldi:explicitMember>
+          </xbrli:segment>
+        </xbrli:entity>
+        <xbrli:period>
+          <xbrli:startDate>2023-10-01</xbrli:startDate>
+          <xbrli:endDate>2024-09-28</xbrli:endDate>
+        </xbrli:period>
+      </xbrli:context>
+      <xbrli:unit id="usd"><xbrli:measure>iso4217:USD</xbrli:measure></xbrli:unit>
+      <ix:nonFraction name="us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+                      contextRef="C_AAPL_IPHONE_2024"
+                      unitRef="usd"
+                      scale="6">201,183</ix:nonFraction>
+      <ix:nonFraction name="aapl:IPhoneGrossMargin"
+                      contextRef="C_AAPL_IPHONE_2024"
+                      unitRef="usd"
+                      scale="6">85,000</ix:nonFraction>
+    </html>`;
+  const bytes = new TextEncoder().encode(xbrl);
+  const objectStore = new MemoryObjectStore();
+  await objectStore.put(bytes);
+  const rawBlobId = rawBlobIdFromBytes(bytes);
+  const db: QueryExecutor = {
+    async query<R extends Record<string, unknown>>(text: string) {
+      if (/from documents/.test(text)) {
+        return {
+          rows: [{
+            ...fakeDocumentRow(),
+            kind: "filing",
+            published_at: new Date("2024-11-01T00:00:00.000Z"),
+            raw_blob_id: rawBlobId,
+          }] as unknown as R[],
+          command: "SELECT",
+          rowCount: 1,
+          oid: 0,
+          fields: [],
+        };
+      }
+      throw new Error(`unexpected query: ${text}`);
+    },
+  };
+  const handlers = createEvidenceReaderToolHandlers({ db, objectStore });
+
+  const out = await handlers.extract_candidate_facts({ document_id: SAMPLE_DOC_UUID });
+
+  assert.deepEqual([...out.source_ids], [SAMPLE_SOURCE_UUID]);
+  assert.equal(out.items.some((item) => item.item_type === "xbrl_segment_fact"), true);
+  assert.equal(out.items.some((item) => item.item_type === "xbrl_extension_fact"), true);
+  const iphone = out.items.find(
+    (item) => item.item_type === "xbrl_segment_fact" && item.member?.name === "aapl:IPhoneMember",
+  );
+  assert.ok(iphone);
+  assert.equal(iphone.definition_as_of, "2024-11-01");
+});
+
+test("extract_candidate_facts includes non-GAAP reconciliations with GAAP mappings", async () => {
+  const filing = `
+    <html>
+      <body>
+        <table>
+          <tr><th>GAAP to non-GAAP reconciliation</th><th>Fiscal 2024</th></tr>
+          <tr><td>GAAP net income</td><td>$93,736</td></tr>
+          <tr><td>Restructuring charges</td><td>1,250</td></tr>
+          <tr><td>Non-GAAP net income</td><td>$94,986</td></tr>
+        </table>
+      </body>
+    </html>`;
+  const bytes = new TextEncoder().encode(filing);
+  const objectStore = new MemoryObjectStore();
+  await objectStore.put(bytes);
+  const rawBlobId = rawBlobIdFromBytes(bytes);
+  const db: QueryExecutor = {
+    async query<R extends Record<string, unknown>>(text: string) {
+      if (/from documents/.test(text)) {
+        return {
+          rows: [{
+            ...fakeDocumentRow(),
+            kind: "filing",
+            published_at: new Date("2024-11-01T00:00:00.000Z"),
+            raw_blob_id: rawBlobId,
+          }] as unknown as R[],
+          command: "SELECT",
+          rowCount: 1,
+          oid: 0,
+          fields: [],
+        };
+      }
+      throw new Error(`unexpected query: ${text}`);
+    },
+  };
+  const handlers = createEvidenceReaderToolHandlers({ db, objectStore });
+
+  const out = await handlers.extract_candidate_facts({ document_id: SAMPLE_DOC_UUID });
+
+  const reconciliation = out.items.find((item) => item.item_type === "non_gaap_reconciliation");
+  assert.ok(reconciliation);
+  assert.equal(reconciliation.measure_key, "net_income");
+  assert.equal(reconciliation.gaap?.label, "GAAP net income");
+  assert.equal(reconciliation.non_gaap?.label, "Non-GAAP net income");
 });
