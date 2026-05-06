@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
 import test, { type TestContext } from "node:test";
-import { createDevApiServer, createFixtureDevApiAdapters } from "../src/http.ts";
+import {
+  createDevApiServer,
+  createFixtureDevApiAdapters,
+  createServiceDevApiAdapters,
+} from "../src/http.ts";
 
 async function startServer(
   t: TestContext,
@@ -232,6 +236,56 @@ test("Analyze and Agents BFF routes use durable adapters instead of server-local
   assert.ok(persistedTemplatesBody.runs?.some((persisted) => persisted.template_id === "earnings-quality"));
 });
 
+test("service Analyze adapter writes blocks with the sealed snapshot id", async () => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const templateId = "11111111-1111-4111-8111-111111111111";
+  const insertedBlocks: unknown[] = [];
+  const db = fakeAnalyzeDb({
+    userId,
+    templateId,
+    insertedBlocks,
+  });
+  const adapters = createServiceDevApiAdapters({
+    db,
+    async sealAnalyzeSnapshot(input) {
+      assert.equal(input.snapshotId, (input.blocks[0] as { snapshot_id?: string }).snapshot_id);
+      return {
+        ok: true,
+        snapshot: {
+          snapshot_id: input.snapshotId,
+          subject_refs: [],
+          fact_refs: [],
+          claim_refs: [],
+          event_refs: [],
+          document_refs: [],
+          series_specs: [],
+          source_ids: [],
+          tool_call_ids: [],
+          tool_call_result_hashes: [],
+          as_of: "2026-05-06T00:00:00.000Z",
+          basis: "test",
+          normalization: {},
+          coverage_start: null,
+          allowed_transforms: null,
+          model_version: "test",
+          parent_snapshot: null,
+          created_at: "2026-05-06T00:00:00.000Z",
+        },
+        verification: { ok: true, failures: [] },
+      };
+    },
+  });
+
+  const run = await adapters.analyze.createRun({
+    userId,
+    body: { template_id: templateId, instructions: "Use sealed snapshot" },
+  });
+
+  assert.notEqual(run.snapshot_id, "pending");
+  assert.equal((run.blocks[0] as { snapshot_id?: string }).snapshot_id, run.snapshot_id);
+  assert.deepEqual(insertedBlocks, run.blocks);
+});
+
 test("GET /v1/agents requires an authenticated user", async (t) => {
   const base = await startServer(t);
 
@@ -269,3 +323,65 @@ test("GET /v1/dev/services documents local BFF routing and intentional exclusion
   assert.ok(body.services?.some((service) => service.name === "chat" && service.status === "vite_proxy"));
   assert.ok(body.services?.some((service) => service.name === "artifact" && service.status === "library"));
 });
+
+function fakeAnalyzeDb(input: {
+  userId: string;
+  templateId: string;
+  insertedBlocks: unknown[];
+}) {
+  const client = {
+    async query(text: string, values?: unknown[]) {
+      if (text === "begin" || text === "commit" || text === "rollback") {
+        return { rows: [], rowCount: null };
+      }
+      if (text.includes("from analyze_templates")) {
+        return {
+          rows: [
+            {
+              template_id: input.templateId,
+              user_id: input.userId,
+              name: "Earnings quality",
+              prompt_template: "Review earnings quality",
+              source_categories: ["filings"],
+              added_subject_refs: [],
+              block_layout_hint: null,
+              peer_policy: null,
+              disclosure_policy: null,
+              version: 3,
+              created_at: "2026-05-06T00:00:00.000Z",
+              updated_at: "2026-05-06T00:00:00.000Z",
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+      if (text.includes("insert into analyze_template_runs")) {
+        const blocks = JSON.parse(String(values?.[3]));
+        input.insertedBlocks.splice(0, input.insertedBlocks.length, ...blocks);
+        return {
+          rows: [
+            {
+              run_id: "22222222-2222-4222-8222-222222222222",
+              template_id: values?.[0],
+              template_version: values?.[1],
+              snapshot_id: values?.[2],
+              blocks,
+              created_at: "2026-05-06T00:00:00.000Z",
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+      throw new Error(`unexpected query: ${text}`);
+    },
+    release() {
+      // No-op test pool client.
+    },
+  };
+  return {
+    async connect() {
+      return client;
+    },
+    query: client.query,
+  };
+}

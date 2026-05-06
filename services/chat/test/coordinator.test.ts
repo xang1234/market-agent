@@ -5,6 +5,7 @@ import {
   ChatTurnUnavailableError,
   createRegistryBackedAnalystToolRuntime,
   createChatCoordinator,
+  type ChatAnalystToolRuntime,
   type ChatTurnRunContext,
   type ChatTurnRunner,
 } from "../src/coordinator.ts";
@@ -19,6 +20,33 @@ function deferred<T = void>() {
   });
   return { promise, resolve, reject };
 }
+
+const successfulRuntime: ChatAnalystToolRuntime = async (context) => {
+  const snapshotId = "11111111-1111-4111-a111-111111111111";
+  return {
+    snapshot_id: snapshotId,
+    verification: { ok: true, failures: [] },
+    tool_calls: [
+      {
+        tool_call_id: "tool-backed-1",
+        tool_name: "get_quote",
+        status: "ok",
+        bundle_id: context.bundleId,
+      },
+    ],
+    blocks: [
+      {
+        id: "block-tool-backed-1",
+        kind: "rich_text",
+        snapshot_id: snapshotId,
+        data_ref: { kind: "chat_turn", id: context.turnId ?? context.runId },
+        source_refs: [],
+        as_of: "2026-05-06T00:00:00.000Z",
+        segments: [{ type: "text", text: "Runtime generated analyst blocks." }],
+      },
+    ],
+  };
+};
 
 test("per-thread coordinator serializes concurrent turns for the same thread", async () => {
   const firstTurnCanComplete = deferred();
@@ -486,6 +514,19 @@ test("default turn runner calls analyst tool runtime and persists after verifica
   assert.equal(turn.events[1].tool_call_id, "tool-backed-1");
 });
 
+test("default turn runner fails closed when no analyst tool runtime is configured", async () => {
+  const coordinator = createChatCoordinator();
+
+  const turn = coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1" });
+  await turn.completed;
+
+  assert.deepEqual(
+    turn.events.map((event) => event.type),
+    ["turn.started", "turn.error"],
+  );
+  assert.equal(turn.events[1].error_code, "analyst_tool_runtime_not_configured");
+});
+
 test("default turn runner gates persistence on successful snapshot verification", async () => {
   let persistCalls = 0;
   const coordinator = createChatCoordinator({
@@ -867,9 +908,11 @@ test("ticker chat and theme chat traverse the same coordinator path — only the
   const themeEvents: string[] = [];
   const ticker = createChatCoordinator({
     preResolveSubject: async () => resolvedAaplPreResolution(),
+    analystToolRuntime: successfulRuntime,
   });
   const theme = createChatCoordinator({
     preResolveSubject: async () => resolvedThemePreResolution(),
+    analystToolRuntime: successfulRuntime,
   });
   const tickerTurn = ticker.getOrCreateTurn({ threadId: "t", runId: "r", subjectText: "AAPL" });
   const themeTurn = theme.getOrCreateTurn({ threadId: "t", runId: "r", subjectText: "AI Chips" });
@@ -887,13 +930,16 @@ test("ticker chat and theme chat traverse the same coordinator path — only the
 test("default analyst runner surfaces bundle_id on turn.started for no-subject turns and on turn.completed for resolved turns", async () => {
   // SSE consumers should be able to discover which analyst bundle drove a
   // turn without reading the thread row.
-  const noSubject = createChatCoordinator();
+  const noSubject = createChatCoordinator({ analystToolRuntime: successfulRuntime });
   const noSubjectTurn = noSubject.getOrCreateTurn({ threadId: "t", runId: "r" });
   await noSubjectTurn.completed;
   const startedEvent = noSubjectTurn.events.find((e) => e.type === "turn.started")!;
   assert.equal(startedEvent.bundle_id, "single_subject_analysis");
 
-  const themed = createChatCoordinator({ preResolveSubject: async () => resolvedThemePreResolution() });
+  const themed = createChatCoordinator({
+    preResolveSubject: async () => resolvedThemePreResolution(),
+    analystToolRuntime: successfulRuntime,
+  });
   const themedTurn = themed.getOrCreateTurn({ threadId: "t", runId: "r", subjectText: "AI Chips" });
   await themedTurn.completed;
   const completedEvent = themedTurn.events.at(-1)!;

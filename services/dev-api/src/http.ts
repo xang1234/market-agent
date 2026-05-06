@@ -401,6 +401,7 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
 export type DevApiServiceAdapterDeps = {
   db: QueryExecutor & AnalyzeTemplateRunClientPool;
   sealAnalyzeSnapshot(input: {
+    snapshotId: string;
     userId: string;
     templateId: string;
     body: Record<string, unknown>;
@@ -436,10 +437,11 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
           throw new DevApiHttpError(404, "analyze template not found");
         }
         const blockId = randomUUID();
+        const snapshotId = randomUUID();
         const blocks = [
           richTextBlock({
             id: blockId,
-            snapshotId: "pending",
+            snapshotId,
             title: template.name,
             text: nonEmptyString(body.instructions) ?? template.prompt_template,
           }),
@@ -448,12 +450,34 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
           template_id: template.template_id,
           template_version: template.version,
           blocks: blocks as JsonValue,
-          sealSnapshot: () => deps.sealAnalyzeSnapshot({
-            userId,
-            templateId: template.template_id,
-            body,
-            blocks,
-          }),
+          sealSnapshot: async () => {
+            const seal = await deps.sealAnalyzeSnapshot({
+              snapshotId,
+              userId,
+              templateId: template.template_id,
+              body,
+              blocks,
+            });
+            if (seal.ok && seal.snapshot.snapshot_id !== snapshotId) {
+              return {
+                ok: false,
+                verification: {
+                  ok: false,
+                  failures: [
+                    {
+                      reason_code: "invalid_block_binding",
+                      details: {
+                        reason: "analyze_snapshot_id_mismatch",
+                        expected_snapshot_id: snapshotId,
+                        actual_snapshot_id: seal.snapshot.snapshot_id,
+                      },
+                    },
+                  ],
+                },
+              };
+            }
+            return seal;
+          },
         });
         if (!persisted.ok) {
           throw new DevApiHttpError(422, "snapshot seal failed");

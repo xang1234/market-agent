@@ -9,8 +9,9 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 import { AgentsPage } from './AgentsPage.tsx'
 import { AnalyzePage } from './AnalyzePage.tsx'
-import { ChatEmptyState, ChatLayout, ChatThreadView } from './ChatPage.tsx'
+import { ChatEmptyState, ChatLayout, ChatThreadView, openChatTurnStream } from './ChatPage.tsx'
 import { BlockRegistryProvider, createDefaultBlockRegistry, type Block } from '../blocks'
+import type { ChatSseEvent } from '../chat/sseEventTypes.ts'
 import { AuthContext } from '../shell/authTypes.ts'
 
 const USER_ID = '00000000-0000-4000-8000-000000000001'
@@ -157,6 +158,48 @@ test('Chat thread route loads persisted assistant Block[] messages on direct nav
   }
 })
 
+test('Chat stream URL carries dev identity and refreshes history after completion', () => {
+  const eventSources: MockEventSource[] = []
+  const events: ChatSseEvent[] = []
+  let refreshes = 0
+  const source = openChatTurnStream({
+    threadId: 'thread-123',
+    runId: 'run-1',
+    userIntent: 'Review margins',
+    userId: USER_ID,
+  }, {
+    onEvent: (event) => events.push(event),
+    onCompleted: () => {
+      refreshes += 1
+    },
+    onError: () => {
+      throw new Error('unexpected stream error')
+    },
+  }, class extends MockEventSource {
+      constructor(url: string | URL) {
+        super(url)
+        eventSources.push(this)
+      }
+    } as unknown as typeof EventSource)
+
+  assert.equal(source, eventSources[0] as unknown as EventSource)
+  assert.match(eventSources[0].url, /user_id=00000000-0000-4000-8000-000000000001/)
+  assert.match(eventSources[0].url, /user_intent=Review\+margins/)
+
+  eventSources[0].emit('turn.completed', {
+    type: 'turn.completed',
+    seq: 1,
+    thread_id: 'thread-123',
+    run_id: 'run-1',
+    turn_id: 'run-1',
+    message_id: 'message-completed',
+  })
+
+  assert.equal(refreshes, 1)
+  assert.equal(events.at(-1)?.type, 'turn.completed')
+  assert.equal(eventSources[0].closed, true)
+})
+
 test('Analyze surface renders template controls, source controls, memo canvas, and Add to chat action', () => {
   const html = renderWithAuth(
     <MemoryRouter initialEntries={['/analyze']}>
@@ -210,5 +253,35 @@ function installDomGlobals(domWindow: Window): () => void {
     else delete globals.document
     if (hadWindow) globals.window = previousWindow
     else delete globals.window
+  }
+}
+
+class MockEventSource {
+  readonly url: string
+  onmessage: ((event: MessageEvent) => void) | null = null
+  closed = false
+  private readonly listeners = new Map<string, Array<(event: MessageEvent) => void>>()
+
+  constructor(url: string | URL) {
+    this.url = String(url)
+  }
+
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+    const callback = typeof listener === 'function'
+      ? listener as (event: MessageEvent) => void
+      : (event: MessageEvent) => listener.handleEvent(event)
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), callback])
+  }
+
+  close() {
+    this.closed = true
+  }
+
+  emit(type: string, payload: Record<string, unknown>) {
+    const event = new MessageEvent(type, { data: JSON.stringify(payload) })
+    this.onmessage?.(event)
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener(event)
+    }
   }
 }

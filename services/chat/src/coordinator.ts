@@ -218,13 +218,14 @@ export function createChatCoordinator(
 ): ChatCoordinator {
   const persistAssistantMessage = options.persistAssistantMessage;
   const preResolveSubject = options.preResolveSubject;
-  let defaultAnalystToolRuntime: ChatAnalystToolRuntime | undefined;
   const baseRunner = options.runner ?? (options.allowSyntheticAnalystFallback
     ? ((context) => syntheticAnalystTurnRunner(context, persistAssistantMessage))
-    : ((context) => toolBackedAnalystTurnRunner(context, {
+    : options.analystToolRuntime
+    ? ((context) => toolBackedAnalystTurnRunner(context, {
       persistAssistantMessage,
-      runtime: options.analystToolRuntime ?? (defaultAnalystToolRuntime ??= createRegistryBackedAnalystToolRuntime()),
-    })));
+      runtime: options.analystToolRuntime,
+    }))
+    : missingAnalystToolRuntimeRunner);
   const runner = threadTitleGenerationRunner(runActivityReportingRunner(subjectAwareRunner(baseRunner, {
     persistAssistantMessage,
     preResolveSubject,
@@ -914,6 +915,16 @@ async function toolBackedAnalystTurnRunner(
     message_id: messageId,
     bundle_id: context.bundleId,
     ...(preResolution?.status === "resolved" ? { subject_ref: preResolution.subject_ref } : {}),
+  });
+}
+
+async function missingAnalystToolRuntimeRunner(context: ChatTurnRunContext) {
+  if (!context.subjectPreResolution) {
+    context.emit("turn.started", { bundle_id: context.bundleId });
+  }
+  context.emit("turn.error", {
+    error_code: "analyst_tool_runtime_not_configured",
+    message: "analyst tool runtime is not configured",
   });
 }
 

@@ -3,8 +3,13 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import type { AddressInfo } from "node:net";
 import test, { type TestContext } from "node:test";
-import { createChatCoordinator, type ChatTurnRunner } from "../src/coordinator.ts";
+import {
+  createChatCoordinator,
+  type ChatAnalystToolRuntime,
+  type ChatTurnRunner,
+} from "../src/coordinator.ts";
 import { createChatServer, createSseFrameWriter } from "../src/http.ts";
+import type { ChatThreadsDb } from "../src/threads-repo.ts";
 import {
   createRunActivityHub,
   type RunActivityInput,
@@ -17,16 +22,66 @@ import type {
 
 const USER_ID = "44444444-4444-4444-8444-444444444444";
 const USER_B = "55555555-5555-4555-8555-555555555555";
+const THREAD_ID = "66666666-6666-4666-8666-666666666666";
 
 async function startServer(
   t: TestContext,
   options: Parameters<typeof createChatServer>[0] = {},
 ): Promise<string> {
-  const server = createChatServer(options);
+  const server = createChatServer(withDefaultTestRuntime(options));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const { port } = server.address() as AddressInfo;
   return `http://127.0.0.1:${port}`;
+}
+
+const defaultTestRuntime: ChatAnalystToolRuntime = async (context) => {
+  const turnId = context.turnId ?? context.runId;
+  const snapshotId = "11111111-1111-4111-a111-111111111111";
+  const query = context.userIntent?.trim() || "Start a research thread";
+  return {
+    snapshot_id: snapshotId,
+    verification: { ok: true, failures: [] },
+    tool_calls: [
+      {
+        tool_call_id: "tool-backed-1",
+        tool_name: "get_quote",
+        status: "ok",
+        bundle_id: context.bundleId,
+        arguments: { query },
+      },
+    ],
+    blocks: [
+      {
+        id: "block-tool-backed-1",
+        kind: "rich_text",
+        snapshot_id: snapshotId,
+        data_ref: { kind: "chat_turn", id: turnId },
+        source_refs: [],
+        as_of: "2026-05-06T00:00:00.000Z",
+        title: "Tool-backed note",
+        segments: [
+          {
+            type: "text",
+            text: `${query}. Used get_quote from the single_subject_analysis bundle and produced snapshot-backed research blocks.`,
+          },
+        ],
+      },
+    ],
+  };
+};
+
+function withDefaultTestRuntime(
+  options: Parameters<typeof createChatServer>[0],
+): Parameters<typeof createChatServer>[0] {
+  if (
+    options.coordinator
+    || options.analystToolRuntime
+    || options.allowSyntheticAnalystFallback
+  ) {
+    return options;
+  }
+  return { ...options, analystToolRuntime: defaultTestRuntime };
 }
 
 async function getRaw(base: string, path: string): Promise<{ status: number; body: string }> {
@@ -215,6 +270,40 @@ test("stream route returns SSE headers for a valid request", async (t) => {
   const reader = response.body?.getReader();
   assert.ok(reader, "expected a readable stream body");
   await reader.cancel();
+});
+
+test("stream route requires a thread owner before using a DB-backed thread", async (t) => {
+  const queries: unknown[][] = [];
+  const db: ChatThreadsDb = {
+    async query(_text, values) {
+      queries.push(values ?? []);
+      return { rows: [], rowCount: 0 };
+    },
+  };
+  const base = await startServer(t, { threadsDb: db });
+
+  const response = await fetch(`${base}/v1/chat/threads/${THREAD_ID}/stream?run_id=run-456`);
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(queries, []);
+});
+
+test("stream route rejects non-owner access before creating a DB-backed turn", async (t) => {
+  const queries: unknown[][] = [];
+  const db: ChatThreadsDb = {
+    async query(_text, values) {
+      queries.push(values ?? []);
+      return { rows: [], rowCount: 0 };
+    },
+  };
+  const base = await startServer(t, { threadsDb: db });
+
+  const response = await fetch(
+    `${base}/v1/chat/threads/${THREAD_ID}/stream?run_id=run-456&user_id=${USER_B}`,
+  );
+
+  assert.equal(response.status, 404);
+  assert.deepEqual(queries, [[USER_B, THREAD_ID]]);
 });
 
 test("stream route writes an immediate turn.started event", async (t) => {

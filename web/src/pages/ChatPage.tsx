@@ -39,6 +39,12 @@ type MessageHistoryState =
   | { kind: 'error'; message: string }
   | { kind: 'ready'; messages: ReadonlyArray<PersistedChatMessage> }
 
+type ChatTurnStreamCallbacks = {
+  onEvent(event: ChatSseEvent): void
+  onCompleted(): void
+  onError(): void
+}
+
 export function ChatLayout() {
   const { session } = useAuth()
   const userId = session?.userId ?? ''
@@ -133,6 +139,7 @@ export function ChatThreadView() {
   const [prompt, setPrompt] = useState('')
   const [transcript, setTranscript] = useState<ReadonlyArray<{ role: 'user'; text: string }>>([])
   const [history, setHistory] = useState<MessageHistoryState>({ kind: 'idle' })
+  const [historyReloadKey, setHistoryReloadKey] = useState(0)
   const [state, dispatch] = useReducer(applyChatStreamEvent, INITIAL_STREAM_STATE)
   const [streamError, setStreamError] = useState<string | null>(null)
 
@@ -156,7 +163,7 @@ export function ChatThreadView() {
         setHistory({ kind: 'error', message: caught instanceof Error ? caught.message : String(caught) })
       })
     return () => controller.abort()
-  }, [session, threadId])
+  }, [session, threadId, historyReloadKey])
 
   const submitPrompt = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -167,32 +174,16 @@ export function ChatThreadView() {
     setPrompt('')
     setStreamError(null)
     const runId = makeRunId()
-    const params = new URLSearchParams({ run_id: runId, turn_id: runId, user_intent: text })
-    const source = new EventSource(`/v1/chat/threads/${encodeURIComponent(threadId)}/stream?${params}`)
-    source.onmessage = (event) => {
-      dispatch(JSON.parse(event.data) as ChatSseEvent)
-    }
-    for (const type of [
-      'turn.started',
-      'tool.started',
-      'tool.completed',
-      'snapshot.staged',
-      'snapshot.sealed',
-      'block.began',
-      'block.delta',
-      'block.completed',
-      'turn.completed',
-      'turn.error',
-    ] as const) {
-      source.addEventListener(type, (event) => {
-        dispatch(JSON.parse((event as MessageEvent).data) as ChatSseEvent)
-        if (type === 'turn.completed' || type === 'turn.error') source.close()
-      })
-    }
-    source.onerror = () => {
-      setStreamError('The analyst stream disconnected.')
-      source.close()
-    }
+    openChatTurnStream({
+      threadId,
+      runId,
+      userIntent: text,
+      userId: session.userId,
+    }, {
+      onEvent: dispatch,
+      onCompleted: () => setHistoryReloadKey((current) => current + 1),
+      onError: () => setStreamError('The analyst stream disconnected.'),
+    })
   }
 
   return (
@@ -388,4 +379,52 @@ function ThreadList({ userId }: { userId: string }) {
 function makeRunId(): string {
   if ('randomUUID' in crypto) return crypto.randomUUID()
   return `00000000-0000-4000-8000-${Math.floor(Math.random() * 1e12).toString().padStart(12, '0')}`
+}
+
+export function openChatTurnStream(
+  input: {
+    threadId: string
+    runId: string
+    userIntent: string
+    userId: string
+  },
+  callbacks: ChatTurnStreamCallbacks,
+  EventSourceCtor: typeof EventSource = EventSource,
+): EventSource {
+  const params = new URLSearchParams({
+    run_id: input.runId,
+    turn_id: input.runId,
+    user_intent: input.userIntent,
+    user_id: input.userId,
+  })
+  const source = new EventSourceCtor(`/v1/chat/threads/${encodeURIComponent(input.threadId)}/stream?${params}`)
+  source.onmessage = (event) => {
+    callbacks.onEvent(JSON.parse(event.data) as ChatSseEvent)
+  }
+  for (const type of [
+    'turn.started',
+    'tool.started',
+    'tool.completed',
+    'snapshot.staged',
+    'snapshot.sealed',
+    'block.began',
+    'block.delta',
+    'block.completed',
+    'turn.completed',
+    'turn.error',
+  ] as const) {
+    source.addEventListener(type, (event) => {
+      callbacks.onEvent(JSON.parse((event as MessageEvent).data) as ChatSseEvent)
+      if (type === 'turn.completed') {
+        callbacks.onCompleted()
+        source.close()
+      }
+      if (type === 'turn.error') source.close()
+    })
+  }
+  source.onerror = () => {
+    callbacks.onError()
+    source.close()
+  }
+  return source
 }
