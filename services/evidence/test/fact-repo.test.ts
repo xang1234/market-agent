@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   approveFactReview,
+  approveFactReviewWithPool,
   createFact,
   editFactReviewCandidate,
   FactEgressEntitlementError,
@@ -99,7 +100,7 @@ class FakeDb implements QueryExecutor {
     if (/insert into fact_review_queue/i.test(text)) {
       return {
         rows: [
-          {
+          reviewQueueRow({
             review_id: QUEUE_ID,
             candidate: values?.[0],
             reason: values?.[1],
@@ -108,22 +109,28 @@ class FakeDb implements QueryExecutor {
             confidence: values?.[4],
             threshold: values?.[5],
             status: "queued",
-            created_at: new Date("2026-05-03T00:00:00.000Z"),
-            updated_at: new Date("2026-05-03T00:00:00.000Z"),
-          },
+          }),
         ],
         rowCount: 1,
       } as never;
     }
     if (/update fact_review_queue/i.test(text)) {
       const status = /status = 'reviewed'/i.test(text) ? "reviewed" : /status = 'dismissed'/i.test(text) ? "dismissed" : "queued";
-      const candidate = values?.[1] ?? this.reviewQueueRows[0]?.candidate ?? factInput({ value_num: 99.9 });
+      const existingCandidate = this.reviewQueueRows[0]?.candidate ?? factInput({ value_num: 99.9 });
+      const candidate = status === "dismissed" ? existingCandidate : values?.[1] ?? existingCandidate;
+      const reviewedBy = status === "reviewed" ? values?.[2] : status === "dismissed" ? values?.[1] : null;
+      const reviewedAtValue = status === "reviewed" ? values?.[3] : status === "dismissed" ? values?.[2] : null;
+      const reviewedAt = reviewedAtValue == null ? null : new Date(String(reviewedAtValue));
+      const factId = status === "reviewed" ? values?.[4] : null;
       return {
         rows: [
           reviewQueueRow({
             review_id: values?.[0],
             candidate,
             status,
+            reviewed_by: reviewedBy,
+            reviewed_at: reviewedAt,
+            fact_id: factId,
             updated_at: new Date("2026-05-03T00:01:00.000Z"),
           }),
         ],
@@ -323,6 +330,9 @@ test("approveFactReview audits approval and creates an authoritative fact with r
 
   assert.equal(result.fact.fact_id, NEW_FACT_ID);
   assert.equal(result.fact.verification_status, "authoritative");
+  assert.equal(result.review.reviewed_by, REVIEWER_ID);
+  assert.equal(result.review.reviewed_at, "2026-05-03T00:01:00.000Z");
+  assert.equal(result.review.fact_id, NEW_FACT_ID);
   assert.deepEqual(result.fact.quality_flags, [
     {
       kind: "manual_review",
@@ -395,6 +405,9 @@ test("rejectFactReview dismisses a queued candidate without creating a fact and 
   });
 
   assert.equal(row.status, "dismissed");
+  assert.equal(row.reviewed_by, REVIEWER_ID);
+  assert.equal(row.reviewed_at, "2026-05-03T00:01:00.000Z");
+  assert.equal(row.fact_id, null);
   assert.equal(db.queries.some((query) => /insert into facts/i.test(query.text)), false);
   assert.equal(db.queries.some((query) => /insert into fact_review_actions/i.test(query.text) && query.values?.[1] === "rejected"), true);
 });
@@ -488,6 +501,18 @@ test("supersedeFact rejects pool-like clients before opening a transaction", asy
   assert.equal(client.queries.length, 0);
 });
 
+test("supersedeFact accepts standalone pg.Client-like executors", async () => {
+  const db = Object.assign(new FakeDb(), {
+    connect: async () => undefined,
+    connectionParameters: {},
+  });
+
+  const result = await supersedeFact(db, FACT_ID, factInput({ value_num: 120.0 }));
+
+  assert.equal(result.new_fact.fact_id, NEW_FACT_ID);
+  assert.match(db.queries[0].text, /^begin$/i);
+});
+
 test("supersedeFactWithPool pins and releases one client", async () => {
   const client = new FakeDb();
 
@@ -497,7 +522,7 @@ test("supersedeFactWithPool pins and releases one client", async () => {
   assert.deepEqual(client.releaseArgs, [false]);
 });
 
-test("supersedeFactWithPool destroys clients after errors", async () => {
+test("supersedeFactWithPool preserves clients after ordinary validation errors", async () => {
   const client = new FakeDb();
 
   await assert.rejects(
@@ -505,7 +530,43 @@ test("supersedeFactWithPool destroys clients after errors", async () => {
     /superseded_fact_id/,
   );
 
+  assert.deepEqual(client.releaseArgs, [false]);
+});
+
+test("supersedeFactWithPool destroys clients after connection errors", async () => {
+  const client = new FakeDb();
+  client.query = async () => {
+    const error = new Error("connection reset") as Error & { code: string };
+    error.code = "ECONNRESET";
+    throw error;
+  };
+
+  await assert.rejects(
+    supersedeFactWithPool({ connect: async () => client }, FACT_ID, factInput({ value_num: 120.0 })),
+    /connection reset/,
+  );
+
   assert.deepEqual(client.releaseArgs, [true]);
+});
+
+test("approveFactReviewWithPool preserves clients after throughput validation errors", async () => {
+  const client = new FakeDb();
+  client.reviewActionCount = 1;
+
+  await assert.rejects(
+    approveFactReviewWithPool(
+      { connect: async () => client },
+      {
+        review_id: QUEUE_ID,
+        reviewer_id: REVIEWER_ID,
+        reviewed_at: "2026-05-03T00:01:00Z",
+        throughput_limit: { max_actions: 1, window_seconds: 3600 },
+      },
+    ),
+    FactReviewThroughputExceededError,
+  );
+
+  assert.deepEqual(client.releaseArgs, [false]);
 });
 
 function factInput(overrides: Partial<FactInput> = {}): FactInput {
@@ -592,6 +653,9 @@ function reviewQueueRow(overrides: Record<string, unknown> = {}) {
     status: "queued",
     created_at: new Date("2026-05-03T00:00:00.000Z"),
     updated_at: new Date("2026-05-03T00:00:00.000Z"),
+    reviewed_by: null,
+    reviewed_at: null,
+    fact_id: null,
     ...overrides,
   };
 }

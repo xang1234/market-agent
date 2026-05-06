@@ -434,7 +434,7 @@ export async function supersedeFactWithPool(
   try {
     return await supersedeFact(client, supersededFactId, input);
   } catch (error) {
-    destroyClient = true;
+    destroyClient = isConnectionError(error);
     throw error;
   } finally {
     client.release(destroyClient);
@@ -722,7 +722,7 @@ async function withFactReviewClient<T>(
   try {
     return await action(client);
   } catch (error) {
-    destroyClient = true;
+    destroyClient = isConnectionError(error);
     throw error;
   } finally {
     client.release(destroyClient);
@@ -1188,9 +1188,37 @@ function assertEntitlementChannels(value: unknown): asserts value is readonly Fa
 function isPoolLike(value: QueryExecutor): boolean {
   return (
     typeof (value as Partial<FactClientPool>).connect === "function" &&
-    typeof (value as Partial<FactPoolClient>).release !== "function"
+    typeof (value as Partial<FactPoolClient>).release !== "function" &&
+    !hasPgClientConnectionParameters(value)
   );
 }
+
+function hasPgClientConnectionParameters(value: QueryExecutor): boolean {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    Object.prototype.hasOwnProperty.call(value, "connectionParameters")
+  );
+}
+
+function isConnectionError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = typeof (error as { code?: unknown }).code === "string" ? (error as { code: string }).code : "";
+  return (
+    CONNECTION_ERROR_CODES.has(code) ||
+    error.name === "ConnectionError" ||
+    error.name === "ConnectionTimeoutError"
+  );
+}
+
+const CONNECTION_ERROR_CODES = new Set([
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "ENETUNREACH",
+  "ECONNREFUSED",
+  "EPIPE",
+  "PROTOCOL_CONNECTION_LOST",
+]);
 
 function nullableIsoString(value: Date | string | null): string | null {
   return value == null ? null : isoString(value);

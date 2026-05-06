@@ -42,10 +42,11 @@ export async function generateFindingHeadline(
   input: GenerateFindingHeadlineInput,
 ): Promise<string> {
   try {
-    return normalizeHeadline(await input.model({
+    const raw = await input.model({
       kind: "finding",
       prompt: findingPrompt(input),
-    }));
+    });
+    return rawModelHeadlineOrFallback(raw, input.claimCluster.claim);
   } catch {
     return fallbackHeadline(input.claimCluster.claim);
   }
@@ -55,10 +56,11 @@ export async function generateHomeCardHeadline(
   input: GenerateHomeCardHeadlineInput,
 ): Promise<string> {
   try {
-    return normalizeHeadline(await input.model({
+    const raw = await input.model({
       kind: "home_card",
       prompt: homeCardPrompt(input),
-    }));
+    });
+    return rawModelHeadlineOrFallback(raw, input.finding.headline);
   } catch {
     return fallbackHeadline(input.finding.headline);
   }
@@ -78,6 +80,14 @@ export function normalizeHeadline(value: string): string {
 
 function fallbackHeadline(value: string): string {
   return normalizeHeadline(toTitleCase(value.replace(/[.]+$/u, "")));
+}
+
+function rawModelHeadlineOrFallback(raw: string, fallback: string): string {
+  const firstLine = raw.split(/\r?\n/u)[0] ?? "";
+  if (raw.trim().length === 0 || firstLine.trim().length === 0) {
+    return fallbackHeadline(fallback);
+  }
+  return normalizeHeadline(raw);
 }
 
 function findingPrompt(input: GenerateFindingHeadlineInput): string {

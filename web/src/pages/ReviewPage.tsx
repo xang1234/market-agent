@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { FactReviewQueue, type FactReviewQueueAction, type FactReviewQueueItem, type FactReviewQueueRejectAction } from '../review/FactReviewQueue.tsx'
 import {
@@ -11,6 +11,7 @@ import { useAuth } from '../shell/useAuth.ts'
 
 type ReviewLoadState =
   | { kind: 'loading' }
+  | { kind: 'unauthenticated' }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; items: ReadonlyArray<FactReviewQueueItem> }
 
@@ -18,29 +19,40 @@ export function ReviewPage() {
   const { session } = useAuth()
   const reviewerId = session?.userId ?? null
   const [state, setState] = useState<ReviewLoadState>({ kind: 'loading' })
+  const refreshTokenRef = useRef(0)
 
   const refresh = useCallback(async () => {
+    const token = refreshTokenRef.current + 1
+    refreshTokenRef.current = token
     if (reviewerId === null) return
     try {
-      const items = await fetchFactReviewQueue({ reviewerId })
-      setState({ kind: 'ready', items })
+      const nextState = await fetchReviewLoadState(reviewerId)
+      if (token !== refreshTokenRef.current) return
+      setState(nextState)
     } catch (error) {
+      if (token !== refreshTokenRef.current) return
       setState({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
     }
   }, [reviewerId])
 
   useEffect(() => {
-    if (reviewerId === null) return
-    let cancelled = false
-    fetchFactReviewQueue({ reviewerId })
-      .then((items) => {
-        if (!cancelled) setState({ kind: 'ready', items })
+    if (reviewerId === null) {
+      refreshTokenRef.current += 1
+      return
+    }
+    const token = refreshTokenRef.current + 1
+    refreshTokenRef.current = token
+    fetchReviewLoadState(reviewerId)
+      .then((nextState) => {
+        if (token === refreshTokenRef.current) setState(nextState)
       })
       .catch((error: unknown) => {
-        if (!cancelled) setState({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
+        if (token === refreshTokenRef.current) {
+          setState({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
+        }
       })
     return () => {
-      cancelled = true
+      refreshTokenRef.current += 1
     }
   }, [reviewerId])
 
@@ -69,6 +81,8 @@ export function ReviewPage() {
     [refresh, reviewerId],
   )
 
+  const visibleState: ReviewLoadState = reviewerId === null ? { kind: 'unauthenticated' } : state
+
   return (
     <div className="flex flex-1 flex-col gap-6 overflow-auto p-8">
       <header>
@@ -77,15 +91,22 @@ export function ReviewPage() {
           Candidate fact queue for human approval, correction, and dismissal.
         </p>
       </header>
-      {state.kind === 'loading' ? (
+      {visibleState.kind === 'loading' ? (
         <ReviewStatus title="Loading reviewer queue" message="Fetching candidate facts." />
-      ) : state.kind === 'error' ? (
-        <ReviewStatus title="Review queue unavailable" message={state.message} tone="error" />
+      ) : visibleState.kind === 'unauthenticated' ? (
+        <ReviewStatus title="Reviewer sign-in required" message="Sign in to review candidate facts." />
+      ) : visibleState.kind === 'error' ? (
+        <ReviewStatus title="Review queue unavailable" message={visibleState.message} tone="error" />
       ) : (
-        <FactReviewQueue items={state.items} onApprove={approve} onEdit={edit} onReject={reject} />
+        <FactReviewQueue items={visibleState.items} onApprove={approve} onEdit={edit} onReject={reject} />
       )}
     </div>
   )
+}
+
+async function fetchReviewLoadState(reviewerId: string): Promise<ReviewLoadState> {
+  const items = await fetchFactReviewQueue({ reviewerId })
+  return { kind: 'ready', items }
 }
 
 function ReviewStatus({

@@ -54,6 +54,19 @@ test("generateFindingHeadline fallback preserves acronym casing", async () => {
   assert.equal(headline, "IFRS EPS Growth Accelerated After Pricing Improved");
 });
 
+test("generateFindingHeadline falls back when model returns a blank first line", async () => {
+  const headline = await generateFindingHeadline({
+    snapshot: SNAPSHOT,
+    claimCluster: {
+      cluster_id: "55555555-5555-4555-8555-555555555555",
+      claim: "services margin improved as mix shifted higher.",
+    },
+    model: async () => "\nIgnored Second Line",
+  });
+
+  assert.equal(headline, "Services Margin Improved as Mix Shifted Higher");
+});
+
 test("generateHomeCardHeadline prefers finding context and applies the same cap", async () => {
   const headline = await generateHomeCardHeadline({
     finding: {
@@ -66,4 +79,17 @@ test("generateHomeCardHeadline prefers finding context and applies the same cap"
   });
 
   assert.equal(headline, "Apple Services Demand Improves");
+});
+
+test("generateHomeCardHeadline falls back when model returns whitespace", async () => {
+  const headline = await generateHomeCardHeadline({
+    finding: {
+      headline: "EPS upside widened after cost cuts.",
+      severity: "high",
+      subjectLabel: "Apple",
+    },
+    model: async () => "   \n  ",
+  });
+
+  assert.equal(headline, "EPS Upside Widened After Cost Cuts");
 });

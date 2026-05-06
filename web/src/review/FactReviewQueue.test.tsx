@@ -76,6 +76,19 @@ test('FactReviewQueue surfaces stale queue items for operators', () => {
   assert.match(html, /Stale <!-- -->2h/)
 })
 
+test('FactReviewQueue renders sub-minute stale durations without 0m', () => {
+  const html = renderToString(
+    <FactReviewQueue
+      items={[{ ...ITEM, age_seconds: 12, stale_after_seconds: 10 }]}
+      onApprove={() => undefined}
+      onEdit={() => undefined}
+      onReject={() => undefined}
+    />,
+  )
+
+  assert.match(html, /Stale <!-- -->12s/)
+})
+
 test('FactReviewQueue submits approved reviewer edits with notes', async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
   const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
@@ -101,8 +114,8 @@ test('FactReviewQueue submits approved reviewer edits with notes', async () => {
     const candidate = textareas[0]!
     const notes = textareas[1]!
     await act(async () => {
-      candidate.value = JSON.stringify({ ...ITEM.candidate, value_num: 101.25 })
-      notes.value = 'matches 10-Q table'
+      setTextareaValue(candidate, JSON.stringify({ ...ITEM.candidate, value_num: 101.25 }))
+      setTextareaValue(notes, 'matches 10-Q table')
     })
     await act(async () => {
       getButton(container, 'Approve').click()
@@ -143,8 +156,10 @@ test('FactReviewQueue submits rejects without reparsing candidate JSON', async (
     })
 
     const textareas = container.querySelectorAll('textarea')
-    textareas[0]!.value = '{'
-    textareas[1]!.value = 'wrong segment'
+    await act(async () => {
+      setTextareaValue(textareas[0]!, '{')
+      setTextareaValue(textareas[1]!, 'wrong segment')
+    })
     await act(async () => {
       getButton(container, 'Reject').click()
     })
@@ -179,7 +194,7 @@ test('FactReviewQueue blocks approve when candidate JSON is invalid', async () =
 
     const candidate = container.querySelector('textarea')!
     await act(async () => {
-      candidate.value = '{'
+      setTextareaValue(candidate, '{')
     })
     await act(async () => {
       getButton(container, 'Approve').click()
@@ -288,4 +303,13 @@ function getButtons(container: Element, label: string): HTMLButtonElement[] {
   return [...container.querySelectorAll('button')].filter(
     (candidate): candidate is HTMLButtonElement => candidate.tagName === 'BUTTON' && candidate.textContent === label,
   )
+}
+
+function setTextareaValue(textarea: HTMLTextAreaElement, value: string): void {
+  const TextAreaCtor = textarea.ownerDocument.defaultView?.HTMLTextAreaElement ?? HTMLTextAreaElement
+  const descriptor = Object.getOwnPropertyDescriptor(TextAreaCtor.prototype, 'value')
+  descriptor?.set?.call(textarea, value)
+  const EventCtor = textarea.ownerDocument.defaultView?.Event ?? Event
+  textarea.dispatchEvent(new EventCtor('input', { bubbles: true }))
+  textarea.dispatchEvent(new EventCtor('change', { bubbles: true }))
 }

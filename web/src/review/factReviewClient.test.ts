@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   approveFactReview,
+  editFactReviewCandidate,
   FactReviewFetchError,
   fetchFactReviewQueue,
   rejectFactReview,
@@ -68,6 +69,35 @@ test('approveFactReview POSTs candidate edits and notes', async () => {
   assert.deepEqual(JSON.parse(String(requests[0].init?.body)), {
     candidate: { value_num: 101.25 },
     notes: 'verified',
+  })
+})
+
+test('editFactReviewCandidate PATCHes candidate edits and notes', async () => {
+  const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
+  const fetchImpl: typeof fetch = async (input, init) => {
+    requests.push({ input, init })
+    return jsonResponse(200, { ok: true })
+  }
+
+  await editFactReviewCandidate(
+    REVIEWER_ID,
+    {
+      review_id: REVIEW_ID,
+      candidate: { value_num: 101.25 },
+      notes: 'corrected value',
+    },
+    fetchImpl,
+  )
+
+  assert.equal(requests[0].input, `/v1/evidence/fact-review-queue/${REVIEW_ID}/candidate`)
+  assert.equal(requests[0].init?.method, 'PATCH')
+  assert.deepEqual(requests[0].init?.headers, {
+    'content-type': 'application/json',
+    'x-user-id': REVIEWER_ID,
+  })
+  assert.deepEqual(JSON.parse(String(requests[0].init?.body)), {
+    candidate: { value_num: 101.25 },
+    notes: 'corrected value',
   })
 })
 

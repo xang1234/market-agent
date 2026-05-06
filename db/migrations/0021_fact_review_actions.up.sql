@@ -9,11 +9,19 @@ alter table fact_review_queue
       status = 'queued'
       and reviewed_by is null
       and reviewed_at is null
+      and fact_id is null
     ) or (
-      status in ('reviewed', 'dismissed')
+      status = 'reviewed'
       and reviewed_by is not null
       and length(btrim(reviewed_by)) > 0
       and reviewed_at is not null
+      and fact_id is not null
+    ) or (
+      status = 'dismissed'
+      and reviewed_by is not null
+      and length(btrim(reviewed_by)) > 0
+      and reviewed_at is not null
+      and fact_id is null
     )
   );
 

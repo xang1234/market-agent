@@ -93,10 +93,13 @@ test("fact review actions preserve audit history instead of cascading queue dele
     assert.match(sql, /review_id uuid not null references fact_review_queue\(review_id\)/i);
     assert.doesNotMatch(sql, /review_id uuid not null references fact_review_queue\(review_id\) on delete cascade/i);
     assert.match(sql, /constraint fact_review_queue_review_metadata_chk check/i);
-    assert.match(sql, /status = 'queued'\s+and reviewed_by is null\s+and reviewed_at is null/i);
-    assert.match(sql, /status in \('reviewed', 'dismissed'\)\s+and reviewed_by is not null/i);
+    assert.match(sql, /status = 'queued'\s+and reviewed_by is null\s+and reviewed_at is null\s+and fact_id is null/i);
+    assert.match(sql, /status = 'reviewed'\s+and reviewed_by is not null/i);
+    assert.match(sql, /status = 'dismissed'\s+and reviewed_by is not null/i);
     assert.match(sql, /length\(btrim\(reviewed_by\)\) > 0/i);
     assert.match(sql, /and reviewed_at is not null/i);
+    assert.match(sql, /status = 'reviewed'[\s\S]*and fact_id is not null/i);
+    assert.match(sql, /status = 'dismissed'[\s\S]*and fact_id is null/i);
   }
 });
 

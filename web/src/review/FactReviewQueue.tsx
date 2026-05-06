@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useRef, useState } from 'react'
 
 export type FactReviewCandidate = Record<string, unknown>
 
@@ -38,10 +38,28 @@ type DraftState = {
   notes: string
 }
 
+type DraftRefs = {
+  candidate: HTMLTextAreaElement | null
+  notes: HTMLTextAreaElement | null
+}
+
 type PendingReviewIds = Record<string, true>
 
 export function FactReviewQueue({ items, onApprove, onEdit, onReject }: FactReviewQueueProps) {
-  const initialDrafts = useMemo(() => buildInitialDrafts(items), [items])
+  const queueKey = items.map((item) => `${item.review_id}:${JSON.stringify(item.candidate)}`).join('|')
+  return (
+    <FactReviewQueueContent
+      key={queueKey}
+      items={items}
+      onApprove={onApprove}
+      onEdit={onEdit}
+      onReject={onReject}
+    />
+  )
+}
+
+function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactReviewQueueProps) {
+  const draftRefs = useRef<Record<string, DraftRefs>>({})
   const [validationErrors, setValidationErrors] = useState<Record<string, string | null>>({})
   const [actionErrors, setActionErrors] = useState<Record<string, string | null>>({})
   const [pendingReviewIds, setPendingReviewIds] = useState<PendingReviewIds>({})
@@ -65,15 +83,14 @@ export function FactReviewQueue({ items, onApprove, onEdit, onReject }: FactRevi
       </header>
       <ul className="flex flex-col gap-3">
         {items.map((item) => {
-          const draft = initialDrafts[item.review_id]!
+          const draft = draftFromItem(item)
           const validationError = validationErrors[item.review_id] ?? null
           const actionError = actionErrors[item.review_id] ?? null
           const isPending = pendingReviewIds[item.review_id] === true
           const isStale = item.age_seconds != null && item.stale_after_seconds != null && item.age_seconds >= item.stale_after_seconds
           return (
             <li
-              key={`${item.review_id}:${draft.candidateJson}`}
-              data-review-row
+              key={item.review_id}
               className="rounded-md border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -97,8 +114,8 @@ export function FactReviewQueue({ items, onApprove, onEdit, onReject }: FactRevi
                     type="button"
                     disabled={isPending}
                     className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
-                    onClick={(event) =>
-                      void submitCandidateAction(item.review_id, readDraft(event.currentTarget), onEdit, {
+                    onClick={() =>
+                      void submitCandidateAction(item.review_id, readDraft(item.review_id, draftRefs.current), onEdit, {
                         setValidationErrors,
                         setActionErrors,
                         setPendingReviewIds,
@@ -111,8 +128,8 @@ export function FactReviewQueue({ items, onApprove, onEdit, onReject }: FactRevi
                     type="button"
                     disabled={isPending}
                     className="rounded-md border border-emerald-700 bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
-                    onClick={(event) =>
-                      void submitCandidateAction(item.review_id, readDraft(event.currentTarget), onApprove, {
+                    onClick={() =>
+                      void submitCandidateAction(item.review_id, readDraft(item.review_id, draftRefs.current), onApprove, {
                         setValidationErrors,
                         setActionErrors,
                         setPendingReviewIds,
@@ -125,8 +142,8 @@ export function FactReviewQueue({ items, onApprove, onEdit, onReject }: FactRevi
                     type="button"
                     disabled={isPending}
                     className="rounded-md border border-rose-700 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60 dark:text-rose-300 dark:hover:bg-rose-950/40"
-                    onClick={(event) =>
-                      void submitRejectAction(item.review_id, readDraft(event.currentTarget), onReject, {
+                    onClick={() =>
+                      void submitRejectAction(item.review_id, readDraft(item.review_id, draftRefs.current), onReject, {
                         setActionErrors,
                         setPendingReviewIds,
                       })
@@ -143,6 +160,9 @@ export function FactReviewQueue({ items, onApprove, onEdit, onReject }: FactRevi
                     data-role="candidate"
                     className="min-h-40 resize-y rounded-md border border-neutral-300 bg-white p-2 font-mono text-xs text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100"
                     defaultValue={draft.candidateJson}
+                    ref={(node) => {
+                      setDraftCandidateRef(draftRefs.current, item.review_id, node)
+                    }}
                   />
                 </label>
                 <div className="flex min-w-0 flex-col gap-3">
@@ -152,6 +172,9 @@ export function FactReviewQueue({ items, onApprove, onEdit, onReject }: FactRevi
                       data-role="notes"
                       className="min-h-24 resize-y rounded-md border border-neutral-300 bg-white p-2 text-sm text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100"
                       defaultValue={draft.notes}
+                      ref={(node) => {
+                        setDraftNotesRef(draftRefs.current, item.review_id, node)
+                      }}
                     />
                   </label>
                   <dl className="grid gap-1 text-xs text-neutral-500 dark:text-neutral-400">
@@ -170,16 +193,40 @@ export function FactReviewQueue({ items, onApprove, onEdit, onReject }: FactRevi
   )
 }
 
-function buildInitialDrafts(items: ReadonlyArray<FactReviewQueueItem>): Record<string, DraftState> {
-  return Object.fromEntries(
-    items.map((item) => [
-      item.review_id,
-      {
-        candidateJson: JSON.stringify(item.candidate, null, 2),
-        notes: '',
-      },
-    ]),
-  )
+function draftFromItem(item: FactReviewQueueItem): DraftState {
+  return {
+    candidateJson: JSON.stringify(item.candidate, null, 2),
+    notes: '',
+  }
+}
+
+function refsForReview(refs: Record<string, DraftRefs>, reviewId: string): DraftRefs {
+  refs[reviewId] ??= { candidate: null, notes: null }
+  return refs[reviewId]
+}
+
+function setDraftCandidateRef(
+  refs: Record<string, DraftRefs>,
+  reviewId: string,
+  node: HTMLTextAreaElement | null,
+): void {
+  refsForReview(refs, reviewId).candidate = node
+}
+
+function setDraftNotesRef(
+  refs: Record<string, DraftRefs>,
+  reviewId: string,
+  node: HTMLTextAreaElement | null,
+): void {
+  refsForReview(refs, reviewId).notes = node
+}
+
+function readDraft(reviewId: string, refs: Record<string, DraftRefs>): DraftState {
+  const rowRefs = refs[reviewId]
+  return {
+    candidateJson: rowRefs?.candidate?.value ?? '',
+    notes: rowRefs?.notes?.value ?? '',
+  }
 }
 
 async function submitCandidateAction(
@@ -213,16 +260,6 @@ async function submitCandidateAction(
     }))
   } finally {
     state.setPendingReviewIds((pending) => withoutPendingReviewId(pending, reviewId))
-  }
-}
-
-function readDraft(button: HTMLButtonElement): DraftState {
-  const row = button.closest('[data-review-row]')
-  const candidate = row?.querySelector<HTMLTextAreaElement>('textarea[data-role="candidate"]')
-  const notes = row?.querySelector<HTMLTextAreaElement>('textarea[data-role="notes"]')
-  return {
-    candidateJson: candidate?.value ?? '',
-    notes: notes?.value ?? '',
   }
 }
 
@@ -282,7 +319,8 @@ function formatPercent(value: number): string {
 function formatDuration(seconds: number): string {
   if (seconds >= 86400) return `${Math.floor(seconds / 86400)}d`
   if (seconds >= 3600) return `${Math.floor(seconds / 3600)}h`
-  return `${Math.floor(seconds / 60)}m`
+  if (seconds >= 60) return `${Math.floor(seconds / 60)}m`
+  return `${Math.max(0, Math.floor(seconds))}s`
 }
 
 function MetaRow({ label, value }: { label: string; value: string }) {
