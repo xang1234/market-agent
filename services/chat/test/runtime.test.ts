@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { loadChatServerOptionsFromEnv } from "../src/runtime.ts";
 
-test("runtime config returns stub chat options when persistence module is not configured", async () => {
+test("runtime config returns default chat options when persistence module is not configured", async () => {
   assert.deepEqual(await loadChatServerOptionsFromEnv({}), {});
 });
 

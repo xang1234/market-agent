@@ -12,15 +12,17 @@ type CommandRunner = typeof run;
 type ConnectionProbe = (databaseUrl: string) => Promise<void>;
 type Sleep = (ms: number) => Promise<void>;
 const cleanupStacks = new WeakMap<TestContext, Cleanup[]>();
+let cachedDockerAvailable: boolean | undefined;
 
 export function run(
   command: string,
   args: string[],
-  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {},
 ) {
   return spawnSync(command, args, {
     cwd: options.cwd ?? workspaceRoot,
     encoding: "utf8",
+    timeout: options.timeoutMs,
     env: {
       ...process.env,
       ...options.env,
@@ -29,8 +31,13 @@ export function run(
 }
 
 export function dockerAvailable() {
-  const result = run("docker", ["version", "--format", "{{.Server.Version}}"]);
-  return result.status === 0;
+  if (cachedDockerAvailable !== undefined) {
+    return cachedDockerAvailable;
+  }
+
+  const result = run("docker", ["version", "--format", "{{.Server.Version}}"], { timeoutMs: 2000 });
+  cachedDockerAvailable = result.status === 0;
+  return cachedDockerAvailable;
 }
 
 export function createContainerName(prefix: string) {

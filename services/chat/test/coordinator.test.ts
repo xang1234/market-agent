@@ -434,7 +434,8 @@ test("default turn runner persists assistant message before snapshot.sealed", as
   const turn = coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1" });
   await turn.completed;
 
-  assert.deepEqual(steps, ["persist:thread-1:assistant:stub-block-1:1"]);
+  assert.equal(steps.length, 1);
+  assert.match(steps[0], /^persist:thread-1:assistant:sha256:[0-9a-f]{64}:1$/);
   assert.deepEqual(
     turn.events.map((event) => event.type),
     [
@@ -452,6 +453,47 @@ test("default turn runner persists assistant message before snapshot.sealed", as
   assert.equal(turn.events[4].snapshot_id, "22222222-2222-4222-a222-222222222222");
   assert.equal(turn.events[8].message_id, "33333333-3333-4333-a333-333333333333");
   assert.equal(turn.events[3].snapshot_id, turn.events[4].snapshot_id);
+});
+
+test("default turn runner emits strict Block[] analyst content without stub payload markers", async () => {
+  const persistedBlocks: unknown[] = [];
+  const coordinator = createChatCoordinator({
+    persistAssistantMessage: async ({ blocks }) => {
+      persistedBlocks.push(...blocks);
+      return {
+        snapshot_id: "22222222-2222-4222-a222-222222222222",
+        message_id: "33333333-3333-4333-a333-333333333333",
+      };
+    },
+  });
+
+  const turn = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    userIntent: "Review AAPL earnings quality",
+  });
+  await turn.completed;
+
+  assert.equal(turn.events.some((event) => event.stub === true), false);
+  assert.equal(persistedBlocks.length, 1);
+  assert.deepEqual(
+    Object.keys(persistedBlocks[0] as Record<string, unknown>).sort(),
+    [
+      "as_of",
+      "data_ref",
+      "id",
+      "kind",
+      "segments",
+      "snapshot_id",
+      "source_refs",
+      "title",
+    ],
+  );
+  assert.equal((persistedBlocks[0] as Record<string, unknown>).kind, "rich_text");
+  assert.match(
+    JSON.stringify(persistedBlocks[0]),
+    /Review AAPL earnings quality/,
+  );
 });
 
 test("default turn runner emits turn.error when assistant message persistence fails", async () => {
@@ -750,7 +792,7 @@ test("ticker chat and theme chat traverse the same coordinator path — only the
   assert.equal(themeCompleted.bundle_id, "theme_research");
 });
 
-test("stub runner surfaces bundle_id on turn.started for no-subject turns and on turn.completed for resolved turns", async () => {
+test("default analyst runner surfaces bundle_id on turn.started for no-subject turns and on turn.completed for resolved turns", async () => {
   // SSE consumers should be able to discover which analyst bundle drove a
   // turn without reading the thread row.
   const noSubject = createChatCoordinator();

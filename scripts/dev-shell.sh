@@ -16,8 +16,9 @@ set +a
 # expansion below doesn't abort, and so child processes receive them.
 # Keep in sync with .env.dev.example.
 : "${HOME_PORT:=4334}"
+: "${EVIDENCE_PORT:=4335}"
 : "${HOME_PULSE_LISTINGS:=}"
-export HOME_PORT HOME_PULSE_LISTINGS
+export HOME_PORT EVIDENCE_PORT HOME_PULSE_LISTINGS
 
 DEV_DIR="$ROOT/.dev"
 LOG_DIR="$DEV_DIR/logs"
@@ -294,7 +295,19 @@ up() {
   ensure_install "$ROOT/services/dev-api"
   ensure_install "$ROOT/services/watchlists"
   ensure_install "$ROOT/services/market"
+  ensure_install "$ROOT/services/fundamentals"
+  ensure_install "$ROOT/services/screener"
+  ensure_install "$ROOT/services/portfolio"
   ensure_install "$ROOT/services/home"
+  ensure_install "$ROOT/services/evidence"
+  ensure_install "$ROOT/services/agents"
+  ensure_install "$ROOT/services/analyze"
+  ensure_install "$ROOT/services/artifact"
+  ensure_install "$ROOT/services/observability"
+  ensure_install "$ROOT/services/snapshot"
+  ensure_install "$ROOT/services/summary"
+  ensure_install "$ROOT/services/themes"
+  ensure_install "$ROOT/services/tools"
 
   assert_port_available web "$WEB_PORT"
   assert_port_available chat "$CHAT_PORT"
@@ -302,7 +315,11 @@ up() {
   assert_port_available dev-api "$DEV_API_PORT"
   assert_port_available watchlists "$WATCHLISTS_PORT"
   assert_port_available market "$MARKET_PORT"
+  assert_port_available fundamentals "$FUNDAMENTALS_PORT"
+  assert_port_available screener "$SCREENER_PORT"
+  assert_port_available portfolio "$PORTFOLIO_PORT"
   assert_port_available home "$HOME_PORT"
+  assert_port_available evidence "$EVIDENCE_PORT"
 
   if [[ "$(container_status postgres)" == "running" ]]; then
     postgres_was_running=1
@@ -338,6 +355,16 @@ up() {
 
   export VITE_MA_FLAG_PLACEHOLDER_API="$MA_FLAG_PLACEHOLDER_API"
   export VITE_MA_FLAG_SHOW_DEV_BANNER="$MA_FLAG_SHOW_DEV_BANNER"
+  export DEV_API_ORIGIN="${DEV_API_ORIGIN:-http://127.0.0.1:$DEV_API_PORT}"
+  export CHAT_ORIGIN="${CHAT_ORIGIN:-http://127.0.0.1:$CHAT_PORT}"
+  export RESOLVER_ORIGIN="${RESOLVER_ORIGIN:-http://127.0.0.1:$RESOLVER_PORT}"
+  export WATCHLISTS_ORIGIN="${WATCHLISTS_ORIGIN:-http://127.0.0.1:$WATCHLISTS_PORT}"
+  export MARKET_ORIGIN="${MARKET_ORIGIN:-http://127.0.0.1:$MARKET_PORT}"
+  export FUNDAMENTALS_ORIGIN="${FUNDAMENTALS_ORIGIN:-http://127.0.0.1:$FUNDAMENTALS_PORT}"
+  export SCREENER_ORIGIN="${SCREENER_ORIGIN:-http://127.0.0.1:$SCREENER_PORT}"
+  export PORTFOLIO_ORIGIN="${PORTFOLIO_ORIGIN:-http://127.0.0.1:$PORTFOLIO_PORT}"
+  export HOME_ORIGIN="${HOME_ORIGIN:-http://127.0.0.1:$HOME_PORT}"
+  export EVIDENCE_ORIGIN="${EVIDENCE_ORIGIN:-http://127.0.0.1:$EVIDENCE_PORT}"
 
   start_and_track_process web "$ROOT/web" "npm run dev -- --host 127.0.0.1 --port $WEB_PORT"
   start_and_track_process chat "$ROOT/services/chat" "npm run dev"
@@ -345,7 +372,11 @@ up() {
   start_and_track_process dev-api "$ROOT/services/dev-api" "npm run dev"
   start_and_track_process watchlists "$ROOT/services/watchlists" "npm run dev"
   start_and_track_process market "$ROOT/services/market" "npm run dev"
+  start_and_track_process fundamentals "$ROOT/services/fundamentals" "npm run dev"
+  start_and_track_process screener "$ROOT/services/screener" "npm run dev"
+  start_and_track_process portfolio "$ROOT/services/portfolio" "npm run dev"
   start_and_track_process home "$ROOT/services/home" "npm run dev"
+  start_and_track_process evidence "$ROOT/services/evidence" "npm run dev"
 
   if ! wait_for_service web "$WEB_PORT"; then
     cleanup_failed_up
@@ -377,7 +408,27 @@ up() {
     return 1
   fi
 
+  if ! wait_for_service fundamentals "$FUNDAMENTALS_PORT"; then
+    cleanup_failed_up
+    return 1
+  fi
+
+  if ! wait_for_service screener "$SCREENER_PORT"; then
+    cleanup_failed_up
+    return 1
+  fi
+
+  if ! wait_for_service portfolio "$PORTFOLIO_PORT"; then
+    cleanup_failed_up
+    return 1
+  fi
+
   if ! wait_for_service home "$HOME_PORT"; then
+    cleanup_failed_up
+    return 1
+  fi
+
+  if ! wait_for_service evidence "$EVIDENCE_PORT"; then
     cleanup_failed_up
     return 1
   fi
@@ -399,7 +450,19 @@ status() {
   printf "dev-api   %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status dev-api "$DEV_API_PORT")" "$DEV_API_PORT" "$LOG_DIR/dev-api.log"
   printf "watchlists %-7s http://127.0.0.1:%s  log=%s\n" "$(service_status watchlists "$WATCHLISTS_PORT")" "$WATCHLISTS_PORT" "$LOG_DIR/watchlists.log"
   printf "market    %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status market "$MARKET_PORT")" "$MARKET_PORT" "$LOG_DIR/market.log"
+  printf "fundamentals %-4s http://127.0.0.1:%s  log=%s\n" "$(service_status fundamentals "$FUNDAMENTALS_PORT")" "$FUNDAMENTALS_PORT" "$LOG_DIR/fundamentals.log"
+  printf "screener  %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status screener "$SCREENER_PORT")" "$SCREENER_PORT" "$LOG_DIR/screener.log"
+  printf "portfolio %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status portfolio "$PORTFOLIO_PORT")" "$PORTFOLIO_PORT" "$LOG_DIR/portfolio.log"
   printf "home      %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status home "$HOME_PORT")" "$HOME_PORT" "$LOG_DIR/home.log"
+  printf "evidence  %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status evidence "$EVIDENCE_PORT")" "$EVIDENCE_PORT" "$LOG_DIR/evidence.log"
+  printf "analyze   %-8s %s\n" "bff" "/v1/analyze via dev-api"
+  printf "agents    %-8s %s\n" "bff" "/v1/agents via dev-api"
+  printf "artifact  %-8s %s\n" "library" "shared package; no standalone dev HTTP server"
+  printf "snapshot  %-8s %s\n" "library" "shared package; no standalone dev HTTP server"
+  printf "tools     %-8s %s\n" "library" "shared package; no standalone dev HTTP server"
+  printf "observability %-3s %s\n" "library" "run-activity primitives exposed via chat/home"
+  printf "themes    %-8s %s\n" "library" "shared package; no standalone dev HTTP server"
+  printf "summary   %-8s %s\n" "library" "shared package; no standalone dev HTTP server"
 }
 
 configure_runtime_env

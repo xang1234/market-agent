@@ -33,6 +33,7 @@ type StreamRoute = {
   runId: string | null;
   turnId: string | null;
   subjectText: string | null;
+  userIntent: string | null;
 };
 
 type SseWritable = {
@@ -119,6 +120,7 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
       runId,
       turnId,
       ...(route.subjectText ? { subjectText: route.subjectText } : {}),
+      ...(route.userIntent ? { userIntent: route.userIntent } : {}),
       ...(userId ? { userId } : {}),
     };
     const turn = getTurnForRoute(coordinator, turnInput, resumeAfterSeq > 0);
@@ -297,6 +299,7 @@ function matchStreamRoute(method: string, rawUrl: string): StreamRoute | typeof 
   const runId = nonEmptyQueryParam(url.searchParams.get("run_id"));
   const turnId = nonEmptyQueryParam(url.searchParams.get("turn_id"));
   const subjectText = nonEmptyQueryParam(url.searchParams.get("subject"));
+  const userIntent = nonEmptyQueryParam(url.searchParams.get("user_intent"));
   let threadId: string;
   try {
     threadId = decodeURIComponent(match[1]);
@@ -308,6 +311,7 @@ function matchStreamRoute(method: string, rawUrl: string): StreamRoute | typeof 
     runId,
     turnId,
     subjectText,
+    userIntent,
   };
 }
 
@@ -423,6 +427,5 @@ function heartbeatFrame(route: { threadId: string; runId: string; turnId?: strin
     thread_id: route.threadId,
     run_id: route.runId,
     turn_id: route.turnId ?? route.runId,
-    stub: true,
   })}\n\n`;
 }

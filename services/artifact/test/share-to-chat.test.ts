@@ -6,7 +6,6 @@ import {
   type ShareableArtifactBlock,
   type ShareableArtifactSource,
 } from "../src/share-to-chat.ts";
-import { FactEgressEntitlementError } from "../../evidence/src/fact-repo.ts";
 import type { QueryExecutor } from "../../evidence/src/types.ts";
 
 const ANALYZE_SNAPSHOT = "11111111-1111-4111-8111-111111111111";
@@ -17,6 +16,7 @@ const RICH_BLOCK_ID = "block-rich-001";
 const SOURCE_ID = "44444444-4444-4444-8444-444444444444";
 const SUBJECT_ID = "55555555-5555-4555-8555-555555555555";
 const METRIC_ID = "66666666-6666-4666-8666-666666666666";
+const DENIED_FACT_ID = "77777777-7777-4777-8777-777777777777";
 
 type Query = { text: string; values?: unknown[] };
 
@@ -137,26 +137,105 @@ test("shareArtifactToChat reads fact refs through the export entitlement gate", 
 test("shareArtifactToChat blocks app-only fact refs from export egress", async () => {
   const db = new FakeEgressDb(new Set());
 
-  await assert.rejects(
-    () => share({
-      sources: [
-        memoSource([
-          block({
-            id: PERF_BLOCK_ID,
-            snapshot_id: ANALYZE_SNAPSHOT,
-            fact_refs: [FACT_ID] as never,
-          }),
-        ]),
-      ],
-    }, db),
-    (error) =>
-      error instanceof FactEgressEntitlementError &&
-      error.channel === "export" &&
-      error.denied_fact_ids.includes(FACT_ID),
-  );
+  const result = await share({
+    sources: [
+      memoSource([
+        block({
+          id: PERF_BLOCK_ID,
+          snapshot_id: ANALYZE_SNAPSHOT,
+          fact_refs: [FACT_ID] as never,
+        }),
+      ]),
+    ],
+  }, db);
 
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.deepEqual(result.rejections, [
+    {
+      reason: "unauthorized_fact_refs",
+      source_index: 0,
+      block_index: 0,
+      fact_ids: [FACT_ID],
+    },
+  ]);
   assert.match(db.queries[0].text, /entitlement_channels \? \$2/);
   assert.deepEqual(db.queries[0].values, [[FACT_ID], "export"]);
+});
+
+test("shareArtifactToChat returns deterministic rejection details for unauthorized fact refs", async () => {
+  const db = new FakeEgressDb(new Set([FACT_ID]));
+
+  const result = await share({
+    sources: [
+      memoSource([
+        block({
+          id: PERF_BLOCK_ID,
+          snapshot_id: ANALYZE_SNAPSHOT,
+          fact_refs: [FACT_ID, DENIED_FACT_ID] as never,
+        }),
+      ]),
+    ],
+  }, db);
+
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.deepEqual(result.rejections, [
+    {
+      reason: "unauthorized_fact_refs",
+      source_index: 0,
+      block_index: 0,
+      fact_ids: [DENIED_FACT_ID],
+    },
+  ]);
+});
+
+test("shareArtifactToChat rejects unauthorized refs when the egress helper filters without throwing", async () => {
+  const result = await shareArtifactToChat({
+    sources: [
+      memoSource([
+        block({
+          id: PERF_BLOCK_ID,
+          snapshot_id: ANALYZE_SNAPSHOT,
+          fact_refs: [FACT_ID, DENIED_FACT_ID] as never,
+        }),
+      ]),
+    ],
+    egress: {
+      db: new FakeEgressDb(new Set([FACT_ID, DENIED_FACT_ID])),
+      listFactsForEgress: async () => [factRow({ fact_id: FACT_ID })],
+    },
+  });
+
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal("blocks" in result, false);
+  assert.deepEqual(result.rejections, [
+    {
+      reason: "unauthorized_fact_refs",
+      source_index: 0,
+      block_index: 0,
+      fact_ids: [DENIED_FACT_ID],
+    },
+  ]);
+});
+
+test("shareArtifactToChat succeeds without calling egress when shared blocks contain no fact refs", async () => {
+  const db = new FakeEgressDb();
+
+  const result = await share({
+    sources: [
+      memoSource([
+        block({
+          id: PERF_BLOCK_ID,
+          snapshot_id: ANALYZE_SNAPSHOT,
+        }),
+      ]),
+    ],
+  }, db);
+
+  assert.equal(result.ok, true);
+  assert.equal(db.queries.length, 0);
 });
 
 test("shareArtifactToChat does not allow callers to downgrade share egress to app channel", async () => {

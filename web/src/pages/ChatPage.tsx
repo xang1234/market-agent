@@ -1,63 +1,302 @@
-import { Outlet, useParams } from 'react-router-dom'
+import { useEffect, useMemo, useReducer, useState, type FormEvent } from 'react'
+import { Link, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
 
-// Chat is a thread-scoped surface: `/chat` shows an empty-thread state and
-// `/chat/:threadId` shows a specific thread. Per spec §3.7 / bead fra-6al.2.1,
-// Chat stays thread-scoped (not symbol-scoped) so threads can span themes,
-// multiple subjects, or imported Analyze artifacts.
-//
-// ChatLayout is the route-level element. Auth gating is driven by route
-// metadata (fra-6al.2.3): the `/chat` route in App.tsx declares
-// `handle: { scope: 'protected', label: 'Chat' }`, and RouteScopeGate
-// (mounted in WorkspaceShell's main canvas) walks useMatches() to swap
-// in <AuthGate /> when unauthed. The `:threadId` child route inherits
-// the parent's scope automatically — no child-level handle needed.
-// P2.1 (fra-2fu.1 thread coordinator) will replace this with the real
-// layout: persistent thread list + SSE transport + composer.
+import { BlockView, type Block } from '../blocks'
+import { INITIAL_STREAM_STATE, applyChatStreamEvent } from '../chat/streamReducer.ts'
+import { StreamingTurnView } from '../chat/StreamingTurnView.tsx'
+import type { ChatSseEvent } from '../chat/sseEventTypes.ts'
+import { useAuth } from '../shell/useAuth.ts'
+
+type ChatThread = {
+  thread_id: string
+  title: string | null
+  updated_at: string
+}
+
+type ThreadListState =
+  | { kind: 'loading' }
+  | { kind: 'error'; message: string }
+  | { kind: 'ready'; threads: ReadonlyArray<ChatThread> }
+
+type ImportedAnalyzeMemo = {
+  run_id: string
+  snapshot_id: string
+  blocks: ReadonlyArray<Block>
+}
 
 export function ChatLayout() {
+  const { session } = useAuth()
+  const userId = session?.userId ?? ''
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="border-b border-neutral-200 px-8 py-6 dark:border-neutral-800">
         <h1 className="text-2xl font-semibold">Chat</h1>
         <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-          Thread-scoped research interface. Full surface ships with P2.1
-          (thread coordinator + SSE).
+          Thread-scoped research workspace with live analyst turns, strict Block[] rendering,
+          and reusable artifacts.
         </p>
       </header>
-      <div className="flex min-h-0 flex-1 overflow-auto">
-        <Outlet />
+      <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)] overflow-hidden">
+        <aside className="min-h-0 border-r border-neutral-200 bg-neutral-50/70 p-4 dark:border-neutral-800 dark:bg-neutral-950/40">
+          <ThreadList userId={userId} />
+        </aside>
+        <div className="min-h-0 overflow-auto">
+          <Outlet />
+        </div>
       </div>
     </div>
   )
 }
 
 export function ChatEmptyState() {
+  const { session } = useAuth()
+  const navigate = useNavigate()
+  const [title, setTitle] = useState('')
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const startThread = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!session || pending) return
+    setPending(true)
+    setError(null)
+    try {
+      const response = await fetch('/v1/chat/threads', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-user-id': session.userId,
+        },
+        body: JSON.stringify({ title: title.trim() || null }),
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const thread = (await response.json()) as ChatThread
+      navigate(`/chat/${thread.thread_id}`)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setPending(false)
+    }
+  }
+
   return (
-    <div
-      data-testid="chat-empty"
-      className="flex flex-1 items-center justify-center p-8 text-center text-sm text-neutral-500 dark:text-neutral-400"
-    >
-      <div>
-        <p className="font-medium text-neutral-700 dark:text-neutral-300">
-          No thread selected
+    <div data-testid="chat-empty" className="flex min-h-full flex-col gap-6 p-8">
+      <section className="rounded-md border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900">
+        <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Start research</h2>
+        <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-300">
+          Create a thread, ask the analyst, and keep each answer pinned to its sealed
+          snapshot.
         </p>
-        <p className="mt-1">
-          Thread list + composer ship with P2.1. Open <code>/chat/:threadId</code> to
-          render a thread view.
-        </p>
-      </div>
+        <form onSubmit={startThread} className="mt-5 flex max-w-2xl gap-3">
+          <input
+            aria-label="Thread title"
+            value={title}
+            onChange={(event) => setTitle(event.currentTarget.value)}
+            placeholder="Optional thread title"
+            className="min-w-0 flex-1 rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+          />
+          <button
+            type="submit"
+            disabled={pending}
+            className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60 dark:bg-neutral-100 dark:text-neutral-900"
+          >
+            Start research
+          </button>
+        </form>
+        {error ? <p className="mt-3 text-sm text-rose-600 dark:text-rose-300">{error}</p> : null}
+      </section>
     </div>
   )
 }
 
 export function ChatThreadView() {
-  const { threadId } = useParams<{ threadId: string }>()
+  const { session } = useAuth()
+  const { threadId = '' } = useParams<{ threadId: string }>()
+  const location = useLocation()
+  const importedMemo = readImportedAnalyzeMemo(location.state)
+  const [prompt, setPrompt] = useState('')
+  const [transcript, setTranscript] = useState<ReadonlyArray<{ role: 'user'; text: string }>>([])
+  const [state, dispatch] = useReducer(applyChatStreamEvent, INITIAL_STREAM_STATE)
+  const [streamError, setStreamError] = useState<string | null>(null)
+
+  const submitPrompt = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const text = prompt.trim()
+    if (!session || text.length === 0) return
+
+    setTranscript((current) => [...current, { role: 'user', text }])
+    setPrompt('')
+    setStreamError(null)
+    const runId = makeRunId()
+    const params = new URLSearchParams({ run_id: runId, turn_id: runId, user_intent: text })
+    const source = new EventSource(`/v1/chat/threads/${encodeURIComponent(threadId)}/stream?${params}`)
+    source.onmessage = (event) => {
+      dispatch(JSON.parse(event.data) as ChatSseEvent)
+    }
+    for (const type of [
+      'turn.started',
+      'tool.started',
+      'tool.completed',
+      'snapshot.staged',
+      'snapshot.sealed',
+      'block.began',
+      'block.delta',
+      'block.completed',
+      'turn.completed',
+      'turn.error',
+    ] as const) {
+      source.addEventListener(type, (event) => {
+        dispatch(JSON.parse((event as MessageEvent).data) as ChatSseEvent)
+        if (type === 'turn.completed' || type === 'turn.error') source.close()
+      })
+    }
+    source.onerror = () => {
+      setStreamError('The analyst stream disconnected.')
+      source.close()
+    }
+  }
+
   return (
-    <div data-testid="chat-thread" className="flex flex-1 flex-col gap-6 p-8">
-      <div className="rounded-md border border-neutral-200 bg-white p-6 text-sm text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400">
-        Thread <code className="font-mono text-neutral-700 dark:text-neutral-200">{threadId}</code>{' '}
-        — message stream + composer ship with P2.1 (thread coordinator + SSE).
+    <div data-testid="chat-thread" className="flex min-h-full flex-col">
+      <section className="border-b border-neutral-200 px-8 py-4 dark:border-neutral-800">
+        <h2 className="text-sm font-semibold uppercase text-neutral-500 dark:text-neutral-400">
+          Message stream
+        </h2>
+        <p className="mt-1 font-mono text-xs text-neutral-500 dark:text-neutral-400">{threadId}</p>
+      </section>
+      <div className="flex flex-1 flex-col gap-3 p-6">
+        {importedMemo ? (
+          <section className="rounded-md border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Imported analyze memo</h3>
+              <span className="font-mono text-xs text-neutral-500 dark:text-neutral-400">
+                {importedMemo.run_id}
+              </span>
+            </div>
+            <div className="flex flex-col gap-3">
+              {importedMemo.blocks.map((block) => <BlockView key={block.id} block={block} />)}
+            </div>
+          </section>
+        ) : null}
+        {transcript.map((message, index) => (
+          <div
+            key={`${message.text}-${index}`}
+            className="self-end rounded-md bg-neutral-900 px-4 py-2 text-sm text-white dark:bg-neutral-100 dark:text-neutral-900"
+          >
+            {message.text}
+          </div>
+        ))}
+        <StreamingTurnView state={state} />
+        {streamError ? <p className="text-sm text-rose-600 dark:text-rose-300">{streamError}</p> : null}
       </div>
+      <form onSubmit={submitPrompt} className="border-t border-neutral-200 p-4 dark:border-neutral-800">
+        <label className="text-sm font-medium text-neutral-700 dark:text-neutral-200" htmlFor="chat-composer">
+          Ask the analyst
+        </label>
+        <div className="mt-2 flex gap-3">
+          <textarea
+            id="chat-composer"
+            value={prompt}
+            onChange={(event) => setPrompt(event.currentTarget.value)}
+            rows={2}
+            className="min-w-0 flex-1 rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+            placeholder="Ask about a company, theme, screen, or prior artifact"
+          />
+          <button
+            type="submit"
+            className="self-end rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-900"
+          >
+            Send
+          </button>
+        </div>
+      </form>
     </div>
   )
+}
+
+function readImportedAnalyzeMemo(state: unknown): ImportedAnalyzeMemo | null {
+  if (typeof state !== 'object' || state === null) return null
+  const importedMemo = (state as { importedMemo?: unknown }).importedMemo
+  if (typeof importedMemo !== 'object' || importedMemo === null) return null
+  const candidate = importedMemo as Partial<ImportedAnalyzeMemo>
+  if (
+    typeof candidate.run_id !== 'string'
+    || typeof candidate.snapshot_id !== 'string'
+    || !Array.isArray(candidate.blocks)
+  ) {
+    return null
+  }
+  return {
+    run_id: candidate.run_id,
+    snapshot_id: candidate.snapshot_id,
+    blocks: candidate.blocks,
+  }
+}
+
+function ThreadList({ userId }: { userId: string }) {
+  const [state, setState] = useState<ThreadListState>({ kind: 'loading' })
+
+  useEffect(() => {
+    if (!userId) return
+    const controller = new AbortController()
+    fetch('/v1/chat/threads', {
+      headers: { 'x-user-id': userId },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        return (await response.json()) as { threads: ChatThread[] }
+      })
+      .then((body) => setState({ kind: 'ready', threads: body.threads }))
+      .catch((error: unknown) => {
+        if ((error as { name?: string }).name !== 'AbortError') {
+          setState({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
+        }
+      })
+    return () => controller.abort()
+  }, [userId])
+
+  const rows = useMemo(() => (state.kind === 'ready' ? state.threads : []), [state])
+
+  return (
+    <nav aria-label="Thread list" className="flex min-h-0 flex-col gap-3">
+      <div>
+        <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Thread list</h2>
+        <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+          Persistent research threads scoped to your session.
+        </p>
+      </div>
+      {state.kind === 'error' ? (
+        <p className="text-xs text-rose-600 dark:text-rose-300">{state.message}</p>
+      ) : rows.length === 0 ? (
+        <p className="rounded-md border border-dashed border-neutral-300 p-3 text-xs text-neutral-500 dark:border-neutral-700">
+          No threads yet.
+        </p>
+      ) : (
+        <ul className="flex min-h-0 flex-col gap-2 overflow-auto">
+          {rows.map((thread) => (
+            <li key={thread.thread_id}>
+              <Link
+                to={`/chat/${thread.thread_id}`}
+                className="block rounded-md border border-neutral-200 bg-white p-3 text-sm hover:border-neutral-400 dark:border-neutral-800 dark:bg-neutral-900"
+              >
+                <span className="block font-medium text-neutral-900 dark:text-neutral-100">
+                  {thread.title ?? 'Untitled thread'}
+                </span>
+                <span className="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">
+                  {new Date(thread.updated_at).toLocaleString()}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </nav>
+  )
+}
+
+function makeRunId(): string {
+  if ('randomUUID' in crypto) return crypto.randomUUID()
+  return `00000000-0000-4000-8000-${Math.floor(Math.random() * 1e12).toString().padStart(12, '0')}`
 }

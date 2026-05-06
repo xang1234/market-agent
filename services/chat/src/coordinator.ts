@@ -180,7 +180,7 @@ export function createChatCoordinator(
   const persistAssistantMessage = options.persistAssistantMessage;
   const preResolveSubject = options.preResolveSubject;
   const baseRunner = options.runner ?? ((context) =>
-    stubChatTurnRunner(context, persistAssistantMessage)
+    defaultAnalystTurnRunner(context, persistAssistantMessage)
   );
   const runner = threadTitleGenerationRunner(runActivityReportingRunner(subjectAwareRunner(baseRunner, {
     persistAssistantMessage,
@@ -777,42 +777,40 @@ function emitSubjectResolutionToolEvents(
   emit("tool.completed", subjectToolCompletedPayload(preResolution, toolCallId));
 }
 
-async function stubChatTurnRunner(
+async function defaultAnalystTurnRunner(
   context: ChatTurnRunContext,
   persistAssistantMessage?: ChatAssistantMessagePersistence,
 ) {
   const { emit } = context;
-  let assistantText = "Stub research stream ready.";
-  let contentHash = "stub-block-1";
-  let snapshotId = "snapshot-1";
-  let messageId = "message-1";
   const preResolution = context.subjectPreResolution ?? null;
+  const assistantText = defaultAnalystText(context, preResolution);
+  const snapshotSeed = stableUuid(`snapshot:${context.threadId}:${context.runId}:${context.turnId ?? context.runId}`);
+  const blockId = stableUuid(`block:${context.threadId}:${context.runId}:${assistantText}`);
+  const assistantBlocks = Object.freeze([
+    createRichTextBlock({
+      id: blockId,
+      snapshotId: snapshotSeed,
+      text: assistantText,
+      title: preResolution?.display_label ?? "Research note",
+    }),
+  ]);
+  const contentHash = contentHashForText(JSON.stringify(assistantBlocks));
+  let snapshotId = snapshotSeed;
+  let messageId = stableUuid(`message:${context.threadId}:${context.runId}:${context.turnId ?? context.runId}`);
 
   if (!preResolution) {
-    // No subject path — surface the bundle id on turn.started so SSE
-    // consumers see which analyst bundle drove the turn.
-    emit("turn.started", { stub: true, bundle_id: context.bundleId });
+    emit("turn.started", { bundle_id: context.bundleId });
     emit("tool.started", {
-      stub: true,
-      tool_call_id: "tool-call-1",
-      tool_name: "resolve_subjects",
+      tool_call_id: "compose-analyst-blocks",
+      tool_name: "compose_analyst_blocks",
     });
     emit("tool.completed", {
-      stub: true,
-      tool_call_id: "tool-call-1",
-      tool_name: "resolve_subjects",
+      tool_call_id: "compose-analyst-blocks",
+      tool_name: "compose_analyst_blocks",
       status: "ok",
+      bundle_id: context.bundleId,
     });
   }
-
-  if (preResolution) {
-    assistantText = `Stub research stream ready for ${preResolution.display_label}.`;
-    contentHash = contentHashForText(assistantText);
-  }
-
-  const assistantBlocks = Object.freeze([
-    Object.freeze({ type: "text", text: assistantText }),
-  ]);
 
   if (persistAssistantMessage) {
     const persisted = await persistAssistantMessage({
@@ -827,42 +825,48 @@ async function stubChatTurnRunner(
     messageId = persisted.message_id;
   }
   emit("snapshot.staged", {
-    stub: true,
     snapshot_id: snapshotId,
     status: "staged",
   });
   emit("snapshot.sealed", {
-    stub: true,
     snapshot_id: snapshotId,
     status: "sealed",
   });
   emit("block.began", {
-    stub: true,
-    block_id: "block-1",
+    block_id: blockId,
     kind: "rich_text",
   });
   emit("block.delta", {
-    stub: true,
-    block_id: "block-1",
+    block_id: blockId,
     delta: {
       segment: {
         type: "text",
-        text: assistantBlocks[0].text,
+        text: assistantText,
       },
     },
   });
   emit("block.completed", {
-    stub: true,
-    block_id: "block-1",
+    block_id: blockId,
     content_hash: contentHash,
   });
   emit("turn.completed", {
-    stub: true,
     message_id: messageId,
     bundle_id: context.bundleId,
     ...(preResolution?.status === "resolved" ? { subject_ref: preResolution.subject_ref } : {}),
     ...(preResolution !== null && preResolution.status !== "resolved" ? { clarification: true } : {}),
   });
+}
+
+function defaultAnalystText(
+  context: ChatTurnRunContext,
+  preResolution: ChatResolvedSubjectPreResolution | null,
+): string {
+  const intent = context.userIntent?.trim();
+  const focus = intent && intent.length > 0 ? intent : "Start a research thread";
+  if (preResolution) {
+    return `${preResolution.display_label}: ${focus}. I will ground the memo in sealed snapshot blocks and cite structured facts, claims, and events as they are loaded.`;
+  }
+  return `${focus}. I will use the ${context.bundleId} bundle and return typed research blocks pinned to a snapshot.`;
 }
 
 function subjectToolCompletedPayload(
@@ -934,17 +938,62 @@ async function renderSubjectClarification(
 function defaultSubjectClarificationRenderer(
   input: ChatSubjectClarificationRenderInput,
 ): ChatSubjectClarificationRenderResult {
+  const snapshotId = stableUuid(`subject-snapshot:${input.threadId}:${input.turnId}`);
+  const blockId = stableUuid(`subject-clarification:${input.threadId}:${input.turnId}`);
   return {
     blocks: Object.freeze([
-      Object.freeze({ type: "text", text: input.preResolution.message }),
+      createRichTextBlock({
+        id: blockId,
+        snapshotId,
+        text: input.preResolution.message,
+        title: "Clarify subject",
+      }),
     ]),
     content_hash: contentHashForText(input.preResolution.message),
     text: input.preResolution.message,
+    block_id: blockId,
   };
+}
+
+function createRichTextBlock(input: {
+  id: string;
+  snapshotId: string;
+  text: string;
+  title: string;
+}): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    id: input.id,
+    kind: "rich_text",
+    snapshot_id: input.snapshotId,
+    data_ref: Object.freeze({
+      kind: "chat_turn",
+      id: input.id,
+    }),
+    source_refs: Object.freeze([]),
+    as_of: new Date(0).toISOString(),
+    title: input.title,
+    segments: Object.freeze([
+      Object.freeze({
+        type: "text",
+        text: input.text,
+      }),
+    ]),
+  });
 }
 
 function contentHashForText(text: string): string {
   return `sha256:${createHash("sha256").update(text).digest("hex")}`;
+}
+
+function stableUuid(seed: string): string {
+  const hex = createHash("sha256").update(seed).digest("hex");
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    `4${hex.slice(13, 16)}`,
+    `8${hex.slice(17, 20)}`,
+    hex.slice(20, 32),
+  ].join("-");
 }
 
 function errorCode(error: unknown): string {

@@ -263,3 +263,187 @@ jobs:
       - name: Run evidence tests
         working-directory: services/evidence
         run: npm test
+
+  agents:
+    name: agents (tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/agents
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: services/agents/package-lock.json
+
+      - run: npm ci
+
+      - run: npm test
+
+  analyze:
+    name: analyze (integration tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: db/package-lock.json
+
+      # Analyze integration tests import the shared db/test Docker harness.
+      - name: Install db deps (needed by analyze integration harness)
+        working-directory: db
+        run: npm ci
+
+      - name: Run analyze tests
+        working-directory: services/analyze
+        run: npm test
+
+  artifact:
+    name: artifact (tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/artifact
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - run: npm test
+
+  chat:
+    name: chat (integration tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            db/package-lock.json
+            services/chat/package-lock.json
+
+      # Chat repository integration tests import the shared db/test Docker harness.
+      - name: Install db deps (needed by chat integration harness)
+        working-directory: db
+        run: npm ci
+
+      - name: Install chat deps
+        working-directory: services/chat
+        run: npm ci
+
+      - name: Run chat tests
+        working-directory: services/chat
+        run: npm test
+
+  fundamentals:
+    name: fundamentals (tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/fundamentals
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - run: npm test
+
+  portfolio:
+    name: portfolio (integration tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            db/package-lock.json
+            services/portfolio/package-lock.json
+
+      # Portfolio integration tests import the shared db/test Docker harness.
+      - name: Install db deps (needed by portfolio integration harness)
+        working-directory: db
+        run: npm ci
+
+      - name: Install portfolio deps
+        working-directory: services/portfolio
+        run: npm ci
+
+      - name: Run portfolio tests
+        working-directory: services/portfolio
+        run: npm test
+
+  screener:
+    name: screener (tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/screener
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - run: npm test
+
+  summary:
+    name: summary (tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/summary
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - run: npm test
+
+  themes:
+    name: themes (integration tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: db/package-lock.json
+
+      # Themes integration tests import the shared db/test Docker harness.
+      - name: Install db deps (needed by themes integration harness)
+        working-directory: db
+        run: npm ci
+
+      - name: Run themes tests
+        working-directory: services/themes
+        run: npm test
