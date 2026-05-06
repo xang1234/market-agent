@@ -18,8 +18,11 @@ tags:
   - name: Analyze
   - name: Agents
   - name: Home
+  - name: Portfolios
+  - name: RunActivity
   - name: Watchlists
   - name: Screener
+  - name: Dev
 paths:
   /v1/subjects/resolve:
     post:
@@ -105,6 +108,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SeriesResponse'
+  /v1/market/cache-audit:
+    get:
+      tags: [Market]
+      summary: Inspect runtime market cache audit events
+      operationId: getMarketCacheAudit
+      description: Internal/dev diagnostic endpoint exposed by the market service.
+      responses:
+        '200':
+          description: Cache audit events
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /v1/fundamentals/profile:
     get:
       tags: [Fundamentals]
@@ -162,6 +179,96 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FactListResponse'
+  /v1/fundamentals/consensus:
+    get:
+      tags: [Fundamentals]
+      summary: Get analyst consensus for an issuer
+      operationId: getFundamentalsConsensus
+      parameters:
+        - $ref: '#/components/parameters/SubjectKindQuery'
+        - $ref: '#/components/parameters/SubjectIdQuery'
+      responses:
+        '200':
+          description: Analyst consensus envelope
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/fundamentals/earnings:
+    get:
+      tags: [Fundamentals]
+      summary: Get earnings events for an issuer
+      operationId: getFundamentalsEarnings
+      parameters:
+        - $ref: '#/components/parameters/SubjectKindQuery'
+        - $ref: '#/components/parameters/SubjectIdQuery'
+      responses:
+        '200':
+          description: Earnings envelope
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/fundamentals/holders:
+    get:
+      tags: [Fundamentals]
+      summary: Get institutional or insider holders for an issuer
+      operationId: getFundamentalsHolders
+      parameters:
+        - $ref: '#/components/parameters/SubjectKindQuery'
+        - $ref: '#/components/parameters/SubjectIdQuery'
+        - in: query
+          name: kind
+          required: true
+          schema:
+            type: string
+            enum: [institutional, insider]
+      responses:
+        '200':
+          description: Holders envelope
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/fundamentals/segments:
+    post:
+      tags: [Fundamentals]
+      summary: Get segment facts for an issuer
+      operationId: getFundamentalsSegments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Segment facts envelope
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/fundamentals/stats:
+    get:
+      tags: [Fundamentals]
+      summary: Get key stats for an issuer
+      operationId: getFundamentalsStats
+      parameters:
+        - $ref: '#/components/parameters/SubjectKindQuery'
+        - $ref: '#/components/parameters/SubjectIdQuery'
+      responses:
+        '200':
+          description: Key stats envelope
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /v1/evidence/claims/search:
     post:
       tags: [Evidence]
@@ -308,6 +415,74 @@ paths:
                     items:
                       type: object
                       additionalProperties: true
+  /v1/evidence/healthz:
+    get:
+      tags: [Evidence]
+      summary: Evidence service health check
+      operationId: getEvidenceHealth
+      description: Internal health endpoint documented for route inventory completeness.
+      responses:
+        '200':
+          description: Evidence service health
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/evidence/fact-review-queue:
+    get:
+      tags: [Evidence]
+      summary: List fact review queue items
+      operationId: listFactReviewQueue
+      parameters:
+        - in: query
+          name: stale_after_seconds
+          required: false
+          schema:
+            type: integer
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Review queue items
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/evidence/fact-review-queue/{reviewId}/approve:
+    post:
+      tags: [Evidence]
+      summary: Approve a queued fact candidate
+      operationId: approveFactReview
+      parameters:
+        - $ref: '#/components/parameters/ReviewIdPath'
+      responses:
+        '200':
+          description: Candidate approved
+  /v1/evidence/fact-review-queue/{reviewId}/candidate:
+    patch:
+      tags: [Evidence]
+      summary: Edit a queued fact candidate
+      operationId: editFactReviewCandidate
+      parameters:
+        - $ref: '#/components/parameters/ReviewIdPath'
+      responses:
+        '200':
+          description: Candidate edited
+  /v1/evidence/fact-review-queue/{reviewId}/reject:
+    post:
+      tags: [Evidence]
+      summary: Reject a queued fact candidate
+      operationId: rejectFactReview
+      parameters:
+        - $ref: '#/components/parameters/ReviewIdPath'
+      responses:
+        '200':
+          description: Candidate rejected
   /v1/snapshots/{snapshotId}:
     get:
       tags: [Snapshots]
@@ -560,6 +735,14 @@ paths:
             selection.
           schema:
             type: string
+        - in: query
+          name: user_intent
+          required: false
+          description: Natural-language prompt text for the analyst turn. This
+            is intentionally separate from `subject` so normal prompts do not
+            trigger subject pre-resolution.
+          schema:
+            type: string
         - in: header
           name: Last-Event-ID
           required: false
@@ -682,6 +865,18 @@ paths:
                 properties:
                   error:
                     type: string
+  /v1/run-activities/stream:
+    get:
+      tags: [RunActivity]
+      summary: SSE stream for run activity rows
+      operationId: streamRunActivities
+      responses:
+        '200':
+          description: text/event-stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
   /v1/analyze/templates:
     get:
       tags: [Analyze]
@@ -779,6 +974,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Agent'
+  /v1/agents/{agentId}/runs:
+    post:
+      tags: [Agents]
+      summary: Start an agent run
+      operationId: runAgent
+      parameters:
+        - in: path
+          name: agentId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '201':
+          description: Agent run created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /v1/agents/{agentId}/findings:
     get:
       tags: [Agents]
@@ -827,23 +1042,132 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/RunActivity'
-  /v1/home/feed:
+  /v1/home/summary:
     get:
       tags: [Home]
-      summary: Get deduped findings-first home feed
-      operationId: getHomeFeed
+      summary: Get the composed Home summary
+      operationId: getHomeSummary
       responses:
         '200':
-          description: Home feed
+          description: Home summary
           content:
             application/json:
               schema:
                 type: object
+                additionalProperties: true
                 properties:
                   items:
                     type: array
                     items:
                       $ref: '#/components/schemas/HomeFeedItem'
+  /v1/portfolios:
+    get:
+      tags: [Portfolios]
+      summary: List portfolios for the calling user
+      operationId: listPortfolios
+      responses:
+        '200':
+          description: Portfolio list
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+    post:
+      tags: [Portfolios]
+      summary: Create a portfolio
+      operationId: createPortfolio
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '201':
+          description: Portfolio created
+  /v1/portfolios/{portfolioId}:
+    get:
+      tags: [Portfolios]
+      summary: Get a portfolio
+      operationId: getPortfolio
+      parameters:
+        - $ref: '#/components/parameters/PortfolioIdPath'
+      responses:
+        '200':
+          description: Portfolio envelope
+    delete:
+      tags: [Portfolios]
+      summary: Delete a portfolio
+      operationId: deletePortfolio
+      parameters:
+        - $ref: '#/components/parameters/PortfolioIdPath'
+      responses:
+        '204':
+          description: Portfolio deleted
+  /v1/portfolios/{portfolioId}/holdings:
+    get:
+      tags: [Portfolios]
+      summary: List portfolio holdings
+      operationId: listPortfolioHoldings
+      parameters:
+        - $ref: '#/components/parameters/PortfolioIdPath'
+      responses:
+        '200':
+          description: Holding list
+    post:
+      tags: [Portfolios]
+      summary: Create a portfolio holding
+      operationId: createPortfolioHolding
+      parameters:
+        - $ref: '#/components/parameters/PortfolioIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '201':
+          description: Holding created
+  /v1/portfolios/{portfolioId}/holdings/{holdingId}:
+    delete:
+      tags: [Portfolios]
+      summary: Delete a portfolio holding
+      operationId: deletePortfolioHolding
+      parameters:
+        - $ref: '#/components/parameters/PortfolioIdPath'
+        - in: path
+          name: holdingId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Holding deleted
+  /v1/portfolios/overlays:
+    post:
+      tags: [Portfolios]
+      summary: Build portfolio overlay inputs for subjects
+      operationId: getPortfolioOverlays
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Overlay inputs
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /v1/watchlists:
     get:
       tags: [Watchlists]
@@ -1068,7 +1392,131 @@ paths:
                     items:
                       type: object
                       additionalProperties: true
+  /v1/screener/screens:
+    get:
+      tags: [Screener]
+      summary: List saved screens
+      operationId: listSavedScreens
+      responses:
+        '200':
+          description: Saved screens
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+    post:
+      tags: [Screener]
+      summary: Save a screen
+      operationId: saveScreen
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Screen replaced
+        '201':
+          description: Screen created
+  /v1/screener/screens/{screenId}:
+    get:
+      tags: [Screener]
+      summary: Get a saved screen
+      operationId: getSavedScreen
+      parameters:
+        - in: path
+          name: screenId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Saved screen
+    delete:
+      tags: [Screener]
+      summary: Delete a saved screen
+      operationId: deleteSavedScreen
+      parameters:
+        - in: path
+          name: screenId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Screen deleted
+  /v1/screener/screens/{screenId}/replay:
+    post:
+      tags: [Screener]
+      summary: Replay a saved screen query
+      operationId: replaySavedScreen
+      parameters:
+        - in: path
+          name: screenId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Screen results
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/dev/placeholders:
+    get:
+      tags: [Dev]
+      summary: List enabled dev placeholder surfaces
+      operationId: listDevPlaceholders
+      description: Internal dev API route; not part of production product behavior.
+      responses:
+        '200':
+          description: Dev placeholders
+  /v1/dev/services:
+    get:
+      tags: [Dev]
+      summary: List local dev service routing inventory
+      operationId: listDevServices
+      description: Internal dev API route documenting local stack routing.
+      responses:
+        '200':
+          description: Dev service catalog
 components:
+  parameters:
+    SubjectKindQuery:
+      in: query
+      name: subject_kind
+      required: true
+      schema:
+        $ref: '#/components/schemas/SubjectKind'
+    SubjectIdQuery:
+      in: query
+      name: subject_id
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ReviewIdPath:
+      in: path
+      name: reviewId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PortfolioIdPath:
+      in: path
+      name: portfolioId
+      required: true
+      schema:
+        type: string
+        format: uuid
   securitySchemes:
     bearerAuth:
       type: http

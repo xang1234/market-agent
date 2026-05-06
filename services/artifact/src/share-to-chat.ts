@@ -1,5 +1,10 @@
 import type { JsonObject, JsonValue } from "../../observability/src/types.ts";
-import { listFactsForEgress } from "../../evidence/src/fact-repo.ts";
+import {
+  FactEgressEntitlementError,
+  listFactsForEgress,
+  type FactRow,
+  type ListFactsForEgressInput,
+} from "../../evidence/src/fact-repo.ts";
 import type { QueryExecutor } from "../../evidence/src/types.ts";
 
 export type ShareableArtifactBlock = JsonObject & {
@@ -25,6 +30,10 @@ export type ShareToChatInput = {
   sources: ReadonlyArray<ShareableArtifactSource>;
   egress: {
     db: QueryExecutor;
+    listFactsForEgress?: (
+      db: QueryExecutor,
+      input: ListFactsForEgressInput,
+    ) => Promise<ReadonlyArray<FactRow>>;
   };
 };
 
@@ -33,12 +42,14 @@ export type ShareToChatRejectionReason =
   | "origin_snapshot_mismatch"
   | "empty_share"
   | "empty_source"
-  | "invalid_block_shape";
+  | "invalid_block_shape"
+  | "unauthorized_fact_refs";
 
 export type ShareToChatRejection = {
   reason: ShareToChatRejectionReason;
   source_index: number;
   block_index?: number;
+  fact_ids?: ReadonlyArray<string>;
 };
 
 export type ShareToChatResult =
@@ -94,7 +105,12 @@ export async function shareArtifactToChat(input: ShareToChatInput): Promise<Shar
   }
 
   const rejections: ShareToChatRejection[] = [];
-  const blocks: ShareableArtifactBlock[] = [];
+  const accepted: Array<{
+    block: ShareableArtifactBlock;
+    sourceIndex: number;
+    blockIndex: number;
+    factIds: ReadonlyArray<string>;
+  }> = [];
 
   input.sources.forEach((source, sourceIndex) => {
     if (!isNonEmptyString(source.origin_snapshot_id)) {
@@ -122,7 +138,13 @@ export async function shareArtifactToChat(input: ShareToChatInput): Promise<Shar
       // either failure mode into a rejection so the result type's promise
       // holds end-to-end.
       try {
-        blocks.push(deepFreezeBlock(block));
+        const frozenBlock = deepFreezeBlock(block);
+        accepted.push({
+          block: frozenBlock,
+          sourceIndex,
+          blockIndex,
+          factIds: factIdsForEgress([frozenBlock]),
+        });
       } catch {
         rejections.push(reject("invalid_block_shape", sourceIndex, blockIndex));
       }
@@ -133,10 +155,18 @@ export async function shareArtifactToChat(input: ShareToChatInput): Promise<Shar
     return Object.freeze({ ok: false, rejections: Object.freeze(rejections) });
   }
 
-  await listFactsForEgress(input.egress.db, {
-    fact_ids: factIdsForEgress(blocks),
-    channel: "export",
-  });
+  const factIds = Object.freeze([...new Set(accepted.flatMap((candidate) => candidate.factIds))]);
+  if (factIds.length > 0) {
+    const authorized = await authorizeFactRefs(input, factIds);
+    const authorizedIds = new Set(authorized.map((fact) => fact.fact_id));
+    const deniedIds = factIds.filter((factId) => !authorizedIds.has(factId));
+    if (deniedIds.length > 0) {
+      return Object.freeze({
+        ok: false,
+        rejections: Object.freeze(rejectionsForDeniedFacts(accepted, deniedIds)),
+      });
+    }
+  }
 
   // Dedupe in source order — callers can rely on the first appearance of a
   // snapshot id determining its position in the result.
@@ -146,18 +176,66 @@ export async function shareArtifactToChat(input: ShareToChatInput): Promise<Shar
 
   return Object.freeze({
     ok: true,
-    blocks: Object.freeze(blocks),
+    blocks: Object.freeze(accepted.map((candidate) => candidate.block)),
     origin_snapshot_ids: originSnapshotIds,
   });
+}
+
+async function authorizeFactRefs(
+  input: ShareToChatInput,
+  factIds: ReadonlyArray<string>,
+): Promise<ReadonlyArray<FactRow>> {
+  try {
+    return await (input.egress.listFactsForEgress ?? listFactsForEgress)(input.egress.db, {
+      fact_ids: factIds,
+      channel: "export",
+    });
+  } catch (error) {
+    if (error instanceof FactEgressEntitlementError) {
+      const authorizedIds = new Set(factIds.filter((factId) => !error.denied_fact_ids.includes(factId)));
+      return Object.freeze(
+        factIds
+          .filter((factId) => authorizedIds.has(factId))
+          .map((factId) => ({ fact_id: factId }) as FactRow),
+      );
+    }
+    throw error;
+  }
+}
+
+function rejectionsForDeniedFacts(
+  accepted: ReadonlyArray<{
+    sourceIndex: number;
+    blockIndex: number;
+    factIds: ReadonlyArray<string>;
+  }>,
+  deniedIds: ReadonlyArray<string>,
+): ReadonlyArray<ShareToChatRejection> {
+  const denied = new Set(deniedIds);
+  return Object.freeze(
+    accepted
+      .map((candidate) => {
+        const factIds = candidate.factIds.filter((factId) => denied.has(factId));
+        if (factIds.length === 0) return null;
+        return reject("unauthorized_fact_refs", candidate.sourceIndex, candidate.blockIndex, factIds);
+      })
+      .filter((rejection): rejection is ShareToChatRejection => rejection !== null),
+  );
 }
 
 function reject(
   reason: ShareToChatRejectionReason,
   source_index: number,
   block_index?: number,
+  fact_ids?: ReadonlyArray<string>,
 ): ShareToChatRejection {
   return Object.freeze(
-    block_index === undefined ? { reason, source_index } : { reason, source_index, block_index },
+    {
+      reason,
+      source_index,
+      ...(block_index === undefined ? {} : { block_index }),
+      ...(fact_ids === undefined ? {} : { fact_ids: Object.freeze([...fact_ids]) }),
+    },
   );
 }
 
