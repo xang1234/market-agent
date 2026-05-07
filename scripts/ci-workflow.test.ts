@@ -9,8 +9,12 @@ const DB_HARNESS_SERVICE_DIRS = [
   "services/analyze",
   "services/chat",
   "services/dev-api",
+  "services/evidence",
+  "services/observability",
   "services/portfolio",
+  "services/resolver",
   "services/themes",
+  "services/watchlists",
 ];
 
 test("ci workflow includes services/dev-api coverage", async () => {
@@ -25,10 +29,11 @@ test("ci workflow includes services/dev-api coverage", async () => {
 
 test("ci workflow includes services/watchlists coverage", async () => {
   const workflow = await readFile(CI_WORKFLOW, "utf8");
+  const section = jobSection(workflow, "services/watchlists");
 
   assert.match(workflow, /\bwatchlists\b/);
   assert.match(workflow, /working-directory:\s*services\/watchlists/);
-  assert.match(workflow, /cache-dependency-path:\s*services\/watchlists\/package-lock\.json/);
+  assert.match(section, /services\/watchlists\/package-lock\.json/);
 });
 
 test("ci workflow includes services/market coverage", async () => {

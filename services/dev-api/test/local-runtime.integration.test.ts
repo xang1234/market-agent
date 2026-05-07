@@ -129,13 +129,22 @@ test(
     assert.deepEqual(finding.subject_refs, [{ kind: "issuer", id: SUBJECT_ID }]);
     assert.equal(Array.isArray(finding.claim_cluster_ids), true);
 
-    const snapshotCount = (
-      await seedClient.query<{ count: string }>(
-        "select count(*)::text as count from snapshots where snapshot_id = $1::uuid",
+    const snapshotRows = (
+      await seedClient.query<{
+        basis: string;
+        model_version: string | null;
+        subject_refs: unknown;
+      }>(
+        `select basis, model_version, subject_refs
+           from snapshots
+          where snapshot_id = $1::uuid`,
         [finding.snapshot_id],
       )
-    ).rows[0].count;
-    assert.equal(snapshotCount, "1", "finding must reference a sealed snapshot row");
+    ).rows;
+    assert.equal(snapshotRows.length, 1, "finding must reference a sealed snapshot row");
+    assert.equal(snapshotRows[0].basis, "unadjusted");
+    assert.equal(snapshotRows[0].model_version, "dev-api-local-agent-runtime");
+    assert.deepEqual(snapshotRows[0].subject_refs, [{ kind: "issuer", id: SUBJECT_ID }]);
 
     assert.equal(Array.isArray(finding.summary_blocks), true);
     const summaryBlock = (finding.summary_blocks as Array<Record<string, unknown>>)[0];

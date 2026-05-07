@@ -109,7 +109,9 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: services/resolver/package-lock.json
+          cache-dependency-path: |
+            db/package-lock.json
+            services/resolver/package-lock.json
 
       # Resolver tests invoke `npm run apply:schema` inside db/, so the db
       # workspace needs its dependencies installed too.
@@ -166,7 +168,9 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: services/watchlists/package-lock.json
+          cache-dependency-path: |
+            db/package-lock.json
+            services/watchlists/package-lock.json
 
       # Watchlists tests invoke `npm run apply:schema` inside db/, so the db
       # workspace needs its dependencies installed too.
