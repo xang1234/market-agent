@@ -8,17 +8,19 @@ const CI_WORKFLOW = join(REPO_ROOT, ".github", "workflows", "ci.yml");
 const DB_HARNESS_SERVICE_DIRS = [
   "services/analyze",
   "services/chat",
+  "services/dev-api",
   "services/portfolio",
   "services/themes",
 ];
 
 test("ci workflow includes services/dev-api coverage", async () => {
   const workflow = await readFile(CI_WORKFLOW, "utf8");
+  const section = jobSection(workflow, "services/dev-api");
 
   assert.match(workflow, /\bdev-api\b/);
   assert.match(workflow, /working-directory:\s*services\/dev-api/);
-  assert.match(workflow, /cache-dependency-path:\s*services\/dev-api\/package-lock\.json/);
-  assert.match(workflow, /run:\s*npm test/);
+  assert.match(section, /services\/dev-api\/package-lock\.json/);
+  assert.match(section, /run:\s*npm test/);
 });
 
 test("ci workflow includes services/watchlists coverage", async () => {

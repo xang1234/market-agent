@@ -81,7 +81,7 @@ export const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, run
         manifest: stageSnapshotManifest({
           subject_refs: subjectRefs,
           as_of: asOf,
-          basis: "reported",
+          basis: "unadjusted",
           normalization: "raw",
           allowed_transforms: {},
           model_version: "dev-api-local-agent-runtime",
@@ -92,7 +92,7 @@ export const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, run
         documents: [],
       });
       if (!seal.ok) {
-        throw new Error("local agent runtime failed to seal run snapshot");
+        throw new Error(`local agent runtime failed to seal run snapshot: ${JSON.stringify(seal.verification.failures)}`);
       }
       return {
         trigger: "manual",
@@ -171,6 +171,12 @@ function pool(): Pool {
   }
   localPool = new Pool({ connectionString: databaseUrl });
   return localPool;
+}
+
+export async function closeLocalRuntimePoolForTests(): Promise<void> {
+  const poolToClose = localPool;
+  localPool = null;
+  await poolToClose?.end();
 }
 
 function analyzeMemoText(input: DevApiAnalyzeWorkflowInput): string {

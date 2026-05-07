@@ -1,0 +1,177 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import type { Client } from "pg";
+
+import { claimAgentRun } from "../../agents/src/agent-run-repo.ts";
+import { createAgent } from "../../agents/src/agent-repo.ts";
+import { runAgentLoop } from "../../agents/src/agent-loop.ts";
+import {
+  bootstrapDatabase,
+  connectedClient,
+  connectedPool,
+  dockerAvailable,
+  registerLifoCleanup,
+} from "../../../db/test/docker-pg.ts";
+import {
+  closeLocalRuntimePoolForTests,
+  createAgentLoopStages,
+} from "../src/local-runtime.ts";
+
+const USER_ID = "10000000-0000-4000-8000-000000000001";
+const SUBJECT_ID = "20000000-0000-4000-8000-000000000002";
+const RUN_ID = "30000000-0000-4000-8000-000000000003";
+
+async function seedUser(client: Client): Promise<void> {
+  await client.query(
+    `insert into users (user_id, email) values ($1::uuid, $2)`,
+    [USER_ID, "local-runtime-agent@example.com"],
+  );
+}
+
+test(
+  "local agent runtime creates snapshot-backed findings that real alert evaluation can fire on",
+  { skip: !dockerAvailable(), timeout: 120_000 },
+  async (t) => {
+    const { databaseUrl } = await bootstrapDatabase(t, "dev-api-local-agent-runtime");
+    const previousDevApiUrl = process.env.DEV_API_DATABASE_URL;
+    const previousDatabaseUrl = process.env.DATABASE_URL;
+    process.env.DEV_API_DATABASE_URL = databaseUrl;
+    registerLifoCleanup(t, async () => {
+      await closeLocalRuntimePoolForTests();
+      if (previousDevApiUrl === undefined) {
+        delete process.env.DEV_API_DATABASE_URL;
+      } else {
+        process.env.DEV_API_DATABASE_URL = previousDevApiUrl;
+      }
+      if (previousDatabaseUrl === undefined) {
+        delete process.env.DATABASE_URL;
+      } else {
+        process.env.DATABASE_URL = previousDatabaseUrl;
+      }
+    });
+
+    const seedClient = await connectedClient(t, databaseUrl);
+    await seedUser(seedClient);
+
+    const alertRules = [
+      {
+        rule_id: "local-runtime-check",
+        severity_at_least: "medium",
+        headline_contains: "configured research universe",
+        channels: ["email"],
+      },
+    ];
+    const agent = await createAgent(seedClient, {
+      user_id: USER_ID,
+      name: "Local runtime integration agent",
+      thesis: "Track whether the configured universe has fresh evidence.",
+      cadence: "daily",
+      universe: {
+        mode: "static",
+        subject_refs: [{ kind: "issuer", id: SUBJECT_ID }],
+      },
+      alert_rules: alertRules,
+    });
+    const claim = await claimAgentRun(seedClient, {
+      run_id: RUN_ID,
+      agent_id: agent.agent_id,
+      inputs_watermark: agent.watermarks,
+    });
+    assert.equal(claim.claimed, true);
+
+    const pool = await connectedPool(t, databaseUrl);
+    const result = await runAgentLoop({
+      pool,
+      agent_id: agent.agent_id,
+      run_id: RUN_ID,
+      current_watermarks: agent.watermarks,
+      alert_rules: alertRules,
+      stages: createAgentLoopStages({ userId: USER_ID, runId: RUN_ID, agent }),
+    });
+
+    assert.deepEqual(result.outputs_summary, {
+      findings: 1,
+      activities: 1,
+      alerts: { evaluated_rules: 1, evaluated_findings: 1, fired: 1 },
+    });
+
+    const findingRows = (
+      await seedClient.query<{
+        finding_id: string;
+        agent_id: string;
+        snapshot_id: string;
+        subject_refs: unknown;
+        claim_cluster_ids: unknown;
+        severity: string;
+        headline: string;
+        summary_blocks: unknown;
+      }>(
+        `select finding_id::text as finding_id,
+                agent_id::text as agent_id,
+                snapshot_id::text as snapshot_id,
+                subject_refs,
+                claim_cluster_ids,
+                severity,
+                headline,
+                summary_blocks
+           from findings
+          where agent_id = $1::uuid`,
+        [agent.agent_id],
+      )
+    ).rows;
+
+    assert.equal(findingRows.length, 1);
+    const finding = findingRows[0];
+    assert.equal(finding.agent_id, agent.agent_id);
+    assert.equal(finding.severity, "medium");
+    assert.match(finding.headline, /configured research universe/);
+    assert.deepEqual(finding.subject_refs, [{ kind: "issuer", id: SUBJECT_ID }]);
+    assert.equal(Array.isArray(finding.claim_cluster_ids), true);
+
+    const snapshotCount = (
+      await seedClient.query<{ count: string }>(
+        "select count(*)::text as count from snapshots where snapshot_id = $1::uuid",
+        [finding.snapshot_id],
+      )
+    ).rows[0].count;
+    assert.equal(snapshotCount, "1", "finding must reference a sealed snapshot row");
+
+    assert.equal(Array.isArray(finding.summary_blocks), true);
+    const summaryBlock = (finding.summary_blocks as Array<Record<string, unknown>>)[0];
+    assert.equal(summaryBlock.kind, "finding_card");
+    assert.equal(summaryBlock.finding_id, finding.finding_id);
+    assert.equal(summaryBlock.snapshot_id, finding.snapshot_id);
+    assert.deepEqual(summaryBlock.subject_refs, [{ kind: "issuer", id: SUBJECT_ID }]);
+
+    const alertRows = (
+      await seedClient.query<{
+        run_id: string;
+        finding_id: string;
+        rule_id: string;
+        status: string;
+        channels: unknown;
+        trigger_refs: unknown;
+      }>(
+        `select run_id::text as run_id,
+                finding_id::text as finding_id,
+                rule_id,
+                status,
+                channels,
+                trigger_refs
+           from alerts_fired
+          where agent_id = $1::uuid`,
+        [agent.agent_id],
+      )
+    ).rows;
+    assert.equal(alertRows.length, 1);
+    assert.equal(alertRows[0].run_id, RUN_ID);
+    assert.equal(alertRows[0].finding_id, finding.finding_id);
+    assert.equal(alertRows[0].rule_id, "local-runtime-check");
+    assert.equal(alertRows[0].status, "pending_notification");
+    assert.deepEqual(alertRows[0].channels, ["email"]);
+    assert.deepEqual(alertRows[0].trigger_refs, [
+      { kind: "finding", id: finding.finding_id },
+    ]);
+  },
+);
