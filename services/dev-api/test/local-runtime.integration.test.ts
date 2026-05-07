@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import test, { type TestContext } from "node:test";
 
 import type { Client } from "pg";
 
 import { claimAgentRun } from "../../agents/src/agent-run-repo.ts";
-import { createAgent } from "../../agents/src/agent-repo.ts";
+import { createAgent, getAgent } from "../../agents/src/agent-repo.ts";
 import { runAgentLoop } from "../../agents/src/agent-loop.ts";
 import { createAnalyzeTemplate } from "../../analyze/src/template-repo.ts";
 import {
@@ -45,17 +46,16 @@ async function seedUser(client: Client, userId = USER_ID): Promise<void> {
 
 async function seedExistingEvidence(
   client: Client,
-  input: { userId?: string | null; label: string },
+  input: { userId?: string | null; label: string; textCanonical?: string; effectiveTime?: string },
 ): Promise<{ claimId: string; documentId: string; sourceId: string }> {
-  const asOf = "2026-05-07T00:00:00.000Z";
-  const hashDigit = input.label === "owned" ? "1" : "9";
+  const asOf = input.effectiveTime ?? "2026-05-07T00:00:00.000Z";
   const source = await createSource(client, {
     provider: `seeded-local-evidence-${input.label}`,
     kind: "article",
     trust_tier: "secondary",
     license_class: "public",
     retrieved_at: asOf,
-    content_hash: `sha256:${hashDigit.repeat(64)}`,
+    content_hash: testHash(`source:${input.label}`),
     user_id: input.userId ?? null,
   });
   const document = (await createDocument(client, {
@@ -63,14 +63,14 @@ async function seedExistingEvidence(
     kind: "article",
     title: `Seeded operating margin evidence (${input.label})`,
     published_at: asOf,
-    content_hash: `sha256:${(input.label === "owned" ? "2" : "8").repeat(64)}`,
+    content_hash: testHash(`document:${input.label}`),
     raw_blob_id: ephemeralRawBlobIdForSource(source.source_id),
     parse_status: "parsed",
   })).document;
   const claim = await createClaim(client, {
     document_id: document.document_id,
     predicate: "margin.quality",
-    text_canonical: `${input.label} seeded evidence says operating margin quality improved because gross margin expanded.`,
+    text_canonical: input.textCanonical ?? `${input.label} seeded evidence says operating margin quality improved because gross margin expanded.`,
     polarity: "positive",
     modality: "asserted",
     reported_by_source_id: source.source_id,
@@ -91,6 +91,14 @@ async function seedExistingEvidence(
     confidence: 0.84,
   });
   return { claimId: claim.claim_id, documentId: document.document_id, sourceId: source.source_id };
+}
+
+function testHash(seed: string): string {
+  return `sha256:${createHash("sha256").update(seed).digest("hex")}`;
+}
+
+function sorted(values: ReadonlyArray<string>): string[] {
+  return [...values].sort();
 }
 
 async function startDevApiServer(
@@ -229,7 +237,17 @@ test(
 
     const seedClient = await connectedClient(t, databaseUrl);
     await seedUser(seedClient);
-    const seeded = await seedExistingEvidence(seedClient, { userId: USER_ID, label: "owned" });
+    const canonicalClusterText = "operating margin quality improved because gross margin expanded.";
+    const seeded = await seedExistingEvidence(seedClient, {
+      userId: USER_ID,
+      label: "owned",
+      textCanonical: canonicalClusterText,
+    });
+    const corroborating = await seedExistingEvidence(seedClient, {
+      userId: USER_ID,
+      label: "owned-corroborating",
+      textCanonical: canonicalClusterText,
+    });
 
     const alertRules = [
       {
@@ -264,7 +282,7 @@ test(
       run_id: RUN_ID,
       current_watermarks: agent.watermarks,
       alert_rules: alertRules,
-      stages: createAgentLoopStages({ userId: USER_ID, runId: RUN_ID, agent }),
+      stages: createAgentLoopStages({ userId: USER_ID, runId: RUN_ID, agent, trigger: "manual" }),
     });
 
     assert.deepEqual(result.outputs_summary, {
@@ -315,7 +333,7 @@ test(
         [clusterId],
       )
     ).rows;
-    assert.deepEqual(clusterMemberRows.map((row) => row.claim_id), [seeded.claimId]);
+    assert.deepEqual(sorted(clusterMemberRows.map((row) => row.claim_id)), sorted([seeded.claimId, corroborating.claimId]));
 
     const snapshotRows = (
       await seedClient.query<{
@@ -336,9 +354,9 @@ test(
     assert.equal(snapshotRows[0].basis, "unadjusted");
     assert.equal(snapshotRows[0].model_version, "dev-api-local-agent-runtime");
     assert.deepEqual(snapshotRows[0].subject_refs, [{ kind: "issuer", id: SUBJECT_ID }]);
-    assert.deepEqual(snapshotRows[0].source_ids, [seeded.sourceId]);
-    assert.deepEqual(snapshotRows[0].claim_refs, [seeded.claimId]);
-    assert.deepEqual(snapshotRows[0].document_refs, [seeded.documentId]);
+    assert.deepEqual(sorted(snapshotRows[0].source_ids as string[]), sorted([seeded.sourceId, corroborating.sourceId]));
+    assert.deepEqual(sorted(snapshotRows[0].claim_refs as string[]), sorted([seeded.claimId, corroborating.claimId]));
+    assert.deepEqual(sorted(snapshotRows[0].document_refs as string[]), sorted([seeded.documentId, corroborating.documentId]));
 
     assert.equal(Array.isArray(finding.summary_blocks), true);
     const summaryBlock = (finding.summary_blocks as Array<Record<string, unknown>>)[0];
@@ -346,7 +364,7 @@ test(
     assert.equal(summaryBlock.finding_id, finding.finding_id);
     assert.equal(summaryBlock.snapshot_id, finding.snapshot_id);
     assert.deepEqual(summaryBlock.subject_refs, [{ kind: "issuer", id: SUBJECT_ID }]);
-    assert.deepEqual(summaryBlock.source_refs, [seeded.sourceId]);
+    assert.deepEqual(sorted(summaryBlock.source_refs as string[]), sorted([seeded.sourceId, corroborating.sourceId]));
 
     const activityRows = (
       await seedClient.query<{
@@ -362,10 +380,10 @@ test(
       )
     ).rows;
     assert.deepEqual(activityRows.map((row) => row.stage), ["reading", "investigating", "found"]);
-    assert.match(activityRows[0].summary, /Read 1 evidence claim/);
-    assert.match(activityRows[1].summary, /Clustered 1 source-backed claim/);
+    assert.match(activityRows[0].summary, /Read 2 evidence claims/);
+    assert.match(activityRows[1].summary, /Clustered 2 source-backed claims into 1 evidence cluster/);
     assert.match(activityRows[2].summary, /Created 1 source-backed finding/);
-    assert.deepEqual(activityRows[2].source_refs, [seeded.sourceId]);
+    assert.deepEqual(sorted(activityRows[2].source_refs as string[]), sorted([seeded.sourceId, corroborating.sourceId]));
 
     const alertRows = (
       await seedClient.query<{
@@ -396,6 +414,92 @@ test(
     assert.deepEqual(alertRows[0].trigger_refs, [
       { kind: "finding", id: finding.finding_id },
     ]);
+
+    const updatedAgent = await getAgent(seedClient, agent.agent_id);
+    assert.notEqual(updatedAgent, null);
+    const secondRunId = "30000000-0000-4000-8000-000000000013";
+    const secondResult = await runAgentLoop({
+      pool,
+      agent_id: agent.agent_id,
+      run_id: secondRunId,
+      current_watermarks: updatedAgent!.watermarks,
+      alert_rules: alertRules,
+      stages: createAgentLoopStages({ userId: USER_ID, runId: secondRunId, agent: updatedAgent!, trigger: "manual" }),
+    });
+
+    assert.deepEqual(secondResult.outputs_summary, {
+      findings: 0,
+      activities: 2,
+      alerts: { evaluated_rules: 1, evaluated_findings: 0, fired: 0 },
+    });
+    const postRerunFindingCount = Number((
+      await seedClient.query<{ count: string }>(
+        `select count(*)::text as count
+           from findings
+          where agent_id = $1::uuid`,
+        [agent.agent_id],
+      )
+    ).rows[0].count);
+    assert.equal(postRerunFindingCount, 1);
+    const postRerunAlertCount = Number((
+      await seedClient.query<{ count: string }>(
+        `select count(*)::text as count
+           from alerts_fired
+          where agent_id = $1::uuid`,
+        [agent.agent_id],
+      )
+    ).rows[0].count);
+    assert.equal(postRerunAlertCount, 1);
+
+    const laterCorroborating = await seedExistingEvidence(seedClient, {
+      userId: USER_ID,
+      label: "owned-later-corroborating",
+      textCanonical: canonicalClusterText,
+    });
+    const agentAfterNoopRun = await getAgent(seedClient, agent.agent_id);
+    assert.notEqual(agentAfterNoopRun, null);
+    const thirdRunId = "30000000-0000-4000-8000-000000000023";
+    const thirdResult = await runAgentLoop({
+      pool,
+      agent_id: agent.agent_id,
+      current_watermarks: agentAfterNoopRun!.watermarks,
+      stages: createAgentLoopStages({ userId: USER_ID, runId: thirdRunId, agent: agentAfterNoopRun!, trigger: "manual" }),
+    });
+
+    assert.deepEqual(thirdResult.outputs_summary, {
+      findings: 0,
+      activities: 3,
+    });
+    const postClusterUpdateFindingCount = Number((
+      await seedClient.query<{ count: string }>(
+        `select count(*)::text as count
+           from findings
+          where agent_id = $1::uuid`,
+        [agent.agent_id],
+      )
+    ).rows[0].count);
+    assert.equal(postClusterUpdateFindingCount, 1);
+    const postClusterUpdateAlertCount = Number((
+      await seedClient.query<{ count: string }>(
+        `select count(*)::text as count
+           from alerts_fired
+          where agent_id = $1::uuid`,
+        [agent.agent_id],
+      )
+    ).rows[0].count);
+    assert.equal(postClusterUpdateAlertCount, 1);
+    const updatedClusterMemberRows = (
+      await seedClient.query<{ claim_id: string }>(
+        `select claim_id::text as claim_id
+           from claim_cluster_members
+          where cluster_id = $1::uuid`,
+        [clusterId],
+      )
+    ).rows;
+    assert.deepEqual(
+      sorted(updatedClusterMemberRows.map((row) => row.claim_id)),
+      sorted([seeded.claimId, corroborating.claimId, laterCorroborating.claimId]),
+    );
   },
 );
 
@@ -455,7 +559,7 @@ test(
       run_id: emptyRunId,
       current_watermarks: agent.watermarks,
       alert_rules: agent.alert_rules as ReadonlyArray<unknown>,
-      stages: createAgentLoopStages({ userId: USER_ID, runId: emptyRunId, agent }),
+      stages: createAgentLoopStages({ userId: USER_ID, runId: emptyRunId, agent, trigger: "manual" }),
     });
 
     assert.deepEqual(result.outputs_summary, {

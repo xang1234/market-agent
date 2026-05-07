@@ -100,6 +100,9 @@ export function AgentsPage() {
     editingAgent?.universe !== undefined && !canRoundTripUniverse(editingAgent.universe)
   const preservesUnsupportedAlertRules =
     editingAgent?.alert_rules !== undefined && !canRoundTripAlertRules(editingAgent.alert_rules)
+  const visibleFindings = session && selectedAgentId ? findings : []
+  const visibleRunActivities = session && selectedAgentId ? runActivities : []
+  const visibleDetailsError = session && selectedAgentId ? detailsError : null
 
   useEffect(() => {
     if (!session) return
@@ -623,14 +626,14 @@ export function AgentsPage() {
           </section>
           <section className="rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
             <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Findings</h2>
-            {detailsError ? (
-              <p className="mt-3 text-sm text-rose-600 dark:text-rose-300">Details failed: {detailsError}</p>
+            {visibleDetailsError ? (
+              <p className="mt-3 text-sm text-rose-600 dark:text-rose-300">Details failed: {visibleDetailsError}</p>
             ) : null}
-            {findings.length === 0 ? (
+            {visibleFindings.length === 0 ? (
               <p className="mt-4 text-sm text-neutral-500 dark:text-neutral-400">No findings for this agent yet.</p>
             ) : (
               <ul className="mt-4 flex flex-col gap-3">
-                {findings.map((finding) => (
+                {visibleFindings.map((finding) => (
                   <li key={finding.finding_id} className="rounded-md border border-neutral-200 p-3 text-sm dark:border-neutral-800">
                     <div className="flex items-start justify-between gap-3">
                       <span className="font-medium text-neutral-900 dark:text-neutral-100">{finding.headline}</span>
@@ -662,11 +665,11 @@ export function AgentsPage() {
           </section>
           <section className="rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
             <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Run activity</h2>
-            {runActivities.length === 0 ? (
+            {visibleRunActivities.length === 0 ? (
               <p className="mt-4 text-sm text-neutral-500 dark:text-neutral-400">No activity for this agent yet.</p>
             ) : (
               <ul className="mt-4 flex flex-col gap-3">
-                {runActivities.map((item) => (
+                {visibleRunActivities.map((item) => (
                   <li key={item.run_activity_id} className="rounded-md border border-neutral-200 p-3 text-sm dark:border-neutral-800">
                     <div className="flex items-start justify-between gap-3">
                       <span className="font-medium capitalize text-neutral-900 dark:text-neutral-100">{item.stage}</span>

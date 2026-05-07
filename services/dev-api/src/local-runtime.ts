@@ -28,6 +28,19 @@ import type {
 
 let localPool: Pool | null = null;
 
+type LocalRuntimeClusterGroup = {
+  canonical_signature: string;
+  claims: ReadonlyArray<LocalRuntimeClaimEvidence>;
+  source_ids: ReadonlyArray<string>;
+  document_refs: ReadonlyArray<string>;
+  claim_refs: ReadonlyArray<string>;
+};
+
+type LocalRuntimeClusterEvidence = {
+  evidence: LocalRuntimeEvidence;
+  clusters: ReadonlyArray<LocalRuntimeClusterGroup>;
+};
+
 export async function runAnalyzeWorkflow(
   input: DevApiAnalyzeWorkflowInput,
 ): Promise<DevApiAnalyzeWorkflowResult> {
@@ -114,46 +127,59 @@ export async function sealAnalyzeSnapshot(
   });
 }
 
-export const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, runId, agent }) => {
+export const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, runId, agent, trigger = "scheduled" }) => {
   const subjectRefs = normalizeSubjectRefs(subjectRefsFromUniverse(agent.universe), agent.agent_id);
   const asOf = new Date().toISOString();
   const activityClock = activityClockFrom(asOf);
   let findings: ReadonlyArray<FindingRow> = [];
   return {
     readDeltas: async ({ current_watermarks }) => ({
-      trigger: "manual",
+      trigger,
       run_id: runId,
       current_watermarks,
       subject_refs: subjectRefs,
       as_of: asOf,
+      processed_claim_ids: processedClaimIdsFromWatermarks(current_watermarks),
     }),
     extractEvidence: async ({ deltas }) => ({
       deltas,
       evidence: await loadLocalRuntimeEvidence(pool(), {
         subject_refs: subjectRefs,
         user_id: userId,
+        exclude_claim_ids: processedClaimIdsFromWatermarks(
+          isJsonObject(deltas) ? deltas.current_watermarks : {},
+        ),
       }),
     }),
     clusterEvidence: async ({ evidence }) => ({
       evidence,
-      claims: localRuntimeEvidence(evidence).claims,
+      clusters: clusterLocalRuntimeEvidence(localRuntimeEvidence(evidence), subjectRefs),
     }),
     analyze: async ({ clusters }) => ({
-      claims: Array.isArray((clusters as { claims?: unknown }).claims)
-        ? (clusters as { claims: LocalRuntimeClaimEvidence[] }).claims
-        : [],
+      clusters: localRuntimeClusterEvidence(clusters).clusters,
     }),
     nextWatermarks: async ({ current_watermarks, evidence }) => {
       const loadedEvidence = localRuntimeEvidence(evidence);
+      const existingLocal = localAgentWatermarks(current_watermarks);
+      const processedClaimIds = uniqueStrings([
+        ...processedClaimIdsFromWatermarks(current_watermarks),
+        ...loadedEvidence.claim_refs,
+      ]);
       return {
         ...(isJsonObject(current_watermarks) ? current_watermarks : {}),
-        last_manual_run_id: runId,
-        last_checked_at: new Date().toISOString(),
-        last_evidence_claim_count: loadedEvidence.claim_refs.length,
+        local_agent_evidence: {
+          ...existingLocal,
+          trigger,
+          [`last_${trigger}_run_id`]: runId,
+          last_checked_at: new Date().toISOString(),
+          last_evidence_claim_count: loadedEvidence.claim_refs.length,
+          processed_claim_ids: processedClaimIds,
+        },
       };
     },
-    applySideEffects: async ({ tx, evidence }) => {
+    applySideEffects: async ({ tx, evidence, clusters }) => {
       const loadedEvidence = localRuntimeEvidence(evidence);
+      const clusterGroups = localRuntimeClusterEvidence(clusters).clusters;
       await writeRunActivity(tx, {
         user_id: userId,
         agent_id: agent.agent_id,
@@ -164,7 +190,7 @@ export const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, run
         ts: activityClock(0),
       });
 
-      if (loadedEvidence.claims.length === 0) {
+      if (clusterGroups.length === 0) {
         await writeRunActivity(tx, {
           user_id: userId,
           agent_id: agent.agent_id,
@@ -186,7 +212,7 @@ export const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, run
         stage: "investigating",
         subject_refs: subjectRefs,
         source_refs: loadedEvidence.source_ids,
-        summary: `Clustered ${loadedEvidence.claims.length} source-backed ${plural(loadedEvidence.claims.length, "claim")}.`,
+        summary: `Clustered ${loadedEvidence.claims.length} source-backed ${plural(loadedEvidence.claims.length, "claim")} into ${clusterGroups.length} evidence ${plural(clusterGroups.length, "cluster")}.`,
         ts: activityClock(1),
       });
 
@@ -198,17 +224,22 @@ export const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, run
       });
 
       const createdFindings: FindingRow[] = [];
-      for (const claim of loadedEvidence.claims) {
-        const cluster = await upsertClusterForClaim(tx, claim, subjectRefs, asOf);
+      for (const group of clusterGroups) {
+        const cluster = await upsertClusterForGroup(tx, group, subjectRefs, asOf);
+        if (await agentAlreadyHasFindingForCluster(tx, agent.agent_id, cluster.cluster_id)) {
+          continue;
+        }
+        const representativeClaim = group.claims[0];
+        if (representativeClaim === undefined) continue;
         createdFindings.push(await generateFinding(tx, {
           agent_id: agent.agent_id,
           snapshot_id: snapshotId,
           snapshot_manifest: snapshotManifest,
           subject_refs: subjectRefs,
           claim_cluster_ids: [cluster.cluster_id],
-          headline: claim.text_canonical,
-          severity_input: severityInputForClaim(claim),
-          source_refs: [claim.source_id],
+          headline: representativeClaim.text_canonical,
+          severity_input: severityInputForClaims(group.claims),
+          source_refs: group.source_ids,
         }));
       }
       findings = createdFindings;
@@ -310,28 +341,40 @@ async function sealAgentEvidenceSnapshot(input: {
   };
 }
 
-async function upsertClusterForClaim(
+async function upsertClusterForGroup(
   db: QueryExecutor,
-  claim: LocalRuntimeClaimEvidence,
+  group: LocalRuntimeClusterGroup,
   subjectRefs: ReadonlyArray<SnapshotSubjectRef>,
   seenAt: string,
 ) {
   const cluster = await upsertClaimCluster(db, {
-    canonical_signature: buildClaimCanonicalSignature({
-      predicate: claim.predicate,
-      text_canonical: claim.text_canonical,
-      event_type: claim.predicate,
-      effective_time: claim.effective_time,
-      subjects: subjectRefs,
-    }),
+    canonical_signature: group.canonical_signature,
     seen_at: seenAt,
   });
-  await addClaimClusterMember(db, {
-    cluster_id: cluster.cluster_id,
-    claim_id: claim.claim_id,
-    relation: claim.polarity === "negative" ? "contradict" : "support",
-  });
+  for (const claim of group.claims) {
+    await addClaimClusterMember(db, {
+      cluster_id: cluster.cluster_id,
+      claim_id: claim.claim_id,
+      relation: claim.polarity === "negative" ? "contradict" : "support",
+    });
+  }
   return cluster;
+}
+
+async function agentAlreadyHasFindingForCluster(
+  db: QueryExecutor,
+  agentId: string,
+  clusterId: string,
+): Promise<boolean> {
+  const { rows } = await db.query<{ finding_id: string }>(
+    `select finding_id::text as finding_id
+       from findings
+      where agent_id = $1::uuid
+        and claim_cluster_ids ? $2
+      limit 1`,
+    [agentId, clusterId],
+  );
+  return rows.length > 0;
 }
 
 function localRuntimeEvidence(value: unknown): LocalRuntimeEvidence {
@@ -339,21 +382,87 @@ function localRuntimeEvidence(value: unknown): LocalRuntimeEvidence {
   return value as LocalRuntimeEvidence;
 }
 
-function severityInputForClaim(claim: LocalRuntimeClaimEvidence) {
+function localRuntimeClusterEvidence(value: unknown): LocalRuntimeClusterEvidence {
+  if (isJsonObject(value) && Array.isArray(value.clusters)) return value as unknown as LocalRuntimeClusterEvidence;
+  const evidence = localRuntimeEvidence(value);
+  return {
+    evidence,
+    clusters: clusterLocalRuntimeEvidence(evidence, evidence.subject_refs),
+  };
+}
+
+function clusterLocalRuntimeEvidence(
+  evidence: LocalRuntimeEvidence,
+  subjectRefs: ReadonlyArray<SnapshotSubjectRef>,
+): ReadonlyArray<LocalRuntimeClusterGroup> {
+  const groups = new Map<string, LocalRuntimeClaimEvidence[]>();
+  for (const claim of evidence.claims) {
+    const signature = buildClaimCanonicalSignature({
+      predicate: claim.predicate,
+      text_canonical: claim.text_canonical,
+      event_type: claim.predicate,
+      effective_time: claim.effective_time,
+      subjects: subjectRefs,
+    });
+    groups.set(signature, [...(groups.get(signature) ?? []), claim]);
+  }
+  return Object.freeze([...groups.entries()].map(([canonicalSignature, claims]) => {
+    const frozenClaims = Object.freeze([...claims]);
+    return Object.freeze({
+      canonical_signature: canonicalSignature,
+      claims: frozenClaims,
+      source_ids: Object.freeze(uniqueStrings(frozenClaims.map((claim) => claim.source_id))),
+      document_refs: Object.freeze(uniqueStrings(frozenClaims.map((claim) => claim.document_id))),
+      claim_refs: Object.freeze(uniqueStrings(frozenClaims.map((claim) => claim.claim_id))),
+    });
+  }));
+}
+
+function severityInputForClaims(claims: ReadonlyArray<LocalRuntimeClaimEvidence>) {
+  const representative = claims[0];
+  if (representative === undefined) {
+    throw new Error("cannot score an empty evidence cluster");
+  }
   return {
     evidence: {
-      trust_tier: scoringTrustTier(claim.trust_tier),
-      corroborating_source_count: 1,
-      confidence: clamp01(claim.confidence),
+      trust_tier: scoringTrustTier(bestTrustTier(claims)),
+      corroborating_source_count: uniqueStrings(claims.map((claim) => claim.source_id)).length,
+      confidence: clamp01(Math.max(...claims.map((claim) => claim.confidence))),
     },
     impact: {
-      direction: scoringDirection(claim.polarity),
+      direction: scoringDirection(representative.polarity),
       channel: "demand" as const,
       horizon: "near_term" as const,
       confidence: 0.5,
     },
     thesis_relevance: 0.5,
   };
+}
+
+function bestTrustTier(claims: ReadonlyArray<LocalRuntimeClaimEvidence>): string {
+  const rank = new Map([
+    ["primary", 4],
+    ["user", 3],
+    ["secondary", 2],
+    ["tertiary", 1],
+  ]);
+  return [...claims]
+    .sort((left, right) => (rank.get(right.trust_tier) ?? 0) - (rank.get(left.trust_tier) ?? 0))[0]?.trust_tier ?? "secondary";
+}
+
+function processedClaimIdsFromWatermarks(value: unknown): ReadonlyArray<string> {
+  const local = localAgentWatermarks(value);
+  const processed = local.processed_claim_ids;
+  return Array.isArray(processed) ? uniqueStrings(processed.filter((id): id is string => typeof id === "string" && isUuid(id))) : [];
+}
+
+function localAgentWatermarks(value: unknown): Record<string, JsonValue> {
+  if (!isJsonObject(value)) return {};
+  return isJsonObject(value.local_agent_evidence) ? value.local_agent_evidence : {};
+}
+
+function uniqueStrings(values: ReadonlyArray<string>): string[] {
+  return [...new Set(values)];
 }
 
 function scoringTrustTier(value: string): "primary" | "secondary" | "tertiary" | "user" {

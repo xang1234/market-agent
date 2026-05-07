@@ -5,6 +5,7 @@ import type { QueryExecutor } from "./types.ts";
 export type LocalRuntimeEvidenceInput = {
   subject_refs: ReadonlyArray<SnapshotSubjectRef>;
   user_id?: string | null;
+  exclude_claim_ids?: ReadonlyArray<string>;
   limit?: number;
 };
 
@@ -60,44 +61,63 @@ export async function loadLocalRuntimeEvidence(
   const subjectRefs = normalizeSubjectRefs(input.subject_refs);
   if (subjectRefs.length === 0) return emptyEvidence(subjectRefs);
 
+  const excludedClaimIds = unique(input.exclude_claim_ids ?? []);
   const { rows } = await db.query<ClaimEvidenceRow>(
     `with subject_refs as (
        select kind::subject_kind as subject_kind,
               id::uuid as subject_id
          from jsonb_to_recordset($1::jsonb) as refs(kind text, id text)
+     ),
+     matching_claims as (
+       select distinct on (c.claim_id)
+              c.claim_id::text as claim_id,
+              c.document_id::text as document_id,
+              c.reported_by_source_id::text as source_id,
+              c.text_canonical,
+              c.predicate,
+              c.polarity,
+              s.trust_tier,
+              c.confidence,
+              d.title as document_title,
+              d.published_at,
+              c.effective_time,
+              c.created_at as claim_created_at
+         from subject_refs sr
+         join claim_arguments ca
+           on ca.subject_kind = sr.subject_kind
+          and ca.subject_id = sr.subject_id
+         join claims c
+           on c.claim_id = ca.claim_id
+         join documents d
+           on d.document_id = c.document_id
+         join sources s
+           on s.source_id = c.reported_by_source_id
+        where c.status in ('extracted', 'corroborated')
+          and not (c.claim_id = any($4::uuid[]))
+          and (
+            s.user_id is null
+            or ($3::uuid is not null and s.user_id = $3::uuid)
+          )
+        order by c.claim_id,
+                 c.effective_time desc nulls last,
+                 c.created_at desc
      )
-     select distinct on (c.claim_id)
-            c.claim_id::text as claim_id,
-            c.document_id::text as document_id,
-            c.reported_by_source_id::text as source_id,
-            c.text_canonical,
-            c.predicate,
-            c.polarity,
-            s.trust_tier,
-            c.confidence,
-            d.title as document_title,
-            d.published_at,
-            c.effective_time
-       from subject_refs sr
-       join claim_arguments ca
-         on ca.subject_kind = sr.subject_kind
-        and ca.subject_id = sr.subject_id
-       join claims c
-         on c.claim_id = ca.claim_id
-       join documents d
-         on d.document_id = c.document_id
-       join sources s
-         on s.source_id = c.reported_by_source_id
-      where c.status in ('extracted', 'corroborated')
-        and (
-          s.user_id is null
-          or ($3::uuid is not null and s.user_id = $3::uuid)
-        )
-      order by c.claim_id,
-               c.effective_time desc nulls last,
-               c.created_at desc
+     select claim_id,
+            document_id,
+            source_id,
+            text_canonical,
+            predicate,
+            polarity,
+            trust_tier,
+            confidence,
+            document_title,
+            published_at,
+            effective_time
+       from matching_claims
+      order by coalesce(effective_time, published_at, claim_created_at) desc nulls last,
+               claim_id desc
       limit $2`,
-    [JSON.stringify(subjectRefs), input.limit ?? 5, userIdOrNull(input.user_id)],
+    [JSON.stringify(subjectRefs), input.limit ?? 5, userIdOrNull(input.user_id), excludedClaimIds],
   );
 
   return evidenceFromClaimRows(subjectRefs, rows);

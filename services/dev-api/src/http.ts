@@ -175,6 +175,7 @@ export type DevApiAgentLoopStageFactoryInput = {
   userId: string;
   runId: string;
   agent: AgentRow;
+  trigger?: "manual" | "scheduled";
 };
 
 export type DevApiAgentLoopStageFactory = (
@@ -873,6 +874,7 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
               userId,
               runId,
               agent: loopAgent,
+              trigger: "manual",
             }),
           });
           return toDevAgentRun(await completeAgentRun(deps.db, {
