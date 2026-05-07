@@ -246,8 +246,6 @@ configure_runtime_env() {
   CHAT_ANALYST_RUNTIME_MODULE="${CHAT_ANALYST_RUNTIME_MODULE:-$ROOT/services/chat/src/local-runtime.ts}"
   export CHAT_PERSISTENCE_MODULE
   CHAT_PERSISTENCE_MODULE="${CHAT_PERSISTENCE_MODULE:-$ROOT/services/chat/src/local-runtime.ts}"
-  export CHAT_LOCAL_TOOL_EXECUTOR
-  CHAT_LOCAL_TOOL_EXECUTOR="${CHAT_LOCAL_TOOL_EXECUTOR:-dev_stub}"
 }
 
 container_status() {

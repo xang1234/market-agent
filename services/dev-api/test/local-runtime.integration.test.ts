@@ -6,6 +6,7 @@ import type { Client } from "pg";
 import { claimAgentRun } from "../../agents/src/agent-run-repo.ts";
 import { createAgent } from "../../agents/src/agent-repo.ts";
 import { runAgentLoop } from "../../agents/src/agent-loop.ts";
+import { createAnalyzeTemplate } from "../../analyze/src/template-repo.ts";
 import {
   bootstrapDatabase,
   connectedClient,
@@ -16,6 +17,8 @@ import {
 import {
   closeLocalRuntimePoolForTests,
   createAgentLoopStages,
+  runAnalyzeWorkflow,
+  sealAnalyzeSnapshot,
 } from "../src/local-runtime.ts";
 
 const USER_ID = "10000000-0000-4000-8000-000000000001";
@@ -28,6 +31,76 @@ async function seedUser(client: Client): Promise<void> {
     [USER_ID, "local-runtime-agent@example.com"],
   );
 }
+
+test(
+  "local analyze runtime produces verifier-valid claim/document/source backed blocks",
+  { skip: !dockerAvailable(), timeout: 120_000 },
+  async (t) => {
+    const { databaseUrl } = await bootstrapDatabase(t, "dev-api-local-analyze-runtime");
+    const previousDevApiUrl = process.env.DEV_API_DATABASE_URL;
+    const previousDatabaseUrl = process.env.DATABASE_URL;
+    process.env.DEV_API_DATABASE_URL = databaseUrl;
+    registerLifoCleanup(t, async () => {
+      await closeLocalRuntimePoolForTests();
+      if (previousDevApiUrl === undefined) {
+        delete process.env.DEV_API_DATABASE_URL;
+      } else {
+        process.env.DEV_API_DATABASE_URL = previousDevApiUrl;
+      }
+      if (previousDatabaseUrl === undefined) {
+        delete process.env.DATABASE_URL;
+      } else {
+        process.env.DATABASE_URL = previousDatabaseUrl;
+      }
+    });
+
+    const client = await connectedClient(t, databaseUrl);
+    await seedUser(client);
+    const template = await createAnalyzeTemplate(client, {
+      user_id: USER_ID,
+      name: "Evidence-backed memo",
+      prompt_template: "Summarize the evidence",
+      source_categories: ["filings", "news"],
+    });
+
+    const snapshotId = "40000000-0000-4000-8000-000000000004";
+    const rendered = await runAnalyzeWorkflow({
+      userId: USER_ID,
+      template,
+      body: {},
+      snapshotId,
+      instructions: "Summarize the evidence",
+      sourceCategories: ["filings"],
+      bundleIds: ["company_profile", "filings"],
+      subjectRefs: [{ kind: "issuer", id: SUBJECT_ID }],
+    });
+
+    assert.equal(rendered.blocks.length >= 1, true);
+    const firstBlock = rendered.blocks[0]!;
+    assert.equal(firstBlock.snapshot_id, snapshotId);
+    assert.equal(Array.isArray(firstBlock.source_refs), true);
+    assert.equal((firstBlock.source_refs as unknown[]).length > 0, true);
+    assert.equal(Array.isArray(firstBlock.claim_refs), true);
+    assert.equal((firstBlock.claim_refs as unknown[]).length > 0, true);
+    assert.equal(Array.isArray(firstBlock.document_refs), true);
+    assert.equal((firstBlock.document_refs as unknown[]).length > 0, true);
+
+    const seal = await sealAnalyzeSnapshot({
+      snapshotId,
+      userId: USER_ID,
+      templateId: template.template_id,
+      body: {},
+      blocks: rendered.blocks,
+    });
+
+    assert.equal(seal.ok, true, JSON.stringify(seal.verification.failures));
+    if (!seal.ok) return;
+    assert.equal(seal.snapshot.snapshot_id, snapshotId);
+    assert.equal(seal.snapshot.source_ids.length > 0, true);
+    assert.equal(seal.snapshot.claim_refs.length > 0, true);
+    assert.equal(seal.snapshot.document_refs.length > 0, true);
+  },
+);
 
 test(
   "local agent runtime creates snapshot-backed findings that real alert evaluation can fire on",

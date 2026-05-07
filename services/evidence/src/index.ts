@@ -300,6 +300,13 @@ export type {
 
 export { createEvidenceReaderToolHandlers } from "./reader/extract-tools.ts";
 export type { EvidenceReaderToolDeps } from "./reader/extract-tools.ts";
+export {
+  createLocalRuntimeEvidence,
+} from "./local-runtime-evidence.ts";
+export type {
+  LocalRuntimeEvidence,
+  LocalRuntimeEvidenceInput,
+} from "./local-runtime-evidence.ts";
 export { linkDocumentMentions } from "./reader/entity-linker.ts";
 export type {
   DetectedMentionCandidate,

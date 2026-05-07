@@ -30,7 +30,7 @@ test("runtime config resolves in-repo default runtime when loader cwd is the rep
   assert.equal(typeof options.persistAssistantMessage, "function");
 });
 
-test("in-repo chat runtime requires explicit local stub tool executor mode", async () => {
+test("in-repo chat runtime runs without the local stub tool executor mode", async () => {
   const previous = process.env.CHAT_LOCAL_TOOL_EXECUTOR;
   delete process.env.CHAT_LOCAL_TOOL_EXECUTOR;
   try {
@@ -48,7 +48,7 @@ test("in-repo chat runtime requires explicit local stub tool executor mode", asy
           userIntent: "Summarize the latest filing",
           emit() {},
         }),
-      /CHAT_LOCAL_TOOL_EXECUTOR=dev_stub/,
+      /DATABASE_URL|ENOTFOUND|getaddrinfo|connect/i,
     );
   } finally {
     if (previous === undefined) {

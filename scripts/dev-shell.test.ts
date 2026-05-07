@@ -262,7 +262,7 @@ test("runtime module env vars default to in-repo durable local stack wiring", as
   const result = await runBash(
     [
       "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
-      'printf "%s\\n%s\\n%s\\n%s\\n%s" "$DEV_API_ANALYZE_SEAL_MODULE" "$DEV_API_RUNTIME_MODULE" "$CHAT_ANALYST_RUNTIME_MODULE" "$CHAT_PERSISTENCE_MODULE" "$CHAT_LOCAL_TOOL_EXECUTOR"',
+      'printf "%s\\n%s\\n%s\\n%s\\n<%s>" "$DEV_API_ANALYZE_SEAL_MODULE" "$DEV_API_RUNTIME_MODULE" "$CHAT_ANALYST_RUNTIME_MODULE" "$CHAT_PERSISTENCE_MODULE" "${CHAT_LOCAL_TOOL_EXECUTOR:-}"',
     ].join("\n"),
     fixture.root,
   );
@@ -274,7 +274,7 @@ test("runtime module env vars default to in-repo durable local stack wiring", as
     `${root}/services/dev-api/src/local-runtime.ts`,
     `${root}/services/chat/src/local-runtime.ts`,
     `${root}/services/chat/src/local-runtime.ts`,
-    "dev_stub",
+    "<>",
   ]);
 
   await rm(fixture.root, { recursive: true, force: true });
