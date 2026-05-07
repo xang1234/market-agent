@@ -327,6 +327,7 @@ test("POST /v1/chat/threads/:id/messages persists a durable user message", async
   const messageId = "66666666-6666-4666-a666-666666666666";
   const snapshotId = "77777777-7777-4777-a777-777777777777";
   const { db, queries } = fakeDb(({ text, values }) => {
+    if (text === "begin" || text === "commit" || text === "rollback") return [];
     if (text.includes("from chat_threads")) return [{ owned: true }];
     if (text.includes("insert into snapshots")) return [];
     if (text.includes("insert into chat_messages")) {
@@ -364,10 +365,41 @@ test("POST /v1/chat/threads/:id/messages persists a durable user message", async
   };
 
   assert.equal(response.status, 201);
+  assert.equal(queries[0].text, "begin");
+  assert.equal(queries.at(-1)?.text, "commit");
   assert.equal(body.message?.role, "user");
   assert.equal(body.message?.blocks[0].segments?.[0].text, "Review margins");
   assert.ok(queries.some((query) => query.text.includes("insert into snapshots")));
   assert.ok(queries.some((query) => query.text.includes("insert into chat_messages")));
+});
+
+test("POST /v1/chat/threads/:id/messages rolls back and returns 409 for idempotency mismatch", async (t) => {
+  const { db, queries } = fakeDb(({ text }) => {
+    if (text === "begin" || text === "commit" || text === "rollback") return [];
+    if (text.includes("from chat_threads")) return [{ owned: true }];
+    if (text.includes("insert into snapshots")) return [];
+    if (text.includes("insert into chat_messages")) return [];
+    throw new Error(`unexpected query: ${text}`);
+  });
+  const base = await startServer(t, db);
+
+  const response = await fetch(`${base}/v1/chat/threads/${THREAD_ID}/messages`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-id": USER_ID,
+    },
+    body: JSON.stringify({
+      message_id: "66666666-6666-4666-a666-666666666666",
+      snapshot_id: "77777777-7777-4777-a777-777777777777",
+      content: "Different prompt",
+    }),
+  });
+  const body = (await response.json()) as { error?: string };
+
+  assert.equal(response.status, 409);
+  assert.match(body.error ?? "", /idempotency/i);
+  assert.ok(queries.some((query) => query.text === "rollback"));
 });
 
 test("GET /v1/chat/threads/:id/messages returns an empty history for owned threads without messages", async (t) => {

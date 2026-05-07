@@ -28,6 +28,13 @@ export type PersistedChatMessage = {
   created_at: string
 }
 
+type PendingChatTurn = {
+  runId: string
+  messageId: string
+  snapshotId: string
+  text: string
+}
+
 type MessageHistoryState =
   | { kind: 'idle' | 'loading' }
   | { kind: 'error'; message: string }
@@ -127,6 +134,7 @@ export function ChatThreadView() {
   const [historyReloadKey, setHistoryReloadKey] = useState(0)
   const [state, dispatch] = useReducer(applyChatStreamEvent, INITIAL_STREAM_STATE)
   const [streamError, setStreamError] = useState<string | null>(null)
+  const [failedTurn, setFailedTurn] = useState<PendingChatTurn | null>(null)
 
   useEffect(() => {
     if (!session || !threadId) return
@@ -149,22 +157,47 @@ export function ChatThreadView() {
     return () => controller.abort()
   }, [session, threadId, historyReloadKey])
 
+  const startPersistedTurn = (turn: PendingChatTurn) => {
+    if (!session) return
+    setStreamError(null)
+    setFailedTurn(null)
+    openChatTurnStream({
+      threadId,
+      runId: turn.runId,
+      turnId: turn.messageId,
+      userIntent: turn.text,
+      userId: session.userId,
+    }, {
+      onEvent: dispatch,
+      onCompleted: () => {
+        setFailedTurn(null)
+        setHistoryReloadKey((current) => current + 1)
+      },
+      onError: () => {
+        setFailedTurn(turn)
+        setStreamError('The analyst stream disconnected.')
+      },
+    })
+  }
+
   const submitPrompt = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const text = prompt.trim()
     if (!session || text.length === 0) return
 
-    setStreamError(null)
-    const runId = makeRunId()
-    const messageId = makeRunId()
-    const snapshotId = makeRunId()
+    const turn: PendingChatTurn = {
+      runId: makeRunId(),
+      messageId: makeRunId(),
+      snapshotId: makeRunId(),
+      text,
+    }
     try {
       const message = await persistUserChatTurn({
         threadId,
         userId: session.userId,
-        messageId,
-        snapshotId,
-        content: text,
+        messageId: turn.messageId,
+        snapshotId: turn.snapshotId,
+        content: turn.text,
       })
       setHistory((current) => {
         if (current.kind !== 'ready') return { kind: 'ready', messages: [message] }
@@ -176,16 +209,7 @@ export function ChatThreadView() {
       setStreamError(`Message save failed: ${caught instanceof Error ? caught.message : String(caught)}`)
       return
     }
-    openChatTurnStream({
-      threadId,
-      runId,
-      userIntent: text,
-      userId: session.userId,
-    }, {
-      onEvent: dispatch,
-      onCompleted: () => setHistoryReloadKey((current) => current + 1),
-      onError: () => setStreamError('The analyst stream disconnected.'),
-    })
+    startPersistedTurn(turn)
   }
 
   return (
@@ -207,7 +231,20 @@ export function ChatThreadView() {
           <PersistedMessageHistory messages={history.messages} />
         ) : null}
         <StreamingTurnView state={state} />
-        {streamError ? <p className="text-sm text-rose-600 dark:text-rose-300">{streamError}</p> : null}
+        {streamError ? (
+          <div className="flex items-center gap-3 text-sm">
+            <p className="text-rose-600 dark:text-rose-300">{streamError}</p>
+            {failedTurn ? (
+              <button
+                type="button"
+                onClick={() => startPersistedTurn(failedTurn)}
+                className="rounded-md border border-rose-300 px-3 py-1.5 text-xs font-medium text-rose-700 dark:border-rose-700 dark:text-rose-200"
+              >
+                Retry stream
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       <form onSubmit={submitPrompt} className="border-t border-neutral-200 p-4 dark:border-neutral-800">
         <label className="text-sm font-medium text-neutral-700 dark:text-neutral-200" htmlFor="chat-composer">

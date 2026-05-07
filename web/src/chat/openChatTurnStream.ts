@@ -10,6 +10,7 @@ export function openChatTurnStream(
   input: {
     threadId: string
     runId: string
+    turnId?: string
     userIntent: string
     userId: string
   },
@@ -18,7 +19,7 @@ export function openChatTurnStream(
 ): EventSource {
   const params = new URLSearchParams({
     run_id: input.runId,
-    turn_id: input.runId,
+    turn_id: input.turnId ?? input.runId,
     user_intent: input.userIntent,
     user_id: input.userId,
   })

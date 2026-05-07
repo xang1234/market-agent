@@ -228,6 +228,7 @@ test('Chat stream URL carries dev identity and refreshes history after completio
   const source = openChatTurnStream({
     threadId: 'thread-123',
     runId: 'run-1',
+    turnId: 'message-user',
     userIntent: 'Review margins',
     userId: USER_ID,
   }, {
@@ -248,6 +249,7 @@ test('Chat stream URL carries dev identity and refreshes history after completio
   assert.equal(source, eventSources[0] as unknown as EventSource)
   assert.match(eventSources[0].url, /user_id=00000000-0000-4000-8000-000000000001/)
   assert.match(eventSources[0].url, /user_intent=Review\+margins/)
+  assert.match(eventSources[0].url, /turn_id=message-user/)
 
   eventSources[0].emit('turn.completed', {
     type: 'turn.completed',
@@ -383,6 +385,32 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     cadence: 'weekly',
     universe: { mode: 'static', subject_refs: [{ kind: 'theme', id: 'quality' }] },
     alert_rules: [],
+  })
+
+  const screenUniverse = { mode: 'screen', screen_id: 'screen-123' } as const
+  const multipleRules = [
+    { rule_id: 'margin-risk', severity_at_least: 'high', headline_contains: 'margin' },
+    { rule_id: 'cash-risk', severity_at_least: 'medium', headline_contains: 'cash' },
+  ] as const
+  assert.deepEqual(buildAgentPayload({
+    name: ' Existing screen monitor ',
+    thesis: ' Preserve unsupported config ',
+    cadence: 'daily',
+    subjectKind: 'issuer',
+    subjectId: '',
+    alertRuleId: '',
+    alertSeverity: 'high',
+    alertHeadline: '',
+    alertEmail: false,
+  }, {
+    universe: screenUniverse,
+    alert_rules: multipleRules,
+  }), {
+    name: 'Existing screen monitor',
+    thesis: 'Preserve unsupported config',
+    cadence: 'daily',
+    universe: screenUniverse,
+    alert_rules: multipleRules,
   })
 })
 

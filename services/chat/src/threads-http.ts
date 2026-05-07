@@ -1,6 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { listChatMessagesForThread, persistUserChatMessage } from "./messages.ts";
+import {
+  ChatMessageIdempotencyConflictError,
+  listChatMessagesForThread,
+  persistUserChatMessage,
+} from "./messages.ts";
 import {
   archiveThread,
   ChatThreadNotFoundError,
@@ -89,13 +93,22 @@ export async function tryHandleThreadsRequest(
           respond(res, 400, { error: "'content' is required" });
           return true;
         }
-        const message = await persistUserChatMessage(db, {
-          thread_id: route.threadId,
-          user_id: userId,
-          content: input.content,
-          message_id: input.message_id,
-          snapshot_id: input.snapshot_id,
-        });
+        let message;
+        try {
+          message = await persistUserChatMessage(db, {
+            thread_id: route.threadId,
+            user_id: userId,
+            content: input.content,
+            message_id: input.message_id,
+            snapshot_id: input.snapshot_id,
+          });
+        } catch (error) {
+          if (error instanceof ChatMessageIdempotencyConflictError) {
+            respond(res, 409, { error: error.message });
+            return true;
+          }
+          throw error;
+        }
         if (message === null) {
           respond(res, 404, { error: "chat thread not found" });
           return true;

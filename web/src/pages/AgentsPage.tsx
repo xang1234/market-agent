@@ -37,7 +37,7 @@ export type AgentPayload = {
   name: string
   thesis: string
   cadence: string
-  universe: { mode: 'static'; subject_refs: ReadonlyArray<SubjectRef> }
+  universe: AgentUniverse
   alert_rules: ReadonlyArray<AgentAlertRule>
 }
 
@@ -89,6 +89,7 @@ export function AgentsPage() {
   const [thesis, setThesis] = useState('')
   const [cadence, setCadence] = useState('daily')
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
+  const [editingAgent, setEditingAgent] = useState<AgentRow | null>(null)
   const [subjectKind, setSubjectKind] = useState('issuer')
   const [subjectId, setSubjectId] = useState('')
   const [alertRuleId, setAlertRuleId] = useState('')
@@ -123,6 +124,7 @@ export function AgentsPage() {
 
   const resetForm = () => {
     setEditingAgentId(null)
+    setEditingAgent(null)
     setName('')
     setThesis('')
     setCadence('daily')
@@ -147,7 +149,7 @@ export function AgentsPage() {
       alertSeverity,
       alertHeadline,
       alertEmail,
-    })
+    }, editingAgent ?? undefined)
     if (!input.name || !input.thesis) return
     setActivity(editingAgentId ? 'Updating agent' : 'Creating agent')
     const response = await fetch(editingAgentId ? `/v1/agents/${encodeURIComponent(editingAgentId)}` : '/v1/agents', {
@@ -173,6 +175,7 @@ export function AgentsPage() {
     const subject = universe?.subject_refs[0] ?? null
     const alert = agent.alert_rules?.[0] ?? null
     setEditingAgentId(agent.agent_id)
+    setEditingAgent(agent)
     setName(agent.name)
     setThesis(agent.thesis)
     setCadence(agent.cadence)
@@ -467,7 +470,10 @@ function alertRuleLabel(alertRules: AgentRow['alert_rules']): string {
   return `${severity}+${headline}`.trim()
 }
 
-export function buildAgentPayload(state: AgentFormState): AgentPayload {
+export function buildAgentPayload(
+  state: AgentFormState,
+  existing?: Pick<AgentRow, 'universe' | 'alert_rules'>,
+): AgentPayload {
   const subjectRef = state.subjectId.trim()
     ? [{ kind: state.subjectKind, id: state.subjectId.trim() }]
     : []
@@ -481,11 +487,23 @@ export function buildAgentPayload(state: AgentFormState): AgentPayload {
         },
       ]
     : []
+  const preservedUniverse: AgentUniverse | null =
+    existing?.universe !== undefined && !canRoundTripUniverse(existing.universe) ? existing.universe : null
+  const preservedAlertRules: ReadonlyArray<AgentAlertRule> | null =
+    existing?.alert_rules !== undefined && !canRoundTripAlertRules(existing.alert_rules) ? existing.alert_rules : null
   return {
     name: state.name.trim(),
     thesis: state.thesis.trim(),
     cadence: state.cadence,
-    universe: { mode: 'static', subject_refs: subjectRef },
-    alert_rules: alertRules,
+    universe: preservedUniverse ?? { mode: 'static', subject_refs: subjectRef },
+    alert_rules: preservedAlertRules ?? alertRules,
   }
+}
+
+function canRoundTripUniverse(universe: AgentRow['universe']): boolean {
+  return universe === undefined || (universe.mode === 'static' && universe.subject_refs.length <= 1)
+}
+
+function canRoundTripAlertRules(alertRules: AgentRow['alert_rules']): boolean {
+  return alertRules === undefined || alertRules.length <= 1
 }
