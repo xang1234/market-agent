@@ -66,6 +66,28 @@ type DevAgentRun = {
   error: string | null;
 };
 
+type DevAgentFinding = {
+  finding_id: string;
+  agent_id: string;
+  snapshot_id: string;
+  headline: string;
+  severity: string;
+  subject_refs: JsonValue;
+  claim_cluster_ids: JsonValue;
+  summary_blocks: JsonValue;
+  created_at: string;
+};
+
+type DevAgentActivity = {
+  run_activity_id: string;
+  agent_id: string;
+  stage: string;
+  subject_refs: JsonValue;
+  source_refs: JsonValue;
+  summary: string;
+  ts: string;
+};
+
 type DevAnalyzeRun = {
   run_id: string;
   template_id: string;
@@ -121,6 +143,12 @@ export type DevApiAgentsAdapter = {
   }): Promise<DevAgent | null>;
   delete(input: { userId: string; agentId: string }): Promise<boolean>;
   run(input: { userId: string; agentId: string }): Promise<DevAgentRun | null>;
+  listFindings(input: { userId: string; agentId: string }): Promise<{
+    findings: DevAgentFinding[];
+  } | null>;
+  listActivity(input: { userId: string; agentId: string }): Promise<{
+    activity: DevAgentActivity[];
+  } | null>;
 };
 
 export type DevApiAdapters = {
@@ -333,6 +361,48 @@ export function createDevApiServer(
       return;
     }
 
+    const findingsMatch = url.pathname.match(/^\/v1\/agents\/([^/]+)\/findings$/);
+    if (req.method === "GET" && findingsMatch) {
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (userId === null) {
+        respondJson(res, 401, { error: "x-user-id header is required" });
+        return;
+      }
+      const agentId = decodeURIComponent(findingsMatch[1]);
+      if (!adapters) {
+        respondJson(res, 503, { error: "durable agents adapter is not configured" });
+        return;
+      }
+      const findings = await adapters.agents.listFindings({ userId, agentId });
+      if (findings === null) {
+        respondJson(res, 404, { error: "agent not found" });
+        return;
+      }
+      respondJson(res, 200, findings);
+      return;
+    }
+
+    const activityMatch = url.pathname.match(/^\/v1\/agents\/([^/]+)\/activity$/);
+    if (req.method === "GET" && activityMatch) {
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (userId === null) {
+        respondJson(res, 401, { error: "x-user-id header is required" });
+        return;
+      }
+      const agentId = decodeURIComponent(activityMatch[1]);
+      if (!adapters) {
+        respondJson(res, 503, { error: "durable agents adapter is not configured" });
+        return;
+      }
+      const activity = await adapters.agents.listActivity({ userId, agentId });
+      if (activity === null) {
+        respondJson(res, 404, { error: "agent not found" });
+        return;
+      }
+      respondJson(res, 200, activity);
+      return;
+    }
+
     const runMatch = url.pathname.match(/^\/v1\/agents\/([^/]+)\/runs$/);
     if (req.method === "POST" && runMatch) {
       const userId = readUserIdHeader(req.headers["x-user-id"]);
@@ -536,6 +606,16 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
         };
         agentRuns.unshift(run);
         return run;
+      },
+      async listFindings({ userId, agentId }) {
+        const agent = agents.get(agentId);
+        if (!agent || agent.user_id !== userId) return null;
+        return { findings: [] };
+      },
+      async listActivity({ userId, agentId }) {
+        const agent = agents.get(agentId);
+        if (!agent || agent.user_id !== userId) return null;
+        return { activity: [] };
       },
     },
   };
@@ -751,6 +831,16 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
         );
         return (result.rowCount ?? 0) > 0;
       },
+      async listFindings({ userId, agentId }) {
+        const existing = await getAgent(deps.db, agentId);
+        if (existing === null || existing.user_id !== userId) return null;
+        return { findings: await listFindingsForAgent(deps.db, agentId) };
+      },
+      async listActivity({ userId, agentId }) {
+        const existing = await getAgent(deps.db, agentId);
+        if (existing === null || existing.user_id !== userId) return null;
+        return { activity: await listActivityForAgent(deps.db, agentId) };
+      },
       async run({ userId, agentId }) {
         const existing = await getAgent(deps.db, agentId);
         if (existing === null || existing.user_id !== userId) return null;
@@ -961,6 +1051,10 @@ function jsonObjectOrEmpty(value: JsonValue | null | undefined): Record<string, 
     : {};
 }
 
+function jsonArrayOrEmpty(value: JsonValue | null | undefined): JsonValue {
+  return Array.isArray(value) ? value : [];
+}
+
 async function listAnalyzeRunsForTemplate(
   db: AnalyzeTemplateRunClientPool,
   templateId: string,
@@ -1005,6 +1099,78 @@ async function listRunsForAgents(db: QueryExecutor, agentIds: string[]): Promise
     started_at: new Date(row.started_at).toISOString(),
     ended_at: row.ended_at === null ? null : new Date(row.ended_at).toISOString(),
     error: row.error,
+  }));
+}
+
+async function listFindingsForAgent(db: QueryExecutor, agentId: string): Promise<DevAgentFinding[]> {
+  const { rows } = await db.query<{
+    finding_id: string;
+    agent_id: string;
+    snapshot_id: string;
+    headline: string;
+    severity: string;
+    subject_refs: JsonValue | null;
+    claim_cluster_ids: JsonValue | null;
+    summary_blocks: JsonValue | null;
+    created_at: Date | string;
+  }>(
+    `select finding_id::text as finding_id,
+            agent_id::text as agent_id,
+            snapshot_id::text as snapshot_id,
+            headline,
+            severity::text as severity,
+            subject_refs,
+            claim_cluster_ids,
+            summary_blocks,
+            created_at
+       from findings
+      where agent_id = $1::uuid
+      order by created_at desc, finding_id asc`,
+    [agentId],
+  );
+  return rows.map((row) => ({
+    finding_id: row.finding_id,
+    agent_id: row.agent_id,
+    snapshot_id: row.snapshot_id,
+    headline: row.headline,
+    severity: row.severity,
+    subject_refs: jsonArrayOrEmpty(row.subject_refs),
+    claim_cluster_ids: jsonArrayOrEmpty(row.claim_cluster_ids),
+    summary_blocks: jsonArrayOrEmpty(row.summary_blocks),
+    created_at: new Date(row.created_at).toISOString(),
+  }));
+}
+
+async function listActivityForAgent(db: QueryExecutor, agentId: string): Promise<DevAgentActivity[]> {
+  const { rows } = await db.query<{
+    run_activity_id: string;
+    agent_id: string;
+    stage: string;
+    subject_refs: JsonValue | null;
+    source_refs: JsonValue | null;
+    summary: string;
+    ts: Date | string;
+  }>(
+    `select run_activity_id::text as run_activity_id,
+            agent_id::text as agent_id,
+            stage::text as stage,
+            subject_refs,
+            source_refs,
+            summary,
+            ts
+       from run_activities
+      where agent_id = $1::uuid
+      order by ts desc, run_activity_id asc`,
+    [agentId],
+  );
+  return rows.map((row) => ({
+    run_activity_id: row.run_activity_id,
+    agent_id: row.agent_id,
+    stage: row.stage,
+    subject_refs: jsonArrayOrEmpty(row.subject_refs),
+    source_refs: jsonArrayOrEmpty(row.source_refs),
+    summary: row.summary,
+    ts: new Date(row.ts).toISOString(),
   }));
 }
 

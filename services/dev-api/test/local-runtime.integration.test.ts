@@ -229,12 +229,13 @@ test(
 
     const seedClient = await connectedClient(t, databaseUrl);
     await seedUser(seedClient);
+    const seeded = await seedExistingEvidence(seedClient, { userId: USER_ID, label: "owned" });
 
     const alertRules = [
       {
         rule_id: "local-runtime-check",
         severity_at_least: "medium",
-        headline_contains: "configured research universe",
+        headline_contains: "operating margin quality",
         channels: ["email"],
       },
     ];
@@ -268,7 +269,7 @@ test(
 
     assert.deepEqual(result.outputs_summary, {
       findings: 1,
-      activities: 1,
+      activities: 3,
       alerts: { evaluated_rules: 1, evaluated_findings: 1, fired: 1 },
     });
 
@@ -301,17 +302,31 @@ test(
     const finding = findingRows[0];
     assert.equal(finding.agent_id, agent.agent_id);
     assert.equal(finding.severity, "medium");
-    assert.match(finding.headline, /configured research universe/);
+    assert.match(finding.headline, /operating margin quality improved/);
     assert.deepEqual(finding.subject_refs, [{ kind: "issuer", id: SUBJECT_ID }]);
     assert.equal(Array.isArray(finding.claim_cluster_ids), true);
+    assert.equal((finding.claim_cluster_ids as string[]).length, 1);
+    const clusterId = (finding.claim_cluster_ids as string[])[0];
+    const clusterMemberRows = (
+      await seedClient.query<{ claim_id: string }>(
+        `select claim_id::text as claim_id
+           from claim_cluster_members
+          where cluster_id = $1::uuid`,
+        [clusterId],
+      )
+    ).rows;
+    assert.deepEqual(clusterMemberRows.map((row) => row.claim_id), [seeded.claimId]);
 
     const snapshotRows = (
       await seedClient.query<{
         basis: string;
         model_version: string | null;
         subject_refs: unknown;
+        source_ids: unknown;
+        claim_refs: unknown;
+        document_refs: unknown;
       }>(
-        `select basis, model_version, subject_refs
+        `select basis, model_version, subject_refs, source_ids, claim_refs, document_refs
            from snapshots
           where snapshot_id = $1::uuid`,
         [finding.snapshot_id],
@@ -321,6 +336,9 @@ test(
     assert.equal(snapshotRows[0].basis, "unadjusted");
     assert.equal(snapshotRows[0].model_version, "dev-api-local-agent-runtime");
     assert.deepEqual(snapshotRows[0].subject_refs, [{ kind: "issuer", id: SUBJECT_ID }]);
+    assert.deepEqual(snapshotRows[0].source_ids, [seeded.sourceId]);
+    assert.deepEqual(snapshotRows[0].claim_refs, [seeded.claimId]);
+    assert.deepEqual(snapshotRows[0].document_refs, [seeded.documentId]);
 
     assert.equal(Array.isArray(finding.summary_blocks), true);
     const summaryBlock = (finding.summary_blocks as Array<Record<string, unknown>>)[0];
@@ -328,6 +346,26 @@ test(
     assert.equal(summaryBlock.finding_id, finding.finding_id);
     assert.equal(summaryBlock.snapshot_id, finding.snapshot_id);
     assert.deepEqual(summaryBlock.subject_refs, [{ kind: "issuer", id: SUBJECT_ID }]);
+    assert.deepEqual(summaryBlock.source_refs, [seeded.sourceId]);
+
+    const activityRows = (
+      await seedClient.query<{
+        stage: string;
+        source_refs: unknown;
+        summary: string;
+      }>(
+        `select stage, source_refs, summary
+           from run_activities
+          where agent_id = $1::uuid
+          order by ts asc, run_activity_id asc`,
+        [agent.agent_id],
+      )
+    ).rows;
+    assert.deepEqual(activityRows.map((row) => row.stage), ["reading", "investigating", "found"]);
+    assert.match(activityRows[0].summary, /Read 1 evidence claim/);
+    assert.match(activityRows[1].summary, /Clustered 1 source-backed claim/);
+    assert.match(activityRows[2].summary, /Created 1 source-backed finding/);
+    assert.deepEqual(activityRows[2].source_refs, [seeded.sourceId]);
 
     const alertRows = (
       await seedClient.query<{
@@ -358,5 +396,95 @@ test(
     assert.deepEqual(alertRows[0].trigger_refs, [
       { kind: "finding", id: finding.finding_id },
     ]);
+  },
+);
+
+test(
+  "local agent runtime records an empty evidence run without fabricating findings",
+  { skip: !dockerAvailable(), timeout: 120_000 },
+  async (t) => {
+    const { databaseUrl } = await bootstrapDatabase(t, "dev-api-local-agent-runtime-empty");
+    const previousDevApiUrl = process.env.DEV_API_DATABASE_URL;
+    const previousDatabaseUrl = process.env.DATABASE_URL;
+    process.env.DEV_API_DATABASE_URL = databaseUrl;
+    registerLifoCleanup(t, async () => {
+      await closeLocalRuntimePoolForTests();
+      if (previousDevApiUrl === undefined) {
+        delete process.env.DEV_API_DATABASE_URL;
+      } else {
+        process.env.DEV_API_DATABASE_URL = previousDevApiUrl;
+      }
+      if (previousDatabaseUrl === undefined) {
+        delete process.env.DATABASE_URL;
+      } else {
+        process.env.DATABASE_URL = previousDatabaseUrl;
+      }
+    });
+
+    const seedClient = await connectedClient(t, databaseUrl);
+    await seedUser(seedClient);
+    const agent = await createAgent(seedClient, {
+      user_id: USER_ID,
+      name: "Empty local runtime integration agent",
+      thesis: "Track whether the configured universe has fresh evidence.",
+      cadence: "daily",
+      universe: {
+        mode: "static",
+        subject_refs: [{ kind: "issuer", id: SUBJECT_ID }],
+      },
+      alert_rules: [
+        {
+          rule_id: "empty-run-check",
+          severity_at_least: "medium",
+          channels: ["email"],
+        },
+      ],
+    });
+    const emptyRunId = "30000000-0000-4000-8000-000000000004";
+    const claim = await claimAgentRun(seedClient, {
+      run_id: emptyRunId,
+      agent_id: agent.agent_id,
+      inputs_watermark: agent.watermarks,
+    });
+    assert.equal(claim.claimed, true);
+
+    const pool = await connectedPool(t, databaseUrl);
+    const result = await runAgentLoop({
+      pool,
+      agent_id: agent.agent_id,
+      run_id: emptyRunId,
+      current_watermarks: agent.watermarks,
+      alert_rules: agent.alert_rules as ReadonlyArray<unknown>,
+      stages: createAgentLoopStages({ userId: USER_ID, runId: emptyRunId, agent }),
+    });
+
+    assert.deepEqual(result.outputs_summary, {
+      findings: 0,
+      activities: 2,
+      alerts: { evaluated_rules: 1, evaluated_findings: 0, fired: 0 },
+    });
+
+    const findingCount = Number((
+      await seedClient.query<{ count: string }>(
+        `select count(*)::text as count
+           from findings
+          where agent_id = $1::uuid`,
+        [agent.agent_id],
+      )
+    ).rows[0].count);
+    assert.equal(findingCount, 0);
+
+    const activityRows = (
+      await seedClient.query<{ stage: string; summary: string }>(
+        `select stage, summary
+           from run_activities
+          where agent_id = $1::uuid
+          order by ts asc, run_activity_id asc`,
+        [agent.agent_id],
+      )
+    ).rows;
+    assert.deepEqual(activityRows.map((row) => row.stage), ["reading", "dismissed"]);
+    assert.match(activityRows[0].summary, /Read 0 evidence claims/);
+    assert.match(activityRows[1].summary, /No source-backed findings created/);
   },
 );

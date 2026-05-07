@@ -30,6 +30,23 @@ type AgentRunRow = {
   error: string | null
 }
 
+type AgentFindingRow = {
+  finding_id: string
+  agent_id: string
+  snapshot_id: string
+  headline: string
+  severity: string
+  created_at: string
+}
+
+type AgentActivityRow = {
+  run_activity_id: string
+  agent_id: string
+  stage: string
+  summary: string
+  ts: string
+}
+
 const DEMO_AGENTS: ReadonlyArray<AgentRow> = [
   {
     agent_id: 'demo-quality',
@@ -54,6 +71,11 @@ export function AgentsPage() {
   const { session } = useAuth()
   const [agents, setAgents] = useState<ReadonlyArray<AgentRow>>(DEMO_AGENTS)
   const [runs, setRuns] = useState<ReadonlyArray<AgentRunRow>>([])
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
+  const [findings, setFindings] = useState<ReadonlyArray<AgentFindingRow>>([])
+  const [runActivities, setRunActivities] = useState<ReadonlyArray<AgentActivityRow>>([])
+  const [detailsError, setDetailsError] = useState<string | null>(null)
+  const [detailsRefreshKey, setDetailsRefreshKey] = useState(0)
   const [name, setName] = useState('')
   const [thesis, setThesis] = useState('')
   const [cadence, setCadence] = useState('daily')
@@ -92,7 +114,13 @@ export function AgentsPage() {
       })
       .then((body) => {
         setLoadError(null)
-        if (body?.agents) setAgents(body.agents)
+        if (body?.agents) {
+          setAgents(body.agents)
+          setSelectedAgentId((current) => {
+            if (current && body.agents?.some((agent) => agent.agent_id === current)) return current
+            return body.agents?.[0]?.agent_id ?? null
+          })
+        }
         if (body?.runs) setRuns(body.runs)
       })
       .catch((caught) => {
@@ -101,6 +129,44 @@ export function AgentsPage() {
       })
     return () => controller.abort()
   }, [session])
+
+  useEffect(() => {
+    if (!session || !selectedAgentId) {
+      return
+    }
+    const controller = new AbortController()
+    const encodedAgentId = encodeURIComponent(selectedAgentId)
+    Promise.all([
+      fetch(`/v1/agents/${encodedAgentId}/findings`, {
+        headers: { 'x-user-id': session.userId },
+        signal: controller.signal,
+      }),
+      fetch(`/v1/agents/${encodedAgentId}/activity`, {
+        headers: { 'x-user-id': session.userId },
+        signal: controller.signal,
+      }),
+    ])
+      .then(async ([findingsResponse, activityResponse]) => {
+        if (!findingsResponse.ok || !activityResponse.ok) {
+          throw new Error(`details fetch failed with HTTP ${findingsResponse.status}/${activityResponse.status}`)
+        }
+        const findingsBody = (await findingsResponse.json()) as { findings?: AgentFindingRow[] }
+        const activityBody = (await activityResponse.json()) as { activity?: AgentActivityRow[] }
+        return { findings: findingsBody.findings ?? [], activity: activityBody.activity ?? [] }
+      })
+      .then((body) => {
+        setDetailsError(null)
+        setFindings(body.findings)
+        setRunActivities(body.activity)
+      })
+      .catch((caught) => {
+        if (controller.signal.aborted) return
+        setFindings([])
+        setRunActivities([])
+        setDetailsError(caught instanceof Error ? caught.message : String(caught))
+      })
+    return () => controller.abort()
+  }, [session, selectedAgentId, detailsRefreshKey])
 
   const resetForm = () => {
     setEditingAgentId(null)
@@ -157,6 +223,8 @@ export function AgentsPage() {
     if (response.ok) {
       const saved = (await response.json()) as AgentRow
       setAgents((current) => [saved, ...current.filter((agent) => agent.agent_id !== saved.agent_id)])
+      setSelectedAgentId(saved.agent_id)
+      setDetailsRefreshKey((current) => current + 1)
       resetForm()
       setActivity(editingAgentId ? 'Agent updated' : 'Agent created')
     } else {
@@ -170,6 +238,7 @@ export function AgentsPage() {
     const alert = agent.alert_rules?.[0] ?? null
     const channels = alert?.channels ?? []
     setEditingAgentId(agent.agent_id)
+    setSelectedAgentId(agent.agent_id)
     setEditingAgent(agent)
     setName(agent.name)
     setThesis(agent.thesis)
@@ -207,6 +276,7 @@ export function AgentsPage() {
     if (response.ok) {
       const updated = (await response.json()) as AgentRow
       setAgents((current) => current.map((agent) => (agent.agent_id === updated.agent_id ? updated : agent)))
+      setSelectedAgentId(updated.agent_id)
       setActivity('Agent updated')
     } else {
       setActivity(`Update failed: HTTP ${response.status}`)
@@ -221,8 +291,14 @@ export function AgentsPage() {
       headers: { 'x-user-id': session.userId },
     })
     if (response.ok) {
+      const nextAgentId = agents.find((agent) => agent.agent_id !== agentId)?.agent_id ?? null
       setAgents((current) => current.filter((agent) => agent.agent_id !== agentId))
       setRuns((current) => current.filter((run) => run.agent_id !== agentId))
+      setSelectedAgentId((current) => (current === agentId ? nextAgentId : current))
+      if (selectedAgentId === agentId && nextAgentId === null) {
+        setFindings([])
+        setRunActivities([])
+      }
       setActivity('Agent deleted')
     } else {
       setActivity(`Delete failed: HTTP ${response.status}`)
@@ -239,6 +315,8 @@ export function AgentsPage() {
     if (response.ok) {
       const run = (await response.json()) as AgentRunRow
       setRuns((current) => [run, ...current])
+      setSelectedAgentId(agentId)
+      setDetailsRefreshKey((current) => current + 1)
       setActivity(run.status === 'completed' ? 'Run completed' : 'Run queued')
     } else {
       setActivity(`Run failed: HTTP ${response.status}`)
@@ -479,7 +557,14 @@ export function AgentsPage() {
             ) : null}
             <ul className="mt-4 flex flex-col gap-3">
               {agents.map((agent) => (
-                <li key={agent.agent_id} className="rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
+                <li
+                  key={agent.agent_id}
+                  className={`rounded-md border p-3 ${
+                    selectedAgentId === agent.agent_id
+                      ? 'border-neutral-900 dark:border-neutral-100'
+                      : 'border-neutral-200 dark:border-neutral-800'
+                  }`}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{agent.name}</h3>
@@ -495,6 +580,13 @@ export function AgentsPage() {
                       </p>
                     </div>
                     <div className="flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedAgentId(agent.agent_id)}
+                        className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium dark:border-neutral-700"
+                      >
+                        View
+                      </button>
                       <button
                         type="button"
                         onClick={() => editAgent(agent)}
@@ -530,6 +622,29 @@ export function AgentsPage() {
             </ul>
           </section>
           <section className="rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+            <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Findings</h2>
+            {detailsError ? (
+              <p className="mt-3 text-sm text-rose-600 dark:text-rose-300">Details failed: {detailsError}</p>
+            ) : null}
+            {findings.length === 0 ? (
+              <p className="mt-4 text-sm text-neutral-500 dark:text-neutral-400">No findings for this agent yet.</p>
+            ) : (
+              <ul className="mt-4 flex flex-col gap-3">
+                {findings.map((finding) => (
+                  <li key={finding.finding_id} className="rounded-md border border-neutral-200 p-3 text-sm dark:border-neutral-800">
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="font-medium text-neutral-900 dark:text-neutral-100">{finding.headline}</span>
+                      <span className="rounded border border-neutral-300 px-2 py-0.5 text-xs text-neutral-600 dark:border-neutral-700 dark:text-neutral-300">
+                        {finding.severity}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">{finding.created_at}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          <section className="rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
             <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Run history</h2>
             {runs.length === 0 ? (
               <p className="mt-4 text-sm text-neutral-500 dark:text-neutral-400">No recorded runs yet.</p>
@@ -540,6 +655,24 @@ export function AgentsPage() {
                     <span className="font-medium">{run.status}</span>
                     <span className="ml-2 text-neutral-500 dark:text-neutral-400">{run.started_at}</span>
                     {run.error ? <p className="mt-1 text-rose-600 dark:text-rose-300">{run.error}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          <section className="rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+            <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Run activity</h2>
+            {runActivities.length === 0 ? (
+              <p className="mt-4 text-sm text-neutral-500 dark:text-neutral-400">No activity for this agent yet.</p>
+            ) : (
+              <ul className="mt-4 flex flex-col gap-3">
+                {runActivities.map((item) => (
+                  <li key={item.run_activity_id} className="rounded-md border border-neutral-200 p-3 text-sm dark:border-neutral-800">
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="font-medium capitalize text-neutral-900 dark:text-neutral-100">{item.stage}</span>
+                      <span className="text-xs text-neutral-500 dark:text-neutral-400">{item.ts}</span>
+                    </div>
+                    <p className="mt-2 text-neutral-600 dark:text-neutral-300">{item.summary}</p>
                   </li>
                 ))}
               </ul>

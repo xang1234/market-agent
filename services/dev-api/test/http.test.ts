@@ -511,6 +511,108 @@ test("service Agent adapter lets durable loop stages create findings and evaluat
   assert.ok(db.queries.some((query) => query.text.includes("insert into alerts_fired")));
 });
 
+test("GET /v1/agents/:id/findings and /activity expose the adapter-backed product surfaces", async (t) => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const agentId = "11111111-1111-4111-8111-111111111111";
+  const calls: string[] = [];
+  const adapters = {
+    analyze: {
+      listTemplates: async () => ({ templates: [] }),
+      createRun: async () => {
+        throw new Error("not used");
+      },
+      shareRunToChat: async () => {
+        throw new Error("not used");
+      },
+    },
+    agents: {
+      list: async () => ({ agents: [], runs: [] }),
+      create: async () => {
+        throw new Error("not used");
+      },
+      update: async () => null,
+      delete: async () => false,
+      run: async () => null,
+      listFindings: async (input: { userId: string; agentId: string }) => {
+        calls.push(`findings:${input.userId}:${input.agentId}`);
+        return {
+          findings: [
+            {
+              finding_id: "44444444-4444-4444-8444-444444444444",
+              agent_id: input.agentId,
+              snapshot_id: "55555555-5555-4555-8555-555555555555",
+              headline: "Operating margin quality improved",
+              severity: "medium",
+              subject_refs: [{ kind: "issuer", id: "22222222-2222-4222-8222-222222222222" }],
+              summary_blocks: [],
+              created_at: "2026-05-06T00:00:00.000Z",
+            },
+          ],
+        };
+      },
+      listActivity: async (input: { userId: string; agentId: string }) => {
+        calls.push(`activity:${input.userId}:${input.agentId}`);
+        return {
+          activity: [
+            {
+              run_activity_id: "33333333-3333-4333-8333-333333333333",
+              agent_id: input.agentId,
+              stage: "found",
+              subject_refs: [{ kind: "issuer", id: "22222222-2222-4222-8222-222222222222" }],
+              source_refs: ["66666666-6666-4666-8666-666666666666"],
+              summary: "Created 1 source-backed finding.",
+              ts: "2026-05-06T00:00:00.000Z",
+            },
+          ],
+        };
+      },
+    },
+  };
+  const base = await startServer(t, {}, { adapters: adapters as never });
+
+  const findingsResponse = await fetch(`${base}/v1/agents/${agentId}/findings`, {
+    headers: { "x-user-id": userId },
+  });
+  const findingsBody = await findingsResponse.json() as { findings?: Array<{ headline?: string }> };
+  const activityResponse = await fetch(`${base}/v1/agents/${agentId}/activity`, {
+    headers: { "x-user-id": userId },
+  });
+  const activityBody = await activityResponse.json() as { activity?: Array<{ summary?: string }> };
+
+  assert.equal(findingsResponse.status, 200);
+  assert.equal(findingsBody.findings?.[0]?.headline, "Operating margin quality improved");
+  assert.equal(activityResponse.status, 200);
+  assert.equal(activityBody.activity?.[0]?.summary, "Created 1 source-backed finding.");
+  assert.deepEqual(calls, [
+    `findings:${userId}:${agentId}`,
+    `activity:${userId}:${agentId}`,
+  ]);
+});
+
+test("service Agent adapter lists owned durable findings and activity", async () => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const agentId = "11111111-1111-4111-8111-111111111111";
+  const db = fakeAgentDetailsDb({ userId, agentId });
+  const adapters = createServiceDevApiAdapters({
+    db,
+    createAgentLoopStages: createActivityAgentLoopStages,
+    async sealAnalyzeSnapshot() {
+      throw new Error("analyze seal is not used");
+    },
+  });
+
+  const findings = await adapters.agents.listFindings({ userId, agentId });
+  const activity = await adapters.agents.listActivity({ userId, agentId });
+  const missing = await adapters.agents.listFindings({
+    userId: "00000000-0000-4000-8000-000000000099",
+    agentId,
+  });
+
+  assert.deepEqual(findings?.findings.map((finding) => finding.headline), ["Operating margin quality improved"]);
+  assert.deepEqual(activity?.activity.map((item) => item.summary), ["Created 1 source-backed finding."]);
+  assert.equal(missing, null);
+});
+
 test("POST /v1/agents/:id/runs rejects durable adapter without loop stages", async (t) => {
   const userId = "00000000-0000-4000-8000-000000000001";
   const agentId = "11111111-1111-4111-8111-111111111111";
@@ -1156,6 +1258,75 @@ function fakeAgentLoopDb(input: {
     },
   };
   return db;
+}
+
+function fakeAgentDetailsDb(input: {
+  userId: string;
+  agentId: string;
+}) {
+  const agentRow = {
+    agent_id: input.agentId,
+    user_id: input.userId,
+    name: "Durable loop monitor",
+    thesis: "Track source-backed changes",
+    universe: { mode: "static", subject_refs: [{ kind: "issuer", id: "22222222-2222-4222-8222-222222222222" }] },
+    source_policy: null,
+    cadence: "daily",
+    prompt_template: null,
+    alert_rules: [],
+    watermarks: { cursor: "old" },
+    enabled: true,
+    created_at: "2026-05-06T00:00:00.000Z",
+    updated_at: "2026-05-06T00:00:00.000Z",
+  };
+  return {
+    async connect() {
+      return this;
+    },
+    release() {
+      // No-op test pool client.
+    },
+    async query(text: string, values?: unknown[]) {
+      if (text.includes("from agents") && text.includes("where agent_id")) {
+        return { rows: values?.[0] === input.agentId ? [agentRow] : [], rowCount: null };
+      }
+      if (text.includes("from findings")) {
+        return {
+          rows: [
+            {
+              finding_id: "44444444-4444-4444-8444-444444444444",
+              agent_id: input.agentId,
+              snapshot_id: "55555555-5555-4555-8555-555555555555",
+              headline: "Operating margin quality improved",
+              severity: "medium",
+              subject_refs: [{ kind: "issuer", id: "22222222-2222-4222-8222-222222222222" }],
+              claim_cluster_ids: [],
+              summary_blocks: [],
+              created_at: "2026-05-06T00:00:00.000Z",
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+      if (text.includes("from run_activities")) {
+        return {
+          rows: [
+            {
+              run_activity_id: "33333333-3333-4333-8333-333333333333",
+              agent_id: input.agentId,
+              stage: "found",
+              subject_refs: [{ kind: "issuer", id: "22222222-2222-4222-8222-222222222222" }],
+              source_refs: ["66666666-6666-4666-8666-666666666666"],
+              summary: "Created 1 source-backed finding.",
+              ts: "2026-05-06T00:00:00.000Z",
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+      throw new Error(`unexpected query: ${text}`);
+    },
+  };
 }
 
 function createActivityAgentLoopStages() {

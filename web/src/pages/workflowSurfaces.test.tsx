@@ -381,8 +381,90 @@ test('Agents surface renders CRUD controls, run history, and activity status', (
   assert.match(html, /Disable/)
   assert.match(html, /Delete/)
   assert.match(html, /Run history/)
+  assert.match(html, /Findings/)
+  assert.match(html, /Run activity/)
   assert.match(html, /Activity/)
   assert.doesNotMatch(html, /ships with P5\.1/i)
+})
+
+test('Agents surface loads selected agent findings and activity routes', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restore = installDomGlobals(dom.window as unknown as Window)
+  const originalFetch = globalThis.fetch
+  const calls: string[] = []
+  try {
+    globalThis.fetch = async (input, init) => {
+      calls.push(String(input))
+      assert.equal((init?.headers as Record<string, string>)['x-user-id'], USER_ID)
+      if (String(input) === '/v1/agents') {
+        return new Response(JSON.stringify({
+          agents: [
+            {
+              agent_id: '11111111-1111-4111-8111-111111111111',
+              name: 'Evidence monitor',
+              thesis: 'Track source-backed evidence',
+              cadence: 'daily',
+              enabled: true,
+              universe: { mode: 'static', subject_refs: [{ kind: 'issuer', id: '22222222-2222-4222-8222-222222222222' }] },
+              alert_rules: [],
+              updated_at: '2026-05-06T00:00:00.000Z',
+            },
+          ],
+          runs: [],
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (String(input) === '/v1/agents/11111111-1111-4111-8111-111111111111/findings') {
+        return new Response(JSON.stringify({
+          findings: [
+            {
+              finding_id: '44444444-4444-4444-8444-444444444444',
+              agent_id: '11111111-1111-4111-8111-111111111111',
+              snapshot_id: SNAPSHOT_ID,
+              headline: 'Operating margin quality improved',
+              severity: 'medium',
+              subject_refs: [{ kind: 'issuer', id: '22222222-2222-4222-8222-222222222222' }],
+              summary_blocks: [],
+              created_at: '2026-05-06T00:00:00.000Z',
+            },
+          ],
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (String(input) === '/v1/agents/11111111-1111-4111-8111-111111111111/activity') {
+        return new Response(JSON.stringify({
+          activity: [
+            {
+              run_activity_id: '33333333-3333-4333-8333-333333333333',
+              agent_id: '11111111-1111-4111-8111-111111111111',
+              stage: 'found',
+              subject_refs: [{ kind: 'issuer', id: '22222222-2222-4222-8222-222222222222' }],
+              source_refs: ['66666666-6666-4666-8666-666666666666'],
+              summary: 'Created 1 source-backed finding.',
+              ts: '2026-05-06T00:00:00.000Z',
+            },
+          ],
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      throw new Error(`unexpected fetch: ${String(input)}`)
+    }
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(wrapWithAuth(<AgentsPage />))
+    })
+    await act(async () => undefined)
+    await act(async () => undefined)
+
+    assert.deepEqual(calls, [
+      '/v1/agents',
+      '/v1/agents/11111111-1111-4111-8111-111111111111/findings',
+      '/v1/agents/11111111-1111-4111-8111-111111111111/activity',
+    ])
+    assert.match(dom.window.document.body.innerHTML, /Operating margin quality improved/)
+    assert.match(dom.window.document.body.innerHTML, /Created 1 source-backed finding/)
+    await act(async () => root.unmount())
+  } finally {
+    globalThis.fetch = originalFetch
+    restore()
+  }
 })
 
 test('Agents create/edit payloads include selected universe and alert rule policy', () => {

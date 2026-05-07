@@ -3,8 +3,13 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 
 import {
+  addClaimClusterMember,
+  buildClaimCanonicalSignature,
   loadLocalRuntimeEvidence,
   loadVerifierRowsForRefs,
+  upsertClaimCluster,
+  type LocalRuntimeClaimEvidence,
+  type LocalRuntimeEvidence,
 } from "../../evidence/src/index.ts";
 import { hashJsonValue, toolCallArgsDigest } from "../../observability/src/tool-call.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
@@ -111,98 +116,268 @@ export async function sealAnalyzeSnapshot(
 
 export const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, runId, agent }) => {
   const subjectRefs = normalizeSubjectRefs(subjectRefsFromUniverse(agent.universe), agent.agent_id);
-  const snapshotId = randomUUID();
   const asOf = new Date().toISOString();
-  const claimClusterId = randomUUID();
+  const activityClock = activityClockFrom(asOf);
   let findings: ReadonlyArray<FindingRow> = [];
   return {
-    readDeltas: async ({ current_watermarks }) => {
-      const seal = await sealSnapshotWithPool(pool(), {
-        snapshot_id: snapshotId,
-        manifest: stageSnapshotManifest({
-          subject_refs: subjectRefs,
-          as_of: asOf,
-          basis: "unadjusted",
-          normalization: "raw",
-          allowed_transforms: {},
-          model_version: "dev-api-local-agent-runtime",
-          tool_calls: [],
-        }),
-        blocks: [],
-        sources: [],
-        documents: [],
-      });
-      if (!seal.ok) {
-        throw new Error(`local agent runtime failed to seal run snapshot: ${JSON.stringify(seal.verification.failures)}`);
-      }
-      return {
-        trigger: "manual",
-        run_id: runId,
-        snapshot_id: snapshotId,
-        current_watermarks,
-      };
-    },
+    readDeltas: async ({ current_watermarks }) => ({
+      trigger: "manual",
+      run_id: runId,
+      current_watermarks,
+      subject_refs: subjectRefs,
+      as_of: asOf,
+    }),
     extractEvidence: async ({ deltas }) => ({
       deltas,
-      subject_refs: subjectRefs,
+      evidence: await loadLocalRuntimeEvidence(pool(), {
+        subject_refs: subjectRefs,
+        user_id: userId,
+      }),
     }),
     clusterEvidence: async ({ evidence }) => ({
       evidence,
-      clusters: [],
+      claims: localRuntimeEvidence(evidence).claims,
     }),
     analyze: async ({ clusters }) => ({
-      clusters,
-      findings: [],
+      claims: Array.isArray((clusters as { claims?: unknown }).claims)
+        ? (clusters as { claims: LocalRuntimeClaimEvidence[] }).claims
+        : [],
     }),
-    nextWatermarks: async ({ current_watermarks }) => ({
-      ...(isJsonObject(current_watermarks) ? current_watermarks : {}),
-      last_manual_run_id: runId,
-      last_checked_at: new Date().toISOString(),
-    }),
-    applySideEffects: async ({ tx }) => {
+    nextWatermarks: async ({ current_watermarks, evidence }) => {
+      const loadedEvidence = localRuntimeEvidence(evidence);
+      return {
+        ...(isJsonObject(current_watermarks) ? current_watermarks : {}),
+        last_manual_run_id: runId,
+        last_checked_at: new Date().toISOString(),
+        last_evidence_claim_count: loadedEvidence.claim_refs.length,
+      };
+    },
+    applySideEffects: async ({ tx, evidence }) => {
+      const loadedEvidence = localRuntimeEvidence(evidence);
       await writeRunActivity(tx, {
         user_id: userId,
         agent_id: agent.agent_id,
         stage: "reading",
         subject_refs: subjectRefs,
-        summary: "Checked configured research universe for new evidence.",
+        source_refs: loadedEvidence.source_ids,
+        summary: `Read ${loadedEvidence.claims.length} evidence ${plural(loadedEvidence.claims.length, "claim")} for the configured research universe.`,
+        ts: activityClock(0),
       });
-      const finding = await generateFinding(tx, {
+
+      if (loadedEvidence.claims.length === 0) {
+        await writeRunActivity(tx, {
+          user_id: userId,
+          agent_id: agent.agent_id,
+          stage: "dismissed",
+          subject_refs: subjectRefs,
+          summary: "No source-backed findings created because no evidence claims matched the configured universe.",
+          ts: activityClock(1),
+        });
+        findings = [];
+        return {
+          findings: 0,
+          activities: 2,
+        };
+      }
+
+      await writeRunActivity(tx, {
+        user_id: userId,
         agent_id: agent.agent_id,
-        snapshot_id: snapshotId,
-        snapshot_manifest: {
-          snapshot_id: snapshotId,
-          source_ids: [],
-          as_of: asOf,
-        },
+        stage: "investigating",
         subject_refs: subjectRefs,
-        claim_cluster_ids: [claimClusterId],
-        headline: "Local agent run checked the configured research universe",
-        severity_input: {
-          evidence: {
-            trust_tier: "user",
-            corroborating_source_count: 0,
-            confidence: 0.5,
-          },
-          impact: {
-            direction: "unknown",
-            channel: "sentiment",
-            horizon: "near_term",
-            confidence: 0.35,
-          },
-          thesis_relevance: 0.5,
-        },
-        source_refs: [],
+        source_refs: loadedEvidence.source_ids,
+        summary: `Clustered ${loadedEvidence.claims.length} source-backed ${plural(loadedEvidence.claims.length, "claim")}.`,
+        ts: activityClock(1),
       });
-      findings = [finding];
+
+      const snapshotId = randomUUID();
+      const snapshotManifest = await sealAgentEvidenceSnapshot({
+        snapshotId,
+        subjectRefs,
+        evidence: loadedEvidence,
+      });
+
+      const createdFindings: FindingRow[] = [];
+      for (const claim of loadedEvidence.claims) {
+        const cluster = await upsertClusterForClaim(tx, claim, subjectRefs, asOf);
+        createdFindings.push(await generateFinding(tx, {
+          agent_id: agent.agent_id,
+          snapshot_id: snapshotId,
+          snapshot_manifest: snapshotManifest,
+          subject_refs: subjectRefs,
+          claim_cluster_ids: [cluster.cluster_id],
+          headline: claim.text_canonical,
+          severity_input: severityInputForClaim(claim),
+          source_refs: [claim.source_id],
+        }));
+      }
+      findings = createdFindings;
+
+      await writeRunActivity(tx, {
+        user_id: userId,
+        agent_id: agent.agent_id,
+        stage: "found",
+        subject_refs: subjectRefs,
+        source_refs: loadedEvidence.source_ids,
+        summary: `Created ${createdFindings.length} source-backed ${plural(createdFindings.length, "finding")}.`,
+        ts: activityClock(2),
+      });
+
       return {
         findings: findings.length,
-        activities: 1,
+        activities: 3,
       };
     },
     alertFindings: async () => findings,
   };
 };
+
+async function sealAgentEvidenceSnapshot(input: {
+  snapshotId: string;
+  subjectRefs: ReadonlyArray<SnapshotSubjectRef>;
+  evidence: LocalRuntimeEvidence;
+}): Promise<{ snapshot_id: string; source_ids: ReadonlyArray<string>; as_of: string }> {
+  const asOf = new Date().toISOString();
+  const toolCallId = randomUUID();
+  const toolResult = {
+    kind: "local_agent_evidence_result",
+    evidence_status: "available",
+    manifest_contribution: {
+      subject_refs: input.subjectRefs,
+      claim_refs: input.evidence.claim_refs,
+      document_refs: input.evidence.document_refs,
+      source_ids: input.evidence.source_ids,
+    },
+  } satisfies JsonValue;
+  await writeLocalToolCallLog({
+    toolCallId,
+    toolName: "local_agent_evidence_retrieval",
+    args: {
+      subject_refs: input.subjectRefs,
+      limit: input.evidence.claims.length,
+    },
+    result: toolResult,
+  });
+  const manifest = stageSnapshotManifest({
+    subject_refs: input.subjectRefs,
+    as_of: asOf,
+    basis: "unadjusted",
+    normalization: "raw",
+    allowed_transforms: {},
+    model_version: "dev-api-local-agent-runtime",
+    tool_calls: [
+      {
+        tool_call_id: toolCallId,
+        result: toolResult,
+        subject_refs: input.subjectRefs,
+        claim_refs: input.evidence.claim_refs,
+        document_refs: input.evidence.document_refs,
+        source_ids: input.evidence.source_ids,
+      },
+    ],
+  });
+  const verifierRows = await loadVerifierRowsForRefs(pool(), {
+    source_ids: manifest.source_ids,
+    document_refs: manifest.document_refs,
+    claim_refs: manifest.claim_refs,
+  });
+  const seal = await sealSnapshotWithPool(pool(), {
+    snapshot_id: input.snapshotId,
+    manifest,
+    blocks: input.evidence.claims.map((claim) => ({
+      id: `agent-evidence-${claim.claim_id}`,
+      kind: "rich_text",
+      snapshot_id: input.snapshotId,
+      data_ref: { kind: "rich_text", id: claim.claim_id },
+      source_refs: [claim.source_id],
+      claim_refs: [claim.claim_id],
+      document_refs: [claim.document_id],
+      as_of: asOf,
+      subject_refs: input.subjectRefs,
+      segments: [{ type: "text", text: claim.text_canonical }],
+    })) as never,
+    sources: verifierRows.sources,
+    documents: verifierRows.documents,
+    claims: verifierRows.claims,
+  });
+  if (!seal.ok) {
+    throw new Error(`local agent runtime failed to seal evidence snapshot: ${JSON.stringify(seal.verification.failures)}`);
+  }
+  return {
+    snapshot_id: input.snapshotId,
+    source_ids: manifest.source_ids,
+    as_of: manifest.as_of,
+  };
+}
+
+async function upsertClusterForClaim(
+  db: QueryExecutor,
+  claim: LocalRuntimeClaimEvidence,
+  subjectRefs: ReadonlyArray<SnapshotSubjectRef>,
+  seenAt: string,
+) {
+  const cluster = await upsertClaimCluster(db, {
+    canonical_signature: buildClaimCanonicalSignature({
+      predicate: claim.predicate,
+      text_canonical: claim.text_canonical,
+      event_type: claim.predicate,
+      effective_time: claim.effective_time,
+      subjects: subjectRefs,
+    }),
+    seen_at: seenAt,
+  });
+  await addClaimClusterMember(db, {
+    cluster_id: cluster.cluster_id,
+    claim_id: claim.claim_id,
+    relation: claim.polarity === "negative" ? "contradict" : "support",
+  });
+  return cluster;
+}
+
+function localRuntimeEvidence(value: unknown): LocalRuntimeEvidence {
+  if (isJsonObject(value) && isJsonObject(value.evidence)) return value.evidence as unknown as LocalRuntimeEvidence;
+  return value as LocalRuntimeEvidence;
+}
+
+function severityInputForClaim(claim: LocalRuntimeClaimEvidence) {
+  return {
+    evidence: {
+      trust_tier: scoringTrustTier(claim.trust_tier),
+      corroborating_source_count: 1,
+      confidence: clamp01(claim.confidence),
+    },
+    impact: {
+      direction: scoringDirection(claim.polarity),
+      channel: "demand" as const,
+      horizon: "near_term" as const,
+      confidence: 0.5,
+    },
+    thesis_relevance: 0.5,
+  };
+}
+
+function scoringTrustTier(value: string): "primary" | "secondary" | "tertiary" | "user" {
+  if (value === "primary" || value === "secondary" || value === "tertiary" || value === "user") return value;
+  return "secondary";
+}
+
+function scoringDirection(value: string): "positive" | "negative" | "mixed" | "unknown" {
+  if (value === "positive" || value === "negative" || value === "mixed" || value === "unknown") return value;
+  return "unknown";
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function plural(count: number, singular: string): string {
+  return count === 1 ? singular : `${singular}s`;
+}
+
+function activityClockFrom(asOf: string): (offsetMs: number) => Date {
+  const start = Date.parse(asOf);
+  return (offsetMs) => new Date(start + offsetMs);
+}
 
 function pool(): Pool {
   if (localPool) return localPool;

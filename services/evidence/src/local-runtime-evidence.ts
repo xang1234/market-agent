@@ -14,9 +14,12 @@ export type LocalRuntimeClaimEvidence = {
   source_id: string;
   text_canonical: string;
   predicate: string;
+  polarity: string;
+  trust_tier: string;
   confidence: number;
   document_title: string | null;
   published_at: string | null;
+  effective_time: string | null;
 };
 
 export type LocalRuntimeEvidence = {
@@ -36,9 +39,12 @@ type ClaimEvidenceRow = {
   source_id: string;
   text_canonical: string;
   predicate: string;
+  polarity: string;
+  trust_tier: string;
   confidence: number | string;
   document_title: string | null;
   published_at: Date | string | null;
+  effective_time: Date | string | null;
 };
 
 type VerifierRows = {
@@ -66,9 +72,12 @@ export async function loadLocalRuntimeEvidence(
             c.reported_by_source_id::text as source_id,
             c.text_canonical,
             c.predicate,
+            c.polarity,
+            s.trust_tier,
             c.confidence,
             d.title as document_title,
-            d.published_at
+            d.published_at,
+            c.effective_time
        from subject_refs sr
        join claim_arguments ca
          on ca.subject_kind = sr.subject_kind
@@ -155,9 +164,12 @@ function evidenceFromClaimRows(
       source_id: row.source_id,
       text_canonical: row.text_canonical,
       predicate: row.predicate,
+      polarity: row.polarity,
+      trust_tier: row.trust_tier,
       confidence: Number(row.confidence),
       document_title: row.document_title,
       published_at: row.published_at == null ? null : isoString(row.published_at),
+      effective_time: row.effective_time == null ? null : isoString(row.effective_time),
     }),
   );
   const sourceIds = unique(claims.map((claim) => claim.source_id));
