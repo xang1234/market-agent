@@ -19,7 +19,7 @@ export type ChatRuntimeEnv = {
   DATABASE_URL?: string;
 };
 
-const DEFAULT_CHAT_RUNTIME_MODULE = "./src/local-runtime.ts";
+const DEFAULT_CHAT_RUNTIME_MODULE = new URL("./local-runtime.ts", import.meta.url).href;
 
 export async function loadChatServerOptionsFromEnv(
   env: ChatRuntimeEnv = process.env,

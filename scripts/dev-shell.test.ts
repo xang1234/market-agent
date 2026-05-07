@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import net from "node:net";
@@ -262,16 +262,19 @@ test("runtime module env vars default to in-repo durable local stack wiring", as
   const result = await runBash(
     [
       "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
-      'printf "%s\\n%s\\n%s" "$DEV_API_ANALYZE_SEAL_MODULE" "$CHAT_ANALYST_RUNTIME_MODULE" "$CHAT_PERSISTENCE_MODULE"',
+      'printf "%s\\n%s\\n%s\\n%s\\n%s" "$DEV_API_ANALYZE_SEAL_MODULE" "$DEV_API_RUNTIME_MODULE" "$CHAT_ANALYST_RUNTIME_MODULE" "$CHAT_PERSISTENCE_MODULE" "$CHAT_LOCAL_TOOL_EXECUTOR"',
     ].join("\n"),
     fixture.root,
   );
 
   assert.equal(result.code, 0);
+  const root = await realpath(fixture.root);
   assert.deepEqual(result.stdout.trim().split("\n"), [
-    "./src/local-runtime.ts",
-    "./src/local-runtime.ts",
-    "./src/local-runtime.ts",
+    `${root}/services/dev-api/src/local-runtime.ts`,
+    `${root}/services/dev-api/src/local-runtime.ts`,
+    `${root}/services/chat/src/local-runtime.ts`,
+    `${root}/services/chat/src/local-runtime.ts`,
+    "dev_stub",
   ]);
 
   await rm(fixture.root, { recursive: true, force: true });

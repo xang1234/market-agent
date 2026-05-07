@@ -4,6 +4,7 @@ import { Pool } from "pg";
 
 import type { JsonValue } from "../../observability/src/types.ts";
 import { writeRunActivity } from "../../observability/src/run-activity.ts";
+import { generateFinding, type FindingRow } from "../../agents/src/finding-generator.ts";
 import type { SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
 import { stageSnapshotManifest } from "../../snapshot/src/manifest-staging.ts";
 import { sealSnapshotWithPool } from "../../snapshot/src/snapshot-sealer.ts";
@@ -68,13 +69,38 @@ export async function sealAnalyzeSnapshot(
 }
 
 export const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, runId, agent }) => {
-  const subjectRefs = subjectRefsFromUniverse(agent.universe);
+  const subjectRefs = normalizeSubjectRefs(subjectRefsFromUniverse(agent.universe), agent.agent_id);
+  const snapshotId = randomUUID();
+  const asOf = new Date().toISOString();
+  const claimClusterId = randomUUID();
+  let findings: ReadonlyArray<FindingRow> = [];
   return {
-    readDeltas: async ({ current_watermarks }) => ({
-      trigger: "manual",
-      run_id: runId,
-      current_watermarks,
-    }),
+    readDeltas: async ({ current_watermarks }) => {
+      const seal = await sealSnapshotWithPool(pool(), {
+        snapshot_id: snapshotId,
+        manifest: stageSnapshotManifest({
+          subject_refs: subjectRefs,
+          as_of: asOf,
+          basis: "reported",
+          normalization: "raw",
+          allowed_transforms: {},
+          model_version: "dev-api-local-agent-runtime",
+          tool_calls: [],
+        }),
+        blocks: [],
+        sources: [],
+        documents: [],
+      });
+      if (!seal.ok) {
+        throw new Error("local agent runtime failed to seal run snapshot");
+      }
+      return {
+        trigger: "manual",
+        run_id: runId,
+        snapshot_id: snapshotId,
+        current_watermarks,
+      };
+    },
     extractEvidence: async ({ deltas }) => ({
       deltas,
       subject_refs: subjectRefs,
@@ -100,12 +126,40 @@ export const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, run
         subject_refs: subjectRefs,
         summary: "Checked configured research universe for new evidence.",
       });
+      const finding = await generateFinding(tx, {
+        agent_id: agent.agent_id,
+        snapshot_id: snapshotId,
+        snapshot_manifest: {
+          snapshot_id: snapshotId,
+          source_ids: [],
+          as_of: asOf,
+        },
+        subject_refs: subjectRefs,
+        claim_cluster_ids: [claimClusterId],
+        headline: "Local agent run checked the configured research universe",
+        severity_input: {
+          evidence: {
+            trust_tier: "user",
+            corroborating_source_count: 0,
+            confidence: 0.5,
+          },
+          impact: {
+            direction: "unknown",
+            channel: "sentiment",
+            horizon: "near_term",
+            confidence: 0.35,
+          },
+          thesis_relevance: 0.5,
+        },
+        source_refs: [],
+      });
+      findings = [finding];
       return {
-        findings: 0,
+        findings: findings.length,
         activities: 1,
       };
     },
-    alertFindings: async () => [],
+    alertFindings: async () => findings,
   };
 };
 

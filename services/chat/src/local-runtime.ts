@@ -1,35 +1,46 @@
 import { Pool } from "pg";
 
-import type { JsonValue } from "../../observability/src/types.ts";
-import type { SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
+import { hashJsonValue, toolCallArgsDigest } from "../../observability/src/tool-call.ts";
+import { serializeJsonValue, type JsonValue } from "../../observability/src/types.ts";
+import type { SnapshotSubjectRef, ToolCallManifestContribution } from "../../snapshot/src/manifest-staging.ts";
 import { stageSnapshotManifest } from "../../snapshot/src/manifest-staging.ts";
 import { sealSnapshotWithPool } from "../../snapshot/src/snapshot-sealer.ts";
 import {
   createRegistryBackedAnalystToolRuntime,
   type ChatAnalystToolRuntime,
   type ChatAnalystToolRuntimeResult,
+  type ChatAnalystToolRuntimeToolCall,
   type ChatAssistantMessagePersistence,
   type ChatAssistantMessagePersistenceInput,
 } from "./coordinator.ts";
 import { createChatMessagePersistence } from "./messages.ts";
 
 let localPool: Pool | null = null;
-
-const registryRuntime = createRegistryBackedAnalystToolRuntime({
-  executeTool: async ({ toolName, arguments: args }) => ({
-    kind: "local_tool_result",
-    status: "ok",
-    tool_name: toolName,
-    arguments: args,
-  }),
-});
+const toolContributionsBySnapshot = new Map<string, ReadonlyArray<ToolCallManifestContribution>>();
 
 export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
-  const result = await registryRuntime(context);
   const asOf = new Date().toISOString();
   const subjectRefs = context.subjectPreResolution?.status === "resolved"
     ? [context.subjectPreResolution.subject_ref]
     : [{ kind: "screen" as const, id: context.threadId }];
+  const registryRuntime = createRegistryBackedAnalystToolRuntime({
+    executeTool: async ({ toolName, arguments: args }) => {
+      assertDevStubToolExecutorEnabled();
+      return {
+        kind: "dev_stub_tool_result",
+        status: "ok",
+        tool_name: toolName,
+        arguments: args,
+        manifest_contribution: {
+          subject_refs: subjectRefs,
+        },
+      };
+    },
+  });
+  const result = await registryRuntime(context);
+  const toolContributions = manifestContributionsForToolCalls(result.tool_calls, subjectRefs);
+  await writeLocalToolCallLogs(context.threadId, result.tool_calls);
+  toolContributionsBySnapshot.set(result.snapshot_id, toolContributions);
   return {
     ...result,
     blocks: result.blocks.map((block) =>
@@ -52,22 +63,75 @@ async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersisten
   const blocks = input.blocks as ReadonlyArray<Record<string, unknown>>;
   const snapshotId = snapshotIdFromBlocks(blocks);
   const asOf = maxBlockAsOf(blocks) ?? new Date().toISOString();
-  return sealSnapshotWithPool(pool(), {
-    snapshot_id: snapshotId,
-    thread_id: input.threadId,
-    manifest: stageSnapshotManifest({
-      subject_refs: subjectRefsFromBlocks(blocks, input.threadId),
-      as_of: asOf,
-      basis: "reported",
-      normalization: "raw",
-      allowed_transforms: {},
-      model_version: "chat-local-runtime",
-      tool_calls: [],
-    }),
-    blocks: blocks as never,
-    sources: [],
-    documents: [],
-  });
+  try {
+    return await sealSnapshotWithPool(pool(), {
+      snapshot_id: snapshotId,
+      thread_id: input.threadId,
+      manifest: stageSnapshotManifest({
+        subject_refs: subjectRefsFromBlocks(blocks, input.threadId),
+        as_of: asOf,
+        basis: "reported",
+        normalization: "raw",
+        allowed_transforms: {},
+        model_version: "chat-local-runtime",
+        tool_calls: toolContributionsBySnapshot.get(snapshotId) ?? [],
+      }),
+      blocks: blocks as never,
+      sources: [],
+      documents: [],
+    });
+  } finally {
+    toolContributionsBySnapshot.delete(snapshotId);
+  }
+}
+
+function assertDevStubToolExecutorEnabled(): void {
+  if (process.env.CHAT_LOCAL_TOOL_EXECUTOR !== "dev_stub") {
+    throw new Error("CHAT_LOCAL_TOOL_EXECUTOR=dev_stub is required to use the local stub chat tool executor");
+  }
+}
+
+function manifestContributionsForToolCalls(
+  toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>,
+  subjectRefs: ReadonlyArray<SnapshotSubjectRef>,
+): ReadonlyArray<ToolCallManifestContribution> {
+  return toolCalls
+    .filter((toolCall) => toolCall.status === "ok" && isJsonObject(toolCall.result))
+    .map((toolCall) => ({
+      tool_call_id: toolCall.tool_call_id,
+      result: toolCall.result as JsonValue,
+      subject_refs: subjectRefs,
+    }));
+}
+
+async function writeLocalToolCallLogs(
+  threadId: string,
+  toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>,
+): Promise<void> {
+  for (const toolCall of toolCalls) {
+    if (toolCall.status !== "ok" || toolCall.result === undefined) continue;
+    const args = (toolCall.arguments ?? {}) as JsonValue;
+    const result = toolCall.result;
+    await pool().query(
+      `insert into tool_call_logs
+         (tool_call_id, thread_id, tool_name, args, result_hash, duration_ms, status, error_code)
+       values ($1::uuid, $2::uuid, $3, $4::jsonb, $5, $6, $7, $8)
+       on conflict (tool_call_id) do update
+          set result_hash = excluded.result_hash,
+              status = excluded.status,
+              error_code = excluded.error_code`,
+      [
+        toolCall.tool_call_id,
+        threadId,
+        toolCall.tool_name,
+        serializeJsonValue(toolCallArgsDigest(args)),
+        hashJsonValue(result),
+        0,
+        "ok",
+        null,
+      ],
+    );
+  }
 }
 
 function normalizeAssistantBlock(

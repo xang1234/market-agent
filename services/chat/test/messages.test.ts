@@ -105,6 +105,18 @@ test("chat message persistence rejects pool-like executors before branding", () 
   );
 });
 
+test("chat message persistence accepts acquired pg clients that expose connect and release", () => {
+  const client = unpinnedRecordingDb();
+  const acquiredPgClient = Object.assign(client, {
+    async connect() {
+      throw new Error("acquired clients must not be reacquired");
+    },
+  });
+
+  assert.doesNotThrow(() => chatMessageTransactionClient(acquiredPgClient));
+  assert.deepEqual(client.queries, []);
+});
+
 test("chat message persistence rejects query-only pool wrappers before branding", () => {
   const client = unpinnedRecordingDb();
   const queryOnlyWrapper = {
