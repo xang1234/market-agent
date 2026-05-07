@@ -219,8 +219,10 @@ Routes like:
 * `/symbol/:ticker/financials`
 * `/symbol/:ticker/earnings`
 * `/symbol/:ticker/holders`
-* `/symbol/:ticker/reddit`
+* `/symbol/:ticker/signals`
 * `/symbol/:ticker/analyze`
+
+`signals` is the accepted route bucket for Reddit-like community views, news pulse, sentiment, and future alternative-data views. Earlier drafts called this `/symbol/:ticker/reddit`; the implementation deliberately generalized it so source-specific content composes shared evidence-backed blocks instead of defining a provider-specific shell.
 
 ### 5.5 Analyze
 
@@ -1100,11 +1102,10 @@ A practical implementation stack:
 
 * React + TypeScript
 * route-driven app shell
-* TanStack Query for server state
-* Zustand for local UI state
-* Motion for animation
-* TradingView Lightweight Charts for price/performance
-* Recharts or Visx for smaller analytical blocks
+* React-native state primitives for the current implementation stage; see [ADR 0001](docs/adr/0001-frontend-state-management.md)
+* typed BlockRegistry renderers with deterministic SVG/HTML chart blocks for the current implementation stage; see [ADR 0002](docs/adr/0002-chart-engine-strategy.md)
+* TanStack Query and Zustand remain migration options when ADR 0001's triggers are met
+* TradingView Lightweight Charts, Recharts/Visx, and Motion remain migration options when ADR 0002's triggers are met
 * Electron shell for desktop
 * Expo for later mobile client
 
@@ -1119,15 +1120,19 @@ A practical implementation stack:
 /symbol/:ticker/financials
 /symbol/:ticker/earnings
 /symbol/:ticker/holders
-/symbol/:ticker/reddit
+/symbol/:ticker/signals
 /symbol/:ticker/analyze
 ```
+
+`/symbol/:ticker/signals` supersedes the older `/symbol/:ticker/reddit` draft route. Reddit-like content remains supported as a data/source family inside `signals`, not as a separate provider-specific tab.
 
 ### 16.3 State split
 
 * **local UI state**: composer text, expanded sections, scroll anchoring, selected chart range
 * **server state**: quotes, bars, profile, artifacts, findings
 * **persistent state**: threads, watchlists, agents, templates, snapshots
+
+Current frontend state management is documented in [ADR 0001](docs/adr/0001-frontend-state-management.md). This preserves the state split above while using React-local state and focused shell contexts until shared cache/store pressure justifies TanStack Query or Zustand.
 
 ### 16.4 Rendering model
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { homeCardPath, type HomeCardDestination } from './deepLinks.ts'
+import { HOME_SYMBOL_TABS, homeCardPath, type HomeCardDestination } from './deepLinks.ts'
 
 const LISTING_REF = {
   kind: 'listing',
@@ -17,6 +17,20 @@ test('homeCardPath maps symbol earnings destinations to the symbol earnings tab'
   assert.equal(
     homeCardPath(destination),
     '/symbol/listing%3A55555555-5555-4555-a555-555555555555/earnings',
+  )
+})
+
+test('symbol tab destinations use signals as the Reddit-like route bucket', () => {
+  assert.ok(HOME_SYMBOL_TABS.includes('signals'))
+  assert.equal((HOME_SYMBOL_TABS as ReadonlyArray<string>).includes('reddit'), false)
+
+  assert.equal(
+    homeCardPath({
+      kind: 'symbol',
+      subject_ref: LISTING_REF,
+      tab: 'signals',
+    }),
+    '/symbol/listing%3A55555555-5555-4555-a555-555555555555/signals',
   )
 })
 
