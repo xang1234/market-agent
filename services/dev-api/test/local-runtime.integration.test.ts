@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import type { AddressInfo } from "node:net";
+import test, { type TestContext } from "node:test";
 
 import type { Client } from "pg";
 
@@ -7,6 +8,14 @@ import { claimAgentRun } from "../../agents/src/agent-run-repo.ts";
 import { createAgent } from "../../agents/src/agent-repo.ts";
 import { runAgentLoop } from "../../agents/src/agent-loop.ts";
 import { createAnalyzeTemplate } from "../../analyze/src/template-repo.ts";
+import {
+  createClaim,
+  createClaimArgument,
+  createClaimEvidence,
+  createDocument,
+  createSource,
+  ephemeralRawBlobIdForSource,
+} from "../../evidence/src/index.ts";
 import {
   bootstrapDatabase,
   connectedClient,
@@ -20,16 +29,79 @@ import {
   runAnalyzeWorkflow,
   sealAnalyzeSnapshot,
 } from "../src/local-runtime.ts";
+import { createDevApiServer, createServiceDevApiAdapters } from "../src/http.ts";
 
 const USER_ID = "10000000-0000-4000-8000-000000000001";
+const OTHER_USER_ID = "10000000-0000-4000-8000-000000000099";
 const SUBJECT_ID = "20000000-0000-4000-8000-000000000002";
 const RUN_ID = "30000000-0000-4000-8000-000000000003";
 
-async function seedUser(client: Client): Promise<void> {
+async function seedUser(client: Client, userId = USER_ID): Promise<void> {
   await client.query(
     `insert into users (user_id, email) values ($1::uuid, $2)`,
-    [USER_ID, "local-runtime-agent@example.com"],
+    [userId, `${userId}@local-runtime-agent.example.com`],
   );
+}
+
+async function seedExistingEvidence(
+  client: Client,
+  input: { userId?: string | null; label: string },
+): Promise<{ claimId: string; documentId: string; sourceId: string }> {
+  const asOf = "2026-05-07T00:00:00.000Z";
+  const hashDigit = input.label === "owned" ? "1" : "9";
+  const source = await createSource(client, {
+    provider: `seeded-local-evidence-${input.label}`,
+    kind: "article",
+    trust_tier: "secondary",
+    license_class: "public",
+    retrieved_at: asOf,
+    content_hash: `sha256:${hashDigit.repeat(64)}`,
+    user_id: input.userId ?? null,
+  });
+  const document = (await createDocument(client, {
+    source_id: source.source_id,
+    kind: "article",
+    title: `Seeded operating margin evidence (${input.label})`,
+    published_at: asOf,
+    content_hash: `sha256:${(input.label === "owned" ? "2" : "8").repeat(64)}`,
+    raw_blob_id: ephemeralRawBlobIdForSource(source.source_id),
+    parse_status: "parsed",
+  })).document;
+  const claim = await createClaim(client, {
+    document_id: document.document_id,
+    predicate: "margin.quality",
+    text_canonical: `${input.label} seeded evidence says operating margin quality improved because gross margin expanded.`,
+    polarity: "positive",
+    modality: "asserted",
+    reported_by_source_id: source.source_id,
+    effective_time: asOf,
+    confidence: 0.84,
+    status: "extracted",
+  });
+  await createClaimArgument(client, {
+    claim_id: claim.claim_id,
+    subject_kind: "issuer",
+    subject_id: SUBJECT_ID,
+    role: "subject",
+  });
+  await createClaimEvidence(client, {
+    claim_id: claim.claim_id,
+    document_id: document.document_id,
+    locator: { kind: "paragraph", index: 3 },
+    confidence: 0.84,
+  });
+  return { claimId: claim.claim_id, documentId: document.document_id, sourceId: source.source_id };
+}
+
+async function startDevApiServer(
+  t: TestContext,
+  adapters: ReturnType<typeof createServiceDevApiAdapters>,
+): Promise<string> {
+  const server = createDevApiServer({}, { adapters });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const { port } = server.address() as AddressInfo;
+  return `http://127.0.0.1:${port}`;
 }
 
 test(
@@ -56,6 +128,9 @@ test(
 
     const client = await connectedClient(t, databaseUrl);
     await seedUser(client);
+    await seedUser(client, OTHER_USER_ID);
+    const otherUserSeeded = await seedExistingEvidence(client, { userId: OTHER_USER_ID, label: "other-user" });
+    const seeded = await seedExistingEvidence(client, { userId: USER_ID, label: "owned" });
     const template = await createAnalyzeTemplate(client, {
       user_id: USER_ID,
       name: "Evidence-backed memo",
@@ -79,11 +154,14 @@ test(
     const firstBlock = rendered.blocks[0]!;
     assert.equal(firstBlock.snapshot_id, snapshotId);
     assert.equal(Array.isArray(firstBlock.source_refs), true);
-    assert.equal((firstBlock.source_refs as unknown[]).length > 0, true);
+    assert.deepEqual(firstBlock.source_refs, [seeded.sourceId]);
     assert.equal(Array.isArray(firstBlock.claim_refs), true);
-    assert.equal((firstBlock.claim_refs as unknown[]).length > 0, true);
+    assert.deepEqual(firstBlock.claim_refs, [seeded.claimId]);
     assert.equal(Array.isArray(firstBlock.document_refs), true);
-    assert.equal((firstBlock.document_refs as unknown[]).length > 0, true);
+    assert.deepEqual(firstBlock.document_refs, [seeded.documentId]);
+    assert.match(JSON.stringify(firstBlock), /owned seeded evidence says operating margin quality improved/);
+    assert.doesNotMatch(JSON.stringify(firstBlock), /other-user seeded evidence/);
+    assert.equal((firstBlock.claim_refs as unknown[]).includes(otherUserSeeded.claimId), false);
 
     const seal = await sealAnalyzeSnapshot({
       snapshotId,
@@ -99,6 +177,31 @@ test(
     assert.equal(seal.snapshot.source_ids.length > 0, true);
     assert.equal(seal.snapshot.claim_refs.length > 0, true);
     assert.equal(seal.snapshot.document_refs.length > 0, true);
+
+    const pool = await connectedPool(t, databaseUrl);
+    const base = await startDevApiServer(t, createServiceDevApiAdapters({
+      db: pool,
+      runAnalyzeWorkflow,
+      sealAnalyzeSnapshot,
+      createAgentLoopStages,
+    }));
+    const response = await fetch(`${base}/v1/analyze/runs`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-user-id": USER_ID,
+      },
+      body: JSON.stringify({
+        template_id: template.template_id,
+        instructions: "Summarize the evidence",
+        source_categories: ["filings"],
+        subject_ref: { kind: "issuer", id: SUBJECT_ID },
+      }),
+    });
+    const body = await response.json() as { blocks?: Array<Record<string, unknown>>; snapshot_id?: string };
+    assert.equal(response.status, 201);
+    assert.deepEqual(body.blocks?.[0]?.claim_refs, [seeded.claimId]);
+    assert.equal(typeof body.snapshot_id, "string");
   },
 );
 

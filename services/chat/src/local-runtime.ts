@@ -1,10 +1,14 @@
 import { Pool } from "pg";
 
-import { createLocalRuntimeEvidence, type LocalRuntimeEvidence } from "../../evidence/src/index.ts";
+import {
+  loadLocalRuntimeEvidence,
+  loadVerifierRowsForRefs,
+  type LocalRuntimeEvidence,
+} from "../../evidence/src/index.ts";
 import { hashJsonValue, toolCallArgsDigest } from "../../observability/src/tool-call.ts";
 import { serializeJsonValue, type JsonValue } from "../../observability/src/types.ts";
-import type { SnapshotSubjectRef, ToolCallManifestContribution } from "../../snapshot/src/manifest-staging.ts";
-import { stageSnapshotManifest } from "../../snapshot/src/manifest-staging.ts";
+import type { SnapshotManifestDraft, SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
+import { STAGED_SNAPSHOT_MANIFEST } from "../../snapshot/src/manifest-staging.ts";
 import { sealSnapshotWithPool } from "../../snapshot/src/snapshot-sealer.ts";
 import {
   createRegistryBackedAnalystToolRuntime,
@@ -17,8 +21,6 @@ import {
 import { createChatMessagePersistence } from "./messages.ts";
 
 let localPool: Pool | null = null;
-const toolContributionsBySnapshot = new Map<string, ReadonlyArray<ToolCallManifestContribution>>();
-const evidenceBySnapshot = new Map<string, ReadonlyArray<LocalRuntimeEvidence>>();
 
 export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const asOf = new Date().toISOString();
@@ -27,23 +29,16 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     : [{ kind: "screen" as const, id: context.threadId }];
   const registryRuntime = createRegistryBackedAnalystToolRuntime({
     executeTool: async ({ toolName, arguments: args }) => {
-      const evidence = await createLocalRuntimeEvidence(pool(), {
-        provider: "chat-local-runtime",
-        title: `Chat tool evidence: ${toolName}`,
-        summary: localToolSummary({
-          toolName,
-          userIntent: context.userIntent,
-          subjectRefs,
-        }),
-        predicate: `chat.tool.${toolName}`,
+      const evidence = await loadLocalRuntimeEvidence(pool(), {
         subject_refs: subjectRefs,
-        as_of: asOf,
+        user_id: context.userId ?? null,
       });
       return {
         kind: "local_evidence_tool_result",
         status: "ok",
         tool_name: toolName,
         arguments: args,
+        evidence_status: evidence.claim_refs.length > 0 ? "available" : "insufficient_evidence",
         manifest_contribution: {
           subject_refs: subjectRefs,
           claim_refs: evidence.claim_refs,
@@ -56,11 +51,11 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   });
   const result = await registryRuntime(context);
   const evidence = evidenceForToolCalls(result.tool_calls);
-  const toolContributions = manifestContributionsForToolCalls(result.tool_calls, subjectRefs);
   await writeLocalToolCallLogs(context.threadId, result.tool_calls);
-  toolContributionsBySnapshot.set(result.snapshot_id, toolContributions);
-  evidenceBySnapshot.set(result.snapshot_id, evidence);
   const defaultRefs = defaultEvidenceRefs(evidence);
+  const toolCallIds = result.tool_calls
+    ?.filter((toolCall) => toolCall.status === "ok")
+    .map((toolCall) => toolCall.tool_call_id) ?? [];
   return {
     ...result,
     blocks: result.blocks.map((block) =>
@@ -69,6 +64,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
         asOf,
         subjectRefs,
         defaultRefs,
+        toolCallIds,
       })
     ),
   } satisfies ChatAnalystToolRuntimeResult;
@@ -84,61 +80,26 @@ async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersisten
   const blocks = input.blocks as ReadonlyArray<Record<string, unknown>>;
   const snapshotId = snapshotIdFromBlocks(blocks);
   const asOf = maxBlockAsOf(blocks) ?? new Date().toISOString();
-  const evidence = evidenceBySnapshot.get(snapshotId) ?? [];
-  try {
-    return await sealSnapshotWithPool(pool(), {
-      snapshot_id: snapshotId,
-      thread_id: input.threadId,
-      manifest: stageSnapshotManifest({
-        subject_refs: subjectRefsFromBlocks(blocks, input.threadId),
-        as_of: asOf,
-        basis: "unadjusted",
-        normalization: "raw",
-        allowed_transforms: {},
-        model_version: "chat-local-runtime",
-        tool_calls: toolContributionsBySnapshot.get(snapshotId) ?? [],
-      }),
-      blocks: blocks as never,
-      sources: evidence.flatMap((item) => item.verifier_sources),
-      documents: evidence.flatMap((item) => item.verifier_documents),
-      claims: evidence.flatMap((item) => item.verifier_claims),
-    });
-  } finally {
-    toolContributionsBySnapshot.delete(snapshotId);
-    evidenceBySnapshot.delete(snapshotId);
-  }
-}
-
-function manifestContributionsForToolCalls(
-  toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>,
-  subjectRefs: ReadonlyArray<SnapshotSubjectRef>,
-): ReadonlyArray<ToolCallManifestContribution> {
-  return toolCalls
-    .filter((toolCall) => toolCall.status === "ok" && isJsonObject(toolCall.result))
-    .map((toolCall) => ({
-      tool_call_id: toolCall.tool_call_id,
-      result: toolCall.result as JsonValue,
-      subject_refs: subjectRefs,
-      ...manifestContributionFromResult(toolCall.result),
-    }));
-}
-
-function manifestContributionFromResult(
-  result: unknown,
-): Omit<ToolCallManifestContribution, "tool_call_id" | "result"> {
-  if (!isJsonObject(result) || !isJsonObject(result.manifest_contribution)) return {};
-  const contribution = result.manifest_contribution;
-  const staged: Omit<ToolCallManifestContribution, "tool_call_id" | "result"> = {};
-  if (Array.isArray(contribution.subject_refs)) {
-    staged.subject_refs = contribution.subject_refs.filter(isSnapshotSubjectRef);
-  }
-  const claimRefs = uuidArray(contribution.claim_refs);
-  if (claimRefs !== undefined) staged.claim_refs = claimRefs;
-  const documentRefs = uuidArray(contribution.document_refs);
-  if (documentRefs !== undefined) staged.document_refs = documentRefs;
-  const sourceIds = uuidArray(contribution.source_ids);
-  if (sourceIds !== undefined) staged.source_ids = sourceIds;
-  return staged;
+  const manifest = await manifestFromBlockRefs({
+    subjectRefs: subjectRefsFromBlocks(blocks, input.threadId),
+    asOf,
+    modelVersion: "chat-local-runtime",
+    blocks,
+  });
+  const verifierRows = await loadVerifierRowsForRefs(pool(), {
+    source_ids: manifest.source_ids,
+    document_refs: manifest.document_refs,
+    claim_refs: manifest.claim_refs,
+  });
+  return sealSnapshotWithPool(pool(), {
+    snapshot_id: snapshotId,
+    thread_id: input.threadId,
+    manifest,
+    blocks: blocks as never,
+    sources: verifierRows.sources,
+    documents: verifierRows.documents,
+    claims: verifierRows.claims,
+  });
 }
 
 function evidenceForToolCalls(
@@ -162,6 +123,57 @@ function defaultEvidenceRefs(evidence: ReadonlyArray<LocalRuntimeEvidence>): {
     claim_refs: firstSeen(evidence.flatMap((item) => item.claim_refs)),
     document_refs: firstSeen(evidence.flatMap((item) => item.document_refs)),
   };
+}
+
+async function manifestFromBlockRefs(input: {
+  subjectRefs: ReadonlyArray<SnapshotSubjectRef>;
+  asOf: string;
+  modelVersion: string;
+  blocks: ReadonlyArray<Record<string, unknown>>;
+}): Promise<SnapshotManifestDraft> {
+  const toolCallIds = uuidRefsFromBlocks(input.blocks, "tool_call_ids");
+  const toolCallResultHashes = await loadToolCallResultHashes(toolCallIds);
+  return Object.freeze({
+    [STAGED_SNAPSHOT_MANIFEST]: true,
+    subject_refs: Object.freeze([...input.subjectRefs]),
+    fact_refs: Object.freeze([]),
+    claim_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "claim_refs")),
+    event_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "event_refs")),
+    document_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "document_refs")),
+    series_specs: Object.freeze([]),
+    source_ids: Object.freeze(uuidRefsFromBlocks(input.blocks, "source_refs")),
+    tool_call_ids: Object.freeze(toolCallIds),
+    tool_call_result_hashes: Object.freeze(toolCallResultHashes),
+    as_of: input.asOf,
+    basis: "unadjusted",
+    normalization: "raw",
+    coverage_start: null,
+    allowed_transforms: Object.freeze({}),
+    model_version: input.modelVersion,
+    parent_snapshot: null,
+  });
+}
+
+async function loadToolCallResultHashes(
+  toolCallIds: ReadonlyArray<string>,
+): Promise<ReadonlyArray<{ tool_call_id: string; result_hash: string }>> {
+  if (toolCallIds.length === 0) return Object.freeze([]);
+  const { rows } = await pool().query<{ tool_call_id: string; result_hash: string }>(
+    `select tool_call_id::text as tool_call_id,
+            result_hash
+       from tool_call_logs
+      where tool_call_id = any($1::uuid[])
+        and status = 'ok'
+        and result_hash is not null`,
+    [toolCallIds],
+  );
+  const byId = new Map(rows.map((row) => [row.tool_call_id, row.result_hash]));
+  return Object.freeze(
+    toolCallIds.flatMap((tool_call_id) => {
+      const result_hash = byId.get(tool_call_id);
+      return result_hash === undefined ? [] : [Object.freeze({ tool_call_id, result_hash })];
+    }),
+  );
 }
 
 async function writeLocalToolCallLogs(
@@ -194,6 +206,24 @@ async function writeLocalToolCallLogs(
   }
 }
 
+function uuidRefsFromBlocks(
+  blocks: ReadonlyArray<Record<string, unknown>>,
+  key: string,
+): string[] {
+  const seen = new Set<string>();
+  const refs: string[] = [];
+  for (const block of blocks) {
+    const values = block[key];
+    if (!Array.isArray(values)) continue;
+    for (const value of values) {
+      if (typeof value !== "string" || !isUuid(value) || seen.has(value)) continue;
+      seen.add(value);
+      refs.push(value);
+    }
+  }
+  return refs;
+}
+
 function normalizeAssistantBlock(
   block: Record<string, unknown>,
   input: {
@@ -205,6 +235,7 @@ function normalizeAssistantBlock(
       claim_refs: ReadonlyArray<string>;
       document_refs: ReadonlyArray<string>;
     };
+    toolCallIds: ReadonlyArray<string>;
   },
 ): Record<string, unknown> {
   const kind = typeof block.kind === "string" && block.kind.length > 0 ? block.kind : "rich_text";
@@ -222,6 +253,7 @@ function normalizeAssistantBlock(
     document_refs: Array.isArray(block.document_refs) && block.document_refs.length > 0
       ? block.document_refs
       : input.defaultRefs.document_refs,
+    tool_call_ids: input.toolCallIds,
     as_of: input.asOf,
     subject_refs: input.subjectRefs,
   };
@@ -269,20 +301,10 @@ function pool(): Pool {
   return localPool;
 }
 
-function localToolSummary(input: {
-  toolName: string;
-  userIntent: string | undefined;
-  subjectRefs: ReadonlyArray<SnapshotSubjectRef>;
-}): string {
-  const intent = input.userIntent?.trim() || "Start a research thread";
-  const subjects = input.subjectRefs.map((subject) => `${subject.kind}:${subject.id}`).join(", ");
-  return `${intent}. ${input.toolName} read the local evidence plane for ${subjects} and returned structured provenance for a sealed chat response.`;
-}
-
-function uuidArray(value: unknown): ReadonlyArray<string> | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const refs = firstSeen(value.filter((item): item is string => typeof item === "string" && isUuid(item)));
-  return refs.length > 0 ? refs : undefined;
+export async function closeLocalRuntimePoolForTests(): Promise<void> {
+  const poolToClose = localPool;
+  localPool = null;
+  await poolToClose?.end();
 }
 
 function firstSeen(values: ReadonlyArray<string>): ReadonlyArray<string> {

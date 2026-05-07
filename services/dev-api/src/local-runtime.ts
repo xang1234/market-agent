@@ -2,13 +2,16 @@ import { randomUUID } from "node:crypto";
 
 import { Pool } from "pg";
 
-import { createLocalRuntimeEvidence, type LocalRuntimeEvidence } from "../../evidence/src/index.ts";
+import {
+  loadLocalRuntimeEvidence,
+  loadVerifierRowsForRefs,
+} from "../../evidence/src/index.ts";
 import { hashJsonValue, toolCallArgsDigest } from "../../observability/src/tool-call.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
 import { serializeJsonValue } from "../../observability/src/types.ts";
 import { writeRunActivity } from "../../observability/src/run-activity.ts";
 import { generateFinding, type FindingRow } from "../../agents/src/finding-generator.ts";
-import type { SnapshotManifestDraft, SnapshotSubjectRef, ToolCallManifestContribution } from "../../snapshot/src/manifest-staging.ts";
+import type { SnapshotManifestDraft, SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
 import { STAGED_SNAPSHOT_MANIFEST, stageSnapshotManifest } from "../../snapshot/src/manifest-staging.ts";
 import { sealSnapshotWithPool } from "../../snapshot/src/snapshot-sealer.ts";
 import type {
@@ -19,38 +22,22 @@ import type {
 } from "./http.ts";
 
 let localPool: Pool | null = null;
-const analyzeEvidenceBySnapshot = new Map<string, LocalRuntimeEvidence & {
-  readonly tool_call_id: string;
-  readonly tool_result: JsonValue;
-  readonly tool_contribution: ToolCallManifestContribution;
-}>();
 
 export async function runAnalyzeWorkflow(
   input: DevApiAnalyzeWorkflowInput,
 ): Promise<DevApiAnalyzeWorkflowResult> {
   const asOf = new Date().toISOString();
   const subjectRefs = normalizeSubjectRefs(input.subjectRefs, input.snapshotId);
-  const evidence = await createLocalRuntimeEvidence(pool(), {
-    provider: "dev-api-local-analyze",
-    title: `Analyze memo: ${input.template.name}`,
-    summary: analyzeMemoText(input),
-    predicate: "analyze.memo.generated",
+  const evidence = await loadLocalRuntimeEvidence(pool(), {
     subject_refs: subjectRefs,
-    as_of: asOf,
     user_id: input.userId,
   });
   const toolCallId = randomUUID();
-  const toolContribution = {
-    tool_call_id: toolCallId,
-    subject_refs: subjectRefs,
-    claim_refs: evidence.claim_refs,
-    document_refs: evidence.document_refs,
-    source_ids: evidence.source_ids,
-  } satisfies ToolCallManifestContribution;
   const toolResult = {
     kind: "local_analyze_workflow_result",
     template_id: input.template.template_id,
     bundle_ids: [...input.bundleIds],
+    evidence_status: evidence.claim_refs.length > 0 ? "available" : "insufficient_evidence",
     manifest_contribution: {
       subject_refs: subjectRefs,
       claim_refs: evidence.claim_refs,
@@ -69,15 +56,6 @@ export async function runAnalyzeWorkflow(
     },
     result: toolResult,
   });
-  analyzeEvidenceBySnapshot.set(input.snapshotId, {
-    ...evidence,
-    tool_call_id: toolCallId,
-    tool_result: toolResult,
-    tool_contribution: {
-      ...toolContribution,
-      result: toolResult,
-    },
-  });
   return {
     blocks: [
       {
@@ -88,13 +66,14 @@ export async function runAnalyzeWorkflow(
         source_refs: evidence.source_ids,
         claim_refs: evidence.claim_refs,
         document_refs: evidence.document_refs,
+        tool_call_ids: [toolCallId],
         as_of: asOf,
         subject_refs: subjectRefs,
         title: input.template.name,
         segments: [
           {
             type: "text",
-            text: analyzeMemoText(input),
+            text: analyzeMemoText(input, evidence),
           },
         ],
       },
@@ -109,34 +88,25 @@ export async function sealAnalyzeSnapshot(
   const snapshotId = input.snapshotId;
   const asOf = maxBlockAsOf(blocks) ?? new Date().toISOString();
   const subjectRefs = subjectRefsFromBlocks(blocks, snapshotId);
-  const evidence = analyzeEvidenceBySnapshot.get(snapshotId);
-  try {
-    return await sealSnapshotWithPool(pool(), {
-      snapshot_id: snapshotId,
-      manifest: evidence
-        ? stageSnapshotManifest({
-          subject_refs: subjectRefs,
-          as_of: asOf,
-          basis: "unadjusted",
-          normalization: "raw",
-          allowed_transforms: {},
-          model_version: "dev-api-local-runtime",
-          tool_calls: [evidence.tool_contribution],
-        })
-        : manifestFromBlockRefs({
-          subjectRefs,
-          asOf,
-          modelVersion: "dev-api-local-runtime",
-          blocks,
-        }),
-      blocks: blocks as never,
-      sources: evidence?.verifier_sources ?? [],
-      documents: evidence?.verifier_documents ?? [],
-      claims: evidence?.verifier_claims ?? [],
-    });
-  } finally {
-    analyzeEvidenceBySnapshot.delete(snapshotId);
-  }
+  const manifest = await manifestFromBlockRefs({
+    subjectRefs,
+    asOf,
+    modelVersion: "dev-api-local-runtime",
+    blocks,
+  });
+  const verifierRows = await loadVerifierRowsForRefs(pool(), {
+    source_ids: manifest.source_ids,
+    document_refs: manifest.document_refs,
+    claim_refs: manifest.claim_refs,
+  });
+  return sealSnapshotWithPool(pool(), {
+    snapshot_id: snapshotId,
+    manifest,
+    blocks: blocks as never,
+    sources: verifierRows.sources,
+    documents: verifierRows.documents,
+    claims: verifierRows.claims,
+  });
 }
 
 export const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, runId, agent }) => {
@@ -272,12 +242,14 @@ async function writeLocalToolCallLog(input: {
   );
 }
 
-function manifestFromBlockRefs(input: {
+async function manifestFromBlockRefs(input: {
   subjectRefs: ReadonlyArray<SnapshotSubjectRef>;
   asOf: string;
   modelVersion: string;
   blocks: ReadonlyArray<Record<string, unknown>>;
-}): SnapshotManifestDraft {
+}): Promise<SnapshotManifestDraft> {
+  const toolCallIds = uuidRefsFromBlocks(input.blocks, "tool_call_ids");
+  const toolCallResultHashes = await loadToolCallResultHashes(toolCallIds);
   return Object.freeze({
     [STAGED_SNAPSHOT_MANIFEST]: true,
     subject_refs: Object.freeze([...input.subjectRefs]),
@@ -287,8 +259,8 @@ function manifestFromBlockRefs(input: {
     document_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "document_refs")),
     series_specs: Object.freeze([]),
     source_ids: Object.freeze(uuidRefsFromBlocks(input.blocks, "source_refs")),
-    tool_call_ids: Object.freeze([]),
-    tool_call_result_hashes: Object.freeze([]),
+    tool_call_ids: Object.freeze(toolCallIds),
+    tool_call_result_hashes: Object.freeze(toolCallResultHashes),
     as_of: input.asOf,
     basis: "unadjusted",
     normalization: "raw",
@@ -297,6 +269,28 @@ function manifestFromBlockRefs(input: {
     model_version: input.modelVersion,
     parent_snapshot: null,
   });
+}
+
+async function loadToolCallResultHashes(
+  toolCallIds: ReadonlyArray<string>,
+): Promise<ReadonlyArray<{ tool_call_id: string; result_hash: string }>> {
+  if (toolCallIds.length === 0) return Object.freeze([]);
+  const { rows } = await pool().query<{ tool_call_id: string; result_hash: string }>(
+    `select tool_call_id::text as tool_call_id,
+            result_hash
+       from tool_call_logs
+      where tool_call_id = any($1::uuid[])
+        and status = 'ok'
+        and result_hash is not null`,
+    [toolCallIds],
+  );
+  const byId = new Map(rows.map((row) => [row.tool_call_id, row.result_hash]));
+  return Object.freeze(
+    toolCallIds.flatMap((tool_call_id) => {
+      const result_hash = byId.get(tool_call_id);
+      return result_hash === undefined ? [] : [Object.freeze({ tool_call_id, result_hash })];
+    }),
+  );
 }
 
 function uuidRefsFromBlocks(
@@ -323,17 +317,26 @@ export async function closeLocalRuntimePoolForTests(): Promise<void> {
   await poolToClose?.end();
 }
 
-function analyzeMemoText(input: DevApiAnalyzeWorkflowInput): string {
+function analyzeMemoText(
+  input: DevApiAnalyzeWorkflowInput,
+  evidence?: { claims: ReadonlyArray<{ text_canonical: string }> },
+): string {
   const sources = input.sourceCategories.length > 0 ? input.sourceCategories.join(", ") : "base template scope";
   const subjects = input.subjectRefs.length > 0
     ? input.subjectRefs.map((subject) => `${subject.kind}:${subject.id}`).join(", ")
     : "the active workspace context";
+  const evidenceText = evidence === undefined
+    ? ""
+    : evidence.claims.length > 0
+    ? `Evidence claims:\n${evidence.claims.map((claim, index) => `${index + 1}. ${claim.text_canonical}`).join("\n")}`
+    : "Insufficient local evidence: no existing claims, facts, or events were found for the requested subjects.";
   return [
     input.instructions,
     `Sources: ${sources}.`,
     `Subjects: ${subjects}.`,
     `Bundles: ${input.bundleIds.join(", ")}.`,
-  ].join("\n\n");
+    evidenceText,
+  ].filter((line) => line.length > 0).join("\n\n");
 }
 
 function subjectRefsFromBlocks(

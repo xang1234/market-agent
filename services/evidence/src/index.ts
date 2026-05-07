@@ -301,7 +301,8 @@ export type {
 export { createEvidenceReaderToolHandlers } from "./reader/extract-tools.ts";
 export type { EvidenceReaderToolDeps } from "./reader/extract-tools.ts";
 export {
-  createLocalRuntimeEvidence,
+  loadLocalRuntimeEvidence,
+  loadVerifierRowsForRefs,
 } from "./local-runtime-evidence.ts";
 export type {
   LocalRuntimeEvidence,
