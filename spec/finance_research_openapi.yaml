@@ -2084,8 +2084,7 @@ components:
         thesis:
           type: string
         universe:
-          type: object
-          additionalProperties: true
+          $ref: '#/components/schemas/AgentUniverse'
         source_policy:
           type: object
           additionalProperties: true
@@ -2096,8 +2095,75 @@ components:
         alert_rules:
           type: array
           items:
-            type: object
-            additionalProperties: true
+            $ref: '#/components/schemas/AgentAlertRule'
+    AgentUniverse:
+      oneOf:
+        - type: object
+          required: [mode, subject_refs]
+          additionalProperties: false
+          properties:
+            mode:
+              type: string
+              enum: [static]
+            subject_refs:
+              type: array
+              items:
+                $ref: '#/components/schemas/SubjectRef'
+        - type: object
+          required: [mode, screen_id]
+          additionalProperties: false
+          properties:
+            mode:
+              type: string
+              enum: [screen]
+            screen_id:
+              type: string
+        - type: object
+          required: [mode, theme_id]
+          additionalProperties: false
+          properties:
+            mode:
+              type: string
+              enum: [theme]
+            theme_id:
+              type: string
+        - type: object
+          required: [mode, portfolio_id]
+          additionalProperties: false
+          properties:
+            mode:
+              type: string
+              enum: [portfolio]
+            portfolio_id:
+              type: string
+        - type: object
+          required: [mode, agent_id]
+          additionalProperties: false
+          properties:
+            mode:
+              type: string
+              enum: [agent]
+            agent_id:
+              type: string
+    AgentAlertRule:
+      type: object
+      required: [rule_id]
+      additionalProperties: true
+      properties:
+        rule_id:
+          type: string
+        severity_at_least:
+          type: string
+          enum: [low, medium, high, critical]
+        headline_contains:
+          type: string
+        channels:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationChannel'
+    NotificationChannel:
+      type: string
+      enum: [email, web_push, sms, mobile_push, digest]
     AgentPatch:
       type: object
       additionalProperties: false
@@ -2108,6 +2174,12 @@ components:
           type: string
         cadence:
           type: string
+        universe:
+          $ref: '#/components/schemas/AgentUniverse'
+        alert_rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentAlertRule'
         enabled:
           type: boolean
     Agent:

@@ -4,6 +4,7 @@ import {
   buildAgentPayload,
   canRoundTripAlertRules,
   canRoundTripUniverse,
+  subjectRefsText,
   type AgentAlertRule,
   type AgentUniverse,
 } from '../agents/agentPayload.ts'
@@ -58,12 +59,19 @@ export function AgentsPage() {
   const [cadence, setCadence] = useState('daily')
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
   const [editingAgent, setEditingAgent] = useState<AgentRow | null>(null)
+  const [universeMode, setUniverseMode] = useState<AgentUniverse['mode']>('static')
+  const [staticSubjectRefsText, setStaticSubjectRefsText] = useState('')
+  const [dynamicUniverseId, setDynamicUniverseId] = useState('')
   const [subjectKind, setSubjectKind] = useState('issuer')
   const [subjectId, setSubjectId] = useState('')
   const [alertRuleId, setAlertRuleId] = useState('')
   const [alertSeverity, setAlertSeverity] = useState('high')
   const [alertHeadline, setAlertHeadline] = useState('')
   const [alertEmail, setAlertEmail] = useState(false)
+  const [alertWebPush, setAlertWebPush] = useState(false)
+  const [alertSms, setAlertSms] = useState(false)
+  const [alertMobilePush, setAlertMobilePush] = useState(false)
+  const [alertDigest, setAlertDigest] = useState(false)
   const [activity, setActivity] = useState('Idle')
   const [loadError, setLoadError] = useState<string | null>(null)
   const preservesUnsupportedUniverse =
@@ -100,12 +108,19 @@ export function AgentsPage() {
     setName('')
     setThesis('')
     setCadence('daily')
+    setUniverseMode('static')
+    setStaticSubjectRefsText('')
+    setDynamicUniverseId('')
     setSubjectKind('issuer')
     setSubjectId('')
     setAlertRuleId('')
     setAlertSeverity('high')
     setAlertHeadline('')
     setAlertEmail(false)
+    setAlertWebPush(false)
+    setAlertSms(false)
+    setAlertMobilePush(false)
+    setAlertDigest(false)
   }
 
   const submitAgent = async (event: FormEvent<HTMLFormElement>) => {
@@ -115,12 +130,19 @@ export function AgentsPage() {
       name,
       thesis,
       cadence,
+      universeMode,
+      staticSubjectRefsText,
+      dynamicUniverseId,
       subjectKind,
       subjectId,
       alertRuleId,
       alertSeverity,
       alertHeadline,
       alertEmail,
+      alertWebPush,
+      alertSms,
+      alertMobilePush,
+      alertDigest,
     }, editingAgent ?? undefined)
     if (!input.name || !input.thesis) return
     setActivity(editingAgentId ? 'Updating agent' : 'Creating agent')
@@ -146,17 +168,25 @@ export function AgentsPage() {
     const universe = agent.universe?.mode === 'static' ? agent.universe : null
     const subject = universe?.subject_refs[0] ?? null
     const alert = agent.alert_rules?.[0] ?? null
+    const channels = alert?.channels ?? []
     setEditingAgentId(agent.agent_id)
     setEditingAgent(agent)
     setName(agent.name)
     setThesis(agent.thesis)
     setCadence(agent.cadence)
+    setUniverseMode(agent.universe?.mode ?? 'static')
+    setStaticSubjectRefsText(subjectRefsText(universe?.subject_refs))
+    setDynamicUniverseId(dynamicUniverseIdFor(agent.universe))
     setSubjectKind(subject?.kind ?? 'issuer')
     setSubjectId(subject?.id ?? '')
     setAlertRuleId(alert?.rule_id ?? '')
     setAlertSeverity(alert?.severity_at_least ?? 'high')
     setAlertHeadline(alert?.headline_contains ?? '')
-    setAlertEmail(alert?.channels?.includes('email') ?? false)
+    setAlertEmail(channels.includes('email'))
+    setAlertWebPush(channels.includes('web_push'))
+    setAlertSms(channels.includes('sms'))
+    setAlertMobilePush(channels.includes('mobile_push'))
+    setAlertDigest(channels.includes('digest'))
     setActivity('Editing agent')
   }
 
@@ -265,14 +295,55 @@ export function AgentsPage() {
                 Existing {universeLabel(editingAgent.universe)} universe is preserved by this edit.
               </p>
             ) : null}
+            <label className="mt-3 flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+              Mode
+              <select
+                name="universe-mode"
+                value={universeMode}
+                onChange={(event) => setUniverseMode(event.currentTarget.value as AgentUniverse['mode'])}
+                disabled={preservesUnsupportedUniverse}
+                className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+              >
+                <option value="static">static subjects</option>
+                <option value="screen">saved screen</option>
+                <option value="theme">theme</option>
+                <option value="portfolio">portfolio</option>
+                <option value="agent">agent-derived</option>
+              </select>
+            </label>
+            {universeMode === 'static' ? (
+              <label className="mt-3 flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                Subject refs
+                <textarea
+                  name="static-subject-refs"
+                  value={staticSubjectRefsText}
+                  onChange={(event) => setStaticSubjectRefsText(event.currentTarget.value)}
+                  disabled={preservesUnsupportedUniverse}
+                  rows={4}
+                  placeholder="issuer:...\nlisting:..."
+                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+                />
+              </label>
+            ) : (
+              <label className="mt-3 flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                {universeMode} id
+                <input
+                  name="dynamic-universe-id"
+                  value={dynamicUniverseId}
+                  onChange={(event) => setDynamicUniverseId(event.currentTarget.value)}
+                  disabled={preservesUnsupportedUniverse}
+                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+                />
+              </label>
+            )}
             <div className="mt-3 grid gap-3 sm:grid-cols-[120px_minmax(0,1fr)]">
               <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
-                Kind
+                Quick kind
                 <select
                   name="subject-kind"
                   value={subjectKind}
                   onChange={(event) => setSubjectKind(event.currentTarget.value)}
-                  disabled={preservesUnsupportedUniverse}
+                  disabled={preservesUnsupportedUniverse || universeMode !== 'static'}
                   className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
                 >
                   <option value="issuer">issuer</option>
@@ -283,12 +354,12 @@ export function AgentsPage() {
                 </select>
               </label>
               <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
-                Subject id
+                Quick subject id
                 <input
                   name="subject-id"
                   value={subjectId}
                   onChange={(event) => setSubjectId(event.currentTarget.value)}
-                  disabled={preservesUnsupportedUniverse}
+                  disabled={preservesUnsupportedUniverse || universeMode !== 'static'}
                   className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
                 />
               </label>
@@ -348,6 +419,52 @@ export function AgentsPage() {
                 />
                 Email
               </label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="inline-flex items-center gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                  <input
+                    name="alert-web-push"
+                    type="checkbox"
+                    checked={alertWebPush}
+                    onChange={(event) => setAlertWebPush(event.currentTarget.checked)}
+                    disabled={preservesUnsupportedAlertRules}
+                    className="size-4"
+                  />
+                  Web push
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                  <input
+                    name="alert-sms"
+                    type="checkbox"
+                    checked={alertSms}
+                    onChange={(event) => setAlertSms(event.currentTarget.checked)}
+                    disabled={preservesUnsupportedAlertRules}
+                    className="size-4"
+                  />
+                  SMS
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                  <input
+                    name="alert-mobile-push"
+                    type="checkbox"
+                    checked={alertMobilePush}
+                    onChange={(event) => setAlertMobilePush(event.currentTarget.checked)}
+                    disabled={preservesUnsupportedAlertRules}
+                    className="size-4"
+                  />
+                  Mobile push
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                  <input
+                    name="alert-digest"
+                    type="checkbox"
+                    checked={alertDigest}
+                    onChange={(event) => setAlertDigest(event.currentTarget.checked)}
+                    disabled={preservesUnsupportedAlertRules}
+                    className="size-4"
+                  />
+                  Digest
+                </label>
+              </div>
             </div>
           </fieldset>
           <button type="submit" className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-900">
@@ -455,5 +572,14 @@ function alertRuleLabel(alertRules: AgentRow['alert_rules']): string {
   if (!rule) return 'not configured'
   const severity = rule.severity_at_least ?? 'any'
   const headline = rule.headline_contains ? ` headline contains ${rule.headline_contains}` : ''
-  return `${severity}+${headline}`.trim()
+  const channels = rule.channels?.length ? ` via ${rule.channels.join(', ')}` : ''
+  return `${severity}+${headline}${channels}`.trim()
+}
+
+function dynamicUniverseIdFor(universe: AgentRow['universe']): string {
+  if (!universe || universe.mode === 'static') return ''
+  if (universe.mode === 'screen') return universe.screen_id
+  if (universe.mode === 'theme') return universe.theme_id
+  if (universe.mode === 'portfolio') return universe.portfolio_id
+  return universe.agent_id
 }

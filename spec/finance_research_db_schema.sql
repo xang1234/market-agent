@@ -746,12 +746,19 @@ create table alerts_fired (
   channels jsonb not null,
   trigger_refs jsonb not null,
   status text not null default 'pending_notification',
+  notification_delivery jsonb not null default '{}'::jsonb,
+  delivery_attempts integer not null default 0,
+  last_delivery_error text,
+  last_delivery_at timestamptz,
   fired_at timestamptz not null default now(),
   unique (agent_id, run_id, rule_id, finding_id),
   constraint alerts_fired_channels_array_chk check (jsonb_typeof(channels) = 'array'),
   constraint alerts_fired_trigger_refs_array_chk check (jsonb_typeof(trigger_refs) = 'array'),
-  constraint alerts_fired_status_chk check (status in ('pending_notification', 'notified', 'failed', 'acknowledged'))
+  constraint alerts_fired_notification_delivery_object_chk check (jsonb_typeof(notification_delivery) = 'object'),
+  constraint alerts_fired_delivery_attempts_nonnegative_chk check (delivery_attempts >= 0),
+  constraint alerts_fired_status_chk check (status in ('pending_notification', 'delivering', 'notified', 'failed', 'acknowledged'))
 );
 create index alerts_fired_agent_fired_idx on alerts_fired(agent_id, fired_at desc);
 create index alerts_fired_run_idx on alerts_fired(run_id);
 create index alerts_fired_finding_idx on alerts_fired(finding_id);
+create index alerts_fired_pending_delivery_idx on alerts_fired(fired_at asc) where status = 'pending_notification';

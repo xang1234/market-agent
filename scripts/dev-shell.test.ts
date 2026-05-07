@@ -169,7 +169,7 @@ test("up rolls back already-started services when a later readiness check fails"
     [
       "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
       `TRACE_FILE="${traceFile}"`,
-      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api" "$ROOT/services/watchlists" "$ROOT/services/market" "$ROOT/services/fundamentals" "$ROOT/services/screener" "$ROOT/services/portfolio" "$ROOT/services/home" "$ROOT/services/evidence" "$ROOT/services/agents" "$ROOT/services/analyze" "$ROOT/services/artifact" "$ROOT/services/observability" "$ROOT/services/snapshot" "$ROOT/services/summary" "$ROOT/services/themes" "$ROOT/services/tools"',
+      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api" "$ROOT/services/watchlists" "$ROOT/services/market" "$ROOT/services/fundamentals" "$ROOT/services/screener" "$ROOT/services/portfolio" "$ROOT/services/home" "$ROOT/services/evidence" "$ROOT/services/agents" "$ROOT/services/analyze" "$ROOT/services/artifact" "$ROOT/services/notifications" "$ROOT/services/observability" "$ROOT/services/snapshot" "$ROOT/services/summary" "$ROOT/services/themes" "$ROOT/services/tools"',
       "ensure_command(){ :; }",
       "ensure_install(){ :; }",
       "npm(){ :; }",
@@ -206,7 +206,7 @@ test("up rolls back when postgres never becomes ready", async () => {
     [
       "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
       `TRACE_FILE="${traceFile}"`,
-      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api" "$ROOT/services/watchlists" "$ROOT/services/market" "$ROOT/services/fundamentals" "$ROOT/services/screener" "$ROOT/services/portfolio" "$ROOT/services/home" "$ROOT/services/evidence" "$ROOT/services/agents" "$ROOT/services/analyze" "$ROOT/services/artifact" "$ROOT/services/observability" "$ROOT/services/snapshot" "$ROOT/services/summary" "$ROOT/services/themes" "$ROOT/services/tools"',
+      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api" "$ROOT/services/watchlists" "$ROOT/services/market" "$ROOT/services/fundamentals" "$ROOT/services/screener" "$ROOT/services/portfolio" "$ROOT/services/home" "$ROOT/services/evidence" "$ROOT/services/agents" "$ROOT/services/analyze" "$ROOT/services/artifact" "$ROOT/services/notifications" "$ROOT/services/observability" "$ROOT/services/snapshot" "$ROOT/services/summary" "$ROOT/services/themes" "$ROOT/services/tools"',
       "ensure_command(){ :; }",
       "ensure_install(){ :; }",
       "sleep(){ :; }",
