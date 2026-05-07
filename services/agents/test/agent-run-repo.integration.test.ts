@@ -13,6 +13,7 @@ const RUN_ID_A = "11111111-1111-4111-8111-111111111111";
 const RUN_ID_B = "11111111-1111-4111-8111-111111111112";
 const RUN_ID_C = "11111111-1111-4111-8111-111111111113";
 const AGENT_ID = "22222222-2222-4222-8222-222222222222";
+const FUTURE_LEASE_EXPIRES_AT = "2099-05-04T01:00:00.000Z";
 const WORKSPACE_ROOT = join(import.meta.dirname, "..", "..", "..");
 const DB_ROOT = join(WORKSPACE_ROOT, "db");
 
@@ -115,12 +116,12 @@ test(
       claimAgentRun(pool, {
         run_id: RUN_ID_A,
         agent_id: AGENT_ID,
-        lease_expires_at: "2026-05-04T01:00:00.000Z",
+        lease_expires_at: FUTURE_LEASE_EXPIRES_AT,
       }),
       claimAgentRun(pool, {
         run_id: RUN_ID_B,
         agent_id: AGENT_ID,
-        lease_expires_at: "2026-05-04T01:00:00.000Z",
+        lease_expires_at: FUTURE_LEASE_EXPIRES_AT,
       }),
     ]);
 

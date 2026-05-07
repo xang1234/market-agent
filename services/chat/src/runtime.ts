@@ -2,6 +2,7 @@ import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type {
+  ChatAnalystToolRuntime,
   ChatAssistantMessagePersistence,
   ChatSubjectClarificationRenderer,
   ChatThreadTitleGenerator,
@@ -13,6 +14,7 @@ export type ChatRuntimeEnv = {
   CHAT_PERSISTENCE_MODULE?: string;
   CHAT_SUBJECT_RESOLVER_MODULE?: string;
   CHAT_THREAD_TITLE_MODULE?: string;
+  CHAT_ANALYST_RUNTIME_MODULE?: string;
 };
 
 export async function loadChatServerOptionsFromEnv(
@@ -52,6 +54,15 @@ export async function loadChatServerOptionsFromEnv(
     }
 
     options.generateThreadTitle = module.generateThreadTitle as ChatThreadTitleGenerator;
+  }
+
+  if (env.CHAT_ANALYST_RUNTIME_MODULE != null && env.CHAT_ANALYST_RUNTIME_MODULE.trim() !== "") {
+    const module = await import(moduleSpecifier(env.CHAT_ANALYST_RUNTIME_MODULE, cwd));
+    if (typeof module.analystToolRuntime !== "function") {
+      throw new Error("CHAT_ANALYST_RUNTIME_MODULE must export analystToolRuntime");
+    }
+
+    options.analystToolRuntime = module.analystToolRuntime as ChatAnalystToolRuntime;
   }
 
   return options;

@@ -3,6 +3,7 @@ import {
   ChatTurnInputMismatchError,
   ChatTurnUnavailableError,
   createChatCoordinator,
+  type ChatAnalystToolRuntime,
   type ChatAssistantMessagePersistence,
   type ChatCoordinator,
   type ChatRunActivityReporter,
@@ -11,7 +12,12 @@ import {
 } from "./coordinator.ts";
 import type { ChatSubjectPreResolver } from "./subjects.ts";
 import { tryHandleThreadsRequest } from "./threads-http.ts";
-import type { ChatThreadsDb } from "./threads-repo.ts";
+import {
+  ChatThreadNotFoundError,
+  ChatThreadValidationError,
+  getThread,
+  type ChatThreadsDb,
+} from "./threads-repo.ts";
 import {
   createRunActivityHub,
   type RunActivitySseEvent,
@@ -20,6 +26,7 @@ import {
 import {
   authenticatedUserRequiredMessage,
   readAuthenticatedUserId,
+  resolveAuthMode,
   type RequestAuthConfig,
 } from "../../shared/src/request-auth.ts";
 
@@ -34,6 +41,7 @@ type StreamRoute = {
   turnId: string | null;
   subjectText: string | null;
   userIntent: string | null;
+  userId: string | null;
 };
 
 type SseWritable = {
@@ -58,6 +66,8 @@ export type ChatServerOptions = {
   runActivity?: ChatRunActivityReporter;
   generateThreadTitle?: ChatThreadTitleGenerator;
   onThreadTitleGenerationError?: Parameters<typeof createChatCoordinator>[0]["onThreadTitleGenerationError"];
+  analystToolRuntime?: ChatAnalystToolRuntime;
+  allowSyntheticAnalystFallback?: boolean;
   runActivityHub?: RunActivityHub;
   auth?: RequestAuthConfig;
   threadsDb?: ChatThreadsDb;
@@ -72,6 +82,8 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
     runActivity: options.runActivity,
     generateThreadTitle: options.generateThreadTitle,
     onThreadTitleGenerationError: options.onThreadTitleGenerationError,
+    analystToolRuntime: options.analystToolRuntime,
+    allowSyntheticAnalystFallback: options.allowSyntheticAnalystFallback,
   });
   const threadsDb = options.threadsDb;
 
@@ -103,10 +115,25 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
     }
     const runId = route.runId;
     const turnId = route.turnId ?? runId;
-    const userId = readAuthenticatedUserId(req, options.auth);
-    if (options.runActivity && userId === null) {
+    const userId = readStreamAuthenticatedUserId(req, route, options.auth);
+    if ((options.runActivity || threadsDb) && userId === null) {
       respondJson(res, 401, { error: authenticatedUserRequiredMessage(options.auth) });
       return;
+    }
+    if (threadsDb && userId !== null) {
+      try {
+        await getThread(threadsDb, userId, route.threadId);
+      } catch (error) {
+        if (error instanceof ChatThreadNotFoundError) {
+          respondJson(res, 404, { error: "chat thread not found" });
+          return;
+        }
+        if (error instanceof ChatThreadValidationError) {
+          respondJson(res, 400, { error: error.message });
+          return;
+        }
+        throw error;
+      }
     }
 
     const resumeAfterSeq = parseLastEventId(req.headers["last-event-id"]);
@@ -300,6 +327,7 @@ function matchStreamRoute(method: string, rawUrl: string): StreamRoute | typeof 
   const turnId = nonEmptyQueryParam(url.searchParams.get("turn_id"));
   const subjectText = nonEmptyQueryParam(url.searchParams.get("subject"));
   const userIntent = nonEmptyQueryParam(url.searchParams.get("user_intent"));
+  const userId = nonEmptyQueryParam(url.searchParams.get("user_id"));
   let threadId: string;
   try {
     threadId = decodeURIComponent(match[1]);
@@ -312,6 +340,7 @@ function matchStreamRoute(method: string, rawUrl: string): StreamRoute | typeof 
     turnId,
     subjectText,
     userIntent,
+    userId,
   };
 }
 
@@ -325,6 +354,19 @@ function matchRunActivityStreamRoute(method: string, rawUrl: string): boolean {
 
 function nonEmptyQueryParam(value: string | null): string | null {
   return value && value.trim() !== "" ? value : null;
+}
+
+const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function readStreamAuthenticatedUserId(
+  req: IncomingMessage,
+  route: StreamRoute,
+  auth: RequestAuthConfig = {},
+): string | null {
+  const headerUserId = readAuthenticatedUserId(req, auth);
+  if (headerUserId !== null) return headerUserId;
+  if (resolveAuthMode(auth) !== "dev_user_header") return null;
+  return route.userId !== null && USER_ID_PATTERN.test(route.userId) ? route.userId : null;
 }
 
 function respondJson(res: ServerResponse, status: number, body: object) {

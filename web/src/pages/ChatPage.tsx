@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useReducer, useState, type FormEvent } from 'react'
-import { Link, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link, Outlet, useNavigate, useParams } from 'react-router-dom'
 
 import { BlockView, type Block } from '../blocks'
+import type { ChatMessage as PersistedChatMessage } from '../chat/messageTypes.ts'
+import { openChatTurnStream } from '../chat/openChatTurnStream.ts'
+import { persistUserChatTurn } from '../chat/persistUserChatTurn.ts'
 import { INITIAL_STREAM_STATE, applyChatStreamEvent } from '../chat/streamReducer.ts'
 import { StreamingTurnView } from '../chat/StreamingTurnView.tsx'
-import type { ChatSseEvent } from '../chat/sseEventTypes.ts'
 import { useAuth } from '../shell/useAuth.ts'
 
 type ChatThread = {
@@ -18,11 +20,17 @@ type ThreadListState =
   | { kind: 'error'; message: string }
   | { kind: 'ready'; threads: ReadonlyArray<ChatThread> }
 
-type ImportedAnalyzeMemo = {
-  run_id: string
-  snapshot_id: string
-  blocks: ReadonlyArray<Block>
+type PendingChatTurn = {
+  runId: string
+  messageId: string
+  snapshotId: string
+  text: string
 }
+
+type MessageHistoryState =
+  | { kind: 'idle' }
+  | { kind: 'error'; requestKey: string; message: string }
+  | { kind: 'ready'; requestKey: string; messages: ReadonlyArray<PersistedChatMessage> }
 
 export function ChatLayout() {
   const { session } = useAuth()
@@ -113,48 +121,100 @@ export function ChatEmptyState() {
 export function ChatThreadView() {
   const { session } = useAuth()
   const { threadId = '' } = useParams<{ threadId: string }>()
-  const location = useLocation()
-  const importedMemo = readImportedAnalyzeMemo(location.state)
   const [prompt, setPrompt] = useState('')
-  const [transcript, setTranscript] = useState<ReadonlyArray<{ role: 'user'; text: string }>>([])
+  const [history, setHistory] = useState<MessageHistoryState>({ kind: 'idle' })
+  const [historyReloadKey, setHistoryReloadKey] = useState(0)
   const [state, dispatch] = useReducer(applyChatStreamEvent, INITIAL_STREAM_STATE)
   const [streamError, setStreamError] = useState<string | null>(null)
+  const [failedTurn, setFailedTurn] = useState<PendingChatTurn | null>(null)
+  const historyRequestKey = session && threadId ? `${session.userId}:${threadId}:${historyReloadKey}` : ''
+  const visibleHistory: MessageHistoryState | { kind: 'loading' } =
+    !session || !threadId
+      ? { kind: 'idle' }
+      : history.kind !== 'idle' && history.requestKey === historyRequestKey
+        ? history
+        : { kind: 'loading' }
 
-  const submitPrompt = (event: FormEvent<HTMLFormElement>) => {
+  useEffect(() => {
+    if (!session || !threadId) return
+    const controller = new AbortController()
+    fetch(`/v1/chat/threads/${encodeURIComponent(threadId)}/messages`, {
+      headers: { 'x-user-id': session.userId },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        return (await response.json()) as { messages?: PersistedChatMessage[] }
+      })
+      .then((body) => {
+        setHistory({ kind: 'ready', requestKey: historyRequestKey, messages: body.messages ?? [] })
+      })
+      .catch((caught) => {
+        if (controller.signal.aborted) return
+        setHistory({
+          kind: 'error',
+          requestKey: historyRequestKey,
+          message: caught instanceof Error ? caught.message : String(caught),
+        })
+      })
+    return () => controller.abort()
+  }, [session, threadId, historyRequestKey])
+
+  const startPersistedTurn = (turn: PendingChatTurn) => {
+    if (!session) return
+    setStreamError(null)
+    setFailedTurn(null)
+    openChatTurnStream({
+      threadId,
+      runId: turn.runId,
+      turnId: turn.messageId,
+      userIntent: turn.text,
+      userId: session.userId,
+    }, {
+      onEvent: dispatch,
+      onCompleted: () => {
+        setFailedTurn(null)
+        setHistoryReloadKey((current) => current + 1)
+      },
+      onError: () => {
+        setFailedTurn(turn)
+        setStreamError('The analyst stream disconnected.')
+      },
+    })
+  }
+
+  const submitPrompt = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const text = prompt.trim()
     if (!session || text.length === 0) return
 
-    setTranscript((current) => [...current, { role: 'user', text }])
-    setPrompt('')
-    setStreamError(null)
-    const runId = makeRunId()
-    const params = new URLSearchParams({ run_id: runId, turn_id: runId, user_intent: text })
-    const source = new EventSource(`/v1/chat/threads/${encodeURIComponent(threadId)}/stream?${params}`)
-    source.onmessage = (event) => {
-      dispatch(JSON.parse(event.data) as ChatSseEvent)
+    const turn: PendingChatTurn = {
+      runId: makeRunId(),
+      messageId: makeRunId(),
+      snapshotId: makeRunId(),
+      text,
     }
-    for (const type of [
-      'turn.started',
-      'tool.started',
-      'tool.completed',
-      'snapshot.staged',
-      'snapshot.sealed',
-      'block.began',
-      'block.delta',
-      'block.completed',
-      'turn.completed',
-      'turn.error',
-    ] as const) {
-      source.addEventListener(type, (event) => {
-        dispatch(JSON.parse((event as MessageEvent).data) as ChatSseEvent)
-        if (type === 'turn.completed' || type === 'turn.error') source.close()
+    try {
+      const message = await persistUserChatTurn({
+        threadId,
+        userId: session.userId,
+        messageId: turn.messageId,
+        snapshotId: turn.snapshotId,
+        content: turn.text,
       })
+      setHistory((current) => {
+        if (current.kind !== 'ready' || current.requestKey !== historyRequestKey) {
+          return { kind: 'ready', requestKey: historyRequestKey, messages: [message] }
+        }
+        if (current.messages.some((existing) => existing.message_id === message.message_id)) return current
+        return { kind: 'ready', requestKey: historyRequestKey, messages: [...current.messages, message] }
+      })
+      setPrompt('')
+    } catch (caught) {
+      setStreamError(`Message save failed: ${caught instanceof Error ? caught.message : String(caught)}`)
+      return
     }
-    source.onerror = () => {
-      setStreamError('The analyst stream disconnected.')
-      source.close()
-    }
+    startPersistedTurn(turn)
   }
 
   return (
@@ -166,29 +226,30 @@ export function ChatThreadView() {
         <p className="mt-1 font-mono text-xs text-neutral-500 dark:text-neutral-400">{threadId}</p>
       </section>
       <div className="flex flex-1 flex-col gap-3 p-6">
-        {importedMemo ? (
-          <section className="rounded-md border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Imported analyze memo</h3>
-              <span className="font-mono text-xs text-neutral-500 dark:text-neutral-400">
-                {importedMemo.run_id}
-              </span>
-            </div>
-            <div className="flex flex-col gap-3">
-              {importedMemo.blocks.map((block) => <BlockView key={block.id} block={block} />)}
-            </div>
-          </section>
+        {visibleHistory.kind === 'loading' ? (
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading message history.</p>
         ) : null}
-        {transcript.map((message, index) => (
-          <div
-            key={`${message.text}-${index}`}
-            className="self-end rounded-md bg-neutral-900 px-4 py-2 text-sm text-white dark:bg-neutral-100 dark:text-neutral-900"
-          >
-            {message.text}
-          </div>
-        ))}
+        {visibleHistory.kind === 'error' ? (
+          <p className="text-sm text-rose-600 dark:text-rose-300">Message history unavailable: {visibleHistory.message}</p>
+        ) : null}
+        {visibleHistory.kind === 'ready' ? (
+          <PersistedMessageHistory messages={visibleHistory.messages} />
+        ) : null}
         <StreamingTurnView state={state} />
-        {streamError ? <p className="text-sm text-rose-600 dark:text-rose-300">{streamError}</p> : null}
+        {streamError ? (
+          <div className="flex items-center gap-3 text-sm">
+            <p className="text-rose-600 dark:text-rose-300">{streamError}</p>
+            {failedTurn ? (
+              <button
+                type="button"
+                onClick={() => startPersistedTurn(failedTurn)}
+                className="rounded-md border border-rose-300 px-3 py-1.5 text-xs font-medium text-rose-700 dark:border-rose-700 dark:text-rose-200"
+              >
+                Retry stream
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       <form onSubmit={submitPrompt} className="border-t border-neutral-200 p-4 dark:border-neutral-800">
         <label className="text-sm font-medium text-neutral-700 dark:text-neutral-200" htmlFor="chat-composer">
@@ -215,23 +276,46 @@ export function ChatThreadView() {
   )
 }
 
-function readImportedAnalyzeMemo(state: unknown): ImportedAnalyzeMemo | null {
-  if (typeof state !== 'object' || state === null) return null
-  const importedMemo = (state as { importedMemo?: unknown }).importedMemo
-  if (typeof importedMemo !== 'object' || importedMemo === null) return null
-  const candidate = importedMemo as Partial<ImportedAnalyzeMemo>
-  if (
-    typeof candidate.run_id !== 'string'
-    || typeof candidate.snapshot_id !== 'string'
-    || !Array.isArray(candidate.blocks)
-  ) {
-    return null
-  }
-  return {
-    run_id: candidate.run_id,
-    snapshot_id: candidate.snapshot_id,
-    blocks: candidate.blocks,
-  }
+function PersistedMessageHistory({ messages }: { messages: ReadonlyArray<PersistedChatMessage> }) {
+  if (messages.length === 0) return null
+  return (
+    <section className="flex flex-col gap-3" aria-label="Persisted message history">
+      {messages.map((message) => (
+        <article
+          key={message.message_id}
+          className="rounded-md border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
+        >
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold capitalize text-neutral-900 dark:text-neutral-100">
+              {message.role}
+            </h3>
+            <span className="font-mono text-xs text-neutral-500 dark:text-neutral-400">
+              {new Date(message.created_at).toLocaleString()}
+            </span>
+          </div>
+          {message.role === 'assistant' ? (
+            <div className="flex flex-col gap-3">
+              {message.blocks.map((block) => (
+                <BlockView key={`${message.message_id}-${block.id}`} block={block} />
+              ))}
+            </div>
+          ) : (
+            <pre className="whitespace-pre-wrap text-sm text-neutral-700 dark:text-neutral-200">
+              {message.blocks.map((block) => blockText(block)).join('\n')}
+            </pre>
+          )}
+        </article>
+      ))}
+    </section>
+  )
+}
+
+function blockText(block: Block): string {
+  const segments = 'segments' in block && Array.isArray(block.segments) ? block.segments : []
+  const text = segments
+    .map((segment) => (typeof segment === 'object' && segment !== null && 'text' in segment ? String(segment.text) : ''))
+    .join('')
+  return text || JSON.stringify(block)
 }
 
 function ThreadList({ userId }: { userId: string }) {

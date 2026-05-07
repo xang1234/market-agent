@@ -1,6 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
+  ChatMessageIdempotencyConflictError,
+  listChatMessagesForThread,
+  persistUserChatMessage,
+} from "./messages.ts";
+import {
   archiveThread,
   ChatThreadNotFoundError,
   ChatThreadValidationError,
@@ -76,6 +81,53 @@ export async function tryHandleThreadsRequest(
       return true;
     }
 
+    if (route.action === "messages") {
+      if (route.method === "POST") {
+        const body = await readJsonBody(req);
+        if (body === BAD_JSON || typeof body !== "object" || body === null) {
+          respond(res, 400, { error: "request body must be a JSON object" });
+          return true;
+        }
+        const input = parseUserMessageInput(body);
+        if (input.kind === "error") {
+          respond(res, 400, { error: input.message });
+          return true;
+        }
+        let message;
+        try {
+          message = await persistUserChatMessage(db, {
+            thread_id: route.threadId,
+            user_id: userId,
+            content: input.value.content,
+            message_id: input.value.message_id,
+            snapshot_id: input.value.snapshot_id,
+          });
+        } catch (error) {
+          if (error instanceof ChatMessageIdempotencyConflictError) {
+            respond(res, 409, { error: error.message });
+            return true;
+          }
+          throw error;
+        }
+        if (message === null) {
+          respond(res, 404, { error: "chat thread not found" });
+          return true;
+        }
+        respond(res, 201, { message });
+        return true;
+      }
+      const result = await listChatMessagesForThread(db, {
+        thread_id: route.threadId,
+        user_id: userId,
+      });
+      if (result === null) {
+        respond(res, 404, { error: "chat thread not found" });
+        return true;
+      }
+      respond(res, 200, result);
+      return true;
+    }
+
     if (route.action === "patch_title") {
       const body = await readJsonBody(req);
       if (body === BAD_JSON || typeof body !== "object" || body === null) {
@@ -148,6 +200,7 @@ function mapThreadError(res: ServerResponse, error: unknown): boolean {
 type Route =
   | { action: "list"; includeArchived: boolean }
   | { action: "create" }
+  | { action: "messages"; method: "GET" | "POST"; threadId: string }
   | { action: "patch_title"; threadId: string }
   | { action: "archive"; threadId: string };
 
@@ -160,6 +213,19 @@ function matchRoute(method: string, rawUrl: string): Route | null {
       return { action: "list", includeArchived: parseIncludeArchived(url) };
     }
     if (method === "POST") return { action: "create" };
+    return null;
+  }
+
+  const messagesMatch = pathname.match(/^\/v1\/chat\/threads\/([^/]+)\/messages$/);
+  if (messagesMatch) {
+    let threadId: string;
+    try {
+      threadId = decodeURIComponent(messagesMatch[1]);
+    } catch {
+      return null;
+    }
+    if (threadId.length === 0) return null;
+    if (method === "GET" || method === "POST") return { action: "messages", method, threadId };
     return null;
   }
 
@@ -219,6 +285,39 @@ function parseCreateInput(body: unknown): CreateThreadInput {
     input.primary_subject_ref = obj.primary_subject_ref as CreateThreadInput["primary_subject_ref"];
   }
   return input;
+}
+
+type UserMessageInputParseResult =
+  | { kind: "ok"; value: { content: string; message_id?: string; snapshot_id?: string } }
+  | { kind: "error"; message: string };
+
+const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+function parseUserMessageInput(body: object): UserMessageInputParseResult {
+  const candidate = body as Record<string, unknown>;
+  const content = typeof candidate.content === "string" ? candidate.content.trim() : "";
+  if (content.length === 0) return { kind: "error", message: "'content' is required" };
+  const messageId = parseOptionalUuid(candidate.message_id);
+  if (messageId.kind === "error") return { kind: "error", message: "'message_id' must be a UUID" };
+  const snapshotId = parseOptionalUuid(candidate.snapshot_id);
+  if (snapshotId.kind === "error") return { kind: "error", message: "'snapshot_id' must be a UUID" };
+  return {
+    kind: "ok",
+    value: {
+      content,
+      message_id: messageId.value,
+      snapshot_id: snapshotId.value,
+    },
+  };
+}
+
+function parseOptionalUuid(value: unknown): { kind: "ok"; value?: string } | { kind: "error" } {
+  if (value === undefined || value === null) return { kind: "ok" };
+  if (typeof value !== "string") return { kind: "error" };
+  const trimmed = value.trim();
+  if (trimmed === "") return { kind: "ok" };
+  if (!UUID_PATTERN.test(trimmed)) return { kind: "error" };
+  return { kind: "ok", value: trimmed };
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {

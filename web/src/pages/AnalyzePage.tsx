@@ -6,7 +6,8 @@ import {
   subjectFromAnalyzeEntry,
   type AnalyzeIntent,
 } from '../analyze/analyzeEntry'
-import { BlockView, type Block } from '../blocks'
+import { shareAnalyzeRunToChat, type AnalyzeRun } from '../analyze/shareToChat.ts'
+import { BlockView } from '../blocks'
 import { subjectDisplayName } from '../symbol/quote'
 import { symbolDetailPathForSubject, type ResolvedSubject } from '../symbol/search'
 import { useAuth } from '../shell/useAuth.ts'
@@ -17,21 +18,6 @@ type AnalyzeTemplate = {
   prompt_template: string
   source_categories: ReadonlyArray<string>
   version: number
-}
-
-type AnalyzeRun = {
-  run_id: string
-  template_id: string
-  template_version: number
-  snapshot_id: string
-  blocks: ReadonlyArray<Block>
-  created_at: string
-}
-
-type ChatThread = {
-  thread_id: string
-  title: string | null
-  updated_at: string
 }
 
 const DEFAULT_TEMPLATES: ReadonlyArray<AnalyzeTemplate> = [
@@ -157,32 +143,18 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
     }
     const run = memoRun ?? (await generateMemo())
     if (!run) return
-    setStatus('Creating chat thread')
     const titleSubject = subject ? subjectDisplayName(subject) : 'Research memo'
     try {
-      const response = await fetch('/v1/chat/threads', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-user-id': session.userId,
-        },
-        body: JSON.stringify({
-          title: `${selectedTemplate.name} - ${titleSubject}`,
-          primary_subject_ref: subject?.subject_ref ?? undefined,
-        }),
+      setStatus('Persisting memo in chat')
+      const result = await shareAnalyzeRunToChat({
+        userId: session.userId,
+        sourceKind: 'memo',
+        run,
+        title: `${selectedTemplate.name} - ${titleSubject}`,
+        primarySubjectRef: subject?.subject_ref ?? null,
       })
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const thread = (await response.json()) as ChatThread
       setStatus(`Added memo ${run.run_id} to chat`)
-      navigate(`/chat/${thread.thread_id}`, {
-        state: {
-          importedMemo: {
-            run_id: run.run_id,
-            snapshot_id: run.snapshot_id,
-            blocks: run.blocks,
-          },
-        },
-      })
+      navigate(`/chat/${result.thread.thread_id}`)
     } catch (caught) {
       setStatus(`Add to chat failed: ${caught instanceof Error ? caught.message : String(caught)}`)
     }

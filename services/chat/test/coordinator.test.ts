@@ -3,7 +3,9 @@ import test from "node:test";
 import {
   ChatTurnInputMismatchError,
   ChatTurnUnavailableError,
+  createRegistryBackedAnalystToolRuntime,
   createChatCoordinator,
+  type ChatAnalystToolRuntime,
   type ChatTurnRunContext,
   type ChatTurnRunner,
 } from "../src/coordinator.ts";
@@ -18,6 +20,33 @@ function deferred<T = void>() {
   });
   return { promise, resolve, reject };
 }
+
+const successfulRuntime: ChatAnalystToolRuntime = async (context) => {
+  const snapshotId = "11111111-1111-4111-a111-111111111111";
+  return {
+    snapshot_id: snapshotId,
+    verification: { ok: true, failures: [] },
+    tool_calls: [
+      {
+        tool_call_id: "tool-backed-1",
+        tool_name: "get_quote",
+        status: "ok",
+        bundle_id: context.bundleId,
+      },
+    ],
+    blocks: [
+      {
+        id: "block-tool-backed-1",
+        kind: "rich_text",
+        snapshot_id: snapshotId,
+        data_ref: { kind: "chat_turn", id: context.turnId ?? context.runId },
+        source_refs: [],
+        as_of: "2026-05-06T00:00:00.000Z",
+        segments: [{ type: "text", text: "Runtime generated analyst blocks." }],
+      },
+    ],
+  };
+};
 
 test("per-thread coordinator serializes concurrent turns for the same thread", async () => {
   const firstTurnCanComplete = deferred();
@@ -419,9 +448,37 @@ test("per-thread coordinator rejects turn reuse with changed subject input", asy
   );
 });
 
-test("default turn runner persists assistant message before snapshot.sealed", async () => {
+test("default turn runner calls analyst tool runtime and persists after verification", async () => {
   const steps: string[] = [];
+  const runtimeCalls: string[] = [];
   const coordinator = createChatCoordinator({
+    analystToolRuntime: async (context) => {
+      runtimeCalls.push(`${context.bundleId}:${context.userIntent ?? ""}`);
+      return {
+        snapshot_id: "11111111-1111-4111-a111-111111111111",
+        verification: { ok: true, failures: [] },
+        tool_calls: [
+          {
+            tool_call_id: "tool-backed-1",
+            tool_name: "get_quote",
+            status: "ok",
+            bundle_id: context.bundleId,
+          },
+        ],
+        blocks: [
+          {
+            id: "block-tool-backed-1",
+            kind: "rich_text",
+            snapshot_id: "11111111-1111-4111-a111-111111111111",
+            data_ref: { kind: "chat_turn", id: context.turnId ?? context.runId },
+            source_refs: [],
+            as_of: "2026-05-06T00:00:00.000Z",
+            title: "Tool-backed note",
+            segments: [{ type: "text", text: "Runtime generated analyst blocks." }],
+          },
+        ],
+      };
+    },
     persistAssistantMessage: async ({ threadId, role, blocks, content_hash }) => {
       steps.push(`persist:${threadId}:${role}:${content_hash}:${blocks.length}`);
       return {
@@ -434,6 +491,7 @@ test("default turn runner persists assistant message before snapshot.sealed", as
   const turn = coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1" });
   await turn.completed;
 
+  assert.deepEqual(runtimeCalls, ["single_subject_analysis:"]);
   assert.equal(steps.length, 1);
   assert.match(steps[0], /^persist:thread-1:assistant:sha256:[0-9a-f]{64}:1$/);
   assert.deepEqual(
@@ -453,11 +511,174 @@ test("default turn runner persists assistant message before snapshot.sealed", as
   assert.equal(turn.events[4].snapshot_id, "22222222-2222-4222-a222-222222222222");
   assert.equal(turn.events[8].message_id, "33333333-3333-4333-a333-333333333333");
   assert.equal(turn.events[3].snapshot_id, turn.events[4].snapshot_id);
+  assert.equal(turn.events[1].tool_call_id, "tool-backed-1");
 });
 
-test("default turn runner emits strict Block[] analyst content without stub payload markers", async () => {
+test("default turn runner fails closed when no analyst tool runtime is configured", async () => {
+  const coordinator = createChatCoordinator();
+
+  const turn = coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1" });
+  await turn.completed;
+
+  assert.deepEqual(
+    turn.events.map((event) => event.type),
+    ["turn.started", "turn.error"],
+  );
+  assert.equal(turn.events[1].error_code, "analyst_tool_runtime_not_configured");
+});
+
+test("analyst runtime takes precedence over explicit dev fallback", async () => {
+  let runtimeCalls = 0;
+  const coordinator = createChatCoordinator({
+    allowSyntheticAnalystFallback: true,
+    analystToolRuntime: async (context) => {
+      runtimeCalls += 1;
+      return {
+        snapshot_id: "11111111-1111-4111-a111-111111111111",
+        verification: { ok: true, failures: [] },
+        tool_calls: [
+          {
+            tool_call_id: "tool-backed-1",
+            tool_name: "get_quote",
+            status: "ok",
+            bundle_id: context.bundleId,
+          },
+        ],
+        blocks: [
+          {
+            id: "block-tool-backed-1",
+            kind: "rich_text",
+            snapshot_id: "11111111-1111-4111-a111-111111111111",
+            data_ref: { kind: "chat_turn", id: context.turnId ?? context.runId },
+            source_refs: [],
+            as_of: "2026-05-06T00:00:00.000Z",
+            segments: [{ type: "text", text: "Runtime generated analyst blocks." }],
+          },
+        ],
+      };
+    },
+  });
+
+  const turn = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    userIntent: "Review AAPL earnings quality",
+  });
+  await turn.completed;
+
+  assert.equal(runtimeCalls, 1);
+  assert.equal(turn.events.some((event) => event.stub === true), false);
+  assert.equal(turn.events[1].tool_call_id, "tool-backed-1");
+});
+
+test("default turn runner gates persistence on successful snapshot verification", async () => {
+  let persistCalls = 0;
+  const coordinator = createChatCoordinator({
+    analystToolRuntime: async () => ({
+      snapshot_id: "11111111-1111-4111-a111-111111111111",
+      verification: {
+        ok: false,
+        failures: [{ reason_code: "missing_fact_ref", details: {} }],
+      },
+      tool_calls: [
+        {
+          tool_call_id: "tool-backed-1",
+          tool_name: "get_quote",
+          status: "ok",
+          bundle_id: "single_subject_analysis",
+        },
+      ],
+      blocks: [],
+    }),
+    persistAssistantMessage: async () => {
+      persistCalls += 1;
+      throw new Error("must not persist");
+    },
+  });
+
+  const turn = coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1" });
+  await turn.completed;
+
+  assert.equal(persistCalls, 0);
+  assert.deepEqual(
+    turn.events.map((event) => event.type),
+    ["turn.started", "tool.started", "tool.completed", "snapshot.staged", "turn.error"],
+  );
+  assert.equal(turn.events[4].error_code, "snapshot_verification_failed");
+});
+
+test("registry-backed analyst runtime stages approval-required tools instead of executing writes", async () => {
+  const runtime = createRegistryBackedAnalystToolRuntime({ preferredToolName: "create_agent" });
+
+  const result = await runtime({
+    threadId: "thread-1",
+    runId: "run-1",
+    bundleId: "agent_management",
+    userIntent: "Create an agent to monitor AAPL margin pressure",
+    emit: () => {
+      throw new Error("runtime should not emit directly");
+    },
+  });
+
+  assert.equal(result.verification.ok, true);
+  assert.equal(result.tool_calls?.[0].tool_name, "create_agent");
+  assert.equal(result.tool_calls?.[0].status, "pending_approval");
+  assert.equal(result.tool_calls?.[0].approval_required, true);
+  assert.equal(
+    (result.tool_calls?.[0].pending_action as Record<string, unknown>).tool_name,
+    "create_agent",
+  );
+});
+
+test("registry-backed analyst runtime fails closed when a read tool has no executor", async () => {
+  const runtime = createRegistryBackedAnalystToolRuntime({ preferredToolName: "resolve_period" });
+
+  const result = await runtime({
+    threadId: "thread-1",
+    runId: "run-1",
+    bundleId: "single_subject_analysis",
+    userIntent: "Review the latest quarter",
+    emit: () => {
+      throw new Error("runtime should not emit directly");
+    },
+  });
+
+  assert.equal(result.verification.ok, false);
+  assert.equal(result.tool_calls?.[0].tool_name, "resolve_period");
+  assert.equal(result.tool_calls?.[0].status, "skipped");
+  assert.match(JSON.stringify(result.tool_calls?.[0].result), /tool_execution_unavailable/);
+});
+
+test("registry-backed analyst runtime executes authorized read tools through the supplied executor", async () => {
+  const executed: string[] = [];
+  const runtime = createRegistryBackedAnalystToolRuntime({
+    preferredToolName: "resolve_period",
+    executeTool: async ({ toolName, arguments: args }) => {
+      executed.push(`${toolName}:${String(args.query)}`);
+      return { kind: "tool_result", status: "ok", tool_name: toolName };
+    },
+  });
+
+  const result = await runtime({
+    threadId: "thread-1",
+    runId: "run-1",
+    bundleId: "single_subject_analysis",
+    userIntent: "Review the latest quarter",
+    emit: () => {
+      throw new Error("runtime should not emit directly");
+    },
+  });
+
+  assert.equal(result.verification.ok, true);
+  assert.deepEqual(executed, ["resolve_period:Review the latest quarter"]);
+  assert.equal(result.tool_calls?.[0].status, "ok");
+  assert.match(JSON.stringify(result.tool_calls?.[0].result), /tool_result/);
+});
+
+test("explicit dev fallback emits synthetic strict Block[] analyst content", async () => {
   const persistedBlocks: unknown[] = [];
   const coordinator = createChatCoordinator({
+    allowSyntheticAnalystFallback: true,
     persistAssistantMessage: async ({ blocks }) => {
       persistedBlocks.push(...blocks);
       return {
@@ -498,6 +719,7 @@ test("default turn runner emits strict Block[] analyst content without stub payl
 
 test("default turn runner emits turn.error when assistant message persistence fails", async () => {
   const coordinator = createChatCoordinator({
+    allowSyntheticAnalystFallback: true,
     persistAssistantMessage: async () => {
       throw new Error("snapshot seal failed");
     },
@@ -775,9 +997,11 @@ test("ticker chat and theme chat traverse the same coordinator path — only the
   const themeEvents: string[] = [];
   const ticker = createChatCoordinator({
     preResolveSubject: async () => resolvedAaplPreResolution(),
+    analystToolRuntime: successfulRuntime,
   });
   const theme = createChatCoordinator({
     preResolveSubject: async () => resolvedThemePreResolution(),
+    analystToolRuntime: successfulRuntime,
   });
   const tickerTurn = ticker.getOrCreateTurn({ threadId: "t", runId: "r", subjectText: "AAPL" });
   const themeTurn = theme.getOrCreateTurn({ threadId: "t", runId: "r", subjectText: "AI Chips" });
@@ -795,13 +1019,16 @@ test("ticker chat and theme chat traverse the same coordinator path — only the
 test("default analyst runner surfaces bundle_id on turn.started for no-subject turns and on turn.completed for resolved turns", async () => {
   // SSE consumers should be able to discover which analyst bundle drove a
   // turn without reading the thread row.
-  const noSubject = createChatCoordinator();
+  const noSubject = createChatCoordinator({ analystToolRuntime: successfulRuntime });
   const noSubjectTurn = noSubject.getOrCreateTurn({ threadId: "t", runId: "r" });
   await noSubjectTurn.completed;
   const startedEvent = noSubjectTurn.events.find((e) => e.type === "turn.started")!;
   assert.equal(startedEvent.bundle_id, "single_subject_analysis");
 
-  const themed = createChatCoordinator({ preResolveSubject: async () => resolvedThemePreResolution() });
+  const themed = createChatCoordinator({
+    preResolveSubject: async () => resolvedThemePreResolution(),
+    analystToolRuntime: successfulRuntime,
+  });
   const themedTurn = themed.getOrCreateTurn({ threadId: "t", runId: "r", subjectText: "AI Chips" });
   await themedTurn.completed;
   const completedEvent = themedTurn.events.at(-1)!;

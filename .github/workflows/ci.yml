@@ -268,9 +268,6 @@ jobs:
     name: agents (tests)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: services/agents
     steps:
       - uses: actions/checkout@v4
 
@@ -278,11 +275,21 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: services/agents/package-lock.json
+          cache-dependency-path: |
+            db/package-lock.json
+            services/agents/package-lock.json
 
-      - run: npm ci
+      - name: Install db deps (needed by agents integration harness)
+        working-directory: db
+        run: npm ci
 
-      - run: npm test
+      - name: Install agents deps
+        working-directory: services/agents
+        run: npm ci
+
+      - name: Run agents tests
+        working-directory: services/agents
+        run: npm test
 
   analyze:
     name: analyze (integration tests)
