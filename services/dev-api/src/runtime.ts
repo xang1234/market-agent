@@ -15,6 +15,8 @@ export type DevApiRuntimeEnv = {
   DEV_API_ANALYZE_SEAL_MODULE?: string;
 };
 
+const DEFAULT_DEV_API_RUNTIME_MODULE = "./src/local-runtime.ts";
+
 export async function createDevApiAdaptersFromEnv(
   env: DevApiRuntimeEnv = process.env,
   cwd = process.cwd(),
@@ -23,8 +25,8 @@ export async function createDevApiAdaptersFromEnv(
     return createFixtureDevApiAdapters();
   }
   const databaseUrl = env.DEV_API_DATABASE_URL ?? env.DATABASE_URL;
-  const sealModulePath = env.DEV_API_ANALYZE_SEAL_MODULE?.trim();
-  if (!databaseUrl || !sealModulePath) return undefined;
+  const sealModulePath = env.DEV_API_ANALYZE_SEAL_MODULE?.trim() || DEFAULT_DEV_API_RUNTIME_MODULE;
+  if (!databaseUrl) return undefined;
 
   const module = await import(moduleSpecifier(sealModulePath, cwd));
   if (typeof module.sealAnalyzeSnapshot !== "function") {

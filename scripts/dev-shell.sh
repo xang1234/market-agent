@@ -238,6 +238,12 @@ configure_runtime_env() {
   DATABASE_URL="$(build_database_url)"
   export REDIS_URL
   REDIS_URL="$(build_redis_url)"
+  export DEV_API_ANALYZE_SEAL_MODULE
+  DEV_API_ANALYZE_SEAL_MODULE="${DEV_API_ANALYZE_SEAL_MODULE:-./src/local-runtime.ts}"
+  export CHAT_ANALYST_RUNTIME_MODULE
+  CHAT_ANALYST_RUNTIME_MODULE="${CHAT_ANALYST_RUNTIME_MODULE:-./src/local-runtime.ts}"
+  export CHAT_PERSISTENCE_MODULE
+  CHAT_PERSISTENCE_MODULE="${CHAT_PERSISTENCE_MODULE:-./src/local-runtime.ts}"
 }
 
 container_status() {

@@ -255,3 +255,24 @@ test("runtime DATABASE_URL is derived from primitive postgres vars", async () =>
 
   await rm(fixture.root, { recursive: true, force: true });
 });
+
+test("runtime module env vars default to in-repo durable local stack wiring", async () => {
+  const fixture = await createShellFixture();
+
+  const result = await runBash(
+    [
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      'printf "%s\\n%s\\n%s" "$DEV_API_ANALYZE_SEAL_MODULE" "$CHAT_ANALYST_RUNTIME_MODULE" "$CHAT_PERSISTENCE_MODULE"',
+    ].join("\n"),
+    fixture.root,
+  );
+
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.stdout.trim().split("\n"), [
+    "./src/local-runtime.ts",
+    "./src/local-runtime.ts",
+    "./src/local-runtime.ts",
+  ]);
+
+  await rm(fixture.root, { recursive: true, force: true });
+});

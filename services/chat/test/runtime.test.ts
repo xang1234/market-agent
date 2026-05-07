@@ -6,8 +6,17 @@ import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { loadChatServerOptionsFromEnv } from "../src/runtime.ts";
 
-test("runtime config returns default chat options when persistence module is not configured", async () => {
+test("runtime config returns empty chat options when no database or modules are configured", async () => {
   assert.deepEqual(await loadChatServerOptionsFromEnv({}), {});
+});
+
+test("runtime config wires in-repo analyst runtime and persistence when DATABASE_URL is configured", async () => {
+  const options = await loadChatServerOptionsFromEnv({
+    DATABASE_URL: "postgres://example.invalid/market_agent",
+  });
+
+  assert.equal(typeof options.analystToolRuntime, "function");
+  assert.equal(typeof options.persistAssistantMessage, "function");
 });
 
 test("runtime config loads assistant persistence from configured module", async () => {
