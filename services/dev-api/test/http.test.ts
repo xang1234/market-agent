@@ -110,18 +110,64 @@ test("PATCH and DELETE /v1/agents expose update and delete controls", async (t) 
   const created = await fetch(`${base}/v1/agents`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ name: "Review bot", thesis: "Track guidance", cadence: "daily" }),
+    body: JSON.stringify({
+      name: "Review bot",
+      thesis: "Track guidance",
+      cadence: "daily",
+      universe: { mode: "static", subject_refs: [{ kind: "issuer", id: "issuer-123" }] },
+      alert_rules: [
+        {
+          rule_id: "guidance-risk",
+          severity_at_least: "high",
+          headline_contains: "guidance",
+          channels: ["email"],
+        },
+      ],
+    }),
   });
-  const agent = await created.json() as { agent_id: string };
+  const agent = await created.json() as {
+    agent_id: string;
+    universe?: unknown;
+    alert_rules?: unknown;
+  };
+  assert.deepEqual(agent.universe, { mode: "static", subject_refs: [{ kind: "issuer", id: "issuer-123" }] });
+  assert.deepEqual(agent.alert_rules, [
+    {
+      rule_id: "guidance-risk",
+      severity_at_least: "high",
+      headline_contains: "guidance",
+      channels: ["email"],
+    },
+  ]);
 
   const patched = await fetch(`${base}/v1/agents/${agent.agent_id}`, {
     method: "PATCH",
     headers,
-    body: JSON.stringify({ enabled: false }),
+    body: JSON.stringify({
+      enabled: false,
+      universe: { mode: "static", subject_refs: [{ kind: "theme", id: "quality" }] },
+      alert_rules: [
+        {
+          rule_id: "quality-risk",
+          severity_at_least: "critical",
+          headline_contains: "margin",
+          channels: [],
+        },
+      ],
+    }),
   });
   const patchBody = await patched.json() as Record<string, unknown>;
   assert.equal(patched.status, 200);
   assert.equal(patchBody.enabled, false);
+  assert.deepEqual(patchBody.universe, { mode: "static", subject_refs: [{ kind: "theme", id: "quality" }] });
+  assert.deepEqual(patchBody.alert_rules, [
+    {
+      rule_id: "quality-risk",
+      severity_at_least: "critical",
+      headline_contains: "margin",
+      channels: [],
+    },
+  ]);
 
   const deleted = await fetch(`${base}/v1/agents/${agent.agent_id}`, {
     method: "DELETE",

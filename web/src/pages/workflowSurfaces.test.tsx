@@ -7,9 +7,9 @@ import { createRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
-import { AgentsPage } from './AgentsPage.tsx'
+import { AgentsPage, buildAgentPayload } from './AgentsPage.tsx'
 import { AnalyzePage } from './AnalyzePage.tsx'
-import { ChatEmptyState, ChatLayout, ChatThreadView } from './ChatPage.tsx'
+import { ChatEmptyState, ChatLayout, ChatThreadView, persistUserChatTurn } from './ChatPage.tsx'
 import { shareAnalyzeRunToChat } from '../analyze/shareToChat.ts'
 import { BlockRegistryProvider, createDefaultBlockRegistry, type Block } from '../blocks'
 import { openChatTurnStream } from '../chat/openChatTurnStream.ts'
@@ -107,7 +107,7 @@ test('Chat thread route does not render imported Analyze memo from Router state'
   assert.doesNotMatch(html, /Imported memo content/)
 })
 
-test('Chat thread route loads persisted assistant Block[] messages on direct navigation', async () => {
+test('Chat thread route loads persisted user and assistant messages on direct navigation', async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
   const restore = installDomGlobals(dom.window as unknown as Window)
   const originalFetch = globalThis.fetch
@@ -126,6 +126,25 @@ test('Chat thread route loads persisted assistant Block[] messages on direct nav
       assert.equal((init?.headers as Record<string, string>)['x-user-id'], USER_ID)
       return new Response(JSON.stringify({
         messages: [
+          {
+            message_id: 'message-user',
+            thread_id: 'thread-123',
+            role: 'user',
+            snapshot_id: SNAPSHOT_ID,
+            blocks: [
+              {
+                id: 'user-block',
+                kind: 'rich_text',
+                snapshot_id: SNAPSHOT_ID,
+                data_ref: { kind: 'chat_turn', id: 'message-user' },
+                source_refs: [],
+                as_of: '2026-05-06T00:00:00.000Z',
+                segments: [{ type: 'text', text: 'Persisted user prompt' }],
+              },
+            ],
+            content_hash: 'sha256:user',
+            created_at: '2026-05-06T00:00:00.000Z',
+          },
           {
             message_id: 'message-1',
             thread_id: 'thread-123',
@@ -152,11 +171,53 @@ test('Chat thread route loads persisted assistant Block[] messages on direct nav
     })
     await act(async () => undefined)
 
+    assert.match(dom.window.document.body.innerHTML, /Persisted user prompt/)
     assert.match(dom.window.document.body.innerHTML, /Persisted assistant answer/)
     await act(async () => root.unmount())
   } finally {
     globalThis.fetch = originalFetch
     restore()
+  }
+})
+
+test('Chat user turns are posted to durable thread messages before streaming', async () => {
+  const originalFetch = globalThis.fetch
+  const calls: Array<{ input: string; init?: RequestInit }> = []
+  try {
+    globalThis.fetch = async (input, init) => {
+      calls.push({ input: String(input), init })
+      return new Response(JSON.stringify({
+        message: {
+          message_id: 'message-user',
+          thread_id: 'thread-123',
+          role: 'user',
+          snapshot_id: SNAPSHOT_ID,
+          blocks: [IMPORTED_MEMO_BLOCK],
+          content_hash: 'sha256:user',
+          created_at: '2026-05-06T00:00:00.000Z',
+        },
+      }), { status: 201, headers: { 'content-type': 'application/json' } })
+    }
+
+    const message = await persistUserChatTurn({
+      threadId: 'thread-123',
+      userId: USER_ID,
+      messageId: 'message-user',
+      snapshotId: SNAPSHOT_ID,
+      content: 'Review margins',
+    })
+
+    assert.equal(message.message_id, 'message-user')
+    assert.equal(calls[0].input, '/v1/chat/threads/thread-123/messages')
+    assert.equal(calls[0].init?.method, 'POST')
+    assert.equal((calls[0].init?.headers as Record<string, string>)['x-user-id'], USER_ID)
+    assert.deepEqual(JSON.parse(String(calls[0].init?.body)), {
+      message_id: 'message-user',
+      snapshot_id: SNAPSHOT_ID,
+      content: 'Review margins',
+    })
+  } finally {
+    globalThis.fetch = originalFetch
   }
 })
 
@@ -269,11 +330,60 @@ test('Agents surface renders CRUD controls, run history, and activity status', (
   const html = renderWithAuth(<AgentsPage />)
 
   assert.match(html, /Create agent/)
+  assert.match(html, /Universe/)
+  assert.match(html, /Alert rule/)
+  assert.match(html, /issuer: demo-issuer/)
+  assert.match(html, /critical\+ headline contains margin/)
   assert.match(html, /Disable/)
   assert.match(html, /Delete/)
   assert.match(html, /Run history/)
   assert.match(html, /Activity/)
   assert.doesNotMatch(html, /ships with P5\.1/i)
+})
+
+test('Agents create/edit payloads include selected universe and alert rule policy', () => {
+  assert.deepEqual(buildAgentPayload({
+    name: ' Margin monitor ',
+    thesis: ' Watch supplier margin risk ',
+    cadence: 'hourly',
+    subjectKind: 'issuer',
+    subjectId: ' issuer-123 ',
+    alertRuleId: ' margin-risk ',
+    alertSeverity: 'high',
+    alertHeadline: ' margin ',
+    alertEmail: true,
+  }), {
+    name: 'Margin monitor',
+    thesis: 'Watch supplier margin risk',
+    cadence: 'hourly',
+    universe: { mode: 'static', subject_refs: [{ kind: 'issuer', id: 'issuer-123' }] },
+    alert_rules: [
+      {
+        rule_id: 'margin-risk',
+        severity_at_least: 'high',
+        headline_contains: 'margin',
+        channels: ['email'],
+      },
+    ],
+  })
+
+  assert.deepEqual(buildAgentPayload({
+    name: 'No-alert monitor',
+    thesis: 'Track guidance',
+    cadence: 'weekly',
+    subjectKind: 'theme',
+    subjectId: 'quality',
+    alertRuleId: '',
+    alertSeverity: 'medium',
+    alertHeadline: '',
+    alertEmail: false,
+  }), {
+    name: 'No-alert monitor',
+    thesis: 'Track guidance',
+    cadence: 'weekly',
+    universe: { mode: 'static', subject_refs: [{ kind: 'theme', id: 'quality' }] },
+    alert_rules: [],
+  })
 })
 
 function installDomGlobals(domWindow: Window): () => void {

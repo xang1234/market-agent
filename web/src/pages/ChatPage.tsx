@@ -18,7 +18,7 @@ type ThreadListState =
   | { kind: 'error'; message: string }
   | { kind: 'ready'; threads: ReadonlyArray<ChatThread> }
 
-type PersistedChatMessage = {
+export type PersistedChatMessage = {
   message_id: string
   thread_id: string
   role: 'user' | 'assistant' | 'tool'
@@ -123,7 +123,6 @@ export function ChatThreadView() {
   const { session } = useAuth()
   const { threadId = '' } = useParams<{ threadId: string }>()
   const [prompt, setPrompt] = useState('')
-  const [transcript, setTranscript] = useState<ReadonlyArray<{ role: 'user'; text: string }>>([])
   const [history, setHistory] = useState<MessageHistoryState>({ kind: 'idle' })
   const [historyReloadKey, setHistoryReloadKey] = useState(0)
   const [state, dispatch] = useReducer(applyChatStreamEvent, INITIAL_STREAM_STATE)
@@ -150,15 +149,33 @@ export function ChatThreadView() {
     return () => controller.abort()
   }, [session, threadId, historyReloadKey])
 
-  const submitPrompt = (event: FormEvent<HTMLFormElement>) => {
+  const submitPrompt = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const text = prompt.trim()
     if (!session || text.length === 0) return
 
-    setTranscript((current) => [...current, { role: 'user', text }])
-    setPrompt('')
     setStreamError(null)
     const runId = makeRunId()
+    const messageId = makeRunId()
+    const snapshotId = makeRunId()
+    try {
+      const message = await persistUserChatTurn({
+        threadId,
+        userId: session.userId,
+        messageId,
+        snapshotId,
+        content: text,
+      })
+      setHistory((current) => {
+        if (current.kind !== 'ready') return { kind: 'ready', messages: [message] }
+        if (current.messages.some((existing) => existing.message_id === message.message_id)) return current
+        return { kind: 'ready', messages: [...current.messages, message] }
+      })
+      setPrompt('')
+    } catch (caught) {
+      setStreamError(`Message save failed: ${caught instanceof Error ? caught.message : String(caught)}`)
+      return
+    }
     openChatTurnStream({
       threadId,
       runId,
@@ -189,14 +206,6 @@ export function ChatThreadView() {
         {history.kind === 'ready' ? (
           <PersistedMessageHistory messages={history.messages} />
         ) : null}
-        {transcript.map((message, index) => (
-          <div
-            key={`${message.text}-${index}`}
-            className="self-end rounded-md bg-neutral-900 px-4 py-2 text-sm text-white dark:bg-neutral-100 dark:text-neutral-900"
-          >
-            {message.text}
-          </div>
-        ))}
         <StreamingTurnView state={state} />
         {streamError ? <p className="text-sm text-rose-600 dark:text-rose-300">{streamError}</p> : null}
       </div>
@@ -257,6 +266,31 @@ function PersistedMessageHistory({ messages }: { messages: ReadonlyArray<Persist
       ))}
     </section>
   )
+}
+
+export async function persistUserChatTurn(input: {
+  threadId: string
+  userId: string
+  messageId: string
+  snapshotId: string
+  content: string
+}): Promise<PersistedChatMessage> {
+  const response = await fetch(`/v1/chat/threads/${encodeURIComponent(input.threadId)}/messages`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-user-id': input.userId,
+    },
+    body: JSON.stringify({
+      message_id: input.messageId,
+      snapshot_id: input.snapshotId,
+      content: input.content,
+    }),
+  })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  const body = (await response.json()) as { message?: PersistedChatMessage }
+  if (!body.message) throw new Error('message missing from response')
+  return body.message
 }
 
 function blockText(block: Block): string {

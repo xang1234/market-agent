@@ -11,8 +11,10 @@ const FRONTEND_V1_ROUTES = [
   "/v1/agents/{agentId}",
   "/v1/agents/{agentId}/runs",
   "/v1/analyze/runs",
+  "/v1/analyze/runs/{runId}/share-to-chat",
   "/v1/analyze/templates",
   "/v1/chat/threads",
+  "/v1/chat/threads/{threadId}/messages",
   "/v1/chat/threads/{threadId}/stream",
   "/v1/evidence/fact-review-queue",
   "/v1/evidence/fact-review-queue/{reviewId}/approve",
@@ -60,6 +62,10 @@ const FRONTEND_V1_OPERATIONS = [
   ["patch", "/v1/agents/{agentId}"],
   ["delete", "/v1/agents/{agentId}"],
   ["post", "/v1/agents/{agentId}/runs"],
+  ["post", "/v1/analyze/runs"],
+  ["post", "/v1/analyze/runs/{runId}/share-to-chat"],
+  ["get", "/v1/chat/threads/{threadId}/messages"],
+  ["post", "/v1/chat/threads/{threadId}/messages"],
 ] as const;
 
 test("OpenAPI includes every frontend /v1 route", async () => {
@@ -88,6 +94,26 @@ test("OpenAPI includes frontend-used HTTP methods for mutable agent routes", asy
   );
 });
 
+test("OpenAPI documents the Analyze run and share-to-chat payload contract", async () => {
+  const spec = await readFile(OPENAPI_PATH, "utf8");
+  const runSection = openApiRouteSection(spec, "/v1/analyze/runs");
+  const shareSection = openApiRouteSection(spec, "/v1/analyze/runs/{runId}/share-to-chat");
+
+  for (const expected of ["'201':", "$ref: '#/components/schemas/AnalyzeRun'"]) {
+    assert.match(runSection, new RegExp(escapeRegExp(expected)));
+  }
+  for (const expected of ["AnalyzeRunInput", "template_id", "instructions", "source_categories", "subject_ref"]) {
+    assert.match(spec, new RegExp(escapeRegExp(expected)));
+  }
+
+  for (const expected of ["runId", "$ref: '#/components/schemas/AnalyzeRunShareResult'"]) {
+    assert.match(shareSection, new RegExp(escapeRegExp(expected)));
+  }
+  for (const expected of ["AnalyzeRunShareInput", "source_kind", "title", "primary_subject_ref"]) {
+    assert.match(spec, new RegExp(escapeRegExp(expected)));
+  }
+});
+
 test("OpenAPI no longer exposes the retired home feed route", async () => {
   const routes = await openApiRoutes();
 
@@ -106,13 +132,16 @@ function escapeRegExp(value: string): string {
 }
 
 function openApiRouteMethods(spec: string, route: string): ReadonlySet<string> {
+  return new Set(
+    [...openApiRouteSection(spec, route).matchAll(/^    (get|post|patch|delete|put):$/gm)].map((match) => match[1]),
+  );
+}
+
+function openApiRouteSection(spec: string, route: string): string {
   const routeHeader = `  ${route}:`;
   const start = spec.indexOf(routeHeader);
-  if (start === -1) return new Set();
+  if (start === -1) return "";
 
   const nextRoute = spec.slice(start + routeHeader.length).search(/\n  \/v1\//);
-  const section = spec.slice(start, nextRoute === -1 ? spec.length : start + routeHeader.length + nextRoute);
-  return new Set(
-    [...section.matchAll(/^    (get|post|patch|delete|put):$/gm)].map((match) => match[1]),
-  );
+  return spec.slice(start, nextRoute === -1 ? spec.length : start + routeHeader.length + nextRoute);
 }

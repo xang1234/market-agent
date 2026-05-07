@@ -2,12 +2,53 @@ import { useEffect, useState, type FormEvent } from 'react'
 
 import { useAuth } from '../shell/useAuth.ts'
 
+type SubjectRef = {
+  kind: string
+  id: string
+}
+
+type AgentUniverse =
+  | { mode: 'static'; subject_refs: ReadonlyArray<SubjectRef> }
+  | { mode: 'screen'; screen_id: string }
+  | { mode: 'theme'; theme_id: string }
+  | { mode: 'portfolio'; portfolio_id: string }
+  | { mode: 'agent'; agent_id: string }
+
+type AgentAlertRule = {
+  rule_id: string
+  severity_at_least?: string
+  headline_contains?: string
+  channels?: ReadonlyArray<string>
+}
+
+type AgentFormState = {
+  name: string
+  thesis: string
+  cadence: string
+  subjectKind: string
+  subjectId: string
+  alertRuleId: string
+  alertSeverity: string
+  alertHeadline: string
+  alertEmail: boolean
+}
+
+export type AgentPayload = {
+  name: string
+  thesis: string
+  cadence: string
+  universe: { mode: 'static'; subject_refs: ReadonlyArray<SubjectRef> }
+  alert_rules: ReadonlyArray<AgentAlertRule>
+}
+
 type AgentRow = {
   agent_id: string
   name: string
   thesis: string
   cadence: string
   enabled: boolean
+  universe?: AgentUniverse
+  alert_rules?: ReadonlyArray<AgentAlertRule>
   updated_at: string
 }
 
@@ -27,6 +68,15 @@ const DEMO_AGENTS: ReadonlyArray<AgentRow> = [
     thesis: 'Find margin, cash conversion, and guidance changes in covered names.',
     cadence: 'daily',
     enabled: true,
+    universe: { mode: 'static', subject_refs: [{ kind: 'issuer', id: 'demo-issuer' }] },
+    alert_rules: [
+      {
+        rule_id: 'demo-margin',
+        severity_at_least: 'critical',
+        headline_contains: 'margin',
+        channels: ['email'],
+      },
+    ],
     updated_at: '2026-05-06T00:00:00.000Z',
   },
 ]
@@ -38,6 +88,13 @@ export function AgentsPage() {
   const [name, setName] = useState('')
   const [thesis, setThesis] = useState('')
   const [cadence, setCadence] = useState('daily')
+  const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
+  const [subjectKind, setSubjectKind] = useState('issuer')
+  const [subjectId, setSubjectId] = useState('')
+  const [alertRuleId, setAlertRuleId] = useState('')
+  const [alertSeverity, setAlertSeverity] = useState('high')
+  const [alertHeadline, setAlertHeadline] = useState('')
+  const [alertEmail, setAlertEmail] = useState(false)
   const [activity, setActivity] = useState('Idle')
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -64,19 +121,37 @@ export function AgentsPage() {
     return () => controller.abort()
   }, [session])
 
-  const createAgent = async (event: FormEvent<HTMLFormElement>) => {
+  const resetForm = () => {
+    setEditingAgentId(null)
+    setName('')
+    setThesis('')
+    setCadence('daily')
+    setSubjectKind('issuer')
+    setSubjectId('')
+    setAlertRuleId('')
+    setAlertSeverity('high')
+    setAlertHeadline('')
+    setAlertEmail(false)
+  }
+
+  const submitAgent = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!session) return
-    const input = {
-      name: name.trim(),
-      thesis: thesis.trim(),
+    const input = buildAgentPayload({
+      name,
+      thesis,
       cadence,
-      universe: { mode: 'static', subject_refs: [] },
-    }
+      subjectKind,
+      subjectId,
+      alertRuleId,
+      alertSeverity,
+      alertHeadline,
+      alertEmail,
+    })
     if (!input.name || !input.thesis) return
-    setActivity('Creating agent')
-    const response = await fetch('/v1/agents', {
-      method: 'POST',
+    setActivity(editingAgentId ? 'Updating agent' : 'Creating agent')
+    const response = await fetch(editingAgentId ? `/v1/agents/${encodeURIComponent(editingAgentId)}` : '/v1/agents', {
+      method: editingAgentId ? 'PATCH' : 'POST',
       headers: {
         'content-type': 'application/json',
         'x-user-id': session.userId,
@@ -84,17 +159,36 @@ export function AgentsPage() {
       body: JSON.stringify(input),
     })
     if (response.ok) {
-      const created = (await response.json()) as AgentRow
-      setAgents((current) => [created, ...current.filter((agent) => agent.agent_id !== created.agent_id)])
-      setName('')
-      setThesis('')
-      setActivity('Agent created')
+      const saved = (await response.json()) as AgentRow
+      setAgents((current) => [saved, ...current.filter((agent) => agent.agent_id !== saved.agent_id)])
+      resetForm()
+      setActivity(editingAgentId ? 'Agent updated' : 'Agent created')
     } else {
-      setActivity(`Create failed: HTTP ${response.status}`)
+      setActivity(`${editingAgentId ? 'Update' : 'Create'} failed: HTTP ${response.status}`)
     }
   }
 
-  const updateAgent = async (agentId: string, patch: Partial<Pick<AgentRow, 'enabled' | 'name' | 'thesis' | 'cadence'>>) => {
+  const editAgent = (agent: AgentRow) => {
+    const universe = agent.universe?.mode === 'static' ? agent.universe : null
+    const subject = universe?.subject_refs[0] ?? null
+    const alert = agent.alert_rules?.[0] ?? null
+    setEditingAgentId(agent.agent_id)
+    setName(agent.name)
+    setThesis(agent.thesis)
+    setCadence(agent.cadence)
+    setSubjectKind(subject?.kind ?? 'issuer')
+    setSubjectId(subject?.id ?? '')
+    setAlertRuleId(alert?.rule_id ?? '')
+    setAlertSeverity(alert?.severity_at_least ?? 'high')
+    setAlertHeadline(alert?.headline_contains ?? '')
+    setAlertEmail(alert?.channels?.includes('email') ?? false)
+    setActivity('Editing agent')
+  }
+
+  const updateAgent = async (
+    agentId: string,
+    patch: Partial<Pick<AgentRow, 'enabled' | 'name' | 'thesis' | 'cadence' | 'universe' | 'alert_rules'>>,
+  ) => {
     if (!session) return
     setActivity('Updating agent')
     const response = await fetch(`/v1/agents/${encodeURIComponent(agentId)}`, {
@@ -155,11 +249,12 @@ export function AgentsPage() {
         </p>
       </header>
       <section className="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
-        <form onSubmit={createAgent} className="flex flex-col gap-4 rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
-          <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Create agent</h2>
+        <form onSubmit={submitAgent} className="flex flex-col gap-4 rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+          <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">{editingAgentId ? 'Edit agent' : 'Create agent'}</h2>
           <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
             Name
             <input
+              name="agent-name"
               value={name}
               onChange={(event) => setName(event.currentTarget.value)}
               className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
@@ -168,6 +263,7 @@ export function AgentsPage() {
           <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
             Thesis
             <textarea
+              name="agent-thesis"
               value={thesis}
               onChange={(event) => setThesis(event.currentTarget.value)}
               rows={4}
@@ -177,6 +273,7 @@ export function AgentsPage() {
           <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
             Cadence
             <select
+              name="agent-cadence"
               value={cadence}
               onChange={(event) => setCadence(event.currentTarget.value)}
               className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
@@ -186,8 +283,84 @@ export function AgentsPage() {
               <option value="weekly">weekly</option>
             </select>
           </label>
+          <fieldset className="rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
+            <legend className="px-1 text-sm font-semibold text-neutral-800 dark:text-neutral-100">Universe</legend>
+            <div className="mt-3 grid gap-3 sm:grid-cols-[120px_minmax(0,1fr)]">
+              <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                Kind
+                <select
+                  name="subject-kind"
+                  value={subjectKind}
+                  onChange={(event) => setSubjectKind(event.currentTarget.value)}
+                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+                >
+                  <option value="issuer">issuer</option>
+                  <option value="instrument">instrument</option>
+                  <option value="listing">listing</option>
+                  <option value="theme">theme</option>
+                  <option value="macro_topic">macro_topic</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                Subject id
+                <input
+                  name="subject-id"
+                  value={subjectId}
+                  onChange={(event) => setSubjectId(event.currentTarget.value)}
+                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+                />
+              </label>
+            </div>
+          </fieldset>
+          <fieldset className="rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
+            <legend className="px-1 text-sm font-semibold text-neutral-800 dark:text-neutral-100">Alert rule</legend>
+            <div className="mt-3 grid gap-3">
+              <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                Rule id
+                <input
+                  name="alert-rule-id"
+                  value={alertRuleId}
+                  onChange={(event) => setAlertRuleId(event.currentTarget.value)}
+                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+                />
+              </label>
+              <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                Severity
+                <select
+                  name="alert-severity"
+                  value={alertSeverity}
+                  onChange={(event) => setAlertSeverity(event.currentTarget.value)}
+                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+                >
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                  <option value="critical">critical</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                Headline contains
+                <input
+                  name="alert-headline"
+                  value={alertHeadline}
+                  onChange={(event) => setAlertHeadline(event.currentTarget.value)}
+                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+                />
+              </label>
+              <label className="inline-flex items-center gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                <input
+                  name="alert-email"
+                  type="checkbox"
+                  checked={alertEmail}
+                  onChange={(event) => setAlertEmail(event.currentTarget.checked)}
+                  className="size-4"
+                />
+                Email
+              </label>
+            </div>
+          </fieldset>
           <button type="submit" className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-900">
-            Create agent
+            {editingAgentId ? 'Save agent' : 'Create agent'}
           </button>
         </form>
         <div className="grid gap-6 lg:grid-cols-2">
@@ -206,8 +379,21 @@ export function AgentsPage() {
                       <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
                         {agent.enabled ? 'enabled' : 'disabled'} · {agent.cadence}
                       </p>
+                      <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
+                        Universe: {universeLabel(agent.universe)}
+                      </p>
+                      <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                        Alert rule: {alertRuleLabel(agent.alert_rules)}
+                      </p>
                     </div>
                     <div className="flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => editAgent(agent)}
+                        className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium dark:border-neutral-700"
+                      >
+                        Edit
+                      </button>
                       <button
                         type="button"
                         onClick={() => void runAgent(agent.agent_id)}
@@ -259,4 +445,47 @@ export function AgentsPage() {
       </section>
     </div>
   )
+}
+
+function universeLabel(universe: AgentRow['universe']): string {
+  if (!universe) return 'not configured'
+  if (universe.mode === 'static') {
+    if (universe.subject_refs.length === 0) return 'static empty'
+    return universe.subject_refs.map((ref) => `${ref.kind}: ${ref.id}`).join(', ')
+  }
+  if (universe.mode === 'screen') return `screen: ${universe.screen_id}`
+  if (universe.mode === 'theme') return `theme: ${universe.theme_id}`
+  if (universe.mode === 'portfolio') return `portfolio: ${universe.portfolio_id}`
+  return `agent: ${universe.agent_id}`
+}
+
+function alertRuleLabel(alertRules: AgentRow['alert_rules']): string {
+  const rule = alertRules?.[0]
+  if (!rule) return 'not configured'
+  const severity = rule.severity_at_least ?? 'any'
+  const headline = rule.headline_contains ? ` headline contains ${rule.headline_contains}` : ''
+  return `${severity}+${headline}`.trim()
+}
+
+export function buildAgentPayload(state: AgentFormState): AgentPayload {
+  const subjectRef = state.subjectId.trim()
+    ? [{ kind: state.subjectKind, id: state.subjectId.trim() }]
+    : []
+  const alertRules = state.alertRuleId.trim() && state.alertHeadline.trim()
+    ? [
+        {
+          rule_id: state.alertRuleId.trim(),
+          severity_at_least: state.alertSeverity,
+          headline_contains: state.alertHeadline.trim(),
+          channels: state.alertEmail ? ['email'] : [],
+        },
+      ]
+    : []
+  return {
+    name: state.name.trim(),
+    thesis: state.thesis.trim(),
+    cadence: state.cadence,
+    universe: { mode: 'static', subject_refs: subjectRef },
+    alert_rules: alertRules,
+  }
 }

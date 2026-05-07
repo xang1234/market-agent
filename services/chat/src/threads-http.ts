@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { listChatMessagesForThread } from "./messages.ts";
+import { listChatMessagesForThread, persistUserChatMessage } from "./messages.ts";
 import {
   archiveThread,
   ChatThreadNotFoundError,
@@ -78,6 +78,31 @@ export async function tryHandleThreadsRequest(
     }
 
     if (route.action === "messages") {
+      if (route.method === "POST") {
+        const body = await readJsonBody(req);
+        if (body === BAD_JSON || typeof body !== "object" || body === null) {
+          respond(res, 400, { error: "request body must be a JSON object" });
+          return true;
+        }
+        const input = parseUserMessageInput(body);
+        if (input === null) {
+          respond(res, 400, { error: "'content' is required" });
+          return true;
+        }
+        const message = await persistUserChatMessage(db, {
+          thread_id: route.threadId,
+          user_id: userId,
+          content: input.content,
+          message_id: input.message_id,
+          snapshot_id: input.snapshot_id,
+        });
+        if (message === null) {
+          respond(res, 404, { error: "chat thread not found" });
+          return true;
+        }
+        respond(res, 201, { message });
+        return true;
+      }
       const result = await listChatMessagesForThread(db, {
         thread_id: route.threadId,
         user_id: userId,
@@ -162,7 +187,7 @@ function mapThreadError(res: ServerResponse, error: unknown): boolean {
 type Route =
   | { action: "list"; includeArchived: boolean }
   | { action: "create" }
-  | { action: "messages"; threadId: string }
+  | { action: "messages"; method: "GET" | "POST"; threadId: string }
   | { action: "patch_title"; threadId: string }
   | { action: "archive"; threadId: string };
 
@@ -187,7 +212,7 @@ function matchRoute(method: string, rawUrl: string): Route | null {
       return null;
     }
     if (threadId.length === 0) return null;
-    if (method === "GET") return { action: "messages", threadId };
+    if (method === "GET" || method === "POST") return { action: "messages", method, threadId };
     return null;
   }
 
@@ -247,6 +272,21 @@ function parseCreateInput(body: unknown): CreateThreadInput {
     input.primary_subject_ref = obj.primary_subject_ref as CreateThreadInput["primary_subject_ref"];
   }
   return input;
+}
+
+function parseUserMessageInput(body: object): { content: string; message_id?: string; snapshot_id?: string } | null {
+  const candidate = body as Record<string, unknown>;
+  const content = typeof candidate.content === "string" ? candidate.content.trim() : "";
+  if (content.length === 0) return null;
+  return {
+    content,
+    message_id: typeof candidate.message_id === "string" && candidate.message_id.trim() !== ""
+      ? candidate.message_id.trim()
+      : undefined,
+    snapshot_id: typeof candidate.snapshot_id === "string" && candidate.snapshot_id.trim() !== ""
+      ? candidate.snapshot_id.trim()
+      : undefined,
+  };
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {

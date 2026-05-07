@@ -323,6 +323,53 @@ test("GET /v1/chat/threads/:id/messages returns persisted messages for the threa
   assert.deepEqual(queries[0].values, [THREAD_ID, USER_ID]);
 });
 
+test("POST /v1/chat/threads/:id/messages persists a durable user message", async (t) => {
+  const messageId = "66666666-6666-4666-a666-666666666666";
+  const snapshotId = "77777777-7777-4777-a777-777777777777";
+  const { db, queries } = fakeDb(({ text, values }) => {
+    if (text.includes("from chat_threads")) return [{ owned: true }];
+    if (text.includes("insert into snapshots")) return [];
+    if (text.includes("insert into chat_messages")) {
+      return [
+        {
+          message_id: messageId,
+          thread_id: THREAD_ID,
+          role: "user",
+          snapshot_id: snapshotId,
+          blocks: JSON.parse(String(values?.[3])),
+          content_hash: values?.[4],
+          created_at: "2026-05-06T00:00:00.000Z",
+        },
+      ];
+    }
+    if (text.includes("update chat_threads")) return [];
+    throw new Error(`unexpected query: ${text}`);
+  });
+  const base = await startServer(t, db);
+
+  const response = await fetch(`${base}/v1/chat/threads/${THREAD_ID}/messages`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-id": USER_ID,
+    },
+    body: JSON.stringify({
+      message_id: messageId,
+      snapshot_id: snapshotId,
+      content: "Review margins",
+    }),
+  });
+  const body = (await response.json()) as {
+    message?: { role: string; blocks: Array<{ segments?: Array<{ text?: string }> }> };
+  };
+
+  assert.equal(response.status, 201);
+  assert.equal(body.message?.role, "user");
+  assert.equal(body.message?.blocks[0].segments?.[0].text, "Review margins");
+  assert.ok(queries.some((query) => query.text.includes("insert into snapshots")));
+  assert.ok(queries.some((query) => query.text.includes("insert into chat_messages")));
+});
+
 test("GET /v1/chat/threads/:id/messages returns an empty history for owned threads without messages", async (t) => {
   const { db } = fakeDb(({ text }) => {
     if (text.includes("from chat_threads")) return [{ owned: true }];

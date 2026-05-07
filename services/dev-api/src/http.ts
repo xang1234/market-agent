@@ -51,6 +51,8 @@ type DevAgent = {
   name: string;
   thesis: string;
   cadence: string;
+  universe: AgentUniverse;
+  alert_rules: JsonValue;
   enabled: boolean;
   updated_at: string;
 };
@@ -382,6 +384,15 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
     name: "Quality monitor",
     thesis: "Find margin, cash conversion, guidance, and source-backed claim changes.",
     cadence: "daily",
+    universe: { mode: "static", subject_refs: [{ kind: "issuer", id: "demo-issuer" }] },
+    alert_rules: [
+      {
+        rule_id: "demo-margin",
+        severity_at_least: "critical",
+        headline_contains: "margin",
+        channels: ["email"],
+      },
+    ],
     enabled: true,
     updated_at: "2026-05-06T00:00:00.000Z",
   } satisfies DevAgent;
@@ -482,6 +493,8 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
           name: nonEmptyString(body.name) ?? "Untitled agent",
           thesis: nonEmptyString(body.thesis) ?? "Monitor source-backed changes.",
           cadence: nonEmptyString(body.cadence) ?? "daily",
+          universe: readUniverse(body.universe),
+          alert_rules: readAlertRules(body.alert_rules),
           enabled: true,
           updated_at: new Date().toISOString(),
         };
@@ -497,6 +510,8 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
           name: nonEmptyString(body.name) ?? existing.name,
           thesis: nonEmptyString(body.thesis) ?? existing.thesis,
           cadence: nonEmptyString(body.cadence) ?? existing.cadence,
+          universe: body.universe === undefined ? existing.universe : readUniverse(body.universe),
+          alert_rules: body.alert_rules === undefined ? existing.alert_rules : readAlertRules(body.alert_rules),
           updated_at: new Date().toISOString(),
         };
         agents.set(agentId, next);
@@ -708,6 +723,7 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
           thesis: nonEmptyString(body.thesis) ?? "Monitor source-backed changes.",
           cadence: nonEmptyString(body.cadence) ?? "daily",
           universe: readUniverse(body.universe),
+          alert_rules: readAlertRules(body.alert_rules),
           prompt_template: nonEmptyString(body.prompt_template) ?? undefined,
         });
         return toDevAgent(row);
@@ -721,6 +737,7 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
           thesis: nonEmptyString(body.thesis) ?? undefined,
           cadence: nonEmptyString(body.cadence) ?? undefined,
           universe: body.universe === undefined ? undefined : readUniverse(body.universe),
+          alert_rules: body.alert_rules === undefined ? undefined : readAlertRules(body.alert_rules),
           prompt_template: nonEmptyString(body.prompt_template) ?? undefined,
         });
         return toDevAgent(row);
@@ -930,6 +947,14 @@ function readUniverse(value: unknown): AgentUniverse {
   return { mode: "static", subject_refs: [] };
 }
 
+function readAlertRules(value: unknown): JsonValue {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    throw new DevApiHttpError(400, "alert_rules must be an array");
+  }
+  return value as JsonValue;
+}
+
 function jsonObjectOrEmpty(value: JsonValue | null | undefined): Record<string, JsonValue> {
   return value !== null && value !== undefined && typeof value === "object" && !Array.isArray(value)
     ? value
@@ -990,6 +1015,8 @@ function toDevAgent(row: AgentRow): DevAgent {
     name: row.name,
     thesis: row.thesis,
     cadence: row.cadence,
+    universe: row.universe,
+    alert_rules: row.alert_rules,
     enabled: row.enabled,
     updated_at: row.updated_at,
   };

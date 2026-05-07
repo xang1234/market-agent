@@ -659,9 +659,36 @@ paths:
         '404':
           description: Thread not found for the calling user
   /v1/chat/threads/{threadId}/messages:
+    get:
+      tags: [Chat]
+      summary: List persisted thread messages
+      operationId: listThreadMessages
+      parameters:
+        - in: path
+          name: threadId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Persisted user, assistant, and tool messages in creation order
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChatMessage'
+        '401':
+          description: Missing or malformed user credential
+        '404':
+          description: Thread not found for the calling user
     post:
       tags: [Chat]
-      summary: Append a user message and start a run
+      summary: Persist a user message before starting or retrying a stream
       operationId: createMessage
       parameters:
         - in: path
@@ -678,6 +705,14 @@ paths:
               type: object
               required: [content]
               properties:
+                message_id:
+                  type: string
+                  format: uuid
+                  description: Optional client-generated idempotency key for retry-safe message creation.
+                snapshot_id:
+                  type: string
+                  format: uuid
+                  description: Optional client-generated snapshot id for the sealed user-input snapshot.
                 content:
                   type: string
                 attachments:
@@ -686,16 +721,21 @@ paths:
                     type: object
                     additionalProperties: true
       responses:
-        '202':
-          description: Accepted
+        '201':
+          description: User message persisted
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  run_id:
-                    type: string
-                    format: uuid
+                  message:
+                    $ref: '#/components/schemas/ChatMessage'
+        '400':
+          description: Malformed request body
+        '401':
+          description: Missing or malformed user credential
+        '404':
+          description: Thread not found for the calling user
   /v1/chat/threads/{threadId}/stream:
     get:
       tags: [Chat]
@@ -914,32 +954,54 @@ paths:
   /v1/analyze/runs:
     post:
       tags: [Analyze]
-      summary: Run an analyze template against a subject
+      summary: Run an analyze template and return the memo blocks
       operationId: runAnalyzeTemplate
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [template_id, primary_subject_ref]
-              properties:
-                template_id:
-                  type: string
-                  format: uuid
-                primary_subject_ref:
-                  $ref: '#/components/schemas/SubjectRef'
+              $ref: '#/components/schemas/AnalyzeRunInput'
       responses:
-        '202':
-          description: Analyze accepted
+        '201':
+          description: Analyze run created with sealed memo blocks
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  run_id:
-                    type: string
-                    format: uuid
+                $ref: '#/components/schemas/AnalyzeRun'
+  /v1/analyze/runs/{runId}/share-to-chat:
+    post:
+      tags: [Analyze]
+      summary: Share a persisted analyze run into a durable chat thread
+      operationId: shareAnalyzeRunToChat
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalyzeRunShareInput'
+      responses:
+        '201':
+          description: Analyze run shared to chat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyzeRunShareResult'
+        '400':
+          description: Malformed request body
+        '401':
+          description: Missing or malformed user credential
+        '404':
+          description: Analyze run not found for the calling user
+        '422':
+          description: Artifact share rejected by provenance or egress guardrails
   /v1/agents:
     get:
       tags: [Agents]
@@ -1892,6 +1954,76 @@ components:
           type: array
           items:
             $ref: './finance_research_block_schema.json#/$defs/Block'
+    AnalyzeRunInput:
+      type: object
+      required: [template_id]
+      properties:
+        template_id:
+          type: string
+          description: Template identifier selected from /v1/analyze/templates.
+        instructions:
+          type: string
+          description: User instructions to apply while rendering the memo.
+        source_categories:
+          type: array
+          items:
+            type: string
+        subject_ref:
+          anyOf:
+            - $ref: '#/components/schemas/SubjectRef'
+            - type: 'null'
+        primary_subject_ref:
+          description: Backward-compatible alias for subject_ref.
+          anyOf:
+            - $ref: '#/components/schemas/SubjectRef'
+            - type: 'null'
+    AnalyzeRun:
+      type: object
+      required: [run_id, template_id, template_version, snapshot_id, blocks, created_at]
+      properties:
+        run_id:
+          type: string
+          format: uuid
+        template_id:
+          type: string
+        template_version:
+          type: integer
+        snapshot_id:
+          type: string
+          format: uuid
+        blocks:
+          type: array
+          items:
+            $ref: './finance_research_block_schema.json#/$defs/Block'
+        created_at:
+          type: string
+          format: date-time
+    AnalyzeRunShareInput:
+      type: object
+      properties:
+        source_kind:
+          type: string
+          enum: [memo]
+        title:
+          type: string
+        primary_subject_ref:
+          anyOf:
+            - $ref: '#/components/schemas/SubjectRef'
+            - type: 'null'
+    AnalyzeRunShareResult:
+      type: object
+      required: [thread, message, origin_snapshot_ids]
+      properties:
+        thread:
+          $ref: '#/components/schemas/ChatThread'
+        message:
+          type: object
+          additionalProperties: true
+        origin_snapshot_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
     AnalyzeTemplateInput:
       type: object
       required: [name, prompt_template, source_categories]
@@ -2141,5 +2273,30 @@ components:
           type: string
           format: date-time
         updated_at:
+          type: string
+          format: date-time
+    ChatMessage:
+      type: object
+      required: [message_id, thread_id, role, snapshot_id, blocks, content_hash, created_at]
+      properties:
+        message_id:
+          type: string
+          format: uuid
+        thread_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [user, assistant, tool]
+        snapshot_id:
+          type: string
+          format: uuid
+        blocks:
+          type: array
+          items:
+            $ref: './finance_research_block_schema.json#/$defs/Block'
+        content_hash:
+          type: string
+        created_at:
           type: string
           format: date-time

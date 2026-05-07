@@ -1,3 +1,5 @@
+import { createHash, randomUUID } from "node:crypto";
+
 import {
   serializeJsonValue,
   type JsonValue,
@@ -62,6 +64,14 @@ export type PersistImportedArtifactMessageInput = {
   snapshot_id: string;
   blocks: JsonValue;
   content_hash: string;
+};
+
+export type PersistUserChatMessageInput = {
+  thread_id: string;
+  user_id: string;
+  content: string;
+  message_id?: string;
+  snapshot_id?: string;
 };
 
 export type ChatMessagePersistenceFactoryInput = {
@@ -214,6 +224,118 @@ export async function persistImportedArtifactMessage(
   return Object.freeze({ ...message });
 }
 
+export async function persistUserChatMessage(
+  db: ChatMessagePersistenceDb,
+  input: PersistUserChatMessageInput,
+): Promise<ChatMessageRow | null> {
+  const owner = await db.query<{ owned: boolean }>(
+    `select true as owned
+       from chat_threads
+      where thread_id = $1::uuid
+        and user_id = $2::uuid
+      limit 1`,
+    [input.thread_id, input.user_id],
+  );
+  if (owner.rows.length === 0) return null;
+
+  const messageId = input.message_id ?? randomUUID();
+  const snapshotId = input.snapshot_id ?? randomUUID();
+  const asOf = new Date().toISOString();
+  const blocks = [
+    {
+      id: messageId,
+      kind: "rich_text",
+      snapshot_id: snapshotId,
+      data_ref: { kind: "chat_turn", id: messageId },
+      source_refs: [],
+      as_of: asOf,
+      segments: [{ type: "text", text: input.content }],
+    },
+  ] satisfies JsonValue[];
+  const contentHash = hashJson(blocks);
+
+  await db.query(
+    `insert into snapshots (
+       snapshot_id,
+       subject_refs,
+       fact_refs,
+       claim_refs,
+       event_refs,
+       document_refs,
+       series_specs,
+       source_ids,
+       tool_call_ids,
+       tool_call_result_hashes,
+       as_of,
+       basis,
+       normalization,
+       coverage_start,
+       allowed_transforms,
+       model_version,
+       parent_snapshot
+     )
+     values (
+       $1::uuid,
+       '[]'::jsonb,
+       '[]'::jsonb,
+       '[]'::jsonb,
+       '[]'::jsonb,
+       '[]'::jsonb,
+       '[]'::jsonb,
+       '[]'::jsonb,
+       '[]'::jsonb,
+       '[]'::jsonb,
+       $2::timestamptz,
+       'user_input',
+       'none',
+       null,
+       '{}'::jsonb,
+       'chat-user-message',
+       null
+     )
+     on conflict (snapshot_id) do nothing`,
+    [snapshotId, asOf],
+  );
+
+  const { rows } = await db.query<ChatMessageRow>(
+    `insert into chat_messages
+       (message_id, thread_id, role, snapshot_id, blocks, content_hash)
+     values ($1::uuid, $2::uuid, 'user'::chat_role, $3::uuid, $4::jsonb, $5)
+     on conflict (message_id) do update
+       set content_hash = chat_messages.content_hash
+      where chat_messages.thread_id = excluded.thread_id
+     returning
+       message_id::text as message_id,
+       thread_id::text as thread_id,
+       role,
+       snapshot_id::text as snapshot_id,
+       blocks,
+       content_hash,
+       created_at::text as created_at`,
+    [
+      messageId,
+      input.thread_id,
+      snapshotId,
+      serializeJsonValue(blocks),
+      contentHash,
+    ],
+  );
+  const message = rows[0];
+  if (message === undefined) {
+    throw new Error("persistUserChatMessage: chat message insert returned no row");
+  }
+
+  await db.query(
+    `update chat_threads
+        set latest_snapshot_id = $2::uuid,
+            updated_at = now()
+      where thread_id = $1::uuid`,
+    [input.thread_id, message.snapshot_id],
+  );
+
+  return Object.freeze({ ...message });
+}
+
 export function chatMessageTransactionClient<T extends ChatMessagePersistenceDb>(
   client: T,
 ): T & ChatMessageTransactionClient {
@@ -320,4 +442,8 @@ function isAcquiredClient(db: ChatMessagePersistenceDb): db is ChatMessagePoolCl
 
 function isVerifiedSeal(seal: SnapshotSealResult): seal is SnapshotSealResult & { ok: true } {
   return seal.ok && seal.verification.ok;
+}
+
+function hashJson(value: JsonValue): string {
+  return `sha256:${createHash("sha256").update(serializeJsonValue(value)).digest("hex")}`;
 }
