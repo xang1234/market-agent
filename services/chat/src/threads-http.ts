@@ -89,8 +89,8 @@ export async function tryHandleThreadsRequest(
           return true;
         }
         const input = parseUserMessageInput(body);
-        if (input === null) {
-          respond(res, 400, { error: "'content' is required" });
+        if (input.kind === "error") {
+          respond(res, 400, { error: input.message });
           return true;
         }
         let message;
@@ -98,9 +98,9 @@ export async function tryHandleThreadsRequest(
           message = await persistUserChatMessage(db, {
             thread_id: route.threadId,
             user_id: userId,
-            content: input.content,
-            message_id: input.message_id,
-            snapshot_id: input.snapshot_id,
+            content: input.value.content,
+            message_id: input.value.message_id,
+            snapshot_id: input.value.snapshot_id,
           });
         } catch (error) {
           if (error instanceof ChatMessageIdempotencyConflictError) {
@@ -287,19 +287,37 @@ function parseCreateInput(body: unknown): CreateThreadInput {
   return input;
 }
 
-function parseUserMessageInput(body: object): { content: string; message_id?: string; snapshot_id?: string } | null {
+type UserMessageInputParseResult =
+  | { kind: "ok"; value: { content: string; message_id?: string; snapshot_id?: string } }
+  | { kind: "error"; message: string };
+
+const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+function parseUserMessageInput(body: object): UserMessageInputParseResult {
   const candidate = body as Record<string, unknown>;
   const content = typeof candidate.content === "string" ? candidate.content.trim() : "";
-  if (content.length === 0) return null;
+  if (content.length === 0) return { kind: "error", message: "'content' is required" };
+  const messageId = parseOptionalUuid(candidate.message_id);
+  if (messageId.kind === "error") return { kind: "error", message: "'message_id' must be a UUID" };
+  const snapshotId = parseOptionalUuid(candidate.snapshot_id);
+  if (snapshotId.kind === "error") return { kind: "error", message: "'snapshot_id' must be a UUID" };
   return {
-    content,
-    message_id: typeof candidate.message_id === "string" && candidate.message_id.trim() !== ""
-      ? candidate.message_id.trim()
-      : undefined,
-    snapshot_id: typeof candidate.snapshot_id === "string" && candidate.snapshot_id.trim() !== ""
-      ? candidate.snapshot_id.trim()
-      : undefined,
+    kind: "ok",
+    value: {
+      content,
+      message_id: messageId.value,
+      snapshot_id: snapshotId.value,
+    },
   };
+}
+
+function parseOptionalUuid(value: unknown): { kind: "ok"; value?: string } | { kind: "error" } {
+  if (value === undefined || value === null) return { kind: "ok" };
+  if (typeof value !== "string") return { kind: "error" };
+  const trimmed = value.trim();
+  if (trimmed === "") return { kind: "ok" };
+  if (!UUID_PATTERN.test(trimmed)) return { kind: "error" };
+  return { kind: "ok", value: trimmed };
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {

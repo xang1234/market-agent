@@ -22,6 +22,7 @@ import {
   loadToolRegistry,
   type JsonValue,
   type ToolCallBudgetDecision,
+  type ToolDefinition,
   type ToolRegistry,
 } from "../../tools/src/index.ts";
 
@@ -80,6 +81,15 @@ export type ChatAnalystToolRuntimeResult = {
 export type ChatAnalystToolRuntime = (
   input: ChatAnalystToolRuntimeInput,
 ) => Promise<ChatAnalystToolRuntimeResult> | ChatAnalystToolRuntimeResult;
+
+export type ChatAnalystToolExecutor = (input: {
+  tool: ToolDefinition;
+  bundleId: string;
+  toolCallId: string;
+  toolName: string;
+  arguments: Record<string, JsonValue>;
+  idempotencyKey: string;
+}) => Promise<JsonValue> | JsonValue;
 
 export type ChatRunActivityReporter = {
   agentId: string;
@@ -218,13 +228,13 @@ export function createChatCoordinator(
 ): ChatCoordinator {
   const persistAssistantMessage = options.persistAssistantMessage;
   const preResolveSubject = options.preResolveSubject;
-  const baseRunner = options.runner ?? (options.allowSyntheticAnalystFallback
-    ? ((context) => syntheticAnalystTurnRunner(context, persistAssistantMessage))
-    : options.analystToolRuntime
+  const baseRunner = options.runner ?? (options.analystToolRuntime
     ? ((context) => toolBackedAnalystTurnRunner(context, {
       persistAssistantMessage,
       runtime: options.analystToolRuntime,
     }))
+    : options.allowSyntheticAnalystFallback
+    ? ((context) => syntheticAnalystTurnRunner(context, persistAssistantMessage))
     : missingAnalystToolRuntimeRunner);
   const runner = threadTitleGenerationRunner(runActivityReportingRunner(subjectAwareRunner(baseRunner, {
     persistAssistantMessage,
@@ -1023,9 +1033,10 @@ function defaultAnalystText(
 export function createRegistryBackedAnalystToolRuntime(options: {
   registry?: ToolRegistry;
   preferredToolName?: string;
+  executeTool?: ChatAnalystToolExecutor;
 } = {}): ChatAnalystToolRuntime {
   const registry = options.registry ?? loadToolRegistry();
-  return (context) => {
+  return async (context) => {
     const turnId = context.turnId ?? context.runId;
     const policy = createTurnToolPolicy({
       registry,
@@ -1064,7 +1075,7 @@ export function createRegistryBackedAnalystToolRuntime(options: {
       arguments: toolArguments,
     });
     const toolCallId = stableUuid(`tool:${context.threadId}:${turnId}:${selectedTool.name}`);
-    const toolCall = runtimeToolCallFromDecision({
+    const toolCall = await runtimeToolCallFromDecision({
       registry,
       bundleId: policy.bundle_id,
       toolCallId,
@@ -1072,14 +1083,29 @@ export function createRegistryBackedAnalystToolRuntime(options: {
       arguments: toolArguments,
       decision,
       idempotencyKey: `${context.threadId}:${turnId}:${selectedTool.name}`,
+      executeTool: options.executeTool,
     });
     const snapshotId = stableUuid(`snapshot:${context.threadId}:${turnId}:${context.bundleId}:${toolCall.status}`);
     const noteText = toolCall.status === "pending_approval"
       ? `Approval is required before ${selectedTool.name} can run.`
+      : toolCall.status === "skipped"
+      ? `${selectedTool.name} was selected for the ${context.bundleId} bundle, but no executor is configured for this registry-backed runtime.`
       : `${toolArguments.query}. Used ${selectedTool.name} from the ${context.bundleId} bundle and produced snapshot-backed research blocks.`;
+    const verification = toolCall.status === "ok" || toolCall.status === "pending_approval"
+      ? { ok: true, failures: [] }
+      : {
+          ok: false,
+          failures: [
+            {
+              reason_code: "tool_execution_unavailable",
+              tool_name: selectedTool.name,
+              status: toolCall.status,
+            },
+          ],
+        };
     return {
       snapshot_id: snapshotId,
-      verification: { ok: true, failures: [] },
+      verification,
       tool_calls: [toolCall],
       blocks: [
         createRichTextBlock({
@@ -1093,15 +1119,16 @@ export function createRegistryBackedAnalystToolRuntime(options: {
   };
 }
 
-function runtimeToolCallFromDecision(input: {
+async function runtimeToolCallFromDecision(input: {
   registry: ToolRegistry;
   bundleId: string;
   toolCallId: string;
   toolName: string;
-  arguments: JsonValue;
+  arguments: Record<string, JsonValue>;
   decision: ToolCallBudgetDecision;
   idempotencyKey: string;
-}): ChatAnalystToolRuntimeToolCall {
+  executeTool?: ChatAnalystToolExecutor;
+}): Promise<ChatAnalystToolRuntimeToolCall> {
   if (!input.decision.ok) {
     return {
       tool_call_id: input.toolCallId,
@@ -1142,18 +1169,35 @@ function runtimeToolCallFromDecision(input: {
       pending_action: approval.pending_action as unknown as JsonValue,
     };
   }
+  if (!input.executeTool) {
+    return {
+      tool_call_id: input.toolCallId,
+      tool_name: input.toolName,
+      status: "skipped",
+      bundle_id: input.bundleId,
+      arguments: input.arguments,
+      result: {
+        kind: "tool_execution_unavailable",
+        tool_name: input.toolName,
+        status: "skipped",
+        note: "Tool runtime selected and authorized this call, but no executor was configured.",
+      },
+    };
+  }
   return {
     tool_call_id: input.toolCallId,
     tool_name: input.toolName,
     status: "ok",
     bundle_id: input.bundleId,
     arguments: input.arguments,
-    result: {
-      kind: "tool_result",
-      tool_name: input.toolName,
-      status: "ok",
-      note: "Tool runtime selected and authorized this call; backend handler output was summarized into blocks.",
-    },
+    result: await input.executeTool({
+      tool: approval.tool,
+      bundleId: input.bundleId,
+      toolCallId: input.toolCallId,
+      toolName: input.toolName,
+      arguments: input.arguments,
+      idempotencyKey: input.idempotencyKey,
+    }),
   };
 }
 

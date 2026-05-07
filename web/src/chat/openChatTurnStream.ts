@@ -45,7 +45,10 @@ export function openChatTurnStream(
         callbacks.onCompleted()
         source.close()
       }
-      if (type === 'turn.error') source.close()
+      if (type === 'turn.error') {
+        callbacks.onError()
+        source.close()
+      }
     })
   }
   source.onerror = () => {

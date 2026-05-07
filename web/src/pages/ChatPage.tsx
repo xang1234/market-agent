@@ -2,7 +2,9 @@ import { useEffect, useMemo, useReducer, useState, type FormEvent } from 'react'
 import { Link, Outlet, useNavigate, useParams } from 'react-router-dom'
 
 import { BlockView, type Block } from '../blocks'
+import type { ChatMessage as PersistedChatMessage } from '../chat/messageTypes.ts'
 import { openChatTurnStream } from '../chat/openChatTurnStream.ts'
+import { persistUserChatTurn } from '../chat/persistUserChatTurn.ts'
 import { INITIAL_STREAM_STATE, applyChatStreamEvent } from '../chat/streamReducer.ts'
 import { StreamingTurnView } from '../chat/StreamingTurnView.tsx'
 import { useAuth } from '../shell/useAuth.ts'
@@ -18,16 +20,6 @@ type ThreadListState =
   | { kind: 'error'; message: string }
   | { kind: 'ready'; threads: ReadonlyArray<ChatThread> }
 
-export type PersistedChatMessage = {
-  message_id: string
-  thread_id: string
-  role: 'user' | 'assistant' | 'tool'
-  snapshot_id: string
-  blocks: ReadonlyArray<Block>
-  content_hash: string
-  created_at: string
-}
-
 type PendingChatTurn = {
   runId: string
   messageId: string
@@ -36,9 +28,9 @@ type PendingChatTurn = {
 }
 
 type MessageHistoryState =
-  | { kind: 'idle' | 'loading' }
-  | { kind: 'error'; message: string }
-  | { kind: 'ready'; messages: ReadonlyArray<PersistedChatMessage> }
+  | { kind: 'idle' }
+  | { kind: 'error'; requestKey: string; message: string }
+  | { kind: 'ready'; requestKey: string; messages: ReadonlyArray<PersistedChatMessage> }
 
 export function ChatLayout() {
   const { session } = useAuth()
@@ -135,6 +127,13 @@ export function ChatThreadView() {
   const [state, dispatch] = useReducer(applyChatStreamEvent, INITIAL_STREAM_STATE)
   const [streamError, setStreamError] = useState<string | null>(null)
   const [failedTurn, setFailedTurn] = useState<PendingChatTurn | null>(null)
+  const historyRequestKey = session && threadId ? `${session.userId}:${threadId}:${historyReloadKey}` : ''
+  const visibleHistory: MessageHistoryState | { kind: 'loading' } =
+    !session || !threadId
+      ? { kind: 'idle' }
+      : history.kind !== 'idle' && history.requestKey === historyRequestKey
+        ? history
+        : { kind: 'loading' }
 
   useEffect(() => {
     if (!session || !threadId) return
@@ -148,14 +147,18 @@ export function ChatThreadView() {
         return (await response.json()) as { messages?: PersistedChatMessage[] }
       })
       .then((body) => {
-        setHistory({ kind: 'ready', messages: body.messages ?? [] })
+        setHistory({ kind: 'ready', requestKey: historyRequestKey, messages: body.messages ?? [] })
       })
       .catch((caught) => {
         if (controller.signal.aborted) return
-        setHistory({ kind: 'error', message: caught instanceof Error ? caught.message : String(caught) })
+        setHistory({
+          kind: 'error',
+          requestKey: historyRequestKey,
+          message: caught instanceof Error ? caught.message : String(caught),
+        })
       })
     return () => controller.abort()
-  }, [session, threadId, historyReloadKey])
+  }, [session, threadId, historyRequestKey])
 
   const startPersistedTurn = (turn: PendingChatTurn) => {
     if (!session) return
@@ -200,9 +203,11 @@ export function ChatThreadView() {
         content: turn.text,
       })
       setHistory((current) => {
-        if (current.kind !== 'ready') return { kind: 'ready', messages: [message] }
+        if (current.kind !== 'ready' || current.requestKey !== historyRequestKey) {
+          return { kind: 'ready', requestKey: historyRequestKey, messages: [message] }
+        }
         if (current.messages.some((existing) => existing.message_id === message.message_id)) return current
-        return { kind: 'ready', messages: [...current.messages, message] }
+        return { kind: 'ready', requestKey: historyRequestKey, messages: [...current.messages, message] }
       })
       setPrompt('')
     } catch (caught) {
@@ -221,14 +226,14 @@ export function ChatThreadView() {
         <p className="mt-1 font-mono text-xs text-neutral-500 dark:text-neutral-400">{threadId}</p>
       </section>
       <div className="flex flex-1 flex-col gap-3 p-6">
-        {history.kind === 'loading' ? (
+        {visibleHistory.kind === 'loading' ? (
           <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading message history.</p>
         ) : null}
-        {history.kind === 'error' ? (
-          <p className="text-sm text-rose-600 dark:text-rose-300">Message history unavailable: {history.message}</p>
+        {visibleHistory.kind === 'error' ? (
+          <p className="text-sm text-rose-600 dark:text-rose-300">Message history unavailable: {visibleHistory.message}</p>
         ) : null}
-        {history.kind === 'ready' ? (
-          <PersistedMessageHistory messages={history.messages} />
+        {visibleHistory.kind === 'ready' ? (
+          <PersistedMessageHistory messages={visibleHistory.messages} />
         ) : null}
         <StreamingTurnView state={state} />
         {streamError ? (
@@ -303,31 +308,6 @@ function PersistedMessageHistory({ messages }: { messages: ReadonlyArray<Persist
       ))}
     </section>
   )
-}
-
-export async function persistUserChatTurn(input: {
-  threadId: string
-  userId: string
-  messageId: string
-  snapshotId: string
-  content: string
-}): Promise<PersistedChatMessage> {
-  const response = await fetch(`/v1/chat/threads/${encodeURIComponent(input.threadId)}/messages`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-user-id': input.userId,
-    },
-    body: JSON.stringify({
-      message_id: input.messageId,
-      snapshot_id: input.snapshotId,
-      content: input.content,
-    }),
-  })
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  const body = (await response.json()) as { message?: PersistedChatMessage }
-  if (!body.message) throw new Error('message missing from response')
-  return body.message
 }
 
 function blockText(block: Block): string {

@@ -7,9 +7,11 @@ import { createRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
-import { AgentsPage, buildAgentPayload } from './AgentsPage.tsx'
+import { buildAgentPayload } from '../agents/agentPayload.ts'
+import { persistUserChatTurn } from '../chat/persistUserChatTurn.ts'
+import { AgentsPage } from './AgentsPage.tsx'
 import { AnalyzePage } from './AnalyzePage.tsx'
-import { ChatEmptyState, ChatLayout, ChatThreadView, persistUserChatTurn } from './ChatPage.tsx'
+import { ChatEmptyState, ChatLayout, ChatThreadView } from './ChatPage.tsx'
 import { shareAnalyzeRunToChat } from '../analyze/shareToChat.ts'
 import { BlockRegistryProvider, createDefaultBlockRegistry, type Block } from '../blocks'
 import { openChatTurnStream } from '../chat/openChatTurnStream.ts'
@@ -265,6 +267,46 @@ test('Chat stream URL carries dev identity and refreshes history after completio
   assert.equal(eventSources[0].closed, true)
 })
 
+test('Chat stream reports server-signaled turn errors to retry callbacks', () => {
+  const eventSources: MockEventSource[] = []
+  const events: ChatSseEvent[] = []
+  let errors = 0
+
+  openChatTurnStream({
+    threadId: 'thread-123',
+    runId: 'run-1',
+    turnId: 'message-user',
+    userIntent: 'Review margins',
+    userId: USER_ID,
+  }, {
+    onEvent: (event) => events.push(event),
+    onCompleted: () => {
+      throw new Error('unexpected completion')
+    },
+    onError: () => {
+      errors += 1
+    },
+  }, class extends MockEventSource {
+      constructor(url: string | URL) {
+        super(url)
+        eventSources.push(this)
+      }
+    } as unknown as typeof EventSource)
+
+  eventSources[0].emit('turn.error', {
+    type: 'turn.error',
+    seq: 1,
+    thread_id: 'thread-123',
+    run_id: 'run-1',
+    turn_id: 'run-1',
+    error: 'upstream_500',
+  })
+
+  assert.equal(errors, 1)
+  assert.equal(events.at(-1)?.type, 'turn.error')
+  assert.equal(eventSources[0].closed, true)
+})
+
 test('Analyze surface renders template controls, source controls, memo canvas, and Add to chat action', () => {
   const html = renderWithAuth(
     <MemoryRouter initialEntries={['/analyze']}>
@@ -344,6 +386,30 @@ test('Agents surface renders CRUD controls, run history, and activity status', (
 })
 
 test('Agents create/edit payloads include selected universe and alert rule policy', () => {
+  assert.deepEqual(buildAgentPayload({
+    name: 'Headline optional monitor',
+    thesis: 'Alert on any high severity finding',
+    cadence: 'daily',
+    subjectKind: 'issuer',
+    subjectId: 'issuer-123',
+    alertRuleId: 'any-high',
+    alertSeverity: 'high',
+    alertHeadline: '',
+    alertEmail: false,
+  }), {
+    name: 'Headline optional monitor',
+    thesis: 'Alert on any high severity finding',
+    cadence: 'daily',
+    universe: { mode: 'static', subject_refs: [{ kind: 'issuer', id: 'issuer-123' }] },
+    alert_rules: [
+      {
+        rule_id: 'any-high',
+        severity_at_least: 'high',
+        channels: [],
+      },
+    ],
+  })
+
   assert.deepEqual(buildAgentPayload({
     name: ' Margin monitor ',
     thesis: ' Watch supplier margin risk ',

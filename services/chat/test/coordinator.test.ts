@@ -527,6 +527,50 @@ test("default turn runner fails closed when no analyst tool runtime is configure
   assert.equal(turn.events[1].error_code, "analyst_tool_runtime_not_configured");
 });
 
+test("analyst runtime takes precedence over explicit dev fallback", async () => {
+  let runtimeCalls = 0;
+  const coordinator = createChatCoordinator({
+    allowSyntheticAnalystFallback: true,
+    analystToolRuntime: async (context) => {
+      runtimeCalls += 1;
+      return {
+        snapshot_id: "11111111-1111-4111-a111-111111111111",
+        verification: { ok: true, failures: [] },
+        tool_calls: [
+          {
+            tool_call_id: "tool-backed-1",
+            tool_name: "get_quote",
+            status: "ok",
+            bundle_id: context.bundleId,
+          },
+        ],
+        blocks: [
+          {
+            id: "block-tool-backed-1",
+            kind: "rich_text",
+            snapshot_id: "11111111-1111-4111-a111-111111111111",
+            data_ref: { kind: "chat_turn", id: context.turnId ?? context.runId },
+            source_refs: [],
+            as_of: "2026-05-06T00:00:00.000Z",
+            segments: [{ type: "text", text: "Runtime generated analyst blocks." }],
+          },
+        ],
+      };
+    },
+  });
+
+  const turn = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    userIntent: "Review AAPL earnings quality",
+  });
+  await turn.completed;
+
+  assert.equal(runtimeCalls, 1);
+  assert.equal(turn.events.some((event) => event.stub === true), false);
+  assert.equal(turn.events[1].tool_call_id, "tool-backed-1");
+});
+
 test("default turn runner gates persistence on successful snapshot verification", async () => {
   let persistCalls = 0;
   const coordinator = createChatCoordinator({
@@ -584,6 +628,51 @@ test("registry-backed analyst runtime stages approval-required tools instead of 
     (result.tool_calls?.[0].pending_action as Record<string, unknown>).tool_name,
     "create_agent",
   );
+});
+
+test("registry-backed analyst runtime fails closed when a read tool has no executor", async () => {
+  const runtime = createRegistryBackedAnalystToolRuntime({ preferredToolName: "resolve_period" });
+
+  const result = await runtime({
+    threadId: "thread-1",
+    runId: "run-1",
+    bundleId: "single_subject_analysis",
+    userIntent: "Review the latest quarter",
+    emit: () => {
+      throw new Error("runtime should not emit directly");
+    },
+  });
+
+  assert.equal(result.verification.ok, false);
+  assert.equal(result.tool_calls?.[0].tool_name, "resolve_period");
+  assert.equal(result.tool_calls?.[0].status, "skipped");
+  assert.match(JSON.stringify(result.tool_calls?.[0].result), /tool_execution_unavailable/);
+});
+
+test("registry-backed analyst runtime executes authorized read tools through the supplied executor", async () => {
+  const executed: string[] = [];
+  const runtime = createRegistryBackedAnalystToolRuntime({
+    preferredToolName: "resolve_period",
+    executeTool: async ({ toolName, arguments: args }) => {
+      executed.push(`${toolName}:${String(args.query)}`);
+      return { kind: "tool_result", status: "ok", tool_name: toolName };
+    },
+  });
+
+  const result = await runtime({
+    threadId: "thread-1",
+    runId: "run-1",
+    bundleId: "single_subject_analysis",
+    userIntent: "Review the latest quarter",
+    emit: () => {
+      throw new Error("runtime should not emit directly");
+    },
+  });
+
+  assert.equal(result.verification.ok, true);
+  assert.deepEqual(executed, ["resolve_period:Review the latest quarter"]);
+  assert.equal(result.tool_calls?.[0].status, "ok");
+  assert.match(JSON.stringify(result.tool_calls?.[0].result), /tool_result/);
 });
 
 test("explicit dev fallback emits synthetic strict Block[] analyst content", async () => {

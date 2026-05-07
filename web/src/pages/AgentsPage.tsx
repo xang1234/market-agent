@@ -1,45 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react'
 
+import {
+  buildAgentPayload,
+  canRoundTripAlertRules,
+  canRoundTripUniverse,
+  type AgentAlertRule,
+  type AgentUniverse,
+} from '../agents/agentPayload.ts'
 import { useAuth } from '../shell/useAuth.ts'
-
-type SubjectRef = {
-  kind: string
-  id: string
-}
-
-type AgentUniverse =
-  | { mode: 'static'; subject_refs: ReadonlyArray<SubjectRef> }
-  | { mode: 'screen'; screen_id: string }
-  | { mode: 'theme'; theme_id: string }
-  | { mode: 'portfolio'; portfolio_id: string }
-  | { mode: 'agent'; agent_id: string }
-
-type AgentAlertRule = {
-  rule_id: string
-  severity_at_least?: string
-  headline_contains?: string
-  channels?: ReadonlyArray<string>
-}
-
-type AgentFormState = {
-  name: string
-  thesis: string
-  cadence: string
-  subjectKind: string
-  subjectId: string
-  alertRuleId: string
-  alertSeverity: string
-  alertHeadline: string
-  alertEmail: boolean
-}
-
-export type AgentPayload = {
-  name: string
-  thesis: string
-  cadence: string
-  universe: AgentUniverse
-  alert_rules: ReadonlyArray<AgentAlertRule>
-}
 
 type AgentRow = {
   agent_id: string
@@ -98,6 +66,10 @@ export function AgentsPage() {
   const [alertEmail, setAlertEmail] = useState(false)
   const [activity, setActivity] = useState('Idle')
   const [loadError, setLoadError] = useState<string | null>(null)
+  const preservesUnsupportedUniverse =
+    editingAgent?.universe !== undefined && !canRoundTripUniverse(editingAgent.universe)
+  const preservesUnsupportedAlertRules =
+    editingAgent?.alert_rules !== undefined && !canRoundTripAlertRules(editingAgent.alert_rules)
 
   useEffect(() => {
     if (!session) return
@@ -288,6 +260,11 @@ export function AgentsPage() {
           </label>
           <fieldset className="rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
             <legend className="px-1 text-sm font-semibold text-neutral-800 dark:text-neutral-100">Universe</legend>
+            {preservesUnsupportedUniverse ? (
+              <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200">
+                Existing {universeLabel(editingAgent.universe)} universe is preserved by this edit.
+              </p>
+            ) : null}
             <div className="mt-3 grid gap-3 sm:grid-cols-[120px_minmax(0,1fr)]">
               <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
                 Kind
@@ -295,6 +272,7 @@ export function AgentsPage() {
                   name="subject-kind"
                   value={subjectKind}
                   onChange={(event) => setSubjectKind(event.currentTarget.value)}
+                  disabled={preservesUnsupportedUniverse}
                   className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
                 >
                   <option value="issuer">issuer</option>
@@ -310,6 +288,7 @@ export function AgentsPage() {
                   name="subject-id"
                   value={subjectId}
                   onChange={(event) => setSubjectId(event.currentTarget.value)}
+                  disabled={preservesUnsupportedUniverse}
                   className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
                 />
               </label>
@@ -317,6 +296,11 @@ export function AgentsPage() {
           </fieldset>
           <fieldset className="rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
             <legend className="px-1 text-sm font-semibold text-neutral-800 dark:text-neutral-100">Alert rule</legend>
+            {preservesUnsupportedAlertRules ? (
+              <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200">
+                Existing {alertRuleLabel(editingAgent.alert_rules)} alert rules are preserved by this edit.
+              </p>
+            ) : null}
             <div className="mt-3 grid gap-3">
               <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
                 Rule id
@@ -324,6 +308,7 @@ export function AgentsPage() {
                   name="alert-rule-id"
                   value={alertRuleId}
                   onChange={(event) => setAlertRuleId(event.currentTarget.value)}
+                  disabled={preservesUnsupportedAlertRules}
                   className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
                 />
               </label>
@@ -333,6 +318,7 @@ export function AgentsPage() {
                   name="alert-severity"
                   value={alertSeverity}
                   onChange={(event) => setAlertSeverity(event.currentTarget.value)}
+                  disabled={preservesUnsupportedAlertRules}
                   className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
                 >
                   <option value="low">low</option>
@@ -347,6 +333,7 @@ export function AgentsPage() {
                   name="alert-headline"
                   value={alertHeadline}
                   onChange={(event) => setAlertHeadline(event.currentTarget.value)}
+                  disabled={preservesUnsupportedAlertRules}
                   className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
                 />
               </label>
@@ -356,6 +343,7 @@ export function AgentsPage() {
                   type="checkbox"
                   checked={alertEmail}
                   onChange={(event) => setAlertEmail(event.currentTarget.checked)}
+                  disabled={preservesUnsupportedAlertRules}
                   className="size-4"
                 />
                 Email
@@ -468,42 +456,4 @@ function alertRuleLabel(alertRules: AgentRow['alert_rules']): string {
   const severity = rule.severity_at_least ?? 'any'
   const headline = rule.headline_contains ? ` headline contains ${rule.headline_contains}` : ''
   return `${severity}+${headline}`.trim()
-}
-
-export function buildAgentPayload(
-  state: AgentFormState,
-  existing?: Pick<AgentRow, 'universe' | 'alert_rules'>,
-): AgentPayload {
-  const subjectRef = state.subjectId.trim()
-    ? [{ kind: state.subjectKind, id: state.subjectId.trim() }]
-    : []
-  const alertRules = state.alertRuleId.trim() && state.alertHeadline.trim()
-    ? [
-        {
-          rule_id: state.alertRuleId.trim(),
-          severity_at_least: state.alertSeverity,
-          headline_contains: state.alertHeadline.trim(),
-          channels: state.alertEmail ? ['email'] : [],
-        },
-      ]
-    : []
-  const preservedUniverse: AgentUniverse | null =
-    existing?.universe !== undefined && !canRoundTripUniverse(existing.universe) ? existing.universe : null
-  const preservedAlertRules: ReadonlyArray<AgentAlertRule> | null =
-    existing?.alert_rules !== undefined && !canRoundTripAlertRules(existing.alert_rules) ? existing.alert_rules : null
-  return {
-    name: state.name.trim(),
-    thesis: state.thesis.trim(),
-    cadence: state.cadence,
-    universe: preservedUniverse ?? { mode: 'static', subject_refs: subjectRef },
-    alert_rules: preservedAlertRules ?? alertRules,
-  }
-}
-
-function canRoundTripUniverse(universe: AgentRow['universe']): boolean {
-  return universe === undefined || (universe.mode === 'static' && universe.subject_refs.length <= 1)
-}
-
-function canRoundTripAlertRules(alertRules: AgentRow['alert_rules']): boolean {
-  return alertRules === undefined || alertRules.length <= 1
 }

@@ -633,6 +633,8 @@ paths:
           description: Malformed request body
         '401':
           description: Missing or malformed user credential
+        '409':
+          description: Idempotency key conflicts with an existing chat message
         '404':
           description: Thread not found for the calling user
     delete:
@@ -969,6 +971,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AnalyzeRun'
+        '400':
+          description: Malformed request body or unsupported source categories
+        '401':
+          description: Missing or malformed user credential
+        '404':
+          description: Template not found
+        '422':
+          description: Analyze workflow could not seal a valid snapshot
   /v1/analyze/runs/{runId}/share-to-chat:
     post:
       tags: [Analyze]
