@@ -40,7 +40,6 @@ import {
   type ChatThread,
   type ChatThreadsDb,
 } from "../../chat/src/threads-repo.ts";
-import { writeRunActivity } from "../../observability/src/run-activity.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
 import type { SubjectRef } from "../../resolver/src/subject-ref.ts";
 import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
@@ -738,6 +737,9 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
       async run({ userId, agentId }) {
         const existing = await getAgent(deps.db, agentId);
         if (existing === null || existing.user_id !== userId) return null;
+        if (!deps.createAgentLoopStages) {
+          throw new DevApiHttpError(503, "durable agent loop stages are not configured");
+        }
         const runId = randomUUID();
         const claimed = await claimAgentRun(deps.db, {
           run_id: runId,
@@ -746,16 +748,24 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
         });
         if (!claimed.claimed) return toDevAgentRun(claimed.row);
         try {
+          const loopAgent = await getAgent(deps.db, agentId);
+          if (loopAgent === null || loopAgent.user_id !== userId) {
+            return toDevAgentRun(await failAgentRun(deps.db, {
+              run_id: runId,
+              error: "agent not found after run claim",
+              outputs_summary: { trigger: "manual", status: "failed" },
+            }));
+          }
           const loopResult = await runAgentLoop({
             pool: deps.db,
             agent_id: agentId,
             run_id: runId,
-            current_watermarks: existing.watermarks,
-            alert_rules: Array.isArray(existing.alert_rules) ? existing.alert_rules : [],
-            stages: (deps.createAgentLoopStages ?? defaultAgentLoopStages)({
+            current_watermarks: loopAgent.watermarks,
+            alert_rules: Array.isArray(loopAgent.alert_rules) ? loopAgent.alert_rules : [],
+            stages: deps.createAgentLoopStages({
               userId,
               runId,
-              agent: existing,
+              agent: loopAgent,
             }),
           });
           return toDevAgentRun(await completeAgentRun(deps.db, {
@@ -815,7 +825,7 @@ function readAnalyzeSourceCategories(
     if (text === null) throw new DevApiHttpError(400, `source_categories[${index}] must be a non-empty string`);
     return text;
   });
-  return categories.length > 0 ? categories : [...fallback];
+  return categories;
 }
 
 function analyzeBundleIds(sourceCategories: ReadonlyArray<string>): ReadonlyArray<string> {
@@ -918,81 +928,6 @@ function emptyEgressDb(): QueryExecutor {
 function readUniverse(value: unknown): AgentUniverse {
   if (value !== null && typeof value === "object") return value as AgentUniverse;
   return { mode: "static", subject_refs: [] };
-}
-
-function defaultAgentLoopStages(
-  input: DevApiAgentLoopStageFactoryInput,
-): AgentLoopStages {
-  const subjectRefs = subjectRefsFromUniverse(input.agent.universe);
-  return {
-    readDeltas: async () => ({
-      trigger: "manual",
-      watermarks: input.agent.watermarks,
-      universe: input.agent.universe as unknown as JsonValue,
-    }),
-    extractEvidence: async ({ deltas }) => ({
-      deltas: deltas as JsonValue,
-      source_policy: input.agent.source_policy,
-      subject_refs: subjectRefs as unknown as JsonValue,
-    }),
-    clusterEvidence: async ({ evidence }) => ({
-      evidence: evidence as JsonValue,
-      claim_clusters: [],
-    }),
-    analyze: async ({ clusters }) => ({
-      clusters: clusters as JsonValue,
-      findings: [],
-    }),
-    nextWatermarks: async ({ current_watermarks }) => ({
-      ...jsonObjectOrEmpty(current_watermarks),
-      last_manual_run_at: new Date().toISOString(),
-    }),
-    applySideEffects: async ({ tx }) => {
-      await writeRunActivity(tx, {
-        user_id: input.userId,
-        agent_id: input.agent.agent_id,
-        stage: "reading",
-        subject_refs: subjectRefs,
-        summary: `Read ${input.agent.name} watermarks for a manual run.`,
-      });
-      await writeRunActivity(tx, {
-        user_id: input.userId,
-        agent_id: input.agent.agent_id,
-        stage: "investigating",
-        subject_refs: subjectRefs,
-        summary: `Investigated ${input.agent.name} configured universe.`,
-      });
-      await writeRunActivity(tx, {
-        user_id: input.userId,
-        agent_id: input.agent.agent_id,
-        stage: "found",
-        subject_refs: subjectRefs,
-        summary: `Completed ${input.agent.name} run with no generated findings.`,
-      });
-      return { findings: 0, activities: 3 };
-    },
-    alertFindings: async () => [],
-  };
-}
-
-function subjectRefsFromUniverse(universe: AgentUniverse): ReadonlyArray<{ kind: string; id: string }> {
-  if (universe.mode === "static") {
-    return Object.freeze(universe.subject_refs.map((ref) => ({ kind: ref.kind, id: ref.id })));
-  }
-  return Object.freeze([{ kind: universe.mode, id: universeId(universe) }]);
-}
-
-function universeId(universe: Exclude<AgentUniverse, { mode: "static" }>): string {
-  switch (universe.mode) {
-    case "screen":
-      return universe.screen_id;
-    case "theme":
-      return universe.theme_id;
-    case "portfolio":
-      return universe.portfolio_id;
-    case "agent":
-      return universe.agent_id;
-  }
 }
 
 function jsonObjectOrEmpty(value: JsonValue | null | undefined): Record<string, JsonValue> {

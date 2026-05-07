@@ -6,6 +6,7 @@ import {
   createFixtureDevApiAdapters,
   createServiceDevApiAdapters,
 } from "../src/http.ts";
+import { ANALYZE_BASE_BUNDLE_ID } from "../../analyze/src/index.ts";
 
 async function startServer(
   t: TestContext,
@@ -331,6 +332,7 @@ test("service Agent adapter runs the durable loop and writes activity before com
   const db = fakeAgentLoopDb({ userId, agentId });
   const adapters = createServiceDevApiAdapters({
     db,
+    createAgentLoopStages: createActivityAgentLoopStages,
     async sealAnalyzeSnapshot() {
       throw new Error("analyze seal is not used by agent runs");
     },
@@ -349,6 +351,43 @@ test("service Agent adapter runs the durable loop and writes activity before com
   const activityQueryIndex = db.queries.findIndex((query) => query.text.includes("insert into run_activities"));
   assert.ok(activityQueryIndex > -1);
   assert.ok(completeQueryIndex > activityQueryIndex);
+});
+
+test("service Agent adapter reloads watermarks after claiming the run", async () => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const agentId = "11111111-1111-4111-8111-111111111111";
+  const db = fakeAgentLoopDb({
+    userId,
+    agentId,
+    agentWatermarksByRead: [{ cursor: "stale" }, { cursor: "fresh" }],
+  });
+  let observedWatermarks: unknown = null;
+  const adapters = createServiceDevApiAdapters({
+    db,
+    createAgentLoopStages({ agent }) {
+      assert.deepEqual(agent.watermarks, { cursor: "fresh" });
+      return {
+        readDeltas: async ({ current_watermarks }) => {
+          observedWatermarks = current_watermarks;
+          return {};
+        },
+        extractEvidence: async () => ({}),
+        clusterEvidence: async () => ({}),
+        analyze: async () => ({}),
+        nextWatermarks: async () => ({ cursor: "next" }),
+        applySideEffects: async () => ({ findings: 0 }),
+      };
+    },
+    async sealAnalyzeSnapshot() {
+      throw new Error("analyze seal is not used by agent runs");
+    },
+  });
+
+  const run = await adapters.agents.run({ userId, agentId });
+
+  assert.equal(run?.status, "completed");
+  assert.deepEqual(observedWatermarks, { cursor: "fresh" });
+  assert.equal(db.queries.filter((query) => query.text.includes("from agents") && query.text.includes("where agent_id")).length, 2);
 });
 
 test("service Agent adapter lets durable loop stages create findings and evaluate alerts", async () => {
@@ -426,6 +465,29 @@ test("service Agent adapter lets durable loop stages create findings and evaluat
   assert.ok(db.queries.some((query) => query.text.includes("insert into alerts_fired")));
 });
 
+test("POST /v1/agents/:id/runs rejects durable adapter without loop stages", async (t) => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const agentId = "11111111-1111-4111-8111-111111111111";
+  const db = fakeAgentLoopDb({ userId, agentId });
+  const adapters = createServiceDevApiAdapters({
+    db,
+    async sealAnalyzeSnapshot() {
+      throw new Error("analyze seal is not used by agent runs");
+    },
+  });
+  const base = await startServer(t, {}, { adapters });
+
+  const response = await fetch(`${base}/v1/agents/${agentId}/runs`, {
+    method: "POST",
+    headers: { "x-user-id": userId },
+  });
+  const body = await response.json() as { error?: string };
+
+  assert.equal(response.status, 503);
+  assert.equal(body.error, "durable agent loop stages are not configured");
+  assert.equal(db.queries.some((query) => query.text.includes("insert into agent_run_logs")), false);
+});
+
 test("service Analyze adapter rejects unknown source categories before persistence", async () => {
   const userId = "00000000-0000-4000-8000-000000000001";
   const templateId = "11111111-1111-4111-8111-111111111111";
@@ -450,6 +512,110 @@ test("service Analyze adapter rejects unknown source categories before persisten
     /unknown source category/,
   );
   assert.equal(workflowCalls, 0);
+  assert.deepEqual(insertedBlocks, []);
+});
+
+test("service Analyze adapter honors explicit empty source categories as base bundle only", async () => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const templateId = "11111111-1111-4111-8111-111111111111";
+  const insertedBlocks: unknown[] = [];
+  let workflowInput: Parameters<NonNullable<Parameters<typeof createServiceDevApiAdapters>[0]["runAnalyzeWorkflow"]>>[0] | null = null;
+  const adapters = createServiceDevApiAdapters({
+    db: fakeAnalyzeDb({ userId, templateId, insertedBlocks }),
+    runAnalyzeWorkflow(input) {
+      workflowInput = input;
+      return {
+        blocks: [
+          {
+            id: "44444444-4444-4444-8444-444444444444",
+            kind: "rich_text",
+            snapshot_id: input.snapshotId,
+            source_refs: [],
+            as_of: "2026-05-06T00:00:00.000Z",
+            segments: [],
+          },
+        ],
+      };
+    },
+    async sealAnalyzeSnapshot(input) {
+      return {
+        ok: true,
+        snapshot: {
+          snapshot_id: input.snapshotId,
+          subject_refs: [],
+          as_of: "2026-05-06T00:00:00.000Z",
+          basis: "reported",
+          normalization: "none",
+          source_ids: [],
+          fact_refs: [],
+          claim_refs: [],
+          event_refs: [],
+          allowed_transforms: {},
+        },
+        verification: { ok: true, failures: [] },
+      };
+    },
+  });
+
+  await adapters.analyze.createRun({
+    userId,
+    body: { template_id: templateId, source_categories: [] },
+  });
+
+  assert.ok(workflowInput);
+  assert.deepEqual(workflowInput.sourceCategories, []);
+  assert.deepEqual(workflowInput.bundleIds, [ANALYZE_BASE_BUNDLE_ID]);
+});
+
+test("POST /v1/analyze/runs rejects verifier failures before persistence", async (t) => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const templateId = "11111111-1111-4111-8111-111111111111";
+  const insertedBlocks: unknown[] = [];
+  const adapters = createServiceDevApiAdapters({
+    db: fakeAnalyzeDb({ userId, templateId, insertedBlocks }),
+    runAnalyzeWorkflow(input) {
+      return {
+        blocks: [
+          {
+            id: "44444444-4444-4444-8444-444444444444",
+            kind: "rich_text",
+            snapshot_id: input.snapshotId,
+            source_refs: [],
+            as_of: "2026-05-06T00:00:00.000Z",
+            segments: [],
+          },
+        ],
+      };
+    },
+    async sealAnalyzeSnapshot() {
+      return {
+        ok: false,
+        verification: {
+          ok: false,
+          failures: [
+            {
+              reason_code: "missing_ref",
+              details: { ref: "claim:missing" },
+            },
+          ],
+        },
+      };
+    },
+  });
+  const base = await startServer(t, {}, { adapters });
+
+  const response = await fetch(`${base}/v1/analyze/runs`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-id": userId,
+    },
+    body: JSON.stringify({ template_id: templateId }),
+  });
+  const body = await response.json() as { error?: string };
+
+  assert.equal(response.status, 422);
+  assert.equal(body.error, "snapshot seal failed");
   assert.deepEqual(insertedBlocks, []);
 });
 
@@ -782,10 +948,12 @@ function fakeAgentLoopDb(input: {
   userId: string;
   agentId: string;
   alertRules?: unknown[];
+  agentWatermarksByRead?: unknown[];
 }) {
   const queries: Array<{ text: string; values?: unknown[] }> = [];
+  let agentReads = 0;
   const runIdFromInsert = () => queries.find((query) => query.text.includes("insert into agent_run_logs"))?.values?.[0] as string;
-  const agentRow = {
+  const agentRow = () => ({
     agent_id: input.agentId,
     user_id: input.userId,
     name: "Durable loop monitor",
@@ -795,11 +963,13 @@ function fakeAgentLoopDb(input: {
     cadence: "daily",
     prompt_template: null,
     alert_rules: input.alertRules ?? [],
-    watermarks: { cursor: "old" },
+    watermarks: input.agentWatermarksByRead?.[
+      Math.min(agentReads, input.agentWatermarksByRead.length - 1)
+    ] ?? { cursor: "old" },
     enabled: true,
     created_at: "2026-05-06T00:00:00.000Z",
     updated_at: "2026-05-06T00:00:00.000Z",
-  };
+  });
   const db = {
     queries,
     async connect() {
@@ -817,7 +987,9 @@ function fakeAgentLoopDb(input: {
         return { rows: [], rowCount: 0 };
       }
       if (text.includes("from agents") && text.includes("where agent_id")) {
-        return { rows: values?.[0] === input.agentId ? [agentRow] : [], rowCount: null };
+        const row = agentRow();
+        agentReads += 1;
+        return { rows: values?.[0] === input.agentId ? [row] : [], rowCount: null };
       }
       if (text.includes("insert into agent_run_logs")) {
         return {
@@ -938,6 +1110,24 @@ function fakeAgentLoopDb(input: {
     },
   };
   return db;
+}
+
+function createActivityAgentLoopStages() {
+  return {
+    readDeltas: async () => ({ cursor: "old" }),
+    extractEvidence: async () => ({ docs: 1 }),
+    clusterEvidence: async () => ({ clusters: 1 }),
+    analyze: async () => ({ findings: [] }),
+    nextWatermarks: async () => ({ cursor: "new" }),
+    applySideEffects: async ({ tx }: { tx: { query(text: string, values?: unknown[]): Promise<unknown> } }) => {
+      await tx.query("insert into run_activities (agent_id, stage, summary) values ($1, $2, $3)", [
+        "11111111-1111-4111-8111-111111111111",
+        "found",
+        "Completed agent run",
+      ]);
+      return { findings: 0, activities: 1 };
+    },
+  };
 }
 
 function fakeArtifactShareDb(input: {
