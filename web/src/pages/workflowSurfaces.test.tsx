@@ -182,6 +182,46 @@ test('Chat thread route loads persisted user and assistant messages on direct na
   }
 })
 
+test('Chat thread route virtualizes long persisted histories while preserving rendered assistant blocks', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restore = installDomGlobals(dom.window as unknown as Window)
+  const originalFetch = globalThis.fetch
+  try {
+    globalThis.fetch = async (input, init) => {
+      assert.equal(String(input), '/v1/chat/threads/thread-123/messages')
+      assert.equal((init?.headers as Record<string, string>)['x-user-id'], USER_ID)
+      return new Response(JSON.stringify({
+        messages: Array.from({ length: 80 }, (_, index) => persistedMessage(index)),
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(wrapWithAuth(
+        <BlockRegistryProvider registry={createDefaultBlockRegistry()}>
+          <MemoryRouter initialEntries={['/chat/thread-123']}>
+            <Routes>
+              <Route path="/chat/:threadId" element={<ChatThreadView />} />
+            </Routes>
+          </MemoryRouter>
+        </BlockRegistryProvider>,
+      ))
+    })
+    await act(async () => undefined)
+
+    const list = dom.window.document.querySelector('[data-testid="virtualized-message-list"]')
+    const renderedRows = dom.window.document.querySelectorAll('[data-testid^="chat-message-"]')
+    assert.ok(list)
+    assert.ok(renderedRows.length > 0)
+    assert.ok(renderedRows.length < 20, `expected a bounded rendered window, got ${renderedRows.length}`)
+    assert.match(dom.window.document.body.innerHTML, /Persisted assistant answer 0/)
+    assert.doesNotMatch(dom.window.document.body.innerHTML, /Persisted assistant answer 79/)
+    await act(async () => root.unmount())
+  } finally {
+    globalThis.fetch = originalFetch
+    restore()
+  }
+})
+
 test('Chat user turns are posted to durable thread messages before streaming', async () => {
   const originalFetch = globalThis.fetch
   const calls: Array<{ input: string; init?: RequestInit }> = []
@@ -630,22 +670,55 @@ test('Agents create/edit payloads include selected universe and alert rule polic
   })
 })
 
+function persistedMessage(index: number) {
+  return {
+    message_id: `message-${index}`,
+    thread_id: 'thread-123',
+    role: index % 2 === 0 ? 'assistant' : 'user',
+    snapshot_id: SNAPSHOT_ID,
+    blocks: [
+      {
+        id: `block-${index}`,
+        kind: 'rich_text',
+        snapshot_id: SNAPSHOT_ID,
+        data_ref: { kind: 'chat_turn', id: `message-${index}` },
+        source_refs: [],
+        as_of: '2026-05-06T00:00:00.000Z',
+        segments: [{ type: 'text', text: `Persisted assistant answer ${index}` }],
+      },
+    ],
+    content_hash: `sha256:${index}`,
+    created_at: '2026-05-06T00:00:00.000Z',
+  }
+}
+
 function installDomGlobals(domWindow: Window): () => void {
   const globals = globalThis as unknown as {
     IS_REACT_ACT_ENVIRONMENT?: boolean
     document?: Document
     window?: Window
+    ResizeObserver?: typeof ResizeObserver
   }
   const hadActEnv = Object.prototype.hasOwnProperty.call(globals, 'IS_REACT_ACT_ENVIRONMENT')
   const hadDocument = Object.prototype.hasOwnProperty.call(globals, 'document')
   const hadWindow = Object.prototype.hasOwnProperty.call(globals, 'window')
+  const hadResizeObserver = Object.prototype.hasOwnProperty.call(globals, 'ResizeObserver')
   const previousActEnv = globals.IS_REACT_ACT_ENVIRONMENT
   const previousDocument = globals.document
   const previousWindow = globals.window
+  const previousResizeObserver = globals.ResizeObserver
 
   globals.IS_REACT_ACT_ENVIRONMENT = true
   globals.document = domWindow.document
   globals.window = domWindow
+  globals.ResizeObserver = class {
+    observe() {
+      return undefined
+    }
+    disconnect() {
+      return undefined
+    }
+  } as unknown as typeof ResizeObserver
 
   return () => {
     if (hadActEnv) globals.IS_REACT_ACT_ENVIRONMENT = previousActEnv
@@ -654,6 +727,8 @@ function installDomGlobals(domWindow: Window): () => void {
     else delete globals.document
     if (hadWindow) globals.window = previousWindow
     else delete globals.window
+    if (hadResizeObserver) globals.ResizeObserver = previousResizeObserver
+    else delete globals.ResizeObserver
   }
 }
 

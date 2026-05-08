@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createConfiguredNotificationAdapters,
   createDevNoopNotificationAdapters,
   processPendingNotifications,
   type NotificationAdapter,
@@ -9,6 +10,7 @@ import {
   type NotificationChannel,
   type NotificationPayload,
 } from "../src/delivery-processor.ts";
+import { runNotificationWorkerOnce } from "../src/worker.ts";
 
 const ALERT_ID = "11111111-1111-4111-8111-111111111111";
 const AGENT_ID = "22222222-2222-4222-8222-222222222222";
@@ -205,6 +207,67 @@ test("dev no-op adapters expose every production notification channel", async ()
   const adapters = createDevNoopNotificationAdapters();
   assert.deepEqual(Object.keys(adapters).sort(), ["digest", "email", "mobile_push", "sms", "web_push"]);
   assert.equal((await adapters.email.send({ title: "T", body: "B", alerts: [] })).provider, "dev-noop");
+});
+
+test("configured webhook adapters send provider-shaped payloads for every production channel", async () => {
+  const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const adapters = createConfiguredNotificationAdapters({
+    NOTIFICATIONS_EMAIL_WEBHOOK_URL: "https://notify.example/email",
+    NOTIFICATIONS_WEB_PUSH_WEBHOOK_URL: "https://notify.example/web-push",
+    NOTIFICATIONS_SMS_WEBHOOK_URL: "https://notify.example/sms",
+    NOTIFICATIONS_MOBILE_PUSH_WEBHOOK_URL: "https://notify.example/mobile-push",
+    NOTIFICATIONS_DIGEST_WEBHOOK_URL: "https://notify.example/digest",
+  }, async (url, init) => {
+    calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+    return new Response(JSON.stringify({ message_id: `provider-${calls.length}` }), {
+      status: 202,
+      headers: { "content-type": "application/json" },
+    });
+  });
+
+  const payload: NotificationPayload = { title: "T", body: "B", alerts: [] };
+  const receipts = await Promise.all([
+    adapters.email.send(payload),
+    adapters.web_push.send(payload),
+    adapters.sms.send(payload),
+    adapters.mobile_push.send(payload),
+    adapters.digest.send(payload),
+  ]);
+
+  assert.deepEqual(calls.map((call) => call.url), [
+    "https://notify.example/email",
+    "https://notify.example/web-push",
+    "https://notify.example/sms",
+    "https://notify.example/mobile-push",
+    "https://notify.example/digest",
+  ]);
+  assert.deepEqual(calls.map((call) => call.body.channel), ["email", "web_push", "sms", "mobile_push", "digest"]);
+  assert.deepEqual(receipts.map((receipt) => receipt.provider_message_id), [
+    "provider-1",
+    "provider-2",
+    "provider-3",
+    "provider-4",
+    "provider-5",
+  ]);
+});
+
+test("runNotificationWorkerOnce processes pending alerts through configured adapters", async () => {
+  const sent: string[] = [];
+  const db = fakeNotificationDb({ pendingRows: [pendingRow({ channels: ["email"] })] });
+
+  const result = await runNotificationWorkerOnce({
+    db,
+    adapters: channelAdapters((channel) => {
+      sent.push(channel);
+      return { provider: "test-provider", provider_message_id: "receipt-1" };
+    }),
+    now: () => "2026-05-07T00:00:00.000Z",
+  });
+
+  assert.deepEqual(sent, ["email"]);
+  assert.equal(result.delivered, 1);
+  assert.equal(db.updates[0]?.status, "notified");
+  assert.equal(db.updates[0]?.metadata.channels[0].provider_message_id, "receipt-1");
 });
 
 type FakeDbOptions = {

@@ -703,6 +703,12 @@ This service replaces the idea of a completely separate “fact store service”
 
 This sits adjacent to Evidence and feeds it.
 
+Current implementation note: filing extraction is an internal sub-boundary
+across Evidence and Fundamentals rather than a standalone service package. See
+[ADR 0003](docs/adr/0003-filing-extraction-boundary.md) for the accepted
+boundary, handoff contracts, test coverage, and triggers for splitting into
+`services/filing-extraction`.
+
 Responsibilities:
 
 * filing retrieval

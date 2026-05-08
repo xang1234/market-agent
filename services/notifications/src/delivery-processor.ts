@@ -32,6 +32,8 @@ export type NotificationAdapter = {
 
 export type NotificationAdapters = Partial<Record<NotificationChannel, NotificationAdapter>>;
 
+export type NotificationEnv = Partial<Record<string, string | undefined>>;
+
 export type ProcessPendingNotificationsInput = {
   adapters: NotificationAdapters;
   claimTimeoutMs?: number;
@@ -61,6 +63,8 @@ type QueryExecutor = {
     values?: unknown[],
   ): Promise<{ rows: R[] }>;
 };
+
+export type NotificationQueryExecutor = QueryExecutor;
 
 type AlertNotificationRow = {
   alert_fired_id: string;
@@ -191,6 +195,74 @@ export function createDevNoopNotificationAdapters(): Record<NotificationChannel,
     mobile_push: adapter,
     digest: adapter,
   };
+}
+
+export function createConfiguredNotificationAdapters(
+  env: NotificationEnv,
+  fetchImpl: typeof fetch = fetch,
+): Record<NotificationChannel, NotificationAdapter> {
+  if (env.NOTIFICATIONS_ADAPTER_MODE === "dev-noop") {
+    return createDevNoopNotificationAdapters();
+  }
+  return {
+    email: webhookAdapter("email", requireEnvUrl(env, "NOTIFICATIONS_EMAIL_WEBHOOK_URL"), fetchImpl),
+    web_push: webhookAdapter("web_push", requireEnvUrl(env, "NOTIFICATIONS_WEB_PUSH_WEBHOOK_URL"), fetchImpl),
+    sms: webhookAdapter("sms", requireEnvUrl(env, "NOTIFICATIONS_SMS_WEBHOOK_URL"), fetchImpl),
+    mobile_push: webhookAdapter("mobile_push", requireEnvUrl(env, "NOTIFICATIONS_MOBILE_PUSH_WEBHOOK_URL"), fetchImpl),
+    digest: webhookAdapter("digest", requireEnvUrl(env, "NOTIFICATIONS_DIGEST_WEBHOOK_URL"), fetchImpl),
+  };
+}
+
+function webhookAdapter(
+  channel: NotificationChannel,
+  url: string,
+  fetchImpl: typeof fetch,
+): NotificationAdapter {
+  return {
+    async send(payload) {
+      const response = await fetchImpl(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ channel, ...payload }),
+      });
+      const body = await readProviderResponse(response);
+      if (!response.ok) {
+        throw new Error(`${channel} provider returned HTTP ${response.status}${body.error ? `: ${body.error}` : ""}`);
+      }
+      return {
+        provider: body.provider ?? "webhook",
+        provider_message_id: body.provider_message_id ?? body.message_id ?? body.id,
+        metadata: body.metadata,
+      };
+    },
+  };
+}
+
+async function readProviderResponse(response: Response): Promise<{
+  provider?: string;
+  provider_message_id?: string;
+  message_id?: string;
+  id?: string;
+  error?: string;
+  metadata?: JsonValue;
+}> {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) return {};
+  const value = await response.json() as Record<string, unknown>;
+  return {
+    provider: typeof value.provider === "string" ? value.provider : undefined,
+    provider_message_id: typeof value.provider_message_id === "string" ? value.provider_message_id : undefined,
+    message_id: typeof value.message_id === "string" ? value.message_id : undefined,
+    id: typeof value.id === "string" ? value.id : undefined,
+    error: typeof value.error === "string" ? value.error : undefined,
+    metadata: isJsonValue(value.metadata) ? value.metadata : undefined,
+  };
+}
+
+function requireEnvUrl(env: NotificationEnv, name: string): string {
+  const value = env[name]?.trim();
+  if (!value) throw new Error(`${name} is required unless NOTIFICATIONS_ADAPTER_MODE=dev-noop`);
+  return value;
 }
 
 async function claimPendingAlerts(
@@ -486,6 +558,19 @@ function visitJson(value: JsonValue, visitor: (value: JsonValue) => void): void 
   } else if (value !== null && typeof value === "object") {
     for (const child of Object.values(value)) visitJson(child, visitor);
   }
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (
+    value === null ||
+    typeof value === "boolean" ||
+    typeof value === "number" ||
+    typeof value === "string"
+  ) {
+    return true;
+  }
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  return typeof value === "object" && Object.values(value).every(isJsonValue);
 }
 
 function stringArray(value: unknown, label: string): ReadonlyArray<string> {

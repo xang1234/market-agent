@@ -5,6 +5,24 @@ Tracking beads: `fra-5gb`, `fra-131`, and related P3 evidence-plane work.
 This package provides small repository helpers over the evidence-plane tables in
 `spec/finance_research_db_schema.sql`.
 
+## Filing Extraction Boundary
+
+Filing extraction is intentionally part of the Evidence/Fundamentals boundary
+for the current implementation stage; see
+`docs/adr/0003-filing-extraction-boundary.md`.
+
+Evidence owns the filing-document side of the contract:
+
+- source and document identity for SEC filings and related raw material;
+- immutable raw blob storage and retrieval;
+- Inline XBRL extension extraction and candidate fact extraction;
+- footnote, non-GAAP, management-claim, claim/event, and low-confidence review
+  promotion paths.
+
+Downstream callers should hand off by `source_id`, `document_id`, `fact_id`,
+claim/event ids, and canonical `SubjectRef`/issuer identity. They should not
+pass raw filing bytes or ticker-only identifiers across service boundaries.
+
 ## Source Repo
 
 `createSource` writes rows to `sources` with the provenance fields ingestion and

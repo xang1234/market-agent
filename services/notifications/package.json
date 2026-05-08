@@ -7,6 +7,10 @@
     "node": ">=22.6.0"
   },
   "scripts": {
+    "worker": "node --experimental-strip-types src/worker.ts",
     "test": "node --experimental-strip-types --test \"test/**/*.test.ts\""
+  },
+  "dependencies": {
+    "pg": "^8.20.0"
   }
 }
