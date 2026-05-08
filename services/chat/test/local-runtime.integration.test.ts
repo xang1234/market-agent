@@ -132,7 +132,10 @@ test("default local chat runtime persists a verifier-valid assistant message fro
   assert.deepEqual(result.blocks[0]?.document_refs, [seeded.documentId]);
   assert.equal((result.blocks[0]?.claim_refs as unknown[]).includes(otherUserSeeded.claimId), false);
   assert.doesNotMatch(JSON.stringify(result.blocks[0]), /other-user seeded chat evidence/);
-  assert.ok(Array.isArray(result.blocks[0]?.tool_call_ids));
+  const runtimeToolCallIds = result.blocks[0]?.tool_call_ids;
+  assert.ok(Array.isArray(runtimeToolCallIds));
+  assert.ok(runtimeToolCallIds.length > 0);
+  assert.equal(runtimeToolCallIds.every((id) => typeof id === "string" && id.length > 0), true);
 
   const persisted = await persistAssistantMessage({
     threadId: thread.thread_id,
@@ -159,7 +162,11 @@ test("default local chat runtime persists a verifier-valid assistant message fro
   assert.deepEqual(snapshotRows[0]?.claim_refs, [seeded.claimId]);
   assert.deepEqual(snapshotRows[0]?.document_refs, [seeded.documentId]);
   assert.deepEqual(snapshotRows[0]?.source_ids, [seeded.sourceId]);
-  assert.equal(Array.isArray(snapshotRows[0]?.tool_call_ids), true);
+  const persistedToolCallIds = snapshotRows[0]?.tool_call_ids;
+  assert.ok(Array.isArray(persistedToolCallIds));
+  assert.ok(persistedToolCallIds.length > 0);
+  assert.equal(persistedToolCallIds.every((id) => typeof id === "string" && id.length > 0), true);
+  assert.deepEqual(persistedToolCallIds, runtimeToolCallIds);
 
   const messageRows = (await client.query<{ message_id: string }>(
     `select message_id::text as message_id

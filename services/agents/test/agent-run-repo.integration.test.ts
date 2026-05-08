@@ -67,13 +67,18 @@ async function waitForPostgres(name: string, databaseUrl: string): Promise<void>
   for (let attempt = 0; attempt < 60; attempt += 1) {
     const ready = run("docker", ["exec", name, "pg_isready", "-U", "postgres"], { timeout: 5000 });
     if (ready.status === 0) {
-      const pool = new Pool({ connectionString: databaseUrl, max: 1 });
       try {
-        await pool.query("select 1");
-      } finally {
-        await pool.end();
+        const pool = new Pool({ connectionString: databaseUrl, max: 1 });
+        try {
+          await pool.query("select 1");
+          return;
+        } finally {
+          await pool.end().catch(() => {});
+        }
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        continue;
       }
-      return;
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
@@ -96,6 +101,7 @@ async function bootstrapDatabase(t: TestContext, prefix: string): Promise<{
     const apply = run("npm", ["run", "apply:schema", "--", "--database-url", databaseUrl], {
       cwd: DB_ROOT,
       env: { DATABASE_URL: databaseUrl },
+      timeout: 60000,
     });
     assert.equal(apply.status, 0, apply.stderr || apply.stdout);
     return { containerName: name, databaseUrl };

@@ -135,34 +135,32 @@ export async function loadVerifierRowsForRefs(
   const documentIds = unique(input.document_refs);
   const claimIds = unique(input.claim_refs);
 
-  const [sources, documents, claims] = await Promise.all([
-    sourceIds.length === 0
-      ? Promise.resolve({ rows: [] as Array<{ source_id: string }> })
-      : db.query<{ source_id: string }>(
-        `select source_id::text as source_id
-           from sources
-          where source_id = any($1::uuid[])`,
-        [sourceIds],
-      ),
-    documentIds.length === 0
-      ? Promise.resolve({ rows: [] as Array<{ document_id: string; source_id: string }> })
-      : db.query<{ document_id: string; source_id: string }>(
-        `select document_id::text as document_id,
-                source_id::text as source_id
-           from documents
-          where document_id = any($1::uuid[])`,
-        [documentIds],
-      ),
-    claimIds.length === 0
-      ? Promise.resolve({ rows: [] as Array<{ claim_id: string; source_id: string }> })
-      : db.query<{ claim_id: string; source_id: string }>(
-        `select claim_id::text as claim_id,
-                reported_by_source_id::text as source_id
-           from claims
-          where claim_id = any($1::uuid[])`,
-        [claimIds],
-      ),
-  ]);
+  const sources = sourceIds.length === 0
+    ? { rows: [] as Array<{ source_id: string }> }
+    : await db.query<{ source_id: string }>(
+      `select source_id::text as source_id
+         from sources
+        where source_id = any($1::uuid[])`,
+      [sourceIds],
+    );
+  const documents = documentIds.length === 0
+    ? { rows: [] as Array<{ document_id: string; source_id: string }> }
+    : await db.query<{ document_id: string; source_id: string }>(
+      `select document_id::text as document_id,
+              source_id::text as source_id
+         from documents
+        where document_id = any($1::uuid[])`,
+      [documentIds],
+    );
+  const claims = claimIds.length === 0
+    ? { rows: [] as Array<{ claim_id: string; source_id: string }> }
+    : await db.query<{ claim_id: string; source_id: string }>(
+      `select claim_id::text as claim_id,
+              reported_by_source_id::text as source_id
+         from claims
+        where claim_id = any($1::uuid[])`,
+      [claimIds],
+    );
 
   return Object.freeze({
     sources: Object.freeze(sources.rows.map((row) => Object.freeze({ source_id: row.source_id }))),

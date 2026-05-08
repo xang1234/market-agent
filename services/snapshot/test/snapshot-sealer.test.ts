@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   sealSnapshot,
+  sealSnapshotInTransaction,
   sealSnapshotWithPool,
   snapshotTransactionClient,
 } from "../src/snapshot-sealer.ts";
@@ -189,6 +190,18 @@ test("sealSnapshot rolls back when persistence fails after transaction start", a
     "begin",
     "insert into snapshots",
     "rollback",
+  ]);
+});
+
+test("sealSnapshotInTransaction uses the caller transaction", async () => {
+  const { db, queries } = recordingDb();
+
+  const result = await sealSnapshotInTransaction(snapshotTransactionClient(db), validSealInput());
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(queries.map((query) => normalizedSql(query.text)), [
+    "select from tool_call_logs",
+    "insert into snapshots",
   ]);
 });
 

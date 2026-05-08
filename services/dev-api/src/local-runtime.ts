@@ -20,7 +20,11 @@ import { writeRunActivity } from "../../observability/src/run-activity.ts";
 import { generateFinding, type FindingRow } from "../../agents/src/finding-generator.ts";
 import type { SnapshotManifestDraft, SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
 import { STAGED_SNAPSHOT_MANIFEST, stageSnapshotManifest } from "../../snapshot/src/manifest-staging.ts";
-import { sealSnapshotWithPool } from "../../snapshot/src/snapshot-sealer.ts";
+import {
+  sealSnapshotInTransaction,
+  sealSnapshotWithPool,
+  snapshotTransactionClient,
+} from "../../snapshot/src/snapshot-sealer.ts";
 import type {
   DevApiAgentLoopStageFactory,
   DevApiAnalyzeWorkflowInput,
@@ -47,7 +51,7 @@ export async function runAnalyzeWorkflow(
   input: DevApiAnalyzeWorkflowInput,
 ): Promise<DevApiAnalyzeWorkflowResult> {
   const asOf = new Date().toISOString();
-  const subjectRefs = normalizeSubjectRefs(input.subjectRefs, input.snapshotId);
+  const subjectRefs = normalizeSubjectRefs(input.subjectRefs);
   const evidence = await loadLocalRuntimeEvidence(pool(), {
     subject_refs: subjectRefs,
     user_id: input.userId,
@@ -65,7 +69,7 @@ export async function runAnalyzeWorkflow(
       source_ids: evidence.source_ids,
     },
   } satisfies JsonValue;
-  await writeLocalToolCallLog({
+  await writeLocalToolCallLog(pool(), {
     toolCallId,
     toolName: "local_analyze_workflow",
     args: {
@@ -107,7 +111,7 @@ export async function sealAnalyzeSnapshot(
   const blocks = input.blocks as ReadonlyArray<Record<string, unknown>>;
   const snapshotId = input.snapshotId;
   const asOf = maxBlockAsOf(blocks) ?? new Date().toISOString();
-  const subjectRefs = subjectRefsFromBlocks(blocks, snapshotId);
+  const subjectRefs = subjectRefsFromBlocks(blocks);
   const manifest = await manifestFromBlockRefs({
     subjectRefs,
     asOf,
@@ -130,7 +134,7 @@ export async function sealAnalyzeSnapshot(
 }
 
 export const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, runId, agent, trigger = "scheduled" }) => {
-  const subjectRefs = normalizeSubjectRefs(subjectRefsFromUniverse(agent.universe), agent.agent_id);
+  const subjectRefs = normalizeSubjectRefs(subjectRefsFromUniverse(agent.universe));
   const asOf = new Date().toISOString();
   const activityClock = activityClockFrom(asOf);
   let findings: ReadonlyArray<FindingRow> = [];
@@ -220,6 +224,7 @@ export const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, run
 
       const snapshotId = randomUUID();
       const snapshotManifest = await sealAgentEvidenceSnapshot({
+        tx,
         snapshotId,
         subjectRefs,
         evidence: loadedEvidence,
@@ -266,6 +271,7 @@ export const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, run
 };
 
 async function sealAgentEvidenceSnapshot(input: {
+  tx: QueryExecutor;
   snapshotId: string;
   subjectRefs: ReadonlyArray<SnapshotSubjectRef>;
   evidence: LocalRuntimeEvidence;
@@ -282,7 +288,7 @@ async function sealAgentEvidenceSnapshot(input: {
       source_ids: input.evidence.source_ids,
     },
   } satisfies JsonValue;
-  await writeLocalToolCallLog({
+  await writeLocalToolCallLog(input.tx, {
     toolCallId,
     toolName: "local_agent_evidence_retrieval",
     args: {
@@ -309,12 +315,12 @@ async function sealAgentEvidenceSnapshot(input: {
       },
     ],
   });
-  const verifierRows = await loadVerifierRowsForRefs(pool(), {
+  const verifierRows = await loadVerifierRowsForRefs(input.tx, {
     source_ids: manifest.source_ids,
     document_refs: manifest.document_refs,
     claim_refs: manifest.claim_refs,
   });
-  const seal = await sealSnapshotWithPool(pool(), {
+  const seal = await sealSnapshotInTransaction(snapshotTransactionClient(input.tx), {
     snapshot_id: input.snapshotId,
     manifest,
     blocks: input.evidence.claims.map((claim) => ({
@@ -500,14 +506,14 @@ function pool(): Pool {
   return localPool;
 }
 
-async function writeLocalToolCallLog(input: {
+async function writeLocalToolCallLog(db: QueryExecutor, input: {
   toolCallId: string;
   threadId?: string | null;
   toolName: string;
   args: JsonValue;
   result: JsonValue;
 }): Promise<void> {
-  await pool().query(
+  await db.query(
     `insert into tool_call_logs
        (tool_call_id, thread_id, tool_name, args, result_hash, duration_ms, status, error_code)
      values ($1::uuid, $2::uuid, $3, $4::jsonb, $5, $6, $7, $8)
@@ -625,10 +631,7 @@ function analyzeMemoText(
   ].filter((line) => line.length > 0).join("\n\n");
 }
 
-function subjectRefsFromBlocks(
-  blocks: ReadonlyArray<Record<string, unknown>>,
-  fallbackId: string,
-): ReadonlyArray<SnapshotSubjectRef> {
+function subjectRefsFromBlocks(blocks: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<SnapshotSubjectRef> {
   const refs: SnapshotSubjectRef[] = [];
   for (const block of blocks) {
     const subjectRefs = block.subject_refs;
@@ -637,7 +640,7 @@ function subjectRefsFromBlocks(
       if (isSnapshotSubjectRef(subjectRef)) refs.push(subjectRef);
     }
   }
-  return normalizeSubjectRefs(refs, fallbackId);
+  return normalizeSubjectRefs(refs);
 }
 
 function subjectRefsFromUniverse(universe: unknown): ReadonlyArray<SnapshotSubjectRef> {
@@ -655,11 +658,8 @@ function subjectRefsFromUniverse(universe: unknown): ReadonlyArray<SnapshotSubje
 
 function normalizeSubjectRefs(
   refs: ReadonlyArray<unknown>,
-  fallbackId: string,
 ): ReadonlyArray<SnapshotSubjectRef> {
-  const normalized = refs.filter(isSnapshotSubjectRef);
-  if (normalized.length > 0) return normalized;
-  return [{ kind: "screen", id: fallbackId }];
+  return refs.filter(isSnapshotSubjectRef);
 }
 
 function maxBlockAsOf(blocks: ReadonlyArray<Record<string, unknown>>): string | null {

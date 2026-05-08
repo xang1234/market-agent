@@ -57,7 +57,7 @@ function stopMinio(containerName: string): void {
   run("docker", ["rm", "--force", containerName]);
 }
 
-async function waitForMinio(client: S3Client, maxAttempts = 30): Promise<void> {
+async function waitForMinio(client: S3Client, maxAttempts = 120): Promise<void> {
   let lastError: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
