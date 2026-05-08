@@ -172,6 +172,7 @@ test("up rolls back already-started services when a later readiness check fails"
       'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api" "$ROOT/services/watchlists" "$ROOT/services/market" "$ROOT/services/fundamentals" "$ROOT/services/screener" "$ROOT/services/portfolio" "$ROOT/services/home" "$ROOT/services/evidence" "$ROOT/services/agents" "$ROOT/services/analyze" "$ROOT/services/artifact" "$ROOT/services/notifications" "$ROOT/services/observability" "$ROOT/services/snapshot" "$ROOT/services/summary" "$ROOT/services/themes" "$ROOT/services/tools"',
       "ensure_command(){ :; }",
       "ensure_install(){ :; }",
+      "assert_port_available(){ :; }",
       "npm(){ :; }",
       "export -f npm",
       'compose(){ printf "compose:%s\\n" "$*" >> "$TRACE_FILE"; }',
@@ -209,6 +210,7 @@ test("up rolls back when postgres never becomes ready", async () => {
       'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api" "$ROOT/services/watchlists" "$ROOT/services/market" "$ROOT/services/fundamentals" "$ROOT/services/screener" "$ROOT/services/portfolio" "$ROOT/services/home" "$ROOT/services/evidence" "$ROOT/services/agents" "$ROOT/services/analyze" "$ROOT/services/artifact" "$ROOT/services/notifications" "$ROOT/services/observability" "$ROOT/services/snapshot" "$ROOT/services/summary" "$ROOT/services/themes" "$ROOT/services/tools"',
       "ensure_command(){ :; }",
       "ensure_install(){ :; }",
+      "assert_port_available(){ :; }",
       "sleep(){ :; }",
       'compose(){ printf "compose:%s\\n" "$*" >> "$TRACE_FILE"; case "$*" in "exec -T postgres pg_isready"*) return 1 ;; esac; return 0; }',
       'start_process(){ local name="$1"; printf "start:%s\\n" "$name" >> "$TRACE_FILE"; sleep 60 & echo $! > "$PID_DIR/$name.pid"; }',
@@ -278,4 +280,33 @@ test("runtime module env vars default to in-repo durable local stack wiring", as
   ]);
 
   await rm(fixture.root, { recursive: true, force: true });
+});
+
+test("down stops compose services without deleting dev database containers", async () => {
+  const fixture = await createShellFixture();
+  const traceFile = join(fixture.root, "trace.log");
+
+  const result = await runBash(
+    [
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      `TRACE_FILE="${traceFile}"`,
+      'compose(){ printf "compose:%s\\n" "$*" >> "$TRACE_FILE"; }',
+      "down",
+    ].join("\n"),
+    fixture.root,
+  );
+
+  assert.equal(result.code, 0, result.stderr);
+  const trace = await readFile(traceFile, "utf8");
+  assert.match(trace, /compose:stop/);
+  assert.doesNotMatch(trace, /compose:down/);
+
+  await rm(fixture.root, { recursive: true, force: true });
+});
+
+test("docker compose declares persistent storage for Postgres dev data", async () => {
+  const composeFile = await readFile(join(REPO_ROOT, "docker-compose.dev.yml"), "utf8");
+
+  assert.match(composeFile, /postgres-data:\/var\/lib\/postgresql\/data/);
+  assert.match(composeFile, /^volumes:\n(?:[\s\S]*\n)?  postgres-data:/m);
 });

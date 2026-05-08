@@ -1,5 +1,6 @@
-// Dev-only listing records and a polygon snapshot fetcher that returns canned
-// data for known tickers. Stable UUIDs let the web frontend hard-link to a
+// Dev-only listing records and a Polygon-compatible fetcher that returns canned
+// data for seeded tickers and deterministic synthetic data for discovered
+// tickers. Stable UUIDs let the web frontend hard-link to a
 // listing (e.g., `/symbol/listing/<uuid>`) without a DB seed step. Production
 // wiring replaces both with DB-backed listings + a real polygon HTTP client
 // using POLYGON_API_KEY.
@@ -61,7 +62,8 @@ const DEV_SNAPSHOTS: Record<string, DevSnapshot> = {
   NVDA: { price: 142.18, prev_close: 138.55 },
 };
 
-// A polygon fetcher that returns canned snapshot payloads for known tickers.
+// A polygon fetcher that returns canned snapshot payloads for seeded tickers
+// and deterministic synthetic payloads for discovered tickers.
 // Routes match the real polygon API path so the adapter can run unmodified.
 // The injected clock determines the snapshot's lastTrade.t — tests pass a
 // fixed clock for deterministic as_of; dev passes `() => new Date()` so the
@@ -73,10 +75,7 @@ export function createDevPolygonFetcher(opts: { clock: () => Date }): PolygonFet
     );
     if (snapshotMatch) {
       const ticker = decodeURIComponent(snapshotMatch[1]);
-      const snap = DEV_SNAPSHOTS[ticker];
-      if (!snap) {
-        throw new Error(`dev fixture: unknown ticker ${ticker}`);
-      }
+      const snap = snapshotForTicker(ticker);
       const tNs = opts.clock().getTime() * 1_000_000;
       return {
         status: "OK",
@@ -96,10 +95,7 @@ export function createDevPolygonFetcher(opts: { clock: () => Date }): PolygonFet
       const timespan = aggsMatch[3] as "minute" | "hour" | "day";
       const startMs = Number(aggsMatch[4]);
       const endMs = Number(aggsMatch[5]);
-      const snap = DEV_SNAPSHOTS[ticker];
-      if (!snap) {
-        throw new Error(`dev fixture: unknown ticker ${ticker}`);
-      }
+      const snap = snapshotForTicker(ticker);
       return {
         adjusted: true,
         results: synthesizeAggBars({ ticker, prevClose: snap.prev_close, multiplier, timespan, startMs, endMs }),
@@ -117,19 +113,29 @@ export function createSeededFixtureFallbackFetcher(opts: {
     try {
       return await opts.primary(path);
     } catch (error) {
-      if (!isSeededTickerPath(path)) throw error;
+      if (!isMarketTickerPath(path)) throw error;
       return opts.fallback(path);
     }
   };
 }
 
-function isSeededTickerPath(path: string): boolean {
+function isMarketTickerPath(path: string): boolean {
   const match =
     path.match(/^\/v2\/snapshot\/locale\/us\/markets\/stocks\/tickers\/([^?]+)/) ??
     path.match(/^\/v2\/aggs\/ticker\/([^/]+)\//);
-  if (!match) return false;
-  const ticker = decodeURIComponent(match[1]);
-  return Object.hasOwn(DEV_SNAPSHOTS, ticker);
+  return Boolean(match);
+}
+
+function snapshotForTicker(ticker: string): DevSnapshot {
+  return DEV_SNAPSHOTS[ticker] ?? syntheticSnapshot(ticker);
+}
+
+function syntheticSnapshot(ticker: string): DevSnapshot {
+  const seed = tickerSeed(ticker);
+  const prevClose = round2(5 + (seed % 25_000) / 100);
+  const driftPct = (((seed >>> 8) % 1001) - 500) / 10_000;
+  const price = Math.max(0.01, round2(prevClose * (1 + driftPct)));
+  return { price, prev_close: prevClose };
 }
 
 // Generate deterministic per-period bars for a ticker. The walk is seeded by

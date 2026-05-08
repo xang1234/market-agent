@@ -228,7 +228,7 @@ The dev shell brings up:
 ./scripts/dev-shell.sh down
 ```
 
-This stops the service processes and runs `docker compose down`. State persists in Docker volumes.
+This stops the service processes and Docker services while keeping the Postgres and MinIO dev volumes intact. To reset all local dev state, run `docker compose -f docker-compose.dev.yml --env-file .env.dev down -v`.
 
 ### Dev-mode authentication
 

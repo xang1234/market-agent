@@ -18,7 +18,7 @@ test("seeded fixture fallback fetcher preserves dev quotes when live Polygon rej
   assert.equal((payload as { ticker?: { lastTrade?: { p?: number } } }).ticker?.lastTrade?.p, 196.58);
 });
 
-test("seeded fixture fallback fetcher keeps unknown discovered tickers on the live path", async () => {
+test("seeded fixture fallback fetcher synthesizes discovered ticker quotes when live Polygon rejects them", async () => {
   const fallback = createSeededFixtureFallbackFetcher({
     primary: async () => {
       throw new Error("polygon: HTTP 403");
@@ -26,8 +26,7 @@ test("seeded fixture fallback fetcher keeps unknown discovered tickers on the li
     fallback: createDevPolygonFetcher({ clock: () => new Date("2026-05-08T12:00:00.000Z") }),
   });
 
-  await assert.rejects(
-    () => fallback("/v2/snapshot/locale/us/markets/stocks/tickers/AMD"),
-    /polygon: HTTP 403/,
-  );
+  const payload = await fallback("/v2/snapshot/locale/us/markets/stocks/tickers/SNDL");
+
+  assert.equal(typeof (payload as { ticker?: { lastTrade?: { p?: unknown } } }).ticker?.lastTrade?.p, "number");
 });

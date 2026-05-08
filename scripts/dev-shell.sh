@@ -169,7 +169,7 @@ start_process() {
 
   (
     cd "$dir"
-    nohup bash -lc "$command" >"$log_file" 2>&1 &
+    nohup bash -lc "$command" </dev/null >"$log_file" 2>&1 &
     echo $! >"$pid_file"
   )
 }
@@ -447,7 +447,7 @@ up() {
 
 down() {
   stop_processes
-  compose down
+  compose stop
 }
 
 status() {
