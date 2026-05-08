@@ -5,8 +5,11 @@ import type { Client } from "pg";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import {
   createResolverServer,
+  handleHydrateSubject,
   handleResolveSubjects,
+  validateHydrateSubjectRequest,
   validateResolveRequest,
+  type HydrateSubjectResponse,
   type ResolveResponse,
 } from "../src/http.ts";
 import { normalizeNameForLookup, type QueryExecutor } from "../src/lookup.ts";
@@ -197,6 +200,14 @@ function postResolve(base: string, body: unknown): Promise<Response> {
   });
 }
 
+function postHydrate(base: string, body: unknown): Promise<Response> {
+  return fetch(`${base}/v1/subjects/hydrate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: typeof body === "string" ? body : JSON.stringify(body),
+  });
+}
+
 // OpenAPI-schema-shaped assertion: every ResolvedSubject has the required
 // primitive fields, optional hydrated handoff fields, and alternatives (if
 // present) are SubjectRef-only.
@@ -229,7 +240,7 @@ function assertResolveResponseShape(body: unknown): asserts body is ResolveRespo
       assert.equal(typeof s.normalized_input, "string");
     }
     if (s.resolution_path !== undefined) {
-      assert.ok(["auto_advanced", "explicit_choice"].includes(String(s.resolution_path)));
+      assert.ok(["auto_advanced", "explicit_choice", "direct_ref"].includes(String(s.resolution_path)));
     }
     if (s.context !== undefined) {
       assert.equal(typeof s.context, "object");
@@ -247,6 +258,12 @@ function assertResolveResponseShape(body: unknown): asserts body is ResolveRespo
   for (const u of obj.unresolved as unknown[]) {
     assert.equal(typeof u, "string");
   }
+}
+
+function assertHydrateResponseShape(body: unknown): asserts body is HydrateSubjectResponse {
+  assert.equal(typeof body, "object");
+  assert.ok(body !== null);
+  assertResolveResponseShape({ subjects: [(body as { subject?: unknown }).subject], unresolved: [] });
 }
 
 test("validateResolveRequest rejects missing or non-string text", () => {
@@ -318,6 +335,28 @@ test("validateResolveRequest rejects malformed explicit choices", () => {
       error: "'choice.subject_ref.kind' must be a valid SubjectKind",
     },
   );
+});
+
+test("validateHydrateSubjectRequest accepts a canonical subject_ref", () => {
+  assert.deepEqual(validateHydrateSubjectRequest({ subject_ref: hydratedAaplXnas }), {
+    valid: true,
+    request: { subject_ref: hydratedAaplXnas },
+  });
+});
+
+test("validateHydrateSubjectRequest rejects malformed subject refs", () => {
+  assert.deepEqual(validateHydrateSubjectRequest(null), {
+    valid: false,
+    error: "request body must be a JSON object",
+  });
+  assert.deepEqual(validateHydrateSubjectRequest({}), {
+    valid: false,
+    error: "'subject_ref' is required",
+  });
+  assert.deepEqual(validateHydrateSubjectRequest({ subject_ref: { kind: "ticker", id: "AAPL" } }), {
+    valid: false,
+    error: "'subject_ref.kind' must be a valid SubjectKind",
+  });
 });
 
 test("handler: identifier-like input falls back to ticker lookup when identifier resolution misses", async () => {
@@ -506,6 +545,20 @@ test("handler: explicit ambiguous choice returns selected hydrated subject bundl
     ((subject.context as Record<string, unknown>).listing as Record<string, unknown>).trading_currency,
     "EUR",
   );
+});
+
+test("handler: hydrate subject_ref returns issuer context for a bare listing route", async () => {
+  const response = await handleHydrateSubject(hydratedListingDb([hydratedAaplXnas]), {
+    subject_ref: hydratedAaplXnas,
+  });
+
+  assert.deepEqual(response.subject.subject_ref, hydratedAaplXnas);
+  assert.equal(response.subject.resolution_path, "direct_ref");
+  assert.equal(response.subject.display_name, "AAPL · XNAS — Apple Inc.");
+  assert.equal(response.subject.display_labels?.ticker, "AAPL");
+  assert.equal(response.subject.context?.issuer?.subject_ref.id, hydratedAppleIssuer);
+  assert.equal(response.subject.context?.issuer?.cik, "320193");
+  assert.equal(response.subject.context?.listing?.ticker, "AAPL");
 });
 
 test("handler: ticker text returns a single listing subject with matching confidence", { timeout: 120000 }, async (t) => {
@@ -787,6 +840,33 @@ test("server: POST /v1/subjects/resolve returns 200 with the OpenAPI-shaped resp
   assertResolveResponseShape(body);
   assert.equal(body.subjects.length, 1);
   assert.equal(body.subjects[0].subject_ref.id, apple.listing_id);
+});
+
+test("server: POST /v1/subjects/hydrate returns hydrated context for a bare subject_ref", async (t) => {
+  const base = await startServer(t, hydratedListingDb([hydratedAaplXnas]));
+
+  const res = await postHydrate(base, { subject_ref: hydratedAaplXnas });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("content-type"), "application/json");
+  const body = await res.json();
+  assertHydrateResponseShape(body);
+  assert.equal(body.subject.context.issuer.subject_ref.id, hydratedAppleIssuer);
+  assert.equal(body.subject.context.listing.ticker, "AAPL");
+});
+
+test("server: POST /v1/subjects/hydrate returns 404 for an unknown subject_ref", async (t) => {
+  const base = await startServer(t, hydratedListingDb([]));
+  const unknownListing: SubjectRef = {
+    kind: "listing",
+    id: "99999999-9999-4999-a999-999999999999",
+  };
+
+  const res = await postHydrate(base, { subject_ref: unknownListing });
+
+  assert.equal(res.status, 404);
+  const body = (await res.json()) as { error: string };
+  assert.match(body.error, /Cannot hydrate listing subject_ref/);
 });
 
 test("server: malformed JSON body returns 400 with a descriptive error", { timeout: 120000 }, async (t) => {

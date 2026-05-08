@@ -1,8 +1,11 @@
+import { useEffect, useMemo, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useParams } from 'react-router-dom'
 import { analyzeEntryFromSubject } from '../analyze/analyzeEntry'
 import { QuoteSnapshot } from '../symbol/QuoteSnapshot'
 import { subjectDisplayName } from '../symbol/quote'
 import {
+  fetchSubjectHydration,
+  subjectNeedsHydration,
   subjectFromRouteParam,
   subjectFromRouterState,
   type ResolvedSubject,
@@ -47,9 +50,34 @@ const HEADER_ACTION_CLASS =
 export function SubjectDetailShell() {
   const { subjectRef } = useParams<{ subjectRef: string }>()
   const location = useLocation()
-  const subject = subjectFromRouterState(location.state) ?? subjectFromRouteParam(subjectRef)
+  const routeSubject = useMemo(() => subjectFromRouteParam(subjectRef), [subjectRef])
+  const baseSubject = subjectFromRouterState(location.state) ?? routeSubject
+  const [hydratedSubject, setHydratedSubject] = useState<ResolvedSubject | null>(null)
+  const needsHydration = subjectNeedsHydration(baseSubject)
+  const baseSubjectRef = baseSubject.subject_ref
   const { session } = useAuth()
   const userId = session?.userId ?? null
+  const hydratedSubjectMatchesBase =
+    hydratedSubject?.subject_ref.kind === baseSubjectRef.kind &&
+    hydratedSubject.subject_ref.id === baseSubjectRef.id
+  const subject = needsHydration && hydratedSubjectMatchesBase ? hydratedSubject : baseSubject
+
+  useEffect(() => {
+    if (!needsHydration) return
+
+    const controller = new AbortController()
+    fetchSubjectHydration({
+      subject_ref: baseSubjectRef,
+      signal: controller.signal,
+    })
+      .then((hydrated) => setHydratedSubject(hydrated))
+      .catch((error: unknown) => {
+        if (error instanceof Error && error.name === 'AbortError') return
+        console.warn('subject hydration failed', error)
+      })
+
+    return () => controller.abort()
+  }, [baseSubjectRef, needsHydration])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

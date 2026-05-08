@@ -69,7 +69,7 @@ export type ResolvedSubject = {
   display_label?: string
   display_labels?: SubjectDisplayLabels
   normalized_input?: string
-  resolution_path?: 'auto_advanced' | 'explicit_choice'
+  resolution_path?: 'auto_advanced' | 'explicit_choice' | 'direct_ref'
   context?: HydratedSubjectContext
 }
 
@@ -80,6 +80,10 @@ export type ResolveSubjectsResponse = {
 
 export type SubjectChoice = {
   subject_ref: SubjectRef
+}
+
+export type HydrateSubjectResponse = {
+  subject: ResolvedSubject
 }
 
 export type SymbolResolutionPlan =
@@ -167,6 +171,17 @@ export function subjectFromRouterState(state: unknown): ResolvedSubject | null {
   if (typeof state !== 'object' || state === null) return null
   const subject = (state as { subject?: unknown }).subject
   return isResolvedSubject(subject) ? subject : null
+}
+
+export function subjectNeedsHydration(subject: ResolvedSubject): boolean {
+  switch (subject.subject_ref.kind) {
+    case 'issuer':
+    case 'instrument':
+    case 'listing':
+      return subject.context?.issuer === undefined
+    default:
+      return false
+  }
 }
 
 // Strict counterpart to parseSubjectRouteParam: takes an already-decoded
@@ -282,6 +297,25 @@ export async function resolveSubjects(args: {
   }
 
   return (await response.json()) as ResolveSubjectsResponse
+}
+
+export async function fetchSubjectHydration(args: {
+  subject_ref: SubjectRef
+  endpoint?: string
+  fetchImpl?: typeof fetch
+  signal?: AbortSignal
+}): Promise<ResolvedSubject> {
+  const response = await (args.fetchImpl ?? fetch)(args.endpoint ?? '/v1/subjects/hydrate', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ subject_ref: args.subject_ref }),
+    signal: args.signal,
+  })
+  if (!response.ok) {
+    throw new Error(`subject hydrate failed with HTTP ${response.status}`)
+  }
+  const body = (await response.json()) as HydrateSubjectResponse
+  return body.subject
 }
 
 export function displaySubjectRef(subjectRef: SubjectRef): string {

@@ -24,12 +24,22 @@ import { writeToolCallLog } from "../../observability/src/tool-call.ts";
 import { normalize } from "./normalize.ts";
 import type { SubjectKind, SubjectRef } from "./subject-ref.ts";
 
-export type ResolutionPath = "auto_advanced" | "explicit_choice";
+export type ResolutionPath = "auto_advanced" | "explicit_choice" | "direct_ref";
 
 export class InvalidChoiceError extends Error {
   constructor(message = "choice subject_ref must match one of the ambiguous candidates") {
     super(message);
     this.name = "InvalidChoiceError";
+  }
+}
+
+export class SubjectHydrationNotFoundError extends Error {
+  readonly subject_ref: SubjectRef;
+
+  constructor(subjectRef: SubjectRef) {
+    super(`Cannot hydrate ${subjectRef.kind} subject_ref: ${subjectRef.id}`);
+    this.name = "SubjectHydrationNotFoundError";
+    this.subject_ref = subjectRef;
   }
 }
 
@@ -346,6 +356,24 @@ async function handoffFromResolved(
   };
 }
 
+export async function hydrateSubjectRef(
+  db: QueryExecutor,
+  subjectRef: SubjectRef,
+): Promise<HydratedSubjectHandoff> {
+  const context = await loadSubjectContext(db, subjectRef);
+  const displayLabel = displayLabelForSubjectRef(subjectRef, context);
+  return {
+    subject_ref: subjectRef,
+    identity_level: subjectRef.kind,
+    display_label: displayLabel,
+    display_labels: displayLabelsFor(displayLabel, context),
+    normalized_input: `${subjectRef.kind}:${subjectRef.id}`,
+    resolution_path: "direct_ref",
+    confidence: 1,
+    context,
+  };
+}
+
 function resolvedFromCandidate(candidate: ResolverCandidate): ResolvedEnvelope {
   return resolved({
     subject_ref: candidate.subject_ref,
@@ -465,7 +493,7 @@ async function loadListingSubjectContext(
 
   const row = result.rows[0];
   if (!row) {
-    throw new Error(`Cannot hydrate listing subject_ref: ${listingId}`);
+    throw new SubjectHydrationNotFoundError({ kind: "listing", id: listingId });
   }
 
   return contextFromListingRow(row);
@@ -495,7 +523,7 @@ async function loadInstrumentSubjectContext(
 
   const row = result.rows[0];
   if (!row) {
-    throw new Error(`Cannot hydrate instrument subject_ref: ${instrumentId}`);
+    throw new SubjectHydrationNotFoundError({ kind: "instrument", id: instrumentId });
   }
 
   return {
@@ -524,7 +552,7 @@ async function loadIssuerSubjectContext(
 
   const row = result.rows[0];
   if (!row) {
-    throw new Error(`Cannot hydrate issuer subject_ref: ${issuerId}`);
+    throw new SubjectHydrationNotFoundError({ kind: "issuer", id: issuerId });
   }
 
   return {
@@ -626,6 +654,25 @@ function listingContextFromRow(row: ListingContextRow): ListingContext {
     active_from: row.active_from ?? undefined,
     active_to: row.active_to ?? undefined,
   });
+}
+
+function displayLabelForSubjectRef(
+  subjectRef: SubjectRef,
+  context: HydratedSubjectContext,
+): string {
+  if (subjectRef.kind === "listing" && context.listing && context.issuer) {
+    const shareClass = context.instrument?.share_class;
+    const base = shareClass ? `${context.issuer.legal_name} (${shareClass})` : context.issuer.legal_name;
+    return `${context.listing.ticker} · ${context.listing.mic} — ${base}`;
+  }
+  if (subjectRef.kind === "instrument" && context.issuer) {
+    const shareClass = context.instrument?.share_class;
+    return shareClass ? `${context.issuer.legal_name} (${shareClass})` : context.issuer.legal_name;
+  }
+  if (subjectRef.kind === "issuer" && context.issuer) {
+    return context.issuer.legal_name;
+  }
+  return `${subjectRef.kind}:${subjectRef.id}`;
 }
 
 function displayLabelsFor(
