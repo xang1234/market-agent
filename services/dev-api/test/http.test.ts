@@ -160,10 +160,14 @@ test("GET /v1/themes/membership-rationales validates subject and limit query par
   const badAsOf = await fetch(
     `${base}/v1/themes/membership-rationales?subject_kind=issuer&subject_id=33333333-3333-4333-8333-333333333333&as_of=not-a-date`,
   );
+  const dateOnlyAsOf = await fetch(
+    `${base}/v1/themes/membership-rationales?subject_kind=issuer&subject_id=33333333-3333-4333-8333-333333333333&as_of=2026-05-08`,
+  );
 
   assert.equal(missing.status, 400);
   assert.equal(badLimit.status, 400);
   assert.equal(badAsOf.status, 400);
+  assert.equal(dateOnlyAsOf.status, 400);
 });
 
 test("service Themes adapter lists membership rationale through the read model", async () => {

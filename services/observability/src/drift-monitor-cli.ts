@@ -1,4 +1,5 @@
-import { fileURLToPath } from "node:url";
+import { isAbsolute, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { Pool } from "pg";
 
@@ -16,7 +17,7 @@ async function main(): Promise<void> {
   const evaluatorModule = process.env.GOLDEN_EVAL_EVALUATOR_MODULE;
   if (!evaluatorModule) throw new Error("GOLDEN_EVAL_EVALUATOR_MODULE is required");
 
-  const imported = await import(evaluatorModule) as EvaluatorModule;
+  const imported = await import(resolveModuleSpecifier(evaluatorModule)) as EvaluatorModule;
   const evaluate = imported.evaluateGoldenCase ?? imported.default;
   if (typeof evaluate !== "function") {
     throw new Error("GOLDEN_EVAL_EVALUATOR_MODULE must export evaluateGoldenCase or a default evaluator");
@@ -43,6 +44,14 @@ function requiredEnv(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is required`);
   return value;
+}
+
+function resolveModuleSpecifier(specifier: string): string {
+  if (specifier.startsWith("file:")) return specifier;
+  if (specifier.startsWith(".") || isAbsolute(specifier)) {
+    return pathToFileURL(resolve(process.cwd(), specifier)).href;
+  }
+  return specifier;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

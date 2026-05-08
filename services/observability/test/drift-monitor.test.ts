@@ -35,6 +35,27 @@ test("runGoldenEvalDriftMonitor persists a run, computes drift, and flags policy
   );
   assert.match(db.queries[0]?.text ?? "", /insert into eval_run_results/i);
   assert.match(db.queries[1]?.text ?? "", /from eval_run_results/i);
+  assert.deepEqual(db.queries[1]?.values, ["golden-nightly", "00000000-0000-4000-8000-000000000002"]);
+});
+
+test("runGoldenEvalDriftMonitor fails closed when drift report belongs to another run", async () => {
+  const db = fakeDb({ driftCurrentRunId: "00000000-0000-4000-8000-000000000099" });
+  const cases = GOLDEN_EVAL_CATEGORIES.map((category, index): GoldenEvalCase => ({
+    id: `case-${index}`,
+    category,
+    prompt: `Prompt ${index}`,
+  }));
+
+  const result = await runGoldenEvalDriftMonitor(db, {
+    suite_name: "golden-nightly",
+    model_version: "model-v2",
+    prompt_version: "prompt-v2",
+    cases,
+    evaluate: () => ({ passed: true }),
+  });
+
+  assert.equal(result.drift_report?.current_run.eval_run_result_id, "00000000-0000-4000-8000-000000000099");
+  assert.equal(result.policy_status, "failed");
 });
 
 test("runGoldenEvalDriftMonitor can explicitly opt out of failing on alert", async () => {
@@ -82,7 +103,7 @@ test("runGoldenEvalDriftMonitor passes policy when there is no previous run yet"
   assert.equal(result.policy_status, "passed");
 });
 
-function fakeDb(options: { includePrevious?: boolean } = {}) {
+function fakeDb(options: { includePrevious?: boolean; driftCurrentRunId?: string } = {}) {
   const queries: Array<{ text: string; values: unknown[] }> = [];
   let currentResult: unknown;
   const includePrevious = options.includePrevious ?? true;
@@ -105,7 +126,7 @@ function fakeDb(options: { includePrevious?: boolean } = {}) {
         return {
           rows: [
             {
-              eval_run_result_id: "00000000-0000-4000-8000-000000000002",
+              eval_run_result_id: options.driftCurrentRunId ?? "00000000-0000-4000-8000-000000000002",
               suite_name: "golden-nightly",
               model_version: "model-v2",
               prompt_version: "prompt-v2",

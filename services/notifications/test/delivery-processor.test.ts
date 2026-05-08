@@ -143,11 +143,11 @@ test("processPendingNotifications batches digest rows and throttles burst channe
     { channel: "email", title: "First finding" },
     { channel: "digest", title: "2 agent alerts" },
   ]);
-  assert.equal(result.delivered, 1);
-  assert.equal(result.failed, 1);
+  assert.equal(result.delivered, 2);
+  assert.equal(result.failed, 0);
   assert.equal(db.updates.length, 2);
   assert.equal(db.updates[0].status, "notified");
-  assert.equal(db.updates[1].status, "failed");
+  assert.equal(db.updates[1].status, "notified");
   assert.equal(db.updates[1].metadata.channels.some((channel) => channel.channel === "email" && channel.status === "throttled"), true);
 });
 
@@ -203,6 +203,24 @@ test("processPendingNotifications respects user and per-agent channel preference
   assert.deepEqual(db.updates[0]?.metadata.channels.map((channel) => channel.channel), ["web_push"]);
 });
 
+test("processPendingNotifications treats partial channel delivery as notified", async () => {
+  const db = fakeNotificationDb({
+    pendingRows: [pendingRow({ channels: ["email", "sms"] })],
+  });
+
+  const result = await processPendingNotifications(db, {
+    adapters: channelAdapters((channel) => {
+      if (channel === "sms") throw new Error("provider unavailable");
+      return { provider_message_id: `${channel}-receipt` };
+    }),
+  });
+
+  assert.equal(result.delivered, 1);
+  assert.equal(result.failed, 0);
+  assert.equal(db.updates[0]?.status, "notified");
+  assert.equal(db.updates[0]?.metadata.channels.some((channel) => channel.channel === "sms" && channel.status === "failed"), true);
+});
+
 test("dev no-op adapters expose every production notification channel", async () => {
   const adapters = createDevNoopNotificationAdapters();
   assert.deepEqual(Object.keys(adapters).sort(), ["digest", "email", "mobile_push", "sms", "web_push"]);
@@ -219,6 +237,7 @@ test("configured webhook adapters send provider-shaped payloads for every produc
     NOTIFICATIONS_DIGEST_WEBHOOK_URL: "https://notify.example/digest",
   }, async (url, init) => {
     calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+    assert.ok(init?.signal instanceof AbortSignal);
     return new Response(JSON.stringify({ message_id: `provider-${calls.length}` }), {
       status: 202,
       headers: { "content-type": "application/json" },

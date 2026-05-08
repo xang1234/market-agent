@@ -1064,11 +1064,13 @@ function readOptionalPositiveInteger(value: string | null, label: string): numbe
 function readOptionalIsoTimestamp(value: string | null, label: string): string | undefined {
   const text = nonEmptyString(value);
   if (text === null) return undefined;
-  if (Number.isNaN(Date.parse(text))) {
+  if (!ISO_TIMESTAMP_RE.test(text) || Number.isNaN(Date.parse(text))) {
     throw new DevApiHttpError(400, `${label} must be a valid ISO timestamp`);
   }
   return text;
 }
+
+const ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
 
 function enrichAnalyzeRunBlocks(
   blocks: ReadonlyArray<Record<string, unknown> | JsonValue>,

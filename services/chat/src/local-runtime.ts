@@ -80,6 +80,7 @@ async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersisten
   const blocks = input.blocks as ReadonlyArray<Record<string, unknown>>;
   const snapshotId = snapshotIdFromBlocks(blocks);
   const asOf = maxBlockAsOf(blocks) ?? new Date().toISOString();
+  const userId = await threadUserId(input.threadId);
   const manifest = await manifestFromBlockRefs({
     subjectRefs: subjectRefsFromBlocks(blocks, input.threadId),
     asOf,
@@ -90,6 +91,7 @@ async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersisten
     source_ids: manifest.source_ids,
     document_refs: manifest.document_refs,
     claim_refs: manifest.claim_refs,
+    user_id: userId,
   });
   return sealSnapshotWithPool(pool(), {
     snapshot_id: snapshotId,
@@ -100,6 +102,16 @@ async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersisten
     documents: verifierRows.documents,
     claims: verifierRows.claims,
   });
+}
+
+async function threadUserId(threadId: string): Promise<string | null> {
+  const { rows } = await pool().query<{ user_id: string }>(
+    `select user_id::text as user_id
+       from chat_threads
+      where thread_id = $1::uuid`,
+    [threadId],
+  );
+  return rows[0]?.user_id ?? null;
 }
 
 function evidenceForToolCalls(

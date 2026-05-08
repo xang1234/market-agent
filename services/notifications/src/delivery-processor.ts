@@ -220,11 +220,19 @@ function webhookAdapter(
 ): NotificationAdapter {
   return {
     async send(payload) {
-      const response = await fetchImpl(url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ channel, ...payload }),
-      });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+      let response: Response;
+      try {
+        response = await fetchImpl(url, {
+          signal: controller.signal,
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ channel, ...payload }),
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
       const body = await readProviderResponse(response);
       if (!response.ok) {
         throw new Error(`${channel} provider returned HTTP ${response.status}${body.error ? `: ${body.error}` : ""}`);
@@ -451,7 +459,7 @@ function terminalStatusFor(
   pendingDigest: boolean,
 ): "notified" | "failed" | null {
   if (pendingDigest) return null;
-  return receipts.length > 0 && receipts.every((receipt) => receipt.status === "delivered") ? "notified" : "failed";
+  return receipts.some((receipt) => receipt.status === "delivered") ? "notified" : "failed";
 }
 
 async function updateAlertDelivery(

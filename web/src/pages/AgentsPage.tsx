@@ -135,9 +135,16 @@ export function AgentsPage() {
 
   useEffect(() => {
     if (!session || !selectedAgentId) {
+      setFindings([])
+      setRunActivities([])
+      setDetailsError(null)
       return
     }
+    let ignore = false
     const controller = new AbortController()
+    setFindings([])
+    setRunActivities([])
+    setDetailsError(null)
     const encodedAgentId = encodeURIComponent(selectedAgentId)
     Promise.all([
       fetch(`/v1/agents/${encodedAgentId}/findings`, {
@@ -158,17 +165,21 @@ export function AgentsPage() {
         return { findings: findingsBody.findings ?? [], activity: activityBody.activity ?? [] }
       })
       .then((body) => {
+        if (ignore) return
         setDetailsError(null)
         setFindings(body.findings)
         setRunActivities(body.activity)
       })
       .catch((caught) => {
-        if (controller.signal.aborted) return
+        if (ignore || controller.signal.aborted) return
         setFindings([])
         setRunActivities([])
         setDetailsError(caught instanceof Error ? caught.message : String(caught))
       })
-    return () => controller.abort()
+    return () => {
+      ignore = true
+      controller.abort()
+    }
   }, [session, selectedAgentId, detailsRefreshKey])
 
   const resetForm = () => {

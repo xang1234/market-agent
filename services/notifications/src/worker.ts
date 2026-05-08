@@ -46,10 +46,10 @@ async function main(): Promise<void> {
 }
 
 function integerEnv(name: string): number | undefined {
-  const value = process.env[name];
+  const value = process.env[name]?.trim();
   if (!value) return undefined;
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${name} must be a positive integer`);
+  if (!/^[1-9]\d*$/.test(value)) throw new Error(`${name} must be a positive integer`);
+  const parsed = Number(value);
   return parsed;
 }
 

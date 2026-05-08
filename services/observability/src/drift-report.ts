@@ -41,6 +41,7 @@ export type BuildGoldenEvalDriftReportInput = {
 
 export type ReadLatestGoldenEvalDriftReportInput = {
   suite_name: string;
+  current_eval_run_result_id?: string;
 };
 
 export type GoldenEvalDriftRunRef = {
@@ -116,9 +117,16 @@ export async function readLatestGoldenEvalDriftReport(
             result_json
        from eval_run_results
       where suite_name = $1
-      order by created_at desc, eval_run_result_id desc
+        and ($2::uuid is null or eval_run_result_id = $2::uuid or created_at < (
+          select created_at
+            from eval_run_results
+           where eval_run_result_id = $2::uuid
+        ))
+      order by case when eval_run_result_id = $2::uuid then 0 else 1 end,
+               created_at desc,
+               eval_run_result_id desc
       limit 2`,
-    [input.suite_name],
+    [input.suite_name, input.current_eval_run_result_id ?? null],
   );
 
   if (rows.length < 2) {

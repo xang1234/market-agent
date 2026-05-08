@@ -122,6 +122,7 @@ export async function sealAnalyzeSnapshot(
     source_ids: manifest.source_ids,
     document_refs: manifest.document_refs,
     claim_refs: manifest.claim_refs,
+    user_id: input.userId,
   });
   return sealSnapshotWithPool(pool(), {
     snapshot_id: snapshotId,
@@ -226,6 +227,7 @@ export const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, run
       const snapshotManifest = await sealAgentEvidenceSnapshot({
         tx,
         snapshotId,
+        userId,
         subjectRefs,
         evidence: loadedEvidence,
       });
@@ -273,6 +275,7 @@ export const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, run
 async function sealAgentEvidenceSnapshot(input: {
   tx: QueryExecutor;
   snapshotId: string;
+  userId: string;
   subjectRefs: ReadonlyArray<SnapshotSubjectRef>;
   evidence: LocalRuntimeEvidence;
 }): Promise<{ snapshot_id: string; source_ids: ReadonlyArray<string>; as_of: string }> {
@@ -319,6 +322,7 @@ async function sealAgentEvidenceSnapshot(input: {
     source_ids: manifest.source_ids,
     document_refs: manifest.document_refs,
     claim_refs: manifest.claim_refs,
+    user_id: input.userId,
   });
   const seal = await sealSnapshotInTransaction(snapshotTransactionClient(input.tx), {
     snapshot_id: input.snapshotId,

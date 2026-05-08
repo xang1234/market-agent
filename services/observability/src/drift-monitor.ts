@@ -46,10 +46,15 @@ export async function runGoldenEvalDriftMonitor(
   });
   const drift_report = await readLatestGoldenEvalDriftReport(db, {
     suite_name: input.suite_name,
+    current_eval_run_result_id: run.row.eval_run_result_id,
   });
   const failOnAlert = input.policy?.failOnAlert !== false;
+  const reportMismatch = drift_report !== null &&
+    drift_report.current_run.eval_run_result_id !== run.row.eval_run_result_id;
   const policy_status =
-    failOnAlert && drift_report?.alert === true ? "failed" : "passed";
+    failOnAlert && (drift_report?.alert === true || reportMismatch)
+      ? "failed"
+      : "passed";
 
   return Object.freeze({
     run,
