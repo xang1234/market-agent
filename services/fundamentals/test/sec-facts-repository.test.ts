@@ -5,7 +5,11 @@ import {
   createSecBackedStatsRepository,
 } from "../src/sec-facts-repository.ts";
 import type { MetricDefinition } from "../src/metric-mapper.ts";
-import type { SecEdgarFetcher } from "../src/sec-edgar.ts";
+import {
+  SecEdgarFetchError,
+  type SecEdgarFetcher,
+} from "../src/sec-edgar.ts";
+import { FundamentalsDataUnavailableError } from "../src/availability.ts";
 
 const ISSUER_ID = "11111111-1111-4111-8111-111111111111";
 const SOURCE_ID = "22222222-2222-4222-8222-222222222222";
@@ -73,6 +77,32 @@ test("SEC-backed stats can ingest latest annual companyfacts on demand", async (
   assert.equal(db.facts.some((fact) => fact.fiscal_year === 2024), true);
   assert.equal(db.facts.some((fact) => fact.fiscal_year === 2023), true);
   assert.equal(fetchCount > 0, true);
+});
+
+test("SEC-backed statements propagate provider failures instead of returning missing coverage", async () => {
+  const db = new FakeFundamentalsDb();
+  const statements = createSecBackedStatementRepository(db, {
+    fetcher: async () => {
+      throw new SecEdgarFetchError(403, "sec_edgar: HTTP 403");
+    },
+    sourceId: SOURCE_ID,
+    clock: () => new Date("2026-05-08T00:00:00.000Z"),
+    logger: { warn() {} },
+  });
+
+  await assert.rejects(
+    () => statements.find({
+      issuer_id: ISSUER_ID,
+      family: "income",
+      basis: "as_reported",
+      fiscal_year: 2024,
+      fiscal_period: "FY",
+    }),
+    (error) =>
+      error instanceof FundamentalsDataUnavailableError &&
+      error.reason === "provider_error" &&
+      error.retryable === false,
+  );
 });
 
 type FactRecord = {

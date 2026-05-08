@@ -8,11 +8,13 @@ import {
 import {
   fetchCompanyFacts,
   extractStatement,
+  SecEdgarFetchError,
   SEC_INCOME_METRIC_KEYS,
   US_GAAP_TO_METRIC_KEY,
   type SecCompanyFacts,
   type SecEdgarFetcher,
 } from "./sec-edgar.ts";
+import { FundamentalsDataUnavailableError } from "./availability.ts";
 import {
   normalizedStatement,
   type CoverageLevel,
@@ -92,13 +94,15 @@ export function createSecBackedStatementRepository(
         await persistStatementFacts(db, mapStatement(registry, statement), clock);
         return statement;
       } catch (error) {
+        const unavailable = classifySecIngestionError(error);
         logger.warn("sec_edgar fundamentals ingestion failed", {
           issuer_id: lookup.issuer_id,
           fiscal_year: lookup.fiscal_year,
           fiscal_period: lookup.fiscal_period,
           error: error instanceof Error ? error.message : String(error),
         });
-        return null;
+        if (!unavailable) return null;
+        throw unavailable;
       }
     },
   };
@@ -174,11 +178,13 @@ async function discoverLatestFiscalYear(
     const fiscalYear = latestAnnualRevenueYear(facts);
     return fiscalYear === null ? null : { fiscal_year: fiscalYear };
   } catch (error) {
+    const unavailable = classifySecIngestionError(error);
     logger.warn("sec_edgar latest fiscal year lookup failed", {
       issuer_id: issuerId,
       error: error instanceof Error ? error.message : String(error),
     });
-    return null;
+    if (!unavailable) return null;
+    throw unavailable;
   }
 }
 
@@ -198,6 +204,33 @@ function latestAnnualRevenueYear(facts: SecCompanyFacts): number | null {
     }
   }
   return latest;
+}
+
+function classifySecIngestionError(error: unknown): FundamentalsDataUnavailableError | null {
+  if (error instanceof FundamentalsDataUnavailableError) return error;
+
+  if (error instanceof SecEdgarFetchError) {
+    if (error.status === 404) return null;
+    if (error.status === 429) {
+      return new FundamentalsDataUnavailableError("rate_limited", error.message, true);
+    }
+    return new FundamentalsDataUnavailableError(
+      "provider_error",
+      error.message,
+      error.status >= 500,
+    );
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  if (
+    message.includes("no us-gaap values") ||
+    message.includes('has no "us-gaap" taxonomy') ||
+    message.includes("no monetary lines extracted")
+  ) {
+    return null;
+  }
+
+  return new FundamentalsDataUnavailableError("provider_error", message, false);
 }
 
 type IssuerRow = {
@@ -365,31 +398,6 @@ async function persistStatementFacts(
   clock: () => Date,
 ): Promise<void> {
   for (const line of statement.lines) {
-    const existing = await db.query<{ fact_id: string }>(
-      `select fact_id::text as fact_id
-         from facts
-        where subject_kind = 'issuer'
-          and subject_id = $1
-          and metric_id = $2
-          and period_kind = $3
-          and fiscal_year = $4
-          and fiscal_period = $5
-          and source_id = $6
-          and method = 'reported'
-          and invalidated_at is null
-          and superseded_by is null
-        limit 1`,
-      [
-        statement.subject.id,
-        line.metric_id,
-        statement.period_kind,
-        statement.fiscal_year,
-        statement.fiscal_period,
-        statement.source_id,
-      ],
-    );
-    if (existing.rows[0]) continue;
-
     await db.query(
       `insert into facts (
          subject_kind, subject_id, metric_id, period_kind, period_start,
@@ -401,7 +409,8 @@ async function persistStatementFacts(
          'issuer', $1, $2, $3, $4, $5, $6, $7, $8, $9,
          $10, $11, $12, $13, $14, $15, $16,
          'reported', 1, 'authoritative', 'filing_time', $17, 1
-       )`,
+       )
+       on conflict do nothing`,
       [
         statement.subject.id,
         line.metric_id,

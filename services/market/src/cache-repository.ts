@@ -58,6 +58,14 @@ export type MarketCacheQueryExecutor = {
   ): Promise<{ rows: R[] }>;
 };
 
+type MarketCacheTransactionClient = MarketCacheQueryExecutor & {
+  release(): void;
+};
+
+type MarketCacheTransactionalExecutor = MarketCacheQueryExecutor & {
+  connect(): Promise<MarketCacheTransactionClient>;
+};
+
 export function createInMemoryMarketCacheRepository(): MarketCacheRepository {
   const quotes = new Map<string, CachedQuote[]>();
   const bars = new Map<string, CachedBars>();
@@ -165,48 +173,44 @@ export function createPostgresMarketCacheRepository(
       return findBars(db, listing, interval, range, adjustment_basis);
     },
     async storeBars(value, metadata) {
-      const { rows } = await db.query<{ bar_range_id: string }>(
-        `insert into market_bar_ranges
-           (listing_id, source_id, provider, interval, adjustment_basis, range_start, range_end,
-            as_of, delay_class, currency, fetched_at, expires_at, payload)
-         values ($1::uuid, $2::uuid, $3, $4, $5, $6::timestamptz, $7::timestamptz,
-                 $8::timestamptz, $9, $10, $11::timestamptz, $12::timestamptz, $13::jsonb)
-         on conflict (listing_id, source_id, interval, adjustment_basis, range_start, range_end)
-         do update set provider = excluded.provider,
-                       as_of = excluded.as_of,
-                       delay_class = excluded.delay_class,
-                       currency = excluded.currency,
-                       fetched_at = excluded.fetched_at,
-                       expires_at = excluded.expires_at,
-                       payload = excluded.payload,
-                       updated_at = now()
-         returning bar_range_id::text as bar_range_id`,
-        [
-          value.listing.id,
-          value.source_id,
-          metadata.provider,
-          value.interval,
-          value.adjustment_basis,
-          value.range.start,
-          value.range.end,
-          value.as_of,
-          value.delay_class,
-          value.currency,
-          metadata.fetched_at,
-          metadata.expires_at,
-          JSON.stringify(value),
-        ],
-      );
-      const barRangeId = rows[0]?.bar_range_id;
-      if (!barRangeId) throw new Error("market bar range upsert did not return an id");
-      await db.query(`delete from market_bars where bar_range_id = $1::uuid`, [barRangeId]);
-      for (const bar of value.bars) {
-        await db.query(
-          `insert into market_bars (bar_range_id, ts, open, high, low, close, volume)
-           values ($1::uuid, $2::timestamptz, $3, $4, $5, $6, $7)`,
-          [barRangeId, bar.ts, bar.open, bar.high, bar.low, bar.close, bar.volume],
+      await withCacheTransaction(db, async (tx) => {
+        const { rows } = await tx.query<{ bar_range_id: string }>(
+          `insert into market_bar_ranges
+             (listing_id, source_id, provider, interval, adjustment_basis, range_start, range_end,
+              as_of, delay_class, currency, fetched_at, expires_at, payload)
+           values ($1::uuid, $2::uuid, $3, $4, $5, $6::timestamptz, $7::timestamptz,
+                   $8::timestamptz, $9, $10, $11::timestamptz, $12::timestamptz, $13::jsonb)
+           on conflict (listing_id, source_id, interval, adjustment_basis, range_start, range_end)
+           do update set provider = excluded.provider,
+                         as_of = excluded.as_of,
+                         delay_class = excluded.delay_class,
+                         currency = excluded.currency,
+                         fetched_at = excluded.fetched_at,
+                         expires_at = excluded.expires_at,
+                         payload = excluded.payload,
+                         updated_at = now()
+           returning bar_range_id::text as bar_range_id`,
+          [
+            value.listing.id,
+            value.source_id,
+            metadata.provider,
+            value.interval,
+            value.adjustment_basis,
+            value.range.start,
+            value.range.end,
+            value.as_of,
+            value.delay_class,
+            value.currency,
+            metadata.fetched_at,
+            metadata.expires_at,
+            JSON.stringify(value),
+          ],
         );
-      }
+        const barRangeId = rows[0]?.bar_range_id;
+        if (!barRangeId) throw new Error("market bar range upsert did not return an id");
+        await tx.query(`delete from market_bars where bar_range_id = $1::uuid`, [barRangeId]);
+        await insertBars(tx, barRangeId, value.bars);
+      });
     },
   };
 }
@@ -261,6 +265,66 @@ type BarRow = {
   close: number | string;
   volume: number | string;
 };
+
+async function withCacheTransaction<T>(
+  db: MarketCacheQueryExecutor,
+  fn: (tx: MarketCacheQueryExecutor) => Promise<T>,
+): Promise<T> {
+  if (!isTransactionalExecutor(db)) {
+    return fn(db);
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query("begin");
+    const result = await fn(client);
+    await client.query("commit");
+    return result;
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function isTransactionalExecutor(
+  db: MarketCacheQueryExecutor,
+): db is MarketCacheTransactionalExecutor {
+  return typeof (db as { connect?: unknown }).connect === "function";
+}
+
+async function insertBars(
+  db: MarketCacheQueryExecutor,
+  barRangeId: string,
+  bars: ReadonlyArray<NormalizedBar>,
+): Promise<void> {
+  if (bars.length === 0) return;
+
+  const maxBarsPerInsert = 5_000;
+  for (let offset = 0; offset < bars.length; offset += maxBarsPerInsert) {
+    await insertBarChunk(db, barRangeId, bars.slice(offset, offset + maxBarsPerInsert));
+  }
+}
+
+async function insertBarChunk(
+  db: MarketCacheQueryExecutor,
+  barRangeId: string,
+  bars: ReadonlyArray<NormalizedBar>,
+): Promise<void> {
+  const values: unknown[] = [barRangeId];
+  const placeholders = bars.map((bar, index) => {
+    const base = index * 6 + 2;
+    values.push(bar.ts, bar.open, bar.high, bar.low, bar.close, bar.volume);
+    return `($1::uuid, $${base}::timestamptz, $${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`;
+  });
+
+  await db.query(
+    `insert into market_bars (bar_range_id, ts, open, high, low, close, volume)
+     values ${placeholders.join(", ")}`,
+    values,
+  );
+}
 
 async function findBars(
   db: MarketCacheQueryExecutor,

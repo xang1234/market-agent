@@ -41,6 +41,18 @@ export type UnavailableEnvelope = {
 
 export type FundamentalsOutcome<T> = AvailableEnvelope<T> | UnavailableEnvelope;
 
+export class FundamentalsDataUnavailableError extends Error {
+  readonly reason: AvailabilityReason;
+  readonly retryable: boolean;
+
+  constructor(reason: AvailabilityReason, message: string, retryable: boolean) {
+    super(message);
+    this.name = "FundamentalsDataUnavailableError";
+    this.reason = reason;
+    this.retryable = retryable;
+  }
+}
+
 export function isAvailable<T>(
   outcome: FundamentalsOutcome<T>,
 ): outcome is AvailableEnvelope<T> {

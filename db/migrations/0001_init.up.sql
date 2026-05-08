@@ -420,6 +420,13 @@ create index facts_subject_metric_idx on facts(subject_kind, subject_id, metric_
 create index facts_metric_period_idx on facts(metric_id, period_end desc);
 create index facts_asof_idx on facts(as_of desc);
 create index facts_verification_idx on facts(verification_status);
+create unique index facts_active_reported_identity_idx
+  on facts(subject_kind, subject_id, metric_id, period_kind, fiscal_year, fiscal_period, source_id, method)
+  where method = 'reported'
+    and invalidated_at is null
+    and superseded_by is null
+    and fiscal_year is not null
+    and fiscal_period is not null;
 
 create table computations (
   computation_id uuid primary key default gen_random_uuid(),

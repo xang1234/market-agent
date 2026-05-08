@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AnalystConsensusEnvelope } from "./analyst-consensus.ts";
 import {
+  FundamentalsDataUnavailableError,
   isAvailable,
   unavailable,
   type FundamentalsOutcome,
@@ -320,7 +321,12 @@ async function fetchStatsOutcome(
   clock: () => Date,
   subject_id: UUID,
 ): Promise<FundamentalsOutcome<KeyStatsEnvelope>> {
-  const envelope = await deps.stats.find(subject_id);
+  let envelope: KeyStatsEnvelope | null;
+  try {
+    envelope = await deps.stats.find(subject_id);
+  } catch (error) {
+    return unavailableForError(deps, subject_id, clock().toISOString(), error);
+  }
   if (!envelope) {
     return missingCoverage(
       deps,
@@ -559,13 +565,21 @@ async function fetchStatementsResponse(
   const issuer_id = request.subject_ref.id;
   const results = await Promise.all(
     parsedPeriods.map(async (period): Promise<StatementResultEntry> => {
-      const statement = await deps.statements.find({
-        issuer_id,
-        family: request.statement,
-        basis: request.basis,
-        fiscal_year: period.fiscal_year,
-        fiscal_period: period.fiscal_period,
-      });
+      let statement: NormalizedStatement | null;
+      try {
+        statement = await deps.statements.find({
+          issuer_id,
+          family: request.statement,
+          basis: request.basis,
+          fiscal_year: period.fiscal_year,
+          fiscal_period: period.fiscal_period,
+        });
+      } catch (error) {
+        return {
+          period: period.raw,
+          outcome: unavailableForError(deps, issuer_id, clock().toISOString(), error),
+        };
+      }
       if (!statement) {
         return {
           period: period.raw,
@@ -597,6 +611,26 @@ function missingCoverage(
     as_of,
     retryable: false,
     detail,
+  });
+}
+
+function unavailableForError(
+  deps: FundamentalsServerDeps,
+  subject_id: UUID,
+  as_of: string,
+  error: unknown,
+): UnavailableEnvelope {
+  if (!(error instanceof FundamentalsDataUnavailableError)) {
+    throw error;
+  }
+
+  return unavailable({
+    reason: error.reason,
+    subject: { kind: "issuer", id: subject_id },
+    source_id: deps.source_id,
+    as_of,
+    retryable: error.retryable,
+    detail: error.message,
   });
 }
 

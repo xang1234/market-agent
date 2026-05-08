@@ -1,13 +1,13 @@
 // Screener executor (cw0.7.4 runtime).
 //
-// Pure pipeline: takes a normalized ScreenerQuery (cw0.7.1) and a
+// Query pipeline: takes a normalized ScreenerQuery (cw0.7.1) and a
 // candidate registry (`candidate.ts`), produces a frozen ScreenerResponse
 // (cw0.7.2). Filter → sort → page → assemble rows.
 //
-// "Pure" means no I/O, no clocks of its own — `deps.clock` is injected
-// so tests pin a fixed `as_of` for deterministic snapshots and so prod
-// can substitute a wall-clock. The executor does NOT make HTTP calls;
-// the candidate registry already holds pre-hydrated values.
+// The executor has no clocks of its own — `deps.clock` is injected so tests
+// pin a fixed `as_of` for deterministic snapshots and so prod can substitute
+// a wall-clock. It does NOT make HTTP calls; the candidate registry supplies
+// pre-hydrated values from memory or Postgres/provider caches.
 
 import type { ScreenerCandidate, ScreenerCandidateRepository } from "./candidate.ts";
 import { getFieldDefinition, type FieldDefinition } from "./fields.ts";
@@ -31,11 +31,11 @@ export type ExecutorDeps = {
   clock: () => Date;
 };
 
-export function executeScreenerQuery(
+export async function executeScreenerQuery(
   deps: ExecutorDeps,
   query: ScreenerQuery,
-): ScreenerResponse {
-  const all = deps.candidates.list();
+): Promise<ScreenerResponse> {
+  const all = await deps.candidates.list();
   // Pre-resolve market clauses' enum/numeric kind once instead of asking
   // the field registry per (candidate × clause) inside the filter.
   const marketResolved: ResolvedMarketClause[] = query.market.map((clause) => ({

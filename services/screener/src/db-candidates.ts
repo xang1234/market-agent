@@ -1,5 +1,6 @@
 import type {
   ScreenerCandidate,
+  ScreenerCandidateRepository,
   ScreenerCandidateUniverse,
 } from "./candidate.ts";
 import type { AssetType } from "./fields.ts";
@@ -10,6 +11,23 @@ export type ScreenerCandidateQueryExecutor = {
     values?: unknown[],
   ): Promise<{ rows: R[] }>;
 };
+
+export function createPostgresCandidateRepository(
+  db: ScreenerCandidateQueryExecutor,
+  clock: () => Date = () => new Date(),
+): ScreenerCandidateRepository {
+  return {
+    async list() {
+      return loadPostgresScreenerCandidates(db, clock());
+    },
+    async findByRef(ref) {
+      const candidates = await loadPostgresScreenerCandidates(db, clock());
+      return candidates.find((candidate) =>
+        candidate.subject_ref.kind === ref.kind && candidate.subject_ref.id === ref.id
+      ) ?? null;
+    },
+  };
+}
 
 type CandidateRow = {
   issuer_id: string;

@@ -58,6 +58,14 @@ type QueryExecutor = {
   ): Promise<{ rows: R[]; rowCount?: number | null }>;
 };
 
+type TransactionClient = QueryExecutor & {
+  release(): void;
+};
+
+type TransactionalExecutor = QueryExecutor & {
+  connect(): Promise<TransactionClient>;
+};
+
 const databaseUrl = process.env.DATABASE_URL;
 
 if (!databaseUrl) {
@@ -78,7 +86,7 @@ try {
   await pool.end();
 }
 
-async function repairLegacyIdentities(db: QueryExecutor): Promise<void> {
+async function repairLegacyIdentities(db: TransactionalExecutor): Promise<void> {
   for (const legacy of LEGACY_IDENTITIES) {
     const exists = await legacyExists(db, legacy);
     if (!exists) continue;
@@ -90,12 +98,20 @@ async function repairLegacyIdentities(db: QueryExecutor): Promise<void> {
           `Legacy seeded identity ${legacy.ticker} (${legacy.listingId}) is still referenced. Set POLYGON_API_KEY so startup can rediscover and remap it, or remove those references before starting dev.`,
         );
       }
-      await deleteLegacyIdentity(db, legacy);
+      await withTransaction(db, async (tx) => {
+        if (!(await legacyExists(tx, legacy))) return;
+        const txReferenceCount = await countLegacyReferences(tx, legacy);
+        if (txReferenceCount > 0) {
+          throw new Error(
+            `Legacy seeded identity ${legacy.ticker} (${legacy.listingId}) became referenced during repair. Set POLYGON_API_KEY and restart dev.`,
+          );
+        }
+        await deleteLegacyIdentity(tx, legacy);
+      });
       console.log(`removed unreferenced legacy seeded identity ${legacy.ticker}`);
       continue;
     }
 
-    await retireLegacyListing(db, legacy);
     const listing = await discoverPreferredListing(legacy.ticker, legacy.mic);
     if (!listing) {
       throw new Error(
@@ -103,17 +119,42 @@ async function repairLegacyIdentities(db: QueryExecutor): Promise<void> {
       );
     }
 
-    const newRef = await upsertDiscoveredListing(db, listing);
-    const replacement = await loadListingChain(db, newRef.id);
-    if (!replacement) {
-      throw new Error(`provider repair inserted ${legacy.ticker} but could not reload listing ${newRef.id}`);
-    }
+    const replacement = await withTransaction(db, async (tx) => {
+      if (!(await legacyExists(tx, legacy))) return null;
+      await retireLegacyListing(tx, legacy);
+      const newRef = await upsertDiscoveredListing(tx, listing);
+      const loaded = await loadListingChain(tx, newRef.id);
+      if (!loaded) {
+        throw new Error(`provider repair inserted ${legacy.ticker} but could not reload listing ${newRef.id}`);
+      }
 
-    await remapSubjectReferences(db, "issuer", legacy.issuerId, replacement.issuerId);
-    await remapSubjectReferences(db, "instrument", legacy.instrumentId, replacement.instrumentId);
-    await remapSubjectReferences(db, "listing", legacy.listingId, replacement.listingId);
-    await deleteLegacyIdentity(db, legacy);
-    console.log(`replaced legacy seeded identity ${legacy.ticker} with provider listing ${replacement.listingId}`);
+      await remapSubjectReferences(tx, "issuer", legacy.issuerId, loaded.issuerId);
+      await remapSubjectReferences(tx, "instrument", legacy.instrumentId, loaded.instrumentId);
+      await remapSubjectReferences(tx, "listing", legacy.listingId, loaded.listingId);
+      await deleteLegacyIdentity(tx, legacy);
+      return loaded;
+    });
+    if (replacement) {
+      console.log(`replaced legacy seeded identity ${legacy.ticker} with provider listing ${replacement.listingId}`);
+    }
+  }
+}
+
+async function withTransaction<T>(
+  db: TransactionalExecutor,
+  fn: (tx: QueryExecutor) => Promise<T>,
+): Promise<T> {
+  const client = await db.connect();
+  try {
+    await client.query("begin");
+    const result = await fn(client);
+    await client.query("commit");
+    return result;
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
   }
 }
 

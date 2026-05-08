@@ -328,7 +328,7 @@ async function fanOutOne(
     const outcome = await deps.adapter.getBars({
       listing,
       interval: query.interval,
-      range: canonicalizeProviderBarRange(query.range, query.interval),
+      range: canonicalizeProviderBarRange(query.range, query.interval, record.timezone),
     });
 
     if (isAvailable(outcome) && outcome.data.adjustment_basis !== query.basis) {

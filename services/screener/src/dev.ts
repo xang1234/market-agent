@@ -1,6 +1,5 @@
 import { Pool } from "pg";
-import { createInMemoryCandidateRepository } from "./candidate.ts";
-import { loadPostgresScreenerCandidates } from "./db-candidates.ts";
+import { createPostgresCandidateRepository } from "./db-candidates.ts";
 import { createScreenerServer } from "./http.ts";
 import { createPostgresScreenRepository } from "./screen-repository.ts";
 
@@ -13,14 +12,13 @@ if (!databaseUrl) {
 }
 
 const pool = new Pool({ connectionString: databaseUrl });
-const loadedCandidates = await loadPostgresScreenerCandidates(pool);
-const candidates = createInMemoryCandidateRepository(loadedCandidates);
+const candidates = createPostgresCandidateRepository(pool);
 const screens = createPostgresScreenRepository(pool);
 const server = createScreenerServer({ candidates, screens });
 
 server.listen(port, host, () => {
   console.log(`screener listening on http://${host}:${port}`);
-  console.log(`loaded ${loadedCandidates.length} DB-backed screener candidate(s)`);
+  console.log("using live Postgres/provider-backed screener candidates");
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
