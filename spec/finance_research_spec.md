@@ -335,6 +335,13 @@ ThemeMembership {
   expires_at?: timestamp
 }
 
+Theme membership rationale is product-visible. `inferred` memberships use
+`rationale_claim_ids` as the inspectable chain back to supporting claims.
+`manual` memberships must be shown as manually curated rather than carrying
+fabricated claim rationale. `rule_based` memberships may expose the rule/spec
+and score, but only claim ids supplied by the membership writer count as
+claim-level provenance.
+
 Portfolio {
   portfolio_id: UUID
   user_id: UUID

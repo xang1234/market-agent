@@ -5,6 +5,7 @@ import { formatCompactNumber } from '../../symbol/format.ts'
 import { issuerIdFromSubject } from '../../symbol/profile.ts'
 import {
   EVIDENCE_SOURCE_KINDS,
+  loadThemeMembershipRationaleFixture,
   loadSignalsFixture,
   sourceKindLabel,
   stanceLabel,
@@ -15,6 +16,7 @@ import {
   type EvidenceSourceKind,
   type SentimentTrendBlock,
 } from '../../symbol/signals.ts'
+import { ThemeMembershipRationaleList } from '../../symbol/ThemeMembershipRationaleList.tsx'
 import {
   NEGATIVE_CLASS,
   NEUTRAL_CLASS,
@@ -63,6 +65,10 @@ export function SignalsSection() {
     () => (issuerId === null ? null : loadSignalsFixture(issuerId)),
     [issuerId],
   )
+  const themeRationales = useMemo(
+    () => (issuerId === null ? [] : loadThemeMembershipRationaleFixture(issuerId)),
+    [issuerId],
+  )
 
   return (
     <div data-testid="section-signals" className="flex w-full flex-col gap-6 p-8">
@@ -89,6 +95,17 @@ export function SignalsSection() {
           <ClaimClustersBody block={envelope.claim_clusters} />
         ) : (
           <p className={PLACEHOLDER_CLASS}>Issuer context unavailable for this entry.</p>
+        )}
+      </Card>
+      <Card
+        testId="signals-theme-rationale"
+        headingId="signals-theme-rationale-heading"
+        heading="Theme rationale"
+      >
+        {themeRationales.length > 0 ? (
+          <ThemeMembershipRationaleList memberships={themeRationales} />
+        ) : (
+          <p className={PLACEHOLDER_CLASS}>Issuer context unavailable for theme rationale.</p>
         )}
       </Card>
       <p className={`${PLACEHOLDER_CLASS} px-1`} data-testid="signals-provenance-note">

@@ -69,6 +69,16 @@ export type SignalsEnvelope = {
   as_of: string
 }
 
+export type ThemeMembershipRationale = {
+  theme_id: string
+  theme_name: string
+  theme_description: string | null
+  membership_mode: 'manual' | 'rule_based' | 'inferred'
+  score: number | null
+  rationale_supported: boolean
+  rationale_claim_ids: ReadonlyArray<string>
+}
+
 const PLACEHOLDER_SNAPSHOT_ID = '00000000-0000-4000-a000-00000000000a'
 const PLACEHOLDER_DATA_REF = 'dev-fixture'
 const PLACEHOLDER_SOURCE_REFS: ReadonlyArray<string> = Object.freeze([
@@ -104,6 +114,35 @@ export function loadSignalsFixture(issuerId: string): SignalsEnvelope {
     },
     as_of: PLACEHOLDER_AS_OF,
   }
+}
+
+export function loadThemeMembershipRationaleFixture(
+  issuerId: string,
+): ReadonlyArray<ThemeMembershipRationale> {
+  const seed = hashSeed(issuerId, 'theme-rationale')
+  return Object.freeze([
+    Object.freeze({
+      theme_id: stableUuid(seed, 1),
+      theme_name: 'AI infrastructure',
+      theme_description: 'Issuers with source-backed claims tied to AI buildout and supply chain capacity.',
+      membership_mode: 'inferred' as const,
+      score: 2,
+      rationale_supported: true,
+      rationale_claim_ids: Object.freeze([
+        stableUuid(seed, 2),
+        stableUuid(seed, 3),
+      ]),
+    }),
+    Object.freeze({
+      theme_id: stableUuid(seed, 4),
+      theme_name: 'Quality compounders',
+      theme_description: null,
+      membership_mode: 'manual' as const,
+      score: null,
+      rationale_supported: false,
+      rationale_claim_ids: Object.freeze([]),
+    }),
+  ])
 }
 
 const SENTIMENT_FIXTURE_END = Date.UTC(2024, 9, 31)
@@ -258,4 +297,11 @@ function hashSeed(input: string, salt: string): number {
     h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0
   }
   return h >>> 0
+}
+
+function stableUuid(seed: number, offset: number): string {
+  const suffix = Math.abs((seed + offset * 7919) % 1_000_000_000_000)
+    .toString()
+    .padStart(12, '0')
+  return `00000000-0000-4000-a000-${suffix}`
 }

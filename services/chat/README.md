@@ -3,6 +3,11 @@
 This package owns the chat streaming transport, the per-thread turn
 coordinator, and the thread-list CRUD surface used by the chat workspace.
 
+The default hosting choice is Node plus Postgres with Durable-Object-compatible
+coordination semantics. See `docs/adr/0004-session-coordinator-hosting.md` for
+the accepted equivalence contract and the triggers for adding a Cloudflare
+Durable Object adapter.
+
 ## Current scope
 
 - `GET /v1/chat/threads/:threadId/stream`

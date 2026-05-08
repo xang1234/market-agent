@@ -60,6 +60,14 @@ export type {
   GoldenEvalDriftRunRef,
   ReadLatestGoldenEvalDriftReportInput,
 } from "./drift-report.ts";
+export {
+  runGoldenEvalDriftMonitor,
+} from "./drift-monitor.ts";
+export type {
+  GoldenEvalDriftPolicy,
+  RunGoldenEvalDriftMonitorInput,
+  RunGoldenEvalDriftMonitorResult,
+} from "./drift-monitor.ts";
 
 export { startAgentRunLog, completeAgentRunLog } from "./agent-run.ts";
 export type {
