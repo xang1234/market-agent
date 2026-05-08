@@ -1,28 +1,22 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
 import type { Client } from "pg";
-import { bootstrapDatabase, connectedClient, dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
+import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { createWatchlistsServer } from "../src/http.ts";
 import { signTrustedUserId, type RequestAuthConfig } from "../../shared/src/request-auth.ts";
 
-// bootstrapDatabase applies the base schema pack only; these migrations add
-// and mark the implicit default manual watchlist. Apply them explicitly so
-// these service tests exercise the same DB state the migrations produce.
-const defaultManualWatchlistMigrationSql = readFileSync(
-  join(workspaceRoot, "db", "migrations", "0003_default_manual_watchlist.up.sql"),
-  "utf8",
-);
-const watchlistListManagementMigrationSql = readFileSync(
-  join(workspaceRoot, "db", "migrations", "0022_watchlist_list_management.up.sql"),
-  "utf8",
-);
-
-async function applyDefaultManualWatchlistMigration(client: Client): Promise<void> {
-  await client.query(defaultManualWatchlistMigrationSql);
-  await client.query(watchlistListManagementMigrationSql);
+// bootstrapDatabase applies the normative schema pack. The default-watchlist
+// trigger lives there now, matching the fully migrated DB shape that dev-shell
+// uses at runtime.
+async function assertDefaultManualWatchlistSchema(client: Client): Promise<void> {
+  const result = await client.query<{ has_trigger: boolean }>(
+    `select exists(
+       select 1 from pg_trigger
+        where tgname = 'users_default_manual_watchlist'
+     ) as has_trigger`,
+  );
+  assert.equal(result.rows[0]?.has_trigger, true);
 }
 
 async function startServer(
@@ -97,7 +91,7 @@ test("server: GET /v1/watchlists/default/members returns empty list for fresh us
   }
   const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-6-1");
   const client = await connectedClient(t, databaseUrl);
-  await applyDefaultManualWatchlistMigration(client);
+  await assertDefaultManualWatchlistSchema(client);
   const userId = await seedUser(client, "list-empty@example.test");
   const base = await startServer(t, client);
 
@@ -113,7 +107,7 @@ test("server: trusted-proxy auth scopes watchlists from server-derived identity,
   }
   const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-6-1");
   const client = await connectedClient(t, databaseUrl);
-  await applyDefaultManualWatchlistMigration(client);
+  await assertDefaultManualWatchlistSchema(client);
   const userA = await seedUser(client, "trusted-a@example.test");
   const userB = await seedUser(client, "trusted-b@example.test");
   const base = await startServer(t, client, {
@@ -187,7 +181,7 @@ test("server: POST adds a member, GET returns it, idempotent on repeat", { timeo
   }
   const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-6-1");
   const client = await connectedClient(t, databaseUrl);
-  await applyDefaultManualWatchlistMigration(client);
+  await assertDefaultManualWatchlistSchema(client);
   const userId = await seedUser(client, "list-add@example.test");
   const base = await startServer(t, client);
 
@@ -230,7 +224,7 @@ test("server: DELETE removes a member, returns 204; second delete returns 404", 
   }
   const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-6-1");
   const client = await connectedClient(t, databaseUrl);
-  await applyDefaultManualWatchlistMigration(client);
+  await assertDefaultManualWatchlistSchema(client);
   const userId = await seedUser(client, "list-delete@example.test");
   const base = await startServer(t, client);
 
@@ -267,7 +261,7 @@ test("server: POST with missing or malformed subject_ref returns 400", { timeout
   }
   const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-6-1");
   const client = await connectedClient(t, databaseUrl);
-  await applyDefaultManualWatchlistMigration(client);
+  await assertDefaultManualWatchlistSchema(client);
   const userId = await seedUser(client, "list-validate@example.test");
   const base = await startServer(t, client);
 
@@ -319,7 +313,7 @@ test("server: DELETE with invalid subject_kind path returns 404", { timeout: 120
   }
   const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-6-1");
   const client = await connectedClient(t, databaseUrl);
-  await applyDefaultManualWatchlistMigration(client);
+  await assertDefaultManualWatchlistSchema(client);
   const userId = await seedUser(client, "list-bad-path@example.test");
   const base = await startServer(t, client);
 
@@ -337,7 +331,7 @@ test("server: members from one user are isolated from another user", { timeout: 
   }
   const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-6-1");
   const client = await connectedClient(t, databaseUrl);
-  await applyDefaultManualWatchlistMigration(client);
+  await assertDefaultManualWatchlistSchema(client);
   const alice = await seedUser(client, "alice@example.test");
   const bob = await seedUser(client, "bob@example.test");
   const base = await startServer(t, client);
@@ -369,7 +363,7 @@ test("server: GET /v1/watchlists lists the implicit default watchlist", { timeou
   }
   const { databaseUrl } = await bootstrapDatabase(t, "fra-6al-6-1");
   const client = await connectedClient(t, databaseUrl);
-  await applyDefaultManualWatchlistMigration(client);
+  await assertDefaultManualWatchlistSchema(client);
   const userId = await seedUser(client, "unknown-path@example.test");
   const base = await startServer(t, client);
 

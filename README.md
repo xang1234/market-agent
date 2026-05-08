@@ -232,15 +232,7 @@ This stops the service processes and runs `docker compose down`. State persists 
 
 Auth in development is an in-memory mock (`web/src/shell/AuthContext.tsx`). The "Sign in" button in the top bar — and the same button inside the AuthGate panel — sets a stable mock UUID so persistent surfaces (watchlists, threads, portfolios) round-trip the same `user_id` across runs. The real provider plugs in later without changing the `RouteScopeGate` / `AuthGate` contract.
 
-For dev parity with the FK-enforced schema, the mock user must exist in `users`:
-
-```sql
-INSERT INTO users (user_id, email, display_name)
-VALUES ('00000000-0000-4000-8000-000000000001', 'mock@dev.local', 'Mock User')
-ON CONFLICT (user_id) DO NOTHING;
-```
-
-A `users_default_manual_watchlist` trigger then creates that user's default watchlist automatically.
+The matching `users` row is created automatically by `db/seed/00_dev_mock_user.sql`, which `npm run seed` (run by `./scripts/dev-shell.sh up`) applies on every start. The `users_default_manual_watchlist` trigger then creates the default manual watchlist with `is_default=true`. Both inserts are idempotent.
 
 ---
 

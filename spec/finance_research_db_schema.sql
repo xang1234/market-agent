@@ -564,6 +564,21 @@ create table watchlists (
 );
 create unique index watchlists_default_per_user_idx on watchlists(user_id) where is_default;
 
+create function ensure_default_manual_watchlist() returns trigger
+language plpgsql
+as $$
+begin
+  insert into watchlists (user_id, name, mode, is_default)
+  values (new.user_id, 'Watchlist', 'manual', true)
+  on conflict do nothing;
+  return new;
+end;
+$$;
+
+create trigger users_default_manual_watchlist
+after insert on users
+for each row execute function ensure_default_manual_watchlist();
+
 create table watchlist_members (
   watchlist_member_id uuid primary key default gen_random_uuid(),
   watchlist_id uuid not null references watchlists(watchlist_id) on delete cascade,
