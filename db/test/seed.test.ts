@@ -23,7 +23,7 @@ type SeedSnapshot = {
   mockDefaultWatchlistCount: string;
   metricsDigest: string;
   sourcesDigest: string;
-  devListingsDigest: string;
+  devListingsDigest: string | null;
 };
 
 function snapshotSeed(containerName: string): SeedSnapshot {
@@ -105,8 +105,6 @@ const DEV_LISTING_IDS = [
   "44444444-4444-4444-a444-444444444444",
   "55555555-5555-4555-a555-555555555555",
 ];
-
-const EXPECTED_DEV_LISTINGS_DIGEST = "54dea6790b9b6ded521028154804b45a";
 
 test("seed populates metrics and sources with the expected registry", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
@@ -248,7 +246,7 @@ test("seed provisions the mock user and default manual watchlist", { timeout: 12
   );
 });
 
-test("seed provisions resolver-backed dev listing identities", { timeout: 120000 }, async (t) => {
+test("seed does not provision provider-owned ticker identities", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for db seed integration coverage");
     return;
@@ -271,11 +269,15 @@ test("seed provisions resolver-backed dev listing identities", { timeout: 120000
         and i.instrument_id = '11111111-1111-4111-b111-111111111111'::uuid
         and iss.issuer_id = '11111111-1111-4111-9111-111111111111'::uuid`,
   );
-  assert.equal(aaplLookupRows, "1", "expected AAPL to be resolvable through listing -> instrument -> issuer");
+  assert.equal(
+    aaplLookupRows,
+    "0",
+    "normal seed data must not create hardcoded AAPL listing -> instrument -> issuer rows",
+  );
 
   const snapshot = snapshotSeed(containerName);
-  assert.equal(snapshot.devIssuerCount, "5");
-  assert.equal(snapshot.devInstrumentCount, "5");
-  assert.equal(snapshot.devListingCount, "5");
-  assert.equal(snapshot.devListingsDigest, EXPECTED_DEV_LISTINGS_DIGEST);
+  assert.equal(snapshot.devIssuerCount, "0");
+  assert.equal(snapshot.devInstrumentCount, "0");
+  assert.equal(snapshot.devListingCount, "0");
+  assert.equal(snapshot.devListingsDigest, "");
 });

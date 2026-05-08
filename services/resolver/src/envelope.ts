@@ -28,9 +28,18 @@ export const CONFIDENCE_NAME_LEGAL = 0.9;
 export const CONFIDENCE_NAME_FORMER = 0.85;
 export const CONFIDENCE_NAME_ALIAS_LISTING = 0.8;
 
+export type ResolverDisplayLabels = {
+  primary: string;
+  legal_name?: string;
+  ticker?: string;
+  mic?: string;
+  share_class?: string;
+};
+
 export type ResolverCandidate = {
   subject_ref: SubjectRef;
   display_name: string;
+  display_labels?: ResolverDisplayLabels;
   confidence: number;
   match_reason?: string;
 };

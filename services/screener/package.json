@@ -9,5 +9,11 @@
   "scripts": {
     "test": "node --experimental-strip-types --test \"test/**/*.test.ts\"",
     "dev": "node --experimental-strip-types src/dev.ts"
+  },
+  "dependencies": {
+    "pg": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0"
   }
 }

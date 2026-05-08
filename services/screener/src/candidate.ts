@@ -7,7 +7,8 @@
 // screener service owns a candidate registry that is pre-hydrated by an
 // upstream poller (out of scope for this bead) or fixture-loaded for
 // dev. The executor reads from the registry; the registry is the only
-// place candidate identity + values live.
+// place candidate identity + values live. Normal dev builds this registry
+// from Postgres/provider caches; the in-memory constructor remains for tests.
 //
 // Fields exposed in `universe` / `quote` / `fundamentals` mirror the
 // closed registry in `fields.ts`. Adding a new screener-queryable field
@@ -135,4 +136,3 @@ function freezeUniverse(
     industry: raw.industry as string,
   });
 }
-

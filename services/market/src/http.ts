@@ -4,6 +4,7 @@ import { isAvailable, unavailable, type MarketDataOutcome, type UnavailableEnvel
 import type { NormalizedBars } from "./bar.ts";
 import { ListingNotFoundError, type ListingRepository, type ListingRecord } from "./listings.ts";
 import type { NormalizedQuote } from "./quote.ts";
+import { canonicalizeProviderBarRange } from "./range-canonicalization.ts";
 import {
   assertSeriesQueryContract,
   buildSeriesCacheAuditDashboard,
@@ -327,7 +328,7 @@ async function fanOutOne(
     const outcome = await deps.adapter.getBars({
       listing,
       interval: query.interval,
-      range: query.range,
+      range: canonicalizeProviderBarRange(query.range, query.interval),
     });
 
     if (isAvailable(outcome) && outcome.data.adjustment_basis !== query.basis) {

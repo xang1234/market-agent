@@ -17,8 +17,8 @@ set +a
 # Keep in sync with .env.dev.example.
 : "${HOME_PORT:=4334}"
 : "${EVIDENCE_PORT:=4335}"
-: "${HOME_PULSE_LISTINGS:=}"
-export HOME_PORT EVIDENCE_PORT HOME_PULSE_LISTINGS
+: "${HOME_PULSE_TICKERS:=AAPL,MSFT,GOOGL}"
+export HOME_PORT EVIDENCE_PORT HOME_PULSE_TICKERS
 
 DEV_DIR="$ROOT/.dev"
 LOG_DIR="$DEV_DIR/logs"
@@ -358,6 +358,11 @@ up() {
   fi
 
   if ! (cd "$ROOT/db" && npm run seed); then
+    cleanup_failed_up
+    return 1
+  fi
+
+  if ! (cd "$ROOT/services/resolver" && npm run repair:provider-identities); then
     cleanup_failed_up
     return 1
   fi

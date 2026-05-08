@@ -193,11 +193,11 @@ market-agent/
 
 ```bash
 cp .env.dev.example .env.dev      # ports + flags; safe defaults
-./scripts/dev-shell.sh up         # first run installs ~12 npm packages, pulls images, runs migrations + seeds
+./scripts/dev-shell.sh up         # first run installs packages, pulls images, runs migrations + reference seeds
 ./scripts/dev-shell.sh status     # confirms all services are running
 ```
 
-Set `POLYGON_API_KEY` in `.env.dev` to enable on-demand stock ticker discovery and live Polygon market fetches for DB-backed listings. Without a key, the seeded dev listings still work and unknown tickers resolve as `not_found`.
+Set `POLYGON_API_KEY` in `.env.dev` to enable provider-backed stock ticker discovery and Polygon quote/bar caching. Dev no longer seeds ticker identities or fixture market data; without a key, unknown tickers resolve as `not_found` and market surfaces return unavailable. Set `SEC_EDGAR_USER_AGENT` to enable on-demand SEC companyfacts ingestion for statements and key stats.
 
 When `up` completes, the app is at **<http://localhost:5173>**.
 
@@ -241,10 +241,10 @@ The matching `users` row is created automatically by `db/seed/00_dev_mock_user.s
 ## Usage walkthrough
 
 ### Home
-Opens to the cross-agent findings feed deduped by `ClaimCluster`, plus a market-pulse strip (default seeds: AAPL, MSFT, GOOGL — configurable via `HOME_PULSE_LISTINGS` in `.env.dev`), watchlist movers, last-24-h agent summaries grouped by severity, and pinned screens. No sign-in required to land; sign-in is required to load the user-scoped sections.
+Opens to the cross-agent findings feed deduped by `ClaimCluster`, plus a market-pulse strip (default tickers: AAPL, MSFT, GOOGL — configurable via `HOME_PULSE_TICKERS` in `.env.dev`), watchlist movers, last-24-h agent summaries grouped by severity, and pinned screens. No sign-in required to land; sign-in is required to load the user-scoped sections.
 
 ### Symbol detail
-Type a ticker into the top search (e.g. `AAPL`). The resolver maps it to a canonical `SubjectRef` like `listing:11111111-1111-4111-a111-111111111111` and lands at `/symbol/<ref>/overview`. The five tabs are **Overview · Financials · Earnings · Holders · Signals** (the source-agnostic supersession of the older `/reddit` draft route — community, news, and filing-derived evidence all compose through the same shared blocks). Charts and tables are sealed against an immutable snapshot per [§15](stock-agent-v2.md): timeframe buttons resolve inside the snapshot's `allowed_transforms`; anything else triggers a refresh.
+Type a ticker into the top search (e.g. `AAPL`). The resolver discovers and persists a provider-backed canonical `SubjectRef` like `listing:<uuid>` and lands at `/symbol/<ref>/overview`. The five tabs are **Overview · Financials · Earnings · Holders · Signals** (the source-agnostic supersession of the older `/reddit` draft route — community, news, and filing-derived evidence all compose through the same shared blocks). Charts and tables are sealed against an immutable snapshot per [§15](stock-agent-v2.md): timeframe buttons resolve inside the snapshot's `allowed_transforms`; anything else triggers a refresh.
 
 ### Chat
 Protected surface — sign in via the top-bar button or the AuthGate panel. New threads are created from the empty state. Messages stream via SSE; the analyst's reply arrives as a `Block[]` (typed `RichText`, `Section`, `MetricRow`, `Table`, `LineChart`, etc.) — never raw markdown. Old blocks stay interactive in their sealed snapshot. The right rail shows the activity stream (`Reading` / `Investigating` / `Found` / `Dismissed`); the left rail lists threads scoped to the session.

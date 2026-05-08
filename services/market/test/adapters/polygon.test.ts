@@ -268,6 +268,42 @@ test("polygon adapter classifies a 401 from the fetcher as non-retryable provide
   assert.equal(outcome.retryable, false);
 });
 
+test("polygon adapter falls back to aggregate-derived quote when snapshot is forbidden", async () => {
+  const endMs = Date.parse(FIXED_NOW);
+  const startMs = endMs - 14 * 24 * 60 * 60 * 1000;
+  const aggsPath = `/v2/aggs/ticker/AAPL/range/1/day/${startMs}/${endMs}?adjusted=true&sort=asc&limit=50000`;
+  const seen: string[] = [];
+  const adapter = createPolygonAdapter({
+    sourceId: POLYGON_SOURCE_ID,
+    delayClass: POLYGON_DELAY_CLASS,
+    fetcher: async (path) => {
+      seen.push(path);
+      if (path === SNAPSHOT_PATH) throw new PolygonFetchError(403, "forbidden");
+      if (path === aggsPath) {
+        return {
+          adjusted: true,
+          results: [
+            { t: Date.parse("2026-04-20T04:00:00.000Z"), o: 90, h: 101, l: 89, c: 100, v: 10_000 },
+            { t: Date.parse("2026-04-21T04:00:00.000Z"), o: 100, h: 103, l: 99, c: 102, v: 12_000 },
+          ],
+        };
+      }
+      throw new Error(`unexpected fetch: ${path}`);
+    },
+    resolveListing: async () => aaplCtx,
+    clock: fixedClock,
+  });
+
+  const outcome = await adapter.getQuote({ listing: aaplListing });
+
+  assert.equal(isAvailable(outcome), true);
+  if (!isAvailable(outcome)) return;
+  assert.deepEqual(seen, [SNAPSHOT_PATH, aggsPath]);
+  assert.equal(outcome.data.price, 102);
+  assert.equal(outcome.data.prev_close, 100);
+  assert.equal(outcome.data.session_state, "closed");
+});
+
 test("polygon adapter classifies a generic network error as retryable provider_error", async () => {
   const adapter = createPolygonAdapter({
     sourceId: POLYGON_SOURCE_ID,

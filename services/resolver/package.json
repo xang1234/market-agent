@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "node --experimental-strip-types src/dev.ts",
+    "repair:provider-identities": "node --experimental-strip-types src/repair-provider-identities.ts",
     "test": "node --experimental-strip-types --test \"test/**/*.test.ts\""
   },
   "dependencies": {

@@ -18,9 +18,10 @@ npm run dev      # starts http server on $MARKET_PORT (defaults to 4321)
 
 `src/dev.ts` boots the HTTP server using:
 
-- `createPostgresListingRepository` when `DATABASE_URL` is present, so listings discovered by the resolver can be quoted. Without a database URL it falls back to `createInMemoryListingRepository(DEV_LISTINGS)` for AAPL, MSFT, GOOGL, TSLA, and NVDA.
-- `createPolygonHttpFetcher` when `POLYGON_API_KEY` is present. Seeded fixture tickers still fall back to `createDevPolygonFetcher` if live Polygon rejects the request, so local AAPL/MSFT/GOOGL/TSLA/NVDA demos keep working with restricted API keys.
-- `DEV_POLYGON_SOURCE_ID` — a real UUID v4 (not a stub sentinel) carried through as `quote.source_id` so consumers can verify the live wiring.
+- `createPostgresListingRepository`; `DATABASE_URL` is required in normal dev so provider-discovered listings can be quoted after restart.
+- `createCachedMarketDataAdapter` backed by Postgres quote/bar cache tables.
+- `createPolygonHttpFetcher` when `POLYGON_API_KEY` is present. Without a key, requests return unavailable envelopes instead of fixture quotes.
+- `POLYGON_MARKET_SOURCE_ID` carried through as `quote.source_id` / `bars.source_id` so consumers can verify provider provenance.
 
 `POLYGON_API_BASE_URL` can point the Polygon quote/bar fetcher at a mock server
 in tests.

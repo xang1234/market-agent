@@ -159,11 +159,16 @@ function subjectFromHandoff(
 }
 
 function candidateToSubject(candidate: ResolverCandidate): ResolvedSubject {
-  return {
+  const subject: ResolvedSubject = {
     subject_ref: candidate.subject_ref,
     display_name: candidate.display_name,
     confidence: candidate.confidence,
   };
+  if (candidate.display_labels) {
+    subject.display_label = candidate.display_name;
+    subject.display_labels = candidate.display_labels;
+  }
+  return subject;
 }
 
 export function createResolverServer(

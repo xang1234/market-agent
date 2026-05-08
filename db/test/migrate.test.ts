@@ -27,6 +27,7 @@ const alertDeliveryMetadataMigrationPath = join(dbRoot, "migrations", "0023_aler
 const factReviewActionsMigrationPath = join(dbRoot, "migrations", "0021_fact_review_actions.up.sql");
 const watchlistListManagementMigrationPath = join(dbRoot, "migrations", "0022_watchlist_list_management.up.sql");
 const polygonDiscoveryMigrationPath = join(dbRoot, "migrations", "0024_instruments_figi_composite.up.sql");
+const providerBackedDevDataMigrationPath = join(dbRoot, "migrations", "0025_provider_backed_dev_data.up.sql");
 
 function loadExpectedTables() {
   return Array.from(
@@ -149,6 +150,20 @@ test("polygon ticker discovery can dedupe instruments by composite FIGI", () => 
   }
 });
 
+test("provider-backed dev data schema stores market cache and saved screens", () => {
+  const forwardMigration = readFileSync(providerBackedDevDataMigrationPath, "utf8");
+  const schema = readFileSync(schemaPath, "utf8");
+
+  for (const sql of [forwardMigration, schema]) {
+    assert.match(sql, /create table(?: if not exists)? market_quote_snapshots/i);
+    assert.match(sql, /create table(?: if not exists)? market_bar_ranges/i);
+    assert.match(sql, /create table(?: if not exists)? market_bars/i);
+    assert.match(sql, /create table(?: if not exists)? screener_screens/i);
+    assert.match(sql, /reference_data/i);
+    assert.match(sql, /market_data/i);
+  }
+});
+
 test("migrate up applies pending migrations and records them in schema_migrations", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for db migration integration coverage");
@@ -172,7 +187,7 @@ test("migrate up applies pending migrations and records them in schema_migration
   });
 
   assert.equal(migrateResult.status, 0, migrateResult.stderr || migrateResult.stdout);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "24");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "25");
   assert.deepEqual(
     queryValue(containerName, "select version || ':' || name from schema_migrations order by version").split("\n"),
     [
@@ -200,6 +215,7 @@ test("migrate up applies pending migrations and records them in schema_migration
       "0022:watchlist_list_management",
       "0023:alert_delivery_metadata",
       "0024:instruments_figi_composite",
+      "0025:provider_backed_dev_data",
     ],
   );
 
@@ -946,7 +962,7 @@ test("migrate down rolls back schema changes when removing the migration record 
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /rejecting schema_migrations delete/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "24");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "25");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -955,13 +971,13 @@ test("migrate down rolls back schema changes when removing the migration record 
   // migration's schema change must still be in place. If the runner
   // accidentally executed the down DDL before hitting the trigger block, the
   // schema_migrations row count alone wouldn't catch that — checking the
-  // latest migration's actual artifact does. 0024 added the composite FIGI
-  // index; the down would remove it, so its presence is independent proof the
+  // latest migration's actual artifact does. 0025 added the market cache
+  // tables; the down would remove them, so their presence is independent proof the
   // down DDL did not execute.
   assert.equal(
     queryValue(
       containerName,
-      "select count(*) from pg_indexes where schemaname = 'public' and indexname = 'instruments_figi_composite_idx'",
+      "select count(*) from pg_tables where schemaname = 'public' and tablename = 'market_quote_snapshots'",
     ),
     "1",
   );
@@ -1012,7 +1028,7 @@ test("migrate down fails when any applied migration is missing locally", { timeo
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /Applied migration 0000 is missing locally/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "24");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "26");
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
 });
 

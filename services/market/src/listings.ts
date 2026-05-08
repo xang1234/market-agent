@@ -1,11 +1,9 @@
 // Listing context lookup: maps a listing UUID to the provider-neutral context
 // needed to fetch quotes (ticker + venue + currency + display timezone).
 //
-// In production this would query the `listings` table seeded by P0.5 and
-// joined to the relevant venue/currency tables. For dev mode, a small
-// in-memory map keyed by listing UUID stands in. Either backing exposes the
-// same `find` shape so callers (the polygon adapter's resolveListing dep,
-// the HTTP handler) don't change between environments.
+// Normal dev uses the Postgres implementation so provider-discovered listings
+// can quote immediately and survive restarts. The in-memory implementation is
+// retained for focused unit tests.
 
 import type { ListingSubjectRef, UUID } from "./subject-ref.ts";
 

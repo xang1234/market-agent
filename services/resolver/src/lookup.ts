@@ -226,6 +226,7 @@ export async function resolveByTicker(
   const candidates: ResolverCandidate[] = result.rows.map((row) => ({
     subject_ref: { kind: "listing", id: row.listing_id },
     display_name: listingDisplayName(row),
+    display_labels: listingDisplayLabels(row),
     confidence: CONFIDENCE_TICKER_AMBIGUOUS,
     match_reason: "exact_ticker_match",
   }));
@@ -268,6 +269,16 @@ function listingDisplayName(row: ListingRow): string {
   return `${row.ticker} · ${row.mic} — ${base}`;
 }
 
+function listingDisplayLabels(row: ListingRow): ResolverCandidate["display_labels"] {
+  return stripUndefined({
+    primary: listingDisplayName(row),
+    legal_name: row.legal_name,
+    ticker: row.ticker,
+    mic: row.mic,
+    share_class: row.share_class ?? undefined,
+  });
+}
+
 async function listingCandidatesForAliasIssuers(
   db: QueryExecutor,
   issuerIds: string[],
@@ -290,9 +301,16 @@ async function listingCandidatesForAliasIssuers(
   return result.rows.map((row) => ({
     subject_ref: { kind: "listing", id: row.listing_id },
     display_name: listingDisplayName(row),
+    display_labels: listingDisplayLabels(row),
     confidence: CONFIDENCE_NAME_ALIAS_LISTING,
     match_reason: "alias_related_listing",
   }));
+}
+
+function stripUndefined<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, v]) => v !== undefined),
+  ) as T;
 }
 
 function dedupeCandidates(candidates: ResolverCandidate[]): ResolverCandidate[] {
