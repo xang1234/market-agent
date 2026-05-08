@@ -71,6 +71,8 @@ function ThemeMembershipRationaleRow({
           {membership.rationale_claim_ids.map((claimId) => (
             <li
               key={claimId}
+              title={`claim:${claimId}`}
+              aria-label={`claim:${claimId}`}
               className="rounded bg-neutral-100 px-2 py-0.5 font-mono text-xs text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
             >
               {`claim:${claimId.slice(0, 8)}`}

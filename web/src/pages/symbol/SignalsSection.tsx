@@ -1,11 +1,10 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSubjectDetailContext } from '../../shell/subjectDetailOutletContext.ts'
 import { Card } from '../../symbol/Card.tsx'
 import { formatCompactNumber } from '../../symbol/format.ts'
 import { issuerIdFromSubject } from '../../symbol/profile.ts'
 import {
   EVIDENCE_SOURCE_KINDS,
-  loadThemeMembershipRationaleFixture,
   loadSignalsFixture,
   sourceKindLabel,
   stanceLabel,
@@ -16,7 +15,10 @@ import {
   type EvidenceSourceKind,
   type SentimentTrendBlock,
 } from '../../symbol/signals.ts'
-import { ThemeMembershipRationaleList } from '../../symbol/ThemeMembershipRationaleList.tsx'
+import {
+  ThemeMembershipRationaleList,
+  type ThemeMembershipRationaleView,
+} from '../../symbol/ThemeMembershipRationaleList.tsx'
 import {
   NEGATIVE_CLASS,
   NEUTRAL_CLASS,
@@ -25,6 +27,7 @@ import {
   type SignedDirection,
 } from '../../symbol/signedColor.ts'
 import { Sparkline } from '../../symbol/Sparkline.tsx'
+import { fetchThemeMembershipRationales } from '../../symbol/themeRationale.ts'
 
 const PLACEHOLDER_CLASS = 'text-sm text-neutral-500 dark:text-neutral-400'
 
@@ -58,15 +61,58 @@ const SOURCE_KIND_DOT_CLASS: Readonly<Record<EvidenceSourceKind, string>> = {
   filing: 'bg-amber-500',
 }
 
+type ThemeRationaleState =
+  | { status: 'loading'; memberships: ReadonlyArray<ThemeMembershipRationaleView> }
+  | { status: 'loaded'; memberships: ReadonlyArray<ThemeMembershipRationaleView> }
+  | { status: 'error'; memberships: ReadonlyArray<ThemeMembershipRationaleView> }
+
+function ThemeRationaleLoader({ issuerId }: { issuerId: string }) {
+  const [themeRationaleState, setThemeRationaleState] = useState<ThemeRationaleState>({
+    status: 'loading',
+    memberships: [],
+  })
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchThemeMembershipRationales(
+      { kind: 'issuer', id: issuerId },
+      { signal: controller.signal, limit: 8 },
+    )
+      .then((response) => {
+        setThemeRationaleState({ status: 'loaded', memberships: response.memberships })
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        setThemeRationaleState({ status: 'error', memberships: [] })
+      })
+
+    return () => controller.abort()
+  }, [issuerId])
+
+  return <ThemeRationaleBody state={themeRationaleState} />
+}
+
+function ThemeRationaleCard({ issuerId }: { issuerId: string | null }) {
+  return (
+    <Card
+      testId="signals-theme-rationale"
+      headingId="signals-theme-rationale-heading"
+      heading="Theme rationale"
+    >
+      {issuerId === null ? (
+        <p className={PLACEHOLDER_CLASS}>Issuer context unavailable for theme rationale.</p>
+      ) : (
+        <ThemeRationaleLoader key={issuerId} issuerId={issuerId} />
+      )}
+    </Card>
+  )
+}
+
 export function SignalsSection() {
   const { subject } = useSubjectDetailContext()
   const issuerId = issuerIdFromSubject(subject)
   const envelope = useMemo(
     () => (issuerId === null ? null : loadSignalsFixture(issuerId)),
-    [issuerId],
-  )
-  const themeRationales = useMemo(
-    () => (issuerId === null ? [] : loadThemeMembershipRationaleFixture(issuerId)),
     [issuerId],
   )
 
@@ -97,17 +143,7 @@ export function SignalsSection() {
           <p className={PLACEHOLDER_CLASS}>Issuer context unavailable for this entry.</p>
         )}
       </Card>
-      <Card
-        testId="signals-theme-rationale"
-        headingId="signals-theme-rationale-heading"
-        heading="Theme rationale"
-      >
-        {themeRationales.length > 0 ? (
-          <ThemeMembershipRationaleList memberships={themeRationales} />
-        ) : (
-          <p className={PLACEHOLDER_CLASS}>Issuer context unavailable for theme rationale.</p>
-        )}
-      </Card>
+      <ThemeRationaleCard issuerId={issuerId} />
       <p className={`${PLACEHOLDER_CLASS} px-1`} data-testid="signals-provenance-note">
         Source-agnostic surface: community, news, and filing-derived evidence compose shared
         blocks. Real evidence-bundle wiring lands with the document/evidence plane (P3) and the
@@ -115,6 +151,23 @@ export function SignalsSection() {
       </p>
     </div>
   )
+}
+
+function ThemeRationaleBody({
+  state,
+}: {
+  state: ThemeRationaleState
+}) {
+  if (state.status === 'loading') {
+    return <p className={PLACEHOLDER_CLASS}>Loading theme rationale...</p>
+  }
+  if (state.status === 'error') {
+    return <p className={PLACEHOLDER_CLASS}>Theme rationale is unavailable.</p>
+  }
+  if (state.memberships.length === 0) {
+    return <p className={PLACEHOLDER_CLASS}>No theme rationale is available for this issuer.</p>
+  }
+  return <ThemeMembershipRationaleList memberships={state.memberships} />
 }
 
 function SentimentTrendBody({ block }: { block: SentimentTrendBlock }) {

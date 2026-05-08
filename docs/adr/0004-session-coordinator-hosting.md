@@ -29,10 +29,13 @@ The equivalence contract is:
 
 - Chat turn execution is serialized by `services/chat/src/coordinator.ts` per
   thread, with tests covering same-thread queuing, turn identity, history
-  retention, and subscriber isolation.
+  retention, and subscriber isolation. This is currently a single-coordinator
+  guarantee: a production deployment must run one chat coordinator process or
+  use sticky routing that keeps all traffic for a thread on the same process.
 - SSE resume is handled by sequenced coordinator events and `Last-Event-ID`;
   durable chat messages remain in Postgres, while bounded coordinator history
-  covers short reconnect windows.
+  covers short reconnect windows on that coordinator process. Process restarts
+  recover the durable messages but not the bounded in-memory SSE event log.
 - Analyze runs and Agent runs persist run state and outputs in Postgres through
   the dev-api durable adapters and agents repositories, so process restarts do
   not own the result of record.
@@ -40,6 +43,13 @@ The equivalence contract is:
   writes instead of assuming FIFO queue delivery.
 - Any future Cloudflare Durable Object adapter must preserve these semantics
   rather than introduce a second product contract.
+
+The Node/Postgres stack is therefore Durable-Object-compatible, not currently
+Durable-Object-equivalent under arbitrary horizontal scaling. If the deployed
+topology needs multiple chat coordinator instances without sticky routing, the
+next adapter must add a Postgres-backed per-thread lease or advisory lock, a
+durable event ledger for SSE replay, and idempotency keys for turn execution
+before claiming cross-process serialization.
 
 ## When To Adopt Durable Objects
 

@@ -7,7 +7,7 @@ import {
   type GoldenEvalCase,
 } from "../src/index.ts";
 
-test("runGoldenEvalDriftMonitor persists a run, computes drift, and flags policy failure", async () => {
+test("runGoldenEvalDriftMonitor persists a run, computes drift, and flags policy failure by default", async () => {
   const db = fakeDb();
   const cases = GOLDEN_EVAL_CATEGORIES.map((category, index): GoldenEvalCase => ({
     id: `case-${index}`,
@@ -24,7 +24,6 @@ test("runGoldenEvalDriftMonitor persists a run, computes drift, and flags policy
       passed: testCase.category !== "themes_macro_topics",
       actual: { checked: testCase.id },
     }),
-    policy: { failOnAlert: true },
   });
 
   assert.equal(result.run.row.eval_run_result_id, "00000000-0000-4000-8000-000000000002");
@@ -36,6 +35,30 @@ test("runGoldenEvalDriftMonitor persists a run, computes drift, and flags policy
   );
   assert.match(db.queries[0]?.text ?? "", /insert into eval_run_results/i);
   assert.match(db.queries[1]?.text ?? "", /from eval_run_results/i);
+});
+
+test("runGoldenEvalDriftMonitor can explicitly opt out of failing on alert", async () => {
+  const db = fakeDb();
+  const cases = GOLDEN_EVAL_CATEGORIES.map((category, index): GoldenEvalCase => ({
+    id: `case-${index}`,
+    category,
+    prompt: `Prompt ${index}`,
+  }));
+
+  const result = await runGoldenEvalDriftMonitor(db, {
+    suite_name: "golden-nightly",
+    model_version: "model-v2",
+    prompt_version: "prompt-v2",
+    cases,
+    evaluate: async (testCase) => ({
+      passed: testCase.category !== "themes_macro_topics",
+      actual: { checked: testCase.id },
+    }),
+    policy: { failOnAlert: false },
+  });
+
+  assert.equal(result.drift_report?.alert, true);
+  assert.equal(result.policy_status, "passed");
 });
 
 test("runGoldenEvalDriftMonitor passes policy when there is no previous run yet", async () => {

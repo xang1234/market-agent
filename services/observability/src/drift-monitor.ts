@@ -47,8 +47,9 @@ export async function runGoldenEvalDriftMonitor(
   const drift_report = await readLatestGoldenEvalDriftReport(db, {
     suite_name: input.suite_name,
   });
+  const failOnAlert = input.policy?.failOnAlert !== false;
   const policy_status =
-    input.policy?.failOnAlert === true && drift_report?.alert === true ? "failed" : "passed";
+    failOnAlert && drift_report?.alert === true ? "failed" : "passed";
 
   return Object.freeze({
     run,

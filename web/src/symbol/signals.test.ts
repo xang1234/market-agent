@@ -3,7 +3,6 @@ import test from 'node:test'
 import {
   CLAIM_STANCES,
   EVIDENCE_SOURCE_KINDS,
-  loadThemeMembershipRationaleFixture,
   loadSignalsFixture,
   sourceKindLabel,
   stanceLabel,
@@ -106,20 +105,6 @@ test('first_observed precedes or equals last_observed for every cluster', () => 
   for (const cluster of env.claim_clusters.clusters) {
     assert.ok(cluster.first_observed <= cluster.last_observed)
   }
-})
-
-test('loadThemeMembershipRationaleFixture includes inferred claim rationale and manual-mode disclosure', () => {
-  const memberships = loadThemeMembershipRationaleFixture(APPLE_ISSUER_ID)
-  const inferred = memberships.find((membership) => membership.membership_mode === 'inferred')
-  const manual = memberships.find((membership) => membership.membership_mode === 'manual')
-
-  assert.ok(inferred)
-  assert.equal(inferred.rationale_supported, true)
-  assert.ok(inferred.rationale_claim_ids.length > 0)
-  assert.ok(inferred.rationale_claim_ids.every((id) => /^[0-9a-f-]{36}$/.test(id)))
-  assert.ok(manual)
-  assert.equal(manual.rationale_supported, false)
-  assert.deepEqual(manual.rationale_claim_ids, [])
 })
 
 test('stanceLabel and sourceKindLabel cover every enum value', () => {

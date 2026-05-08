@@ -44,6 +44,10 @@ import type { JsonValue } from "../../observability/src/types.ts";
 import type { SubjectRef } from "../../resolver/src/subject-ref.ts";
 import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
 import { readDevFlags } from "../../shared/src/devFlags.ts";
+import {
+  listThemeMembershipRationalesBySubject,
+  type ThemeMembershipRationaleRow,
+} from "../../themes/src/index.ts";
 
 type DevAgent = {
   agent_id: string;
@@ -111,6 +115,16 @@ type DevArtifactShareResult = {
   origin_snapshot_ids: ReadonlyArray<string>;
 };
 
+type DevThemeMembershipRationale = {
+  theme_id: string;
+  theme_name: string;
+  theme_description: string | null;
+  membership_mode: ThemeMembershipRationaleRow["membership_mode"];
+  score: number | null;
+  rationale_supported: boolean;
+  rationale_claim_ids: ReadonlyArray<string>;
+};
+
 export type DevApiAnalyzeAdapter = {
   listTemplates(input: { userId: string }): Promise<{
     templates: DevAnalyzeTemplate[];
@@ -151,9 +165,21 @@ export type DevApiAgentsAdapter = {
   } | null>;
 };
 
+export type DevApiThemesAdapter = {
+  listMembershipRationales(input: {
+    subjectRef: SubjectRef;
+    asOf?: string;
+    limit?: number;
+  }): Promise<{
+    memberships: DevThemeMembershipRationale[];
+    truncated: boolean;
+  }>;
+};
+
 export type DevApiAdapters = {
   analyze: DevApiAnalyzeAdapter;
   agents: DevApiAgentsAdapter;
+  themes: DevApiThemesAdapter;
 };
 
 export type DevApiAnalyzeWorkflowInput = {
@@ -218,6 +244,19 @@ export function createDevApiServer(
       respondJson(res, 200, {
         services: serviceCatalog(env, Boolean(adapters)),
       });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/themes/membership-rationales") {
+      if (!adapters) {
+        respondJson(res, 503, { error: "durable themes adapter is not configured" });
+        return;
+      }
+      respondJson(res, 200, await adapters.themes.listMembershipRationales({
+        subjectRef: readSubjectRefFromQuery(url),
+        asOf: readOptionalIsoTimestamp(url.searchParams.get("as_of"), "as_of"),
+        limit: readOptionalPositiveInteger(url.searchParams.get("limit"), "limit"),
+      }));
       return;
     }
 
@@ -619,6 +658,11 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
         return { activity: [] };
       },
     },
+    themes: {
+      async listMembershipRationales() {
+        return { memberships: [], truncated: false };
+      },
+    },
   };
 }
 
@@ -896,6 +940,18 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
         }
       },
     },
+    themes: {
+      async listMembershipRationales({ subjectRef, asOf, limit }) {
+        const page = await listThemeMembershipRationalesBySubject(deps.db, subjectRef, {
+          asOf,
+          limit,
+        });
+        return {
+          memberships: page.rows.map(toDevThemeMembershipRationale),
+          truncated: page.truncated,
+        };
+      },
+    },
   };
 }
 
@@ -972,6 +1028,46 @@ function readOptionalSubjectRef(value: unknown): SubjectRef | null {
     throw new DevApiHttpError(400, "primary_subject_ref is invalid");
   }
   return { kind: candidate.kind as SubjectRef["kind"], id: candidate.id };
+}
+
+const SUBJECT_KINDS: ReadonlyArray<SubjectRef["kind"]> = Object.freeze([
+  "issuer",
+  "instrument",
+  "listing",
+  "theme",
+  "macro_topic",
+  "portfolio",
+  "screen",
+]);
+
+function readSubjectRefFromQuery(url: URL): SubjectRef {
+  const kind = nonEmptyString(url.searchParams.get("subject_kind"));
+  const id = nonEmptyString(url.searchParams.get("subject_id"));
+  if (kind === null || id === null) {
+    throw new DevApiHttpError(400, "subject_kind and subject_id are required");
+  }
+  if (!SUBJECT_KINDS.includes(kind as SubjectRef["kind"])) {
+    throw new DevApiHttpError(400, "subject_kind is invalid");
+  }
+  return { kind: kind as SubjectRef["kind"], id };
+}
+
+function readOptionalPositiveInteger(value: string | null, label: string): number | undefined {
+  if (value === null || value.trim() === "") return undefined;
+  const numberValue = Number(value);
+  if (!Number.isInteger(numberValue) || numberValue <= 0) {
+    throw new DevApiHttpError(400, `${label} must be a positive integer`);
+  }
+  return numberValue;
+}
+
+function readOptionalIsoTimestamp(value: string | null, label: string): string | undefined {
+  const text = nonEmptyString(value);
+  if (text === null) return undefined;
+  if (Number.isNaN(Date.parse(text))) {
+    throw new DevApiHttpError(400, `${label} must be a valid ISO timestamp`);
+  }
+  return text;
 }
 
 function enrichAnalyzeRunBlocks(
@@ -1201,6 +1297,18 @@ function toDevAgentRun(row: AgentRunRow): DevAgentRun {
   };
 }
 
+function toDevThemeMembershipRationale(row: ThemeMembershipRationaleRow): DevThemeMembershipRationale {
+  return {
+    theme_id: row.theme_id,
+    theme_name: row.theme_name,
+    theme_description: row.theme_description,
+    membership_mode: row.membership_mode,
+    score: row.score,
+    rationale_supported: row.rationale_supported,
+    rationale_claim_ids: [...row.rationale_claim_ids],
+  };
+}
+
 function respondJson(res: ServerResponse, status: number, body: object) {
   res.statusCode = status;
   res.setHeader("content-type", "application/json");
@@ -1292,7 +1400,7 @@ function serviceCatalog(env: Record<string, string | undefined>, hasAdapters: bo
     { name: "snapshot", status: "library", note: "used by chat/analyze persistence paths; no standalone dev HTTP server" },
     { name: "tools", status: "library", note: "analyst tool registry package; no standalone dev HTTP server" },
     { name: "observability", status: "library", note: "run activity primitives exposed through chat/home routes" },
-    { name: "themes", status: "library", note: "theme inference package; no standalone dev HTTP server" },
+    { name: "themes", status: bffStatus, origin: env.DEV_API_ORIGIN ?? "http://127.0.0.1:4312", note: "theme membership rationale is exposed through dev-api; no standalone dev HTTP server" },
     { name: "summary", status: "library", note: "summary package; no standalone dev HTTP server" },
   ];
 }

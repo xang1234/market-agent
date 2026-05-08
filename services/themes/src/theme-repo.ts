@@ -519,7 +519,7 @@ function themeMembershipRationaleRowFromDb(
     theme_description: row.theme_description,
     membership_mode: row.membership_mode,
     membership_spec: row.membership_spec,
-    rationale_supported: row.membership_mode === "inferred" && membership.rationale_claim_ids.length > 0,
+    rationale_supported: row.membership_mode !== "manual" && membership.rationale_claim_ids.length > 0,
   });
 }
 

@@ -100,6 +100,115 @@ test("GET /v1/agents and POST /v1/agents/:id/runs expose agent workflow data", a
   assert.equal(runBody.status, "completed");
 });
 
+test("GET /v1/themes/membership-rationales hydrates service-backed theme rationale", async (t) => {
+  const subjectId = "33333333-3333-4333-8333-333333333333";
+  const calls: unknown[] = [];
+  const adapters = {
+    ...createFixtureDevApiAdapters(),
+    themes: {
+      async listMembershipRationales(input: unknown) {
+        calls.push(input);
+        return {
+          memberships: [
+            {
+              theme_id: "11111111-1111-4111-8111-111111111111",
+              theme_name: "AI infrastructure",
+              theme_description: "Source-backed AI buildout claims",
+              membership_mode: "rule_based",
+              score: 0.75,
+              rationale_supported: true,
+              rationale_claim_ids: ["44444444-4444-4444-8444-444444444444"],
+            },
+          ],
+          truncated: false,
+        };
+      },
+    },
+  };
+  const base = await startServer(t, {}, { adapters: adapters as never });
+
+  const response = await fetch(
+    `${base}/v1/themes/membership-rationales?subject_kind=issuer&subject_id=${subjectId}&limit=8`,
+  );
+  const body = await response.json() as {
+    memberships?: Array<{ theme_name?: string; rationale_claim_ids?: string[] }>;
+    truncated?: boolean;
+  };
+
+  assert.equal(response.status, 200);
+  assert.equal(body.memberships?.[0]?.theme_name, "AI infrastructure");
+  assert.deepEqual(body.memberships?.[0]?.rationale_claim_ids, [
+    "44444444-4444-4444-8444-444444444444",
+  ]);
+  assert.equal(body.truncated, false);
+  assert.deepEqual(calls, [
+    {
+      subjectRef: { kind: "issuer", id: subjectId },
+      asOf: undefined,
+      limit: 8,
+    },
+  ]);
+});
+
+test("GET /v1/themes/membership-rationales validates subject and limit query params", async (t) => {
+  const base = await startServer(t);
+
+  const missing = await fetch(`${base}/v1/themes/membership-rationales`);
+  const badLimit = await fetch(
+    `${base}/v1/themes/membership-rationales?subject_kind=issuer&subject_id=33333333-3333-4333-8333-333333333333&limit=0`,
+  );
+  const badAsOf = await fetch(
+    `${base}/v1/themes/membership-rationales?subject_kind=issuer&subject_id=33333333-3333-4333-8333-333333333333&as_of=not-a-date`,
+  );
+
+  assert.equal(missing.status, 400);
+  assert.equal(badLimit.status, 400);
+  assert.equal(badAsOf.status, 400);
+});
+
+test("service Themes adapter lists membership rationale through the read model", async () => {
+  const subjectId = "33333333-3333-4333-8333-333333333333";
+  const db = {
+    async query(text: string, values?: unknown[]) {
+      assert.match(text, /from theme_memberships tm/i);
+      assert.deepEqual(values, ["issuer", subjectId, "2026-05-08T00:00:00.000Z", 9]);
+      return {
+        rows: [
+          {
+            theme_membership_id: "22222222-2222-4222-8222-222222222222",
+            theme_id: "11111111-1111-4111-8111-111111111111",
+            theme_name: "Quality compounders",
+            theme_description: null,
+            membership_mode: "inferred",
+            membership_spec: null,
+            subject_kind: "issuer",
+            subject_id: subjectId,
+            score: "2",
+            rationale_claim_ids: ["44444444-4444-4444-8444-444444444444"],
+            effective_at: "2026-05-07T00:00:00.000Z",
+            expires_at: null,
+          },
+        ],
+      };
+    },
+  };
+  const adapters = createServiceDevApiAdapters({
+    db: db as never,
+    async sealAnalyzeSnapshot() {
+      throw new Error("analyze seal is not used");
+    },
+  });
+
+  const result = await adapters.themes.listMembershipRationales({
+    subjectRef: { kind: "issuer", id: subjectId },
+    asOf: "2026-05-08T00:00:00.000Z",
+    limit: 8,
+  });
+
+  assert.equal(result.memberships[0]?.theme_name, "Quality compounders");
+  assert.equal(result.memberships[0]?.rationale_supported, true);
+});
+
 test("PATCH and DELETE /v1/agents expose update and delete controls", async (t) => {
   const base = await startServer(t);
   const headers = {

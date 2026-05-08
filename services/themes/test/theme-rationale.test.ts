@@ -83,3 +83,34 @@ test("listThemeMembershipRationalesBySubject marks manual memberships as unsuppo
   assert.equal(page.rows[0]?.rationale_supported, false);
   assert.deepEqual(page.rows[0]?.rationale_claim_ids, []);
 });
+
+test("listThemeMembershipRationalesBySubject exposes explicit rule-based claim rationale", async () => {
+  const db = {
+    async query() {
+      return {
+        rows: [
+          {
+            theme_membership_id: MEMBERSHIP_ID,
+            theme_id: THEME_ID,
+            theme_name: "Rule-backed quality",
+            theme_description: null,
+            membership_mode: "rule_based",
+            membership_spec: { rules: [{ field: "gross_margin", op: "gt", value: 0.4 }] },
+            subject_kind: "issuer",
+            subject_id: SUBJECT_ID,
+            score: "0.91",
+            rationale_claim_ids: [CLAIM_A],
+            effective_at: "2026-05-07T00:00:00.000Z",
+            expires_at: null,
+          },
+        ],
+      };
+    },
+  };
+
+  const page = await listThemeMembershipRationalesBySubject(db, { kind: "issuer", id: SUBJECT_ID });
+
+  assert.equal(page.rows[0]?.membership_mode, "rule_based");
+  assert.equal(page.rows[0]?.rationale_supported, true);
+  assert.deepEqual(page.rows[0]?.rationale_claim_ids, [CLAIM_A]);
+});
