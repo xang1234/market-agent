@@ -9,14 +9,12 @@ import { claimAgentRun } from "../../agents/src/agent-run-repo.ts";
 import { createAgent, getAgent } from "../../agents/src/agent-repo.ts";
 import { runAgentLoop } from "../../agents/src/agent-loop.ts";
 import { createAnalyzeTemplate } from "../../analyze/src/template-repo.ts";
-import {
-  createClaim,
-  createClaimArgument,
-  createClaimEvidence,
-  createDocument,
-  createSource,
-  ephemeralRawBlobIdForSource,
-} from "../../evidence/src/index.ts";
+import { createClaimArgument } from "../../evidence/src/claim-argument-repo.ts";
+import { createClaimEvidence } from "../../evidence/src/claim-evidence-repo.ts";
+import { createClaim } from "../../evidence/src/claim-repo.ts";
+import { createDocument } from "../../evidence/src/document-repo.ts";
+import { ephemeralRawBlobIdForSource } from "../../evidence/src/object-store.ts";
+import { createSource } from "../../evidence/src/source-repo.ts";
 import {
   bootstrapDatabase,
   connectedClient,

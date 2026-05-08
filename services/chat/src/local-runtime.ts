@@ -4,7 +4,7 @@ import {
   loadLocalRuntimeEvidence,
   loadVerifierRowsForRefs,
   type LocalRuntimeEvidence,
-} from "../../evidence/src/index.ts";
+} from "../../evidence/src/local-runtime-evidence.ts";
 import { hashJsonValue, toolCallArgsDigest } from "../../observability/src/tool-call.ts";
 import { serializeJsonValue, type JsonValue } from "../../observability/src/types.ts";
 import type { SnapshotManifestDraft, SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";

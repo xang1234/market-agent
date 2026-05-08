@@ -10,14 +10,12 @@ import {
   dockerAvailable,
   registerLifoCleanup,
 } from "../../../db/test/docker-pg.ts";
-import {
-  createClaim,
-  createClaimArgument,
-  createClaimEvidence,
-  createDocument,
-  createSource,
-  ephemeralRawBlobIdForSource,
-} from "../../evidence/src/index.ts";
+import { createClaimArgument } from "../../evidence/src/claim-argument-repo.ts";
+import { createClaimEvidence } from "../../evidence/src/claim-evidence-repo.ts";
+import { createClaim } from "../../evidence/src/claim-repo.ts";
+import { createDocument } from "../../evidence/src/document-repo.ts";
+import { ephemeralRawBlobIdForSource } from "../../evidence/src/object-store.ts";
+import { createSource } from "../../evidence/src/source-repo.ts";
 import {
   analystToolRuntime,
   closeLocalRuntimePoolForTests,

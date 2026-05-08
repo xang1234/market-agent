@@ -5,12 +5,14 @@ import { Pool } from "pg";
 import {
   addClaimClusterMember,
   buildClaimCanonicalSignature,
+  upsertClaimCluster,
+} from "../../evidence/src/claim-cluster-repo.ts";
+import {
   loadLocalRuntimeEvidence,
   loadVerifierRowsForRefs,
-  upsertClaimCluster,
   type LocalRuntimeClaimEvidence,
   type LocalRuntimeEvidence,
-} from "../../evidence/src/index.ts";
+} from "../../evidence/src/local-runtime-evidence.ts";
 import { hashJsonValue, toolCallArgsDigest } from "../../observability/src/tool-call.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
 import { serializeJsonValue } from "../../observability/src/types.ts";

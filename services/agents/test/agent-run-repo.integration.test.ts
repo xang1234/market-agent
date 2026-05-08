@@ -80,37 +80,42 @@ async function waitForPostgres(name: string, databaseUrl: string): Promise<void>
   assert.fail(`Timed out waiting for Postgres container ${name}`);
 }
 
-async function bootstrapDatabase(t: TestContext, prefix: string): Promise<{ databaseUrl: string }> {
+async function bootstrapDatabase(t: TestContext, prefix: string): Promise<{
+  containerName: string;
+  databaseUrl: string;
+}> {
   const name = containerName(prefix);
-  t.after(() => stopPostgres(name));
   const hostPort = startPostgres(name);
   if (hostPort === null) {
     t.skip("Docker is present but Postgres container did not start");
-    return { databaseUrl: "" };
+    return { containerName: name, databaseUrl: "" };
   }
   const databaseUrl = `postgresql://postgres:postgres@127.0.0.1:${hostPort}/postgres`;
-  await waitForPostgres(name, databaseUrl);
-  const apply = run("npm", ["run", "apply:schema", "--", "--database-url", databaseUrl], {
-    cwd: DB_ROOT,
-    env: { DATABASE_URL: databaseUrl },
-  });
-  assert.equal(apply.status, 0, apply.stderr || apply.stdout);
-  return { databaseUrl };
-}
-
-async function connectedPool(t: TestContext, databaseUrl: string, max = 4): Promise<Pool> {
-  const pool = new Pool({ connectionString: databaseUrl, max });
-  t.after(() => pool.end().catch(() => {}));
-  return pool;
+  try {
+    await waitForPostgres(name, databaseUrl);
+    const apply = run("npm", ["run", "apply:schema", "--", "--database-url", databaseUrl], {
+      cwd: DB_ROOT,
+      env: { DATABASE_URL: databaseUrl },
+    });
+    assert.equal(apply.status, 0, apply.stderr || apply.stdout);
+    return { containerName: name, databaseUrl };
+  } catch (error) {
+    stopPostgres(name);
+    throw error;
+  }
 }
 
 test(
   "claimAgentRun enforces one active run per agent in Postgres",
   { skip: !dockerAvailable(), timeout: 120000 },
   async (t) => {
-    const { databaseUrl } = await bootstrapDatabase(t, "agent-run-claims");
+    const { containerName, databaseUrl } = await bootstrapDatabase(t, "agent-run-claims");
     if (databaseUrl === "") return;
-    const pool = await connectedPool(t, databaseUrl, 4);
+    const pool = new Pool({ connectionString: databaseUrl, max: 4 });
+    t.after(async () => {
+      await pool.end().catch(() => {});
+      stopPostgres(containerName);
+    });
 
     const [claimA, claimB] = await Promise.all([
       claimAgentRun(pool, {
@@ -148,9 +153,13 @@ test(
   "claimAgentRun expires stale active runs before claiming a new run",
   { skip: !dockerAvailable(), timeout: 120000 },
   async (t) => {
-    const { databaseUrl } = await bootstrapDatabase(t, "agent-run-stale");
+    const { containerName, databaseUrl } = await bootstrapDatabase(t, "agent-run-stale");
     if (databaseUrl === "") return;
-    const pool = await connectedPool(t, databaseUrl);
+    const pool = new Pool({ connectionString: databaseUrl });
+    t.after(async () => {
+      await pool.end().catch(() => {});
+      stopPostgres(containerName);
+    });
 
     await pool.query(
       `insert into agent_run_logs
