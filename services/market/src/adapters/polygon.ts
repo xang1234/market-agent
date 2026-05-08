@@ -21,6 +21,12 @@ export type PolygonListingContext = {
 
 export type PolygonFetcher = (path: string) => Promise<unknown>;
 
+export type PolygonHttpFetcherOptions = {
+  apiKey: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+};
+
 export type PolygonAdapterDeps = {
   sourceId: UUID;
   delayClass: DelayClass;
@@ -82,6 +88,26 @@ const INTERVAL_TO_POLYGON: Record<BarInterval, { multiplier: number; timespan: s
   "1h": { multiplier: 1, timespan: "hour" },
   "1d": { multiplier: 1, timespan: "day" },
 };
+
+const DEFAULT_POLYGON_BASE_URL = "https://api.polygon.io";
+
+export function createPolygonHttpFetcher(options: PolygonHttpFetcherOptions): PolygonFetcher {
+  const apiKey = options.apiKey.trim();
+  const baseUrl = options.baseUrl ?? DEFAULT_POLYGON_BASE_URL;
+  const fetchImpl = options.fetchImpl ?? fetch;
+
+  return async (path: string): Promise<unknown> => {
+    const url = new URL(path, baseUrl);
+    if (!url.searchParams.has("apiKey")) {
+      url.searchParams.set("apiKey", apiKey);
+    }
+    const response = await fetchImpl(url);
+    if (!response.ok) {
+      throw new PolygonFetchError(response.status, `polygon: HTTP ${response.status}`);
+    }
+    return response.json();
+  };
+}
 
 export function createPolygonAdapter(deps: PolygonAdapterDeps): MarketDataAdapter {
   assertOneOf(deps.delayClass, DELAY_CLASSES, "polygon.delayClass");

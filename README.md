@@ -197,6 +197,8 @@ cp .env.dev.example .env.dev      # ports + flags; safe defaults
 ./scripts/dev-shell.sh status     # confirms all services are running
 ```
 
+Set `POLYGON_API_KEY` in `.env.dev` to enable on-demand stock ticker discovery and live Polygon market fetches for DB-backed listings. Without a key, the seeded dev listings still work and unknown tickers resolve as `not_found`.
+
 When `up` completes, the app is at **<http://localhost:5173>**.
 
 The dev shell brings up:

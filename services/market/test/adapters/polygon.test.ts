@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createPolygonAdapter, PolygonFetchError } from "../../src/adapters/polygon.ts";
+import { createPolygonAdapter, createPolygonHttpFetcher, PolygonFetchError } from "../../src/adapters/polygon.ts";
 import { quoteMove } from "../../src/quote.ts";
 import {
   assertUnavailableContract,
@@ -20,6 +20,34 @@ import {
 
 const FIXED_NOW = "2026-04-22T20:00:00.000Z";
 const fixedClock = () => new Date(FIXED_NOW);
+
+test("polygon HTTP fetcher appends apiKey and maps non-OK responses to PolygonFetchError", async () => {
+  const urls: string[] = [];
+  const fetcher = createPolygonHttpFetcher({
+    apiKey: "market-test-key",
+    baseUrl: "https://polygon.test",
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      return new Response(JSON.stringify({ status: "OK" }), { status: 200 });
+    },
+  });
+
+  assert.deepEqual(await fetcher("/v2/snapshot/locale/us/markets/stocks/tickers/AMD"), { status: "OK" });
+  assert.equal(
+    urls[0],
+    "https://polygon.test/v2/snapshot/locale/us/markets/stocks/tickers/AMD?apiKey=market-test-key",
+  );
+
+  const failingFetcher = createPolygonHttpFetcher({
+    apiKey: "market-test-key",
+    baseUrl: "https://polygon.test",
+    fetchImpl: async () => new Response("nope", { status: 429 }),
+  });
+  await assert.rejects(
+    () => failingFetcher("/v2/snapshot/locale/us/markets/stocks/tickers/AMD"),
+    (error: unknown) => error instanceof PolygonFetchError && error.status === 429,
+  );
+});
 
 test("polygon adapter normalizes a snapshot payload into a NormalizedQuote with move math", async () => {
   const adapter = createPolygonAdapter({

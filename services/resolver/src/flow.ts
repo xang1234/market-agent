@@ -19,6 +19,7 @@ import {
   resolveByTicker,
   type QueryExecutor,
 } from "./lookup.ts";
+import { upsertDiscoveredListing, type TickerDiscoveryProvider } from "./discovery.ts";
 import { writeToolCallLog } from "../../observability/src/tool-call.ts";
 import { normalize } from "./normalize.ts";
 import type { SubjectKind, SubjectRef } from "./subject-ref.ts";
@@ -39,6 +40,11 @@ export type SubjectChoice = {
 export type SearchToSubjectRequest = {
   text: string;
   choice?: SubjectChoice;
+};
+
+export type SearchToSubjectOptions = {
+  tickerDiscoveryProvider?: TickerDiscoveryProvider;
+  discoveryLogger?: Pick<Console, "warn">;
 };
 
 export type CandidateSearchResult = {
@@ -171,8 +177,9 @@ export type SearchToSubjectFlowResult =
 export async function runSearchToSubjectFlow(
   db: QueryExecutor,
   request: SearchToSubjectRequest,
+  options: SearchToSubjectOptions = {},
 ): Promise<SearchToSubjectFlowResult> {
-  const search = await searchSubjectCandidates(db, request.text);
+  const search = await searchSubjectCandidates(db, request.text, options);
   const { envelope, normalized_input } = search;
 
   if (isNotFound(envelope)) {
@@ -232,6 +239,7 @@ export async function runSearchToSubjectFlow(
 export async function searchSubjectCandidates(
   db: QueryExecutor,
   text: string,
+  options: SearchToSubjectOptions = {},
 ): Promise<CandidateSearchResult> {
   const n = normalize(text);
   let identifierEnvelope: ResolverEnvelope | null = null;
@@ -265,7 +273,7 @@ export async function searchSubjectCandidates(
   const candidateEnvelopes: ResolverEnvelope[] = [];
 
   if (n.ticker_candidate) {
-    const envelope = await resolveByTicker(db, n.ticker_candidate);
+    const envelope = await resolveTickerWithDiscovery(db, n.ticker_candidate, options);
     if (!isNotFound(envelope)) candidateEnvelopes.push(envelope);
   }
 
@@ -292,6 +300,30 @@ export async function searchSubjectCandidates(
     normalized_input: n.trimmed,
     envelope: notFound({ normalized_input: n.trimmed, reason: "no_candidates" }),
   };
+}
+
+async function resolveTickerWithDiscovery(
+  db: QueryExecutor,
+  ticker: string,
+  options: SearchToSubjectOptions,
+): Promise<ResolverEnvelope> {
+  const initial = await resolveByTicker(db, ticker);
+  if (!isNotFound(initial) || initial.reason !== "unknown_ticker" || !options.tickerDiscoveryProvider) {
+    return initial;
+  }
+
+  try {
+    const discovered = await options.tickerDiscoveryProvider.discoverTicker(ticker);
+    for (const listing of discovered) {
+      await upsertDiscoveredListing(db, listing);
+    }
+    if (discovered.length === 0) return initial;
+    return await resolveByTicker(db, ticker);
+  } catch (error) {
+    const logger = options.discoveryLogger ?? console;
+    logger.warn("ticker discovery failed", error);
+    return initial;
+  }
 }
 
 async function handoffFromResolved(

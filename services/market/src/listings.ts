@@ -21,6 +21,13 @@ export type ListingRepository = {
   find(listing_id: UUID): Promise<ListingRecord | null>;
 };
 
+export type ListingQueryExecutor = {
+  query<R extends Record<string, unknown> = Record<string, unknown>>(
+    text: string,
+    values?: unknown[],
+  ): Promise<{ rows: R[] }>;
+};
+
 export class ListingNotFoundError extends Error {
   readonly listing_id: UUID;
   constructor(listing_id: UUID) {
@@ -37,6 +44,24 @@ export function createInMemoryListingRepository(
   return {
     async find(listing_id: UUID): Promise<ListingRecord | null> {
       return byId.get(listing_id) ?? null;
+    },
+  };
+}
+
+export function createPostgresListingRepository(db: ListingQueryExecutor): ListingRepository {
+  return {
+    async find(listing_id: UUID): Promise<ListingRecord | null> {
+      const result = await db.query<ListingRecord>(
+        `select listing_id::text as listing_id,
+                ticker,
+                mic,
+                trading_currency,
+                timezone
+           from listings
+          where listing_id = $1`,
+        [listing_id],
+      );
+      return result.rows[0] ?? null;
     },
   };
 }

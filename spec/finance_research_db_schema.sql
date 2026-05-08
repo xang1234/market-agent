@@ -143,6 +143,7 @@ create table instruments (
 );
 create index instruments_issuer_idx on instruments(issuer_id);
 create unique index instruments_isin_idx on instruments(isin) where isin is not null;
+create unique index instruments_figi_composite_idx on instruments(figi_composite) where figi_composite is not null;
 
 -- Listings model venue-specific symbol state. Use listing identity for quotes, bars,
 -- session state, and other market interactions that depend on exchange context.

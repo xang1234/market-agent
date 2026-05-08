@@ -18,12 +18,12 @@ npm run dev      # starts http server on $MARKET_PORT (defaults to 4321)
 
 `src/dev.ts` boots the HTTP server using:
 
-- `createInMemoryListingRepository(DEV_LISTINGS)` — fixture listing UUIDs (AAPL, MSFT, GOOGL, TSLA, NVDA) wired to ticker/MIC/currency/timezone.
-- `createDevPolygonFetcher` — returns canned snapshot payloads for those tickers, so no real polygon API key is needed locally.
+- `createPostgresListingRepository` when `DATABASE_URL` is present, so listings discovered by the resolver can be quoted. Without a database URL it falls back to `createInMemoryListingRepository(DEV_LISTINGS)` for AAPL, MSFT, GOOGL, TSLA, and NVDA.
+- `createPolygonHttpFetcher` when `POLYGON_API_KEY` is present. Without a key it falls back to `createDevPolygonFetcher`, which returns canned snapshot payloads for the fixture tickers.
 - `DEV_POLYGON_SOURCE_ID` — a real UUID v4 (not a stub sentinel) carried through as `quote.source_id` so consumers can verify the live wiring.
 
-For production, swap both deps for DB-backed listing reads and a real polygon
-HTTP fetcher reading `POLYGON_API_KEY`.
+`POLYGON_API_BASE_URL` can point the Polygon quote/bar fetcher at a mock server
+in tests.
 
 ## Provider fallback plan
 

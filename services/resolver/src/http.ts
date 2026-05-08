@@ -8,6 +8,7 @@ import {
   type HydratedSubjectContext,
   type HydratedSubjectHandoff,
   type ResolutionPath,
+  type SearchToSubjectOptions,
   type SubjectChoice,
   type SubjectDisplayLabels,
 } from "./flow.ts";
@@ -108,11 +109,12 @@ export function validateResolveRequest(body: unknown): RequestValidation {
 export async function handleResolveSubjects(
   db: QueryExecutor,
   request: ResolveRequest,
+  options: SearchToSubjectOptions = {},
 ): Promise<ResolveResponse> {
   const flow = await runSearchToSubjectFlow(db, {
     text: request.text,
     ...(request.choice ? { choice: request.choice } : {}),
-  });
+  }, options);
 
   if (flow.status === "not_found") {
     return { subjects: [], unresolved: [flow.normalized_input] };
@@ -164,7 +166,10 @@ function candidateToSubject(candidate: ResolverCandidate): ResolvedSubject {
   };
 }
 
-export function createResolverServer(db: QueryExecutor): Server {
+export function createResolverServer(
+  db: QueryExecutor,
+  options: SearchToSubjectOptions = {},
+): Server {
   return createServer(async (req, res) => {
     try {
       if (req.method !== "POST" || req.url !== "/v1/subjects/resolve") {
@@ -188,7 +193,7 @@ export function createResolverServer(db: QueryExecutor): Server {
         return;
       }
 
-      const response = await handleResolveSubjects(db, validation.request);
+      const response = await handleResolveSubjects(db, validation.request, options);
       respond(res, 200, response);
     } catch (error) {
       // Keep the server alive on unexpected errors — dropped sockets during

@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import { createResolverServer } from "./http.ts";
+import { createPolygonTickerDiscoveryProvider } from "./discovery.ts";
 
 const host = process.env.RESOLVER_HOST ?? "127.0.0.1";
 const port = Number(process.env.RESOLVER_PORT ?? "4311");
@@ -10,7 +11,12 @@ if (!databaseUrl) {
 }
 
 const pool = new Pool({ connectionString: databaseUrl });
-const server = createResolverServer(pool);
+const polygonApiKey = process.env.POLYGON_API_KEY;
+const tickerDiscoveryProvider = createPolygonTickerDiscoveryProvider({
+  apiKey: polygonApiKey,
+  baseUrl: process.env.RESOLVER_POLYGON_REFERENCE_BASE_URL,
+});
+const server = createResolverServer(pool, { tickerDiscoveryProvider });
 
 server.listen(port, host, () => {
   console.log(`resolver listening on http://${host}:${port}`);

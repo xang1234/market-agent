@@ -581,6 +581,128 @@ test("handler: unknown text returns empty subjects and surfaces the input in unr
   assert.equal(response.unresolved[0], "NOTREAL");
 });
 
+test("handler: unknown ticker uses discovery provider and returns the discovered listing", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver discovery coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-nff-resolve");
+  const client = await connectedClient(t, databaseUrl);
+  const seenTickers: string[] = [];
+
+  const response = await handleResolveSubjects(
+    client,
+    { text: "AMD" },
+    {
+      tickerDiscoveryProvider: {
+        discoverTicker: async (ticker) => {
+          seenTickers.push(ticker);
+          return [
+            {
+              ticker: "AMD",
+              legal_name: "Advanced Micro Devices, Inc.",
+              market: "stocks",
+              active: true,
+              mic: "XNAS",
+              trading_currency: "USD",
+              timezone: "America/New_York",
+              asset_type: "common_stock",
+              cik: "0000002488",
+              figi_composite: "BBG000BBQCY0",
+            },
+          ];
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(seenTickers, ["AMD"]);
+  assert.equal(response.subjects.length, 1);
+  assert.equal(response.unresolved.length, 0);
+  const [subject] = response.subjects;
+  assert.equal(subject.subject_ref.kind, "listing");
+  assert.equal(subject.display_labels?.ticker, "AMD");
+  assert.equal(subject.display_labels?.mic, "XNAS");
+});
+
+test("handler: discovery provider failure degrades to unresolved", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver discovery coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-nff-failure");
+  const client = await connectedClient(t, databaseUrl);
+  let called = false;
+
+  const response = await handleResolveSubjects(
+    client,
+    { text: "AMD" },
+    {
+      tickerDiscoveryProvider: {
+        discoverTicker: async () => {
+          called = true;
+          throw new Error("polygon reference unavailable");
+        },
+      },
+    },
+  );
+
+  assert.equal(called, true);
+  assert.deepEqual(response, { subjects: [], unresolved: ["AMD"] });
+});
+
+test("handler: discovery can surface multiple active listings as existing ambiguity", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for resolver discovery coverage");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "fra-nff-ambiguous");
+  const client = await connectedClient(t, databaseUrl);
+
+  const response = await handleResolveSubjects(
+    client,
+    { text: "SHOP" },
+    {
+      tickerDiscoveryProvider: {
+        discoverTicker: async () => [
+          {
+            ticker: "SHOP",
+            legal_name: "Shopify Inc.",
+            market: "stocks",
+            active: true,
+            mic: "XNYS",
+            trading_currency: "USD",
+            timezone: "America/New_York",
+            asset_type: "common_stock",
+            figi_composite: "BBG008HBD923",
+          },
+          {
+            ticker: "SHOP",
+            legal_name: "Shopify Inc.",
+            market: "stocks",
+            active: true,
+            mic: "XTSE",
+            trading_currency: "CAD",
+            timezone: "America/Toronto",
+            asset_type: "common_stock",
+            figi_composite: "BBG008HBD923",
+          },
+        ],
+      },
+    },
+  );
+
+  assert.equal(response.subjects.length, 2);
+  assert.equal(response.unresolved.length, 0);
+  assert.deepEqual(
+    response.subjects.map((subject) => subject.display_labels?.mic).sort(),
+    ["XNYS", "XTSE"],
+  );
+});
+
 test("handler: issuer legal-name text returns an issuer subject", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for resolver http coverage");

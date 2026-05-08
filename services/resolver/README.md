@@ -43,6 +43,17 @@ The constructor functions enforce invariants the TypeScript compiler can't:
 - Candidates must be sorted by `confidence` descending.
 - A `resolved` envelope's `alternatives` must not out-rank the chosen target.
 
+## Dev ticker discovery
+
+`npm run dev` reads `POLYGON_API_KEY` from the environment. When it is present,
+`/v1/subjects/resolve` first performs the normal Postgres lookup and, only for
+unknown tickers, queries Polygon reference data for active stocks, persists the
+canonical issuer/instrument/listing rows, then re-runs the normal resolver path.
+
+`RESOLVER_POLYGON_REFERENCE_BASE_URL` can point the reference client at a mock
+server in tests. Missing keys, provider failures, rate limits, and malformed
+provider rows degrade to the existing `not_found` response.
+
 ## Tests
 
 ```bash
