@@ -75,6 +75,7 @@ export function AgentsPage() {
   const [findings, setFindings] = useState<ReadonlyArray<AgentFindingRow>>([])
   const [runActivities, setRunActivities] = useState<ReadonlyArray<AgentActivityRow>>([])
   const [detailsError, setDetailsError] = useState<string | null>(null)
+  const [detailsAgentId, setDetailsAgentId] = useState<string | null>(null)
   const [detailsRefreshKey, setDetailsRefreshKey] = useState(0)
   const [name, setName] = useState('')
   const [thesis, setThesis] = useState('')
@@ -100,9 +101,10 @@ export function AgentsPage() {
     editingAgent?.universe !== undefined && !canRoundTripUniverse(editingAgent.universe)
   const preservesUnsupportedAlertRules =
     editingAgent?.alert_rules !== undefined && !canRoundTripAlertRules(editingAgent.alert_rules)
-  const visibleFindings = session && selectedAgentId ? findings : []
-  const visibleRunActivities = session && selectedAgentId ? runActivities : []
-  const visibleDetailsError = session && selectedAgentId ? detailsError : null
+  const detailsMatchSelection = session && selectedAgentId && detailsAgentId === selectedAgentId
+  const visibleFindings = detailsMatchSelection ? findings : []
+  const visibleRunActivities = detailsMatchSelection ? runActivities : []
+  const visibleDetailsError = detailsMatchSelection ? detailsError : null
 
   useEffect(() => {
     if (!session) return
@@ -135,16 +137,10 @@ export function AgentsPage() {
 
   useEffect(() => {
     if (!session || !selectedAgentId) {
-      setFindings([])
-      setRunActivities([])
-      setDetailsError(null)
       return
     }
     let ignore = false
     const controller = new AbortController()
-    setFindings([])
-    setRunActivities([])
-    setDetailsError(null)
     const encodedAgentId = encodeURIComponent(selectedAgentId)
     Promise.all([
       fetch(`/v1/agents/${encodedAgentId}/findings`, {
@@ -166,12 +162,14 @@ export function AgentsPage() {
       })
       .then((body) => {
         if (ignore) return
+        setDetailsAgentId(selectedAgentId)
         setDetailsError(null)
         setFindings(body.findings)
         setRunActivities(body.activity)
       })
       .catch((caught) => {
         if (ignore || controller.signal.aborted) return
+        setDetailsAgentId(selectedAgentId)
         setFindings([])
         setRunActivities([])
         setDetailsError(caught instanceof Error ? caught.message : String(caught))

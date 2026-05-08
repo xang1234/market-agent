@@ -199,8 +199,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: services/notifications/package-lock.json
 
       - run: npm ci
       - run: npm test
@@ -343,7 +341,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: services/notifications/package-lock.json
 
+      - run: npm ci
       - run: npm test
 
   notifications:
