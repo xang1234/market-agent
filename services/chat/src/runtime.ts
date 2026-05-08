@@ -15,7 +15,11 @@ export type ChatRuntimeEnv = {
   CHAT_SUBJECT_RESOLVER_MODULE?: string;
   CHAT_THREAD_TITLE_MODULE?: string;
   CHAT_ANALYST_RUNTIME_MODULE?: string;
+  CHAT_DATABASE_URL?: string;
+  DATABASE_URL?: string;
 };
+
+const DEFAULT_CHAT_RUNTIME_MODULE = new URL("./local-runtime.ts", import.meta.url).href;
 
 export async function loadChatServerOptionsFromEnv(
   env: ChatRuntimeEnv = process.env,
@@ -23,8 +27,14 @@ export async function loadChatServerOptionsFromEnv(
 ): Promise<ChatServerOptions> {
   const options: ChatServerOptions = {};
 
-  if (env.CHAT_PERSISTENCE_MODULE != null && env.CHAT_PERSISTENCE_MODULE.trim() !== "") {
-    const module = await import(moduleSpecifier(env.CHAT_PERSISTENCE_MODULE, cwd));
+  const databaseUrl = env.CHAT_DATABASE_URL ?? env.DATABASE_URL;
+  const persistenceModule = env.CHAT_PERSISTENCE_MODULE?.trim() ||
+    (databaseUrl ? DEFAULT_CHAT_RUNTIME_MODULE : "");
+  const analystRuntimeModule = env.CHAT_ANALYST_RUNTIME_MODULE?.trim() ||
+    (databaseUrl ? DEFAULT_CHAT_RUNTIME_MODULE : "");
+
+  if (persistenceModule !== "") {
+    const module = await import(moduleSpecifier(persistenceModule, cwd));
     if (typeof module.persistAssistantMessage !== "function") {
       throw new Error("CHAT_PERSISTENCE_MODULE must export persistAssistantMessage");
     }
@@ -56,8 +66,8 @@ export async function loadChatServerOptionsFromEnv(
     options.generateThreadTitle = module.generateThreadTitle as ChatThreadTitleGenerator;
   }
 
-  if (env.CHAT_ANALYST_RUNTIME_MODULE != null && env.CHAT_ANALYST_RUNTIME_MODULE.trim() !== "") {
-    const module = await import(moduleSpecifier(env.CHAT_ANALYST_RUNTIME_MODULE, cwd));
+  if (analystRuntimeModule !== "") {
+    const module = await import(moduleSpecifier(analystRuntimeModule, cwd));
     if (typeof module.analystToolRuntime !== "function") {
       throw new Error("CHAT_ANALYST_RUNTIME_MODULE must export analystToolRuntime");
     }

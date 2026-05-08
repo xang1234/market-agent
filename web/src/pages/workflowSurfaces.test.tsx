@@ -182,6 +182,46 @@ test('Chat thread route loads persisted user and assistant messages on direct na
   }
 })
 
+test('Chat thread route virtualizes long persisted histories while preserving rendered assistant blocks', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restore = installDomGlobals(dom.window as unknown as Window)
+  const originalFetch = globalThis.fetch
+  try {
+    globalThis.fetch = async (input, init) => {
+      assert.equal(String(input), '/v1/chat/threads/thread-123/messages')
+      assert.equal((init?.headers as Record<string, string>)['x-user-id'], USER_ID)
+      return new Response(JSON.stringify({
+        messages: Array.from({ length: 80 }, (_, index) => persistedMessage(index)),
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(wrapWithAuth(
+        <BlockRegistryProvider registry={createDefaultBlockRegistry()}>
+          <MemoryRouter initialEntries={['/chat/thread-123']}>
+            <Routes>
+              <Route path="/chat/:threadId" element={<ChatThreadView />} />
+            </Routes>
+          </MemoryRouter>
+        </BlockRegistryProvider>,
+      ))
+    })
+    await act(async () => undefined)
+
+    const list = dom.window.document.querySelector('[data-testid="virtualized-message-list"]')
+    const renderedRows = dom.window.document.querySelectorAll('[data-testid^="chat-message-"]')
+    assert.ok(list)
+    assert.ok(renderedRows.length > 0)
+    assert.ok(renderedRows.length < 20, `expected a bounded rendered window, got ${renderedRows.length}`)
+    assert.match(dom.window.document.body.innerHTML, /Persisted assistant answer 0/)
+    assert.doesNotMatch(dom.window.document.body.innerHTML, /Persisted assistant answer 79/)
+    await act(async () => root.unmount())
+  } finally {
+    globalThis.fetch = originalFetch
+    restore()
+  }
+})
+
 test('Chat user turns are posted to durable thread messages before streaming', async () => {
   const originalFetch = globalThis.fetch
   const calls: Array<{ input: string; init?: RequestInit }> = []
@@ -381,8 +421,90 @@ test('Agents surface renders CRUD controls, run history, and activity status', (
   assert.match(html, /Disable/)
   assert.match(html, /Delete/)
   assert.match(html, /Run history/)
+  assert.match(html, /Findings/)
+  assert.match(html, /Run activity/)
   assert.match(html, /Activity/)
   assert.doesNotMatch(html, /ships with P5\.1/i)
+})
+
+test('Agents surface loads selected agent findings and activity routes', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restore = installDomGlobals(dom.window as unknown as Window)
+  const originalFetch = globalThis.fetch
+  const calls: string[] = []
+  try {
+    globalThis.fetch = async (input, init) => {
+      calls.push(String(input))
+      assert.equal((init?.headers as Record<string, string>)['x-user-id'], USER_ID)
+      if (String(input) === '/v1/agents') {
+        return new Response(JSON.stringify({
+          agents: [
+            {
+              agent_id: '11111111-1111-4111-8111-111111111111',
+              name: 'Evidence monitor',
+              thesis: 'Track source-backed evidence',
+              cadence: 'daily',
+              enabled: true,
+              universe: { mode: 'static', subject_refs: [{ kind: 'issuer', id: '22222222-2222-4222-8222-222222222222' }] },
+              alert_rules: [],
+              updated_at: '2026-05-06T00:00:00.000Z',
+            },
+          ],
+          runs: [],
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (String(input) === '/v1/agents/11111111-1111-4111-8111-111111111111/findings') {
+        return new Response(JSON.stringify({
+          findings: [
+            {
+              finding_id: '44444444-4444-4444-8444-444444444444',
+              agent_id: '11111111-1111-4111-8111-111111111111',
+              snapshot_id: SNAPSHOT_ID,
+              headline: 'Operating margin quality improved',
+              severity: 'medium',
+              subject_refs: [{ kind: 'issuer', id: '22222222-2222-4222-8222-222222222222' }],
+              summary_blocks: [],
+              created_at: '2026-05-06T00:00:00.000Z',
+            },
+          ],
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (String(input) === '/v1/agents/11111111-1111-4111-8111-111111111111/activity') {
+        return new Response(JSON.stringify({
+          activity: [
+            {
+              run_activity_id: '33333333-3333-4333-8333-333333333333',
+              agent_id: '11111111-1111-4111-8111-111111111111',
+              stage: 'found',
+              subject_refs: [{ kind: 'issuer', id: '22222222-2222-4222-8222-222222222222' }],
+              source_refs: ['66666666-6666-4666-8666-666666666666'],
+              summary: 'Created 1 source-backed finding.',
+              ts: '2026-05-06T00:00:00.000Z',
+            },
+          ],
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      throw new Error(`unexpected fetch: ${String(input)}`)
+    }
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(wrapWithAuth(<AgentsPage />))
+    })
+    await act(async () => undefined)
+    await act(async () => undefined)
+
+    assert.deepEqual(calls, [
+      '/v1/agents',
+      '/v1/agents/11111111-1111-4111-8111-111111111111/findings',
+      '/v1/agents/11111111-1111-4111-8111-111111111111/activity',
+    ])
+    assert.match(dom.window.document.body.innerHTML, /Operating margin quality improved/)
+    assert.match(dom.window.document.body.innerHTML, /Created 1 source-backed finding/)
+    await act(async () => root.unmount())
+  } finally {
+    globalThis.fetch = originalFetch
+    restore()
+  }
 })
 
 test('Agents create/edit payloads include selected universe and alert rule policy', () => {
@@ -390,22 +512,35 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     name: 'Headline optional monitor',
     thesis: 'Alert on any high severity finding',
     cadence: 'daily',
+    universeMode: 'static',
+    staticSubjectRefsText: 'issuer:issuer-123\nlisting:listing-456',
+    dynamicUniverseId: '',
     subjectKind: 'issuer',
     subjectId: 'issuer-123',
     alertRuleId: 'any-high',
     alertSeverity: 'high',
     alertHeadline: '',
     alertEmail: false,
+    alertWebPush: true,
+    alertSms: false,
+    alertMobilePush: true,
+    alertDigest: true,
   }), {
     name: 'Headline optional monitor',
     thesis: 'Alert on any high severity finding',
     cadence: 'daily',
-    universe: { mode: 'static', subject_refs: [{ kind: 'issuer', id: 'issuer-123' }] },
+    universe: {
+      mode: 'static',
+      subject_refs: [
+        { kind: 'issuer', id: 'issuer-123' },
+        { kind: 'listing', id: 'listing-456' },
+      ],
+    },
     alert_rules: [
       {
         rule_id: 'any-high',
         severity_at_least: 'high',
-        channels: [],
+        channels: ['web_push', 'mobile_push', 'digest'],
       },
     ],
   })
@@ -414,23 +549,30 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     name: ' Margin monitor ',
     thesis: ' Watch supplier margin risk ',
     cadence: 'hourly',
+    universeMode: 'theme',
+    staticSubjectRefsText: '',
+    dynamicUniverseId: ' theme-123 ',
     subjectKind: 'issuer',
     subjectId: ' issuer-123 ',
     alertRuleId: ' margin-risk ',
     alertSeverity: 'high',
     alertHeadline: ' margin ',
     alertEmail: true,
+    alertWebPush: true,
+    alertSms: true,
+    alertMobilePush: true,
+    alertDigest: false,
   }), {
     name: 'Margin monitor',
     thesis: 'Watch supplier margin risk',
     cadence: 'hourly',
-    universe: { mode: 'static', subject_refs: [{ kind: 'issuer', id: 'issuer-123' }] },
+    universe: { mode: 'theme', theme_id: 'theme-123' },
     alert_rules: [
       {
         rule_id: 'margin-risk',
         severity_at_least: 'high',
         headline_contains: 'margin',
-        channels: ['email'],
+        channels: ['email', 'web_push', 'sms', 'mobile_push'],
       },
     ],
   })
@@ -439,17 +581,24 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     name: 'No-alert monitor',
     thesis: 'Track guidance',
     cadence: 'weekly',
+    universeMode: 'portfolio',
+    staticSubjectRefsText: '',
+    dynamicUniverseId: 'portfolio-123',
     subjectKind: 'theme',
     subjectId: 'quality',
     alertRuleId: '',
     alertSeverity: 'medium',
     alertHeadline: '',
     alertEmail: false,
+    alertWebPush: false,
+    alertSms: false,
+    alertMobilePush: false,
+    alertDigest: false,
   }), {
     name: 'No-alert monitor',
     thesis: 'Track guidance',
     cadence: 'weekly',
-    universe: { mode: 'static', subject_refs: [{ kind: 'theme', id: 'quality' }] },
+    universe: { mode: 'portfolio', portfolio_id: 'portfolio-123' },
     alert_rules: [],
   })
 
@@ -462,12 +611,19 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     name: ' Existing screen monitor ',
     thesis: ' Preserve unsupported config ',
     cadence: 'daily',
+    universeMode: 'agent',
+    staticSubjectRefsText: '',
+    dynamicUniverseId: 'agent-123',
     subjectKind: 'issuer',
     subjectId: '',
     alertRuleId: '',
     alertSeverity: 'high',
     alertHeadline: '',
     alertEmail: false,
+    alertWebPush: false,
+    alertSms: false,
+    alertMobilePush: false,
+    alertDigest: false,
   }, {
     universe: screenUniverse,
     alert_rules: multipleRules,
@@ -475,27 +631,94 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     name: 'Existing screen monitor',
     thesis: 'Preserve unsupported config',
     cadence: 'daily',
-    universe: screenUniverse,
+    universe: { mode: 'agent', agent_id: 'agent-123' },
     alert_rules: multipleRules,
   })
+
+  const unsupportedUniverse = { mode: 'custom_query', query_id: 'query-123' }
+  const unsupportedSingleRule = {
+    rule_id: 'claim-watch',
+    severity_at_least: 'high',
+    claim_cluster_id_in: ['cluster-123'],
+  }
+  assert.deepEqual(buildAgentPayload({
+    name: ' Existing custom monitor ',
+    thesis: ' Preserve unsupported single rule ',
+    cadence: 'daily',
+    universeMode: 'static',
+    staticSubjectRefsText: 'issuer:new-issuer',
+    dynamicUniverseId: '',
+    subjectKind: 'issuer',
+    subjectId: '',
+    alertRuleId: 'replacement',
+    alertSeverity: 'medium',
+    alertHeadline: 'replacement',
+    alertEmail: true,
+    alertWebPush: false,
+    alertSms: false,
+    alertMobilePush: false,
+    alertDigest: false,
+  }, {
+    universe: unsupportedUniverse,
+    alert_rules: [unsupportedSingleRule],
+  }), {
+    name: 'Existing custom monitor',
+    thesis: 'Preserve unsupported single rule',
+    cadence: 'daily',
+    universe: unsupportedUniverse,
+    alert_rules: [unsupportedSingleRule],
+  })
 })
+
+function persistedMessage(index: number) {
+  return {
+    message_id: `message-${index}`,
+    thread_id: 'thread-123',
+    role: index % 2 === 0 ? 'assistant' : 'user',
+    snapshot_id: SNAPSHOT_ID,
+    blocks: [
+      {
+        id: `block-${index}`,
+        kind: 'rich_text',
+        snapshot_id: SNAPSHOT_ID,
+        data_ref: { kind: 'chat_turn', id: `message-${index}` },
+        source_refs: [],
+        as_of: '2026-05-06T00:00:00.000Z',
+        segments: [{ type: 'text', text: `Persisted assistant answer ${index}` }],
+      },
+    ],
+    content_hash: `sha256:${index}`,
+    created_at: '2026-05-06T00:00:00.000Z',
+  }
+}
 
 function installDomGlobals(domWindow: Window): () => void {
   const globals = globalThis as unknown as {
     IS_REACT_ACT_ENVIRONMENT?: boolean
     document?: Document
     window?: Window
+    ResizeObserver?: typeof ResizeObserver
   }
   const hadActEnv = Object.prototype.hasOwnProperty.call(globals, 'IS_REACT_ACT_ENVIRONMENT')
   const hadDocument = Object.prototype.hasOwnProperty.call(globals, 'document')
   const hadWindow = Object.prototype.hasOwnProperty.call(globals, 'window')
+  const hadResizeObserver = Object.prototype.hasOwnProperty.call(globals, 'ResizeObserver')
   const previousActEnv = globals.IS_REACT_ACT_ENVIRONMENT
   const previousDocument = globals.document
   const previousWindow = globals.window
+  const previousResizeObserver = globals.ResizeObserver
 
   globals.IS_REACT_ACT_ENVIRONMENT = true
   globals.document = domWindow.document
   globals.window = domWindow
+  globals.ResizeObserver = class {
+    observe() {
+      return undefined
+    }
+    disconnect() {
+      return undefined
+    }
+  } as unknown as typeof ResizeObserver
 
   return () => {
     if (hadActEnv) globals.IS_REACT_ACT_ENVIRONMENT = previousActEnv
@@ -504,6 +727,8 @@ function installDomGlobals(domWindow: Window): () => void {
     else delete globals.document
     if (hadWindow) globals.window = previousWindow
     else delete globals.window
+    if (hadResizeObserver) globals.ResizeObserver = previousResizeObserver
+    else delete globals.ResizeObserver
   }
 }
 

@@ -72,6 +72,44 @@ export async function sealSnapshot(
 ): Promise<SnapshotSealResult> {
   assertSnapshotTransactionClient(db);
 
+  const prepared = await prepareSnapshotSeal(db, input);
+  if (!prepared.ok) return prepared.result;
+
+  await db.query("begin");
+  try {
+    const result = await insertVerifiedSnapshot(db, input, prepared.verification);
+    await db.query("commit");
+    return result;
+  } catch (error) {
+    try {
+      await db.query("rollback");
+    } catch (rollbackError) {
+      if (error !== null && typeof error === "object") {
+        (error as { rollback_error?: unknown }).rollback_error = rollbackError;
+      }
+    }
+    throw error;
+  }
+}
+
+export async function sealSnapshotInTransaction(
+  db: SnapshotTransactionClient,
+  input: SnapshotSealInput,
+): Promise<SnapshotSealResult> {
+  assertSnapshotTransactionClient(db);
+
+  const prepared = await prepareSnapshotSeal(db, input);
+  if (!prepared.ok) return prepared.result;
+  return insertVerifiedSnapshot(db, input, prepared.verification);
+}
+
+async function prepareSnapshotSeal(
+  db: SnapshotTransactionClient,
+  input: SnapshotSealInput,
+): Promise<
+  | { ok: true; verification: SnapshotVerificationResult }
+  | { ok: false; result: SnapshotSealResult }
+> {
   const verificationInput = {
     ...input,
     manifest: {
@@ -81,7 +119,10 @@ export async function sealSnapshot(
   };
   const verification = await verifySnapshotSeal(verificationInput, db);
   if (!verification.ok) {
-    return Object.freeze({ ok: false, verification });
+    return Object.freeze({
+      ok: false,
+      result: Object.freeze({ ok: false, verification }),
+    });
   }
 
   const toolCallAudit = await auditManifestToolCallLog(db, input.manifest, {
@@ -102,17 +143,26 @@ export async function sealSnapshot(
     await writeSealFailure(db, input, failure);
     return Object.freeze({
       ok: false,
-      verification: Object.freeze({
+      result: Object.freeze({
         ok: false,
-        failures: Object.freeze([failure]),
+        verification: Object.freeze({
+          ok: false,
+          failures: Object.freeze([failure]),
+        }),
       }),
     });
   }
 
-  await db.query("begin");
-  try {
-    const { rows } = await db.query<{ snapshot_id: string; created_at: string }>(
-      `insert into snapshots (
+  return Object.freeze({ ok: true, verification });
+}
+
+async function insertVerifiedSnapshot(
+  db: QueryExecutor,
+  input: SnapshotSealInput,
+  verification: SnapshotVerificationResult,
+): Promise<SnapshotSealResult> {
+  const { rows } = await db.query<{ snapshot_id: string; created_at: string }>(
+    `insert into snapshots (
          snapshot_id,
          subject_refs,
          fact_refs,
@@ -170,47 +220,36 @@ export async function sealSnapshot(
         input.manifest.model_version,
         input.manifest.parent_snapshot,
       ],
-    );
-    const row = rows[0];
-    if (row === undefined) {
-      throw new Error("sealSnapshot: snapshot insert returned no row");
-    }
-
-    await db.query("commit");
-    return Object.freeze({
-      ok: true,
-      verification,
-      snapshot: Object.freeze({
-        snapshot_id: row.snapshot_id,
-        created_at: row.created_at,
-        subject_refs: input.manifest.subject_refs,
-        fact_refs: input.manifest.fact_refs,
-        claim_refs: input.manifest.claim_refs,
-        event_refs: input.manifest.event_refs,
-        document_refs: input.manifest.document_refs,
-        series_specs: input.manifest.series_specs,
-        source_ids: input.manifest.source_ids,
-        tool_call_ids: input.manifest.tool_call_ids,
-        tool_call_result_hashes: input.manifest.tool_call_result_hashes,
-        as_of: input.manifest.as_of,
-        basis: input.manifest.basis,
-        normalization: input.manifest.normalization,
-        coverage_start: input.manifest.coverage_start,
-        allowed_transforms: input.manifest.allowed_transforms,
-        model_version: input.manifest.model_version,
-        parent_snapshot: input.manifest.parent_snapshot,
-      }),
-    });
-  } catch (error) {
-    try {
-      await db.query("rollback");
-    } catch (rollbackError) {
-      if (error !== null && typeof error === "object") {
-        (error as { rollback_error?: unknown }).rollback_error = rollbackError;
-      }
-    }
-    throw error;
+  );
+  const row = rows[0];
+  if (row === undefined) {
+    throw new Error("sealSnapshot: snapshot insert returned no row");
   }
+
+  return Object.freeze({
+    ok: true,
+    verification,
+    snapshot: Object.freeze({
+      snapshot_id: row.snapshot_id,
+      created_at: row.created_at,
+      subject_refs: input.manifest.subject_refs,
+      fact_refs: input.manifest.fact_refs,
+      claim_refs: input.manifest.claim_refs,
+      event_refs: input.manifest.event_refs,
+      document_refs: input.manifest.document_refs,
+      series_specs: input.manifest.series_specs,
+      source_ids: input.manifest.source_ids,
+      tool_call_ids: input.manifest.tool_call_ids,
+      tool_call_result_hashes: input.manifest.tool_call_result_hashes,
+      as_of: input.manifest.as_of,
+      basis: input.manifest.basis,
+      normalization: input.manifest.normalization,
+      coverage_start: input.manifest.coverage_start,
+      allowed_transforms: input.manifest.allowed_transforms,
+      model_version: input.manifest.model_version,
+      parent_snapshot: input.manifest.parent_snapshot,
+    }),
+  });
 }
 
 export async function sealSnapshotWithPool(
@@ -237,15 +276,11 @@ function assertSnapshotTransactionClient(db: QueryExecutor): asserts db is Snaps
   }
 }
 
-// fra-asy: this misclassifies acquired pg.PoolClients (they inherit
-// .connect from pg.Client AND have .release), so callers using the
-// *WithPool variant correctly hit the wrong error. Fixed in
-// services/analyze/src/template-runner.ts; consolidate when fra-asy lands.
 function isPoolLike(db: QueryExecutor): boolean {
-  const candidate = db as {
-    connect?: unknown;
-  };
-  return typeof candidate.connect === "function";
+  return (
+    typeof (db as { connect?: unknown }).connect === "function" &&
+    typeof (db as { release?: unknown }).release !== "function"
+  );
 }
 
 function isAcquiredClient(db: QueryExecutor): db is SnapshotPoolClient {

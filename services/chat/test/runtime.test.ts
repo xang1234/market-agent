@@ -1,13 +1,62 @@
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import { loadChatServerOptionsFromEnv } from "../src/runtime.ts";
 
-test("runtime config returns default chat options when persistence module is not configured", async () => {
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+
+test("runtime config returns empty chat options when no database or modules are configured", async () => {
   assert.deepEqual(await loadChatServerOptionsFromEnv({}), {});
+});
+
+test("runtime config wires in-repo analyst runtime and persistence when DATABASE_URL is configured", async () => {
+  const options = await loadChatServerOptionsFromEnv({
+    DATABASE_URL: "postgres://example.invalid/market_agent",
+  });
+
+  assert.equal(typeof options.analystToolRuntime, "function");
+  assert.equal(typeof options.persistAssistantMessage, "function");
+});
+
+test("runtime config resolves in-repo default runtime when loader cwd is the repo root", async () => {
+  const options = await loadChatServerOptionsFromEnv({
+    DATABASE_URL: "postgres://example.invalid/market_agent",
+  }, repoRoot);
+
+  assert.equal(typeof options.analystToolRuntime, "function");
+  assert.equal(typeof options.persistAssistantMessage, "function");
+});
+
+test("in-repo chat runtime runs without the local stub tool executor mode", async () => {
+  const previous = process.env.CHAT_LOCAL_TOOL_EXECUTOR;
+  delete process.env.CHAT_LOCAL_TOOL_EXECUTOR;
+  try {
+    const options = await loadChatServerOptionsFromEnv({
+      DATABASE_URL: "postgres://example.invalid/market_agent",
+    }, repoRoot);
+
+    await assert.rejects(
+      () =>
+        options.analystToolRuntime!({
+          threadId: "11111111-1111-4111-a111-111111111111",
+          runId: "22222222-2222-4222-a222-222222222222",
+          turnId: "33333333-3333-4333-a333-333333333333",
+          bundleId: "single_subject_analysis",
+          userIntent: "Summarize the latest filing",
+          emit() {},
+        }),
+      /DATABASE_URL|ENOTFOUND|getaddrinfo|connect/i,
+    );
+  } finally {
+    if (previous === undefined) {
+      delete process.env.CHAT_LOCAL_TOOL_EXECUTOR;
+    } else {
+      process.env.CHAT_LOCAL_TOOL_EXECUTOR = previous;
+    }
+  }
 });
 
 test("runtime config loads assistant persistence from configured module", async () => {

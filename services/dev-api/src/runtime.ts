@@ -12,8 +12,11 @@ export type DevApiRuntimeEnv = {
   MA_DEV_API_FIXTURE_ADAPTER?: string;
   DEV_API_DATABASE_URL?: string;
   DATABASE_URL?: string;
+  DEV_API_RUNTIME_MODULE?: string;
   DEV_API_ANALYZE_SEAL_MODULE?: string;
 };
+
+const DEFAULT_DEV_API_RUNTIME_MODULE = new URL("./local-runtime.ts", import.meta.url).href;
 
 export async function createDevApiAdaptersFromEnv(
   env: DevApiRuntimeEnv = process.env,
@@ -23,18 +26,20 @@ export async function createDevApiAdaptersFromEnv(
     return createFixtureDevApiAdapters();
   }
   const databaseUrl = env.DEV_API_DATABASE_URL ?? env.DATABASE_URL;
-  const sealModulePath = env.DEV_API_ANALYZE_SEAL_MODULE?.trim();
-  if (!databaseUrl || !sealModulePath) return undefined;
+  const sealModulePath = env.DEV_API_RUNTIME_MODULE?.trim() ||
+    env.DEV_API_ANALYZE_SEAL_MODULE?.trim() ||
+    DEFAULT_DEV_API_RUNTIME_MODULE;
+  if (!databaseUrl) return undefined;
 
   const module = await import(moduleSpecifier(sealModulePath, cwd));
   if (typeof module.sealAnalyzeSnapshot !== "function") {
-    throw new Error("DEV_API_ANALYZE_SEAL_MODULE must export sealAnalyzeSnapshot");
+    throw new Error("DEV_API_RUNTIME_MODULE must export sealAnalyzeSnapshot");
   }
   if (module.runAnalyzeWorkflow !== undefined && typeof module.runAnalyzeWorkflow !== "function") {
-    throw new Error("DEV_API_ANALYZE_SEAL_MODULE runAnalyzeWorkflow export must be a function");
+    throw new Error("DEV_API_RUNTIME_MODULE runAnalyzeWorkflow export must be a function");
   }
   if (module.createAgentLoopStages !== undefined && typeof module.createAgentLoopStages !== "function") {
-    throw new Error("DEV_API_ANALYZE_SEAL_MODULE createAgentLoopStages export must be a function");
+    throw new Error("DEV_API_RUNTIME_MODULE createAgentLoopStages export must be a function");
   }
 
   const { Pool } = await import("pg");

@@ -129,7 +129,7 @@ API / BFF Layer
         |
         v
 Session Coordinator
-(Durable Object per chat thread / long-running analysis / agent run)
+(Node/Postgres default; Durable Object-compatible semantics)
         |
         v
 Orchestrator
@@ -163,7 +163,7 @@ Storage Layer
 - Queue
 ```
 
-For a Cloudflare-centric build, Durable Objects are appropriate for **stateful coordination** because each object is globally addressable, single-threaded, and has strongly consistent colocated storage. D1 is suitable for app metadata and smaller relational workloads but is not the right primary store for a large fact warehouse; current D1 limits are 10 GB per database on paid plans. Cloudflare Queues are useful for async ingestion and agent runs, but they provide at-least-once delivery and do not guarantee messages are consumed in publish order, so agent runs must be idempotent and watermark updates must not assume FIFO behavior.
+For a Cloudflare-centric build, Durable Objects are appropriate for **stateful coordination** because each object is globally addressable, single-threaded, and has strongly consistent colocated storage. The current implementation deliberately uses Node services plus Postgres while preserving Durable-Object-style semantics for per-thread serialization, SSE replay, durable run outputs, and idempotent queue handling; see [ADR 0004](docs/adr/0004-session-coordinator-hosting.md). D1 is suitable for app metadata and smaller relational workloads but is not the right primary store for a large fact warehouse; current D1 limits are 10 GB per database on paid plans. Cloudflare Queues are useful for async ingestion and agent runs, but they provide at-least-once delivery and do not guarantee messages are consumed in publish order, so agent runs must be idempotent and watermark updates must not assume FIFO behavior.
 
 ---
 
@@ -219,8 +219,10 @@ Routes like:
 * `/symbol/:ticker/financials`
 * `/symbol/:ticker/earnings`
 * `/symbol/:ticker/holders`
-* `/symbol/:ticker/reddit`
+* `/symbol/:ticker/signals`
 * `/symbol/:ticker/analyze`
+
+`signals` is the accepted route bucket for Reddit-like community views, news pulse, sentiment, and future alternative-data views. Earlier drafts called this `/symbol/:ticker/reddit`; the implementation deliberately generalized it so source-specific content composes shared evidence-backed blocks instead of defining a provider-specific shell.
 
 ### 5.5 Analyze
 
@@ -701,6 +703,12 @@ This service replaces the idea of a completely separate “fact store service”
 
 This sits adjacent to Evidence and feeds it.
 
+Current implementation note: filing extraction is an internal sub-boundary
+across Evidence and Fundamentals rather than a standalone service package. See
+[ADR 0003](docs/adr/0003-filing-extraction-boundary.md) for the accepted
+boundary, handoff contracts, test coverage, and triggers for splitting into
+`services/filing-extraction`.
+
 Responsibilities:
 
 * filing retrieval
@@ -761,11 +769,11 @@ Responsibilities:
 | Raw documents and parsed artifacts                  | R2/S3                              |
 | Symbol/typeahead index                              | Typesense / Meilisearch            |
 | Corpus retrieval index                              | BM25 + vector store                |
-| Live session coordination                           | Durable Objects                    |
+| Live session coordination                           | Node/Postgres coordinator now; Durable Objects optional adapter |
 | Async ingestion / agent jobs                        | Queues                             |
 | Hot quote/session cache                             | Redis/KV                           |
 
-This split preserves Cloudflare where it is strongest—edge coordination and app plumbing—without forcing D1 to become the whole research warehouse. Durable Objects are a strong fit for serialized per-thread coordination; D1 has database-size limits that make it a poor sole backend for a growing finance evidence store; and Queues are appropriate for async jobs but must be handled with idempotency because delivery is at-least-once and ordering is not guaranteed.
+This split preserves Cloudflare where it is strongest—edge coordination and app plumbing—without forcing D1 to become the whole research warehouse. Durable Objects remain a strong fit for serialized per-thread coordination, but the accepted implementation path is Node/Postgres with the equivalence contract in [ADR 0004](docs/adr/0004-session-coordinator-hosting.md); D1 has database-size limits that make it a poor sole backend for a growing finance evidence store; and Queues are appropriate for async jobs but must be handled with idempotency because delivery is at-least-once and ordering is not guaranteed.
 
 ---
 
@@ -1100,11 +1108,10 @@ A practical implementation stack:
 
 * React + TypeScript
 * route-driven app shell
-* TanStack Query for server state
-* Zustand for local UI state
-* Motion for animation
-* TradingView Lightweight Charts for price/performance
-* Recharts or Visx for smaller analytical blocks
+* React-native state primitives for the current implementation stage; see [ADR 0001](docs/adr/0001-frontend-state-management.md)
+* typed BlockRegistry renderers with deterministic SVG/HTML chart blocks for the current implementation stage; see [ADR 0002](docs/adr/0002-chart-engine-strategy.md)
+* TanStack Query and Zustand remain migration options when ADR 0001's triggers are met
+* TradingView Lightweight Charts, Recharts/Visx, and Motion remain migration options when ADR 0002's triggers are met
 * Electron shell for desktop
 * Expo for later mobile client
 
@@ -1119,15 +1126,19 @@ A practical implementation stack:
 /symbol/:ticker/financials
 /symbol/:ticker/earnings
 /symbol/:ticker/holders
-/symbol/:ticker/reddit
+/symbol/:ticker/signals
 /symbol/:ticker/analyze
 ```
+
+`/symbol/:ticker/signals` supersedes the older `/symbol/:ticker/reddit` draft route. Reddit-like content remains supported as a data/source family inside `signals`, not as a separate provider-specific tab.
 
 ### 16.3 State split
 
 * **local UI state**: composer text, expanded sections, scroll anchoring, selected chart range
 * **server state**: quotes, bars, profile, artifacts, findings
 * **persistent state**: threads, watchlists, agents, templates, snapshots
+
+Current frontend state management is documented in [ADR 0001](docs/adr/0001-frontend-state-management.md). This preserves the state split above while using React-local state and focused shell contexts until shared cache/store pressure justifies TanStack Query or Zustand.
 
 ### 16.4 Rendering model
 
@@ -1415,6 +1426,12 @@ You need these from the start:
 * `agent_run_log`
 * `drift_report`
 * `golden_eval_results`
+
+The current observability package provides a one-shot drift monitor command:
+`services/observability npm run drift:monitor`. It loads golden cases, runs the
+configured evaluator, writes `eval_run_results`, computes the latest drift
+report against the previous run, and exits non-zero when policy treats
+regressions as blocking.
 
 ### Golden set categories
 

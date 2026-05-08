@@ -461,15 +461,11 @@ function assertChatMessageTransactionClient(
   }
 }
 
-// fra-asy: this misclassifies acquired pg.PoolClients (they inherit
-// .connect from pg.Client AND have .release), so callers using the
-// *WithPool variant correctly hit the wrong error. Fixed in
-// services/analyze/src/template-runner.ts; consolidate when fra-asy lands.
 function isPoolLike(db: ChatMessagePersistenceDb): boolean {
-  const candidate = db as {
-    connect?: unknown;
-  };
-  return typeof candidate.connect === "function";
+  return (
+    typeof (db as { connect?: unknown }).connect === "function" &&
+    typeof (db as { release?: unknown }).release !== "function"
+  );
 }
 
 function isAcquiredClient(db: ChatMessagePersistenceDb): db is ChatMessagePoolClient {

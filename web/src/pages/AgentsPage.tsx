@@ -4,6 +4,7 @@ import {
   buildAgentPayload,
   canRoundTripAlertRules,
   canRoundTripUniverse,
+  subjectRefsText,
   type AgentAlertRule,
   type AgentUniverse,
 } from '../agents/agentPayload.ts'
@@ -27,6 +28,23 @@ type AgentRunRow = {
   started_at: string
   ended_at: string | null
   error: string | null
+}
+
+type AgentFindingRow = {
+  finding_id: string
+  agent_id: string
+  snapshot_id: string
+  headline: string
+  severity: string
+  created_at: string
+}
+
+type AgentActivityRow = {
+  run_activity_id: string
+  agent_id: string
+  stage: string
+  summary: string
+  ts: string
 }
 
 const DEMO_AGENTS: ReadonlyArray<AgentRow> = [
@@ -53,23 +71,40 @@ export function AgentsPage() {
   const { session } = useAuth()
   const [agents, setAgents] = useState<ReadonlyArray<AgentRow>>(DEMO_AGENTS)
   const [runs, setRuns] = useState<ReadonlyArray<AgentRunRow>>([])
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
+  const [findings, setFindings] = useState<ReadonlyArray<AgentFindingRow>>([])
+  const [runActivities, setRunActivities] = useState<ReadonlyArray<AgentActivityRow>>([])
+  const [detailsError, setDetailsError] = useState<string | null>(null)
+  const [detailsAgentId, setDetailsAgentId] = useState<string | null>(null)
+  const [detailsRefreshKey, setDetailsRefreshKey] = useState(0)
   const [name, setName] = useState('')
   const [thesis, setThesis] = useState('')
   const [cadence, setCadence] = useState('daily')
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
   const [editingAgent, setEditingAgent] = useState<AgentRow | null>(null)
+  const [universeMode, setUniverseMode] = useState<AgentUniverse['mode']>('static')
+  const [staticSubjectRefsText, setStaticSubjectRefsText] = useState('')
+  const [dynamicUniverseId, setDynamicUniverseId] = useState('')
   const [subjectKind, setSubjectKind] = useState('issuer')
   const [subjectId, setSubjectId] = useState('')
   const [alertRuleId, setAlertRuleId] = useState('')
   const [alertSeverity, setAlertSeverity] = useState('high')
   const [alertHeadline, setAlertHeadline] = useState('')
   const [alertEmail, setAlertEmail] = useState(false)
+  const [alertWebPush, setAlertWebPush] = useState(false)
+  const [alertSms, setAlertSms] = useState(false)
+  const [alertMobilePush, setAlertMobilePush] = useState(false)
+  const [alertDigest, setAlertDigest] = useState(false)
   const [activity, setActivity] = useState('Idle')
   const [loadError, setLoadError] = useState<string | null>(null)
   const preservesUnsupportedUniverse =
     editingAgent?.universe !== undefined && !canRoundTripUniverse(editingAgent.universe)
   const preservesUnsupportedAlertRules =
     editingAgent?.alert_rules !== undefined && !canRoundTripAlertRules(editingAgent.alert_rules)
+  const detailsMatchSelection = session && selectedAgentId && detailsAgentId === selectedAgentId
+  const visibleFindings = detailsMatchSelection ? findings : []
+  const visibleRunActivities = detailsMatchSelection ? runActivities : []
+  const visibleDetailsError = detailsMatchSelection ? detailsError : null
 
   useEffect(() => {
     if (!session) return
@@ -84,7 +119,13 @@ export function AgentsPage() {
       })
       .then((body) => {
         setLoadError(null)
-        if (body?.agents) setAgents(body.agents)
+        if (body?.agents) {
+          setAgents(body.agents)
+          setSelectedAgentId((current) => {
+            if (current && body.agents?.some((agent) => agent.agent_id === current)) return current
+            return body.agents?.[0]?.agent_id ?? null
+          })
+        }
         if (body?.runs) setRuns(body.runs)
       })
       .catch((caught) => {
@@ -94,18 +135,70 @@ export function AgentsPage() {
     return () => controller.abort()
   }, [session])
 
+  useEffect(() => {
+    if (!session || !selectedAgentId) {
+      return
+    }
+    let ignore = false
+    const controller = new AbortController()
+    const encodedAgentId = encodeURIComponent(selectedAgentId)
+    Promise.all([
+      fetch(`/v1/agents/${encodedAgentId}/findings`, {
+        headers: { 'x-user-id': session.userId },
+        signal: controller.signal,
+      }),
+      fetch(`/v1/agents/${encodedAgentId}/activity`, {
+        headers: { 'x-user-id': session.userId },
+        signal: controller.signal,
+      }),
+    ])
+      .then(async ([findingsResponse, activityResponse]) => {
+        if (!findingsResponse.ok || !activityResponse.ok) {
+          throw new Error(`details fetch failed with HTTP ${findingsResponse.status}/${activityResponse.status}`)
+        }
+        const findingsBody = (await findingsResponse.json()) as { findings?: AgentFindingRow[] }
+        const activityBody = (await activityResponse.json()) as { activity?: AgentActivityRow[] }
+        return { findings: findingsBody.findings ?? [], activity: activityBody.activity ?? [] }
+      })
+      .then((body) => {
+        if (ignore) return
+        setDetailsAgentId(selectedAgentId)
+        setDetailsError(null)
+        setFindings(body.findings)
+        setRunActivities(body.activity)
+      })
+      .catch((caught) => {
+        if (ignore || controller.signal.aborted) return
+        setDetailsAgentId(selectedAgentId)
+        setFindings([])
+        setRunActivities([])
+        setDetailsError(caught instanceof Error ? caught.message : String(caught))
+      })
+    return () => {
+      ignore = true
+      controller.abort()
+    }
+  }, [session, selectedAgentId, detailsRefreshKey])
+
   const resetForm = () => {
     setEditingAgentId(null)
     setEditingAgent(null)
     setName('')
     setThesis('')
     setCadence('daily')
+    setUniverseMode('static')
+    setStaticSubjectRefsText('')
+    setDynamicUniverseId('')
     setSubjectKind('issuer')
     setSubjectId('')
     setAlertRuleId('')
     setAlertSeverity('high')
     setAlertHeadline('')
     setAlertEmail(false)
+    setAlertWebPush(false)
+    setAlertSms(false)
+    setAlertMobilePush(false)
+    setAlertDigest(false)
   }
 
   const submitAgent = async (event: FormEvent<HTMLFormElement>) => {
@@ -115,12 +208,19 @@ export function AgentsPage() {
       name,
       thesis,
       cadence,
+      universeMode,
+      staticSubjectRefsText,
+      dynamicUniverseId,
       subjectKind,
       subjectId,
       alertRuleId,
       alertSeverity,
       alertHeadline,
       alertEmail,
+      alertWebPush,
+      alertSms,
+      alertMobilePush,
+      alertDigest,
     }, editingAgent ?? undefined)
     if (!input.name || !input.thesis) return
     setActivity(editingAgentId ? 'Updating agent' : 'Creating agent')
@@ -135,6 +235,8 @@ export function AgentsPage() {
     if (response.ok) {
       const saved = (await response.json()) as AgentRow
       setAgents((current) => [saved, ...current.filter((agent) => agent.agent_id !== saved.agent_id)])
+      setSelectedAgentId(saved.agent_id)
+      setDetailsRefreshKey((current) => current + 1)
       resetForm()
       setActivity(editingAgentId ? 'Agent updated' : 'Agent created')
     } else {
@@ -146,17 +248,26 @@ export function AgentsPage() {
     const universe = agent.universe?.mode === 'static' ? agent.universe : null
     const subject = universe?.subject_refs[0] ?? null
     const alert = agent.alert_rules?.[0] ?? null
+    const channels = alert?.channels ?? []
     setEditingAgentId(agent.agent_id)
+    setSelectedAgentId(agent.agent_id)
     setEditingAgent(agent)
     setName(agent.name)
     setThesis(agent.thesis)
     setCadence(agent.cadence)
+    setUniverseMode(agent.universe?.mode ?? 'static')
+    setStaticSubjectRefsText(subjectRefsText(universe?.subject_refs))
+    setDynamicUniverseId(dynamicUniverseIdFor(agent.universe))
     setSubjectKind(subject?.kind ?? 'issuer')
     setSubjectId(subject?.id ?? '')
     setAlertRuleId(alert?.rule_id ?? '')
     setAlertSeverity(alert?.severity_at_least ?? 'high')
     setAlertHeadline(alert?.headline_contains ?? '')
-    setAlertEmail(alert?.channels?.includes('email') ?? false)
+    setAlertEmail(channels.includes('email'))
+    setAlertWebPush(channels.includes('web_push'))
+    setAlertSms(channels.includes('sms'))
+    setAlertMobilePush(channels.includes('mobile_push'))
+    setAlertDigest(channels.includes('digest'))
     setActivity('Editing agent')
   }
 
@@ -177,6 +288,7 @@ export function AgentsPage() {
     if (response.ok) {
       const updated = (await response.json()) as AgentRow
       setAgents((current) => current.map((agent) => (agent.agent_id === updated.agent_id ? updated : agent)))
+      setSelectedAgentId(updated.agent_id)
       setActivity('Agent updated')
     } else {
       setActivity(`Update failed: HTTP ${response.status}`)
@@ -191,8 +303,14 @@ export function AgentsPage() {
       headers: { 'x-user-id': session.userId },
     })
     if (response.ok) {
+      const nextAgentId = agents.find((agent) => agent.agent_id !== agentId)?.agent_id ?? null
       setAgents((current) => current.filter((agent) => agent.agent_id !== agentId))
       setRuns((current) => current.filter((run) => run.agent_id !== agentId))
+      setSelectedAgentId((current) => (current === agentId ? nextAgentId : current))
+      if (selectedAgentId === agentId && nextAgentId === null) {
+        setFindings([])
+        setRunActivities([])
+      }
       setActivity('Agent deleted')
     } else {
       setActivity(`Delete failed: HTTP ${response.status}`)
@@ -209,6 +327,8 @@ export function AgentsPage() {
     if (response.ok) {
       const run = (await response.json()) as AgentRunRow
       setRuns((current) => [run, ...current])
+      setSelectedAgentId(agentId)
+      setDetailsRefreshKey((current) => current + 1)
       setActivity(run.status === 'completed' ? 'Run completed' : 'Run queued')
     } else {
       setActivity(`Run failed: HTTP ${response.status}`)
@@ -265,14 +385,55 @@ export function AgentsPage() {
                 Existing {universeLabel(editingAgent.universe)} universe is preserved by this edit.
               </p>
             ) : null}
+            <label className="mt-3 flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+              Mode
+              <select
+                name="universe-mode"
+                value={universeMode}
+                onChange={(event) => setUniverseMode(event.currentTarget.value as AgentUniverse['mode'])}
+                disabled={preservesUnsupportedUniverse}
+                className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+              >
+                <option value="static">static subjects</option>
+                <option value="screen">saved screen</option>
+                <option value="theme">theme</option>
+                <option value="portfolio">portfolio</option>
+                <option value="agent">agent-derived</option>
+              </select>
+            </label>
+            {universeMode === 'static' ? (
+              <label className="mt-3 flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                Subject refs
+                <textarea
+                  name="static-subject-refs"
+                  value={staticSubjectRefsText}
+                  onChange={(event) => setStaticSubjectRefsText(event.currentTarget.value)}
+                  disabled={preservesUnsupportedUniverse}
+                  rows={4}
+                  placeholder="issuer:...\nlisting:..."
+                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+                />
+              </label>
+            ) : (
+              <label className="mt-3 flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                {universeMode} id
+                <input
+                  name="dynamic-universe-id"
+                  value={dynamicUniverseId}
+                  onChange={(event) => setDynamicUniverseId(event.currentTarget.value)}
+                  disabled={preservesUnsupportedUniverse}
+                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+                />
+              </label>
+            )}
             <div className="mt-3 grid gap-3 sm:grid-cols-[120px_minmax(0,1fr)]">
               <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
-                Kind
+                Quick kind
                 <select
                   name="subject-kind"
                   value={subjectKind}
                   onChange={(event) => setSubjectKind(event.currentTarget.value)}
-                  disabled={preservesUnsupportedUniverse}
+                  disabled={preservesUnsupportedUniverse || universeMode !== 'static'}
                   className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
                 >
                   <option value="issuer">issuer</option>
@@ -283,12 +444,12 @@ export function AgentsPage() {
                 </select>
               </label>
               <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
-                Subject id
+                Quick subject id
                 <input
                   name="subject-id"
                   value={subjectId}
                   onChange={(event) => setSubjectId(event.currentTarget.value)}
-                  disabled={preservesUnsupportedUniverse}
+                  disabled={preservesUnsupportedUniverse || universeMode !== 'static'}
                   className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
                 />
               </label>
@@ -348,6 +509,52 @@ export function AgentsPage() {
                 />
                 Email
               </label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="inline-flex items-center gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                  <input
+                    name="alert-web-push"
+                    type="checkbox"
+                    checked={alertWebPush}
+                    onChange={(event) => setAlertWebPush(event.currentTarget.checked)}
+                    disabled={preservesUnsupportedAlertRules}
+                    className="size-4"
+                  />
+                  Web push
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                  <input
+                    name="alert-sms"
+                    type="checkbox"
+                    checked={alertSms}
+                    onChange={(event) => setAlertSms(event.currentTarget.checked)}
+                    disabled={preservesUnsupportedAlertRules}
+                    className="size-4"
+                  />
+                  SMS
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                  <input
+                    name="alert-mobile-push"
+                    type="checkbox"
+                    checked={alertMobilePush}
+                    onChange={(event) => setAlertMobilePush(event.currentTarget.checked)}
+                    disabled={preservesUnsupportedAlertRules}
+                    className="size-4"
+                  />
+                  Mobile push
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                  <input
+                    name="alert-digest"
+                    type="checkbox"
+                    checked={alertDigest}
+                    onChange={(event) => setAlertDigest(event.currentTarget.checked)}
+                    disabled={preservesUnsupportedAlertRules}
+                    className="size-4"
+                  />
+                  Digest
+                </label>
+              </div>
             </div>
           </fieldset>
           <button type="submit" className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-900">
@@ -362,7 +569,14 @@ export function AgentsPage() {
             ) : null}
             <ul className="mt-4 flex flex-col gap-3">
               {agents.map((agent) => (
-                <li key={agent.agent_id} className="rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
+                <li
+                  key={agent.agent_id}
+                  className={`rounded-md border p-3 ${
+                    selectedAgentId === agent.agent_id
+                      ? 'border-neutral-900 dark:border-neutral-100'
+                      : 'border-neutral-200 dark:border-neutral-800'
+                  }`}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{agent.name}</h3>
@@ -378,6 +592,13 @@ export function AgentsPage() {
                       </p>
                     </div>
                     <div className="flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedAgentId(agent.agent_id)}
+                        className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium dark:border-neutral-700"
+                      >
+                        View
+                      </button>
                       <button
                         type="button"
                         onClick={() => editAgent(agent)}
@@ -413,6 +634,29 @@ export function AgentsPage() {
             </ul>
           </section>
           <section className="rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+            <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Findings</h2>
+            {visibleDetailsError ? (
+              <p className="mt-3 text-sm text-rose-600 dark:text-rose-300">Details failed: {visibleDetailsError}</p>
+            ) : null}
+            {visibleFindings.length === 0 ? (
+              <p className="mt-4 text-sm text-neutral-500 dark:text-neutral-400">No findings for this agent yet.</p>
+            ) : (
+              <ul className="mt-4 flex flex-col gap-3">
+                {visibleFindings.map((finding) => (
+                  <li key={finding.finding_id} className="rounded-md border border-neutral-200 p-3 text-sm dark:border-neutral-800">
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="font-medium text-neutral-900 dark:text-neutral-100">{finding.headline}</span>
+                      <span className="rounded border border-neutral-300 px-2 py-0.5 text-xs text-neutral-600 dark:border-neutral-700 dark:text-neutral-300">
+                        {finding.severity}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">{finding.created_at}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          <section className="rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
             <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Run history</h2>
             {runs.length === 0 ? (
               <p className="mt-4 text-sm text-neutral-500 dark:text-neutral-400">No recorded runs yet.</p>
@@ -423,6 +667,24 @@ export function AgentsPage() {
                     <span className="font-medium">{run.status}</span>
                     <span className="ml-2 text-neutral-500 dark:text-neutral-400">{run.started_at}</span>
                     {run.error ? <p className="mt-1 text-rose-600 dark:text-rose-300">{run.error}</p> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          <section className="rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+            <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Run activity</h2>
+            {visibleRunActivities.length === 0 ? (
+              <p className="mt-4 text-sm text-neutral-500 dark:text-neutral-400">No activity for this agent yet.</p>
+            ) : (
+              <ul className="mt-4 flex flex-col gap-3">
+                {visibleRunActivities.map((item) => (
+                  <li key={item.run_activity_id} className="rounded-md border border-neutral-200 p-3 text-sm dark:border-neutral-800">
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="font-medium capitalize text-neutral-900 dark:text-neutral-100">{item.stage}</span>
+                      <span className="text-xs text-neutral-500 dark:text-neutral-400">{item.ts}</span>
+                    </div>
+                    <p className="mt-2 text-neutral-600 dark:text-neutral-300">{item.summary}</p>
                   </li>
                 ))}
               </ul>
@@ -455,5 +717,14 @@ function alertRuleLabel(alertRules: AgentRow['alert_rules']): string {
   if (!rule) return 'not configured'
   const severity = rule.severity_at_least ?? 'any'
   const headline = rule.headline_contains ? ` headline contains ${rule.headline_contains}` : ''
-  return `${severity}+${headline}`.trim()
+  const channels = rule.channels?.length ? ` via ${rule.channels.join(', ')}` : ''
+  return `${severity}+${headline}${channels}`.trim()
+}
+
+function dynamicUniverseIdFor(universe: AgentRow['universe']): string {
+  if (!universe || universe.mode === 'static') return ''
+  if (universe.mode === 'screen') return universe.screen_id
+  if (universe.mode === 'theme') return universe.theme_id
+  if (universe.mode === 'portfolio') return universe.portfolio_id
+  return universe.agent_id
 }

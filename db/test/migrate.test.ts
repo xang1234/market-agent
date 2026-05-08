@@ -23,6 +23,7 @@ const snapshotManifestMigrationPath = join(dbRoot, "migrations", "0005_snapshot_
 const evidenceBundleMigrationPath = join(dbRoot, "migrations", "0017_evidence_bundles.up.sql");
 const agentRunClaimsMigrationPath = join(dbRoot, "migrations", "0018_agent_run_claims.up.sql");
 const alertsFiredMigrationPath = join(dbRoot, "migrations", "0019_alerts_fired.up.sql");
+const alertDeliveryMetadataMigrationPath = join(dbRoot, "migrations", "0023_alert_delivery_metadata.up.sql");
 const factReviewActionsMigrationPath = join(dbRoot, "migrations", "0021_fact_review_actions.up.sql");
 const watchlistListManagementMigrationPath = join(dbRoot, "migrations", "0022_watchlist_list_management.up.sql");
 
@@ -92,10 +93,29 @@ test("alerts fired schema records trigger provenance before notification deliver
     assert.match(sql, /finding_id uuid not null references findings\(finding_id\)/i);
     assert.match(sql, /trigger_refs jsonb not null/i);
     assert.match(sql, /status text not null default 'pending_notification'/i);
-    assert.match(sql, /status in \('pending_notification', 'notified', 'failed', 'acknowledged'\)/i);
+    assert.match(sql, /status in \('pending_notification', (?:'delivering', )?'notified', 'failed', 'acknowledged'\)/i);
     assert.match(sql, /unique \(agent_id, run_id, rule_id, finding_id\)/i);
     assert.match(sql, /create index alerts_fired_finding_idx on alerts_fired\(finding_id\)/i);
   }
+});
+
+test("alert delivery metadata schema supports notification audit and retry", () => {
+  const forwardMigration = readFileSync(alertDeliveryMetadataMigrationPath, "utf8");
+  const schema = readFileSync(schemaPath, "utf8");
+
+  for (const sql of [forwardMigration, schema]) {
+    assert.match(sql, /notification_delivery jsonb not null default '\{\}'::jsonb/i);
+    assert.match(sql, /delivery_attempts integer not null default 0/i);
+    assert.match(sql, /last_delivery_error text/i);
+    assert.match(sql, /last_delivery_at timestamptz/i);
+    assert.match(sql, /status in \('pending_notification', 'delivering', 'notified', 'failed', 'acknowledged'\)/i);
+    assert.match(sql, /alerts_fired_notification_delivery_object_chk/i);
+    assert.match(sql, /create index(?: if not exists)? alerts_fired_pending_delivery_idx/i);
+  }
+
+  const rollbackMigration = readFileSync(join(dbRoot, "migrations", "0023_alert_delivery_metadata.down.sql"), "utf8");
+  assert.match(rollbackMigration, /where status = 'delivering'/i);
+  assert.match(rollbackMigration, /set status = 'failed'/i);
 });
 
 test("fact review actions preserve audit history instead of cascading queue deletes", () => {
@@ -140,7 +160,7 @@ test("migrate up applies pending migrations and records them in schema_migration
   });
 
   assert.equal(migrateResult.status, 0, migrateResult.stderr || migrateResult.stdout);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "22");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "23");
   assert.deepEqual(
     queryValue(containerName, "select version || ':' || name from schema_migrations order by version").split("\n"),
     [
@@ -166,6 +186,7 @@ test("migrate up applies pending migrations and records them in schema_migration
       "0020:run_activities_user_id",
       "0021:fact_review_actions",
       "0022:watchlist_list_management",
+      "0023:alert_delivery_metadata",
     ],
   );
 
@@ -281,6 +302,7 @@ test("migrate status reports all migrations as applied after migrate up", { time
   assert.match(statusResult.stdout, /0020\s+run_activities_user_id\s+applied/);
   assert.match(statusResult.stdout, /0021\s+fact_review_actions\s+applied/);
   assert.match(statusResult.stdout, /0022\s+watchlist_list_management\s+applied/);
+  assert.match(statusResult.stdout, /0023\s+alert_delivery_metadata\s+applied/);
 });
 
 test("migrate down rolls back the most recently applied migration", { timeout: 120000 }, async (t) => {
@@ -911,7 +933,7 @@ test("migrate down rolls back schema changes when removing the migration record 
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /rejecting schema_migrations delete/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "22");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "23");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -920,13 +942,13 @@ test("migrate down rolls back schema changes when removing the migration record 
   // migration's schema change must still be in place. If the runner
   // accidentally executed the down DDL before hitting the trigger block, the
   // schema_migrations row count alone wouldn't catch that — checking the
-  // latest migration's actual artifact does. 0022 added watchlists.is_default;
+  // latest migration's actual artifact does. 0023 added notification_delivery;
   // the down would remove it, so its presence is independent proof the down
   // DDL did not execute.
   assert.equal(
     queryValue(
       containerName,
-      "select count(*) from information_schema.columns where table_name = 'watchlists' and column_name = 'is_default'",
+      "select count(*) from information_schema.columns where table_name = 'alerts_fired' and column_name = 'notification_delivery'",
     ),
     "1",
   );
@@ -977,7 +999,7 @@ test("migrate down fails when any applied migration is missing locally", { timeo
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /Applied migration 0000 is missing locally/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "23");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "24");
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
 });
 

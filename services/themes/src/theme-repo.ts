@@ -152,6 +152,14 @@ export type ThemeMembershipRow = {
   expires_at: string | null;
 };
 
+export type ThemeMembershipRationaleRow = ThemeMembershipRow & {
+  theme_name: string;
+  theme_description: string | null;
+  membership_mode: ThemeMembershipMode;
+  membership_spec: JsonValue | null;
+  rationale_supported: boolean;
+};
+
 type ThemeMembershipDbRow = {
   theme_membership_id: string;
   theme_id: string;
@@ -163,6 +171,13 @@ type ThemeMembershipDbRow = {
   expires_at: Date | string | null;
 };
 
+type ThemeMembershipRationaleDbRow = ThemeMembershipDbRow & {
+  theme_name: string;
+  theme_description: string | null;
+  membership_mode: ThemeMembershipMode;
+  membership_spec: JsonValue | null;
+};
+
 const MEMBERSHIP_SELECT_COLUMNS = `theme_membership_id::text as theme_membership_id,
        theme_id::text as theme_id,
        subject_kind,
@@ -171,6 +186,14 @@ const MEMBERSHIP_SELECT_COLUMNS = `theme_membership_id::text as theme_membership
        rationale_claim_ids,
        effective_at,
        expires_at`;
+const MEMBERSHIP_RATIONALE_SELECT_COLUMNS = `tm.theme_membership_id::text as theme_membership_id,
+       tm.theme_id::text as theme_id,
+       tm.subject_kind,
+       tm.subject_id::text as subject_id,
+       tm.score,
+       tm.rationale_claim_ids,
+       tm.effective_at,
+       tm.expires_at`;
 
 // Builds the half-open active-window predicate against a single bind index.
 // (Not a string template + .replace — that approach silently misfires if a
@@ -178,6 +201,11 @@ const MEMBERSHIP_SELECT_COLUMNS = `theme_membership_id::text as theme_membership
 function membershipActiveWindowPredicate(asOfBindIndex: number): string {
   const bind = `$${asOfBindIndex}::timestamptz`;
   return `effective_at <= ${bind} and (expires_at is null or expires_at > ${bind})`;
+}
+
+function membershipActiveWindowPredicateFor(alias: string, asOfBindIndex: number): string {
+  const bind = `$${asOfBindIndex}::timestamptz`;
+  return `${alias}.effective_at <= ${bind} and (${alias}.expires_at is null or ${alias}.expires_at > ${bind})`;
 }
 
 // Adds a (theme, subject) row. Idempotent at (theme_id, subject_kind, subject_id)
@@ -265,6 +293,11 @@ export type MembershipPage = {
   truncated: boolean;
 };
 
+export type MembershipRationalePage = {
+  rows: ReadonlyArray<ThemeMembershipRationaleRow>;
+  truncated: boolean;
+};
+
 // Lists active members of a theme as of `asOf`. Capped at `limit` rows
 // (default DEFAULT_MEMBERSHIP_PAGE_SIZE, max MAX_MEMBERSHIP_PAGE_SIZE) so a
 // popular theme can't dump thousands of rows into a chat pre-resolve call.
@@ -316,6 +349,33 @@ export async function listThemesBySubject(
   return makeMembershipPage(rows, limit);
 }
 
+export async function listThemeMembershipRationalesBySubject(
+  db: QueryExecutor,
+  subjectRef: SubjectRef,
+  options: ListMembershipOptions = {},
+): Promise<MembershipRationalePage> {
+  assertSubjectRef(subjectRef, "subject_ref");
+  if (options.asOf !== undefined) assertValidTimestamp(options.asOf, "asOf");
+  const limit = resolvePageSize(options.limit);
+  const asOf = options.asOf ?? new Date().toISOString();
+  const { rows } = await db.query<ThemeMembershipRationaleDbRow>(
+    `select ${MEMBERSHIP_RATIONALE_SELECT_COLUMNS},
+            t.name as theme_name,
+            t.description as theme_description,
+            t.membership_mode,
+            t.membership_spec
+       from theme_memberships tm
+       join themes t on t.theme_id = tm.theme_id
+      where tm.subject_kind = $1::subject_kind
+        and tm.subject_id = $2::uuid
+        and ${membershipActiveWindowPredicateFor("tm", 3)}
+      order by tm.score desc nulls last, tm.effective_at asc
+      limit $4`,
+    [subjectRef.kind, subjectRef.id, asOf, limit + 1],
+  );
+  return makeMembershipRationalePage(rows, limit);
+}
+
 function resolvePageSize(limit: number | undefined): number {
   if (limit === undefined) return DEFAULT_MEMBERSHIP_PAGE_SIZE;
   if (!Number.isInteger(limit) || limit <= 0) {
@@ -333,6 +393,18 @@ function makeMembershipPage(
   const visible = truncated ? rows.slice(0, limit) : rows;
   return Object.freeze({
     rows: Object.freeze(visible.map(themeMembershipRowFromDb)),
+    truncated,
+  });
+}
+
+function makeMembershipRationalePage(
+  rows: ReadonlyArray<ThemeMembershipRationaleDbRow>,
+  limit: number,
+): MembershipRationalePage {
+  const truncated = rows.length > limit;
+  const visible = truncated ? rows.slice(0, limit) : rows;
+  return Object.freeze({
+    rows: Object.freeze(visible.map(themeMembershipRationaleRowFromDb)),
     truncated,
   });
 }
@@ -433,6 +505,21 @@ function themeMembershipRowFromDb(row: ThemeMembershipDbRow | undefined): ThemeM
     rationale_claim_ids: rationaleClaimIds(row.rationale_claim_ids),
     effective_at: isoString(row.effective_at),
     expires_at: row.expires_at === null ? null : isoString(row.expires_at),
+  });
+}
+
+function themeMembershipRationaleRowFromDb(
+  row: ThemeMembershipRationaleDbRow | undefined,
+): ThemeMembershipRationaleRow {
+  if (!row) throw new Error("theme membership rationale select did not return a row");
+  const membership = themeMembershipRowFromDb(row);
+  return Object.freeze({
+    ...membership,
+    theme_name: row.theme_name,
+    theme_description: row.theme_description,
+    membership_mode: row.membership_mode,
+    membership_spec: row.membership_spec,
+    rationale_supported: row.membership_mode !== "manual" && membership.rationale_claim_ids.length > 0,
   });
 }
 

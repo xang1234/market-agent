@@ -17,6 +17,7 @@ tags:
   - name: Chat
   - name: Analyze
   - name: Agents
+  - name: Themes
   - name: Home
   - name: Portfolios
   - name: RunActivity
@@ -1600,6 +1601,41 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+  /v1/themes/membership-rationales:
+    get:
+      tags: [Themes]
+      summary: List theme membership rationale for a subject
+      operationId: listThemeMembershipRationales
+      parameters:
+        - $ref: '#/components/parameters/SubjectKindQuery'
+        - $ref: '#/components/parameters/SubjectIdQuery'
+        - in: query
+          name: as_of
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Theme membership rationale rows
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [memberships, truncated]
+                properties:
+                  memberships:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ThemeMembershipRationale'
+                  truncated:
+                    type: boolean
   /v1/dev/placeholders:
     get:
       tags: [Dev]
@@ -1659,6 +1695,41 @@ components:
       enum: [issuer, instrument, listing, theme, macro_topic, portfolio, screen]
     SubjectRef:
       $ref: './finance_research_block_schema.json#/$defs/SubjectRef'
+    ThemeMembershipRationale:
+      type: object
+      required:
+        - theme_id
+        - theme_name
+        - theme_description
+        - membership_mode
+        - score
+        - rationale_supported
+        - rationale_claim_ids
+      properties:
+        theme_id:
+          type: string
+          format: uuid
+        theme_name:
+          type: string
+        theme_description:
+          type:
+            - string
+            - 'null'
+        membership_mode:
+          type: string
+          enum: [manual, rule_based, inferred]
+        score:
+          type:
+            - number
+            - 'null'
+        rationale_supported:
+          type: boolean
+          description: True when the product should render rationale_claim_ids for this membership.
+        rationale_claim_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
     ResolvedSubject:
       type: object
       description: Resolver result carrying a canonical subject reference, hydrated handoff context when resolved, plus any lower-confidence alternatives.
@@ -2084,8 +2155,7 @@ components:
         thesis:
           type: string
         universe:
-          type: object
-          additionalProperties: true
+          $ref: '#/components/schemas/AgentUniverse'
         source_policy:
           type: object
           additionalProperties: true
@@ -2096,8 +2166,75 @@ components:
         alert_rules:
           type: array
           items:
-            type: object
-            additionalProperties: true
+            $ref: '#/components/schemas/AgentAlertRule'
+    AgentUniverse:
+      oneOf:
+        - type: object
+          required: [mode, subject_refs]
+          additionalProperties: false
+          properties:
+            mode:
+              type: string
+              enum: [static]
+            subject_refs:
+              type: array
+              items:
+                $ref: '#/components/schemas/SubjectRef'
+        - type: object
+          required: [mode, screen_id]
+          additionalProperties: false
+          properties:
+            mode:
+              type: string
+              enum: [screen]
+            screen_id:
+              type: string
+        - type: object
+          required: [mode, theme_id]
+          additionalProperties: false
+          properties:
+            mode:
+              type: string
+              enum: [theme]
+            theme_id:
+              type: string
+        - type: object
+          required: [mode, portfolio_id]
+          additionalProperties: false
+          properties:
+            mode:
+              type: string
+              enum: [portfolio]
+            portfolio_id:
+              type: string
+        - type: object
+          required: [mode, agent_id]
+          additionalProperties: false
+          properties:
+            mode:
+              type: string
+              enum: [agent]
+            agent_id:
+              type: string
+    AgentAlertRule:
+      type: object
+      required: [rule_id]
+      additionalProperties: true
+      properties:
+        rule_id:
+          type: string
+        severity_at_least:
+          type: string
+          enum: [low, medium, high, critical]
+        headline_contains:
+          type: string
+        channels:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationChannel'
+    NotificationChannel:
+      type: string
+      enum: [email, web_push, sms, mobile_push, digest]
     AgentPatch:
       type: object
       additionalProperties: false
@@ -2108,6 +2245,12 @@ components:
           type: string
         cadence:
           type: string
+        universe:
+          $ref: '#/components/schemas/AgentUniverse'
+        alert_rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentAlertRule'
         enabled:
           type: boolean
     Agent:

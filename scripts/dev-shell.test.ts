@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import net from "node:net";
@@ -169,7 +169,7 @@ test("up rolls back already-started services when a later readiness check fails"
     [
       "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
       `TRACE_FILE="${traceFile}"`,
-      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api" "$ROOT/services/watchlists" "$ROOT/services/market" "$ROOT/services/fundamentals" "$ROOT/services/screener" "$ROOT/services/portfolio" "$ROOT/services/home" "$ROOT/services/evidence" "$ROOT/services/agents" "$ROOT/services/analyze" "$ROOT/services/artifact" "$ROOT/services/observability" "$ROOT/services/snapshot" "$ROOT/services/summary" "$ROOT/services/themes" "$ROOT/services/tools"',
+      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api" "$ROOT/services/watchlists" "$ROOT/services/market" "$ROOT/services/fundamentals" "$ROOT/services/screener" "$ROOT/services/portfolio" "$ROOT/services/home" "$ROOT/services/evidence" "$ROOT/services/agents" "$ROOT/services/analyze" "$ROOT/services/artifact" "$ROOT/services/notifications" "$ROOT/services/observability" "$ROOT/services/snapshot" "$ROOT/services/summary" "$ROOT/services/themes" "$ROOT/services/tools"',
       "ensure_command(){ :; }",
       "ensure_install(){ :; }",
       "npm(){ :; }",
@@ -206,7 +206,7 @@ test("up rolls back when postgres never becomes ready", async () => {
     [
       "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
       `TRACE_FILE="${traceFile}"`,
-      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api" "$ROOT/services/watchlists" "$ROOT/services/market" "$ROOT/services/fundamentals" "$ROOT/services/screener" "$ROOT/services/portfolio" "$ROOT/services/home" "$ROOT/services/evidence" "$ROOT/services/agents" "$ROOT/services/analyze" "$ROOT/services/artifact" "$ROOT/services/observability" "$ROOT/services/snapshot" "$ROOT/services/summary" "$ROOT/services/themes" "$ROOT/services/tools"',
+      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api" "$ROOT/services/watchlists" "$ROOT/services/market" "$ROOT/services/fundamentals" "$ROOT/services/screener" "$ROOT/services/portfolio" "$ROOT/services/home" "$ROOT/services/evidence" "$ROOT/services/agents" "$ROOT/services/analyze" "$ROOT/services/artifact" "$ROOT/services/notifications" "$ROOT/services/observability" "$ROOT/services/snapshot" "$ROOT/services/summary" "$ROOT/services/themes" "$ROOT/services/tools"',
       "ensure_command(){ :; }",
       "ensure_install(){ :; }",
       "sleep(){ :; }",
@@ -252,6 +252,30 @@ test("runtime DATABASE_URL is derived from primitive postgres vars", async () =>
 
   assert.equal(result.code, 0);
   assert.equal(result.stdout.trim(), "postgresql://devuser:secret@127.0.0.1:5544/sample_db");
+
+  await rm(fixture.root, { recursive: true, force: true });
+});
+
+test("runtime module env vars default to in-repo durable local stack wiring", async () => {
+  const fixture = await createShellFixture();
+
+  const result = await runBash(
+    [
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      'printf "%s\\n%s\\n%s\\n%s\\n<%s>" "$DEV_API_ANALYZE_SEAL_MODULE" "$DEV_API_RUNTIME_MODULE" "$CHAT_ANALYST_RUNTIME_MODULE" "$CHAT_PERSISTENCE_MODULE" "${CHAT_LOCAL_TOOL_EXECUTOR:-}"',
+    ].join("\n"),
+    fixture.root,
+  );
+
+  assert.equal(result.code, 0);
+  const root = await realpath(fixture.root);
+  assert.deepEqual(result.stdout.trim().split("\n"), [
+    `${root}/services/dev-api/src/local-runtime.ts`,
+    `${root}/services/dev-api/src/local-runtime.ts`,
+    `${root}/services/chat/src/local-runtime.ts`,
+    `${root}/services/chat/src/local-runtime.ts`,
+    "<>",
+  ]);
 
   await rm(fixture.root, { recursive: true, force: true });
 });

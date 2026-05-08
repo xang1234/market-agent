@@ -164,6 +164,29 @@ async function readSseEvents(response: Response, expectedCount: number): Promise
   return events.slice(0, expectedCount);
 }
 
+async function readSseEventsMatching(
+  response: Response,
+  expectedCount: number,
+  predicate: (event: ParsedSseEvent) => boolean,
+): Promise<ParsedSseEvent[]> {
+  const reader = response.body?.getReader();
+  assert.ok(reader, "expected a readable stream body");
+
+  const decoder = new TextDecoder();
+  let transcript = "";
+  let matched: ParsedSseEvent[] = [];
+
+  while (matched.length < expectedCount) {
+    const next = await reader.read();
+    assert.equal(next.done, false, "expected the SSE stream to remain open");
+    transcript += decoder.decode(next.value, { stream: true });
+    matched = parseSseEvents(transcript).filter(predicate);
+  }
+
+  await reader.cancel();
+  return matched.slice(0, expectedCount);
+}
+
 test("SSE writer disconnects clients that exceed the pending frame cap", () => {
   class SlowWritable extends EventEmitter {
     readonly frames: string[] = [];
@@ -481,7 +504,11 @@ test("run activity stream receives activity emitted from the live chat runner li
   });
   assert.equal(chatResponse.status, 200);
 
-  const activityEvents = await readSseEvents(activityResponse, 3);
+  const activityEvents = await readSseEventsMatching(
+    activityResponse,
+    3,
+    (event) => event.event === "run_activity",
+  );
   await chatResponse.body?.cancel();
 
   assert.deepEqual(

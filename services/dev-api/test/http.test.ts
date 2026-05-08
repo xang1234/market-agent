@@ -100,6 +100,119 @@ test("GET /v1/agents and POST /v1/agents/:id/runs expose agent workflow data", a
   assert.equal(runBody.status, "completed");
 });
 
+test("GET /v1/themes/membership-rationales hydrates service-backed theme rationale", async (t) => {
+  const subjectId = "33333333-3333-4333-8333-333333333333";
+  const calls: unknown[] = [];
+  const adapters = {
+    ...createFixtureDevApiAdapters(),
+    themes: {
+      async listMembershipRationales(input: unknown) {
+        calls.push(input);
+        return {
+          memberships: [
+            {
+              theme_id: "11111111-1111-4111-8111-111111111111",
+              theme_name: "AI infrastructure",
+              theme_description: "Source-backed AI buildout claims",
+              membership_mode: "rule_based",
+              score: 0.75,
+              rationale_supported: true,
+              rationale_claim_ids: ["44444444-4444-4444-8444-444444444444"],
+            },
+          ],
+          truncated: false,
+        };
+      },
+    },
+  };
+  const base = await startServer(t, {}, { adapters: adapters as never });
+
+  const response = await fetch(
+    `${base}/v1/themes/membership-rationales?subject_kind=issuer&subject_id=${subjectId}&limit=8`,
+  );
+  const body = await response.json() as {
+    memberships?: Array<{ theme_name?: string; rationale_claim_ids?: string[] }>;
+    truncated?: boolean;
+  };
+
+  assert.equal(response.status, 200);
+  assert.equal(body.memberships?.[0]?.theme_name, "AI infrastructure");
+  assert.deepEqual(body.memberships?.[0]?.rationale_claim_ids, [
+    "44444444-4444-4444-8444-444444444444",
+  ]);
+  assert.equal(body.truncated, false);
+  assert.deepEqual(calls, [
+    {
+      subjectRef: { kind: "issuer", id: subjectId },
+      asOf: undefined,
+      limit: 8,
+    },
+  ]);
+});
+
+test("GET /v1/themes/membership-rationales validates subject and limit query params", async (t) => {
+  const base = await startServer(t);
+
+  const missing = await fetch(`${base}/v1/themes/membership-rationales`);
+  const badLimit = await fetch(
+    `${base}/v1/themes/membership-rationales?subject_kind=issuer&subject_id=33333333-3333-4333-8333-333333333333&limit=0`,
+  );
+  const badAsOf = await fetch(
+    `${base}/v1/themes/membership-rationales?subject_kind=issuer&subject_id=33333333-3333-4333-8333-333333333333&as_of=not-a-date`,
+  );
+  const dateOnlyAsOf = await fetch(
+    `${base}/v1/themes/membership-rationales?subject_kind=issuer&subject_id=33333333-3333-4333-8333-333333333333&as_of=2026-05-08`,
+  );
+
+  assert.equal(missing.status, 400);
+  assert.equal(badLimit.status, 400);
+  assert.equal(badAsOf.status, 400);
+  assert.equal(dateOnlyAsOf.status, 400);
+});
+
+test("service Themes adapter lists membership rationale through the read model", async () => {
+  const subjectId = "33333333-3333-4333-8333-333333333333";
+  const db = {
+    async query(text: string, values?: unknown[]) {
+      assert.match(text, /from theme_memberships tm/i);
+      assert.deepEqual(values, ["issuer", subjectId, "2026-05-08T00:00:00.000Z", 9]);
+      return {
+        rows: [
+          {
+            theme_membership_id: "22222222-2222-4222-8222-222222222222",
+            theme_id: "11111111-1111-4111-8111-111111111111",
+            theme_name: "Quality compounders",
+            theme_description: null,
+            membership_mode: "inferred",
+            membership_spec: null,
+            subject_kind: "issuer",
+            subject_id: subjectId,
+            score: "2",
+            rationale_claim_ids: ["44444444-4444-4444-8444-444444444444"],
+            effective_at: "2026-05-07T00:00:00.000Z",
+            expires_at: null,
+          },
+        ],
+      };
+    },
+  };
+  const adapters = createServiceDevApiAdapters({
+    db: db as never,
+    async sealAnalyzeSnapshot() {
+      throw new Error("analyze seal is not used");
+    },
+  });
+
+  const result = await adapters.themes.listMembershipRationales({
+    subjectRef: { kind: "issuer", id: subjectId },
+    asOf: "2026-05-08T00:00:00.000Z",
+    limit: 8,
+  });
+
+  assert.equal(result.memberships[0]?.theme_name, "Quality compounders");
+  assert.equal(result.memberships[0]?.rationale_supported, true);
+});
+
 test("PATCH and DELETE /v1/agents expose update and delete controls", async (t) => {
   const base = await startServer(t);
   const headers = {
@@ -509,6 +622,108 @@ test("service Agent adapter lets durable loop stages create findings and evaluat
   assert.ok(db.queries.some((query) => query.text.includes("insert into findings")));
   assert.ok(db.queries.some((query) => query.text.includes("insert into run_activities")));
   assert.ok(db.queries.some((query) => query.text.includes("insert into alerts_fired")));
+});
+
+test("GET /v1/agents/:id/findings and /activity expose the adapter-backed product surfaces", async (t) => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const agentId = "11111111-1111-4111-8111-111111111111";
+  const calls: string[] = [];
+  const adapters = {
+    analyze: {
+      listTemplates: async () => ({ templates: [] }),
+      createRun: async () => {
+        throw new Error("not used");
+      },
+      shareRunToChat: async () => {
+        throw new Error("not used");
+      },
+    },
+    agents: {
+      list: async () => ({ agents: [], runs: [] }),
+      create: async () => {
+        throw new Error("not used");
+      },
+      update: async () => null,
+      delete: async () => false,
+      run: async () => null,
+      listFindings: async (input: { userId: string; agentId: string }) => {
+        calls.push(`findings:${input.userId}:${input.agentId}`);
+        return {
+          findings: [
+            {
+              finding_id: "44444444-4444-4444-8444-444444444444",
+              agent_id: input.agentId,
+              snapshot_id: "55555555-5555-4555-8555-555555555555",
+              headline: "Operating margin quality improved",
+              severity: "medium",
+              subject_refs: [{ kind: "issuer", id: "22222222-2222-4222-8222-222222222222" }],
+              summary_blocks: [],
+              created_at: "2026-05-06T00:00:00.000Z",
+            },
+          ],
+        };
+      },
+      listActivity: async (input: { userId: string; agentId: string }) => {
+        calls.push(`activity:${input.userId}:${input.agentId}`);
+        return {
+          activity: [
+            {
+              run_activity_id: "33333333-3333-4333-8333-333333333333",
+              agent_id: input.agentId,
+              stage: "found",
+              subject_refs: [{ kind: "issuer", id: "22222222-2222-4222-8222-222222222222" }],
+              source_refs: ["66666666-6666-4666-8666-666666666666"],
+              summary: "Created 1 source-backed finding.",
+              ts: "2026-05-06T00:00:00.000Z",
+            },
+          ],
+        };
+      },
+    },
+  };
+  const base = await startServer(t, {}, { adapters: adapters as never });
+
+  const findingsResponse = await fetch(`${base}/v1/agents/${agentId}/findings`, {
+    headers: { "x-user-id": userId },
+  });
+  const findingsBody = await findingsResponse.json() as { findings?: Array<{ headline?: string }> };
+  const activityResponse = await fetch(`${base}/v1/agents/${agentId}/activity`, {
+    headers: { "x-user-id": userId },
+  });
+  const activityBody = await activityResponse.json() as { activity?: Array<{ summary?: string }> };
+
+  assert.equal(findingsResponse.status, 200);
+  assert.equal(findingsBody.findings?.[0]?.headline, "Operating margin quality improved");
+  assert.equal(activityResponse.status, 200);
+  assert.equal(activityBody.activity?.[0]?.summary, "Created 1 source-backed finding.");
+  assert.deepEqual(calls, [
+    `findings:${userId}:${agentId}`,
+    `activity:${userId}:${agentId}`,
+  ]);
+});
+
+test("service Agent adapter lists owned durable findings and activity", async () => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const agentId = "11111111-1111-4111-8111-111111111111";
+  const db = fakeAgentDetailsDb({ userId, agentId });
+  const adapters = createServiceDevApiAdapters({
+    db,
+    createAgentLoopStages: createActivityAgentLoopStages,
+    async sealAnalyzeSnapshot() {
+      throw new Error("analyze seal is not used");
+    },
+  });
+
+  const findings = await adapters.agents.listFindings({ userId, agentId });
+  const activity = await adapters.agents.listActivity({ userId, agentId });
+  const missing = await adapters.agents.listFindings({
+    userId: "00000000-0000-4000-8000-000000000099",
+    agentId,
+  });
+
+  assert.deepEqual(findings?.findings.map((finding) => finding.headline), ["Operating margin quality improved"]);
+  assert.deepEqual(activity?.activity.map((item) => item.summary), ["Created 1 source-backed finding."]);
+  assert.equal(missing, null);
 });
 
 test("POST /v1/agents/:id/runs rejects durable adapter without loop stages", async (t) => {
@@ -1156,6 +1371,75 @@ function fakeAgentLoopDb(input: {
     },
   };
   return db;
+}
+
+function fakeAgentDetailsDb(input: {
+  userId: string;
+  agentId: string;
+}) {
+  const agentRow = {
+    agent_id: input.agentId,
+    user_id: input.userId,
+    name: "Durable loop monitor",
+    thesis: "Track source-backed changes",
+    universe: { mode: "static", subject_refs: [{ kind: "issuer", id: "22222222-2222-4222-8222-222222222222" }] },
+    source_policy: null,
+    cadence: "daily",
+    prompt_template: null,
+    alert_rules: [],
+    watermarks: { cursor: "old" },
+    enabled: true,
+    created_at: "2026-05-06T00:00:00.000Z",
+    updated_at: "2026-05-06T00:00:00.000Z",
+  };
+  return {
+    async connect() {
+      return this;
+    },
+    release() {
+      // No-op test pool client.
+    },
+    async query(text: string, values?: unknown[]) {
+      if (text.includes("from agents") && text.includes("where agent_id")) {
+        return { rows: values?.[0] === input.agentId ? [agentRow] : [], rowCount: null };
+      }
+      if (text.includes("from findings")) {
+        return {
+          rows: [
+            {
+              finding_id: "44444444-4444-4444-8444-444444444444",
+              agent_id: input.agentId,
+              snapshot_id: "55555555-5555-4555-8555-555555555555",
+              headline: "Operating margin quality improved",
+              severity: "medium",
+              subject_refs: [{ kind: "issuer", id: "22222222-2222-4222-8222-222222222222" }],
+              claim_cluster_ids: [],
+              summary_blocks: [],
+              created_at: "2026-05-06T00:00:00.000Z",
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+      if (text.includes("from run_activities")) {
+        return {
+          rows: [
+            {
+              run_activity_id: "33333333-3333-4333-8333-333333333333",
+              agent_id: input.agentId,
+              stage: "found",
+              subject_refs: [{ kind: "issuer", id: "22222222-2222-4222-8222-222222222222" }],
+              source_refs: ["66666666-6666-4666-8666-666666666666"],
+              summary: "Created 1 source-backed finding.",
+              ts: "2026-05-06T00:00:00.000Z",
+            },
+          ],
+          rowCount: 1,
+        };
+      }
+      throw new Error(`unexpected query: ${text}`);
+    },
+  };
 }
 
 function createActivityAgentLoopStages() {

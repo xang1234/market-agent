@@ -6,6 +6,24 @@ The fundamentals service: the issuer-anchored layer that turns
 filing-backed or vendor-backed statement inputs into canonical value
 objects keyed by metric definitions (spec §6.3.1).
 
+## Filing Extraction Boundary
+
+Filing extraction remains an integrated Evidence/Fundamentals boundary for the
+current implementation stage; see
+`docs/adr/0003-filing-extraction-boundary.md`.
+
+Fundamentals owns the issuer-normalization side of the contract:
+
+- SEC companyfacts ingestion for issuer-level statement facts;
+- fiscal calendar and period normalization;
+- metric mapping into canonical statement lines;
+- segment fact and fundamentals read models.
+
+Evidence owns raw filing documents, Inline XBRL extension/candidate extraction,
+claims/events, review promotion, and raw blob storage. Callers should hand
+Fundamentals issuer identity and Evidence-promoted facts or normalized filing
+inputs, not raw filing bytes or ticker-only identifiers.
+
 All four child beads of `fra-cw0.3` have landed:
 
 - `fra-cw0.3.1` — canonical statement value object

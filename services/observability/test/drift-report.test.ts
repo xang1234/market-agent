@@ -164,9 +164,9 @@ test("readLatestGoldenEvalDriftReport compares the newest two runs for a suite",
   assert.match(queries[0].text, /from eval_run_results/i);
   assert.match(
     queries[0].text,
-    /order by created_at desc,\s+eval_run_result_id desc/i,
+    /order by case when eval_run_result_id = \$2::uuid then 0 else 1 end,\s+created_at desc,\s+eval_run_result_id desc/i,
   );
-  assert.deepEqual(queries[0].values, ["golden-nightly"]);
+  assert.deepEqual(queries[0].values, ["golden-nightly", null]);
   assert.equal(report?.current_run.eval_run_result_id, "00000000-0000-4000-8000-000000000002");
   assert.equal(report?.previous_run.eval_run_result_id, "00000000-0000-4000-8000-000000000001");
   assert.equal(report?.regressed_categories[0].category, "social_rumor_handling");

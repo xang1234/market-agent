@@ -16,6 +16,9 @@ by the normative schema pack:
   `eval_run_results` row
 - `readLatestGoldenEvalDriftReport` → compares the latest two eval runs for a
   suite and flags category regressions
+- `runGoldenEvalDriftMonitor` → loads golden cases, runs the evaluator, writes
+  `eval_run_results`, computes the latest drift report, and returns a
+  pass/fail policy status
 - `startAgentRunLog` / `completeAgentRunLog` → `agent_run_logs` (operational
   audit per agent run; one row spans the run and is closed with a terminal
   status, outputs summary, and server-computed `duration_ms`)
@@ -30,6 +33,56 @@ unchanged) and returns the generated primary key plus `created_at`.
 - Preserve jsonb column semantics by validating JSON-compatible payloads
   before binding them to `$N::jsonb` parameters.
 
+## Drift Monitoring Loop
+
+Run the end-to-end drift monitor with:
+
+```bash
+DATABASE_URL=... \
+GOLDEN_EVAL_EVALUATOR_MODULE=file:///abs/path/to/evaluator.mjs \
+GOLDEN_EVAL_MODEL_VERSION=model-2026-05-08 \
+GOLDEN_EVAL_PROMPT_VERSION=analyst/v2 \
+npm run drift:monitor
+```
+
+The evaluator module must export `evaluateGoldenCase(testCase)` or a default
+function matching `GoldenEvalEvaluator`. The command loads cases from
+`GOLDEN_EVAL_CASES_DIR` or the default `evals/golden/cases`, persists the run,
+compares against the previous run for the same suite, prints the report JSON,
+and exits non-zero when `GOLDEN_EVAL_FAIL_ON_ALERT` is not `false` and drift
+regressed.
+
+Operational dashboard/query paths:
+
+```sql
+-- Latest golden eval runs and summaries
+select suite_name, model_version, prompt_version, created_at,
+       result_json->'summary' as summary
+  from eval_run_results
+ order by created_at desc
+ limit 20;
+
+-- Recent verifier failures by route / snapshot
+select created_at, thread_id, snapshot_id, error_code, details
+  from verifier_fail_logs
+ order by created_at desc
+ limit 100;
+
+-- Tool latency and error codes by tool
+select tool_name, status, error_code, count(*) as calls,
+       percentile_disc(0.95) within group (order by duration_ms) as p95_ms
+  from tool_call_logs
+ where created_at > now() - interval '24 hours'
+ group by tool_name, status, error_code
+ order by calls desc;
+
+-- Citation coverage by snapshot
+select snapshot_id, count(*) as citation_refs
+  from citation_logs
+ group by snapshot_id
+ order by citation_refs desc;
+```
+
 ## Explicitly out of scope
 
 - **Block emission orchestration** — callers still decide when a snapshot is
@@ -37,10 +90,8 @@ unchanged) and returns the generated primary key plus `created_at`.
   here under `fra-hyz.1.1`; orchestration code that calls
   `start`/`completeAgentRunLog` around a run lives in the agent runtime, not in
   this package.
-- **Nightly scheduling and drift report generation** — covered by PX.1 children
-  (`fra-2yd`, `fra-gfq`). This package provides the runner, result persistence,
-  and deterministic drift-report primitive; scheduling remains an orchestration
-  concern.
+- **Scheduler ownership** — the package now provides the runnable one-shot
+  monitor. Cron/GitHub Actions/worker scheduling decides when to invoke it.
 - **Status / reason-code taxonomies** — callers choose the vocabulary
   today; PX.1 formalizes it.
 
@@ -116,6 +167,18 @@ category, and writes the JSON summary to `eval_run_results`.
 `readLatestGoldenEvalDriftReport` loads the newest two rows for a suite and
 reports summary/category deltas. Any category with more failures or fewer passes
 sets `alert: true`, giving schedulers a deterministic regression signal.
+
+`runGoldenEvalDriftMonitor` composes that full loop for schedulers or CI:
+
+```ts
+await runGoldenEvalDriftMonitor(db, {
+  suite_name: "golden-nightly",
+  model_version: "model-2026-05-08",
+  prompt_version: "analyst/v2",
+  evaluate: async (testCase) => evaluateGoldenCase(testCase),
+  policy: { failOnAlert: true },
+});
+```
 
 ## Tests
 

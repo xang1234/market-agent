@@ -238,6 +238,14 @@ configure_runtime_env() {
   DATABASE_URL="$(build_database_url)"
   export REDIS_URL
   REDIS_URL="$(build_redis_url)"
+  export DEV_API_ANALYZE_SEAL_MODULE
+  DEV_API_ANALYZE_SEAL_MODULE="${DEV_API_ANALYZE_SEAL_MODULE:-$ROOT/services/dev-api/src/local-runtime.ts}"
+  export DEV_API_RUNTIME_MODULE
+  DEV_API_RUNTIME_MODULE="${DEV_API_RUNTIME_MODULE:-$DEV_API_ANALYZE_SEAL_MODULE}"
+  export CHAT_ANALYST_RUNTIME_MODULE
+  CHAT_ANALYST_RUNTIME_MODULE="${CHAT_ANALYST_RUNTIME_MODULE:-$ROOT/services/chat/src/local-runtime.ts}"
+  export CHAT_PERSISTENCE_MODULE
+  CHAT_PERSISTENCE_MODULE="${CHAT_PERSISTENCE_MODULE:-$ROOT/services/chat/src/local-runtime.ts}"
 }
 
 container_status() {
@@ -303,6 +311,7 @@ up() {
   ensure_install "$ROOT/services/agents"
   ensure_install "$ROOT/services/analyze"
   ensure_install "$ROOT/services/artifact"
+  ensure_install "$ROOT/services/notifications"
   ensure_install "$ROOT/services/observability"
   ensure_install "$ROOT/services/snapshot"
   ensure_install "$ROOT/services/summary"
@@ -458,6 +467,7 @@ status() {
   printf "analyze   %-8s %s\n" "bff" "/v1/analyze via dev-api"
   printf "agents    %-8s %s\n" "bff" "/v1/agents via dev-api"
   printf "artifact  %-8s %s\n" "library" "shared package; no standalone dev HTTP server"
+  printf "notifications %-4s %s\n" "library" "delivery processor package; no standalone dev HTTP server"
   printf "snapshot  %-8s %s\n" "library" "shared package; no standalone dev HTTP server"
   printf "tools     %-8s %s\n" "library" "shared package; no standalone dev HTTP server"
   printf "observability %-3s %s\n" "library" "run-activity primitives exposed via chat/home"

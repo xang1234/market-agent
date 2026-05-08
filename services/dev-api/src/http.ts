@@ -44,6 +44,10 @@ import type { JsonValue } from "../../observability/src/types.ts";
 import type { SubjectRef } from "../../resolver/src/subject-ref.ts";
 import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
 import { readDevFlags } from "../../shared/src/devFlags.ts";
+import {
+  listThemeMembershipRationalesBySubject,
+  type ThemeMembershipRationaleRow,
+} from "../../themes/src/index.ts";
 
 type DevAgent = {
   agent_id: string;
@@ -64,6 +68,28 @@ type DevAgentRun = {
   started_at: string;
   ended_at: string | null;
   error: string | null;
+};
+
+type DevAgentFinding = {
+  finding_id: string;
+  agent_id: string;
+  snapshot_id: string;
+  headline: string;
+  severity: string;
+  subject_refs: JsonValue;
+  claim_cluster_ids: JsonValue;
+  summary_blocks: JsonValue;
+  created_at: string;
+};
+
+type DevAgentActivity = {
+  run_activity_id: string;
+  agent_id: string;
+  stage: string;
+  subject_refs: JsonValue;
+  source_refs: JsonValue;
+  summary: string;
+  ts: string;
 };
 
 type DevAnalyzeRun = {
@@ -87,6 +113,16 @@ type DevArtifactShareResult = {
   thread: ChatThread;
   message: ChatMessageRow;
   origin_snapshot_ids: ReadonlyArray<string>;
+};
+
+type DevThemeMembershipRationale = {
+  theme_id: string;
+  theme_name: string;
+  theme_description: string | null;
+  membership_mode: ThemeMembershipRationaleRow["membership_mode"];
+  score: number | null;
+  rationale_supported: boolean;
+  rationale_claim_ids: ReadonlyArray<string>;
 };
 
 export type DevApiAnalyzeAdapter = {
@@ -121,11 +157,29 @@ export type DevApiAgentsAdapter = {
   }): Promise<DevAgent | null>;
   delete(input: { userId: string; agentId: string }): Promise<boolean>;
   run(input: { userId: string; agentId: string }): Promise<DevAgentRun | null>;
+  listFindings(input: { userId: string; agentId: string }): Promise<{
+    findings: DevAgentFinding[];
+  } | null>;
+  listActivity(input: { userId: string; agentId: string }): Promise<{
+    activity: DevAgentActivity[];
+  } | null>;
+};
+
+export type DevApiThemesAdapter = {
+  listMembershipRationales(input: {
+    subjectRef: SubjectRef;
+    asOf?: string;
+    limit?: number;
+  }): Promise<{
+    memberships: DevThemeMembershipRationale[];
+    truncated: boolean;
+  }>;
 };
 
 export type DevApiAdapters = {
   analyze: DevApiAnalyzeAdapter;
   agents: DevApiAgentsAdapter;
+  themes: DevApiThemesAdapter;
 };
 
 export type DevApiAnalyzeWorkflowInput = {
@@ -147,6 +201,7 @@ export type DevApiAgentLoopStageFactoryInput = {
   userId: string;
   runId: string;
   agent: AgentRow;
+  trigger?: "manual" | "scheduled";
 };
 
 export type DevApiAgentLoopStageFactory = (
@@ -189,6 +244,19 @@ export function createDevApiServer(
       respondJson(res, 200, {
         services: serviceCatalog(env, Boolean(adapters)),
       });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/themes/membership-rationales") {
+      if (!adapters) {
+        respondJson(res, 503, { error: "durable themes adapter is not configured" });
+        return;
+      }
+      respondJson(res, 200, await adapters.themes.listMembershipRationales({
+        subjectRef: readSubjectRefFromQuery(url),
+        asOf: readOptionalIsoTimestamp(url.searchParams.get("as_of"), "as_of"),
+        limit: readOptionalPositiveInteger(url.searchParams.get("limit"), "limit"),
+      }));
       return;
     }
 
@@ -330,6 +398,48 @@ export function createDevApiServer(
       }
       res.statusCode = 204;
       res.end();
+      return;
+    }
+
+    const findingsMatch = url.pathname.match(/^\/v1\/agents\/([^/]+)\/findings$/);
+    if (req.method === "GET" && findingsMatch) {
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (userId === null) {
+        respondJson(res, 401, { error: "x-user-id header is required" });
+        return;
+      }
+      const agentId = decodeURIComponent(findingsMatch[1]);
+      if (!adapters) {
+        respondJson(res, 503, { error: "durable agents adapter is not configured" });
+        return;
+      }
+      const findings = await adapters.agents.listFindings({ userId, agentId });
+      if (findings === null) {
+        respondJson(res, 404, { error: "agent not found" });
+        return;
+      }
+      respondJson(res, 200, findings);
+      return;
+    }
+
+    const activityMatch = url.pathname.match(/^\/v1\/agents\/([^/]+)\/activity$/);
+    if (req.method === "GET" && activityMatch) {
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (userId === null) {
+        respondJson(res, 401, { error: "x-user-id header is required" });
+        return;
+      }
+      const agentId = decodeURIComponent(activityMatch[1]);
+      if (!adapters) {
+        respondJson(res, 503, { error: "durable agents adapter is not configured" });
+        return;
+      }
+      const activity = await adapters.agents.listActivity({ userId, agentId });
+      if (activity === null) {
+        respondJson(res, 404, { error: "agent not found" });
+        return;
+      }
+      respondJson(res, 200, activity);
       return;
     }
 
@@ -536,6 +646,21 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
         };
         agentRuns.unshift(run);
         return run;
+      },
+      async listFindings({ userId, agentId }) {
+        const agent = agents.get(agentId);
+        if (!agent || agent.user_id !== userId) return null;
+        return { findings: [] };
+      },
+      async listActivity({ userId, agentId }) {
+        const agent = agents.get(agentId);
+        if (!agent || agent.user_id !== userId) return null;
+        return { activity: [] };
+      },
+    },
+    themes: {
+      async listMembershipRationales() {
+        return { memberships: [], truncated: false };
       },
     },
   };
@@ -751,6 +876,16 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
         );
         return (result.rowCount ?? 0) > 0;
       },
+      async listFindings({ userId, agentId }) {
+        const existing = await getAgent(deps.db, agentId);
+        if (existing === null || existing.user_id !== userId) return null;
+        return { findings: await listFindingsForAgent(deps.db, agentId) };
+      },
+      async listActivity({ userId, agentId }) {
+        const existing = await getAgent(deps.db, agentId);
+        if (existing === null || existing.user_id !== userId) return null;
+        return { activity: await listActivityForAgent(deps.db, agentId) };
+      },
       async run({ userId, agentId }) {
         const existing = await getAgent(deps.db, agentId);
         if (existing === null || existing.user_id !== userId) return null;
@@ -783,6 +918,7 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
               userId,
               runId,
               agent: loopAgent,
+              trigger: "manual",
             }),
           });
           return toDevAgentRun(await completeAgentRun(deps.db, {
@@ -802,6 +938,18 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
             outputs_summary: { trigger: "manual", status: "failed" },
           }));
         }
+      },
+    },
+    themes: {
+      async listMembershipRationales({ subjectRef, asOf, limit }) {
+        const page = await listThemeMembershipRationalesBySubject(deps.db, subjectRef, {
+          asOf,
+          limit,
+        });
+        return {
+          memberships: page.rows.map(toDevThemeMembershipRationale),
+          truncated: page.truncated,
+        };
       },
     },
   };
@@ -882,6 +1030,48 @@ function readOptionalSubjectRef(value: unknown): SubjectRef | null {
   return { kind: candidate.kind as SubjectRef["kind"], id: candidate.id };
 }
 
+const SUBJECT_KINDS: ReadonlyArray<SubjectRef["kind"]> = Object.freeze([
+  "issuer",
+  "instrument",
+  "listing",
+  "theme",
+  "macro_topic",
+  "portfolio",
+  "screen",
+]);
+
+function readSubjectRefFromQuery(url: URL): SubjectRef {
+  const kind = nonEmptyString(url.searchParams.get("subject_kind"));
+  const id = nonEmptyString(url.searchParams.get("subject_id"));
+  if (kind === null || id === null) {
+    throw new DevApiHttpError(400, "subject_kind and subject_id are required");
+  }
+  if (!SUBJECT_KINDS.includes(kind as SubjectRef["kind"])) {
+    throw new DevApiHttpError(400, "subject_kind is invalid");
+  }
+  return { kind: kind as SubjectRef["kind"], id };
+}
+
+function readOptionalPositiveInteger(value: string | null, label: string): number | undefined {
+  if (value === null || value.trim() === "") return undefined;
+  const numberValue = Number(value);
+  if (!Number.isInteger(numberValue) || numberValue <= 0) {
+    throw new DevApiHttpError(400, `${label} must be a positive integer`);
+  }
+  return numberValue;
+}
+
+function readOptionalIsoTimestamp(value: string | null, label: string): string | undefined {
+  const text = nonEmptyString(value);
+  if (text === null) return undefined;
+  if (!ISO_TIMESTAMP_RE.test(text) || Number.isNaN(Date.parse(text))) {
+    throw new DevApiHttpError(400, `${label} must be a valid ISO timestamp`);
+  }
+  return text;
+}
+
+const ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+
 function enrichAnalyzeRunBlocks(
   blocks: ReadonlyArray<Record<string, unknown> | JsonValue>,
   run: Pick<AnalyzeTemplateRunRow | DevAnalyzeRun, "run_id" | "template_id" | "template_version" | "snapshot_id" | "created_at">,
@@ -961,6 +1151,10 @@ function jsonObjectOrEmpty(value: JsonValue | null | undefined): Record<string, 
     : {};
 }
 
+function jsonArrayOrEmpty(value: JsonValue | null | undefined): JsonValue {
+  return Array.isArray(value) ? value : [];
+}
+
 async function listAnalyzeRunsForTemplate(
   db: AnalyzeTemplateRunClientPool,
   templateId: string,
@@ -1008,6 +1202,78 @@ async function listRunsForAgents(db: QueryExecutor, agentIds: string[]): Promise
   }));
 }
 
+async function listFindingsForAgent(db: QueryExecutor, agentId: string): Promise<DevAgentFinding[]> {
+  const { rows } = await db.query<{
+    finding_id: string;
+    agent_id: string;
+    snapshot_id: string;
+    headline: string;
+    severity: string;
+    subject_refs: JsonValue | null;
+    claim_cluster_ids: JsonValue | null;
+    summary_blocks: JsonValue | null;
+    created_at: Date | string;
+  }>(
+    `select finding_id::text as finding_id,
+            agent_id::text as agent_id,
+            snapshot_id::text as snapshot_id,
+            headline,
+            severity::text as severity,
+            subject_refs,
+            claim_cluster_ids,
+            summary_blocks,
+            created_at
+       from findings
+      where agent_id = $1::uuid
+      order by created_at desc, finding_id asc`,
+    [agentId],
+  );
+  return rows.map((row) => ({
+    finding_id: row.finding_id,
+    agent_id: row.agent_id,
+    snapshot_id: row.snapshot_id,
+    headline: row.headline,
+    severity: row.severity,
+    subject_refs: jsonArrayOrEmpty(row.subject_refs),
+    claim_cluster_ids: jsonArrayOrEmpty(row.claim_cluster_ids),
+    summary_blocks: jsonArrayOrEmpty(row.summary_blocks),
+    created_at: new Date(row.created_at).toISOString(),
+  }));
+}
+
+async function listActivityForAgent(db: QueryExecutor, agentId: string): Promise<DevAgentActivity[]> {
+  const { rows } = await db.query<{
+    run_activity_id: string;
+    agent_id: string;
+    stage: string;
+    subject_refs: JsonValue | null;
+    source_refs: JsonValue | null;
+    summary: string;
+    ts: Date | string;
+  }>(
+    `select run_activity_id::text as run_activity_id,
+            agent_id::text as agent_id,
+            stage::text as stage,
+            subject_refs,
+            source_refs,
+            summary,
+            ts
+       from run_activities
+      where agent_id = $1::uuid
+      order by ts desc, run_activity_id asc`,
+    [agentId],
+  );
+  return rows.map((row) => ({
+    run_activity_id: row.run_activity_id,
+    agent_id: row.agent_id,
+    stage: row.stage,
+    subject_refs: jsonArrayOrEmpty(row.subject_refs),
+    source_refs: jsonArrayOrEmpty(row.source_refs),
+    summary: row.summary,
+    ts: new Date(row.ts).toISOString(),
+  }));
+}
+
 function toDevAgent(row: AgentRow): DevAgent {
   return {
     agent_id: row.agent_id,
@@ -1030,6 +1296,18 @@ function toDevAgentRun(row: AgentRunRow): DevAgentRun {
     started_at: row.started_at,
     ended_at: row.ended_at,
     error: row.error,
+  };
+}
+
+function toDevThemeMembershipRationale(row: ThemeMembershipRationaleRow): DevThemeMembershipRationale {
+  return {
+    theme_id: row.theme_id,
+    theme_name: row.theme_name,
+    theme_description: row.theme_description,
+    membership_mode: row.membership_mode,
+    score: row.score,
+    rationale_supported: row.rationale_supported,
+    rationale_claim_ids: [...row.rationale_claim_ids],
   };
 }
 
@@ -1124,7 +1402,7 @@ function serviceCatalog(env: Record<string, string | undefined>, hasAdapters: bo
     { name: "snapshot", status: "library", note: "used by chat/analyze persistence paths; no standalone dev HTTP server" },
     { name: "tools", status: "library", note: "analyst tool registry package; no standalone dev HTTP server" },
     { name: "observability", status: "library", note: "run activity primitives exposed through chat/home routes" },
-    { name: "themes", status: "library", note: "theme inference package; no standalone dev HTTP server" },
+    { name: "themes", status: bffStatus, origin: env.DEV_API_ORIGIN ?? "http://127.0.0.1:4312", note: "theme membership rationale is exposed through dev-api; no standalone dev HTTP server" },
     { name: "summary", status: "library", note: "summary package; no standalone dev HTTP server" },
   ];
 }

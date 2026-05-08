@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useReducer, useState, type FormEvent } from 'react'
 import { Link, Outlet, useNavigate, useParams } from 'react-router-dom'
 
-import { BlockView, type Block } from '../blocks'
+import { VirtualizedMessageList } from '../chat'
 import type { ChatMessage as PersistedChatMessage } from '../chat/messageTypes.ts'
 import { openChatTurnStream } from '../chat/openChatTurnStream.ts'
 import { persistUserChatTurn } from '../chat/persistUserChatTurn.ts'
@@ -225,7 +225,7 @@ export function ChatThreadView() {
         </h2>
         <p className="mt-1 font-mono text-xs text-neutral-500 dark:text-neutral-400">{threadId}</p>
       </section>
-      <div className="flex flex-1 flex-col gap-3 p-6">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 p-6">
         {visibleHistory.kind === 'loading' ? (
           <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading message history.</p>
         ) : null}
@@ -279,43 +279,10 @@ export function ChatThreadView() {
 function PersistedMessageHistory({ messages }: { messages: ReadonlyArray<PersistedChatMessage> }) {
   if (messages.length === 0) return null
   return (
-    <section className="flex flex-col gap-3" aria-label="Persisted message history">
-      {messages.map((message) => (
-        <article
-          key={message.message_id}
-          className="rounded-md border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
-        >
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold capitalize text-neutral-900 dark:text-neutral-100">
-              {message.role}
-            </h3>
-            <span className="font-mono text-xs text-neutral-500 dark:text-neutral-400">
-              {new Date(message.created_at).toLocaleString()}
-            </span>
-          </div>
-          {message.role === 'assistant' ? (
-            <div className="flex flex-col gap-3">
-              {message.blocks.map((block) => (
-                <BlockView key={`${message.message_id}-${block.id}`} block={block} />
-              ))}
-            </div>
-          ) : (
-            <pre className="whitespace-pre-wrap text-sm text-neutral-700 dark:text-neutral-200">
-              {message.blocks.map((block) => blockText(block)).join('\n')}
-            </pre>
-          )}
-        </article>
-      ))}
+    <section className="flex min-h-[24rem] flex-1 flex-col" aria-label="Persisted message history">
+      <VirtualizedMessageList messages={messages} />
     </section>
   )
-}
-
-function blockText(block: Block): string {
-  const segments = 'segments' in block && Array.isArray(block.segments) ? block.segments : []
-  const text = segments
-    .map((segment) => (typeof segment === 'object' && segment !== null && 'text' in segment ? String(segment.text) : ''))
-    .join('')
-  return text || JSON.stringify(block)
 }
 
 function ThreadList({ userId }: { userId: string }) {

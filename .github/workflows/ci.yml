@@ -109,7 +109,9 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: services/resolver/package-lock.json
+          cache-dependency-path: |
+            db/package-lock.json
+            services/resolver/package-lock.json
 
       # Resolver tests invoke `npm run apply:schema` inside db/, so the db
       # workspace needs its dependencies installed too.
@@ -126,9 +128,9 @@ jobs:
         run: npm test
 
   dev-api:
-    name: dev-api (tests)
+    name: dev-api (integration tests)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: services/dev-api
@@ -139,11 +141,21 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: services/dev-api/package-lock.json
+          cache-dependency-path: |
+            db/package-lock.json
+            services/dev-api/package-lock.json
 
-      - run: npm ci
+      # Dev-api tests import the shared db/test Docker harness and invoke
+      # `npm run apply:schema` inside db/, so db dependencies must be present.
+      - name: Install db deps (needed by dev-api integration harness)
+        working-directory: db
+        run: npm ci
 
-      - run: npm test
+      - name: Install dev-api deps
+        run: npm ci
+
+      - name: Run dev-api tests
+        run: npm test
 
   watchlists:
     name: watchlists (integration tests)
@@ -156,7 +168,9 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: services/watchlists/package-lock.json
+          cache-dependency-path: |
+            db/package-lock.json
+            services/watchlists/package-lock.json
 
       # Watchlists tests invoke `npm run apply:schema` inside db/, so the db
       # workspace needs its dependencies installed too.
@@ -327,6 +341,25 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - run: npm test
+
+  notifications:
+    name: notifications (tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/notifications
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: services/notifications/package-lock.json
+
+      - run: npm ci
       - run: npm test
 
   chat:

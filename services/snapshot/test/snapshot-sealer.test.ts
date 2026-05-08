@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   sealSnapshot,
+  sealSnapshotInTransaction,
   sealSnapshotWithPool,
   snapshotTransactionClient,
 } from "../src/snapshot-sealer.ts";
@@ -192,6 +193,18 @@ test("sealSnapshot rolls back when persistence fails after transaction start", a
   ]);
 });
 
+test("sealSnapshotInTransaction uses the caller transaction", async () => {
+  const { db, queries } = recordingDb();
+
+  const result = await sealSnapshotInTransaction(snapshotTransactionClient(db), validSealInput());
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(queries.map((query) => normalizedSql(query.text)), [
+    "select from tool_call_logs",
+    "insert into snapshots",
+  ]);
+});
+
 test("sealSnapshot rejects malformed allowed_transforms before starting a transaction", async () => {
   const { db, queries } = recordingDb();
 
@@ -254,12 +267,13 @@ test("sealSnapshot rejects unmarked executors before starting a transaction", as
 
 test("snapshotTransactionClient rejects pool-like executors before starting a transaction", () => {
   const { db, queries } = recordingDb();
-  const poolLike = Object.assign(db, {
+  const poolLike = {
+    query: db.query.bind(db),
     totalCount: 0,
     async connect() {
       throw new Error("sealSnapshot must not acquire clients itself");
     },
-  });
+  };
 
   assert.throws(
     () => snapshotTransactionClient(poolLike),
@@ -271,17 +285,33 @@ test("snapshotTransactionClient rejects pool-like executors before starting a tr
 
 test("snapshotTransactionClient rejects query-plus-connect pool wrappers", () => {
   const { db, queries } = recordingDb();
-  const poolWrapper = Object.assign(db, {
+  const poolWrapper = {
+    query: db.query.bind(db),
     async connect() {
       throw new Error("sealSnapshot must not acquire clients through wrapper pools");
     },
-  });
+  };
 
   assert.throws(
     () => snapshotTransactionClient(poolWrapper),
     /requires a pinned transaction client/i,
   );
 
+  assert.deepEqual(queries, []);
+});
+
+test("snapshotTransactionClient accepts acquired pg clients that expose connect and release", () => {
+  const { db, queries } = recordingDb();
+  const acquiredPgClient = Object.assign(db, {
+    async connect() {
+      throw new Error("acquired clients must not be reacquired");
+    },
+    release() {
+      // Real pg.PoolClient has release() and also inherits connect().
+    },
+  });
+
+  assert.doesNotThrow(() => snapshotTransactionClient(acquiredPgClient));
   assert.deepEqual(queries, []);
 });
 
