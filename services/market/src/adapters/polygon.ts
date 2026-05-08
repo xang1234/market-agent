@@ -190,27 +190,32 @@ export function createPolygonAdapter(deps: PolygonAdapterDeps): MarketDataAdapte
         const pages = await fetchAggPages(deps.fetcher, path);
 
         const rawBars = pages.flatMap((page) => page.results ?? []);
-        const bars: NormalizedBar[] = rawBars.map((row, i) => {
-          const { t, o, h, l, c, v } = row;
-          if (
-            typeof t !== "number" ||
-            typeof o !== "number" ||
-            typeof h !== "number" ||
-            typeof l !== "number" ||
-            typeof c !== "number" ||
-            typeof v !== "number"
-          ) {
-            throw new MalformedPayloadError(`aggs row ${i} missing OHLCV field`);
-          }
-          return {
-            ts: new Date(t).toISOString(),
-            open: o,
-            high: h,
-            low: l,
-            close: c,
-            volume: v,
-          };
-        });
+        const bars: NormalizedBar[] = rawBars
+          .map((row, i) => {
+            const { t, o, h, l, c, v } = row;
+            if (
+              typeof t !== "number" ||
+              typeof o !== "number" ||
+              typeof h !== "number" ||
+              typeof l !== "number" ||
+              typeof c !== "number" ||
+              typeof v !== "number"
+            ) {
+              throw new MalformedPayloadError(`aggs row ${i} missing OHLCV field`);
+            }
+            return {
+              ts: new Date(t).toISOString(),
+              open: o,
+              high: h,
+              low: l,
+              close: c,
+              volume: v,
+            };
+          })
+          .filter((bar) => {
+            const barMs = Date.parse(bar.ts);
+            return barMs >= startMs && barMs < endMs;
+          });
 
         const adjustment_basis = aggregateAdjustmentBasis(pages);
         const asOf = bars.length > 0 ? bars[bars.length - 1].ts : request.range.end;

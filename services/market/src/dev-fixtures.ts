@@ -109,6 +109,29 @@ export function createDevPolygonFetcher(opts: { clock: () => Date }): PolygonFet
   };
 }
 
+export function createSeededFixtureFallbackFetcher(opts: {
+  primary: PolygonFetcher;
+  fallback: PolygonFetcher;
+}): PolygonFetcher {
+  return async (path: string) => {
+    try {
+      return await opts.primary(path);
+    } catch (error) {
+      if (!isSeededTickerPath(path)) throw error;
+      return opts.fallback(path);
+    }
+  };
+}
+
+function isSeededTickerPath(path: string): boolean {
+  const match =
+    path.match(/^\/v2\/snapshot\/locale\/us\/markets\/stocks\/tickers\/([^?]+)/) ??
+    path.match(/^\/v2\/aggs\/ticker\/([^/]+)\//);
+  if (!match) return false;
+  const ticker = decodeURIComponent(match[1]);
+  return Object.hasOwn(DEV_SNAPSHOTS, ticker);
+}
+
 // Generate deterministic per-period bars for a ticker. The walk is seeded by
 // the ticker so the same range yields the same bars across calls (keeps dev
 // reloads stable and makes failing tests reproducible). Each bar satisfies the

@@ -1,6 +1,11 @@
 import { Pool } from "pg";
 import { createPolygonAdapter, createPolygonHttpFetcher } from "./adapters/polygon.ts";
-import { createDevPolygonFetcher, DEV_LISTINGS, DEV_POLYGON_SOURCE_ID } from "./dev-fixtures.ts";
+import {
+  createDevPolygonFetcher,
+  createSeededFixtureFallbackFetcher,
+  DEV_LISTINGS,
+  DEV_POLYGON_SOURCE_ID,
+} from "./dev-fixtures.ts";
 import { createMarketServer } from "./http.ts";
 import {
   createInMemoryListingRepository,
@@ -17,15 +22,20 @@ const pool = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null;
 const listings = pool
   ? createPostgresListingRepository(pool)
   : createInMemoryListingRepository(DEV_LISTINGS);
+const fixtureFetcher = createDevPolygonFetcher({ clock: () => new Date() });
+const polygonFetcher = polygonApiKey
+  ? createSeededFixtureFallbackFetcher({
+      primary: createPolygonHttpFetcher({
+        apiKey: polygonApiKey,
+        baseUrl: process.env.POLYGON_API_BASE_URL,
+      }),
+      fallback: fixtureFetcher,
+    })
+  : fixtureFetcher;
 const adapter = createPolygonAdapter({
   sourceId: DEV_POLYGON_SOURCE_ID,
   delayClass: "delayed_15m",
-  fetcher: polygonApiKey
-    ? createPolygonHttpFetcher({
-        apiKey: polygonApiKey,
-        baseUrl: process.env.POLYGON_API_BASE_URL,
-      })
-    : createDevPolygonFetcher({ clock: () => new Date() }),
+  fetcher: polygonFetcher,
   resolveListing: listingResolverFromRepository(listings),
 });
 

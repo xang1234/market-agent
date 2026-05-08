@@ -95,10 +95,30 @@ export async function fetchQuoteSnapshot(
   const url = `${MARKET_API_BASE}/quote?subject_kind=listing&subject_id=${encodeURIComponent(listingId)}`
   const res = await fetchFn(url, { signal: init.signal })
   if (!res.ok) {
-    throw new QuoteFetchError(res.status, `market quote fetch failed: HTTP ${res.status}`)
+    throw new QuoteFetchError(res.status, await quoteErrorMessage(res))
   }
   const body = (await res.json()) as WireGetQuoteResponse
   return snapshotFromWire(body)
+}
+
+async function quoteErrorMessage(res: Response): Promise<string> {
+  try {
+    const body = await res.json()
+    const detail = unavailableDetail(body)
+    if (detail) return `market quote fetch failed: ${detail}`
+  } catch {
+    // Fall through to the stable HTTP-status message when the body is absent
+    // or not JSON.
+  }
+  return `market quote fetch failed: HTTP ${res.status}`
+}
+
+function unavailableDetail(body: unknown): string | null {
+  if (body === null || typeof body !== 'object') return null
+  const unavailable = (body as { unavailable?: unknown }).unavailable
+  if (unavailable === null || typeof unavailable !== 'object') return null
+  const detail = (unavailable as { detail?: unknown }).detail
+  return typeof detail === 'string' && detail.length > 0 ? detail : null
 }
 
 export function snapshotFromWire(body: WireGetQuoteResponse): QuoteSnapshot {
