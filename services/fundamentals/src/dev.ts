@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { createDevProvidersIssuerProfileRepository } from "./dev-providers.ts";
 import { createPostgresIssuerProfileRepository } from "./issuer-repository.ts";
 import { createSecCompanyFactsHttpFetcher } from "./sec-edgar-http.ts";
 import {
@@ -23,7 +24,16 @@ if (!databaseUrl) {
 }
 
 const pool = new Pool({ connectionString: databaseUrl });
-const profiles = createPostgresIssuerProfileRepository(pool);
+const postgresProfiles = createPostgresIssuerProfileRepository(pool);
+const unofficialDevProvidersEnabled = process.env.ENABLE_UNOFFICIAL_DEV_PROVIDERS === "true";
+const devProvidersBaseUrl = process.env.DEV_PROVIDERS_BASE_URL ?? process.env.DEV_PROVIDERS_ORIGIN;
+const profiles = unofficialDevProvidersEnabled && devProvidersBaseUrl
+  ? createDevProvidersIssuerProfileRepository({
+      primary: postgresProfiles,
+      db: pool,
+      baseUrl: devProvidersBaseUrl,
+    })
+  : postgresProfiles;
 const secFetcher = process.env.SEC_EDGAR_USER_AGENT
   ? createSecCompanyFactsHttpFetcher({
       userAgent: process.env.SEC_EDGAR_USER_AGENT,

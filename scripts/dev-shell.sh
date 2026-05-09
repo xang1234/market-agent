@@ -17,8 +17,10 @@ set +a
 # Keep in sync with .env.dev.example.
 : "${HOME_PORT:=4334}"
 : "${EVIDENCE_PORT:=4335}"
+: "${DEV_PROVIDERS_PORT:=4336}"
 : "${HOME_PULSE_TICKERS:=AAPL,MSFT,GOOGL}"
-export HOME_PORT EVIDENCE_PORT HOME_PULSE_TICKERS
+: "${ENABLE_UNOFFICIAL_DEV_PROVIDERS:=false}"
+export HOME_PORT EVIDENCE_PORT DEV_PROVIDERS_PORT HOME_PULSE_TICKERS ENABLE_UNOFFICIAL_DEV_PROVIDERS
 
 DEV_DIR="$ROOT/.dev"
 LOG_DIR="$DEV_DIR/logs"
@@ -43,6 +45,34 @@ ensure_install() {
   local dir="$1"
   if [[ ! -d "$dir/node_modules" ]]; then
     (cd "$dir" && npm install)
+  fi
+}
+
+ensure_python_service_install() {
+  local dir="$1"
+  if command -v uv >/dev/null 2>&1; then
+    (cd "$dir" && uv sync)
+    return
+  fi
+
+  if [[ ! -x "$dir/.venv/bin/python" ]]; then
+    python3 -m venv "$dir/.venv"
+  fi
+  "$dir/.venv/bin/python" -m pip install -r "$dir/requirements.txt"
+}
+
+python_service_command() {
+  local dir="$1"
+  local module="$2"
+  local port="$3"
+  local python="$dir/.venv/bin/python"
+
+  if [[ -x "$python" ]]; then
+    printf '"%s" -m uvicorn %s --host 127.0.0.1 --port %s' "$python" "$module" "$port"
+  elif command -v uv >/dev/null 2>&1; then
+    printf 'uv run python -m uvicorn %s --host 127.0.0.1 --port %s' "$module" "$port"
+  else
+    printf 'python3 -m uvicorn %s --host 127.0.0.1 --port %s' "$module" "$port"
   fi
 }
 
@@ -246,6 +276,12 @@ configure_runtime_env() {
   CHAT_ANALYST_RUNTIME_MODULE="${CHAT_ANALYST_RUNTIME_MODULE:-$ROOT/services/chat/src/local-runtime.ts}"
   export CHAT_PERSISTENCE_MODULE
   CHAT_PERSISTENCE_MODULE="${CHAT_PERSISTENCE_MODULE:-$ROOT/services/chat/src/local-runtime.ts}"
+  if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
+    export DEV_PROVIDERS_ORIGIN
+    DEV_PROVIDERS_ORIGIN="${DEV_PROVIDERS_ORIGIN:-http://127.0.0.1:$DEV_PROVIDERS_PORT}"
+    export DEV_PROVIDERS_BASE_URL
+    DEV_PROVIDERS_BASE_URL="${DEV_PROVIDERS_BASE_URL:-$DEV_PROVIDERS_ORIGIN}"
+  fi
 }
 
 container_status() {
@@ -292,6 +328,9 @@ up() {
   ensure_command docker
   ensure_command lsof
   ensure_command npm
+  if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
+    ensure_command python3
+  fi
   configure_runtime_env
   STARTED_SERVICES=()
   COMPOSE_STARTED=0
@@ -317,6 +356,9 @@ up() {
   ensure_install "$ROOT/services/summary"
   ensure_install "$ROOT/services/themes"
   ensure_install "$ROOT/services/tools"
+  if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
+    ensure_python_service_install "$ROOT/services/dev-providers"
+  fi
 
   assert_port_available web "$WEB_PORT"
   assert_port_available chat "$CHAT_PORT"
@@ -329,6 +371,9 @@ up() {
   assert_port_available portfolio "$PORTFOLIO_PORT"
   assert_port_available home "$HOME_PORT"
   assert_port_available evidence "$EVIDENCE_PORT"
+  if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
+    assert_port_available dev-providers "$DEV_PROVIDERS_PORT"
+  fi
 
   if [[ "$(container_status postgres)" == "running" ]]; then
     postgres_was_running=1
@@ -380,6 +425,9 @@ up() {
   export HOME_ORIGIN="${HOME_ORIGIN:-http://127.0.0.1:$HOME_PORT}"
   export EVIDENCE_ORIGIN="${EVIDENCE_ORIGIN:-http://127.0.0.1:$EVIDENCE_PORT}"
 
+  if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
+    start_and_track_process dev-providers "$ROOT/services/dev-providers" "$(python_service_command "$ROOT/services/dev-providers" "dev_providers.main:app" "$DEV_PROVIDERS_PORT")"
+  fi
   start_and_track_process web "$ROOT/web" "npm run dev -- --host 127.0.0.1 --port $WEB_PORT"
   start_and_track_process chat "$ROOT/services/chat" "npm run dev"
   start_and_track_process resolver "$ROOT/services/resolver" "npm run dev"
@@ -391,6 +439,11 @@ up() {
   start_and_track_process portfolio "$ROOT/services/portfolio" "npm run dev"
   start_and_track_process home "$ROOT/services/home" "npm run dev"
   start_and_track_process evidence "$ROOT/services/evidence" "npm run dev"
+
+  if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]] && ! wait_for_service dev-providers "$DEV_PROVIDERS_PORT"; then
+    cleanup_failed_up
+    return 1
+  fi
 
   if ! wait_for_service web "$WEB_PORT"; then
     cleanup_failed_up
@@ -469,6 +522,9 @@ status() {
   printf "portfolio %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status portfolio "$PORTFOLIO_PORT")" "$PORTFOLIO_PORT" "$LOG_DIR/portfolio.log"
   printf "home      %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status home "$HOME_PORT")" "$HOME_PORT" "$LOG_DIR/home.log"
   printf "evidence  %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status evidence "$EVIDENCE_PORT")" "$EVIDENCE_PORT" "$LOG_DIR/evidence.log"
+  if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
+    printf "dev-providers %-3s http://127.0.0.1:%s  log=%s\n" "$(service_status dev-providers "$DEV_PROVIDERS_PORT")" "$DEV_PROVIDERS_PORT" "$LOG_DIR/dev-providers.log"
+  fi
   printf "analyze   %-8s %s\n" "bff" "/v1/analyze via dev-api"
   printf "agents    %-8s %s\n" "bff" "/v1/agents via dev-api"
   printf "artifact  %-8s %s\n" "library" "shared package; no standalone dev HTTP server"

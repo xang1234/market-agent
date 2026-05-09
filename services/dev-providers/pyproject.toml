@@ -1,0 +1,13 @@
+[project]
+name = "market-agent-dev-providers"
+version = "0.0.0"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.30,<1",
+  "yfinance>=0.2.40,<1",
+  "finvizfinance>=1.1.0,<2",
+]
+
+[tool.uv]
+package = false

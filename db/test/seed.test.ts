@@ -145,6 +145,21 @@ test("seed populates metrics and sources with the expected registry", { timeout:
     "1",
     "expected sec_edgar filing source to be present exactly once",
   );
+  assert.equal(
+    queryValue(containerName, "select count(*) from sources where provider = 'yahoo_finance_dev_reference' and kind = 'reference_data'"),
+    "1",
+    "expected yahoo_finance_dev_reference source to be present exactly once",
+  );
+  assert.equal(
+    queryValue(containerName, "select count(*) from sources where provider = 'yahoo_finance_dev_market' and kind = 'market_data'"),
+    "1",
+    "expected yahoo_finance_dev_market source to be present exactly once",
+  );
+  assert.equal(
+    queryValue(containerName, "select count(*) from sources where provider = 'finviz_dev_reference' and kind = 'reference_data'"),
+    "1",
+    "expected finviz_dev_reference source to be present exactly once",
+  );
 });
 
 test("seed is idempotent: re-running produces no duplicates", { timeout: 180000 }, async (t) => {

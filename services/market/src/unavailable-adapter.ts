@@ -13,6 +13,7 @@ export function createUnavailableMarketDataAdapter(options: {
   providerName: string;
   sourceId: UUID;
   detail: string;
+  retryable?: boolean;
   clock?: () => Date;
 }): MarketDataAdapter {
   const clock = options.clock ?? (() => new Date());
@@ -22,7 +23,7 @@ export function createUnavailableMarketDataAdapter(options: {
       listing,
       source_id: options.sourceId,
       as_of: clock().toISOString(),
-      retryable: false,
+      retryable: options.retryable ?? false,
       detail: options.detail,
     });
 

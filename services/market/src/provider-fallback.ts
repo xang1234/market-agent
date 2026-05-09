@@ -30,6 +30,11 @@ export type FallbackMarketDataAdapterOptions = {
   providerName: string;
   adapters: ReadonlyArray<MarketDataAdapter>;
   onAuditEvent?: (event: ProviderAuditEvent) => void;
+  isFallbackEligible?: (
+    outcome: MarketDataOutcome<NormalizedQuote | NormalizedBars>,
+    adapter: MarketDataAdapter,
+    operation: ProviderAuditOperation,
+  ) => boolean;
   clock?: () => Date;
 };
 
@@ -53,6 +58,7 @@ export function createFallbackMarketDataAdapter(
         listing: request.listing,
         invoke: (adapter) => adapter.getQuote(request),
         onAuditEvent: options.onAuditEvent,
+        isFallbackEligible: options.isFallbackEligible,
         clock,
       });
     },
@@ -63,6 +69,7 @@ export function createFallbackMarketDataAdapter(
         listing: request.listing,
         invoke: (adapter) => adapter.getBars(request),
         onAuditEvent: options.onAuditEvent,
+        isFallbackEligible: options.isFallbackEligible,
         clock,
       });
     },
@@ -75,6 +82,11 @@ async function firstAvailable<T extends NormalizedQuote | NormalizedBars>(input:
   listing: QuoteRequest["listing"];
   invoke: ProviderCall<T>;
   onAuditEvent?: (event: ProviderAuditEvent) => void;
+  isFallbackEligible?: (
+    outcome: MarketDataOutcome<NormalizedQuote | NormalizedBars>,
+    adapter: MarketDataAdapter,
+    operation: ProviderAuditOperation,
+  ) => boolean;
   clock: () => Date;
 }): Promise<MarketDataOutcome<T>> {
   let lastOutcome: MarketDataOutcome<T> | undefined;
@@ -83,7 +95,9 @@ async function firstAvailable<T extends NormalizedQuote | NormalizedBars>(input:
     const started = Date.now();
     try {
       const outcome = await input.invoke(adapter);
-      const fallbackEligible = !isAvailable(outcome) && outcome.retryable;
+      const fallbackEligible =
+        !isAvailable(outcome) &&
+        (outcome.retryable || input.isFallbackEligible?.(outcome, adapter, input.operation) === true);
       input.onAuditEvent?.({
         providerName: adapter.providerName,
         sourceId: adapter.sourceId,

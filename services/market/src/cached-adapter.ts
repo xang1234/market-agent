@@ -8,6 +8,7 @@ import type {
 } from "./adapter.ts";
 import { available, isAvailable, unavailable } from "./availability.ts";
 import type { MarketCacheRepository } from "./cache-repository.ts";
+import { providerNameForMarketSource } from "./provider-sources.ts";
 
 export type CachedMarketDataAdapterOptions = {
   provider: MarketDataAdapter;
@@ -38,7 +39,7 @@ export function createCachedMarketDataAdapter(
       const outcome = await provider.getQuote(request);
       if (isAvailable(outcome)) {
         await cache.storeQuote(outcome.data, {
-          provider: provider.providerName,
+          provider: providerNameForMarketSource(outcome.data.source_id, provider.providerName),
           fetched_at: nowIso,
           expires_at: new Date(now.getTime() + QUOTE_TTL_MS).toISOString(),
         });
@@ -78,7 +79,7 @@ export function createCachedMarketDataAdapter(
       const outcome = await provider.getBars(request);
       if (isAvailable(outcome)) {
         await cache.storeBars(outcome.data, {
-          provider: provider.providerName,
+          provider: providerNameForMarketSource(outcome.data.source_id, provider.providerName),
           fetched_at: nowIso,
           expires_at: barsExpiresAt(now, request.interval),
         });

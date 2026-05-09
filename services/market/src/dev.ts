@@ -1,13 +1,15 @@
 import { Pool } from "pg";
+import { createDevProvidersMarketDataAdapter } from "./adapters/dev-providers.ts";
 import { createPolygonAdapter, createPolygonHttpFetcher } from "./adapters/polygon.ts";
 import { createCachedMarketDataAdapter } from "./cached-adapter.ts";
 import { createPostgresMarketCacheRepository } from "./cache-repository.ts";
 import { createMarketServer } from "./http.ts";
+import { createFallbackMarketDataAdapter } from "./provider-fallback.ts";
 import {
   createPostgresListingRepository,
   listingResolverFromRepository,
 } from "./listings.ts";
-import { POLYGON_MARKET_SOURCE_ID } from "./provider-sources.ts";
+import { POLYGON_MARKET_SOURCE_ID, YAHOO_FINANCE_DEV_MARKET_SOURCE_ID } from "./provider-sources.ts";
 import { createUnavailableMarketDataAdapter } from "./unavailable-adapter.ts";
 
 const host = process.env.MARKET_HOST ?? "127.0.0.1";
@@ -22,7 +24,7 @@ if (!databaseUrl) {
 const pool = new Pool({ connectionString: databaseUrl });
 const listings = createPostgresListingRepository(pool);
 const cache = createPostgresMarketCacheRepository(pool);
-const provider = polygonApiKey
+const polygonProvider = polygonApiKey
   ? createPolygonAdapter({
       sourceId: POLYGON_MARKET_SOURCE_ID,
       delayClass: "delayed_15m",
@@ -36,7 +38,36 @@ const provider = polygonApiKey
       providerName: "polygon",
       sourceId: POLYGON_MARKET_SOURCE_ID,
       detail: "POLYGON_API_KEY is not configured",
+      retryable: process.env.ENABLE_UNOFFICIAL_DEV_PROVIDERS === "true",
     });
+const unofficialDevProvidersEnabled = process.env.ENABLE_UNOFFICIAL_DEV_PROVIDERS === "true";
+const devProvidersBaseUrl = process.env.DEV_PROVIDERS_BASE_URL ?? process.env.DEV_PROVIDERS_ORIGIN;
+const provider = unofficialDevProvidersEnabled && devProvidersBaseUrl
+  ? createFallbackMarketDataAdapter({
+      providerName: "market-provider-fallback",
+      adapters: [
+        polygonProvider,
+        createDevProvidersMarketDataAdapter({
+          baseUrl: devProvidersBaseUrl,
+          sourceId: YAHOO_FINANCE_DEV_MARKET_SOURCE_ID,
+          resolveListing: async (listing) => {
+            const record = await listings.find(listing.id);
+            if (!record) throw new Error(`listing not found: ${listing.id}`);
+            return {
+              ticker: record.ticker,
+              mic: record.mic,
+              currency: record.trading_currency,
+              timezone: record.timezone,
+            };
+          },
+        }),
+      ],
+      isFallbackEligible: (outcome, adapter) =>
+        adapter.providerName === "polygon" &&
+        outcome.outcome === "unavailable" &&
+        outcome.detail === "polygon: HTTP 403",
+    })
+  : polygonProvider;
 const adapter = createCachedMarketDataAdapter({ provider, cache });
 
 const server = createMarketServer({ adapter, listings });

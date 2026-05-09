@@ -199,6 +199,8 @@ cp .env.dev.example .env.dev      # ports + flags; safe defaults
 
 Set `POLYGON_API_KEY` in `.env.dev` to enable provider-backed stock ticker discovery and Polygon quote/bar caching. Dev no longer seeds ticker identities or fixture market data; without a key, unknown tickers resolve as `not_found` and market surfaces return unavailable. Set `SEC_EDGAR_USER_AGENT` to enable on-demand SEC companyfacts ingestion for statements and key stats.
 
+For local-only fallback coverage, set `ENABLE_UNOFFICIAL_DEV_PROVIDERS=true`. `dev-shell` then starts the Python `services/dev-providers` sidecar on `DEV_PROVIDERS_PORT`. Resolver/market may use yfinance after the primary provider path misses or is unavailable, and fundamentals may use Finviz to fill missing profile sector/industry/domicile fields. Successful fallback identities, quotes, daily adjusted bars, and profile enrichments are persisted in Postgres under dev-only source IDs where the schema has source fields.
+
 When `up` completes, the app is at **<http://localhost:5173>**.
 
 The dev shell brings up:
@@ -216,6 +218,7 @@ The dev shell brings up:
 | `portfolio` | <http://localhost:4333> | holdings, currency basis |
 | `home` | <http://localhost:4334> | findings feed + market pulse |
 | `evidence` | <http://localhost:4335> | docs, claims, events, facts |
+| `dev-providers` | <http://localhost:4336> | opt-in unofficial local-dev provider sidecar |
 | `postgres` | `127.0.0.1:54329` | metadata + evidence DB |
 | `redis` | `127.0.0.1:63791` | session cache |
 | `minio` | <http://localhost:9001> (console) | raw-document object store |
