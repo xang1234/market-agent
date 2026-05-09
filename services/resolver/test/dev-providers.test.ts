@@ -95,6 +95,38 @@ test("fallback discovery tries yfinance only when primary discovery has no clean
   assert.deepEqual(calls, ["primary:AMD", "fallback:AMD"]);
 });
 
+test("fallback discovery tries yfinance when primary discovery throws", async () => {
+  const calls: string[] = [];
+  const primary: TickerDiscoveryProvider = {
+    async discoverTicker(ticker) {
+      calls.push(`primary:${ticker}`);
+      throw new Error("polygon reference HTTP 403");
+    },
+  };
+  const fallback: TickerDiscoveryProvider = {
+    async discoverTicker(ticker) {
+      calls.push(`fallback:${ticker}`);
+      return [
+        {
+          ticker: "AMD",
+          legal_name: "Advanced Micro Devices, Inc.",
+          market: "stocks",
+          active: true,
+          mic: "XNAS",
+          trading_currency: "USD",
+          timezone: "America/New_York",
+          asset_type: "common_stock",
+        },
+      ];
+    },
+  };
+
+  const provider = createFallbackTickerDiscoveryProvider([primary, fallback]);
+
+  assert.equal((await provider.discoverTicker("AMD")).length, 1);
+  assert.deepEqual(calls, ["primary:AMD", "fallback:AMD"]);
+});
+
 test("fallback discovery does not call lower-trust providers after primary discovery succeeds", async () => {
   let fallbackCalls = 0;
   const primary: TickerDiscoveryProvider = {

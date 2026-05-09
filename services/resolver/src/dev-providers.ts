@@ -77,12 +77,24 @@ export function createFallbackTickerDiscoveryProvider(
   return {
     async discoverTicker(ticker: string): Promise<DiscoveredListing[]> {
       for (const provider of providers) {
-        const discovered = await provider.discoverTicker(ticker);
+        const discovered = await discoverWithProvider(provider, ticker);
         if (discovered.length > 0) return discovered;
       }
       return [];
     },
   };
+}
+
+async function discoverWithProvider(provider: TickerDiscoveryProvider, ticker: string): Promise<DiscoveredListing[]> {
+  try {
+    return await provider.discoverTicker(ticker);
+  } catch (error) {
+    console.warn("ticker discovery provider failed; trying next provider", {
+      ticker,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
 }
 
 function discoveredListingFromDevProvider(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,7 +20,10 @@ NEGATIVE_TTL_SECONDS = 60
 app = FastAPI(title="market-agent dev providers")
 _provider = YFinanceProvider()
 _finviz_provider = FinvizProvider()
-_semaphore = asyncio.Semaphore(2)
+_provider_executors = {
+    "yfinance": ThreadPoolExecutor(max_workers=2, thread_name_prefix="dev-provider-yfinance"),
+    "finviz": ThreadPoolExecutor(max_workers=2, thread_name_prefix="dev-provider-finviz"),
+}
 _negative_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
@@ -43,7 +47,7 @@ async def reference_ticker(ticker: str) -> dict[str, Any]:
         return cached
 
     try:
-        listing = await _bounded_call(lambda: _provider.reference_listing(ticker))
+        listing = await _bounded_call("yfinance", lambda: _provider.reference_listing(ticker))
     except ProviderUnavailable as exc:
         return _cache_unavailable(key, exc)
     except Exception as exc:
@@ -70,7 +74,7 @@ async def market_quote(request: Request) -> dict[str, Any]:
         return cached
 
     try:
-        quote = await _bounded_call(lambda: _provider.quote(ticker=ticker, mic=mic, currency=currency))
+        quote = await _bounded_call("yfinance", lambda: _provider.quote(ticker=ticker, mic=mic, currency=currency))
     except ValueError as exc:
         return _cache_unavailable(key, ProviderUnavailable("missing_coverage", False, str(exc)))
     except ProviderUnavailable as exc:
@@ -104,6 +108,7 @@ async def market_daily_bars(request: Request) -> dict[str, Any]:
 
     try:
         bars = await _bounded_call(
+            "yfinance",
             lambda: _provider.daily_bars(
                 ticker=ticker,
                 mic=mic,
@@ -147,7 +152,7 @@ async def reference_profile(request: Request) -> dict[str, Any]:
         return cached
 
     try:
-        profile = await _bounded_call(lambda: _finviz_provider.profile(ticker=ticker, mic=mic))
+        profile = await _bounded_call("finviz", lambda: _finviz_provider.profile(ticker=ticker, mic=mic))
     except ValueError as exc:
         return _cache_unavailable(key, ProviderUnavailable("missing_coverage", False, str(exc)))
     except ProviderUnavailable as exc:
@@ -164,12 +169,13 @@ async def reference_profile(request: Request) -> dict[str, Any]:
     return _available(profile)
 
 
-async def _bounded_call(fn: Callable[[], Any]) -> Any:
-    async with _semaphore:
-        try:
-            return await asyncio.wait_for(asyncio.to_thread(fn), PROVIDER_TIMEOUT_SECONDS)
-        except TimeoutError as exc:
-            raise ProviderUnavailable("provider_error", True, "dev provider: timeout") from exc
+async def _bounded_call(provider_name: str, fn: Callable[[], Any]) -> Any:
+    executor = _provider_executors[provider_name]
+    loop = asyncio.get_running_loop()
+    try:
+        return await asyncio.wait_for(loop.run_in_executor(executor, fn), PROVIDER_TIMEOUT_SECONDS)
+    except TimeoutError as exc:
+        raise ProviderUnavailable("provider_error", True, f"{provider_name}: timeout") from exc
 
 
 def _available(data: dict[str, Any]) -> dict[str, Any]:
