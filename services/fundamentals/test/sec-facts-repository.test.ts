@@ -36,7 +36,7 @@ test("SEC-backed statements persist companyfacts and repeat reads from facts", a
   });
   assert.equal(first?.lines.find((line) => line.metric_key === "revenue")?.value_num, 1000);
   assert.equal(db.facts.length > 0, true);
-  assert.equal(first?.source_id, "22222222-2222-4222-8222-000032019325");
+  assert.match(first?.source_id ?? "", /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   assert.equal(db.facts.every((fact) => fact.source_id === first?.source_id), true);
   assert.equal(
     db.sources[0]?.[3],
@@ -54,6 +54,34 @@ test("SEC-backed statements persist companyfacts and repeat reads from facts", a
   assert.equal(second?.lines.find((line) => line.metric_key === "revenue")?.value_num, 1000);
   assert.equal(db.facts.length, factCount);
   assert.equal(fetchCount, 1);
+});
+
+test("SEC-backed statements derive distinct source ids from full accessions with shared CIK/year prefix", async () => {
+  const sourceA = await statementSourceIdFor(companyFactsWithAccession("0000320193-25-000001"));
+  const sourceB = await statementSourceIdFor(companyFactsWithAccession("0000320193-25-000002"));
+
+  assert.notEqual(sourceA, sourceB);
+});
+
+test("SEC-backed statements only persist facts from the selected filing accession", async () => {
+  const db = new FakeFundamentalsDb();
+  const statements = createSecBackedStatementRepository(db, {
+    fetcher: async () => mixedAccessionCompanyFacts(),
+    sourceId: SOURCE_ID,
+    clock: () => new Date("2026-05-08T00:00:00.000Z"),
+  });
+
+  const statement = await statements.find({
+    issuer_id: ISSUER_ID,
+    family: "income",
+    basis: "as_reported",
+    fiscal_year: 2024,
+    fiscal_period: "FY",
+  });
+
+  assert.equal(statement?.lines.find((line) => line.metric_key === "revenue")?.value_num, 1000);
+  assert.equal(statement?.lines.find((line) => line.metric_key === "gross_profit")?.value_num, 400);
+  assert.equal(db.sources[0]?.[3], "https://www.sec.gov/Archives/edgar/data/320193/000032019325000001/0000320193-25-000001-index.htm");
 });
 
 test("SEC-backed stats can ingest latest annual companyfacts on demand", async () => {
@@ -329,4 +357,47 @@ function annualValues(current: number, prior: number) {
       filed: "2024-02-01",
     },
   ];
+}
+
+async function statementSourceIdFor(facts: ReturnType<typeof companyFacts>): Promise<string | undefined> {
+  const db = new FakeFundamentalsDb();
+  const statements = createSecBackedStatementRepository(db, {
+    fetcher: async () => facts,
+    sourceId: SOURCE_ID,
+    clock: () => new Date("2026-05-08T00:00:00.000Z"),
+  });
+  const statement = await statements.find({
+    issuer_id: ISSUER_ID,
+    family: "income",
+    basis: "as_reported",
+    fiscal_year: 2024,
+    fiscal_period: "FY",
+  });
+  return statement?.source_id;
+}
+
+function companyFactsWithAccession(accession: string) {
+  const facts = companyFacts();
+  for (const concept of Object.values(facts.facts["us-gaap"])) {
+    for (const values of Object.values(concept.units)) {
+      values[0].accn = accession;
+    }
+  }
+  return facts;
+}
+
+function mixedAccessionCompanyFacts() {
+  const facts = companyFacts();
+  const mixedAccession = "0000320193-25-000002";
+  facts.facts["us-gaap"].RevenueFromContractWithCustomerExcludingAssessedTax.units.USD.unshift({
+    start: "2024-01-01",
+    end: "2024-12-31",
+    val: 9999,
+    accn: mixedAccession,
+    fy: 2024,
+    fp: "FY",
+    form: "10-K",
+    filed: "2025-03-01",
+  });
+  return facts;
 }

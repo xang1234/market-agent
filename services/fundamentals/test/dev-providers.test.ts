@@ -78,6 +78,35 @@ test("dev providers profile repository fills missing issuer profile fields from 
   ]);
 });
 
+test("dev providers profile repository does not update issuers when provenance insert fails", async () => {
+  const updates: unknown[][] = [];
+  const primaryProfile = sparseProfile();
+  const repo = createDevProvidersIssuerProfileRepository({
+    primary: {
+      async find() {
+        return primaryProfile;
+      },
+    },
+    db: {
+      async query(text, values) {
+        if (text.includes("issuer_profile_enrichments")) {
+          throw new Error("missing source row");
+        }
+        updates.push(values ?? []);
+        return { rows: [] };
+      },
+    },
+    baseUrl: "http://dev-providers.test",
+    fetchImpl: async () => new Response(JSON.stringify({
+      status: "available",
+      data: { sector: "Technology" },
+    }), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+
+  assert.equal(await repo.find(ISSUER_ID), primaryProfile);
+  assert.deepEqual(updates, []);
+});
+
 test("dev providers profile repository fills nulls only and keeps primary provider values", async () => {
   const primary: IssuerProfileRepository = {
     async find() {

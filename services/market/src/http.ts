@@ -47,9 +47,6 @@ export type MarketDataProvenance = {
   source_id: string;
   delay_class: NormalizedQuote["delay_class"];
   as_of: string;
-  fetched_at: string;
-  expires_at: string;
-  freshness_class: "fresh";
 };
 
 // HTTP shape for /v1/market/series. Per-listing outcome envelopes ride inside
@@ -120,7 +117,7 @@ export function createMarketServer(deps: MarketServerDeps): Server {
           }
           const response: GetQuoteResponse = {
             quote: quote.data,
-            provenance: quoteProvenance(deps.adapter.providerName, quote.data, clock()),
+            provenance: quoteProvenance(deps.adapter.providerName, quote.data),
             listing_context: listingContext(record),
           };
           respond(res, 200, response);
@@ -207,16 +204,12 @@ export function createMarketServer(deps: MarketServerDeps): Server {
 function quoteProvenance(
   providerName: string,
   quote: NormalizedQuote,
-  now: Date,
 ): MarketDataProvenance {
   return {
     provider: providerNameForMarketSource(quote.source_id, providerName),
     source_id: quote.source_id,
     delay_class: quote.delay_class,
     as_of: quote.as_of,
-    fetched_at: now.toISOString(),
-    expires_at: new Date(now.getTime() + 30 * 60 * 1000).toISOString(),
-    freshness_class: "fresh",
   };
 }
 

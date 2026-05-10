@@ -63,8 +63,8 @@ export function createDevProvidersIssuerProfileRepository(
         const merged = mergeProfileNulls(primary, enrichment);
         const changed = changedProfileFields(primary, merged);
         if (!changed) return primary;
-        await persistProfileEnrichment(options.db, primary.subject.id, changed);
         await persistProfileEnrichmentProvenance(options.db, primary.subject.id, changed);
+        await persistProfileEnrichment(options.db, primary.subject.id, changed);
         return merged;
       } catch {
         return primary;

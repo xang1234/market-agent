@@ -85,7 +85,6 @@ export function createSecBackedStatementRepository(
         const accessionNumber = statementAccession(companyFacts, lookup.fiscal_year, lookup.fiscal_period);
         const sourceId = accessionNumber
           ? await upsertSecFilingSource(db, {
-              baseSourceId: options.sourceId,
               cik: cikNumber,
               accessionNumber,
               retrievedAt: asOf,
@@ -97,6 +96,7 @@ export function createSecBackedStatementRepository(
           family: lookup.family,
           fiscal_year: lookup.fiscal_year,
           fiscal_period: lookup.fiscal_period,
+          accession_number: accessionNumber ?? undefined,
           source_id: sourceId,
           as_of: asOf,
         }));
@@ -122,14 +122,13 @@ export function createSecBackedStatementRepository(
 async function upsertSecFilingSource(
   db: FundamentalsQueryExecutor,
   input: {
-    baseSourceId: UUID;
     cik: number;
     accessionNumber: string;
     retrievedAt: string;
   },
 ): Promise<UUID> {
   const source = buildSecSource({
-    source_id: sourceIdForAccession(input.baseSourceId, input.accessionNumber),
+    source_id: sourceIdForAccession(input.accessionNumber),
     cik: input.cik,
     accession_number: input.accessionNumber,
     retrieved_at: input.retrievedAt,
@@ -158,9 +157,12 @@ async function upsertSecFilingSource(
   return (result.rows[0]?.source_id ?? source.source_id) as UUID;
 }
 
-function sourceIdForAccession(baseSourceId: UUID, accessionNumber: string): UUID {
-  const digits = accessionNumber.replaceAll("-", "");
-  return `${baseSourceId.slice(0, 24)}${digits.slice(0, 12)}` as UUID;
+function sourceIdForAccession(accessionNumber: string): UUID {
+  const hash = createHash("sha256").update(accessionNumber).digest("hex").slice(0, 32).split("");
+  hash[12] = "4";
+  hash[16] = ((Number.parseInt(hash[16], 16) & 0x3) | 0x8).toString(16);
+  const hex = hash.join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}` as UUID;
 }
 
 function statementAccession(

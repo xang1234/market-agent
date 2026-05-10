@@ -73,9 +73,6 @@ test("GET /v1/market/quote returns a normalized quote with the live source_id", 
     source_id: DEV_POLYGON_SOURCE_ID,
     delay_class: "delayed_15m",
     as_of: body.quote.as_of,
-    fetched_at: FIXED_NOW.toISOString(),
-    expires_at: new Date(FIXED_NOW.getTime() + 30 * 60 * 1000).toISOString(),
-    freshness_class: "fresh",
   });
 
   assert.deepEqual(body.listing_context, {
