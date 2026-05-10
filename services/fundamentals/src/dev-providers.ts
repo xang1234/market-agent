@@ -8,6 +8,7 @@ import type {
   IssuerProfileRepository,
 } from "./issuer-repository.ts";
 import type { IssuerProfileExchange } from "./profile.ts";
+import { FINVIZ_DEV_REFERENCE_SOURCE_ID } from "./provider-sources.ts";
 import type { UUID } from "./subject-ref.ts";
 
 export type DevProvidersIssuerProfileRepositoryOptions = {
@@ -63,6 +64,7 @@ export function createDevProvidersIssuerProfileRepository(
         const changed = changedProfileFields(primary, merged);
         if (!changed) return primary;
         await persistProfileEnrichment(options.db, primary.subject.id, changed);
+        await persistProfileEnrichmentProvenance(options.db, primary.subject.id, changed);
         return merged;
       } catch {
         return primary;
@@ -155,6 +157,27 @@ async function persistProfileEnrichment(
       where issuer_id = $1`,
     [issuerId, fields.domicile ?? null, fields.sector ?? null, fields.industry ?? null],
   );
+}
+
+async function persistProfileEnrichmentProvenance(
+  db: IssuerProfileQueryExecutor,
+  issuerId: UUID,
+  fields: Pick<Partial<IssuerProfileRecord>, "domicile" | "sector" | "industry">,
+): Promise<void> {
+  for (const field of ["domicile", "sector", "industry"] as const) {
+    const value = fields[field];
+    if (value === undefined) continue;
+    await db.query(
+      `insert into issuer_profile_enrichments
+         (issuer_id, field_name, field_value, source_id, provider, retrieved_at)
+       values ($1::uuid, $2, $3, $4::uuid, 'finviz_dev_reference', now())
+       on conflict (issuer_id, field_name, source_id)
+       do update set field_value = excluded.field_value,
+                     provider = excluded.provider,
+                     retrieved_at = excluded.retrieved_at`,
+      [issuerId, field, value, FINVIZ_DEV_REFERENCE_SOURCE_ID],
+    );
+  }
 }
 
 function stringValue(value: unknown): string | null {

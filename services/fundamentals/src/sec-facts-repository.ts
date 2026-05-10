@@ -6,6 +6,7 @@ import {
   type MetricRegistry,
 } from "./metric-mapper.ts";
 import {
+  buildSecSource,
   fetchCompanyFacts,
   extractStatement,
   SecEdgarFetchError,
@@ -14,6 +15,7 @@ import {
   type SecCompanyFacts,
   type SecEdgarFetcher,
 } from "./sec-edgar.ts";
+import { createHash } from "node:crypto";
 import { FundamentalsDataUnavailableError } from "./availability.ts";
 import {
   normalizedStatement,
@@ -80,13 +82,22 @@ export function createSecBackedStatementRepository(
       const asOf = clock().toISOString();
       try {
         const companyFacts = await fetchCompanyFacts(options.fetcher, cikNumber);
+        const accessionNumber = statementAccession(companyFacts, lookup.fiscal_year, lookup.fiscal_period);
+        const sourceId = accessionNumber
+          ? await upsertSecFilingSource(db, {
+              baseSourceId: options.sourceId,
+              cik: cikNumber,
+              accessionNumber,
+              retrievedAt: asOf,
+            })
+          : options.sourceId;
         const statement = normalizedStatement(extractStatement({
           subject: { kind: "issuer", id: lookup.issuer_id },
           facts: companyFacts,
           family: lookup.family,
           fiscal_year: lookup.fiscal_year,
           fiscal_period: lookup.fiscal_period,
-          source_id: options.sourceId,
+          source_id: sourceId,
           as_of: asOf,
         }));
 
@@ -106,6 +117,73 @@ export function createSecBackedStatementRepository(
       }
     },
   };
+}
+
+async function upsertSecFilingSource(
+  db: FundamentalsQueryExecutor,
+  input: {
+    baseSourceId: UUID;
+    cik: number;
+    accessionNumber: string;
+    retrievedAt: string;
+  },
+): Promise<UUID> {
+  const source = buildSecSource({
+    source_id: sourceIdForAccession(input.baseSourceId, input.accessionNumber),
+    cik: input.cik,
+    accession_number: input.accessionNumber,
+    retrieved_at: input.retrievedAt,
+    content_hash: createHash("sha256").update(input.accessionNumber).digest("hex"),
+  });
+  const result = await db.query<{ source_id: string }>(
+    `insert into sources
+       (source_id, provider, kind, canonical_url, trust_tier, license_class, retrieved_at, content_hash)
+     values ($1::uuid, $2, $3, $4, $5, $6, $7::timestamptz, $8)
+     on conflict (source_id)
+     do update set canonical_url = excluded.canonical_url,
+                   retrieved_at = excluded.retrieved_at,
+                   content_hash = excluded.content_hash
+     returning source_id::text as source_id`,
+    [
+      source.source_id,
+      source.provider,
+      source.kind,
+      source.canonical_url,
+      source.trust_tier,
+      source.license_class,
+      source.retrieved_at,
+      source.content_hash,
+    ],
+  );
+  return (result.rows[0]?.source_id ?? source.source_id) as UUID;
+}
+
+function sourceIdForAccession(baseSourceId: UUID, accessionNumber: string): UUID {
+  const digits = accessionNumber.replaceAll("-", "");
+  return `${baseSourceId.slice(0, 24)}${digits.slice(0, 12)}` as UUID;
+}
+
+function statementAccession(
+  facts: SecCompanyFacts,
+  fiscalYear: number,
+  fiscalPeriod: FiscalPeriod,
+): string | null {
+  const expectedForm = fiscalPeriod === "FY" ? "10-K" : "10-Q";
+  const counts = new Map<string, number>();
+  const usGaap = facts.facts["us-gaap"];
+  if (!usGaap) return null;
+  for (const [conceptName, metricKey] of Object.entries(US_GAAP_TO_METRIC_KEY)) {
+    if (!SEC_INCOME_METRIC_KEYS.includes(metricKey)) continue;
+    const concept = usGaap[conceptName];
+    if (!concept) continue;
+    for (const values of Object.values(concept.units)) {
+      for (const value of values) {
+        if (value.fy !== fiscalYear || value.fp !== fiscalPeriod || value.form !== expectedForm) continue;
+        counts.set(value.accn, (counts.get(value.accn) ?? 0) + 1);
+      }
+    }
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null;
 }
 
 export type SecBackedStatsRepositoryOptions = {

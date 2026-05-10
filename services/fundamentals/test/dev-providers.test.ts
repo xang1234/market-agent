@@ -26,6 +26,7 @@ function sparseProfile(overrides: Partial<IssuerProfileRecord> = {}): IssuerProf
 
 test("dev providers profile repository fills missing issuer profile fields from Finviz", async () => {
   const updates: unknown[][] = [];
+  const insertedEnrichments: unknown[][] = [];
   const primary: IssuerProfileRepository = {
     async find() {
       return sparseProfile();
@@ -34,8 +35,12 @@ test("dev providers profile repository fills missing issuer profile fields from 
   const repo = createDevProvidersIssuerProfileRepository({
     primary,
     db: {
-      async query(_text, values) {
-        updates.push(values ?? []);
+      async query(text, values) {
+        if (text.includes("issuer_profile_enrichments")) {
+          insertedEnrichments.push(values ?? []);
+        } else {
+          updates.push(values ?? []);
+        }
         return { rows: [] };
       },
     },
@@ -66,6 +71,11 @@ test("dev providers profile repository fills missing issuer profile fields from 
   assert.equal(profile?.industry, "Semiconductors");
   assert.equal(profile?.domicile, "USA");
   assert.deepEqual(updates[0], [ISSUER_ID, "USA", "Technology", "Semiconductors"]);
+  assert.deepEqual(insertedEnrichments, [
+    [ISSUER_ID, "domicile", "USA", "00000000-0000-4000-a000-00000000000c"],
+    [ISSUER_ID, "sector", "Technology", "00000000-0000-4000-a000-00000000000c"],
+    [ISSUER_ID, "industry", "Semiconductors", "00000000-0000-4000-a000-00000000000c"],
+  ]);
 });
 
 test("dev providers profile repository fills nulls only and keeps primary provider values", async () => {

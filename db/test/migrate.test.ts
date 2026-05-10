@@ -201,7 +201,7 @@ test("migrate up applies pending migrations and records them in schema_migration
   });
 
   assert.equal(migrateResult.status, 0, migrateResult.stderr || migrateResult.stdout);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "26");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "27");
   assert.deepEqual(
     queryValue(containerName, "select version || ':' || name from schema_migrations order by version").split("\n"),
     [
@@ -231,6 +231,7 @@ test("migrate up applies pending migrations and records them in schema_migration
       "0024:instruments_figi_composite",
       "0025:provider_backed_dev_data",
       "0026:sec_fact_identity",
+      "0027:issuer_profile_enrichment_provenance",
     ],
   );
 
@@ -977,7 +978,7 @@ test("migrate down rolls back schema changes when removing the migration record 
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /rejecting schema_migrations delete/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "26");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "27");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -986,13 +987,13 @@ test("migrate down rolls back schema changes when removing the migration record 
   // migration's schema change must still be in place. If the runner
   // accidentally executed the down DDL before hitting the trigger block, the
   // schema_migrations row count alone wouldn't catch that — checking the
-  // latest migration's actual artifact does. 0026 added the active SEC fact
-  // identity index; the down would remove it, so its presence is independent proof the
+  // latest migration's actual artifact does. 0027 added the issuer profile
+  // enrichment table; the down would remove it, so its presence is independent proof the
   // down DDL did not execute.
   assert.equal(
     queryValue(
       containerName,
-      "select count(*) from pg_indexes where schemaname = 'public' and indexname = 'facts_active_reported_identity_idx'",
+      "select count(*) from pg_tables where schemaname = 'public' and tablename = 'issuer_profile_enrichments'",
     ),
     "1",
   );
@@ -1043,7 +1044,7 @@ test("migrate down fails when any applied migration is missing locally", { timeo
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /Applied migration 0000 is missing locally/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "27");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "28");
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
 });
 

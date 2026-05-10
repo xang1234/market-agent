@@ -36,6 +36,12 @@ test("SEC-backed statements persist companyfacts and repeat reads from facts", a
   });
   assert.equal(first?.lines.find((line) => line.metric_key === "revenue")?.value_num, 1000);
   assert.equal(db.facts.length > 0, true);
+  assert.equal(first?.source_id, "22222222-2222-4222-8222-000032019325");
+  assert.equal(db.facts.every((fact) => fact.source_id === first?.source_id), true);
+  assert.equal(
+    db.sources[0]?.[3],
+    "https://www.sec.gov/Archives/edgar/data/320193/000032019325000001/0000320193-25-000001-index.htm",
+  );
 
   const factCount = db.facts.length;
   const second = await statements.find({
@@ -129,6 +135,7 @@ type FactRecord = {
 class FakeFundamentalsDb {
   readonly metrics = metricDefinitions();
   readonly facts: FactRecord[] = [];
+  readonly sources: unknown[][] = [];
 
   async query<R extends Record<string, unknown> = Record<string, unknown>>(
     text: string,
@@ -141,6 +148,10 @@ class FakeFundamentalsDb {
     if (sql.includes("from metrics") && sql.includes("where metric_key = any")) {
       const keys = new Set(values[0] as string[]);
       return rows(this.metrics.filter((metric) => keys.has(metric.metric_key)));
+    }
+    if (sql.includes("insert into sources")) {
+      this.sources.push(values);
+      return rows([{ source_id: values[0] }]);
     }
     if (sql.includes("select distinct on (m.metric_key)")) {
       const [subjectId, periodKind, fiscalYear, fiscalPeriod, metricKeys] = values as [

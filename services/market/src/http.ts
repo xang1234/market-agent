@@ -4,6 +4,7 @@ import { isAvailable, unavailable, type MarketDataOutcome, type UnavailableEnvel
 import type { NormalizedBars } from "./bar.ts";
 import { ListingNotFoundError, type ListingRepository, type ListingRecord } from "./listings.ts";
 import type { NormalizedQuote } from "./quote.ts";
+import { providerNameForMarketSource } from "./provider-sources.ts";
 import { canonicalizeProviderBarRange } from "./range-canonicalization.ts";
 import {
   assertSeriesQueryContract,
@@ -33,11 +34,22 @@ export type MarketServerDeps = {
 // to render without a separate hydration call.
 export type GetQuoteResponse = {
   quote: NormalizedQuote;
+  provenance: MarketDataProvenance;
   listing_context: {
     ticker: string;
     mic: string;
     timezone: string;
   };
+};
+
+export type MarketDataProvenance = {
+  provider: string;
+  source_id: string;
+  delay_class: NormalizedQuote["delay_class"];
+  as_of: string;
+  fetched_at: string;
+  expires_at: string;
+  freshness_class: "fresh";
 };
 
 // HTTP shape for /v1/market/series. Per-listing outcome envelopes ride inside
@@ -108,6 +120,7 @@ export function createMarketServer(deps: MarketServerDeps): Server {
           }
           const response: GetQuoteResponse = {
             quote: quote.data,
+            provenance: quoteProvenance(deps.adapter.providerName, quote.data, clock()),
             listing_context: listingContext(record),
           };
           respond(res, 200, response);
@@ -189,6 +202,22 @@ export function createMarketServer(deps: MarketServerDeps): Server {
       if (!res.headersSent) respond(res, 502, { error: "upstream market data unavailable" });
     }
   });
+}
+
+function quoteProvenance(
+  providerName: string,
+  quote: NormalizedQuote,
+  now: Date,
+): MarketDataProvenance {
+  return {
+    provider: providerNameForMarketSource(quote.source_id, providerName),
+    source_id: quote.source_id,
+    delay_class: quote.delay_class,
+    as_of: quote.as_of,
+    fetched_at: now.toISOString(),
+    expires_at: new Date(now.getTime() + 30 * 60 * 1000).toISOString(),
+    freshness_class: "fresh",
+  };
 }
 
 function seriesCacheFreshnessBoundary(query: NormalizedSeriesQuery): string {
