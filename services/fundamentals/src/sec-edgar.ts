@@ -243,13 +243,7 @@ export function extractStatement(
       const lineUnit = UNIT_TO_LINE_UNIT[unitCode];
       if (!lineUnit) continue;
 
-      const match = values.find(
-        (v) =>
-          v.fy === input.fiscal_year &&
-          v.fp === input.fiscal_period &&
-          v.form === expectedForm &&
-          (input.accession_number === undefined || v.accn === input.accession_number),
-      );
+      const match = selectConceptValue(values, input, expectedForm);
       if (!match) continue;
 
       // Period agreement: every matched value must share the same
@@ -316,6 +310,78 @@ export function extractStatement(
     source_id: input.source_id,
     lines,
   };
+}
+
+function selectConceptValue(
+  values: ReadonlyArray<SecConceptValue>,
+  input: ExtractStatementInput,
+  expectedForm: string,
+): SecConceptValue | undefined {
+  const matches = values.filter(
+    (v) =>
+      v.fy === input.fiscal_year &&
+      v.fp === input.fiscal_period &&
+      v.form === expectedForm &&
+      (input.accession_number === undefined || v.accn === input.accession_number),
+  );
+  if (input.fiscal_period === "FY") {
+    return matches[0];
+  }
+  return matches
+    .filter(isDiscreteQuarterDuration)
+    .sort(compareQuarterFactQuality)[0];
+}
+
+function isDiscreteQuarterDuration(value: SecConceptValue): boolean {
+  if (value.start === undefined) return false;
+  const days = inclusiveDurationDays(value.start, value.end);
+  return days >= 60 && days <= 125;
+}
+
+function compareQuarterFactQuality(
+  a: SecConceptValue,
+  b: SecConceptValue,
+): number {
+  const scoreDiff = quarterFactScore(b) - quarterFactScore(a);
+  if (scoreDiff !== 0) return scoreDiff;
+  return b.filed.localeCompare(a.filed);
+}
+
+function quarterFactScore(value: SecConceptValue): number {
+  let score = 0;
+  if (/^CY\d{4}Q[1-4]$/.test(value.frame ?? "")) score += 2;
+  if (value.start !== undefined && inclusiveDurationDays(value.start, value.end) >= 80) {
+    score += 1;
+  }
+  return score;
+}
+
+function inclusiveDurationDays(start: string, end: string): number {
+  const startMs = parseSecDateMs(start);
+  const endMs = parseSecDateMs(end);
+  if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs < startMs) {
+    return 0;
+  }
+  return Math.floor((endMs - startMs) / 86_400_000) + 1;
+}
+
+function parseSecDateMs(value: string): number {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return Number.NaN;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const ms = Date.UTC(year, month - 1, day);
+  const date = new Date(ms);
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return Number.NaN;
+  }
+  return ms;
 }
 
 // metric_keys this module emits for income-family extraction. Used by
