@@ -100,6 +100,58 @@ test("SEC-backed statements persist quarterly companyfacts as fiscal_q facts", a
   assert.equal(fetchCount, 1);
 });
 
+test("SEC-backed quarterly statements choose a discrete accession over a YTD-heavy accession", async () => {
+  const db = new FakeFundamentalsDb();
+  const statements = createSecBackedStatementRepository(db, {
+    fetcher: async () => mixedQuarterlyAccessionCompanyFacts(),
+    sourceId: SOURCE_ID,
+    clock: () => new Date("2026-05-08T00:00:00.000Z"),
+  });
+
+  const statement = await statements.find({
+    issuer_id: ISSUER_ID,
+    family: "income",
+    basis: "as_reported",
+    fiscal_year: 2024,
+    fiscal_period: "Q2",
+  });
+
+  assert.equal(statement?.period_kind, "fiscal_q");
+  assert.equal(statement?.period_start, "2023-12-31");
+  assert.equal(statement?.period_end, "2024-03-30");
+  assert.equal(statement?.lines.find((line) => line.metric_key === "revenue")?.value_num, 90_753_000_000);
+  assert.equal(
+    db.sources[0]?.[3],
+    "https://www.sec.gov/Archives/edgar/data/320193/000032019324000020/0000320193-24-000020-index.htm",
+  );
+});
+
+test("SEC-backed statements derive Q4 from annual and first-three-quarter companyfacts", async () => {
+  const db = new FakeFundamentalsDb();
+  const statements = createSecBackedStatementRepository(db, {
+    fetcher: async () => fourthQuarterCompanyFacts(),
+    sourceId: SOURCE_ID,
+    clock: () => new Date("2026-05-08T00:00:00.000Z"),
+  });
+
+  const statement = await statements.find({
+    issuer_id: ISSUER_ID,
+    family: "income",
+    basis: "as_reported",
+    fiscal_year: 2024,
+    fiscal_period: "Q4",
+  });
+
+  assert.equal(statement?.period_kind, "fiscal_q");
+  assert.equal(statement?.period_start, "2024-10-01");
+  assert.equal(statement?.period_end, "2024-12-31");
+  assert.equal(statement?.lines.find((line) => line.metric_key === "revenue")?.value_num, 400);
+  assert.equal(
+    db.sources[0]?.[3],
+    "https://www.sec.gov/Archives/edgar/data/320193/000032019325000001/0000320193-25-000001-index.htm",
+  );
+});
+
 test("SEC-backed statements derive distinct source ids from full accessions with shared CIK/year prefix", async () => {
   const sourceA = await statementSourceIdFor(companyFactsWithAccession("0000320193-25-000001"));
   const sourceB = await statementSourceIdFor(companyFactsWithAccession("0000320193-25-000002"));
@@ -504,5 +556,111 @@ function mixedAccessionCompanyFacts() {
     form: "10-K",
     filed: "2025-03-01",
   });
+  return facts;
+}
+
+function mixedQuarterlyAccessionCompanyFacts() {
+  const facts = companyFacts();
+  const ytdAccn = "0000320193-24-000010";
+  const discreteAccn = "0000320193-24-000020";
+  const q2Ytd = {
+    start: "2023-10-01",
+    end: "2024-03-30",
+    accn: ytdAccn,
+    fy: 2024,
+    fp: "Q2",
+    form: "10-Q",
+    filed: "2024-05-02",
+  };
+  const q2Discrete = {
+    start: "2023-12-31",
+    end: "2024-03-30",
+    accn: discreteAccn,
+    fy: 2024,
+    fp: "Q2",
+    form: "10-Q",
+    filed: "2024-05-03",
+    frame: "CY2024Q1",
+  };
+  const usGaap = facts.facts["us-gaap"];
+
+  usGaap.RevenueFromContractWithCustomerExcludingAssessedTax.units.USD = [
+    { ...q2Ytd, val: 210_328_000_000 },
+    { ...q2Discrete, val: 90_753_000_000 },
+  ];
+  usGaap.CostOfRevenue.units.USD = [
+    { ...q2Ytd, val: 112_258_000_000 },
+  ];
+  usGaap.GrossProfit.units.USD = [
+    { ...q2Ytd, val: 98_070_000_000 },
+  ];
+  usGaap.OperatingIncomeLoss.units.USD = [
+    { ...q2Ytd, val: 70_898_000_000 },
+  ];
+  usGaap.NetIncomeLoss.units.USD = [
+    { ...q2Ytd, val: 57_552_000_000 },
+  ];
+  usGaap.EarningsPerShareBasic.units["USD/shares"] = [
+    { ...q2Ytd, val: 3.71 },
+  ];
+  usGaap.EarningsPerShareDiluted.units["USD/shares"] = [
+    { ...q2Ytd, val: 3.71 },
+  ];
+  usGaap.WeightedAverageNumberOfSharesOutstandingBasic.units.shares = [
+    { ...q2Ytd, val: 15_509_763_000 },
+  ];
+  usGaap.WeightedAverageNumberOfDilutedSharesOutstanding.units.shares = [
+    { ...q2Ytd, val: 15_464_709_000 },
+  ];
+  return facts;
+}
+
+function fourthQuarterCompanyFacts() {
+  const facts = companyFacts();
+  facts.facts["us-gaap"].RevenueFromContractWithCustomerExcludingAssessedTax.units.USD = [
+    {
+      start: "2024-01-01",
+      end: "2024-12-31",
+      val: 1000,
+      accn: "0000320193-25-000001",
+      fy: 2024,
+      fp: "FY",
+      form: "10-K",
+      filed: "2025-02-01",
+    },
+    {
+      start: "2024-01-01",
+      end: "2024-03-31",
+      val: 100,
+      accn: "0000320193-24-000010",
+      fy: 2024,
+      fp: "Q1",
+      form: "10-Q",
+      filed: "2024-05-01",
+      frame: "CY2024Q1",
+    },
+    {
+      start: "2024-04-01",
+      end: "2024-06-30",
+      val: 200,
+      accn: "0000320193-24-000020",
+      fy: 2024,
+      fp: "Q2",
+      form: "10-Q",
+      filed: "2024-08-01",
+      frame: "CY2024Q2",
+    },
+    {
+      start: "2024-07-01",
+      end: "2024-09-30",
+      val: 300,
+      accn: "0000320193-24-000030",
+      fy: 2024,
+      fp: "Q3",
+      form: "10-Q",
+      filed: "2024-11-01",
+      frame: "CY2024Q3",
+    },
+  ];
   return facts;
 }
