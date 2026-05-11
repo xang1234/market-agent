@@ -172,6 +172,7 @@ export function ScreenerWorkspace() {
   // and post-delete failure). Async/await is fine here — we're not in
   // an effect body.
   const refreshSavedScreens = useCallback(async () => {
+    if (sessionUserId == null) return
     try {
       const screens = await listSavedScreens({ userId: sessionUserId })
       setSavedScreensState({ userId: sessionUserId, screens })
@@ -186,6 +187,7 @@ export function ScreenerWorkspace() {
   // through the sign-in flow, satisfying the bead's "preserves
   // current screen definition" verification.
   useResumedProtectedAction(ProtectedActionType.SaveScreen, async (action) => {
+    if (sessionUserId == null) return
     try {
       const result = await saveScreen({ ...action.payload, userId: sessionUserId })
       setSavedMessage(null)
@@ -236,6 +238,7 @@ export function ScreenerWorkspace() {
   }
 
   const handleDeleteSaved = async (screen: ScreenSubject) => {
+    if (sessionUserId == null) return
     // Optimistic removal — the panel only renders when authed, so
     // Delete cannot reach this code path without a session and does
     // not need the auth interrupt. On failure we re-fetch instead of

@@ -19,16 +19,27 @@ import {
   resolveByTicker,
   type QueryExecutor,
 } from "./lookup.ts";
+import { upsertDiscoveredListing, type TickerDiscoveryProvider } from "./discovery.ts";
 import { writeToolCallLog } from "../../observability/src/tool-call.ts";
 import { normalize } from "./normalize.ts";
 import type { SubjectKind, SubjectRef } from "./subject-ref.ts";
 
-export type ResolutionPath = "auto_advanced" | "explicit_choice";
+export type ResolutionPath = "auto_advanced" | "explicit_choice" | "direct_ref";
 
 export class InvalidChoiceError extends Error {
   constructor(message = "choice subject_ref must match one of the ambiguous candidates") {
     super(message);
     this.name = "InvalidChoiceError";
+  }
+}
+
+export class SubjectHydrationNotFoundError extends Error {
+  readonly subject_ref: SubjectRef;
+
+  constructor(subjectRef: SubjectRef) {
+    super(`Cannot hydrate ${subjectRef.kind} subject_ref: ${subjectRef.id}`);
+    this.name = "SubjectHydrationNotFoundError";
+    this.subject_ref = subjectRef;
   }
 }
 
@@ -39,6 +50,11 @@ export type SubjectChoice = {
 export type SearchToSubjectRequest = {
   text: string;
   choice?: SubjectChoice;
+};
+
+export type SearchToSubjectOptions = {
+  tickerDiscoveryProvider?: TickerDiscoveryProvider;
+  discoveryLogger?: Pick<Console, "warn">;
 };
 
 export type CandidateSearchResult = {
@@ -171,8 +187,9 @@ export type SearchToSubjectFlowResult =
 export async function runSearchToSubjectFlow(
   db: QueryExecutor,
   request: SearchToSubjectRequest,
+  options: SearchToSubjectOptions = {},
 ): Promise<SearchToSubjectFlowResult> {
-  const search = await searchSubjectCandidates(db, request.text);
+  const search = await searchSubjectCandidates(db, request.text, options);
   const { envelope, normalized_input } = search;
 
   if (isNotFound(envelope)) {
@@ -232,6 +249,7 @@ export async function runSearchToSubjectFlow(
 export async function searchSubjectCandidates(
   db: QueryExecutor,
   text: string,
+  options: SearchToSubjectOptions = {},
 ): Promise<CandidateSearchResult> {
   const n = normalize(text);
   let identifierEnvelope: ResolverEnvelope | null = null;
@@ -265,7 +283,7 @@ export async function searchSubjectCandidates(
   const candidateEnvelopes: ResolverEnvelope[] = [];
 
   if (n.ticker_candidate) {
-    const envelope = await resolveByTicker(db, n.ticker_candidate);
+    const envelope = await resolveTickerWithDiscovery(db, n.ticker_candidate, options);
     if (!isNotFound(envelope)) candidateEnvelopes.push(envelope);
   }
 
@@ -294,6 +312,30 @@ export async function searchSubjectCandidates(
   };
 }
 
+async function resolveTickerWithDiscovery(
+  db: QueryExecutor,
+  ticker: string,
+  options: SearchToSubjectOptions,
+): Promise<ResolverEnvelope> {
+  const initial = await resolveByTicker(db, ticker);
+  if (!isNotFound(initial) || initial.reason !== "unknown_ticker" || !options.tickerDiscoveryProvider) {
+    return initial;
+  }
+
+  try {
+    const discovered = await options.tickerDiscoveryProvider.discoverTicker(ticker);
+    for (const listing of discovered) {
+      await upsertDiscoveredListing(db, listing);
+    }
+    if (discovered.length === 0) return initial;
+    return await resolveByTicker(db, ticker);
+  } catch (error) {
+    const logger = options.discoveryLogger ?? console;
+    logger.warn("ticker discovery failed", error);
+    return initial;
+  }
+}
+
 async function handoffFromResolved(
   db: QueryExecutor,
   envelope: ResolvedEnvelope,
@@ -310,6 +352,24 @@ async function handoffFromResolved(
     normalized_input: normalizedInput,
     resolution_path: resolutionPath,
     confidence: envelope.confidence,
+    context,
+  };
+}
+
+export async function hydrateSubjectRef(
+  db: QueryExecutor,
+  subjectRef: SubjectRef,
+): Promise<HydratedSubjectHandoff> {
+  const context = await loadSubjectContext(db, subjectRef);
+  const displayLabel = displayLabelForSubjectRef(subjectRef, context);
+  return {
+    subject_ref: subjectRef,
+    identity_level: subjectRef.kind,
+    display_label: displayLabel,
+    display_labels: displayLabelsFor(displayLabel, context),
+    normalized_input: `${subjectRef.kind}:${subjectRef.id}`,
+    resolution_path: "direct_ref",
+    confidence: 1,
     context,
   };
 }
@@ -433,7 +493,7 @@ async function loadListingSubjectContext(
 
   const row = result.rows[0];
   if (!row) {
-    throw new Error(`Cannot hydrate listing subject_ref: ${listingId}`);
+    throw new SubjectHydrationNotFoundError({ kind: "listing", id: listingId });
   }
 
   return contextFromListingRow(row);
@@ -463,7 +523,7 @@ async function loadInstrumentSubjectContext(
 
   const row = result.rows[0];
   if (!row) {
-    throw new Error(`Cannot hydrate instrument subject_ref: ${instrumentId}`);
+    throw new SubjectHydrationNotFoundError({ kind: "instrument", id: instrumentId });
   }
 
   return {
@@ -492,7 +552,7 @@ async function loadIssuerSubjectContext(
 
   const row = result.rows[0];
   if (!row) {
-    throw new Error(`Cannot hydrate issuer subject_ref: ${issuerId}`);
+    throw new SubjectHydrationNotFoundError({ kind: "issuer", id: issuerId });
   }
 
   return {
@@ -594,6 +654,25 @@ function listingContextFromRow(row: ListingContextRow): ListingContext {
     active_from: row.active_from ?? undefined,
     active_to: row.active_to ?? undefined,
   });
+}
+
+function displayLabelForSubjectRef(
+  subjectRef: SubjectRef,
+  context: HydratedSubjectContext,
+): string {
+  if (subjectRef.kind === "listing" && context.listing && context.issuer) {
+    const shareClass = context.instrument?.share_class;
+    const base = shareClass ? `${context.issuer.legal_name} (${shareClass})` : context.issuer.legal_name;
+    return `${context.listing.ticker} · ${context.listing.mic} — ${base}`;
+  }
+  if (subjectRef.kind === "instrument" && context.issuer) {
+    const shareClass = context.instrument?.share_class;
+    return shareClass ? `${context.issuer.legal_name} (${shareClass})` : context.issuer.legal_name;
+  }
+  if (subjectRef.kind === "issuer" && context.issuer) {
+    return context.issuer.legal_name;
+  }
+  return `${subjectRef.kind}:${subjectRef.id}`;
 }
 
 function displayLabelsFor(

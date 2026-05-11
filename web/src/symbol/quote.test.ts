@@ -144,6 +144,28 @@ test('fetchQuoteSnapshot throws QuoteFetchError on non-2xx responses with the st
   )
 })
 
+test('fetchQuoteSnapshot includes backend unavailable detail on non-2xx responses', async () => {
+  const mockFetch = (async () =>
+    new Response(
+      JSON.stringify({
+        error: 'market quote unavailable',
+        unavailable: { detail: 'polygon: HTTP 403' },
+      }),
+      {
+        status: 502,
+        headers: { 'content-type': 'application/json' },
+      },
+    )) as typeof fetch
+
+  await assert.rejects(
+    fetchQuoteSnapshot(APPLE_LISTING_ID, { fetchImpl: mockFetch }),
+    (err: unknown) =>
+      err instanceof QuoteFetchError &&
+      err.status === 502 &&
+      err.message === 'market quote fetch failed: polygon: HTTP 403',
+  )
+})
+
 test('fetchQuoteSnapshot URL-encodes the listing id', async () => {
   let calledUrl: string | null = null
   const mockFetch = (async (url: string | URL) => {

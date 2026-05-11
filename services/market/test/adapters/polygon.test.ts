@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createPolygonAdapter, PolygonFetchError } from "../../src/adapters/polygon.ts";
+import { createPolygonAdapter, createPolygonHttpFetcher, PolygonFetchError } from "../../src/adapters/polygon.ts";
 import { quoteMove } from "../../src/quote.ts";
 import {
   assertUnavailableContract,
@@ -20,6 +20,34 @@ import {
 
 const FIXED_NOW = "2026-04-22T20:00:00.000Z";
 const fixedClock = () => new Date(FIXED_NOW);
+
+test("polygon HTTP fetcher appends apiKey and maps non-OK responses to PolygonFetchError", async () => {
+  const urls: string[] = [];
+  const fetcher = createPolygonHttpFetcher({
+    apiKey: "market-test-key",
+    baseUrl: "https://polygon.test",
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      return new Response(JSON.stringify({ status: "OK" }), { status: 200 });
+    },
+  });
+
+  assert.deepEqual(await fetcher("/v2/snapshot/locale/us/markets/stocks/tickers/AMD"), { status: "OK" });
+  assert.equal(
+    urls[0],
+    "https://polygon.test/v2/snapshot/locale/us/markets/stocks/tickers/AMD?apiKey=market-test-key",
+  );
+
+  const failingFetcher = createPolygonHttpFetcher({
+    apiKey: "market-test-key",
+    baseUrl: "https://polygon.test",
+    fetchImpl: async () => new Response("nope", { status: 429 }),
+  });
+  await assert.rejects(
+    () => failingFetcher("/v2/snapshot/locale/us/markets/stocks/tickers/AMD"),
+    (error: unknown) => error instanceof PolygonFetchError && error.status === 429,
+  );
+});
 
 test("polygon adapter normalizes a snapshot payload into a NormalizedQuote with move math", async () => {
   const adapter = createPolygonAdapter({
@@ -240,6 +268,42 @@ test("polygon adapter classifies a 401 from the fetcher as non-retryable provide
   assert.equal(outcome.retryable, false);
 });
 
+test("polygon adapter falls back to aggregate-derived quote when snapshot is forbidden", async () => {
+  const endMs = Date.parse(FIXED_NOW);
+  const startMs = endMs - 14 * 24 * 60 * 60 * 1000;
+  const aggsPath = `/v2/aggs/ticker/AAPL/range/1/day/${startMs}/${endMs}?adjusted=true&sort=asc&limit=50000`;
+  const seen: string[] = [];
+  const adapter = createPolygonAdapter({
+    sourceId: POLYGON_SOURCE_ID,
+    delayClass: POLYGON_DELAY_CLASS,
+    fetcher: async (path) => {
+      seen.push(path);
+      if (path === SNAPSHOT_PATH) throw new PolygonFetchError(403, "forbidden");
+      if (path === aggsPath) {
+        return {
+          adjusted: true,
+          results: [
+            { t: Date.parse("2026-04-20T04:00:00.000Z"), o: 90, h: 101, l: 89, c: 100, v: 10_000 },
+            { t: Date.parse("2026-04-21T04:00:00.000Z"), o: 100, h: 103, l: 99, c: 102, v: 12_000 },
+          ],
+        };
+      }
+      throw new Error(`unexpected fetch: ${path}`);
+    },
+    resolveListing: async () => aaplCtx,
+    clock: fixedClock,
+  });
+
+  const outcome = await adapter.getQuote({ listing: aaplListing });
+
+  assert.equal(isAvailable(outcome), true);
+  if (!isAvailable(outcome)) return;
+  assert.deepEqual(seen, [SNAPSHOT_PATH, aggsPath]);
+  assert.equal(outcome.data.price, 102);
+  assert.equal(outcome.data.prev_close, 100);
+  assert.equal(outcome.data.session_state, "closed");
+});
+
 test("polygon adapter classifies a generic network error as retryable provider_error", async () => {
   const adapter = createPolygonAdapter({
     sourceId: POLYGON_SOURCE_ID,
@@ -428,6 +492,39 @@ test("polygon adapter normalizes aggs into NormalizedBars and reports adjusted b
   assert.equal(bars.source_id, POLYGON_SOURCE_ID);
   assert.equal(bars.bars[0].open, 100);
   assert.equal(bars.bars[1].close, 101.7);
+});
+
+test("polygon adapter filters provider aggregate bars outside the requested range", async () => {
+  const requestStart = "2026-04-08T11:56:58.042Z";
+  const requestEnd = "2026-05-08T11:56:58.042Z";
+  const startMs = Date.parse(requestStart);
+  const endMs = Date.parse(requestEnd);
+  const inRangeBarTs = Date.parse("2026-04-09T04:00:00.000Z");
+  const adapter = createPolygonAdapter({
+    sourceId: POLYGON_SOURCE_ID,
+    delayClass: POLYGON_DELAY_CLASS,
+    fetcher: makeRouteFetcher({
+      [`/v2/aggs/ticker/AAPL/range/1/day/${startMs}/${endMs}?adjusted=true&sort=asc&limit=50000`]: {
+        adjusted: true,
+        results: [
+          { t: Date.parse("2026-04-08T04:00:00.000Z"), o: 100, h: 101, l: 99, c: 100.5, v: 10_000 },
+          { t: inRangeBarTs, o: 100.5, h: 102, l: 100.4, c: 101.7, v: 12_000 },
+          { t: Date.parse(requestEnd), o: 101.7, h: 102, l: 101, c: 101.2, v: 11_000 },
+        ],
+      },
+    }),
+    resolveListing: async () => aaplCtx,
+  });
+
+  const outcome = await adapter.getBars({
+    listing: aaplListing,
+    interval: "1d",
+    range: { start: requestStart, end: requestEnd },
+  });
+
+  assert.equal(isAvailable(outcome), true);
+  if (!isAvailable(outcome)) return;
+  assert.deepEqual(outcome.data.bars.map((bar) => bar.ts), [new Date(inRangeBarTs).toISOString()]);
 });
 
 test("polygon adapter follows aggregate next_url pages", async () => {

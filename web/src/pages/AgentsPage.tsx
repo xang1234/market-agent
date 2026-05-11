@@ -1,13 +1,18 @@
 import { useEffect, useState, type FormEvent } from 'react'
 
 import {
+  AgentPayloadValidationError,
   buildAgentPayload,
   canRoundTripAlertRules,
   canRoundTripUniverse,
+  isAgentSubjectKind,
   subjectRefsText,
   type AgentAlertRule,
+  type AgentPayload,
   type AgentUniverse,
 } from '../agents/agentPayload.ts'
+import type { SubjectKind } from '../subject/subjectRef.ts'
+import { authenticatedFetch } from '../http/authFetch.ts'
 import { useAuth } from '../shell/useAuth.ts'
 
 type AgentRow = {
@@ -54,7 +59,7 @@ const DEMO_AGENTS: ReadonlyArray<AgentRow> = [
     thesis: 'Find margin, cash conversion, and guidance changes in covered names.',
     cadence: 'daily',
     enabled: true,
-    universe: { mode: 'static', subject_refs: [{ kind: 'issuer', id: 'demo-issuer' }] },
+    universe: { mode: 'static', subject_refs: [{ kind: 'issuer', id: '99999999-9999-4999-8999-999999999999' }] },
     alert_rules: [
       {
         rule_id: 'demo-margin',
@@ -85,7 +90,7 @@ export function AgentsPage() {
   const [universeMode, setUniverseMode] = useState<AgentUniverse['mode']>('static')
   const [staticSubjectRefsText, setStaticSubjectRefsText] = useState('')
   const [dynamicUniverseId, setDynamicUniverseId] = useState('')
-  const [subjectKind, setSubjectKind] = useState('issuer')
+  const [subjectKind, setSubjectKind] = useState<SubjectKind>('issuer')
   const [subjectId, setSubjectId] = useState('')
   const [alertRuleId, setAlertRuleId] = useState('')
   const [alertSeverity, setAlertSeverity] = useState('high')
@@ -109,8 +114,8 @@ export function AgentsPage() {
   useEffect(() => {
     if (!session) return
     const controller = new AbortController()
-    fetch('/v1/agents', {
-      headers: { 'x-user-id': session.userId },
+    authenticatedFetch('/v1/agents', {
+      userId: session.userId,
       signal: controller.signal,
     })
       .then(async (response) => {
@@ -143,12 +148,12 @@ export function AgentsPage() {
     const controller = new AbortController()
     const encodedAgentId = encodeURIComponent(selectedAgentId)
     Promise.all([
-      fetch(`/v1/agents/${encodedAgentId}/findings`, {
-        headers: { 'x-user-id': session.userId },
+      authenticatedFetch(`/v1/agents/${encodedAgentId}/findings`, {
+        userId: session.userId,
         signal: controller.signal,
       }),
-      fetch(`/v1/agents/${encodedAgentId}/activity`, {
-        headers: { 'x-user-id': session.userId },
+      authenticatedFetch(`/v1/agents/${encodedAgentId}/activity`, {
+        userId: session.userId,
         signal: controller.signal,
       }),
     ])
@@ -204,31 +209,37 @@ export function AgentsPage() {
   const submitAgent = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!session) return
-    const input = buildAgentPayload({
-      name,
-      thesis,
-      cadence,
-      universeMode,
-      staticSubjectRefsText,
-      dynamicUniverseId,
-      subjectKind,
-      subjectId,
-      alertRuleId,
-      alertSeverity,
-      alertHeadline,
-      alertEmail,
-      alertWebPush,
-      alertSms,
-      alertMobilePush,
-      alertDigest,
-    }, editingAgent ?? undefined)
+    let input: AgentPayload
+    try {
+      input = buildAgentPayload({
+        name,
+        thesis,
+        cadence,
+        universeMode,
+        staticSubjectRefsText,
+        dynamicUniverseId,
+        subjectKind,
+        subjectId,
+        alertRuleId,
+        alertSeverity,
+        alertHeadline,
+        alertEmail,
+        alertWebPush,
+        alertSms,
+        alertMobilePush,
+        alertDigest,
+      }, editingAgent ?? undefined)
+    } catch (caught) {
+      setActivity(caught instanceof AgentPayloadValidationError ? caught.message : String(caught))
+      return
+    }
     if (!input.name || !input.thesis) return
     setActivity(editingAgentId ? 'Updating agent' : 'Creating agent')
-    const response = await fetch(editingAgentId ? `/v1/agents/${encodeURIComponent(editingAgentId)}` : '/v1/agents', {
+    const response = await authenticatedFetch(editingAgentId ? `/v1/agents/${encodeURIComponent(editingAgentId)}` : '/v1/agents', {
+      userId: session.userId,
       method: editingAgentId ? 'PATCH' : 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-user-id': session.userId,
       },
       body: JSON.stringify(input),
     })
@@ -277,11 +288,11 @@ export function AgentsPage() {
   ) => {
     if (!session) return
     setActivity('Updating agent')
-    const response = await fetch(`/v1/agents/${encodeURIComponent(agentId)}`, {
+    const response = await authenticatedFetch(`/v1/agents/${encodeURIComponent(agentId)}`, {
+      userId: session.userId,
       method: 'PATCH',
       headers: {
         'content-type': 'application/json',
-        'x-user-id': session.userId,
       },
       body: JSON.stringify(patch),
     })
@@ -298,9 +309,9 @@ export function AgentsPage() {
   const deleteAgent = async (agentId: string) => {
     if (!session) return
     setActivity('Deleting agent')
-    const response = await fetch(`/v1/agents/${encodeURIComponent(agentId)}`, {
+    const response = await authenticatedFetch(`/v1/agents/${encodeURIComponent(agentId)}`, {
+      userId: session.userId,
       method: 'DELETE',
-      headers: { 'x-user-id': session.userId },
     })
     if (response.ok) {
       const nextAgentId = agents.find((agent) => agent.agent_id !== agentId)?.agent_id ?? null
@@ -320,9 +331,9 @@ export function AgentsPage() {
   const runAgent = async (agentId: string) => {
     if (!session) return
     setActivity('Starting run')
-    const response = await fetch(`/v1/agents/${encodeURIComponent(agentId)}/runs`, {
+    const response = await authenticatedFetch(`/v1/agents/${encodeURIComponent(agentId)}/runs`, {
+      userId: session.userId,
       method: 'POST',
-      headers: { 'x-user-id': session.userId },
     })
     if (response.ok) {
       const run = (await response.json()) as AgentRunRow
@@ -432,7 +443,10 @@ export function AgentsPage() {
                 <select
                   name="subject-kind"
                   value={subjectKind}
-                  onChange={(event) => setSubjectKind(event.currentTarget.value)}
+                  onChange={(event) => {
+                    const next = event.currentTarget.value
+                    if (isAgentSubjectKind(next)) setSubjectKind(next)
+                  }}
                   disabled={preservesUnsupportedUniverse || universeMode !== 'static'}
                   className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
                 >

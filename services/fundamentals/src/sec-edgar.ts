@@ -202,6 +202,7 @@ export type ExtractStatementInput = {
   family: StatementFamily;
   fiscal_year: number;
   fiscal_period: FiscalPeriod;
+  accession_number?: string;
   source_id: UUID;
   as_of: string;
   reported_at?: string | null;
@@ -246,7 +247,8 @@ export function extractStatement(
         (v) =>
           v.fy === input.fiscal_year &&
           v.fp === input.fiscal_period &&
-          v.form === expectedForm,
+          v.form === expectedForm &&
+          (input.accession_number === undefined || v.accn === input.accession_number),
       );
       if (!match) continue;
 

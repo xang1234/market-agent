@@ -13,6 +13,7 @@ import {
   SCREENER_API_BASE,
   ScreenerFetchError,
 } from './screenerFetch.ts'
+import { authenticatedFetch, type FetchImpl } from '../http/authFetch.ts'
 
 export type ScreenSubject = {
   screen_id: string
@@ -28,10 +29,8 @@ export type SaveScreenResult = {
   screen: ScreenSubject
 }
 
-type FetchImpl = typeof fetch
-
 type CommonArgs = {
-  userId?: string
+  userId: string
   endpoint?: string
   fetchImpl?: FetchImpl
   signal?: AbortSignal
@@ -40,7 +39,6 @@ type CommonArgs = {
 export async function saveScreen(
   args: { name: string; definition: ScreenerQuery; screen_id?: string } & CommonArgs,
 ): Promise<SaveScreenResult> {
-  const fetchImpl = args.fetchImpl ?? fetch
   const url = args.endpoint ?? `${SCREENER_API_BASE}/screens`
   const body: Record<string, unknown> = {
     name: args.name,
@@ -48,9 +46,11 @@ export async function saveScreen(
   }
   if (args.screen_id) body.screen_id = args.screen_id
 
-  const response = await fetchImpl(url, {
+  const response = await authenticatedFetch(url, {
+    userId: args.userId,
+    fetchImpl: args.fetchImpl,
     method: 'POST',
-    headers: screenHeaders(args.userId),
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
     signal: args.signal,
   })
@@ -64,12 +64,12 @@ export async function saveScreen(
   return (await response.json()) as SaveScreenResult
 }
 
-export async function listSavedScreens(args: CommonArgs = {}): Promise<ScreenSubject[]> {
-  const fetchImpl = args.fetchImpl ?? fetch
+export async function listSavedScreens(args: CommonArgs): Promise<ScreenSubject[]> {
   const url = args.endpoint ?? `${SCREENER_API_BASE}/screens`
-  const response = await fetchImpl(url, {
+  const response = await authenticatedFetch(url, {
+    userId: args.userId,
+    fetchImpl: args.fetchImpl,
     method: 'GET',
-    headers: userHeaders(args.userId),
     signal: args.signal,
   })
   if (!response.ok) {
@@ -86,12 +86,12 @@ export async function listSavedScreens(args: CommonArgs = {}): Promise<ScreenSub
 export async function deleteSavedScreen(
   args: { screen_id: string } & CommonArgs,
 ): Promise<void> {
-  const fetchImpl = args.fetchImpl ?? fetch
   const url =
     args.endpoint ?? `${SCREENER_API_BASE}/screens/${encodeURIComponent(args.screen_id)}`
-  const response = await fetchImpl(url, {
+  const response = await authenticatedFetch(url, {
+    userId: args.userId,
+    fetchImpl: args.fetchImpl,
     method: 'DELETE',
-    headers: userHeaders(args.userId),
     signal: args.signal,
   })
   // 204 No Content (the documented success path) and 404 (already gone)
@@ -105,14 +105,4 @@ export async function deleteSavedScreen(
         `delete screen failed with HTTP ${response.status}`,
     )
   }
-}
-
-function screenHeaders(userId: string | undefined): HeadersInit {
-  return userId
-    ? { 'content-type': 'application/json', 'x-user-id': userId }
-    : { 'content-type': 'application/json' }
-}
-
-function userHeaders(userId: string | undefined): HeadersInit | undefined {
-  return userId ? { 'x-user-id': userId } : undefined
 }

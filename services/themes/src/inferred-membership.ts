@@ -1,5 +1,5 @@
 import type { QueryExecutor } from "../../observability/src/types.ts";
-import type { SubjectKind, SubjectRef } from "../../resolver/src/subject-ref.ts";
+import type { SubjectKind, SubjectRef } from "../../shared/src/subject-ref.ts";
 import { addThemeMembership, type ThemeRow } from "./theme-repo.ts";
 
 // Mirrors the impact_direction enum in spec/finance_research_db_schema.sql:40.

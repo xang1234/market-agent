@@ -10,7 +10,7 @@ import type {
   ResolverCandidate,
 } from "../../resolver/src/envelope.ts";
 import type { QueryExecutor } from "../../resolver/src/lookup.ts";
-import type { SubjectKind, SubjectRef } from "../../resolver/src/subject-ref.ts";
+import type { SubjectKind, SubjectRef } from "../../shared/src/subject-ref.ts";
 
 export type ChatSubjectPreResolveRequest = {
   text: string;

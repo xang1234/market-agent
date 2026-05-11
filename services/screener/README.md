@@ -26,14 +26,13 @@ npm run dev                 # start dev server on 127.0.0.1:4323
 
 ## Runtime (cw0.7.4)
 
-The executor is a pure pipeline over a pre-hydrated candidate registry —
+The executor is a pipeline over a provider-backed candidate registry —
 filter → sort → page → assemble — keyed off the closed field registry from
-cw0.7.1. Pre-hydration is a deliberate architectural choice: the executor
-must not fan out N×K HTTP calls to `services/market` and
-`services/fundamentals` per query. A future poller will keep the registry
-fresh; for now `src/dev-candidates.ts` seeds AAPL/MSFT/GOOGL/TSLA/NVDA
-with listing UUIDs that match `services/market`'s dev fixtures so the
-symbol-entry handoff lands on the same canonical identity.
+cw0.7.1. Normal dev requires `DATABASE_URL`: candidates are assembled from
+canonical listings, fresh market cache rows, and persisted fundamentals in
+Postgres at request time. The executor still must not fan out N×K HTTP calls
+to `services/market` and `services/fundamentals` per query; upstream provider
+hydration writes to Postgres first, then the screener reads those rows.
 
 Two semantics worth flagging because they are easy to get wrong:
 

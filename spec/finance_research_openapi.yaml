@@ -67,6 +67,34 @@ paths:
                     type: array
                     items:
                       type: string
+  /v1/subjects/hydrate:
+    post:
+      tags: [Subjects]
+      summary: Hydrate a persisted subject reference with resolver context
+      operationId: hydrateSubject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject_ref]
+              properties:
+                subject_ref:
+                  $ref: '#/components/schemas/SubjectRef'
+      responses:
+        '200':
+          description: Hydrated subject context for direct navigation or persisted references
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [subject]
+                properties:
+                  subject:
+                    $ref: '#/components/schemas/ResolvedSubject'
+        '404':
+          description: Subject reference does not exist
   /v1/market/quote:
     get:
       tags: [Market]
@@ -1762,7 +1790,7 @@ components:
           type: string
         resolution_path:
           type: string
-          enum: [auto_advanced, explicit_choice]
+          enum: [auto_advanced, explicit_choice, direct_ref]
         context:
           type: object
           description: Entry context for issuer, instrument, listing, or active listing details. Persist only subject_ref.

@@ -7,6 +7,7 @@ import { openChatTurnStream } from '../chat/openChatTurnStream.ts'
 import { persistUserChatTurn } from '../chat/persistUserChatTurn.ts'
 import { INITIAL_STREAM_STATE, applyChatStreamEvent } from '../chat/streamReducer.ts'
 import { StreamingTurnView } from '../chat/StreamingTurnView.tsx'
+import { authenticatedFetch, authenticatedJson } from '../http/authFetch.ts'
 import { useAuth } from '../shell/useAuth.ts'
 
 type ChatThread = {
@@ -70,16 +71,14 @@ export function ChatEmptyState() {
     setPending(true)
     setError(null)
     try {
-      const response = await fetch('/v1/chat/threads', {
+      const thread = await authenticatedJson<ChatThread>('/v1/chat/threads', {
+        userId: session.userId,
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'x-user-id': session.userId,
         },
         body: JSON.stringify({ title: title.trim() || null }),
       })
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const thread = (await response.json()) as ChatThread
       navigate(`/chat/${thread.thread_id}`)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught))
@@ -138,14 +137,10 @@ export function ChatThreadView() {
   useEffect(() => {
     if (!session || !threadId) return
     const controller = new AbortController()
-    fetch(`/v1/chat/threads/${encodeURIComponent(threadId)}/messages`, {
-      headers: { 'x-user-id': session.userId },
+    authenticatedJson<{ messages?: PersistedChatMessage[] }>(`/v1/chat/threads/${encodeURIComponent(threadId)}/messages`, {
+      userId: session.userId,
       signal: controller.signal,
     })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        return (await response.json()) as { messages?: PersistedChatMessage[] }
-      })
       .then((body) => {
         setHistory({ kind: 'ready', requestKey: historyRequestKey, messages: body.messages ?? [] })
       })
@@ -291,8 +286,8 @@ function ThreadList({ userId }: { userId: string }) {
   useEffect(() => {
     if (!userId) return
     const controller = new AbortController()
-    fetch('/v1/chat/threads', {
-      headers: { 'x-user-id': userId },
+    authenticatedFetch('/v1/chat/threads', {
+      userId,
       signal: controller.signal,
     })
       .then(async (response) => {

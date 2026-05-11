@@ -145,6 +145,61 @@ test("fallback adapter stops on non-retryable provider failures", async () => {
   assert.equal(fallbackCalls, 0);
 });
 
+test("fallback adapter can treat Polygon 403 as dev-only fallback eligible", async () => {
+  let fallbackCalls = 0;
+  const primary: MarketDataAdapter = {
+    providerName: "polygon",
+    sourceId: FIXTURE_SOURCE_ID,
+    async getQuote() {
+      return unavailable({
+        reason: "provider_error",
+        listing: aaplListing,
+        source_id: FIXTURE_SOURCE_ID,
+        retryable: false,
+        detail: "polygon: HTTP 403",
+        as_of: "2026-04-22T20:00:00.000Z",
+      });
+    },
+    async getBars() {
+      throw new Error("not used");
+    },
+  };
+  const fallbackQuote = normalizedQuote({
+    listing: aaplListing,
+    price: 189,
+    prev_close: 187,
+    session_state: "regular",
+    as_of: "2026-04-22T20:00:00.000Z",
+    delay_class: "delayed_15m",
+    currency: "USD",
+    source_id: FALLBACK_SOURCE_ID,
+  });
+  const fallback: MarketDataAdapter = {
+    providerName: "yahoo_finance_dev_market",
+    sourceId: FALLBACK_SOURCE_ID,
+    async getQuote() {
+      fallbackCalls++;
+      return available(fallbackQuote);
+    },
+    async getBars() {
+      throw new Error("not used");
+    },
+  };
+
+  const adapter = createFallbackMarketDataAdapter({
+    providerName: "market-fallback",
+    adapters: [primary, fallback],
+    isFallbackEligible: (outcome) =>
+      outcome.outcome === "unavailable" &&
+      outcome.detail === "polygon: HTTP 403",
+  });
+
+  const outcome = await adapter.getQuote({ listing: aaplListing });
+
+  assert.equal(isAvailable(outcome), true);
+  assert.equal(fallbackCalls, 1);
+});
+
 test("fallback adapter serves bars from fallback provider after retryable primary provider failure", async () => {
   const primary: MarketDataAdapter = {
     providerName: "primary",

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { webDevFlags } from '../devFlags'
 import { homeCardPath } from '../home/deepLinks.ts'
+import { authenticatedFetch } from '../http/authFetch.ts'
 import {
   fetchHomeSummary,
   type HomeAgentSummaryRow,
@@ -415,9 +416,10 @@ async function consumeRunActivityStream({
   lastEventId: number | null
   onEvent(event: ParsedRunActivity): void
 }) {
-  const headers: Record<string, string> = { 'x-user-id': userId }
+  const headers: Record<string, string> = {}
   if (lastEventId !== null) headers['Last-Event-ID'] = String(lastEventId)
-  const response = await fetch('/v1/run-activities/stream', {
+  const response = await authenticatedFetch('/v1/run-activities/stream', {
+    userId,
     credentials: 'same-origin',
     headers,
     signal,

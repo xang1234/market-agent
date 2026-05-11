@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
-import type { SubjectRef } from "../../resolver/src/subject-ref.ts";
-import { SUBJECT_KINDS } from "../../resolver/src/subject-ref.ts";
+import type { SubjectRef } from "../../shared/src/subject-ref.ts";
+import { SUBJECT_KINDS } from "../../shared/src/subject-ref.ts";
 
 import type { QueryExecutor } from "./types.ts";
 import {

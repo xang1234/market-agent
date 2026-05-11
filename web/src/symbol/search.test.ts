@@ -3,12 +3,15 @@ import test from 'node:test'
 import {
   clearSymbolTypeaheadForQueryChange,
   createSymbolTypeaheadState,
+  fetchSubjectHydration,
   moveSymbolTypeaheadHighlight,
   parseSubjectRouteParam,
   planSymbolResolution,
   selectedSymbolCandidate,
   symbolDetailPathForSubject,
+  subjectFromRef,
   subjectFromRouteParam,
+  subjectNeedsHydration,
   subjectRouteParam,
   type ResolvedSubject,
 } from './search.ts'
@@ -129,6 +132,97 @@ test('route fallback display avoids presenting raw subject refs as market labels
 test('parseSubjectRouteParam falls back without crashing on malformed percent-encoding', () => {
   const subjectRef = parseSubjectRouteParam('listing%ZZbroken')
 
-  assert.equal(subjectRef.kind, 'listing')
-  assert.equal(typeof subjectRef.id, 'string')
+  assert.deepEqual(subjectRef, { kind: 'legacy_listing_route', ticker: 'listing%ZZbroken' })
+})
+
+test('legacy ticker route fallback is not a canonical subject ref', () => {
+  const subject = subjectFromRouteParam('AAPL')
+
+  assert.deepEqual(subject.subject_ref, { kind: 'legacy_listing_route', ticker: 'AAPL' })
+  assert.equal(subject.display_name, 'AAPL')
+  assert.equal(subjectNeedsHydration(subject), false)
+})
+
+test('subjectNeedsHydration targets bare entity refs only', () => {
+  assert.equal(subjectNeedsHydration(subjectFromRef(appleListing.subject_ref)), true)
+  assert.equal(subjectNeedsHydration({ ...appleListing, context: {} }), true)
+  assert.equal(
+    subjectNeedsHydration({
+      ...appleListing,
+      context: {
+        issuer: {
+          subject_ref: {
+            kind: 'issuer',
+            id: '33333333-3333-4333-a333-333333333333',
+          },
+          legal_name: 'Apple Inc.',
+        },
+      },
+    }),
+    false,
+  )
+  assert.equal(
+    subjectNeedsHydration(
+      subjectFromRef({
+        kind: 'theme',
+        id: '55555555-5555-4555-a555-555555555555',
+      }),
+    ),
+    false,
+  )
+})
+
+test('fetchSubjectHydration posts a subject_ref and returns the hydrated subject', async () => {
+  const hydrated: ResolvedSubject = {
+    ...appleListing,
+    resolution_path: 'direct_ref',
+    context: {
+      issuer: {
+        subject_ref: {
+          kind: 'issuer',
+          id: '33333333-3333-4333-a333-333333333333',
+        },
+        legal_name: 'Apple Inc.',
+        cik: '320193',
+      },
+    },
+  }
+  const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
+  const fetchImpl: typeof fetch = async (input, init) => {
+    calls.push({ input, init })
+    return new Response(JSON.stringify({ subject: hydrated }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+
+  const subject = await fetchSubjectHydration({
+    subject_ref: appleListing.subject_ref,
+    endpoint: '/custom/hydrate',
+    fetchImpl,
+  })
+
+  assert.equal(subject.context?.issuer?.cik, '320193')
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].input, '/custom/hydrate')
+  assert.equal(calls[0].init?.method, 'POST')
+  assert.deepEqual(JSON.parse(String(calls[0].init?.body)), {
+    subject_ref: appleListing.subject_ref,
+  })
+})
+
+test('fetchSubjectHydration throws a status-specific error when hydration fails', async () => {
+  const fetchImpl: typeof fetch = async () =>
+    new Response(JSON.stringify({ error: 'missing' }), {
+      status: 404,
+      headers: { 'content-type': 'application/json' },
+    })
+
+  await assert.rejects(
+    fetchSubjectHydration({
+      subject_ref: appleListing.subject_ref,
+      fetchImpl,
+    }),
+    /subject hydrate failed with HTTP 404/,
+  )
 })

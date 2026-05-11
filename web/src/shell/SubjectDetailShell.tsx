@@ -1,8 +1,12 @@
+import { useEffect, useMemo, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useParams } from 'react-router-dom'
 import { analyzeEntryFromSubject } from '../analyze/analyzeEntry'
 import { QuoteSnapshot } from '../symbol/QuoteSnapshot'
 import { subjectDisplayName } from '../symbol/quote'
 import {
+  fetchSubjectHydration,
+  isCanonicalResolvedSubject,
+  subjectNeedsHydration,
   subjectFromRouteParam,
   subjectFromRouterState,
   type ResolvedSubject,
@@ -47,9 +51,36 @@ const HEADER_ACTION_CLASS =
 export function SubjectDetailShell() {
   const { subjectRef } = useParams<{ subjectRef: string }>()
   const location = useLocation()
-  const subject = subjectFromRouterState(location.state) ?? subjectFromRouteParam(subjectRef)
+  const routeSubject = useMemo(() => subjectFromRouteParam(subjectRef), [subjectRef])
+  const baseSubject = subjectFromRouterState(location.state) ?? routeSubject
+  const [hydratedSubject, setHydratedSubject] = useState<ResolvedSubject | null>(null)
+  const canonicalBaseSubject = isCanonicalResolvedSubject(baseSubject) ? baseSubject : null
+  const needsHydration = canonicalBaseSubject !== null && subjectNeedsHydration(canonicalBaseSubject)
   const { session } = useAuth()
   const userId = session?.userId ?? null
+  const hydratedSubjectMatchesBase =
+    canonicalBaseSubject !== null &&
+    hydratedSubject?.subject_ref.kind === canonicalBaseSubject.subject_ref.kind &&
+    hydratedSubject.subject_ref.id === canonicalBaseSubject.subject_ref.id
+  const subject = needsHydration && hydratedSubjectMatchesBase ? hydratedSubject : baseSubject
+  const canonicalSubject = isCanonicalResolvedSubject(subject) ? subject : null
+
+  useEffect(() => {
+    if (!needsHydration) return
+
+    const controller = new AbortController()
+    fetchSubjectHydration({
+      subject_ref: canonicalBaseSubject.subject_ref,
+      signal: controller.signal,
+    })
+      .then((hydrated) => setHydratedSubject(hydrated))
+      .catch((error: unknown) => {
+        if (error instanceof Error && error.name === 'AbortError') return
+        console.warn('subject hydration failed', error)
+      })
+
+    return () => controller.abort()
+  }, [canonicalBaseSubject, needsHydration])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -58,12 +89,16 @@ export function SubjectDetailShell() {
         className="border-b border-neutral-200 px-8 py-5 dark:border-neutral-800"
       >
         <QuoteSnapshot subject={subject} />
-        {userId !== null ? (
-          <SubjectMembershipBadges subjectRef={subject.subject_ref} userId={userId} />
+        {userId !== null && canonicalSubject !== null ? (
+          <SubjectMembershipBadges subjectRef={canonicalSubject.subject_ref} userId={userId} />
         ) : null}
         <div className="mt-4 flex items-center gap-2">
-          <SaveToWatchlistButton subject={subject} />
-          <AnalyzeThisSubjectButton subject={subject} />
+          {canonicalSubject !== null ? (
+            <>
+              <SaveToWatchlistButton subject={canonicalSubject} />
+              <AnalyzeThisSubjectButton subject={canonicalSubject} />
+            </>
+          ) : null}
         </div>
       </header>
       <nav

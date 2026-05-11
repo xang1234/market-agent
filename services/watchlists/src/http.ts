@@ -19,7 +19,7 @@ import {
   type WatchlistMember,
   type WatchlistRow,
 } from "./queries.ts";
-import { isSubjectRef, SUBJECT_KINDS, type SubjectKind, type SubjectRef } from "./subject-ref.ts";
+import { isSubjectRef, type SubjectRef } from "./subject-ref.ts";
 import {
   authenticatedUserRequiredMessage,
   readAuthenticatedUserId,
@@ -206,9 +206,9 @@ function matchRoute(method: string, rawUrl: string): Route | null {
     } catch {
       return null;
     }
-    if (!(SUBJECT_KINDS as readonly string[]).includes(kind)) return null;
-    if (id.length === 0) return null;
-    return { action: "remove", subject_ref: { kind: kind as SubjectKind, id } };
+    const subjectRef = { kind, id };
+    if (!isSubjectRef(subjectRef)) return null;
+    return { action: "remove", subject_ref: subjectRef };
   }
 
   return null;

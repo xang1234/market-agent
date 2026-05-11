@@ -1,4 +1,4 @@
-import { assertSubjectRef, type SubjectRef } from "../../resolver/src/subject-ref.ts";
+import { assertSubjectRef, type SubjectRef } from "../../shared/src/subject-ref.ts";
 import type { FindingSeverity } from "./severity-scorer.ts";
 
 export type FindingCardBlock = {

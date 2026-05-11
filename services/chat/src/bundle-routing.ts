@@ -1,4 +1,4 @@
-import { SUBJECT_KINDS, type SubjectKind } from "../../resolver/src/subject-ref.ts";
+import { SUBJECT_KINDS, type SubjectKind } from "../../shared/src/subject-ref.ts";
 
 export class BundleRoutingError extends Error {
   constructor(message: string) {

@@ -26,6 +26,9 @@ const alertsFiredMigrationPath = join(dbRoot, "migrations", "0019_alerts_fired.u
 const alertDeliveryMetadataMigrationPath = join(dbRoot, "migrations", "0023_alert_delivery_metadata.up.sql");
 const factReviewActionsMigrationPath = join(dbRoot, "migrations", "0021_fact_review_actions.up.sql");
 const watchlistListManagementMigrationPath = join(dbRoot, "migrations", "0022_watchlist_list_management.up.sql");
+const polygonDiscoveryMigrationPath = join(dbRoot, "migrations", "0024_instruments_figi_composite.up.sql");
+const providerBackedDevDataMigrationPath = join(dbRoot, "migrations", "0025_provider_backed_dev_data.up.sql");
+const secFactIdentityMigrationPath = join(dbRoot, "migrations", "0026_sec_fact_identity.up.sql");
 
 function loadExpectedTables() {
   return Array.from(
@@ -137,6 +140,45 @@ test("fact review actions preserve audit history instead of cascading queue dele
   }
 });
 
+test("polygon ticker discovery can dedupe instruments by composite FIGI", () => {
+  const forwardMigration = readFileSync(polygonDiscoveryMigrationPath, "utf8");
+  const schema = readFileSync(schemaPath, "utf8");
+
+  for (const sql of [forwardMigration, schema]) {
+    assert.match(sql, /create unique index(?: if not exists)? instruments_figi_composite_idx/i);
+    assert.match(sql, /on instruments\(figi_composite\)/i);
+    assert.match(sql, /where figi_composite is not null/i);
+  }
+  assert.match(forwardMigration, /alter table instruments\s+add column if not exists figi_composite text/i);
+});
+
+test("provider-backed dev data schema stores market cache and saved screens", () => {
+  const forwardMigration = readFileSync(providerBackedDevDataMigrationPath, "utf8");
+  const schema = readFileSync(schemaPath, "utf8");
+
+  for (const sql of [forwardMigration, schema]) {
+    assert.match(sql, /create table(?: if not exists)? market_quote_snapshots/i);
+    assert.match(sql, /create table(?: if not exists)? market_bar_ranges/i);
+    assert.match(sql, /create table(?: if not exists)? market_bars/i);
+    assert.match(sql, /create table(?: if not exists)? screener_screens/i);
+    assert.match(sql, /reference_data/i);
+    assert.match(sql, /market_data/i);
+  }
+});
+
+test("SEC fact identity prevents duplicate active reported facts", () => {
+  const forwardMigration = readFileSync(secFactIdentityMigrationPath, "utf8");
+  const schema = readFileSync(schemaPath, "utf8");
+
+  for (const sql of [forwardMigration, schema]) {
+    assert.match(sql, /create unique index(?: if not exists)? facts_active_reported_identity_idx/i);
+    assert.match(sql, /on facts\(subject_kind, subject_id, metric_id, period_kind, fiscal_year, fiscal_period, source_id, method\)/i);
+    assert.match(sql, /where method = 'reported'/i);
+    assert.match(sql, /invalidated_at is null/i);
+    assert.match(sql, /superseded_by is null/i);
+  }
+});
+
 test("migrate up applies pending migrations and records them in schema_migrations", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for db migration integration coverage");
@@ -160,7 +202,7 @@ test("migrate up applies pending migrations and records them in schema_migration
   });
 
   assert.equal(migrateResult.status, 0, migrateResult.stderr || migrateResult.stdout);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "23");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "27");
   assert.deepEqual(
     queryValue(containerName, "select version || ':' || name from schema_migrations order by version").split("\n"),
     [
@@ -187,6 +229,10 @@ test("migrate up applies pending migrations and records them in schema_migration
       "0021:fact_review_actions",
       "0022:watchlist_list_management",
       "0023:alert_delivery_metadata",
+      "0024:instruments_figi_composite",
+      "0025:provider_backed_dev_data",
+      "0026:sec_fact_identity",
+      "0027:issuer_profile_enrichment_provenance",
     ],
   );
 
@@ -933,7 +979,7 @@ test("migrate down rolls back schema changes when removing the migration record 
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /rejecting schema_migrations delete/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "23");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "27");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -942,13 +988,13 @@ test("migrate down rolls back schema changes when removing the migration record 
   // migration's schema change must still be in place. If the runner
   // accidentally executed the down DDL before hitting the trigger block, the
   // schema_migrations row count alone wouldn't catch that — checking the
-  // latest migration's actual artifact does. 0023 added notification_delivery;
-  // the down would remove it, so its presence is independent proof the down
-  // DDL did not execute.
+  // latest migration's actual artifact does. 0027 added the issuer profile
+  // enrichment table; the down would remove it, so its presence is independent proof the
+  // down DDL did not execute.
   assert.equal(
     queryValue(
       containerName,
-      "select count(*) from information_schema.columns where table_name = 'alerts_fired' and column_name = 'notification_delivery'",
+      "select count(*) from pg_tables where schemaname = 'public' and tablename = 'issuer_profile_enrichments'",
     ),
     "1",
   );
@@ -999,7 +1045,7 @@ test("migrate down fails when any applied migration is missing locally", { timeo
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /Applied migration 0000 is missing locally/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "24");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "28");
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
 });
 

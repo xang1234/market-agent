@@ -112,8 +112,8 @@ const META = candidate(META_ID, {
 
 const ALL = [APPLE, MSFT, NVDA, TSLA, META];
 
-test("executor returns all candidates when no filters and sorts by market_cap desc", () => {
-  const r = executeScreenerQuery(deps(ALL), baseQuery());
+test("executor returns all candidates when no filters and sorts by market_cap desc", async () => {
+  const r = await executeScreenerQuery(deps(ALL), baseQuery());
   assert.equal(r.total_count, 5);
   assert.equal(r.rows.length, 5);
   assert.deepEqual(
@@ -126,8 +126,8 @@ test("executor returns all candidates when no filters and sorts by market_cap de
   assert.equal(r.snapshot_compatible, false);
 });
 
-test("executor universe filter excludes by mic / sector", () => {
-  const r = executeScreenerQuery(
+test("executor universe filter excludes by mic / sector", async () => {
+  const r = await executeScreenerQuery(
     deps(ALL),
     baseQuery({
       universe: [{ field: "sector", values: ["Technology"] }],
@@ -139,8 +139,8 @@ test("executor universe filter excludes by mic / sector", () => {
   );
 });
 
-test("executor market clause: numeric range filters by last_price", () => {
-  const r = executeScreenerQuery(
+test("executor market clause: numeric range filters by last_price", async () => {
+  const r = await executeScreenerQuery(
     deps(ALL),
     baseQuery({
       market: [{ field: "last_price", min: 200, max: 600 }],
@@ -152,8 +152,8 @@ test("executor market clause: numeric range filters by last_price", () => {
   );
 });
 
-test("executor fundamentals clause: filter by market_cap > $1T", () => {
-  const r = executeScreenerQuery(
+test("executor fundamentals clause: filter by market_cap > $1T", async () => {
+  const r = await executeScreenerQuery(
     deps(ALL),
     baseQuery({
       fundamentals: [{ field: "market_cap", min: 1_000_000_000_000 }],
@@ -165,9 +165,9 @@ test("executor fundamentals clause: filter by market_cap > $1T", () => {
   );
 });
 
-test("executor combines universe + market + fundamentals filters (AND semantics)", () => {
+test("executor combines universe + market + fundamentals filters (AND semantics)", async () => {
   // Tech sector + price > $300 + market_cap > $2T → MSFT, NVDA only.
-  const r = executeScreenerQuery(
+  const r = await executeScreenerQuery(
     deps(ALL),
     baseQuery({
       universe: [{ field: "sector", values: ["Technology"] }],
@@ -181,8 +181,8 @@ test("executor combines universe + market + fundamentals filters (AND semantics)
   );
 });
 
-test("executor sort asc reverses the order", () => {
-  const r = executeScreenerQuery(
+test("executor sort asc reverses the order", async () => {
+  const r = await executeScreenerQuery(
     deps(ALL),
     baseQuery({
       sort: [{ field: "market_cap", direction: "asc" }],
@@ -194,10 +194,10 @@ test("executor sort asc reverses the order", () => {
   );
 });
 
-test("executor multi-field sort uses primary then tiebreaker", () => {
+test("executor multi-field sort uses primary then tiebreaker", async () => {
   // Primary: gross_margin desc — META(0.81) > NVDA(0.74) > MSFT(0.69) > APPLE(0.45) > TSLA(0.18)
   // No ties here; just verify order respects primary.
-  const r = executeScreenerQuery(
+  const r = await executeScreenerQuery(
     deps(ALL),
     baseQuery({
       sort: [
@@ -212,8 +212,8 @@ test("executor multi-field sort uses primary then tiebreaker", () => {
   );
 });
 
-test("executor pagination: limit caps row count, total_count holds full match set", () => {
-  const r = executeScreenerQuery(
+test("executor pagination: limit caps row count, total_count holds full match set", async () => {
+  const r = await executeScreenerQuery(
     deps(ALL),
     baseQuery({ page: { limit: 2 } }),
   );
@@ -227,8 +227,8 @@ test("executor pagination: limit caps row count, total_count holds full match se
   assert.equal(r.rows[1].rank, 2);
 });
 
-test("executor pagination: offset advances rank window globally", () => {
-  const r = executeScreenerQuery(
+test("executor pagination: offset advances rank window globally", async () => {
+  const r = await executeScreenerQuery(
     deps(ALL),
     baseQuery({ page: { limit: 2, offset: 2 } }),
   );
@@ -242,8 +242,8 @@ test("executor pagination: offset advances rank window globally", () => {
   assert.equal(r.rows[1].rank, 4);
 });
 
-test("executor pagination: offset beyond match set returns empty rows but real total_count", () => {
-  const r = executeScreenerQuery(
+test("executor pagination: offset beyond match set returns empty rows but real total_count", async () => {
+  const r = await executeScreenerQuery(
     deps(ALL),
     baseQuery({ page: { limit: 2, offset: 100 } }),
   );
@@ -251,7 +251,7 @@ test("executor pagination: offset beyond match set returns empty rows but real t
   assert.equal(r.rows.length, 0);
 });
 
-test("executor: numeric clause excludes candidates whose value is null", () => {
+test("executor: numeric clause excludes candidates whose value is null", async () => {
   const lossMaker = candidate("66666666-6666-4666-a666-666666666666", {
     display: { primary: "Loss Co", ticker: "LOSS" },
     fundamentals: {
@@ -263,7 +263,7 @@ test("executor: numeric clause excludes candidates whose value is null", () => {
       revenue_growth_yoy: -0.05,
     },
   });
-  const r = executeScreenerQuery(
+  const r = await executeScreenerQuery(
     deps([APPLE, lossMaker]),
     baseQuery({
       fundamentals: [{ field: "pe_ratio", min: 5 }],
@@ -276,7 +276,7 @@ test("executor: numeric clause excludes candidates whose value is null", () => {
   );
 });
 
-test("executor: sort with null values pushes them to the bottom regardless of direction", () => {
+test("executor: sort with null values pushes them to the bottom regardless of direction", async () => {
   const lossMaker = candidate("66666666-6666-4666-a666-666666666666", {
     display: { primary: "Loss Co" },
     fundamentals: {
@@ -289,7 +289,7 @@ test("executor: sort with null values pushes them to the bottom regardless of di
     },
   });
   // Asc sort by pe_ratio — null should still rank last, not first.
-  const r = executeScreenerQuery(
+  const r = await executeScreenerQuery(
     deps([APPLE, MSFT, lossMaker]),
     baseQuery({
       sort: [{ field: "pe_ratio", direction: "asc" }],
@@ -301,12 +301,12 @@ test("executor: sort with null values pushes them to the bottom regardless of di
   );
 });
 
-test("executor: market enum clause filters by delay_class", () => {
+test("executor: market enum clause filters by delay_class", async () => {
   const eod = candidate("66666666-6666-4666-a666-666666666666", {
     display: { primary: "EOD Only", ticker: "EOD" },
     quote: { last_price: 50, prev_close: 50, change_pct: 0, volume: 1_000, delay_class: "eod", currency: "USD", as_of: AS_OF },
   });
-  const r = executeScreenerQuery(
+  const r = await executeScreenerQuery(
     deps([APPLE, eod]),
     baseQuery({
       market: [{ field: "delay_class", values: ["real_time"] }],
@@ -318,8 +318,8 @@ test("executor: market enum clause filters by delay_class", () => {
   );
 });
 
-test("executor returns an empty response when no candidates match", () => {
-  const r = executeScreenerQuery(
+test("executor returns an empty response when no candidates match", async () => {
+  const r = await executeScreenerQuery(
     deps(ALL),
     baseQuery({
       universe: [{ field: "asset_type", values: ["bond"] }],
@@ -329,19 +329,19 @@ test("executor returns an empty response when no candidates match", () => {
   assert.equal(r.rows.length, 0);
 });
 
-test("executor passes the validated frozen ScreenerResponse contract", () => {
+test("executor passes the validated frozen ScreenerResponse contract", async () => {
   // Freezing + invariant checks happen inside normalizedScreenerResponse,
   // which is what the executor returns. Just sanity-check a few invariants.
-  const r = executeScreenerQuery(deps(ALL), baseQuery());
+  const r = await executeScreenerQuery(deps(ALL), baseQuery());
   assert.equal(Object.isFrozen(r), true);
   assert.equal(Object.isFrozen(r.rows), true);
   assert.equal(Object.isFrozen(r.rows[0]), true);
 });
 
-test("executor does not mutate the candidate registry (sort happens on a copy)", () => {
+test("executor does not mutate the candidate registry (sort happens on a copy)", async () => {
   const repo = createInMemoryCandidateRepository(ALL);
   const before = repo.list().map((c) => c.subject_ref.id);
-  executeScreenerQuery(
+  await executeScreenerQuery(
     { candidates: repo, clock: fixedClock },
     baseQuery({
       sort: [{ field: "market_cap", direction: "asc" }],
@@ -351,8 +351,8 @@ test("executor does not mutate the candidate registry (sort happens on a copy)",
   assert.deepEqual(after, before);
 });
 
-test("executor: row.subject_ref hands off the canonical {kind, id} for symbol-entry flow", () => {
-  const r = executeScreenerQuery(
+test("executor: row.subject_ref hands off the canonical {kind, id} for symbol-entry flow", async () => {
+  const r = await executeScreenerQuery(
     deps([APPLE]),
     baseQuery(),
   );

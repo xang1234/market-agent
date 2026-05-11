@@ -1,5 +1,10 @@
-import type { SubjectKind, SubjectRef } from "../../resolver/src/subject-ref.ts";
-import { SUBJECT_KINDS } from "../../resolver/src/subject-ref.ts";
+import {
+  SUBJECT_KINDS,
+  isSubjectRef,
+  isUuid,
+  type SubjectKind,
+  type SubjectRef,
+} from "../../shared/src/subject-ref.ts";
 
 export type ChatThreadsDb = {
   query<R extends Record<string, unknown> = Record<string, unknown>>(
@@ -21,8 +26,6 @@ export class ChatThreadValidationError extends Error {
     this.name = "ChatThreadValidationError";
   }
 }
-
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // UI input cap; column is `text` so bumping requires no schema change.
 const MAX_TITLE_LENGTH = 240;
@@ -210,7 +213,7 @@ function toIsoString(value: Date | string | null | undefined): string | null {
 }
 
 function assertUuid(value: unknown, field: string): asserts value is string {
-  if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
+  if (!isUuid(value)) {
     throw new ChatThreadValidationError(`${field} must be a UUID`);
   }
 }
@@ -234,13 +237,13 @@ function normalizePrimarySubjectRef(value: SubjectRef | undefined): SubjectRef |
     throw new ChatThreadValidationError("primary_subject_ref must be an object with kind and id");
   }
   const candidate = value as { kind?: unknown; id?: unknown };
-  if (typeof candidate.kind !== "string" || !(SUBJECT_KINDS as readonly string[]).includes(candidate.kind)) {
+  if (typeof candidate.kind !== "string" || !(SUBJECT_KINDS as ReadonlyArray<string>).includes(candidate.kind)) {
     throw new ChatThreadValidationError(
       `primary_subject_ref.kind must be one of: ${SUBJECT_KINDS.join(", ")}`,
     );
   }
-  if (typeof candidate.id !== "string" || !UUID_PATTERN.test(candidate.id)) {
-    throw new ChatThreadValidationError("primary_subject_ref.id must be a UUID");
+  if (!isSubjectRef(value)) {
+    throw new ChatThreadValidationError("primary_subject_ref.id must be a UUID v4");
   }
-  return { kind: candidate.kind as SubjectKind, id: candidate.id };
+  return { kind: value.kind, id: value.id };
 }

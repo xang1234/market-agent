@@ -26,7 +26,10 @@ import {
 import { DEV_SEGMENTS } from "../src/dev-segment-fixtures.ts";
 import { DEV_STATEMENTS } from "../src/dev-statement-fixtures.ts";
 import { DEV_STATS_INPUTS } from "../src/dev-stats-fixtures.ts";
-import type { UnavailableEnvelope } from "../src/availability.ts";
+import {
+  FundamentalsDataUnavailableError,
+  type UnavailableEnvelope,
+} from "../src/availability.ts";
 import { assertIssuerProfileContract } from "../src/profile.ts";
 
 const FIXED_NOW = new Date("2026-04-26T15:30:00.000Z");
@@ -191,6 +194,28 @@ test("GET /v1/fundamentals/profile returns 502 when the repository throws an une
   assert.equal(res.status, 502);
   const body = (await res.json()) as { error: string };
   assert.equal(body.error, "upstream fundamentals data unavailable");
+});
+
+test("GET /v1/fundamentals/stats surfaces typed provider failures as unavailable envelopes", async (t) => {
+  const deps: FundamentalsServerDeps = {
+    ...buildDeps(),
+    stats: {
+      async find() {
+        throw new FundamentalsDataUnavailableError("provider_error", "sec_edgar: HTTP 403", false);
+      },
+    },
+  };
+  const url = await startServer(t, deps);
+  const res = await fetch(
+    `${url}/v1/fundamentals/stats?subject_kind=issuer&subject_id=${APPLE_ISSUER_ID}`,
+  );
+
+  assert.equal(res.status, 502);
+  const body = (await res.json()) as { error: string; unavailable: UnavailableEnvelope };
+  assert.equal(body.error, "fundamentals stats unavailable");
+  assert.equal(body.unavailable.reason, "provider_error");
+  assert.equal(body.unavailable.retryable, false);
+  assert.equal(body.unavailable.detail, "sec_edgar: HTTP 403");
 });
 
 test("response surfaces every issuer in DEV_ISSUER_PROFILES with its declared legal_name", async (t) => {

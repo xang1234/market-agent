@@ -1,11 +1,9 @@
 // Listing context lookup: maps a listing UUID to the provider-neutral context
 // needed to fetch quotes (ticker + venue + currency + display timezone).
 //
-// In production this would query the `listings` table seeded by P0.5 and
-// joined to the relevant venue/currency tables. For dev mode, a small
-// in-memory map keyed by listing UUID stands in. Either backing exposes the
-// same `find` shape so callers (the polygon adapter's resolveListing dep,
-// the HTTP handler) don't change between environments.
+// Normal dev uses the Postgres implementation so provider-discovered listings
+// can quote immediately and survive restarts. The in-memory implementation is
+// retained for focused unit tests.
 
 import type { ListingSubjectRef, UUID } from "./subject-ref.ts";
 
@@ -19,6 +17,13 @@ export type ListingRecord = {
 
 export type ListingRepository = {
   find(listing_id: UUID): Promise<ListingRecord | null>;
+};
+
+export type ListingQueryExecutor = {
+  query<R extends Record<string, unknown> = Record<string, unknown>>(
+    text: string,
+    values?: unknown[],
+  ): Promise<{ rows: R[] }>;
 };
 
 export class ListingNotFoundError extends Error {
@@ -37,6 +42,24 @@ export function createInMemoryListingRepository(
   return {
     async find(listing_id: UUID): Promise<ListingRecord | null> {
       return byId.get(listing_id) ?? null;
+    },
+  };
+}
+
+export function createPostgresListingRepository(db: ListingQueryExecutor): ListingRepository {
+  return {
+    async find(listing_id: UUID): Promise<ListingRecord | null> {
+      const result = await db.query<ListingRecord>(
+        `select listing_id::text as listing_id,
+                ticker,
+                mic,
+                trading_currency,
+                timezone
+           from listings
+          where listing_id = $1`,
+        [listing_id],
+      );
+      return result.rows[0] ?? null;
     },
   };
 }

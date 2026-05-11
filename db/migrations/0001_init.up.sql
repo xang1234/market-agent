@@ -24,7 +24,16 @@ create type asset_type as enum (
 );
 
 create type source_kind as enum (
-  'filing', 'press_release', 'transcript', 'article', 'research_note', 'social_post', 'upload', 'internal'
+  'filing',
+  'press_release',
+  'transcript',
+  'article',
+  'research_note',
+  'social_post',
+  'upload',
+  'internal',
+  'reference_data',
+  'market_data'
 );
 
 create type trust_tier as enum ('primary', 'secondary', 'tertiary', 'user');
@@ -175,6 +184,77 @@ create table sources (
   created_at timestamptz not null default now()
 );
 create index sources_provider_kind_idx on sources(provider, kind);
+
+create table issuer_profile_enrichments (
+  issuer_id uuid not null references issuers(issuer_id) on delete cascade,
+  field_name text not null check (field_name in ('domicile', 'sector', 'industry')),
+  field_value text not null check (length(field_value) > 0),
+  source_id uuid not null references sources(source_id),
+  provider text not null,
+  retrieved_at timestamptz not null,
+  expires_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (issuer_id, field_name, source_id)
+);
+create index issuer_profile_enrichments_fresh_idx
+  on issuer_profile_enrichments(issuer_id, field_name, retrieved_at desc);
+
+create table market_quote_snapshots (
+  quote_snapshot_id uuid primary key default gen_random_uuid(),
+  listing_id uuid not null references listings(listing_id) on delete cascade,
+  source_id uuid not null references sources(source_id),
+  provider text not null,
+  price numeric not null check (price > 0),
+  prev_close numeric not null check (prev_close > 0),
+  session_state text not null check (session_state in ('pre_market', 'regular', 'post_market', 'closed')),
+  as_of timestamptz not null,
+  delay_class text not null check (delay_class in ('real_time', 'delayed_15m', 'eod', 'unknown')),
+  currency text not null,
+  fetched_at timestamptz not null,
+  expires_at timestamptz not null,
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (listing_id, source_id, as_of)
+);
+create index market_quote_snapshots_fresh_idx
+  on market_quote_snapshots(listing_id, expires_at desc, as_of desc);
+
+create table market_bar_ranges (
+  bar_range_id uuid primary key default gen_random_uuid(),
+  listing_id uuid not null references listings(listing_id) on delete cascade,
+  source_id uuid not null references sources(source_id),
+  provider text not null,
+  interval text not null check (interval in ('1m', '5m', '15m', '1h', '1d')),
+  adjustment_basis text not null check (adjustment_basis in ('unadjusted', 'split_adjusted', 'split_and_div_adjusted')),
+  range_start timestamptz not null,
+  range_end timestamptz not null,
+  as_of timestamptz not null,
+  delay_class text not null check (delay_class in ('real_time', 'delayed_15m', 'eod', 'unknown')),
+  currency text not null,
+  fetched_at timestamptz not null,
+  expires_at timestamptz not null,
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check (range_start < range_end),
+  unique (listing_id, source_id, interval, adjustment_basis, range_start, range_end)
+);
+create index market_bar_ranges_fresh_idx
+  on market_bar_ranges(listing_id, interval, adjustment_basis, expires_at desc);
+
+create table market_bars (
+  bar_range_id uuid not null references market_bar_ranges(bar_range_id) on delete cascade,
+  ts timestamptz not null,
+  open numeric not null check (open > 0),
+  high numeric not null check (high > 0),
+  low numeric not null check (low > 0),
+  close numeric not null check (close > 0),
+  volume numeric not null check (volume >= 0),
+  primary key (bar_range_id, ts),
+  check (high >= low and high >= open and high >= close and low <= open and low <= close)
+);
 
 create table documents (
   document_id uuid primary key default gen_random_uuid(),
@@ -355,6 +435,13 @@ create index facts_subject_metric_idx on facts(subject_kind, subject_id, metric_
 create index facts_metric_period_idx on facts(metric_id, period_end desc);
 create index facts_asof_idx on facts(as_of desc);
 create index facts_verification_idx on facts(verification_status);
+create unique index facts_active_reported_identity_idx
+  on facts(subject_kind, subject_id, metric_id, period_kind, fiscal_year, fiscal_period, source_id, method)
+  where method = 'reported'
+    and invalidated_at is null
+    and superseded_by is null
+    and fiscal_year is not null
+    and fiscal_period is not null;
 
 create table computations (
   computation_id uuid primary key default gen_random_uuid(),
@@ -451,6 +538,17 @@ create table findings (
 );
 -- findings must point at a sealed snapshot and remain user-facing artifacts.
 create index findings_agent_created_idx on findings(agent_id, created_at desc);
+
+create table screener_screens (
+  screen_id uuid primary key,
+  user_id uuid not null references users(user_id) on delete cascade,
+  name text not null,
+  definition jsonb not null,
+  created_at timestamptz not null,
+  updated_at timestamptz not null,
+  check (created_at <= updated_at)
+);
+create index screener_screens_user_updated_idx on screener_screens(user_id, updated_at desc);
 
 create table run_activities (
   run_activity_id uuid primary key default gen_random_uuid(),

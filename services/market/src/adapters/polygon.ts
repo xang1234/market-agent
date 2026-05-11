@@ -21,6 +21,12 @@ export type PolygonListingContext = {
 
 export type PolygonFetcher = (path: string) => Promise<unknown>;
 
+export type PolygonHttpFetcherOptions = {
+  apiKey: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+};
+
 export type PolygonAdapterDeps = {
   sourceId: UUID;
   delayClass: DelayClass;
@@ -83,6 +89,26 @@ const INTERVAL_TO_POLYGON: Record<BarInterval, { multiplier: number; timespan: s
   "1d": { multiplier: 1, timespan: "day" },
 };
 
+const DEFAULT_POLYGON_BASE_URL = "https://api.polygon.io";
+
+export function createPolygonHttpFetcher(options: PolygonHttpFetcherOptions): PolygonFetcher {
+  const apiKey = options.apiKey.trim();
+  const baseUrl = options.baseUrl ?? DEFAULT_POLYGON_BASE_URL;
+  const fetchImpl = options.fetchImpl ?? fetch;
+
+  return async (path: string): Promise<unknown> => {
+    const url = new URL(path, baseUrl);
+    if (!url.searchParams.has("apiKey")) {
+      url.searchParams.set("apiKey", apiKey);
+    }
+    const response = await fetchImpl(url);
+    if (!response.ok) {
+      throw new PolygonFetchError(response.status, `polygon: HTTP ${response.status}`);
+    }
+    return response.json();
+  };
+}
+
 export function createPolygonAdapter(deps: PolygonAdapterDeps): MarketDataAdapter {
   assertOneOf(deps.delayClass, DELAY_CLASSES, "polygon.delayClass");
   const clock = deps.clock ?? (() => new Date());
@@ -111,34 +137,16 @@ export function createPolygonAdapter(deps: PolygonAdapterDeps): MarketDataAdapte
 
       try {
         const ctx = await resolveListing(deps, request.listing);
-        const path = `/v2/snapshot/locale/us/markets/stocks/tickers/${encodeURIComponent(ctx.ticker)}`;
-        const raw = (await deps.fetcher(path)) as PolygonSnapshotPayload;
-
-        const price = raw?.ticker?.lastTrade?.p;
-        const tNs = raw?.ticker?.lastTrade?.t;
-        const prevClose = raw?.ticker?.prevDay?.c;
-
-        if (typeof price !== "number" || typeof tNs !== "number") {
-          throw new MalformedPayloadError("snapshot.lastTrade missing price or timestamp");
+        try {
+          return await getSnapshotQuote(deps, request, ctx);
+        } catch (err) {
+          if (!shouldTryAggregateQuoteFallback(err)) throw err;
+          try {
+            return await getAggregateQuoteFallback(deps, clock, request, ctx);
+          } catch {
+            throw err;
+          }
         }
-        if (typeof prevClose !== "number") {
-          throw new MalformedPayloadError("snapshot.prevDay.c missing — cannot compute change");
-        }
-
-        const as_of = new Date(Math.floor(tNs / 1_000_000)).toISOString();
-
-        return available(
-          normalizedQuote({
-            listing: request.listing,
-            price,
-            prev_close: prevClose,
-            session_state: classifySession(raw?.ticker?.market_status, as_of),
-            as_of,
-            delay_class: deps.delayClass,
-            currency: ctx.currency,
-            source_id: deps.sourceId,
-          }),
-        );
       } catch (err) {
         return wrapUnavailable(request.listing, err);
       }
@@ -164,27 +172,32 @@ export function createPolygonAdapter(deps: PolygonAdapterDeps): MarketDataAdapte
         const pages = await fetchAggPages(deps.fetcher, path);
 
         const rawBars = pages.flatMap((page) => page.results ?? []);
-        const bars: NormalizedBar[] = rawBars.map((row, i) => {
-          const { t, o, h, l, c, v } = row;
-          if (
-            typeof t !== "number" ||
-            typeof o !== "number" ||
-            typeof h !== "number" ||
-            typeof l !== "number" ||
-            typeof c !== "number" ||
-            typeof v !== "number"
-          ) {
-            throw new MalformedPayloadError(`aggs row ${i} missing OHLCV field`);
-          }
-          return {
-            ts: new Date(t).toISOString(),
-            open: o,
-            high: h,
-            low: l,
-            close: c,
-            volume: v,
-          };
-        });
+        const bars: NormalizedBar[] = rawBars
+          .map((row, i) => {
+            const { t, o, h, l, c, v } = row;
+            if (
+              typeof t !== "number" ||
+              typeof o !== "number" ||
+              typeof h !== "number" ||
+              typeof l !== "number" ||
+              typeof c !== "number" ||
+              typeof v !== "number"
+            ) {
+              throw new MalformedPayloadError(`aggs row ${i} missing OHLCV field`);
+            }
+            return {
+              ts: new Date(t).toISOString(),
+              open: o,
+              high: h,
+              low: l,
+              close: c,
+              volume: v,
+            };
+          })
+          .filter((bar) => {
+            const barMs = Date.parse(bar.ts);
+            return barMs >= startMs && barMs < endMs;
+          });
 
         const adjustment_basis = aggregateAdjustmentBasis(pages);
         const asOf = bars.length > 0 ? bars[bars.length - 1].ts : request.range.end;
@@ -207,6 +220,87 @@ export function createPolygonAdapter(deps: PolygonAdapterDeps): MarketDataAdapte
       }
     },
   };
+}
+
+async function getSnapshotQuote(
+  deps: PolygonAdapterDeps,
+  request: QuoteRequest,
+  ctx: PolygonListingContext,
+): Promise<MarketDataOutcome<NormalizedQuote>> {
+  const path = `/v2/snapshot/locale/us/markets/stocks/tickers/${encodeURIComponent(ctx.ticker)}`;
+  const raw = (await deps.fetcher(path)) as PolygonSnapshotPayload;
+
+  const price = raw?.ticker?.lastTrade?.p;
+  const tNs = raw?.ticker?.lastTrade?.t;
+  const prevClose = raw?.ticker?.prevDay?.c;
+
+  if (typeof price !== "number" || typeof tNs !== "number") {
+    throw new MalformedPayloadError("snapshot.lastTrade missing price or timestamp");
+  }
+  if (typeof prevClose !== "number") {
+    throw new MalformedPayloadError("snapshot.prevDay.c missing — cannot compute change");
+  }
+
+  const as_of = new Date(Math.floor(tNs / 1_000_000)).toISOString();
+
+  return available(
+    normalizedQuote({
+      listing: request.listing,
+      price,
+      prev_close: prevClose,
+      session_state: classifySession(raw?.ticker?.market_status, as_of),
+      as_of,
+      delay_class: deps.delayClass,
+      currency: ctx.currency,
+      source_id: deps.sourceId,
+    }),
+  );
+}
+
+async function getAggregateQuoteFallback(
+  deps: PolygonAdapterDeps,
+  clock: () => Date,
+  request: QuoteRequest,
+  ctx: PolygonListingContext,
+): Promise<MarketDataOutcome<NormalizedQuote>> {
+  const endMs = clock().getTime();
+  const startMs = endMs - 14 * 24 * 60 * 60 * 1000;
+  const path =
+    `/v2/aggs/ticker/${encodeURIComponent(ctx.ticker)}/range/` +
+    `1/day/${startMs}/${endMs}?adjusted=true&sort=asc&limit=50000`;
+  const pages = await fetchAggPages(deps.fetcher, path);
+  const rows = pages.flatMap((page) => page.results ?? [])
+    .filter((row) =>
+      typeof row.t === "number" &&
+      typeof row.o === "number" &&
+      typeof row.h === "number" &&
+      typeof row.l === "number" &&
+      typeof row.c === "number" &&
+      typeof row.v === "number"
+    )
+    .sort((left, right) => (left.t as number) - (right.t as number));
+  if (rows.length < 2) {
+    throw new MalformedPayloadError("aggregate quote fallback needs at least two daily bars");
+  }
+  const latest = rows[rows.length - 1];
+  const previous = rows[rows.length - 2];
+  return available(
+    normalizedQuote({
+      listing: request.listing,
+      price: latest.c as number,
+      prev_close: previous.c as number,
+      session_state: "closed",
+      as_of: new Date(latest.t as number).toISOString(),
+      delay_class: deps.delayClass,
+      currency: ctx.currency,
+      source_id: deps.sourceId,
+    }),
+  );
+}
+
+function shouldTryAggregateQuoteFallback(err: unknown): boolean {
+  if (err instanceof PolygonFetchError) return err.status === 403;
+  return err instanceof MalformedPayloadError;
 }
 
 // Internal sentinel for "200 OK but the payload is missing required fields."

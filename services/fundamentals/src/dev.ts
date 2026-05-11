@@ -1,38 +1,54 @@
-import { createInMemoryConsensusRepository } from "./consensus-repository.ts";
-import { createInMemoryEarningsRepository } from "./earnings-repository.ts";
-import { createInMemoryHoldersRepository } from "./holders-repository.ts";
-import { createInMemoryIssuerProfileRepository } from "./issuer-repository.ts";
-import { createInMemorySegmentsRepository } from "./segments-repository.ts";
-import { createInMemoryStatementRepository } from "./statement-repository.ts";
-import { createInMemoryStatsRepository } from "./stats-repository.ts";
-import { DEV_CONSENSUS_INPUTS } from "./dev-consensus-fixtures.ts";
-import { DEV_EARNINGS_INPUTS } from "./dev-earnings-fixtures.ts";
+import { Pool } from "pg";
+import { createDevProvidersIssuerProfileRepository } from "./dev-providers.ts";
+import { createPostgresIssuerProfileRepository } from "./issuer-repository.ts";
+import { createSecCompanyFactsHttpFetcher } from "./sec-edgar-http.ts";
 import {
-  DEV_INSIDER_HOLDERS_INPUTS,
-  DEV_INSTITUTIONAL_HOLDERS_INPUTS,
-} from "./dev-holders-fixtures.ts";
+  createSecBackedStatementRepository,
+  createSecBackedStatsRepository,
+} from "./sec-facts-repository.ts";
+import { SEC_EDGAR_FILING_SOURCE_ID } from "./provider-sources.ts";
 import {
-  DEV_FUNDAMENTALS_SOURCE_ID,
-  DEV_ISSUER_PROFILES,
-} from "./dev-fixtures.ts";
-import { DEV_SEGMENTS } from "./dev-segment-fixtures.ts";
-import { DEV_STATEMENTS } from "./dev-statement-fixtures.ts";
-import { DEV_STATS_INPUTS } from "./dev-stats-fixtures.ts";
+  createUnsupportedConsensusRepository,
+  createUnsupportedEarningsRepository,
+  createUnsupportedHoldersRepository,
+  createUnsupportedSegmentsRepository,
+} from "./unsupported-repositories.ts";
 import { createFundamentalsServer } from "./http.ts";
 
 const host = process.env.FUNDAMENTALS_HOST ?? "127.0.0.1";
 const port = Number(process.env.FUNDAMENTALS_PORT ?? "4322");
+const databaseUrl = process.env.DATABASE_URL;
 
-const profiles = createInMemoryIssuerProfileRepository(DEV_ISSUER_PROFILES);
-const stats = createInMemoryStatsRepository(DEV_STATS_INPUTS);
-const statements = createInMemoryStatementRepository(DEV_STATEMENTS);
-const segments = createInMemorySegmentsRepository(DEV_SEGMENTS);
-const consensus = createInMemoryConsensusRepository(DEV_CONSENSUS_INPUTS);
-const earnings = createInMemoryEarningsRepository(DEV_EARNINGS_INPUTS);
-const holders = createInMemoryHoldersRepository({
-  institutional: DEV_INSTITUTIONAL_HOLDERS_INPUTS,
-  insider: DEV_INSIDER_HOLDERS_INPUTS,
+if (!databaseUrl) {
+  throw new Error("DATABASE_URL is required for fundamentals dev; fixture-backed dev data is disabled.");
+}
+
+const pool = new Pool({ connectionString: databaseUrl });
+const postgresProfiles = createPostgresIssuerProfileRepository(pool);
+const unofficialDevProvidersEnabled = process.env.ENABLE_UNOFFICIAL_DEV_PROVIDERS === "true";
+const devProvidersBaseUrl = process.env.DEV_PROVIDERS_BASE_URL ?? process.env.DEV_PROVIDERS_ORIGIN;
+const profiles = unofficialDevProvidersEnabled && devProvidersBaseUrl
+  ? createDevProvidersIssuerProfileRepository({
+      primary: postgresProfiles,
+      db: pool,
+      baseUrl: devProvidersBaseUrl,
+    })
+  : postgresProfiles;
+const secFetcher = process.env.SEC_EDGAR_USER_AGENT
+  ? createSecCompanyFactsHttpFetcher({
+      userAgent: process.env.SEC_EDGAR_USER_AGENT,
+      baseUrl: process.env.SEC_EDGAR_BASE_URL,
+    })
+  : null;
+const statements = createSecBackedStatementRepository(pool, {
+  fetcher: secFetcher,
+  sourceId: SEC_EDGAR_FILING_SOURCE_ID,
 });
+const stats = createSecBackedStatsRepository(pool, { statements, fetcher: secFetcher });
+const segments = createUnsupportedSegmentsRepository();
+const consensus = createUnsupportedConsensusRepository();
+const earnings = createUnsupportedEarningsRepository();
+const holders = createUnsupportedHoldersRepository();
 const server = createFundamentalsServer({
   profiles,
   stats,
@@ -41,14 +57,19 @@ const server = createFundamentalsServer({
   consensus,
   earnings,
   holders,
-  source_id: DEV_FUNDAMENTALS_SOURCE_ID,
+  source_id: SEC_EDGAR_FILING_SOURCE_ID,
 });
 server.listen(port, host, () => {
   console.log(`fundamentals listening on http://${host}:${port}`);
+  if (!secFetcher) {
+    console.warn("SEC_EDGAR_USER_AGENT is not set; fundamentals will serve persisted facts only.");
+  }
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    server.close(() => process.exit(0));
+    server.close(() => {
+      pool.end().finally(() => process.exit(0));
+    });
   });
 }

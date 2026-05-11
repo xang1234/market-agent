@@ -1,5 +1,5 @@
-import type { SubjectKind, SubjectRef } from "../../resolver/src/subject-ref.ts";
-import { SUBJECT_KINDS } from "../../resolver/src/subject-ref.ts";
+import type { SubjectKind, SubjectRef } from "../../shared/src/subject-ref.ts";
+import { SUBJECT_KINDS } from "../../shared/src/subject-ref.ts";
 
 import type { QueryExecutor } from "./types.ts";
 import {

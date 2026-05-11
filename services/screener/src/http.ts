@@ -143,7 +143,7 @@ async function handleSearch(
     respond(res, 400, { error: errorMessage(err, "invalid screener query") });
     return;
   }
-  const response = executeScreenerQuery(
+  const response = await executeScreenerQuery(
     { candidates: deps.candidates, clock },
     query,
   );
@@ -255,7 +255,7 @@ async function handleReplayScreen(
 ): Promise<void> {
   const screen = await loadScreenForUserOrThrow(req, res, deps, screen_id);
   if (!screen) return;
-  const response = executeScreenerQuery(
+  const response = await executeScreenerQuery(
     { candidates: deps.candidates, clock },
     replayScreen(screen),
   );

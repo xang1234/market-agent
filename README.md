@@ -193,9 +193,13 @@ market-agent/
 
 ```bash
 cp .env.dev.example .env.dev      # ports + flags; safe defaults
-./scripts/dev-shell.sh up         # first run installs ~12 npm packages, pulls images, runs migrations + seeds
+./scripts/dev-shell.sh up         # first run installs packages, pulls images, runs migrations + reference seeds
 ./scripts/dev-shell.sh status     # confirms all services are running
 ```
+
+Set `POLYGON_API_KEY` in `.env.dev` to enable provider-backed stock ticker discovery and Polygon quote/bar caching. Dev no longer seeds ticker identities or fixture market data; without a key, unknown tickers resolve as `not_found` and market surfaces return unavailable. Set `SEC_EDGAR_USER_AGENT` to enable on-demand SEC companyfacts ingestion for statements and key stats.
+
+For local-only fallback coverage, set `ENABLE_UNOFFICIAL_DEV_PROVIDERS=true`. `dev-shell` then starts the Python `services/dev-providers` sidecar on `DEV_PROVIDERS_PORT`. Resolver/market may use yfinance after the primary provider path misses or is unavailable, and fundamentals may use Finviz to fill missing profile sector/industry/domicile fields. Successful fallback identities, quotes, daily adjusted bars, and profile enrichments are persisted in Postgres under dev-only source IDs where the schema has source fields.
 
 When `up` completes, the app is at **<http://localhost:5173>**.
 
@@ -214,6 +218,7 @@ The dev shell brings up:
 | `portfolio` | <http://localhost:4333> | holdings, currency basis |
 | `home` | <http://localhost:4334> | findings feed + market pulse |
 | `evidence` | <http://localhost:4335> | docs, claims, events, facts |
+| `dev-providers` | <http://localhost:4336> | opt-in unofficial local-dev provider sidecar |
 | `postgres` | `127.0.0.1:54329` | metadata + evidence DB |
 | `redis` | `127.0.0.1:63791` | session cache |
 | `minio` | <http://localhost:9001> (console) | raw-document object store |
@@ -226,31 +231,23 @@ The dev shell brings up:
 ./scripts/dev-shell.sh down
 ```
 
-This stops the service processes and runs `docker compose down`. State persists in Docker volumes.
+This stops the service processes and Docker services while keeping the Postgres and MinIO dev volumes intact. To reset all local dev state, run `docker compose -f docker-compose.dev.yml --env-file .env.dev down -v`.
 
 ### Dev-mode authentication
 
 Auth in development is an in-memory mock (`web/src/shell/AuthContext.tsx`). The "Sign in" button in the top bar — and the same button inside the AuthGate panel — sets a stable mock UUID so persistent surfaces (watchlists, threads, portfolios) round-trip the same `user_id` across runs. The real provider plugs in later without changing the `RouteScopeGate` / `AuthGate` contract.
 
-For dev parity with the FK-enforced schema, the mock user must exist in `users`:
-
-```sql
-INSERT INTO users (user_id, email, display_name)
-VALUES ('00000000-0000-4000-8000-000000000001', 'mock@dev.local', 'Mock User')
-ON CONFLICT (user_id) DO NOTHING;
-```
-
-A `users_default_manual_watchlist` trigger then creates that user's default watchlist automatically.
+The matching `users` row is created automatically by `db/seed/00_dev_mock_user.sql`, which `npm run seed` (run by `./scripts/dev-shell.sh up`) applies on every start. The `users_default_manual_watchlist` trigger then creates the default manual watchlist with `is_default=true`. Both inserts are idempotent.
 
 ---
 
 ## Usage walkthrough
 
 ### Home
-Opens to the cross-agent findings feed deduped by `ClaimCluster`, plus a market-pulse strip (default seeds: AAPL, MSFT, GOOGL — configurable via `HOME_PULSE_LISTINGS` in `.env.dev`), watchlist movers, last-24-h agent summaries grouped by severity, and pinned screens. No sign-in required to land; sign-in is required to load the user-scoped sections.
+Opens to the cross-agent findings feed deduped by `ClaimCluster`, plus a market-pulse strip (default tickers: AAPL, MSFT, GOOGL — configurable via `HOME_PULSE_TICKERS` in `.env.dev`), watchlist movers, last-24-h agent summaries grouped by severity, and pinned screens. No sign-in required to land; sign-in is required to load the user-scoped sections.
 
 ### Symbol detail
-Type a ticker into the top search (e.g. `AAPL`). The resolver maps it to a canonical `SubjectRef` like `listing:11111111-1111-4111-a111-111111111111` and lands at `/symbol/<ref>/overview`. The five tabs are **Overview · Financials · Earnings · Holders · Signals** (the source-agnostic supersession of the older `/reddit` draft route — community, news, and filing-derived evidence all compose through the same shared blocks). Charts and tables are sealed against an immutable snapshot per [§15](stock-agent-v2.md): timeframe buttons resolve inside the snapshot's `allowed_transforms`; anything else triggers a refresh.
+Type a ticker into the top search (e.g. `AAPL`). The resolver discovers and persists a provider-backed canonical `SubjectRef` like `listing:<uuid>` and lands at `/symbol/<ref>/overview`. The five tabs are **Overview · Financials · Earnings · Holders · Signals** (the source-agnostic supersession of the older `/reddit` draft route — community, news, and filing-derived evidence all compose through the same shared blocks). Charts and tables are sealed against an immutable snapshot per [§15](stock-agent-v2.md): timeframe buttons resolve inside the snapshot's `allowed_transforms`; anything else triggers a refresh.
 
 ### Chat
 Protected surface — sign in via the top-bar button or the AuthGate panel. New threads are created from the empty state. Messages stream via SSE; the analyst's reply arrives as a `Block[]` (typed `RichText`, `Section`, `MetricRow`, `Table`, `LineChart`, etc.) — never raw markdown. Old blocks stay interactive in their sealed snapshot. The right rail shows the activity stream (`Reading` / `Investigating` / `Found` / `Dismissed`); the left rail lists threads scoped to the session.

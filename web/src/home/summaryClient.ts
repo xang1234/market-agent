@@ -1,4 +1,5 @@
 import type { FindingSeverity } from '../blocks/types.ts'
+import { authenticatedFetch, HttpJsonError, readJsonBody, type FetchImpl } from '../http/authFetch.ts'
 import type { SubjectRef } from '../symbol/search.ts'
 import type { HomeCardDestination } from './deepLinks.ts'
 
@@ -97,8 +98,6 @@ export type HomeSummary = {
   saved_screens: HomeSavedScreens
 }
 
-type FetchImpl = typeof fetch
-
 type CallArgs = {
   userId: string
   endpoint?: string
@@ -108,13 +107,13 @@ type CallArgs = {
 
 export async function fetchHomeSummary(args: CallArgs): Promise<HomeSummary> {
   const endpoint = args.endpoint ?? '/v1/home/summary'
-  const response = await (args.fetchImpl ?? fetch)(endpoint, {
-    headers: { 'x-user-id': args.userId },
+  const response = await authenticatedFetch(endpoint, {
+    userId: args.userId,
+    fetchImpl: args.fetchImpl,
     signal: args.signal,
   })
   if (!response.ok) {
-    void response.body?.cancel()
-    throw new Error(`fetch home summary failed with HTTP ${response.status}`)
+    throw new HttpJsonError(response.status, await readJsonBody(response), `fetch home summary failed with HTTP ${response.status}`)
   }
   return (await response.json()) as HomeSummary
 }

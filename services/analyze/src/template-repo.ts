@@ -4,8 +4,8 @@ import {
   type JsonValue,
   type QueryExecutor,
 } from "../../observability/src/types.ts";
-import type { SubjectRef } from "../../resolver/src/subject-ref.ts";
-import { assertSubjectRef } from "../../resolver/src/subject-ref.ts";
+import type { SubjectRef } from "../../shared/src/subject-ref.ts";
+import { assertSubjectRef } from "../../shared/src/subject-ref.ts";
 
 export class AnalyzeTemplateNotFoundError extends Error {
   constructor(message = "analyze template not found") {

@@ -18,12 +18,13 @@ npm run dev      # starts http server on $MARKET_PORT (defaults to 4321)
 
 `src/dev.ts` boots the HTTP server using:
 
-- `createInMemoryListingRepository(DEV_LISTINGS)` — fixture listing UUIDs (AAPL, MSFT, GOOGL, TSLA, NVDA) wired to ticker/MIC/currency/timezone.
-- `createDevPolygonFetcher` — returns canned snapshot payloads for those tickers, so no real polygon API key is needed locally.
-- `DEV_POLYGON_SOURCE_ID` — a real UUID v4 (not a stub sentinel) carried through as `quote.source_id` so consumers can verify the live wiring.
+- `createPostgresListingRepository`; `DATABASE_URL` is required in normal dev so provider-discovered listings can be quoted after restart.
+- `createCachedMarketDataAdapter` backed by Postgres quote/bar cache tables.
+- `createPolygonHttpFetcher` when `POLYGON_API_KEY` is present. Without a key, requests return unavailable envelopes instead of fixture quotes.
+- `POLYGON_MARKET_SOURCE_ID` carried through as `quote.source_id` / `bars.source_id` so consumers can verify provider provenance.
 
-For production, swap both deps for DB-backed listing reads and a real polygon
-HTTP fetcher reading `POLYGON_API_KEY`.
+`POLYGON_API_BASE_URL` can point the Polygon quote/bar fetcher at a mock server
+in tests.
 
 ## Provider fallback plan
 

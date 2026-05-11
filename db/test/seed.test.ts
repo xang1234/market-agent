@@ -16,8 +16,14 @@ const SOURCES_DIGEST_EXPR =
 type SeedSnapshot = {
   metricCount: string;
   sourceCount: string;
+  devIssuerCount: string;
+  devInstrumentCount: string;
+  devListingCount: string;
+  mockUserCount: string;
+  mockDefaultWatchlistCount: string;
   metricsDigest: string;
   sourcesDigest: string;
+  devListingsDigest: string | null;
 };
 
 function snapshotSeed(containerName: string): SeedSnapshot {
@@ -28,11 +34,43 @@ function snapshotSeed(containerName: string): SeedSnapshot {
     `select
        (select count(*) from metrics),
        (select count(*) from sources),
+       (select count(*) from issuers where issuer_id in (${DEV_ISSUER_IDS.map((id) => `'${id}'::uuid`).join(",")})),
+       (select count(*) from instruments where instrument_id in (${DEV_INSTRUMENT_IDS.map((id) => `'${id}'::uuid`).join(",")})),
+       (select count(*) from listings where listing_id in (${DEV_LISTING_IDS.map((id) => `'${id}'::uuid`).join(",")})),
+       (select count(*) from users where user_id = '${DEV_MOCK_USER_ID}'::uuid),
+       (select count(*) from watchlists where user_id = '${DEV_MOCK_USER_ID}'::uuid and mode = 'manual' and is_default),
        (select ${METRICS_DIGEST_EXPR} from metrics),
-       (select ${SOURCES_DIGEST_EXPR} from sources)`,
+       (select ${SOURCES_DIGEST_EXPR} from sources),
+       (select md5(string_agg(l.ticker || ':' || l.mic || ':' || l.listing_id::text || ':' || i.instrument_id::text || ':' || iss.issuer_id::text, ',' order by l.ticker))
+          from listings l
+          join instruments i on i.instrument_id = l.instrument_id
+          join issuers iss on iss.issuer_id = i.issuer_id
+         where l.listing_id in (${DEV_LISTING_IDS.map((id) => `'${id}'::uuid`).join(",")}))`,
   );
-  const [metricCount, sourceCount, metricsDigest, sourcesDigest] = row.split("|");
-  return { metricCount, sourceCount, metricsDigest, sourcesDigest };
+  const [
+    metricCount,
+    sourceCount,
+    devIssuerCount,
+    devInstrumentCount,
+    devListingCount,
+    mockUserCount,
+    mockDefaultWatchlistCount,
+    metricsDigest,
+    sourcesDigest,
+    devListingsDigest,
+  ] = row.split("|");
+  return {
+    metricCount,
+    sourceCount,
+    devIssuerCount,
+    devInstrumentCount,
+    devListingCount,
+    mockUserCount,
+    mockDefaultWatchlistCount,
+    metricsDigest,
+    sourcesDigest,
+    devListingsDigest,
+  };
 }
 
 function runSeed(databaseUrl: string) {
@@ -41,6 +79,32 @@ function runSeed(databaseUrl: string) {
     env: { DATABASE_URL: databaseUrl },
   });
 }
+
+const DEV_MOCK_USER_ID = "00000000-0000-4000-8000-000000000001";
+
+const DEV_ISSUER_IDS = [
+  "11111111-1111-4111-9111-111111111111",
+  "22222222-2222-4222-9222-222222222222",
+  "33333333-3333-4333-9333-333333333333",
+  "44444444-4444-4444-9444-444444444444",
+  "55555555-5555-4555-9555-555555555555",
+];
+
+const DEV_INSTRUMENT_IDS = [
+  "11111111-1111-4111-b111-111111111111",
+  "22222222-2222-4222-b222-222222222222",
+  "33333333-3333-4333-b333-333333333333",
+  "44444444-4444-4444-b444-444444444444",
+  "55555555-5555-4555-b555-555555555555",
+];
+
+const DEV_LISTING_IDS = [
+  "11111111-1111-4111-a111-111111111111",
+  "22222222-2222-4222-a222-222222222222",
+  "33333333-3333-4333-a333-333333333333",
+  "44444444-4444-4444-a444-444444444444",
+  "55555555-5555-4555-a555-555555555555",
+];
 
 test("seed populates metrics and sources with the expected registry", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
@@ -80,6 +144,21 @@ test("seed populates metrics and sources with the expected registry", { timeout:
     queryValue(containerName, "select count(*) from sources where provider = 'sec_edgar' and kind = 'filing'"),
     "1",
     "expected sec_edgar filing source to be present exactly once",
+  );
+  assert.equal(
+    queryValue(containerName, "select count(*) from sources where provider = 'yahoo_finance_dev_reference' and kind = 'reference_data'"),
+    "1",
+    "expected yahoo_finance_dev_reference source to be present exactly once",
+  );
+  assert.equal(
+    queryValue(containerName, "select count(*) from sources where provider = 'yahoo_finance_dev_market' and kind = 'market_data'"),
+    "1",
+    "expected yahoo_finance_dev_market source to be present exactly once",
+  );
+  assert.equal(
+    queryValue(containerName, "select count(*) from sources where provider = 'finviz_dev_reference' and kind = 'reference_data'"),
+    "1",
+    "expected finviz_dev_reference source to be present exactly once",
   );
 });
 
@@ -150,4 +229,70 @@ test("seeded metric and source rows satisfy referential contracts for facts", { 
   ]);
   assert.equal(insertFact.status, 0, insertFact.stderr || insertFact.stdout);
   assert.equal(queryValue(containerName, "select count(*) from facts"), "1");
+});
+
+test("seed provisions the mock user and default manual watchlist", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for db seed integration coverage");
+    return;
+  }
+
+  const { containerName, databaseUrl } = await bootstrapDatabase(t, "fra-jmu");
+
+  const seedResult = runSeed(databaseUrl);
+  assert.equal(seedResult.status, 0, seedResult.stderr || seedResult.stdout);
+
+  assert.equal(
+    queryValue(containerName, `select count(*) from users where user_id = '${DEV_MOCK_USER_ID}'::uuid`),
+    "1",
+    "expected the dev mock user to be present",
+  );
+  assert.equal(
+    queryValue(
+      containerName,
+      `select count(*)
+         from watchlists
+        where user_id = '${DEV_MOCK_USER_ID}'::uuid
+          and mode = 'manual'
+          and is_default`,
+    ),
+    "1",
+    "expected the users_default_manual_watchlist trigger to create the default manual watchlist",
+  );
+});
+
+test("seed does not provision provider-owned ticker identities", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for db seed integration coverage");
+    return;
+  }
+
+  const { containerName, databaseUrl } = await bootstrapDatabase(t, "fra-q4d");
+
+  const seedResult = runSeed(databaseUrl);
+  assert.equal(seedResult.status, 0, seedResult.stderr || seedResult.stdout);
+
+  const aaplLookupRows = queryValue(
+    containerName,
+    `select count(*)
+       from listings l
+       join instruments i on i.instrument_id = l.instrument_id
+       join issuers iss on iss.issuer_id = i.issuer_id
+      where l.ticker = 'AAPL'
+        and l.mic = 'XNAS'
+        and l.listing_id = '11111111-1111-4111-a111-111111111111'::uuid
+        and i.instrument_id = '11111111-1111-4111-b111-111111111111'::uuid
+        and iss.issuer_id = '11111111-1111-4111-9111-111111111111'::uuid`,
+  );
+  assert.equal(
+    aaplLookupRows,
+    "0",
+    "normal seed data must not create hardcoded AAPL listing -> instrument -> issuer rows",
+  );
+
+  const snapshot = snapshotSeed(containerName);
+  assert.equal(snapshot.devIssuerCount, "0");
+  assert.equal(snapshot.devInstrumentCount, "0");
+  assert.equal(snapshot.devListingCount, "0");
+  assert.equal(snapshot.devListingsDigest, "");
 });
