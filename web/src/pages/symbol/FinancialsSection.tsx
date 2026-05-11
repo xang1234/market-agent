@@ -8,6 +8,7 @@ import { SegmentedToggle } from '../../symbol/SegmentedToggle.tsx'
 import {
   fetchStatements,
   findLineValue,
+  recentFiscalQuarterPeriods,
   recentFyPeriods,
   type GetStatementsResponse,
   type NormalizedStatement,
@@ -23,7 +24,11 @@ import {
 import { useFetched } from '../../symbol/useFetched.ts'
 
 const STATEMENT_FAMILY = 'income' as const
+type PeriodMode = 'annual' | 'quarterly'
+
 const PERIOD_COUNT = 5
+const QUARTER_PERIOD_COUNT = 4
+const LATEST_FISCAL_QUARTER = 'Q4' as const
 // Apple, MSFT, NVDA, etc. each have a different fiscal year end (Sep, Jun,
 // Jan…), so a calendar-year heuristic is wrong in general. The current
 // fixture caps at FY2024 for every issuer; a real backend would expose a
@@ -47,6 +52,11 @@ const BASIS_OPTIONS: ReadonlyArray<{ value: StatementBasis; label: string }> = [
   { value: 'as_restated', label: 'As restated' },
 ]
 
+const PERIOD_MODE_OPTIONS: ReadonlyArray<{ value: PeriodMode; label: string }> = [
+  { value: 'annual', label: 'Annual' },
+  { value: 'quarterly', label: 'Quarterly' },
+]
+
 const AXIS_OPTIONS: ReadonlyArray<{ value: SegmentAxis; label: string }> = [
   { value: 'business', label: axisLabel('business') },
   { value: 'geography', label: axisLabel('geography') },
@@ -55,14 +65,21 @@ const AXIS_OPTIONS: ReadonlyArray<{ value: SegmentAxis; label: string }> = [
 export function FinancialsSection() {
   const { subject } = useSubjectDetailContext()
   const issuerId = issuerIdFromSubject(subject)
+  const [periodMode, setPeriodMode] = useState<PeriodMode>('annual')
   const [basis, setBasis] = useState<StatementBasis>('as_reported')
   const [axis, setAxis] = useState<SegmentAxis>('business')
 
-  const statementsKey = issuerId === null ? null : `${issuerId}|${basis}`
+  const statementsKey = issuerId === null ? null : `${issuerId}|${basis}|${periodMode}`
   const segmentsKey = issuerId === null ? null : `${issuerId}|${axis}`
+  const statementsHeading =
+    periodMode === 'annual'
+      ? `Income statement · last ${PERIOD_COUNT} FY`
+      : `Income statement · last ${QUARTER_PERIOD_COUNT} quarters`
 
   const statements = useFetched<GetStatementsResponse>(statementsKey, async (_key, signal) => {
-    const periods = recentFyPeriods(LATEST_FISCAL_YEAR, PERIOD_COUNT)
+    const periods = periodMode === 'annual'
+      ? recentFyPeriods(LATEST_FISCAL_YEAR, PERIOD_COUNT)
+      : recentFiscalQuarterPeriods(LATEST_FISCAL_YEAR, LATEST_FISCAL_QUARTER, QUARTER_PERIOD_COUNT)
     const data = await fetchStatements(
       {
         subject_ref: { kind: 'issuer', id: issuerId! },
@@ -93,15 +110,24 @@ export function FinancialsSection() {
       <Card
         testId="financials-statements"
         headingId="financials-statements-heading"
-        heading={`Income statement · last ${PERIOD_COUNT} FY`}
+        heading={statementsHeading}
         action={
-          <SegmentedToggle
-            options={BASIS_OPTIONS}
-            value={basis}
-            onChange={setBasis}
-            ariaLabel="Statement basis"
-            testIdPrefix="basis"
-          />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <SegmentedToggle
+              options={PERIOD_MODE_OPTIONS}
+              value={periodMode}
+              onChange={setPeriodMode}
+              ariaLabel="Statement period mode"
+              testIdPrefix="period-mode"
+            />
+            <SegmentedToggle
+              options={BASIS_OPTIONS}
+              value={basis}
+              onChange={setBasis}
+              ariaLabel="Statement basis"
+              testIdPrefix="basis"
+            />
+          </div>
         }
       >
         <FetchStateView
