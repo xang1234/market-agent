@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   fetchStatements,
   findLineValue,
+  recentFiscalQuarterPeriods,
   recentFyPeriods,
   StatementsFetchError,
   type GetStatementsRequest,
@@ -46,6 +47,18 @@ test('recentFyPeriods returns N most-recent FY period strings, newest first', ()
   assert.deepEqual(recentFyPeriods(2024, 5), ['2024-FY', '2023-FY', '2022-FY', '2021-FY', '2020-FY'])
   assert.deepEqual(recentFyPeriods(2024, 1), ['2024-FY'])
   assert.deepEqual(recentFyPeriods(2024, 0), [])
+})
+
+test('recentFiscalQuarterPeriods returns N most-recent fiscal quarter strings, newest first', () => {
+  assert.deepEqual(recentFiscalQuarterPeriods(2024, 'Q4', 4), ['2024-Q4', '2024-Q3', '2024-Q2', '2024-Q1'])
+  assert.deepEqual(recentFiscalQuarterPeriods(2024, 'Q2', 4), ['2024-Q2', '2024-Q1', '2023-Q4', '2023-Q3'])
+  assert.deepEqual(recentFiscalQuarterPeriods(2024, 'Q1', 1), ['2024-Q1'])
+  assert.deepEqual(recentFiscalQuarterPeriods(2024, 'Q4', 0), [])
+})
+
+test('recentFiscalQuarterPeriods rejects invalid runtime quarter labels', () => {
+  assert.throws(() => recentFiscalQuarterPeriods(2024, 'FY' as never, 1), RangeError)
+  assert.throws(() => recentFiscalQuarterPeriods(2024, 'Q5' as never, 1), RangeError)
 })
 
 test('fetchStatements POSTs JSON, sends the binding query, and returns the GetStatementsResponse', async () => {
