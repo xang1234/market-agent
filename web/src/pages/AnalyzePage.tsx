@@ -8,6 +8,7 @@ import {
 } from '../analyze/analyzeEntry'
 import { shareAnalyzeRunToChat, type AnalyzeRun } from '../analyze/shareToChat.ts'
 import { BlockView } from '../blocks'
+import { authenticatedFetch, authenticatedJson } from '../http/authFetch.ts'
 import { subjectDisplayName } from '../symbol/quote'
 import { symbolDetailPathForSubject, type ResolvedSubject } from '../symbol/search'
 import { useAuth } from '../shell/useAuth.ts'
@@ -72,8 +73,8 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
   useEffect(() => {
     if (!session) return
     const controller = new AbortController()
-    fetch('/v1/analyze/templates', {
-      headers: { 'x-user-id': session.userId },
+    authenticatedFetch('/v1/analyze/templates', {
+      userId: session.userId,
       signal: controller.signal,
     })
       .then(async (response) => {
@@ -112,11 +113,11 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
     }
     setStatus('Generating memo')
     try {
-      const response = await fetch('/v1/analyze/runs', {
+      const run = await authenticatedJson<AnalyzeRun>('/v1/analyze/runs', {
+        userId: session.userId,
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'x-user-id': session.userId,
         },
         body: JSON.stringify({
           template_id: selectedTemplate.template_id,
@@ -125,8 +126,6 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
           subject_ref: subject?.subject_ref ?? null,
         }),
       })
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const run = (await response.json()) as AnalyzeRun
       setMemoRun(run)
       setStatus('Memo generated')
       return run

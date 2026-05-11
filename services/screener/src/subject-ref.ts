@@ -10,9 +10,8 @@
 // row.subject_ref can be handed off to the symbol-entry flow without
 // adapter code (cw0.6.3 already parses `kind:uuid` URL params).
 
-import { assertOneOf, assertUuid } from "./validators.ts";
-
-export type UUID = string;
+import { assertOneOf } from "./validators.ts";
+import { assertSubjectRef as assertCanonicalSubjectRef, type UUID } from "../../shared/src/subject-ref.ts";
 
 export type ScreenerSubjectKind = "issuer" | "instrument" | "listing";
 
@@ -43,6 +42,6 @@ export function assertSubjectRef(
     throw new Error(`${label}: must be a SubjectRef object`);
   }
   const ref = value as { kind?: unknown; id?: unknown };
+  assertCanonicalSubjectRef(value, label);
   assertOneOf(ref.kind, SCREENER_SUBJECT_KINDS, `${label}.kind`);
-  assertUuid(ref.id, `${label}.id`);
 }

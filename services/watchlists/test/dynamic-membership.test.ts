@@ -59,6 +59,14 @@ class FakeDb implements QueryExecutor {
 
 const USER_ID = "00000000-0000-4000-8000-000000000001";
 const WATCHLIST_ID = "00000000-0000-4000-8000-000000000010";
+const AAPL_INSTRUMENT_ID = "11111111-1111-4111-8111-111111111111";
+const MSFT_INSTRUMENT_ID = "22222222-2222-4222-8222-222222222222";
+const TSLA_INSTRUMENT_ID = "33333333-3333-4333-8333-333333333333";
+const APPLE_ISSUER_ID = "44444444-4444-4444-8444-444444444444";
+const AAPL_LISTING_ID = "55555555-5555-4555-8555-555555555555";
+const ACTIVE_INSTRUMENT_ID = "66666666-6666-4666-8666-666666666666";
+const FUTURE_INSTRUMENT_ID = "77777777-7777-4777-8777-777777777777";
+const EXPIRED_INSTRUMENT_ID = "88888888-8888-4888-8888-888888888888";
 
 test("screen watchlists replay the current screen definition on every resolve", async () => {
   const db = new FakeDb();
@@ -73,8 +81,8 @@ test("screen watchlists replay the current screen definition on every resolve", 
     ["screen-growth", { screen_id: "screen-growth", definition: { version: 1 } }],
   ]);
   const screenRows = new Map<number, ReadonlyArray<{ subject_ref: { kind: "instrument"; id: string } }>>([
-    [1, [{ subject_ref: { kind: "instrument", id: "AAPL" } }]],
-    [2, [{ subject_ref: { kind: "instrument", id: "MSFT" } }]],
+    [1, [{ subject_ref: { kind: "instrument", id: AAPL_INSTRUMENT_ID } }]],
+    [2, [{ subject_ref: { kind: "instrument", id: MSFT_INSTRUMENT_ID } }]],
   ]);
   const deps: DynamicWatchlistDeps = {
     db,
@@ -95,8 +103,8 @@ test("screen watchlists replay the current screen definition on every resolve", 
     watchlist_id: WATCHLIST_ID,
   });
 
-  assert.deepEqual(first.members.map((member) => member.subject_ref.id), ["AAPL"]);
-  assert.deepEqual(second.members.map((member) => member.subject_ref.id), ["MSFT"]);
+  assert.deepEqual(first.members.map((member) => member.subject_ref.id), [AAPL_INSTRUMENT_ID]);
+  assert.deepEqual(second.members.map((member) => member.subject_ref.id), [MSFT_INSTRUMENT_ID]);
   assert.equal(second.source.mode, "screen");
   assert.equal(second.source.id, "screen-growth");
   assert.equal(db.writeCalls().length, 0);
@@ -112,12 +120,12 @@ test("theme and portfolio watchlists mirror source rows with deterministic order
   });
   db.themeMembers.set("theme-ai", [
     {
-      subject_ref: { kind: "instrument", id: "MSFT" },
+      subject_ref: { kind: "instrument", id: MSFT_INSTRUMENT_ID },
       effective_at: "2026-01-01T00:00:00.000Z",
       expires_at: null,
     },
     {
-      subject_ref: { kind: "issuer", id: "apple-inc" },
+      subject_ref: { kind: "issuer", id: APPLE_ISSUER_ID },
       effective_at: "2026-01-01T00:00:00.000Z",
       expires_at: null,
     },
@@ -129,8 +137,8 @@ test("theme and portfolio watchlists mirror source rows with deterministic order
     membership_spec: { portfolio_id: "portfolio-main" },
   });
   db.portfolioHoldings.set("portfolio-main", [
-    { subject_ref: { kind: "listing", id: "NASDAQ:AAPL" } },
-    { subject_ref: { kind: "instrument", id: "AAPL" } },
+    { subject_ref: { kind: "listing", id: AAPL_LISTING_ID } },
+    { subject_ref: { kind: "instrument", id: AAPL_INSTRUMENT_ID } },
   ]);
 
   const deps: DynamicWatchlistDeps = {
@@ -150,15 +158,15 @@ test("theme and portfolio watchlists mirror source rows with deterministic order
   assert.deepEqual(
     theme.members.map((member) => member.subject_ref),
     [
-      { kind: "instrument", id: "MSFT" },
-      { kind: "issuer", id: "apple-inc" },
+      { kind: "instrument", id: MSFT_INSTRUMENT_ID },
+      { kind: "issuer", id: APPLE_ISSUER_ID },
     ],
   );
   assert.deepEqual(
     portfolio.members.map((member) => member.subject_ref),
     [
-      { kind: "instrument", id: "AAPL" },
-      { kind: "listing", id: "NASDAQ:AAPL" },
+      { kind: "instrument", id: AAPL_INSTRUMENT_ID },
+      { kind: "listing", id: AAPL_LISTING_ID },
     ],
   );
 });
@@ -173,17 +181,17 @@ test("theme watchlists exclude future and expired memberships as of resolver tim
   });
   db.themeMembers.set("theme-windowed", [
     {
-      subject_ref: { kind: "instrument", id: "ACTIVE" },
+      subject_ref: { kind: "instrument", id: ACTIVE_INSTRUMENT_ID },
       effective_at: "2026-01-01T00:00:00.000Z",
       expires_at: null,
     },
     {
-      subject_ref: { kind: "instrument", id: "FUTURE" },
+      subject_ref: { kind: "instrument", id: FUTURE_INSTRUMENT_ID },
       effective_at: "2026-06-01T00:00:00.000Z",
       expires_at: null,
     },
     {
-      subject_ref: { kind: "instrument", id: "EXPIRED" },
+      subject_ref: { kind: "instrument", id: EXPIRED_INSTRUMENT_ID },
       effective_at: "2026-01-01T00:00:00.000Z",
       expires_at: "2026-04-01T00:00:00.000Z",
     },
@@ -200,7 +208,7 @@ test("theme watchlists exclude future and expired memberships as of resolver tim
     },
   );
 
-  assert.deepEqual(result.members.map((member) => member.subject_ref.id), ["ACTIVE"]);
+  assert.deepEqual(result.members.map((member) => member.subject_ref.id), [ACTIVE_INSTRUMENT_ID]);
   const themeQuery = db.calls.find((call) => call.text.includes("from theme_memberships"));
   assert.equal(themeQuery?.values[1], "2026-05-04T00:00:00.000Z");
 });
@@ -222,8 +230,8 @@ test("agent watchlists mirror static agent universes without collapsing provenan
         universe: {
           mode: "static",
           subject_refs: [
-            { kind: "instrument", id: "TSLA" },
-            { kind: "instrument", id: "AAPL" },
+            { kind: "instrument", id: TSLA_INSTRUMENT_ID },
+            { kind: "instrument", id: AAPL_INSTRUMENT_ID },
           ],
         },
       }),
@@ -237,7 +245,7 @@ test("agent watchlists mirror static agent universes without collapsing provenan
 
   assert.deepEqual(
     result.members.map((member) => member.subject_ref.id),
-    ["AAPL", "TSLA"],
+    [AAPL_INSTRUMENT_ID, TSLA_INSTRUMENT_ID],
   );
   assert.deepEqual(
     result.members.map((member) => member.source),

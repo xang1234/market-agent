@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { assertSubjectRef, type SubjectRef } from "../../resolver/src/subject-ref.ts";
+import { assertSubjectRef, type SubjectRef } from "../../shared/src/subject-ref.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
 import type { QueryExecutor } from "./agent-repo.ts";
 import {

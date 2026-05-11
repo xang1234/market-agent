@@ -5,7 +5,7 @@ import test from "node:test";
 import type { QueryResult } from "pg";
 
 import type { JsonValue, QueryExecutor } from "../../observability/src/types.ts";
-import type { SubjectRef } from "../../resolver/src/subject-ref.ts";
+import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import {
   DEFAULT_MEMBERSHIP_PAGE_SIZE,
   MAX_MEMBERSHIP_PAGE_SIZE,

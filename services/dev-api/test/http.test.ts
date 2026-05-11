@@ -154,6 +154,9 @@ test("GET /v1/themes/membership-rationales validates subject and limit query par
   const base = await startServer(t);
 
   const missing = await fetch(`${base}/v1/themes/membership-rationales`);
+  const badSubjectId = await fetch(
+    `${base}/v1/themes/membership-rationales?subject_kind=issuer&subject_id=AAPL`,
+  );
   const badLimit = await fetch(
     `${base}/v1/themes/membership-rationales?subject_kind=issuer&subject_id=33333333-3333-4333-8333-333333333333&limit=0`,
   );
@@ -165,6 +168,7 @@ test("GET /v1/themes/membership-rationales validates subject and limit query par
   );
 
   assert.equal(missing.status, 400);
+  assert.equal(badSubjectId.status, 400);
   assert.equal(badLimit.status, 400);
   assert.equal(badAsOf.status, 400);
   assert.equal(dateOnlyAsOf.status, 400);
@@ -219,6 +223,8 @@ test("PATCH and DELETE /v1/agents expose update and delete controls", async (t) 
     "content-type": "application/json",
     "x-user-id": "00000000-0000-4000-8000-000000000001",
   };
+  const issuerId = "11111111-1111-4111-8111-111111111111";
+  const themeId = "22222222-2222-4222-8222-222222222222";
 
   const created = await fetch(`${base}/v1/agents`, {
     method: "POST",
@@ -227,7 +233,7 @@ test("PATCH and DELETE /v1/agents expose update and delete controls", async (t) 
       name: "Review bot",
       thesis: "Track guidance",
       cadence: "daily",
-      universe: { mode: "static", subject_refs: [{ kind: "issuer", id: "issuer-123" }] },
+      universe: { mode: "static", subject_refs: [{ kind: "issuer", id: issuerId }] },
       alert_rules: [
         {
           rule_id: "guidance-risk",
@@ -243,7 +249,7 @@ test("PATCH and DELETE /v1/agents expose update and delete controls", async (t) 
     universe?: unknown;
     alert_rules?: unknown;
   };
-  assert.deepEqual(agent.universe, { mode: "static", subject_refs: [{ kind: "issuer", id: "issuer-123" }] });
+  assert.deepEqual(agent.universe, { mode: "static", subject_refs: [{ kind: "issuer", id: issuerId }] });
   assert.deepEqual(agent.alert_rules, [
     {
       rule_id: "guidance-risk",
@@ -258,7 +264,7 @@ test("PATCH and DELETE /v1/agents expose update and delete controls", async (t) 
     headers,
     body: JSON.stringify({
       enabled: false,
-      universe: { mode: "static", subject_refs: [{ kind: "theme", id: "quality" }] },
+      universe: { mode: "static", subject_refs: [{ kind: "theme", id: themeId }] },
       alert_rules: [
         {
           rule_id: "quality-risk",
@@ -272,7 +278,7 @@ test("PATCH and DELETE /v1/agents expose update and delete controls", async (t) 
   const patchBody = await patched.json() as Record<string, unknown>;
   assert.equal(patched.status, 200);
   assert.equal(patchBody.enabled, false);
-  assert.deepEqual(patchBody.universe, { mode: "static", subject_refs: [{ kind: "theme", id: "quality" }] });
+  assert.deepEqual(patchBody.universe, { mode: "static", subject_refs: [{ kind: "theme", id: themeId }] });
   assert.deepEqual(patchBody.alert_rules, [
     {
       rule_id: "quality-risk",
@@ -281,6 +287,15 @@ test("PATCH and DELETE /v1/agents expose update and delete controls", async (t) 
       channels: [],
     },
   ]);
+
+  const malformedUniverse = await fetch(`${base}/v1/agents/${agent.agent_id}`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify({
+      universe: { mode: "static", subject_refs: [{ kind: "listing", id: "AAPL" }] },
+    }),
+  });
+  assert.equal(malformedUniverse.status, 400);
 
   const deleted = await fetch(`${base}/v1/agents/${agent.agent_id}`, {
     method: "DELETE",

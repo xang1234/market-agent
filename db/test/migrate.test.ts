@@ -149,6 +149,7 @@ test("polygon ticker discovery can dedupe instruments by composite FIGI", () => 
     assert.match(sql, /on instruments\(figi_composite\)/i);
     assert.match(sql, /where figi_composite is not null/i);
   }
+  assert.match(forwardMigration, /alter table instruments\s+add column if not exists figi_composite text/i);
 });
 
 test("provider-backed dev data schema stores market cache and saved screens", () => {

@@ -1,12 +1,15 @@
 import {
   displaySubjectRef,
+  isCanonicalResolvedSubject,
+  isSubjectRef,
   type IssuerContext,
   type ListingContext,
   type ResolvedSubject,
+  type RouteResolvedSubject,
   type SubjectRef,
 } from './search.ts'
 
-export type { ResolvedSubject }
+export type { ResolvedSubject, RouteResolvedSubject }
 
 // Aligned with services/market/src/quote.ts so the frontend speaks the same
 // vocabulary as the spec §6.2.1 quote contract.
@@ -75,11 +78,14 @@ const MARKET_API_BASE = '/v1/market'
 // kind subject with hydrated active_listings, we use the first active
 // listing. Anything else (issuer without context, instrument, etc.) returns
 // null — the caller must surface a "quote unavailable" UI rather than guess.
-export function listingIdForQuote(subject: ResolvedSubject): string | null {
-  if (subject.subject_ref.kind === 'listing') return subject.subject_ref.id
+export function listingIdForQuote(subject: ResolvedSubject | RouteResolvedSubject): string | null {
+  if (subject.subject_ref.kind === 'listing') {
+    return isSubjectRef(subject.subject_ref) ? subject.subject_ref.id : null
+  }
+  if (!isCanonicalResolvedSubject(subject)) return null
   const listing =
     subject.context?.listing ?? subject.context?.active_listings?.[0]
-  return listing ? listing.subject_ref.id : null
+  return listing && isSubjectRef(listing.subject_ref) ? listing.subject_ref.id : null
 }
 
 // Async quote fetch from the market service. Returns a normalized snapshot
@@ -171,8 +177,9 @@ export function quoteBelongsToListing(
 }
 
 export function issuerProfileFromSubject(
-  subject: ResolvedSubject,
+  subject: ResolvedSubject | RouteResolvedSubject,
 ): { legal_name: string; sector?: string; industry?: string } | null {
+  if (!isCanonicalResolvedSubject(subject)) return null
   const issuer = subject.context?.issuer
   if (!issuer) return null
   return {
@@ -182,12 +189,12 @@ export function issuerProfileFromSubject(
   }
 }
 
-export function subjectDisplayName(subject: ResolvedSubject): string {
+export function subjectDisplayName(subject: ResolvedSubject | RouteResolvedSubject): string {
   return (
     subject.display_labels?.primary ??
     subject.display_label ??
     subject.display_name ??
-    displaySubjectRef(subject.subject_ref)
+    (isSubjectRef(subject.subject_ref) ? displaySubjectRef(subject.subject_ref) : subject.subject_ref.ticker.toUpperCase())
   )
 }
 

@@ -335,6 +335,16 @@ test("validateResolveRequest rejects malformed explicit choices", () => {
       error: "'choice.subject_ref.kind' must be a valid SubjectKind",
     },
   );
+  assert.deepEqual(
+    validateResolveRequest({
+      text: "AAPL",
+      choice: { subject_ref: { kind: "listing", id: "AAPL" } },
+    }),
+    {
+      valid: false,
+      error: "'choice.subject_ref.id' must be a UUID",
+    },
+  );
 });
 
 test("validateHydrateSubjectRequest accepts a canonical subject_ref", () => {
@@ -356,6 +366,10 @@ test("validateHydrateSubjectRequest rejects malformed subject refs", () => {
   assert.deepEqual(validateHydrateSubjectRequest({ subject_ref: { kind: "ticker", id: "AAPL" } }), {
     valid: false,
     error: "'subject_ref.kind' must be a valid SubjectKind",
+  });
+  assert.deepEqual(validateHydrateSubjectRequest({ subject_ref: { kind: "listing", id: "AAPL" } }), {
+    valid: false,
+    error: "'subject_ref.id' must be a UUID",
   });
 });
 

@@ -4,8 +4,8 @@ import {
   type JsonValue,
   type QueryExecutor,
 } from "../../observability/src/types.ts";
-import type { SubjectKind, SubjectRef } from "../../resolver/src/subject-ref.ts";
-import { assertSubjectRef } from "../../resolver/src/subject-ref.ts";
+import type { SubjectKind, SubjectRef } from "../../shared/src/subject-ref.ts";
+import { assertSubjectRef } from "../../shared/src/subject-ref.ts";
 
 export const THEME_MEMBERSHIP_MODES = ["manual", "rule_based", "inferred"] as const;
 export type ThemeMembershipMode = (typeof THEME_MEMBERSHIP_MODES)[number];

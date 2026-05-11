@@ -5,6 +5,7 @@ import { QuoteSnapshot } from '../symbol/QuoteSnapshot'
 import { subjectDisplayName } from '../symbol/quote'
 import {
   fetchSubjectHydration,
+  isCanonicalResolvedSubject,
   subjectNeedsHydration,
   subjectFromRouteParam,
   subjectFromRouterState,
@@ -53,21 +54,23 @@ export function SubjectDetailShell() {
   const routeSubject = useMemo(() => subjectFromRouteParam(subjectRef), [subjectRef])
   const baseSubject = subjectFromRouterState(location.state) ?? routeSubject
   const [hydratedSubject, setHydratedSubject] = useState<ResolvedSubject | null>(null)
-  const needsHydration = subjectNeedsHydration(baseSubject)
-  const baseSubjectRef = baseSubject.subject_ref
+  const canonicalBaseSubject = isCanonicalResolvedSubject(baseSubject) ? baseSubject : null
+  const needsHydration = canonicalBaseSubject !== null && subjectNeedsHydration(canonicalBaseSubject)
   const { session } = useAuth()
   const userId = session?.userId ?? null
   const hydratedSubjectMatchesBase =
-    hydratedSubject?.subject_ref.kind === baseSubjectRef.kind &&
-    hydratedSubject.subject_ref.id === baseSubjectRef.id
+    canonicalBaseSubject !== null &&
+    hydratedSubject?.subject_ref.kind === canonicalBaseSubject.subject_ref.kind &&
+    hydratedSubject.subject_ref.id === canonicalBaseSubject.subject_ref.id
   const subject = needsHydration && hydratedSubjectMatchesBase ? hydratedSubject : baseSubject
+  const canonicalSubject = isCanonicalResolvedSubject(subject) ? subject : null
 
   useEffect(() => {
     if (!needsHydration) return
 
     const controller = new AbortController()
     fetchSubjectHydration({
-      subject_ref: baseSubjectRef,
+      subject_ref: canonicalBaseSubject.subject_ref,
       signal: controller.signal,
     })
       .then((hydrated) => setHydratedSubject(hydrated))
@@ -77,7 +80,7 @@ export function SubjectDetailShell() {
       })
 
     return () => controller.abort()
-  }, [baseSubjectRef, needsHydration])
+  }, [canonicalBaseSubject, needsHydration])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -86,12 +89,16 @@ export function SubjectDetailShell() {
         className="border-b border-neutral-200 px-8 py-5 dark:border-neutral-800"
       >
         <QuoteSnapshot subject={subject} />
-        {userId !== null ? (
-          <SubjectMembershipBadges subjectRef={subject.subject_ref} userId={userId} />
+        {userId !== null && canonicalSubject !== null ? (
+          <SubjectMembershipBadges subjectRef={canonicalSubject.subject_ref} userId={userId} />
         ) : null}
         <div className="mt-4 flex items-center gap-2">
-          <SaveToWatchlistButton subject={subject} />
-          <AnalyzeThisSubjectButton subject={subject} />
+          {canonicalSubject !== null ? (
+            <>
+              <SaveToWatchlistButton subject={canonicalSubject} />
+              <AnalyzeThisSubjectButton subject={canonicalSubject} />
+            </>
+          ) : null}
         </div>
       </header>
       <nav

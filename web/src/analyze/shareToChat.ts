@@ -1,4 +1,5 @@
 import type { Block } from '../blocks'
+import { authenticatedJson } from '../http/authFetch.ts'
 
 export type AnalyzeRun = {
   run_id: string
@@ -24,11 +25,11 @@ export async function shareAnalyzeRunToChat(input: {
   title: string
   primarySubjectRef?: unknown
 }): Promise<AnalyzeRunShareResult> {
-  const response = await fetch(`/v1/analyze/runs/${encodeURIComponent(input.run.run_id)}/share-to-chat`, {
+  return authenticatedJson<AnalyzeRunShareResult>(`/v1/analyze/runs/${encodeURIComponent(input.run.run_id)}/share-to-chat`, {
+    userId: input.userId,
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-user-id': input.userId,
     },
     body: JSON.stringify({
       source_kind: input.sourceKind,
@@ -36,6 +37,4 @@ export async function shareAnalyzeRunToChat(input: {
       primary_subject_ref: input.primarySubjectRef ?? null,
     }),
   })
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  return (await response.json()) as AnalyzeRunShareResult
 }

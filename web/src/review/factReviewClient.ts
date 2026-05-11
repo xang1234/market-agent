@@ -4,6 +4,7 @@ import type {
   FactReviewQueueItem,
   FactReviewQueueRejectAction,
 } from './FactReviewQueue.tsx'
+import { authenticatedFetch, readJsonBody } from '../http/authFetch.ts'
 
 export const FACT_REVIEW_API_BASE = '/v1/evidence/fact-review-queue'
 
@@ -30,10 +31,11 @@ export async function fetchFactReviewQueue({
 }: FetchFactReviewQueueArgs): Promise<ReadonlyArray<FactReviewQueueItem>> {
   const endpoint = new URL(FACT_REVIEW_API_BASE, 'http://localhost')
   if (staleAfterSeconds != null) endpoint.searchParams.set('stale_after_seconds', String(staleAfterSeconds))
-  const response = await fetchImpl(`${endpoint.pathname}${endpoint.search}`, {
-    headers: { 'x-user-id': reviewerId },
+  const response = await authenticatedFetch(`${endpoint.pathname}${endpoint.search}`, {
+    userId: reviewerId,
+    fetchImpl,
   })
-  const body = await readJson(response)
+  const body = await readJsonBody(response)
   if (!response.ok) throw new FactReviewFetchError(response.status, errorMessage(body, response.status))
   const items = (body as { items?: unknown }).items
   if (!Array.isArray(items)) throw new FactReviewFetchError(response.status, 'Malformed fact review queue response')
@@ -80,24 +82,17 @@ async function submitReviewAction(
   body: { candidate?: FactReviewCandidate; notes: string | null },
   fetchImpl: typeof fetch,
 ): Promise<void> {
-  const response = await fetchImpl(`${FACT_REVIEW_API_BASE}/${encodeURIComponent(reviewId)}/${actionPath}`, {
+  const response = await authenticatedFetch(`${FACT_REVIEW_API_BASE}/${encodeURIComponent(reviewId)}/${actionPath}`, {
+    userId: reviewerId,
+    fetchImpl,
     method,
     headers: {
       'content-type': 'application/json',
-      'x-user-id': reviewerId,
     },
     body: JSON.stringify(body),
   })
-  const parsed = await readJson(response)
+  const parsed = await readJsonBody(response)
   if (!response.ok) throw new FactReviewFetchError(response.status, errorMessage(parsed, response.status))
-}
-
-async function readJson(response: Response): Promise<unknown> {
-  try {
-    return await response.json()
-  } catch {
-    return null
-  }
 }
 
 function errorMessage(body: unknown, status: number): string {

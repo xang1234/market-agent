@@ -1,5 +1,5 @@
 import type { ResolverEnvelope } from "../../../resolver/src/envelope.ts";
-import type { SubjectRef } from "../../../resolver/src/subject-ref.ts";
+import type { SubjectRef } from "../../../shared/src/subject-ref.ts";
 
 import {
   createMention,

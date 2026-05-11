@@ -1,4 +1,4 @@
-import type { ResolvedSubject, SubjectRef } from './search.ts'
+import { isCanonicalResolvedSubject, type ResolvedSubject, type RouteResolvedSubject, type SubjectRef } from './search.ts'
 
 export type IssuerProfileExchange = {
   listing: SubjectRef & { kind: 'listing' }
@@ -42,7 +42,8 @@ const FUNDAMENTALS_API_BASE = '/v1/fundamentals'
 // Returns null for a bare listing/instrument subject without resolver
 // hydration — caller renders a "context unavailable" message rather than
 // guessing the issuer linkage.
-export function issuerIdFromSubject(subject: ResolvedSubject): string | null {
+export function issuerIdFromSubject(subject: ResolvedSubject | RouteResolvedSubject): string | null {
+  if (!isCanonicalResolvedSubject(subject)) return null
   if (subject.subject_ref.kind === 'issuer') return subject.subject_ref.id
   return subject.context?.issuer?.subject_ref.id ?? null
 }

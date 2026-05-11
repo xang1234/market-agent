@@ -1,19 +1,20 @@
-export const SUBJECT_KINDS = [
-  'issuer',
-  'instrument',
-  'listing',
-  'theme',
-  'macro_topic',
-  'portfolio',
-  'screen',
-] as const
+import {
+  formatSubjectRef,
+  isSubjectRef,
+  parseSubjectRefString,
+  type SubjectKind,
+  type SubjectRef,
+} from '../subject/subjectRef.ts'
 
-export type SubjectKind = (typeof SUBJECT_KINDS)[number]
-
-export type SubjectRef = {
-  kind: SubjectKind
-  id: string
-}
+export {
+  formatSubjectRef,
+  isSubjectKind,
+  isSubjectRef,
+  isUuid,
+  parseSubjectRefString,
+  SUBJECT_KINDS,
+} from '../subject/subjectRef.ts'
+export type { SubjectKind, SubjectRef } from '../subject/subjectRef.ts'
 
 export type SubjectDisplayLabels = {
   primary: string
@@ -73,6 +74,17 @@ export type ResolvedSubject = {
   context?: HydratedSubjectContext
 }
 
+export type LegacyRouteSubjectRef = {
+  kind: 'legacy_listing_route'
+  ticker: string
+}
+
+export type RouteSubjectRef = SubjectRef | LegacyRouteSubjectRef
+
+export type RouteResolvedSubject = Omit<ResolvedSubject, 'subject_ref' | 'alternatives' | 'identity_level' | 'context'> & {
+  subject_ref: RouteSubjectRef
+}
+
 export type ResolveSubjectsResponse = {
   subjects: ResolvedSubject[]
   unresolved: string[]
@@ -107,14 +119,14 @@ export type SymbolTypeaheadState = {
 }
 
 export function subjectRouteParam(subjectRef: SubjectRef): string {
-  return encodeURIComponent(`${subjectRef.kind}:${subjectRef.id}`)
+  return encodeURIComponent(formatSubjectRef(subjectRef))
 }
 
 export function symbolDetailPathForSubject(subjectRef: SubjectRef): string {
   return `/symbol/${subjectRouteParam(subjectRef)}/overview`
 }
 
-export function parseSubjectRouteParam(param: string | undefined): SubjectRef {
+export function parseSubjectRouteParam(param: string | undefined): RouteSubjectRef {
   const raw = param ?? ''
   let decoded: string
   try {
@@ -122,22 +134,19 @@ export function parseSubjectRouteParam(param: string | undefined): SubjectRef {
   } catch {
     decoded = raw
   }
-  const separator = decoded.indexOf(':')
-  const kind = decoded.slice(0, separator)
-  const id = decoded.slice(separator + 1)
-
-  if (separator > 0 && isSubjectKind(kind) && id) {
-    return { kind, id }
+  const canonical = parseSubjectRefString(decoded)
+  if (canonical !== null) {
+    return canonical
   }
 
   return {
-    kind: 'listing',
-    id: decoded || 'unknown',
+    kind: 'legacy_listing_route',
+    ticker: decoded || 'unknown',
   }
 }
 
-export function subjectFromRouteParam(param: string | undefined): ResolvedSubject {
-  return subjectFromRef(parseSubjectRouteParam(param))
+export function subjectFromRouteParam(param: string | undefined): RouteResolvedSubject {
+  return subjectFromRouteRef(parseSubjectRouteParam(param))
 }
 
 // Build a minimal ResolvedSubject from a bare SubjectRef. Shared between the
@@ -146,6 +155,10 @@ export function subjectFromRouteParam(param: string | undefined): ResolvedSubjec
 // same shape — the verification that row values equal landing values for the
 // same subject reduces to a single derivation function over a single subject.
 export function subjectFromRef(subjectRef: SubjectRef): ResolvedSubject {
+  return subjectFromRouteRef(subjectRef) as ResolvedSubject
+}
+
+function subjectFromRouteRef(subjectRef: RouteSubjectRef): RouteResolvedSubject {
   const displayName = routeFallbackDisplayName(subjectRef)
   return {
     subject_ref: subjectRef,
@@ -155,6 +168,10 @@ export function subjectFromRef(subjectRef: SubjectRef): ResolvedSubject {
       primary: displayName,
     },
   }
+}
+
+export function isCanonicalResolvedSubject(subject: RouteResolvedSubject | ResolvedSubject): subject is ResolvedSubject {
+  return isSubjectRef(subject.subject_ref)
 }
 
 export function isResolvedSubject(value: unknown): value is ResolvedSubject {
@@ -173,7 +190,8 @@ export function subjectFromRouterState(state: unknown): ResolvedSubject | null {
   return isResolvedSubject(subject) ? subject : null
 }
 
-export function subjectNeedsHydration(subject: ResolvedSubject): boolean {
+export function subjectNeedsHydration(subject: RouteResolvedSubject | ResolvedSubject): boolean {
+  if (!isCanonicalResolvedSubject(subject)) return false
   switch (subject.subject_ref.kind) {
     case 'issuer':
     case 'instrument':
@@ -182,23 +200,6 @@ export function subjectNeedsHydration(subject: ResolvedSubject): boolean {
     default:
       return false
   }
-}
-
-// Strict counterpart to parseSubjectRouteParam: takes an already-decoded
-// `kind:id` string (e.g. from `URLSearchParams.get`), returns null on
-// anything that isn't a known SubjectKind paired with a non-empty id.
-// `parseSubjectRouteParam` itself coerces malformed input into a
-// `{kind: 'listing', id: '<raw>'}` fallback to support the legacy
-// ticker-style `/symbol/AAPL` URL — surfaces that don't have that
-// fallback contract (e.g. Analyze's `?subject=` query) should use this.
-export function parseSubjectRefString(decoded: string): SubjectRef | null {
-  const separator = decoded.indexOf(':')
-  if (separator <= 0) return null
-  const kind = decoded.slice(0, separator)
-  const id = decoded.slice(separator + 1)
-  if (id.length === 0) return null
-  if (!isSubjectKind(kind)) return null
-  return { kind, id }
 }
 
 export function planSymbolResolution(response: ResolveSubjectsResponse): SymbolResolutionPlan {
@@ -319,7 +320,7 @@ export async function fetchSubjectHydration(args: {
 }
 
 export function displaySubjectRef(subjectRef: SubjectRef): string {
-  return `${subjectRef.kind}:${subjectRef.id}`
+  return formatSubjectRef(subjectRef)
 }
 
 export function candidateListingLabel(subject: ResolvedSubject): string {
@@ -332,22 +333,8 @@ export function candidateListingLabel(subject: ResolvedSubject): string {
   return subject.identity_level ?? subject.subject_ref.kind
 }
 
-export function isSubjectRef(value: unknown): value is SubjectRef {
-  if (typeof value !== 'object' || value === null) return false
-  const obj = value as Record<string, unknown>
-  return (
-    typeof obj.id === 'string' &&
-    obj.id.length > 0 &&
-    typeof obj.kind === 'string' &&
-    isSubjectKind(obj.kind)
-  )
-}
-
-function isSubjectKind(value: string): value is SubjectKind {
-  return (SUBJECT_KINDS as readonly string[]).includes(value)
-}
-
-function routeFallbackDisplayName(subjectRef: SubjectRef): string {
+function routeFallbackDisplayName(subjectRef: RouteSubjectRef): string {
+  if (subjectRef.kind === 'legacy_listing_route') return subjectRef.ticker.toUpperCase()
   const label = subjectRef.kind
     .split('_')
     .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)

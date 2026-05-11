@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { fetchHomeSummary, type HomeSummary } from './summaryClient.ts'
+import { HttpJsonError } from '../http/authFetch.ts'
 
 const USER_ID = '00000000-0000-4000-8000-000000000001'
 
@@ -39,5 +40,12 @@ test('fetchHomeSummary threads x-user-id and parses the envelope', async () => {
 
 test('fetchHomeSummary throws on non-ok response', async () => {
   const fetchImpl: typeof fetch = async () => fixedResponse({ error: 'boom' }, { status: 500 })
-  await assert.rejects(fetchHomeSummary({ userId: USER_ID, fetchImpl }), /HTTP 500/)
+  await assert.rejects(
+    fetchHomeSummary({ userId: USER_ID, fetchImpl }),
+    (error: unknown) =>
+      error instanceof HttpJsonError &&
+      error.status === 500 &&
+      error.message === 'fetch home summary failed with HTTP 500' &&
+      JSON.stringify(error.body) === JSON.stringify({ error: 'boom' }),
+  )
 })

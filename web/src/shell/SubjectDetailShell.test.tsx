@@ -160,3 +160,46 @@ test('SubjectDetailShell hydrates a bare listing route before child sections nee
     restoreGlobals()
   }
 })
+
+test('SubjectDetailShell does not hydrate legacy non-UUID route input as canonical identity', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
+  const originalFetch = globalThis.fetch
+  const calls: string[] = []
+
+  try {
+    globalThis.fetch = async (input) => {
+      const url = String(input)
+      calls.push(url)
+      return new Response(JSON.stringify({ unavailable: { detail: 'test unavailable' } }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(
+        wrapShell(
+          <MemoryRouter initialEntries={['/symbol/AAPL/overview']}>
+            <Routes>
+              <Route path="/symbol/:subjectRef" element={<SubjectDetailShell />}>
+                <Route path="overview" element={<SubjectIssuerProbe />} />
+              </Route>
+            </Routes>
+          </MemoryRouter>,
+        ),
+      )
+    })
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    assert.equal(calls.includes('/v1/subjects/hydrate'), false)
+    await act(async () => root.unmount())
+  } finally {
+    globalThis.fetch = originalFetch
+    restoreGlobals()
+  }
+})

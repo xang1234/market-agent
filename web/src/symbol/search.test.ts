@@ -132,8 +132,15 @@ test('route fallback display avoids presenting raw subject refs as market labels
 test('parseSubjectRouteParam falls back without crashing on malformed percent-encoding', () => {
   const subjectRef = parseSubjectRouteParam('listing%ZZbroken')
 
-  assert.equal(subjectRef.kind, 'listing')
-  assert.equal(typeof subjectRef.id, 'string')
+  assert.deepEqual(subjectRef, { kind: 'legacy_listing_route', ticker: 'listing%ZZbroken' })
+})
+
+test('legacy ticker route fallback is not a canonical subject ref', () => {
+  const subject = subjectFromRouteParam('AAPL')
+
+  assert.deepEqual(subject.subject_ref, { kind: 'legacy_listing_route', ticker: 'AAPL' })
+  assert.equal(subject.display_name, 'AAPL')
+  assert.equal(subjectNeedsHydration(subject), false)
 })
 
 test('subjectNeedsHydration targets bare entity refs only', () => {

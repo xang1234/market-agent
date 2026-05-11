@@ -4,10 +4,9 @@
 // list means the user holds no position in that subject.
 
 import type { SubjectKind, SubjectRef } from '../symbol/search.ts'
+import { authenticatedFetch, readJsonBody, type FetchImpl } from '../http/authFetch.ts'
 
 export const PORTFOLIO_API_BASE = '/v1/portfolios'
-
-const USER_ID_HEADER = 'x-user-id'
 
 // Mirror of HOLDING_SUBJECT_KINDS in services/portfolio/src/holdings.ts.
 // Server enforces the same allowlist at the API boundary; this constant
@@ -36,8 +35,6 @@ export type SubjectOverlay = {
   contributions: ReadonlyArray<OverlayContribution>
 }
 
-type FetchImpl = typeof fetch
-
 export class PortfolioFetchError extends Error {
   readonly status: number
   constructor(status: number, message: string) {
@@ -58,24 +55,23 @@ export async function fetchOverlays(args: {
   fetchImpl?: FetchImpl
   signal?: AbortSignal
 }): Promise<SubjectOverlay[]> {
-  const fetchImpl = args.fetchImpl ?? fetch
   const url = args.endpoint ?? `${PORTFOLIO_API_BASE}/overlays`
-  const response = await fetchImpl(url, {
+  const response = await authenticatedFetch(url, {
+    userId: args.userId,
+    fetchImpl: args.fetchImpl,
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      [USER_ID_HEADER]: args.userId,
     },
     body: JSON.stringify({ subject_refs: args.subjectRefs }),
     signal: args.signal,
   })
   if (!response.ok) {
     let detail: string | null = null
-    try {
-      const body = (await response.json()) as { error?: unknown }
-      if (typeof body.error === 'string') detail = body.error
-    } catch {
-      // tolerate non-JSON error bodies; fall through to the generic message
+    const body = await readJsonBody(response)
+    if (body !== null && typeof body === 'object') {
+      const error = (body as { error?: unknown }).error
+      if (typeof error === 'string') detail = error
     }
     throw new PortfolioFetchError(
       response.status,

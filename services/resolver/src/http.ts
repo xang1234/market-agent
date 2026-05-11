@@ -15,7 +15,7 @@ import {
   type SubjectDisplayLabels,
 } from "./flow.ts";
 import type { QueryExecutor } from "./lookup.ts";
-import { SUBJECT_KINDS, type SubjectKind, type SubjectRef } from "./subject-ref.ts";
+import { SUBJECT_KINDS, isSubjectRef, type SubjectKind, type SubjectRef } from "./subject-ref.ts";
 
 const MAX_REQUEST_BODY_BYTES = 64 * 1024;
 
@@ -92,18 +92,9 @@ export function validateResolveRequest(body: unknown): RequestValidation {
       return { valid: false, error: "'choice' must be an object" };
     }
     const choiceObj = obj.choice as Record<string, unknown>;
-    const subjectRef = choiceObj.subject_ref;
-    if (typeof subjectRef !== "object" || subjectRef === null) {
-      return { valid: false, error: "'choice.subject_ref' is required" };
-    }
-    const ref = subjectRef as Record<string, unknown>;
-    if (typeof ref.kind !== "string" || !(SUBJECT_KINDS as readonly string[]).includes(ref.kind)) {
-      return { valid: false, error: "'choice.subject_ref.kind' must be a valid SubjectKind" };
-    }
-    if (typeof ref.id !== "string") {
-      return { valid: false, error: "'choice.subject_ref.id' must be a string" };
-    }
-    choice = { subject_ref: { kind: ref.kind as SubjectKind, id: ref.id } };
+    const ref = validateSubjectRef(choiceObj.subject_ref, "choice.subject_ref");
+    if (!ref.valid) return { valid: false, error: ref.error };
+    choice = { subject_ref: ref.subject_ref };
   }
 
   return {
@@ -138,14 +129,14 @@ function validateSubjectRef(value: unknown, label: string): SubjectRefValidation
   if (typeof value !== "object" || value === null) {
     return { valid: false, error: `'${label}' is required` };
   }
-  const ref = value as Record<string, unknown>;
-  if (typeof ref.kind !== "string" || !(SUBJECT_KINDS as readonly string[]).includes(ref.kind)) {
+  if (typeof (value as Record<string, unknown>).kind !== "string" ||
+    !(SUBJECT_KINDS as readonly string[]).includes((value as Record<string, unknown>).kind as string)) {
     return { valid: false, error: `'${label}.kind' must be a valid SubjectKind` };
   }
-  if (typeof ref.id !== "string") {
-    return { valid: false, error: `'${label}.id' must be a string` };
+  if (!isSubjectRef(value)) {
+    return { valid: false, error: `'${label}.id' must be a UUID` };
   }
-  return { valid: true, subject_ref: { kind: ref.kind as SubjectKind, id: ref.id } };
+  return { valid: true, subject_ref: value };
 }
 
 export async function handleResolveSubjects(

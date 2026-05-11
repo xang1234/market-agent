@@ -41,7 +41,7 @@ import {
   type ChatThreadsDb,
 } from "../../chat/src/threads-repo.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
-import type { SubjectRef } from "../../resolver/src/subject-ref.ts";
+import { isSubjectRef, isUuid, type SubjectRef } from "../../shared/src/subject-ref.ts";
 import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
 import { readDevFlags } from "../../shared/src/devFlags.ts";
 import {
@@ -494,7 +494,7 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
     name: "Quality monitor",
     thesis: "Find margin, cash conversion, guidance, and source-backed claim changes.",
     cadence: "daily",
-    universe: { mode: "static", subject_refs: [{ kind: "issuer", id: "demo-issuer" }] },
+    universe: { mode: "static", subject_refs: [{ kind: "issuer", id: "99999999-9999-4999-8999-999999999999" }] },
     alert_rules: [
       {
         rule_id: "demo-margin",
@@ -1023,22 +1023,11 @@ function readOptionalSubjectRef(value: unknown): SubjectRef | null {
   if (typeof value !== "object" || Array.isArray(value)) {
     throw new DevApiHttpError(400, "primary_subject_ref is invalid");
   }
-  const candidate = value as Partial<SubjectRef>;
-  if (typeof candidate.kind !== "string" || typeof candidate.id !== "string") {
+  if (!isSubjectRef(value)) {
     throw new DevApiHttpError(400, "primary_subject_ref is invalid");
   }
-  return { kind: candidate.kind as SubjectRef["kind"], id: candidate.id };
+  return value;
 }
-
-const SUBJECT_KINDS: ReadonlyArray<SubjectRef["kind"]> = Object.freeze([
-  "issuer",
-  "instrument",
-  "listing",
-  "theme",
-  "macro_topic",
-  "portfolio",
-  "screen",
-]);
 
 function readSubjectRefFromQuery(url: URL): SubjectRef {
   const kind = nonEmptyString(url.searchParams.get("subject_kind"));
@@ -1046,10 +1035,11 @@ function readSubjectRefFromQuery(url: URL): SubjectRef {
   if (kind === null || id === null) {
     throw new DevApiHttpError(400, "subject_kind and subject_id are required");
   }
-  if (!SUBJECT_KINDS.includes(kind as SubjectRef["kind"])) {
-    throw new DevApiHttpError(400, "subject_kind is invalid");
+  const subjectRef = { kind, id };
+  if (!isSubjectRef(subjectRef)) {
+    throw new DevApiHttpError(400, "subject_ref is invalid");
   }
-  return { kind: kind as SubjectRef["kind"], id };
+  return subjectRef;
 }
 
 function readOptionalPositiveInteger(value: string | null, label: string): number | undefined {
@@ -1133,8 +1123,37 @@ function emptyEgressDb(): QueryExecutor {
 }
 
 function readUniverse(value: unknown): AgentUniverse {
-  if (value !== null && typeof value === "object") return value as AgentUniverse;
-  return { mode: "static", subject_refs: [] };
+  if (value === undefined || value === null) return { mode: "static", subject_refs: [] };
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new DevApiHttpError(400, "universe is invalid");
+  }
+  const universe = value as Record<string, unknown>;
+  if (universe.mode === "static") {
+    const subjectRefs = universe.subject_refs;
+    if (!Array.isArray(subjectRefs) || !subjectRefs.every(isSubjectRef)) {
+      throw new DevApiHttpError(400, "universe.subject_refs is invalid");
+    }
+    return {
+      mode: "static",
+      subject_refs: Object.freeze(subjectRefs.map((ref) => Object.freeze({ kind: ref.kind, id: ref.id }))),
+    };
+  }
+  if (universe.mode === "screen") return readDynamicUniverse(universe, "screen_id");
+  if (universe.mode === "theme") return readDynamicUniverse(universe, "theme_id");
+  if (universe.mode === "portfolio") return readDynamicUniverse(universe, "portfolio_id");
+  if (universe.mode === "agent") return readDynamicUniverse(universe, "agent_id");
+  throw new DevApiHttpError(400, "universe.mode is invalid");
+}
+
+function readDynamicUniverse<T extends "screen_id" | "theme_id" | "portfolio_id" | "agent_id">(
+  universe: Record<string, unknown>,
+  key: T,
+): Extract<AgentUniverse, Record<T, string>> {
+  const id = universe[key];
+  if (!isUuid(id)) {
+    throw new DevApiHttpError(400, `universe.${key} is invalid`);
+  }
+  return Object.freeze({ mode: key.slice(0, -3), [key]: id }) as Extract<AgentUniverse, Record<T, string>>;
 }
 
 function readAlertRules(value: unknown): JsonValue {

@@ -7,7 +7,7 @@ import { createRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
-import { buildAgentPayload } from '../agents/agentPayload.ts'
+import { AgentPayloadValidationError, buildAgentPayload } from '../agents/agentPayload.ts'
 import { persistUserChatTurn } from '../chat/persistUserChatTurn.ts'
 import { AgentsPage } from './AgentsPage.tsx'
 import { AnalyzePage } from './AnalyzePage.tsx'
@@ -416,7 +416,7 @@ test('Agents surface renders CRUD controls, run history, and activity status', (
   assert.match(html, /Create agent/)
   assert.match(html, /Universe/)
   assert.match(html, /Alert rule/)
-  assert.match(html, /issuer: demo-issuer/)
+  assert.match(html, /issuer: 99999999-9999-4999-8999-999999999999/)
   assert.match(html, /critical\+ headline contains margin/)
   assert.match(html, /Disable/)
   assert.match(html, /Delete/)
@@ -513,10 +513,10 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     thesis: 'Alert on any high severity finding',
     cadence: 'daily',
     universeMode: 'static',
-    staticSubjectRefsText: 'issuer:issuer-123\nlisting:listing-456',
+    staticSubjectRefsText: 'issuer:11111111-1111-4111-8111-111111111111\nlisting: 22222222-2222-4222-8222-222222222222',
     dynamicUniverseId: '',
     subjectKind: 'issuer',
-    subjectId: 'issuer-123',
+    subjectId: '11111111-1111-4111-8111-111111111111',
     alertRuleId: 'any-high',
     alertSeverity: 'high',
     alertHeadline: '',
@@ -532,8 +532,8 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     universe: {
       mode: 'static',
       subject_refs: [
-        { kind: 'issuer', id: 'issuer-123' },
-        { kind: 'listing', id: 'listing-456' },
+        { kind: 'issuer', id: '11111111-1111-4111-8111-111111111111' },
+        { kind: 'listing', id: '22222222-2222-4222-8222-222222222222' },
       ],
     },
     alert_rules: [
@@ -551,9 +551,9 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     cadence: 'hourly',
     universeMode: 'theme',
     staticSubjectRefsText: '',
-    dynamicUniverseId: ' theme-123 ',
+    dynamicUniverseId: ' 33333333-3333-4333-8333-333333333333 ',
     subjectKind: 'issuer',
-    subjectId: ' issuer-123 ',
+    subjectId: ' 11111111-1111-4111-8111-111111111111 ',
     alertRuleId: ' margin-risk ',
     alertSeverity: 'high',
     alertHeadline: ' margin ',
@@ -566,7 +566,7 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     name: 'Margin monitor',
     thesis: 'Watch supplier margin risk',
     cadence: 'hourly',
-    universe: { mode: 'theme', theme_id: 'theme-123' },
+    universe: { mode: 'theme', theme_id: '33333333-3333-4333-8333-333333333333' },
     alert_rules: [
       {
         rule_id: 'margin-risk',
@@ -583,7 +583,7 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     cadence: 'weekly',
     universeMode: 'portfolio',
     staticSubjectRefsText: '',
-    dynamicUniverseId: 'portfolio-123',
+    dynamicUniverseId: '44444444-4444-4444-8444-444444444444',
     subjectKind: 'theme',
     subjectId: 'quality',
     alertRuleId: '',
@@ -598,11 +598,11 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     name: 'No-alert monitor',
     thesis: 'Track guidance',
     cadence: 'weekly',
-    universe: { mode: 'portfolio', portfolio_id: 'portfolio-123' },
+    universe: { mode: 'portfolio', portfolio_id: '44444444-4444-4444-8444-444444444444' },
     alert_rules: [],
   })
 
-  const screenUniverse = { mode: 'screen', screen_id: 'screen-123' } as const
+  const screenUniverse = { mode: 'screen', screen_id: '55555555-5555-4555-8555-555555555555' } as const
   const multipleRules = [
     { rule_id: 'margin-risk', severity_at_least: 'high', headline_contains: 'margin' },
     { rule_id: 'cash-risk', severity_at_least: 'medium', headline_contains: 'cash' },
@@ -613,7 +613,7 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     cadence: 'daily',
     universeMode: 'agent',
     staticSubjectRefsText: '',
-    dynamicUniverseId: 'agent-123',
+    dynamicUniverseId: '66666666-6666-4666-8666-666666666666',
     subjectKind: 'issuer',
     subjectId: '',
     alertRuleId: '',
@@ -631,7 +631,7 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     name: 'Existing screen monitor',
     thesis: 'Preserve unsupported config',
     cadence: 'daily',
-    universe: { mode: 'agent', agent_id: 'agent-123' },
+    universe: { mode: 'agent', agent_id: '66666666-6666-4666-8666-666666666666' },
     alert_rules: multipleRules,
   })
 
@@ -646,7 +646,7 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     thesis: ' Preserve unsupported single rule ',
     cadence: 'daily',
     universeMode: 'static',
-    staticSubjectRefsText: 'issuer:new-issuer',
+    staticSubjectRefsText: 'issuer:33333333-3333-4333-8333-333333333333',
     dynamicUniverseId: '',
     subjectKind: 'issuer',
     subjectId: '',
@@ -668,6 +668,50 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     universe: unsupportedUniverse,
     alert_rules: [unsupportedSingleRule],
   })
+
+  assert.throws(
+    () => buildAgentPayload({
+      name: 'Invalid dynamic monitor',
+      thesis: 'Do not send backend-rejected dynamic ids',
+      cadence: 'daily',
+      universeMode: 'theme',
+      staticSubjectRefsText: '',
+      dynamicUniverseId: 'theme-123',
+      subjectKind: 'issuer',
+      subjectId: '',
+      alertRuleId: '',
+      alertSeverity: 'medium',
+      alertHeadline: '',
+      alertEmail: false,
+      alertWebPush: false,
+      alertSms: false,
+      alertMobilePush: false,
+      alertDigest: false,
+    }),
+    (error: unknown) => error instanceof AgentPayloadValidationError && error.message === 'theme universe id must be a UUID',
+  )
+
+  assert.throws(
+    () => buildAgentPayload({
+      name: 'Invalid static monitor',
+      thesis: 'Reject partial static universe',
+      cadence: 'daily',
+      universeMode: 'static',
+      staticSubjectRefsText: 'issuer:33333333-3333-4333-8333-333333333333\nlisting:AAPL',
+      dynamicUniverseId: '',
+      subjectKind: 'issuer',
+      subjectId: '',
+      alertRuleId: '',
+      alertSeverity: 'medium',
+      alertHeadline: '',
+      alertEmail: false,
+      alertWebPush: false,
+      alertSms: false,
+      alertMobilePush: false,
+      alertDigest: false,
+    }),
+    (error: unknown) => error instanceof AgentPayloadValidationError && error.message === 'Static subject ref line 2 must be kind:uuid',
+  )
 })
 
 function persistedMessage(index: number) {

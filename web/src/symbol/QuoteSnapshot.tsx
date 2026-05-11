@@ -11,10 +11,11 @@ import {
   subjectDisplayName,
   type QuoteSnapshot as QuoteSnapshotData,
   type ResolvedSubject,
+  type RouteResolvedSubject,
 } from './quote.ts'
 
 type QuoteSnapshotProps = {
-  subject: ResolvedSubject
+  subject: ResolvedSubject | RouteResolvedSubject
 }
 
 type FetchState =

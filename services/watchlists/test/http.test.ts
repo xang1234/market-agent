@@ -306,7 +306,7 @@ test("server: POST with missing or malformed subject_ref returns 400", { timeout
   assert.equal(notJson.status, 400);
 });
 
-test("server: DELETE with invalid subject_kind path returns 404", { timeout: 120000 }, async (t) => {
+test("server: DELETE with invalid subject_ref path returns 404", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for watchlists coverage");
     return;
@@ -317,11 +317,17 @@ test("server: DELETE with invalid subject_kind path returns 404", { timeout: 120
   const userId = await seedUser(client, "list-bad-path@example.test");
   const base = await startServer(t, client);
 
-  const res = await fetch(
+  const badKind = await fetch(
     `${base}/v1/watchlists/default/members/ticker/${APPLE_LISTING.id}`,
     withUser(userId, { method: "DELETE" }),
   );
-  assert.equal(res.status, 404);
+  assert.equal(badKind.status, 404);
+
+  const badId = await fetch(
+    `${base}/v1/watchlists/default/members/listing/AAPL`,
+    withUser(userId, { method: "DELETE" }),
+  );
+  assert.equal(badId.status, 404);
 });
 
 test("server: members from one user are isolated from another user", { timeout: 120000 }, async (t) => {

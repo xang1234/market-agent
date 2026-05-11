@@ -5,7 +5,7 @@ import {
   DEFAULT_BUNDLE_ID,
   chooseBundleIdForSubjectKind,
 } from "../src/bundle-routing.ts";
-import { SUBJECT_KINDS } from "../../resolver/src/subject-ref.ts";
+import { SUBJECT_KINDS } from "../../shared/src/subject-ref.ts";
 import { analystPromptTemplateBundleIds } from "../../tools/src/prompt-templates.ts";
 
 test("chooseBundleIdForSubjectKind routes a theme chat to the theme_research bundle (fra-95e contract)", () => {
