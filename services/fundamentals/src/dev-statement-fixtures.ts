@@ -34,6 +34,8 @@ function epsLine(metric_key: string, value_num: number, currency = "USD"): State
 
 type PeriodLines = {
   fiscal_year: number;
+  fiscal_period: "FY" | "Q1" | "Q2" | "Q3" | "Q4";
+  period_kind: "fiscal_y" | "fiscal_q";
   period_start: string;
   period_end: string;
   reported_at: string;
@@ -52,11 +54,11 @@ function appleIncomeStatement(p: PeriodLines): NormalizedStatementInput {
     subject: APPLE_ISSUER,
     family: "income",
     basis: "as_reported",
-    period_kind: "fiscal_y",
+    period_kind: p.period_kind,
     period_start: p.period_start,
     period_end: p.period_end,
     fiscal_year: p.fiscal_year,
-    fiscal_period: "FY",
+    fiscal_period: p.fiscal_period,
     reporting_currency: "USD",
     as_of: `${p.reported_at}T20:30:00.000Z`,
     reported_at: `${p.reported_at}T20:30:00.000Z`,
@@ -77,6 +79,8 @@ function appleIncomeStatement(p: PeriodLines): NormalizedStatementInput {
 const APPLE_INCOME_PERIODS: ReadonlyArray<PeriodLines> = [
   {
     fiscal_year: 2020,
+    fiscal_period: "FY",
+    period_kind: "fiscal_y",
     period_start: "2019-09-29",
     period_end: "2020-09-26",
     reported_at: "2020-10-30",
@@ -91,6 +95,8 @@ const APPLE_INCOME_PERIODS: ReadonlyArray<PeriodLines> = [
   },
   {
     fiscal_year: 2021,
+    fiscal_period: "FY",
+    period_kind: "fiscal_y",
     period_start: "2020-09-27",
     period_end: "2021-09-25",
     reported_at: "2021-10-29",
@@ -105,6 +111,8 @@ const APPLE_INCOME_PERIODS: ReadonlyArray<PeriodLines> = [
   },
   {
     fiscal_year: 2022,
+    fiscal_period: "FY",
+    period_kind: "fiscal_y",
     period_start: "2021-09-26",
     period_end: "2022-09-24",
     reported_at: "2022-10-28",
@@ -119,6 +127,8 @@ const APPLE_INCOME_PERIODS: ReadonlyArray<PeriodLines> = [
   },
   {
     fiscal_year: 2023,
+    fiscal_period: "FY",
+    period_kind: "fiscal_y",
     period_start: "2022-10-02",
     period_end: "2023-09-30",
     reported_at: "2023-11-03",
@@ -133,6 +143,8 @@ const APPLE_INCOME_PERIODS: ReadonlyArray<PeriodLines> = [
   },
   {
     fiscal_year: 2024,
+    fiscal_period: "FY",
+    period_kind: "fiscal_y",
     period_start: "2023-10-01",
     period_end: "2024-09-28",
     reported_at: "2024-11-01",
@@ -144,6 +156,73 @@ const APPLE_INCOME_PERIODS: ReadonlyArray<PeriodLines> = [
     net_income: 93_736_000_000,
     eps_basic: 6.11,
     eps_diluted: 6.08,
+  },
+];
+
+const APPLE_INCOME_QUARTERS_FY2024: ReadonlyArray<PeriodLines> = [
+  {
+    fiscal_year: 2024,
+    fiscal_period: "Q1",
+    period_kind: "fiscal_q",
+    period_start: "2023-10-01",
+    period_end: "2023-12-30",
+    reported_at: "2024-02-02",
+    revenue: 119_575_000_000,
+    cost_of_revenue: 64_720_000_000,
+    gross_profit: 54_855_000_000,
+    operating_expenses: 14_482_000_000,
+    operating_income: 40_373_000_000,
+    net_income: 33_916_000_000,
+    eps_basic: 2.19,
+    eps_diluted: 2.18,
+  },
+  {
+    fiscal_year: 2024,
+    fiscal_period: "Q2",
+    period_kind: "fiscal_q",
+    period_start: "2023-12-31",
+    period_end: "2024-03-30",
+    reported_at: "2024-05-03",
+    revenue: 90_753_000_000,
+    cost_of_revenue: 48_482_000_000,
+    gross_profit: 42_271_000_000,
+    operating_expenses: 14_371_000_000,
+    operating_income: 27_900_000_000,
+    net_income: 23_636_000_000,
+    eps_basic: 1.53,
+    eps_diluted: 1.53,
+  },
+  {
+    fiscal_year: 2024,
+    fiscal_period: "Q3",
+    period_kind: "fiscal_q",
+    period_start: "2024-03-31",
+    period_end: "2024-06-29",
+    reported_at: "2024-08-02",
+    revenue: 85_777_000_000,
+    cost_of_revenue: 46_099_000_000,
+    gross_profit: 39_678_000_000,
+    operating_expenses: 14_326_000_000,
+    operating_income: 25_352_000_000,
+    net_income: 21_448_000_000,
+    eps_basic: 1.40,
+    eps_diluted: 1.40,
+  },
+  {
+    fiscal_year: 2024,
+    fiscal_period: "Q4",
+    period_kind: "fiscal_q",
+    period_start: "2024-06-30",
+    period_end: "2024-09-28",
+    reported_at: "2024-11-01",
+    revenue: 94_930_000_000,
+    cost_of_revenue: 51_051_000_000,
+    gross_profit: 43_879_000_000,
+    operating_expenses: 14_288_000_000,
+    operating_income: 29_591_000_000,
+    net_income: 14_736_000_000,
+    eps_basic: 0.98,
+    eps_diluted: 0.97,
   },
 ];
 
@@ -171,6 +250,11 @@ const APPLE_INCOME_FY2020_RESTATED: NormalizedStatementInput = {
 
 export const DEV_STATEMENTS: ReadonlyArray<StatementRepositoryRecord> = [
   ...APPLE_INCOME_PERIODS.map((p) => ({
+    issuer_id: APPLE_ISSUER.id,
+    basis: "as_reported" as const,
+    statement: appleIncomeStatement(p),
+  })),
+  ...APPLE_INCOME_QUARTERS_FY2024.map((p) => ({
     issuer_id: APPLE_ISSUER.id,
     basis: "as_reported" as const,
     statement: appleIncomeStatement(p),

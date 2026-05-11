@@ -125,6 +125,37 @@ test("POST /v1/fundamentals/statements returns per-period statements and echoes 
   }
 });
 
+test("POST /v1/fundamentals/statements returns quarterly statement periods", async (t) => {
+  const url = await startServer(t, buildDeps());
+  const request = appleIncomeRequest(["2024-Q4", "2024-Q3", "2024-Q2", "2024-Q1"]);
+  const res = await postStatements(url, request);
+
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as GetStatementsResponse;
+
+  assert.deepEqual(body.query, request);
+  assert.equal(body.results.length, 4);
+  assert.deepEqual(
+    body.results.map((entry) =>
+      entry.outcome.outcome === "available" ? entry.outcome.data.fiscal_period : null,
+    ),
+    ["Q4", "Q3", "Q2", "Q1"],
+  );
+
+  for (const entry of body.results) {
+    assert.equal(entry.outcome.outcome, "available");
+    if (entry.outcome.outcome !== "available") return;
+    assert.equal(entry.outcome.data.period_kind, "fiscal_q");
+    assert.match(entry.outcome.data.fiscal_period, /^Q[1-4]$/);
+  }
+
+  const q2 = body.results.find((entry) => entry.period === "2024-Q2")?.outcome;
+  assert.ok(q2 && q2.outcome === "available");
+  if (q2.outcome !== "available") return;
+  const revenue = q2.data.lines.find((line) => line.metric_key === "revenue");
+  assert.equal(revenue?.value_num, 90_753_000_000);
+});
+
 test("POST /v1/fundamentals/statements per-period misses become missing_coverage without polluting siblings", async (t) => {
   const url = await startServer(t, buildDeps());
   // FY2019 isn't seeded; FY2024 is.
