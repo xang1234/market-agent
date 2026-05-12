@@ -7,6 +7,7 @@ import {
   type DevApiAdapters,
   type DevApiServiceAdapterDeps,
 } from "./http.ts";
+import { createServiceLlmAdapter } from "./llm-adapter.ts";
 
 export type DevApiRuntimeEnv = {
   MA_DEV_API_FIXTURE_ADAPTER?: string;
@@ -14,6 +15,7 @@ export type DevApiRuntimeEnv = {
   DATABASE_URL?: string;
   DEV_API_RUNTIME_MODULE?: string;
   DEV_API_ANALYZE_SEAL_MODULE?: string;
+  LLM_MASTER_ENCRYPTION_KEY?: string;
 };
 
 const DEFAULT_DEV_API_RUNTIME_MODULE = new URL("./local-runtime.ts", import.meta.url).href;
@@ -44,12 +46,14 @@ export async function createDevApiAdaptersFromEnv(
 
   const { Pool } = await import("pg");
   const pool = new Pool({ connectionString: databaseUrl });
-  return createServiceDevApiAdapters({
+  const adapters = createServiceDevApiAdapters({
     db: pool,
     sealAnalyzeSnapshot: module.sealAnalyzeSnapshot as DevApiServiceAdapterDeps["sealAnalyzeSnapshot"],
     runAnalyzeWorkflow: module.runAnalyzeWorkflow as DevApiServiceAdapterDeps["runAnalyzeWorkflow"],
     createAgentLoopStages: module.createAgentLoopStages as DevApiServiceAdapterDeps["createAgentLoopStages"],
   });
+  const llm = await createServiceLlmAdapter({ db: pool, env });
+  return llm === null ? adapters : { ...adapters, llm };
 }
 
 function moduleSpecifier(specifier: string, cwd: string): string {

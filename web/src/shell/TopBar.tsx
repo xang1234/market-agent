@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { SessionControl } from './SessionControl'
 import { ThemeToggle } from './ThemeToggle'
 import { SymbolSearch } from '../symbol/SymbolSearch'
@@ -13,6 +14,12 @@ export function TopBar() {
       </div>
       <div className="mx-2 h-6 w-px bg-neutral-200 dark:bg-neutral-800" aria-hidden="true" />
       <SymbolSearch placement="topbar" />
+      <Link
+        to="/settings"
+        className="shrink-0 rounded border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
+      >
+        Settings
+      </Link>
       <div className="shrink-0">
         <ThemeToggle />
       </div>

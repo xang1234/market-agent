@@ -48,6 +48,13 @@ import {
   listThemeMembershipRationalesBySubject,
   type ThemeMembershipRationaleRow,
 } from "../../themes/src/index.ts";
+import {
+  DevApiLlmRequestError,
+  assertLlmRoleOrThrow,
+  createFixtureLlmAdapter,
+  createServiceLlmAdapter,
+  type DevApiLlmAdapter,
+} from "./llm-adapter.ts";
 
 type DevAgent = {
   agent_id: string;
@@ -180,6 +187,9 @@ export type DevApiAdapters = {
   analyze: DevApiAnalyzeAdapter;
   agents: DevApiAgentsAdapter;
   themes: DevApiThemesAdapter;
+  // Optional: requires LLM_MASTER_ENCRYPTION_KEY for the service-backed
+  // adapter. When absent, /v1/llm/* routes respond 503.
+  llm?: DevApiLlmAdapter;
 };
 
 export type DevApiAnalyzeWorkflowInput = {
@@ -464,10 +474,102 @@ export function createDevApiServer(
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/v1/llm/providers") {
+      if (!adapters?.llm) {
+        respondJson(res, 503, { error: "llm adapter is not configured" });
+        return;
+      }
+      respondJson(res, 200, await adapters.llm.listProviders());
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/llm/credentials") {
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (userId === null) {
+        respondJson(res, 401, { error: "x-user-id header is required" });
+        return;
+      }
+      if (!adapters?.llm) {
+        respondJson(res, 503, { error: "llm adapter is not configured" });
+        return;
+      }
+      respondJson(res, 200, await adapters.llm.listCredentials({ user_id: userId }));
+      return;
+    }
+
+    const credentialPutMatch = url.pathname.match(/^\/v1\/llm\/credentials\/([^/]+)$/);
+    if (credentialPutMatch && req.method === "PUT") {
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (userId === null) {
+        respondJson(res, 401, { error: "x-user-id header is required" });
+        return;
+      }
+      if (!adapters?.llm) {
+        respondJson(res, 503, { error: "llm adapter is not configured" });
+        return;
+      }
+      const role = assertLlmRoleOrThrow(decodeURIComponent(credentialPutMatch[1]));
+      const body = await readJson(req).catch(() => BAD_JSON);
+      if (body === BAD_JSON) {
+        respondJson(res, 400, { error: "request body must be valid JSON" });
+        return;
+      }
+      const bodyRecord = typeof body === "object" && body !== null && !Array.isArray(body)
+        ? body as Record<string, unknown>
+        : {};
+      respondJson(res, 200, await adapters.llm.upsertCredential({
+        user_id: userId,
+        role,
+        body: bodyRecord,
+      }));
+      return;
+    }
+
+    if (credentialPutMatch && req.method === "DELETE") {
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (userId === null) {
+        respondJson(res, 401, { error: "x-user-id header is required" });
+        return;
+      }
+      if (!adapters?.llm) {
+        respondJson(res, 503, { error: "llm adapter is not configured" });
+        return;
+      }
+      const role = assertLlmRoleOrThrow(decodeURIComponent(credentialPutMatch[1]));
+      const deleted = await adapters.llm.deleteCredential({ user_id: userId, role });
+      if (!deleted) {
+        respondJson(res, 404, { error: "credential not found" });
+        return;
+      }
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+
+    const credentialTestMatch = url.pathname.match(/^\/v1\/llm\/credentials\/([^/]+)\/test$/);
+    if (credentialTestMatch && req.method === "POST") {
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (userId === null) {
+        respondJson(res, 401, { error: "x-user-id header is required" });
+        return;
+      }
+      if (!adapters?.llm) {
+        respondJson(res, 503, { error: "llm adapter is not configured" });
+        return;
+      }
+      const role = assertLlmRoleOrThrow(decodeURIComponent(credentialTestMatch[1]));
+      respondJson(res, 200, await adapters.llm.testCredential({ user_id: userId, role }));
+      return;
+    }
+
     respondJson(res, 404, { error: "not found" });
     } catch (error) {
       if (res.headersSent) {
         res.end();
+        return;
+      }
+      if (error instanceof DevApiLlmRequestError) {
+        respondJson(res, error.status, { error: error.message });
         return;
       }
       if (error instanceof DevApiHttpError) {
@@ -663,6 +765,7 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
         return { memberships: [], truncated: false };
       },
     },
+    llm: createFixtureLlmAdapter(),
   };
 }
 

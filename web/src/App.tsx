@@ -16,6 +16,7 @@ import { ChatEmptyState, ChatLayout, ChatThreadView } from './pages/ChatPage'
 import { ScreenerPage } from './pages/ScreenerPage'
 import { AnalyzePage } from './pages/AnalyzePage'
 import { ReviewPage } from './pages/ReviewPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { SubjectDetailShell } from './shell/SubjectDetailShell'
 import {
   EarningsSection,
@@ -32,6 +33,7 @@ const publicHandle: RouteHandle = { scope: 'public' }
 const protAgents: RouteHandle = { scope: 'protected', label: 'Agents' }
 const protChat: RouteHandle = { scope: 'protected', label: 'Chat' }
 const protReview: RouteHandle = { scope: 'protected', label: 'Review' }
+const protSettings: RouteHandle = { scope: 'protected', label: 'Settings' }
 
 // Route model per spec §3.7 + §3.8. WorkspaceShell is the layout route —
 // persistent across all primary-workspace transitions. Child routes render
@@ -57,6 +59,7 @@ const router = createBrowserRouter(
       </Route>
       <Route path="screener" handle={publicHandle} element={<ScreenerPage />} />
       <Route path="analyze" handle={publicHandle} element={<AnalyzePage />} />
+      <Route path="settings" handle={protSettings} element={<SettingsPage />} />
       <Route path="symbol/:subjectRef" handle={publicHandle} element={<SubjectDetailShell />}>
         <Route index element={<Navigate to="overview" replace />} />
         <Route path="overview" element={<OverviewSection />} />
