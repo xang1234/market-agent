@@ -204,6 +204,230 @@ test("AAPL companyfacts extraction maps US-GAAP concepts to canonical metric_key
   assert.equal(byKey.get("shares_outstanding_basic")?.unit, "shares");
 });
 
+test("quarterly companyfacts extraction prefers discrete quarter values over YTD values", () => {
+  const q2Accn = "0000320193-24-000069";
+  const facts = aaplCompanyFactsFixture();
+  const usGaap = facts.facts["us-gaap"]!;
+  const q2Discrete = {
+    fy: 2024,
+    fp: "Q2",
+    form: "10-Q",
+    accn: q2Accn,
+    filed: "2024-05-03",
+    start: "2023-12-31",
+    end: "2024-03-30",
+    frame: "CY2024Q1",
+  };
+  const q2Ytd = {
+    fy: 2024,
+    fp: "Q2",
+    form: "10-Q",
+    accn: q2Accn,
+    filed: "2024-05-03",
+    start: "2023-10-01",
+    end: "2024-03-30",
+  };
+
+  usGaap.RevenueFromContractWithCustomerExcludingAssessedTax.units.USD = [
+    value({ val: 210_328_000_000, ...q2Ytd }),
+    value({ val: 90_753_000_000, ...q2Discrete }),
+  ];
+  usGaap.CostOfGoodsAndServicesSold.units.USD = [
+    value({ val: 112_258_000_000, ...q2Ytd }),
+    value({ val: 48_482_000_000, ...q2Discrete }),
+  ];
+  usGaap.GrossProfit.units.USD = [
+    value({ val: 98_070_000_000, ...q2Ytd }),
+    value({ val: 42_271_000_000, ...q2Discrete }),
+  ];
+  usGaap.OperatingIncomeLoss.units.USD = [
+    value({ val: 70_898_000_000, ...q2Ytd }),
+    value({ val: 27_900_000_000, ...q2Discrete }),
+  ];
+  usGaap.NetIncomeLoss.units.USD = [
+    value({ val: 57_552_000_000, ...q2Ytd }),
+    value({ val: 23_636_000_000, ...q2Discrete }),
+  ];
+  usGaap.EarningsPerShareBasic.units["USD/shares"] = [
+    value({ val: 3.71, ...q2Ytd }),
+    value({ val: 1.53, ...q2Discrete }),
+  ];
+  usGaap.EarningsPerShareDiluted.units["USD/shares"] = [
+    value({ val: 3.71, ...q2Ytd }),
+    value({ val: 1.53, ...q2Discrete }),
+  ];
+  usGaap.WeightedAverageNumberOfSharesOutstandingBasic.units.shares = [
+    value({ val: 15_509_763_000, ...q2Discrete }),
+  ];
+  usGaap.WeightedAverageNumberOfDilutedSharesOutstanding.units.shares = [
+    value({ val: 15_464_709_000, ...q2Discrete }),
+  ];
+
+  const statement = normalizedStatement(extractStatement({
+    subject: aaplIssuer,
+    facts,
+    family: "income",
+    fiscal_year: 2024,
+    fiscal_period: "Q2",
+    accession_number: q2Accn,
+    source_id: SEC_SOURCE_ID,
+    as_of: "2024-05-03T20:30:00.000Z",
+  }));
+
+  assert.equal(statement.period_kind, "fiscal_q");
+  assert.equal(statement.period_start, "2023-12-31");
+  assert.equal(statement.period_end, "2024-03-30");
+  assert.equal(statement.lines.find((line) => line.metric_key === "revenue")?.value_num, 90_753_000_000);
+  assert.equal(statement.lines.find((line) => line.metric_key === "net_income")?.value_num, 23_636_000_000);
+});
+
+test("quarterly companyfacts extraction does not use six-month YTD values as a discrete quarter", () => {
+  const q2Accn = "0000320193-24-000069";
+  const facts = aaplCompanyFactsFixture();
+  const usGaap = facts.facts["us-gaap"]!;
+  const q2Ytd = {
+    fy: 2024,
+    fp: "Q2",
+    form: "10-Q",
+    accn: q2Accn,
+    filed: "2024-05-03",
+    start: "2023-10-01",
+    end: "2024-03-30",
+  };
+
+  usGaap.RevenueFromContractWithCustomerExcludingAssessedTax.units.USD = [
+    value({ val: 210_328_000_000, ...q2Ytd }),
+  ];
+
+  assert.throws(
+    () => extractStatement({
+      subject: aaplIssuer,
+      facts,
+      family: "income",
+      fiscal_year: 2024,
+      fiscal_period: "Q2",
+      accession_number: q2Accn,
+      source_id: SEC_SOURCE_ID,
+      as_of: "2024-05-03T20:30:00.000Z",
+    }),
+    /no us-gaap values/,
+  );
+});
+
+test("quarterly companyfacts extraction rejects impossible dates when checking discrete quarter duration", () => {
+  const q2Accn = "0000320193-24-000069";
+  const facts = aaplCompanyFactsFixture();
+  const usGaap = facts.facts["us-gaap"]!;
+
+  usGaap.RevenueFromContractWithCustomerExcludingAssessedTax.units.USD = [
+    value({
+      val: 90_753_000_000,
+      fy: 2024,
+      fp: "Q2",
+      form: "10-Q",
+      accn: q2Accn,
+      filed: "2024-05-03",
+      start: "2024-02-30",
+      end: "2024-05-30",
+    }),
+  ];
+
+  assert.throws(
+    () => extractStatement({
+      subject: aaplIssuer,
+      facts,
+      family: "income",
+      fiscal_year: 2024,
+      fiscal_period: "Q2",
+      accession_number: q2Accn,
+      source_id: SEC_SOURCE_ID,
+      as_of: "2024-05-03T20:30:00.000Z",
+    }),
+    /no us-gaap values/,
+  );
+});
+
+test("Q4 companyfacts extraction derives flow values from FY minus the first three discrete quarters", () => {
+  const facts = aaplCompanyFactsFixture();
+  const usGaap = facts.facts["us-gaap"]!;
+  const annual = {
+    fy: 2024,
+    fp: "FY",
+    form: "10-K",
+    accn: AAPL_FY2024_ACCN,
+    filed: "2024-11-01",
+    start: "2023-10-01",
+    end: "2024-09-28",
+  };
+  const q1 = {
+    fy: 2024,
+    fp: "Q1",
+    form: "10-Q",
+    accn: "0000320193-24-000006",
+    filed: "2024-02-02",
+    start: "2023-10-01",
+    end: "2023-12-30",
+    frame: "CY2023Q4",
+  };
+  const q2 = {
+    fy: 2024,
+    fp: "Q2",
+    form: "10-Q",
+    accn: "0000320193-24-000069",
+    filed: "2024-05-03",
+    start: "2023-12-31",
+    end: "2024-03-30",
+    frame: "CY2024Q1",
+  };
+  const q3 = {
+    fy: 2024,
+    fp: "Q3",
+    form: "10-Q",
+    accn: "0000320193-24-000081",
+    filed: "2024-08-02",
+    start: "2024-03-31",
+    end: "2024-06-29",
+    frame: "CY2024Q2",
+  };
+
+  usGaap.RevenueFromContractWithCustomerExcludingAssessedTax.units.USD = [
+    value({ val: 391_035_000_000, ...annual }),
+    value({ val: 119_575_000_000, ...q1 }),
+    value({ val: 90_753_000_000, ...q2 }),
+    value({ val: 85_777_000_000, ...q3 }),
+  ];
+  usGaap.NetIncomeLoss.units.USD = [
+    value({ val: 93_736_000_000, ...annual }),
+    value({ val: 33_916_000_000, ...q1 }),
+    value({ val: 23_636_000_000, ...q2 }),
+    value({ val: 21_448_000_000, ...q3 }),
+  ];
+  usGaap.EarningsPerShareBasic.units["USD/shares"] = [
+    value({ val: 6.11, ...annual }),
+    value({ val: 2.19, ...q1 }),
+    value({ val: 1.53, ...q2 }),
+    value({ val: 1.40, ...q3 }),
+  ];
+
+  const statement = normalizedStatement(extractStatement({
+    subject: aaplIssuer,
+    facts,
+    family: "income",
+    fiscal_year: 2024,
+    fiscal_period: "Q4",
+    accession_number: AAPL_FY2024_ACCN,
+    source_id: SEC_SOURCE_ID,
+    as_of: "2024-11-01T20:30:00.000Z",
+  }));
+
+  assert.equal(statement.period_kind, "fiscal_q");
+  assert.equal(statement.period_start, "2024-06-30");
+  assert.equal(statement.period_end, "2024-09-28");
+  assert.equal(statement.lines.find((line) => line.metric_key === "revenue")?.value_num, 94_930_000_000);
+  assert.equal(statement.lines.find((line) => line.metric_key === "net_income")?.value_num, 14_736_000_000);
+  assert.equal(statement.lines.find((line) => line.metric_key === "eps_basic"), undefined);
+});
+
 test("Facts produced from AAPL companyfacts carry both SEC source_id and resolved metric_id (end-to-end)", () => {
   const source = buildSecSource({
     source_id: SEC_SOURCE_ID,

@@ -12,6 +12,7 @@ import {
   SecEdgarFetchError,
   SEC_INCOME_METRIC_KEYS,
   US_GAAP_TO_METRIC_KEY,
+  selectSecConceptValue,
   type SecCompanyFacts,
   type SecEdgarFetcher,
 } from "./sec-edgar.ts";
@@ -170,7 +171,6 @@ function statementAccession(
   fiscalYear: number,
   fiscalPeriod: FiscalPeriod,
 ): string | null {
-  const expectedForm = fiscalPeriod === "FY" ? "10-K" : "10-Q";
   const counts = new Map<string, number>();
   const usGaap = facts.facts["us-gaap"];
   if (!usGaap) return null;
@@ -178,11 +178,13 @@ function statementAccession(
     if (!SEC_INCOME_METRIC_KEYS.includes(metricKey)) continue;
     const concept = usGaap[conceptName];
     if (!concept) continue;
-    for (const values of Object.values(concept.units)) {
-      for (const value of values) {
-        if (value.fy !== fiscalYear || value.fp !== fiscalPeriod || value.form !== expectedForm) continue;
-        counts.set(value.accn, (counts.get(value.accn) ?? 0) + 1);
-      }
+    for (const [unitCode, values] of Object.entries(concept.units)) {
+      const match = selectSecConceptValue(values, {
+        fiscal_year: fiscalYear,
+        fiscal_period: fiscalPeriod,
+      }, unitCode);
+      if (!match) continue;
+      counts.set(match.accn, (counts.get(match.accn) ?? 0) + 1);
     }
   }
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null;

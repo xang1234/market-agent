@@ -223,7 +223,7 @@ export function extractStatement(
     );
   }
 
-  const expectedForm = input.fiscal_period === "FY" ? "10-K" : "10-Q";
+  const selectionDescription = statementSelectionDescription(input.fiscal_period);
   const lines: StatementLine[] = [];
   const seenKeys = new Set<string>();
   const observedCurrencies = new Set<string>();
@@ -243,13 +243,7 @@ export function extractStatement(
       const lineUnit = UNIT_TO_LINE_UNIT[unitCode];
       if (!lineUnit) continue;
 
-      const match = values.find(
-        (v) =>
-          v.fy === input.fiscal_year &&
-          v.fp === input.fiscal_period &&
-          v.form === expectedForm &&
-          (input.accession_number === undefined || v.accn === input.accession_number),
-      );
+      const match = selectSecConceptValue(values, input, unitCode);
       if (!match) continue;
 
       // Period agreement: every matched value must share the same
@@ -286,7 +280,7 @@ export function extractStatement(
 
   if (resolvedPeriodEnd === null) {
     throw new Error(
-      `extractStatement: no us-gaap values for fiscal_year=${input.fiscal_year} fiscal_period="${input.fiscal_period}" form="${expectedForm}"`,
+      `extractStatement: no us-gaap values for fiscal_year=${input.fiscal_year} fiscal_period="${input.fiscal_period}" ${selectionDescription}`,
     );
   }
   if (observedCurrencies.size > 1) {
@@ -316,6 +310,171 @@ export function extractStatement(
     source_id: input.source_id,
     lines,
   };
+}
+
+export type SecStatementValueSelection = Pick<
+  ExtractStatementInput,
+  "fiscal_year" | "fiscal_period" | "accession_number"
+>;
+
+export function selectSecConceptValue(
+  values: ReadonlyArray<SecConceptValue>,
+  input: SecStatementValueSelection,
+  unitCode: string,
+): SecConceptValue | undefined {
+  if (input.fiscal_period === "Q4") {
+    return deriveFourthQuarterConceptValue(values, input, unitCode);
+  }
+  const expectedForm = input.fiscal_period === "FY" ? "10-K" : "10-Q";
+  const matches = values.filter(
+    (v) =>
+      v.fy === input.fiscal_year &&
+      v.fp === input.fiscal_period &&
+      v.form === expectedForm &&
+      (input.accession_number === undefined || v.accn === input.accession_number),
+  );
+  if (input.fiscal_period === "FY") {
+    return matches[0];
+  }
+  return matches
+    .filter(isDiscreteQuarterDuration)
+    .sort(compareQuarterFactQuality)[0];
+}
+
+function deriveFourthQuarterConceptValue(
+  values: ReadonlyArray<SecConceptValue>,
+  input: SecStatementValueSelection,
+  unitCode: string,
+): SecConceptValue | undefined {
+  if (unitCode !== "USD") return undefined;
+
+  const annual = selectAnnualConceptValue(values, input);
+  if (!annual?.start) return undefined;
+
+  const q1 = selectDiscreteQuarterConceptValue(values, input.fiscal_year, "Q1");
+  const q2 = selectDiscreteQuarterConceptValue(values, input.fiscal_year, "Q2");
+  const q3 = selectDiscreteQuarterConceptValue(values, input.fiscal_year, "Q3");
+  if (!q1?.start || !q2?.start || !q3?.start) return undefined;
+
+  const q2ExpectedStart = nextIsoDate(q1.end);
+  const q3ExpectedStart = nextIsoDate(q2.end);
+  const q4Start = nextIsoDate(q3.end);
+  if (
+    q2ExpectedStart === null ||
+    q3ExpectedStart === null ||
+    q4Start === null ||
+    q1.start !== annual.start ||
+    q2.start !== q2ExpectedStart ||
+    q3.start !== q3ExpectedStart ||
+    inclusiveDurationDays(q4Start, annual.end) < 60 ||
+    inclusiveDurationDays(q4Start, annual.end) > 125
+  ) {
+    return undefined;
+  }
+
+  return {
+    ...annual,
+    val: annual.val - q1.val - q2.val - q3.val,
+    fp: "Q4",
+    form: annual.form,
+    start: q4Start,
+    end: annual.end,
+  };
+}
+
+function selectAnnualConceptValue(
+  values: ReadonlyArray<SecConceptValue>,
+  input: SecStatementValueSelection,
+): SecConceptValue | undefined {
+  return values.find(
+    (v) =>
+      v.fy === input.fiscal_year &&
+      v.fp === "FY" &&
+      v.form === "10-K" &&
+      (input.accession_number === undefined || v.accn === input.accession_number),
+  );
+}
+
+function selectDiscreteQuarterConceptValue(
+  values: ReadonlyArray<SecConceptValue>,
+  fiscalYear: number,
+  fiscalPeriod: "Q1" | "Q2" | "Q3",
+): SecConceptValue | undefined {
+  return values
+    .filter(
+      (v) =>
+        v.fy === fiscalYear &&
+        v.fp === fiscalPeriod &&
+        v.form === "10-Q",
+    )
+    .filter(isDiscreteQuarterDuration)
+    .sort(compareQuarterFactQuality)[0];
+}
+
+function statementSelectionDescription(fiscalPeriod: FiscalPeriod): string {
+  if (fiscalPeriod === "FY") return 'form="10-K"';
+  if (fiscalPeriod === "Q4") {
+    return 'derived from form="10-K" FY and Q1-Q3 form="10-Q"';
+  }
+  return 'form="10-Q"';
+}
+
+function isDiscreteQuarterDuration(value: SecConceptValue): boolean {
+  if (value.start === undefined) return false;
+  const days = inclusiveDurationDays(value.start, value.end);
+  return days >= 60 && days <= 125;
+}
+
+function compareQuarterFactQuality(
+  a: SecConceptValue,
+  b: SecConceptValue,
+): number {
+  const scoreDiff = quarterFactScore(b) - quarterFactScore(a);
+  if (scoreDiff !== 0) return scoreDiff;
+  return b.filed.localeCompare(a.filed);
+}
+
+function quarterFactScore(value: SecConceptValue): number {
+  let score = 0;
+  if (/^CY\d{4}Q[1-4]$/.test(value.frame ?? "")) score += 2;
+  if (value.start !== undefined && inclusiveDurationDays(value.start, value.end) >= 80) {
+    score += 1;
+  }
+  return score;
+}
+
+function inclusiveDurationDays(start: string, end: string): number {
+  const startMs = parseSecDateMs(start);
+  const endMs = parseSecDateMs(end);
+  if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs < startMs) {
+    return 0;
+  }
+  return Math.floor((endMs - startMs) / 86_400_000) + 1;
+}
+
+function parseSecDateMs(value: string): number {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return Number.NaN;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const ms = Date.UTC(year, month - 1, day);
+  const date = new Date(ms);
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return Number.NaN;
+  }
+  return ms;
+}
+
+function nextIsoDate(value: string): string | null {
+  const ms = parseSecDateMs(value);
+  if (Number.isNaN(ms)) return null;
+  return new Date(ms + 86_400_000).toISOString().slice(0, 10);
 }
 
 // metric_keys this module emits for income-family extraction. Used by

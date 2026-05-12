@@ -107,6 +107,28 @@ export function recentFyPeriods(latestFiscalYear: number, count: number): string
   return periods
 }
 
+export function recentFiscalQuarterPeriods(
+  latestFiscalYear: number,
+  latestFiscalPeriod: Exclude<FiscalPeriod, 'FY'>,
+  count: number,
+): string[] {
+  if (!/^Q[1-4]$/.test(latestFiscalPeriod)) {
+    throw new RangeError(`latestFiscalPeriod must be Q1..Q4; received ${latestFiscalPeriod}`)
+  }
+  const periods: string[] = []
+  let year = latestFiscalYear
+  let quarter = Number(latestFiscalPeriod.slice(1))
+  for (let i = 0; i < count; i++) {
+    periods.push(`${year}-Q${quarter}`)
+    quarter -= 1
+    if (quarter === 0) {
+      year -= 1
+      quarter = 4
+    }
+  }
+  return periods
+}
+
 export function findLineValue(
   statement: Pick<NormalizedStatement, 'lines'> | null | undefined,
   metric_key: string,
