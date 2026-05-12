@@ -177,6 +177,7 @@ test('FinancialsSection requests recent fiscal quarters after switching statemen
     if (root !== null) {
       await act(async () => root?.unmount())
     }
+    dom.window.close()
     globalThis.fetch = originalFetch
     restoreGlobals()
   }
