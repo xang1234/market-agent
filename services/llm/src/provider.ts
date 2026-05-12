@@ -75,11 +75,11 @@ export type OpenAiCompatibleProviderConfig = {
   defaultHeaders?: Record<string, string>;
 };
 
-export interface LlmProvider {
+export type LlmProvider = {
   readonly providerId: string;
   readonly model: string;
   chatComplete(request: LlmChatRequest): Promise<LlmChatCompletion>;
-}
+};
 
 export class OpenAiCompatibleProvider implements LlmProvider {
   readonly providerId: string;

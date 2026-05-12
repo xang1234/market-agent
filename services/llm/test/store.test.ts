@@ -283,6 +283,38 @@ test("listLlmCredentials never returns plaintext key fields", async () => {
   }
 });
 
+test("getActiveLlmCredential decrypts the stored key for the active role", async () => {
+  const catalog = await loadCatalog();
+  const { db } = fakeDb();
+  await upsertLlmCredential(
+    db,
+    {
+      user_id: USER_ID,
+      role: "analyst",
+      provider_id: "openai",
+      model: "gpt-4o",
+      reasoning_effort: "medium",
+      api_key: "sk-analyst-9876",
+    },
+    { catalog, masterKey: MASTER_KEY },
+  );
+
+  const active = await getActiveLlmCredential(
+    db,
+    { user_id: USER_ID, role: "analyst" },
+    { masterKey: MASTER_KEY },
+  );
+
+  assert.ok(active !== null);
+  assert.equal(active.role, "analyst");
+  assert.equal(active.provider_id, "openai");
+  assert.equal(active.model, "gpt-4o");
+  assert.equal(active.base_url, "https://api.openai.com/v1");
+  assert.equal(active.reasoning_effort, "medium");
+  assert.equal(active.key_fingerprint, "9876");
+  assert.equal(active.api_key, "sk-analyst-9876");
+});
+
 test("getActiveLlmCredential returns null when missing", async () => {
   const { db } = fakeDb();
   const credential = await getActiveLlmCredential(

@@ -40,6 +40,10 @@ export type UpsertLlmCredentialInput = {
   model: string;
   base_url?: string | null;
   reasoning_effort?: LlmReasoningEffort | null;
+  // Three-state field. `undefined` keeps the existing encrypted key untouched
+  // (used when the UI saves provider/model changes without re-entering the
+  // key); `""` clears the stored key (the "Clear key" checkbox); any other
+  // non-empty string encrypts and stores it as the new key.
   api_key?: string | null;
 };
 
