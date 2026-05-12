@@ -1,0 +1,33 @@
+[
+  {
+    "id": "openai",
+    "label": "OpenAI",
+    "default_base_url": "https://api.openai.com/v1",
+    "default_model": "gpt-4o-mini",
+    "suggested_models": [
+      "gpt-4o-mini",
+      "gpt-4o",
+      "gpt-4.1",
+      "o4-mini"
+    ],
+    "requires_key": true,
+    "base_url_editable": false,
+    "supports_reasoning_effort": true,
+    "supports_tools": true,
+    "supports_json_mode": true,
+    "supports_streaming": true
+  },
+  {
+    "id": "openai_compatible",
+    "label": "OpenAI-compatible (Ollama, vLLM, OpenRouter, ...)",
+    "default_base_url": null,
+    "default_model": null,
+    "suggested_models": [],
+    "requires_key": false,
+    "base_url_editable": true,
+    "supports_reasoning_effort": false,
+    "supports_tools": true,
+    "supports_json_mode": true,
+    "supports_streaming": true
+  }
+]
