@@ -7,6 +7,7 @@ import {
   createServiceDevApiAdapters,
 } from "../src/http.ts";
 import { ANALYZE_BASE_BUNDLE_ID } from "../../analyze/src/index.ts";
+import { EvidenceInspectionError } from "../../evidence/src/index.ts";
 
 async function startServer(
   t: TestContext,
@@ -78,6 +79,100 @@ test("POST /v1/analyze/runs returns a generated Block[] memo", async (t) => {
   assert.ok(Array.isArray(body.blocks));
   assert.equal(body.blocks[0].kind, "rich_text");
   assert.match(JSON.stringify(body.blocks), /Review margin quality/);
+});
+
+test("POST /v1/evidence/inspect requires x-user-id", async (t) => {
+  const base = await startServer(t, {}, {
+    adapters: {
+      ...createFixtureDevApiAdapters(),
+      evidence: {
+        inspect: async () => {
+          throw new Error("should not inspect without auth");
+        },
+      },
+    } as never,
+  });
+
+  const response = await fetch(`${base}/v1/evidence/inspect`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      snapshot_id: "11111111-1111-4111-8111-111111111111",
+      ref: { kind: "source", id: "22222222-2222-4222-8222-222222222222" },
+    }),
+  });
+
+  assert.equal(response.status, 401);
+});
+
+test("POST /v1/evidence/inspect returns adapter inspection", async (t) => {
+  const base = await startServer(t, {}, {
+    adapters: {
+      ...createFixtureDevApiAdapters(),
+      evidence: {
+        inspect: async ({ snapshotId, ref }) => ({
+          snapshot_id: snapshotId,
+          ref,
+          kind: ref.kind,
+          title: "sec filing",
+          subtitle: "https://www.sec.gov/Archives/example",
+          badges: ["primary"],
+          rows: [{ label: "Provider", value: "sec" }],
+          links: [{ label: "Open source", href: "https://www.sec.gov/Archives/example" }],
+          related_refs: [],
+        }),
+      },
+    } as never,
+  });
+
+  const response = await fetch(`${base}/v1/evidence/inspect`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-id": "00000000-0000-4000-8000-000000000001",
+    },
+    body: JSON.stringify({
+      snapshot_id: "11111111-1111-4111-8111-111111111111",
+      ref: { kind: "source", id: "22222222-2222-4222-8222-222222222222" },
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  const body = await response.json() as { title?: string; rows?: Array<{ label: string; value: string }> };
+  assert.equal(body.title, "sec filing");
+  assert.equal(body.rows?.[0]?.value, "sec");
+});
+
+test("POST /v1/evidence/inspect hides missing and authorization reason", async (t) => {
+  const base = await startServer(t, {}, {
+    adapters: {
+      ...createFixtureDevApiAdapters(),
+      evidence: {
+        inspect: async () => {
+          throw new EvidenceInspectionError(404, "source not found");
+        },
+      },
+    } as never,
+  });
+
+  const response = await fetch(`${base}/v1/evidence/inspect`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-id": "00000000-0000-4000-8000-000000000001",
+    },
+    body: JSON.stringify({
+      snapshot_id: "11111111-1111-4111-8111-111111111111",
+      ref: { kind: "source", id: "22222222-2222-4222-8222-222222222222" },
+    }),
+  });
+
+  assert.equal(response.status, 404);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  const body = await response.json() as { error?: string };
+  assert.equal(body.error, "evidence is not available for this artifact");
+  assert.equal(JSON.stringify(body).includes("source not found"), false);
 });
 
 test("GET /v1/agents and POST /v1/agents/:id/runs expose agent workflow data", async (t) => {

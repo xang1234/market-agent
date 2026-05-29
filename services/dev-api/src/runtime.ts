@@ -41,6 +41,9 @@ export async function createDevApiAdaptersFromEnv(
   if (module.createAgentLoopStages !== undefined && typeof module.createAgentLoopStages !== "function") {
     throw new Error("DEV_API_RUNTIME_MODULE createAgentLoopStages export must be a function");
   }
+  if (module.inspectEvidence !== undefined && typeof module.inspectEvidence !== "function") {
+    throw new Error("DEV_API_RUNTIME_MODULE inspectEvidence export must be a function");
+  }
 
   const { Pool } = await import("pg");
   const pool = new Pool({ connectionString: databaseUrl });
@@ -49,6 +52,7 @@ export async function createDevApiAdaptersFromEnv(
     sealAnalyzeSnapshot: module.sealAnalyzeSnapshot as DevApiServiceAdapterDeps["sealAnalyzeSnapshot"],
     runAnalyzeWorkflow: module.runAnalyzeWorkflow as DevApiServiceAdapterDeps["runAnalyzeWorkflow"],
     createAgentLoopStages: module.createAgentLoopStages as DevApiServiceAdapterDeps["createAgentLoopStages"],
+    inspectEvidence: module.inspectEvidence as DevApiServiceAdapterDeps["inspectEvidence"],
   });
 }
 

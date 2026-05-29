@@ -48,6 +48,11 @@ import {
   listThemeMembershipRationalesBySubject,
   type ThemeMembershipRationaleRow,
 } from "../../themes/src/index.ts";
+import type {
+  EvidenceInspection,
+  EvidenceInspectionRef,
+} from "../../evidence/src/index.ts";
+import { EvidenceInspectionError } from "../../evidence/src/index.ts";
 
 type DevAgent = {
   agent_id: string;
@@ -176,10 +181,19 @@ export type DevApiThemesAdapter = {
   }>;
 };
 
+export type DevApiEvidenceAdapter = {
+  inspect(input: {
+    userId: string;
+    snapshotId: string;
+    ref: EvidenceInspectionRef;
+  }): Promise<EvidenceInspection>;
+};
+
 export type DevApiAdapters = {
   analyze: DevApiAnalyzeAdapter;
   agents: DevApiAgentsAdapter;
   themes: DevApiThemesAdapter;
+  evidence: DevApiEvidenceAdapter;
 };
 
 export type DevApiAnalyzeWorkflowInput = {
@@ -257,6 +271,38 @@ export function createDevApiServer(
         asOf: readOptionalIsoTimestamp(url.searchParams.get("as_of"), "as_of"),
         limit: readOptionalPositiveInteger(url.searchParams.get("limit"), "limit"),
       }));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/v1/evidence/inspect") {
+      res.setHeader("cache-control", "no-store");
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (userId === null) {
+        respondJson(res, 401, { error: "x-user-id header is required" });
+        return;
+      }
+      if (!adapters) {
+        respondJson(res, 503, { error: "durable evidence adapter is not configured" });
+        return;
+      }
+      const body = await readJson(req).catch(() => BAD_JSON);
+      if (body === BAD_JSON) {
+        respondJson(res, 400, { error: "request body must be valid JSON" });
+        return;
+      }
+      const { snapshotId, ref } = readEvidenceInspectionBody(body);
+      try {
+        respondJson(res, 200, await adapters.evidence.inspect({ userId, snapshotId, ref }));
+      } catch (error) {
+        if (error instanceof EvidenceInspectionError && error.status === 404) {
+          respondJson(res, 404, { error: EVIDENCE_INSPECTION_UNAVAILABLE_ERROR });
+          return;
+        }
+        if (error instanceof EvidenceInspectionError) {
+          throw new DevApiHttpError(error.status, error.message);
+        }
+        throw error;
+      }
       return;
     }
 
@@ -663,6 +709,21 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
         return { memberships: [], truncated: false };
       },
     },
+    evidence: {
+      async inspect({ snapshotId, ref }) {
+        return {
+          snapshot_id: snapshotId,
+          ref,
+          kind: ref.kind,
+          title: `${ref.kind} ${ref.id}`,
+          subtitle: null,
+          badges: [],
+          rows: [{ label: "Reference id", value: ref.id }],
+          links: [],
+          related_refs: [],
+        };
+      },
+    },
   };
 }
 
@@ -679,6 +740,11 @@ export type DevApiServiceAdapterDeps = {
     body: Record<string, unknown>;
     blocks: ReadonlyArray<Record<string, unknown>>;
   }): Promise<SnapshotSealResult>;
+  inspectEvidence?(input: {
+    userId: string;
+    snapshotId: string;
+    ref: EvidenceInspectionRef;
+  }): Promise<EvidenceInspection>;
 };
 
 export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): DevApiAdapters {
@@ -952,6 +1018,14 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
         };
       },
     },
+    evidence: {
+      async inspect(input) {
+        if (!deps.inspectEvidence) {
+          throw new DevApiHttpError(503, "durable evidence inspector is not configured");
+        }
+        return deps.inspectEvidence(input);
+      },
+    },
   };
 }
 
@@ -1016,6 +1090,47 @@ function analyzeSubjectRefs(input: {
     byKey.set(`${ref.kind}:${ref.id}`, { kind: ref.kind, id: ref.id });
   }
   return Object.freeze([...byKey.values()]);
+}
+
+const EVIDENCE_INSPECTION_UNAVAILABLE_ERROR = "evidence is not available for this artifact";
+
+function readEvidenceInspectionBody(value: unknown): { snapshotId: string; ref: EvidenceInspectionRef } {
+  if (!isObjectRecord(value)) {
+    throw new DevApiHttpError(400, "request body must be an object");
+  }
+  return {
+    snapshotId: readRequiredUuidValue(value.snapshot_id, "snapshot_id"),
+    ref: readEvidenceInspectionRefValue(value.ref),
+  };
+}
+
+function readEvidenceInspectionRefValue(value: unknown): EvidenceInspectionRef {
+  if (!isObjectRecord(value)) {
+    throw new DevApiHttpError(400, "ref must be an object");
+  }
+  const kind = value.kind;
+  const id = readRequiredUuidValue(value.id, "ref.id");
+  if (
+    kind !== "source" &&
+    kind !== "document" &&
+    kind !== "claim" &&
+    kind !== "event" &&
+    kind !== "fact"
+  ) {
+    throw new DevApiHttpError(400, "ref.kind is invalid");
+  }
+  return { kind, id };
+}
+
+function readRequiredUuidValue(value: unknown, label: string): string {
+  if (typeof value !== "string" || !isUuid(value)) {
+    throw new DevApiHttpError(400, `${label} must be a UUID`);
+  }
+  return value;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function readOptionalSubjectRef(value: unknown): SubjectRef | null {

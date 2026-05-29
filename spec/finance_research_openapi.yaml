@@ -444,6 +444,52 @@ paths:
                     items:
                       type: object
                       additionalProperties: true
+  /v1/evidence/inspect:
+    post:
+      tags: [Evidence]
+      summary: Inspect a snapshot-contained evidence reference
+      operationId: inspectEvidence
+      description: Returns artifact-safe details for a ref inside a sealed snapshot. The endpoint intentionally does not expose raw blob ids, content hashes, raw body text, or document bytes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvidenceInspectionRequest'
+      responses:
+        '200':
+          description: Artifact-safe evidence inspection
+          headers:
+            Cache-Control:
+              description: Always `no-store`; inspection requests are user- and artifact-scoped.
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvidenceInspection'
+        '400':
+          description: Malformed request body or ref
+        '401':
+          description: Missing or malformed user credential
+        '404':
+          description: Evidence is not available for this artifact. This intentionally covers missing snapshot, invisible artifact, ref absent from snapshot, missing evidence row, and entitlement denial with the same response.
+          headers:
+            Cache-Control:
+              description: Always `no-store`; inspection requests are user- and artifact-scoped.
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    const: evidence is not available for this artifact
   /v1/evidence/healthz:
     get:
       tags: [Evidence]
@@ -1969,6 +2015,91 @@ components:
           format: date-time
         parse_status:
           type: string
+    EvidenceInspectionRequest:
+      type: object
+      required: [snapshot_id, ref]
+      additionalProperties: false
+      properties:
+        snapshot_id:
+          type: string
+          format: uuid
+        ref:
+          $ref: '#/components/schemas/EvidenceInspectionRef'
+    EvidenceInspectionRef:
+      type: object
+      required: [kind, id]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [source, document, claim, event, fact]
+        id:
+          type: string
+          format: uuid
+    EvidenceInspectionRow:
+      type: object
+      required: [label, value]
+      additionalProperties: false
+      properties:
+        label:
+          type: string
+        value:
+          type: string
+    EvidenceInspectionLink:
+      type: object
+      required: [label, href]
+      additionalProperties: false
+      properties:
+        label:
+          type: string
+        href:
+          type: string
+          format: uri
+    EvidenceInspection:
+      type: object
+      required:
+        - snapshot_id
+        - ref
+        - kind
+        - title
+        - subtitle
+        - badges
+        - rows
+        - links
+        - related_refs
+      additionalProperties: false
+      properties:
+        snapshot_id:
+          type: string
+          format: uuid
+        ref:
+          $ref: '#/components/schemas/EvidenceInspectionRef'
+        kind:
+          type: string
+          enum: [source, document, claim, event, fact]
+        title:
+          type: string
+        subtitle:
+          type:
+            - string
+            - 'null'
+        badges:
+          type: array
+          items:
+            type: string
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvidenceInspectionRow'
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvidenceInspectionLink'
+        related_refs:
+          type: array
+          description: Navigation refs filtered to the same sealed snapshot.
+          items:
+            $ref: '#/components/schemas/EvidenceInspectionRef'
     SnapshotManifest:
       type: object
       description: Snapshot manifests seal the exact fact, claim, event, and source references that support an answer or finding at a specific as_of.

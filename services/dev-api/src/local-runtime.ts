@@ -13,6 +13,7 @@ import {
   type LocalRuntimeClaimEvidence,
   type LocalRuntimeEvidence,
 } from "../../evidence/src/local-runtime-evidence.ts";
+import { loadEvidenceInspection } from "../../evidence/src/inspector.ts";
 import { hashJsonValue, toolCallArgsDigest } from "../../observability/src/tool-call.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
 import { serializeJsonValue } from "../../observability/src/types.ts";
@@ -131,6 +132,16 @@ export async function sealAnalyzeSnapshot(
     sources: verifierRows.sources,
     documents: verifierRows.documents,
     claims: verifierRows.claims,
+  });
+}
+
+export async function inspectEvidence(
+  input: Parameters<NonNullable<DevApiServiceAdapterDeps["inspectEvidence"]>>[0],
+) {
+  return loadEvidenceInspection(pool(), {
+    user_id: input.userId,
+    snapshot_id: input.snapshotId,
+    ref: input.ref,
   });
 }
 
