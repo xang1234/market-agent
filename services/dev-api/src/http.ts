@@ -5,7 +5,8 @@ import {
   AnalyzePlaybookError,
   AnalyzeRunMetadataError,
   getAnalyzeTemplate,
-  getAnalyzeTemplateRun,
+  getAnalyzeTemplateRunForUser,
+  listAnalyzeTemplateRunsByUser,
   listAnalyzeTemplatesByUser,
   mapSourceCategoriesToBundles,
   parseAnalyzeRunMetadata,
@@ -16,6 +17,8 @@ import {
   withRerunOfRunId,
   type AnalyzeRunMetadataV1,
   type AnalyzeTemplateRunRow,
+  type AnalyzeTemplateRunSummaryRow,
+  type AnalyzeTemplateRunWithTemplateRow,
   type AnalyzeTemplateRunClientPool,
   type AnalyzeTemplateRow,
 } from "../../analyze/src/index.ts";
@@ -916,33 +919,16 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
         };
       },
       async listRuns({ userId, limit, cursor }) {
-        const templates = await listAnalyzeTemplatesByUser(deps.db, userId);
-        const runs = (
-          await Promise.all(
-            templates.map((template) => listAnalyzeRunsForTemplate(deps.db, template.template_id, template.name)),
-          )
-        )
-          .flat()
-          .sort(compareAnalyzeRunsNewestFirst);
-        const startIndex = cursor
-          ? Math.max(0, runs.findIndex((run) => encodeAnalyzeRunCursor(run) === cursor) + 1)
-          : 0;
-        const page = runs.slice(startIndex, startIndex + limit);
+        const page = await listAnalyzeTemplateRunsByUser(deps.db, { userId, limit, cursor });
         return {
-          runs: page.map(toAnalyzeRunSummary),
-          next_cursor: runs[startIndex + limit] && page.length > 0
-            ? encodeAnalyzeRunCursor(page[page.length - 1])
-            : null,
+          runs: page.runs.map(toDevAnalyzeRunSummary),
+          next_cursor: page.next_cursor,
         };
       },
       async getRun({ userId, runId }) {
-        const run = await getAnalyzeTemplateRun(deps.db, runId);
+        const run = await getAnalyzeTemplateRunForUser(deps.db, { userId, runId });
         if (run === null) throw new DevApiHttpError(404, "analyze run not found");
-        const template = await getAnalyzeTemplate(deps.db, run.template_id);
-        if (template === null || template.user_id !== userId) {
-          throw new DevApiHttpError(404, "analyze run not found");
-        }
-        return toDevAnalyzeRun(run, template.name);
+        return toDevAnalyzeRun(run, run.template_name);
       },
       async createRun({ userId, body }) {
         const templateId = requireNonEmpty(body.template_id, "template_id");
@@ -994,6 +980,8 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
           template_id: template.template_id,
           template_version: template.version,
           blocks: blocks as JsonValue,
+          playbook_id: resolvedPlaybook.playbook.playbook_id,
+          run_metadata: runMetadata as unknown as JsonValue,
           sealSnapshot: async () => {
             const seal = await deps.sealAnalyzeSnapshot({
               snapshotId,
@@ -1026,39 +1014,97 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
         if (!persisted.ok) {
           throw new DevApiHttpError(422, "snapshot seal failed");
         }
-        return {
-          run_id: persisted.run.run_id,
-          template_id: persisted.run.template_id,
-          template_name: template.name,
-          template_version: persisted.run.template_version,
-          playbook_id: resolvedPlaybook.playbook.playbook_id,
-          playbook_name: resolvedPlaybook.playbook.name,
-          playbook_version: resolvedPlaybook.playbook.version,
-          display_title: resolvedPlaybook.playbook.name,
-          run_metadata: runMetadata,
-          can_rerun: true,
-          rerun_unavailable_reason: null,
-          snapshot_id: persisted.run.snapshot_id,
-          blocks: persisted.run.blocks as ReadonlyArray<Record<string, unknown>>,
-          created_at: persisted.run.created_at,
-        };
+        return toDevAnalyzeRun(persisted.run, template.name);
       },
       async rerun({ userId, runId }) {
-        const run = await getAnalyzeTemplateRun(deps.db, runId);
-        if (run === null) throw new DevApiHttpError(404, "analyze run not found");
-        const template = await getAnalyzeTemplate(deps.db, run.template_id);
-        if (template === null || template.user_id !== userId) {
-          throw new DevApiHttpError(404, "analyze run not found");
+        const original = await getAnalyzeTemplateRunForUser(deps.db, { userId, runId });
+        if (original === null) throw new DevApiHttpError(404, "analyze run not found");
+        const metadata = parseStoredAnalyzeRunMetadata(original.run_metadata);
+        if (metadata.template_id !== original.template_id) {
+          throw new DevApiHttpError(409, "analyze run metadata is not rerunnable");
         }
-        throw new DevApiHttpError(409, "analyze run metadata is not rerunnable");
+        const template = await getAnalyzeTemplate(deps.db, original.template_id);
+        if (template === null || template.user_id !== userId) {
+          throw new DevApiHttpError(409, "analyze template is no longer runnable");
+        }
+        if (!deps.runAnalyzeWorkflow) {
+          throw new DevApiHttpError(503, "durable analyze workflow is not configured");
+        }
+        const sourceCategories = [...metadata.source_categories];
+        const bundleIds = analyzeBundleIds(sourceCategories);
+        const subjectRefs = metadata.subject_refs.map((ref) => analyzeSubjectRefFromMetadata(ref));
+        const rerunMetadata = serializeAnalyzeRunMetadataV1({
+          template_id: template.template_id,
+          template_version: template.version,
+          playbook_id: metadata.playbook_id,
+          playbook_version: metadata.playbook_version,
+          instructions: metadata.instructions,
+          source_categories: sourceCategories,
+          subject_refs: subjectRefs,
+          rerun_of_run_id: original.run_id,
+        });
+        const snapshotId = randomUUID();
+        const body = {
+          template_id: template.template_id,
+          ...(metadata.playbook_id ? { playbook_id: metadata.playbook_id } : {}),
+          instructions: metadata.instructions,
+          source_categories: sourceCategories,
+          ...(subjectRefs[0] ? { subject_ref: subjectRefs[0] } : {}),
+        };
+        const rendered = await deps.runAnalyzeWorkflow({
+          userId,
+          template,
+          body,
+          snapshotId,
+          instructions: metadata.instructions,
+          sourceCategories,
+          bundleIds,
+          subjectRefs,
+        });
+        const blocks = Object.freeze(rendered.blocks.map((block) => Object.freeze({ ...block })));
+        const persisted = await persistAnalyzeTemplateRunAfterSnapshotSealWithPool(deps.db, {
+          template_id: template.template_id,
+          template_version: template.version,
+          blocks: blocks as JsonValue,
+          playbook_id: metadata.playbook_id,
+          run_metadata: rerunMetadata as unknown as JsonValue,
+          sealSnapshot: async () => {
+            const seal = await deps.sealAnalyzeSnapshot({
+              snapshotId,
+              userId,
+              templateId: template.template_id,
+              body,
+              blocks,
+            });
+            if (seal.ok && seal.snapshot.snapshot_id !== snapshotId) {
+              return {
+                ok: false,
+                verification: {
+                  ok: false,
+                  failures: [
+                    {
+                      reason_code: "invalid_block_binding",
+                      details: {
+                        reason: "analyze_snapshot_id_mismatch",
+                        expected_snapshot_id: snapshotId,
+                        actual_snapshot_id: seal.snapshot.snapshot_id,
+                      },
+                    },
+                  ],
+                },
+              };
+            }
+            return seal;
+          },
+        });
+        if (!persisted.ok) {
+          throw new DevApiHttpError(422, "snapshot seal failed");
+        }
+        return toDevAnalyzeRun(persisted.run, template.name);
       },
       async shareRunToChat({ userId, runId, body }) {
-        const run = await getAnalyzeTemplateRun(deps.db, runId);
+        const run = await getAnalyzeTemplateRunForUser(deps.db, { userId, runId });
         if (run === null) throw new DevApiHttpError(404, "analyze run not found");
-        const template = await getAnalyzeTemplate(deps.db, run.template_id);
-        if (template === null || template.user_id !== userId) {
-          throw new DevApiHttpError(404, "analyze run not found");
-        }
         const blocks = enrichAnalyzeRunBlocks(run.blocks, run);
         const shared = await shareArtifactToChat({
           sources: [
@@ -1565,23 +1611,72 @@ async function listAnalyzeRunsForTemplate(
   return rows.map((row) => toDevAnalyzeRun(row, templateName));
 }
 
-function toDevAnalyzeRun(row: AnalyzeTemplateRunRow, templateName = "Analyze template"): DevAnalyzeRun {
+function toDevAnalyzeRunSummary(row: AnalyzeTemplateRunSummaryRow): DevAnalyzeRunSummary {
+  return toDevAnalyzeRunSummaryFields(row, row.template_name);
+}
+
+function toDevAnalyzeRun(
+  row: AnalyzeTemplateRunRow | AnalyzeTemplateRunWithTemplateRow,
+  templateName = "template_name" in row ? row.template_name : "Analyze template",
+): DevAnalyzeRun {
+  return {
+    ...toDevAnalyzeRunSummaryFields(row, templateName),
+    blocks: row.blocks as ReadonlyArray<Record<string, unknown>>,
+  };
+}
+
+function toDevAnalyzeRunSummaryFields(
+  row: Omit<AnalyzeTemplateRunRow, "blocks">,
+  templateName: string,
+): DevAnalyzeRunSummary {
+  const metadata = safeParseStoredAnalyzeRunMetadata(row.run_metadata);
+  const playbookId = metadata?.playbook_id ?? row.playbook_id;
+  const playbook = playbookId === null
+    ? undefined
+    : ANALYZE_PLAYBOOKS.find((candidate) => candidate.playbook_id === playbookId);
   return {
     run_id: row.run_id,
     template_id: row.template_id,
     template_name: templateName,
     template_version: row.template_version,
-    playbook_id: null,
-    playbook_name: null,
-    playbook_version: null,
-    display_title: templateName,
-    run_metadata: {},
-    can_rerun: false,
-    rerun_unavailable_reason: "This run's metadata is not rerunnable.",
+    playbook_id: playbookId,
+    playbook_name: playbook?.name ?? null,
+    playbook_version: metadata?.playbook_version ?? null,
+    display_title: playbook?.name ?? templateName,
+    run_metadata: row.run_metadata,
+    can_rerun: metadata !== null,
+    rerun_unavailable_reason: metadata === null
+      ? "This run's metadata is not rerunnable."
+      : null,
     snapshot_id: row.snapshot_id,
-    blocks: row.blocks as ReadonlyArray<Record<string, unknown>>,
     created_at: row.created_at,
   };
+}
+
+function parseStoredAnalyzeRunMetadata(value: unknown): AnalyzeRunMetadataV1 {
+  try {
+    return parseAnalyzeRunMetadata(value);
+  } catch (error) {
+    if (error instanceof AnalyzeRunMetadataError) {
+      throw new DevApiHttpError(409, "analyze run metadata is not rerunnable");
+    }
+    throw error;
+  }
+}
+
+function safeParseStoredAnalyzeRunMetadata(value: unknown): AnalyzeRunMetadataV1 | null {
+  try {
+    return parseAnalyzeRunMetadata(value);
+  } catch {
+    return null;
+  }
+}
+
+function analyzeSubjectRefFromMetadata(ref: { kind: string; id: string }): SubjectRef {
+  if (!isSubjectRef(ref)) {
+    throw new DevApiHttpError(409, "analyze run metadata is not rerunnable");
+  }
+  return Object.freeze({ kind: ref.kind, id: ref.id });
 }
 
 async function listRunsForAgents(db: QueryExecutor, agentIds: string[]): Promise<DevAgentRun[]> {

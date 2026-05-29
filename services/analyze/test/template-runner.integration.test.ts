@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 
 import type { Client } from "pg";
 
-import { createAnalyzeTemplate } from "../src/template-repo.ts";
+import type { JsonValue } from "../../observability/src/types.ts";
+import { createAnalyzeTemplate, deleteAnalyzeTemplate } from "../src/template-repo.ts";
 import {
   getAnalyzeTemplateRun,
   listAnalyzeTemplateRunsByTemplate,
@@ -33,8 +34,8 @@ async function seedUser(client: Client, email: string): Promise<string> {
 // verifier needs a populated evidence plane). The persist-after-seal
 // contract is unit-tested with a fake seal callback; here we drop sealed
 // snapshot rows directly so the integration suite focuses on what it
-// uniquely verifies: real-pg FK behavior, the cascade-from-template
-// delete, and the round-trip read of stored runs.
+// uniquely verifies: real-pg FK behavior, soft-delete retention, and the
+// round-trip read of stored runs.
 async function seedSealedSnapshot(client: Client, snapshotId: string, asOf: string): Promise<void> {
   await client.query(
     `insert into snapshots (
@@ -108,6 +109,19 @@ function okSeal(snapshotId: string, asOf: string): SnapshotSealResult & { ok: tr
   });
 }
 
+function runMetadata(templateId: string, templateVersion: number): JsonValue {
+  return {
+    schema_version: 1,
+    template_id: templateId,
+    template_version: templateVersion,
+    playbook_id: "earnings_quality",
+    playbook_version: 1,
+    instructions: "Review earnings quality.",
+    source_categories: ["filings"],
+    subject_refs: [{ kind: "issuer", id: SUBJECT_ID }],
+  };
+}
+
 test(
   "analyze_template_runs: rerun produces a new sealed snapshot, both memos readable at their original snapshots (fra-dpj headline)",
   { skip: !dockerAvailable() },
@@ -138,6 +152,8 @@ test(
       template_id: template.template_id,
       template_version: template.version,
       blocks: blocksA,
+      playbook_id: "earnings_quality",
+      run_metadata: runMetadata(template.template_id, template.version),
       sealSnapshot: async () => okSeal(SNAPSHOT_ID_A, asOfA),
     });
     assert.equal(resultA.ok, true);
@@ -147,6 +163,8 @@ test(
       template_id: template.template_id,
       template_version: template.version,
       blocks: blocksB,
+      playbook_id: "earnings_quality",
+      run_metadata: runMetadata(template.template_id, template.version),
       sealSnapshot: async () => okSeal(SNAPSHOT_ID_B, asOfB),
     });
     assert.equal(resultB.ok, true);
@@ -177,14 +195,12 @@ test(
 );
 
 test(
-  "analyze_template_runs: cascade delete from analyze_templates wipes its runs (fra-dpj cleanup contract)",
+  "analyze_template_runs: soft-deleting an analyze_template preserves historical runs",
   { skip: !dockerAvailable() },
   async (t) => {
-    // Templates are user-owned. When the template is removed (or the user
-    // is — which cascades to their templates per fra-ast), every persisted
-    // run for it must go away too. Otherwise listAnalyzeTemplateRunsByTemplate
-    // is the only read path that could surface them and they'd become
-    // unreachable orphans.
+    // Run history is an analyst artifact. Deleting a template removes it
+    // from active pickers, but the sealed memo and its metadata must remain
+    // readable for evidence review.
     const { databaseUrl } = await bootstrapDatabase(t, "analyze-runner-cascade");
     const seedClient = await connectedClient(t, databaseUrl);
     const userId = await seedUser(seedClient, "cascade@example.com");
@@ -200,12 +216,12 @@ test(
       template_id: template.template_id,
       template_version: template.version,
       blocks: [{ id: "b1", kind: "section", title: "x", children: [], snapshot_id: SNAPSHOT_ID_A }],
+      playbook_id: "earnings_quality",
+      run_metadata: runMetadata(template.template_id, template.version),
       sealSnapshot: async () => okSeal(SNAPSHOT_ID_A, "2026-05-01T00:00:00.000Z"),
     });
 
-    await seedClient.query("delete from analyze_templates where template_id = $1::uuid", [
-      template.template_id,
-    ]);
+    await deleteAnalyzeTemplate(seedClient, template.template_id);
 
     const surviving = (
       await seedClient.query<{ count: string }>(
@@ -213,7 +229,7 @@ test(
         [template.template_id],
       )
     ).rows[0].count;
-    assert.equal(surviving, "0", "ON DELETE CASCADE from analyze_templates must wipe its runs");
+    assert.equal(surviving, "1", "soft-deleted templates must retain sealed runs");
   },
 );
 
@@ -240,6 +256,8 @@ test(
       template_id: template.template_id,
       template_version: template.version,
       blocks: [{ id: "b1", kind: "section", title: "x", children: [], snapshot_id: SNAPSHOT_ID_A }],
+      playbook_id: "earnings_quality",
+      run_metadata: runMetadata(template.template_id, template.version),
       sealSnapshot: async () => okSeal(SNAPSHOT_ID_A, "2026-05-01T00:00:00.000Z"),
     });
 
@@ -274,6 +292,8 @@ test(
       template_id: template.template_id,
       template_version: template.version,
       blocks: [],
+      playbook_id: "earnings_quality",
+      run_metadata: runMetadata(template.template_id, template.version),
       sealSnapshot: async () =>
         Object.freeze({
           ok: false,

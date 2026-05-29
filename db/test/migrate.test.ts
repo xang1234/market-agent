@@ -202,7 +202,7 @@ test("migrate up applies pending migrations and records them in schema_migration
   });
 
   assert.equal(migrateResult.status, 0, migrateResult.stderr || migrateResult.stdout);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "27");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "28");
   assert.deepEqual(
     queryValue(containerName, "select version || ':' || name from schema_migrations order by version").split("\n"),
     [
@@ -233,6 +233,7 @@ test("migrate up applies pending migrations and records them in schema_migration
       "0025:provider_backed_dev_data",
       "0026:sec_fact_identity",
       "0027:issuer_profile_enrichment_provenance",
+      "0028:analyze_playbook_metadata",
     ],
   );
 
@@ -349,6 +350,11 @@ test("migrate status reports all migrations as applied after migrate up", { time
   assert.match(statusResult.stdout, /0021\s+fact_review_actions\s+applied/);
   assert.match(statusResult.stdout, /0022\s+watchlist_list_management\s+applied/);
   assert.match(statusResult.stdout, /0023\s+alert_delivery_metadata\s+applied/);
+  assert.match(statusResult.stdout, /0024\s+instruments_figi_composite\s+applied/);
+  assert.match(statusResult.stdout, /0025\s+provider_backed_dev_data\s+applied/);
+  assert.match(statusResult.stdout, /0026\s+sec_fact_identity\s+applied/);
+  assert.match(statusResult.stdout, /0027\s+issuer_profile_enrichment_provenance\s+applied/);
+  assert.match(statusResult.stdout, /0028\s+analyze_playbook_metadata\s+applied/);
 });
 
 test("migrate down rolls back the most recently applied migration", { timeout: 120000 }, async (t) => {
@@ -979,7 +985,7 @@ test("migrate down rolls back schema changes when removing the migration record 
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /rejecting schema_migrations delete/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "27");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "28");
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -988,15 +994,15 @@ test("migrate down rolls back schema changes when removing the migration record 
   // migration's schema change must still be in place. If the runner
   // accidentally executed the down DDL before hitting the trigger block, the
   // schema_migrations row count alone wouldn't catch that — checking the
-  // latest migration's actual artifact does. 0027 added the issuer profile
-  // enrichment table; the down would remove it, so its presence is independent proof the
-  // down DDL did not execute.
+  // latest migration's actual artifact does. 0028 adds soft-delete and
+  // playbook metadata columns; the down would remove them, so their presence
+  // is independent proof the down DDL did not execute.
   assert.equal(
     queryValue(
       containerName,
-      "select count(*) from pg_tables where schemaname = 'public' and tablename = 'issuer_profile_enrichments'",
+      "select count(*) from information_schema.columns where (table_name = 'analyze_templates' and column_name = 'deleted_at') or (table_name = 'analyze_template_runs' and column_name in ('playbook_id', 'run_metadata'))",
     ),
-    "1",
+    "3",
   );
 });
 
@@ -1045,7 +1051,7 @@ test("migrate down fails when any applied migration is missing locally", { timeo
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /Applied migration 0000 is missing locally/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "28");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "29");
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
 });
 

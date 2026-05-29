@@ -1451,7 +1451,8 @@ function fakeAnalyzeDb(input: {
         };
       }
       if (text.includes("insert into analyze_template_runs")) {
-        const blocks = JSON.parse(String(values?.[3]));
+        const runMetadata = JSON.parse(String(values?.[3]));
+        const blocks = JSON.parse(String(values?.[5]));
         input.insertedBlocks.splice(0, input.insertedBlocks.length, ...blocks);
         return {
           rows: [
@@ -1459,7 +1460,9 @@ function fakeAnalyzeDb(input: {
               run_id: "22222222-2222-4222-8222-222222222222",
               template_id: values?.[0],
               template_version: values?.[1],
-              snapshot_id: values?.[2],
+              playbook_id: values?.[2],
+              run_metadata: runMetadata,
+              snapshot_id: values?.[4],
               blocks,
               created_at: "2026-05-06T00:00:00.000Z",
             },
@@ -1759,12 +1762,24 @@ function fakeArtifactShareDb(input: {
       }
       if (text.includes("from analyze_template_runs")) {
         return {
-          rows: values?.[0] === input.runId
+          rows: values?.[0] === input.userId && values?.[1] === input.runId
             ? [
                 {
                   run_id: input.runId,
                   template_id: "77777777-7777-4777-8777-777777777777",
+                  template_name: "Earnings quality",
                   template_version: 3,
+                  playbook_id: "earnings_quality",
+                  run_metadata: {
+                    schema_version: 1,
+                    template_id: "77777777-7777-4777-8777-777777777777",
+                    template_version: 3,
+                    playbook_id: "earnings_quality",
+                    playbook_version: 1,
+                    instructions: "Review earnings quality.",
+                    source_categories: ["filings"],
+                    subject_refs: [],
+                  },
                   snapshot_id: input.snapshotId,
                   blocks: input.blocks,
                   created_at: "2026-05-06T00:00:00.000Z",

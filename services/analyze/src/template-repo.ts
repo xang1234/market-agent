@@ -125,7 +125,8 @@ export async function getAnalyzeTemplate(
   const { rows } = await db.query<AnalyzeTemplateDbRow>(
     `select ${SELECT_COLUMNS}
        from analyze_templates
-      where template_id = $1::uuid`,
+      where template_id = $1::uuid
+        and deleted_at is null`,
     [templateId],
   );
   return rows[0] ? rowFromDb(rows[0]) : null;
@@ -142,6 +143,7 @@ export async function listAnalyzeTemplatesByUser(
     `select ${SELECT_COLUMNS}
        from analyze_templates
       where user_id = $1::uuid
+        and deleted_at is null
       order by name asc`,
     [userId],
   );
@@ -171,6 +173,7 @@ export async function updateAnalyzeTemplate(
             version = version + 1,
             updated_at = now()
       where template_id = $1::uuid
+        and deleted_at is null
       returning ${SELECT_COLUMNS}`,
     [
       templateId,
@@ -200,7 +203,11 @@ export async function deleteAnalyzeTemplate(
 ): Promise<void> {
   assertUuidString(templateId, "template_id");
   const result = await db.query(
-    `delete from analyze_templates where template_id = $1::uuid`,
+    `update analyze_templates
+        set deleted_at = now(),
+            updated_at = now()
+      where template_id = $1::uuid
+        and deleted_at is null`,
     [templateId],
   );
   if ((result.rowCount ?? 0) === 0) {
