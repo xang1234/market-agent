@@ -1,3 +1,4 @@
+import { EvidenceInspectorProvider } from '../evidence/EvidenceInspectorProvider.tsx'
 import { WatchlistProvider } from '../watchlists/WatchlistProvider'
 import { AuthInterrupt } from './AuthInterrupt'
 import { AuthInterruptProvider } from './AuthInterruptProvider'
@@ -40,20 +41,22 @@ export function WorkspaceShell() {
     <AuthInterruptProvider>
       <RightRailProvider>
         <WatchlistProvider userId={userId}>
-          <div className="flex h-full w-full bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
-            <WatchlistSlot />
-            <div className="flex min-w-0 flex-1 flex-col">
-              <TopBar />
-              <PrimaryTabs />
-              <div className="flex min-h-0 flex-1">
-                <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-                  <RouteScopeGate />
-                </main>
-                <RightRailSlot />
+          <EvidenceInspectorProvider>
+            <div className="flex h-full w-full bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
+              <WatchlistSlot />
+              <div className="flex min-w-0 flex-1 flex-col">
+                <TopBar />
+                <PrimaryTabs />
+                <div className="flex min-h-0 flex-1">
+                  <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                    <RouteScopeGate />
+                  </main>
+                  <RightRailSlot />
+                </div>
               </div>
             </div>
-          </div>
-          <AuthInterrupt />
+            <AuthInterrupt />
+          </EvidenceInspectorProvider>
         </WatchlistProvider>
       </RightRailProvider>
     </AuthInterruptProvider>
