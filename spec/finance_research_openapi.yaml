@@ -994,6 +994,18 @@ paths:
             text/event-stream:
               schema:
                 type: string
+  /v1/analyze/playbooks:
+    get:
+      tags: [Analyze]
+      summary: List built-in guided Analyze playbooks
+      operationId: listAnalyzePlaybooks
+      responses:
+        '200':
+          description: Built-in playbooks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyzePlaybookListResponse'
   /v1/analyze/templates:
     get:
       tags: [Analyze]
@@ -1029,10 +1041,40 @@ paths:
               schema:
                 $ref: '#/components/schemas/AnalyzeTemplate'
   /v1/analyze/runs:
+    get:
+      tags: [Analyze]
+      summary: List user-scoped Analyze run history
+      operationId: listAnalyzeRuns
+      description: Returns run summaries only; call getAnalyzeRun before opening or diffing a historical run because summaries intentionally omit blocks.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 25
+            maximum: 100
+            minimum: 1
+        - in: query
+          name: cursor
+          description: Opaque cursor encoding the last row position in created_at desc, run_id desc order.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Analyze run summary page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyzeRunListResponse'
+        '400':
+          description: Malformed limit or cursor
+        '401':
+          description: Missing or malformed user credential
     post:
       tags: [Analyze]
       summary: Run an analyze template and return the memo blocks
       operationId: runAnalyzeTemplate
+      description: template_id is always the selected AnalyzeTemplate UUID; playbook_id guides the run but never substitutes for template_id.
       requestBody:
         required: true
         content:
@@ -1054,6 +1096,55 @@ paths:
           description: Template not found
         '422':
           description: Analyze workflow could not seal a valid snapshot
+  /v1/analyze/runs/{runId}:
+    get:
+      tags: [Analyze]
+      summary: Get full Analyze run detail
+      operationId: getAnalyzeRun
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Full run detail including blocks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyzeRun'
+        '401':
+          description: Missing or malformed user credential
+        '404':
+          description: Analyze run not found for the calling user
+  /v1/analyze/runs/{runId}/rerun:
+    post:
+      tags: [Analyze]
+      summary: Rerun an Analyze run from stored server-side metadata
+      operationId: rerunAnalyzeRun
+      description: Reruns are created from stored run_metadata. Runs with unsupported metadata remain viewable but return 409 when rerun; deleted active templates also return 409.
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '201':
+          description: Rerun created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyzeRun'
+        '401':
+          description: Missing or malformed user credential
+        '404':
+          description: Analyze run not found for the calling user
+        '409':
+          description: Run metadata or active template is not rerunnable
   /v1/analyze/runs/{runId}/share-to-chat:
     post:
       tags: [Analyze]
@@ -2194,13 +2285,67 @@ components:
           type: array
           items:
             $ref: './finance_research_block_schema.json#/$defs/Block'
+    AnalyzePlaybookSection:
+      type: object
+      required: [section_id, title, required, block_hint]
+      properties:
+        section_id:
+          type: string
+        title:
+          type: string
+        required:
+          type: boolean
+        block_hint:
+          type: string
+          enum: [rich_text, metric_row, table, line_chart, section]
+    AnalyzePlaybook:
+      type: object
+      required:
+        - playbook_id
+        - version
+        - name
+        - description
+        - default_instructions
+        - default_source_categories
+        - sections
+      properties:
+        playbook_id:
+          type: string
+        version:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        default_instructions:
+          type: string
+        default_source_categories:
+          type: array
+          items:
+            type: string
+        sections:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalyzePlaybookSection'
+    AnalyzePlaybookListResponse:
+      type: object
+      required: [playbooks]
+      properties:
+        playbooks:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalyzePlaybook'
     AnalyzeRunInput:
       type: object
       required: [template_id]
       properties:
         template_id:
           type: string
+          format: uuid
           description: Template identifier selected from /v1/analyze/templates.
+        playbook_id:
+          type: string
+          description: Optional guided playbook id. This never substitutes for template_id.
         instructions:
           type: string
           description: User instructions to apply while rendering the memo.
@@ -2217,27 +2362,133 @@ components:
           anyOf:
             - $ref: '#/components/schemas/SubjectRef'
             - type: 'null'
-    AnalyzeRun:
+    AnalyzeRunMetadataSubjectRef:
       type: object
-      required: [run_id, template_id, template_version, snapshot_id, blocks, created_at]
+      required: [kind, id]
+      properties:
+        kind:
+          type: string
+        id:
+          type: string
+    AnalyzeRunMetadataV1:
+      type: object
+      required:
+        - schema_version
+        - template_id
+        - template_version
+        - playbook_id
+        - playbook_version
+        - instructions
+        - source_categories
+        - subject_refs
+      properties:
+        schema_version:
+          type: integer
+          enum: [1]
+        template_id:
+          type: string
+          format: uuid
+        template_version:
+          type: integer
+        playbook_id:
+          type:
+            - string
+            - 'null'
+        playbook_version:
+          type:
+            - integer
+            - 'null'
+        instructions:
+          type: string
+        source_categories:
+          type: array
+          items:
+            type: string
+        subject_refs:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalyzeRunMetadataSubjectRef'
+        rerun_of_run_id:
+          type: string
+          format: uuid
+    AnalyzeRunSummary:
+      type: object
+      description: Lightweight run-history row. It intentionally omits blocks.
+      required:
+        - run_id
+        - template_id
+        - template_name
+        - template_version
+        - playbook_id
+        - playbook_name
+        - playbook_version
+        - display_title
+        - run_metadata
+        - can_rerun
+        - rerun_unavailable_reason
+        - snapshot_id
+        - created_at
       properties:
         run_id:
           type: string
           format: uuid
         template_id:
           type: string
+          format: uuid
+        template_name:
+          type: string
         template_version:
           type: integer
+        playbook_id:
+          type:
+            - string
+            - 'null'
+        playbook_name:
+          type:
+            - string
+            - 'null'
+        playbook_version:
+          type:
+            - integer
+            - 'null'
+        display_title:
+          type: string
+        run_metadata:
+          $ref: '#/components/schemas/AnalyzeRunMetadataV1'
+        can_rerun:
+          type: boolean
+        rerun_unavailable_reason:
+          type:
+            - string
+            - 'null'
         snapshot_id:
           type: string
           format: uuid
-        blocks:
-          type: array
-          items:
-            $ref: './finance_research_block_schema.json#/$defs/Block'
         created_at:
           type: string
           format: date-time
+    AnalyzeRun:
+      allOf:
+        - $ref: '#/components/schemas/AnalyzeRunSummary'
+        - type: object
+          required: [blocks]
+          properties:
+            blocks:
+              type: array
+              items:
+                $ref: './finance_research_block_schema.json#/$defs/Block'
+    AnalyzeRunListResponse:
+      type: object
+      required: [runs, next_cursor]
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalyzeRunSummary'
+        next_cursor:
+          type:
+            - string
+            - 'null'
     AnalyzeRunShareInput:
       type: object
       properties:

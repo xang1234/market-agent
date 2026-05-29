@@ -1,12 +1,20 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { createHash, randomUUID } from "node:crypto";
 import {
+  ANALYZE_PLAYBOOKS,
+  AnalyzePlaybookError,
+  AnalyzeRunMetadataError,
   getAnalyzeTemplate,
   getAnalyzeTemplateRun,
   listAnalyzeTemplatesByUser,
   mapSourceCategoriesToBundles,
+  parseAnalyzeRunMetadata,
   persistAnalyzeTemplateRunAfterSnapshotSealWithPool,
+  resolveAnalyzePlaybookRequest,
+  serializeAnalyzeRunMetadataV1,
   SourceCategoryMappingError,
+  withRerunOfRunId,
+  type AnalyzeRunMetadataV1,
   type AnalyzeTemplateRunRow,
   type AnalyzeTemplateRunClientPool,
   type AnalyzeTemplateRow,
@@ -97,13 +105,24 @@ type DevAgentActivity = {
   ts: string;
 };
 
-type DevAnalyzeRun = {
+type DevAnalyzeRunSummary = {
   run_id: string;
   template_id: string;
+  template_name: string;
   template_version: number;
+  playbook_id: string | null;
+  playbook_name: string | null;
+  playbook_version: number | null;
+  display_title: string;
+  run_metadata: unknown;
+  can_rerun: boolean;
+  rerun_unavailable_reason: string | null;
   snapshot_id: string;
-  blocks: ReadonlyArray<Record<string, unknown>>;
   created_at: string;
+};
+
+type DevAnalyzeRun = DevAnalyzeRunSummary & {
+  blocks: ReadonlyArray<Record<string, unknown>>;
 };
 
 type DevAnalyzeTemplate = {
@@ -135,10 +154,16 @@ export type DevApiAnalyzeAdapter = {
     templates: DevAnalyzeTemplate[];
     runs?: DevAnalyzeRun[];
   }>;
+  listRuns(input: { userId: string; limit: number; cursor: string | null }): Promise<{
+    runs: DevAnalyzeRunSummary[];
+    next_cursor: string | null;
+  }>;
+  getRun(input: { userId: string; runId: string }): Promise<DevAnalyzeRun>;
   createRun(input: {
     userId: string;
     body: Record<string, unknown>;
   }): Promise<DevAnalyzeRun>;
+  rerun(input: { userId: string; runId: string }): Promise<DevAnalyzeRun>;
   shareRunToChat(input: {
     userId: string;
     runId: string;
@@ -306,6 +331,16 @@ export function createDevApiServer(
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/v1/analyze/playbooks") {
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (userId === null) {
+        respondJson(res, 401, { error: "x-user-id header is required" });
+        return;
+      }
+      respondJson(res, 200, { playbooks: ANALYZE_PLAYBOOKS });
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/v1/analyze/templates") {
       const userId = readUserIdHeader(req.headers["x-user-id"]);
       if (userId === null) {
@@ -337,6 +372,55 @@ export function createDevApiServer(
       }
       const input = typeof body === "object" && body !== null ? body as Record<string, unknown> : {};
       respondJson(res, 201, await adapters.analyze.createRun({ userId, body: input }));
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/v1/analyze/runs") {
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (userId === null) {
+        respondJson(res, 401, { error: "x-user-id header is required" });
+        return;
+      }
+      if (!adapters) {
+        respondJson(res, 503, { error: "durable analyze adapter is not configured" });
+        return;
+      }
+      respondJson(res, 200, await adapters.analyze.listRuns({
+        userId,
+        ...readAnalyzeRunPagination(url.searchParams),
+      }));
+      return;
+    }
+
+    const analyzeRunDetailMatch = url.pathname.match(/^\/v1\/analyze\/runs\/([^/]+)$/);
+    if (req.method === "GET" && analyzeRunDetailMatch) {
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (userId === null) {
+        respondJson(res, 401, { error: "x-user-id header is required" });
+        return;
+      }
+      if (!adapters) {
+        respondJson(res, 503, { error: "durable analyze adapter is not configured" });
+        return;
+      }
+      const runId = readRequiredUuidValue(decodeURIComponent(analyzeRunDetailMatch[1]), "run_id");
+      respondJson(res, 200, await adapters.analyze.getRun({ userId, runId }));
+      return;
+    }
+
+    const analyzeRerunMatch = url.pathname.match(/^\/v1\/analyze\/runs\/([^/]+)\/rerun$/);
+    if (req.method === "POST" && analyzeRerunMatch) {
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (userId === null) {
+        respondJson(res, 401, { error: "x-user-id header is required" });
+        return;
+      }
+      if (!adapters) {
+        respondJson(res, 503, { error: "durable analyze adapter is not configured" });
+        return;
+      }
+      const runId = readRequiredUuidValue(decodeURIComponent(analyzeRerunMatch[1]), "run_id");
+      respondJson(res, 201, await adapters.analyze.rerun({ userId, runId }));
       return;
     }
 
@@ -562,24 +646,67 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
           runs: analyzeRuns.filter((run) => runOwner(run.run_id) === userId),
         };
       },
+      async listRuns({ userId, limit, cursor }) {
+        const runs = analyzeRuns
+          .filter((run) => runOwner(run.run_id) === userId)
+          .sort(compareAnalyzeRunsNewestFirst);
+        const startIndex = cursor
+          ? Math.max(0, runs.findIndex((run) => encodeAnalyzeRunCursor(run) === cursor) + 1)
+          : 0;
+        const page = runs.slice(startIndex, startIndex + limit);
+        return {
+          runs: page.map(toAnalyzeRunSummary),
+          next_cursor: runs[startIndex + limit] && page.length > 0
+            ? encodeAnalyzeRunCursor(page[page.length - 1])
+            : null,
+        };
+      },
+      async getRun({ userId, runId }) {
+        const run = analyzeRuns.find((item) => item.run_id === runId && runOwner(item.run_id) === userId);
+        if (!run) throw new DevApiHttpError(404, "analyze run not found");
+        return run;
+      },
       async createRun({ userId, body }) {
-        const runId = stableUuid(`analyze-run:${userId}:${analyzeRuns.length}:${String(body.template_id ?? "")}`);
-        const snapshotId = stableUuid(`analyze-snapshot:${runId}`);
-        const instructions = nonEmptyString(body.instructions) ?? "Assess the selected subject using the chosen sources.";
+        const templateId = nonEmptyString(body.template_id) ?? EARNINGS_TEMPLATE_ID;
+        const resolvedPlaybook = resolveFixtureAnalyzePlaybook(body);
+        const primarySubjectRef = readOptionalSubjectRef(body.subject_ref ?? body.primary_subject_ref);
+        const subjectRefs = primarySubjectRef ? [primarySubjectRef] : [];
         const sourceCategories = Array.isArray(body.source_categories)
-          ? body.source_categories.filter((category): category is string => typeof category === "string" && category.trim() !== "")
-          : [];
+          ? body.source_categories
+            .filter((category): category is string => typeof category === "string" && category.trim() !== "")
+            .map((category) => category.trim())
+          : [...resolvedPlaybook.source_categories];
+        const runId = stableUuid(`analyze-run:${userId}:${analyzeRuns.length}:${templateId}:${resolvedPlaybook.playbook.playbook_id}`);
+        const snapshotId = stableUuid(`analyze-snapshot:${runId}`);
+        const runMetadata = serializeAnalyzeRunMetadataV1({
+          template_id: templateId,
+          template_version: 1,
+          playbook_id: resolvedPlaybook.playbook.playbook_id,
+          playbook_version: resolvedPlaybook.playbook.version,
+          instructions: resolvedPlaybook.instructions,
+          source_categories: sourceCategories,
+          subject_refs: subjectRefs,
+        });
         const run: DevAnalyzeRun = {
           run_id: runId,
-          template_id: nonEmptyString(body.template_id) ?? "earnings-quality",
+          template_id: templateId,
+          template_name: fixtureTemplateName(templateId),
           template_version: 1,
+          playbook_id: resolvedPlaybook.playbook.playbook_id,
+          playbook_name: resolvedPlaybook.playbook.name,
+          playbook_version: resolvedPlaybook.playbook.version,
+          display_title: resolvedPlaybook.playbook.name,
+          run_metadata: runMetadata,
+          can_rerun: true,
+          rerun_unavailable_reason: null,
           snapshot_id: snapshotId,
           blocks: [
             richTextBlock({
               id: stableUuid(`analyze-block:${runId}`),
               snapshotId,
-              title: "Analyze memo",
-              text: `${instructions} Sources: ${sourceCategories.length > 0 ? sourceCategories.join(", ") : "default evidence set"}.`,
+              title: resolvedPlaybook.playbook.name,
+              text: `${resolvedPlaybook.instructions} Sources: ${sourceCategories.join(", ")}.`,
+              playbookSectionId: resolvedPlaybook.playbook.sections[0]?.section_id ?? "summary",
             }),
           ],
           created_at: new Date().toISOString(),
@@ -587,6 +714,26 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
         analyzeRuns.unshift(run);
         analyzeRunOwners.set(run.run_id, userId);
         return run;
+      },
+      async rerun({ userId, runId }) {
+        const original = analyzeRuns.find((run) => run.run_id === runId && runOwner(run.run_id) === userId);
+        if (!original) throw new DevApiHttpError(404, "analyze run not found");
+        const metadata = parseAnalyzeRunMetadata(original.run_metadata);
+        const rerunId = stableUuid(`analyze-rerun:${userId}:${runId}:${analyzeRuns.length}`);
+        const snapshotId = stableUuid(`analyze-snapshot:${rerunId}`);
+        const rerun: DevAnalyzeRun = {
+          ...original,
+          run_id: rerunId,
+          snapshot_id: snapshotId,
+          blocks: original.blocks.map((block, index) => cloneAnalyzeRunBlockForRerun(block, rerunId, snapshotId, index)),
+          created_at: new Date().toISOString(),
+          run_metadata: withRerunOfRunId(metadata, original.run_id),
+          can_rerun: true,
+          rerun_unavailable_reason: null,
+        };
+        analyzeRuns.unshift(rerun);
+        analyzeRunOwners.set(rerun.run_id, userId);
+        return rerun;
       },
       async shareRunToChat({ userId, runId, body }) {
         const run = analyzeRuns.find((candidate) => candidate.run_id === runId);
@@ -754,7 +901,7 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
         const templates = await listAnalyzeTemplatesByUser(deps.db, userId);
         const runs = (
           await Promise.all(
-            templates.map((template) => listAnalyzeRunsForTemplate(deps.db, template.template_id)),
+            templates.map((template) => listAnalyzeRunsForTemplate(deps.db, template.template_id, template.name)),
           )
         ).flat();
         return {
@@ -768,6 +915,35 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
           runs,
         };
       },
+      async listRuns({ userId, limit, cursor }) {
+        const templates = await listAnalyzeTemplatesByUser(deps.db, userId);
+        const runs = (
+          await Promise.all(
+            templates.map((template) => listAnalyzeRunsForTemplate(deps.db, template.template_id, template.name)),
+          )
+        )
+          .flat()
+          .sort(compareAnalyzeRunsNewestFirst);
+        const startIndex = cursor
+          ? Math.max(0, runs.findIndex((run) => encodeAnalyzeRunCursor(run) === cursor) + 1)
+          : 0;
+        const page = runs.slice(startIndex, startIndex + limit);
+        return {
+          runs: page.map(toAnalyzeRunSummary),
+          next_cursor: runs[startIndex + limit] && page.length > 0
+            ? encodeAnalyzeRunCursor(page[page.length - 1])
+            : null,
+        };
+      },
+      async getRun({ userId, runId }) {
+        const run = await getAnalyzeTemplateRun(deps.db, runId);
+        if (run === null) throw new DevApiHttpError(404, "analyze run not found");
+        const template = await getAnalyzeTemplate(deps.db, run.template_id);
+        if (template === null || template.user_id !== userId) {
+          throw new DevApiHttpError(404, "analyze run not found");
+        }
+        return toDevAnalyzeRun(run, template.name);
+      },
       async createRun({ userId, body }) {
         const templateId = requireNonEmpty(body.template_id, "template_id");
         const template = await getAnalyzeTemplate(deps.db, templateId);
@@ -775,13 +951,31 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
           throw new DevApiHttpError(404, "analyze template not found");
         }
         const snapshotId = randomUUID();
-        const sourceCategories = readAnalyzeSourceCategories(body.source_categories, template.source_categories);
+        const resolvedPlaybook = resolveAnalyzePlaybookRequest({
+          playbook_id: nonEmptyString(body.playbook_id) ?? "earnings_quality",
+          instructions: nonEmptyString(body.instructions) ?? undefined,
+          source_categories: body.source_categories === undefined
+            ? undefined
+            : readAnalyzeSourceCategories(body.source_categories, []),
+        });
+        const sourceCategories = body.source_categories === undefined
+          ? [...resolvedPlaybook.source_categories]
+          : readAnalyzeSourceCategories(body.source_categories, []);
         const bundleIds = analyzeBundleIds(sourceCategories);
         const subjectRefs = analyzeSubjectRefs({
           primary: readOptionalSubjectRef(body.subject_ref ?? body.primary_subject_ref),
           added: template.added_subject_refs,
         });
-        const instructions = nonEmptyString(body.instructions) ?? template.prompt_template;
+        const instructions = resolvedPlaybook.instructions;
+        const runMetadata = serializeAnalyzeRunMetadataV1({
+          template_id: template.template_id,
+          template_version: template.version,
+          playbook_id: resolvedPlaybook.playbook.playbook_id,
+          playbook_version: resolvedPlaybook.playbook.version,
+          instructions,
+          source_categories: sourceCategories,
+          subject_refs: subjectRefs,
+        });
         if (!deps.runAnalyzeWorkflow) {
           throw new DevApiHttpError(503, "durable analyze workflow is not configured");
         }
@@ -835,11 +1029,28 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
         return {
           run_id: persisted.run.run_id,
           template_id: persisted.run.template_id,
+          template_name: template.name,
           template_version: persisted.run.template_version,
+          playbook_id: resolvedPlaybook.playbook.playbook_id,
+          playbook_name: resolvedPlaybook.playbook.name,
+          playbook_version: resolvedPlaybook.playbook.version,
+          display_title: resolvedPlaybook.playbook.name,
+          run_metadata: runMetadata,
+          can_rerun: true,
+          rerun_unavailable_reason: null,
           snapshot_id: persisted.run.snapshot_id,
           blocks: persisted.run.blocks as ReadonlyArray<Record<string, unknown>>,
           created_at: persisted.run.created_at,
         };
+      },
+      async rerun({ userId, runId }) {
+        const run = await getAnalyzeTemplateRun(deps.db, runId);
+        if (run === null) throw new DevApiHttpError(404, "analyze run not found");
+        const template = await getAnalyzeTemplate(deps.db, run.template_id);
+        if (template === null || template.user_id !== userId) {
+          throw new DevApiHttpError(404, "analyze run not found");
+        }
+        throw new DevApiHttpError(409, "analyze run metadata is not rerunnable");
       },
       async shareRunToChat({ userId, runId, body }) {
         const run = await getAnalyzeTemplateRun(deps.db, runId);
@@ -1045,6 +1256,61 @@ function requireNonEmpty(value: unknown, label: string): string {
   const text = nonEmptyString(value);
   if (text === null) throw new DevApiHttpError(400, `${label} is required`);
   return text;
+}
+
+const DEFAULT_ANALYZE_RUN_LIMIT = 25;
+const MAX_ANALYZE_RUN_LIMIT = 100;
+
+type AnalyzeRunPaginationInput = {
+  limit: number;
+  cursor: string | null;
+};
+
+function readAnalyzeRunPagination(params: URLSearchParams): AnalyzeRunPaginationInput {
+  const cursor = nonEmptyString(params.get("cursor"));
+  if (cursor !== null) decodeAnalyzeRunCursor(cursor);
+  return {
+    limit: readBoundedLimit(params.get("limit"), DEFAULT_ANALYZE_RUN_LIMIT, MAX_ANALYZE_RUN_LIMIT),
+    cursor,
+  };
+}
+
+function readBoundedLimit(value: string | null, defaultLimit: number, maxLimit: number): number {
+  if (value === null || value.trim() === "") return defaultLimit;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new DevApiHttpError(400, "limit must be a positive integer");
+  }
+  return Math.min(parsed, maxLimit);
+}
+
+function encodeAnalyzeRunCursor(run: Pick<DevAnalyzeRunSummary, "created_at" | "run_id">): string {
+  return Buffer.from(JSON.stringify({
+    created_at: run.created_at,
+    run_id: run.run_id,
+  })).toString("base64url");
+}
+
+function decodeAnalyzeRunCursor(value: string): { created_at: string; run_id: string } {
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Record<string, unknown>;
+    const createdAt = nonEmptyString(parsed.created_at);
+    const runId = nonEmptyString(parsed.run_id);
+    if (createdAt === null || runId === null) throw new Error("invalid cursor payload");
+    return { created_at: createdAt, run_id: runId };
+  } catch {
+    throw new DevApiHttpError(400, "cursor is invalid");
+  }
+}
+
+function compareAnalyzeRunsNewestFirst(a: DevAnalyzeRunSummary, b: DevAnalyzeRunSummary): number {
+  const created = b.created_at.localeCompare(a.created_at);
+  return created === 0 ? b.run_id.localeCompare(a.run_id) : created;
+}
+
+function toAnalyzeRunSummary(run: DevAnalyzeRun): DevAnalyzeRunSummary {
+  const { blocks: _blocks, ...summary } = run;
+  return summary;
 }
 
 function contentHash(value: JsonValue): string {
@@ -1292,17 +1558,30 @@ function jsonArrayOrEmpty(value: JsonValue | null | undefined): JsonValue {
 async function listAnalyzeRunsForTemplate(
   db: AnalyzeTemplateRunClientPool,
   templateId: string,
+  templateName = "Analyze template",
 ): Promise<DevAnalyzeRun[]> {
   const { listAnalyzeTemplateRunsByTemplate } = await import("../../analyze/src/index.ts");
   const rows = await listAnalyzeTemplateRunsByTemplate(db, templateId);
-  return rows.map((row) => ({
+  return rows.map((row) => toDevAnalyzeRun(row, templateName));
+}
+
+function toDevAnalyzeRun(row: AnalyzeTemplateRunRow, templateName = "Analyze template"): DevAnalyzeRun {
+  return {
     run_id: row.run_id,
     template_id: row.template_id,
+    template_name: templateName,
     template_version: row.template_version,
+    playbook_id: null,
+    playbook_name: null,
+    playbook_version: null,
+    display_title: templateName,
+    run_metadata: {},
+    can_rerun: false,
+    rerun_unavailable_reason: "This run's metadata is not rerunnable.",
     snapshot_id: row.snapshot_id,
     blocks: row.blocks as ReadonlyArray<Record<string, unknown>>,
     created_at: row.created_at,
-  }));
+  };
 }
 
 async function listRunsForAgents(db: QueryExecutor, agentIds: string[]): Promise<DevAgentRun[]> {
@@ -1481,17 +1760,57 @@ function stableUuid(seed: string): string {
   return `00000000-0000-4000-8000-${suffix}`;
 }
 
+function resolveFixtureAnalyzePlaybook(body: Record<string, unknown>) {
+  try {
+    return resolveAnalyzePlaybookRequest({
+      playbook_id: nonEmptyString(body.playbook_id) ?? "earnings_quality",
+      instructions: nonEmptyString(body.instructions) ?? undefined,
+      source_categories: Array.isArray(body.source_categories)
+        ? body.source_categories.filter((category): category is string => typeof category === "string")
+        : undefined,
+    });
+  } catch (error) {
+    if (error instanceof AnalyzePlaybookError) {
+      throw new DevApiHttpError(400, error.message);
+    }
+    throw error;
+  }
+}
+
+function cloneAnalyzeRunBlockForRerun(
+  block: Record<string, unknown>,
+  rerunId: string,
+  snapshotId: string,
+  index: number,
+): Record<string, unknown> {
+  const id = stableUuid(`analyze-rerun-block:${rerunId}:${index}`);
+  const dataRef = block.data_ref;
+  const dataRefRecord = isObjectRecord(dataRef) ? dataRef : { kind: "analyze_run" };
+  return {
+    ...block,
+    id,
+    snapshot_id: snapshotId,
+    data_ref: {
+      ...dataRefRecord,
+      id,
+    },
+  };
+}
+
 function richTextBlock(input: {
   id: string;
   snapshotId: string;
   title: string;
   text: string;
+  playbookSectionId?: string;
 }): Record<string, unknown> {
   return {
     id: input.id,
     kind: "rich_text",
     snapshot_id: input.snapshotId,
-    data_ref: { kind: "analyze_run", id: input.id },
+    data_ref: input.playbookSectionId
+      ? { kind: "analyze_run", id: input.id, params: { playbook_section_id: input.playbookSectionId } }
+      : { kind: "analyze_run", id: input.id },
     source_refs: [],
     as_of: new Date(0).toISOString(),
     title: input.title,
@@ -1499,20 +1818,27 @@ function richTextBlock(input: {
   };
 }
 
+const EARNINGS_TEMPLATE_ID = "11111111-1111-4111-8111-111111111111";
+const VARIANT_TEMPLATE_ID = "22222222-2222-4222-8222-222222222222";
+
+function fixtureTemplateName(templateId: string): string {
+  return defaultAnalyzeTemplates().find((template) => template.template_id === templateId)?.name ?? "Analyze template";
+}
+
 function defaultAnalyzeTemplates(): DevAnalyzeTemplate[] {
   return [
     {
-      template_id: "earnings-quality",
-      name: "Earnings quality",
+      template_id: EARNINGS_TEMPLATE_ID,
+      name: "Earnings template",
       prompt_template: "Assess revenue quality, margins, cash conversion, and management commentary.",
       source_categories: ["filings", "transcripts", "news"],
       version: 1,
     },
     {
-      template_id: "variant-view",
+      template_id: VARIANT_TEMPLATE_ID,
       name: "Variant view",
       prompt_template: "Compare the market narrative with evidence-backed counterpoints.",
-      source_categories: ["filings", "news", "social"],
+      source_categories: ["filings", "news", "transcripts"],
       version: 1,
     },
   ];
