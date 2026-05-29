@@ -356,7 +356,9 @@ test('Analyze surface renders template controls, source controls, memo canvas, a
     </MemoryRouter>,
   )
 
+  assert.match(html, /Playbook/)
   assert.match(html, /Template/)
+  assert.match(html, /Sections/)
   assert.match(html, /Instructions/)
   assert.match(html, /Source controls/)
   assert.match(html, /Memo canvas/)
