@@ -191,6 +191,8 @@ export type {
 } from "./document-repo.ts";
 export type { QueryExecutor } from "./types.ts";
 
+export * from "./inspector.ts";
+
 export { createEvidenceReviewServer } from "./review-http.ts";
 export type { EvidenceReviewServerDb } from "./review-http.ts";
 
