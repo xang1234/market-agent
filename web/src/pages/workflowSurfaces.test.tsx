@@ -5,7 +5,7 @@ import { JSDOM } from 'jsdom'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from 'react-router-dom'
 
 import { AgentPayloadValidationError, buildAgentPayload } from '../agents/agentPayload.ts'
 import { persistUserChatTurn } from '../chat/persistUserChatTurn.ts'
@@ -17,6 +17,8 @@ import { BlockRegistryProvider, createDefaultBlockRegistry, type Block } from '.
 import { openChatTurnStream } from '../chat/openChatTurnStream.ts'
 import type { ChatSseEvent } from '../chat/sseEventTypes.ts'
 import { AuthContext } from '../shell/authTypes.ts'
+import { ThemeProvider } from '../shell/ThemeProvider.tsx'
+import { WorkspaceShell } from '../shell/WorkspaceShell.tsx'
 
 const USER_ID = '00000000-0000-4000-8000-000000000001'
 const SNAPSHOT_ID = '11111111-1111-4111-8111-111111111111'
@@ -48,6 +50,23 @@ function wrapWithAuth(element: React.ReactElement): React.ReactElement {
 function renderWithAuth(element: React.ReactElement): string {
   return renderToString(wrapWithAuth(element))
 }
+
+test('Analyze playbooks and inspectable evidence controls are present in workflow surfaces', () => {
+  const router = createMemoryRouter([
+    {
+      element: <WorkspaceShell />,
+      children: [{ index: true, element: <AnalyzePage /> }],
+    },
+  ])
+  const html = renderWithAuth(
+    <ThemeProvider>
+      <RouterProvider router={router} />
+    </ThemeProvider>,
+  )
+
+  assert.match(html, /Finance Research/)
+  assert.doesNotMatch(html, /raw provider payload/i)
+})
 
 test('Chat surface renders thread list and composer workflow copy without phase placeholders', () => {
   const html = renderWithAuth(

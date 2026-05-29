@@ -23,6 +23,17 @@ Downstream callers should hand off by `source_id`, `document_id`, `fact_id`,
 claim/event ids, and canonical `SubjectRef`/issuer identity. They should not
 pass raw filing bytes or ticker-only identifiers across service boundaries.
 
+## Evidence Inspector
+
+`loadEvidenceInspection(db, { user_id, snapshot_id, ref })` is the read-side
+contract for user-facing provenance inspection. It first verifies that the user
+can see an artifact referencing the sealed snapshot, then verifies that the
+requested ref is present in the snapshot manifest, and returns a normalized
+inspection envelope with title, badges, rows, links, and related refs.
+
+The inspector is intentionally read-only. It does not retrieve raw untrusted
+document text and does not alter fact, claim, event, or source state.
+
 ## Source Repo
 
 `createSource` writes rows to `sources` with the provenance fields ingestion and
