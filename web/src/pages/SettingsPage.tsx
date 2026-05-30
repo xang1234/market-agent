@@ -22,10 +22,20 @@ export type LlmEditableSettings = {
 type SettingsState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'ready'; version: string; settings: LlmEditableSettings; message?: string }
+  | { kind: 'ready'; version: string; settings: LlmEditableSettings; message?: string; messageTone?: MessageTone }
+
+type MessageTone = 'success' | 'error'
+type BusyAction = 'save' | 'test' | 'discover' | null
+type TestChannelResponse =
+  | { ok: true; reply: string; deployment?: unknown }
+  | { ok: false; reply?: string; error_code?: string; message?: string; attempts?: unknown[] }
+type DiscoverModelsResponse =
+  | { ok: true; models: string[] }
+  | { ok: false; error_code?: string; message?: string; models: [] }
 
 export function SettingsPage() {
   const [state, setState] = useState<SettingsState>({ kind: 'loading' })
+  const [busyAction, setBusyAction] = useState<BusyAction>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -44,27 +54,62 @@ export function SettingsPage() {
   return (
     <SettingsView
       state={state}
+      busyAction={busyAction}
       onChange={(settings) => setState((current) => current.kind === 'ready' ? { ...current, settings } : current)}
       onSave={async (settings, version) => {
-        const body = await putJson<{ version: string; settings: LlmEditableSettings }>('/v1/dev/llm-settings', {
-          version,
-          settings,
-        })
-        setState({ kind: 'ready', version: body.version, settings: normalizeSettings(body.settings), message: 'Saved' })
+        setBusyAction('save')
+        try {
+          const body = await putJson<{ version: string; settings: LlmEditableSettings }>('/v1/dev/llm-settings', {
+            version,
+            settings,
+          })
+          setState({
+            kind: 'ready',
+            version: body.version,
+            settings: normalizeSettings(body.settings),
+            message: 'Saved',
+            messageTone: 'success',
+          })
+        } catch (error) {
+          setState((current) => current.kind === 'ready'
+            ? { ...current, message: errorMessage(error), messageTone: 'error' }
+            : current)
+        } finally {
+          setBusyAction(null)
+        }
       }}
       onTest={async () => {
-        const body = await postJson<{ ok: boolean; reply: string }>('/v1/dev/llm-settings/test-channel', {})
-        setState((current) => current.kind === 'ready'
-          ? { ...current, message: body.ok ? `Test passed: ${body.reply}` : `Unexpected reply: ${body.reply}` }
-          : current)
+        setBusyAction('test')
+        try {
+          const body = await postJson<TestChannelResponse>('/v1/dev/llm-settings/test-channel', {})
+          setState((current) => current.kind === 'ready'
+            ? {
+                ...current,
+                message: testMessage(body),
+                messageTone: body.ok ? 'success' : 'error',
+              }
+            : current)
+        } catch (error) {
+          setState((current) => current.kind === 'ready'
+            ? { ...current, message: errorMessage(error), messageTone: 'error' }
+            : current)
+        } finally {
+          setBusyAction(null)
+        }
       }}
       onDiscover={async (channel) => {
-        const body = await postJson<{ models: string[] }>('/v1/dev/llm-settings/discover-models', {
-          baseUrl: channel.baseUrl,
-          apiKey: channel.apiKey,
-        })
-        setState((current) => current.kind === 'ready'
-          ? {
+        setBusyAction('discover')
+        try {
+          const body = await postJson<DiscoverModelsResponse>('/v1/dev/llm-settings/discover-models', {
+            baseUrl: channel.baseUrl,
+            apiKey: channel.apiKey,
+          })
+          setState((current) => {
+            if (current.kind !== 'ready') return current
+            if (!body.ok) {
+              return { ...current, message: diagnosticMessage(body), messageTone: 'error' }
+            }
+            return {
               ...current,
               settings: {
                 ...current.settings,
@@ -73,8 +118,16 @@ export function SettingsPage() {
                 ),
               },
               message: `Discovered ${body.models.length} models`,
+              messageTone: 'success',
             }
-          : current)
+          })
+        } catch (error) {
+          setState((current) => current.kind === 'ready'
+            ? { ...current, message: errorMessage(error), messageTone: 'error' }
+            : current)
+        } finally {
+          setBusyAction(null)
+        }
       }}
     />
   )
@@ -86,15 +139,20 @@ export function SettingsView({
   onSave = async () => undefined,
   onTest = async () => undefined,
   onDiscover = async () => undefined,
+  busyAction = null,
 }: {
   state: SettingsState
   onChange?: (settings: LlmEditableSettings) => void
   onSave?: (settings: LlmEditableSettings, version: string) => Promise<void>
   onTest?: () => Promise<void>
   onDiscover?: (channel: LlmChannelSettings) => Promise<void>
+  busyAction?: BusyAction
 }) {
   const modelOptions = state.kind === 'ready'
     ? state.settings.channels.flatMap((channel) => channel.models.map((model) => `${channel.name}/${model}`))
+    : []
+  const fallbackOptions = state.kind === 'ready'
+    ? uniqueStrings([...modelOptions, ...state.settings.fallbackModels])
     : []
   if (state.kind === 'loading') {
     return <div className="p-6 text-sm text-neutral-600 dark:text-neutral-300">Loading settings...</div>
@@ -125,12 +183,16 @@ export function SettingsView({
             <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">AI model channels</p>
           </div>
           <div className="flex gap-2">
-            <button className={SECONDARY_BUTTON} onClick={() => onTest()} type="button">Test</button>
-            <button className={PRIMARY_BUTTON} onClick={() => onSave(settings, state.version)} type="button">Save</button>
+            <button className={SECONDARY_BUTTON} disabled={busyAction !== null} onClick={() => onTest()} type="button">
+              {busyAction === 'test' ? 'Testing...' : 'Test'}
+            </button>
+            <button className={PRIMARY_BUTTON} disabled={busyAction !== null} onClick={() => onSave(settings, state.version)} type="button">
+              {busyAction === 'save' ? 'Saving...' : 'Save'}
+            </button>
           </div>
         </header>
 
-        {state.message ? <p className="text-sm text-emerald-700 dark:text-emerald-300">{state.message}</p> : null}
+        {state.message ? <p className={messageClass(state.messageTone)}>{state.message}</p> : null}
         {settings.issues?.length ? (
           <div className="border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
             {settings.issues.join(' ')}
@@ -168,12 +230,14 @@ export function SettingsView({
                 <input className={INPUT_CLASS} value={channel.models.join(',')} onChange={(event) => updateChannel(index, { ...channel, models: splitCsv(event.target.value) })} />
               </label>
               <div className="flex items-end gap-2">
-                <button className={SECONDARY_BUTTON} onClick={() => onDiscover(channel)} type="button">Discover</button>
-                <button className={DANGER_BUTTON} onClick={() => onChange({ ...settings, channels: settings.channels.filter((_, candidateIndex) => candidateIndex !== index) })} type="button">Remove</button>
+                <button className={SECONDARY_BUTTON} disabled={busyAction !== null} onClick={() => onDiscover(channel)} type="button">
+                  {busyAction === 'discover' ? 'Discovering...' : 'Discover'}
+                </button>
+                <button className={DANGER_BUTTON} disabled={busyAction !== null} onClick={() => onChange({ ...settings, channels: settings.channels.filter((_, candidateIndex) => candidateIndex !== index) })} type="button">Remove</button>
               </div>
             </div>
           ))}
-          <button className={SECONDARY_BUTTON} onClick={() => onChange({ ...settings, channels: [...settings.channels, defaultChannel()] })} type="button">
+          <button className={SECONDARY_BUTTON} disabled={busyAction !== null} onClick={() => onChange({ ...settings, channels: [...settings.channels, defaultChannel()] })} type="button">
             Add channel
           </button>
         </section>
@@ -188,7 +252,17 @@ export function SettingsView({
           </label>
           <label className={FIELD_LABEL}>
             Fallback models
-            <input className={INPUT_CLASS} value={settings.fallbackModels.join(',')} onChange={(event) => onChange({ ...settings, fallbackModels: splitCsv(event.target.value) })} />
+            <select
+              className={MULTI_SELECT_CLASS}
+              multiple
+              value={settings.fallbackModels}
+              onChange={(event) => onChange({
+                ...settings,
+                fallbackModels: [...event.target.selectedOptions].map((option) => option.value),
+              })}
+            >
+              {fallbackOptions.map((model) => <option key={model} value={model}>{model}</option>)}
+            </select>
           </label>
           <label className={FIELD_LABEL}>
             Agent model
@@ -258,12 +332,34 @@ function splitCsv(value: string): string[] {
   return value.split(',').map((item) => item.trim()).filter(Boolean)
 }
 
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)]
+}
+
+function testMessage(body: TestChannelResponse): string {
+  if (body.ok) return `Test passed: ${body.reply}`
+  if (body.error_code) return diagnosticMessage(body)
+  return `Unexpected reply: ${body.reply ?? 'empty response'}`
+}
+
+function diagnosticMessage(body: { error_code?: string; message?: string }): string {
+  if (body.error_code && body.message) return `${body.error_code}: ${body.message}`
+  return body.message ?? body.error_code ?? 'request failed'
+}
+
+function messageClass(tone: MessageTone = 'success'): string {
+  return tone === 'error'
+    ? 'text-sm text-rose-700 dark:text-rose-300'
+    : 'text-sm text-emerald-700 dark:text-emerald-300'
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'settings request failed'
 }
 
 const FIELD_LABEL = 'flex flex-col gap-1 text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400'
 const INPUT_CLASS = 'h-9 border border-neutral-300 bg-white px-2 text-sm normal-case tracking-normal text-neutral-900 outline-none focus:border-neutral-900 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100 dark:focus:border-neutral-100'
+const MULTI_SELECT_CLASS = 'min-h-24 border border-neutral-300 bg-white px-2 py-1 text-sm normal-case tracking-normal text-neutral-900 outline-none focus:border-neutral-900 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100 dark:focus:border-neutral-100'
 const PRIMARY_BUTTON = 'h-9 border border-neutral-900 bg-neutral-900 px-3 text-sm font-medium text-white dark:border-neutral-100 dark:bg-neutral-100 dark:text-neutral-950'
 const SECONDARY_BUTTON = 'h-9 border border-neutral-300 bg-white px-3 text-sm font-medium text-neutral-800 hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800'
 const DANGER_BUTTON = 'h-9 border border-rose-300 bg-white px-3 text-sm font-medium text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:bg-neutral-900 dark:text-rose-300 dark:hover:bg-rose-950'

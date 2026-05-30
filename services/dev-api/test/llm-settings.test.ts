@@ -6,6 +6,7 @@ import { Readable } from "node:stream";
 import test from "node:test";
 
 import { MASKED_LLM_SECRET } from "../../llm/src/index.ts";
+import { LlmProviderError, type LlmProviderErrorCode } from "../../llm/src/router.ts";
 import {
   handleLlmSettingsRequest,
   type DevApiLlmSettingsOptions,
@@ -29,6 +30,22 @@ test("GET /v1/dev/llm-settings returns masked env-file settings", async () => {
   assert.match(String(body.version), /^sha256:/);
   assert.equal(body.settings.channels[0].apiKey, MASKED_LLM_SECRET);
   assert.deepEqual(body.settings.channels[0].apiKeys, [MASKED_LLM_SECRET]);
+});
+
+test("GET /v1/dev/llm-settings reports validation issues", async () => {
+  const envFile = await seedEnvFile([
+    "LLM_CHANNELS=custom,custom",
+    "",
+  ]);
+  const response = await invoke("/v1/dev/llm-settings", { env: enabledEnv(envFile) });
+  const body = response.body as { settings: { issues: string[] } };
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(body.settings.issues, [
+    "LLM_CHANNELS: duplicate channel 'custom' ignored",
+    "LLM_CUSTOM_BASE_URL: required for openai-compatible channel 'custom'",
+    "LLM_CUSTOM_MODELS: at least one model is required for channel 'custom'",
+  ]);
 });
 
 test("PUT /v1/dev/llm-settings preserves masked keys and detects version conflicts", async () => {
@@ -88,6 +105,55 @@ test("POST /v1/dev/llm-settings/test-channel uses the shared router", async () =
   assert.equal((response.body as { reply?: string }).reply, "Reply OK");
 });
 
+test("POST /v1/dev/llm-settings/test-channel distinguishes provider failures", async () => {
+  const envFile = await seedEnvFile();
+  const response = await invoke("/v1/dev/llm-settings/test-channel", {
+    method: "POST",
+    env: enabledEnv(envFile),
+    options: {
+      createClient: () => async () => {
+        throw new LlmProviderError("auth_failed", "bad key");
+      },
+    },
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body, {
+    ok: false,
+    error_code: "auth_failed",
+    message: "bad key",
+    attempts: [{
+      deployment: { channel: "openai", model: "gpt-4.1" },
+      code: "auth_failed",
+      message: "bad key",
+    }],
+  });
+});
+
+test("POST /v1/dev/llm-settings/test-channel classifies retryable provider failures", async () => {
+  for (const failure of [
+    { code: "model_not_found", message: "missing model" },
+    { code: "provider_failed", message: "provider down" },
+    { code: "timeout", message: "timed out" },
+  ] satisfies Array<{ code: LlmProviderErrorCode; message: string }>) {
+    const envFile = await seedEnvFile();
+    const response = await invoke("/v1/dev/llm-settings/test-channel", {
+      method: "POST",
+      env: enabledEnv(envFile),
+      options: {
+        createClient: () => async () => {
+          throw new LlmProviderError(failure.code, failure.message);
+        },
+      },
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.ok, false);
+    assert.equal(response.body.error_code, failure.code);
+    assert.equal(response.body.message, failure.message);
+  }
+});
+
 test("POST /v1/dev/llm-settings/discover-models reads OpenAI-compatible /models", async () => {
   const envFile = await seedEnvFile();
   const response = await invoke("/v1/dev/llm-settings/discover-models", {
@@ -106,7 +172,90 @@ test("POST /v1/dev/llm-settings/discover-models reads OpenAI-compatible /models"
   });
 
   assert.equal(response.status, 200);
-  assert.deepEqual((response.body as { models?: string[] }).models, ["model-a", "model-b"]);
+  assert.deepEqual(response.body, { ok: true, models: ["model-a", "model-b"] });
+});
+
+test("POST /v1/dev/llm-settings/discover-models classifies provider failures", async () => {
+  const envFile = await seedEnvFile();
+  const unauthorized = await invoke("/v1/dev/llm-settings/discover-models", {
+    method: "POST",
+    env: enabledEnv(envFile),
+    body: { baseUrl: "https://provider.example/v1" },
+    options: {
+      fetch: async () => new Response(JSON.stringify({ error: "bad key" }), { status: 401 }),
+    },
+  });
+  const malformed = await invoke("/v1/dev/llm-settings/discover-models", {
+    method: "POST",
+    env: enabledEnv(envFile),
+    body: { baseUrl: "https://provider.example/v1" },
+    options: {
+      fetch: async () => new Response(JSON.stringify({ data: "not an array" }), { status: 200 }),
+    },
+  });
+  const unsupported = await invoke("/v1/dev/llm-settings/discover-models", {
+    method: "POST",
+    env: enabledEnv(envFile),
+    body: { baseUrl: "https://provider.example/v1" },
+    options: {
+      fetch: async () => new Response(JSON.stringify({ error: "not found" }), { status: 404 }),
+    },
+  });
+  const network = await invoke("/v1/dev/llm-settings/discover-models", {
+    method: "POST",
+    env: enabledEnv(envFile),
+    body: { baseUrl: "https://provider.example/v1" },
+    options: {
+      fetch: async () => {
+        throw new Error("ENOTFOUND");
+      },
+    },
+  });
+  const timeout = await invoke("/v1/dev/llm-settings/discover-models", {
+    method: "POST",
+    env: enabledEnv(envFile),
+    body: { baseUrl: "https://provider.example/v1" },
+    options: {
+      fetch: async () => {
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        throw error;
+      },
+    },
+  });
+
+  assert.equal(unauthorized.status, 200);
+  assert.deepEqual(unauthorized.body, {
+    ok: false,
+    error_code: "auth_failed",
+    models: [],
+    message: "model discovery failed with HTTP 401",
+  });
+  assert.equal(malformed.status, 200);
+  assert.deepEqual(malformed.body, {
+    ok: false,
+    error_code: "malformed_response",
+    models: [],
+    message: "provider response did not include a model data array",
+  });
+  assert.deepEqual(unsupported.body, {
+    ok: false,
+    error_code: "model_listing_unavailable",
+    models: [],
+    message: "model discovery failed with HTTP 404",
+  });
+  assert.deepEqual(network.body, {
+    ok: false,
+    error_code: "network_failed",
+    models: [],
+    message: "ENOTFOUND",
+  });
+  assert.deepEqual(timeout.body, {
+    ok: false,
+    error_code: "timeout",
+    models: [],
+    message: "aborted",
+  });
 });
 
 test("LLM settings endpoints reject forwarded non-local requests", async () => {
@@ -181,17 +330,17 @@ function enabledEnv(envFile: string): Record<string, string> {
   };
 }
 
-async function seedEnvFile(): Promise<string> {
+async function seedEnvFile(lines = [
+  "LLM_CHANNELS=openai",
+  "LLM_OPENAI_PROTOCOL=openai",
+  "LLM_OPENAI_BASE_URL=https://api.openai.com/v1",
+  "LLM_OPENAI_API_KEY=sk-old",
+  "LLM_OPENAI_MODELS=gpt-4.1",
+  "LITELLM_MODEL=openai/gpt-4.1",
+  "",
+]): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "dev-api-llm-settings-"));
   const envFile = join(dir, ".env.dev");
-  await writeFile(envFile, [
-    "LLM_CHANNELS=openai",
-    "LLM_OPENAI_PROTOCOL=openai",
-    "LLM_OPENAI_BASE_URL=https://api.openai.com/v1",
-    "LLM_OPENAI_API_KEY=sk-old",
-    "LLM_OPENAI_MODELS=gpt-4.1",
-    "LITELLM_MODEL=openai/gpt-4.1",
-    "",
-  ].join("\n"));
+  await writeFile(envFile, lines.join("\n"));
   return envFile;
 }

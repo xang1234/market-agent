@@ -34,6 +34,7 @@ export type LlmDeployment = {
 export function parseLlmEnv(env: LlmEnv): LlmSettings {
   const issues: string[] = [];
   const channels = parseChannels(env, issues);
+  validateChannels(channels, issues);
   const primaryModel = parseOptionalModelRef("LITELLM_MODEL", env.LITELLM_MODEL, channels, issues);
   const fallbackModels = splitCsv(env.LITELLM_FALLBACK_MODELS)
     .flatMap((value) => {
@@ -69,7 +70,7 @@ export function buildLlmDeploymentOrder(settings: LlmSettings): ReadonlyArray<Ll
       ...settings.fallbackModels,
     ]).flatMap((ref) => {
       const channel = channelsByName.get(ref.channel);
-      if (!channel || !channel.enabled) return [];
+      if (!channel || !isDeployableChannel(channel)) return [];
       return [
         Object.freeze({
           channel: channel.name,
@@ -133,6 +134,24 @@ function channelFromEnv(env: LlmEnv, name: string): LlmChannelConfig {
     models: Object.freeze(splitCsv(env[`LLM_${envName}_MODELS`])),
     enabled: parseEnabled(env[`LLM_${envName}_ENABLED`]),
   });
+}
+
+function validateChannels(channels: ReadonlyArray<LlmChannelConfig>, issues: string[]): void {
+  for (const channel of channels) {
+    if (!channel.enabled) continue;
+    if (channel.protocol === "openai-compatible" && channel.baseUrl === null) {
+      issues.push(`LLM_${channel.envName}_BASE_URL: required for openai-compatible channel '${channel.name}'`);
+    }
+    if (channel.models.length === 0) {
+      issues.push(`LLM_${channel.envName}_MODELS: at least one model is required for channel '${channel.name}'`);
+    }
+  }
+}
+
+function isDeployableChannel(channel: LlmChannelConfig): boolean {
+  return channel.enabled &&
+    channel.models.length > 0 &&
+    (channel.protocol !== "openai-compatible" || channel.baseUrl !== null);
 }
 
 function parseOptionalModelRef(

@@ -15,6 +15,7 @@ test("loadLlmSettingsFromEnv merges shell env with LLM_SETTINGS_ENV_FILE overrid
   const envFile = join(dir, ".env.dev");
   await writeFile(envFile, [
     "LLM_CHANNELS=deepseek",
+    "LLM_DEEPSEEK_BASE_URL=https://api.deepseek.com/v1",
     "LLM_DEEPSEEK_API_KEY=ds-key",
     "LLM_DEEPSEEK_MODELS=deepseek-chat",
     "LITELLM_MODEL=deepseek/deepseek-chat",
@@ -35,7 +36,7 @@ test("loadLlmSettingsFromEnv merges shell env with LLM_SETTINGS_ENV_FILE overrid
       channel: "deepseek",
       model: "deepseek-chat",
       protocol: "openai-compatible",
-      baseUrl: null,
+      baseUrl: "https://api.deepseek.com/v1",
       apiKeys: ["ds-key"],
     },
   ]);
@@ -47,6 +48,7 @@ test("loadLlmSettingsFromEnv rereads the env file on every call", async () => {
 
   await writeFile(envFile, [
     "LLM_CHANNELS=openai",
+    "LLM_OPENAI_PROTOCOL=openai",
     "LLM_OPENAI_MODELS=gpt-4.1",
     "LITELLM_MODEL=openai/gpt-4.1",
     "",
@@ -55,6 +57,7 @@ test("loadLlmSettingsFromEnv rereads the env file on every call", async () => {
 
   await writeFile(envFile, [
     "LLM_CHANNELS=openai",
+    "LLM_OPENAI_PROTOCOL=openai",
     "LLM_OPENAI_MODELS=o3",
     "LITELLM_MODEL=openai/o3",
     "",
@@ -78,6 +81,7 @@ test("createLlmRouterFromEnv returns null until deployments are configured", asy
 test("createLlmRouterFromEnv builds a router with the injected client", async () => {
   const router = await createLlmRouterFromEnv({
     LLM_CHANNELS: "openai",
+    LLM_OPENAI_PROTOCOL: "openai",
     LLM_OPENAI_MODELS: "gpt-4.1",
     LITELLM_MODEL: "openai/gpt-4.1",
   }, {

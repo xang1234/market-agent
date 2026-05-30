@@ -55,6 +55,7 @@ test("parseLlmEnv reads flat DSA-compatible channel settings", () => {
 test("parseLlmEnv deduplicates channels and reports malformed model refs", () => {
   const settings = parseLlmEnv({
     LLM_CHANNELS: "OpenAI, openai, missing",
+    LLM_OPENAI_BASE_URL: "https://api.openai.com/v1",
     LLM_OPENAI_MODELS: "gpt-4.1",
     LLM_MISSING_ENABLED: "false",
     LITELLM_MODEL: "unknown-model",
@@ -69,6 +70,21 @@ test("parseLlmEnv deduplicates channels and reports malformed model refs", () =>
     "LITELLM_MODEL: model 'unknown-model' does not match any enabled channel",
     "LITELLM_FALLBACK_MODELS: channel 'missing' is disabled",
   ]);
+});
+
+test("parseLlmEnv reports enabled channels that cannot build deployments", () => {
+  const settings = parseLlmEnv({
+    LLM_CHANNELS: "custom,disabled",
+    LLM_CUSTOM_PROTOCOL: "openai-compatible",
+    LLM_DISABLED_ENABLED: "false",
+    LITELLM_MODEL: "custom/custom-model",
+  });
+
+  assert.deepEqual(settings.issues, [
+    "LLM_CUSTOM_BASE_URL: required for openai-compatible channel 'custom'",
+    "LLM_CUSTOM_MODELS: at least one model is required for channel 'custom'",
+  ]);
+  assert.deepEqual(buildLlmDeploymentOrder(settings), []);
 });
 
 test("buildLlmDeploymentOrder emits primary then unique fallbacks", () => {
@@ -115,6 +131,7 @@ test("parseLlmEnvFileText reads dotenv-style LLM settings without shell state", 
   const settings = parseLlmEnv(parseLlmEnvFileText(`
     # Local model channels
     LLM_CHANNELS=openai
+    LLM_OPENAI_BASE_URL=https://api.openai.com/v1
     LLM_OPENAI_API_KEY="sk-local"
     LLM_OPENAI_MODELS='gpt-4.1,o3'
     LITELLM_MODEL=openai/gpt-4.1
