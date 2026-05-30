@@ -24,6 +24,46 @@ export function canonicalizeProviderBarRange(
   });
 }
 
+export function zonedDateStartUtcIso(date: string, timezone: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) {
+    throw new Error(`date must be YYYY-MM-DD; received ${date}`);
+  }
+  const [, year, month, day] = match;
+  const parts = {
+    year: Number(year),
+    month: Number(month),
+    day: Number(day),
+  };
+  const utcDate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  if (
+    utcDate.getUTCFullYear() !== parts.year ||
+    utcDate.getUTCMonth() + 1 !== parts.month ||
+    utcDate.getUTCDate() !== parts.day
+  ) {
+    throw new Error(`date must be a valid YYYY-MM-DD value; received ${date}`);
+  }
+  return new Date(
+    zonedPartsToUtcMs(
+      {
+        ...parts,
+        hour: 0,
+        minute: 0,
+        second: 0,
+      },
+      timezone,
+    ),
+  ).toISOString();
+}
+
+export function zonedDateParam(ms: number, timezone: string): string {
+  if (!Number.isFinite(ms)) {
+    throw new Error(`ms must be finite; received ${ms}`);
+  }
+  const parts = localParts(ms, timezone);
+  return `${parts.year}${pad2(parts.month)}${pad2(parts.day)}`;
+}
+
 type LocalParts = {
   year: number;
   month: number;
@@ -135,4 +175,8 @@ function timezoneOffsetMs(ms: number, timezone: string): number {
     parts.minute,
     parts.second,
   ) - ms;
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
 }

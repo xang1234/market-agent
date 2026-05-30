@@ -206,8 +206,9 @@ Open datasource coverage is opt-in. `OPENFIGI_REFERENCE_ENABLED`,
 resolver enrichment from OpenFIGI, GLEIF, and Nasdaq Trader; OpenFIGI can also
 use `OPENFIGI_API_KEY` to raise rate limits. These sources are reference
 enrichment unless the resolver can prove a high-confidence identity match.
-`STOOQ_MARKET_ENABLED` gates the Stooq free market fallback, which is EOD daily
-historical bars only and must not be shown as realtime quote or intraday data.
+`STOOQ_MARKET_ENABLED` gates the Stooq free market fallback for eligible `1d`
+EOD historical bars when paid coverage is missing or unavailable. It is not a
+quote or intraday source.
 
 When `up` completes, the app is at **<http://localhost:5173>**.
 

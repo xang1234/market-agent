@@ -28,10 +28,11 @@ in tests.
 
 The open datasource slice also registers `stooq_market` as a free
 `market_data` source. `STOOQ_MARKET_ENABLED` and `STOOQ_MARKET_BASE_URL`
-configure the future Stooq adapter. Stooq is an EOD fallback only: it is
-eligible for 1d historical bars when paid coverage is missing or unavailable,
-and it must return unavailable for quotes and intraday intervals rather than
-pretending to be realtime market data.
+configure the Stooq adapter. Stooq is an EOD fallback only: it is eligible for
+`1d` historical bars when paid coverage is missing or unavailable, and it
+returns unavailable for quotes and intraday intervals rather than pretending to
+be realtime market data. The dev server routes Stooq only through the daily-bars
+fallback path so quote and intraday requests never use it.
 
 ## Provider fallback plan
 
