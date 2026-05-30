@@ -54,6 +54,18 @@ canonical issuer/instrument/listing rows, then re-runs the normal resolver path.
 server in tests. Missing keys, provider failures, rate limits, and malformed
 provider rows degrade to the existing `not_found` response.
 
+## Open reference provider foundation
+
+The open datasource slice registers three resolver reference sources:
+`nasdaq_trader_reference`, `openfigi_reference`, and `gleif_reference`.
+`NASDAQ_TRADER_REFERENCE_ENABLED`, `OPENFIGI_REFERENCE_ENABLED`, and
+`GLEIF_REFERENCE_ENABLED` gate future discovery/enrichment paths, with optional
+`OPENFIGI_API_KEY` support for OpenFIGI rate limits. Nasdaq Trader is intended
+to validate US listed symbols; OpenFIGI contributes FIGI/ISIN/security
+metadata; GLEIF contributes LEI/legal entity metadata. These providers should
+enrich existing identity and only create a new canonical listing when the match
+is unambiguous.
+
 ## Tests
 
 ```bash

@@ -25,6 +25,36 @@ test("source seed registers GDELT as metadata-only public news discovery", () =>
   );
 });
 
+test("source seed registers open reference and Stooq market sources", () => {
+  const sourcesSql = readFileSync(new URL("../seed/sources.sql", import.meta.url), "utf8");
+
+  for (const provider of [
+    "openfigi_reference",
+    "gleif_reference",
+    "nasdaq_trader_reference",
+    "stooq_market",
+  ]) {
+    assert.match(sourcesSql, new RegExp(`'${provider}'`), `${provider} must be seeded`);
+  }
+
+  assert.match(
+    sourcesSql,
+    /'openfigi_reference',\s*'reference_data',\s*'https:\/\/api\.openfigi\.com\/v3\/mapping',\s*'secondary',\s*'free'/,
+  );
+  assert.match(
+    sourcesSql,
+    /'gleif_reference',\s*'reference_data',\s*'https:\/\/api\.gleif\.org\/api\/v1\/lei-records',\s*'primary',\s*'public'/,
+  );
+  assert.match(
+    sourcesSql,
+    /'nasdaq_trader_reference',\s*'reference_data',\s*'https:\/\/www\.nasdaqtrader\.com\/dynamic\/symdir\/nasdaqlisted\.txt',\s*'primary',\s*'public'/,
+  );
+  assert.match(
+    sourcesSql,
+    /'stooq_market',\s*'market_data',\s*'https:\/\/stooq\.com\/q\/d\/l\/',\s*'tertiary',\s*'free'/,
+  );
+});
+
 type SeedSnapshot = {
   metricCount: string;
   sourceCount: string;
@@ -180,6 +210,19 @@ test("seed populates metrics and sources with the expected registry", { timeout:
     "1",
     "expected gdelt_article_discovery metadata-only article source to be present exactly once",
   );
+
+  for (const [provider, kind] of [
+    ["openfigi_reference", "reference_data"],
+    ["gleif_reference", "reference_data"],
+    ["nasdaq_trader_reference", "reference_data"],
+    ["stooq_market", "market_data"],
+  ] as const) {
+    assert.equal(
+      queryValue(containerName, `select count(*) from sources where provider = '${provider}' and kind = '${kind}'`),
+      "1",
+      `expected ${provider} ${kind} source to be present exactly once`,
+    );
+  }
 });
 
 test("seed is idempotent: re-running produces no duplicates", { timeout: 180000 }, async (t) => {

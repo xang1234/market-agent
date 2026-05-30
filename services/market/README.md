@@ -26,6 +26,13 @@ npm run dev      # starts http server on $MARKET_PORT (defaults to 4321)
 `POLYGON_API_BASE_URL` can point the Polygon quote/bar fetcher at a mock server
 in tests.
 
+The open datasource slice also registers `stooq_market` as a free
+`market_data` source. `STOOQ_MARKET_ENABLED` and `STOOQ_MARKET_BASE_URL`
+configure the future Stooq adapter. Stooq is an EOD fallback only: it is
+eligible for 1d historical bars when paid coverage is missing or unavailable,
+and it must return unavailable for quotes and intraday intervals rather than
+pretending to be realtime market data.
+
 ## Provider fallback plan
 
 Use `createFallbackMarketDataAdapter` when a deployment has more than one

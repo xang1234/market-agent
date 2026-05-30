@@ -16,6 +16,8 @@ export const SOURCE_KINDS = Object.freeze([
   "social_post",
   "upload",
   "internal",
+  "reference_data",
+  "market_data",
 ] as const);
 
 export const TRUST_TIERS = Object.freeze([
