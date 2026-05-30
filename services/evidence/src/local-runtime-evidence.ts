@@ -71,7 +71,9 @@ export async function loadLocalRuntimeEvidence(
   if (subjectRefs.length === 0) return emptyEvidence(subjectRefs);
 
   const excludedClaimIds = unique(input.exclude_claim_ids ?? []);
-  const includeIssuerIr = (input.source_categories ?? []).includes("issuer_ir");
+  const sourceCategories = input.source_categories ?? null;
+  const includeIssuerIr = (sourceCategories ?? []).includes("issuer_ir");
+  const includeNonIr = sourceCategories === null || sourceCategories.some((category) => category !== "issuer_ir");
   const { rows } = await db.query<ClaimEvidenceRow>(
     `with subject_refs as (
        select kind::subject_kind as subject_kind,
@@ -112,11 +114,21 @@ export async function loadLocalRuntimeEvidence(
             or ($3::uuid is not null and s.user_id = $3::uuid)
           )
           and (
-            $5::boolean = true
-            or not exists (
-              select 1
-                from ir_document_assets ira
-               where ira.document_id = d.document_id
+            (
+              $5::boolean = true
+              and exists (
+                select 1
+                  from ir_document_assets ira
+                 where ira.document_id = d.document_id
+              )
+            )
+            or (
+              $6::boolean = true
+              and not exists (
+                select 1
+                  from ir_document_assets ira
+                 where ira.document_id = d.document_id
+              )
             )
           )
         order by c.claim_id,
@@ -141,7 +153,14 @@ export async function loadLocalRuntimeEvidence(
       order by coalesce(effective_time, published_at, claim_created_at) desc nulls last,
                claim_id desc
       limit $2`,
-    [JSON.stringify(subjectRefs), input.limit ?? 5, userIdOrNull(input.user_id), excludedClaimIds, includeIssuerIr],
+    [
+      JSON.stringify(subjectRefs),
+      input.limit ?? 5,
+      userIdOrNull(input.user_id),
+      excludedClaimIds,
+      includeIssuerIr,
+      includeNonIr,
+    ],
   );
 
   return evidenceFromClaimRows(subjectRefs, rows);

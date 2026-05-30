@@ -121,8 +121,22 @@ test("loadLocalRuntimeEvidence hides IR-only claims unless issuer_ir is selected
     subject_refs: [{ kind: "issuer", id: SUBJECT_ID }],
     source_categories: ["issuer_ir"],
   });
+  await loadLocalRuntimeEvidence(db, {
+    subject_refs: [{ kind: "issuer", id: SUBJECT_ID }],
+    source_categories: ["news", "issuer_ir"],
+  });
+  await loadLocalRuntimeEvidence(db, {
+    subject_refs: [{ kind: "issuer", id: SUBJECT_ID }],
+    source_categories: [],
+  });
 
   assert.match(queries[0]!.text, /ir_document_assets/i);
   assert.equal(queries[0]!.values[4], false);
+  assert.equal(queries[0]!.values[5], true);
   assert.equal(queries[1]!.values[4], true);
+  assert.equal(queries[1]!.values[5], false);
+  assert.equal(queries[2]!.values[4], true);
+  assert.equal(queries[2]!.values[5], true);
+  assert.equal(queries[3]!.values[4], false);
+  assert.equal(queries[3]!.values[5], false);
 });
