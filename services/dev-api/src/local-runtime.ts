@@ -626,7 +626,15 @@ export async function closeLocalRuntimePoolForTests(): Promise<void> {
 
 function analyzeMemoText(
   input: DevApiAnalyzeWorkflowInput,
-  evidence?: { claims: ReadonlyArray<{ text_canonical: string }> },
+  evidence?: {
+    claims: ReadonlyArray<{
+      text_canonical: string;
+      source_disclosure?: string | null;
+      provider?: string;
+      license_class?: string;
+      source_canonical_url?: string | null;
+    }>;
+  },
 ): string {
   const sources = input.sourceCategories.length > 0 ? input.sourceCategories.join(", ") : "base template scope";
   const subjects = input.subjectRefs.length > 0
@@ -635,7 +643,7 @@ function analyzeMemoText(
   const evidenceText = evidence === undefined
     ? ""
     : evidence.claims.length > 0
-    ? `Evidence claims:\n${evidence.claims.map((claim, index) => `${index + 1}. ${claim.text_canonical}`).join("\n")}`
+    ? `Evidence claims:\n${evidence.claims.map((claim, index) => `${index + 1}. ${claim.text_canonical}${claimDisclosureSuffix(claim)}`).join("\n")}`
     : "Insufficient local evidence: no existing claims, facts, or events were found for the requested subjects.";
   return [
     input.playbookPrompt,
@@ -644,6 +652,21 @@ function analyzeMemoText(
     `Bundles: ${input.bundleIds.join(", ")}.`,
     evidenceText,
   ].filter((line) => line.length > 0).join("\n\n");
+}
+
+function claimDisclosureSuffix(claim: {
+  source_disclosure?: string | null;
+  provider?: string;
+  license_class?: string;
+  source_canonical_url?: string | null;
+}): string {
+  const parts: string[] = [];
+  if (claim.source_disclosure) parts.push(claim.source_disclosure);
+  if (claim.provider || claim.license_class) {
+    parts.push(`Source: ${claim.provider ?? "unknown"}; license: ${claim.license_class ?? "unknown"}`);
+  }
+  if (claim.source_canonical_url) parts.push(`original URL: ${claim.source_canonical_url}`);
+  return parts.length === 0 ? "" : ` [${parts.join("; ")}]`;
 }
 
 function analyzeRunDataRef(input: DevApiAnalyzeWorkflowInput): JsonValue {

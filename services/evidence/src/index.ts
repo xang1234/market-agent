@@ -212,6 +212,7 @@ export type {
 export {
   GDELT_ARTICLE_DISCOVERY_PROVIDER,
   GDELT_ARTICLE_DISCOVERY_SOURCE_ID,
+  GDELT_DISCOVERY_DISCLOSURE,
   GDELT_DISCOVERY_DEFAULT_MAX_RECORDS_ENV,
   GDELT_DISCOVERY_ENABLED_ENV,
   GDELT_DISCOVERY_LICENSE_CLASS,
@@ -223,6 +224,21 @@ export {
   GDELT_DOC_API_CANONICAL_URL,
   GDELT_DOC_API_BASE_URL_ENV,
 } from "./gdelt-source.ts";
+
+export {
+  fetchEvidenceDocumentMetadata,
+  searchEvidenceDocuments,
+} from "./document-research.ts";
+export {
+  sourceDisclosure,
+  storagePolicyForDocument,
+} from "./source-disclosure.ts";
+export type {
+  EvidenceDocumentResearchInput,
+  EvidenceDocumentResearchResult,
+  FetchEvidenceDocumentMetadataInput,
+  SearchEvidenceDocumentsResult,
+} from "./document-research.ts";
 
 export {
   EPHEMERAL_RAW_BLOB_ID_PREFIX,

@@ -82,6 +82,14 @@ provider metadata/hashes. If a later integration wants to persist publisher
 article text, it must first make an explicit source-specific license decision
 and change the source/license policy intentionally.
 
+GDELT-discovered documents are exposed to research surfaces as public news
+discovery metadata, not canonical facts. Document search/fetch helpers return
+document/source metadata, original article URLs, `license_class='ephemeral'`,
+`storage_policy='metadata_only'`, and the disclosure that publisher article
+bodies are not retained. Evidence bundles and local analyze evidence carry the
+same disclosure so analysts can cite the discovered article URL without treating
+GDELT itself as the factual source of truth.
+
 Development wiring is controlled by:
 
 - `GDELT_DISCOVERY_ENABLED`
@@ -89,6 +97,14 @@ Development wiring is controlled by:
 - `GDELT_DISCOVERY_STORE_POLICY=metadata_only`
 - `GDELT_DISCOVERY_DEFAULT_MAX_RECORDS`
 - `GDELT_DISCOVERY_RATE_LIMIT_PER_SECOND`
+
+Verification commands for this slice:
+
+```bash
+cd services/evidence
+node --experimental-strip-types --test test/gdelt-source.test.ts test/gdelt-provider.test.ts test/gdelt-ingest.test.ts test/document-research.test.ts test/evidence-bundle-repo.test.ts test/local-runtime-evidence.test.ts test/inspector.test.ts
+npm test
+```
 
 ## Threaded sources
 

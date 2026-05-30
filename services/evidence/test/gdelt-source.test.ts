@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import {
   GDELT_ARTICLE_DISCOVERY_PROVIDER,
   GDELT_DISCOVERY_DEFAULT_MAX_RECORDS_ENV,
+  GDELT_DISCOVERY_DISCLOSURE,
   GDELT_DISCOVERY_ENABLED_ENV,
   GDELT_DISCOVERY_LICENSE_CLASS,
   GDELT_DISCOVERY_RATE_LIMIT_PER_SECOND_ENV,
@@ -24,6 +25,7 @@ test("GDELT discovery constants encode metadata-only article provenance", () => 
   assert.equal(GDELT_DISCOVERY_TRUST_TIER, "tertiary");
   assert.equal(GDELT_DISCOVERY_LICENSE_CLASS, "ephemeral");
   assert.equal(GDELT_DISCOVERY_STORE_POLICY, "metadata_only");
+  assert.match(GDELT_DISCOVERY_DISCLOSURE, /not a canonical fact source/i);
   assert.equal(GDELT_DOC_API_CANONICAL_URL, "https://api.gdeltproject.org/api/v2/doc/doc");
 });
 
@@ -111,4 +113,6 @@ test("evidence README documents GDELT as discovery metadata, not a truth source"
   assert.match(readme, /discovery source, not a truth source/i);
   assert.match(readme, /metadata\/snippet-only/i);
   assert.match(readme, /full article bodies are not\s+stored by default/i);
+  assert.match(readme, /public news\s+discovery metadata, not canonical facts/i);
+  assert.match(readme, /test\/document-research\.test\.ts/);
 });

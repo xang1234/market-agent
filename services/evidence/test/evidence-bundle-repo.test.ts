@@ -6,6 +6,13 @@ import {
   buildEvidenceBundle,
   getEvidenceBundle,
 } from "../src/evidence-bundle-repo.ts";
+import {
+  GDELT_ARTICLE_DISCOVERY_PROVIDER,
+  GDELT_DISCOVERY_DISCLOSURE,
+  GDELT_DISCOVERY_LICENSE_CLASS,
+  GDELT_DISCOVERY_STORE_POLICY,
+  GDELT_DISCOVERY_TRUST_TIER,
+} from "../src/gdelt-source.ts";
 import type { QueryExecutor } from "../src/types.ts";
 
 const CLAIM_A = "11111111-1111-4111-a111-111111111111";
@@ -79,7 +86,13 @@ test("assembleEvidenceBundle returns metadata-only documents and evidence locato
       author: "Apple Inc.",
       published_at: "2026-05-01T00:00:00.000Z",
       canonical_url: "https://www.sec.gov/aapl-q1",
-      source: { trust_tier: "primary" },
+      source: {
+        provider: "sec",
+        trust_tier: "primary",
+        license_class: "public",
+        storage_policy: "stored_blob",
+        disclosure: null,
+      },
     },
   ]);
   assert.deepEqual(bundle.evidence, [
@@ -94,6 +107,29 @@ test("assembleEvidenceBundle returns metadata-only documents and evidence locato
   assert.equal(JSON.stringify(bundle).includes("raw_blob_id"), false);
   assert.equal(JSON.stringify(bundle).includes("raw_body"), false);
   assert.equal(JSON.stringify(bundle).includes("content_hash"), false);
+});
+
+test("assembleEvidenceBundle discloses GDELT as metadata-only discovery evidence", async () => {
+  const { db } = recordingDb([
+    bundleRow({
+      provider: GDELT_ARTICLE_DISCOVERY_PROVIDER,
+      trust_tier: GDELT_DISCOVERY_TRUST_TIER,
+      license_class: GDELT_DISCOVERY_LICENSE_CLASS,
+      raw_blob_id: "ephemeral:11111111-1111-4111-a111-111111111111",
+      canonical_url: "https://reuters.com/markets/acme-robotics",
+    }),
+  ]);
+
+  const bundle = await assembleEvidenceBundle(db, { claim_ids: [CLAIM_A] });
+
+  assert.deepEqual(bundle.documents[0]?.source, {
+    provider: GDELT_ARTICLE_DISCOVERY_PROVIDER,
+    trust_tier: GDELT_DISCOVERY_TRUST_TIER,
+    license_class: GDELT_DISCOVERY_LICENSE_CLASS,
+    storage_policy: GDELT_DISCOVERY_STORE_POLICY,
+    disclosure: GDELT_DISCOVERY_DISCLOSURE,
+  });
+  assert.doesNotMatch(JSON.stringify(bundle), /raw_blob_id|raw_text|FULL ARTICLE BODY/i);
 });
 
 test("assembleEvidenceBundle produces deterministic document and evidence ordering", async () => {
@@ -177,6 +213,81 @@ test("getEvidenceBundle resolves a deterministic bundle_id and returns the same 
   assert.equal(build.queries.some((query) => /insert into evidence_bundles/i.test(query.text)), true);
   assert.match(fetch.queries[0]!.text, /from evidence_bundles/i);
   assert.deepEqual(fetch.queries[0]!.values, [built.bundle_id]);
+});
+
+test("getEvidenceBundle can read legacy bundles that only stored source trust tier", async () => {
+  const legacyBundle = {
+    bundle_id: "1538d604-4392-4649-9507-b582a55a8e73",
+    documents: [
+      {
+        document_id: DOCUMENT_A,
+        title: "Document",
+        author: "Reporter",
+        published_at: "2026-05-03T00:00:00.000Z",
+        canonical_url: "https://example.com/doc",
+        source: { trust_tier: "secondary" },
+      },
+    ],
+    evidence: [
+      {
+        claim_id: CLAIM_A,
+        document_id: DOCUMENT_A,
+        locator: { kind: "text_quote", offset_start: 10, offset_end: 20 },
+        excerpt_hash: "sha256:abcdef",
+        confidence: 0.91,
+      },
+    ],
+  };
+  const { db } = recordingDb([], [{ bundle: legacyBundle }]);
+
+  const fetched = await getEvidenceBundle(db, legacyBundle.bundle_id);
+
+  assert.deepEqual(fetched.documents[0]?.source, {
+    provider: "legacy_unknown",
+    trust_tier: "secondary",
+    license_class: "legacy_unknown",
+    storage_policy: "legacy_unknown",
+    disclosure: null,
+  });
+});
+
+test("getEvidenceBundle rejects new source metadata when the bundle id only matches legacy content", async () => {
+  const legacyIdWithTamperedSource = {
+    bundle_id: "1538d604-4392-4649-9507-b582a55a8e73",
+    documents: [
+      {
+        document_id: DOCUMENT_A,
+        title: "Document",
+        author: "Reporter",
+        published_at: "2026-05-03T00:00:00.000Z",
+        canonical_url: "https://example.com/doc",
+        source: {
+          provider: "tampered",
+          trust_tier: "secondary",
+          license_class: "public",
+          storage_policy: "stored_blob",
+          disclosure: null,
+        },
+      },
+    ],
+    evidence: [
+      {
+        claim_id: CLAIM_A,
+        document_id: DOCUMENT_A,
+        locator: { kind: "text_quote", offset_start: 10, offset_end: 20 },
+        excerpt_hash: "sha256:abcdef",
+        confidence: 0.91,
+      },
+    ],
+  };
+
+  await assert.rejects(
+    () => getEvidenceBundle(
+      recordingDb([], [{ bundle: legacyIdWithTamperedSource }]).db,
+      legacyIdWithTamperedSource.bundle_id,
+    ),
+    /canonical content/,
+  );
 });
 
 test("buildEvidenceBundle persists the immutable bundle payload under the deterministic id", async () => {
@@ -267,7 +378,10 @@ function bundleRow(overrides: Record<string, unknown> = {}) {
     author: "Reporter",
     published_at: new Date("2026-05-03T00:00:00.000Z"),
     canonical_url: "https://example.com/doc",
+    provider: "sec",
     trust_tier: "secondary",
+    license_class: "public",
+    raw_blob_id: "sha256:raw",
     ...overrides,
   };
 }
