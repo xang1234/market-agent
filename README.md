@@ -201,11 +201,13 @@ Set `POLYGON_API_KEY` in `.env.dev` to enable provider-backed stock ticker disco
 
 For local-only fallback coverage, set `ENABLE_UNOFFICIAL_DEV_PROVIDERS=true`. `dev-shell` then starts the Python `services/dev-providers` sidecar on `DEV_PROVIDERS_PORT`. Resolver/market may use yfinance after the primary provider path misses or is unavailable, and fundamentals may use Finviz to fill missing profile sector/industry/domicile fields. Successful fallback identities, quotes, daily adjusted bars, and profile enrichments are persisted in Postgres under dev-only source IDs where the schema has source fields.
 
-Open datasource coverage is opt-in. `OPENFIGI_REFERENCE_ENABLED`,
-`GLEIF_REFERENCE_ENABLED`, and `NASDAQ_TRADER_REFERENCE_ENABLED` gate future
-resolver enrichment from OpenFIGI, GLEIF, and Nasdaq Trader; OpenFIGI can also
-use `OPENFIGI_API_KEY` to raise rate limits. These sources are reference
-enrichment unless the resolver can prove a high-confidence identity match.
+Open datasource coverage is opt-in. `NASDAQ_TRADER_REFERENCE_ENABLED` lets the
+resolver validate unknown US listed tickers from Nasdaq Trader symbol
+directories; `OPENFIGI_REFERENCE_ENABLED` can add FIGI/ISIN security metadata;
+and `GLEIF_REFERENCE_ENABLED` can add LEI/legal-entity metadata when the legal
+name match is unambiguous. OpenFIGI can also use `OPENFIGI_API_KEY` to raise
+rate limits. These sources only fill missing identity fields and do not
+overwrite existing SEC/Polygon/local values.
 `STOOQ_MARKET_ENABLED` gates the Stooq free market fallback for eligible `1d`
 EOD historical bars when paid coverage is missing or unavailable. It is not a
 quote or intraday source.

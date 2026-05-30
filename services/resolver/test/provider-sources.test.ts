@@ -200,6 +200,6 @@ test("env example documents open reference provider gates and optional OpenFIGI 
   ]) {
     assert.match(envExample, new RegExp(`^${name}=`, "m"), `${name} must be present in .env.dev.example`);
   }
-  assert.match(envExample, /enrichment\/discovery/i);
-  assert.match(envExample, /high-confidence match/i);
+  assert.match(envExample, /discovery\/enrichment/i);
+  assert.match(envExample, /do not overwrite existing SEC\/Polygon\/local identifiers/i);
 });
