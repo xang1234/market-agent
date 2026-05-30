@@ -95,12 +95,16 @@ test("pi adapter maps auth and model errors to provider errors", async () => {
   });
 
   await assert.rejects(
-    () => authClient(deployment(), { messages: [{ role: "user", content: "hello" }] }),
-    (error) => error instanceof LlmProviderError && error.code === "auth_failed",
+    async () => {
+      await authClient(deployment(), { messages: [{ role: "user", content: "hello" }] });
+    },
+    (error: unknown) => error instanceof LlmProviderError && error.code === "auth_failed",
   );
   await assert.rejects(
-    () => modelClient(deployment(), { messages: [{ role: "user", content: "hello" }] }),
-    (error) => error instanceof LlmProviderError && error.code === "model_not_found",
+    async () => {
+      await modelClient(deployment(), { messages: [{ role: "user", content: "hello" }] });
+    },
+    (error: unknown) => error instanceof LlmProviderError && error.code === "model_not_found",
   );
 });
 
@@ -114,8 +118,10 @@ test("pi adapter treats assistant error responses as provider failures", async (
   });
 
   await assert.rejects(
-    () => client(deployment(), { messages: [{ role: "user", content: "hello" }] }),
-    (error) => error instanceof LlmProviderError &&
+    async () => {
+      await client(deployment(), { messages: [{ role: "user", content: "hello" }] });
+    },
+    (error: unknown) => error instanceof LlmProviderError &&
       error.code === "provider_failed" &&
       error.message === "upstream unavailable",
   );

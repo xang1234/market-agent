@@ -35,7 +35,7 @@ type PiModel = {
   provider: string;
   baseUrl?: string;
   reasoning: false;
-  input: ReadonlyArray<"text">;
+  input: Array<"text">;
   cost: {
     input: number;
     output: number;
@@ -68,7 +68,7 @@ export type CreatePiLlmChatClientInput = {
 export async function createDefaultPiLlmChatClient(): Promise<LlmChatClient> {
   const pi = await import("@earendil-works/pi-ai");
   return createPiLlmChatClient({
-    complete: pi.complete as PiComplete,
+    complete: pi.complete as unknown as PiComplete,
   });
 }
 
@@ -92,34 +92,32 @@ export function createPiLlmChatClient(input: CreatePiLlmChatClientInput): LlmCha
 }
 
 function modelFromDeployment(deployment: LlmDeployment, request: LlmChatRequest): PiModel {
-  return Object.freeze({
+  return {
     id: deployment.model,
     name: `${deployment.channel}/${deployment.model}`,
     api: "openai-completions",
     provider: deployment.channel,
     ...(deployment.baseUrl === null ? {} : { baseUrl: deployment.baseUrl }),
     reasoning: false,
-    input: Object.freeze(["text"] as const),
-    cost: Object.freeze({
+    input: ["text"],
+    cost: {
       input: 0,
       output: 0,
       cacheRead: 0,
       cacheWrite: 0,
-    }),
+    },
     contextWindow: 128000,
     maxTokens: request.maxTokens ?? 16384,
-    compat: Object.freeze({
+    compat: {
       supportsStore: false,
-    }),
-  });
+    },
+  };
 }
 
 function contextFromRequest(request: LlmChatRequest): PiContext {
   const systemPrompt = messagesByRole(request.messages, "system").join("\n\n").trim();
   const messages = request.messages
-    .filter((message): message is Extract<LlmChatMessage, { role: "user" | "assistant" }> =>
-      message.role === "user" || message.role === "assistant"
-    )
+    .filter(isConversationMessage)
     .map((message) => Object.freeze({
       role: message.role,
       content: message.content,
@@ -128,6 +126,12 @@ function contextFromRequest(request: LlmChatRequest): PiContext {
     ...(systemPrompt.length === 0 ? {} : { systemPrompt }),
     messages: Object.freeze(messages),
   });
+}
+
+function isConversationMessage(
+  message: LlmChatMessage,
+): message is LlmChatMessage & { role: "user" | "assistant" } {
+  return message.role === "user" || message.role === "assistant";
 }
 
 function optionsFromDeployment(deployment: LlmDeployment, request: LlmChatRequest): PiCompleteOptions {

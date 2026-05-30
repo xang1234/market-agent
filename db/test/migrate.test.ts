@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -36,6 +36,17 @@ function loadExpectedTables() {
     readFileSync(schemaPath, "utf8").matchAll(/^create table ([a-z_][a-z0-9_]*) \($/gim),
     (match) => match[1],
   ).sort();
+}
+
+function loadExpectedMigrationRecords() {
+  return readdirSync(join(dbRoot, "migrations"))
+    .filter((name) => /^\d{4}_[a-z0-9_]+\.up\.sql$/i.test(name))
+    .sort()
+    .map((name) => {
+      const match = /^(\d{4})_(.+)\.up\.sql$/i.exec(name);
+      if (!match) throw new Error(`unexpected migration filename: ${name}`);
+      return `${match[1]}:${match[2]}`;
+    });
 }
 
 test("snapshot manifest forward migration owns post-baseline snapshot columns", () => {
@@ -222,39 +233,11 @@ test("migrate up applies pending migrations and records them in schema_migration
   });
 
   assert.equal(migrateResult.status, 0, migrateResult.stderr || migrateResult.stdout);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "28");
+  const expectedMigrationRecords = loadExpectedMigrationRecords();
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), String(expectedMigrationRecords.length));
   assert.deepEqual(
     queryValue(containerName, "select version || ':' || name from schema_migrations order by version").split("\n"),
-    [
-      "0001:init",
-      "0002:issuer_aliases",
-      "0003:default_manual_watchlist",
-      "0004:agent_run_log",
-      "0005:snapshot_document_refs",
-      "0006:chat_messages_snapshot_not_null",
-      "0007:documents_parent_idx",
-      "0008:chat_threads_archived_at",
-      "0009:theme_memberships_unique",
-      "0010:analyze_template_runs",
-      "0011:sources_user_id",
-      "0012:document_kind_press_release",
-      "0013:mentions_unique",
-      "0014:entity_impacts_channel_constraint",
-      "0015:object_blob_gc_queue",
-      "0016:fact_review_queue",
-      "0017:evidence_bundles",
-      "0018:agent_run_claims",
-      "0019:alerts_fired",
-      "0020:run_activities_user_id",
-      "0021:fact_review_actions",
-      "0022:watchlist_list_management",
-      "0023:alert_delivery_metadata",
-      "0024:instruments_figi_composite",
-      "0025:provider_backed_dev_data",
-      "0026:sec_fact_identity",
-      "0027:issuer_profile_enrichment_provenance",
-      "0028:analyze_playbook_metadata",
-    ],
+    expectedMigrationRecords,
   );
 
   const publicTables = queryValue(
@@ -1005,7 +988,8 @@ test("migrate down rolls back schema changes when removing the migration record 
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /rejecting schema_migrations delete/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "28");
+  const expectedMigrationRecords = loadExpectedMigrationRecords();
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), String(expectedMigrationRecords.length));
   assert.equal(
     queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'agent_run_logs'"),
     "1",
@@ -1014,15 +998,15 @@ test("migrate down rolls back schema changes when removing the migration record 
   // migration's schema change must still be in place. If the runner
   // accidentally executed the down DDL before hitting the trigger block, the
   // schema_migrations row count alone wouldn't catch that — checking the
-  // latest migration's actual artifact does. 0028 adds soft-delete and
-  // playbook metadata columns; the down would remove them, so their presence
-  // is independent proof the down DDL did not execute.
+  // latest migration's actual artifacts does. 0029 adds issuer IR tables and
+  // enum types; the down would remove them, so their presence is independent
+  // proof the down DDL did not execute.
   assert.equal(
     queryValue(
       containerName,
-      "select count(*) from information_schema.columns where (table_name = 'analyze_templates' and column_name = 'deleted_at') or (table_name = 'analyze_template_runs' and column_name in ('playbook_id', 'run_metadata'))",
+      "select (select count(*) from pg_tables where schemaname = 'public' and tablename in ('ir_source_registry', 'ir_document_assets')) + (select count(*) from pg_type where typname in ('ir_source_type', 'ir_asset_kind'))",
     ),
-    "3",
+    "4",
   );
 });
 
@@ -1071,7 +1055,7 @@ test("migrate down fails when any applied migration is missing locally", { timeo
 
   assert.notEqual(downResult.status, 0);
   assert.match(downResult.stderr || downResult.stdout, /Applied migration 0000 is missing locally/);
-  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), "29");
+  assert.equal(queryValue(containerName, "select count(*) from schema_migrations"), String(loadExpectedMigrationRecords().length + 1));
   assert.equal(queryValue(containerName, "select count(*) from pg_tables where schemaname = 'public' and tablename = 'users'"), "1");
 });
 
