@@ -410,7 +410,7 @@ test("ingestGdeltArticleDiscoveries is idempotent by GDELT canonical article URL
   assert.equal(queries.some((query) => /insert into sources/i.test(query.text)), false);
   assert.equal(queries.some((query) => /insert into documents/i.test(query.text)), false);
   assert.equal(objectStore.putCalls, 0);
-  assert.deepEqual(routed, []);
+  assert.deepEqual(routed, GDELT_ROUTED_READER_TOOL_NAMES);
 });
 
 test("ingestGdeltArticleDiscoveries does not match issuer phrases inside unrelated words", async () => {

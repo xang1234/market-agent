@@ -5,8 +5,9 @@ import { createClaim, type ClaimRow } from "./claim-repo.ts";
 import type { DocumentRow } from "./document-repo.ts";
 import { createEvent, createEventSubject, type EventRow } from "./event-repo.ts";
 import {
-  documentTextFromBytes,
+  emptyIssuerIrExtractionResult,
   extractIssuerIrEvidence,
+  issuerIrTextFromBytes,
 } from "./issuer-ir-extraction.ts";
 import {
   createIrDocumentAsset,
@@ -35,6 +36,10 @@ import {
   type SourceRow,
 } from "./source-repo.ts";
 import type { QueryExecutor } from "./types.ts";
+import {
+  withPinnedClient,
+  withTransaction,
+} from "./transaction.ts";
 import {
   assertNonEmptyString,
 } from "./validators.ts";
@@ -121,6 +126,17 @@ async function persistIssuerIrCandidate(
   candidate: IssuerIrCandidate,
   fetched: { bytes: Uint8Array; contentType: string | null; fetchedAt: string },
 ): Promise<IssuerIrIngestRecord> {
+  return withPinnedClient(deps.db, (db) =>
+    persistIssuerIrCandidateWithDb({ ...deps, db }, input, candidate, fetched)
+  );
+}
+
+async function persistIssuerIrCandidateWithDb(
+  deps: IngestIssuerIrSourceDeps,
+  input: IngestIssuerIrSourceInput,
+  candidate: IssuerIrCandidate,
+  fetched: { bytes: Uint8Array; contentType: string | null; fetchedAt: string },
+): Promise<IssuerIrIngestRecord> {
   const provider = sourceProvider(candidate);
   const licenseClass = provider === "issuer_ir" ? "public" : "free";
   let source: SourceRow;
@@ -170,8 +186,8 @@ async function persistIssuerIrCandidate(
   }
 
   const document = ingest.document;
-  const persisted = await withTransaction(deps.db, async () => {
-    const asset = await createIrDocumentAsset(deps.db, {
+  const persisted = await withTransaction(deps.db, async (tx) => {
+    const asset = await createIrDocumentAsset(tx, {
       ir_source_id: input.registryEntry.ir_source_id,
       issuer_id: input.registryEntry.issuer_id,
       document_id: document.document_id,
@@ -184,7 +200,7 @@ async function persistIssuerIrCandidate(
       discovered_at: candidate.publishedAt ?? fetched.fetchedAt,
       fetched_at: fetched.fetchedAt,
     });
-    await createMention(deps.db, {
+    await createMention(tx, {
       document_id: document.document_id,
       subject_kind: input.subjectRef.kind,
       subject_id: input.subjectRef.id,
@@ -192,16 +208,22 @@ async function persistIssuerIrCandidate(
       mention_count: 1,
       confidence: provider === "issuer_ir" ? 0.95 : 0.82,
     });
-    const extracted = extractIssuerIrEvidence({
-      text: documentTextFromBytes(fetched.bytes, candidate.assetKind),
-      document_id: document.document_id,
-      source_id: source.source_id,
-      subject_ref: input.subjectRef,
-      asset,
-      effective_time: candidate.publishedAt ?? fetched.fetchedAt,
+    const text = issuerIrTextFromBytes({
+      bytes: fetched.bytes,
+      contentType: fetched.contentType,
     });
-    const claims = await persistClaims(deps.db, extracted.claims, input.subjectRef);
-    const events = await persistEvents(deps.db, extracted.events, input.subjectRef, claims.map((claim) => claim.claim_id));
+    const extracted = text.status === "available"
+      ? extractIssuerIrEvidence({
+        text: text.text,
+        document_id: document.document_id,
+        source_id: source.source_id,
+        subject_ref: input.subjectRef,
+        asset,
+        effective_time: candidate.publishedAt ?? fetched.fetchedAt,
+      })
+      : emptyIssuerIrExtractionResult();
+    const claims = await persistClaims(tx, extracted.claims, input.subjectRef);
+    const events = await persistEvents(tx, extracted.events, input.subjectRef, claims.map((claim) => claim.claim_id));
     return Object.freeze({ asset, claims, events });
   });
   return Object.freeze({
@@ -303,18 +325,6 @@ async function persistEvents(
     rows.push(event);
   }
   return Object.freeze(rows);
-}
-
-async function withTransaction<T>(db: QueryExecutor, action: () => Promise<T>): Promise<T> {
-  await db.query("begin");
-  try {
-    const result = await action();
-    await db.query("commit");
-    return result;
-  } catch (error) {
-    await db.query("rollback");
-    throw error;
-  }
 }
 
 function sourceProvider(candidate: IssuerIrCandidate): string {

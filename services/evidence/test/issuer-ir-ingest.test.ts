@@ -185,6 +185,35 @@ function recordingDb() {
   return { db, queries };
 }
 
+function recordingPoolDb() {
+  const base = recordingDb();
+  const poolQueries: Array<{ text: string; values?: unknown[] }> = [];
+  const txQueries: Array<{ text: string; values?: unknown[] }> = [];
+  const releases: unknown[] = [];
+  const tx: QueryExecutor & { release(destroy?: boolean): void } = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      txQueries.push({ text, values });
+      return base.db.query<R>(text, values);
+    },
+    release(destroy?: boolean) {
+      releases.push(destroy);
+    },
+  };
+  const db: QueryExecutor & { connect(): Promise<QueryExecutor & { release(destroy?: boolean): void }> } = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      poolQueries.push({ text, values });
+      if (/^(begin|commit|rollback)$/i.test(text) || /insert into/i.test(text)) {
+        throw new Error(`candidate persistence used the pool instead of an acquired client: ${text}`);
+      }
+      return base.db.query<R>(text, values);
+    },
+    async connect() {
+      return tx;
+    },
+  };
+  return { db, poolQueries, txQueries, releases };
+}
+
 function result<R extends Record<string, unknown>>(rows: R[]) {
   return { rows, command: rows.length ? "INSERT" : "SELECT", rowCount: rows.length, oid: 0, fields: [] };
 }
@@ -232,6 +261,40 @@ test("ingestIssuerIrSource stores issuer releases, links IR asset metadata, and 
   assert.ok(transactionBeginIndex >= 0, "IR asset writes should start inside a transaction");
   assert.ok(transactionCommitIndex > assetIndex, "IR asset writes should commit after asset creation");
   assert.ok(claimIndex > assetIndex && claimIndex < transactionCommitIndex, "IR claim writes should commit atomically with the asset");
+});
+
+test("ingestIssuerIrSource persists candidate writes on an acquired client when db can connect", async () => {
+  const feed = `<rss><channel><item>
+    <title>Acme reports Q1 results and raises guidance</title>
+    <link>https://investors.acme.example/news/q1-results</link>
+    <pubDate>Fri, 29 May 2026 12:00:00 GMT</pubDate>
+  </item></channel></rss>`;
+  const body = "Acme reports Q1 results. Management raised full-year revenue guidance.";
+  const { db, poolQueries, txQueries, releases } = recordingPoolDb();
+
+  const result = await ingestIssuerIrSource(
+    {
+      db,
+      objectStore: new MemoryObjectStore(),
+      fetch: async (url) => new Response(url.endsWith("/rss") ? feed : body, {
+        status: 200,
+        headers: { "content-type": url.endsWith("/rss") ? "application/rss+xml" : "text/html" },
+      }),
+      now: () => Date.parse("2026-05-30T01:00:00.000Z"),
+    },
+    {
+      registryEntry: registry(),
+      issuerName: "Acme Robotics Holdings",
+      subjectRef: { kind: "issuer", id: ISSUER_ID },
+    },
+  );
+
+  assert.equal(result.records.length, 1);
+  assert.equal(poolQueries.some((query) => /insert into/i.test(query.text)), false);
+  assert.ok(txQueries.some((query) => /insert into sources/i.test(query.text)));
+  assert.ok(txQueries.some((query) => /insert into ir_document_assets/i.test(query.text)));
+  assert.ok(txQueries.some((query) => /insert into claims/i.test(query.text)));
+  assert.equal(releases.length, 1);
 });
 
 test("ingestIssuerIrSource stores presentation PDFs as research_note documents", async () => {

@@ -464,6 +464,110 @@ test("extract_mentions links and deletes stale mentions in one transaction", asy
   assert.ok(deleteIndex < commitIndex);
 });
 
+test("extract_mentions uses an acquired client for transactional mention writes when available", async () => {
+  const mentionId = "22222222-2222-4222-a222-222222222222";
+  const issuerId = "33333333-3333-4333-a333-333333333333";
+  const poolQueries: string[] = [];
+  const txQueries: string[] = [];
+  const releases: unknown[] = [];
+  const query = async <R extends Record<string, unknown>>(
+    queries: string[],
+    text: string,
+    values?: unknown[],
+  ) => {
+    queries.push(text);
+    if (/from documents/.test(text)) {
+      return { rows: [fakeDocumentRow()] as unknown as R[], command: "SELECT", rowCount: 1, oid: 0, fields: [] };
+    }
+    if (/^(begin|commit|rollback)$/i.test(text)) {
+      return { rows: [] as R[], command: text.toUpperCase(), rowCount: null, oid: 0, fields: [] };
+    }
+    if (/insert into mentions/.test(text)) {
+      return {
+        rows: [{
+          mention_id: mentionId,
+          document_id: SAMPLE_DOC_UUID,
+          subject_kind: values?.[1],
+          subject_id: values?.[2],
+          prominence: values?.[3],
+          mention_count: values?.[4],
+          confidence: values?.[5],
+          created_at: new Date("2026-05-03T00:00:00.000Z"),
+        }] as R[],
+        command: "INSERT",
+        rowCount: 1,
+        oid: 0,
+        fields: [],
+      };
+    }
+    if (/delete from mentions/.test(text)) {
+      return { rows: [] as R[], command: "DELETE", rowCount: 0, oid: 0, fields: [] };
+    }
+    if (/from mentions/.test(text)) {
+      return {
+        rows: [{
+          mention_id: mentionId,
+          document_id: SAMPLE_DOC_UUID,
+          subject_kind: "issuer",
+          subject_id: issuerId,
+          prominence: "headline",
+          mention_count: 1,
+          confidence: 0.8,
+          created_at: new Date("2026-05-03T00:00:00.000Z"),
+        }] as R[],
+        command: "SELECT",
+        rowCount: 1,
+        oid: 0,
+        fields: [],
+      };
+    }
+    throw new Error(`unexpected query: ${text}`);
+  };
+  const tx: QueryExecutor & { release(destroy?: boolean): void } = {
+    query: (text, values) => query(txQueries, text, values),
+    release(destroy?: boolean) {
+      releases.push(destroy);
+    },
+  };
+  const db: QueryExecutor & { connect(): Promise<QueryExecutor & { release(destroy?: boolean): void }> } = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      if (/^(begin|commit|rollback)$/i.test(text) || /insert into mentions|delete from mentions/.test(text)) {
+        throw new Error(`transactional mention write used the pool: ${text}`);
+      }
+      return query<R>(poolQueries, text, values);
+    },
+    async connect() {
+      return tx;
+    },
+  };
+  const handlers = createEvidenceReaderToolHandlers({
+    db,
+    extractMentionCandidates: async () => [
+      { text: "Apple", prominence: "headline", mention_count: 1, confidence: 0.8 },
+    ],
+    resolveMention: async () => ({
+      outcome: "resolved",
+      subject_ref: { kind: "issuer", id: issuerId },
+      display_name: "Apple Inc.",
+      confidence: 0.9,
+      canonical_kind: "issuer",
+    }),
+  });
+
+  await handlers.extract_mentions({ document_id: SAMPLE_DOC_UUID });
+
+  assert.equal(poolQueries.some((queryText) => /insert into mentions|delete from mentions/.test(queryText)), false);
+  const beginIndex = txQueries.findIndex((queryText) => /^begin$/i.test(queryText));
+  const insertIndex = txQueries.findIndex((queryText) => /insert into mentions/.test(queryText));
+  const deleteIndex = txQueries.findIndex((queryText) => /delete from mentions/.test(queryText));
+  const commitIndex = txQueries.findIndex((queryText) => /^commit$/i.test(queryText));
+  assert.ok(beginIndex >= 0);
+  assert.ok(beginIndex < insertIndex);
+  assert.ok(insertIndex < deleteIndex);
+  assert.ok(deleteIndex < commitIndex);
+  assert.deepEqual(releases, [undefined]);
+});
+
 test("extract_mentions rolls back when stale mention deletion fails", async () => {
   const issuerId = "33333333-3333-4333-a333-333333333333";
   const queries: string[] = [];

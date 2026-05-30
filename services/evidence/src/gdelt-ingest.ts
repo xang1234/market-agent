@@ -178,15 +178,12 @@ export async function ingestGdeltArticleDiscoveries(
       retrievedAt,
       requestUrl: discovery.requestUrl,
     });
-    let readerToolRuns: ReadonlyArray<GdeltReaderToolRun> = Object.freeze([]);
-    if (persisted.status === "created") {
-      readerToolRuns = await routeReaderTools(deps.readerTools, {
-        article,
-        subject: input.subject,
-        query,
-        document: persisted.document,
-      });
-    }
+    const readerToolRuns = await routeReaderTools(deps.readerTools, {
+      article,
+      subject: input.subject,
+      query,
+      document: persisted.document,
+    });
     await createDiscoveryMention(deps.db, {
       article,
       subject: input.subject,

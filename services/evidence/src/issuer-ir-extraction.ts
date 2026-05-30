@@ -2,7 +2,7 @@ import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import type { JsonObject } from "../../tools/src/registry.ts";
 import type { ClaimInput } from "./claim-repo.ts";
 import type { EventInput } from "./event-repo.ts";
-import type { IrAssetKind, IrDocumentAssetRow } from "./issuer-ir-registry.ts";
+import type { IrDocumentAssetRow } from "./issuer-ir-registry.ts";
 
 export type IssuerIrExtractionInput = {
   text: string;
@@ -19,6 +19,10 @@ export type IssuerIrExtractionResult = Readonly<{
   candidate_facts: ReadonlyArray<JsonObject>;
   sentiment: ReadonlyArray<JsonObject>;
 }>;
+
+export type IssuerIrDocumentText =
+  | Readonly<{ status: "available"; text: string }>
+  | Readonly<{ status: "unsupported_binary"; reason: "pdf" }>;
 
 const KPI_RE = /\b(revenue|sales|margin|operating income|eps|earnings per share|free cash flow|cash flow|arr|bookings|backlog)\b/i;
 const GUIDANCE_RE = /\b(guidance|outlook|forecast|expects?|raise[sd]?|lift(?:ed|s)?|lower(?:ed|s)?|cut|reduce[sd]?|increase[sd]?)\b/i;
@@ -136,9 +140,40 @@ export function normalizeDocumentText(text: string): string {
     .trim();
 }
 
-export function documentTextFromBytes(bytes: Uint8Array, assetKind?: IrAssetKind): string {
-  if (assetKind === "presentation") return "";
+export function documentTextFromBytes(bytes: Uint8Array): string {
   return normalizeDocumentText(new TextDecoder("utf-8", { fatal: false }).decode(bytes));
+}
+
+export function issuerIrTextFromBytes(input: {
+  bytes: Uint8Array;
+  contentType?: string | null;
+}): IssuerIrDocumentText {
+  const contentType = input.contentType?.split(";")[0]?.trim().toLowerCase() ?? null;
+  if (contentType === "application/pdf" || isPdfBytes(input.bytes)) {
+    return Object.freeze({ status: "unsupported_binary", reason: "pdf" as const });
+  }
+  return Object.freeze({
+    status: "available" as const,
+    text: documentTextFromBytes(input.bytes),
+  });
+}
+
+export function emptyIssuerIrExtractionResult(): IssuerIrExtractionResult {
+  return Object.freeze({
+    claims: Object.freeze([]),
+    events: Object.freeze([]),
+    candidate_facts: Object.freeze([]),
+    sentiment: Object.freeze([]),
+  });
+}
+
+function isPdfBytes(bytes: Uint8Array): boolean {
+  return bytes.length >= 5 &&
+    bytes[0] === 0x25 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x44 &&
+    bytes[3] === 0x46 &&
+    bytes[4] === 0x2d;
 }
 
 function claim(

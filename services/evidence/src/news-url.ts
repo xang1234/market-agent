@@ -43,7 +43,5 @@ export function canonicalizeNewsUrl(rawUrl: string): string {
     parsed.pathname = parsed.pathname.slice(0, -1);
   }
 
-  parsed.hash = "";
-
   return parsed.toString();
 }

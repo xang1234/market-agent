@@ -106,12 +106,13 @@ test("canonicalizeNewsUrl drops a trailing slash from the path (but not from a b
   assert.equal(canonicalizeNewsUrl("https://example.com/"), "https://example.com/");
 });
 
-test("canonicalizeNewsUrl strips URL fragments before deduping articles", () => {
-  // Fragments are client-side anchors and should not split one article
-  // into multiple canonical source identities.
+test("canonicalizeNewsUrl preserves the fragment (#) — anchors sometimes identify article versions", () => {
+  // Per the bake-in decision: fragments aren't stripped because some
+  // publishers use them to disambiguate article variants (#comments,
+  // #v2, etc.).
   assert.equal(
     canonicalizeNewsUrl("https://example.com/article#section-2"),
-    "https://example.com/article",
+    "https://example.com/article#section-2",
   );
 });
 
