@@ -199,6 +199,13 @@ cp .env.dev.example .env.dev      # ports + flags; safe defaults
 
 Set `POLYGON_API_KEY` in `.env.dev` to enable provider-backed stock ticker discovery and Polygon quote/bar caching. Dev no longer seeds ticker identities or fixture market data; without a key, unknown tickers resolve as `not_found` and market surfaces return unavailable. Set `SEC_EDGAR_USER_AGENT` to enable on-demand SEC companyfacts ingestion for statements and key stats.
 
+LLM channels are configured through the Settings page or the flat `.env.dev`
+fields `LLM_CHANNELS`, `LLM_<NAME>_*`, `LITELLM_MODEL`,
+`LITELLM_FALLBACK_MODELS`, and `AGENT_LITELLM_MODEL`. The dev shell exports
+`LLM_SETTINGS_ENV_FILE=$ROOT/.env.dev`, `MA_FLAG_LLM_SETTINGS=true`, and
+`VITE_MA_FLAG_LLM_SETTINGS=true` so local settings changes are picked up by
+chat/title generation without editing the shell environment manually.
+
 For local-only fallback coverage, set `ENABLE_UNOFFICIAL_DEV_PROVIDERS=true`. `dev-shell` then starts the Python `services/dev-providers` sidecar on `DEV_PROVIDERS_PORT`. Resolver/market may use yfinance after the primary provider path misses or is unavailable, and fundamentals may use Finviz to fill missing profile sector/industry/domicile fields. Successful fallback identities, quotes, daily adjusted bars, and profile enrichments are persisted in Postgres under dev-only source IDs where the schema has source fields.
 
 When `up` completes, the app is at **<http://localhost:5173>**.

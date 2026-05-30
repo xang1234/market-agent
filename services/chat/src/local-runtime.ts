@@ -17,8 +17,14 @@ import {
   type ChatAnalystToolRuntimeToolCall,
   type ChatAssistantMessagePersistence,
   type ChatAssistantMessagePersistenceInput,
+  type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
+import {
+  composeAnalystBlocksWithLlm,
+  createLlmThreadTitleModel,
+} from "./llm-runtime.ts";
 import { createChatMessagePersistence } from "./messages.ts";
+import { createThreadTitleGenerationJob } from "./thread-title.ts";
 
 let localPool: Pool | null = null;
 
@@ -56,9 +62,14 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const toolCallIds = result.tool_calls
     ?.filter((toolCall) => toolCall.status === "ok")
     .map((toolCall) => toolCall.tool_call_id) ?? [];
+  const llmBlocks = await composeAnalystBlocksWithLlm({
+    context,
+    blocks: result.blocks,
+    toolCalls: result.tool_calls ?? [],
+  });
   return {
     ...result,
-    blocks: result.blocks.map((block) =>
+    blocks: llmBlocks.map((block) =>
       normalizeAssistantBlock(block, {
         snapshotId: result.snapshot_id,
         asOf,
@@ -75,6 +86,12 @@ export const persistAssistantMessage: ChatAssistantMessagePersistence = async (m
     pool: pool(),
     sealSnapshot: sealAssistantMessageSnapshot,
   })(message);
+
+export const generateThreadTitle: ChatThreadTitleGenerator = async (job) =>
+  createThreadTitleGenerationJob({
+    db: pool(),
+    model: createLlmThreadTitleModel(),
+  })(job);
 
 async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersistenceInput) {
   const blocks = input.blocks as ReadonlyArray<Record<string, unknown>>;

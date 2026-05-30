@@ -1,10 +1,12 @@
 export type DevFlags = {
+  llmSettingsEnabled: boolean;
   placeholderApiEnabled: boolean;
   showDevBanner: boolean;
 };
 
 export function readDevFlags(env: Record<string, string | undefined>): DevFlags {
   return {
+    llmSettingsEnabled: parseBoolean(env.MA_FLAG_LLM_SETTINGS, false),
     placeholderApiEnabled: parseBoolean(env.MA_FLAG_PLACEHOLDER_API, true),
     showDevBanner: parseBoolean(env.MA_FLAG_SHOW_DEV_BANNER, false),
   };
