@@ -407,6 +407,10 @@ test("listAnalyzeTemplateRunsByUser uses bounded cursor pagination without loadi
   assert.equal(typeof page.next_cursor, "string");
   assert.equal(page.runs[0].template_name, "Earnings quality");
   assert.equal(page.runs[0].playbook_id, "earnings_quality");
+  assert.equal("run_metadata" in page.runs[0], false);
+  assert.equal(page.runs[0].playbook_version, 1);
+  assert.equal(page.runs[0].can_rerun, true);
+  assert.equal(page.runs[0].rerun_unavailable_reason, null);
   assert.match(queries[0].text, /order by r\.created_at desc, r\.run_id desc/);
   assert.match(queries[0].text, /t\.name as template_name/);
   assert.doesNotMatch(queries[0].text, /r\.blocks/);

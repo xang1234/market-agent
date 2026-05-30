@@ -21,7 +21,6 @@ export type AnalyzeRunHistoryItem = {
   playbook_name: string | null
   playbook_version: number | null
   display_title: string
-  run_metadata: AnalyzeRunMetadata | Record<string, unknown>
   can_rerun: boolean
   rerun_unavailable_reason: string | null
   created_at: string
@@ -29,6 +28,7 @@ export type AnalyzeRunHistoryItem = {
 }
 
 export type AnalyzeRunDetail = AnalyzeRunHistoryItem & {
+  run_metadata: AnalyzeRunMetadata | Record<string, unknown>
   blocks: ReadonlyArray<Record<string, unknown>>
 }
 
@@ -148,15 +148,15 @@ function diffSummary(before: AnalyzeRunDetail, after: AnalyzeRunDetail): Analyze
   }
 }
 
-function templateId(run: AnalyzeRunHistoryItem): string | null {
+function templateId(run: AnalyzeRunDetail): string | null {
   return stringValue(metadataRecord(run.run_metadata).template_id)
 }
 
-function templateVersion(run: AnalyzeRunHistoryItem): number | null {
+function templateVersion(run: AnalyzeRunDetail): number | null {
   return numberValue(metadataRecord(run.run_metadata).template_version)
 }
 
-function metadataRecord(metadata: AnalyzeRunHistoryItem['run_metadata']): Record<string, unknown> {
+function metadataRecord(metadata: AnalyzeRunDetail['run_metadata']): Record<string, unknown> {
   return isRecord(metadata) ? metadata : {}
 }
 

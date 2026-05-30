@@ -33,7 +33,7 @@ test("EvidenceInspectorProvider opens the drawer with fetched inspection details
         badges: ["primary"],
         rows: [{ label: "Provider", value: "sec" }],
         links: [{ label: "Open source", href: "https://www.sec.gov/Archives/example" }],
-        related_refs: [],
+        related_refs: [{ kind: "document", id: NEXT_SOURCE_ID }],
       }), { status: 200, headers: { "content-type": "application/json" } });
     };
 
@@ -85,6 +85,8 @@ test("EvidenceInspectorProvider opens the drawer with fetched inspection details
     assert.match(dom.window.document.body.innerHTML, /sec filing/);
     assert.match(dom.window.document.body.innerHTML, /Provider/);
     assert.match(dom.window.document.body.innerHTML, /Open source/);
+    assert.match(dom.window.document.body.innerHTML, /Related refs/);
+    assert.match(dom.window.document.body.innerHTML, /document:/);
 
     await act(async () => root.unmount());
   } finally {

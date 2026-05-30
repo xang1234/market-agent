@@ -2411,9 +2411,15 @@ components:
         rerun_of_run_id:
           type: string
           format: uuid
+    AnalyzeRunMetadata:
+      description: Versioned Analyze run metadata. Legacy malformed metadata remains viewable but is not rerunnable.
+      anyOf:
+        - $ref: '#/components/schemas/AnalyzeRunMetadataV1'
+        - type: object
+          additionalProperties: true
     AnalyzeRunSummary:
       type: object
-      description: Lightweight run-history row. It intentionally omits blocks.
+      description: Lightweight run-history row. It intentionally omits blocks and raw run metadata.
       required:
         - run_id
         - template_id
@@ -2423,7 +2429,6 @@ components:
         - playbook_name
         - playbook_version
         - display_title
-        - run_metadata
         - can_rerun
         - rerun_unavailable_reason
         - snapshot_id
@@ -2453,8 +2458,6 @@ components:
             - 'null'
         display_title:
           type: string
-        run_metadata:
-          $ref: '#/components/schemas/AnalyzeRunMetadataV1'
         can_rerun:
           type: boolean
         rerun_unavailable_reason:
@@ -2471,8 +2474,10 @@ components:
       allOf:
         - $ref: '#/components/schemas/AnalyzeRunSummary'
         - type: object
-          required: [blocks]
+          required: [run_metadata, blocks]
           properties:
+            run_metadata:
+              $ref: '#/components/schemas/AnalyzeRunMetadata'
             blocks:
               type: array
               items:

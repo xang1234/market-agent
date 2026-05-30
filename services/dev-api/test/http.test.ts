@@ -206,6 +206,7 @@ test("GET /v1/analyze/runs paginates user run history with an opaque cursor", as
   };
   assert.equal(firstPage.runs?.length, 1);
   assert.equal("blocks" in (firstPage.runs?.[0] ?? {}), false);
+  assert.equal("run_metadata" in (firstPage.runs?.[0] ?? {}), false);
   assert.equal(firstPage.runs?.[0]?.display_title, "Earnings quality");
   assert.equal(typeof firstPage.next_cursor, "string");
 
@@ -241,9 +242,15 @@ test("GET /v1/analyze/runs/:id returns full run detail with blocks", async (t) =
   });
 
   assert.equal(detailResponse.status, 200);
-  const detail = await detailResponse.json() as { run_id?: string; display_title?: string; blocks?: Array<{ title?: string }> };
+  const detail = await detailResponse.json() as {
+    run_id?: string;
+    display_title?: string;
+    run_metadata?: { schema_version?: number };
+    blocks?: Array<{ title?: string }>;
+  };
   assert.equal(detail.run_id, created.run_id);
   assert.equal(detail.display_title, "Earnings quality");
+  assert.equal(detail.run_metadata?.schema_version, 1);
   assert.equal(detail.blocks?.[0]?.title, "Earnings quality");
 });
 
@@ -752,6 +759,7 @@ test("service Analyze adapter writes blocks with the sealed snapshot id", async 
   assert.ok(workflowInput);
   assert.deepEqual(workflowInput.sourceCategories, ["filings", "news"]);
   assert.deepEqual(workflowInput.subjectRefs, [primarySubject, addedSubject]);
+  assert.equal(workflowInput.playbookSectionId, "summary");
   assert.ok(workflowInput.bundleIds.includes("analyze_template_run"));
   assert.ok(workflowInput.bundleIds.includes("filing_research"));
   assert.ok(workflowInput.bundleIds.includes("document_research"));
@@ -1052,6 +1060,43 @@ test("service Analyze adapter rejects unknown source categories before persisten
   assert.deepEqual(insertedBlocks, []);
 });
 
+test("POST /v1/analyze/runs rejects unknown playbooks before workflow execution", async (t) => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const templateId = "11111111-1111-4111-8111-111111111111";
+  const insertedBlocks: unknown[] = [];
+  let workflowCalls = 0;
+  const adapters = createServiceDevApiAdapters({
+    db: fakeAnalyzeDb({ userId, templateId, insertedBlocks }),
+    runAnalyzeWorkflow() {
+      workflowCalls += 1;
+      return { blocks: [] };
+    },
+    async sealAnalyzeSnapshot() {
+      throw new Error("unknown playbooks should not seal a snapshot");
+    },
+  });
+  const base = await startServer(t, {}, { adapters });
+
+  const response = await fetch(`${base}/v1/analyze/runs`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-id": userId,
+    },
+    body: JSON.stringify({
+      template_id: templateId,
+      playbook_id: "unknown-playbook",
+      source_categories: ["filings"],
+    }),
+  });
+  const body = await response.json() as { error?: string };
+
+  assert.equal(response.status, 400);
+  assert.match(body.error ?? "", /playbook_id is unknown/);
+  assert.equal(workflowCalls, 0);
+  assert.deepEqual(insertedBlocks, []);
+});
+
 test("service Analyze adapter honors explicit empty source categories as base bundle only", async () => {
   const userId = "00000000-0000-4000-8000-000000000001";
   const templateId = "11111111-1111-4111-8111-111111111111";
@@ -1102,6 +1147,7 @@ test("service Analyze adapter honors explicit empty source categories as base bu
   assert.ok(workflowInput);
   assert.deepEqual(workflowInput.sourceCategories, []);
   assert.deepEqual(workflowInput.bundleIds, [ANALYZE_BASE_BUNDLE_ID]);
+  assert.equal(workflowInput.playbookSectionId, "summary");
 });
 
 test("POST /v1/analyze/runs rejects verifier failures before persistence", async (t) => {

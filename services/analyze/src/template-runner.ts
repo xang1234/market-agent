@@ -1,5 +1,6 @@
 import { serializeJsonValue, type JsonValue } from "../../observability/src/types.ts";
 import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
+import { AnalyzeRunMetadataError, parseAnalyzeRunMetadata } from "./runMetadata.ts";
 
 // Mirrors services/chat/src/messages.ts. The persistence layer is
 // snapshot-aware but does NOT itself stage manifests or seal — those are
@@ -61,7 +62,12 @@ export type AnalyzeTemplateRunWithTemplateRow = AnalyzeTemplateRunRow & {
   template_name: string;
 };
 
-export type AnalyzeTemplateRunSummaryRow = Omit<AnalyzeTemplateRunWithTemplateRow, "blocks">;
+export type AnalyzeTemplateRunSummaryRow =
+  Omit<AnalyzeTemplateRunWithTemplateRow, "blocks" | "run_metadata"> & {
+    playbook_version: number | null;
+    can_rerun: boolean;
+    rerun_unavailable_reason: string | null;
+  };
 
 export type AnalyzeTemplateRunsPage = {
   runs: ReadonlyArray<AnalyzeTemplateRunSummaryRow>;
@@ -469,6 +475,7 @@ function summaryRowFromDb(row: AnalyzeTemplateRunDbRow): AnalyzeTemplateRunSumma
   if (typeof templateName !== "string" || templateName.length === 0) {
     throw new Error("analyze_template_runs.template_name: expected non-empty string");
   }
+  const metadata = safeParseRunMetadata(row.run_metadata);
   return Object.freeze({
     run_id: row.run_id,
     template_id: row.template_id,
@@ -476,7 +483,11 @@ function summaryRowFromDb(row: AnalyzeTemplateRunDbRow): AnalyzeTemplateRunSumma
     template_version:
       typeof row.template_version === "string" ? Number(row.template_version) : row.template_version,
     playbook_id: row.playbook_id,
-    run_metadata: parseJsonValue(row.run_metadata, "analyze_template_runs.run_metadata"),
+    playbook_version: metadata?.playbook_version ?? null,
+    can_rerun: metadata !== null,
+    rerun_unavailable_reason: metadata === null
+      ? "This run's metadata is not rerunnable."
+      : null,
     snapshot_id: row.snapshot_id,
     created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
   });
@@ -502,6 +513,15 @@ function parseJsonValue(value: unknown, label: string): JsonValue {
     throw new Error(`${label}: ${errorMessage(error)}`);
   }
   return value as JsonValue;
+}
+
+function safeParseRunMetadata(value: unknown) {
+  try {
+    return parseAnalyzeRunMetadata(value);
+  } catch (error) {
+    if (error instanceof AnalyzeRunMetadataError) return null;
+    throw error;
+  }
 }
 
 function encodeRunCursor(run: Pick<AnalyzeTemplateRunSummaryRow, "created_at" | "run_id">): string {

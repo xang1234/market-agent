@@ -451,7 +451,6 @@ function toAnalyzeRunHistoryItem(run: AnalyzeRunDetail): AnalyzeRunHistoryItem {
     playbook_name: run.playbook_name,
     playbook_version: run.playbook_version,
     display_title: run.display_title,
-    run_metadata: run.run_metadata,
     can_rerun: run.can_rerun,
     rerun_unavailable_reason: run.rerun_unavailable_reason,
     created_at: run.created_at,

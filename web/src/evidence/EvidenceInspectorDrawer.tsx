@@ -1,4 +1,5 @@
 import type { EvidenceInspection, EvidenceInspectionRef } from './inspectionTypes.ts'
+import { InspectableRef } from './InspectableRef.tsx'
 
 export type EvidenceInspectorState =
   | { kind: 'closed' }
@@ -93,6 +94,28 @@ function InspectionBody({ inspection }: { inspection: EvidenceInspection }) {
           ))}
         </ul>
       ) : null}
+      {inspection.related_refs.length > 0 ? (
+        <section className="grid gap-2">
+          <h4 className="text-xs font-semibold uppercase text-neutral-500 dark:text-neutral-400">Related refs</h4>
+          <ul className="flex flex-col gap-2">
+            {inspection.related_refs.map((ref) => (
+              <li key={`${ref.kind}:${ref.id}`}>
+                <InspectableRef
+                  snapshotId={inspection.snapshot_id}
+                  inspectionRef={ref}
+                  className="break-all text-left text-sm font-medium text-blue-700 underline decoration-dotted underline-offset-2 dark:text-blue-300"
+                >
+                  {inspectionRefLabel(ref)}
+                </InspectableRef>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </div>
   )
+}
+
+function inspectionRefLabel(ref: EvidenceInspectionRef): string {
+  return `${ref.kind}:${ref.id}`
 }

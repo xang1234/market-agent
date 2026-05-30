@@ -87,7 +87,7 @@ export async function runAnalyzeWorkflow(
         id: randomUUID(),
         kind: "rich_text",
         snapshot_id: input.snapshotId,
-        data_ref: { kind: "rich_text", id: `analyze:${input.template.template_id}` },
+        data_ref: analyzeRunDataRef(input),
         source_refs: evidence.source_ids,
         claim_refs: evidence.claim_refs,
         document_refs: evidence.document_refs,
@@ -644,6 +644,19 @@ function analyzeMemoText(
     `Bundles: ${input.bundleIds.join(", ")}.`,
     evidenceText,
   ].filter((line) => line.length > 0).join("\n\n");
+}
+
+function analyzeRunDataRef(input: DevApiAnalyzeWorkflowInput): JsonValue {
+  const base = {
+    kind: "rich_text",
+    id: `analyze:${input.template.template_id}`,
+  };
+  return input.playbookSectionId
+    ? {
+      ...base,
+      params: { playbook_section_id: input.playbookSectionId },
+    }
+    : base;
 }
 
 function subjectRefsFromBlocks(blocks: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<SnapshotSubjectRef> {
