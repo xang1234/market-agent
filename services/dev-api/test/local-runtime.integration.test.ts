@@ -151,6 +151,8 @@ test(
       body: {},
       snapshotId,
       instructions: "Summarize the evidence",
+      playbookPrompt: "Earnings quality: Assess revenue quality.\nRequired sections: Summary",
+      playbookName: "Earnings quality",
       sourceCategories: ["filings"],
       bundleIds: ["company_profile", "filings"],
       subjectRefs: [{ kind: "issuer", id: SUBJECT_ID }],
@@ -160,6 +162,8 @@ test(
     assert.equal(rendered.blocks.length >= 1, true);
     const firstBlock = rendered.blocks[0]!;
     assert.equal(firstBlock.snapshot_id, snapshotId);
+    assert.equal(firstBlock.title, "Earnings quality");
+    assert.match(JSON.stringify(firstBlock), /Required sections: Summary/);
     assert.equal(
       (firstBlock.data_ref as { params?: { playbook_section_id?: string } }).params?.playbook_section_id,
       "summary",

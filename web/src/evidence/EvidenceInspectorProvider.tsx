@@ -37,6 +37,10 @@ export function EvidenceInspectorProvider({ children }: { children: ReactNode })
             })
           })
       },
+      openBlockInspection(inspection) {
+        requestSeqRef.current += 1
+        setState({ kind: 'block', inspection })
+      },
       closeInspection() {
         requestSeqRef.current += 1
         setState({ kind: 'closed' })

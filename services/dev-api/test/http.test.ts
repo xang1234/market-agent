@@ -760,6 +760,9 @@ test("service Analyze adapter writes blocks with the sealed snapshot id", async 
   assert.deepEqual(workflowInput.sourceCategories, ["filings", "news"]);
   assert.deepEqual(workflowInput.subjectRefs, [primarySubject, addedSubject]);
   assert.equal(workflowInput.playbookSectionId, "summary");
+  assert.match(workflowInput.playbookPrompt, /Earnings quality/);
+  assert.match(workflowInput.playbookPrompt, /Required sections: Summary/);
+  assert.equal(workflowInput.playbookName, "Earnings quality");
   assert.ok(workflowInput.bundleIds.includes("analyze_template_run"));
   assert.ok(workflowInput.bundleIds.includes("filing_research"));
   assert.ok(workflowInput.bundleIds.includes("document_research"));
@@ -767,6 +770,44 @@ test("service Analyze adapter writes blocks with the sealed snapshot id", async 
   assert.equal((run.blocks[0] as { snapshot_id?: string }).snapshot_id, run.snapshot_id);
   assert.equal(JSON.stringify(run.blocks).includes("Use sealed snapshot"), false);
   assert.deepEqual(insertedBlocks, run.blocks);
+});
+
+test("service Analyze adapter marks soft-deleted template runs as not rerunnable in list and detail", async () => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const templateId = "11111111-1111-4111-8111-111111111111";
+  const runId = "22222222-2222-4222-8222-222222222222";
+  const runMetadata = {
+    schema_version: 1,
+    template_id: templateId,
+    template_version: 3,
+    playbook_id: "earnings_quality",
+    playbook_version: 1,
+    instructions: "Review earnings quality.",
+    source_categories: ["filings"],
+    subject_refs: [],
+  };
+  const db = fakeAnalyzeRunHistoryDb({
+    userId,
+    templateId,
+    runId,
+    runMetadata,
+    activeTemplate: false,
+  });
+  const adapters = createServiceDevApiAdapters({
+    db,
+    async sealAnalyzeSnapshot() {
+      throw new Error("list/detail should not seal snapshots");
+    },
+  });
+
+  const list = await adapters.analyze.listRuns({ userId, limit: 1, cursor: null });
+  assert.equal(list.runs[0]?.can_rerun, false);
+  assert.equal(list.runs[0]?.rerun_unavailable_reason, "The template used by this run is no longer runnable.");
+
+  const detail = await adapters.analyze.getRun({ userId, runId });
+  assert.equal(detail.can_rerun, false);
+  assert.equal(detail.rerun_unavailable_reason, "The template used by this run is no longer runnable.");
+  assert.deepEqual(detail.blocks, [{ id: "block-1", kind: "rich_text" }]);
 });
 
 test("service Agent adapter runs the durable loop and writes activity before completion", async () => {
@@ -1527,6 +1568,61 @@ function fakeAnalyzeDb(input: {
       return client;
     },
     query: client.query,
+  };
+}
+
+function fakeAnalyzeRunHistoryDb(input: {
+  userId: string;
+  templateId: string;
+  runId: string;
+  runMetadata: unknown;
+  activeTemplate: boolean;
+}) {
+  const runRow = {
+    run_id: input.runId,
+    template_id: input.templateId,
+    template_name: "Earnings quality",
+    template_version: 3,
+    playbook_id: "earnings_quality",
+    run_metadata: input.runMetadata,
+    snapshot_id: "33333333-3333-4333-8333-333333333333",
+    blocks: [{ id: "block-1", kind: "rich_text" }],
+    created_at: "2026-05-06T00:00:00.000Z",
+  };
+  const templateRow = {
+    template_id: input.templateId,
+    user_id: input.userId,
+    name: "Earnings quality",
+    prompt_template: "Review earnings quality",
+    source_categories: ["filings"],
+    added_subject_refs: [],
+    block_layout_hint: null,
+    peer_policy: null,
+    disclosure_policy: null,
+    version: 3,
+    created_at: "2026-05-06T00:00:00.000Z",
+    updated_at: "2026-05-06T00:00:00.000Z",
+  };
+  return {
+    async connect() {
+      throw new Error("history read tests must not acquire a write client");
+    },
+    async query(text: string, values?: unknown[]) {
+      if (text.includes("from analyze_template_runs r") && text.includes("order by r.created_at")) {
+        assert.equal(values?.[0], input.userId);
+        return { rows: [runRow], rowCount: 1 };
+      }
+      if (text.includes("from analyze_template_runs r") && text.includes("r.run_id")) {
+        assert.equal(values?.[0], input.userId);
+        assert.equal(values?.[1], input.runId);
+        return { rows: [runRow], rowCount: 1 };
+      }
+      if (text.includes("from analyze_templates") && text.includes("where template_id")) {
+        assert.equal(values?.[0], input.templateId);
+        return { rows: input.activeTemplate ? [templateRow] : [], rowCount: input.activeTemplate ? 1 : 0 };
+      }
+      throw new Error(`unexpected query: ${text}`);
+    },
   };
 }
 

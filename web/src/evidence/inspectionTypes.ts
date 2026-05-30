@@ -26,3 +26,14 @@ export type EvidenceInspection = {
   links: ReadonlyArray<EvidenceInspectionLink>
   related_refs: ReadonlyArray<EvidenceInspectionRef>
 }
+
+export type EvidenceBlockInspection = {
+  snapshot_id: string
+  block_id: string
+  block_kind: string
+  title: string
+  subtitle: string | null
+  badges: ReadonlyArray<string>
+  rows: ReadonlyArray<EvidenceInspectionRow>
+  related_refs: ReadonlyArray<EvidenceInspectionRef>
+}

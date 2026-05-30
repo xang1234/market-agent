@@ -230,6 +230,8 @@ export type DevApiAnalyzeWorkflowInput = {
   body: Record<string, unknown>;
   snapshotId: string;
   instructions: string;
+  playbookPrompt: string;
+  playbookName?: string | null;
   sourceCategories: ReadonlyArray<string>;
   bundleIds: ReadonlyArray<string>;
   subjectRefs: ReadonlyArray<SubjectRef>;
@@ -924,14 +926,14 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
       async listRuns({ userId, limit, cursor }) {
         const page = await listAnalyzeTemplateRunsByUser(deps.db, { userId, limit, cursor });
         return {
-          runs: page.runs.map(toDevAnalyzeRunSummary),
+          runs: await Promise.all(page.runs.map((run) => toDevAnalyzeRunSummary(deps.db, run))),
           next_cursor: page.next_cursor,
         };
       },
       async getRun({ userId, runId }) {
         const run = await getAnalyzeTemplateRunForUser(deps.db, { userId, runId });
         if (run === null) throw new DevApiHttpError(404, "analyze run not found");
-        return toDevAnalyzeRun(run, run.template_name);
+        return toDevAnalyzeRun(deps.db, run, run.template_name);
       },
       async createRun({ userId, body }) {
         const templateId = requireNonEmpty(body.template_id, "template_id");
@@ -974,6 +976,8 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
           body,
           snapshotId,
           instructions,
+          playbookPrompt: resolvedPlaybook.prompt,
+          playbookName: resolvedPlaybook.playbook.name,
           sourceCategories,
           bundleIds,
           subjectRefs,
@@ -1018,7 +1022,7 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
         if (!persisted.ok) {
           throw new DevApiHttpError(422, "snapshot seal failed");
         }
-        return toDevAnalyzeRun(persisted.run, template.name);
+        return toDevAnalyzeRun(deps.db, persisted.run, template.name);
       },
       async rerun({ userId, runId }) {
         const original = await getAnalyzeTemplateRunForUser(deps.db, { userId, runId });
@@ -1040,6 +1044,13 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
         const playbook = metadata.playbook_id === null
           ? undefined
           : ANALYZE_PLAYBOOKS.find((candidate) => candidate.playbook_id === metadata.playbook_id);
+        const playbookPrompt = playbook
+          ? resolveAnalyzePlaybookRequest({
+            playbook_id: playbook.playbook_id,
+            instructions: metadata.instructions,
+            source_categories: metadata.source_categories,
+          }).prompt
+          : metadata.instructions;
         const rerunMetadata = serializeAnalyzeRunMetadataV1({
           template_id: template.template_id,
           template_version: template.version,
@@ -1064,6 +1075,8 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
           body,
           snapshotId,
           instructions: metadata.instructions,
+          playbookPrompt,
+          playbookName: playbook?.name ?? null,
           sourceCategories,
           bundleIds,
           subjectRefs,
@@ -1108,7 +1121,7 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
         if (!persisted.ok) {
           throw new DevApiHttpError(422, "snapshot seal failed");
         }
-        return toDevAnalyzeRun(persisted.run, template.name);
+        return toDevAnalyzeRun(deps.db, persisted.run, template.name);
       },
       async shareRunToChat({ userId, runId, body }) {
         const run = await getAnalyzeTemplateRunForUser(deps.db, { userId, runId });
@@ -1610,25 +1623,35 @@ function jsonArrayOrEmpty(value: JsonValue | null | undefined): JsonValue {
 }
 
 async function listAnalyzeRunsForTemplate(
-  db: AnalyzeTemplateRunClientPool,
+  db: AnalyzeTemplateRunClientPool & QueryExecutor,
   templateId: string,
   templateName = "Analyze template",
 ): Promise<DevAnalyzeRunSummary[]> {
   const { listAnalyzeTemplateRunsByTemplate } = await import("../../analyze/src/index.ts");
   const rows = await listAnalyzeTemplateRunsByTemplate(db, templateId);
-  return rows.map((row) => toDevAnalyzeRunSummaryFields(row, templateName));
+  return Promise.all(rows.map((row) => toDevAnalyzeRunSummary(db, row, templateName)));
 }
 
-function toDevAnalyzeRunSummary(row: AnalyzeTemplateRunSummaryRow): DevAnalyzeRunSummary {
-  return toDevAnalyzeRunSummaryFields(row, row.template_name);
+async function toDevAnalyzeRunSummary(
+  db: QueryExecutor,
+  row: AnalyzeTemplateRunSummarySource,
+  templateName = "template_name" in row ? row.template_name : "Analyze template",
+): Promise<DevAnalyzeRunSummary> {
+  return withDurableAnalyzeRerunEligibility(db, toDevAnalyzeRunSummaryFields(row, templateName), row);
 }
 
-function toDevAnalyzeRun(
+async function toDevAnalyzeRun(
+  db: QueryExecutor,
   row: AnalyzeTemplateRunRow | AnalyzeTemplateRunWithTemplateRow,
   templateName = "template_name" in row ? row.template_name : "Analyze template",
-): DevAnalyzeRun {
+): Promise<DevAnalyzeRun> {
+  const summary = await withDurableAnalyzeRerunEligibility(
+    db,
+    toDevAnalyzeRunSummaryFields(row, templateName),
+    row,
+  );
   return {
-    ...toDevAnalyzeRunSummaryFields(row, templateName),
+    ...summary,
     run_metadata: row.run_metadata,
     blocks: row.blocks as ReadonlyArray<Record<string, unknown>>,
   };
@@ -1679,6 +1702,33 @@ function hasAnalyzeRunSummaryRerunFields(
   row: AnalyzeTemplateRunSummarySource,
 ): row is AnalyzeTemplateRunSummaryRow {
   return "can_rerun" in row;
+}
+
+async function withDurableAnalyzeRerunEligibility(
+  db: QueryExecutor,
+  summary: DevAnalyzeRunSummary,
+  row: AnalyzeTemplateRunSummarySource,
+): Promise<DevAnalyzeRunSummary> {
+  if (!summary.can_rerun) return summary;
+  const metadata = hasAnalyzeRunMetadata(row)
+    ? safeParseStoredAnalyzeRunMetadata(row.run_metadata)
+    : null;
+  if (metadata !== null && metadata.template_id !== row.template_id) {
+    return {
+      ...summary,
+      can_rerun: false,
+      rerun_unavailable_reason: "This run's metadata is not rerunnable.",
+    };
+  }
+  const template = await getAnalyzeTemplate(db, metadata?.template_id ?? row.template_id);
+  if (template === null) {
+    return {
+      ...summary,
+      can_rerun: false,
+      rerun_unavailable_reason: "The template used by this run is no longer runnable.",
+    };
+  }
+  return summary;
 }
 
 function parseStoredAnalyzeRunMetadata(value: unknown): AnalyzeRunMetadataV1 {

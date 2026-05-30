@@ -94,7 +94,7 @@ export async function runAnalyzeWorkflow(
         tool_call_ids: [toolCallId],
         as_of: asOf,
         subject_refs: subjectRefs,
-        title: input.template.name,
+        title: input.playbookName ?? input.template.name,
         segments: [
           {
             type: "text",
@@ -638,7 +638,7 @@ function analyzeMemoText(
     ? `Evidence claims:\n${evidence.claims.map((claim, index) => `${index + 1}. ${claim.text_canonical}`).join("\n")}`
     : "Insufficient local evidence: no existing claims, facts, or events were found for the requested subjects.";
   return [
-    input.instructions,
+    input.playbookPrompt,
     `Sources: ${sources}.`,
     `Subjects: ${subjects}.`,
     `Bundles: ${input.bundleIds.join(", ")}.`,
