@@ -9,6 +9,7 @@ import {
   ephemeralRawBlobIdForSource,
   rawBlobIdFromBytes,
 } from "../src/object-store.ts";
+import { withTransaction } from "../src/transaction.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { RecordingObjectStore } from "./recording-object-store.ts";
 
@@ -405,20 +406,43 @@ test("ingestDocumentInTransaction requires the shared transaction boundary befor
     },
   };
   const objectStore = new RecordingObjectStore();
+  const invalidDeps = { db: connectOnlyPool, objectStore } as unknown as Parameters<typeof ingestDocumentInTransaction>[0];
 
   await assert.rejects(
     ingestDocumentInTransaction(
-      { db: connectOnlyPool, objectStore },
+      invalidDeps,
       {
         source: { source_id: SOURCE_ID, license_class: "public" },
         bytes: TWEET_BYTES,
         document: { kind: "social_post" },
       },
     ),
-    /active transaction/,
+    /TransactionContext/,
   );
   assert.equal(queries.length, 0);
   assert.equal(objectStore.putCalls, 0);
+});
+
+test("ingestDocumentInTransaction writes when passed the explicit transaction context", async () => {
+  const { db, queries } = recordingDb();
+  const objectStore = new RecordingObjectStore();
+
+  const result = await withTransaction(db, (tx) =>
+    ingestDocumentInTransaction(
+      { tx, objectStore },
+      {
+        source: { source_id: SOURCE_ID, license_class: "public" },
+        bytes: TWEET_BYTES,
+        document: { kind: "social_post" },
+      },
+    )
+  );
+
+  assert.equal(result.raw_blob_id, TWEET_HASH);
+  assert.match(queries[0]?.text ?? "", /^begin$/i);
+  assert.match(queries[1]?.text ?? "", /pg_advisory_xact_lock/);
+  assert.match(queries.at(-1)?.text ?? "", /^commit$/i);
+  assert.equal(objectStore.putCalls, 1);
 });
 
 test("content_hash is derived from bytes regardless of storage policy (same bytes ⇒ same hash)", async () => {

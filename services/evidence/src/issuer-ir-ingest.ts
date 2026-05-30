@@ -36,6 +36,7 @@ import {
 } from "./source-repo.ts";
 import type { QueryExecutor } from "./types.ts";
 import {
+  type TransactionContext,
   withTransaction,
 } from "./transaction.ts";
 import {
@@ -44,6 +45,11 @@ import {
 
 export type IngestIssuerIrSourceDeps = DiscoverIssuerIrCandidatesConfig & {
   db: QueryExecutor;
+  objectStore: ObjectStore;
+};
+
+type IngestIssuerIrSourceTransactionDeps = DiscoverIssuerIrCandidatesConfig & {
+  tx: TransactionContext;
   objectStore: ObjectStore;
 };
 
@@ -124,13 +130,13 @@ async function persistIssuerIrCandidate(
   candidate: IssuerIrCandidate,
   fetched: { bytes: Uint8Array; contentType: string | null; fetchedAt: string },
 ): Promise<IssuerIrIngestRecord> {
-  return withTransaction(deps.db, (db) =>
-    persistIssuerIrCandidateWithDb({ ...deps, db }, input, candidate, fetched)
+  return withTransaction(deps.db, (tx) =>
+    persistIssuerIrCandidateWithTx(transactionDeps(deps, tx), input, candidate, fetched)
   );
 }
 
-async function persistIssuerIrCandidateWithDb(
-  deps: IngestIssuerIrSourceDeps,
+async function persistIssuerIrCandidateWithTx(
+  deps: IngestIssuerIrSourceTransactionDeps,
   input: IngestIssuerIrSourceInput,
   candidate: IssuerIrCandidate,
   fetched: { bytes: Uint8Array; contentType: string | null; fetchedAt: string },
@@ -139,7 +145,7 @@ async function persistIssuerIrCandidateWithDb(
   const { source, ingest } = await persistIssuerIrDocument(deps, input, candidate, fetched, provider);
 
   const document = ingest.document;
-  const asset = await createIrDocumentAsset(deps.db, {
+  const asset = await createIrDocumentAsset(deps.tx.db, {
     ir_source_id: input.registryEntry.ir_source_id,
     issuer_id: input.registryEntry.issuer_id,
     document_id: document.document_id,
@@ -152,7 +158,7 @@ async function persistIssuerIrCandidateWithDb(
     discovered_at: candidate.publishedAt ?? fetched.fetchedAt,
     fetched_at: fetched.fetchedAt,
   });
-  await createMention(deps.db, {
+  await createMention(deps.tx.db, {
     document_id: document.document_id,
     subject_kind: input.subjectRef.kind,
     subject_id: input.subjectRef.id,
@@ -174,8 +180,8 @@ async function persistIssuerIrCandidateWithDb(
       effective_time: candidate.publishedAt ?? fetched.fetchedAt,
     })
     : emptyIssuerIrExtractionResult();
-  const claims = await persistClaims(deps.db, extracted.claims, input.subjectRef);
-  const events = await persistEvents(deps.db, extracted.events, input.subjectRef, claims.map((claim) => claim.claim_id));
+  const claims = await persistClaims(deps.tx.db, extracted.claims, input.subjectRef);
+  const events = await persistEvents(deps.tx.db, extracted.events, input.subjectRef, claims.map((claim) => claim.claim_id));
   return Object.freeze({
     candidate,
     source,
@@ -189,7 +195,7 @@ async function persistIssuerIrCandidateWithDb(
 }
 
 async function persistIssuerIrDocument(
-  deps: IngestIssuerIrSourceDeps,
+  deps: IngestIssuerIrSourceTransactionDeps,
   input: IngestIssuerIrSourceInput,
   candidate: IssuerIrCandidate,
   fetched: { bytes: Uint8Array; fetchedAt: string },
@@ -227,7 +233,7 @@ async function persistIssuerIrDocument(
   }
 
   const licenseClass = provider === "issuer_ir" ? "public" : "free";
-  const source = await createSource(deps.db, {
+  const source = await createSource(deps.tx.db, {
     provider,
     kind: "research_note",
     canonical_url: candidate.canonicalUrl,
@@ -247,6 +253,20 @@ async function persistIssuerIrDocument(
     },
   });
   return Object.freeze({ source, ingest });
+}
+
+function transactionDeps(
+  deps: IngestIssuerIrSourceDeps,
+  tx: TransactionContext,
+): IngestIssuerIrSourceTransactionDeps {
+  return {
+    objectStore: deps.objectStore,
+    tx,
+    ...(deps.fetch ? { fetch: deps.fetch } : {}),
+    ...(deps.now ? { now: deps.now } : {}),
+    ...(deps.requestTimeoutMs !== undefined ? { requestTimeoutMs: deps.requestTimeoutMs } : {}),
+    ...(deps.maxCandidates !== undefined ? { maxCandidates: deps.maxCandidates } : {}),
+  };
 }
 
 async function persistClaims(

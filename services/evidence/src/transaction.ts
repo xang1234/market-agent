@@ -1,44 +1,40 @@
 import type { QueryExecutor } from "./types.ts";
 
+const TRANSACTION_CONTEXT: unique symbol = Symbol("evidence.transactionContext");
+const TRANSACTION_EXECUTOR: unique symbol = Symbol("evidence.transactionExecutor");
+
 export type TransactionClient = QueryExecutor & {
   release(destroy?: boolean | Error): void;
 };
 
-export type ConnectableQueryExecutor = QueryExecutor & {
+type ConnectableQueryExecutor = QueryExecutor & {
   connect(): Promise<TransactionClient>;
 };
 
 export type TransactionRollbackCleanup = (error: unknown) => Promise<void> | void;
 
+type TransactionContextBrand = {
+  readonly [TRANSACTION_CONTEXT]: true;
+};
+
+type TransactionExecutorBrand = {
+  readonly [TRANSACTION_EXECUTOR]: true;
+};
+
+export type TransactionExecutor = QueryExecutor & TransactionExecutorBrand;
+
+export type TransactionContext = Readonly<{
+  db: TransactionExecutor;
+  onRollback(cleanup: TransactionRollbackCleanup): () => void;
+} & TransactionContextBrand>;
+
 type TransactionScope = {
   rollbackCleanups: TransactionRollbackCleanup[];
 };
 
-const ACTIVE_TRANSACTIONS = new WeakMap<object, TransactionScope>();
-
-export async function withPinnedClient<T>(
-  db: QueryExecutor,
-  action: (db: QueryExecutor) => Promise<T>,
-): Promise<T> {
-  if (!isConnectableQueryExecutor(db)) {
-    return action(db);
-  }
-
-  const client = await db.connect();
-  let destroyClient = false;
-  try {
-    return await action(client);
-  } catch (error) {
-    destroyClient = true;
-    throw error;
-  } finally {
-    client.release(destroyClient);
-  }
-}
-
 export async function withTransaction<T>(
   db: QueryExecutor,
-  action: (tx: QueryExecutor) => Promise<T>,
+  action: (tx: TransactionContext) => Promise<T>,
 ): Promise<T> {
   if (isConnectableQueryExecutor(db)) {
     const client = await db.connect();
@@ -53,14 +49,19 @@ export async function withTransaction<T>(
     }
   }
 
-  if (isActiveTransaction(db)) {
-    return action(db);
-  }
-
   return runTransaction(db, action);
 }
 
-export function isConnectableQueryExecutor(db: QueryExecutor): db is ConnectableQueryExecutor {
+export function assertTransactionContext(
+  tx: TransactionContext | undefined,
+  label: string,
+): asserts tx is TransactionContext {
+  if ((tx as Partial<TransactionContextBrand> | undefined)?.[TRANSACTION_CONTEXT] !== true) {
+    throw new Error(`${label} requires a TransactionContext from withTransaction`);
+  }
+}
+
+function isConnectableQueryExecutor(db: QueryExecutor): db is ConnectableQueryExecutor {
   return (
     typeof (db as Partial<ConnectableQueryExecutor>).connect === "function" &&
     typeof (db as Partial<TransactionClient>).release !== "function" &&
@@ -76,52 +77,16 @@ function hasPgClientConnectionParameters(db: QueryExecutor): boolean {
   );
 }
 
-export function assertActiveTransaction(db: QueryExecutor, label: string): void {
-  if (!isActiveTransaction(db)) {
-    throw new Error(`${label} requires an active transaction; use withTransaction`);
-  }
-}
-
-export function onTransactionRollback(
-  db: QueryExecutor,
-  cleanup: TransactionRollbackCleanup,
-): () => void {
-  const scope = transactionScope(db);
-  if (!scope) {
-    throw new Error("onTransactionRollback requires an active transaction; use withTransaction");
-  }
-  scope.rollbackCleanups.push(cleanup);
-  let registered = true;
-  return () => {
-    if (!registered) return;
-    registered = false;
-    const index = scope.rollbackCleanups.indexOf(cleanup);
-    if (index >= 0) {
-      scope.rollbackCleanups.splice(index, 1);
-    }
-  };
-}
-
-function isActiveTransaction(db: QueryExecutor): boolean {
-  return transactionScope(db) !== null;
-}
-
-function transactionScope(db: QueryExecutor): TransactionScope | null {
-  if (db === null || typeof db !== "object") return null;
-  return ACTIVE_TRANSACTIONS.get(db) ?? null;
-}
-
 async function runTransaction<T>(
   db: QueryExecutor,
-  action: (tx: QueryExecutor) => Promise<T>,
+  action: (tx: TransactionContext) => Promise<T>,
 ): Promise<T> {
   let commitAttempted = false;
   await db.query("begin");
   const scope: TransactionScope = { rollbackCleanups: [] };
-  const key = db as object;
-  ACTIVE_TRANSACTIONS.set(key, scope);
+  const tx = createTransactionContext(db, scope);
   try {
-    const result = await action(db);
+    const result = await action(tx);
     commitAttempted = true;
     await db.query("commit");
     return result;
@@ -131,9 +96,26 @@ async function runTransaction<T>(
       await runRollbackCleanups(scope, error);
     }
     throw error;
-  } finally {
-    ACTIVE_TRANSACTIONS.delete(key);
   }
+}
+
+function createTransactionContext(db: QueryExecutor, scope: TransactionScope): TransactionContext {
+  return Object.freeze({
+    db: db as TransactionExecutor,
+    onRollback(cleanup: TransactionRollbackCleanup): () => void {
+      scope.rollbackCleanups.push(cleanup);
+      let registered = true;
+      return () => {
+        if (!registered) return;
+        registered = false;
+        const index = scope.rollbackCleanups.indexOf(cleanup);
+        if (index >= 0) {
+          scope.rollbackCleanups.splice(index, 1);
+        }
+      };
+    },
+    [TRANSACTION_CONTEXT]: true as const,
+  });
 }
 
 async function rollbackBestEffort(db: QueryExecutor, originalError: unknown): Promise<void> {

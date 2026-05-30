@@ -17,7 +17,7 @@ import {
   type SourceRow,
   type TrustTier,
 } from "./source-repo.ts";
-import { assertActiveTransaction } from "./transaction.ts";
+import type { TransactionContext } from "./transaction.ts";
 import type { QueryExecutor } from "./types.ts";
 import {
   assertIso8601WithOffset,
@@ -77,6 +77,11 @@ type IngestDeps = {
   objectStore: ObjectStore;
 };
 
+type TransactionIngestDeps = {
+  tx: TransactionContext;
+  objectStore: ObjectStore;
+};
+
 type IngestResult = {
   source: SourceRow;
   ingest: IngestDocumentResult;
@@ -108,7 +113,7 @@ export async function ingestPressRelease(
 }
 
 export async function ingestPressReleaseInTransaction(
-  deps: IngestDeps,
+  deps: TransactionIngestDeps,
   input: IngestPressReleaseInput,
 ): Promise<IngestResult> {
   return persistKindedSourceInTransaction(deps, preparePressRelease(input));
@@ -189,7 +194,7 @@ export async function ingestEarningsTranscript(
 }
 
 export async function ingestEarningsTranscriptInTransaction(
-  deps: IngestDeps,
+  deps: TransactionIngestDeps,
   input: IngestEarningsTranscriptInput,
 ): Promise<IngestResult> {
   return persistKindedSourceInTransaction(deps, prepareEarningsTranscript(input));
@@ -324,13 +329,12 @@ async function persistKindedSource(
 }
 
 async function persistKindedSourceInTransaction(
-  deps: IngestDeps,
+  deps: TransactionIngestDeps,
   input: PersistInput,
 ): Promise<IngestResult> {
-  assertActiveTransaction(deps.db, "persistKindedSourceInTransaction");
-  const source = await createKindedSource(deps.db, input);
+  const source = await createKindedSource(deps.tx.db, input);
   const ingest = await ingestDocumentInTransaction(
-    { db: deps.db, objectStore: deps.objectStore },
+    { tx: deps.tx, objectStore: deps.objectStore },
     {
       source: { source_id: source.source_id, license_class: source.license_class },
       bytes: input.bytes,

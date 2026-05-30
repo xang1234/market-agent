@@ -182,13 +182,13 @@ function makeExtractMentionsHandler(deps: EvidenceReaderToolDeps): ReaderToolHan
       const candidates = await deps.extractMentionCandidates(document);
       const linked = await withTransaction(deps.db, async (tx) => {
         const linkedMentions = await linkDocumentMentions({
-          db: tx,
+          db: tx.db,
           document_id: document.document_id,
           candidates,
           resolveMention: deps.resolveMention!,
         });
         await deleteMentionsForDocumentExcept(
-          tx,
+          tx.db,
           document.document_id,
           linkedMentions.mentions.map((mention) => ({
             subject_kind: mention.subject_ref.kind,

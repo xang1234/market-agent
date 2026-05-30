@@ -6,11 +6,20 @@ import {
   ephemeralRawBlobIdForSource,
   rawBlobIdFromBytes,
 } from "./object-store.ts";
-import { assertActiveTransaction, onTransactionRollback, withTransaction } from "./transaction.ts";
+import {
+  assertTransactionContext,
+  type TransactionContext,
+  withTransaction,
+} from "./transaction.ts";
 import type { QueryExecutor } from "./types.ts";
 
 export type IngestDocumentDeps = {
   db: QueryExecutor;
+  objectStore: ObjectStore;
+};
+
+export type IngestDocumentTransactionDeps = {
+  tx: TransactionContext;
   objectStore: ObjectStore;
 };
 
@@ -73,15 +82,16 @@ export async function ingestDocument(
 }
 
 export async function ingestDocumentInTransaction(
-  deps: IngestDocumentDeps,
+  deps: IngestDocumentTransactionDeps,
   input: IngestDocumentInput,
 ): Promise<IngestDocumentResult> {
+  assertTransactionContext(deps.tx, "ingestDocumentInTransaction");
+  const db = deps.tx.db;
   const policy = decideStoragePolicy(input.source.license_class);
   const content_hash = contentHashFromBytes(input.bytes);
-  assertActiveTransaction(deps.db, "ingestDocumentInTransaction");
   if (!policy.store_blob) {
     const raw_blob_id = ephemeralRawBlobIdForSource(input.source.source_id);
-    const result = await createDocument(deps.db, {
+    const result = await createDocument(db, {
       ...input.document,
       source_id: input.source.source_id,
       content_hash,
@@ -96,12 +106,12 @@ export async function ingestDocumentInTransaction(
   }
 
   const raw_blob_id = rawBlobIdFromBytes(input.bytes);
-  await deps.db.query("select pg_advisory_xact_lock(hashtext($1))", [raw_blob_id]);
-  await lockSourceForBlobIngest(deps.db, input.source.source_id);
+  await db.query("select pg_advisory_xact_lock(hashtext($1))", [raw_blob_id]);
+  await lockSourceForBlobIngest(db, input.source.source_id);
   const putResult = await deps.objectStore.put(input.bytes);
   let unregisterRollbackCleanup = () => {};
   if (putResult.status === "created") {
-    unregisterRollbackCleanup = onTransactionRollback(deps.db, (error) =>
+    unregisterRollbackCleanup = deps.tx.onRollback((error) =>
       deleteCreatedBlobBestEffort(deps.objectStore, raw_blob_id, error)
     );
   }
@@ -109,7 +119,7 @@ export async function ingestDocumentInTransaction(
     if (putResult.blob.raw_blob_id !== raw_blob_id) {
       throw new Error("ingestDocument: object store returned a blob id that does not match the input bytes");
     }
-    const result = await createDocument(deps.db, {
+    const result = await createDocument(db, {
       ...input.document,
       source_id: input.source.source_id,
       content_hash,
@@ -151,8 +161,8 @@ async function ingestStoredDocumentWithBlobLock(
   deps: IngestDocumentDeps,
   input: IngestDocumentInput,
 ): Promise<IngestDocumentResult> {
-  return withTransaction(deps.db, (db) =>
-    ingestDocumentInTransaction({ ...deps, db }, input)
+  return withTransaction(deps.db, (tx) =>
+    ingestDocumentInTransaction({ objectStore: deps.objectStore, tx }, input)
   );
 }
 
