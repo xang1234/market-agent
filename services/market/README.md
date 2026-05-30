@@ -34,6 +34,25 @@ returns unavailable for quotes and intraday intervals rather than pretending to
 be realtime market data. The dev server routes Stooq only through the daily-bars
 fallback path so quote and intraday requests never use it.
 
+Rate-limit expectation: Stooq fallback requests are public EOD CSV downloads,
+not a paid realtime feed. Keep `STOOQ_MARKET_ENABLED` opt-in, avoid live Stooq
+checks in CI, and rely on the fixture smoke test below for repeatable fallback
+coverage.
+
+### Verification
+
+Run the fixture smoke from the repository root to prove a paid daily-bars miss
+can fall through to Stooq `1d` EOD coverage without using Stooq for realtime
+quotes:
+
+```bash
+node --experimental-strip-types --test scripts/open-datasource-coverage.test.ts
+```
+
+Run `cd services/market && npm test` for the market slice. Stooq provenance is
+`stooq_market`, and Stooq EOD bars must stay labeled as free EOD source data,
+not realtime quote data.
+
 ## Provider fallback plan
 
 Use `createFallbackMarketDataAdapter` when a deployment has more than one

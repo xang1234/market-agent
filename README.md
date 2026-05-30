@@ -206,11 +206,40 @@ resolver validate unknown US listed tickers from Nasdaq Trader symbol
 directories; `OPENFIGI_REFERENCE_ENABLED` can add FIGI/ISIN security metadata;
 and `GLEIF_REFERENCE_ENABLED` can add LEI/legal-entity metadata when the legal
 name match is unambiguous. OpenFIGI can also use `OPENFIGI_API_KEY` to raise
-rate limits. These sources only fill missing identity fields and do not
-overwrite existing SEC/Polygon/local values.
+rate limits. Treat the free public endpoints as quota-sensitive external
+references: keep the gates off unless the operator intentionally wants fallback
+coverage, and prefer fixture tests over live checks for CI. These sources only
+fill missing identity fields and do not overwrite existing SEC/Polygon/local
+values.
 `STOOQ_MARKET_ENABLED` gates the Stooq free market fallback for eligible `1d`
 EOD historical bars when paid coverage is missing or unavailable. It is not a
-quote or intraday source.
+quote or intraday source, and live Stooq requests should be treated as public
+rate-limited EOD downloads rather than a realtime market feed.
+
+### Open datasource coverage verification
+
+Use the fixture smoke test to verify the whole free-coverage path without live
+network calls:
+
+```bash
+node --experimental-strip-types --test scripts/open-datasource-coverage.test.ts
+```
+
+That smoke covers a paid reference miss falling through to free reference
+enrichment, then a paid market bars miss falling through to Stooq EOD bars. Run
+the service slices for broader coverage:
+
+```bash
+cd services/resolver && npm test
+cd services/market && npm test
+```
+
+Operator disclosure: Nasdaq Trader, OpenFIGI, and GLEIF are free reference enrichment
+sources used to fill missing identity fields only; they are not stronger than
+existing SEC/Polygon/local identity. OpenFIGI may require
+`OPENFIGI_API_KEY` for higher live rate limits. Stooq EOD bars are not realtime
+quotes, are not intraday bars, and should be labeled as free EOD market data
+when surfaced to users or tools.
 
 When `up` completes, the app is at **<http://localhost:5173>**.
 
