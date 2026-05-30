@@ -88,6 +88,9 @@ export async function searchEvidenceDocuments(
        from documents d
        join sources s
          on s.source_id = d.source_id
+       left join lateral (
+         select lower(regexp_replace(substring(s.canonical_url from '^[a-z][a-z0-9+.-]*://([^/?#]+)'), ':[0-9]+$', '')) as canonical_host
+       ) host on true
       where d.deleted_at is null
         and (
           $1::text is null
@@ -108,7 +111,11 @@ export async function searchEvidenceDocuments(
           )
         )
         and ($3::text is null or s.canonical_url = $3::text)
-        and ($4::text is null or s.canonical_url ilike $4::text)
+        and (
+          $4::text is null
+          or host.canonical_host = $4::text
+          or host.canonical_host like ('%.' || $4::text)
+        )
         and ($5::text is null or d.kind = $5::document_kind)
         and ($6::timestamptz is null or d.published_at >= $6::timestamptz)
         and ($7::timestamptz is null or d.published_at <= $7::timestamptz)
@@ -120,7 +127,7 @@ export async function searchEvidenceDocuments(
       normalized.query,
       JSON.stringify(normalized.subjectRefs),
       normalized.canonicalUrl,
-      normalized.domainPattern,
+      normalized.domainFilter,
       normalized.kind,
       normalized.publishedFrom,
       normalized.publishedTo,
@@ -167,7 +174,7 @@ function normalizeSearchInput(input: EvidenceDocumentResearchInput): Required<{
   query: string | null;
   subjectRefs: ReadonlyArray<SubjectRef>;
   canonicalUrl: string | null;
-  domainPattern: string | null;
+  domainFilter: string | null;
   kind: DocumentKind | null;
   publishedFrom: string | null;
   publishedTo: string | null;
@@ -219,7 +226,7 @@ function normalizeSearchInput(input: EvidenceDocumentResearchInput): Required<{
     query: input.query ?? null,
     subjectRefs: Object.freeze(subjectRefs.map((ref) => Object.freeze({ kind: ref.kind, id: ref.id }))),
     canonicalUrl: input.canonicalUrl ?? null,
-    domainPattern: input.domain === undefined ? null : `%${input.domain.trim().toLowerCase()}%`,
+    domainFilter: normalizeDomainFilter(input.domain),
     kind: input.kind ?? null,
     publishedFrom: input.publishedFrom === undefined ? null : new Date(input.publishedFrom).toISOString(),
     publishedTo: input.publishedTo === undefined ? null : new Date(input.publishedTo).toISOString(),
@@ -250,6 +257,15 @@ function userIdOrNull(value: string | null | undefined): string | null {
   if (value === null || value === undefined) return null;
   assertUuidV4(value, "user_id");
   return value;
+}
+
+function normalizeDomainFilter(value: string | undefined): string | null {
+  if (value === undefined) return null;
+  const domain = value.trim().toLowerCase().replace(/^www\./, "");
+  if (!/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/.test(domain) || !domain.includes(".")) {
+    throw new Error("domain: must be a host name such as reuters.com");
+  }
+  return domain;
 }
 
 function isoString(value: Date | string): string {

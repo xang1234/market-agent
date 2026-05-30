@@ -19,13 +19,23 @@
 // without renegotiating the wire shape.
 
 import {
-  READER_EXTRACTION_TOOL_NAMES,
+  READER_TOOL_NAMES,
   ReaderToolError,
-  type ReaderExtractionToolName,
+  type ReaderToolName,
   type ReaderToolHandler,
   type ReaderToolHandlerMap,
 } from "../../../tools/src/reader-tool-dispatcher.ts";
-import { getDocument, type DocumentRow } from "../document-repo.ts";
+import type { JsonObject } from "../../../tools/src/registry.ts";
+import {
+  fetchEvidenceDocumentMetadata,
+  searchEvidenceDocuments,
+} from "../document-research.ts";
+import {
+  DOCUMENT_KINDS,
+  getDocument,
+  type DocumentKind,
+  type DocumentRow,
+} from "../document-repo.ts";
 import {
   deleteMentionsForDocumentExcept,
   listMentionsForDocument,
@@ -57,15 +67,72 @@ export function createEvidenceReaderToolHandlers(
 ): Required<ReaderToolHandlerMap> {
   // `Required<>` so callers (and tests) can index by tool name without
   // an undefined check — the dispatcher already requires every entry.
-  const handlers = {} as { [K in ReaderExtractionToolName]: ReaderToolHandler };
-  for (const name of READER_EXTRACTION_TOOL_NAMES) {
-    handlers[name] = name === "extract_mentions"
-      ? makeExtractMentionsHandler(deps)
-      : name === "extract_candidate_facts"
-        ? makeExtractCandidateFactsHandler(deps)
-      : makeStubHandler(deps);
+  const handlers = {} as { [K in ReaderToolName]: ReaderToolHandler<K> };
+  for (const name of READER_TOOL_NAMES) {
+    if (name === "search_raw_documents") {
+      handlers[name] = makeSearchRawDocumentsHandler(deps);
+    } else if (name === "fetch_raw_document") {
+      handlers[name] = makeFetchRawDocumentHandler(deps);
+    } else if (name === "extract_mentions") {
+      handlers[name] = makeExtractMentionsHandler(deps);
+    } else if (name === "extract_candidate_facts") {
+      handlers[name] = makeExtractCandidateFactsHandler(deps);
+    } else {
+      handlers[name] = makeStubHandler(deps);
+    }
   }
   return handlers;
+}
+
+function makeSearchRawDocumentsHandler(deps: EvidenceReaderToolDeps): ReaderToolHandler<"search_raw_documents"> {
+  return async (input) => {
+    let result;
+    try {
+      result = await searchEvidenceDocuments(deps.db, {
+        query: input.query,
+        subjectRefs: input.subject_refs?.map((ref) => ({ kind: ref.kind, id: ref.id })),
+        canonicalUrl: input.canonical_url ?? input.url,
+        domain: input.domain,
+        kind: parseDocumentKind(input.kind),
+        publishedFrom: input.range?.start,
+        publishedTo: input.range?.end,
+        limit: input.limit,
+      });
+    } catch (error) {
+      if (isDocumentResearchInputError(error)) {
+        throw new ReaderToolError("INVALID_ARGUMENT", errorMessage(error));
+      }
+      throw error;
+    }
+    return {
+      documents: result.documents.map(jsonRecord),
+    };
+  };
+}
+
+function makeFetchRawDocumentHandler(deps: EvidenceReaderToolDeps): ReaderToolHandler<"fetch_raw_document"> {
+  return async (input) => {
+    let document;
+    try {
+      document = await fetchEvidenceDocumentMetadata(deps.db, {
+        documentId: input.document_id,
+      });
+    } catch (error) {
+      if (isDocumentResearchInputError(error)) {
+        throw new ReaderToolError("INVALID_ARGUMENT", errorMessage(error));
+      }
+      throw error;
+    }
+    if (!document) {
+      throw new ReaderToolError(
+        "NOT_FOUND",
+        `document_id "${input.document_id}" not found`,
+      );
+    }
+    return {
+      document: jsonRecord(document),
+    };
+  };
 }
 
 function makeStubHandler(deps: EvidenceReaderToolDeps): ReaderToolHandler {
@@ -227,6 +294,21 @@ function skippedMentionToToolItem(skipped: SkippedMention) {
   };
 }
 
+function jsonRecord(value: Record<string, unknown>): JsonObject {
+  return Object.freeze({ ...value }) as JsonObject;
+}
+
+function parseDocumentKind(value: string | undefined): DocumentKind | undefined {
+  if (value === undefined) return undefined;
+  if ((DOCUMENT_KINDS as ReadonlyArray<string>).includes(value)) {
+    return value as DocumentKind;
+  }
+  throw new ReaderToolError(
+    "INVALID_ARGUMENT",
+    `kind: must be one of ${DOCUMENT_KINDS.join(", ")}`,
+  );
+}
+
 function documentDefinitionAsOf(document: DocumentRow): string | undefined {
   if (!document.published_at) return undefined;
   const publishedAt: unknown = document.published_at;
@@ -238,4 +320,9 @@ function documentDefinitionAsOf(document: DocumentRow): string | undefined {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isDocumentResearchInputError(error: unknown): boolean {
+  return error instanceof Error &&
+    /^(searchEvidenceDocuments|query|canonical_url|domain|kind|publishedFrom|publishedTo|limit|subjectRefs|document_id|user_id):/.test(error.message);
 }

@@ -75,12 +75,13 @@ GDELT is treated as a discovery source, not a truth source. The seeded
 the GDELT DOC 2.0 API (`https://api.gdeltproject.org/api/v2/doc/doc`) as
 tertiary `article` evidence with `license_class='ephemeral'`.
 
-The MVP storage policy is metadata/snippet-only. Full article bodies are not
-stored by default; ingestion should retain article URLs, titles, timestamps,
-domains, languages, source-country metadata, snippets when available, and
-provider metadata/hashes. If a later integration wants to persist publisher
-article text, it must first make an explicit source-specific license decision
-and change the source/license policy intentionally.
+The MVP storage policy is metadata-only. Full article bodies are not stored by
+default; ingestion retains article URLs, titles, timestamps, domains, languages,
+and provider metadata hashes in structured source/document rows. GDELT snippets
+may be passed transiently to reader tools for extraction, but they are not
+retained as raw blobs. If a later integration wants to persist snippets or
+publisher article text, it must first make an explicit source-specific license
+decision and change the source/license policy intentionally.
 
 GDELT-discovered documents are exposed to research surfaces as public news
 discovery metadata, not canonical facts. Document search/fetch helpers return

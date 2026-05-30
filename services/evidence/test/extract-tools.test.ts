@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   READER_EXTRACTION_TOOL_NAMES,
+  READER_TOOL_NAMES,
   ReaderToolError,
   createReaderToolDispatcher,
 } from "../../tools/src/reader-tool-dispatcher.ts";
@@ -53,6 +54,35 @@ function recordingDb(opts: { documentExists: boolean }) {
   return { db, queries };
 }
 
+function documentResearchDb() {
+  const queries: Array<{ text: string; values?: unknown[] }> = [];
+  const db: QueryExecutor = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      queries.push({ text, values });
+      return {
+        rows: [{
+          document_id: SAMPLE_DOC_UUID,
+          source_id: SAMPLE_SOURCE_UUID,
+          kind: "article",
+          title: "Acme Robotics wins order",
+          author: "reuters.com",
+          published_at: new Date("2026-05-29T12:30:00.000Z"),
+          canonical_url: "https://reuters.com/markets/acme-robotics",
+          provider: "gdelt_article_discovery",
+          trust_tier: "tertiary",
+          license_class: "ephemeral",
+          raw_blob_id: `ephemeral:${SAMPLE_SOURCE_UUID}`,
+        }] as R[],
+        command: "SELECT",
+        rowCount: 1,
+        oid: 0,
+        fields: [],
+      };
+    },
+  };
+  return { db, queries };
+}
+
 // ---- factory shape ---------------------------------------------------------
 
 test("createEvidenceReaderToolHandlers returns one handler per dispatcher-wired tool name", () => {
@@ -62,7 +92,7 @@ test("createEvidenceReaderToolHandlers returns one handler per dispatcher-wired 
   const { db } = recordingDb({ documentExists: true });
   const handlers = createEvidenceReaderToolHandlers({ db });
   const handlerNames = Object.keys(handlers).sort();
-  assert.deepEqual(handlerNames, [...READER_EXTRACTION_TOOL_NAMES].sort());
+  assert.deepEqual(handlerNames, [...READER_TOOL_NAMES].sort());
 });
 
 test("createEvidenceReaderToolHandlers slots into createReaderToolDispatcher without complaint", () => {
@@ -75,8 +105,51 @@ test("createEvidenceReaderToolHandlers slots into createReaderToolDispatcher wit
   });
   assert.deepEqual(
     [...dispatcher.registeredToolNames()].sort(),
-    [...READER_EXTRACTION_TOOL_NAMES].sort(),
+    [...READER_TOOL_NAMES].sort(),
   );
+});
+
+test("search_raw_documents handler returns metadata-only GDELT document results", async () => {
+  const { db, queries } = documentResearchDb();
+  const handlers = createEvidenceReaderToolHandlers({ db });
+
+  const out = await handlers.search_raw_documents({
+    query: "Acme",
+    subject_refs: [{ kind: "issuer", id: SAMPLE_DOC_UUID }],
+    range: { start: "2026-05-01T00:00:00Z", end: "2026-05-30T00:00:00Z" },
+    domain: "reuters.com",
+    kind: "article",
+    limit: 5,
+  });
+
+  assert.equal(out.documents[0]?.document_id, SAMPLE_DOC_UUID);
+  assert.equal(out.documents[0]?.storage_policy, "metadata_only");
+  assert.equal(out.documents[0]?.raw_available, false);
+  assert.doesNotMatch(JSON.stringify(out), /raw_blob_id|raw_text|FULL ARTICLE BODY/i);
+  assert.deepEqual(queries[0]!.values, [
+    "Acme",
+    JSON.stringify([{ kind: "issuer", id: SAMPLE_DOC_UUID }]),
+    null,
+    "reuters.com",
+    "article",
+    "2026-05-01T00:00:00.000Z",
+    "2026-05-30T00:00:00.000Z",
+    null,
+    5,
+  ]);
+});
+
+test("fetch_raw_document handler returns document metadata without raw handles for ephemeral documents", async () => {
+  const { db, queries } = documentResearchDb();
+  const handlers = createEvidenceReaderToolHandlers({ db });
+
+  const out = await handlers.fetch_raw_document({ document_id: SAMPLE_DOC_UUID });
+
+  assert.equal(out.document.document_id, SAMPLE_DOC_UUID);
+  assert.equal(out.document.storage_policy, "metadata_only");
+  assert.equal("raw_blob_url" in out, false);
+  assert.doesNotMatch(JSON.stringify(out), /raw_blob_id|raw_text|FULL ARTICLE BODY/i);
+  assert.deepEqual(queries[0]!.values, [SAMPLE_DOC_UUID, null]);
 });
 
 // ---- per-handler behaviour: existing document ------------------------------

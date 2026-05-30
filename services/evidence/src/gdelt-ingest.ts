@@ -13,6 +13,7 @@ import {
 } from "./gdelt-source.ts";
 import { ingestDocument, type IngestDocumentResult } from "./ingest.ts";
 import type { DocumentRow } from "./document-repo.ts";
+import { createMention } from "./mention-repo.ts";
 import type { ObjectStore } from "./object-store.ts";
 import type {
   GdeltArticleDiscovery,
@@ -181,6 +182,11 @@ export async function ingestGdeltArticleDiscoveries(
       article,
       subject: input.subject,
       query,
+      document: persisted.document,
+    });
+    await createDiscoveryMention(deps.db, {
+      article,
+      subject: input.subject,
       document: persisted.document,
     });
     articles.push(Object.freeze({ ...persisted, readerToolRuns }));
@@ -447,6 +453,39 @@ async function routeReaderTools(
     }
   }
   return Object.freeze(runs);
+}
+
+async function createDiscoveryMention(
+  db: QueryExecutor,
+  input: {
+    article: GdeltArticleDiscovery;
+    subject: GdeltSubject;
+    document: DocumentRow;
+  },
+): Promise<void> {
+  await createMention(db, {
+    document_id: input.document.document_id,
+    subject_kind: input.subject.subjectRef.kind,
+    subject_id: input.subject.subjectRef.id,
+    prominence: discoveryMentionProminence(input.article, input.subject),
+    mention_count: 1,
+    confidence: 0.6,
+  });
+}
+
+function discoveryMentionProminence(
+  article: GdeltArticleDiscovery,
+  subject: GdeltSubject,
+): "headline" | "lead" | "incidental" {
+  const titleText = normalizeSearchText(article.title);
+  for (const phrase of subjectPhrases(subject)) {
+    if (containsNormalizedPhrase(titleText, phrase)) return "headline";
+  }
+  const snippetText = normalizeSearchText(article.snippet ?? "");
+  for (const phrase of subjectPhrases(subject)) {
+    if (containsNormalizedPhrase(snippetText, phrase)) return "lead";
+  }
+  return "incidental";
 }
 
 function buildReaderSchemaHint(input: {

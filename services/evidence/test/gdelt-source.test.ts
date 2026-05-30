@@ -102,8 +102,9 @@ test("environment example documents GDELT discovery enablement, storage policy, 
     assert.match(envExample, new RegExp(`^${name}=`, "m"), `${name} must be present in .env.dev.example`);
   }
 
-  assert.match(envExample, /metadata\/snippet-only/i);
-  assert.match(envExample, /full article bodies are not stored/i);
+  assert.match(envExample, /metadata-only/i);
+  assert.match(envExample, /snippets may be passed transiently/i);
+  assert.match(envExample, /full article bodies\s+# are not stored/i);
 });
 
 test("evidence README documents GDELT as discovery metadata, not a truth source", () => {
@@ -111,8 +112,9 @@ test("evidence README documents GDELT as discovery metadata, not a truth source"
 
   assert.match(readme, /GDELT Public News Discovery/);
   assert.match(readme, /discovery source, not a truth source/i);
-  assert.match(readme, /metadata\/snippet-only/i);
-  assert.match(readme, /full article bodies are not\s+stored by default/i);
+  assert.match(readme, /metadata-only/i);
+  assert.match(readme, /snippets\s+may be passed transiently/i);
+  assert.match(readme, /full article bodies are not stored by\s+default/i);
   assert.match(readme, /public news\s+discovery metadata, not canonical facts/i);
   assert.match(readme, /test\/document-research\.test\.ts/);
 });

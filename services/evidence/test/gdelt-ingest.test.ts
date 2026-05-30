@@ -109,6 +109,25 @@ function recordingDb(existing: ReadonlyArray<GdeltArticleDiscovery> = []) {
         };
       }
 
+      if (/insert into mentions/i.test(text)) {
+        return {
+          rows: [{
+            mention_id: "44444444-4444-4444-a444-444444444444",
+            document_id: values?.[0],
+            subject_kind: values?.[1],
+            subject_id: values?.[2],
+            prominence: values?.[3],
+            mention_count: values?.[4],
+            confidence: values?.[5],
+            created_at: new Date("2026-05-30T01:00:00.000Z"),
+          }] as R[],
+          command: "INSERT",
+          rowCount: 1,
+          oid: 0,
+          fields: [],
+        };
+      }
+
       if (/delete from sources/i.test(text)) {
         return {
           rows: [] as R[],
@@ -316,6 +335,16 @@ test("ingestGdeltArticleDiscoveries stores metadata-only GDELT articles and rout
   assert.equal(documentInsert?.values?.[8], "English");
   assert.equal(String(documentInsert?.values?.[10]), `ephemeral:${SOURCE_ID}`);
   assert.equal(objectStore.putCalls, 0, "ephemeral GDELT metadata must not persist a raw blob");
+
+  const mentionInsert = queries.find((query) => /insert into mentions/i.test(query.text));
+  assert.deepEqual(mentionInsert?.values, [
+    DOCUMENT_ID,
+    "issuer",
+    SUBJECT_ID,
+    "headline",
+    1,
+    0.6,
+  ]);
 
   assert.deepEqual(
     routed.map((call) => call.toolName),

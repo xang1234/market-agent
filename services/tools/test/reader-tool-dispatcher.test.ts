@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  READER_DOCUMENT_TOOL_NAMES,
   READER_EXTRACTION_TOOL_NAMES,
+  READER_TOOL_NAMES,
   READER_TOOL_ERROR_CODES,
   ReaderToolError,
   createReaderToolDispatcher,
@@ -25,6 +27,8 @@ function fullHandlerSet(
   overrides: Partial<ReaderToolHandlerMap> = {},
 ): ReaderToolHandlerMap {
   return {
+    search_raw_documents: async () => ({ documents: [] }),
+    fetch_raw_document: async () => ({ document: { document_id: SAMPLE_DOC_UUID } }),
     extract_mentions: emptyHandler(),
     extract_claims: emptyHandler(),
     extract_candidate_facts: emptyHandler(),
@@ -35,6 +39,14 @@ function fullHandlerSet(
 }
 
 // ---- contract-pinning constants ---------------------------------------------
+
+test("READER_DOCUMENT_TOOL_NAMES wires the existing raw document tools", () => {
+  assert.deepEqual(
+    [...READER_DOCUMENT_TOOL_NAMES],
+    ["search_raw_documents", "fetch_raw_document"],
+  );
+  assert.equal(Object.isFrozen(READER_DOCUMENT_TOOL_NAMES), true);
+});
 
 test("READER_EXTRACTION_TOOL_NAMES is the bead's exact tool list, frozen", () => {
   // Pinned because the dispatcher's whole purpose is wiring THESE five
@@ -51,6 +63,22 @@ test("READER_EXTRACTION_TOOL_NAMES is the bead's exact tool list, frozen", () =>
     ],
   );
   assert.equal(Object.isFrozen(READER_EXTRACTION_TOOL_NAMES), true);
+});
+
+test("READER_TOOL_NAMES includes document retrieval before extraction tools", () => {
+  assert.deepEqual(
+    [...READER_TOOL_NAMES],
+    [
+      "search_raw_documents",
+      "fetch_raw_document",
+      "extract_mentions",
+      "extract_claims",
+      "extract_candidate_facts",
+      "extract_events",
+      "classify_sentiment",
+    ],
+  );
+  assert.equal(Object.isFrozen(READER_TOOL_NAMES), true);
 });
 
 test("READER_TOOL_ERROR_CODES matches the registry's per-tool error_codes contract, frozen", () => {
@@ -73,7 +101,7 @@ test("READER_TOOL_ERROR_CODES matches the registry's per-tool error_codes contra
 
 // ---- construction-time wiring checks ---------------------------------------
 
-test("createReaderToolDispatcher requires a handler for every reader extract tool", () => {
+test("createReaderToolDispatcher requires a handler for every reader tool", () => {
   // Missing-handler is a service-startup error, not a per-request
   // error. A request-time fallback would let a misconfigured
   // deployment silently fail-open for the un-wired tool.
@@ -86,7 +114,7 @@ test("createReaderToolDispatcher requires a handler for every reader extract too
           extract_mentions: emptyHandler(),
         },
       }),
-    /missing handler.*extract_claims/,
+    /missing handler.*search_raw_documents/,
   );
 });
 
@@ -133,7 +161,7 @@ test("createReaderToolDispatcher.registeredToolNames returns the wired tools, fr
   });
   assert.deepEqual(
     [...dispatcher.registeredToolNames()],
-    [...READER_EXTRACTION_TOOL_NAMES],
+    [...READER_TOOL_NAMES],
   );
   assert.equal(Object.isFrozen(dispatcher.registeredToolNames()), true);
 });
@@ -230,15 +258,19 @@ test("dispatch rejects unknown tool names", async () => {
   }
 });
 
-test("dispatch refuses to invoke reader-audience tools outside the bead's wired set", async () => {
-  // search_raw_documents and fetch_raw_document are reader-audience
-  // tools but NOT this bead's responsibility (different shapes,
-  // different handlers). The dispatcher must refuse them rather than
-  // silently fall through to "no handler".
+test("dispatch invokes fetch_raw_document through the reader document handler", async () => {
   const registry = loadToolRegistry();
+  let receivedInput: unknown = null;
   const dispatcher = createReaderToolDispatcher({
     registry,
-    handlers: fullHandlerSet(),
+    handlers: fullHandlerSet({
+      fetch_raw_document: async (input) => {
+        receivedInput = input;
+        return {
+          document: { document_id: input.document_id, storage_policy: "metadata_only" },
+        };
+      },
+    }),
   });
 
   const result = await dispatcher.dispatch({
@@ -248,13 +280,61 @@ test("dispatch refuses to invoke reader-audience tools outside the bead's wired 
     arguments: { document_id: SAMPLE_DOC_UUID },
   });
 
-  assert.equal(result.ok, false);
-  if (result.ok === false && result.kind === "authorization") {
-    assert.equal(result.authorization.ok, false);
-    if (result.authorization.ok === false) {
-      assert.equal(result.authorization.reason, "unknown_tool");
-    }
+  assert.equal(result.ok, true);
+  if (result.ok === true) {
+    assert.equal(result.tool_name, "fetch_raw_document");
+    assert.deepEqual(result.result, {
+      document: { document_id: SAMPLE_DOC_UUID, storage_policy: "metadata_only" },
+    });
   }
+  assert.deepEqual(receivedInput, { document_id: SAMPLE_DOC_UUID });
+});
+
+test("dispatch invokes search_raw_documents with parsed metadata filters", async () => {
+  const registry = loadToolRegistry();
+  let receivedInput: unknown = null;
+  const dispatcher = createReaderToolDispatcher({
+    registry,
+    handlers: fullHandlerSet({
+      search_raw_documents: async (input) => {
+        receivedInput = input;
+        return {
+          documents: [{ document_id: SAMPLE_DOC_UUID, provider: "gdelt_article_discovery" }],
+        };
+      },
+    }),
+  });
+
+  const result = await dispatcher.dispatch({
+    bundle_id: "document_research",
+    audience: "reader",
+    tool_name: "search_raw_documents",
+    arguments: {
+      query: "Acme",
+      subject_refs: [{ kind: "issuer", id: SAMPLE_DOC_UUID }],
+      range: { start: "2026-05-01T00:00:00Z", end: "2026-05-30T00:00:00Z" },
+      domain: "reuters.com",
+      kind: "article",
+      limit: 5,
+      ignored: "not forwarded",
+    },
+  });
+
+  assert.equal(result.ok, true);
+  if (result.ok === true) {
+    assert.equal(result.tool_name, "search_raw_documents");
+    assert.deepEqual(result.result, {
+      documents: [{ document_id: SAMPLE_DOC_UUID, provider: "gdelt_article_discovery" }],
+    });
+  }
+  assert.deepEqual(receivedInput, {
+    query: "Acme",
+    subject_refs: [{ kind: "issuer", id: SAMPLE_DOC_UUID }],
+    range: { start: "2026-05-01T00:00:00Z", end: "2026-05-30T00:00:00Z" },
+    domain: "reuters.com",
+    kind: "article",
+    limit: 5,
+  });
 });
 
 // ---- input validation (INVALID_ARGUMENT path) ------------------------------

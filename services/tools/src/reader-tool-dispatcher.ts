@@ -1,25 +1,21 @@
 // Reader-audience tool dispatcher (fra-wmx).
 //
-// Wires the bead's five reader-audience extraction tools — extract_*,
-// classify_sentiment — to a runtime that:
+// Wires reader-audience document retrieval and extraction tools to a runtime that:
 //   1. Static-audits the registry at construction (I4 frontier in code).
 //   2. Authorizes every dispatch against the registry (audience match,
 //      tool-in-bundle, raw-payload reject for analyst).
-//   3. Validates the input shape (document_id is a UUID) before invoking
-//      the handler.
+//   3. Validates the per-tool input shape before invoking the handler.
 //   4. Narrows handler-thrown ReaderToolErrors into the registry's
 //      declared error_codes; lets unexpected throws (programmer bugs,
 //      handler-output-shape failures) bubble unmodified so observability
 //      records them as bugs, not as domain errors with a misleading
 //      client-blameable error_code.
 //
-// Input contract narrowing: the registry's input_json_schema declares
-// `additionalProperties: true` for all five tools, but parseReaderToolInput
-// forwards only the contract's named fields (document_id, schema_hint).
-// Extras are dropped silently — handlers don't see them today. Downstream
-// beads (fra-6j0.3 / fra-6j0.4) that want extras (model_hint, temperature,
-// etc.) must extend ReaderToolInput here AND add the field to handler
-// signatures, both of which require an explicit edit here.
+// Input contract narrowing: parseReaderToolInput forwards only the contract's
+// named fields for each tool. Extras are dropped silently — handlers don't see
+// them today. Downstream beads that want extras must extend the input type here
+// and add the field to handler signatures, both of which require an explicit
+// edit here.
 //
 // Handlers themselves live in services/evidence/src/reader/* — the
 // dispatcher is intentionally agnostic to where extraction happens.
@@ -36,8 +32,16 @@ import type {
   ToolRegistry,
 } from "./registry.ts";
 
-// The five tools whose handlers fra-wmx wires. Pinned as a frozen
-// tuple so adding a sixth requires an explicit edit + handler.
+export const READER_DOCUMENT_TOOL_NAMES = Object.freeze([
+  "search_raw_documents",
+  "fetch_raw_document",
+] as const);
+
+export type ReaderDocumentToolName =
+  (typeof READER_DOCUMENT_TOOL_NAMES)[number];
+
+// The extraction tools whose handlers fra-wmx wires. Pinned as a frozen
+// tuple so adding/removing tools requires an explicit edit + handler.
 export const READER_EXTRACTION_TOOL_NAMES = Object.freeze([
   "extract_mentions",
   "extract_claims",
@@ -49,8 +53,15 @@ export const READER_EXTRACTION_TOOL_NAMES = Object.freeze([
 export type ReaderExtractionToolName =
   (typeof READER_EXTRACTION_TOOL_NAMES)[number];
 
+export const READER_TOOL_NAMES = Object.freeze([
+  ...READER_DOCUMENT_TOOL_NAMES,
+  ...READER_EXTRACTION_TOOL_NAMES,
+] as const);
+
+export type ReaderToolName = (typeof READER_TOOL_NAMES)[number];
+
 // Per-tool error_codes from finance_research_tool_registry.json — every
-// reader extract tool declares the same set, so the dispatcher narrows
+// wired reader tool declares the same set, so the dispatcher narrows
 // handler errors into this single union.
 export const READER_TOOL_ERROR_CODES = Object.freeze([
   "INVALID_ARGUMENT",
@@ -81,24 +92,77 @@ export class ReaderToolError extends Error {
   }
 }
 
-// Common shape across all five extract*/classify_sentiment tools per
-// the registry's input/output JSON schemas.
-export type ReaderToolInput = {
+export type ReaderExtractionToolInput = {
   document_id: string;
   schema_hint?: JsonValue;
 };
 
-export type ReaderToolOutput = {
+export type ReaderSearchRawDocumentsInput = {
+  query?: string;
+  subject_refs?: ReadonlyArray<Readonly<{ kind: string; id: string }>>;
+  range?: Readonly<{ start?: string; end?: string }>;
+  source_policy?: JsonObject;
+  canonical_url?: string;
+  url?: string;
+  domain?: string;
+  kind?: string;
+  limit?: number;
+};
+
+export type ReaderFetchRawDocumentInput = {
+  document_id: string;
+};
+
+export type ReaderExtractionToolOutput = {
   items: ReadonlyArray<JsonObject>;
   source_ids: ReadonlyArray<string>;
 };
 
-export type ReaderToolHandler = (
-  input: ReaderToolInput,
-) => Promise<ReaderToolOutput>;
+export type ReaderSearchRawDocumentsOutput = {
+  documents: ReadonlyArray<JsonObject>;
+};
+
+export type ReaderFetchRawDocumentOutput = {
+  document: JsonObject;
+  raw_blob_url?: string;
+};
+
+export type ReaderToolInput =
+  | ReaderSearchRawDocumentsInput
+  | ReaderFetchRawDocumentInput
+  | ReaderExtractionToolInput;
+
+export type ReaderToolOutput =
+  | ReaderSearchRawDocumentsOutput
+  | ReaderFetchRawDocumentOutput
+  | ReaderExtractionToolOutput;
+
+export type ReaderToolInputByName = {
+  readonly search_raw_documents: ReaderSearchRawDocumentsInput;
+  readonly fetch_raw_document: ReaderFetchRawDocumentInput;
+  readonly extract_mentions: ReaderExtractionToolInput;
+  readonly extract_claims: ReaderExtractionToolInput;
+  readonly extract_candidate_facts: ReaderExtractionToolInput;
+  readonly extract_events: ReaderExtractionToolInput;
+  readonly classify_sentiment: ReaderExtractionToolInput;
+};
+
+export type ReaderToolOutputByName = {
+  readonly search_raw_documents: ReaderSearchRawDocumentsOutput;
+  readonly fetch_raw_document: ReaderFetchRawDocumentOutput;
+  readonly extract_mentions: ReaderExtractionToolOutput;
+  readonly extract_claims: ReaderExtractionToolOutput;
+  readonly extract_candidate_facts: ReaderExtractionToolOutput;
+  readonly extract_events: ReaderExtractionToolOutput;
+  readonly classify_sentiment: ReaderExtractionToolOutput;
+};
+
+export type ReaderToolHandler<K extends ReaderToolName = ReaderToolName> = (
+  input: ReaderToolInputByName[K],
+) => Promise<ReaderToolOutputByName[K]>;
 
 export type ReaderToolHandlerMap = {
-  readonly [K in ReaderExtractionToolName]?: ReaderToolHandler;
+  readonly [K in ReaderToolName]?: ReaderToolHandler<K>;
 };
 
 export type DispatchInput = {
@@ -110,7 +174,7 @@ export type DispatchInput = {
 
 export type DispatchSuccess = {
   ok: true;
-  tool_name: ReaderExtractionToolName;
+  tool_name: ReaderToolName;
   result: ReaderToolOutput;
 };
 
@@ -135,7 +199,7 @@ export type DispatchResult =
 
 export type ReaderToolDispatcher = {
   dispatch(input: DispatchInput): Promise<DispatchResult>;
-  registeredToolNames(): ReadonlyArray<ReaderExtractionToolName>;
+  registeredToolNames(): ReadonlyArray<ReaderToolName>;
 };
 
 export type CreateReaderToolDispatcherInput = {
@@ -148,9 +212,7 @@ export type CreateReaderToolDispatcherInput = {
 const UUID_V4 =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
 
-const READER_EXTRACTION_TOOL_NAME_SET: ReadonlySet<string> = new Set(
-  READER_EXTRACTION_TOOL_NAMES,
-);
+const READER_TOOL_NAME_SET: ReadonlySet<string> = new Set(READER_TOOL_NAMES);
 
 export function createReaderToolDispatcher(
   input: CreateReaderToolDispatcherInput,
@@ -175,16 +237,16 @@ export function createReaderToolDispatcher(
         `createReaderToolDispatcher: handler "${name}" wires a non-reader tool (audience="${tool.audience}"); reader-tool dispatcher only accepts reader-audience tools`,
       );
     }
-    if (!READER_EXTRACTION_TOOL_NAME_SET.has(name)) {
+    if (!READER_TOOL_NAME_SET.has(name)) {
       throw new Error(
-        `createReaderToolDispatcher: handler "${name}" is reader-audience but not in the dispatcher's wired set (${[...READER_EXTRACTION_TOOL_NAMES].join(", ")})`,
+        `createReaderToolDispatcher: handler "${name}" is reader-audience but not in the dispatcher's wired set (${[...READER_TOOL_NAMES].join(", ")})`,
       );
     }
   }
-  for (const name of READER_EXTRACTION_TOOL_NAMES) {
+  for (const name of READER_TOOL_NAMES) {
     if (!handlers[name]) {
       throw new Error(
-        `createReaderToolDispatcher: missing handler for reader extract tool "${name}"`,
+        `createReaderToolDispatcher: missing handler for reader tool "${name}"`,
       );
     }
   }
@@ -192,7 +254,7 @@ export function createReaderToolDispatcher(
   // to Required<> so dispatch() can index without an undefined check.
   const validatedHandlers = handlers as Required<ReaderToolHandlerMap>;
 
-  const wiredNames = Object.freeze([...READER_EXTRACTION_TOOL_NAMES]);
+  const wiredNames = Object.freeze([...READER_TOOL_NAMES]);
 
   return Object.freeze({
     registeredToolNames: () => wiredNames,
@@ -213,10 +275,8 @@ export function createReaderToolDispatcher(
         });
       }
 
-      // Gate 2: refuse reader-audience tools the dispatcher does not own
-      // (search_raw_documents, fetch_raw_document, etc.). They share
-      // audience but have different shapes/handlers.
-      if (!isReaderExtractionToolName(call.tool_name)) {
+      // Gate 2: refuse reader-audience tools the dispatcher does not own.
+      if (!isReaderToolName(call.tool_name)) {
         return Object.freeze({
           ok: false,
           kind: "authorization",
@@ -224,13 +284,13 @@ export function createReaderToolDispatcher(
             ok: false,
             reason: "unknown_tool",
             tool_name: call.tool_name,
-            message: `Reader extraction dispatcher does not handle "${call.tool_name}"`,
+            message: `Reader tool dispatcher does not handle "${call.tool_name}"`,
           }),
         });
       }
 
       // Gate 3: input shape.
-      const parsed = parseReaderToolInput(call.arguments);
+      const parsed = parseReaderToolInput(call.tool_name, call.arguments);
       if (parsed.kind === "error") {
         return toolError(call.tool_name, parsed.code, parsed.message);
       }
@@ -240,7 +300,7 @@ export function createReaderToolDispatcher(
       // observability can record it as such (not as a domain error).
       let raw: ReaderToolOutput;
       try {
-        raw = await validatedHandlers[call.tool_name](parsed.input);
+        raw = await (validatedHandlers[call.tool_name] as ReaderToolHandler)(parsed.input as never);
       } catch (error) {
         if (error instanceof ReaderToolError) {
           return toolError(call.tool_name, error.code, error.message);
@@ -253,7 +313,7 @@ export function createReaderToolDispatcher(
       // bubbled like the non-ReaderToolError throw above so observability
       // sees them as bugs rather than as a misleading INVALID_ARGUMENT
       // response that a caller couldn't act on.
-      const validated = assertValidReaderToolOutput(raw);
+      const validated = assertValidReaderToolOutput(call.tool_name, raw);
 
       return Object.freeze({
         ok: true,
@@ -264,10 +324,10 @@ export function createReaderToolDispatcher(
   });
 }
 
-function isReaderExtractionToolName(
+function isReaderToolName(
   name: string,
-): name is ReaderExtractionToolName {
-  return READER_EXTRACTION_TOOL_NAME_SET.has(name);
+): name is ReaderToolName {
+  return READER_TOOL_NAME_SET.has(name);
 }
 
 function toolError(
@@ -288,7 +348,99 @@ type ParseInputResult =
   | { kind: "ok"; input: ReaderToolInput }
   | { kind: "error"; code: ReaderToolErrorCode; message: string };
 
-function parseReaderToolInput(args: JsonValue): ParseInputResult {
+function parseReaderToolInput(toolName: ReaderToolName, args: JsonValue): ParseInputResult {
+  if (toolName === "search_raw_documents") return parseSearchRawDocumentsInput(args);
+  return parseDocumentIdToolInput(toolName, args);
+}
+
+function parseSearchRawDocumentsInput(args: JsonValue): ParseInputResult {
+  if (args === null || typeof args !== "object" || Array.isArray(args)) {
+    return {
+      kind: "error",
+      code: "INVALID_ARGUMENT",
+      message: "arguments: must be an object",
+    };
+  }
+
+  const record = args as { [key: string]: JsonValue | undefined };
+  const input: ReaderSearchRawDocumentsInput = {};
+
+  for (const [key, label] of [
+    ["query", "query"],
+    ["canonical_url", "canonical_url"],
+    ["url", "url"],
+    ["domain", "domain"],
+    ["kind", "kind"],
+  ] as const) {
+    const value = record[key];
+    if (value !== undefined) {
+      if (typeof value !== "string" || value.trim().length === 0) {
+        return { kind: "error", code: "INVALID_ARGUMENT", message: `${label}: must be a non-empty string` };
+      }
+      input[key] = value;
+    }
+  }
+
+  if (record.limit !== undefined) {
+    if (!Number.isInteger(record.limit) || record.limit <= 0) {
+      return { kind: "error", code: "INVALID_ARGUMENT", message: "limit: must be a positive integer" };
+    }
+    input.limit = record.limit;
+  }
+
+  if (record.subject_refs !== undefined) {
+    if (!Array.isArray(record.subject_refs)) {
+      return { kind: "error", code: "INVALID_ARGUMENT", message: "subject_refs: must be an array" };
+    }
+    const refs: Array<{ kind: string; id: string }> = [];
+    for (const [index, ref] of record.subject_refs.entries()) {
+      if (ref === null || typeof ref !== "object" || Array.isArray(ref)) {
+        return { kind: "error", code: "INVALID_ARGUMENT", message: `subject_refs[${index}]: must be an object` };
+      }
+      const subject = ref as { [key: string]: JsonValue | undefined };
+      if (typeof subject.kind !== "string" || subject.kind.length === 0) {
+        return { kind: "error", code: "INVALID_ARGUMENT", message: `subject_refs[${index}].kind: must be a non-empty string` };
+      }
+      if (typeof subject.id !== "string" || !UUID_V4.test(subject.id)) {
+        return { kind: "error", code: "INVALID_ARGUMENT", message: `subject_refs[${index}].id: must be a UUID v4` };
+      }
+      refs.push({ kind: subject.kind, id: subject.id });
+    }
+    input.subject_refs = Object.freeze(refs);
+  }
+
+  if (record.range !== undefined) {
+    if (record.range === null || typeof record.range !== "object" || Array.isArray(record.range)) {
+      return { kind: "error", code: "INVALID_ARGUMENT", message: "range: must be an object" };
+    }
+    const range = record.range as { [key: string]: JsonValue | undefined };
+    const parsedRange: { start?: string; end?: string } = {};
+    if (range.start !== undefined) {
+      if (typeof range.start !== "string" || range.start.length === 0) {
+        return { kind: "error", code: "INVALID_ARGUMENT", message: "range.start: must be a non-empty string" };
+      }
+      parsedRange.start = range.start;
+    }
+    if (range.end !== undefined) {
+      if (typeof range.end !== "string" || range.end.length === 0) {
+        return { kind: "error", code: "INVALID_ARGUMENT", message: "range.end: must be a non-empty string" };
+      }
+      parsedRange.end = range.end;
+    }
+    input.range = Object.freeze(parsedRange);
+  }
+
+  if (record.source_policy !== undefined) {
+    if (record.source_policy === null || typeof record.source_policy !== "object" || Array.isArray(record.source_policy)) {
+      return { kind: "error", code: "INVALID_ARGUMENT", message: "source_policy: must be an object" };
+    }
+    input.source_policy = record.source_policy as JsonObject;
+  }
+
+  return { kind: "ok", input };
+}
+
+function parseDocumentIdToolInput(toolName: ReaderToolName, args: JsonValue): ParseInputResult {
   if (args === null || typeof args !== "object" || Array.isArray(args)) {
     return {
       kind: "error",
@@ -315,18 +467,59 @@ function parseReaderToolInput(args: JsonValue): ParseInputResult {
   }
 
   const schema_hint = record.schema_hint;
-  if (schema_hint === undefined) {
+  if (toolName === "fetch_raw_document" || schema_hint === undefined) {
     return { kind: "ok", input: { document_id } };
   }
   return { kind: "ok", input: { document_id, schema_hint } };
 }
 
-function assertValidReaderToolOutput(output: unknown): ReaderToolOutput {
+function assertValidReaderToolOutput(toolName: ReaderToolName, output: unknown): ReaderToolOutput {
   if (output === null || typeof output !== "object" || Array.isArray(output)) {
     throw new Error("handler output: must be an object");
   }
 
   const record = output as { [key: string]: unknown };
+  if (toolName === "search_raw_documents") {
+    return assertValidSearchRawDocumentsOutput(record);
+  }
+  if (toolName === "fetch_raw_document") {
+    return assertValidFetchRawDocumentOutput(record);
+  }
+
+  return assertValidExtractionOutput(record);
+}
+
+function assertValidSearchRawDocumentsOutput(record: { [key: string]: unknown }): ReaderSearchRawDocumentsOutput {
+  const documents = record.documents;
+  if (!Array.isArray(documents)) {
+    throw new Error("handler output.documents: must be an array");
+  }
+  for (const [i, document] of documents.entries()) {
+    if (document === null || typeof document !== "object" || Array.isArray(document)) {
+      throw new Error(`handler output.documents[${i}]: must be a JSON object`);
+    }
+  }
+  return Object.freeze({
+    documents: Object.freeze([...documents]) as ReadonlyArray<JsonObject>,
+  });
+}
+
+function assertValidFetchRawDocumentOutput(record: { [key: string]: unknown }): ReaderFetchRawDocumentOutput {
+  const document = record.document;
+  if (document === null || typeof document !== "object" || Array.isArray(document)) {
+    throw new Error("handler output.document: must be a JSON object");
+  }
+  const raw_blob_url = record.raw_blob_url;
+  if (raw_blob_url !== undefined && typeof raw_blob_url !== "string") {
+    throw new Error("handler output.raw_blob_url: must be a string when present");
+  }
+  return Object.freeze({
+    document: Object.freeze({ ...(document as JsonObject) }),
+    ...(raw_blob_url === undefined ? {} : { raw_blob_url }),
+  });
+}
+
+function assertValidExtractionOutput(record: { [key: string]: unknown }): ReaderExtractionToolOutput {
   const items = record.items;
   if (!Array.isArray(items)) {
     throw new Error("handler output.items: must be an array");

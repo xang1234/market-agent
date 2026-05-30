@@ -62,11 +62,12 @@ test("searchEvidenceDocuments finds GDELT documents through metadata filters wit
   assert.match(queries[0]!.text, /from documents d/i);
   assert.match(queries[0]!.text, /join sources s/i);
   assert.match(queries[0]!.text, /from mentions m/i);
+  assert.match(queries[0]!.text, /canonical_host/i);
   assert.deepEqual(queries[0]!.values, [
     "Acme",
     JSON.stringify([{ kind: "issuer", id: SUBJECT_ID }]),
     "https://reuters.com/markets/acme-robotics",
-    "%reuters.com%",
+    "reuters.com",
     "article",
     "2026-05-01T00:00:00.000Z",
     "2026-05-30T00:00:00.000Z",
@@ -120,6 +121,29 @@ test("searchEvidenceDocuments rejects inverted publication ranges before queryin
       publishedTo: "2026-05-01T00:00:00Z",
     }),
     /publishedFrom/,
+  );
+
+  assert.equal(queries.length, 0);
+});
+
+test("searchEvidenceDocuments normalizes domain filters to host-boundary matching", async () => {
+  const { db, queries } = recordingDb([]);
+
+  await searchEvidenceDocuments(db, {
+    domain: "WWW.Reuters.com",
+  });
+
+  assert.match(queries[0]!.text, /canonical_host = \$4::text/i);
+  assert.match(queries[0]!.text, /canonical_host like \('%\.' \|\| \$4::text\)/i);
+  assert.equal(queries[0]!.values?.[3], "reuters.com");
+});
+
+test("searchEvidenceDocuments rejects domain filters that are not host names", async () => {
+  const { db, queries } = recordingDb([]);
+
+  await assert.rejects(
+    () => searchEvidenceDocuments(db, { domain: "notreuters.com/path" }),
+    /domain/,
   );
 
   assert.equal(queries.length, 0);
