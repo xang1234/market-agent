@@ -19,6 +19,10 @@ import {
 } from "./issuer-ir-registry.ts";
 import { ingestDocumentInTransaction, type IngestDocumentResult } from "./ingest.ts";
 import { createMention } from "./mention-repo.ts";
+import {
+  ingestEarningsTranscriptInTransaction,
+  ingestPressReleaseInTransaction,
+} from "./news-ingest.ts";
 import type { ObjectStore } from "./object-store.ts";
 import {
   discoverIssuerIrCandidates,
@@ -192,12 +196,42 @@ async function persistIssuerIrDocument(
   provider: string,
 ): Promise<{ source: SourceRow; ingest: IngestDocumentResult }> {
   const publishedAt = candidate.publishedAt ?? fetched.fetchedAt;
-  const licenseClass = issuerIrLicenseClass(candidate, provider);
+  if (candidate.assetKind === "press_release") {
+    return ingestPressReleaseInTransaction(deps, {
+      bytes: fetched.bytes,
+      provider,
+      canonicalUrl: candidate.canonicalUrl,
+      publisher: input.issuerName,
+      publishedAt,
+      title: candidate.title,
+      trustTier: provider === "issuer_ir" ? "primary" : "secondary",
+      licenseClass: provider === "issuer_ir" ? "public" : "free",
+      retrievedAt: fetched.fetchedAt,
+      providerDocId: providerDocId(candidate),
+    });
+  }
+  if (candidate.assetKind === "transcript") {
+    return ingestEarningsTranscriptInTransaction(deps, {
+      bytes: fetched.bytes,
+      provider,
+      canonicalUrl: candidate.canonicalUrl,
+      publisher: input.issuerName,
+      publishedAt,
+      fiscalPeriod: inferFiscalPeriod(candidate.title, publishedAt),
+      issuer: input.issuerName,
+      trustTier: provider === "issuer_ir" ? "secondary" : "tertiary",
+      licenseClass: provider === "issuer_ir" ? "public" : "licensed",
+      retrievedAt: fetched.fetchedAt,
+      providerDocId: providerDocId(candidate),
+    });
+  }
+
+  const licenseClass = provider === "issuer_ir" ? "public" : "free";
   const source = await createSource(deps.db, {
     provider,
-    kind: issuerIrSourceKind(candidate),
+    kind: "research_note",
     canonical_url: candidate.canonicalUrl,
-    trust_tier: issuerIrTrustTier(candidate, provider),
+    trust_tier: provider === "issuer_ir" ? "primary" : "secondary",
     license_class: licenseClass,
     retrieved_at: fetched.fetchedAt,
   });
@@ -206,46 +240,13 @@ async function persistIssuerIrDocument(
     bytes: fetched.bytes,
     document: {
       provider_doc_id: providerDocId(candidate),
-      kind: issuerIrDocumentKind(candidate),
-      title: issuerIrDocumentTitle(candidate, input.issuerName, publishedAt),
+      kind: "research_note",
+      title: candidate.title,
       author: input.issuerName,
       published_at: publishedAt,
     },
   });
   return Object.freeze({ source, ingest });
-}
-
-function issuerIrSourceKind(candidate: IssuerIrCandidate): SourceRow["kind"] {
-  if (candidate.assetKind === "press_release") return "press_release";
-  if (candidate.assetKind === "transcript") return "transcript";
-  return "research_note";
-}
-
-function issuerIrDocumentKind(candidate: IssuerIrCandidate): DocumentRow["kind"] {
-  if (candidate.assetKind === "press_release") return "press_release";
-  if (candidate.assetKind === "transcript") return "transcript";
-  return "research_note";
-}
-
-function issuerIrTrustTier(candidate: IssuerIrCandidate, provider: string): SourceRow["trust_tier"] {
-  if (candidate.assetKind === "press_release") return provider === "issuer_ir" ? "primary" : "secondary";
-  if (candidate.assetKind === "transcript") return provider === "issuer_ir" ? "secondary" : "tertiary";
-  return provider === "issuer_ir" ? "primary" : "secondary";
-}
-
-function issuerIrLicenseClass(candidate: IssuerIrCandidate, provider: string): string {
-  if (candidate.assetKind === "transcript") return provider === "issuer_ir" ? "public" : "licensed";
-  return provider === "issuer_ir" ? "public" : "free";
-}
-
-function issuerIrDocumentTitle(
-  candidate: IssuerIrCandidate,
-  issuerName: string,
-  publishedAt: string,
-): string {
-  if (candidate.assetKind !== "transcript") return candidate.title;
-  const fiscalPeriod = inferFiscalPeriod(candidate.title, publishedAt);
-  return `${issuerName} \u2014 ${fiscalPeriod} earnings call`;
 }
 
 async function persistClaims(

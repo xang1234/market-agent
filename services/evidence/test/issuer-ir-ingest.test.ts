@@ -7,6 +7,8 @@ import {
 import type { IrSourceRegistryRow } from "../src/issuer-ir-registry.ts";
 import { MemoryObjectStore, rawBlobIdFromBytes } from "../src/object-store.ts";
 import type { QueryExecutor } from "../src/types.ts";
+import { RecordingObjectStore } from "./recording-object-store.ts";
+import { recordingPoolExecutor } from "./recording-query-executor.ts";
 
 const ISSUER_ID = "33333333-3333-4333-a333-333333333333";
 const SOURCE_ID = "11111111-1111-4111-a111-111111111111";
@@ -187,31 +189,12 @@ function recordingDb() {
 
 function recordingPoolDb() {
   const base = recordingDb();
-  const poolQueries: Array<{ text: string; values?: unknown[] }> = [];
-  const txQueries: Array<{ text: string; values?: unknown[] }> = [];
-  const releases: unknown[] = [];
-  const tx: QueryExecutor & { release(destroy?: boolean): void } = {
-    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
-      txQueries.push({ text, values });
-      return base.db.query<R>(text, values);
-    },
-    release(destroy?: boolean) {
-      releases.push(destroy);
-    },
-  };
-  const db: QueryExecutor & { connect(): Promise<QueryExecutor & { release(destroy?: boolean): void }> } = {
-    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
-      poolQueries.push({ text, values });
-      if (/^(begin|commit|rollback)$/i.test(text) || /insert into/i.test(text)) {
-        throw new Error(`candidate persistence used the pool instead of an acquired client: ${text}`);
-      }
-      return base.db.query<R>(text, values);
-    },
-    async connect() {
-      return tx;
-    },
-  };
-  return { db, poolQueries, txQueries, releases };
+  return recordingPoolExecutor(async <R extends Record<string, unknown>>(target, text: string, values?: unknown[]) => {
+    if (target === "pool" && (/^(begin|commit|rollback)$/i.test(text) || /insert into/i.test(text))) {
+      throw new Error(`candidate persistence used the pool instead of an acquired client: ${text}`);
+    }
+    return base.db.query<R>(text, values);
+  });
 }
 
 function result<R extends Record<string, unknown>>(rows: R[]) {
@@ -290,22 +273,22 @@ test("ingestIssuerIrSource persists candidate writes on an acquired client when 
   );
 
   assert.equal(result.records.length, 1);
-  assert.equal(poolQueries.some((query) => /insert into/i.test(query.text)), false);
-  const beginIndex = txQueries.findIndex((query) => query.text === "begin");
-  const sourceIndex = txQueries.findIndex((query) => /insert into sources/i.test(query.text));
-  const documentIndex = txQueries.findIndex((query) => /insert into documents/i.test(query.text));
-  const assetIndex = txQueries.findIndex((query) => /insert into ir_document_assets/i.test(query.text));
-  const claimIndex = txQueries.findIndex((query) => /insert into claims/i.test(query.text));
-  const commitIndex = txQueries.findIndex((query) => query.text === "commit");
+  assert.equal(poolQueries.some((query) => /insert into/i.test(query)), false);
+  const beginIndex = txQueries.findIndex((query) => query === "begin");
+  const sourceIndex = txQueries.findIndex((query) => /insert into sources/i.test(query));
+  const documentIndex = txQueries.findIndex((query) => /insert into documents/i.test(query));
+  const assetIndex = txQueries.findIndex((query) => /insert into ir_document_assets/i.test(query));
+  const claimIndex = txQueries.findIndex((query) => /insert into claims/i.test(query));
+  const commitIndex = txQueries.findIndex((query) => query === "commit");
   assert.ok(beginIndex >= 0);
   assert.ok(beginIndex < sourceIndex);
   assert.ok(sourceIndex < documentIndex);
   assert.ok(documentIndex < assetIndex);
   assert.ok(assetIndex < claimIndex);
   assert.ok(claimIndex < commitIndex);
-  assert.ok(txQueries.some((query) => /insert into sources/i.test(query.text)));
-  assert.ok(txQueries.some((query) => /insert into ir_document_assets/i.test(query.text)));
-  assert.ok(txQueries.some((query) => /insert into claims/i.test(query.text)));
+  assert.ok(txQueries.some((query) => /insert into sources/i.test(query)));
+  assert.ok(txQueries.some((query) => /insert into ir_document_assets/i.test(query)));
+  assert.ok(txQueries.some((query) => /insert into claims/i.test(query)));
   assert.equal(releases.length, 1);
 });
 
@@ -318,6 +301,7 @@ test("ingestIssuerIrSource rolls back source and document rows when IR asset per
   const body = "Acme reports Q1 results. Management raised full-year revenue guidance.";
   const base = recordingDb();
   const txQueries: string[] = [];
+  const objectStore = new RecordingObjectStore();
   const db: QueryExecutor & { connect(): Promise<QueryExecutor & { release(destroy?: boolean): void }> } = {
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       if (/insert into/i.test(text) || /^(begin|commit|rollback)$/i.test(text)) {
@@ -343,7 +327,7 @@ test("ingestIssuerIrSource rolls back source and document rows when IR asset per
     ingestIssuerIrSource(
       {
         db,
-        objectStore: new MemoryObjectStore(),
+        objectStore,
         fetch: async (url) => new Response(url.endsWith("/rss") ? feed : body, {
           status: 200,
           headers: { "content-type": url.endsWith("/rss") ? "application/rss+xml" : "text/html" },
@@ -370,6 +354,8 @@ test("ingestIssuerIrSource rolls back source and document rows when IR asset per
   assert.ok(documentIndex < assetIndex);
   assert.ok(assetIndex < rollbackIndex);
   assert.equal(txQueries.some((query) => query === "commit"), false);
+  assert.equal(objectStore.deleteCalls, 1);
+  assert.deepEqual(objectStore.deletedRawBlobIds, [rawBlobIdFromBytes(new TextEncoder().encode(body))]);
 });
 
 test("ingestIssuerIrSource stores presentation PDFs as research_note documents", async () => {

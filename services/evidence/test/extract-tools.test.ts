@@ -12,6 +12,7 @@ import { loadToolRegistry } from "../../tools/src/registry.ts";
 import { createEvidenceReaderToolHandlers } from "../src/reader/extract-tools.ts";
 import { MemoryObjectStore, rawBlobIdFromBytes } from "../src/object-store.ts";
 import type { QueryExecutor } from "../src/types.ts";
+import { recordingPoolExecutor } from "./recording-query-executor.ts";
 
 const SAMPLE_DOC_UUID = "70a0cc2e-e198-4b59-a5c9-9bd2da4a359b";
 const SAMPLE_SOURCE_UUID = "11111111-1111-4111-a111-111111111111";
@@ -467,15 +468,17 @@ test("extract_mentions links and deletes stale mentions in one transaction", asy
 test("extract_mentions uses an acquired client for transactional mention writes when available", async () => {
   const mentionId = "22222222-2222-4222-a222-222222222222";
   const issuerId = "33333333-3333-4333-a333-333333333333";
-  const poolQueries: string[] = [];
-  const txQueries: string[] = [];
-  const releases: unknown[] = [];
-  const query = async <R extends Record<string, unknown>>(
-    queries: string[],
+  const { db, poolQueries, txQueries, releases } = recordingPoolExecutor(async <R extends Record<string, unknown>>(
+    target,
     text: string,
     values?: unknown[],
   ) => {
-    queries.push(text);
+    if (
+      target === "pool" &&
+      (/^(begin|commit|rollback)$/i.test(text) || /insert into mentions|delete from mentions/.test(text))
+    ) {
+      throw new Error(`transactional mention write used the pool: ${text}`);
+    }
     if (/from documents/.test(text)) {
       return { rows: [fakeDocumentRow()] as unknown as R[], command: "SELECT", rowCount: 1, oid: 0, fields: [] };
     }
@@ -522,24 +525,7 @@ test("extract_mentions uses an acquired client for transactional mention writes 
       };
     }
     throw new Error(`unexpected query: ${text}`);
-  };
-  const tx: QueryExecutor & { release(destroy?: boolean): void } = {
-    query: (text, values) => query(txQueries, text, values),
-    release(destroy?: boolean) {
-      releases.push(destroy);
-    },
-  };
-  const db: QueryExecutor & { connect(): Promise<QueryExecutor & { release(destroy?: boolean): void }> } = {
-    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
-      if (/^(begin|commit|rollback)$/i.test(text) || /insert into mentions|delete from mentions/.test(text)) {
-        throw new Error(`transactional mention write used the pool: ${text}`);
-      }
-      return query<R>(poolQueries, text, values);
-    },
-    async connect() {
-      return tx;
-    },
-  };
+  });
   const handlers = createEvidenceReaderToolHandlers({
     db,
     extractMentionCandidates: async () => [

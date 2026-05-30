@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
-import { ingestDocument, ingestDocumentWithPool } from "../src/ingest.ts";
+import { ingestDocument, ingestDocumentInTransaction, ingestDocumentWithPool } from "../src/ingest.ts";
 import { LicensePolicyError } from "../src/license-policy.ts";
 import {
   EPHEMERAL_RAW_BLOB_ID_PREFIX,
@@ -351,21 +351,71 @@ test("ingestDocument does not delete a new blob when commit outcome is uncertain
   assert.equal(queries.some((query) => /^rollback$/i.test(query.text)), false);
 });
 
-test("ingestDocument rejects pg.Pool-like deps for stored blob transactions", async () => {
+test("ingestDocument pins pg.Pool-like deps for stored blob transactions", async () => {
   const { db, queries } = recordingDb();
-  const poolLike = Object.assign(db, { connect: async () => db, totalCount: 1, idleCount: 1 });
+  const poolQueries: Array<{ text: string; values?: unknown[] }> = [];
+  const releaseArgs: boolean[] = [];
+  const poolLike = {
+    totalCount: 1,
+    idleCount: 1,
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      poolQueries.push({ text, values });
+      throw new Error(`pool query must not be used: ${text}`);
+    },
+    async connect() {
+      return {
+        ...db,
+        release(destroy = false) {
+          releaseArgs.push(destroy);
+        },
+      };
+    },
+  };
+  const objectStore = new RecordingObjectStore();
+
+  const result = await ingestDocument(
+    { db: poolLike, objectStore },
+    {
+      source: { source_id: SOURCE_ID, license_class: "public" },
+      bytes: TWEET_BYTES,
+      document: { kind: "social_post" },
+    },
+  );
+
+  assert.equal(result.raw_blob_id, TWEET_HASH);
+  assert.deepEqual(poolQueries, []);
+  assert.deepEqual(releaseArgs, [false]);
+  assert.match(queries[0]?.text ?? "", /^begin$/i);
+  assert.match(queries.at(-1)?.text ?? "", /^commit$/i);
+  assert.equal(objectStore.putCalls, 1);
+});
+
+test("ingestDocumentInTransaction requires the shared transaction boundary before writes", async () => {
+  const { db, queries } = recordingDb();
+  const connectOnlyPool = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      queries.push({ text, values });
+      throw new Error(`pool query must not be used: ${text}`);
+    },
+    async connect() {
+      return {
+        ...db,
+        release() {},
+      };
+    },
+  };
   const objectStore = new RecordingObjectStore();
 
   await assert.rejects(
-    ingestDocument(
-      { db: poolLike, objectStore },
+    ingestDocumentInTransaction(
+      { db: connectOnlyPool, objectStore },
       {
         source: { source_id: SOURCE_ID, license_class: "public" },
         bytes: TWEET_BYTES,
         document: { kind: "social_post" },
       },
     ),
-    /pinned database client/,
+    /active transaction/,
   );
   assert.equal(queries.length, 0);
   assert.equal(objectStore.putCalls, 0);

@@ -7,7 +7,7 @@
 // are intentionally out of scope (each lands as its own bead).
 
 import { type DocumentInput } from "./document-repo.ts";
-import { ingestDocument, type IngestDocumentResult } from "./ingest.ts";
+import { ingestDocument, ingestDocumentInTransaction, type IngestDocumentResult } from "./ingest.ts";
 import { canonicalizeNewsUrl } from "./news-url.ts";
 import type { ObjectStore } from "./object-store.ts";
 import {
@@ -17,6 +17,7 @@ import {
   type SourceRow,
   type TrustTier,
 } from "./source-repo.ts";
+import { assertActiveTransaction } from "./transaction.ts";
 import type { QueryExecutor } from "./types.ts";
 import {
   assertIso8601WithOffset,
@@ -103,6 +104,17 @@ export async function ingestPressRelease(
   deps: IngestDeps,
   input: IngestPressReleaseInput,
 ): Promise<IngestResult> {
+  return persistKindedSource(deps, preparePressRelease(input));
+}
+
+export async function ingestPressReleaseInTransaction(
+  deps: IngestDeps,
+  input: IngestPressReleaseInput,
+): Promise<IngestResult> {
+  return persistKindedSourceInTransaction(deps, preparePressRelease(input));
+}
+
+function preparePressRelease(input: IngestPressReleaseInput): PersistInput {
   assertNonEmptyBytes(input.bytes, "bytes");
   assertNonEmptyString(input.provider, "provider");
   assertNonEmptyString(input.publisher, "publisher");
@@ -119,7 +131,7 @@ export async function ingestPressRelease(
 
   const canonicalUrl = canonicalizeNewsUrl(input.canonicalUrl);
 
-  return persistKindedSource(deps, {
+  return {
     provider: input.provider,
     kind: "press_release",
     canonicalUrl,
@@ -133,7 +145,7 @@ export async function ingestPressRelease(
       published_at: input.publishedAt,
     },
     retrievedAt: input.retrievedAt,
-  });
+  };
 }
 
 function defaultPressReleaseTrustTier(provider: string): TrustTier {
@@ -173,6 +185,17 @@ export async function ingestEarningsTranscript(
   deps: IngestDeps,
   input: IngestEarningsTranscriptInput,
 ): Promise<IngestResult> {
+  return persistKindedSource(deps, prepareEarningsTranscript(input));
+}
+
+export async function ingestEarningsTranscriptInTransaction(
+  deps: IngestDeps,
+  input: IngestEarningsTranscriptInput,
+): Promise<IngestResult> {
+  return persistKindedSourceInTransaction(deps, prepareEarningsTranscript(input));
+}
+
+function prepareEarningsTranscript(input: IngestEarningsTranscriptInput): PersistInput {
   assertNonEmptyBytes(input.bytes, "bytes");
   assertNonEmptyString(input.provider, "provider");
   assertNonEmptyString(input.publisher, "publisher");
@@ -190,7 +213,7 @@ export async function ingestEarningsTranscript(
 
   const canonicalUrl = canonicalizeNewsUrl(input.canonicalUrl);
 
-  return persistKindedSource(deps, {
+  return {
     provider: input.provider,
     kind: "transcript",
     canonicalUrl,
@@ -204,7 +227,7 @@ export async function ingestEarningsTranscript(
       published_at: input.publishedAt,
     },
     retrievedAt: input.retrievedAt,
-  });
+  };
 }
 
 // ---- ingestNewsArticle -----------------------------------------------------
@@ -281,15 +304,7 @@ async function persistKindedSource(
   deps: IngestDeps,
   input: PersistInput,
 ): Promise<IngestResult> {
-  const retrievedAt = normalizeRetrievedAt(input.retrievedAt);
-  const source = await createSource(deps.db, {
-    provider: input.provider,
-    kind: input.kind,
-    canonical_url: input.canonicalUrl,
-    trust_tier: input.trustTier,
-    license_class: input.licenseClass,
-    retrieved_at: retrievedAt,
-  });
+  const source = await createKindedSource(deps.db, input);
 
   let ingest: IngestDocumentResult;
   try {
@@ -306,6 +321,38 @@ async function persistKindedSource(
   }
 
   return Object.freeze({ source, ingest });
+}
+
+async function persistKindedSourceInTransaction(
+  deps: IngestDeps,
+  input: PersistInput,
+): Promise<IngestResult> {
+  assertActiveTransaction(deps.db, "persistKindedSourceInTransaction");
+  const source = await createKindedSource(deps.db, input);
+  const ingest = await ingestDocumentInTransaction(
+    { db: deps.db, objectStore: deps.objectStore },
+    {
+      source: { source_id: source.source_id, license_class: source.license_class },
+      bytes: input.bytes,
+      document: { ...input.document, kind: input.kind },
+    },
+  );
+  return Object.freeze({ source, ingest });
+}
+
+async function createKindedSource(
+  db: QueryExecutor,
+  input: PersistInput,
+): Promise<SourceRow> {
+  const retrievedAt = normalizeRetrievedAt(input.retrievedAt);
+  return createSource(db, {
+    provider: input.provider,
+    kind: input.kind,
+    canonical_url: input.canonicalUrl,
+    trust_tier: input.trustTier,
+    license_class: input.licenseClass,
+    retrieved_at: retrievedAt,
+  });
 }
 
 function normalizeRetrievedAt(retrievedAt: string | undefined): string {

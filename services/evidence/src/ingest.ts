@@ -6,6 +6,7 @@ import {
   ephemeralRawBlobIdForSource,
   rawBlobIdFromBytes,
 } from "./object-store.ts";
+import { assertActiveTransaction, onTransactionRollback, withTransaction } from "./transaction.ts";
 import type { QueryExecutor } from "./types.ts";
 
 export type IngestDocumentDeps = {
@@ -77,6 +78,7 @@ export async function ingestDocumentInTransaction(
 ): Promise<IngestDocumentResult> {
   const policy = decideStoragePolicy(input.source.license_class);
   const content_hash = contentHashFromBytes(input.bytes);
+  assertActiveTransaction(deps.db, "ingestDocumentInTransaction");
   if (!policy.store_blob) {
     const raw_blob_id = ephemeralRawBlobIdForSource(input.source.source_id);
     const result = await createDocument(deps.db, {
@@ -94,12 +96,15 @@ export async function ingestDocumentInTransaction(
   }
 
   const raw_blob_id = rawBlobIdFromBytes(input.bytes);
-  if (isPgPoolLike(deps.db)) {
-    throw new Error("ingestDocumentInTransaction requires a pinned database client");
-  }
   await deps.db.query("select pg_advisory_xact_lock(hashtext($1))", [raw_blob_id]);
   await lockSourceForBlobIngest(deps.db, input.source.source_id);
   const putResult = await deps.objectStore.put(input.bytes);
+  let unregisterRollbackCleanup = () => {};
+  if (putResult.status === "created") {
+    unregisterRollbackCleanup = onTransactionRollback(deps.db, (error) =>
+      deleteCreatedBlobBestEffort(deps.objectStore, raw_blob_id, error)
+    );
+  }
   try {
     if (putResult.blob.raw_blob_id !== raw_blob_id) {
       throw new Error("ingestDocument: object store returned a blob id that does not match the input bytes");
@@ -117,6 +122,7 @@ export async function ingestDocumentInTransaction(
       policy,
     });
   } catch (error) {
+    unregisterRollbackCleanup();
     if (putResult.status === "created") {
       await deleteCreatedBlobBestEffort(deps.objectStore, raw_blob_id, error);
     }
@@ -145,22 +151,9 @@ async function ingestStoredDocumentWithBlobLock(
   deps: IngestDocumentDeps,
   input: IngestDocumentInput,
 ): Promise<IngestDocumentResult> {
-  if (isPgPoolLike(deps.db)) {
-    throw new Error("ingestDocument requires a pinned database client for stored blobs; use ingestDocumentWithPool for pools");
-  }
-  let commitAttempted = false;
-  await deps.db.query("begin");
-  try {
-    const result = await ingestDocumentInTransaction(deps, input);
-    commitAttempted = true;
-    await deps.db.query("commit");
-    return result;
-  } catch (error) {
-    if (!commitAttempted) {
-      await deps.db.query("rollback");
-    }
-    throw error;
-  }
+  return withTransaction(deps.db, (db) =>
+    ingestDocumentInTransaction({ ...deps, db }, input)
+  );
 }
 
 async function deleteCreatedBlobBestEffort(
@@ -188,17 +181,4 @@ async function lockSourceForBlobIngest(db: QueryExecutor, sourceId: string): Pro
   if (result.rowCount !== 1) {
     throw new Error("ingestDocument: source does not exist or is being erased");
   }
-}
-
-function isPgPoolLike(db: QueryExecutor): boolean {
-  const candidate = db as {
-    connect?: unknown;
-    totalCount?: unknown;
-    idleCount?: unknown;
-  };
-  return (
-    typeof candidate.connect === "function" &&
-    typeof candidate.totalCount === "number" &&
-    typeof candidate.idleCount === "number"
-  );
 }
