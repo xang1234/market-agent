@@ -59,11 +59,11 @@ import {
   listThemeMembershipRationalesBySubject,
   type ThemeMembershipRationaleRow,
 } from "../../themes/src/index.ts";
-import type {
-  EvidenceInspection,
-  EvidenceInspectionRef,
-} from "../../evidence/src/index.ts";
-import { EvidenceInspectionError } from "../../evidence/src/index.ts";
+import {
+  EvidenceInspectionError,
+  type EvidenceInspection,
+  type EvidenceInspectionRef,
+} from "../../evidence/src/inspector.ts";
 
 type DevAgent = {
   agent_id: string;

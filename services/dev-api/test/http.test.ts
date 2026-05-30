@@ -7,7 +7,7 @@ import {
   createServiceDevApiAdapters,
 } from "../src/http.ts";
 import { ANALYZE_BASE_BUNDLE_ID } from "../../analyze/src/index.ts";
-import { EvidenceInspectionError } from "../../evidence/src/index.ts";
+import { EvidenceInspectionError } from "../../evidence/src/inspector.ts";
 
 const EARNINGS_TEMPLATE_ID = "11111111-1111-4111-8111-111111111111";
 
