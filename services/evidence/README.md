@@ -23,6 +23,17 @@ Downstream callers should hand off by `source_id`, `document_id`, `fact_id`,
 claim/event ids, and canonical `SubjectRef`/issuer identity. They should not
 pass raw filing bytes or ticker-only identifiers across service boundaries.
 
+## Evidence Inspector
+
+`loadEvidenceInspection(db, { user_id, snapshot_id, ref })` is the read-side
+contract for user-facing provenance inspection. It first verifies that the user
+can see an artifact referencing the sealed snapshot, then verifies that the
+requested ref is present in the snapshot manifest, and returns a normalized
+inspection envelope with title, badges, rows, links, and related refs.
+
+The inspector is intentionally read-only. It does not retrieve raw untrusted
+document text and does not alter fact, claim, event, or source state.
+
 ## Source Repo
 
 `createSource` writes rows to `sources` with the provenance fields ingestion and
@@ -56,6 +67,28 @@ The repository validates document kind, parse status, UUID references,
 timestamps, and required hash/blob metadata before querying. Parent document
 threading is accepted as metadata here; threaded-source behavior is covered by
 `fra-8la`.
+
+## GDELT Public News Discovery
+
+GDELT is treated as a discovery source, not a truth source. The seeded
+`gdelt_article_discovery` source identifies public news article discoveries from
+the GDELT DOC 2.0 API (`https://api.gdeltproject.org/api/v2/doc/doc`) as
+tertiary `article` evidence with `license_class='ephemeral'`.
+
+The MVP storage policy is metadata/snippet-only. Full article bodies are not
+stored by default; ingestion should retain article URLs, titles, timestamps,
+domains, languages, source-country metadata, snippets when available, and
+provider metadata/hashes. If a later integration wants to persist publisher
+article text, it must first make an explicit source-specific license decision
+and change the source/license policy intentionally.
+
+Development wiring is controlled by:
+
+- `GDELT_DISCOVERY_ENABLED`
+- `GDELT_DOC_API_BASE_URL`
+- `GDELT_DISCOVERY_STORE_POLICY=metadata_only`
+- `GDELT_DISCOVERY_DEFAULT_MAX_RECORDS`
+- `GDELT_DISCOVERY_RATE_LIMIT_PER_SECOND`
 
 ## Threaded sources
 

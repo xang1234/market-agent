@@ -13,6 +13,7 @@ import {
   type LocalRuntimeClaimEvidence,
   type LocalRuntimeEvidence,
 } from "../../evidence/src/local-runtime-evidence.ts";
+import { loadEvidenceInspection } from "../../evidence/src/inspector.ts";
 import { hashJsonValue, toolCallArgsDigest } from "../../observability/src/tool-call.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
 import { serializeJsonValue } from "../../observability/src/types.ts";
@@ -86,14 +87,14 @@ export async function runAnalyzeWorkflow(
         id: randomUUID(),
         kind: "rich_text",
         snapshot_id: input.snapshotId,
-        data_ref: { kind: "rich_text", id: `analyze:${input.template.template_id}` },
+        data_ref: analyzeRunDataRef(input),
         source_refs: evidence.source_ids,
         claim_refs: evidence.claim_refs,
         document_refs: evidence.document_refs,
         tool_call_ids: [toolCallId],
         as_of: asOf,
         subject_refs: subjectRefs,
-        title: input.template.name,
+        title: input.playbookName ?? input.template.name,
         segments: [
           {
             type: "text",
@@ -131,6 +132,16 @@ export async function sealAnalyzeSnapshot(
     sources: verifierRows.sources,
     documents: verifierRows.documents,
     claims: verifierRows.claims,
+  });
+}
+
+export async function inspectEvidence(
+  input: Parameters<NonNullable<DevApiServiceAdapterDeps["inspectEvidence"]>>[0],
+) {
+  return loadEvidenceInspection(pool(), {
+    user_id: input.userId,
+    snapshot_id: input.snapshotId,
+    ref: input.ref,
   });
 }
 
@@ -627,12 +638,25 @@ function analyzeMemoText(
     ? `Evidence claims:\n${evidence.claims.map((claim, index) => `${index + 1}. ${claim.text_canonical}`).join("\n")}`
     : "Insufficient local evidence: no existing claims, facts, or events were found for the requested subjects.";
   return [
-    input.instructions,
+    input.playbookPrompt,
     `Sources: ${sources}.`,
     `Subjects: ${subjects}.`,
     `Bundles: ${input.bundleIds.join(", ")}.`,
     evidenceText,
   ].filter((line) => line.length > 0).join("\n\n");
+}
+
+function analyzeRunDataRef(input: DevApiAnalyzeWorkflowInput): JsonValue {
+  const base = {
+    kind: "rich_text",
+    id: `analyze:${input.template.template_id}`,
+  };
+  return input.playbookSectionId
+    ? {
+      ...base,
+      params: { playbook_section_id: input.playbookSectionId },
+    }
+    : base;
 }
 
 function subjectRefsFromBlocks(blocks: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<SnapshotSubjectRef> {

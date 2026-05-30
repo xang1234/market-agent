@@ -16,5 +16,6 @@ insert into sources (source_id, provider, kind, canonical_url, trust_tier, licen
   ('00000000-0000-4000-a000-000000000009', 'polygon_market',    'market_data',    'https://api.polygon.io',                      'primary', 'licensed', '2000-01-01T00:00:00Z'),
   ('00000000-0000-4000-a000-00000000000a', 'yahoo_finance_dev_reference', 'reference_data', 'https://finance.yahoo.com', 'tertiary', 'free_dev', '2000-01-01T00:00:00Z'),
   ('00000000-0000-4000-a000-00000000000b', 'yahoo_finance_dev_market',    'market_data',    'https://finance.yahoo.com', 'tertiary', 'free_dev', '2000-01-01T00:00:00Z'),
-  ('00000000-0000-4000-a000-00000000000c', 'finviz_dev_reference',        'reference_data', 'https://finviz.com',        'tertiary', 'free_dev', '2000-01-01T00:00:00Z')
+  ('00000000-0000-4000-a000-00000000000c', 'finviz_dev_reference',        'reference_data', 'https://finviz.com',        'tertiary', 'free_dev', '2000-01-01T00:00:00Z'),
+  ('00000000-0000-4000-a000-00000000000d', 'gdelt_article_discovery',     'article',        'https://api.gdeltproject.org/api/v2/doc/doc', 'tertiary', 'ephemeral', '2000-01-01T00:00:00Z')
 on conflict (source_id) do nothing;

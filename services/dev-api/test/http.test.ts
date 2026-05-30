@@ -7,6 +7,9 @@ import {
   createServiceDevApiAdapters,
 } from "../src/http.ts";
 import { ANALYZE_BASE_BUNDLE_ID } from "../../analyze/src/index.ts";
+import { EvidenceInspectionError } from "../../evidence/src/inspector.ts";
+
+const EARNINGS_TEMPLATE_ID = "11111111-1111-4111-8111-111111111111";
 
 async function startServer(
   t: TestContext,
@@ -54,7 +57,19 @@ test("GET /v1/analyze/templates returns session-scoped template options", async 
 
   assert.equal(response.status, 200);
   assert.ok(Array.isArray(body.templates));
-  assert.match(JSON.stringify(body.templates), /Earnings quality/);
+  assert.match(JSON.stringify(body.templates), /Earnings template/);
+});
+
+test("GET /v1/analyze/playbooks returns built-in playbooks", async (t) => {
+  const base = await startServer(t);
+
+  const response = await fetch(`${base}/v1/analyze/playbooks`, {
+    headers: { "x-user-id": "00000000-0000-4000-8000-000000000001" },
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.json() as { playbooks?: Array<{ playbook_id: string }> };
+  assert.ok(body.playbooks?.some((playbook) => playbook.playbook_id === "earnings_quality"));
 });
 
 test("POST /v1/analyze/runs returns a generated Block[] memo", async (t) => {
@@ -67,7 +82,7 @@ test("POST /v1/analyze/runs returns a generated Block[] memo", async (t) => {
       "x-user-id": "00000000-0000-4000-8000-000000000001",
     },
     body: JSON.stringify({
-      template_id: "earnings-quality",
+      template_id: EARNINGS_TEMPLATE_ID,
       instructions: "Review margin quality",
       source_categories: ["filings", "news"],
     }),
@@ -78,6 +93,259 @@ test("POST /v1/analyze/runs returns a generated Block[] memo", async (t) => {
   assert.ok(Array.isArray(body.blocks));
   assert.equal(body.blocks[0].kind, "rich_text");
   assert.match(JSON.stringify(body.blocks), /Review margin quality/);
+});
+
+test("POST /v1/analyze/runs accepts playbook_id and records it on the run", async (t) => {
+  const base = await startServer(t);
+
+  const response = await fetch(`${base}/v1/analyze/runs`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-id": "00000000-0000-4000-8000-000000000001",
+    },
+    body: JSON.stringify({
+      template_id: EARNINGS_TEMPLATE_ID,
+      playbook_id: "earnings_quality",
+      instructions: "Focus on cash conversion.",
+      source_categories: ["filings"],
+    }),
+  });
+
+  assert.equal(response.status, 201);
+  const body = await response.json() as {
+    template_id?: string;
+    template_name?: string;
+    playbook_id?: string;
+    playbook_name?: string | null;
+    playbook_version?: number;
+    display_title?: string;
+    can_rerun?: boolean;
+    rerun_unavailable_reason?: string | null;
+    run_metadata?: { schema_version?: number };
+    blocks?: Array<{ title?: string; data_ref?: { params?: { playbook_section_id?: string } } }>;
+  };
+  assert.equal(body.template_id, EARNINGS_TEMPLATE_ID);
+  assert.equal(body.template_name, "Earnings template");
+  assert.equal(body.playbook_id, "earnings_quality");
+  assert.equal(body.playbook_name, "Earnings quality");
+  assert.equal(body.playbook_version, 1);
+  assert.equal(body.display_title, "Earnings quality");
+  assert.equal(body.can_rerun, true);
+  assert.equal(body.rerun_unavailable_reason, null);
+  assert.equal(body.run_metadata?.schema_version, 1);
+  assert.equal(body.blocks?.[0]?.title, "Earnings quality");
+  assert.equal(body.blocks?.[0]?.data_ref?.params?.playbook_section_id, "summary");
+});
+
+test("POST /v1/analyze/runs/:id/rerun uses stored run metadata", async (t) => {
+  const base = await startServer(t);
+  const createdResponse = await fetch(`${base}/v1/analyze/runs`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-id": "00000000-0000-4000-8000-000000000001",
+    },
+    body: JSON.stringify({
+      template_id: EARNINGS_TEMPLATE_ID,
+      playbook_id: "earnings_quality",
+      instructions: "Focus on cash conversion.",
+      source_categories: ["filings"],
+    }),
+  });
+  const created = await createdResponse.json() as { run_id: string };
+
+  const rerunResponse = await fetch(`${base}/v1/analyze/runs/${created.run_id}/rerun`, {
+    method: "POST",
+    headers: { "x-user-id": "00000000-0000-4000-8000-000000000001" },
+  });
+
+  assert.equal(rerunResponse.status, 201);
+  const rerun = await rerunResponse.json() as {
+    run_id?: string;
+    display_title?: string;
+    can_rerun?: boolean;
+    rerun_unavailable_reason?: string | null;
+    run_metadata?: { schema_version?: number; rerun_of_run_id?: string };
+  };
+  assert.notEqual(rerun.run_id, created.run_id);
+  assert.equal(rerun.display_title, "Earnings quality");
+  assert.equal(rerun.can_rerun, true);
+  assert.equal(rerun.rerun_unavailable_reason, null);
+  assert.equal(rerun.run_metadata?.schema_version, 1);
+  assert.equal(rerun.run_metadata?.rerun_of_run_id, created.run_id);
+});
+
+test("GET /v1/analyze/runs paginates user run history with an opaque cursor", async (t) => {
+  const base = await startServer(t);
+  const headers = {
+    "content-type": "application/json",
+    "x-user-id": "00000000-0000-4000-8000-000000000001",
+  };
+  for (const instructions of ["First run", "Second run"]) {
+    const response = await fetch(`${base}/v1/analyze/runs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        template_id: EARNINGS_TEMPLATE_ID,
+        playbook_id: "earnings_quality",
+        instructions,
+        source_categories: ["filings"],
+      }),
+    });
+    assert.equal(response.status, 201);
+  }
+
+  const firstPageResponse = await fetch(`${base}/v1/analyze/runs?limit=1`, {
+    headers: { "x-user-id": headers["x-user-id"] },
+  });
+  assert.equal(firstPageResponse.status, 200);
+  const firstPage = await firstPageResponse.json() as {
+    runs?: Array<{ run_id: string; display_title?: string }>;
+    next_cursor?: string | null;
+  };
+  assert.equal(firstPage.runs?.length, 1);
+  assert.equal("blocks" in (firstPage.runs?.[0] ?? {}), false);
+  assert.equal("run_metadata" in (firstPage.runs?.[0] ?? {}), false);
+  assert.equal(firstPage.runs?.[0]?.display_title, "Earnings quality");
+  assert.equal(typeof firstPage.next_cursor, "string");
+
+  const secondPageResponse = await fetch(
+    `${base}/v1/analyze/runs?limit=1&cursor=${encodeURIComponent(firstPage.next_cursor ?? "")}`,
+    { headers: { "x-user-id": headers["x-user-id"] } },
+  );
+  assert.equal(secondPageResponse.status, 200);
+  const secondPage = await secondPageResponse.json() as { runs?: Array<{ run_id: string }>; next_cursor?: string | null };
+  assert.equal(secondPage.runs?.length, 1);
+  assert.notEqual(secondPage.runs?.[0]?.run_id, firstPage.runs?.[0]?.run_id);
+});
+
+test("GET /v1/analyze/runs/:id returns full run detail with blocks", async (t) => {
+  const base = await startServer(t);
+  const createdResponse = await fetch(`${base}/v1/analyze/runs`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-id": "00000000-0000-4000-8000-000000000001",
+    },
+    body: JSON.stringify({
+      template_id: EARNINGS_TEMPLATE_ID,
+      playbook_id: "earnings_quality",
+      instructions: "Focus on cash conversion.",
+      source_categories: ["filings"],
+    }),
+  });
+  const created = await createdResponse.json() as { run_id: string };
+
+  const detailResponse = await fetch(`${base}/v1/analyze/runs/${created.run_id}`, {
+    headers: { "x-user-id": "00000000-0000-4000-8000-000000000001" },
+  });
+
+  assert.equal(detailResponse.status, 200);
+  const detail = await detailResponse.json() as {
+    run_id?: string;
+    display_title?: string;
+    run_metadata?: { schema_version?: number };
+    blocks?: Array<{ title?: string }>;
+  };
+  assert.equal(detail.run_id, created.run_id);
+  assert.equal(detail.display_title, "Earnings quality");
+  assert.equal(detail.run_metadata?.schema_version, 1);
+  assert.equal(detail.blocks?.[0]?.title, "Earnings quality");
+});
+
+test("POST /v1/evidence/inspect requires x-user-id", async (t) => {
+  const base = await startServer(t, {}, {
+    adapters: {
+      ...createFixtureDevApiAdapters(),
+      evidence: {
+        inspect: async () => {
+          throw new Error("should not inspect without auth");
+        },
+      },
+    } as never,
+  });
+
+  const response = await fetch(`${base}/v1/evidence/inspect`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      snapshot_id: "11111111-1111-4111-8111-111111111111",
+      ref: { kind: "source", id: "22222222-2222-4222-8222-222222222222" },
+    }),
+  });
+
+  assert.equal(response.status, 401);
+});
+
+test("POST /v1/evidence/inspect returns adapter inspection", async (t) => {
+  const base = await startServer(t, {}, {
+    adapters: {
+      ...createFixtureDevApiAdapters(),
+      evidence: {
+        inspect: async ({ snapshotId, ref }) => ({
+          snapshot_id: snapshotId,
+          ref,
+          kind: ref.kind,
+          title: "sec filing",
+          subtitle: "https://www.sec.gov/Archives/example",
+          badges: ["primary"],
+          rows: [{ label: "Provider", value: "sec" }],
+          links: [{ label: "Open source", href: "https://www.sec.gov/Archives/example" }],
+          related_refs: [],
+        }),
+      },
+    } as never,
+  });
+
+  const response = await fetch(`${base}/v1/evidence/inspect`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-id": "00000000-0000-4000-8000-000000000001",
+    },
+    body: JSON.stringify({
+      snapshot_id: "11111111-1111-4111-8111-111111111111",
+      ref: { kind: "source", id: "22222222-2222-4222-8222-222222222222" },
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  const body = await response.json() as { title?: string; rows?: Array<{ label: string; value: string }> };
+  assert.equal(body.title, "sec filing");
+  assert.equal(body.rows?.[0]?.value, "sec");
+});
+
+test("POST /v1/evidence/inspect hides missing and authorization reason", async (t) => {
+  const base = await startServer(t, {}, {
+    adapters: {
+      ...createFixtureDevApiAdapters(),
+      evidence: {
+        inspect: async () => {
+          throw new EvidenceInspectionError(404, "source not found");
+        },
+      },
+    } as never,
+  });
+
+  const response = await fetch(`${base}/v1/evidence/inspect`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-id": "00000000-0000-4000-8000-000000000001",
+    },
+    body: JSON.stringify({
+      snapshot_id: "11111111-1111-4111-8111-111111111111",
+      ref: { kind: "source", id: "22222222-2222-4222-8222-222222222222" },
+    }),
+  });
+
+  assert.equal(response.status, 404);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  const body = await response.json() as { error?: string };
+  assert.equal(body.error, "evidence is not available for this artifact");
+  assert.equal(JSON.stringify(body).includes("source not found"), false);
 });
 
 test("GET /v1/agents and POST /v1/agents/:id/runs expose agent workflow data", async (t) => {
@@ -384,7 +652,7 @@ test("Analyze and Agents BFF routes use durable adapters instead of server-local
     method: "POST",
     headers,
     body: JSON.stringify({
-      template_id: "earnings-quality",
+      template_id: EARNINGS_TEMPLATE_ID,
       instructions: "Persist this memo",
       source_categories: ["filings"],
     }),
@@ -408,7 +676,7 @@ test("Analyze and Agents BFF routes use durable adapters instead of server-local
   });
   const persistedTemplatesBody = await persistedTemplates.json() as { runs?: Array<{ template_id: string }> };
   assert.equal(persistedTemplates.status, 200);
-  assert.ok(persistedTemplatesBody.runs?.some((persisted) => persisted.template_id === "earnings-quality"));
+  assert.ok(persistedTemplatesBody.runs?.some((persisted) => persisted.template_id === EARNINGS_TEMPLATE_ID));
 });
 
 test("service Analyze adapter writes blocks with the sealed snapshot id", async () => {
@@ -491,6 +759,10 @@ test("service Analyze adapter writes blocks with the sealed snapshot id", async 
   assert.ok(workflowInput);
   assert.deepEqual(workflowInput.sourceCategories, ["filings", "news"]);
   assert.deepEqual(workflowInput.subjectRefs, [primarySubject, addedSubject]);
+  assert.equal(workflowInput.playbookSectionId, "summary");
+  assert.match(workflowInput.playbookPrompt, /Earnings quality/);
+  assert.match(workflowInput.playbookPrompt, /Required sections: Summary/);
+  assert.equal(workflowInput.playbookName, "Earnings quality");
   assert.ok(workflowInput.bundleIds.includes("analyze_template_run"));
   assert.ok(workflowInput.bundleIds.includes("filing_research"));
   assert.ok(workflowInput.bundleIds.includes("document_research"));
@@ -498,6 +770,44 @@ test("service Analyze adapter writes blocks with the sealed snapshot id", async 
   assert.equal((run.blocks[0] as { snapshot_id?: string }).snapshot_id, run.snapshot_id);
   assert.equal(JSON.stringify(run.blocks).includes("Use sealed snapshot"), false);
   assert.deepEqual(insertedBlocks, run.blocks);
+});
+
+test("service Analyze adapter marks soft-deleted template runs as not rerunnable in list and detail", async () => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const templateId = "11111111-1111-4111-8111-111111111111";
+  const runId = "22222222-2222-4222-8222-222222222222";
+  const runMetadata = {
+    schema_version: 1,
+    template_id: templateId,
+    template_version: 3,
+    playbook_id: "earnings_quality",
+    playbook_version: 1,
+    instructions: "Review earnings quality.",
+    source_categories: ["filings"],
+    subject_refs: [],
+  };
+  const db = fakeAnalyzeRunHistoryDb({
+    userId,
+    templateId,
+    runId,
+    runMetadata,
+    activeTemplate: false,
+  });
+  const adapters = createServiceDevApiAdapters({
+    db,
+    async sealAnalyzeSnapshot() {
+      throw new Error("list/detail should not seal snapshots");
+    },
+  });
+
+  const list = await adapters.analyze.listRuns({ userId, limit: 1, cursor: null });
+  assert.equal(list.runs[0]?.can_rerun, false);
+  assert.equal(list.runs[0]?.rerun_unavailable_reason, "The template used by this run is no longer runnable.");
+
+  const detail = await adapters.analyze.getRun({ userId, runId });
+  assert.equal(detail.can_rerun, false);
+  assert.equal(detail.rerun_unavailable_reason, "The template used by this run is no longer runnable.");
+  assert.deepEqual(detail.blocks, [{ id: "block-1", kind: "rich_text" }]);
 });
 
 test("service Agent adapter runs the durable loop and writes activity before completion", async () => {
@@ -791,6 +1101,43 @@ test("service Analyze adapter rejects unknown source categories before persisten
   assert.deepEqual(insertedBlocks, []);
 });
 
+test("POST /v1/analyze/runs rejects unknown playbooks before workflow execution", async (t) => {
+  const userId = "00000000-0000-4000-8000-000000000001";
+  const templateId = "11111111-1111-4111-8111-111111111111";
+  const insertedBlocks: unknown[] = [];
+  let workflowCalls = 0;
+  const adapters = createServiceDevApiAdapters({
+    db: fakeAnalyzeDb({ userId, templateId, insertedBlocks }),
+    runAnalyzeWorkflow() {
+      workflowCalls += 1;
+      return { blocks: [] };
+    },
+    async sealAnalyzeSnapshot() {
+      throw new Error("unknown playbooks should not seal a snapshot");
+    },
+  });
+  const base = await startServer(t, {}, { adapters });
+
+  const response = await fetch(`${base}/v1/analyze/runs`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-id": userId,
+    },
+    body: JSON.stringify({
+      template_id: templateId,
+      playbook_id: "unknown-playbook",
+      source_categories: ["filings"],
+    }),
+  });
+  const body = await response.json() as { error?: string };
+
+  assert.equal(response.status, 400);
+  assert.match(body.error ?? "", /playbook_id is unknown/);
+  assert.equal(workflowCalls, 0);
+  assert.deepEqual(insertedBlocks, []);
+});
+
 test("service Analyze adapter honors explicit empty source categories as base bundle only", async () => {
   const userId = "00000000-0000-4000-8000-000000000001";
   const templateId = "11111111-1111-4111-8111-111111111111";
@@ -841,6 +1188,7 @@ test("service Analyze adapter honors explicit empty source categories as base bu
   assert.ok(workflowInput);
   assert.deepEqual(workflowInput.sourceCategories, []);
   assert.deepEqual(workflowInput.bundleIds, [ANALYZE_BASE_BUNDLE_ID]);
+  assert.equal(workflowInput.playbookSectionId, "summary");
 });
 
 test("POST /v1/analyze/runs rejects verifier failures before persistence", async (t) => {
@@ -1190,7 +1538,8 @@ function fakeAnalyzeDb(input: {
         };
       }
       if (text.includes("insert into analyze_template_runs")) {
-        const blocks = JSON.parse(String(values?.[3]));
+        const runMetadata = JSON.parse(String(values?.[3]));
+        const blocks = JSON.parse(String(values?.[5]));
         input.insertedBlocks.splice(0, input.insertedBlocks.length, ...blocks);
         return {
           rows: [
@@ -1198,7 +1547,9 @@ function fakeAnalyzeDb(input: {
               run_id: "22222222-2222-4222-8222-222222222222",
               template_id: values?.[0],
               template_version: values?.[1],
-              snapshot_id: values?.[2],
+              playbook_id: values?.[2],
+              run_metadata: runMetadata,
+              snapshot_id: values?.[4],
               blocks,
               created_at: "2026-05-06T00:00:00.000Z",
             },
@@ -1217,6 +1568,61 @@ function fakeAnalyzeDb(input: {
       return client;
     },
     query: client.query,
+  };
+}
+
+function fakeAnalyzeRunHistoryDb(input: {
+  userId: string;
+  templateId: string;
+  runId: string;
+  runMetadata: unknown;
+  activeTemplate: boolean;
+}) {
+  const runRow = {
+    run_id: input.runId,
+    template_id: input.templateId,
+    template_name: "Earnings quality",
+    template_version: 3,
+    playbook_id: "earnings_quality",
+    run_metadata: input.runMetadata,
+    snapshot_id: "33333333-3333-4333-8333-333333333333",
+    blocks: [{ id: "block-1", kind: "rich_text" }],
+    created_at: "2026-05-06T00:00:00.000Z",
+  };
+  const templateRow = {
+    template_id: input.templateId,
+    user_id: input.userId,
+    name: "Earnings quality",
+    prompt_template: "Review earnings quality",
+    source_categories: ["filings"],
+    added_subject_refs: [],
+    block_layout_hint: null,
+    peer_policy: null,
+    disclosure_policy: null,
+    version: 3,
+    created_at: "2026-05-06T00:00:00.000Z",
+    updated_at: "2026-05-06T00:00:00.000Z",
+  };
+  return {
+    async connect() {
+      throw new Error("history read tests must not acquire a write client");
+    },
+    async query(text: string, values?: unknown[]) {
+      if (text.includes("from analyze_template_runs r") && text.includes("order by r.created_at")) {
+        assert.equal(values?.[0], input.userId);
+        return { rows: [runRow], rowCount: 1 };
+      }
+      if (text.includes("from analyze_template_runs r") && text.includes("r.run_id")) {
+        assert.equal(values?.[0], input.userId);
+        assert.equal(values?.[1], input.runId);
+        return { rows: [runRow], rowCount: 1 };
+      }
+      if (text.includes("from analyze_templates") && text.includes("where template_id")) {
+        assert.equal(values?.[0], input.templateId);
+        return { rows: input.activeTemplate ? [templateRow] : [], rowCount: input.activeTemplate ? 1 : 0 };
+      }
+      throw new Error(`unexpected query: ${text}`);
+    },
   };
 }
 
@@ -1498,12 +1904,24 @@ function fakeArtifactShareDb(input: {
       }
       if (text.includes("from analyze_template_runs")) {
         return {
-          rows: values?.[0] === input.runId
+          rows: values?.[0] === input.userId && values?.[1] === input.runId
             ? [
                 {
                   run_id: input.runId,
                   template_id: "77777777-7777-4777-8777-777777777777",
+                  template_name: "Earnings quality",
                   template_version: 3,
+                  playbook_id: "earnings_quality",
+                  run_metadata: {
+                    schema_version: 1,
+                    template_id: "77777777-7777-4777-8777-777777777777",
+                    template_version: 3,
+                    playbook_id: "earnings_quality",
+                    playbook_version: 1,
+                    instructions: "Review earnings quality.",
+                    source_categories: ["filings"],
+                    subject_refs: [],
+                  },
                   snapshot_id: input.snapshotId,
                   blocks: input.blocks,
                   created_at: "2026-05-06T00:00:00.000Z",

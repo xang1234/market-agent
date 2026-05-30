@@ -252,8 +252,11 @@ Type a ticker into the top search (e.g. `AAPL`). The resolver discovers and pers
 ### Chat
 Protected surface — sign in via the top-bar button or the AuthGate panel. New threads are created from the empty state. Messages stream via SSE; the analyst's reply arrives as a `Block[]` (typed `RichText`, `Section`, `MetricRow`, `Table`, `LineChart`, etc.) — never raw markdown. Old blocks stay interactive in their sealed snapshot. The right rail shows the activity stream (`Reading` / `Investigating` / `Found` / `Dismissed`); the left rail lists threads scoped to the session.
 
+### Evidence inspector
+Snapshot-backed blocks expose inspectable refs. Selecting a number, claim, event, source, or block opens the Evidence inspector with the sealed `snapshot_id`, provenance rows, quality badges, source links, and related refs.
+
 ### Analyze
-A template-driven memo workflow. Pick a template (e.g. *Earnings quality v1*), edit the instructions, toggle source categories (filings · transcripts · news · social · uploads), optionally add peer/benchmark subjects, and **Generate memo** to produce a structured `Block[]` memo using the same renderer as Chat. **Add to chat** copies the memo blocks into a thread with shared snapshot provenance.
+A guided playbook workflow. Pick a playbook such as *Earnings quality*, *Variant view*, or *Peer comparison*, tune instructions and source categories, generate a memo, inspect its evidence, rerun it, compare it with prior runs, and add the result to chat with shared snapshot provenance.
 
 ### Screener
 Filter the universe across asset type, sector, venue (MIC), market metrics (price, change %, volume) and fundamentals (market cap, P/E, gross/operating/net margin, revenue YoY). Sort + paginate. Save the screen — saved screens feed watchlists, agent universes, and Analyze peer policies.

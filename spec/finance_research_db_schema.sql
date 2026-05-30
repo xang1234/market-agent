@@ -690,7 +690,8 @@ create table analyze_templates (
   disclosure_policy jsonb,
   version integer not null default 1,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz
 );
 
 -- Each analyze_template_runs row is a sealed memo: the snapshot anchors
@@ -701,14 +702,21 @@ create table analyze_templates (
 -- fail loudly, not silently orphan the memo.
 create table analyze_template_runs (
   run_id uuid primary key default gen_random_uuid(),
-  template_id uuid not null references analyze_templates(template_id) on delete cascade,
+  template_id uuid not null references analyze_templates(template_id),
   template_version integer not null,
+  playbook_id text,
+  run_metadata jsonb not null default '{}'::jsonb,
   snapshot_id uuid not null references snapshots(snapshot_id),
   blocks jsonb not null,
   created_at timestamptz not null default now()
 );
 create index analyze_template_runs_template_created_idx
-  on analyze_template_runs(template_id, created_at desc);
+  on analyze_template_runs(template_id, created_at desc, run_id desc);
+create index analyze_templates_user_template_idx
+  on analyze_templates(user_id, template_id);
+create index analyze_template_runs_playbook_created_idx
+  on analyze_template_runs(playbook_id, created_at desc)
+  where playbook_id is not null;
 
 create table agents (
   agent_id uuid primary key default gen_random_uuid(),

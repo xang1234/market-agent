@@ -19,6 +19,8 @@ export const PERMISSIVE_LICENSE_CLASSES: ReadonlyArray<string> = Object.freeze([
 ]);
 
 export const EPHEMERAL_LICENSE_CLASSES: ReadonlyArray<string> = Object.freeze([
+  // ephemeral: metadata/snippet-only discovery. Raw provider bytes are not
+  // retained unless a later source-specific license review permits storage.
   "ephemeral",
 ]);
 

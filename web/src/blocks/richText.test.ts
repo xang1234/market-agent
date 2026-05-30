@@ -1,11 +1,18 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+
+import { RichText } from './RichText.tsx'
 import {
   isRefSegment,
   isTextSegment,
   refSegmentPlaceholder,
 } from './richText.ts'
-import type { RefSegment, TextSegment } from './types.ts'
+import type { RefSegment, RichTextBlock, TextSegment } from './types.ts'
+
+const SNAPSHOT_ID = '11111111-1111-4111-8111-111111111111'
+const FACT_ID = '22222222-2222-4222-8222-222222222222'
 
 test('isTextSegment / isRefSegment narrow on the discriminator', () => {
   const text: TextSegment = { type: 'text', text: 'hello' }
@@ -43,4 +50,26 @@ test('refSegmentPlaceholder ignores empty `format` and falls back to the id labe
     format: '',
   }
   assert.equal(refSegmentPlaceholder(ref), '[event:00000000]')
+})
+
+test('RichText renders ref segments as inspectable controls', () => {
+  const block: RichTextBlock = {
+    id: 'rich-text-1',
+    kind: 'rich_text',
+    snapshot_id: SNAPSHOT_ID,
+    data_ref: { kind: 'rich_text', id: 'rich-text-1' },
+    source_refs: [],
+    as_of: '2026-05-29T00:00:00.000Z',
+    segments: [
+      { type: 'text', text: 'Revenue was ' },
+      { type: 'ref', ref_kind: 'fact', ref_id: FACT_ID, format: '$85.8B' },
+    ],
+  }
+
+  const html = renderToStaticMarkup(createElement(RichText, { block }))
+
+  assert.match(html, /\$85\.8B/)
+  assert.match(html, /data-inspection-kind="fact"/)
+  assert.match(html, new RegExp(`data-inspection-id="${FACT_ID}"`))
+  assert.match(html, /data-inspection-disabled="true"/)
 })

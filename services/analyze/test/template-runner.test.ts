@@ -9,6 +9,7 @@ import {
   AnalyzeTemplateRunPersistenceError,
   analyzeTemplateRunTransactionClient,
   getAnalyzeTemplateRun,
+  listAnalyzeTemplateRunsByUser,
   listAnalyzeTemplateRunsByTemplate,
   persistAnalyzeTemplateRunAfterSnapshotSeal,
   type AnalyzeTemplateRunPersistenceDb,
@@ -107,11 +108,24 @@ const sampleBlocks: JsonValue = [
   { id: "block-1", kind: "section", title: "Overview", children: [], snapshot_id: SNAPSHOT_ID },
 ];
 
+const sampleRunMetadata: JsonValue = {
+  schema_version: 1,
+  template_id: TEMPLATE_ID,
+  template_version: 1,
+  playbook_id: "earnings_quality",
+  playbook_version: 1,
+  instructions: "Review earnings quality.",
+  source_categories: ["filings", "news"],
+  subject_refs: [],
+};
+
 function runRow(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
   return {
     run_id: RUN_ID,
     template_id: TEMPLATE_ID,
     template_version: 1,
+    playbook_id: "earnings_quality",
+    run_metadata: sampleRunMetadata,
     snapshot_id: SNAPSHOT_ID,
     blocks: sampleBlocks,
     created_at: FIXED_NOW,
@@ -123,6 +137,8 @@ const baseInput = (sealResult: SnapshotSealResult): PersistAnalyzeTemplateRunInp
   template_id: TEMPLATE_ID,
   template_version: 1,
   blocks: sampleBlocks,
+  playbook_id: "earnings_quality",
+  run_metadata: sampleRunMetadata,
   sealSnapshot: async () => sealResult,
 });
 
@@ -174,12 +190,43 @@ test("persistAnalyzeTemplateRunAfterSnapshotSeal persists template_version and s
   );
   const insert = queries.find((q) => q.text.includes("insert into analyze_template_runs"));
   assert.ok(insert, "expected an insert into analyze_template_runs");
-  // Insert binds in order: template_id, template_version, snapshot_id, blocks.
+  // Insert binds in order: template_id, template_version, playbook metadata,
+  // snapshot_id, blocks.
   assert.equal(insert.values?.[0], TEMPLATE_ID);
   assert.equal(insert.values?.[1], 1);
-  assert.equal(insert.values?.[2], SNAPSHOT_ID, "snapshot_id must come from the seal, not the input");
-  assert.equal(insert.values?.[3], JSON.stringify(sampleBlocks));
+  assert.equal(insert.values?.[2], "earnings_quality");
+  assert.equal(insert.values?.[3], JSON.stringify(sampleRunMetadata));
+  assert.equal(insert.values?.[4], SNAPSHOT_ID, "snapshot_id must come from the seal, not the input");
+  assert.equal(insert.values?.[5], JSON.stringify(sampleBlocks));
   assert.equal(call, 3);
+});
+
+test("persistAnalyzeTemplateRunAfterSnapshotSeal stores playbook metadata for rerun reconstruction", async () => {
+  // The rendered memo is readable on its own, but rerun needs the original
+  // normalized request. Persist the metadata beside the sealed blocks rather
+  // than trying to reverse-engineer it from UI content.
+  const { db } = fakePoolClient((text, values) => {
+    if (text.includes("insert into analyze_template_runs")) {
+      return [
+        runRow({
+          playbook_id: values?.[2],
+          run_metadata: JSON.parse(String(values?.[3])),
+          snapshot_id: values?.[4],
+          blocks: JSON.parse(String(values?.[5])),
+        }),
+      ];
+    }
+    return [];
+  });
+  const result = await persistAnalyzeTemplateRunAfterSnapshotSeal(
+    analyzeTemplateRunTransactionClient(db),
+    baseInput(okSeal()),
+  );
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.run.playbook_id, "earnings_quality");
+    assert.deepEqual(result.run.run_metadata, sampleRunMetadata);
+  }
 });
 
 test("persistAnalyzeTemplateRunAfterSnapshotSeal rolls back if the insert returns no row", async () => {
@@ -338,6 +385,38 @@ test("listAnalyzeTemplateRunsByTemplate orders by created_at desc — newest fir
   assert.equal(queries[0].values?.[0], TEMPLATE_ID);
 });
 
+test("listAnalyzeTemplateRunsByUser uses bounded cursor pagination without loading memo blocks", async () => {
+  const { db, queries } = fakeDb(() => [
+    runRow({
+      run_id: "00000000-0000-4000-8000-000000000002",
+      created_at: "2026-05-02T00:00:00.000Z",
+      template_name: "Earnings quality",
+    }),
+    runRow({
+      run_id: "00000000-0000-4000-8000-000000000001",
+      created_at: "2026-05-01T00:00:00.000Z",
+      template_name: "Earnings quality",
+    }),
+  ]);
+  const page = await listAnalyzeTemplateRunsByUser(db, {
+    userId: "55555555-5555-4555-8555-555555555555",
+    limit: 1,
+    cursor: null,
+  });
+  assert.equal(page.runs.length, 1);
+  assert.equal(typeof page.next_cursor, "string");
+  assert.equal(page.runs[0].template_name, "Earnings quality");
+  assert.equal(page.runs[0].playbook_id, "earnings_quality");
+  assert.equal("run_metadata" in page.runs[0], false);
+  assert.equal(page.runs[0].playbook_version, 1);
+  assert.equal(page.runs[0].can_rerun, true);
+  assert.equal(page.runs[0].rerun_unavailable_reason, null);
+  assert.match(queries[0].text, /order by r\.created_at desc, r\.run_id desc/);
+  assert.match(queries[0].text, /t\.name as template_name/);
+  assert.doesNotMatch(queries[0].text, /r\.blocks/);
+  assert.equal(queries[0].values?.at(-1), 2);
+});
+
 test("listAnalyzeTemplateRunsByTemplate rejects an empty template_id", async () => {
   const { db } = fakeDb(() => []);
   await assert.rejects(
@@ -371,34 +450,43 @@ test("analyzeTemplateRunTransactionClient brands and accepts a real PoolClient s
 
 // ---------- spec drift ---------------------------------------------------
 
-test("analyze_template_runs drift-tests against the spec SQL: required columns, FKs, and the (template_id, created_at desc) index", () => {
+test("analyze_template_runs drift-tests against the spec SQL: required columns, FKs, and run-history indexes", () => {
   // Reads the actual schema and pins what the runner depends on:
-  // - template_id FK with ON DELETE CASCADE (so `delete user → cascade
-  //   templates → cascade runs` works for tenant cleanup).
+  // - template_id FK without ON DELETE CASCADE because template deletion is
+  //   a soft delete; historical runs must remain readable.
   // - snapshot_id FK *without* CASCADE (the chat_messages convention —
   //   deleting a sealed snapshot must fail loudly, not silently orphan
   //   memos).
   // - template_version captured at run time so old memos remain readable
   //   even after the template is edited.
   // - blocks jsonb not null (memo payload).
-  // - composite index on (template_id, created_at desc) for the list path.
+  // - playbook_id + run_metadata captured so reruns can reconstruct the
+  //   original normalized request.
+  // - composite indexes for template history and playbook-filtered history.
   const workspaceRoot = join(import.meta.dirname, "..", "..", "..");
   const schemaSource = readFileSync(join(workspaceRoot, "spec", "finance_research_db_schema.sql"), "utf8");
   const tableMatch = schemaSource.match(/create table analyze_template_runs \(([\s\S]*?)\);/);
   assert.ok(tableMatch, "expected create table analyze_template_runs in spec/finance_research_db_schema.sql");
   const body = tableMatch[1];
   for (const expected of [
-    /template_id uuid not null references analyze_templates\(template_id\) on delete cascade/,
+    /template_id uuid not null references analyze_templates\(template_id\)(?!\s*on\s+delete\s+cascade)/,
     // snapshot_id reference WITHOUT cascade — deleting a referenced snapshot must fail loudly.
     /snapshot_id uuid not null references snapshots\(snapshot_id\)(?!\s*on\s+delete\s+cascade)/,
     /template_version integer not null/,
+    /playbook_id text/,
+    /run_metadata jsonb not null default '\{\}'::jsonb/,
     /blocks jsonb not null/,
   ]) {
     assert.match(body, expected, `analyze_template_runs must declare ${expected}`);
   }
   assert.match(
     schemaSource,
-    /create index \w+\s+on analyze_template_runs\(template_id, created_at desc\)/,
-    "missing covering index on (template_id, created_at desc) for listAnalyzeTemplateRunsByTemplate",
+    /create index \w+\s+on analyze_template_runs\(template_id, created_at desc, run_id desc\)/,
+    "missing covering index on (template_id, created_at desc, run_id desc) for listAnalyzeTemplateRunsByTemplate",
+  );
+  assert.match(
+    schemaSource,
+    /create index \w+\s+on analyze_template_runs\(playbook_id, created_at desc\)\s+where playbook_id is not null/,
+    "missing partial index on playbook history",
   );
 });

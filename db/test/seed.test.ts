@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   bootstrapDatabase,
   dbRoot,
@@ -12,6 +13,17 @@ const METRICS_DIGEST_EXPR =
   "md5(string_agg(metric_key || ':' || display_name || ':' || unit_class || ':' || aggregation || ':' || interpretation || ':' || canonical_source_class, ',' order by metric_key))";
 const SOURCES_DIGEST_EXPR =
   "md5(string_agg(source_id::text || ':' || provider || ':' || kind::text || ':' || trust_tier::text || ':' || license_class, ',' order by source_id))";
+
+test("source seed registers GDELT as metadata-only public news discovery", () => {
+  const sourcesSql = readFileSync(new URL("../seed/sources.sql", import.meta.url), "utf8");
+
+  assert.match(sourcesSql, /gdelt_article_discovery/);
+  assert.match(sourcesSql, /https:\/\/api\.gdeltproject\.org\/api\/v2\/doc\/doc/);
+  assert.match(
+    sourcesSql,
+    /'gdelt_article_discovery',\s*'article',\s*'https:\/\/api\.gdeltproject\.org\/api\/v2\/doc\/doc',\s*'tertiary',\s*'ephemeral'/,
+  );
+});
 
 type SeedSnapshot = {
   metricCount: string;
@@ -159,6 +171,14 @@ test("seed populates metrics and sources with the expected registry", { timeout:
     queryValue(containerName, "select count(*) from sources where provider = 'finviz_dev_reference' and kind = 'reference_data'"),
     "1",
     "expected finviz_dev_reference source to be present exactly once",
+  );
+  assert.equal(
+    queryValue(
+      containerName,
+      "select count(*) from sources where provider = 'gdelt_article_discovery' and kind = 'article' and trust_tier = 'tertiary' and license_class = 'ephemeral'",
+    ),
+    "1",
+    "expected gdelt_article_discovery metadata-only article source to be present exactly once",
   );
 });
 

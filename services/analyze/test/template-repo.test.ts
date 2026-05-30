@@ -277,6 +277,13 @@ test("getAnalyzeTemplate returns the parsed row with subject_refs and version su
   assert.deepEqual([...row.added_subject_refs], refs);
 });
 
+test("getAnalyzeTemplate ignores soft-deleted templates", async () => {
+  const { db, queries } = fakeDb(() => []);
+  const row = await getAnalyzeTemplate(db, TEMPLATE_ID);
+  assert.equal(row, null);
+  assert.match(queries[0].text, /deleted_at is null/);
+});
+
 test("listAnalyzeTemplatesByUser scopes by user_id, orders by name ascending, and freezes the array", async () => {
   // Templates are user-owned — listing must filter by user_id, never return
   // another user's rows. Order-by-name makes the picker UI deterministic.
@@ -289,6 +296,7 @@ test("listAnalyzeTemplatesByUser scopes by user_id, orders by name ascending, an
   assert.equal(Object.isFrozen(rows), true);
   assert.equal(queries[0].values?.[0], USER_ID);
   assert.equal(queries[0].text.includes("where user_id ="), true);
+  assert.match(queries[0].text, /deleted_at is null/);
   assert.equal(queries[0].text.includes("order by name asc"), true);
 });
 
@@ -314,6 +322,7 @@ test("updateAnalyzeTemplate bumps version and returns the updated row", async ()
   // The update SQL must increment version atomically (not read-modify-write).
   assert.match(queries[0].text, /version\s*=\s*version\s*\+\s*1/);
   assert.match(queries[0].text, /updated_at\s*=\s*now\(\)/);
+  assert.match(queries[0].text, /deleted_at is null/);
 });
 
 test("updateAnalyzeTemplate rejects an empty patch — silent no-ops are a footgun", async () => {
@@ -417,6 +426,16 @@ test("deleteAnalyzeTemplate throws AnalyzeTemplateNotFoundError when the row is 
   );
 });
 
+test("deleteAnalyzeTemplate soft-deletes the template so historical runs remain readable", async () => {
+  const { db, queries } = fakeDb(() => [templateRow()]);
+  await deleteAnalyzeTemplate(db, TEMPLATE_ID);
+  assert.match(queries[0].text, /update analyze_templates/);
+  assert.match(queries[0].text, /set deleted_at = now\(\)/);
+  assert.match(queries[0].text, /updated_at = now\(\)/);
+  assert.match(queries[0].text, /deleted_at is null/);
+  assert.equal(queries[0].values?.[0], TEMPLATE_ID);
+});
+
 test("deleteAnalyzeTemplate rejects an empty template_id before any query", async () => {
   const { db, queries } = fakeDb(() => []);
   await assert.rejects(
@@ -444,6 +463,7 @@ test("analyze_templates drift-tests against the spec SQL: jsonb columns and vers
     /peer_policy jsonb/,
     /disclosure_policy jsonb/,
     /version integer not null default 1/,
+    /deleted_at timestamptz/,
   ]) {
     assert.match(body, expected, `analyze_templates must declare ${expected}`);
   }
