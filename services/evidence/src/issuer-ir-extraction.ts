@@ -22,7 +22,7 @@ export type IssuerIrExtractionResult = Readonly<{
 
 export type IssuerIrDocumentText =
   | Readonly<{ status: "available"; text: string }>
-  | Readonly<{ status: "unsupported_binary"; reason: "pdf" }>;
+  | Readonly<{ status: "unsupported_binary"; reason: "pdf" | "binary_content_type" }>;
 
 const KPI_RE = /\b(revenue|sales|margin|operating income|eps|earnings per share|free cash flow|cash flow|arr|bookings|backlog)\b/i;
 const GUIDANCE_RE = /\b(guidance|outlook|forecast|expects?|raise[sd]?|lift(?:ed|s)?|lower(?:ed|s)?|cut|reduce[sd]?|increase[sd]?)\b/i;
@@ -152,6 +152,9 @@ export function issuerIrTextFromBytes(input: {
   if (contentType === "application/pdf" || isPdfBytes(input.bytes)) {
     return Object.freeze({ status: "unsupported_binary", reason: "pdf" as const });
   }
+  if (contentType && !isTextContentType(contentType)) {
+    return Object.freeze({ status: "unsupported_binary", reason: "binary_content_type" as const });
+  }
   return Object.freeze({
     status: "available" as const,
     text: documentTextFromBytes(input.bytes),
@@ -174,6 +177,16 @@ function isPdfBytes(bytes: Uint8Array): boolean {
     bytes[2] === 0x44 &&
     bytes[3] === 0x46 &&
     bytes[4] === 0x2d;
+}
+
+function isTextContentType(contentType: string): boolean {
+  return contentType.startsWith("text/") ||
+    contentType === "application/html" ||
+    contentType === "application/xhtml+xml" ||
+    contentType === "application/xml" ||
+    contentType === "application/json" ||
+    contentType.endsWith("+xml") ||
+    contentType.endsWith("+json");
 }
 
 function claim(

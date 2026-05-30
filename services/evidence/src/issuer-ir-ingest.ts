@@ -17,12 +17,8 @@ import {
   type IrDocumentAssetRow,
   type IrSourceRegistryRow,
 } from "./issuer-ir-registry.ts";
-import { ingestDocument, type IngestDocumentResult } from "./ingest.ts";
+import { ingestDocumentInTransaction, type IngestDocumentResult } from "./ingest.ts";
 import { createMention } from "./mention-repo.ts";
-import {
-  ingestEarningsTranscript,
-  ingestPressRelease,
-} from "./news-ingest.ts";
 import type { ObjectStore } from "./object-store.ts";
 import {
   discoverIssuerIrCandidates,
@@ -32,12 +28,10 @@ import {
 } from "./providers/issuer-ir.ts";
 import {
   createSource,
-  deleteSource,
   type SourceRow,
 } from "./source-repo.ts";
 import type { QueryExecutor } from "./types.ts";
 import {
-  withPinnedClient,
   withTransaction,
 } from "./transaction.ts";
 import {
@@ -126,7 +120,7 @@ async function persistIssuerIrCandidate(
   candidate: IssuerIrCandidate,
   fetched: { bytes: Uint8Array; contentType: string | null; fetchedAt: string },
 ): Promise<IssuerIrIngestRecord> {
-  return withPinnedClient(deps.db, (db) =>
+  return withTransaction(deps.db, (db) =>
     persistIssuerIrCandidateWithDb({ ...deps, db }, input, candidate, fetched)
   );
 }
@@ -138,142 +132,120 @@ async function persistIssuerIrCandidateWithDb(
   fetched: { bytes: Uint8Array; contentType: string | null; fetchedAt: string },
 ): Promise<IssuerIrIngestRecord> {
   const provider = sourceProvider(candidate);
-  const licenseClass = provider === "issuer_ir" ? "public" : "free";
-  let source: SourceRow;
-  let ingest: IngestDocumentResult;
-  if (candidate.assetKind === "press_release") {
-    const result = await ingestPressRelease(deps, {
-      bytes: fetched.bytes,
-      provider,
-      canonicalUrl: candidate.canonicalUrl,
-      publisher: input.issuerName,
-      publishedAt: candidate.publishedAt ?? fetched.fetchedAt,
-      title: candidate.title,
-      trustTier: provider === "issuer_ir" ? "primary" : "secondary",
-      licenseClass,
-      retrievedAt: fetched.fetchedAt,
-      providerDocId: providerDocId(candidate),
-    });
-    source = result.source;
-    ingest = result.ingest;
-  } else if (candidate.assetKind === "transcript") {
-    const result = await ingestEarningsTranscript(deps, {
-      bytes: fetched.bytes,
-      provider,
-      canonicalUrl: candidate.canonicalUrl,
-      publisher: input.issuerName,
-      publishedAt: candidate.publishedAt ?? fetched.fetchedAt,
-      fiscalPeriod: inferFiscalPeriod(candidate.title, candidate.publishedAt ?? fetched.fetchedAt),
-      issuer: input.issuerName,
-      trustTier: provider === "issuer_ir" ? "secondary" : "tertiary",
-      licenseClass: provider === "issuer_ir" ? "public" : "licensed",
-      retrievedAt: fetched.fetchedAt,
-      providerDocId: providerDocId(candidate),
-    });
-    source = result.source;
-    ingest = result.ingest;
-  } else {
-    const result = await ingestPresentation(deps, {
-      candidate,
-      bytes: fetched.bytes,
-      provider,
-      licenseClass,
-      issuerName: input.issuerName,
-      retrievedAt: fetched.fetchedAt,
-    });
-    source = result.source;
-    ingest = result.ingest;
-  }
+  const { source, ingest } = await persistIssuerIrDocument(deps, input, candidate, fetched, provider);
 
   const document = ingest.document;
-  const persisted = await withTransaction(deps.db, async (tx) => {
-    const asset = await createIrDocumentAsset(tx, {
-      ir_source_id: input.registryEntry.ir_source_id,
-      issuer_id: input.registryEntry.issuer_id,
+  const asset = await createIrDocumentAsset(deps.db, {
+    ir_source_id: input.registryEntry.ir_source_id,
+    issuer_id: input.registryEntry.issuer_id,
+    document_id: document.document_id,
+    source_id: source.source_id,
+    asset_kind: candidate.assetKind,
+    canonical_url: candidate.canonicalUrl,
+    hosted_provider: candidate.hostedProvider,
+    issuer_attested: provider === "issuer_ir",
+    content_type: fetched.contentType,
+    discovered_at: candidate.publishedAt ?? fetched.fetchedAt,
+    fetched_at: fetched.fetchedAt,
+  });
+  await createMention(deps.db, {
+    document_id: document.document_id,
+    subject_kind: input.subjectRef.kind,
+    subject_id: input.subjectRef.id,
+    prominence: candidate.assetKind === "press_release" ? "headline" : "lead",
+    mention_count: 1,
+    confidence: provider === "issuer_ir" ? 0.95 : 0.82,
+  });
+  const text = issuerIrTextFromBytes({
+    bytes: fetched.bytes,
+    contentType: fetched.contentType,
+  });
+  const extracted = text.status === "available"
+    ? extractIssuerIrEvidence({
+      text: text.text,
       document_id: document.document_id,
       source_id: source.source_id,
-      asset_kind: candidate.assetKind,
-      canonical_url: candidate.canonicalUrl,
-      hosted_provider: candidate.hostedProvider,
-      issuer_attested: provider === "issuer_ir",
-      content_type: fetched.contentType,
-      discovered_at: candidate.publishedAt ?? fetched.fetchedAt,
-      fetched_at: fetched.fetchedAt,
-    });
-    await createMention(tx, {
-      document_id: document.document_id,
-      subject_kind: input.subjectRef.kind,
-      subject_id: input.subjectRef.id,
-      prominence: candidate.assetKind === "press_release" ? "headline" : "lead",
-      mention_count: 1,
-      confidence: provider === "issuer_ir" ? 0.95 : 0.82,
-    });
-    const text = issuerIrTextFromBytes({
-      bytes: fetched.bytes,
-      contentType: fetched.contentType,
-    });
-    const extracted = text.status === "available"
-      ? extractIssuerIrEvidence({
-        text: text.text,
-        document_id: document.document_id,
-        source_id: source.source_id,
-        subject_ref: input.subjectRef,
-        asset,
-        effective_time: candidate.publishedAt ?? fetched.fetchedAt,
-      })
-      : emptyIssuerIrExtractionResult();
-    const claims = await persistClaims(tx, extracted.claims, input.subjectRef);
-    const events = await persistEvents(tx, extracted.events, input.subjectRef, claims.map((claim) => claim.claim_id));
-    return Object.freeze({ asset, claims, events });
-  });
+      subject_ref: input.subjectRef,
+      asset,
+      effective_time: candidate.publishedAt ?? fetched.fetchedAt,
+    })
+    : emptyIssuerIrExtractionResult();
+  const claims = await persistClaims(deps.db, extracted.claims, input.subjectRef);
+  const events = await persistEvents(deps.db, extracted.events, input.subjectRef, claims.map((claim) => claim.claim_id));
   return Object.freeze({
     candidate,
     source,
     document,
     ingest,
-    asset: persisted.asset,
-    claims: persisted.claims,
-    events: persisted.events,
+    asset,
+    claims,
+    events,
     status: "created" as const,
   });
 }
 
-async function ingestPresentation(
+async function persistIssuerIrDocument(
   deps: IngestIssuerIrSourceDeps,
-  input: {
-    candidate: IssuerIrCandidate;
-    bytes: Uint8Array;
-    provider: string;
-    licenseClass: string;
-    issuerName: string;
-    retrievedAt: string;
-  },
+  input: IngestIssuerIrSourceInput,
+  candidate: IssuerIrCandidate,
+  fetched: { bytes: Uint8Array; fetchedAt: string },
+  provider: string,
 ): Promise<{ source: SourceRow; ingest: IngestDocumentResult }> {
+  const publishedAt = candidate.publishedAt ?? fetched.fetchedAt;
+  const licenseClass = issuerIrLicenseClass(candidate, provider);
   const source = await createSource(deps.db, {
-    provider: input.provider,
-    kind: "research_note",
-    canonical_url: input.candidate.canonicalUrl,
-    trust_tier: input.provider === "issuer_ir" ? "primary" : "secondary",
-    license_class: input.licenseClass,
-    retrieved_at: input.retrievedAt,
+    provider,
+    kind: issuerIrSourceKind(candidate),
+    canonical_url: candidate.canonicalUrl,
+    trust_tier: issuerIrTrustTier(candidate, provider),
+    license_class: licenseClass,
+    retrieved_at: fetched.fetchedAt,
   });
-  try {
-    const ingest = await ingestDocument(deps, {
-      source: { source_id: source.source_id, license_class: source.license_class },
-      bytes: input.bytes,
-      document: {
-        provider_doc_id: providerDocId(input.candidate),
-        kind: "research_note",
-        title: input.candidate.title,
-        author: input.issuerName,
-        published_at: input.candidate.publishedAt ?? input.retrievedAt,
-      },
-    });
-    return Object.freeze({ source, ingest });
-  } catch (error) {
-    await deleteSource(deps.db, source.source_id);
-    throw error;
-  }
+  const ingest = await ingestDocumentInTransaction(deps, {
+    source: { source_id: source.source_id, license_class: source.license_class },
+    bytes: fetched.bytes,
+    document: {
+      provider_doc_id: providerDocId(candidate),
+      kind: issuerIrDocumentKind(candidate),
+      title: issuerIrDocumentTitle(candidate, input.issuerName, publishedAt),
+      author: input.issuerName,
+      published_at: publishedAt,
+    },
+  });
+  return Object.freeze({ source, ingest });
+}
+
+function issuerIrSourceKind(candidate: IssuerIrCandidate): SourceRow["kind"] {
+  if (candidate.assetKind === "press_release") return "press_release";
+  if (candidate.assetKind === "transcript") return "transcript";
+  return "research_note";
+}
+
+function issuerIrDocumentKind(candidate: IssuerIrCandidate): DocumentRow["kind"] {
+  if (candidate.assetKind === "press_release") return "press_release";
+  if (candidate.assetKind === "transcript") return "transcript";
+  return "research_note";
+}
+
+function issuerIrTrustTier(candidate: IssuerIrCandidate, provider: string): SourceRow["trust_tier"] {
+  if (candidate.assetKind === "press_release") return provider === "issuer_ir" ? "primary" : "secondary";
+  if (candidate.assetKind === "transcript") return provider === "issuer_ir" ? "secondary" : "tertiary";
+  return provider === "issuer_ir" ? "primary" : "secondary";
+}
+
+function issuerIrLicenseClass(candidate: IssuerIrCandidate, provider: string): string {
+  if (candidate.assetKind === "transcript") return provider === "issuer_ir" ? "public" : "licensed";
+  return provider === "issuer_ir" ? "public" : "free";
+}
+
+function issuerIrDocumentTitle(
+  candidate: IssuerIrCandidate,
+  issuerName: string,
+  publishedAt: string,
+): string {
+  if (candidate.assetKind !== "transcript") return candidate.title;
+  const fiscalPeriod = inferFiscalPeriod(candidate.title, publishedAt);
+  return `${issuerName} \u2014 ${fiscalPeriod} earnings call`;
 }
 
 async function persistClaims(

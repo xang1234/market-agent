@@ -1,7 +1,7 @@
 import type { QueryExecutor } from "./types.ts";
 
 export type TransactionClient = QueryExecutor & {
-  release(destroy?: boolean): void;
+  release(destroy?: boolean | Error): void;
 };
 
 export type ConnectableQueryExecutor = QueryExecutor & {
@@ -12,7 +12,7 @@ export async function withPinnedClient<T>(
   db: QueryExecutor,
   action: (db: QueryExecutor) => Promise<T>,
 ): Promise<T> {
-  if (!isConnectableQueryExecutor(db)) {
+  if (!isPoolLike(db)) {
     return action(db);
   }
 
@@ -24,7 +24,7 @@ export async function withPinnedClient<T>(
     destroyClient = true;
     throw error;
   } finally {
-    client.release(destroyClient || undefined);
+    client.release(destroyClient);
   }
 }
 
@@ -32,7 +32,7 @@ export async function withTransaction<T>(
   db: QueryExecutor,
   action: (tx: QueryExecutor) => Promise<T>,
 ): Promise<T> {
-  if (isConnectableQueryExecutor(db)) {
+  if (isPoolLike(db)) {
     const client = await db.connect();
     let destroyClient = false;
     try {
@@ -41,15 +41,27 @@ export async function withTransaction<T>(
       destroyClient = true;
       throw error;
     } finally {
-      client.release(destroyClient || undefined);
+      client.release(destroyClient);
     }
   }
 
   return runTransaction(db, action);
 }
 
-function isConnectableQueryExecutor(db: QueryExecutor): db is ConnectableQueryExecutor {
-  return typeof (db as Partial<ConnectableQueryExecutor>).connect === "function";
+function isPoolLike(db: QueryExecutor): db is ConnectableQueryExecutor {
+  return (
+    typeof (db as Partial<ConnectableQueryExecutor>).connect === "function" &&
+    typeof (db as Partial<TransactionClient>).release !== "function" &&
+    !hasPgClientConnectionParameters(db)
+  );
+}
+
+function hasPgClientConnectionParameters(db: QueryExecutor): boolean {
+  return (
+    db !== null &&
+    typeof db === "object" &&
+    Object.prototype.hasOwnProperty.call(db, "connectionParameters")
+  );
 }
 
 async function runTransaction<T>(

@@ -291,10 +291,85 @@ test("ingestIssuerIrSource persists candidate writes on an acquired client when 
 
   assert.equal(result.records.length, 1);
   assert.equal(poolQueries.some((query) => /insert into/i.test(query.text)), false);
+  const beginIndex = txQueries.findIndex((query) => query.text === "begin");
+  const sourceIndex = txQueries.findIndex((query) => /insert into sources/i.test(query.text));
+  const documentIndex = txQueries.findIndex((query) => /insert into documents/i.test(query.text));
+  const assetIndex = txQueries.findIndex((query) => /insert into ir_document_assets/i.test(query.text));
+  const claimIndex = txQueries.findIndex((query) => /insert into claims/i.test(query.text));
+  const commitIndex = txQueries.findIndex((query) => query.text === "commit");
+  assert.ok(beginIndex >= 0);
+  assert.ok(beginIndex < sourceIndex);
+  assert.ok(sourceIndex < documentIndex);
+  assert.ok(documentIndex < assetIndex);
+  assert.ok(assetIndex < claimIndex);
+  assert.ok(claimIndex < commitIndex);
   assert.ok(txQueries.some((query) => /insert into sources/i.test(query.text)));
   assert.ok(txQueries.some((query) => /insert into ir_document_assets/i.test(query.text)));
   assert.ok(txQueries.some((query) => /insert into claims/i.test(query.text)));
   assert.equal(releases.length, 1);
+});
+
+test("ingestIssuerIrSource rolls back source and document rows when IR asset persistence fails", async () => {
+  const feed = `<rss><channel><item>
+    <title>Acme reports Q1 results and raises guidance</title>
+    <link>https://investors.acme.example/news/q1-results</link>
+    <pubDate>Fri, 29 May 2026 12:00:00 GMT</pubDate>
+  </item></channel></rss>`;
+  const body = "Acme reports Q1 results. Management raised full-year revenue guidance.";
+  const base = recordingDb();
+  const txQueries: string[] = [];
+  const db: QueryExecutor & { connect(): Promise<QueryExecutor & { release(destroy?: boolean): void }> } = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      if (/insert into/i.test(text) || /^(begin|commit|rollback)$/i.test(text)) {
+        throw new Error(`write used the pool instead of transaction client: ${text}`);
+      }
+      return base.db.query<R>(text, values);
+    },
+    async connect() {
+      return {
+        async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+          txQueries.push(text);
+          if (/insert into ir_document_assets/i.test(text)) {
+            throw new Error("asset failed");
+          }
+          return base.db.query<R>(text, values);
+        },
+        release() {},
+      };
+    },
+  };
+
+  await assert.rejects(
+    ingestIssuerIrSource(
+      {
+        db,
+        objectStore: new MemoryObjectStore(),
+        fetch: async (url) => new Response(url.endsWith("/rss") ? feed : body, {
+          status: 200,
+          headers: { "content-type": url.endsWith("/rss") ? "application/rss+xml" : "text/html" },
+        }),
+        now: () => Date.parse("2026-05-30T01:00:00.000Z"),
+      },
+      {
+        registryEntry: registry(),
+        issuerName: "Acme Robotics Holdings",
+        subjectRef: { kind: "issuer", id: ISSUER_ID },
+      },
+    ),
+    /asset failed/,
+  );
+
+  const beginIndex = txQueries.findIndex((query) => query === "begin");
+  const sourceIndex = txQueries.findIndex((query) => /insert into sources/i.test(query));
+  const documentIndex = txQueries.findIndex((query) => /insert into documents/i.test(query));
+  const assetIndex = txQueries.findIndex((query) => /insert into ir_document_assets/i.test(query));
+  const rollbackIndex = txQueries.findIndex((query) => query === "rollback");
+  assert.ok(beginIndex >= 0);
+  assert.ok(beginIndex < sourceIndex);
+  assert.ok(sourceIndex < documentIndex);
+  assert.ok(documentIndex < assetIndex);
+  assert.ok(assetIndex < rollbackIndex);
+  assert.equal(txQueries.some((query) => query === "commit"), false);
 });
 
 test("ingestIssuerIrSource stores presentation PDFs as research_note documents", async () => {

@@ -565,7 +565,7 @@ test("extract_mentions uses an acquired client for transactional mention writes 
   assert.ok(beginIndex < insertIndex);
   assert.ok(insertIndex < deleteIndex);
   assert.ok(deleteIndex < commitIndex);
-  assert.deepEqual(releases, [undefined]);
+  assert.deepEqual(releases, [false]);
 });
 
 test("extract_mentions rolls back when stale mention deletion fails", async () => {

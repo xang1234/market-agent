@@ -19,4 +19,13 @@ test("issuer IR text extraction decodes text presentations and reports unsupport
     issuerIrTextFromBytes({ bytes: pdfBytes, contentType: "application/pdf" }),
     { status: "unsupported_binary", reason: "pdf" },
   );
+
+  const pptxBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00]);
+  assert.deepEqual(
+    issuerIrTextFromBytes({
+      bytes: pptxBytes,
+      contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }),
+    { status: "unsupported_binary", reason: "binary_content_type" },
+  );
 });
