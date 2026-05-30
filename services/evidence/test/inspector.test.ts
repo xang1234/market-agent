@@ -85,7 +85,28 @@ test("loadEvidenceInspection returns source details only when source belongs to 
   assert.deepEqual(result.badges, ["primary", "public"]);
   assert.equal(result.rows[0]?.label, "Provider");
   assert.equal(result.rows[0]?.value, "sec");
+  assert.deepEqual(result.links, [{ label: "Open source", href: "https://www.sec.gov/Archives/example" }]);
   assertNoRawFields(result);
+});
+
+test("loadEvidenceInspection omits unsafe canonical_url links", async () => {
+  const { db } = stubDb((text) => {
+    if (text.includes("from chat_messages")) return [{ visible: 1 }];
+    if (text.includes("from snapshots")) return [manifestRow()];
+    if (text.includes("from sources")) {
+      return [sourceRow({ source_id: SOURCE_ID, canonical_url: "javascript:alert(1)" })];
+    }
+    return [];
+  });
+
+  const result = await loadEvidenceInspection(db, {
+    user_id: USER_ID,
+    snapshot_id: SNAPSHOT_ID,
+    ref: { kind: "source", id: SOURCE_ID },
+  });
+
+  assert.equal(result.subtitle, "javascript:alert(1)");
+  assert.deepEqual(result.links, []);
 });
 
 test("loadEvidenceInspection returns artifact-safe document details and related source ref", async () => {
@@ -304,12 +325,12 @@ function manifestRow(input: {
   };
 }
 
-function sourceRow(input: { source_id: string }) {
+function sourceRow(input: { source_id: string; canonical_url?: string | null }) {
   return {
     source_id: input.source_id,
     provider: "sec",
     kind: "filing",
-    canonical_url: "https://www.sec.gov/Archives/example",
+    canonical_url: input.canonical_url ?? "https://www.sec.gov/Archives/example",
     trust_tier: "primary",
     license_class: "public",
     retrieved_at: "2026-05-29T00:00:00.000Z",

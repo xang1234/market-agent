@@ -87,7 +87,7 @@ function InspectionBody({ inspection }: { inspection: EvidenceInspection }) {
               <a
                 href={link.href}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="text-sm font-medium text-blue-700 underline underline-offset-2 dark:text-blue-300"
               >
                 {link.label}

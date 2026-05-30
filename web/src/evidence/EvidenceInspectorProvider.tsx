@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 
+import { HttpJsonError } from '../http/authFetch.ts'
 import { useAuth } from '../shell/useAuth.ts'
 import { EvidenceInspectorContext, type EvidenceInspectorContextValue } from './evidenceInspectorContext.ts'
 import { EvidenceInspectorDrawer, type EvidenceInspectorState } from './EvidenceInspectorDrawer.tsx'
@@ -58,8 +59,7 @@ export function EvidenceInspectorProvider({ children }: { children: ReactNode })
 }
 
 function inspectionErrorMessage(error: unknown): string {
+  if (error instanceof HttpJsonError && error.status === 404) return EVIDENCE_INSPECTION_UNAVAILABLE_MESSAGE
   const message = error instanceof Error ? error.message : String(error)
-  return message.includes('evidence is not available for this artifact')
-    ? EVIDENCE_INSPECTION_UNAVAILABLE_MESSAGE
-    : message
+  return message
 }

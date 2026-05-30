@@ -236,7 +236,7 @@ async function inspectSource(
       { label: "Kind", value: row.kind },
       { label: "Retrieved", value: isoString(row.retrieved_at) },
     ]),
-    links: Object.freeze(row.canonical_url ? [{ label: "Open source", href: row.canonical_url }] : []),
+    links: sourceLinks(row.canonical_url),
     related_refs: Object.freeze([]),
   });
 }
@@ -292,7 +292,7 @@ async function inspectDocument(
       { label: "Author", value: row.author ?? "Unknown" },
       { label: "Published", value: row.published_at === null ? "Unknown" : isoString(row.published_at) },
     ]),
-    links: Object.freeze(row.canonical_url ? [{ label: "Open source", href: row.canonical_url }] : []),
+    links: sourceLinks(row.canonical_url),
     related_refs: Object.freeze([{ kind: "source", id: row.source_id }]),
   });
 }
@@ -350,7 +350,7 @@ async function inspectClaim(
       { label: "Effective time", value: row.effective_time === null ? "Unknown" : isoString(row.effective_time) },
       { label: "Provider", value: row.provider },
     ]),
-    links: Object.freeze(row.canonical_url ? [{ label: "Open source", href: row.canonical_url }] : []),
+    links: sourceLinks(row.canonical_url),
     related_refs: Object.freeze([
       { kind: "document", id: row.document_id },
       { kind: "source", id: row.reported_by_source_id },
@@ -464,7 +464,7 @@ async function inspectFact(
       { label: "Method", value: row.method },
       { label: "Confidence", value: String(row.confidence) },
     ]),
-    links: Object.freeze(row.canonical_url ? [{ label: "Open source", href: row.canonical_url }] : []),
+    links: sourceLinks(row.canonical_url),
     related_refs: Object.freeze([{ kind: "source", id: row.source_id }]),
   });
 }
@@ -475,6 +475,20 @@ function assertRef(ref: EvidenceInspectionRef): void {
     throw new EvidenceInspectionError(400, "ref.kind is invalid");
   }
   assertUuid(ref.id, "ref.id");
+}
+
+function sourceLinks(canonicalUrl: string | null): ReadonlyArray<EvidenceInspectionLink> {
+  if (canonicalUrl === null || !isSafeExternalHref(canonicalUrl)) return Object.freeze([]);
+  return Object.freeze([{ label: "Open source", href: canonicalUrl }]);
+}
+
+function isSafeExternalHref(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
 }
 
 function assertUuid(value: unknown, label: string): asserts value is string {

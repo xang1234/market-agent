@@ -85,6 +85,10 @@ test("EvidenceInspectorProvider opens the drawer with fetched inspection details
     assert.match(dom.window.document.body.innerHTML, /sec filing/);
     assert.match(dom.window.document.body.innerHTML, /Provider/);
     assert.match(dom.window.document.body.innerHTML, /Open source/);
+    assert.equal(
+      dom.window.document.querySelector('a[href="https://www.sec.gov/Archives/example"]')?.getAttribute("rel"),
+      "noopener noreferrer",
+    );
     assert.match(dom.window.document.body.innerHTML, /Related refs/);
     assert.match(dom.window.document.body.innerHTML, /document:/);
 
@@ -181,6 +185,61 @@ test("EvidenceInspectorProvider keeps the latest inspection when requests resolv
 
     assert.match(dom.window.document.body.innerHTML, /new filing/);
     assert.doesNotMatch(dom.window.document.body.innerHTML, /old filing/);
+
+    await act(async () => root.unmount());
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreGlobals();
+  }
+});
+
+test("EvidenceInspectorProvider maps inspection 404s to stable user-facing copy", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>");
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window);
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () =>
+      Response.json({ error: "ref is not present in snapshot manifest" }, { status: 404 });
+
+    function OpenButton() {
+      const inspector = useEvidenceInspector();
+      return (
+        <button
+          type="button"
+          onClick={() => inspector?.openInspection({
+            snapshotId: SNAPSHOT_ID,
+            ref: { kind: "source", id: SOURCE_ID },
+          })}
+        >
+          Inspect
+        </button>
+      );
+    }
+
+    const root = createRoot(dom.window.document.getElementById("root")!);
+    await act(async () => {
+      root.render(
+        <AuthContext.Provider
+          value={{
+            session: { userId: USER_ID, displayName: "Mock User" },
+            signIn: () => undefined,
+            signOut: () => undefined,
+          }}
+        >
+          <EvidenceInspectorProvider>
+            <OpenButton />
+          </EvidenceInspectorProvider>
+        </AuthContext.Provider>,
+      );
+    });
+
+    await act(async () => {
+      dom.window.document.querySelector("button")?.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+    });
+    await act(async () => undefined);
+
+    assert.match(dom.window.document.body.innerHTML, /Evidence is not available for this artifact/);
+    assert.doesNotMatch(dom.window.document.body.innerHTML, /ref is not present/);
 
     await act(async () => root.unmount());
   } finally {
