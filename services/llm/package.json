@@ -1,5 +1,5 @@
 {
-  "name": "analyze",
+  "name": "llm",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,6 +7,14 @@
     "node": ">=22.19.0"
   },
   "scripts": {
+    "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test \"test/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "0.78.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.2",
+    "typescript": "~6.0.2"
   }
 }

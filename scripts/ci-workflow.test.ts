@@ -5,6 +5,7 @@ import test from "node:test";
 
 const REPO_ROOT = dirname(dirname(new URL(import.meta.url).pathname));
 const CI_WORKFLOW = join(REPO_ROOT, ".github", "workflows", "ci.yml");
+const MIN_NODE_VERSION = "22.19.0";
 const DB_HARNESS_SERVICE_DIRS = [
   "services/analyze",
   "services/chat",
@@ -16,6 +17,33 @@ const DB_HARNESS_SERVICE_DIRS = [
   "services/themes",
   "services/watchlists",
 ];
+
+test("ci workflow pins the Node version required by pi-ai", async () => {
+  const workflow = await readFile(CI_WORKFLOW, "utf8");
+
+  assert.match(workflow, new RegExp(`NODE_VERSION:\\s*'${MIN_NODE_VERSION}'`));
+});
+
+test("all Node packages declare the pi-ai Node baseline", async () => {
+  const packageDirs = await nodePackageDirs();
+
+  for (const packageDir of packageDirs) {
+    const packageJson = await readPackageJson(packageDir);
+    assert.equal(packageJson.engines?.node, `>=${MIN_NODE_VERSION}`, `${packageDir} should require Node >=${MIN_NODE_VERSION}`);
+  }
+});
+
+test("services/llm owns the pi-ai dependency and import smoke", async () => {
+  const packageJson = await readPackageJson("services/llm");
+
+  assert.equal(packageJson.name, "llm");
+  assert.equal(packageJson.dependencies?.["@earendil-works/pi-ai"], "0.78.0");
+  assert.equal(packageJson.scripts?.test, 'node --experimental-strip-types --test "test/**/*.test.ts"');
+  assert.equal(packageJson.scripts?.typecheck, "tsc --noEmit");
+
+  const smokeTest = await readFile(join(REPO_ROOT, "services", "llm", "test", "pi-ai-import.test.ts"), "utf8");
+  assert.match(smokeTest, /@earendil-works\/pi-ai/);
+});
 
 test("ci workflow includes services/dev-api coverage", async () => {
   const workflow = await readFile(CI_WORKFLOW, "utf8");
@@ -65,27 +93,51 @@ test("ci workflow installs db deps for services that import the shared db test h
 });
 
 async function testedPackageDirs(): Promise<string[]> {
-  const candidates = [
-    "db",
-    "web",
-    ...(await servicePackageDirs()).map((service) => `services/${service}`),
-  ];
+  const candidates = await nodePackageDirs();
   const tested: string[] = [];
   for (const packageDir of candidates) {
-    const packageJson = JSON.parse(
-      await readFile(join(REPO_ROOT, packageDir, "package.json"), "utf8"),
-    ) as { scripts?: Record<string, string> };
+    const packageJson = await readPackageJson(packageDir);
     if (packageJson.scripts?.test) tested.push(packageDir);
   }
   return tested.sort();
 }
 
+async function nodePackageDirs(): Promise<string[]> {
+  return [
+    "db",
+    "web",
+    ...(await servicePackageDirs()).map((service) => `services/${service}`),
+  ].sort();
+}
+
 async function servicePackageDirs(): Promise<string[]> {
   const entries = await readdir(join(REPO_ROOT, "services"), { withFileTypes: true });
-  return entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
+  const serviceDirs: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const packageJsonPath = join(REPO_ROOT, "services", entry.name, "package.json");
+    try {
+      await readFile(packageJsonPath, "utf8");
+      serviceDirs.push(entry.name);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  return serviceDirs.sort();
+}
+
+async function readPackageJson(packageDir: string): Promise<{
+  name?: string;
+  scripts?: Record<string, string>;
+  dependencies?: Record<string, string>;
+  engines?: { node?: string };
+}> {
+  return JSON.parse(await readFile(join(REPO_ROOT, packageDir, "package.json"), "utf8")) as {
+    name?: string;
+    scripts?: Record<string, string>;
+    dependencies?: Record<string, string>;
+    engines?: { node?: string };
+  };
 }
 
 function jobSection(workflow: string, packageDir: string): string {

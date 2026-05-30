@@ -356,6 +356,7 @@ up() {
   ensure_install "$ROOT/services/summary"
   ensure_install "$ROOT/services/themes"
   ensure_install "$ROOT/services/tools"
+  ensure_install "$ROOT/services/llm"
   if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
     ensure_python_service_install "$ROOT/services/dev-providers"
   fi

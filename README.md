@@ -7,7 +7,7 @@
 [![React 19](https://img.shields.io/badge/React-19-149eca?logo=react&logoColor=white)](https://react.dev)
 [![Vite](https://img.shields.io/badge/Vite-7-646cff?logo=vite&logoColor=white)](https://vite.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Node 22](https://img.shields.io/badge/Node-22.6%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Node 22](https://img.shields.io/badge/Node-22.19%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![PostgreSQL 15](https://img.shields.io/badge/Postgres-15-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org)
 [![Redis 7](https://img.shields.io/badge/Redis-7-dc382d?logo=redis&logoColor=white)](https://redis.io)
 [![MinIO / S3](https://img.shields.io/badge/Object%20Store-MinIO%20%2F%20S3-c72e49?logo=minio&logoColor=white)](https://min.io)
@@ -185,7 +185,7 @@ market-agent/
 
 ### Prerequisites
 
-- **Node ≥ 22.6** (the services use `node --experimental-strip-types` for direct `.ts` execution)
+- **Node ≥ 22.19** (the services use `node --experimental-strip-types` for direct `.ts` execution, and the shared LLM router uses `@earendil-works/pi-ai`)
 - **Docker + Docker Compose** (Postgres / Redis / MinIO containers)
 - ~3 GB free for images and dependencies
 

@@ -171,7 +171,7 @@ test("up rolls back already-started services when a later readiness check fails"
     [
       "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
       `TRACE_FILE="${traceFile}"`,
-      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api" "$ROOT/services/watchlists" "$ROOT/services/market" "$ROOT/services/fundamentals" "$ROOT/services/screener" "$ROOT/services/portfolio" "$ROOT/services/home" "$ROOT/services/evidence" "$ROOT/services/agents" "$ROOT/services/analyze" "$ROOT/services/artifact" "$ROOT/services/notifications" "$ROOT/services/observability" "$ROOT/services/snapshot" "$ROOT/services/summary" "$ROOT/services/themes" "$ROOT/services/tools"',
+      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api" "$ROOT/services/watchlists" "$ROOT/services/market" "$ROOT/services/fundamentals" "$ROOT/services/screener" "$ROOT/services/portfolio" "$ROOT/services/home" "$ROOT/services/evidence" "$ROOT/services/agents" "$ROOT/services/analyze" "$ROOT/services/artifact" "$ROOT/services/notifications" "$ROOT/services/observability" "$ROOT/services/snapshot" "$ROOT/services/summary" "$ROOT/services/themes" "$ROOT/services/tools" "$ROOT/services/llm"',
       "ensure_command(){ :; }",
       "ensure_install(){ :; }",
       "assert_port_available(){ :; }",
@@ -209,7 +209,7 @@ test("up rolls back when postgres never becomes ready", async () => {
     [
       "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
       `TRACE_FILE="${traceFile}"`,
-      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api" "$ROOT/services/watchlists" "$ROOT/services/market" "$ROOT/services/fundamentals" "$ROOT/services/screener" "$ROOT/services/portfolio" "$ROOT/services/home" "$ROOT/services/evidence" "$ROOT/services/agents" "$ROOT/services/analyze" "$ROOT/services/artifact" "$ROOT/services/notifications" "$ROOT/services/observability" "$ROOT/services/snapshot" "$ROOT/services/summary" "$ROOT/services/themes" "$ROOT/services/tools"',
+      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api" "$ROOT/services/watchlists" "$ROOT/services/market" "$ROOT/services/fundamentals" "$ROOT/services/screener" "$ROOT/services/portfolio" "$ROOT/services/home" "$ROOT/services/evidence" "$ROOT/services/agents" "$ROOT/services/analyze" "$ROOT/services/artifact" "$ROOT/services/notifications" "$ROOT/services/observability" "$ROOT/services/snapshot" "$ROOT/services/summary" "$ROOT/services/themes" "$ROOT/services/tools" "$ROOT/services/llm"',
       "ensure_command(){ :; }",
       "ensure_install(){ :; }",
       "assert_port_available(){ :; }",
@@ -318,7 +318,7 @@ test("up starts the unofficial dev provider sidecar only when explicitly enabled
     [
       "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
       `TRACE_FILE="${traceFile}"`,
-      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api" "$ROOT/services/watchlists" "$ROOT/services/market" "$ROOT/services/fundamentals" "$ROOT/services/screener" "$ROOT/services/portfolio" "$ROOT/services/home" "$ROOT/services/evidence" "$ROOT/services/dev-providers" "$ROOT/services/agents" "$ROOT/services/analyze" "$ROOT/services/artifact" "$ROOT/services/notifications" "$ROOT/services/observability" "$ROOT/services/snapshot" "$ROOT/services/summary" "$ROOT/services/themes" "$ROOT/services/tools"',
+      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api" "$ROOT/services/watchlists" "$ROOT/services/market" "$ROOT/services/fundamentals" "$ROOT/services/screener" "$ROOT/services/portfolio" "$ROOT/services/home" "$ROOT/services/evidence" "$ROOT/services/dev-providers" "$ROOT/services/agents" "$ROOT/services/analyze" "$ROOT/services/artifact" "$ROOT/services/notifications" "$ROOT/services/observability" "$ROOT/services/snapshot" "$ROOT/services/summary" "$ROOT/services/themes" "$ROOT/services/tools" "$ROOT/services/llm"',
       "ensure_command(){ :; }",
       "ensure_install(){ :; }",
       "ensure_python_service_install(){ printf \"python-install:%s\\n\" \"$1\" >> \"$TRACE_FILE\"; }",
