@@ -68,6 +68,34 @@ timestamps, and required hash/blob metadata before querying. Parent document
 threading is accepted as metadata here; threaded-source behavior is covered by
 `fra-8la`.
 
+## Issuer IR Primary-Source Crawler
+
+Issuer investor-relations sources are first-party narrative evidence. The
+`ir_source_registry` table stores issuer-scoped crawl entrypoints such as RSS,
+Atom, sitemaps, HTML index pages, hosted IR patterns, and manual URLs. Registry
+rows are opt-in (`enabled=false` by default) and carry crawl status fields so a
+bad feed can be diagnosed without disabling the whole evidence plane.
+
+Ingested IR assets are linked through `ir_document_assets`. Press releases land
+as `press_release`, issuer-posted transcripts land as `transcript`, and
+presentation PDFs/decks reuse `research_note` while
+`ir_document_assets.asset_kind = 'presentation'` preserves the deck subtype
+without adding a new document enum.
+Issuer-owned/Q4/Notified content is stored as `provider='issuer_ir'` with
+`license_class='public'`; third-party wire-hosted links use their detected
+provider and free/licensed storage policy.
+
+Analyze use is separately opt-in through the `issuer_ir` source category.
+Local runtime evidence excludes claims linked to `ir_document_assets` unless the
+run selected that category.
+
+Verification commands for this slice:
+
+```bash
+cd services/evidence
+node --experimental-strip-types --test test/issuer-ir-provider.test.ts test/issuer-ir-ingest.test.ts test/extract-tools.test.ts test/local-runtime-evidence.test.ts
+```
+
 ## GDELT Public News Discovery
 
 GDELT is treated as a discovery source, not a truth source. The seeded

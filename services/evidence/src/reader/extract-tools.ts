@@ -47,6 +47,11 @@ import {
   type ObjectStore,
 } from "../object-store.ts";
 import {
+  documentTextFromBytes,
+  extractIssuerIrEvidence,
+} from "../issuer-ir-extraction.ts";
+import { getIrDocumentAssetForDocument } from "../issuer-ir-registry.ts";
+import {
   linkDocumentMentions,
   type DetectedMentionCandidate,
   type ResolveMention,
@@ -75,6 +80,8 @@ export function createEvidenceReaderToolHandlers(
       handlers[name] = makeFetchRawDocumentHandler(deps);
     } else if (name === "extract_mentions") {
       handlers[name] = makeExtractMentionsHandler(deps);
+    } else if (name === "extract_claims" || name === "extract_events" || name === "classify_sentiment") {
+      handlers[name] = makeIssuerIrExtractionHandler(deps, name);
     } else if (name === "extract_candidate_facts") {
       handlers[name] = makeExtractCandidateFactsHandler(deps);
     } else {
@@ -212,7 +219,20 @@ function makeExtractCandidateFactsHandler(deps: EvidenceReaderToolDeps): ReaderT
       );
     }
 
-    if (!deps.objectStore || document.kind !== "filing") {
+    if (document.kind !== "filing") {
+      const ir = await issuerIrExtractionForDocument(deps, document);
+      if (ir) {
+        return {
+          items: ir.candidate_facts,
+          source_ids: [document.source_id],
+        };
+      }
+      return {
+        items: [],
+        source_ids: [document.source_id],
+      };
+    }
+    if (!deps.objectStore) {
       return {
         items: [],
         source_ids: [document.source_id],
@@ -260,6 +280,89 @@ function makeExtractCandidateFactsHandler(deps: EvidenceReaderToolDeps): ReaderT
       source_ids: [document.source_id],
     };
   };
+}
+
+function makeIssuerIrExtractionHandler(
+  deps: EvidenceReaderToolDeps,
+  name: "extract_claims" | "extract_events" | "classify_sentiment",
+): ReaderToolHandler {
+  return async (input) => {
+    const document = await getDocument(deps.db, input.document_id);
+    if (!document) {
+      throw new ReaderToolError(
+        "NOT_FOUND",
+        `document_id "${input.document_id}" not found`,
+      );
+    }
+    const ir = await issuerIrExtractionForDocument(deps, document);
+    if (!ir) {
+      return {
+        items: [],
+        source_ids: [document.source_id],
+      };
+    }
+    const items = name === "extract_claims"
+      ? ir.claims.map((claim) => ({
+        item_type: "issuer_ir_claim",
+        predicate: claim.predicate,
+        text_canonical: claim.text_canonical,
+        polarity: claim.polarity,
+        confidence: claim.confidence,
+      }))
+      : name === "extract_events"
+      ? ir.events.map((event) => ({
+        item_type: "issuer_ir_event",
+        event_type: event.event_type,
+        occurred_at: event.occurred_at,
+        status: event.status,
+        payload_json: event.payload_json,
+      }))
+      : ir.sentiment;
+    return {
+      items,
+      source_ids: [document.source_id],
+    };
+  };
+}
+
+async function issuerIrExtractionForDocument(
+  deps: EvidenceReaderToolDeps,
+  document: DocumentRow,
+): Promise<ReturnType<typeof extractIssuerIrEvidence> | null> {
+  if (!deps.objectStore || !["press_release", "transcript", "research_note"].includes(document.kind)) {
+    return null;
+  }
+  const asset = await getIrDocumentAssetForDocument(deps.db, document.document_id);
+  if (!asset) return null;
+  if (isEphemeralRawBlobId(document.raw_blob_id)) {
+    throw new ReaderToolError(
+      "POLICY_BLOCKED",
+      `document_id "${document.document_id}" has no retained issuer IR bytes`,
+    );
+  }
+  let blob;
+  try {
+    blob = await deps.objectStore.get(document.raw_blob_id);
+  } catch (error) {
+    throw new ReaderToolError(
+      "UPSTREAM_UNAVAILABLE",
+      `raw_blob_id "${document.raw_blob_id}" could not be read from object store: ${errorMessage(error)}`,
+    );
+  }
+  if (!blob) {
+    throw new ReaderToolError(
+      "UPSTREAM_UNAVAILABLE",
+      `raw_blob_id "${document.raw_blob_id}" not found in object store`,
+    );
+  }
+  return extractIssuerIrEvidence({
+    text: documentTextFromBytes(blob.bytes, asset.asset_kind),
+    document_id: document.document_id,
+    source_id: document.source_id,
+    subject_ref: { kind: "issuer", id: asset.issuer_id },
+    asset,
+    effective_time: document.published_at,
+  });
 }
 
 async function withTransaction<T>(db: QueryExecutor, action: () => Promise<T>): Promise<T> {

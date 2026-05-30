@@ -7,6 +7,7 @@ export type LocalRuntimeEvidenceInput = {
   subject_refs: ReadonlyArray<SnapshotSubjectRef>;
   user_id?: string | null;
   exclude_claim_ids?: ReadonlyArray<string>;
+  source_categories?: ReadonlyArray<string>;
   limit?: number;
 };
 
@@ -70,6 +71,7 @@ export async function loadLocalRuntimeEvidence(
   if (subjectRefs.length === 0) return emptyEvidence(subjectRefs);
 
   const excludedClaimIds = unique(input.exclude_claim_ids ?? []);
+  const includeIssuerIr = (input.source_categories ?? []).includes("issuer_ir");
   const { rows } = await db.query<ClaimEvidenceRow>(
     `with subject_refs as (
        select kind::subject_kind as subject_kind,
@@ -109,6 +111,14 @@ export async function loadLocalRuntimeEvidence(
             s.user_id is null
             or ($3::uuid is not null and s.user_id = $3::uuid)
           )
+          and (
+            $5::boolean = true
+            or not exists (
+              select 1
+                from ir_document_assets ira
+               where ira.document_id = d.document_id
+            )
+          )
         order by c.claim_id,
                  c.effective_time desc nulls last,
                  c.created_at desc
@@ -131,7 +141,7 @@ export async function loadLocalRuntimeEvidence(
       order by coalesce(effective_time, published_at, claim_created_at) desc nulls last,
                claim_id desc
       limit $2`,
-    [JSON.stringify(subjectRefs), input.limit ?? 5, userIdOrNull(input.user_id), excludedClaimIds],
+    [JSON.stringify(subjectRefs), input.limit ?? 5, userIdOrNull(input.user_id), excludedClaimIds, includeIssuerIr],
   );
 
   return evidenceFromClaimRows(subjectRefs, rows);

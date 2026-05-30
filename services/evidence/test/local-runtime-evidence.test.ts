@@ -103,3 +103,26 @@ test("loadLocalRuntimeEvidence carries GDELT discovery disclosure with claim cit
   assert.equal(evidence.claims[0]?.source_disclosure, GDELT_DISCOVERY_DISCLOSURE);
   assert.doesNotMatch(JSON.stringify(evidence), /raw_blob_id|raw_text|FULL ARTICLE BODY/i);
 });
+
+test("loadLocalRuntimeEvidence hides IR-only claims unless issuer_ir is selected", async () => {
+  const queries: Array<{ text: string; values: unknown[] }> = [];
+  const db = {
+    async query(text: string, values?: unknown[]) {
+      queries.push({ text, values: values ?? [] });
+      return { rows: [] };
+    },
+  };
+
+  await loadLocalRuntimeEvidence(db, {
+    subject_refs: [{ kind: "issuer", id: SUBJECT_ID }],
+    source_categories: ["news"],
+  });
+  await loadLocalRuntimeEvidence(db, {
+    subject_refs: [{ kind: "issuer", id: SUBJECT_ID }],
+    source_categories: ["issuer_ir"],
+  });
+
+  assert.match(queries[0]!.text, /ir_document_assets/i);
+  assert.equal(queries[0]!.values[4], false);
+  assert.equal(queries[1]!.values[4], true);
+});

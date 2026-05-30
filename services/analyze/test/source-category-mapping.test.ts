@@ -29,6 +29,13 @@ test("mapSourceCategoriesToBundles maps a single category to its declared bundle
   assert.ok(result.bundle_ids.includes(ANALYZE_BASE_BUNDLE_ID));
 });
 
+test("mapSourceCategoriesToBundles maps issuer_ir into document research without making a new bundle", () => {
+  const result = mapSourceCategoriesToBundles({
+    categories: ["issuer_ir"],
+  });
+  assert.deepEqual([...result.bundle_ids], [ANALYZE_BASE_BUNDLE_ID, "document_research"].sort());
+});
+
 test("mapSourceCategoriesToBundles preserves distinct analysis granularity for focused sources", () => {
   const result = mapSourceCategoriesToBundles({
     categories: ["financials_quarterly", "estimates", "holders"],

@@ -29,6 +29,7 @@ const watchlistListManagementMigrationPath = join(dbRoot, "migrations", "0022_wa
 const polygonDiscoveryMigrationPath = join(dbRoot, "migrations", "0024_instruments_figi_composite.up.sql");
 const providerBackedDevDataMigrationPath = join(dbRoot, "migrations", "0025_provider_backed_dev_data.up.sql");
 const secFactIdentityMigrationPath = join(dbRoot, "migrations", "0026_sec_fact_identity.up.sql");
+const issuerIrRegistryMigrationPath = join(dbRoot, "migrations", "0029_issuer_ir_registry.up.sql");
 
 function loadExpectedTables() {
   return Array.from(
@@ -99,6 +100,25 @@ test("alerts fired schema records trigger provenance before notification deliver
     assert.match(sql, /status in \('pending_notification', (?:'delivering', )?'notified', 'failed', 'acknowledged'\)/i);
     assert.match(sql, /unique \(agent_id, run_id, rule_id, finding_id\)/i);
     assert.match(sql, /create index alerts_fired_finding_idx on alerts_fired\(finding_id\)/i);
+  }
+});
+
+test("issuer IR registry schema is issuer-scoped and opt-in by default", () => {
+  const forwardMigration = readFileSync(issuerIrRegistryMigrationPath, "utf8");
+  const schema = readFileSync(schemaPath, "utf8");
+
+  for (const sql of [forwardMigration, schema]) {
+    assert.match(sql, /create type ir_source_type as enum/i);
+    assert.match(sql, /create type ir_asset_kind as enum/i);
+    assert.match(sql, /create table ir_source_registry/i);
+    assert.match(sql, /issuer_id uuid not null references issuers\(issuer_id\) on delete cascade/i);
+    assert.match(sql, /enabled boolean not null default false/i);
+    assert.match(sql, /unique \(issuer_id, url\)/i);
+    assert.match(sql, /create table ir_document_assets/i);
+    assert.match(sql, /document_id uuid not null references documents\(document_id\) on delete cascade/i);
+    assert.match(sql, /asset_kind ir_asset_kind not null/i);
+    assert.match(sql, /unique \(issuer_id, canonical_url\)/i);
+    assert.match(sql, /unique \(document_id\)/i);
   }
 });
 

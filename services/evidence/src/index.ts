@@ -319,6 +319,36 @@ export type {
 } from "./news-ingest.ts";
 
 export {
+  IR_ASSET_KINDS,
+  IR_SOURCE_TYPES,
+  createIrDocumentAsset,
+  createIrSourceRegistryEntry,
+  findIrDocumentAssetByIssuerUrl,
+  getIrDocumentAssetForDocument,
+  listEnabledIrSourceRegistryEntries,
+  recordIrSourceCrawlFailure,
+  recordIrSourceCrawlSuccess,
+} from "./issuer-ir-registry.ts";
+export type {
+  IrAssetKind,
+  IrDocumentAssetInput,
+  IrDocumentAssetRow,
+  IrSourceRegistryInput,
+  IrSourceRegistryRow,
+  IrSourceType,
+} from "./issuer-ir-registry.ts";
+
+export {
+  ingestIssuerIrSource,
+} from "./issuer-ir-ingest.ts";
+export type {
+  IngestIssuerIrSourceDeps,
+  IngestIssuerIrSourceInput,
+  IngestIssuerIrSourceResult,
+  IssuerIrIngestRecord,
+} from "./issuer-ir-ingest.ts";
+
+export {
   USER_UPLOAD_LICENSE_CLASS,
   USER_UPLOAD_PROVIDER,
   getUserUploadDocument,
@@ -397,6 +427,20 @@ export type {
   GdeltArticleDiscoverySort,
   GdeltDocClientConfig,
 } from "./providers/gdelt.ts";
+
+export {
+  ISSUER_IR_DEFAULT_MAX_CANDIDATES,
+  ISSUER_IR_DEFAULT_REQUEST_TIMEOUT_MS,
+  IssuerIrFetchError,
+  classifyIssuerIrAssetKind,
+  discoverIssuerIrCandidates,
+  fetchIssuerIrDocumentBytes,
+  hostedProviderFromUrl,
+} from "./providers/issuer-ir.ts";
+export type {
+  DiscoverIssuerIrCandidatesConfig,
+  IssuerIrCandidate,
+} from "./providers/issuer-ir.ts";
 
 export {
   GDELT_ROUTED_READER_TOOL_NAMES,

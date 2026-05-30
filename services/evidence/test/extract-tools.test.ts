@@ -839,3 +839,60 @@ test("extract_candidate_facts maps object-store read failures to UPSTREAM_UNAVAI
       /object store unavailable/.test(error.message),
   );
 });
+
+test("extract_claims reads stored issuer IR bytes and returns structured IR claims", async () => {
+  const bytes = new TextEncoder().encode(
+    "Acme reports Q1 results. Management raised full-year revenue guidance and expects operating margin to expand.",
+  );
+  const objectStore = new MemoryObjectStore();
+  await objectStore.put(bytes);
+  const rawBlobId = rawBlobIdFromBytes(bytes);
+  const db: QueryExecutor = {
+    async query<R extends Record<string, unknown>>(text: string) {
+      if (/from documents/.test(text)) {
+        return {
+          rows: [{
+            ...fakeDocumentRow(),
+            kind: "press_release",
+            raw_blob_id: rawBlobId,
+            published_at: new Date("2026-05-29T12:00:00.000Z"),
+          }] as unknown as R[],
+          command: "SELECT",
+          rowCount: 1,
+          oid: 0,
+          fields: [],
+        };
+      }
+      if (/from ir_document_assets/.test(text)) {
+        return {
+          rows: [{
+            ir_document_asset_id: "22222222-2222-4222-a222-222222222222",
+            ir_source_id: "33333333-3333-4333-a333-333333333333",
+            issuer_id: "44444444-4444-4444-a444-444444444444",
+            document_id: SAMPLE_DOC_UUID,
+            source_id: SAMPLE_SOURCE_UUID,
+            asset_kind: "press_release",
+            canonical_url: "https://investors.acme.example/news/q1",
+            hosted_provider: "issuer_ir",
+            issuer_attested: true,
+            content_type: "text/html",
+            discovered_at: new Date("2026-05-29T12:00:00.000Z"),
+            fetched_at: new Date("2026-05-29T12:00:00.000Z"),
+            created_at: new Date("2026-05-29T12:00:00.000Z"),
+          }] as unknown as R[],
+          command: "SELECT",
+          rowCount: 1,
+          oid: 0,
+          fields: [],
+        };
+      }
+      throw new Error(`unexpected query: ${text}`);
+    },
+  };
+  const handlers = createEvidenceReaderToolHandlers({ db, objectStore });
+
+  const out = await handlers.extract_claims({ document_id: SAMPLE_DOC_UUID });
+
+  assert.deepEqual([...out.source_ids], [SAMPLE_SOURCE_UUID]);
+  assert.equal(out.items.some((item) => item.predicate === "guidance.change"), true);
+});

@@ -56,6 +56,7 @@ export async function runAnalyzeWorkflow(
   const evidence = await loadLocalRuntimeEvidence(pool(), {
     subject_refs: subjectRefs,
     user_id: input.userId,
+    source_categories: input.sourceCategories,
   });
   const toolCallId = randomUUID();
   const toolResult = {

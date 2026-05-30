@@ -221,6 +221,98 @@ test(
 );
 
 test(
+  "local analyze runtime only includes issuer IR evidence when issuer_ir is selected",
+  { skip: !dockerAvailable(), timeout: 120_000 },
+  async (t) => {
+    const { databaseUrl } = await bootstrapDatabase(t, "dev-api-local-ir-opt-in");
+    const previousDevApiUrl = process.env.DEV_API_DATABASE_URL;
+    const previousDatabaseUrl = process.env.DATABASE_URL;
+    process.env.DEV_API_DATABASE_URL = databaseUrl;
+    registerLifoCleanup(t, async () => {
+      await closeLocalRuntimePoolForTests();
+      if (previousDevApiUrl === undefined) {
+        delete process.env.DEV_API_DATABASE_URL;
+      } else {
+        process.env.DEV_API_DATABASE_URL = previousDevApiUrl;
+      }
+      if (previousDatabaseUrl === undefined) {
+        delete process.env.DATABASE_URL;
+      } else {
+        process.env.DATABASE_URL = previousDatabaseUrl;
+      }
+    });
+
+    const client = await connectedClient(t, databaseUrl);
+    await seedUser(client);
+    await client.query(
+      `insert into issuers (issuer_id, legal_name) values ($1::uuid, 'Acme Robotics Holdings')`,
+      [SUBJECT_ID],
+    );
+    const regular = await seedExistingEvidence(client, { label: "regular-news" });
+    const ir = await seedExistingEvidence(client, {
+      label: "issuer-ir",
+      textCanonical: "issuer IR evidence says management raised full-year revenue guidance.",
+      effectiveTime: "2026-05-08T00:00:00.000Z",
+    });
+    const registry = await client.query<{ ir_source_id: string }>(
+      `insert into ir_source_registry (issuer_id, source_type, url, enabled)
+       values ($1::uuid, 'rss', 'https://investors.acme.example/news/rss', true)
+       returning ir_source_id::text as ir_source_id`,
+      [SUBJECT_ID],
+    );
+    await client.query(
+      `insert into ir_document_assets
+         (ir_source_id, issuer_id, document_id, source_id, asset_kind, canonical_url,
+          hosted_provider, issuer_attested, content_type, discovered_at, fetched_at)
+       values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'press_release',
+               'https://investors.acme.example/news/q1-results',
+               'issuer_ir', true, 'text/html',
+               '2026-05-08T00:00:00.000Z', '2026-05-08T00:00:00.000Z')`,
+      [registry.rows[0]!.ir_source_id, SUBJECT_ID, ir.documentId, ir.sourceId],
+    );
+
+    const template = await createAnalyzeTemplate(client, {
+      user_id: USER_ID,
+      name: "IR opt-in memo",
+      prompt_template: "Summarize the evidence",
+      source_categories: ["news"],
+    });
+
+    const withoutIr = await runAnalyzeWorkflow({
+      userId: USER_ID,
+      template,
+      body: {},
+      snapshotId: "40000000-0000-4000-8000-000000000014",
+      instructions: "Summarize the evidence",
+      playbookPrompt: "Earnings quality",
+      playbookName: "Earnings quality",
+      sourceCategories: ["news"],
+      bundleIds: ["analyze_template_run", "document_research"],
+      subjectRefs: [{ kind: "issuer", id: SUBJECT_ID }],
+      playbookSectionId: "summary",
+    });
+    const withIr = await runAnalyzeWorkflow({
+      userId: USER_ID,
+      template,
+      body: {},
+      snapshotId: "40000000-0000-4000-8000-000000000015",
+      instructions: "Summarize the evidence",
+      playbookPrompt: "Earnings quality",
+      playbookName: "Earnings quality",
+      sourceCategories: ["issuer_ir"],
+      bundleIds: ["analyze_template_run", "document_research"],
+      subjectRefs: [{ kind: "issuer", id: SUBJECT_ID }],
+      playbookSectionId: "summary",
+    });
+
+    assert.deepEqual(withoutIr.blocks[0]!.claim_refs, [regular.claimId]);
+    assert.equal((JSON.stringify(withoutIr.blocks[0])).includes("issuer IR evidence"), false);
+    assert.equal((withIr.blocks[0]!.claim_refs as readonly string[]).includes(ir.claimId), true);
+    assert.match(JSON.stringify(withIr.blocks[0]), /issuer IR evidence/);
+  },
+);
+
+test(
   "local agent runtime creates snapshot-backed findings that real alert evaluation can fire on",
   { skip: !dockerAvailable(), timeout: 120_000 },
   async (t) => {
