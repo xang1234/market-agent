@@ -360,3 +360,24 @@ export type {
   SecFormCode,
   TokenBucketRateLimiterConfig,
 } from "./sec-edgar.ts";
+
+export {
+  GDELT_ARTICLE_DISCOVERY_MODES,
+  GDELT_ARTICLE_DISCOVERY_SORTS,
+  GDELT_DEFAULT_REQUEST_TIMEOUT_MS,
+  GDELT_MAX_ARTICLE_RECORDS,
+  GdeltDocClient,
+  GdeltDocFetchError,
+  GdeltDocPayloadError,
+  GdeltDocRateLimitError,
+  GdeltDocTimeoutError,
+  buildGdeltArticleSearchUrl,
+} from "./providers/gdelt.ts";
+export type {
+  GdeltArticleDiscovery,
+  GdeltArticleDiscoveryMode,
+  GdeltArticleDiscoveryRequest,
+  GdeltArticleDiscoveryResult,
+  GdeltArticleDiscoverySort,
+  GdeltDocClientConfig,
+} from "./providers/gdelt.ts";

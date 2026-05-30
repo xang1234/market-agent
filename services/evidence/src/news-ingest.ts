@@ -8,6 +8,7 @@
 
 import { type DocumentInput } from "./document-repo.ts";
 import { ingestDocument, type IngestDocumentResult } from "./ingest.ts";
+import { canonicalizeNewsUrl } from "./news-url.ts";
 import type { ObjectStore } from "./object-store.ts";
 import {
   createSource,
@@ -24,6 +25,7 @@ import {
   assertOneOf,
   assertOptionalNonEmptyString,
 } from "./validators.ts";
+export { canonicalizeNewsUrl } from "./news-url.ts";
 
 // Spec § 5.2 mappings — the kind-specific subset of trust tiers the
 // orchestrator accepts. Anything outside these (e.g., trust_tier="user"
@@ -66,55 +68,6 @@ export const NEWS_ARTICLE_ALLOWED_LICENSE_CLASSES: ReadonlyArray<string> = Objec
 // transcript license_class accordingly when a press-release/transcript
 // provider matches. Caller can always override.
 const ISSUER_PROVIDER_PATTERNS = [/^issuer_/, /^ir_/];
-
-// ---- canonicalizeNewsUrl ---------------------------------------------------
-
-const TRACKING_PARAM_NAMES: ReadonlyArray<string> = Object.freeze([
-  // utm_* covers all utm_source/utm_medium/utm_campaign/utm_term/utm_content variants.
-  // Handled via prefix match below — the rest of the list is exact-match.
-  "fbclid",
-  "gclid",
-  "mc_eid",
-  "mc_cid",
-  "_hsenc",
-  "_hsmi",
-  "yclid",
-  "msclkid",
-]);
-
-export function canonicalizeNewsUrl(rawUrl: string): string {
-  let parsed: URL;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    throw new Error(`canonicalizeNewsUrl: invalid URL "${rawUrl}"`);
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error(
-      `canonicalizeNewsUrl: scheme must be http(s); received "${parsed.protocol}"`,
-    );
-  }
-
-  // Lowercase host (per RFC 3986 case-insensitive); preserve path/query case.
-  parsed.host = parsed.host.toLowerCase();
-
-  // Strip tracking params: utm_* prefix + the exact-match list above.
-  // URLSearchParams.delete is in-place; iterate over a snapshot of names.
-  const namesToCheck = Array.from(parsed.searchParams.keys());
-  for (const name of namesToCheck) {
-    if (name.startsWith("utm_") || TRACKING_PARAM_NAMES.includes(name)) {
-      parsed.searchParams.delete(name);
-    }
-  }
-
-  // Drop trailing slash from path — but only if there IS a path beyond "/".
-  // "https://example.com/" stays as "/" (root-vs-no-path semantics differ).
-  if (parsed.pathname.length > 1 && parsed.pathname.endsWith("/")) {
-    parsed.pathname = parsed.pathname.slice(0, -1);
-  }
-
-  return parsed.toString();
-}
 
 // ---- shared input/result types ---------------------------------------------
 
