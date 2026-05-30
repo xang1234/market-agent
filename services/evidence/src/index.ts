@@ -381,3 +381,21 @@ export type {
   GdeltArticleDiscoverySort,
   GdeltDocClientConfig,
 } from "./providers/gdelt.ts";
+
+export {
+  GDELT_ROUTED_READER_TOOL_NAMES,
+  buildGdeltSubjectArticleQuery,
+  ingestGdeltArticleDiscoveries,
+} from "./gdelt-ingest.ts";
+export type {
+  GdeltArticleDiscoveryClient,
+  GdeltArticleIngestRecord,
+  GdeltArticleSkipReason,
+  GdeltReaderToolMap,
+  GdeltReaderToolRun,
+  GdeltRoutedReaderToolName,
+  GdeltSubject,
+  IngestGdeltArticleDiscoveriesDeps,
+  IngestGdeltArticleDiscoveriesInput,
+  IngestGdeltArticleDiscoveriesResult,
+} from "./gdelt-ingest.ts";
