@@ -136,7 +136,8 @@ export function normalizeDocumentText(text: string): string {
     .trim();
 }
 
-export function documentTextFromBytes(bytes: Uint8Array, _assetKind?: IrAssetKind): string {
+export function documentTextFromBytes(bytes: Uint8Array, assetKind?: IrAssetKind): string {
+  if (assetKind === "presentation") return "";
   return normalizeDocumentText(new TextDecoder("utf-8", { fatal: false }).decode(bytes));
 }
 

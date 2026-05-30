@@ -110,11 +110,11 @@ export function classifyIssuerIrAssetKind(input: {
 }): IrAssetKind | null {
   const text = `${input.title ?? ""} ${input.url}`.toLowerCase();
   const contentType = (input.contentType ?? "").toLowerCase();
-  if (contentType.includes("pdf") || /\.pdf(?:$|[?#])/i.test(input.url) || /\b(presentation|investor day|slides?|deck)\b/i.test(text)) {
-    return "presentation";
-  }
   if (/\b(transcript|prepared remarks|earnings call)\b/i.test(text)) {
     return "transcript";
+  }
+  if (contentType.includes("pdf") || /\.pdf(?:$|[?#])/i.test(input.url) || /\b(presentation|investor day|slides?|deck)\b/i.test(text)) {
+    return "presentation";
   }
   if (/\b(press release|news release|earnings release|results|reports|announces|guidance|quarter|fiscal)\b/i.test(text)) {
     return "press_release";

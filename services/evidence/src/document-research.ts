@@ -68,6 +68,9 @@ type DocumentResearchRow = {
   raw_blob_id: string;
 };
 
+const DEFAULT_DOCUMENT_RESEARCH_LIMIT = 20;
+const MAX_DOCUMENT_RESEARCH_LIMIT = 100;
+
 export async function searchEvidenceDocuments(
   db: QueryExecutor,
   input: EvidenceDocumentResearchInput,
@@ -231,7 +234,7 @@ function normalizeSearchInput(input: EvidenceDocumentResearchInput): Required<{
     publishedFrom: input.publishedFrom === undefined ? null : new Date(input.publishedFrom).toISOString(),
     publishedTo: input.publishedTo === undefined ? null : new Date(input.publishedTo).toISOString(),
     userId: userIdOrNull(input.userId),
-    limit: input.limit ?? 20,
+    limit: Math.min(input.limit ?? DEFAULT_DOCUMENT_RESEARCH_LIMIT, MAX_DOCUMENT_RESEARCH_LIMIT),
   };
 }
 

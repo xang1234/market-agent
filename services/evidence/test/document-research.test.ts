@@ -95,6 +95,17 @@ test("searchEvidenceDocuments finds GDELT documents through metadata filters wit
   assert.doesNotMatch(JSON.stringify(result), /raw_blob_id|raw_text|FULL ARTICLE BODY/i);
 });
 
+test("searchEvidenceDocuments clamps caller-provided limits before querying", async () => {
+  const { db, queries } = recordingDb([]);
+
+  await searchEvidenceDocuments(db, {
+    domain: "reuters.com",
+    limit: 10_000,
+  });
+
+  assert.equal(queries[0]!.values?.[8], 100);
+});
+
 test("fetchEvidenceDocumentMetadata returns GDELT disclosure and no raw blob handle for an ephemeral document", async () => {
   const { db, queries } = recordingDb([documentRow()]);
 

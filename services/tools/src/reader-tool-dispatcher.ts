@@ -101,7 +101,6 @@ export type ReaderSearchRawDocumentsInput = {
   query?: string;
   subject_refs?: ReadonlyArray<Readonly<{ kind: string; id: string }>>;
   range?: Readonly<{ start?: string; end?: string }>;
-  source_policy?: JsonObject;
   canonical_url?: string;
   url?: string;
   domain?: string;
@@ -431,10 +430,7 @@ function parseSearchRawDocumentsInput(args: JsonValue): ParseInputResult {
   }
 
   if (record.source_policy !== undefined) {
-    if (record.source_policy === null || typeof record.source_policy !== "object" || Array.isArray(record.source_policy)) {
-      return { kind: "error", code: "INVALID_ARGUMENT", message: "source_policy: must be an object" };
-    }
-    input.source_policy = record.source_policy as JsonObject;
+    return { kind: "error", code: "INVALID_ARGUMENT", message: "source_policy: is not supported by search_raw_documents yet" };
   }
 
   return { kind: "ok", input };

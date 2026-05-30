@@ -170,45 +170,48 @@ async function persistIssuerIrCandidate(
   }
 
   const document = ingest.document;
-  const asset = await createIrDocumentAsset(deps.db, {
-    ir_source_id: input.registryEntry.ir_source_id,
-    issuer_id: input.registryEntry.issuer_id,
-    document_id: document.document_id,
-    source_id: source.source_id,
-    asset_kind: candidate.assetKind,
-    canonical_url: candidate.canonicalUrl,
-    hosted_provider: candidate.hostedProvider,
-    issuer_attested: provider === "issuer_ir",
-    content_type: fetched.contentType,
-    discovered_at: candidate.publishedAt ?? fetched.fetchedAt,
-    fetched_at: fetched.fetchedAt,
+  const persisted = await withTransaction(deps.db, async () => {
+    const asset = await createIrDocumentAsset(deps.db, {
+      ir_source_id: input.registryEntry.ir_source_id,
+      issuer_id: input.registryEntry.issuer_id,
+      document_id: document.document_id,
+      source_id: source.source_id,
+      asset_kind: candidate.assetKind,
+      canonical_url: candidate.canonicalUrl,
+      hosted_provider: candidate.hostedProvider,
+      issuer_attested: provider === "issuer_ir",
+      content_type: fetched.contentType,
+      discovered_at: candidate.publishedAt ?? fetched.fetchedAt,
+      fetched_at: fetched.fetchedAt,
+    });
+    await createMention(deps.db, {
+      document_id: document.document_id,
+      subject_kind: input.subjectRef.kind,
+      subject_id: input.subjectRef.id,
+      prominence: candidate.assetKind === "press_release" ? "headline" : "lead",
+      mention_count: 1,
+      confidence: provider === "issuer_ir" ? 0.95 : 0.82,
+    });
+    const extracted = extractIssuerIrEvidence({
+      text: documentTextFromBytes(fetched.bytes, candidate.assetKind),
+      document_id: document.document_id,
+      source_id: source.source_id,
+      subject_ref: input.subjectRef,
+      asset,
+      effective_time: candidate.publishedAt ?? fetched.fetchedAt,
+    });
+    const claims = await persistClaims(deps.db, extracted.claims, input.subjectRef);
+    const events = await persistEvents(deps.db, extracted.events, input.subjectRef, claims.map((claim) => claim.claim_id));
+    return Object.freeze({ asset, claims, events });
   });
-  await createMention(deps.db, {
-    document_id: document.document_id,
-    subject_kind: input.subjectRef.kind,
-    subject_id: input.subjectRef.id,
-    prominence: candidate.assetKind === "press_release" ? "headline" : "lead",
-    mention_count: 1,
-    confidence: provider === "issuer_ir" ? 0.95 : 0.82,
-  });
-  const extracted = extractIssuerIrEvidence({
-    text: documentTextFromBytes(fetched.bytes, candidate.assetKind),
-    document_id: document.document_id,
-    source_id: source.source_id,
-    subject_ref: input.subjectRef,
-    asset,
-    effective_time: candidate.publishedAt ?? fetched.fetchedAt,
-  });
-  const claims = await persistClaims(deps.db, extracted.claims, input.subjectRef);
-  const events = await persistEvents(deps.db, extracted.events, input.subjectRef, claims.map((claim) => claim.claim_id));
   return Object.freeze({
     candidate,
     source,
     document,
     ingest,
-    asset,
-    claims,
-    events,
+    asset: persisted.asset,
+    claims: persisted.claims,
+    events: persisted.events,
     status: "created" as const,
   });
 }
@@ -300,6 +303,18 @@ async function persistEvents(
     rows.push(event);
   }
   return Object.freeze(rows);
+}
+
+async function withTransaction<T>(db: QueryExecutor, action: () => Promise<T>): Promise<T> {
+  await db.query("begin");
+  try {
+    const result = await action();
+    await db.query("commit");
+    return result;
+  } catch (error) {
+    await db.query("rollback");
+    throw error;
+  }
 }
 
 function sourceProvider(candidate: IssuerIrCandidate): string {

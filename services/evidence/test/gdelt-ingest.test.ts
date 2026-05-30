@@ -47,8 +47,8 @@ function recordingDb(existing: ReadonlyArray<GdeltArticleDiscovery> = []) {
   const documents = new Map<string, Record<string, unknown>>();
 
   for (const item of existing) {
-    sources.set(item.url, sourceRow(item.url, item.providerMetadataHash));
-    documents.set(item.url, documentRow(item));
+    sources.set(item.dedupeKey, sourceRow(item.dedupeKey, item.providerMetadataHash));
+    documents.set(item.dedupeKey, documentRow(item));
   }
 
   const db: QueryExecutor = {
@@ -358,18 +358,37 @@ test("ingestGdeltArticleDiscoveries stores metadata-only GDELT articles and rout
 });
 
 test("ingestGdeltArticleDiscoveries is idempotent by GDELT canonical article URL", async () => {
-  const item = article();
-  const { db, queries } = recordingDb([item]);
+  const canonicalUrl = "https://reuters.com/markets/acme-robotics";
+  const existingItem = article({
+    url: `${canonicalUrl}?utm_source=feed`,
+    dedupeKey: canonicalUrl,
+  });
+  const incomingItem = article({
+    url: `${canonicalUrl}?utm_medium=email`,
+    dedupeKey: canonicalUrl,
+  });
+  const { db, queries } = recordingDb([existingItem]);
   const objectStore = new RecordingObjectStore();
+  const routed: string[] = [];
+  const readerTools = Object.fromEntries(
+    GDELT_ROUTED_READER_TOOL_NAMES.map((toolName) => [
+      toolName,
+      async (): Promise<ReaderToolOutput> => {
+        routed.push(toolName);
+        return { items: [], source_ids: [SOURCE_ID] };
+      },
+    ]),
+  );
 
   const result = await ingestGdeltArticleDiscoveries(
     {
       db,
       objectStore,
+      readerTools,
       discoveryClient: {
         async searchArticles() {
           return {
-            articles: [item],
+            articles: [incomingItem],
             requestUrl: "https://api.gdeltproject.org/api/v2/doc/doc?query=...",
             retrievedAt: "2026-05-30T01:00:00.000Z",
           };
@@ -391,6 +410,7 @@ test("ingestGdeltArticleDiscoveries is idempotent by GDELT canonical article URL
   assert.equal(queries.some((query) => /insert into sources/i.test(query.text)), false);
   assert.equal(queries.some((query) => /insert into documents/i.test(query.text)), false);
   assert.equal(objectStore.putCalls, 0);
+  assert.deepEqual(routed, []);
 });
 
 test("ingestGdeltArticleDiscoveries does not match issuer phrases inside unrelated words", async () => {

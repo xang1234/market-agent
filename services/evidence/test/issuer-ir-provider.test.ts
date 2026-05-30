@@ -51,6 +51,14 @@ test("classifyIssuerIrAssetKind distinguishes releases, transcripts, and present
   );
   assert.equal(
     classifyIssuerIrAssetKind({
+      url: "https://investors.acme.example/events/q1-2026-transcript.pdf",
+      title: "Q1 2026 earnings call transcript",
+      contentType: "application/pdf",
+    }),
+    "transcript",
+  );
+  assert.equal(
+    classifyIssuerIrAssetKind({
       url: "https://s201.q4cdn.com/123/files/doc_presentations/2026/acme-investor-day.pdf",
       title: "Investor Day presentation",
       contentType: "application/pdf",

@@ -225,6 +225,13 @@ test("ingestIssuerIrSource stores issuer releases, links IR asset metadata, and 
   assert.ok(queries.some((query) => /insert into ir_document_assets/i.test(query.text)));
   assert.ok(queries.some((query) => /insert into claims/i.test(query.text)));
   assert.ok(queries.some((query) => /update ir_source_registry/i.test(query.text) && /last_success_at/i.test(query.text)));
+  const assetIndex = queries.findIndex((query) => /insert into ir_document_assets/i.test(query.text));
+  const claimIndex = queries.findIndex((query) => /insert into claims/i.test(query.text));
+  const transactionBeginIndex = queries.findLastIndex((query, index) => query.text === "begin" && index < assetIndex);
+  const transactionCommitIndex = queries.findIndex((query, index) => query.text === "commit" && index > assetIndex);
+  assert.ok(transactionBeginIndex >= 0, "IR asset writes should start inside a transaction");
+  assert.ok(transactionCommitIndex > assetIndex, "IR asset writes should commit after asset creation");
+  assert.ok(claimIndex > assetIndex && claimIndex < transactionCommitIndex, "IR claim writes should commit atomically with the asset");
 });
 
 test("ingestIssuerIrSource stores presentation PDFs as research_note documents", async () => {

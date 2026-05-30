@@ -178,12 +178,15 @@ export async function ingestGdeltArticleDiscoveries(
       retrievedAt,
       requestUrl: discovery.requestUrl,
     });
-    const readerToolRuns = await routeReaderTools(deps.readerTools, {
-      article,
-      subject: input.subject,
-      query,
-      document: persisted.document,
-    });
+    let readerToolRuns: ReadonlyArray<GdeltReaderToolRun> = Object.freeze([]);
+    if (persisted.status === "created") {
+      readerToolRuns = await routeReaderTools(deps.readerTools, {
+        article,
+        subject: input.subject,
+        query,
+        document: persisted.document,
+      });
+    }
     await createDiscoveryMention(deps.db, {
       article,
       subject: input.subject,
@@ -326,7 +329,8 @@ async function persistGdeltArticle(
     requestUrl: string;
   },
 ): Promise<Omit<GdeltArticleIngestRecord, "readerToolRuns">> {
-  const existing = await findExistingGdeltArticle(deps.db, input.article.url);
+  const canonicalUrl = input.article.dedupeKey;
+  const existing = await findExistingGdeltArticle(deps.db, canonicalUrl);
   if (existing) {
     return Object.freeze({
       article: input.article,
@@ -340,7 +344,7 @@ async function persistGdeltArticle(
   const source = await createSource(deps.db, {
     provider: GDELT_ARTICLE_DISCOVERY_PROVIDER,
     kind: GDELT_DISCOVERY_SOURCE_KIND,
-    canonical_url: input.article.url,
+    canonical_url: canonicalUrl,
     trust_tier: GDELT_DISCOVERY_TRUST_TIER,
     license_class: GDELT_DISCOVERY_LICENSE_CLASS,
     retrieved_at: input.retrievedAt,

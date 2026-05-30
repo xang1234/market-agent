@@ -307,7 +307,8 @@ test(
 
     assert.deepEqual(withoutIr.blocks[0]!.claim_refs, [regular.claimId]);
     assert.equal((JSON.stringify(withoutIr.blocks[0])).includes("issuer IR evidence"), false);
-    assert.equal((withIr.blocks[0]!.claim_refs as readonly string[]).includes(ir.claimId), true);
+    assert.deepEqual(withIr.blocks[0]!.claim_refs, [ir.claimId]);
+    assert.equal((withIr.blocks[0]!.claim_refs as readonly string[]).includes(regular.claimId), false);
     assert.match(JSON.stringify(withIr.blocks[0]), /issuer IR evidence/);
   },
 );

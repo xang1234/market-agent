@@ -62,6 +62,22 @@ test("GdeltDocClient.searchArticles builds an ArtList JSON request with date, la
   assert.equal(result.articles.length, 1);
 });
 
+test("GdeltDocClient.searchArticles accepts documented singular timespan units", async () => {
+  const requestedTimespans: string[] = [];
+  const client = new GdeltDocClient({
+    fetch: async (url) => {
+      requestedTimespans.push(new URL(url).searchParams.get("timespan") ?? "");
+      return jsonResponse({ articles: [] });
+    },
+  });
+
+  for (const timespan of ["1hour", "1day", "1week", "1month"]) {
+    await client.searchArticles({ query: "Apple", timespan });
+  }
+
+  assert.deepEqual(requestedTimespans, ["1hour", "1day", "1week", "1month"]);
+});
+
 test("GdeltDocClient.searchArticles normalizes metadata-only articles and dedupes by canonical URL", async () => {
   const client = new GdeltDocClient({
     fetch: async () =>

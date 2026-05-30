@@ -337,6 +337,37 @@ test("dispatch invokes search_raw_documents with parsed metadata filters", async
   });
 });
 
+test("dispatch rejects source_policy on search_raw_documents until evidence search supports it", async () => {
+  const registry = loadToolRegistry();
+  let called = false;
+  const dispatcher = createReaderToolDispatcher({
+    registry,
+    handlers: fullHandlerSet({
+      search_raw_documents: async () => {
+        called = true;
+        return { documents: [] };
+      },
+    }),
+  });
+
+  const result = await dispatcher.dispatch({
+    bundle_id: "document_research",
+    audience: "reader",
+    tool_name: "search_raw_documents",
+    arguments: {
+      query: "Acme",
+      source_policy: { license_class: "public" },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  if (result.ok === false) {
+    assert.equal(result.error_code, "INVALID_ARGUMENT");
+    assert.match(result.message, /source_policy/);
+  }
+  assert.equal(called, false);
+});
+
 // ---- input validation (INVALID_ARGUMENT path) ------------------------------
 
 test("dispatch returns INVALID_ARGUMENT when document_id is missing", async () => {

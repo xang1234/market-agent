@@ -31,7 +31,8 @@ export function canonicalizeNewsUrl(rawUrl: string): string {
   // URLSearchParams.delete is in-place; iterate over a snapshot of names.
   const namesToCheck = Array.from(parsed.searchParams.keys());
   for (const name of namesToCheck) {
-    if (name.startsWith("utm_") || TRACKING_PARAM_NAMES.includes(name)) {
+    const normalizedName = name.toLowerCase();
+    if (normalizedName.startsWith("utm_") || TRACKING_PARAM_NAMES.includes(normalizedName)) {
       parsed.searchParams.delete(name);
     }
   }
@@ -41,6 +42,8 @@ export function canonicalizeNewsUrl(rawUrl: string): string {
   if (parsed.pathname.length > 1 && parsed.pathname.endsWith("/")) {
     parsed.pathname = parsed.pathname.slice(0, -1);
   }
+
+  parsed.hash = "";
 
   return parsed.toString();
 }

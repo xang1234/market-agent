@@ -84,6 +84,13 @@ test("canonicalizeNewsUrl strips fbclid, gclid, mc_eid, mc_cid, _hsenc/_hsmi (no
   }
 });
 
+test("canonicalizeNewsUrl strips tracking parameters case-insensitively", () => {
+  assert.equal(
+    canonicalizeNewsUrl("https://example.com/x?UTM_SOURCE=feed&Fbclid=abc123&keep=ok"),
+    "https://example.com/x?keep=ok",
+  );
+});
+
 test("canonicalizeNewsUrl lowercases the host but preserves path/query case", () => {
   // Host is case-insensitive per RFC 3986; path and query are case-sensitive
   // and must be preserved verbatim (e.g. an article slug with capitals).
@@ -99,13 +106,12 @@ test("canonicalizeNewsUrl drops a trailing slash from the path (but not from a b
   assert.equal(canonicalizeNewsUrl("https://example.com/"), "https://example.com/");
 });
 
-test("canonicalizeNewsUrl preserves the fragment (#) — anchors sometimes identify article versions", () => {
-  // Per the bake-in decision: fragments aren't stripped because some
-  // publishers use them to disambiguate article variants (#comments,
-  // #v2, etc.).
+test("canonicalizeNewsUrl strips URL fragments before deduping articles", () => {
+  // Fragments are client-side anchors and should not split one article
+  // into multiple canonical source identities.
   assert.equal(
     canonicalizeNewsUrl("https://example.com/article#section-2"),
-    "https://example.com/article#section-2",
+    "https://example.com/article",
   );
 });
 

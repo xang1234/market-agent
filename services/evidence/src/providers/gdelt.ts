@@ -403,7 +403,7 @@ function normalizeToken(value: string, label: string): string {
 
 function assertTimespan(value: string): void {
   assertNonEmptyString(value, "timespan");
-  if (!/^\d+(min|h|hours|d|days|w|weeks|m|months)$/i.test(value.trim())) {
+  if (!/^\d+(min|h|hours?|d|days?|w|weeks?|m|months?)$/i.test(value.trim())) {
     throw new Error("timespan: must use GDELT units like 15min, 1h, 1d, 1week, or 1month");
   }
 }
