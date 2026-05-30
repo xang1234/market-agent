@@ -68,6 +68,28 @@ timestamps, and required hash/blob metadata before querying. Parent document
 threading is accepted as metadata here; threaded-source behavior is covered by
 `fra-8la`.
 
+## GDELT Public News Discovery
+
+GDELT is treated as a discovery source, not a truth source. The seeded
+`gdelt_article_discovery` source identifies public news article discoveries from
+the GDELT DOC 2.0 API (`https://api.gdeltproject.org/api/v2/doc/doc`) as
+tertiary `article` evidence with `license_class='ephemeral'`.
+
+The MVP storage policy is metadata/snippet-only. Full article bodies are not
+stored by default; ingestion should retain article URLs, titles, timestamps,
+domains, languages, source-country metadata, snippets when available, and
+provider metadata/hashes. If a later integration wants to persist publisher
+article text, it must first make an explicit source-specific license decision
+and change the source/license policy intentionally.
+
+Development wiring is controlled by:
+
+- `GDELT_DISCOVERY_ENABLED`
+- `GDELT_DOC_API_BASE_URL`
+- `GDELT_DISCOVERY_STORE_POLICY=metadata_only`
+- `GDELT_DISCOVERY_DEFAULT_MAX_RECORDS`
+- `GDELT_DISCOVERY_RATE_LIMIT_PER_SECOND`
+
 ## Threaded sources
 
 Some sources have conversation structure: Reddit threads, earnings-call
