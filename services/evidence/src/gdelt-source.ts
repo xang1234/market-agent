@@ -6,6 +6,8 @@ export const GDELT_DISCOVERY_SOURCE_KIND: SourceKind = "article";
 export const GDELT_DISCOVERY_TRUST_TIER: TrustTier = "tertiary";
 export const GDELT_DISCOVERY_LICENSE_CLASS = "ephemeral";
 export const GDELT_DISCOVERY_STORE_POLICY = "metadata_only";
+export const GDELT_DISCOVERY_DISCLOSURE =
+  "GDELT public news discovery metadata; not a canonical fact source; publisher article body is not retained.";
 export const GDELT_DOC_API_CANONICAL_URL = "https://api.gdeltproject.org/api/v2/doc/doc";
 
 export const GDELT_DISCOVERY_ENABLED_ENV = "GDELT_DISCOVERY_ENABLED";

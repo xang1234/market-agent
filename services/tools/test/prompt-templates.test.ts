@@ -63,6 +63,10 @@ test("analystPromptTemplateForBundle returns the immutable template for a bundle
     template.policy_prompt.includes("structured claims, events, facts, and evidence bundles"),
     true,
   );
+  assert.equal(
+    template.policy_prompt.includes("document metadata discovery"),
+    true,
+  );
 });
 
 test("buildPromptCachePrefix enforces cache-stable prompt ordering and excludes user turn", () => {

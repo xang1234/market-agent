@@ -2,6 +2,10 @@ import { createHash } from "node:crypto";
 
 import type { TrustTier } from "./source-repo.ts";
 import { TRUST_TIERS } from "./source-repo.ts";
+import {
+  sourceDisclosure,
+  storagePolicyForDocument,
+} from "./source-disclosure.ts";
 import type { QueryExecutor } from "./types.ts";
 import {
   assertOneOf,
@@ -22,7 +26,11 @@ export type EvidenceBundleDocument = Readonly<{
   published_at: string | null;
   canonical_url: string | null;
   source: Readonly<{
+    provider: string;
     trust_tier: TrustTier;
+    license_class: string;
+    storage_policy: string;
+    disclosure: string | null;
   }>;
 }>;
 
@@ -56,12 +64,26 @@ type EvidenceBundleDbRow = {
   author: string | null;
   published_at: Date | string | null;
   canonical_url: string | null;
+  provider: string;
   trust_tier: TrustTier;
+  license_class: string;
+  raw_blob_id: string;
 };
 
 type StoredEvidenceBundleDbRow = {
   bundle: EvidenceBundle | string;
 };
+
+type LegacyEvidenceBundleDocument = Readonly<{
+  document_id: string;
+  title: string | null;
+  author: string | null;
+  published_at: string | null;
+  canonical_url: string | null;
+  source: Readonly<{
+    trust_tier: TrustTier;
+  }>;
+}>;
 
 export async function assembleEvidenceBundle(
   db: QueryExecutor,
@@ -93,7 +115,10 @@ export async function assembleEvidenceBundle(
             d.author,
             d.published_at,
             s.canonical_url,
-            s.trust_tier
+            s.provider,
+            s.trust_tier,
+            s.license_class,
+            d.raw_blob_id
        from all_claims ac
        join claims c on c.claim_id = ac.claim_id
        join claim_evidence ce on ce.claim_id = c.claim_id
@@ -204,7 +229,13 @@ function documentFromRow(row: EvidenceBundleDbRow): EvidenceBundleDocument {
     author: row.author,
     published_at: nullableIsoString(row.published_at),
     canonical_url: row.canonical_url,
-    source: Object.freeze({ trust_tier: row.trust_tier }),
+    source: Object.freeze({
+      provider: row.provider,
+      trust_tier: row.trust_tier,
+      license_class: row.license_class,
+      storage_policy: storagePolicyForDocument(row),
+      disclosure: sourceDisclosure(row),
+    }),
   });
 }
 
@@ -353,7 +384,8 @@ function assertStoredBundleMatchesCanonicalContent(bundle: EvidenceBundle, expec
     documents: bundle.documents,
     evidence: bundle.evidence,
   });
-  if (canonicalBundleId !== bundle.bundle_id) {
+  const legacyCanonicalBundleId = hasLegacySourceShape(bundle) ? legacyBundleIdForContent(bundle) : null;
+  if (canonicalBundleId !== bundle.bundle_id && legacyCanonicalBundleId !== bundle.bundle_id) {
     throw new Error("bundle_id: stored bundle payload does not match canonical content");
   }
 }
@@ -372,7 +404,26 @@ function evidenceBundleDocumentFromJson(value: unknown, index: number): Evidence
     throw new Error(`bundle.documents[${index}].source: must be an object`);
   }
   const source = record.source as Record<string, unknown>;
+  const provider = requiredSourceStringOrLegacyDefault(
+    source,
+    "provider",
+    "legacy_unknown",
+    `bundle.documents[${index}].source.provider`,
+  );
   assertOneOf(source.trust_tier, TRUST_TIERS, `bundle.documents[${index}].source.trust_tier`);
+  const licenseClass = requiredSourceStringOrLegacyDefault(
+    source,
+    "license_class",
+    "legacy_unknown",
+    `bundle.documents[${index}].source.license_class`,
+  );
+  const storagePolicy = requiredSourceStringOrLegacyDefault(
+    source,
+    "storage_policy",
+    "legacy_unknown",
+    `bundle.documents[${index}].source.storage_policy`,
+  );
+  const disclosure = optionalSourceStringOrNull(source, "disclosure", `bundle.documents[${index}].source.disclosure`);
 
   return {
     document_id: record.document_id,
@@ -380,7 +431,65 @@ function evidenceBundleDocumentFromJson(value: unknown, index: number): Evidence
     author: record.author,
     published_at: record.published_at,
     canonical_url: record.canonical_url,
-    source: { trust_tier: source.trust_tier },
+    source: {
+      provider,
+      trust_tier: source.trust_tier,
+      license_class: licenseClass,
+      storage_policy: storagePolicy,
+      disclosure,
+    },
+  };
+}
+
+function requiredSourceStringOrLegacyDefault(
+  source: Record<string, unknown>,
+  key: string,
+  fallback: string,
+  label: string,
+): string {
+  if (!(key in source)) return fallback;
+  const value = source[key];
+  assertRequiredString(value, label);
+  return value;
+}
+
+function optionalSourceStringOrNull(
+  source: Record<string, unknown>,
+  key: string,
+  label: string,
+): string | null {
+  if (!(key in source)) return null;
+  const value = source[key];
+  assertOptionalString(value, label);
+  return value;
+}
+
+function legacyBundleIdForContent(bundle: EvidenceBundle): string {
+  return bundleIdForContent({
+    documents: bundle.documents.map(legacyDocumentForContent),
+    evidence: bundle.evidence,
+  });
+}
+
+function hasLegacySourceShape(bundle: EvidenceBundle): boolean {
+  return bundle.documents.every((document) =>
+    document.source.provider === "legacy_unknown" &&
+    document.source.license_class === "legacy_unknown" &&
+    document.source.storage_policy === "legacy_unknown" &&
+    document.source.disclosure === null
+  );
+}
+
+function legacyDocumentForContent(document: EvidenceBundleDocument): LegacyEvidenceBundleDocument {
+  return {
+    document_id: document.document_id,
+    title: document.title,
+    author: document.author,
+    published_at: document.published_at,
+    canonical_url: document.canonical_url,
+    source: {
+      trust_tier: document.source.trust_tier,
+    },
   };
 }
 
@@ -407,6 +516,12 @@ function evidenceBundleEvidenceFromJson(value: unknown, index: number): Evidence
 function assertOptionalString(value: unknown, label: string): asserts value is string | null {
   if (value !== null && typeof value !== "string") {
     throw new Error(`${label}: must be a string or null`);
+  }
+}
+
+function assertRequiredString(value: unknown, label: string): asserts value is string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`${label}: must be a non-empty string`);
   }
 }
 

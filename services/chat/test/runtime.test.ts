@@ -19,6 +19,7 @@ test("runtime config wires in-repo analyst runtime and persistence when DATABASE
 
   assert.equal(typeof options.analystToolRuntime, "function");
   assert.equal(typeof options.persistAssistantMessage, "function");
+  assert.equal(typeof options.generateThreadTitle, "function");
 });
 
 test("runtime config resolves in-repo default runtime when loader cwd is the repo root", async () => {

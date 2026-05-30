@@ -1,11 +1,13 @@
 import type { SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
 
+import { sourceDisclosure } from "./source-disclosure.ts";
 import type { QueryExecutor } from "./types.ts";
 
 export type LocalRuntimeEvidenceInput = {
   subject_refs: ReadonlyArray<SnapshotSubjectRef>;
   user_id?: string | null;
   exclude_claim_ids?: ReadonlyArray<string>;
+  source_categories?: ReadonlyArray<string>;
   limit?: number;
 };
 
@@ -17,6 +19,10 @@ export type LocalRuntimeClaimEvidence = {
   predicate: string;
   polarity: string;
   trust_tier: string;
+  license_class: string;
+  provider: string;
+  source_canonical_url: string | null;
+  source_disclosure: string | null;
   confidence: number;
   document_title: string | null;
   published_at: string | null;
@@ -42,6 +48,9 @@ type ClaimEvidenceRow = {
   predicate: string;
   polarity: string;
   trust_tier: string;
+  license_class: string;
+  provider: string;
+  source_canonical_url: string | null;
   confidence: number | string;
   document_title: string | null;
   published_at: Date | string | null;
@@ -62,6 +71,9 @@ export async function loadLocalRuntimeEvidence(
   if (subjectRefs.length === 0) return emptyEvidence(subjectRefs);
 
   const excludedClaimIds = unique(input.exclude_claim_ids ?? []);
+  const sourceCategories = input.source_categories ?? null;
+  const includeIssuerIr = (sourceCategories ?? []).includes("issuer_ir");
+  const includeNonIr = sourceCategories === null || sourceCategories.some((category) => category !== "issuer_ir");
   const { rows } = await db.query<ClaimEvidenceRow>(
     `with subject_refs as (
        select kind::subject_kind as subject_kind,
@@ -77,6 +89,9 @@ export async function loadLocalRuntimeEvidence(
               c.predicate,
               c.polarity,
               s.trust_tier,
+              s.license_class,
+              s.provider,
+              s.canonical_url as source_canonical_url,
               c.confidence,
               d.title as document_title,
               d.published_at,
@@ -98,6 +113,24 @@ export async function loadLocalRuntimeEvidence(
             s.user_id is null
             or ($3::uuid is not null and s.user_id = $3::uuid)
           )
+          and (
+            (
+              $5::boolean = true
+              and exists (
+                select 1
+                  from ir_document_assets ira
+                 where ira.document_id = d.document_id
+              )
+            )
+            or (
+              $6::boolean = true
+              and not exists (
+                select 1
+                  from ir_document_assets ira
+                 where ira.document_id = d.document_id
+              )
+            )
+          )
         order by c.claim_id,
                  c.effective_time desc nulls last,
                  c.created_at desc
@@ -109,6 +142,9 @@ export async function loadLocalRuntimeEvidence(
             predicate,
             polarity,
             trust_tier,
+            license_class,
+            provider,
+            source_canonical_url,
             confidence,
             document_title,
             published_at,
@@ -117,7 +153,14 @@ export async function loadLocalRuntimeEvidence(
       order by coalesce(effective_time, published_at, claim_created_at) desc nulls last,
                claim_id desc
       limit $2`,
-    [JSON.stringify(subjectRefs), input.limit ?? 5, userIdOrNull(input.user_id), excludedClaimIds],
+    [
+      JSON.stringify(subjectRefs),
+      input.limit ?? 5,
+      userIdOrNull(input.user_id),
+      excludedClaimIds,
+      includeIssuerIr,
+      includeNonIr,
+    ],
   );
 
   return evidenceFromClaimRows(subjectRefs, rows);
@@ -193,6 +236,13 @@ function evidenceFromClaimRows(
       predicate: row.predicate,
       polarity: row.polarity,
       trust_tier: row.trust_tier,
+      license_class: row.license_class,
+      provider: row.provider,
+      source_canonical_url: row.source_canonical_url,
+      source_disclosure: sourceDisclosure({
+        provider: row.provider,
+        license_class: row.license_class,
+      }),
       confidence: Number(row.confidence),
       document_title: row.document_title,
       published_at: row.published_at == null ? null : isoString(row.published_at),

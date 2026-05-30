@@ -32,6 +32,8 @@ export async function loadChatServerOptionsFromEnv(
     (databaseUrl ? DEFAULT_CHAT_RUNTIME_MODULE : "");
   const analystRuntimeModule = env.CHAT_ANALYST_RUNTIME_MODULE?.trim() ||
     (databaseUrl ? DEFAULT_CHAT_RUNTIME_MODULE : "");
+  const threadTitleModule = env.CHAT_THREAD_TITLE_MODULE?.trim() ||
+    (databaseUrl ? DEFAULT_CHAT_RUNTIME_MODULE : "");
 
   if (persistenceModule !== "") {
     const module = await import(moduleSpecifier(persistenceModule, cwd));
@@ -57,8 +59,8 @@ export async function loadChatServerOptionsFromEnv(
     }
   }
 
-  if (env.CHAT_THREAD_TITLE_MODULE != null && env.CHAT_THREAD_TITLE_MODULE.trim() !== "") {
-    const module = await import(moduleSpecifier(env.CHAT_THREAD_TITLE_MODULE, cwd));
+  if (threadTitleModule !== "") {
+    const module = await import(moduleSpecifier(threadTitleModule, cwd));
     if (typeof module.generateThreadTitle !== "function") {
       throw new Error("CHAT_THREAD_TITLE_MODULE must export generateThreadTitle");
     }

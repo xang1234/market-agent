@@ -64,6 +64,11 @@ import {
   type EvidenceInspection,
   type EvidenceInspectionRef,
 } from "../../evidence/src/inspector.ts";
+import {
+  handleLlmSettingsRequest,
+  isLlmSettingsPath,
+  type DevApiLlmSettingsOptions,
+} from "./llm-settings-http.ts";
 
 type DevAgent = {
   agent_id: string;
@@ -255,6 +260,7 @@ export type DevApiAgentLoopStageFactory = (
 
 export type DevApiServerOptions = {
   adapters?: DevApiAdapters;
+  llm?: DevApiLlmSettingsOptions;
 };
 
 export function createDevApiServer(
@@ -263,6 +269,7 @@ export function createDevApiServer(
 ): Server {
   const flags = readDevFlags(env);
   const adapters = options.adapters;
+  const llmOptions = options.llm ?? {};
 
   return createServer(async (req, res) => {
     try {
@@ -289,6 +296,11 @@ export function createDevApiServer(
       respondJson(res, 200, {
         services: serviceCatalog(env, Boolean(adapters)),
       });
+      return;
+    }
+
+    if (isLlmSettingsPath(url.pathname)) {
+      await handleLlmSettingsRequest({ req, res, url, env, flags, options: llmOptions });
       return;
     }
 

@@ -6,6 +6,12 @@ import {
   EvidenceInspectionError,
   type EvidenceInspectionRef,
 } from "../src/inspector.ts";
+import {
+  GDELT_ARTICLE_DISCOVERY_PROVIDER,
+  GDELT_DISCOVERY_DISCLOSURE,
+  GDELT_DISCOVERY_LICENSE_CLASS,
+  GDELT_DISCOVERY_TRUST_TIER,
+} from "../src/gdelt-source.ts";
 
 type QueryCall = { text: string; values?: unknown[] };
 
@@ -146,6 +152,46 @@ test("loadEvidenceInspection returns artifact-safe document details and related 
   assert.equal(result.title, "FY 2026 10-K");
   assert.ok(result.rows.length >= 2);
   assert.deepEqual(result.related_refs, [{ kind: "source", id: SOURCE_ID }]);
+  assertNoRawFields(result);
+});
+
+test("loadEvidenceInspection discloses GDELT documents as metadata-only discovery sources", async () => {
+  const { db } = stubDb((text) => {
+    if (text.includes("from chat_messages")) return [{ visible: 1 }];
+    if (text.includes("from snapshots")) return [manifestRow()];
+    if (text.includes("from documents")) {
+      return [
+        {
+          document_id: DOCUMENT_ID,
+          source_id: SOURCE_ID,
+          kind: "article",
+          title: "Acme Robotics wins order as shares rise",
+          author: "reuters.com",
+          published_at: "2026-05-29T12:30:00.000Z",
+          parse_status: "pending",
+          provider: GDELT_ARTICLE_DISCOVERY_PROVIDER,
+          canonical_url: "https://reuters.com/markets/acme-robotics",
+          trust_tier: GDELT_DISCOVERY_TRUST_TIER,
+          license_class: GDELT_DISCOVERY_LICENSE_CLASS,
+          raw_blob_id: `ephemeral:${SOURCE_ID}`,
+          raw_text: "FULL ARTICLE BODY MUST NOT LEAK",
+        },
+      ];
+    }
+    return [];
+  });
+
+  const result = await loadEvidenceInspection(db, {
+    user_id: USER_ID,
+    snapshot_id: SNAPSHOT_ID,
+    ref: { kind: "document", id: DOCUMENT_ID },
+  });
+
+  assert.ok(result.badges.includes("metadata_only"));
+  assert.deepEqual(
+    result.rows.find((row) => row.label === "Disclosure"),
+    { label: "Disclosure", value: GDELT_DISCOVERY_DISCLOSURE },
+  );
   assertNoRawFields(result);
 });
 

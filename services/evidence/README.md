@@ -68,6 +68,34 @@ timestamps, and required hash/blob metadata before querying. Parent document
 threading is accepted as metadata here; threaded-source behavior is covered by
 `fra-8la`.
 
+## Issuer IR Primary-Source Crawler
+
+Issuer investor-relations sources are first-party narrative evidence. The
+`ir_source_registry` table stores issuer-scoped crawl entrypoints such as RSS,
+Atom, sitemaps, HTML index pages, hosted IR patterns, and manual URLs. Registry
+rows are opt-in (`enabled=false` by default) and carry crawl status fields so a
+bad feed can be diagnosed without disabling the whole evidence plane.
+
+Ingested IR assets are linked through `ir_document_assets`. Press releases land
+as `press_release`, issuer-posted transcripts land as `transcript`, and
+presentation PDFs/decks reuse `research_note` while
+`ir_document_assets.asset_kind = 'presentation'` preserves the deck subtype
+without adding a new document enum.
+Issuer-owned/Q4/Notified content is stored as `provider='issuer_ir'` with
+`license_class='public'`; third-party wire-hosted links use their detected
+provider and free/licensed storage policy.
+
+Analyze use is separately opt-in through the `issuer_ir` source category.
+Local runtime evidence excludes claims linked to `ir_document_assets` unless the
+run selected that category.
+
+Verification commands for this slice:
+
+```bash
+cd services/evidence
+node --experimental-strip-types --test test/issuer-ir-provider.test.ts test/issuer-ir-ingest.test.ts test/extract-tools.test.ts test/local-runtime-evidence.test.ts
+```
+
 ## GDELT Public News Discovery
 
 GDELT is treated as a discovery source, not a truth source. The seeded
@@ -75,12 +103,21 @@ GDELT is treated as a discovery source, not a truth source. The seeded
 the GDELT DOC 2.0 API (`https://api.gdeltproject.org/api/v2/doc/doc`) as
 tertiary `article` evidence with `license_class='ephemeral'`.
 
-The MVP storage policy is metadata/snippet-only. Full article bodies are not
-stored by default; ingestion should retain article URLs, titles, timestamps,
-domains, languages, source-country metadata, snippets when available, and
-provider metadata/hashes. If a later integration wants to persist publisher
-article text, it must first make an explicit source-specific license decision
-and change the source/license policy intentionally.
+The MVP storage policy is metadata-only. Full article bodies are not stored by
+default; ingestion retains article URLs, titles, timestamps, domains, languages,
+and provider metadata hashes in structured source/document rows. GDELT snippets
+may be passed transiently to reader tools for extraction, but they are not
+retained as raw blobs. If a later integration wants to persist snippets or
+publisher article text, it must first make an explicit source-specific license
+decision and change the source/license policy intentionally.
+
+GDELT-discovered documents are exposed to research surfaces as public news
+discovery metadata, not canonical facts. Document search/fetch helpers return
+document/source metadata, original article URLs, `license_class='ephemeral'`,
+`storage_policy='metadata_only'`, and the disclosure that publisher article
+bodies are not retained. Evidence bundles and local analyze evidence carry the
+same disclosure so analysts can cite the discovered article URL without treating
+GDELT itself as the factual source of truth.
 
 Development wiring is controlled by:
 
@@ -89,6 +126,14 @@ Development wiring is controlled by:
 - `GDELT_DISCOVERY_STORE_POLICY=metadata_only`
 - `GDELT_DISCOVERY_DEFAULT_MAX_RECORDS`
 - `GDELT_DISCOVERY_RATE_LIMIT_PER_SECOND`
+
+Verification commands for this slice:
+
+```bash
+cd services/evidence
+node --experimental-strip-types --test test/gdelt-source.test.ts test/gdelt-provider.test.ts test/gdelt-ingest.test.ts test/document-research.test.ts test/evidence-bundle-repo.test.ts test/local-runtime-evidence.test.ts test/inspector.test.ts
+npm test
+```
 
 ## Threaded sources
 

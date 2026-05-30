@@ -37,7 +37,7 @@ export const ANALYZE_BASE_BUNDLE_ID = "analyze_template_run";
 // Per-row rationale for the non-obvious entries:
 // - prices spans quote_lookup (fast-path latest quote) AND
 //   single_subject_analysis (historical / performance series).
-// - transcripts ride document_research alongside news; both flow
+// - transcripts and issuer_ir ride document_research alongside news; all flow
 //   through the evidence/claims pipeline rather than the SEC filings
 //   index that filing_research wraps.
 // - financials, estimates, and holders use narrower analysis bundles
@@ -54,6 +54,7 @@ export const SOURCE_CATEGORY_BUNDLES = Object.freeze({
   segments: Object.freeze(["segment_deep_dive"]),
   peers: Object.freeze(["peer_comparison"]),
   news: Object.freeze(["document_research"]),
+  issuer_ir: Object.freeze(["document_research"]),
   filings: Object.freeze(["filing_research"]),
   transcripts: Object.freeze(["document_research"]),
 }) satisfies Readonly<Record<string, ReadonlyArray<string>>>;

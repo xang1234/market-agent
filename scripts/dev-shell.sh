@@ -276,6 +276,12 @@ configure_runtime_env() {
   CHAT_ANALYST_RUNTIME_MODULE="${CHAT_ANALYST_RUNTIME_MODULE:-$ROOT/services/chat/src/local-runtime.ts}"
   export CHAT_PERSISTENCE_MODULE
   CHAT_PERSISTENCE_MODULE="${CHAT_PERSISTENCE_MODULE:-$ROOT/services/chat/src/local-runtime.ts}"
+  export LLM_SETTINGS_ENV_FILE
+  LLM_SETTINGS_ENV_FILE="${LLM_SETTINGS_ENV_FILE:-$ROOT/.env.dev}"
+  export MA_FLAG_LLM_SETTINGS
+  MA_FLAG_LLM_SETTINGS="${MA_FLAG_LLM_SETTINGS:-true}"
+  export VITE_MA_FLAG_LLM_SETTINGS
+  VITE_MA_FLAG_LLM_SETTINGS="${VITE_MA_FLAG_LLM_SETTINGS:-true}"
   if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
     export DEV_PROVIDERS_ORIGIN
     DEV_PROVIDERS_ORIGIN="${DEV_PROVIDERS_ORIGIN:-http://127.0.0.1:$DEV_PROVIDERS_PORT}"
@@ -356,6 +362,7 @@ up() {
   ensure_install "$ROOT/services/summary"
   ensure_install "$ROOT/services/themes"
   ensure_install "$ROOT/services/tools"
+  ensure_install "$ROOT/services/llm"
   if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
     ensure_python_service_install "$ROOT/services/dev-providers"
   fi
