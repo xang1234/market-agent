@@ -178,6 +178,62 @@ test("upsertDiscoveredListing enriches one exact legal-name issuer instead of in
   assert.equal(queries.some((text) => text.includes("update issuers")), true);
 });
 
+test("upsertDiscoveredListing resolves existing instrument identity before creating an issuer", async () => {
+  const queries: Array<{ text: string; values?: unknown[] }> = [];
+  const db = {
+    query: async <R extends Record<string, unknown> = Record<string, unknown>>(
+      text: string,
+      values?: unknown[],
+    ) => {
+      queries.push({ text, values });
+      if (text.includes("select instrument_id, issuer_id from instruments where isin")) {
+        assert.deepEqual(values, ["US0079031078"]);
+        return {
+          rows: [{
+            instrument_id: "22222222-2222-4222-a222-222222222222",
+            issuer_id: "11111111-1111-4111-a111-111111111111",
+          } as R],
+        };
+      }
+      if (text.includes("insert into issuers")) {
+        throw new Error("must not create an orphan issuer when instrument identity already exists");
+      }
+      if (text.includes("update issuers")) return { rows: [] as R[] };
+      if (text.includes("update instruments")) return { rows: [] as R[] };
+      if (text.includes("select listing_id")) return { rows: [] as R[] };
+      if (text.includes("insert into listings")) {
+        assert.deepEqual(values, [
+          "22222222-2222-4222-a222-222222222222",
+          "XNAS",
+          "AMD",
+          "USD",
+          "America/New_York",
+        ]);
+        return { rows: [{ listing_id: "33333333-3333-4333-a333-333333333333" } as R] };
+      }
+      throw new Error(`Unexpected query: ${text}`);
+    },
+  };
+
+  const subject = await upsertDiscoveredListing(db, {
+    ticker: "AMD",
+    legal_name: "Advanced Micro Devices, Inc.",
+    market: "stocks",
+    active: true,
+    mic: "XNAS",
+    trading_currency: "USD",
+    timezone: "America/New_York",
+    asset_type: "common_stock",
+    lei: "549300JAF7F4NE3JZ845",
+    domicile: "US",
+    isin: "us0079031078",
+    figi_composite: "BBG000BBQCY0",
+  });
+
+  assert.deepEqual(subject, { kind: "listing", id: "33333333-3333-4333-a333-333333333333" });
+  assert.equal(queries.some((query) => query.text.includes("insert into issuers")), false);
+});
+
 test("upsertDiscoveredListing is idempotent and dedupes issuer/instrument/listing rows", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for resolver discovery coverage");

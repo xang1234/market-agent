@@ -42,7 +42,7 @@ export function stooqMarketProviderConfigFromEnv(
   env: Record<string, string | undefined>,
 ): StooqMarketProviderConfig {
   return Object.freeze({
-    enabled: env[STOOQ_MARKET_ENABLED_ENV] === "true",
+    enabled: env[STOOQ_MARKET_ENABLED_ENV]?.trim().toLowerCase() === "true",
     baseUrl: env[STOOQ_MARKET_BASE_URL_ENV]?.trim() || STOOQ_MARKET_DEFAULT_BASE_URL,
   });
 }

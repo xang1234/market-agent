@@ -345,6 +345,60 @@ test("open reference provider refuses GLEIF legal-name suffix mismatches", async
   assert.equal(listing.domicile, undefined);
 });
 
+test("open reference provider refuses GLEIF enrichment when the candidate page is truncated", async () => {
+  const provider = createOpenReferenceTickerDiscoveryProvider({
+    nasdaqTrader: { enabled: true, baseUrl: "https://nasdaq.test" },
+    openfigi: { enabled: false, baseUrl: "https://openfigi.test", apiKey: null },
+    gleif: { enabled: true, baseUrl: "https://gleif.test/api/v1" },
+    fetchImpl: async (input) => {
+      const url = input instanceof URL ? input.toString() : String(input);
+      if (url === "https://nasdaq.test/dynamic/symdir/nasdaqlisted.txt") {
+        return textResponse([
+          "Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares",
+          "ACME|Acme Inc. Common Stock|Q|N|N|100|N|N",
+          "File Creation Time: 0529202618:03|||||||",
+        ].join("\n"));
+      }
+      if (url === "https://nasdaq.test/dynamic/symdir/otherlisted.txt") {
+        return textResponse(EMPTY_OTHER_LISTED);
+      }
+      if (url.startsWith("https://gleif.test/api/v1/lei-records?")) {
+        return jsonResponse({
+          data: [
+            {
+              attributes: {
+                lei: "549300ACMEPAGE00001",
+                entity: {
+                  legalName: { name: "Acme Inc." },
+                  legalAddress: { country: "US" },
+                },
+                registration: { status: "ISSUED" },
+              },
+            },
+          ],
+          links: {
+            next: "https://gleif.test/api/v1/lei-records?page[number]=2",
+          },
+          meta: {
+            pagination: {
+              currentPage: 1,
+              lastPage: 2,
+              total: 6,
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected request ${url}`);
+    },
+  });
+
+  const [listing] = await provider.discoverTicker("ACME");
+
+  assert.equal(listing.legal_name, "Acme Inc.");
+  assert.equal(listing.lei, undefined);
+  assert.equal(listing.domicile, undefined);
+});
+
 test("fallback discovery can use open reference coverage after paid discovery has no candidates", async () => {
   let paidCalls = 0;
   const openReferenceProvider = createOpenReferenceTickerDiscoveryProvider({

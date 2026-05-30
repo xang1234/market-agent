@@ -56,6 +56,8 @@ type OpenFigiInstrument = {
 
 type GleifLeiRecordsResponse = {
   data?: unknown[];
+  links?: unknown;
+  meta?: unknown;
 };
 
 type GleifLeiRecord = {
@@ -83,6 +85,7 @@ type LeiEnrichment = {
 };
 
 const DEFAULT_TIMEOUT_MS = 5_000;
+const GLEIF_PAGE_SIZE = 5;
 const NASDAQ_US_TIMEZONE = "America/New_York";
 const NASDAQ_US_CURRENCY = "USD";
 const OPENFIGI_US_EXCH_CODE = "US";
@@ -278,10 +281,11 @@ async function fetchGleifEnrichment(
     const url = new URL(joinUrlPath(baseUrl, "/lei-records"));
     url.searchParams.set("filter[entity.legalName]", legalName);
     url.searchParams.set("filter[registration.status]", "ISSUED");
-    url.searchParams.set("page[size]", "5");
+    url.searchParams.set("page[size]", String(GLEIF_PAGE_SIZE));
     const response = await fetchJson(url, fetchImpl, timeoutMs);
     if (!response) return null;
     if (!isGleifLeiRecordsResponse(response)) return null;
+    if (gleifResponseMayBeTruncated(response, GLEIF_PAGE_SIZE)) return null;
     return uniqueGleifEnrichment(response, legalName);
   } catch {
     return null;
@@ -409,6 +413,26 @@ function isGleifLeiRecordsResponse(value: unknown): value is GleifLeiRecordsResp
   return typeof value === "object" && value !== null;
 }
 
+function gleifResponseMayBeTruncated(response: GleifLeiRecordsResponse, pageSize: number): boolean {
+  const dataLength = Array.isArray(response.data) ? response.data.length : 0;
+  const pagination = objectValue(objectValue(response.meta)?.pagination);
+  const total = numberProperty(pagination, "total");
+  const lastPage = numberProperty(pagination, "lastPage");
+  const currentPage = numberProperty(pagination, "currentPage") ?? 1;
+
+  if (hasNextLink(response.links)) return true;
+  if (total !== null && total > dataLength) return true;
+  if (total !== null && total > pageSize) return true;
+  if (lastPage !== null && lastPage > currentPage) return true;
+  return dataLength >= pageSize && total === null && lastPage === null;
+}
+
+function hasNextLink(value: unknown): boolean {
+  const links = objectValue(value);
+  if (!links || !("next" in links)) return false;
+  return links.next !== null && links.next !== undefined && String(links.next).trim().length > 0;
+}
+
 function cleanSecurityName(value: string): string {
   return value
     .replace(/\s+-\s+.+$/, "")
@@ -436,6 +460,17 @@ function legalNameFromGleif(value: unknown): string | null {
     return stringValue((value as { name?: unknown }).name);
   }
   return null;
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null ? value as Record<string, unknown> : null;
+}
+
+function numberProperty(value: Record<string, unknown> | null, key: string): number | null {
+  if (!value) return null;
+  const raw = value[key];
+  const parsed = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN;
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function countryFromGleif(value: unknown): string | null {

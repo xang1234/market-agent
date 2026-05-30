@@ -14,7 +14,7 @@ import { assertListingRef, type ListingSubjectRef, type UUID } from "../subject-
 
 export type StooqListingContext = {
   ticker: string;
-  mic: string;
+  mic?: string | null;
   currency: string;
   timezone: string;
 };
@@ -122,7 +122,8 @@ export function createStooqMarketDataAdapter(
 }
 
 function stooqSymbol(ctx: StooqListingContext): string | null {
-  if (!SUPPORTED_US_MICS.has(ctx.mic)) return null;
+  const mic = ctx.mic?.trim().toUpperCase();
+  if (!mic || !SUPPORTED_US_MICS.has(mic)) return null;
   return `${ctx.ticker.toLowerCase()}.us`;
 }
 

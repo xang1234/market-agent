@@ -68,7 +68,7 @@ test("Stooq market config env gate defaults to disabled EOD source", () => {
     baseUrl: STOOQ_MARKET_DEFAULT_BASE_URL,
   });
   assert.deepEqual(stooqMarketProviderConfigFromEnv({
-    STOOQ_MARKET_ENABLED: "true",
+    STOOQ_MARKET_ENABLED: " TRUE ",
     STOOQ_MARKET_BASE_URL: "https://stooq.test/q/d/l/",
   }), {
     enabled: true,

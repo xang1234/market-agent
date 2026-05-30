@@ -8,7 +8,7 @@ import { aaplListing } from "../fixtures.ts";
 
 const listingContext = {
   ticker: "AAPL",
-  mic: "XNAS",
+  mic: "xnas",
   currency: "USD",
   timezone: "America/New_York",
 };
