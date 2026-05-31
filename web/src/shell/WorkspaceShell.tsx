@@ -2,23 +2,23 @@ import { EvidenceInspectorProvider } from '../evidence/EvidenceInspectorProvider
 import { WatchlistProvider } from '../watchlists/WatchlistProvider'
 import { AuthInterrupt } from './AuthInterrupt'
 import { AuthInterruptProvider } from './AuthInterruptProvider'
-import { PrimaryTabs } from './PrimaryTabs'
 import { RightRailProvider } from './RightRailProvider'
 import { RightRailSlot } from './RightRailSlot'
 import { RouteScopeGate } from './RouteScopeGate'
+import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
 import { useAuth } from './useAuth'
-import { WatchlistSlot } from './WatchlistSlot'
+import { useSearchHotkey } from './useSearchHotkey'
 
-// The persistent workspace shell. Per the video target (bead fra-4pz IA
-// refactor), the layout is:
+// The persistent workspace shell. Redesign IA collapses the prior separate
+// watchlist rail + horizontal PrimaryTabs into a single left Sidebar:
 //
 //   ┌───────────────┬─────────────────────────────────────────────┐
-//   │               │  TopBar: brand · search · theme · session    │
-//   │  Watchlist    ├──────────────────────────────┬──────────────┤
-//   │  (left rail)  │  PrimaryTabs                 │  RightRail   │
-//   │               ├──────────────────────────────┤  (optional)  │
-//   │               │  Outlet (main canvas)        │              │
+//   │  Sidebar      │  TopBar: search (⌘K)                         │
+//   │  · brand      ├──────────────────────────────┬──────────────┤
+//   │  · nav        │                              │  RightRail   │
+//   │  · watchlist  │  Outlet (main canvas)        │  (optional)  │
+//   │  · user/theme │                              │              │
 //   └───────────────┴──────────────────────────────┴──────────────┘
 //
 // Shell chrome is not auth-gated as a whole; public routes (Home, Screener,
@@ -37,16 +37,16 @@ import { WatchlistSlot } from './WatchlistSlot'
 export function WorkspaceShell() {
   const { session } = useAuth()
   const userId = session?.userId ?? null
+  useSearchHotkey()
   return (
     <AuthInterruptProvider>
       <RightRailProvider>
         <WatchlistProvider userId={userId}>
           <EvidenceInspectorProvider>
-            <div className="flex h-full w-full bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
-              <WatchlistSlot />
+            <div className="flex h-full w-full bg-bg text-fg">
+              <Sidebar />
               <div className="flex min-w-0 flex-1 flex-col">
                 <TopBar />
-                <PrimaryTabs />
                 <div className="flex min-h-0 flex-1">
                   <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
                     <RouteScopeGate />

@@ -11,6 +11,10 @@ export const SPARKLINE_DEFAULTS = {
 
 export type SparklineGeometry = {
   path: string
+  // Closed polygon: the line path continued down to the chart floor and back,
+  // so callers can render a gradient/tinted area fill under the line without
+  // recomputing points. Always present; render it only when an area is wanted.
+  areaPath: string
   baselineY: number | null
 }
 
@@ -48,13 +52,20 @@ export function computeSparklineGeometry({
       return `${i === 0 ? 'M' : 'L'} ${x.toFixed(2)},${y.toFixed(2)}`
     })
     .join(' ')
+  // Close the line down to the chart floor and back to the start for area fills.
+  const firstX = padX
+  const lastX = padX + innerW
+  const floorY = height
+  const areaPath = `${path} L ${lastX.toFixed(2)},${floorY.toFixed(2)} L ${firstX.toFixed(
+    2,
+  )},${floorY.toFixed(2)} Z`
   const baselineY =
     baseline === null
       ? null
       : rawSpan === 0
         ? midY
         : padY + (1 - (baseline - lo) / span) * innerH
-  return { path, baselineY }
+  return { path, areaPath, baselineY }
 }
 
 function resolveDomain(

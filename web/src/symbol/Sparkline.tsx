@@ -17,6 +17,12 @@ type SparklineProps = {
   baseline?: number | null
   width?: number
   height?: number
+  // Tailwind sizing override. Defaults to the full-width symbol-detail size;
+  // pass e.g. "h-5 w-16" for a compact inline watchlist sparkline.
+  className?: string
+  // When set, render a tinted area under the line using this fill class
+  // (e.g. "fill-positive/15"). Omit for a line-only sparkline.
+  areaFillClass?: string
 }
 
 export function Sparkline({
@@ -27,6 +33,8 @@ export function Sparkline({
   baseline = null,
   width = SPARKLINE_DEFAULTS.width,
   height = SPARKLINE_DEFAULTS.height,
+  className = 'h-20 w-full',
+  areaFillClass,
 }: SparklineProps) {
   const geometry = computeSparklineGeometry({ values, domain, baseline, width, height })
   if (geometry === null) return null
@@ -35,9 +43,10 @@ export function Sparkline({
       role="img"
       aria-label={ariaLabel}
       viewBox={`0 0 ${width} ${height}`}
-      className="h-20 w-full"
+      className={className}
       preserveAspectRatio="none"
     >
+      {areaFillClass && <path d={geometry.areaPath} stroke="none" className={areaFillClass} />}
       {geometry.baselineY !== null && (
         <line
           x1={SPARKLINE_DEFAULTS.padX}
