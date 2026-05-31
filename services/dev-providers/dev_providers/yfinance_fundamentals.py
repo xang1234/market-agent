@@ -64,7 +64,9 @@ def normalize_earnings_events(
     used_periods: set[date] = set()
     for row in reported[:limit]:
         release = row["release"]
-        period_end = _period_end_for_release(release, periods, used_periods) or _previous_quarter_end(release)
+        period_end = _period_end_for_release(release, periods, used_periods)
+        if period_end is None:
+            continue
         used_periods.add(period_end)
         events.append(
             {
@@ -75,6 +77,9 @@ def normalize_earnings_events(
                 "as_of": now_iso,
             }
         )
+
+    if not events:
+        return None
 
     return {"events": events, "as_of": now_iso}
 
@@ -181,17 +186,6 @@ def _insider_transaction_type(text: str) -> str:
     if "option" in normalized or "exercise" in normalized:
         return "option_exercise"
     return "other"
-
-
-def _previous_quarter_end(release: date) -> date:
-    quarter = ((release.month - 1) // 3) + 1
-    if quarter == 1:
-        return date(release.year - 1, 12, 31)
-    if quarter == 2:
-        return date(release.year, 3, 31)
-    if quarter == 3:
-        return date(release.year, 6, 30)
-    return date(release.year, 9, 30)
 
 
 def _period_end_for_release(

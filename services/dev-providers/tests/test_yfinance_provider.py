@@ -174,6 +174,22 @@ class YFinanceProviderTests(unittest.TestCase):
         self.assertIsNotNone(earnings)
         self.assertEqual(earnings["events"][0]["period_end"], "2025-12-31")
 
+    def test_earnings_normalization_skips_releases_without_observed_period_end(self):
+        earnings = normalize_earnings_events(
+            [
+                {
+                    "Earnings Date": "2026-01-29 16:00:00-05:00",
+                    "EPS Estimate": 2.67,
+                    "Reported EPS": 2.84,
+                },
+            ],
+            ["2026-03-31"],
+            now_iso="2026-05-31T12:00:00.000Z",
+            limit=1,
+        )
+
+        self.assertIsNone(earnings)
+
     def test_holder_normalization_maps_yfinance_institutional_and_insider_rows(self):
         institutional = normalize_holders(
             "institutional",

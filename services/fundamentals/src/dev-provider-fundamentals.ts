@@ -6,10 +6,8 @@ import {
 import type { EarningsRepository } from "./earnings-repository.ts";
 import { FundamentalsDataUnavailableError } from "./availability.ts";
 import {
-  APPLE_FISCAL_CALENDAR,
-  CALENDAR_YEAR_FISCAL,
-  MICROSOFT_FISCAL_CALENDAR,
-  fiscalQuarterLabel,
+  fiscalCalendarForIssuerProfile,
+  fiscalQuarterLabelForPeriodEnd,
   type FiscalCalendar,
 } from "./fiscal-calendar.ts";
 import {
@@ -32,7 +30,6 @@ import {
   sidecarUnavailableReason,
   type DevProviderSidecarOptions,
 } from "./dev-provider-sidecar.ts";
-import type { FiscalPeriod } from "./statement.ts";
 import type { UUID } from "./subject-ref.ts";
 
 export type DevProvidersEarningsRepositoryOptions = DevProviderSidecarOptions & {
@@ -67,6 +64,7 @@ type IssuerListingContext = {
   mic: string;
   currency: string;
   timezone: string;
+  fiscalCalendar: FiscalCalendar;
 };
 
 export function createDevProvidersEarningsRepository(
@@ -94,7 +92,7 @@ export function createDevProvidersEarningsRepository(
         envelope.data,
         issuer_id,
         context.currency,
-        fiscalCalendarForListing(context),
+        context.fiscalCalendar,
         options.sourceId,
       );
       try {
@@ -160,12 +158,13 @@ async function issuerListingContext(
 ): Promise<IssuerListingContext | null> {
   const profile = await profiles.find(issuerId);
   const exchange = profile?.exchanges[0];
-  if (!exchange) return null;
+  if (!profile || !exchange) return null;
   return {
     ticker: exchange.ticker,
     mic: exchange.mic,
     currency: exchange.trading_currency,
     timezone: exchange.timezone,
+    fiscalCalendar: fiscalCalendarForIssuerProfile(profile),
   };
 }
 
@@ -215,7 +214,7 @@ function sidecarEarningsEvent(
   if (!releaseDate || !periodEnd || epsActual === undefined || epsEstimate === undefined) {
     throw providerPayloadError("yfinance earnings", "earnings event");
   }
-  const fiscal = fiscalQuarterFromPeriodEnd(periodEnd, fiscalCalendar);
+  const fiscal = fiscalQuarterLabelForPeriodEnd(fiscalCalendar, periodEnd);
   if (!fiscal) throw providerPayloadError("yfinance earnings", "earnings event period_end");
   return {
     release_date: releaseDate,
@@ -333,68 +332,6 @@ function sidecarInsiderTransaction(value: unknown): InsiderTransaction {
     price,
     value: transactionValue,
   };
-}
-
-function fiscalCalendarForListing(context: IssuerListingContext): FiscalCalendar {
-  switch (context.ticker.trim().toUpperCase()) {
-    case "AAPL":
-      return APPLE_FISCAL_CALENDAR;
-    case "MSFT":
-      return MICROSOFT_FISCAL_CALENDAR;
-    default:
-      return CALENDAR_YEAR_FISCAL;
-  }
-}
-
-function fiscalQuarterFromPeriodEnd(
-  periodEnd: string,
-  fiscalCalendar: FiscalCalendar,
-): { fiscal_year: number; fiscal_period: FiscalPeriod } | null {
-  const target = isoDateMs(periodEnd);
-  if (target === null) return null;
-  const calendarYear = new Date(target).getUTCFullYear();
-  let best: { fiscal_year: number; fiscal_period: FiscalPeriod; distanceDays: number } | null = null;
-  for (const fiscalYear of [calendarYear - 1, calendarYear, calendarYear + 1]) {
-    for (const quarter of [1, 2, 3, 4] as const) {
-      const label = fiscalQuarterLabel(fiscalCalendar, fiscalYear, quarter);
-      const labelEnd = isoDateMs(label.period_end);
-      if (labelEnd === null) continue;
-      const distanceDays = Math.abs(labelEnd - target) / ONE_DAY_MS;
-      if (distanceDays > 7) continue;
-      if (best === null || distanceDays < best.distanceDays) {
-        best = {
-          fiscal_year: label.fiscal_year,
-          fiscal_period: label.fiscal_period,
-          distanceDays,
-        };
-      }
-    }
-  }
-  return best
-    ? { fiscal_year: best.fiscal_year, fiscal_period: best.fiscal_period }
-    : null;
-}
-
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-
-function isoDateMs(value: string): number | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  if (!Number.isInteger(year) || month < 1 || month > 12 || day < 1 || day > 31) {
-    return null;
-  }
-  const date = new Date(`${value}T00:00:00.000Z`);
-  if (
-    date.getUTCFullYear() !== year ||
-    date.getUTCMonth() + 1 !== month ||
-    date.getUTCDate() !== day
-  ) {
-    return null;
-  }
-  return date.getTime();
 }
 
 function stringValue(value: unknown): string | null {

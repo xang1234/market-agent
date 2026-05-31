@@ -5,12 +5,15 @@ import {
   CALENDAR_YEAR_FISCAL,
   MICROSOFT_FISCAL_CALENDAR,
   assertCalendar,
+  fiscalCalendarForIssuerProfile,
   fiscalQuarterLabel,
+  fiscalQuarterLabelForPeriodEnd,
   fiscalYearEnd,
   fiscalYearLabel,
   fiscalYearStart,
   type FiscalCalendar,
 } from "../src/fiscal-calendar.ts";
+import type { IssuerProfileRecord } from "../src/profile.ts";
 import { normalizedStatement } from "../src/statement.ts";
 import { aaplIssuer, SEC_EDGAR_SOURCE_ID } from "./fixtures.ts";
 
@@ -115,6 +118,27 @@ test("MICROSOFT_FISCAL_CALENDAR (June fiscal year end) resolves quarters as last
   assert.equal(fiscalQuarterLabel(MICROSOFT_FISCAL_CALENDAR, 2024, 2).period_end, "2023-12-31");
   assert.equal(fiscalQuarterLabel(MICROSOFT_FISCAL_CALENDAR, 2024, 3).period_end, "2024-03-31");
   assert.equal(fiscalQuarterLabel(MICROSOFT_FISCAL_CALENDAR, 2024, 4).period_end, "2024-06-30");
+});
+
+test("fiscalCalendarForIssuerProfile centralizes known issuer calendar policy", () => {
+  assert.equal(fiscalCalendarForIssuerProfile(profileForTicker("AAPL")), APPLE_FISCAL_CALENDAR);
+  assert.equal(fiscalCalendarForIssuerProfile(profileForTicker("MSFT")), MICROSOFT_FISCAL_CALENDAR);
+  assert.equal(fiscalCalendarForIssuerProfile(profileForTicker("AMD")), CALENDAR_YEAR_FISCAL);
+});
+
+test("fiscalQuarterLabelForPeriodEnd labels provider month-end rows against issuer fiscal calendars", () => {
+  const appleQ2 = fiscalQuarterLabelForPeriodEnd(APPLE_FISCAL_CALENDAR, "2025-03-31");
+  assert.equal(appleQ2?.fiscal_year, 2025);
+  assert.equal(appleQ2?.fiscal_period, "Q2");
+
+  const calendarQ1 = fiscalQuarterLabelForPeriodEnd(CALENDAR_YEAR_FISCAL, "2026-03-31");
+  assert.equal(calendarQ1?.fiscal_year, 2026);
+  assert.equal(calendarQ1?.fiscal_period, "Q1");
+});
+
+test("fiscalQuarterLabelForPeriodEnd rejects period ends outside the explicit tolerance", () => {
+  assert.equal(fiscalQuarterLabelForPeriodEnd(APPLE_FISCAL_CALENDAR, "2025-04-10"), null);
+  assert.equal(fiscalQuarterLabelForPeriodEnd(APPLE_FISCAL_CALENDAR, "not-a-date"), null);
 });
 
 test("fiscalYearLabel output plugs into normalizedStatement (income statement, FY)", () => {
@@ -241,4 +265,21 @@ function inclusiveDayCount(startIso: string, endIso: string): number {
   const start = Date.parse(`${startIso}T00:00:00Z`);
   const end = Date.parse(`${endIso}T00:00:00Z`);
   return Math.round((end - start) / 86_400_000) + 1;
+}
+
+function profileForTicker(ticker: string): IssuerProfileRecord {
+  return {
+    subject: { kind: "issuer", id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaa1" },
+    legal_name: `${ticker} issuer`,
+    former_names: [],
+    exchanges: [
+      {
+        listing: { kind: "listing", id: "11111111-1111-4111-a111-111111111111" },
+        mic: "XNAS",
+        ticker,
+        trading_currency: "USD",
+        timezone: "America/New_York",
+      },
+    ],
+  };
 }

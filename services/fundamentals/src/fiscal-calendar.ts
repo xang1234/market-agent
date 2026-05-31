@@ -5,7 +5,8 @@
 // (ends 2025-12-31) would silently merge two different periods.
 
 import type { FiscalPeriod, PeriodKind } from "./statement.ts";
-import { assertInteger, assertOneOf } from "./validators.ts";
+import type { IssuerProfileRecord } from "./profile.ts";
+import { assertInteger, assertIsoDate, assertOneOf } from "./validators.ts";
 
 export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -54,6 +55,8 @@ export const MICROSOFT_FISCAL_CALENDAR: FiscalCalendar = Object.freeze({
   fiscal_year_end_month: 6,
 });
 
+export const FISCAL_PERIOD_END_TOLERANCE_DAYS = 7;
+
 export type FiscalLabel = {
   fiscal_year: number;
   fiscal_period: FiscalPeriod;
@@ -63,6 +66,19 @@ export type FiscalLabel = {
 };
 
 const QUARTERS: ReadonlyArray<1 | 2 | 3 | 4> = [1, 2, 3, 4];
+
+const KNOWN_FISCAL_CALENDAR_BY_TICKER: Readonly<Record<string, FiscalCalendar>> = Object.freeze({
+  AAPL: APPLE_FISCAL_CALENDAR,
+  MSFT: MICROSOFT_FISCAL_CALENDAR,
+});
+
+export function fiscalCalendarForIssuerProfile(record: IssuerProfileRecord): FiscalCalendar {
+  for (const exchange of record.exchanges) {
+    const calendar = KNOWN_FISCAL_CALENDAR_BY_TICKER[exchange.ticker.trim().toUpperCase()];
+    if (calendar) return calendar;
+  }
+  return CALENDAR_YEAR_FISCAL;
+}
 
 export function fiscalYearLabel(c: FiscalCalendar, fy: number): FiscalLabel {
   assertCalendar(c, "fiscalYearLabel.calendar");
@@ -95,6 +111,39 @@ export function fiscalQuarterLabel(
     period_start: fiscalQuarterStart(c, fy, q),
     period_end: fiscalQuarterEnd(c, fy, q),
   });
+}
+
+export function fiscalQuarterLabelForPeriodEnd(
+  c: FiscalCalendar,
+  periodEnd: string,
+  options: { toleranceDays?: number } = {},
+): FiscalLabel | null {
+  assertCalendar(c, "fiscalQuarterLabelForPeriodEnd.calendar");
+  const target = isoDateMs(periodEnd);
+  if (target === null) return null;
+  const toleranceDays = options.toleranceDays ?? FISCAL_PERIOD_END_TOLERANCE_DAYS;
+  assertInteger(toleranceDays, "fiscalQuarterLabelForPeriodEnd.toleranceDays");
+  if (toleranceDays < 0) {
+    throw new Error(
+      `fiscalQuarterLabelForPeriodEnd.toleranceDays: must be non-negative; received ${toleranceDays}`,
+    );
+  }
+
+  const calendarYear = new Date(target).getUTCFullYear();
+  let best: { label: FiscalLabel; distanceDays: number } | null = null;
+  for (const fiscalYear of [calendarYear - 1, calendarYear, calendarYear + 1]) {
+    for (const quarter of QUARTERS) {
+      const label = fiscalQuarterLabel(c, fiscalYear, quarter);
+      const labelEnd = isoDateMs(label.period_end);
+      if (labelEnd === null) continue;
+      const distanceDays = Math.abs(labelEnd - target) / 86_400_000;
+      if (distanceDays > toleranceDays) continue;
+      if (best === null || distanceDays < best.distanceDays) {
+        best = { label, distanceDays };
+      }
+    }
+  }
+  return best?.label ?? null;
 }
 
 export function fiscalYearEnd(c: FiscalCalendar, fy: number): string {
@@ -192,6 +241,15 @@ function parseIsoDate(s: string): Date {
   // s is `YYYY-MM-DD`; appending T00:00:00Z anchors at UTC midnight so the
   // subsequent setUTCDate arithmetic is timezone-stable.
   return new Date(`${s}T00:00:00Z`);
+}
+
+function isoDateMs(s: string): number | null {
+  try {
+    assertIsoDate(s, "period_end");
+  } catch {
+    return null;
+  }
+  return parseIsoDate(s).getTime();
 }
 
 function formatIsoDate(d: Date): string {
