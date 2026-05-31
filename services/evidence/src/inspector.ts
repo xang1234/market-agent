@@ -1,4 +1,8 @@
 import type { QueryExecutor } from "./types.ts";
+import {
+  sourceDisclosure,
+  storagePolicyForDocument,
+} from "./source-disclosure.ts";
 
 export const EVIDENCE_INSPECTION_REF_KINDS = [
   "source",
@@ -230,11 +234,12 @@ async function inspectSource(
     kind: "source",
     title: `${row.provider} ${row.kind}`,
     subtitle: row.canonical_url,
-    badges: Object.freeze([row.trust_tier, row.license_class]),
+    badges: sourceBadges(row),
     rows: Object.freeze([
       { label: "Provider", value: row.provider },
       { label: "Kind", value: row.kind },
       { label: "Retrieved", value: isoString(row.retrieved_at) },
+      ...disclosureRows(row),
     ]),
     links: sourceLinks(row.canonical_url),
     related_refs: Object.freeze([]),
@@ -259,6 +264,7 @@ async function inspectDocument(
     canonical_url: string | null;
     trust_tier: string;
     license_class: string;
+    raw_blob_id: string;
   }>(
     `select d.document_id::text as document_id,
             d.source_id::text as source_id,
@@ -270,7 +276,8 @@ async function inspectDocument(
             s.provider,
             s.canonical_url,
             s.trust_tier,
-            s.license_class
+            s.license_class,
+            d.raw_blob_id
        from documents d
        join sources s on s.source_id = d.source_id
       where d.document_id = $1::uuid
@@ -286,11 +293,12 @@ async function inspectDocument(
     kind: "document",
     title: row.title ?? `${row.provider} ${row.kind}`,
     subtitle: row.canonical_url,
-    badges: Object.freeze([row.trust_tier, row.license_class, row.parse_status]),
+    badges: documentBadges(row),
     rows: Object.freeze([
       { label: "Kind", value: row.kind },
       { label: "Author", value: row.author ?? "Unknown" },
       { label: "Published", value: row.published_at === null ? "Unknown" : isoString(row.published_at) },
+      ...disclosureRows(row),
     ]),
     links: sourceLinks(row.canonical_url),
     related_refs: Object.freeze([{ kind: "source", id: row.source_id }]),
@@ -315,6 +323,7 @@ async function inspectClaim(
     confidence: string | number;
     status: string;
     provider: string;
+    license_class: string;
     canonical_url: string | null;
   }>(
     `select c.claim_id::text as claim_id,
@@ -328,6 +337,7 @@ async function inspectClaim(
             c.confidence,
             c.status,
             s.provider,
+            s.license_class,
             s.canonical_url
        from claims c
        join sources s on s.source_id = c.reported_by_source_id
@@ -349,6 +359,7 @@ async function inspectClaim(
       { label: "Confidence", value: String(row.confidence) },
       { label: "Effective time", value: row.effective_time === null ? "Unknown" : isoString(row.effective_time) },
       { label: "Provider", value: row.provider },
+      ...disclosureRows(row),
     ]),
     links: sourceLinks(row.canonical_url),
     related_refs: Object.freeze([
@@ -480,6 +491,44 @@ function assertRef(ref: EvidenceInspectionRef): void {
 function sourceLinks(canonicalUrl: string | null): ReadonlyArray<EvidenceInspectionLink> {
   if (canonicalUrl === null || !isSafeExternalHref(canonicalUrl)) return Object.freeze([]);
   return Object.freeze([{ label: "Open source", href: canonicalUrl }]);
+}
+
+function sourceBadges(row: {
+  provider: string;
+  trust_tier: string;
+  license_class: string;
+}): ReadonlyArray<string> {
+  return badgesWithStorage(row, [row.trust_tier, row.license_class]);
+}
+
+function documentBadges(row: {
+  provider: string;
+  trust_tier: string;
+  license_class: string;
+  parse_status: string;
+  raw_blob_id: string;
+}): ReadonlyArray<string> {
+  return badgesWithStorage(row, [row.trust_tier, row.license_class, row.parse_status]);
+}
+
+function badgesWithStorage(
+  row: {
+    provider: string;
+    license_class: string;
+    raw_blob_id?: string;
+  },
+  badges: ReadonlyArray<string>,
+): ReadonlyArray<string> {
+  const storagePolicy = storagePolicyForDocument(row);
+  return Object.freeze(storagePolicy === "stored_blob" ? [...badges] : [...badges, storagePolicy]);
+}
+
+function disclosureRows(row: {
+  provider: string;
+  license_class: string;
+}): ReadonlyArray<EvidenceInspectionRow> {
+  const disclosure = sourceDisclosure(row);
+  return disclosure ? Object.freeze([{ label: "Disclosure", value: disclosure }]) : Object.freeze([]);
 }
 
 function isSafeExternalHref(value: string): boolean {

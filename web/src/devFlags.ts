@@ -1,10 +1,12 @@
 export type WebDevFlags = {
+  llmSettingsEnabled: boolean;
   placeholderApiEnabled: boolean;
   showDevBanner: boolean;
 };
 
 export function readWebDevFlags(env: Record<string, string | undefined>): WebDevFlags {
   return {
+    llmSettingsEnabled: parseBoolean(env.VITE_MA_FLAG_LLM_SETTINGS, false),
     placeholderApiEnabled: parseBoolean(env.VITE_MA_FLAG_PLACEHOLDER_API, true),
     showDevBanner: parseBoolean(env.VITE_MA_FLAG_SHOW_DEV_BANNER, false),
   };

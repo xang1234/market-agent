@@ -468,6 +468,7 @@ function sourceCategoriesFor(
     'filings',
     'transcripts',
     'news',
+    'issuer_ir',
   ])]
 }
 

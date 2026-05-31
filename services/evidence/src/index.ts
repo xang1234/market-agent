@@ -212,6 +212,7 @@ export type {
 export {
   GDELT_ARTICLE_DISCOVERY_PROVIDER,
   GDELT_ARTICLE_DISCOVERY_SOURCE_ID,
+  GDELT_DISCOVERY_DISCLOSURE,
   GDELT_DISCOVERY_DEFAULT_MAX_RECORDS_ENV,
   GDELT_DISCOVERY_ENABLED_ENV,
   GDELT_DISCOVERY_LICENSE_CLASS,
@@ -223,6 +224,21 @@ export {
   GDELT_DOC_API_CANONICAL_URL,
   GDELT_DOC_API_BASE_URL_ENV,
 } from "./gdelt-source.ts";
+
+export {
+  fetchEvidenceDocumentMetadata,
+  searchEvidenceDocuments,
+} from "./document-research.ts";
+export {
+  sourceDisclosure,
+  storagePolicyForDocument,
+} from "./source-disclosure.ts";
+export type {
+  EvidenceDocumentResearchInput,
+  EvidenceDocumentResearchResult,
+  FetchEvidenceDocumentMetadataInput,
+  SearchEvidenceDocumentsResult,
+} from "./document-research.ts";
 
 export {
   EPHEMERAL_RAW_BLOB_ID_PREFIX,
@@ -303,6 +319,36 @@ export type {
 } from "./news-ingest.ts";
 
 export {
+  IR_ASSET_KINDS,
+  IR_SOURCE_TYPES,
+  createIrDocumentAsset,
+  createIrSourceRegistryEntry,
+  findIrDocumentAssetByIssuerUrl,
+  getIrDocumentAssetForDocument,
+  listEnabledIrSourceRegistryEntries,
+  recordIrSourceCrawlFailure,
+  recordIrSourceCrawlSuccess,
+} from "./issuer-ir-registry.ts";
+export type {
+  IrAssetKind,
+  IrDocumentAssetInput,
+  IrDocumentAssetRow,
+  IrSourceRegistryInput,
+  IrSourceRegistryRow,
+  IrSourceType,
+} from "./issuer-ir-registry.ts";
+
+export {
+  ingestIssuerIrSource,
+} from "./issuer-ir-ingest.ts";
+export type {
+  IngestIssuerIrSourceDeps,
+  IngestIssuerIrSourceInput,
+  IngestIssuerIrSourceResult,
+  IssuerIrIngestRecord,
+} from "./issuer-ir-ingest.ts";
+
+export {
   USER_UPLOAD_LICENSE_CLASS,
   USER_UPLOAD_PROVIDER,
   getUserUploadDocument,
@@ -360,3 +406,56 @@ export type {
   SecFormCode,
   TokenBucketRateLimiterConfig,
 } from "./sec-edgar.ts";
+
+export {
+  GDELT_ARTICLE_DISCOVERY_MODES,
+  GDELT_ARTICLE_DISCOVERY_SORTS,
+  GDELT_DEFAULT_REQUEST_TIMEOUT_MS,
+  GDELT_MAX_ARTICLE_RECORDS,
+  GdeltDocClient,
+  GdeltDocFetchError,
+  GdeltDocPayloadError,
+  GdeltDocRateLimitError,
+  GdeltDocTimeoutError,
+  buildGdeltArticleSearchUrl,
+} from "./providers/gdelt.ts";
+export type {
+  GdeltArticleDiscovery,
+  GdeltArticleDiscoveryMode,
+  GdeltArticleDiscoveryRequest,
+  GdeltArticleDiscoveryResult,
+  GdeltArticleDiscoverySort,
+  GdeltDocClientConfig,
+} from "./providers/gdelt.ts";
+
+export {
+  ISSUER_IR_DEFAULT_MAX_CANDIDATES,
+  ISSUER_IR_DEFAULT_REQUEST_TIMEOUT_MS,
+  IssuerIrFetchError,
+  classifyIssuerIrAssetKind,
+  discoverIssuerIrCandidates,
+  fetchIssuerIrDocumentBytes,
+  hostedProviderFromUrl,
+} from "./providers/issuer-ir.ts";
+export type {
+  DiscoverIssuerIrCandidatesConfig,
+  IssuerIrCandidate,
+} from "./providers/issuer-ir.ts";
+
+export {
+  GDELT_ROUTED_READER_TOOL_NAMES,
+  buildGdeltSubjectArticleQuery,
+  ingestGdeltArticleDiscoveries,
+} from "./gdelt-ingest.ts";
+export type {
+  GdeltArticleDiscoveryClient,
+  GdeltArticleIngestRecord,
+  GdeltArticleSkipReason,
+  GdeltReaderToolMap,
+  GdeltReaderToolRun,
+  GdeltRoutedReaderToolName,
+  GdeltSubject,
+  IngestGdeltArticleDiscoveriesDeps,
+  IngestGdeltArticleDiscoveriesInput,
+  IngestGdeltArticleDiscoveriesResult,
+} from "./gdelt-ingest.ts";

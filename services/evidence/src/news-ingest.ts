@@ -7,7 +7,8 @@
 // are intentionally out of scope (each lands as its own bead).
 
 import { type DocumentInput } from "./document-repo.ts";
-import { ingestDocument, type IngestDocumentResult } from "./ingest.ts";
+import { ingestDocument, ingestDocumentInTransaction, type IngestDocumentResult } from "./ingest.ts";
+import { canonicalizeNewsUrl } from "./news-url.ts";
 import type { ObjectStore } from "./object-store.ts";
 import {
   createSource,
@@ -16,6 +17,7 @@ import {
   type SourceRow,
   type TrustTier,
 } from "./source-repo.ts";
+import { assertTransactionContext, type TransactionContext } from "./transaction.ts";
 import type { QueryExecutor } from "./types.ts";
 import {
   assertIso8601WithOffset,
@@ -24,6 +26,7 @@ import {
   assertOneOf,
   assertOptionalNonEmptyString,
 } from "./validators.ts";
+export { canonicalizeNewsUrl } from "./news-url.ts";
 
 // Spec § 5.2 mappings — the kind-specific subset of trust tiers the
 // orchestrator accepts. Anything outside these (e.g., trust_tier="user"
@@ -67,59 +70,15 @@ export const NEWS_ARTICLE_ALLOWED_LICENSE_CLASSES: ReadonlyArray<string> = Objec
 // provider matches. Caller can always override.
 const ISSUER_PROVIDER_PATTERNS = [/^issuer_/, /^ir_/];
 
-// ---- canonicalizeNewsUrl ---------------------------------------------------
-
-const TRACKING_PARAM_NAMES: ReadonlyArray<string> = Object.freeze([
-  // utm_* covers all utm_source/utm_medium/utm_campaign/utm_term/utm_content variants.
-  // Handled via prefix match below — the rest of the list is exact-match.
-  "fbclid",
-  "gclid",
-  "mc_eid",
-  "mc_cid",
-  "_hsenc",
-  "_hsmi",
-  "yclid",
-  "msclkid",
-]);
-
-export function canonicalizeNewsUrl(rawUrl: string): string {
-  let parsed: URL;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    throw new Error(`canonicalizeNewsUrl: invalid URL "${rawUrl}"`);
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error(
-      `canonicalizeNewsUrl: scheme must be http(s); received "${parsed.protocol}"`,
-    );
-  }
-
-  // Lowercase host (per RFC 3986 case-insensitive); preserve path/query case.
-  parsed.host = parsed.host.toLowerCase();
-
-  // Strip tracking params: utm_* prefix + the exact-match list above.
-  // URLSearchParams.delete is in-place; iterate over a snapshot of names.
-  const namesToCheck = Array.from(parsed.searchParams.keys());
-  for (const name of namesToCheck) {
-    if (name.startsWith("utm_") || TRACKING_PARAM_NAMES.includes(name)) {
-      parsed.searchParams.delete(name);
-    }
-  }
-
-  // Drop trailing slash from path — but only if there IS a path beyond "/".
-  // "https://example.com/" stays as "/" (root-vs-no-path semantics differ).
-  if (parsed.pathname.length > 1 && parsed.pathname.endsWith("/")) {
-    parsed.pathname = parsed.pathname.slice(0, -1);
-  }
-
-  return parsed.toString();
-}
-
 // ---- shared input/result types ---------------------------------------------
 
 type IngestDeps = {
   db: QueryExecutor;
+  objectStore: ObjectStore;
+};
+
+type TransactionIngestDeps = {
+  tx: TransactionContext;
   objectStore: ObjectStore;
 };
 
@@ -150,6 +109,17 @@ export async function ingestPressRelease(
   deps: IngestDeps,
   input: IngestPressReleaseInput,
 ): Promise<IngestResult> {
+  return persistKindedSource(deps, preparePressRelease(input));
+}
+
+export async function ingestPressReleaseInTransaction(
+  deps: TransactionIngestDeps,
+  input: IngestPressReleaseInput,
+): Promise<IngestResult> {
+  return persistKindedSourceInTransaction(deps, preparePressRelease(input));
+}
+
+function preparePressRelease(input: IngestPressReleaseInput): PersistInput {
   assertNonEmptyBytes(input.bytes, "bytes");
   assertNonEmptyString(input.provider, "provider");
   assertNonEmptyString(input.publisher, "publisher");
@@ -166,7 +136,7 @@ export async function ingestPressRelease(
 
   const canonicalUrl = canonicalizeNewsUrl(input.canonicalUrl);
 
-  return persistKindedSource(deps, {
+  return {
     provider: input.provider,
     kind: "press_release",
     canonicalUrl,
@@ -180,7 +150,7 @@ export async function ingestPressRelease(
       published_at: input.publishedAt,
     },
     retrievedAt: input.retrievedAt,
-  });
+  };
 }
 
 function defaultPressReleaseTrustTier(provider: string): TrustTier {
@@ -220,6 +190,17 @@ export async function ingestEarningsTranscript(
   deps: IngestDeps,
   input: IngestEarningsTranscriptInput,
 ): Promise<IngestResult> {
+  return persistKindedSource(deps, prepareEarningsTranscript(input));
+}
+
+export async function ingestEarningsTranscriptInTransaction(
+  deps: TransactionIngestDeps,
+  input: IngestEarningsTranscriptInput,
+): Promise<IngestResult> {
+  return persistKindedSourceInTransaction(deps, prepareEarningsTranscript(input));
+}
+
+function prepareEarningsTranscript(input: IngestEarningsTranscriptInput): PersistInput {
   assertNonEmptyBytes(input.bytes, "bytes");
   assertNonEmptyString(input.provider, "provider");
   assertNonEmptyString(input.publisher, "publisher");
@@ -237,7 +218,7 @@ export async function ingestEarningsTranscript(
 
   const canonicalUrl = canonicalizeNewsUrl(input.canonicalUrl);
 
-  return persistKindedSource(deps, {
+  return {
     provider: input.provider,
     kind: "transcript",
     canonicalUrl,
@@ -251,7 +232,7 @@ export async function ingestEarningsTranscript(
       published_at: input.publishedAt,
     },
     retrievedAt: input.retrievedAt,
-  });
+  };
 }
 
 // ---- ingestNewsArticle -----------------------------------------------------
@@ -328,15 +309,7 @@ async function persistKindedSource(
   deps: IngestDeps,
   input: PersistInput,
 ): Promise<IngestResult> {
-  const retrievedAt = normalizeRetrievedAt(input.retrievedAt);
-  const source = await createSource(deps.db, {
-    provider: input.provider,
-    kind: input.kind,
-    canonical_url: input.canonicalUrl,
-    trust_tier: input.trustTier,
-    license_class: input.licenseClass,
-    retrieved_at: retrievedAt,
-  });
+  const source = await createKindedSource(deps.db, input);
 
   let ingest: IngestDocumentResult;
   try {
@@ -353,6 +326,38 @@ async function persistKindedSource(
   }
 
   return Object.freeze({ source, ingest });
+}
+
+async function persistKindedSourceInTransaction(
+  deps: TransactionIngestDeps,
+  input: PersistInput,
+): Promise<IngestResult> {
+  assertTransactionContext(deps.tx, "persistKindedSourceInTransaction");
+  const source = await createKindedSource(deps.tx.db, input);
+  const ingest = await ingestDocumentInTransaction(
+    { tx: deps.tx, objectStore: deps.objectStore },
+    {
+      source: { source_id: source.source_id, license_class: source.license_class },
+      bytes: input.bytes,
+      document: { ...input.document, kind: input.kind },
+    },
+  );
+  return Object.freeze({ source, ingest });
+}
+
+async function createKindedSource(
+  db: QueryExecutor,
+  input: PersistInput,
+): Promise<SourceRow> {
+  const retrievedAt = normalizeRetrievedAt(input.retrievedAt);
+  return createSource(db, {
+    provider: input.provider,
+    kind: input.kind,
+    canonical_url: input.canonicalUrl,
+    trust_tier: input.trustTier,
+    license_class: input.licenseClass,
+    retrieved_at: retrievedAt,
+  });
 }
 
 function normalizeRetrievedAt(retrievedAt: string | undefined): string {

@@ -32,6 +32,7 @@ test("health endpoint reports ok plus parsed flags", async (t) => {
   assert.equal(response.status, 200);
   assert.equal(body.status, "ok");
   assert.deepEqual(body.flags, {
+    llmSettingsEnabled: false,
     placeholderApiEnabled: true,
     showDevBanner: true,
   });

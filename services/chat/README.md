@@ -18,6 +18,9 @@ Durable Object adapter.
 - serializes turn execution per `thread_id`
 - can load a `persistAssistantMessage` hook from `CHAT_PERSISTENCE_MODULE`
   so assistant messages are persisted only after snapshot sealing succeeds
+- in local durable mode, reloads `LLM_SETTINGS_ENV_FILE` for each LLM-backed
+  chat/title call and routes through the shared `services/llm` pi adapter when
+  `LITELLM_MODEL` has an enabled deployment
 - can pre-resolve `subject` query text through a `preResolveSubject` hook before
   producing a response; ambiguous resolver envelopes surface as clarification
   turns instead of silently selecting a subject

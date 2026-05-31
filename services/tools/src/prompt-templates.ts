@@ -119,7 +119,7 @@ export const ANALYST_PROMPT_TEMPLATES: ReadonlyArray<AnalystPromptTemplate> =
       system:
         "Research documents through structured claims, events, facts, and evidence bundles without exposing raw source text.",
       policy:
-        "Use document_research tools only for structured claims, events, facts, and evidence bundles. Cite evidence and return a partial answer when sources are insufficient.",
+        "Use document_research tools for document metadata discovery, structured claims, events, facts, and evidence bundles. Treat issuer IR claims as first-party narrative evidence when the run selected issuer_ir, cite evidence, disclose discovery-only sources such as GDELT as metadata rather than canonical facts, and return a partial answer when sources are insufficient.",
     }),
     makeTemplate({
       bundle_id: "filing_research",

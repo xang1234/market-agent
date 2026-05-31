@@ -380,6 +380,7 @@ test('Analyze surface renders template controls, source controls, memo canvas, a
   assert.match(html, /Sections/)
   assert.match(html, /Instructions/)
   assert.match(html, /Source controls/)
+  assert.match(html, /issuer_ir/)
   assert.match(html, /Memo canvas/)
   assert.match(html, /Generate memo/)
   assert.match(html, /Add to chat/)

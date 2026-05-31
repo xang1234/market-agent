@@ -2,15 +2,24 @@ import { createDocument, type DocumentInput, type DocumentRow } from "./document
 import { decideStoragePolicy, type StoragePolicy } from "./license-policy.ts";
 import {
   type ObjectStore,
-  type PutResult,
   contentHashFromBytes,
   ephemeralRawBlobIdForSource,
   rawBlobIdFromBytes,
 } from "./object-store.ts";
+import {
+  assertTransactionContext,
+  type TransactionContext,
+  withTransaction,
+} from "./transaction.ts";
 import type { QueryExecutor } from "./types.ts";
 
 export type IngestDocumentDeps = {
   db: QueryExecutor;
+  objectStore: ObjectStore;
+};
+
+export type IngestDocumentTransactionDeps = {
+  tx: TransactionContext;
   objectStore: ObjectStore;
 };
 
@@ -52,8 +61,7 @@ export async function ingestDocument(
 
   let raw_blob_id: string;
   if (policy.store_blob) {
-    raw_blob_id = rawBlobIdFromBytes(input.bytes);
-    return ingestStoredDocumentWithBlobLock(deps, input, policy, content_hash, raw_blob_id);
+    return ingestStoredDocumentWithBlobLock(deps, input);
   } else {
     raw_blob_id = ephemeralRawBlobIdForSource(input.source.source_id);
   }
@@ -71,6 +79,66 @@ export async function ingestDocument(
     raw_blob_id,
     policy,
   });
+}
+
+export async function ingestDocumentInTransaction(
+  deps: IngestDocumentTransactionDeps,
+  input: IngestDocumentInput,
+): Promise<IngestDocumentResult> {
+  assertTransactionContext(deps.tx, "ingestDocumentInTransaction");
+  const db = deps.tx.db;
+  const policy = decideStoragePolicy(input.source.license_class);
+  const content_hash = contentHashFromBytes(input.bytes);
+  if (!policy.store_blob) {
+    const raw_blob_id = ephemeralRawBlobIdForSource(input.source.source_id);
+    const result = await createDocument(db, {
+      ...input.document,
+      source_id: input.source.source_id,
+      content_hash,
+      raw_blob_id,
+    });
+    return Object.freeze({
+      status: "ephemeral" as const,
+      document: result.document,
+      raw_blob_id,
+      policy,
+    });
+  }
+
+  const raw_blob_id = rawBlobIdFromBytes(input.bytes);
+  await db.query("select pg_advisory_xact_lock(hashtext($1))", [raw_blob_id]);
+  await lockSourceForBlobIngest(db, input.source.source_id);
+  const putResult = await deps.objectStore.put(input.bytes);
+  const storedRawBlobId = putResult.blob.raw_blob_id;
+  let unregisterRollbackCleanup = () => {};
+  if (putResult.status === "created") {
+    unregisterRollbackCleanup = deps.tx.onRollback((error) =>
+      deleteCreatedBlobBestEffort(deps.objectStore, storedRawBlobId, error)
+    );
+  }
+  try {
+    if (storedRawBlobId !== raw_blob_id) {
+      throw new Error("ingestDocument: object store returned a blob id that does not match the input bytes");
+    }
+    const result = await createDocument(db, {
+      ...input.document,
+      source_id: input.source.source_id,
+      content_hash,
+      raw_blob_id,
+    });
+    return Object.freeze({
+      status: "blob_stored" as const,
+      document: result.document,
+      raw_blob_id,
+      policy,
+    });
+  } catch (error) {
+    unregisterRollbackCleanup();
+    if (putResult.status === "created") {
+      await deleteCreatedBlobBestEffort(deps.objectStore, storedRawBlobId, error);
+    }
+    throw error;
+  }
 }
 
 export async function ingestDocumentWithPool(
@@ -93,46 +161,10 @@ export async function ingestDocumentWithPool(
 async function ingestStoredDocumentWithBlobLock(
   deps: IngestDocumentDeps,
   input: IngestDocumentInput,
-  policy: StoragePolicy,
-  content_hash: string,
-  raw_blob_id: string,
 ): Promise<IngestDocumentResult> {
-  if (isPgPoolLike(deps.db)) {
-    throw new Error("ingestDocument requires a pinned database client for stored blobs; use ingestDocumentWithPool for pools");
-  }
-  let putResult: PutResult | null = null;
-  let commitAttempted = false;
-  await deps.db.query("begin");
-  try {
-    await deps.db.query("select pg_advisory_xact_lock(hashtext($1))", [raw_blob_id]);
-    await lockSourceForBlobIngest(deps.db, input.source.source_id);
-    putResult = await deps.objectStore.put(input.bytes);
-    if (putResult.blob.raw_blob_id !== raw_blob_id) {
-      throw new Error("ingestDocument: object store returned a blob id that does not match the input bytes");
-    }
-    const result = await createDocument(deps.db, {
-      ...input.document,
-      source_id: input.source.source_id,
-      content_hash,
-      raw_blob_id,
-    });
-    commitAttempted = true;
-    await deps.db.query("commit");
-    return Object.freeze({
-      status: "blob_stored" as const,
-      document: result.document,
-      raw_blob_id,
-      policy,
-    });
-  } catch (error) {
-    if (!commitAttempted && putResult?.status === "created") {
-      await deleteCreatedBlobBestEffort(deps.objectStore, raw_blob_id, error);
-    }
-    if (!commitAttempted) {
-      await deps.db.query("rollback");
-    }
-    throw error;
-  }
+  return withTransaction(deps.db, (tx) =>
+    ingestDocumentInTransaction({ objectStore: deps.objectStore, tx }, input)
+  );
 }
 
 async function deleteCreatedBlobBestEffort(
@@ -160,17 +192,4 @@ async function lockSourceForBlobIngest(db: QueryExecutor, sourceId: string): Pro
   if (result.rowCount !== 1) {
     throw new Error("ingestDocument: source does not exist or is being erased");
   }
-}
-
-function isPgPoolLike(db: QueryExecutor): boolean {
-  const candidate = db as {
-    connect?: unknown;
-    totalCount?: unknown;
-    idleCount?: unknown;
-  };
-  return (
-    typeof candidate.connect === "function" &&
-    typeof candidate.totalCount === "number" &&
-    typeof candidate.idleCount === "number"
-  );
 }

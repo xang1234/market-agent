@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   READER_EXTRACTION_TOOL_NAMES,
+  READER_TOOL_NAMES,
   ReaderToolError,
   createReaderToolDispatcher,
 } from "../../tools/src/reader-tool-dispatcher.ts";
@@ -11,6 +12,7 @@ import { loadToolRegistry } from "../../tools/src/registry.ts";
 import { createEvidenceReaderToolHandlers } from "../src/reader/extract-tools.ts";
 import { MemoryObjectStore, rawBlobIdFromBytes } from "../src/object-store.ts";
 import type { QueryExecutor } from "../src/types.ts";
+import { recordingPoolExecutor } from "./recording-query-executor.ts";
 
 const SAMPLE_DOC_UUID = "70a0cc2e-e198-4b59-a5c9-9bd2da4a359b";
 const SAMPLE_SOURCE_UUID = "11111111-1111-4111-a111-111111111111";
@@ -53,6 +55,35 @@ function recordingDb(opts: { documentExists: boolean }) {
   return { db, queries };
 }
 
+function documentResearchDb() {
+  const queries: Array<{ text: string; values?: unknown[] }> = [];
+  const db: QueryExecutor = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      queries.push({ text, values });
+      return {
+        rows: [{
+          document_id: SAMPLE_DOC_UUID,
+          source_id: SAMPLE_SOURCE_UUID,
+          kind: "article",
+          title: "Acme Robotics wins order",
+          author: "reuters.com",
+          published_at: new Date("2026-05-29T12:30:00.000Z"),
+          canonical_url: "https://reuters.com/markets/acme-robotics",
+          provider: "gdelt_article_discovery",
+          trust_tier: "tertiary",
+          license_class: "ephemeral",
+          raw_blob_id: `ephemeral:${SAMPLE_SOURCE_UUID}`,
+        }] as R[],
+        command: "SELECT",
+        rowCount: 1,
+        oid: 0,
+        fields: [],
+      };
+    },
+  };
+  return { db, queries };
+}
+
 // ---- factory shape ---------------------------------------------------------
 
 test("createEvidenceReaderToolHandlers returns one handler per dispatcher-wired tool name", () => {
@@ -62,7 +93,7 @@ test("createEvidenceReaderToolHandlers returns one handler per dispatcher-wired 
   const { db } = recordingDb({ documentExists: true });
   const handlers = createEvidenceReaderToolHandlers({ db });
   const handlerNames = Object.keys(handlers).sort();
-  assert.deepEqual(handlerNames, [...READER_EXTRACTION_TOOL_NAMES].sort());
+  assert.deepEqual(handlerNames, [...READER_TOOL_NAMES].sort());
 });
 
 test("createEvidenceReaderToolHandlers slots into createReaderToolDispatcher without complaint", () => {
@@ -75,8 +106,51 @@ test("createEvidenceReaderToolHandlers slots into createReaderToolDispatcher wit
   });
   assert.deepEqual(
     [...dispatcher.registeredToolNames()].sort(),
-    [...READER_EXTRACTION_TOOL_NAMES].sort(),
+    [...READER_TOOL_NAMES].sort(),
   );
+});
+
+test("search_raw_documents handler returns metadata-only GDELT document results", async () => {
+  const { db, queries } = documentResearchDb();
+  const handlers = createEvidenceReaderToolHandlers({ db });
+
+  const out = await handlers.search_raw_documents({
+    query: "Acme",
+    subject_refs: [{ kind: "issuer", id: SAMPLE_DOC_UUID }],
+    range: { start: "2026-05-01T00:00:00Z", end: "2026-05-30T00:00:00Z" },
+    domain: "reuters.com",
+    kind: "article",
+    limit: 5,
+  });
+
+  assert.equal(out.documents[0]?.document_id, SAMPLE_DOC_UUID);
+  assert.equal(out.documents[0]?.storage_policy, "metadata_only");
+  assert.equal(out.documents[0]?.raw_available, false);
+  assert.doesNotMatch(JSON.stringify(out), /raw_blob_id|raw_text|FULL ARTICLE BODY/i);
+  assert.deepEqual(queries[0]!.values, [
+    "Acme",
+    JSON.stringify([{ kind: "issuer", id: SAMPLE_DOC_UUID }]),
+    null,
+    "reuters.com",
+    "article",
+    "2026-05-01T00:00:00.000Z",
+    "2026-05-30T00:00:00.000Z",
+    null,
+    5,
+  ]);
+});
+
+test("fetch_raw_document handler returns document metadata without raw handles for ephemeral documents", async () => {
+  const { db, queries } = documentResearchDb();
+  const handlers = createEvidenceReaderToolHandlers({ db });
+
+  const out = await handlers.fetch_raw_document({ document_id: SAMPLE_DOC_UUID });
+
+  assert.equal(out.document.document_id, SAMPLE_DOC_UUID);
+  assert.equal(out.document.storage_policy, "metadata_only");
+  assert.equal("raw_blob_url" in out, false);
+  assert.doesNotMatch(JSON.stringify(out), /raw_blob_id|raw_text|FULL ARTICLE BODY/i);
+  assert.deepEqual(queries[0]!.values, [SAMPLE_DOC_UUID, null]);
 });
 
 // ---- per-handler behaviour: existing document ------------------------------
@@ -389,6 +463,95 @@ test("extract_mentions links and deletes stale mentions in one transaction", asy
   assert.ok(beginIndex < insertIndex);
   assert.ok(insertIndex < deleteIndex);
   assert.ok(deleteIndex < commitIndex);
+});
+
+test("extract_mentions uses an acquired client for transactional mention writes when available", async () => {
+  const mentionId = "22222222-2222-4222-a222-222222222222";
+  const issuerId = "33333333-3333-4333-a333-333333333333";
+  const { db, poolQueries, txQueries, releases } = recordingPoolExecutor(async <R extends Record<string, unknown>>(
+    target,
+    text: string,
+    values?: unknown[],
+  ) => {
+    if (
+      target === "pool" &&
+      (/^(begin|commit|rollback)$/i.test(text) || /insert into mentions|delete from mentions/.test(text))
+    ) {
+      throw new Error(`transactional mention write used the pool: ${text}`);
+    }
+    if (/from documents/.test(text)) {
+      return { rows: [fakeDocumentRow()] as unknown as R[], command: "SELECT", rowCount: 1, oid: 0, fields: [] };
+    }
+    if (/^(begin|commit|rollback)$/i.test(text)) {
+      return { rows: [] as R[], command: text.toUpperCase(), rowCount: null, oid: 0, fields: [] };
+    }
+    if (/insert into mentions/.test(text)) {
+      return {
+        rows: [{
+          mention_id: mentionId,
+          document_id: SAMPLE_DOC_UUID,
+          subject_kind: values?.[1],
+          subject_id: values?.[2],
+          prominence: values?.[3],
+          mention_count: values?.[4],
+          confidence: values?.[5],
+          created_at: new Date("2026-05-03T00:00:00.000Z"),
+        }] as R[],
+        command: "INSERT",
+        rowCount: 1,
+        oid: 0,
+        fields: [],
+      };
+    }
+    if (/delete from mentions/.test(text)) {
+      return { rows: [] as R[], command: "DELETE", rowCount: 0, oid: 0, fields: [] };
+    }
+    if (/from mentions/.test(text)) {
+      return {
+        rows: [{
+          mention_id: mentionId,
+          document_id: SAMPLE_DOC_UUID,
+          subject_kind: "issuer",
+          subject_id: issuerId,
+          prominence: "headline",
+          mention_count: 1,
+          confidence: 0.8,
+          created_at: new Date("2026-05-03T00:00:00.000Z"),
+        }] as R[],
+        command: "SELECT",
+        rowCount: 1,
+        oid: 0,
+        fields: [],
+      };
+    }
+    throw new Error(`unexpected query: ${text}`);
+  });
+  const handlers = createEvidenceReaderToolHandlers({
+    db,
+    extractMentionCandidates: async () => [
+      { text: "Apple", prominence: "headline", mention_count: 1, confidence: 0.8 },
+    ],
+    resolveMention: async () => ({
+      outcome: "resolved",
+      subject_ref: { kind: "issuer", id: issuerId },
+      display_name: "Apple Inc.",
+      confidence: 0.9,
+      canonical_kind: "issuer",
+    }),
+  });
+
+  await handlers.extract_mentions({ document_id: SAMPLE_DOC_UUID });
+
+  assert.equal(poolQueries.some((queryText) => /insert into mentions|delete from mentions/.test(queryText)), false);
+  const beginIndex = txQueries.findIndex((queryText) => /^begin$/i.test(queryText));
+  const insertIndex = txQueries.findIndex((queryText) => /insert into mentions/.test(queryText));
+  const deleteIndex = txQueries.findIndex((queryText) => /delete from mentions/.test(queryText));
+  const commitIndex = txQueries.findIndex((queryText) => /^commit$/i.test(queryText));
+  assert.ok(beginIndex >= 0);
+  assert.ok(beginIndex < insertIndex);
+  assert.ok(insertIndex < deleteIndex);
+  assert.ok(deleteIndex < commitIndex);
+  assert.deepEqual(releases, [false]);
 });
 
 test("extract_mentions rolls back when stale mention deletion fails", async () => {
@@ -765,4 +928,61 @@ test("extract_candidate_facts maps object-store read failures to UPSTREAM_UNAVAI
       error.code === "UPSTREAM_UNAVAILABLE" &&
       /object store unavailable/.test(error.message),
   );
+});
+
+test("extract_claims reads stored issuer IR bytes and returns structured IR claims", async () => {
+  const bytes = new TextEncoder().encode(
+    "Acme reports Q1 results. Management raised full-year revenue guidance and expects operating margin to expand.",
+  );
+  const objectStore = new MemoryObjectStore();
+  await objectStore.put(bytes);
+  const rawBlobId = rawBlobIdFromBytes(bytes);
+  const db: QueryExecutor = {
+    async query<R extends Record<string, unknown>>(text: string) {
+      if (/from documents/.test(text)) {
+        return {
+          rows: [{
+            ...fakeDocumentRow(),
+            kind: "press_release",
+            raw_blob_id: rawBlobId,
+            published_at: new Date("2026-05-29T12:00:00.000Z"),
+          }] as unknown as R[],
+          command: "SELECT",
+          rowCount: 1,
+          oid: 0,
+          fields: [],
+        };
+      }
+      if (/from ir_document_assets/.test(text)) {
+        return {
+          rows: [{
+            ir_document_asset_id: "22222222-2222-4222-a222-222222222222",
+            ir_source_id: "33333333-3333-4333-a333-333333333333",
+            issuer_id: "44444444-4444-4444-a444-444444444444",
+            document_id: SAMPLE_DOC_UUID,
+            source_id: SAMPLE_SOURCE_UUID,
+            asset_kind: "press_release",
+            canonical_url: "https://investors.acme.example/news/q1",
+            hosted_provider: "issuer_ir",
+            issuer_attested: true,
+            content_type: "text/html",
+            discovered_at: new Date("2026-05-29T12:00:00.000Z"),
+            fetched_at: new Date("2026-05-29T12:00:00.000Z"),
+            created_at: new Date("2026-05-29T12:00:00.000Z"),
+          }] as unknown as R[],
+          command: "SELECT",
+          rowCount: 1,
+          oid: 0,
+          fields: [],
+        };
+      }
+      throw new Error(`unexpected query: ${text}`);
+    },
+  };
+  const handlers = createEvidenceReaderToolHandlers({ db, objectStore });
+
+  const out = await handlers.extract_claims({ document_id: SAMPLE_DOC_UUID });
+
+  assert.deepEqual([...out.source_ids], [SAMPLE_SOURCE_UUID]);
+  assert.equal(out.items.some((item) => item.predicate === "guidance.change"), true);
 });
