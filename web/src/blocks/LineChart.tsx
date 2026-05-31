@@ -21,7 +21,7 @@ export function LineChart({ block }: LineChartProps): ReactElement {
       {block.y_format ? (
         <figcaption
           data-testid={`block-line-chart-${block.id}-y-format`}
-          className="text-xs text-neutral-500 dark:text-neutral-400"
+          className="text-xs text-muted"
         >
           y-axis: {block.y_format}
         </figcaption>

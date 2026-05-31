@@ -37,11 +37,11 @@ function SegmentRow({ blockId, index, segment }: SegmentRowProps): ReactElement 
       data-value-ref={segment.value_ref}
       className="flex items-center justify-between gap-3"
     >
-      <span className="text-neutral-800 dark:text-neutral-200">{segment.name}</span>
+      <span className="text-fg">{segment.name}</span>
       {segment.definition_as_of ? (
         <time
           dateTime={segment.definition_as_of}
-          className="text-xs text-neutral-500 dark:text-neutral-400"
+          className="text-xs text-muted"
         >
           as of {segment.definition_as_of}
         </time>
@@ -57,7 +57,7 @@ function CoverageWarnings({ blockId, warnings }: CoverageWarningsProps): ReactEl
     <ul
       data-testid={`block-segment-donut-${blockId}-coverage`}
       role="alert"
-      className="flex list-none flex-col gap-0.5 p-0 text-xs text-amber-700 dark:text-amber-400"
+      className="flex list-none flex-col gap-0.5 p-0 text-xs text-warning"
     >
       {warnings.map((warning, index) => (
         <li key={`${blockId}-warning-${index}`}>{warning}</li>

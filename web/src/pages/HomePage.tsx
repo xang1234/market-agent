@@ -96,12 +96,12 @@ export function HomePage() {
     <div className="flex flex-1 flex-col gap-6 overflow-auto p-8">
       <header>
         <h1 className="text-2xl font-semibold">Home</h1>
-        <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+        <p className="mt-1 text-sm text-muted">
           Cross-agent findings, market pulse, watchlist movers, agent summaries, pinned screens.
         </p>
       </header>
       {webDevFlags.showDevBanner ? (
-        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+        <div className="rounded-md border border-warning bg-warning-soft px-4 py-3 text-sm text-warning">
           Dev banner flag is enabled. Placeholder services are expected in the local stack.
         </div>
       ) : null}
@@ -152,7 +152,7 @@ export function UserHomeView({ state }: { state: LoadState }) {
 function SignInHint() {
   return (
     <Section title="Sign in to load Home">
-      <p className="text-sm text-neutral-500 dark:text-neutral-400">
+      <p className="text-sm text-muted">
         Home loads cross-agent findings and market sections for the signed-in user.
       </p>
     </Section>
@@ -162,7 +162,7 @@ function SignInHint() {
 function LoadingHint() {
   return (
     <Section title="Loading Home...">
-      <p className="text-sm text-neutral-500 dark:text-neutral-400">Fetching your latest findings and market sections.</p>
+      <p className="text-sm text-muted">Fetching your latest findings and market sections.</p>
     </Section>
   )
 }
@@ -170,7 +170,7 @@ function LoadingHint() {
 function ErrorHint({ message }: { message: string }) {
   return (
     <Section title="Home is unavailable">
-      <p className="text-sm text-rose-600 dark:text-rose-300">{message}</p>
+      <p className="text-sm text-negative">{message}</p>
     </Section>
   )
 }
@@ -206,15 +206,15 @@ function FindingsSection({ cards }: { cards: ReadonlyArray<HomeFindingCardSummar
 }
 
 const FINDING_ROW_BASE =
-  'block rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900'
-const FINDING_ROW_LINKED = `${FINDING_ROW_BASE} hover:border-neutral-300 dark:hover:border-neutral-700`
+  'block rounded-lg border border-line bg-surface p-3'
+const FINDING_ROW_LINKED = `${FINDING_ROW_BASE} hover:border-line-strong`
 
 function FindingRow({ card }: { card: HomeFindingCardSummary }) {
   const path = homeCardPath(card.destination)
   const body = (
     <div className="flex flex-col">
       <span className="text-sm font-medium">{card.headline}</span>
-      <span className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+      <span className="text-xs uppercase tracking-wide text-muted">
         {card.severity} · {card.support_count} sources · {card.created_at}
       </span>
     </div>
@@ -280,20 +280,20 @@ function QuoteCell({ row }: { row: HomeQuoteRow }) {
   const direction = quoteDirection(row)
   const tone =
     direction === 'up'
-      ? 'text-emerald-600 dark:text-emerald-300'
+      ? 'text-positive'
       : direction === 'down'
-        ? 'text-rose-600 dark:text-rose-300'
-        : 'text-neutral-500 dark:text-neutral-400'
+        ? 'text-negative'
+        : 'text-muted'
   return (
-    <div className="rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
+    <div className="rounded-lg border border-line bg-surface p-3">
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-sm font-medium">
           {row.ticker}
-          <span className="ml-1 text-xs font-normal text-neutral-400 dark:text-neutral-500">{row.mic}</span>
+          <span className="ml-1 text-xs font-normal text-faint">{row.mic}</span>
         </span>
         <span className={`text-sm font-semibold ${tone}`}>{formatChangePercent(row.change_pct)}</span>
       </div>
-      <div className="mt-1 flex items-baseline justify-between gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+      <div className="mt-1 flex items-baseline justify-between gap-2 text-xs text-muted">
         <span>{formatPrice(row.price, row.currency)}</span>
         <span className="uppercase">{row.delay_class.replace('_', ' ')}</span>
       </div>
@@ -315,13 +315,13 @@ function AgentSummariesSection({
       ) : (
         <ul className="flex flex-col gap-2">
           {rows.map((row) => (
-            <li key={row.agent_id} className="rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
+            <li key={row.agent_id} className="rounded-lg border border-line bg-surface p-3">
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-sm font-medium">{row.name}</span>
-                <span className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">{agentLastRunLabel(row)}</span>
+                <span className="text-xs uppercase tracking-wide text-muted">{agentLastRunLabel(row)}</span>
               </div>
-              <div className="mt-1 text-sm text-neutral-700 dark:text-neutral-200">{agentSummaryHeadline(row)}</div>
-              <div className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+              <div className="mt-1 text-sm text-fg">{agentSummaryHeadline(row)}</div>
+              <div className="mt-1 text-xs text-muted">
                 {row.finding_counts.total} total · {row.finding_counts.high_or_critical} high+ · {row.finding_counts.critical} critical
               </div>
             </li>
@@ -342,10 +342,10 @@ function SavedScreensSection({ rows }: { rows: ReadonlyArray<HomeSavedScreenRow>
           {rows.map((row) => (
             <li
               key={row.screen_id}
-              className="rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
+              className="rounded-lg border border-line bg-surface p-3"
             >
               <div className="text-sm font-medium">{row.name}</div>
-              <div className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{savedScreenSubtitle(row)}</div>
+              <div className="mt-1 text-xs text-muted">{savedScreenSubtitle(row)}</div>
             </li>
           ))}
         </ul>
@@ -357,20 +357,20 @@ function SavedScreensSection({ rows }: { rows: ReadonlyArray<HomeSavedScreenRow>
 function HomeActivityRail({ activities }: { activities: ReadonlyArray<HomeRunActivity> }) {
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-neutral-200 px-4 py-3 text-xs uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400">
+      <div className="border-b border-line px-4 py-3 text-xs uppercase tracking-wide text-muted">
         Activity
       </div>
       <div className="flex flex-col gap-3 overflow-auto p-4">
         {activities.length === 0 ? (
-          <p className="text-xs leading-5 text-neutral-500 dark:text-neutral-400">No recent activity.</p>
+          <p className="text-xs leading-5 text-muted">No recent activity.</p>
         ) : (
           activities.map((activity) => (
-            <div key={activity.run_activity_id} className="rounded border border-neutral-200 p-3 dark:border-neutral-800">
+            <div key={activity.run_activity_id} className="rounded border border-line p-3">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">{activity.stage}</span>
-                <span className="text-xs text-neutral-500 dark:text-neutral-400">{formatActivityTime(activity.ts)}</span>
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted">{activity.stage}</span>
+                <span className="text-xs text-muted">{formatActivityTime(activity.ts)}</span>
               </div>
-              <p className="mt-2 text-sm leading-5 text-neutral-800 dark:text-neutral-200">{activity.summary}</p>
+              <p className="mt-2 text-sm leading-5 text-fg">{activity.summary}</p>
             </div>
           ))
         )}
@@ -383,9 +383,9 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
   return (
     <section>
       <div className="mb-2 flex items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">{title}</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">{title}</h2>
         {subtitle !== undefined ? (
-          <span className="text-xs uppercase tracking-wide text-neutral-400 dark:text-neutral-500">{subtitle}</span>
+          <span className="text-xs uppercase tracking-wide text-faint">{subtitle}</span>
         ) : null}
       </div>
       {children}
@@ -395,14 +395,14 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
 
 function EmptyHint({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-md border border-neutral-200 bg-white p-4 text-sm text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400">
+    <div className="rounded-lg border border-line bg-surface p-4 text-sm text-muted">
       {children}
     </div>
   )
 }
 
 function FootnoteHint({ children }: { children: React.ReactNode }) {
-  return <p className="mt-2 text-xs text-neutral-400 dark:text-neutral-500">{children}</p>
+  return <p className="mt-2 text-xs text-faint">{children}</p>
 }
 
 async function consumeRunActivityStream({

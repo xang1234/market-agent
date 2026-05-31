@@ -16,22 +16,20 @@ type ManualWatchlistProps = {
 export function ManualWatchlist({ members, status, message, onRemove }: ManualWatchlistProps) {
   if (status === 'loading' && members.length === 0) {
     return (
-      <div className="p-4 text-center text-xs text-neutral-500 dark:text-neutral-400">
-        Loading watchlist…
-      </div>
+      <div className="px-1.5 py-3 text-xs text-muted">Loading watchlist…</div>
     )
   }
 
   if (members.length === 0) {
     return (
-      <div className="p-4 text-center text-xs text-neutral-500 dark:text-neutral-400">
+      <div className="px-1.5 py-3 text-xs text-muted">
         {message ?? 'No saved symbols yet. Add one from the search above.'}
       </div>
     )
   }
 
   return (
-    <ul aria-label="Watchlist members" className="divide-y divide-neutral-200 dark:divide-neutral-800">
+    <ul aria-label="Watchlist members" className="flex flex-col">
       {members.map((member) => (
         <QuoteRow
           key={`${member.subject_ref.kind}:${member.subject_ref.id}`}
@@ -41,7 +39,7 @@ export function ManualWatchlist({ members, status, message, onRemove }: ManualWa
               type="button"
               onClick={() => onRemove(member.subject_ref)}
               aria-label={`Remove ${member.subject_ref.kind} from watchlist`}
-              className="shrink-0 px-2 text-xs text-neutral-400 hover:text-red-600 dark:text-neutral-500 dark:hover:text-red-400"
+              className="shrink-0 px-2 text-xs text-faint hover:text-negative"
             >
               ×
             </button>
@@ -49,7 +47,7 @@ export function ManualWatchlist({ members, status, message, onRemove }: ManualWa
         />
       ))}
       {message ? (
-        <li className="px-3 py-2 text-[11px] text-red-600 dark:text-red-400">{message}</li>
+        <li className="px-1.5 py-2 text-[11px] text-negative">{message}</li>
       ) : null}
     </ul>
   )

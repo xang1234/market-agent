@@ -20,7 +20,7 @@ export function ThemeMembershipRationaleList({
   if (memberships.length === 0) return null
   return (
     <section data-testid="theme-membership-rationale" className="flex flex-col gap-3">
-      <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+      <h3 className="text-sm font-semibold text-fg">
         Theme membership rationale
       </h3>
       <ul className="flex flex-col gap-2">
@@ -38,25 +38,25 @@ function ThemeMembershipRationaleRow({
   membership: ThemeMembershipRationaleView
 }): ReactElement {
   return (
-    <li className="rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
+    <li className="rounded-lg border border-line bg-surface p-3 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+          <p className="text-sm font-medium text-fg">
             {membership.theme_name}
           </p>
           {membership.theme_description ? (
-            <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+            <p className="mt-1 text-xs text-muted">
               {membership.theme_description}
             </p>
           ) : null}
         </div>
-        <span className="rounded border border-neutral-200 px-2 py-0.5 text-xs text-neutral-600 dark:border-neutral-700 dark:text-neutral-300">
+        <span className="rounded-md border border-line px-2 py-0.5 text-xs text-fg-soft">
           {membership.membership_mode}
         </span>
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-600 dark:text-neutral-300">
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-fg-soft">
         {membership.score === null ? null : (
-          <span className="font-medium tabular-nums text-neutral-800 dark:text-neutral-100">
+          <span className="font-medium tabular-nums text-fg">
             {`Score ${formatScore(membership.score)}`}
           </span>
         )}
@@ -73,7 +73,7 @@ function ThemeMembershipRationaleRow({
               key={claimId}
               title={`claim:${claimId}`}
               aria-label={`claim:${claimId}`}
-              className="rounded bg-neutral-100 px-2 py-0.5 font-mono text-xs text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
+              className="rounded bg-surface-2 px-2 py-0.5 font-mono text-xs text-fg"
             >
               {`claim:${claimId.slice(0, 8)}`}
             </li>

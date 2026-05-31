@@ -4,6 +4,91 @@
    based so a user choice (or `system` fallback) can drive it via a toggle. */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ============================================================
+   Design tokens (ui-redesign/proposed-index.css). Declared in
+   @theme so they generate utilities (bg-surface, text-muted,
+   border-line, shadow-md, rounded-lg, font-mono, …). Default
+   values are the LIGHT theme; `.dark` below overrides the raw
+   custom properties so a single class flips with the theme.
+   Added ALONGSIDE Tailwind's default palette — existing
+   neutral, emerald and red classes keep working during the
+   phased migration.
+   ============================================================ */
+@theme {
+  /* surfaces */
+  --color-bg: #f7f8fa;
+  --color-surface: #ffffff;
+  --color-surface-2: #f1f3f6;
+  --color-surface-hover: #eceff3;
+  --color-fg: #10131a;
+  --color-fg-soft: #2b3340;
+  --color-muted: #5b6472;
+  --color-faint: #8b93a1;
+  --color-line: #e6e8ec;
+  --color-line-strong: #d3d7de;
+
+  /* brand + semantic */
+  --color-accent: #2f7fe0;
+  --color-accent-strong: #2563c9;
+  --color-accent-soft: rgba(47, 127, 224, 0.1);
+  --color-accent-border: rgba(47, 127, 224, 0.35);
+  /* Foreground for text/glyphs sitting on an accent/cyan fill (brand mark,
+     primary buttons). Near-black navy reads on both the light and dark accent. */
+  --color-on-accent: #04121f;
+  --color-cyan: #0fb5ac;
+  --color-violet: #7c5cf0;
+  --color-positive: #0f9d63;
+  --color-positive-soft: rgba(15, 157, 99, 0.12);
+  --color-negative: #d33a52;
+  --color-negative-soft: rgba(211, 58, 82, 0.12);
+  --color-warning: #c07a12;
+  --color-warning-soft: rgba(192, 122, 18, 0.13);
+
+  /* type */
+  --font-sans: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+
+  /* shape */
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* elevation */
+  --shadow-sm: 0 1px 2px rgba(16, 19, 26, 0.06);
+  --shadow-md: 0 1px 2px rgba(16, 19, 26, 0.06), 0 8px 24px -14px rgba(16, 19, 26, 0.22);
+}
+
+/* Dark theme — override the raw custom properties; every token-based
+   utility (bg-surface, border-line, …) re-resolves through the cascade. */
+.dark {
+  --color-bg: #0a0b0e;
+  --color-surface: #14161b;
+  --color-surface-2: #191c22;
+  --color-surface-hover: #1d212a;
+  --color-fg: #e7eaef;
+  --color-fg-soft: #c3c9d4;
+  --color-muted: #8b93a1;
+  --color-faint: #5b626f;
+  --color-line: #23272f;
+  --color-line-strong: #2e333d;
+
+  --color-accent: #4da3ff;
+  --color-accent-strong: #2f7fe0;
+  --color-accent-soft: rgba(77, 163, 255, 0.14);
+  --color-accent-border: rgba(77, 163, 255, 0.35);
+  --color-cyan: #38d0c8;
+  --color-violet: #a78bfa;
+  --color-positive: #27c281;
+  --color-positive-soft: rgba(39, 194, 129, 0.13);
+  --color-negative: #f0556d;
+  --color-negative-soft: rgba(240, 85, 109, 0.13);
+  --color-warning: #f0b341;
+  --color-warning-soft: rgba(240, 179, 65, 0.14);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+}
+
 html,
 body,
 #root {
@@ -12,7 +97,31 @@ body,
 }
 
 body {
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans);
+  color: var(--color-fg);
+  background:
+    radial-gradient(
+      900px 500px at 80% -10%,
+      color-mix(in srgb, var(--color-accent) 6%, transparent),
+      transparent 60%
+    ),
+    var(--color-bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Financial figures: monospace + aligned digits. Apply where numbers render. */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

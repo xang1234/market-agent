@@ -51,7 +51,7 @@ const SECTIONS = [
 ] satisfies ReadonlyArray<{ to: SymbolDetailTab; label: string }>
 
 const HEADER_ACTION_CLASS =
-  'inline-flex items-center gap-1 rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:border-neutral-400 hover:text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:border-neutral-500 dark:hover:text-neutral-50'
+  'inline-flex items-center gap-1 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-soft transition-colors hover:border-accent hover:text-fg'
 
 type LegacyRouteResolutionState =
   | { status: 'idle' }
@@ -183,7 +183,7 @@ export function SubjectDetailShell() {
     <div className="flex min-h-0 flex-1 flex-col">
       <header
         data-testid="subject-header"
-        className="border-b border-neutral-200 px-8 py-5 dark:border-neutral-800"
+        className="border-b border-line px-8 py-5"
       >
         <QuoteSnapshot subject={subject} />
         {userId !== null && canonicalSubject !== null ? (
@@ -200,7 +200,7 @@ export function SubjectDetailShell() {
       </header>
       <nav
         aria-label="Subject sections"
-        className="flex h-10 shrink-0 items-center gap-1 border-b border-neutral-200 px-4 dark:border-neutral-800"
+        className="flex h-10 shrink-0 items-center gap-1 border-b border-line px-4"
       >
         {SECTIONS.map(({ to, label }) => (
           <NavLink
@@ -211,8 +211,8 @@ export function SubjectDetailShell() {
               [
                 'relative flex h-full items-center px-3 text-sm transition-colors',
                 isActive
-                  ? 'font-medium text-neutral-900 after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:bg-neutral-900 dark:text-neutral-100 dark:after:bg-neutral-100'
-                  : 'text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100',
+                  ? 'font-medium text-fg after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:bg-accent'
+                  : 'text-muted hover:text-fg',
               ].join(' ')
             }
           >
@@ -282,10 +282,10 @@ function LegacySubjectChoice({
   return (
     <section className="flex w-full flex-col gap-4 p-8">
       <div className="flex flex-col gap-1">
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+        <h2 className="text-base font-semibold text-fg">
           Choose a listing to continue
         </h2>
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="text-sm text-muted">
           Multiple matches were found for {state.ticker}. Select the listing to load this
           section.
         </p>
@@ -297,10 +297,10 @@ function LegacySubjectChoice({
               replace
               to={symbolDetailPathForSubject(candidate.subject_ref, currentTab)}
               state={{ subject: candidate }}
-              className="flex items-center justify-between rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-800 transition-colors hover:border-neutral-300 hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:border-neutral-700 dark:hover:bg-neutral-800"
+              className="flex items-center justify-between rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg transition-colors hover:border-line-strong hover:bg-surface-hover"
             >
               <span>{subjectDisplayName(candidate)}</span>
-              <span className="text-xs text-neutral-500 dark:text-neutral-400">
+              <span className="text-xs text-muted">
                 {candidate.subject_ref.kind}
               </span>
             </Link>
@@ -320,10 +320,8 @@ function SubjectContextNotice({
 }) {
   return (
     <section className="flex w-full flex-col gap-2 p-8">
-      <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
-        {title}
-      </h2>
-      <p className="text-sm text-neutral-500 dark:text-neutral-400">{message}</p>
+      <h2 className="text-base font-semibold text-fg">{title}</h2>
+      <p className="text-sm text-muted">{message}</p>
     </section>
   )
 }

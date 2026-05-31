@@ -34,12 +34,12 @@ function SourceRow({ snapshotId, blockId, index, item }: SourceRowProps): ReactE
     <li
       data-testid={`block-sources-${blockId}-source-${index}`}
       data-source-id={item.source_id}
-      className="text-neutral-800 dark:text-neutral-200"
+      className="text-fg"
     >
       <InspectableRef
         snapshotId={snapshotId}
         inspectionRef={{ kind: 'source', id: item.source_id }}
-        className="text-left underline decoration-neutral-300 hover:decoration-neutral-500 dark:decoration-neutral-600"
+        className="text-left underline decoration-line-strong hover:decoration-muted"
       >
         {item.label}
       </InspectableRef>
@@ -48,7 +48,7 @@ function SourceRow({ snapshotId, blockId, index, item }: SourceRowProps): ReactE
           href={item.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="ml-2 text-xs text-neutral-500 underline decoration-neutral-300 hover:text-neutral-700 hover:decoration-neutral-500 dark:text-neutral-400 dark:decoration-neutral-600 dark:hover:text-neutral-200"
+          className="ml-2 text-xs text-muted underline decoration-line-strong hover:text-fg hover:decoration-muted"
         >
           Open
         </a>

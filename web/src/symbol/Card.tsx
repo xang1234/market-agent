@@ -13,12 +13,12 @@ export function Card({ testId, headingId, heading, action, children }: CardProps
     <section
       data-testid={testId}
       aria-labelledby={headingId}
-      className="flex flex-col gap-3 rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900"
+      className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-5 shadow-sm"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3
           id={headingId}
-          className="text-sm font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400"
+          className="text-sm font-medium uppercase tracking-wide text-muted"
         >
           {heading}
         </h3>

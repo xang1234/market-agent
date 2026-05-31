@@ -44,7 +44,7 @@ export function BlockView({ block }: BlockViewProps): ReactElement {
       <div
         data-testid={`block-unknown-${block.id}`}
         data-block-kind={block.kind}
-        className="rounded border border-dashed border-neutral-300 px-2 py-1 text-xs text-neutral-500 dark:border-neutral-700"
+        className="rounded border border-dashed border-line-strong px-2 py-1 text-xs text-muted"
       >
         Unsupported block kind: {block.kind}
       </div>
@@ -62,7 +62,7 @@ export function BlockView({ block }: BlockViewProps): ReactElement {
         aria-label="Inspect block metadata"
         data-testid={`block-${block.id}-metadata`}
         onClick={() => inspector.openBlockInspection(blockInspectionFromBlock(block))}
-        className="absolute right-0 top-0 z-10 hidden h-6 w-6 items-center justify-center rounded border border-neutral-300 bg-white text-xs font-semibold text-neutral-600 shadow-sm group-hover:flex focus:flex dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-300"
+        className="absolute right-0 top-0 z-10 hidden h-6 w-6 items-center justify-center rounded border border-line-strong bg-surface text-xs font-semibold text-muted shadow-sm group-hover:flex focus:flex"
       >
         i
       </button>

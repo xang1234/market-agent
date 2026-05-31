@@ -99,8 +99,8 @@ export function SymbolSearch({
   const inputClassName = useMemo(
     () =>
       [
-        'w-full rounded-md border border-neutral-200 bg-neutral-50 px-3 text-sm text-neutral-800 outline-none transition-colors placeholder:text-neutral-400 focus:border-neutral-400 focus:bg-white focus:ring-2 focus:ring-neutral-200 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder:text-neutral-500 dark:focus:border-neutral-500 dark:focus:bg-neutral-900 dark:focus:ring-neutral-700',
-        placement === 'topbar' ? 'py-2' : 'py-1.5',
+        'w-full rounded-md border border-line bg-surface-2 text-sm text-fg outline-none transition-colors placeholder:text-faint focus:border-accent focus:bg-surface focus:ring-2 focus:ring-accent-soft',
+        placement === 'topbar' ? 'py-2 pl-3 pr-12' : 'px-3 py-1.5',
       ].join(' '),
     [placement],
   )
@@ -200,14 +200,23 @@ export function SymbolSearch({
         aria-expanded={hasCandidates}
         aria-controls={hasCandidates ? listboxId : undefined}
         aria-activedescendant={activeDescendant}
+        data-search-input={placement === 'topbar' ? 'topbar' : undefined}
         className={inputClassName}
       />
+      {placement === 'topbar' && (
+        <kbd
+          aria-hidden="true"
+          className="num pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded border border-line-strong px-1.5 py-0.5 text-[10px] text-faint"
+        >
+          ⌘K
+        </kbd>
+      )}
       {hasCandidates ? (
         <div
           id={listboxId}
           role="listbox"
           className={[
-            'absolute z-30 mt-1 overflow-hidden rounded-md border border-neutral-200 bg-white shadow-lg dark:border-neutral-700 dark:bg-neutral-900',
+            'absolute z-30 mt-1 overflow-hidden rounded-md border border-line bg-surface shadow-lg',
             placement === 'topbar' ? 'left-0 right-0' : 'left-0 w-72',
           ].join(' ')}
         >
@@ -223,19 +232,19 @@ export function SymbolSearch({
               className={[
                 'flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm',
                 index === typeahead.highlightedIndex
-                  ? 'bg-neutral-100 text-neutral-950 dark:bg-neutral-800 dark:text-neutral-50'
-                  : 'text-neutral-700 hover:bg-neutral-50 dark:text-neutral-200 dark:hover:bg-neutral-800',
+                  ? 'bg-surface-2 text-fg'
+                  : 'text-fg hover:bg-surface-2',
               ].join(' ')}
             >
               <span className="min-w-0">
                 <span className="block truncate font-medium">
                   {candidate.display_labels?.primary ?? candidate.display_name}
                 </span>
-                <span className="block truncate text-xs text-neutral-500 dark:text-neutral-400">
+                <span className="block truncate text-xs text-muted">
                   {candidateListingLabel(candidate)}
                 </span>
               </span>
-              <span className="shrink-0 text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
+              <span className="shrink-0 text-xs tabular-nums text-muted">
                 {Math.round(candidate.confidence * 100)}%
               </span>
             </button>
@@ -243,12 +252,12 @@ export function SymbolSearch({
         </div>
       ) : null}
       {message ? (
-        <div className="absolute left-0 right-0 z-20 mt-1 rounded-md border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-600 shadow-lg dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300">
+        <div className="absolute left-0 right-0 z-20 mt-1 rounded-md border border-line bg-surface px-3 py-2 text-xs text-muted shadow-lg">
           {message}
         </div>
       ) : null}
       {status === 'loading' || status === 'resolving' ? (
-        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-neutral-400">
+        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-faint">
           Resolving
         </span>
       ) : null}

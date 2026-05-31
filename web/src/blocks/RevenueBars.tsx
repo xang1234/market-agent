@@ -32,12 +32,12 @@ function RevenueBarColumn({ blockId, index, bar }: RevenueBarColumnProps): React
     >
       <div
         aria-hidden
-        className="w-full rounded-sm bg-blue-200 dark:bg-blue-800"
+        className="w-full rounded-sm bg-accent-soft"
         // Equal-height placeholder bars until the value resolver fills in
         // real heights from the value_ref UUIDs.
         style={{ height: '60%' }}
       />
-      <span className="text-xs text-neutral-600 dark:text-neutral-400">{bar.label}</span>
+      <span className="text-xs text-muted">{bar.label}</span>
     </div>
   )
 }

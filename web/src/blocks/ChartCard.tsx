@@ -22,10 +22,10 @@ export function ChartCard({
       data-testid={testId}
       data-block-kind={blockKind}
       {...dataAttrs}
-      className="flex flex-col gap-2 rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
+      className="flex flex-col gap-2 rounded-lg border border-line bg-surface p-3 shadow-sm"
     >
       {title ? (
-        <figcaption className="text-sm font-medium text-neutral-700 dark:text-neutral-200">
+        <figcaption className="text-sm font-medium text-fg">
           {title}
         </figcaption>
       ) : null}

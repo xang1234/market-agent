@@ -5,10 +5,10 @@
 
 import { type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { fetchQuoteSnapshot, quoteBelongsToListing, type QuoteDirection } from './quote.ts'
+import { ChangePill } from './ChangePill.tsx'
+import { fetchQuoteSnapshot, quoteBelongsToListing, SIGNED_BY_QUOTE_DIRECTION } from './quote.ts'
 import { quoteRowView } from './quoteRowView.ts'
 import type { SubjectRef } from './search.ts'
-import { NEGATIVE_CLASS, NEUTRAL_CLASS, POSITIVE_CLASS } from './signedColor.ts'
 import { useFetched, type FetchedResult } from './useFetched.ts'
 
 type QuoteRowProps = {
@@ -26,40 +26,31 @@ export function QuoteRow({ subjectRef, trailing }: QuoteRowProps) {
       <Link
         to={view.href}
         title={view.price?.freshness}
-        className="flex min-w-0 flex-1 items-center justify-between gap-2 px-3 py-2 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-md px-2.5 py-2 text-xs hover:bg-surface-hover"
       >
         <span className="min-w-0 flex-1">
-          <span className="block truncate font-medium text-neutral-800 dark:text-neutral-100">
-            {view.primary}
-          </span>
-          <span className="block truncate text-[10px] text-neutral-500 dark:text-neutral-400">
-            {view.secondary}
-          </span>
+          <span className="block truncate font-semibold text-fg">{view.primary}</span>
+          <span className="block truncate text-[10px] text-muted">{view.secondary}</span>
         </span>
-        <span className="shrink-0 text-right">
+        <span className="flex shrink-0 flex-col items-end gap-1">
           {view.price ? (
             <>
-              <span className="block tabular-nums font-medium text-neutral-900 dark:text-neutral-50">
-                {view.price.text}
-              </span>
-              <span className={`block text-[10px] tabular-nums ${DIRECTION_CLASS[view.price.direction]}`}>
+              <span className="num block font-medium text-fg">{view.price.text}</span>
+              <ChangePill
+                direction={SIGNED_BY_QUOTE_DIRECTION[view.price.direction]}
+                withArrow={false}
+              >
                 {view.price.percent}
-              </span>
+              </ChangePill>
             </>
           ) : (
-            <span className="block text-[10px] text-neutral-400 dark:text-neutral-500">—</span>
+            <span className="block text-[10px] text-faint">—</span>
           )}
         </span>
       </Link>
       {trailing}
     </li>
   )
-}
-
-const DIRECTION_CLASS: Readonly<Record<QuoteDirection, string>> = {
-  up: POSITIVE_CLASS,
-  down: NEGATIVE_CLASS,
-  flat: NEUTRAL_CLASS,
 }
 
 async function fetchQuoteForListing(

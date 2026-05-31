@@ -52,7 +52,7 @@ export function SegmentedToggle<T extends string>({
     <div
       role="radiogroup"
       aria-label={ariaLabel}
-      className="inline-flex rounded-md border border-neutral-200 dark:border-neutral-700"
+      className="inline-flex overflow-hidden rounded-md border border-line"
     >
       {options.map((opt, index) => {
         const active = opt.value === value
@@ -69,8 +69,8 @@ export function SegmentedToggle<T extends string>({
             onKeyDown={(event) => handleKeyDown(event, index)}
             className={
               active
-                ? 'bg-neutral-900 px-3 py-1 text-xs font-medium text-white dark:bg-neutral-100 dark:text-neutral-900'
-                : 'px-3 py-1 text-xs font-medium text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100'
+                ? 'bg-accent-soft px-3 py-1 text-xs font-medium text-accent'
+                : 'px-3 py-1 text-xs font-medium text-muted hover:text-fg'
             }
           >
             {opt.label}

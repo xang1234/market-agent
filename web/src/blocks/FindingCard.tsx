@@ -19,9 +19,7 @@ export function FindingCard({ block }: FindingCardProps): ReactElement {
       }}
     >
       <div className="flex items-start justify-between gap-3">
-        <p className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
-          {block.headline}
-        </p>
+        <p className="text-sm font-medium text-fg">{block.headline}</p>
         <Badge
           testId={`block-finding-card-${block.id}-severity`}
           toneClass={findingSeverityBadgeClass(block.severity)}

@@ -63,7 +63,7 @@ function SeriesLegend({ testId, series }: SeriesLegendProps): ReactElement | nul
   return (
     <ul
       data-testid={`${testId}-legend`}
-      className="flex flex-wrap gap-3 text-xs text-neutral-600 dark:text-neutral-400"
+      className="flex flex-wrap gap-3 text-xs text-muted"
     >
       {series.map((s, index) => (
         <li
@@ -76,7 +76,7 @@ function SeriesLegend({ testId, series }: SeriesLegendProps): ReactElement | nul
           />
           <span>{s.name}</span>
           {s.unit !== undefined && s.unit.length > 0 ? (
-            <span className="text-neutral-400">({s.unit})</span>
+            <span className="text-faint">({s.unit})</span>
           ) : null}
         </li>
       ))}

@@ -9,19 +9,19 @@ export function MetricsComparison({ block }: MetricsComparisonProps): ReactEleme
     <figure
       data-testid={`block-metrics-comparison-${block.id}`}
       data-block-kind="metrics_comparison"
-      className="overflow-x-auto rounded-md border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900"
+      className="overflow-x-auto rounded-lg border border-line bg-surface shadow-sm"
     >
       {block.title ? (
-        <figcaption className="border-b border-neutral-200 p-3 text-sm font-medium text-neutral-700 dark:border-neutral-800 dark:text-neutral-200">
+        <figcaption className="border-b border-line p-3 text-sm font-medium text-fg">
           {block.title}
         </figcaption>
       ) : null}
       <table className="w-full border-collapse text-left text-sm">
-        <thead className="bg-neutral-50 dark:bg-neutral-900">
+        <thead className="bg-surface-2">
           <tr>
             <th
               scope="col"
-              className="border-b border-neutral-200 px-3 py-2 text-xs font-medium uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"
+              className="border-b border-line px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted"
             >
               Subject
             </th>
@@ -29,7 +29,7 @@ export function MetricsComparison({ block }: MetricsComparisonProps): ReactEleme
               <th
                 key={`${block.id}-metric-${index}`}
                 scope="col"
-                className="border-b border-neutral-200 px-3 py-2 text-xs font-medium uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"
+                className="border-b border-line px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted"
               >
                 {metric}
               </th>
@@ -43,18 +43,15 @@ export function MetricsComparison({ block }: MetricsComparisonProps): ReactEleme
               data-testid={`block-metrics-comparison-${block.id}-row-${rowIndex}`}
               data-subject-kind={subject.kind}
               data-subject-id={subject.id}
-              className="border-t border-neutral-100 dark:border-neutral-800"
+              className="border-t border-line"
             >
-              <th
-                scope="row"
-                className="px-3 py-2 text-left text-neutral-800 dark:text-neutral-200"
-              >
+              <th scope="row" className="px-3 py-2 text-left text-fg">
                 {formatSubjectRefShort(subject)}
               </th>
               {block.metrics.map((_metric, cellIndex) => (
                 <td
                   key={`${block.id}-row-${rowIndex}-cell-${cellIndex}`}
-                  className="px-3 py-2 text-neutral-500 dark:text-neutral-400"
+                  className="px-3 py-2 tabular-nums text-muted"
                 >
                   —
                 </td>

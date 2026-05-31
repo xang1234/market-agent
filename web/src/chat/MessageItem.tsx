@@ -2,6 +2,7 @@ import { memo, useLayoutEffect, useRef, type ReactElement } from 'react'
 
 import { MemoizedBlockView } from '../blocks/MemoizedBlockView.tsx'
 import type { ChatMessage } from './messageTypes.ts'
+import { AssistantTurn, USER_BUBBLE_CLASS } from './turnLayout.tsx'
 
 type MessageItemProps = {
   message: ChatMessage
@@ -23,17 +24,23 @@ function MessageItemInner({ message, onMeasure }: MessageItemProps): ReactElemen
     return () => observer.disconnect()
   }, [message.message_id, onMeasure])
 
+  const isUser = message.role === 'user'
+  const blocks = message.blocks.map((block) => (
+    <MemoizedBlockView key={block.id} block={block} />
+  ))
   return (
     <div
       ref={ref}
       data-testid={`chat-message-${message.message_id}`}
       data-message-id={message.message_id}
       data-role={message.role}
-      className="flex flex-col gap-2 px-4 py-3"
+      className={`flex flex-col py-2 ${isUser ? 'items-end' : 'items-stretch'}`}
     >
-      {message.blocks.map((block) => (
-        <MemoizedBlockView key={block.id} block={block} />
-      ))}
+      {isUser ? (
+        <div className={USER_BUBBLE_CLASS}>{blocks}</div>
+      ) : (
+        <AssistantTurn>{blocks}</AssistantTurn>
+      )}
     </div>
   )
 }
