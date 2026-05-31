@@ -3,9 +3,9 @@
 // Centralized so palette tweaks land in one place and the deadband threshold
 // is explicit per surface.
 
-export const NEUTRAL_CLASS = 'text-neutral-500 dark:text-neutral-400'
-export const POSITIVE_CLASS = 'text-emerald-700 dark:text-emerald-400'
-export const NEGATIVE_CLASS = 'text-red-700 dark:text-red-400'
+export const NEUTRAL_CLASS = 'text-muted'
+export const POSITIVE_CLASS = 'text-positive'
+export const NEGATIVE_CLASS = 'text-negative'
 
 // Filled-pill variants (redesign tokens). Soft tinted background + signed text,
 // for the green/red %-change pills that scan faster than plain colored text.

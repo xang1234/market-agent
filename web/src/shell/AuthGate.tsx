@@ -20,7 +20,7 @@ export function AuthGate({ destinationLabel }: { destinationLabel: string }) {
         role="region"
         aria-label={`${destinationLabel} requires sign-in`}
         data-testid="auth-gate"
-        className="w-full max-w-md rounded-md border border-neutral-200 bg-white p-6 shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
+        className="w-full max-w-md rounded-md border border-line bg-surface p-6 shadow-sm"
       >
         <h2 className="text-lg font-semibold text-fg">
           Sign in to continue to {destinationLabel}
@@ -32,7 +32,7 @@ export function AuthGate({ destinationLabel }: { destinationLabel: string }) {
         <button
           type="button"
           onClick={() => signIn()}
-          className="mt-5 inline-flex items-center rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-300"
+          className="mt-5 inline-flex items-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent transition-opacity hover:opacity-90"
         >
           Sign in
         </button>

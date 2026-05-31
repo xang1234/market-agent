@@ -66,7 +66,7 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactRevi
 
   if (items.length === 0) {
     return (
-      <section className="rounded-md border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900">
+      <section className="rounded-md border border-line bg-surface p-6">
         <h2 className="text-sm font-semibold text-fg">Reviewer queue</h2>
         <p className="mt-2 text-sm text-muted">No candidate facts need review.</p>
       </section>
@@ -91,7 +91,7 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactRevi
           return (
             <li
               key={item.review_id}
-              className="rounded-md border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
+              className="rounded-md border border-line bg-surface p-4"
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -102,7 +102,7 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactRevi
                     <span className="tabular-nums">Confidence {formatPercent(item.confidence)}</span>
                     <span className="tabular-nums">Threshold {formatPercent(item.threshold)}</span>
                     {isStale ? (
-                      <span className="font-medium text-amber-700 dark:text-amber-300">
+                      <span className="font-medium text-warning">
                         Stale {formatDuration(item.age_seconds!)}
                       </span>
                     ) : null}
@@ -113,7 +113,7 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactRevi
                   <button
                     type="button"
                     disabled={isPending}
-                    className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                    className="rounded-md border border-line-strong px-3 py-1.5 text-xs font-medium text-fg hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-60"
                     onClick={() =>
                       void submitCandidateAction(item.review_id, readDraft(item.review_id, draftRefs.current), onEdit, {
                         setValidationErrors,
@@ -127,7 +127,7 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactRevi
                   <button
                     type="button"
                     disabled={isPending}
-                    className="rounded-md border border-emerald-700 bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="rounded-md border border-positive bg-positive px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                     onClick={() =>
                       void submitCandidateAction(item.review_id, readDraft(item.review_id, draftRefs.current), onApprove, {
                         setValidationErrors,
@@ -141,7 +141,7 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactRevi
                   <button
                     type="button"
                     disabled={isPending}
-                    className="rounded-md border border-rose-700 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60 dark:text-rose-300 dark:hover:bg-rose-950/40"
+                    className="rounded-md border border-negative px-3 py-1.5 text-xs font-medium text-negative hover:bg-negative-soft disabled:cursor-not-allowed disabled:opacity-60"
                     onClick={() =>
                       void submitRejectAction(item.review_id, readDraft(item.review_id, draftRefs.current), onReject, {
                         setActionErrors,
@@ -158,7 +158,7 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactRevi
                   Candidate
                   <textarea
                     data-role="candidate"
-                    className="min-h-40 resize-y rounded-md border border-neutral-300 bg-white p-2 font-mono text-xs text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100"
+                    className="min-h-40 resize-y rounded-md border border-line-strong bg-surface p-2 font-mono text-xs text-fg outline-none focus:border-accent"
                     defaultValue={draft.candidateJson}
                     ref={(node) => {
                       setDraftCandidateRef(draftRefs.current, item.review_id, node)
@@ -170,7 +170,7 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactRevi
                     Notes
                     <textarea
                       data-role="notes"
-                      className="min-h-24 resize-y rounded-md border border-neutral-300 bg-white p-2 text-sm text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100"
+                      className="min-h-24 resize-y rounded-md border border-line-strong bg-surface p-2 text-sm text-fg outline-none focus:border-accent"
                       defaultValue={draft.notes}
                       ref={(node) => {
                         setDraftNotesRef(draftRefs.current, item.review_id, node)
@@ -181,8 +181,8 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactRevi
                     <MetaRow label="Source" value={item.source_id ?? 'none'} />
                     <MetaRow label="Metric" value={item.metric_id ?? 'none'} />
                   </dl>
-                  {validationError ? <p className="text-xs text-rose-600 dark:text-rose-300">{validationError}</p> : null}
-                  {actionError ? <p className="text-xs text-rose-600 dark:text-rose-300">{actionError}</p> : null}
+                  {validationError ? <p className="text-xs text-negative">{validationError}</p> : null}
+                  {actionError ? <p className="text-xs text-negative">{actionError}</p> : null}
                 </div>
               </div>
             </li>

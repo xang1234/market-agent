@@ -13,7 +13,7 @@ export function RightRailSlot() {
   return (
     <aside
       aria-label="Activity rail"
-      className="flex h-full w-80 shrink-0 flex-col border-l border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900"
+      className="flex h-full w-80 shrink-0 flex-col border-l border-line bg-surface"
     >
       {railState.mode === 'content' ? railState.content : <div className="flex-1" aria-hidden="true" />}
     </aside>

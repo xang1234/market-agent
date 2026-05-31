@@ -119,9 +119,9 @@ function ReviewStatus({
   tone?: 'neutral' | 'error'
 }) {
   const messageClass =
-    tone === 'error' ? 'text-rose-600 dark:text-rose-300' : 'text-muted'
+    tone === 'error' ? 'text-negative' : 'text-muted'
   return (
-    <section className="rounded-md border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900">
+    <section className="rounded-md border border-line bg-surface p-6">
       <h2 className="text-sm font-semibold text-fg">{title}</h2>
       <p className={`mt-2 text-sm ${messageClass}`}>{message}</p>
     </section>

@@ -55,7 +55,7 @@ export function Sparkline({
           y2={geometry.baselineY}
           strokeWidth={1}
           strokeDasharray="2 3"
-          className="stroke-neutral-300 dark:stroke-neutral-700"
+          className="stroke-line"
         />
       )}
       <path d={geometry.path} fill="none" strokeWidth={1.5} className={trendStrokeClass} />

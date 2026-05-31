@@ -254,7 +254,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
   return (
     <div className="flex flex-col gap-6">
       <section className="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
-        <div className="flex flex-col gap-4 rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+        <div className="flex flex-col gap-4 rounded-md border border-line bg-surface p-5">
           <label className="flex flex-col gap-2 text-sm font-medium text-fg">
             Playbook
             <select
@@ -268,7 +268,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
                 setMemoRun(null)
                 setStatus('Ready')
               }}
-              className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+              className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
             >
               {playbooks.map((playbook) => (
                 <option key={playbook.playbook_id} value={playbook.playbook_id}>
@@ -278,7 +278,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
             </select>
           </label>
           {selectedPlaybook ? (
-            <section className="rounded-md border border-neutral-200 p-3 text-sm dark:border-neutral-800">
+            <section className="rounded-md border border-line p-3 text-sm">
               <h3 className="font-medium text-fg">Sections</h3>
               <ul className="mt-2 flex flex-col gap-1 text-fg-soft">
                 {selectedPlaybook.sections.map((section) => (
@@ -298,7 +298,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
                 setMemoRun(null)
                 setStatus('Ready')
               }}
-              className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+              className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
             >
               {templates.map((template) => (
                 <option key={template.template_id} value={template.template_id}>
@@ -317,7 +317,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
               setStatus('Ready')
             }}
             rows={6}
-            className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+            className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
           />
         </label>
         <fieldset className="flex flex-col gap-2">
@@ -334,7 +334,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
           ))}
         </fieldset>
       </div>
-      <div className="flex min-h-[420px] flex-col rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+      <div className="flex min-h-[420px] flex-col rounded-md border border-line bg-surface p-5">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-fg">Memo canvas</h2>
@@ -346,21 +346,21 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
             <button
               type="button"
               onClick={() => void generateMemo()}
-              className="rounded-md border border-neutral-300 px-4 py-2 text-sm font-medium dark:border-neutral-700"
+              className="rounded-md border border-line-strong px-4 py-2 text-sm font-medium"
             >
               Generate memo
             </button>
             <button
               type="button"
               onClick={() => void addToChat()}
-              className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-900"
+              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent"
             >
               Add to chat
             </button>
           </div>
         </div>
         <p className="mt-3 text-xs text-muted">{status}</p>
-        <article className="mt-5 flex flex-1 flex-col gap-3 rounded-md border border-dashed border-neutral-300 p-4 dark:border-neutral-700">
+        <article className="mt-5 flex flex-1 flex-col gap-3 rounded-md border border-dashed border-line-strong p-4">
           {memoRun ? (
             memoRun.blocks.map((block) => <BlockView key={blockKey(block)} block={block as Block} />)
           ) : (
@@ -373,7 +373,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
       </div>
       </section>
       {runHistory.length > 0 ? (
-        <section className="rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+        <section className="rounded-md border border-line bg-surface p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-fg">Run history</h2>
             <label className="flex items-center gap-2 text-xs text-fg-soft">
@@ -381,7 +381,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
               <select
                 value={compareRunId}
                 onChange={(event) => void handleCompareRunChange(event.currentTarget.value)}
-                className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-950"
+                className="rounded-md border border-line-strong bg-surface px-2 py-1 text-xs"
               >
                 <option value="">None</option>
                 {runHistory.map((run) => (
@@ -394,15 +394,15 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
           </div>
           <ul className="mt-3 flex flex-col gap-2">
             {runHistory.map((run) => (
-              <li key={run.run_id} className="flex flex-wrap items-center justify-between gap-3 rounded border border-neutral-200 p-2 text-sm dark:border-neutral-800">
+              <li key={run.run_id} className="flex flex-wrap items-center justify-between gap-3 rounded border border-line p-2 text-sm">
                 <span>{run.display_title} · {run.playbook_version ? `v${run.playbook_version}` : run.template_name} · {run.created_at}</span>
                 <div className="flex gap-2">
-                  <button type="button" className="rounded-md border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700" onClick={() => void handleOpenRun(run.run_id)}>
+                  <button type="button" className="rounded-md border border-line-strong px-2 py-1 text-xs" onClick={() => void handleOpenRun(run.run_id)}>
                     Open
                   </button>
                   <button
                     type="button"
-                    className="rounded-md border border-neutral-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-neutral-700"
+                    className="rounded-md border border-line-strong px-2 py-1 text-xs disabled:opacity-50"
                     disabled={!isRerunnableRun(run)}
                     title={isRerunnableRun(run) ? 'Rerun' : run.rerun_unavailable_reason ?? 'This run cannot be rerun'}
                     onClick={() => void handleRerun(run.run_id)}
@@ -414,17 +414,17 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
             ))}
           </ul>
           {runHistoryCursor ? (
-            <button type="button" className="mt-3 rounded-md border border-neutral-300 px-3 py-1.5 text-xs dark:border-neutral-700" onClick={() => void handleLoadMoreRuns()}>
+            <button type="button" className="mt-3 rounded-md border border-line-strong px-3 py-1.5 text-xs" onClick={() => void handleLoadMoreRuns()}>
               Load more
             </button>
           ) : null}
           {runDiff ? (
-            <section className="mt-4 rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
+            <section className="mt-4 rounded-md border border-line p-3">
               <h3 className="text-sm font-semibold">Run diff</h3>
               {runDiffDriftLabels.length > 0 ? (
                 <ul className="mt-2 flex flex-wrap gap-2 text-xs text-fg-soft">
                   {runDiffDriftLabels.map((label) => (
-                    <li key={label} className="rounded border border-neutral-200 px-2 py-1 dark:border-neutral-800">{label}</li>
+                    <li key={label} className="rounded border border-line px-2 py-1">{label}</li>
                   ))}
                 </ul>
               ) : null}
@@ -488,7 +488,7 @@ function CarriedSubjectContext({
     <section
       data-testid="analyze-carried-subject"
       aria-labelledby="analyze-carried-subject-heading"
-      className="flex flex-col gap-3 rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900"
+      className="flex flex-col gap-3 rounded-md border border-line bg-surface p-5"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-1">
@@ -501,7 +501,7 @@ function CarriedSubjectContext({
           </span>
         </div>
         {intent !== null && (
-          <span data-testid="analyze-intent-badge" className="rounded border border-neutral-200 bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-700 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200">
+          <span data-testid="analyze-intent-badge" className="rounded border border-line bg-surface-2 px-2 py-0.5 text-xs font-medium text-fg">
             Intent · {analyzeIntentLabel(intent)}
           </span>
         )}
@@ -511,7 +511,7 @@ function CarriedSubjectContext({
           to={symbolDetailPathForSubject(subject.subject_ref)}
           state={{ subject }}
           data-testid="analyze-back-to-symbol"
-          className="inline-flex items-center gap-1 text-xs font-medium text-neutral-600 underline-offset-2 hover:text-neutral-900 hover:underline dark:text-neutral-300 dark:hover:text-neutral-50"
+          className="inline-flex items-center gap-1 text-xs font-medium text-muted underline-offset-2 hover:text-fg hover:underline"
         >
           Back to {displayName}
         </Link>

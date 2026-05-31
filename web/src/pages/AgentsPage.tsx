@@ -355,7 +355,7 @@ export function AgentsPage() {
         </p>
       </header>
       <section className="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
-        <form onSubmit={submitAgent} className="flex flex-col gap-4 rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+        <form onSubmit={submitAgent} className="flex flex-col gap-4 rounded-md border border-line bg-surface p-5">
           <h2 className="text-lg font-semibold text-fg">{editingAgentId ? 'Edit agent' : 'Create agent'}</h2>
           <label className="flex flex-col gap-2 text-sm font-medium text-fg">
             Name
@@ -363,7 +363,7 @@ export function AgentsPage() {
               name="agent-name"
               value={name}
               onChange={(event) => setName(event.currentTarget.value)}
-              className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+              className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
             />
           </label>
           <label className="flex flex-col gap-2 text-sm font-medium text-fg">
@@ -373,7 +373,7 @@ export function AgentsPage() {
               value={thesis}
               onChange={(event) => setThesis(event.currentTarget.value)}
               rows={4}
-              className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+              className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
             />
           </label>
           <label className="flex flex-col gap-2 text-sm font-medium text-fg">
@@ -382,17 +382,17 @@ export function AgentsPage() {
               name="agent-cadence"
               value={cadence}
               onChange={(event) => setCadence(event.currentTarget.value)}
-              className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+              className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
             >
               <option value="hourly">hourly</option>
               <option value="daily">daily</option>
               <option value="weekly">weekly</option>
             </select>
           </label>
-          <fieldset className="rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
+          <fieldset className="rounded-md border border-line p-3">
             <legend className="px-1 text-sm font-semibold text-fg">Universe</legend>
             {preservesUnsupportedUniverse ? (
-              <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200">
+              <p className="mt-2 rounded-md border border-warning bg-warning-soft px-3 py-2 text-xs text-warning">
                 Existing {universeLabel(editingAgent.universe)} universe is preserved by this edit.
               </p>
             ) : null}
@@ -403,7 +403,7 @@ export function AgentsPage() {
                 value={universeMode}
                 onChange={(event) => setUniverseMode(event.currentTarget.value as AgentUniverse['mode'])}
                 disabled={preservesUnsupportedUniverse}
-                className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+                className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
               >
                 <option value="static">static subjects</option>
                 <option value="screen">saved screen</option>
@@ -422,7 +422,7 @@ export function AgentsPage() {
                   disabled={preservesUnsupportedUniverse}
                   rows={4}
                   placeholder="issuer:...\nlisting:..."
-                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+                  className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
                 />
               </label>
             ) : (
@@ -433,7 +433,7 @@ export function AgentsPage() {
                   value={dynamicUniverseId}
                   onChange={(event) => setDynamicUniverseId(event.currentTarget.value)}
                   disabled={preservesUnsupportedUniverse}
-                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+                  className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
                 />
               </label>
             )}
@@ -448,7 +448,7 @@ export function AgentsPage() {
                     if (isAgentSubjectKind(next)) setSubjectKind(next)
                   }}
                   disabled={preservesUnsupportedUniverse || universeMode !== 'static'}
-                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+                  className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
                 >
                   <option value="issuer">issuer</option>
                   <option value="instrument">instrument</option>
@@ -464,15 +464,15 @@ export function AgentsPage() {
                   value={subjectId}
                   onChange={(event) => setSubjectId(event.currentTarget.value)}
                   disabled={preservesUnsupportedUniverse || universeMode !== 'static'}
-                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+                  className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
                 />
               </label>
             </div>
           </fieldset>
-          <fieldset className="rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
+          <fieldset className="rounded-md border border-line p-3">
             <legend className="px-1 text-sm font-semibold text-fg">Alert rule</legend>
             {preservesUnsupportedAlertRules ? (
-              <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200">
+              <p className="mt-2 rounded-md border border-warning bg-warning-soft px-3 py-2 text-xs text-warning">
                 Existing {alertRuleLabel(editingAgent.alert_rules)} alert rules are preserved by this edit.
               </p>
             ) : null}
@@ -484,7 +484,7 @@ export function AgentsPage() {
                   value={alertRuleId}
                   onChange={(event) => setAlertRuleId(event.currentTarget.value)}
                   disabled={preservesUnsupportedAlertRules}
-                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+                  className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
                 />
               </label>
               <label className="flex flex-col gap-2 text-sm font-medium text-fg">
@@ -494,7 +494,7 @@ export function AgentsPage() {
                   value={alertSeverity}
                   onChange={(event) => setAlertSeverity(event.currentTarget.value)}
                   disabled={preservesUnsupportedAlertRules}
-                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+                  className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
                 >
                   <option value="low">low</option>
                   <option value="medium">medium</option>
@@ -509,7 +509,7 @@ export function AgentsPage() {
                   value={alertHeadline}
                   onChange={(event) => setAlertHeadline(event.currentTarget.value)}
                   disabled={preservesUnsupportedAlertRules}
-                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
+                  className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
                 />
               </label>
               <label className="inline-flex items-center gap-2 text-sm font-medium text-fg">
@@ -571,15 +571,15 @@ export function AgentsPage() {
               </div>
             </div>
           </fieldset>
-          <button type="submit" className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-900">
+          <button type="submit" className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent">
             {editingAgentId ? 'Save agent' : 'Create agent'}
           </button>
         </form>
         <div className="grid gap-6 lg:grid-cols-2">
-          <section className="rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+          <section className="rounded-md border border-line bg-surface p-5">
             <h2 className="text-lg font-semibold text-fg">Agents</h2>
             {loadError ? (
-              <p className="mt-3 text-sm text-rose-600 dark:text-rose-300">Load failed: {loadError}</p>
+              <p className="mt-3 text-sm text-negative">Load failed: {loadError}</p>
             ) : null}
             <ul className="mt-4 flex flex-col gap-3">
               {agents.map((agent) => (
@@ -587,7 +587,7 @@ export function AgentsPage() {
                   key={agent.agent_id}
                   className={`rounded-md border p-3 ${
                     selectedAgentId === agent.agent_id
-                      ? 'border-neutral-900 dark:border-neutral-100'
+                      ? 'border-accent'
                       : 'border-line'
                   }`}
                 >
@@ -609,35 +609,35 @@ export function AgentsPage() {
                       <button
                         type="button"
                         onClick={() => setSelectedAgentId(agent.agent_id)}
-                        className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium dark:border-neutral-700"
+                        className="rounded-md border border-line-strong px-3 py-1.5 text-xs font-medium"
                       >
                         View
                       </button>
                       <button
                         type="button"
                         onClick={() => editAgent(agent)}
-                        className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium dark:border-neutral-700"
+                        className="rounded-md border border-line-strong px-3 py-1.5 text-xs font-medium"
                       >
                         Edit
                       </button>
                       <button
                         type="button"
                         onClick={() => void runAgent(agent.agent_id)}
-                        className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium dark:border-neutral-700"
+                        className="rounded-md border border-line-strong px-3 py-1.5 text-xs font-medium"
                       >
                         Run
                       </button>
                       <button
                         type="button"
                         onClick={() => void updateAgent(agent.agent_id, { enabled: !agent.enabled })}
-                        className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium dark:border-neutral-700"
+                        className="rounded-md border border-line-strong px-3 py-1.5 text-xs font-medium"
                       >
                         {agent.enabled ? 'Disable' : 'Enable'}
                       </button>
                       <button
                         type="button"
                         onClick={() => void deleteAgent(agent.agent_id)}
-                        className="rounded-md border border-rose-300 px-3 py-1.5 text-xs font-medium text-rose-700 dark:border-rose-700 dark:text-rose-200"
+                        className="rounded-md border border-negative px-3 py-1.5 text-xs font-medium text-negative"
                       >
                         Delete
                       </button>
@@ -647,20 +647,20 @@ export function AgentsPage() {
               ))}
             </ul>
           </section>
-          <section className="rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+          <section className="rounded-md border border-line bg-surface p-5">
             <h2 className="text-lg font-semibold text-fg">Findings</h2>
             {visibleDetailsError ? (
-              <p className="mt-3 text-sm text-rose-600 dark:text-rose-300">Details failed: {visibleDetailsError}</p>
+              <p className="mt-3 text-sm text-negative">Details failed: {visibleDetailsError}</p>
             ) : null}
             {visibleFindings.length === 0 ? (
               <p className="mt-4 text-sm text-muted">No findings for this agent yet.</p>
             ) : (
               <ul className="mt-4 flex flex-col gap-3">
                 {visibleFindings.map((finding) => (
-                  <li key={finding.finding_id} className="rounded-md border border-neutral-200 p-3 text-sm dark:border-neutral-800">
+                  <li key={finding.finding_id} className="rounded-md border border-line p-3 text-sm">
                     <div className="flex items-start justify-between gap-3">
                       <span className="font-medium text-fg">{finding.headline}</span>
-                      <span className="rounded border border-neutral-300 px-2 py-0.5 text-xs text-neutral-600 dark:border-neutral-700 dark:text-neutral-300">
+                      <span className="rounded border border-line-strong px-2 py-0.5 text-xs text-muted">
                         {finding.severity}
                       </span>
                     </div>
@@ -670,30 +670,30 @@ export function AgentsPage() {
               </ul>
             )}
           </section>
-          <section className="rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+          <section className="rounded-md border border-line bg-surface p-5">
             <h2 className="text-lg font-semibold text-fg">Run history</h2>
             {runs.length === 0 ? (
               <p className="mt-4 text-sm text-muted">No recorded runs yet.</p>
             ) : (
               <ul className="mt-4 flex flex-col gap-3">
                 {runs.map((run) => (
-                  <li key={run.agent_run_log_id} className="rounded-md border border-neutral-200 p-3 text-sm dark:border-neutral-800">
+                  <li key={run.agent_run_log_id} className="rounded-md border border-line p-3 text-sm">
                     <span className="font-medium">{run.status}</span>
                     <span className="ml-2 text-muted">{run.started_at}</span>
-                    {run.error ? <p className="mt-1 text-rose-600 dark:text-rose-300">{run.error}</p> : null}
+                    {run.error ? <p className="mt-1 text-negative">{run.error}</p> : null}
                   </li>
                 ))}
               </ul>
             )}
           </section>
-          <section className="rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+          <section className="rounded-md border border-line bg-surface p-5">
             <h2 className="text-lg font-semibold text-fg">Run activity</h2>
             {visibleRunActivities.length === 0 ? (
               <p className="mt-4 text-sm text-muted">No activity for this agent yet.</p>
             ) : (
               <ul className="mt-4 flex flex-col gap-3">
                 {visibleRunActivities.map((item) => (
-                  <li key={item.run_activity_id} className="rounded-md border border-neutral-200 p-3 text-sm dark:border-neutral-800">
+                  <li key={item.run_activity_id} className="rounded-md border border-line p-3 text-sm">
                     <div className="flex items-start justify-between gap-3">
                       <span className="font-medium capitalize text-fg">{item.stage}</span>
                       <span className="text-xs text-muted">{item.ts}</span>
@@ -706,7 +706,7 @@ export function AgentsPage() {
           </section>
         </div>
       </section>
-      <section className="rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
+      <section className="rounded-md border border-line bg-surface p-5">
         <h2 className="text-lg font-semibold text-fg">Activity</h2>
         <p className="mt-2 text-sm text-fg-soft">{activity}</p>
       </section>

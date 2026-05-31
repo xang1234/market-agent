@@ -22,9 +22,9 @@ export function EvidenceInspectorDrawer({
   return (
     <aside
       aria-label="Evidence inspector"
-      className="fixed bottom-0 right-0 top-0 z-50 flex w-[420px] max-w-full flex-col border-l border-neutral-200 bg-white shadow-xl dark:border-neutral-800 dark:bg-neutral-950"
+      className="fixed bottom-0 right-0 top-0 z-50 flex w-[420px] max-w-full flex-col border-l border-line bg-surface shadow-xl"
     >
-      <header className="flex items-start justify-between gap-3 border-b border-neutral-200 p-4 dark:border-neutral-800">
+      <header className="flex items-start justify-between gap-3 border-b border-line p-4">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-fg">Evidence</h2>
           <p className="mt-1 break-all text-xs text-muted">{snapshotId}</p>
@@ -32,7 +32,7 @@ export function EvidenceInspectorDrawer({
         <button
           type="button"
           onClick={onClose}
-          className="shrink-0 rounded-md border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-900"
+          className="shrink-0 rounded-md border border-line-strong px-2 py-1 text-xs text-fg hover:bg-surface-2"
         >
           Close
         </button>
@@ -64,7 +64,7 @@ function InspectionBody({ inspection }: { inspection: EvidenceInspection }) {
             {inspection.badges.map((badge) => (
               <span
                 key={badge}
-                className="rounded border border-neutral-300 px-2 py-0.5 text-xs text-neutral-700 dark:border-neutral-700 dark:text-neutral-200"
+                className="rounded border border-line-strong px-2 py-0.5 text-xs text-fg"
               >
                 {badge}
               </span>
@@ -74,7 +74,7 @@ function InspectionBody({ inspection }: { inspection: EvidenceInspection }) {
       </section>
       <dl className="grid gap-2">
         {inspection.rows.map((row) => (
-          <div key={`${row.label}:${row.value}`} className="grid gap-1 border-t border-neutral-200 pt-2 dark:border-neutral-800">
+          <div key={`${row.label}:${row.value}`} className="grid gap-1 border-t border-line pt-2">
             <dt className="text-xs uppercase text-muted">{row.label}</dt>
             <dd className="break-words text-sm text-fg">{row.value}</dd>
           </div>
@@ -114,7 +114,7 @@ function BlockInspectionBody({ inspection }: { inspection: EvidenceBlockInspecti
             {inspection.badges.map((badge) => (
               <span
                 key={badge}
-                className="rounded border border-neutral-300 px-2 py-0.5 text-xs text-neutral-700 dark:border-neutral-700 dark:text-neutral-200"
+                className="rounded border border-line-strong px-2 py-0.5 text-xs text-fg"
               >
                 {badge}
               </span>
@@ -124,7 +124,7 @@ function BlockInspectionBody({ inspection }: { inspection: EvidenceBlockInspecti
       </section>
       <dl className="grid gap-2">
         {inspection.rows.map((row) => (
-          <div key={`${row.label}:${row.value}`} className="grid gap-1 border-t border-neutral-200 pt-2 dark:border-neutral-800">
+          <div key={`${row.label}:${row.value}`} className="grid gap-1 border-t border-line pt-2">
             <dt className="text-xs uppercase text-muted">{row.label}</dt>
             <dd className="break-words text-sm text-fg">{row.value}</dd>
           </div>

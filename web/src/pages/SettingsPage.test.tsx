@@ -78,7 +78,7 @@ test('SettingsView displays pending and failed diagnostics states', () => {
 
   assert.match(pending, /Testing/)
   assert.match(failed, /auth_failed: bad key/)
-  assert.match(failed, /text-rose/)
+  assert.match(failed, /text-negative/)
 })
 
 test('SettingsPage reports malformed settings responses clearly', async () => {
