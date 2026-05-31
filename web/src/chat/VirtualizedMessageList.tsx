@@ -124,6 +124,7 @@ export function VirtualizedMessageList({
         <div
           style={{ paddingTop: view.paddingTop, paddingBottom: view.paddingBottom }}
           data-testid="virtualized-message-list-content"
+          className="mx-auto w-full max-w-[780px]"
         >
           {visibleMessages.map((message) => (
             <MessageItem

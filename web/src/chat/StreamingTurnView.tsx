@@ -20,7 +20,7 @@ export function StreamingTurnView({ state }: StreamingTurnViewProps): ReactEleme
     <div
       data-testid="streaming-turn"
       data-turn-status={state.turn_status}
-      className="flex flex-col gap-2 px-4 py-3"
+      className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-4 shadow-md"
     >
       {state.block_order.map((block_id) => {
         const block = state.blocks_by_id.get(block_id)
@@ -28,10 +28,7 @@ export function StreamingTurnView({ state }: StreamingTurnViewProps): ReactEleme
         return <StreamingBlockView key={block_id} block={block} />
       })}
       {state.turn_status === 'error' ? (
-        <p
-          data-testid="streaming-turn-error"
-          className="text-sm text-rose-700 dark:text-rose-300"
-        >
+        <p data-testid="streaming-turn-error" className="text-sm text-negative">
           Stream error: {state.error ?? 'unknown'}
         </p>
       ) : null}

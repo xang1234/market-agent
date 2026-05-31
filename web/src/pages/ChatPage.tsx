@@ -214,31 +214,37 @@ export function ChatThreadView() {
 
   return (
     <div data-testid="chat-thread" className="flex min-h-full flex-col">
-      <section className="border-b border-neutral-200 px-8 py-4 dark:border-neutral-800">
-        <h2 className="text-sm font-semibold uppercase text-neutral-500 dark:text-neutral-400">
+      <section className="border-b border-line px-6 py-3">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wide text-muted">
           Message stream
         </h2>
-        <p className="mt-1 font-mono text-xs text-neutral-500 dark:text-neutral-400">{threadId}</p>
+        <p className="num mt-0.5 text-xs text-faint">{threadId}</p>
       </section>
-      <div className="flex min-h-0 flex-1 flex-col gap-3 p-6">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
         {visibleHistory.kind === 'loading' ? (
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading message history.</p>
+          <p className="mx-auto w-full max-w-[780px] text-sm text-muted">
+            Loading message history.
+          </p>
         ) : null}
         {visibleHistory.kind === 'error' ? (
-          <p className="text-sm text-rose-600 dark:text-rose-300">Message history unavailable: {visibleHistory.message}</p>
+          <p className="mx-auto w-full max-w-[780px] text-sm text-negative">
+            Message history unavailable: {visibleHistory.message}
+          </p>
         ) : null}
         {visibleHistory.kind === 'ready' ? (
           <PersistedMessageHistory messages={visibleHistory.messages} />
         ) : null}
-        <StreamingTurnView state={state} />
+        <div className="mx-auto w-full max-w-[780px]">
+          <StreamingTurnView state={state} />
+        </div>
         {streamError ? (
-          <div className="flex items-center gap-3 text-sm">
-            <p className="text-rose-600 dark:text-rose-300">{streamError}</p>
+          <div className="mx-auto flex w-full max-w-[780px] items-center gap-3 text-sm">
+            <p className="text-negative">{streamError}</p>
             {failedTurn ? (
               <button
                 type="button"
                 onClick={() => startPersistedTurn(failedTurn)}
-                className="rounded-md border border-rose-300 px-3 py-1.5 text-xs font-medium text-rose-700 dark:border-rose-700 dark:text-rose-200"
+                className="rounded-md border border-negative px-3 py-1.5 text-xs font-medium text-negative"
               >
                 Retry stream
               </button>
@@ -246,25 +252,31 @@ export function ChatThreadView() {
           </div>
         ) : null}
       </div>
-      <form onSubmit={submitPrompt} className="border-t border-neutral-200 p-4 dark:border-neutral-800">
-        <label className="text-sm font-medium text-neutral-700 dark:text-neutral-200" htmlFor="chat-composer">
-          Ask the analyst
-        </label>
-        <div className="mt-2 flex gap-3">
-          <textarea
-            id="chat-composer"
-            value={prompt}
-            onChange={(event) => setPrompt(event.currentTarget.value)}
-            rows={2}
-            className="min-w-0 flex-1 rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
-            placeholder="Ask about a company, theme, screen, or prior artifact"
-          />
-          <button
-            type="submit"
-            className="self-end rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white dark:bg-neutral-100 dark:text-neutral-900"
-          >
-            Send
-          </button>
+      <form
+        onSubmit={submitPrompt}
+        className="sticky bottom-0 border-t border-line bg-surface/70 p-4 backdrop-blur"
+      >
+        <div className="mx-auto w-full max-w-[780px]">
+          <label className="sr-only" htmlFor="chat-composer">
+            Ask the analyst
+          </label>
+          <div className="flex items-end gap-2 rounded-2xl border border-line-strong bg-surface px-3 py-2.5 shadow-md">
+            <textarea
+              id="chat-composer"
+              value={prompt}
+              onChange={(event) => setPrompt(event.currentTarget.value)}
+              rows={2}
+              className="min-w-0 flex-1 resize-none border-none bg-transparent text-sm text-fg outline-none placeholder:text-faint"
+              placeholder="Ask about a company, theme, screen, or prior artifact"
+            />
+            <button
+              type="submit"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-accent to-[#2f7fe0] text-base font-bold text-[#04121f]"
+              aria-label="Send"
+            >
+              ↑
+            </button>
+          </div>
         </div>
       </form>
     </div>
