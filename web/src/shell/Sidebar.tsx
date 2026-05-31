@@ -11,7 +11,7 @@ export function Sidebar() {
   return (
     <aside className="flex h-full w-60 shrink-0 flex-col gap-4 border-r border-line bg-surface px-3 py-4">
       <div className="flex items-center gap-2.5 px-1.5">
-        <div className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-accent to-cyan text-[15px] font-bold text-on-accent">
+        <div className="grid h-7 w-7 place-items-center rounded-lg bg-linear-to-br from-accent to-cyan text-[15px] font-bold text-on-accent">
           F
         </div>
         <div className="leading-tight">

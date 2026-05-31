@@ -28,7 +28,7 @@ export function SessionControl() {
     <button
       type="button"
       onClick={() => signIn()}
-      className="rounded-md bg-gradient-to-br from-accent to-accent-strong px-3 py-1.5 text-xs font-medium text-on-accent transition-opacity hover:opacity-90"
+      className="rounded-md bg-linear-to-br from-accent to-accent-strong px-3 py-1.5 text-xs font-medium text-on-accent transition-opacity hover:opacity-90"
     >
       Sign in
     </button>

@@ -273,7 +273,7 @@ export function ChatThreadView() {
             />
             <button
               type="submit"
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-accent to-accent-strong text-base font-bold text-on-accent"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-linear-to-br from-accent to-accent-strong text-base font-bold text-on-accent"
               aria-label="Send"
             >
               ↑
