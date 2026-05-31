@@ -8,8 +8,18 @@ import {
   type RouteResolvedSubject,
   type SubjectRef,
 } from './search.ts'
+import type { SignedDirection } from './signedColor.ts'
 
 export type { ResolvedSubject, RouteResolvedSubject }
+
+// Adapter from the quote domain's up/down/flat to the signed-color tri-state,
+// so the watchlist row and quote header share one map (consumed by <ChangePill>)
+// instead of each declaring an identical copy.
+export const SIGNED_BY_QUOTE_DIRECTION: Readonly<Record<QuoteDirection, SignedDirection>> = {
+  up: 'positive',
+  down: 'negative',
+  flat: 'neutral',
+}
 
 // Aligned with services/market/src/quote.ts so the frontend speaks the same
 // vocabulary as the spec §6.2.1 quote contract.

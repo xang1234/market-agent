@@ -8,19 +8,13 @@ import {
   listingIdForQuote,
   quoteBelongsToListing,
   quoteDirection,
+  SIGNED_BY_QUOTE_DIRECTION,
   subjectDisplayName,
   type QuoteSnapshot as QuoteSnapshotData,
   type ResolvedSubject,
   type RouteResolvedSubject,
 } from './quote.ts'
 import { ChangePill } from './ChangePill.tsx'
-import type { SignedDirection } from './signedColor.ts'
-
-const QUOTE_DIRECTION: Readonly<Record<ReturnType<typeof quoteDirection>, SignedDirection>> = {
-  up: 'positive',
-  down: 'negative',
-  flat: 'neutral',
-}
 
 type QuoteSnapshotProps = {
   subject: ResolvedSubject | RouteResolvedSubject
@@ -89,7 +83,7 @@ export function QuoteSnapshot({ subject }: QuoteSnapshotProps) {
   }
 
   const quote = visibleState.quote
-  const direction = QUOTE_DIRECTION[quoteDirection(quote)]
+  const direction = SIGNED_BY_QUOTE_DIRECTION[quoteDirection(quote)]
 
   return (
     <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(260px,360px)]">

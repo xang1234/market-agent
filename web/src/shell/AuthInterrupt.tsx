@@ -1,4 +1,5 @@
 import { useAuth } from './useAuth'
+import { PRIMARY_BUTTON_CLASS } from './buttonStyles.ts'
 import { useAuthInterrupt } from './useAuthInterrupt'
 
 // The inline auth interrupt modal. Rendered once in the shell, only visible
@@ -45,7 +46,7 @@ export function AuthInterrupt() {
           <button
             type="button"
             onClick={() => signIn()}
-            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent transition-opacity hover:opacity-90"
+            className={PRIMARY_BUTTON_CLASS}
           >
             Sign in
           </button>

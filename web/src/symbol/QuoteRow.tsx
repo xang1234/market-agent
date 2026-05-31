@@ -6,10 +6,9 @@
 import { type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { ChangePill } from './ChangePill.tsx'
-import { fetchQuoteSnapshot, quoteBelongsToListing, type QuoteDirection } from './quote.ts'
+import { fetchQuoteSnapshot, quoteBelongsToListing, SIGNED_BY_QUOTE_DIRECTION } from './quote.ts'
 import { quoteRowView } from './quoteRowView.ts'
 import type { SubjectRef } from './search.ts'
-import type { SignedDirection } from './signedColor.ts'
 import { useFetched, type FetchedResult } from './useFetched.ts'
 
 type QuoteRowProps = {
@@ -37,7 +36,10 @@ export function QuoteRow({ subjectRef, trailing }: QuoteRowProps) {
           {view.price ? (
             <>
               <span className="num block font-medium text-fg">{view.price.text}</span>
-              <ChangePill direction={DIRECTION[view.price.direction]} withArrow={false}>
+              <ChangePill
+                direction={SIGNED_BY_QUOTE_DIRECTION[view.price.direction]}
+                withArrow={false}
+              >
                 {view.price.percent}
               </ChangePill>
             </>
@@ -49,12 +51,6 @@ export function QuoteRow({ subjectRef, trailing }: QuoteRowProps) {
       {trailing}
     </li>
   )
-}
-
-const DIRECTION: Readonly<Record<QuoteDirection, SignedDirection>> = {
-  up: 'positive',
-  down: 'negative',
-  flat: 'neutral',
 }
 
 async function fetchQuoteForListing(

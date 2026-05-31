@@ -1,4 +1,5 @@
 import { useLocation } from 'react-router-dom'
+import { PRIMARY_BUTTON_CLASS } from './buttonStyles.ts'
 import { useAuth } from './useAuth'
 
 // Rendered in the main canvas when a protected surface is entered without a
@@ -32,7 +33,7 @@ export function AuthGate({ destinationLabel }: { destinationLabel: string }) {
         <button
           type="button"
           onClick={() => signIn()}
-          className="mt-5 inline-flex items-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent transition-opacity hover:opacity-90"
+          className={`mt-5 inline-flex items-center ${PRIMARY_BUTTON_CLASS}`}
         >
           Sign in
         </button>

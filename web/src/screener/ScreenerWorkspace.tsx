@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { PRIMARY_BUTTON_CLASS } from '../shell/buttonStyles.ts'
 import { useNavigate } from 'react-router-dom'
 import {
   ProtectedActionType,
@@ -316,7 +317,7 @@ export function ScreenerWorkspace() {
             </button>
             <button
               type="submit"
-              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent shadow-sm hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+              className={`${PRIMARY_BUTTON_CLASS} shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50`}
               disabled={status === 'loading'}
             >
               {status === 'loading' ? 'Running…' : 'Run'}

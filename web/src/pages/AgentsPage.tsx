@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { PRIMARY_BUTTON_CLASS } from '../shell/buttonStyles.ts'
 
 import {
   AgentPayloadValidationError,
@@ -571,7 +572,7 @@ export function AgentsPage() {
               </div>
             </div>
           </fieldset>
-          <button type="submit" className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent">
+          <button type="submit" className={PRIMARY_BUTTON_CLASS}>
             {editingAgentId ? 'Save agent' : 'Create agent'}
           </button>
         </form>

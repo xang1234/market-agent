@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useReducer, useState, type FormEvent } from 'react'
+import { PRIMARY_BUTTON_CLASS } from '../shell/buttonStyles.ts'
 import { Link, Outlet, useNavigate, useParams } from 'react-router-dom'
 
 import { VirtualizedMessageList } from '../chat'
@@ -107,7 +108,7 @@ export function ChatEmptyState() {
           <button
             type="submit"
             disabled={pending}
-            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent disabled:opacity-60"
+            className={`${PRIMARY_BUTTON_CLASS} disabled:opacity-60`}
           >
             Start research
           </button>

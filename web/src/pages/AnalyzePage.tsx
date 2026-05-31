@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { PRIMARY_BUTTON_CLASS } from '../shell/buttonStyles.ts'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   analyzeIntentLabel,
@@ -353,7 +354,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
             <button
               type="button"
               onClick={() => void addToChat()}
-              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent"
+              className={PRIMARY_BUTTON_CLASS}
             >
               Add to chat
             </button>
