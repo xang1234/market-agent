@@ -40,7 +40,7 @@ export function HeldRow({ holding }: HeldRowProps) {
 
 function HoldingBadge({ quantity, costBasis }: { quantity: number; costBasis: number | null }) {
   return (
-    <span className="flex shrink-0 flex-col items-end justify-center px-2 text-[10px] tabular-nums text-muted">
+    <span className="flex shrink-0 flex-col items-end justify-center px-2 text-[10px] num text-muted">
       <span className="font-medium text-fg">
         {QUANTITY_FMT.format(quantity)}
       </span>

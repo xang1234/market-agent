@@ -51,7 +51,7 @@ export function MetricsComparison({ block }: MetricsComparisonProps): ReactEleme
               {block.metrics.map((_metric, cellIndex) => (
                 <td
                   key={`${block.id}-row-${rowIndex}-cell-${cellIndex}`}
-                  className="px-3 py-2 tabular-nums text-muted"
+                  className="px-3 py-2 num text-muted"
                 >
                   —
                 </td>

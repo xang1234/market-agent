@@ -244,7 +244,7 @@ export function SymbolSearch({
                   {candidateListingLabel(candidate)}
                 </span>
               </span>
-              <span className="shrink-0 text-xs tabular-nums text-muted">
+              <span className="shrink-0 text-xs num text-muted">
                 {Math.round(candidate.confidence * 100)}%
               </span>
             </button>

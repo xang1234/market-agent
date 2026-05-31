@@ -185,7 +185,7 @@ function SentimentTrendBody({ block }: { block: SentimentTrendBlock }) {
           <span className={`text-xs uppercase tracking-wide ${NEUTRAL_CLASS}`}>
             Latest score
           </span>
-          <span className={`text-2xl font-semibold tabular-nums ${SCORE_TEXT_CLASS[direction]}`}>
+          <span className={`text-2xl font-semibold num ${SCORE_TEXT_CLASS[direction]}`}>
             {formatScore(latest.sentiment_score)}
           </span>
         </div>
@@ -193,7 +193,7 @@ function SentimentTrendBody({ block }: { block: SentimentTrendBlock }) {
           <span className={`text-xs uppercase tracking-wide ${NEUTRAL_CLASS}`}>
             Mentions ({block.window_days}d)
           </span>
-          <span className="text-lg font-semibold tabular-nums text-fg">
+          <span className="text-lg font-semibold num text-fg">
             {formatCompactNumber(totalMentions)}
           </span>
         </div>
@@ -205,7 +205,7 @@ function SentimentTrendBody({ block }: { block: SentimentTrendBlock }) {
         domain={[-1, 1]}
         baseline={0}
       />
-      <div className={`flex items-center justify-between text-xs tabular-nums ${NEUTRAL_CLASS}`}>
+      <div className={`flex items-center justify-between text-xs num ${NEUTRAL_CLASS}`}>
         <span>{earliest.date}</span>
         <span>{block.points.length} days</span>
         <span>{latest.date}</span>
@@ -241,7 +241,7 @@ function ClaimClusterRow({ cluster }: { cluster: ClaimCluster }) {
         <StanceBadge stance={cluster.stance} />
       </div>
       <div
-        className={`flex flex-wrap items-center gap-x-4 gap-y-1 text-xs tabular-nums ${NEUTRAL_CLASS}`}
+        className={`flex flex-wrap items-center gap-x-4 gap-y-1 text-xs num ${NEUTRAL_CLASS}`}
       >
         <span>{cluster.mention_count.toLocaleString()} mentions</span>
         <span aria-hidden="true">·</span>
@@ -277,7 +277,7 @@ function EvidenceMixLegend({ mix }: { mix: ClaimCluster['evidence_mix'] }) {
         >
           <span aria-hidden="true" className={`inline-block h-2 w-2 rounded-sm ${SOURCE_KIND_DOT_CLASS[kind]}`} />
           <span className={NEUTRAL_CLASS}>{sourceKindLabel(kind)}</span>
-          <span className="tabular-nums text-fg">{mix[kind]}</span>
+          <span className="num text-fg">{mix[kind]}</span>
         </li>
       ))}
     </ul>

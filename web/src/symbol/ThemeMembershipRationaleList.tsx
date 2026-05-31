@@ -56,7 +56,7 @@ function ThemeMembershipRationaleRow({
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-fg-soft">
         {membership.score === null ? null : (
-          <span className="font-medium tabular-nums text-fg">
+          <span className="font-medium num text-fg">
             {`Score ${formatScore(membership.score)}`}
           </span>
         )}

@@ -148,16 +148,16 @@ function EarningsRow({ event, currency }: { event: EarningsEvent; currency: stri
       <td className="px-2 py-2 text-fg">
         FY{event.fiscal_year} {event.fiscal_period}
       </td>
-      <td className="px-2 py-2 text-muted tabular-nums">
+      <td className="px-2 py-2 text-muted num">
         {event.release_date}
       </td>
-      <td className="px-2 py-2 text-right tabular-nums text-fg">
+      <td className="px-2 py-2 text-right num text-fg">
         {formatEps(event.eps_estimate_at_release, currency)}
       </td>
-      <td className="px-2 py-2 text-right tabular-nums text-fg">
+      <td className="px-2 py-2 text-right num text-fg">
         {formatEps(event.eps_actual, currency)}
       </td>
-      <td className={`px-2 py-2 text-right tabular-nums ${surpriseClass}`}>
+      <td className={`px-2 py-2 text-right num ${surpriseClass}`}>
         {formatSurprise(event.surprise_pct, event.surprise_direction)}
       </td>
     </tr>
@@ -253,7 +253,7 @@ function RatingDistributionBar({
                 className={`inline-block h-2 w-2 rounded-sm ${muted ? 'bg-neutral-300 dark:bg-neutral-700' : RATING_BAR_COLORS[rating]}`}
               />
               <span className="flex-1">{ratingLabel(rating)}</span>
-              <span className="tabular-nums">{count}</span>
+              <span className="num">{count}</span>
             </li>
           )
         })}
@@ -274,7 +274,7 @@ function EstimateRow({ estimate }: { estimate: ConsensusEstimate }) {
       <span className="text-fg-soft">
         {estimate.metric_key.replaceAll('_', ' ')} · FY{estimate.fiscal_year} {estimate.fiscal_period}
       </span>
-      <span className="tabular-nums text-fg">
+      <span className="num text-fg">
         {formatEstimateValue(estimate)}
       </span>
     </li>
@@ -328,8 +328,8 @@ function PriceRow({ label, value, emphasis }: { label: string; value: string; em
       <dd
         className={
           emphasis
-            ? 'text-right font-semibold tabular-nums text-fg'
-            : 'text-right tabular-nums text-fg'
+            ? 'text-right font-semibold num text-fg'
+            : 'text-right num text-fg'
         }
       >
         {value}

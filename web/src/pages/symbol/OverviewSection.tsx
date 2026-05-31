@@ -199,7 +199,7 @@ function PriceSparkline({ bars }: { bars: NormalizedBar[] }) {
         ariaLabel={`30-day price line from ${formatPrice(first)} to ${formatPrice(last)}`}
         trendStrokeClass={trendClass}
       />
-      <div className="flex items-center justify-between text-xs tabular-nums text-muted">
+      <div className="flex items-center justify-between text-xs num text-muted">
         <span>{formatPrice(first)}</span>
         <span>{bars.length} bars</span>
         <span>{formatPrice(last)}</span>
