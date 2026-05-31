@@ -6,7 +6,7 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
 
-import { SettingsView, type LlmEditableSettings } from './SettingsPage.tsx'
+import { SettingsPage, SettingsView, type LlmEditableSettings } from './SettingsPage.tsx'
 
 test('SettingsView renders AI model channels and model selectors', () => {
   const html = renderToString(
@@ -79,6 +79,27 @@ test('SettingsView displays pending and failed diagnostics states', () => {
   assert.match(pending, /Testing/)
   assert.match(failed, /auth_failed: bad key/)
   assert.match(failed, /text-rose/)
+})
+
+test('SettingsPage reports malformed settings responses clearly', async () => {
+  const globals = globalThis as Record<string, unknown>
+  const previousFetch = globals.fetch
+  globals.fetch = async () => new Response('<!doctype html>', {
+    status: 200,
+    headers: { 'content-type': 'text/html' },
+  })
+  const { document, cleanup } = renderIntoDom(<SettingsPage />)
+
+  try {
+    await waitForText(document, 'Settings unavailable')
+
+    const text = document.body.textContent ?? ''
+    assert.match(text, /Malformed LLM settings response/)
+    assert.doesNotMatch(text, /Cannot read properties/)
+  } finally {
+    cleanup()
+    globals.fetch = previousFetch
+  }
 })
 
 function settings(): LlmEditableSettings {
@@ -193,4 +214,14 @@ function labelByText(document: Document, text: string): HTMLLabelElement {
   const label = [...document.querySelectorAll('label')].find((candidate) => candidate.textContent?.includes(text))
   assert.ok(label)
   return label
+}
+
+async function waitForText(document: Document, text: string): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (document.body.textContent?.includes(text)) return
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+  }
+  assert.fail(`Timed out waiting for text: ${text}`)
 }

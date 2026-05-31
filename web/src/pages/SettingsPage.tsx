@@ -32,6 +32,7 @@ type TestChannelResponse =
 type DiscoverModelsResponse =
   | { ok: true; models: string[] }
   | { ok: false; error_code?: string; message?: string; models: [] }
+type LlmSettingsResponse = { version: string; settings: LlmEditableSettings }
 
 export function SettingsPage() {
   const [state, setState] = useState<SettingsState>({ kind: 'loading' })
@@ -39,9 +40,10 @@ export function SettingsPage() {
 
   useEffect(() => {
     let cancelled = false
-    getJson<{ version: string; settings: LlmEditableSettings }>('/v1/dev/llm-settings')
+    getJson<unknown>('/v1/dev/llm-settings')
       .then((body) => {
-        if (!cancelled) setState({ kind: 'ready', version: body.version, settings: normalizeSettings(body.settings) })
+        const parsed = parseLlmSettingsResponse(body)
+        if (!cancelled) setState({ kind: 'ready', version: parsed.version, settings: normalizeSettings(parsed.settings) })
       })
       .catch((error) => {
         if (!cancelled) setState({ kind: 'error', message: errorMessage(error) })
@@ -59,10 +61,10 @@ export function SettingsPage() {
       onSave={async (settings, version) => {
         setBusyAction('save')
         try {
-          const body = await putJson<{ version: string; settings: LlmEditableSettings }>('/v1/dev/llm-settings', {
+          const body = parseLlmSettingsResponse(await putJson<unknown>('/v1/dev/llm-settings', {
             version,
             settings,
-          })
+          }))
           setState({
             kind: 'ready',
             version: body.version,
@@ -297,6 +299,24 @@ function normalizeSettings(settings: LlmEditableSettings): LlmEditableSettings {
     agentModel: settings.agentModel ?? null,
     issues: settings.issues ?? [],
   }
+}
+
+function parseLlmSettingsResponse(body: unknown): LlmSettingsResponse {
+  const record = objectRecord(body)
+  const settings = objectRecord(record?.settings)
+  if (record === null || typeof record.version !== 'string' || settings === null) {
+    throw new Error('Malformed LLM settings response')
+  }
+  return {
+    version: record.version,
+    settings: settings as LlmEditableSettings,
+  }
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
 }
 
 async function getJson<T>(url: string): Promise<T> {
