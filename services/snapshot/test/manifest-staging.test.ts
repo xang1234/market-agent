@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   STAGED_SNAPSHOT_MANIFEST,
   auditManifestToolCallLog,
+  isSnapshotSubjectRef,
   stageSnapshotManifest,
   type SnapshotManifestDraft,
 } from "../src/manifest-staging.ts";
@@ -104,6 +105,36 @@ test("stageSnapshotManifest collects refs from tool-call outputs with audit ids"
     model_version: null,
     parent_snapshot: null,
   } satisfies Omit<SnapshotManifestDraft, "tool_call_result_hashes">);
+});
+
+test("stageSnapshotManifest accepts commodity subject refs for sealed daily-call evidence", () => {
+  const manifest = stageSnapshotManifest({
+    subject_refs: [{ kind: "commodity", id: listingId }],
+    as_of: "2026-04-29T00:00:00Z",
+    basis: "reported",
+    normalization: "raw",
+    tool_calls: [
+      {
+        tool_call_id: firstToolCallId,
+        subject_refs: [{ kind: "contract", id: listingId }],
+        source_ids: [firstSourceId],
+      },
+    ],
+  });
+
+  assert.deepEqual(manifest.subject_refs, [
+    { kind: "commodity", id: listingId },
+    { kind: "contract", id: listingId },
+  ]);
+});
+
+test("snapshot subject ref guard accepts the shared commodity subject vocabulary", () => {
+  assert.equal(isSnapshotSubjectRef({ kind: "commodity", id: listingId }), true);
+  assert.equal(isSnapshotSubjectRef({ kind: "contract", id: listingId }), true);
+  assert.equal(isSnapshotSubjectRef({ kind: "curve", id: listingId }), true);
+  assert.equal(isSnapshotSubjectRef({ kind: "issuer", id: listingId }), true);
+  assert.equal(isSnapshotSubjectRef({ kind: "commodity", id: "LME:CA" }), false);
+  assert.equal(isSnapshotSubjectRef({ kind: "not_a_subject", id: listingId }), false);
 });
 
 test("stageSnapshotManifest rejects referenced manifest content without a valid tool_call_id", () => {

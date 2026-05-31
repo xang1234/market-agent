@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { validateBlock } from './BlockValidator.ts'
-import { ALL_BLOCK_FIXTURES, richTextFixture, sourcesFixture } from './fixtures.ts'
+import { ALL_BLOCK_FIXTURES, dailyCallSummaryFixture, richTextFixture, sourcesFixture } from './fixtures.ts'
 
 test('validateBlock accepts every canonical fixture', () => {
   for (const block of ALL_BLOCK_FIXTURES) {
@@ -10,6 +10,42 @@ test('validateBlock accepts every canonical fixture', () => {
       assert.fail(`fixture ${block.kind} failed validation:\n${JSON.stringify(result.errors, null, 2)}`)
     }
   }
+})
+
+test('validateBlock accepts commodity daily-call summary blocks', () => {
+  const result = validateBlock(dailyCallSummaryFixture)
+  if (!result.valid) {
+    assert.fail(`daily_call_summary failed validation:\n${JSON.stringify(result.errors, null, 2)}`)
+  }
+})
+
+test('validateBlock rejects legacy finance refs inside commodity-only block fields', () => {
+  const result = validateBlock({
+    ...dailyCallSummaryFixture,
+    commodity_refs: [{ kind: 'issuer', id: dailyCallSummaryFixture.commodity_refs[0].id }],
+  })
+  assert.equal(result.valid, false)
+})
+
+test('validateBlock rejects invalid commodity impact vocabulary', () => {
+  const result = validateBlock({
+    id: 'impact-1',
+    kind: 'impact_matrix',
+    snapshot_id: dailyCallSummaryFixture.snapshot_id,
+    data_ref: { kind: 'impact_matrix', id: 'impact-1' },
+    source_refs: dailyCallSummaryFixture.source_refs,
+    as_of: dailyCallSummaryFixture.as_of,
+    rows: [
+      {
+        channel: 'balance_sheet',
+        direction: 'negative',
+        horizon: '1w',
+        confidence: 0.7,
+        summary: 'Legacy equity channel must not validate as a commodity impact channel.',
+      },
+    ],
+  })
+  assert.equal(result.valid, false)
 })
 
 test('validateBlock rejects a block missing the kind discriminator', () => {

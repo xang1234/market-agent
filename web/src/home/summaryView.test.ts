@@ -56,12 +56,12 @@ test('agentSummaryHeadline prefers the latest high-or-critical headline', () => 
     finding_counts: { total: 3, high_or_critical: 1, critical: 1 },
     latest_high_or_critical_finding: {
       finding_id: '11111111-1111-4111-a111-111111111111',
-      headline: 'Critical revenue miss',
+      headline: 'Critical copper disruption',
       severity: 'critical',
       created_at: '2026-05-05T00:00:00.000Z',
     },
   })
-  assert.equal(agentSummaryHeadline(row), 'Critical revenue miss')
+  assert.equal(agentSummaryHeadline(row), 'Critical copper disruption')
 })
 
 test('agentSummaryHeadline falls back to a count when no high-or-critical exists', () => {

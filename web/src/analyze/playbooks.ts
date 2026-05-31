@@ -1,21 +1,20 @@
 import { authenticatedJson, type FetchImpl } from '../http/authFetch.ts'
+import playbookCatalog from '../../../spec/commodities_analyze_playbooks.json' with { type: 'json' }
+import {
+  AnalyzePlaybookCatalogError,
+  parseAnalyzePlaybookCatalog,
+  type AnalyzePlaybook,
+  type AnalyzePlaybookSection,
+} from '../../../spec/commodities_analyze_catalog.ts'
 
-export type AnalyzePlaybookSection = {
-  section_id: string
-  title: string
-  required: boolean
-  block_hint: string
+export {
+  AnalyzePlaybookCatalogError,
+  parseAnalyzePlaybookCatalog,
+  type AnalyzePlaybook,
+  type AnalyzePlaybookSection,
 }
 
-export type AnalyzePlaybook = {
-  playbook_id: string
-  version: number
-  name: string
-  description: string
-  default_instructions: string
-  default_source_categories: ReadonlyArray<string>
-  sections: ReadonlyArray<AnalyzePlaybookSection>
-}
+export const DEFAULT_ANALYZE_PLAYBOOKS: ReadonlyArray<AnalyzePlaybook> = parseAnalyzePlaybookCatalog(playbookCatalog)
 
 export async function fetchAnalyzePlaybooks(input: {
   userId: string

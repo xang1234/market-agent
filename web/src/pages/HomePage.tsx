@@ -95,9 +95,9 @@ export function HomePage() {
   return (
     <div className="flex flex-1 flex-col gap-6 overflow-auto p-8">
       <header>
-        <h1 className="text-2xl font-semibold">Home</h1>
+        <h1 className="text-2xl font-semibold">Morning Call Board</h1>
         <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-          Cross-agent findings, market pulse, watchlist movers, agent summaries, pinned screens.
+          Copper and iron ore drivers, price and curve moves, material alerts, watch items, and published call artifacts.
         </p>
       </header>
       {webDevFlags.showDevBanner ? (
@@ -151,9 +151,9 @@ export function UserHomeView({ state }: { state: LoadState }) {
 
 function SignInHint() {
   return (
-    <Section title="Sign in to load Home">
+    <Section title="Sign in to load Morning Call Board">
       <p className="text-sm text-neutral-500 dark:text-neutral-400">
-        Home loads cross-agent findings and market sections for the signed-in user.
+        Morning Call Board loads desk-specific drivers, market sections, and daily-call drafts for the signed-in user.
       </p>
     </Section>
   )
@@ -161,15 +161,15 @@ function SignInHint() {
 
 function LoadingHint() {
   return (
-    <Section title="Loading Home...">
-      <p className="text-sm text-neutral-500 dark:text-neutral-400">Fetching your latest findings and market sections.</p>
+    <Section title="Loading Morning Call Board...">
+      <p className="text-sm text-neutral-500 dark:text-neutral-400">Fetching copper, iron ore, and specialist-agent sections.</p>
     </Section>
   )
 }
 
 function ErrorHint({ message }: { message: string }) {
   return (
-    <Section title="Home is unavailable">
+    <Section title="Morning Call Board is unavailable">
       <p className="text-sm text-rose-600 dark:text-rose-300">{message}</p>
     </Section>
   )
@@ -189,9 +189,9 @@ function SummaryView({ summary }: { summary: HomeSummary }) {
 
 function FindingsSection({ cards }: { cards: ReadonlyArray<HomeFindingCardSummary> }) {
   return (
-    <Section title="Findings">
+    <Section title="Driver findings">
       {cards.length === 0 ? (
-        <EmptyHint>No findings yet from your active agents.</EmptyHint>
+        <EmptyHint>No copper or iron ore driver findings yet from your active agents.</EmptyHint>
       ) : (
         <ul className="flex flex-col gap-2">
           {cards.map((card) => (
@@ -235,9 +235,9 @@ function MarketPulseSection({
   omittedCount: number
 }) {
   return (
-    <Section title="Market pulse">
+    <Section title="Copper and iron ore pulse">
       {rows.length === 0 ? (
-        <EmptyHint>Market pulse is not configured for this environment.</EmptyHint>
+        <EmptyHint>Copper and iron ore pulse is not configured for this environment.</EmptyHint>
       ) : (
         <ul className="grid grid-cols-2 gap-3 md:grid-cols-3">
           {rows.map((row) => (
@@ -254,9 +254,9 @@ function MarketPulseSection({
 
 function WatchlistMoversSection({ movers }: { movers: HomeWatchlistMovers }) {
   return (
-    <Section title="Watchlist movers">
+    <Section title="Watched market movers">
       <WatchlistMoversBody movers={movers} />
-      {movers.omitted.length > 0 ? <FootnoteHint>{movers.omitted.length} listings had no quote.</FootnoteHint> : null}
+      {movers.omitted.length > 0 ? <FootnoteHint>{movers.omitted.length} subjects had no quote.</FootnoteHint> : null}
     </Section>
   )
 }
@@ -264,7 +264,7 @@ function WatchlistMoversSection({ movers }: { movers: HomeWatchlistMovers }) {
 function WatchlistMoversBody({ movers }: { movers: HomeWatchlistMovers }) {
   const empty = watchlistMoversEmptyState(movers.reason)
   if (empty !== null) return <EmptyHint>{empty}</EmptyHint>
-  if (movers.rows.length === 0) return <EmptyHint>No quotable listings in your watchlist.</EmptyHint>
+  if (movers.rows.length === 0) return <EmptyHint>No quotable market subjects in your watchlist.</EmptyHint>
   return (
     <ul className="flex flex-col gap-2">
       {movers.rows.map((row) => (
@@ -309,7 +309,7 @@ function AgentSummariesSection({
   windowHours: number
 }) {
   return (
-    <Section title="Agent summaries" subtitle={`Last ${windowHours}h`}>
+    <Section title="Specialist agents" subtitle={`Last ${windowHours}h`}>
       {rows.length === 0 ? (
         <EmptyHint>No agents enabled for this user.</EmptyHint>
       ) : (
@@ -334,7 +334,7 @@ function AgentSummariesSection({
 
 function SavedScreensSection({ rows }: { rows: ReadonlyArray<HomeSavedScreenRow> }) {
   return (
-    <Section title="Pinned screens">
+    <Section title="Saved market screens">
       {rows.length === 0 ? (
         <EmptyHint>No saved screens yet.</EmptyHint>
       ) : (

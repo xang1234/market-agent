@@ -29,6 +29,20 @@ export type ResearchEvidenceBlockKind = (typeof RESEARCH_EVIDENCE_BLOCK_KINDS)[n
 export const TRUST_PROVENANCE_BLOCK_KINDS = ['sources', 'disclosure'] as const
 export type TrustProvenanceBlockKind = (typeof TRUST_PROVENANCE_BLOCK_KINDS)[number]
 
+export const COMMODITIES_BLOCK_KINDS = [
+  'daily_call_summary',
+  'driver_board',
+  'curve_chart',
+  'spread_table',
+  'inventory_bridge',
+  'impact_matrix',
+  'report_delta',
+  'watch_item_table',
+  'forecast_vs_market',
+  'source_pack',
+] as const
+export type CommoditiesBlockKind = (typeof COMMODITIES_BLOCK_KINDS)[number]
+
 export const FINDING_SEVERITIES = ['low', 'medium', 'high', 'critical'] as const
 export type FindingSeverity = (typeof FINDING_SEVERITIES)[number]
 
@@ -302,6 +316,105 @@ export type DisclosureBlock = BaseBlock & {
 
 export type TrustProvenanceBlock = SourcesBlock | DisclosureBlock
 
+export type DailyCallSummaryBlock = BaseBlock & {
+  kind: 'daily_call_summary'
+  commodity_refs: ReadonlyArray<SubjectRef & { kind: 'commodity' }>
+  horizons: ReadonlyArray<'1d' | '1w' | '1m' | '3m'>
+  narrative: string
+  confidence: number
+}
+
+export const COMMODITY_IMPACT_CHANNELS = [
+  'supply',
+  'demand',
+  'inventory',
+  'curve_structure',
+  'freight',
+  'policy',
+  'macro_fx',
+  'weather',
+  'disruption',
+] as const
+export type CommodityImpactChannel = (typeof COMMODITY_IMPACT_CHANNELS)[number]
+
+export const COMMODITY_IMPACT_DIRECTIONS = ['positive', 'negative', 'mixed', 'unknown'] as const
+export type CommodityImpactDirection = (typeof COMMODITY_IMPACT_DIRECTIONS)[number]
+
+export type DecisionHorizon = '1d' | '1w' | '1m' | '3m'
+
+export type DriverBoardBlock = BaseBlock & {
+  kind: 'driver_board'
+  drivers: ReadonlyArray<{
+    driver_id: string
+    channel: CommodityImpactChannel
+    direction: CommodityImpactDirection
+    horizon: DecisionHorizon
+    summary: string
+    confidence: number
+  }>
+}
+
+export type CurveChartBlock = BaseBlock & {
+  kind: 'curve_chart'
+  curve_ref: SubjectRef & { kind: 'curve' }
+  points: ReadonlyArray<{ tenor: string; price: number }>
+  currency: string
+  unit: string
+}
+
+export type SpreadTableBlock = BaseBlock & {
+  kind: 'spread_table'
+  spreads: ReadonlyArray<{ label: string; value: number; currency: string; unit: string }>
+}
+
+export type InventoryBridgeBlock = BaseBlock & {
+  kind: 'inventory_bridge'
+  rows: ReadonlyArray<{ label: string; value: number; delta?: number; unit: string }>
+}
+
+export type ImpactMatrixBlock = BaseBlock & {
+  kind: 'impact_matrix'
+  rows: ReadonlyArray<{
+    channel: CommodityImpactChannel
+    direction: CommodityImpactDirection
+    horizon: DecisionHorizon
+    confidence: number
+    summary: string
+  }>
+}
+
+export type ReportDeltaBlock = BaseBlock & {
+  kind: 'report_delta'
+  deltas: ReadonlyArray<{ source_id: string; summary: string; horizon: DecisionHorizon; confidence: number }>
+}
+
+export type WatchItemTableBlock = BaseBlock & {
+  kind: 'watch_item_table'
+  items: ReadonlyArray<{ label: string; trigger: string; horizon: DecisionHorizon }>
+}
+
+export type ForecastVsMarketBlock = BaseBlock & {
+  kind: 'forecast_vs_market'
+  rows: ReadonlyArray<{ label: string; market_ref: string; forecast_ref: string; gap_ref?: string }>
+}
+
+export type SourcePackBlock = BaseBlock & {
+  kind: 'source_pack'
+  sources: ReadonlyArray<SourceItem & { entitlement?: string }>
+}
+
+export type CommoditiesBlock =
+  | DailyCallSummaryBlock
+  | DriverBoardBlock
+  | CurveChartBlock
+  | SpreadTableBlock
+  | InventoryBridgeBlock
+  | ImpactMatrixBlock
+  | ReportDeltaBlock
+  | WatchItemTableBlock
+  | ForecastVsMarketBlock
+  | SourcePackBlock
+
 // Open variant lets Section.children carry kinds whose typed shape
 // ships later. Narrow this once the full catalog is unioned.
 export type Block =
@@ -309,4 +422,5 @@ export type Block =
   | ChartComparisonBlock
   | ResearchEvidenceBlock
   | TrustProvenanceBlock
+  | CommoditiesBlock
   | (BaseBlock & { kind: string })

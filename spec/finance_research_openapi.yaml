@@ -95,17 +95,18 @@ paths:
                     $ref: '#/components/schemas/ResolvedSubject'
         '404':
           description: Subject reference does not exist
-  /v1/market/quote:
+  /v1/markets/latest:
     get:
       tags: [Market]
-      summary: Get latest quote for a subject
-      operationId: getQuote
+      summary: Get latest normalized commodity benchmark or contract price
+      operationId: getCommodityLatest
       parameters:
         - in: query
           name: subject_kind
           required: true
           schema:
-            $ref: '#/components/schemas/SubjectKind'
+            type: string
+            enum: [benchmark, contract]
         - in: query
           name: subject_id
           required: true
@@ -114,16 +115,103 @@ paths:
             format: uuid
       responses:
         '200':
-          description: Latest quote facts
+          description: Latest commodity quote with unit, currency, freshness, grade, location, delivery month, and incoterm
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/FactListResponse'
+                type: object
+                additionalProperties: true
+  /v1/markets/series:
+    get:
+      tags: [Market]
+      summary: Get normalized commodity market series
+      operationId: getCommoditySeries
+      parameters:
+        - in: query
+          name: subject_kind
+          required: true
+          schema:
+            type: string
+            enum: [benchmark, contract]
+        - in: query
+          name: subject_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Commodity series response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/markets/curve:
+    get:
+      tags: [Market]
+      summary: Get normalized commodity curve
+      operationId: getCommodityCurve
+      parameters:
+        - in: query
+          name: curve_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Commodity curve response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/markets/spreads:
+    get:
+      tags: [Market]
+      summary: Get configured commodity spreads
+      operationId: getCommoditySpreads
+      parameters:
+        - in: query
+          name: curve_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Commodity spread response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/markets/inventory:
+    get:
+      tags: [Market]
+      summary: Get commodity inventory series
+      operationId: getCommodityInventory
+      parameters:
+        - in: query
+          name: commodity_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Commodity inventory response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /v1/market/series:
     post:
       tags: [Market]
-      summary: Get a normalized time series
-      operationId: getSeries
+      summary: Get a normalized legacy listing time series
+      operationId: getLegacyListingSeries
       requestBody:
         required: true
         content:
@@ -137,6 +225,144 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SeriesResponse'
+  /v1/balances/snapshot:
+    get:
+      tags: [Market]
+      summary: Get supply-demand balance snapshot
+      operationId: getBalanceSnapshot
+      responses:
+        '200':
+          description: Balance snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/balances/changes:
+    get:
+      tags: [Market]
+      summary: Get material balance changes
+      operationId: getBalanceChanges
+      responses:
+        '200':
+          description: Balance changes
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/impact/events:
+    get:
+      tags: [Evidence]
+      summary: Get commodity market events
+      operationId: getImpactEvents
+      responses:
+        '200':
+          description: Impact events
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/impact/drivers:
+    get:
+      tags: [Evidence]
+      summary: Get ranked event-impact drivers
+      operationId: getImpactDrivers
+      responses:
+        '200':
+          description: Impact drivers
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/impact/graph:
+    get:
+      tags: [Evidence]
+      summary: Get event-impact graph
+      operationId: getImpactGraph
+      responses:
+        '200':
+          description: Event-impact graph
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/briefs/daily:
+    get:
+      tags: [Analyze]
+      summary: Get or draft the daily commodities call
+      operationId: getDailyBrief
+      responses:
+        '200':
+          description: Daily call brief
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/briefs/{briefId}:
+    get:
+      tags: [Analyze]
+      summary: Get daily call brief by id
+      operationId: getBrief
+      parameters:
+        - in: path
+          name: briefId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Brief detail
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/briefs/{briefId}/publish:
+    post:
+      tags: [Analyze]
+      summary: Publish a signed-off daily call brief
+      operationId: publishBrief
+      parameters:
+        - in: path
+          name: briefId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Published brief
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /v1/briefs/{briefId}/outcomes:
+    get:
+      tags: [Analyze]
+      summary: Get outcome tracking for a published daily call
+      operationId: getBriefOutcomes
+      parameters:
+        - in: path
+          name: briefId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Brief outcomes
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /v1/market/cache-audit:
     get:
       tags: [Market]
@@ -1856,8 +2082,8 @@ components:
   schemas:
     SubjectKind:
       type: string
-      description: Canonical subject discriminator. Ticker is a listing locator, not canonical identity.
-      enum: [issuer, instrument, listing, theme, macro_topic, portfolio, screen]
+      description: Canonical subject discriminator. Commodity public contracts use commodities market-stack subjects; legacy finance subjects remain readable during migration.
+      enum: [commodity, benchmark, contract, curve, region, delivery_point, asset, producer, route, market_theme, portfolio, screen, issuer, instrument, listing, theme, macro_topic]
     SubjectRef:
       $ref: './finance_research_block_schema.json#/$defs/SubjectRef'
     ThemeMembershipRationale:
@@ -2297,7 +2523,7 @@ components:
           type: boolean
         block_hint:
           type: string
-          enum: [rich_text, metric_row, table, line_chart, section]
+          enum: [rich_text, metric_row, table, line_chart, section, daily_call_summary, driver_board, curve_chart, spread_table, inventory_bridge, impact_matrix, report_delta, watch_item_table, forecast_vs_market]
     AnalyzePlaybook:
       type: object
       required:

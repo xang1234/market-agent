@@ -204,16 +204,16 @@ test("toolsForAudience separates reader-only tools from analyst tools inside sha
 
   const analystTools = toolsForAudience({
     registry,
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "analyst",
   });
   const readerTools = toolsForAudience({
     registry,
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "reader",
   });
 
-  assert.equal(analystTools.some((tool) => tool.name === "get_claims"), true);
+  assert.equal(analystTools.some((tool) => tool.name === "get_report_deltas"), true);
   assert.equal(
     analystTools.some((tool) => tool.name === "fetch_raw_document"),
     false,
@@ -228,17 +228,17 @@ test("authorizeToolCall allows analyst calls to analyst tools in the selected bu
 
   const authorization = authorizeToolCall({
     registry,
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "analyst",
-    tool_name: "get_claims",
+    tool_name: "get_report_deltas",
     arguments: {
       subject_refs: [],
-      predicates: { event_type: "earnings" },
+      since: "2026-05-31T00:00:00.000Z",
     },
   });
 
   assert.equal(authorization.ok, true);
-  assert.equal(authorization.tool.name, "get_claims");
+  assert.equal(authorization.tool.name, "get_report_deltas");
 });
 
 test("authorizeToolCall rejects analyst calls to reader-only tools", () => {
@@ -246,7 +246,7 @@ test("authorizeToolCall rejects analyst calls to reader-only tools", () => {
 
   const authorization = authorizeToolCall({
     registry,
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "analyst",
     tool_name: "fetch_raw_document",
     arguments: {
@@ -258,7 +258,7 @@ test("authorizeToolCall rejects analyst calls to reader-only tools", () => {
     ok: false,
     reason: "audience_mismatch",
     tool_name: "fetch_raw_document",
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "analyst",
     tool_audience: "reader",
     message:
@@ -271,11 +271,11 @@ test("authorizeToolCall rejects analyst calls that carry raw_blob_url", () => {
 
   const authorization = authorizeToolCall({
     registry,
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "analyst",
-    tool_name: "get_claims",
+    tool_name: "get_report_deltas",
     arguments: {
-      raw_blob_url: "s3://raw-filings/aapl-10q.html",
+      raw_blob_url: "s3://raw-reports/copper-weekly.pdf",
     },
   });
 
@@ -283,7 +283,7 @@ test("authorizeToolCall rejects analyst calls that carry raw_blob_url", () => {
     ok: false,
     reason: "raw_document_payload",
     audience: "analyst",
-    tool_name: "get_claims",
+    tool_name: "get_report_deltas",
     path: "arguments.raw_blob_url",
     field: "raw_blob_url",
     message:
@@ -296,14 +296,14 @@ test("authorizeToolResult rejects raw document handles before analyst delivery",
 
   const authorization = authorizeToolResult({
     registry,
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "analyst",
-    tool_name: "get_evidence_bundle",
+    tool_name: "get_report_deltas",
     result: {
       documents: [
         {
           document_id: "70a0cc2e-e198-4b59-a5c9-9bd2da4a359b",
-          raw_blob_url: "s3://raw-filings/aapl-10q.html",
+          raw_blob_url: "s3://raw-reports/copper-weekly.pdf",
         },
       ],
     },
@@ -313,7 +313,7 @@ test("authorizeToolResult rejects raw document handles before analyst delivery",
     ok: false,
     reason: "raw_document_payload",
     audience: "analyst",
-    tool_name: "get_evidence_bundle",
+    tool_name: "get_report_deltas",
     path: "result.documents[0].raw_blob_url",
     field: "raw_blob_url",
     message:
@@ -326,14 +326,14 @@ test("authorizeToolResult allows reader results to carry raw document handles", 
 
   const authorization = authorizeToolResult({
     registry,
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "reader",
     tool_name: "fetch_raw_document",
     result: {
       document: {
         document_id: "70a0cc2e-e198-4b59-a5c9-9bd2da4a359b",
       },
-      raw_blob_url: "s3://raw-filings/aapl-10q.html",
+      raw_blob_url: "s3://raw-reports/copper-weekly.pdf",
     },
   });
 

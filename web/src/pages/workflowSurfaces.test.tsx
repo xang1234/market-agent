@@ -64,7 +64,7 @@ test('Analyze playbooks and inspectable evidence controls are present in workflo
     </ThemeProvider>,
   )
 
-  assert.match(html, /Finance Research/)
+  assert.match(html, /Commodities Intelligence/)
   assert.doesNotMatch(html, /raw provider payload/i)
 })
 
@@ -265,7 +265,7 @@ test('Chat user turns are posted to durable thread messages before streaming', a
       userId: USER_ID,
       messageId: 'message-user',
       snapshotId: SNAPSHOT_ID,
-      content: 'Review margins',
+      content: 'Review copper disruptions',
     })
 
     assert.equal(message.message_id, 'message-user')
@@ -275,7 +275,7 @@ test('Chat user turns are posted to durable thread messages before streaming', a
     assert.deepEqual(JSON.parse(String(calls[0].init?.body)), {
       message_id: 'message-user',
       snapshot_id: SNAPSHOT_ID,
-      content: 'Review margins',
+      content: 'Review copper disruptions',
     })
   } finally {
     globalThis.fetch = originalFetch
@@ -290,7 +290,7 @@ test('Chat stream URL carries dev identity and refreshes history after completio
     threadId: 'thread-123',
     runId: 'run-1',
     turnId: 'message-user',
-    userIntent: 'Review margins',
+    userIntent: 'Review copper disruptions',
     userId: USER_ID,
   }, {
     onEvent: (event) => events.push(event),
@@ -309,7 +309,7 @@ test('Chat stream URL carries dev identity and refreshes history after completio
 
   assert.equal(source, eventSources[0] as unknown as EventSource)
   assert.match(eventSources[0].url, /user_id=00000000-0000-4000-8000-000000000001/)
-  assert.match(eventSources[0].url, /user_intent=Review\+margins/)
+  assert.match(eventSources[0].url, /user_intent=Review\+copper\+disruptions/)
   assert.match(eventSources[0].url, /turn_id=message-user/)
 
   eventSources[0].emit('turn.completed', {
@@ -335,7 +335,7 @@ test('Chat stream reports server-signaled turn errors to retry callbacks', () =>
     threadId: 'thread-123',
     runId: 'run-1',
     turnId: 'message-user',
-    userIntent: 'Review margins',
+    userIntent: 'Review copper disruptions',
     userId: USER_ID,
   }, {
     onEvent: (event) => events.push(event),
@@ -366,7 +366,7 @@ test('Chat stream reports server-signaled turn errors to retry callbacks', () =>
   assert.equal(eventSources[0].closed, true)
 })
 
-test('Analyze surface renders template controls, source controls, memo canvas, and Add to chat action', () => {
+test('Analyze surface renders template controls, source controls, brief canvas, and Add to chat action', () => {
   const html = renderWithAuth(
     <MemoryRouter initialEntries={['/analyze']}>
       <Routes>
@@ -380,9 +380,9 @@ test('Analyze surface renders template controls, source controls, memo canvas, a
   assert.match(html, /Sections/)
   assert.match(html, /Instructions/)
   assert.match(html, /Source controls/)
-  assert.match(html, /issuer_ir/)
-  assert.match(html, /Memo canvas/)
-  assert.match(html, /Generate memo/)
+  assert.match(html, /licensed_reports/)
+  assert.match(html, /Brief canvas/)
+  assert.match(html, /Generate draft/)
   assert.match(html, /Add to chat/)
   assert.doesNotMatch(html, /ships with P4\.2/i)
 })
@@ -396,7 +396,7 @@ test('Analyze Add-to-chat shares run blocks through the durable artifact endpoin
       return new Response(JSON.stringify({
         thread: {
           thread_id: 'thread-123',
-          title: 'Earnings quality - Research memo',
+          title: 'Daily copper call - Research brief',
           updated_at: '2026-05-06T00:00:00.000Z',
         },
       }), { status: 201, headers: { 'content-type': 'application/json' } })
@@ -405,15 +405,10 @@ test('Analyze Add-to-chat shares run blocks through the durable artifact endpoin
     const result = await shareAnalyzeRunToChat({
       userId: USER_ID,
       sourceKind: 'memo',
-      title: 'Earnings quality - Research memo',
+      title: 'Daily copper call - Research brief',
       primarySubjectRef: null,
       run: {
         run_id: 'run-123',
-        template_id: 'earnings-quality',
-        template_version: 1,
-        snapshot_id: SNAPSHOT_ID,
-        blocks: [IMPORTED_MEMO_BLOCK],
-        created_at: '2026-05-06T00:00:00.000Z',
       },
     })
 
@@ -424,7 +419,7 @@ test('Analyze Add-to-chat shares run blocks through the durable artifact endpoin
     assert.equal((calls[0].init?.headers as Record<string, string>)['x-user-id'], USER_ID)
     assert.deepEqual(JSON.parse(String(calls[0].init?.body)), {
       source_kind: 'memo',
-      title: 'Earnings quality - Research memo',
+      title: 'Daily copper call - Research brief',
       primary_subject_ref: null,
     })
   } finally {
@@ -438,8 +433,8 @@ test('Agents surface renders CRUD controls, run history, and activity status', (
   assert.match(html, /Create agent/)
   assert.match(html, /Universe/)
   assert.match(html, /Alert rule/)
-  assert.match(html, /issuer: 99999999-9999-4999-8999-999999999999/)
-  assert.match(html, /critical\+ headline contains margin/)
+  assert.match(html, /commodity: 99999999-9999-4999-8999-999999999999/)
+  assert.match(html, /critical\+ headline contains disruption/)
   assert.match(html, /Disable/)
   assert.match(html, /Delete/)
   assert.match(html, /Run history/)
@@ -463,11 +458,11 @@ test('Agents surface loads selected agent findings and activity routes', async (
           agents: [
             {
               agent_id: '11111111-1111-4111-8111-111111111111',
-              name: 'Evidence monitor',
-              thesis: 'Track source-backed evidence',
+              name: 'Copper evidence monitor',
+              thesis: 'Track source-backed copper drivers',
               cadence: 'daily',
               enabled: true,
-              universe: { mode: 'static', subject_refs: [{ kind: 'issuer', id: '22222222-2222-4222-8222-222222222222' }] },
+              universe: { mode: 'static', subject_refs: [{ kind: 'commodity', id: '22222222-2222-4222-8222-222222222222' }] },
               alert_rules: [],
               updated_at: '2026-05-06T00:00:00.000Z',
             },
@@ -482,9 +477,9 @@ test('Agents surface loads selected agent findings and activity routes', async (
               finding_id: '44444444-4444-4444-8444-444444444444',
               agent_id: '11111111-1111-4111-8111-111111111111',
               snapshot_id: SNAPSHOT_ID,
-              headline: 'Operating margin quality improved',
+              headline: 'Copper disruption risk increased',
               severity: 'medium',
-              subject_refs: [{ kind: 'issuer', id: '22222222-2222-4222-8222-222222222222' }],
+              subject_refs: [{ kind: 'commodity', id: '22222222-2222-4222-8222-222222222222' }],
               summary_blocks: [],
               created_at: '2026-05-06T00:00:00.000Z',
             },
@@ -498,7 +493,7 @@ test('Agents surface loads selected agent findings and activity routes', async (
               run_activity_id: '33333333-3333-4333-8333-333333333333',
               agent_id: '11111111-1111-4111-8111-111111111111',
               stage: 'found',
-              subject_refs: [{ kind: 'issuer', id: '22222222-2222-4222-8222-222222222222' }],
+              subject_refs: [{ kind: 'commodity', id: '22222222-2222-4222-8222-222222222222' }],
               source_refs: ['66666666-6666-4666-8666-666666666666'],
               summary: 'Created 1 source-backed finding.',
               ts: '2026-05-06T00:00:00.000Z',
@@ -520,7 +515,7 @@ test('Agents surface loads selected agent findings and activity routes', async (
       '/v1/agents/11111111-1111-4111-8111-111111111111/findings',
       '/v1/agents/11111111-1111-4111-8111-111111111111/activity',
     ])
-    assert.match(dom.window.document.body.innerHTML, /Operating margin quality improved/)
+    assert.match(dom.window.document.body.innerHTML, /Copper disruption risk increased/)
     assert.match(dom.window.document.body.innerHTML, /Created 1 source-backed finding/)
     await act(async () => root.unmount())
   } finally {
@@ -535,9 +530,9 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     thesis: 'Alert on any high severity finding',
     cadence: 'daily',
     universeMode: 'static',
-    staticSubjectRefsText: 'issuer:11111111-1111-4111-8111-111111111111\nlisting: 22222222-2222-4222-8222-222222222222',
+    staticSubjectRefsText: 'commodity:11111111-1111-4111-8111-111111111111\ncontract: 22222222-2222-4222-8222-222222222222',
     dynamicUniverseId: '',
-    subjectKind: 'issuer',
+    subjectKind: 'commodity',
     subjectId: '11111111-1111-4111-8111-111111111111',
     alertRuleId: 'any-high',
     alertSeverity: 'high',
@@ -554,8 +549,8 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     universe: {
       mode: 'static',
       subject_refs: [
-        { kind: 'issuer', id: '11111111-1111-4111-8111-111111111111' },
-        { kind: 'listing', id: '22222222-2222-4222-8222-222222222222' },
+        { kind: 'commodity', id: '11111111-1111-4111-8111-111111111111' },
+        { kind: 'contract', id: '22222222-2222-4222-8222-222222222222' },
       ],
     },
     alert_rules: [
@@ -568,32 +563,32 @@ test('Agents create/edit payloads include selected universe and alert rule polic
   })
 
   assert.deepEqual(buildAgentPayload({
-    name: ' Margin monitor ',
-    thesis: ' Watch supplier margin risk ',
+    name: ' Disruption monitor ',
+    thesis: ' Watch copper disruption risk ',
     cadence: 'hourly',
     universeMode: 'theme',
     staticSubjectRefsText: '',
     dynamicUniverseId: ' 33333333-3333-4333-8333-333333333333 ',
-    subjectKind: 'issuer',
+    subjectKind: 'commodity',
     subjectId: ' 11111111-1111-4111-8111-111111111111 ',
-    alertRuleId: ' margin-risk ',
+    alertRuleId: ' disruption-risk ',
     alertSeverity: 'high',
-    alertHeadline: ' margin ',
+    alertHeadline: ' disruption ',
     alertEmail: true,
     alertWebPush: true,
     alertSms: true,
     alertMobilePush: true,
     alertDigest: false,
   }), {
-    name: 'Margin monitor',
-    thesis: 'Watch supplier margin risk',
+    name: 'Disruption monitor',
+    thesis: 'Watch copper disruption risk',
     cadence: 'hourly',
     universe: { mode: 'theme', theme_id: '33333333-3333-4333-8333-333333333333' },
     alert_rules: [
       {
-        rule_id: 'margin-risk',
+        rule_id: 'disruption-risk',
         severity_at_least: 'high',
-        headline_contains: 'margin',
+        headline_contains: 'disruption',
         channels: ['email', 'web_push', 'sms', 'mobile_push'],
       },
     ],
@@ -601,12 +596,12 @@ test('Agents create/edit payloads include selected universe and alert rule polic
 
   assert.deepEqual(buildAgentPayload({
     name: 'No-alert monitor',
-    thesis: 'Track guidance',
+    thesis: 'Track report deltas',
     cadence: 'weekly',
     universeMode: 'portfolio',
     staticSubjectRefsText: '',
     dynamicUniverseId: '44444444-4444-4444-8444-444444444444',
-    subjectKind: 'theme',
+    subjectKind: 'market_theme',
     subjectId: 'quality',
     alertRuleId: '',
     alertSeverity: 'medium',
@@ -618,7 +613,7 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     alertDigest: false,
   }), {
     name: 'No-alert monitor',
-    thesis: 'Track guidance',
+    thesis: 'Track report deltas',
     cadence: 'weekly',
     universe: { mode: 'portfolio', portfolio_id: '44444444-4444-4444-8444-444444444444' },
     alert_rules: [],
@@ -626,8 +621,8 @@ test('Agents create/edit payloads include selected universe and alert rule polic
 
   const screenUniverse = { mode: 'screen', screen_id: '55555555-5555-4555-8555-555555555555' } as const
   const multipleRules = [
-    { rule_id: 'margin-risk', severity_at_least: 'high', headline_contains: 'margin' },
-    { rule_id: 'cash-risk', severity_at_least: 'medium', headline_contains: 'cash' },
+    { rule_id: 'disruption-risk', severity_at_least: 'high', headline_contains: 'disruption' },
+    { rule_id: 'inventory-risk', severity_at_least: 'medium', headline_contains: 'inventory' },
   ] as const
   assert.deepEqual(buildAgentPayload({
     name: ' Existing screen monitor ',
@@ -636,7 +631,7 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     universeMode: 'agent',
     staticSubjectRefsText: '',
     dynamicUniverseId: '66666666-6666-4666-8666-666666666666',
-    subjectKind: 'issuer',
+    subjectKind: 'commodity',
     subjectId: '',
     alertRuleId: '',
     alertSeverity: 'high',
@@ -668,9 +663,9 @@ test('Agents create/edit payloads include selected universe and alert rule polic
     thesis: ' Preserve unsupported single rule ',
     cadence: 'daily',
     universeMode: 'static',
-    staticSubjectRefsText: 'issuer:33333333-3333-4333-8333-333333333333',
+    staticSubjectRefsText: 'commodity:33333333-3333-4333-8333-333333333333',
     dynamicUniverseId: '',
-    subjectKind: 'issuer',
+    subjectKind: 'commodity',
     subjectId: '',
     alertRuleId: 'replacement',
     alertSeverity: 'medium',
@@ -699,7 +694,7 @@ test('Agents create/edit payloads include selected universe and alert rule polic
       universeMode: 'theme',
       staticSubjectRefsText: '',
       dynamicUniverseId: 'theme-123',
-      subjectKind: 'issuer',
+      subjectKind: 'commodity',
       subjectId: '',
       alertRuleId: '',
       alertSeverity: 'medium',
@@ -719,9 +714,9 @@ test('Agents create/edit payloads include selected universe and alert rule polic
       thesis: 'Reject partial static universe',
       cadence: 'daily',
       universeMode: 'static',
-      staticSubjectRefsText: 'issuer:33333333-3333-4333-8333-333333333333\nlisting:AAPL',
+      staticSubjectRefsText: 'commodity:33333333-3333-4333-8333-333333333333\ncontract:LME',
       dynamicUniverseId: '',
-      subjectKind: 'issuer',
+      subjectKind: 'commodity',
       subjectId: '',
       alertRuleId: '',
       alertSeverity: 'medium',

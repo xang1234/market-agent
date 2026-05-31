@@ -53,9 +53,9 @@ function validInput(overrides: Partial<GenerateFindingInput> = {}): GenerateFind
       source_ids: [SOURCE_ID],
       as_of: CREATED_AT,
     },
-    subject_refs: [{ kind: "issuer", id: SUBJECT_ID }],
+    subject_refs: [{ kind: "commodity", id: SUBJECT_ID }],
     claim_cluster_ids: [CLAIM_CLUSTER_ID],
-    headline: "Primary evidence supports near-term demand impact",
+    headline: "Primary evidence supports 1d demand impact",
     severity_input: {
       evidence: {
         trust_tier: "primary",
@@ -65,7 +65,7 @@ function validInput(overrides: Partial<GenerateFindingInput> = {}): GenerateFind
       impact: {
         direction: "positive",
         channel: "demand",
-        horizon: "near_term",
+        horizon: "1d",
         confidence: 0.9,
       },
       thesis_relevance: 0.8,
@@ -127,13 +127,13 @@ test("generateFinding can generate the persisted headline from snapshot and clai
     db,
     validInput({
       headline: undefined,
-      headline_model: async () => "Apple Demand Improves in China",
-      headline_claim: "Apple demand improved in China after channel checks.",
+      headline_model: async () => "Copper Demand Improves in China",
+      headline_claim: "Copper demand improved in China after channel checks.",
     } as Partial<GenerateFindingInput>),
   );
 
-  assert.equal(row.headline, "Apple Demand Improves in China");
-  assert.equal(queries[0].values?.[6], "Apple Demand Improves in China");
+  assert.equal(row.headline, "Copper Demand Improves in China");
+  assert.equal(queries[0].values?.[6], "Copper Demand Improves in China");
 });
 
 test("generateFinding treats blank headline as missing when generation inputs are provided", async () => {

@@ -10,7 +10,7 @@ import { loadToolRegistry, type ToolDefinition } from "../src/registry.ts";
 test("createTurnToolPolicy selects each registered bundle with a default budget", () => {
   const registry = loadToolRegistry();
 
-  assert.equal(registry.bundleIds().length, 14);
+  assert.equal(registry.bundleIds().length, 8);
   for (const bundle_id of registry.bundleIds()) {
     const policy = createTurnToolPolicy({
       registry,
@@ -35,48 +35,48 @@ test("createTurnToolPolicy forwards prompt prefix context into bundle selection"
   const policy = createTurnToolPolicy({
     registry,
     audience: "analyst",
-    classification: { bundle_id: "document_research" },
-    response_schema: { schema_id: "finance_research_blocks/v1" },
-    few_shots: [{ name: "document_example", content: "Use structured evidence only." }],
-    thread_summary: "Researching supplier risk.",
+    classification: { bundle_id: "event_impact_analysis" },
+    response_schema: { schema_id: "commodities_research_blocks/v1" },
+    few_shots: [{ name: "impact_example", content: "Map drivers to channel and horizon." }],
+    thread_summary: "Preparing the copper morning call.",
     resolved_context: {
-      subjects: [{ kind: "listing", id: "00000000-0000-4000-8000-000000000001" }],
+      subjects: [{ kind: "commodity", id: "00000000-0000-4000-8000-000000000001" }],
     },
-    user_turn: "What changed in the latest filing?",
+    user_turn: "What changed in the latest port disruption?",
   });
 
   assert.equal(policy.ok, true);
-  assert.equal(policy.selection.prompt_cache_prefix.user_turn, "What changed in the latest filing?");
+  assert.equal(policy.selection.prompt_cache_prefix.user_turn, "What changed in the latest port disruption?");
   assert.equal(
     policy.selection.prompt_cache_prefix.messages.some((message) =>
-      message.content.includes("Researching supplier risk"),
+      message.content.includes("Preparing the copper morning call"),
     ),
     true,
   );
   assert.equal(
     policy.selection.prompt_cache_prefix.messages.some((message) =>
-      message.content.includes("latest filing"),
+      message.content.includes("latest port disruption"),
     ),
     false,
   );
 
-  const decision = policy.checkToolCall({ tool_name: "get_claims" });
+  const decision = policy.checkToolCall({ tool_name: "get_impact_drivers" });
   assert.equal(decision.ok, true);
   const nextPolicy = policy.recordAcceptedToolCall(decision);
   assert.equal(nextPolicy.ok, true);
   assert.equal(
     nextPolicy.selection.prompt_cache_prefix.user_turn,
-    "What changed in the latest filing?",
+    "What changed in the latest port disruption?",
   );
   assert.equal(
     nextPolicy.selection.prompt_cache_prefix.messages.some((message) =>
-      message.content.includes("Researching supplier risk"),
+      message.content.includes("Preparing the copper morning call"),
     ),
     true,
   );
   assert.equal(
     nextPolicy.selection.prompt_cache_prefix.messages.some((message) =>
-      message.content.includes("latest filing"),
+      message.content.includes("latest port disruption"),
     ),
     false,
   );
@@ -131,16 +131,16 @@ test("turn tool policy stress-limits cost classes and returns an explicit partia
   let policy = createTurnToolPolicy({
     registry,
     audience: "analyst",
-    classification: { bundle_id: "single_subject_analysis" },
+    classification: { bundle_id: "event_impact_analysis" },
     budget: { low: 8, medium: 4, high: 2 },
   });
   assert.equal(policy.ok, true);
 
   for (let i = 0; i < 12; i += 1) {
-    const decision = policy.checkToolCall({ tool_name: "get_segment_facts" });
-    if (i < 2) {
+    const decision = policy.checkToolCall({ tool_name: "get_impact_drivers" });
+    if (i < 4) {
       assert.equal(decision.ok, true);
-      assert.equal(decision.cost_class, "high");
+      assert.equal(decision.cost_class, "medium");
       policy = policy.recordAcceptedToolCall(decision);
       continue;
     }
@@ -149,14 +149,14 @@ test("turn tool policy stress-limits cost classes and returns an explicit partia
       ok: false,
       action: "partial_answer",
       reason: "budget_exceeded",
-      tool_name: "get_segment_facts",
-      bundle_id: "single_subject_analysis",
+      tool_name: "get_impact_drivers",
+      bundle_id: "event_impact_analysis",
       audience: "analyst",
-      cost_class: "high",
-      used: 2,
-      limit: 2,
+      cost_class: "medium",
+      used: 4,
+      limit: 4,
       note:
-        'Skipped tool "get_segment_facts" because the high-cost per-turn budget is exhausted; return a partial answer with available evidence.',
+        'Skipped tool "get_impact_drivers" because the medium-cost per-turn budget is exhausted; return a partial answer with available evidence.',
     });
   }
 
@@ -170,16 +170,16 @@ test("turn tool policy records usage only from accepted budget decisions", () =>
   const policy = createTurnToolPolicy({
     registry,
     audience: "analyst",
-    classification: { bundle_id: "single_subject_analysis" },
+    classification: { bundle_id: "event_impact_analysis" },
   });
   assert.equal(policy.ok, true);
 
-  const decision = policy.checkToolCall({ tool_name: "get_segment_facts" });
+  const decision = policy.checkToolCall({ tool_name: "get_impact_drivers" });
   assert.equal(decision.ok, true);
 
   const nextPolicy = policy.recordAcceptedToolCall(decision);
   assert.equal(nextPolicy.ok, true);
-  assert.deepEqual(nextPolicy.usage, { low: 0, medium: 0, high: 1 });
+  assert.deepEqual(nextPolicy.usage, { low: 0, medium: 1, high: 0 });
 });
 
 test("turn tool policy rejects unverified usage progression inputs", () => {
@@ -187,7 +187,7 @@ test("turn tool policy rejects unverified usage progression inputs", () => {
   const policy = createTurnToolPolicy({
     registry,
     audience: "analyst",
-    classification: { bundle_id: "single_subject_analysis" },
+    classification: { bundle_id: "event_impact_analysis" },
   });
   assert.equal(policy.ok, true);
 
@@ -207,11 +207,11 @@ test("turn tool policy rejects unverified usage progression inputs", () => {
       policy.recordAcceptedToolCall({
         ok: true,
         action: "execute",
-        tool: registry.getTool("get_segment_facts") as ToolDefinition,
-        cost_class: "high",
+        tool: registry.getTool("get_impact_drivers") as ToolDefinition,
+        cost_class: "medium",
         used: 0,
-        limit: 2,
-        remaining: { low: 8, medium: 4, high: 1 },
+        limit: 4,
+        remaining: { low: 8, medium: 3, high: 2 },
       } as never),
     /accepted tool-call decision/,
   );
@@ -222,17 +222,17 @@ test("turn tool policy rejects cross-policy and replayed accepted decisions", ()
   const firstPolicy = createTurnToolPolicy({
     registry,
     audience: "analyst",
-    classification: { bundle_id: "single_subject_analysis" },
+    classification: { bundle_id: "event_impact_analysis" },
   });
   const secondPolicy = createTurnToolPolicy({
     registry,
     audience: "analyst",
-    classification: { bundle_id: "quote_lookup" },
+    classification: { bundle_id: "commodity_quote_lookup" },
   });
   assert.equal(firstPolicy.ok, true);
   assert.equal(secondPolicy.ok, true);
 
-  const decision = firstPolicy.checkToolCall({ tool_name: "get_segment_facts" });
+  const decision = firstPolicy.checkToolCall({ tool_name: "get_impact_drivers" });
   assert.equal(decision.ok, true);
 
   assert.throws(
@@ -253,21 +253,25 @@ test("turn tool policy reserves budget for accepted decisions before they are re
   const policy = createTurnToolPolicy({
     registry,
     audience: "analyst",
-    classification: { bundle_id: "single_subject_analysis" },
+    classification: { bundle_id: "event_impact_analysis" },
     budget: { low: 8, medium: 4, high: 2 },
   });
   assert.equal(policy.ok, true);
 
-  const first = policy.checkToolCall({ tool_name: "get_segment_facts" });
-  const second = policy.checkToolCall({ tool_name: "get_segment_facts" });
-  const third = policy.checkToolCall({ tool_name: "get_segment_facts" });
+  const first = policy.checkToolCall({ tool_name: "get_impact_drivers" });
+  const second = policy.checkToolCall({ tool_name: "get_impact_drivers" });
+  const third = policy.checkToolCall({ tool_name: "get_impact_drivers" });
+  const fourth = policy.checkToolCall({ tool_name: "get_impact_drivers" });
+  const fifth = policy.checkToolCall({ tool_name: "get_impact_drivers" });
 
   assert.equal(first.ok, true);
   assert.equal(second.ok, true);
-  assert.equal(third.ok, false);
-  assert.equal(third.reason, "budget_exceeded");
-  assert.equal(third.used, 2);
-  assert.equal(third.limit, 2);
+  assert.equal(third.ok, true);
+  assert.equal(fourth.ok, true);
+  assert.equal(fifth.ok, false);
+  assert.equal(fifth.reason, "budget_exceeded");
+  assert.equal(fifth.used, 4);
+  assert.equal(fifth.limit, 4);
 });
 
 test("turn tool policy records batched accepted decisions in reservation order", () => {
@@ -275,13 +279,13 @@ test("turn tool policy records batched accepted decisions in reservation order",
   const policy = createTurnToolPolicy({
     registry,
     audience: "analyst",
-    classification: { bundle_id: "single_subject_analysis" },
+    classification: { bundle_id: "event_impact_analysis" },
     budget: { low: 8, medium: 4, high: 2 },
   });
   assert.equal(policy.ok, true);
 
-  const first = policy.checkToolCall({ tool_name: "get_segment_facts" });
-  const second = policy.checkToolCall({ tool_name: "get_segment_facts" });
+  const first = policy.checkToolCall({ tool_name: "get_impact_drivers" });
+  const second = policy.checkToolCall({ tool_name: "get_impact_drivers" });
   assert.equal(first.ok, true);
   assert.equal(second.ok, true);
 
@@ -289,7 +293,7 @@ test("turn tool policy records batched accepted decisions in reservation order",
   assert.equal(nextPolicy.ok, true);
   const finalPolicy = nextPolicy.recordAcceptedToolCall(second);
   assert.equal(finalPolicy.ok, true);
-  assert.deepEqual(finalPolicy.usage, { low: 0, medium: 0, high: 2 });
+  assert.deepEqual(finalPolicy.usage, { low: 0, medium: 2, high: 0 });
 
   assert.throws(
     () => policy.recordAcceptedToolCall(second),
@@ -302,13 +306,13 @@ test("turn tool policy keeps model-selected tools inside the system-selected bun
   const policy = createTurnToolPolicy({
     registry,
     audience: "analyst",
-    classification: { bundle_id: "quote_lookup" },
+    classification: { bundle_id: "commodity_quote_lookup" },
   });
   assert.equal(policy.ok, true);
 
-  const decision = policy.checkToolCall({ tool_name: "get_segment_facts" });
+  const decision = policy.checkToolCall({ tool_name: "get_impact_drivers" });
 
   assert.equal(decision.ok, false);
   assert.equal(decision.reason, "tool_not_in_bundle");
-  assert.equal(decision.bundle_id, "quote_lookup");
+  assert.equal(decision.bundle_id, "commodity_quote_lookup");
 });

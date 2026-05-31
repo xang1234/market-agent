@@ -10,36 +10,52 @@ import {
   resolveToolRegistryPath,
 } from "../src/registry.ts";
 
-test("loadToolRegistry reads the default finance research registry", () => {
+test("loadToolRegistry reads the default commodities research registry", () => {
   const registry = loadToolRegistry();
 
   assert.equal(registry.version, "1.0.0");
   assert.ok(registry.bundles.length > 0);
   assert.ok(registry.tools.length > 0);
 
-  const createAlert = registry.getTool("create_alert");
-  assert.ok(createAlert);
-  assert.equal(createAlert.audience, "analyst");
-  assert.equal(createAlert.read_only, false);
-  assert.equal(createAlert.approval_required, true);
-  assert.equal(createAlert.cost_class, "low");
-  assert.equal(createAlert.freshness_expectation, "varies");
-  assert.deepEqual(createAlert.input_json_schema.properties.agent_id, {
+  assert.deepEqual(registry.bundleIds(), [
+    "commodity_quote_lookup",
+    "curve_analysis",
+    "report_delta_analysis",
+    "event_impact_analysis",
+    "balance_snapshot",
+    "daily_call_run",
+    "forecast_assumption_review",
+    "alert_management",
+  ]);
+
+  const buildDailyCall = registry.getTool("build_daily_call");
+  assert.ok(buildDailyCall);
+  assert.equal(buildDailyCall.audience, "analyst");
+  assert.equal(buildDailyCall.read_only, false);
+  assert.equal(buildDailyCall.approval_required, true);
+  assert.equal(buildDailyCall.cost_class, "high");
+  assert.equal(buildDailyCall.freshness_expectation, "daily");
+  assert.deepEqual(buildDailyCall.input_json_schema.properties.snapshot_id, {
     type: "string",
     format: "uuid",
   });
-  assert.deepEqual(createAlert.input_json_schema.required, [
-    "agent_id",
-    "subject_ref",
-    "rule",
-    "channels",
+  assert.deepEqual(buildDailyCall.input_json_schema.required, [
+    "snapshot_id",
+    "commodity_refs",
+    "horizons",
   ]);
-  assert.equal(createAlert.input_json_schema.additionalProperties, false);
+  assert.equal(buildDailyCall.input_json_schema.additionalProperties, false);
 
-  assert.deepEqual(
-    registry.toolsForBundle("alert_management").map((tool) => tool.name),
-    ["create_alert", "add_to_watchlist"],
-  );
+  const dailyCallTools = registry.toolsForBundle("daily_call_run").map((tool) => tool.name);
+  for (const requiredTool of [
+    "get_commodity_latest",
+    "get_curve",
+    "get_balance_snapshot",
+    "get_impact_drivers",
+    "build_daily_call",
+  ]) {
+    assert.equal(dailyCallTools.includes(requiredTool), true, `${requiredTool} must be available to daily_call_run`);
+  }
 });
 
 test("resolveToolRegistryPath finds a repo-level spec from a dist-like module directory", () => {

@@ -13,9 +13,9 @@ test("checkToolCallBudget allows calls while cost-class usage is below the per-t
 
   const decision = checkToolCallBudget({
     registry,
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "analyst",
-    tool_name: "get_claims",
+    tool_name: "get_report_deltas",
     usage: { low: 0, medium: 1, high: 0 },
     budget: { low: 8, medium: 3, high: 1 },
   });
@@ -32,9 +32,9 @@ test("checkToolCallBudget produces a partial-answer path when a cost-class cap i
 
   const decision = checkToolCallBudget({
     registry,
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "analyst",
-    tool_name: "get_claims",
+    tool_name: "get_report_deltas",
     usage: { low: 0, medium: 3, high: 0 },
     budget: { low: 8, medium: 3, high: 1 },
   });
@@ -43,14 +43,14 @@ test("checkToolCallBudget produces a partial-answer path when a cost-class cap i
     ok: false,
     action: "partial_answer",
     reason: "budget_exceeded",
-    tool_name: "get_claims",
-    bundle_id: "document_research",
+    tool_name: "get_report_deltas",
+    bundle_id: "report_delta_analysis",
     audience: "analyst",
     cost_class: "medium",
     used: 3,
     limit: 3,
     note:
-      'Skipped tool "get_claims" because the medium-cost per-turn budget is exhausted; return a partial answer with available evidence.',
+      'Skipped tool "get_report_deltas" because the medium-cost per-turn budget is exhausted; return a partial answer with available evidence.',
   });
 });
 
@@ -61,9 +61,9 @@ test("checkToolCallBudget stress-limits high-cost tools independently from low-c
   for (let i = 0; i < DEFAULT_TOOL_CALL_BUDGET.high; i += 1) {
     const decision = checkToolCallBudget({
       registry,
-      bundle_id: "single_subject_analysis",
+      bundle_id: "daily_call_run",
       audience: "analyst",
-      tool_name: "get_segment_facts",
+      tool_name: "build_daily_call",
       usage,
       budget: DEFAULT_TOOL_CALL_BUDGET,
     });
@@ -73,15 +73,15 @@ test("checkToolCallBudget stress-limits high-cost tools independently from low-c
 
   const exhausted = checkToolCallBudget({
     registry,
-    bundle_id: "single_subject_analysis",
+    bundle_id: "daily_call_run",
     audience: "analyst",
-    tool_name: "get_segment_facts",
+    tool_name: "build_daily_call",
     usage,
     budget: DEFAULT_TOOL_CALL_BUDGET,
   });
   const lowCost = checkToolCallBudget({
     registry,
-    bundle_id: "single_subject_analysis",
+    bundle_id: "daily_call_run",
     audience: "analyst",
     tool_name: "resolve_subjects",
     usage,
@@ -99,7 +99,7 @@ test("checkToolCallBudget rejects unauthorized tool calls before budget handling
 
   const decision = checkToolCallBudget({
     registry,
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "analyst",
     tool_name: "fetch_raw_document",
     usage: { low: 0, medium: 0, high: 0 },

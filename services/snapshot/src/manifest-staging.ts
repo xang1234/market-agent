@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { SUBJECT_KINDS, type SubjectKind } from "../../shared/src/subject-ref.ts";
+
 export type JsonObject = { [key: string]: JsonValue };
 
 export type JsonValue =
@@ -19,22 +21,24 @@ export type QueryExecutor = {
   ): Promise<{ rows: R[] }>;
 };
 
-export const SNAPSHOT_SUBJECT_KINDS = [
-  "issuer",
-  "instrument",
-  "listing",
-  "theme",
-  "macro_topic",
-  "portfolio",
-  "screen",
-] as const;
+export const SNAPSHOT_SUBJECT_KINDS = SUBJECT_KINDS;
 
-export type SnapshotSubjectKind = (typeof SNAPSHOT_SUBJECT_KINDS)[number];
+export type SnapshotSubjectKind = SubjectKind;
 
 export type SnapshotSubjectRef = {
   kind: SnapshotSubjectKind;
   id: string;
 };
+
+export function isSnapshotSubjectKind(value: unknown): value is SnapshotSubjectKind {
+  return typeof value === "string" && (SNAPSHOT_SUBJECT_KINDS as ReadonlyArray<string>).includes(value);
+}
+
+export function isSnapshotSubjectRef(value: unknown): value is SnapshotSubjectRef {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const ref = value as { kind?: unknown; id?: unknown };
+  return isSnapshotSubjectKind(ref.kind) && typeof ref.id === "string" && UUID_V4.test(ref.id);
+}
 
 export const SNAPSHOT_BASES = [
   "unadjusted",

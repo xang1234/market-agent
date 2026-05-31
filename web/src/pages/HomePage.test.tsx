@@ -106,22 +106,22 @@ function installDomGlobals(domWindow: Window): () => void {
 
 test('UserHomeView renders the loading hint when state.kind is loading', () => {
   const html = renderToString(<UserHomeView state={{ kind: 'loading' }} />)
-  assert.match(html, /Loading Home/)
+  assert.match(html, /Loading Morning Call Board/)
 })
 
 test('UserHomeView renders the error message when state.kind is error', () => {
   const html = renderToString(<UserHomeView state={{ kind: 'error', message: 'boom' }} />)
-  assert.match(html, /Home is unavailable/)
+  assert.match(html, /Morning Call Board is unavailable/)
   assert.match(html, /boom/)
 })
 
-test('UserHomeView renders all five sections when state.kind is ready', () => {
+test('UserHomeView renders all five morning-call sections when state.kind is ready', () => {
   const html = renderToString(<UserHomeView state={{ kind: 'ready', summary: EMPTY_SUMMARY }} />)
-  assert.match(html, /Findings/)
-  assert.match(html, /Market pulse/)
-  assert.match(html, /Watchlist movers/)
-  assert.match(html, /Agent summaries/)
-  assert.match(html, /Pinned screens/)
+  assert.match(html, /Driver findings/)
+  assert.match(html, /Copper and iron ore pulse/)
+  assert.match(html, /Watched market movers/)
+  assert.match(html, /Specialist agents/)
+  assert.match(html, /Saved market screens/)
 })
 
 test('UserHomeContent fetches the summary on mount and renders ready state', async () => {
@@ -135,8 +135,8 @@ test('UserHomeContent fetches the summary on mount and renders ready state', asy
       root.render(<UserHomeContent userId={USER_ID_A} fetchImpl={fakeFetchOk(EMPTY_SUMMARY)} />)
     })
     const html = container.innerHTML
-    assert.match(html, /Findings/)
-    assert.match(html, /Watchlist movers/)
+    assert.match(html, /Driver findings/)
+    assert.match(html, /Watched market movers/)
     await act(async () => root.unmount())
   } finally {
     restoreGlobals()
@@ -154,7 +154,7 @@ test('UserHomeContent renders the error state when fetch returns non-200', async
       root.render(<UserHomeContent userId={USER_ID_A} fetchImpl={fakeFetchFail(500)} />)
     })
     const html = container.innerHTML
-    assert.match(html, /Home is unavailable/)
+    assert.match(html, /Morning Call Board is unavailable/)
     assert.match(html, /HTTP 500/)
     await act(async () => root.unmount())
   } finally {
@@ -175,14 +175,14 @@ test('UserHomeContent ignores a stale fetch resolution that lands after an abort
     await act(async () => {
       root.render(<UserHomeContent userId={USER_ID_A} fetchImpl={hanging.fetch} />)
     })
-    assert.match(container.innerHTML, /Loading Home/)
+    assert.match(container.innerHTML, /Loading Morning Call Board/)
 
     // Switch to userId B; the previous A-fetch is now aborted.
     await act(async () => {
       root.render(<UserHomeContent userId={USER_ID_B} fetchImpl={fakeFetchOk(EMPTY_SUMMARY)} />)
     })
     assert.equal(hanging.signal?.aborted, true)
-    assert.match(container.innerHTML, /Findings/)
+    assert.match(container.innerHTML, /Driver findings/)
 
     // Late-resolving A-fetch must NOT overwrite B's ready state.
     await act(async () => {
@@ -193,8 +193,8 @@ test('UserHomeContent ignores a stale fetch resolution that lands after an abort
         }),
       )
     })
-    assert.match(container.innerHTML, /Findings/)
-    assert.doesNotMatch(container.innerHTML, /Loading Home/)
+    assert.match(container.innerHTML, /Driver findings/)
+    assert.doesNotMatch(container.innerHTML, /Loading Morning Call Board/)
 
     await act(async () => root.unmount())
   } finally {

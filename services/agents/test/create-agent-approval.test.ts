@@ -13,7 +13,7 @@ import type { AgentInput } from "../src/agent-repo.ts";
 
 const AGENT_ID = "11111111-1111-4111-8111-111111111111";
 const USER_ID = "22222222-2222-4222-8222-222222222222";
-const ISSUER_ID = "33333333-3333-4333-8333-333333333333";
+const COMMODITY_ID = "33333333-3333-4333-8333-333333333333";
 const FIXED_NOW = "2026-05-04T00:00:00.000Z";
 
 type Captured = { text: string; values?: unknown[] };
@@ -46,11 +46,11 @@ type QueryExecutor = {
 
 const input: AgentInput = {
   user_id: USER_ID,
-  name: "Margin recovery monitor",
-  thesis: "Track margin recovery after inventory normalization.",
-  universe: { mode: "static", subject_refs: [{ kind: "issuer", id: ISSUER_ID }] },
+  name: "Copper disruption monitor",
+  thesis: "Track copper disruption, inventory, and curve changes before the morning call.",
+  universe: { mode: "static", subject_refs: [{ kind: "commodity", id: COMMODITY_ID }] },
   cadence: "daily",
-  prompt_template: "Watch the latest filings and evidence-backed claims.",
+  prompt_template: "Watch licensed reports, news events, and balance changes for copper impact drivers.",
 };
 
 function agentRow() {
@@ -84,7 +84,7 @@ test("createAgentApprovalIntent returns a deterministic pending action and does 
 
   assert.equal(intent.confirmation_required, true);
   assert.equal(intent.pending_action.tool_name, "create_agent");
-  assert.equal(intent.pending_action.bundle_id, "agent_management");
+  assert.equal(intent.pending_action.bundle_id, "alert_management");
   assert.equal(intent.pending_action.approval_required, true);
   assert.equal(intent.pending_action.read_only, false);
   assert.deepEqual(intent.pending_action.arguments, input);

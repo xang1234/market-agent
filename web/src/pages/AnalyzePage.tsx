@@ -6,7 +6,7 @@ import {
   subjectFromAnalyzeEntry,
   type AnalyzeIntent,
 } from '../analyze/analyzeEntry'
-import { fetchAnalyzePlaybooks, type AnalyzePlaybook } from '../analyze/playbooks.ts'
+import { DEFAULT_ANALYZE_PLAYBOOKS, fetchAnalyzePlaybooks, type AnalyzePlaybook } from '../analyze/playbooks.ts'
 import {
   diffAnalyzeRuns,
   fetchAnalyzeRun,
@@ -16,7 +16,7 @@ import {
   type AnalyzeRunDetail,
   type AnalyzeRunHistoryItem,
 } from '../analyze/runHistory.ts'
-import { shareAnalyzeRunToChat, type AnalyzeRun } from '../analyze/shareToChat.ts'
+import { shareAnalyzeRunToChat } from '../analyze/shareToChat.ts'
 import { BlockView, type Block } from '../blocks'
 import { authenticatedJson } from '../http/authFetch.ts'
 import { subjectDisplayName } from '../symbol/quote'
@@ -34,36 +34,17 @@ type AnalyzeTemplate = {
 const DEFAULT_TEMPLATES: ReadonlyArray<AnalyzeTemplate> = [
   {
     template_id: '11111111-1111-4111-8111-111111111111',
-    name: 'Earnings template',
-    prompt_template: 'Assess revenue quality, margins, cash conversion, and management commentary.',
-    source_categories: ['filings', 'transcripts', 'news'],
+    name: 'Copper morning call template',
+    prompt_template: 'Draft the copper call with price, curve, inventory, supply, demand, macro/FX, report deltas, and watch items.',
+    source_categories: ['prices', 'curves', 'inventories', 'licensed_reports', 'news', 'internal_forecasts'],
     version: 1,
   },
   {
     template_id: '22222222-2222-4222-8222-222222222222',
-    name: 'Variant view',
-    prompt_template: 'Compare the market narrative with evidence-backed counterpoints.',
-    source_categories: ['filings', 'news', 'transcripts'],
+    name: 'Supply shock template',
+    prompt_template: 'Map a disruption to affected assets, routes, inventories, balance deltas, confidence, and 1d/1w/1m/3m impact.',
+    source_categories: ['news', 'licensed_reports', 'internal_notes', 'inventories'],
     version: 1,
-  },
-]
-
-const DEFAULT_PLAYBOOKS: ReadonlyArray<AnalyzePlaybook> = [
-  {
-    playbook_id: 'earnings_quality',
-    version: 1,
-    name: 'Earnings quality',
-    description: 'Assess revenue quality, margins, cash conversion, and management commentary.',
-    default_instructions: 'Assess revenue quality, margins, cash conversion, and management commentary.',
-    default_source_categories: ['filings', 'transcripts', 'news'],
-    sections: [
-      { section_id: 'summary', title: 'Summary', required: true, block_hint: 'rich_text' },
-      { section_id: 'quality_of_revenue', title: 'Quality of revenue', required: true, block_hint: 'metric_row' },
-      { section_id: 'margin_bridge', title: 'Margin bridge', required: true, block_hint: 'table' },
-      { section_id: 'cash_conversion', title: 'Cash conversion', required: true, block_hint: 'metric_row' },
-      { section_id: 'management_tone', title: 'Management tone', required: true, block_hint: 'rich_text' },
-      { section_id: 'watch_items', title: 'Watch items', required: true, block_hint: 'table' },
-    ],
   },
 ]
 
@@ -78,8 +59,7 @@ export function AnalyzePage() {
       <header>
         <h1 className="text-2xl font-semibold">Analyze</h1>
         <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-          Template-driven memo workflow with editable instructions, source controls, and
-          chat handoff.
+          Commodity playbook runner with editable instructions, source controls, evidence inspection, and chat handoff.
         </p>
       </header>
       {subject ? <CarriedSubjectContext subject={subject} intent={query.intent} /> : null}
@@ -93,8 +73,8 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
   const navigate = useNavigate()
   const [templates, setTemplates] = useState<ReadonlyArray<AnalyzeTemplate>>(DEFAULT_TEMPLATES)
   const [selectedTemplateId, setSelectedTemplateId] = useState(DEFAULT_TEMPLATES[0].template_id)
-  const [playbooks, setPlaybooks] = useState<ReadonlyArray<AnalyzePlaybook>>(DEFAULT_PLAYBOOKS)
-  const [selectedPlaybookId, setSelectedPlaybookId] = useState(DEFAULT_PLAYBOOKS[0].playbook_id)
+  const [playbooks, setPlaybooks] = useState(DEFAULT_ANALYZE_PLAYBOOKS)
+  const [selectedPlaybookId, setSelectedPlaybookId] = useState(DEFAULT_ANALYZE_PLAYBOOKS[0].playbook_id)
   const selectedTemplate = templates.find((template) => template.template_id === selectedTemplateId) ?? templates[0]
   const selectedPlaybook = playbooks.find((playbook) => playbook.playbook_id === selectedPlaybookId) ?? playbooks[0]
   const [instructions, setInstructions] = useState(selectedPlaybook.default_instructions)
@@ -165,10 +145,10 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
 
   const generateMemo = async (): Promise<AnalyzeRunDetail | null> => {
     if (!session) {
-      setStatus('Sign in to generate a memo')
+      setStatus('Sign in to generate a draft')
       return null
     }
-    setStatus('Generating memo')
+    setStatus('Generating draft')
     try {
       const run = await authenticatedJson<AnalyzeRunDetail>('/v1/analyze/runs', {
         userId: session.userId,
@@ -187,7 +167,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
       setMemoRun(run)
       setOpenedRunDetails((current) => ({ ...current, [run.run_id]: run }))
       setRunHistory((current) => [toAnalyzeRunHistoryItem(run), ...current.filter((item) => item.run_id !== run.run_id)])
-      setStatus('Memo generated')
+      setStatus('Draft generated')
       return run
     } catch (caught) {
       setStatus(`Generate failed: ${caught instanceof Error ? caught.message : String(caught)}`)
@@ -197,22 +177,22 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
 
   const addToChat = async () => {
     if (!session) {
-      setStatus('Sign in to add this memo to chat')
+      setStatus('Sign in to add this brief to chat')
       return
     }
     const run = memoRun ?? (await generateMemo())
     if (!run) return
-    const titleSubject = subject ? subjectDisplayName(subject) : 'Research memo'
+    const titleSubject = subject ? subjectDisplayName(subject) : 'Research brief'
     try {
-      setStatus('Persisting memo in chat')
+      setStatus('Persisting brief in chat')
       const result = await shareAnalyzeRunToChat({
         userId: session.userId,
         sourceKind: 'memo',
-        run: run as unknown as AnalyzeRun,
+        run,
         title: `${run.display_title ?? selectedTemplate.name} - ${titleSubject}`,
         primarySubjectRef: subject?.subject_ref ?? null,
       })
-      setStatus(`Added memo ${run.run_id} to chat`)
+      setStatus(`Added brief ${run.run_id} to chat`)
       navigate(`/chat/${result.thread.thread_id}`)
     } catch (caught) {
       setStatus(`Add to chat failed: ${caught instanceof Error ? caught.message : String(caught)}`)
@@ -337,7 +317,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
       <div className="flex min-h-[420px] flex-col rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Memo canvas</h2>
+            <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Brief canvas</h2>
             <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
               {subject ? subjectDisplayName(subject) : 'No subject selected'} · {[...sources].join(', ') || 'no sources'}
             </p>
@@ -348,7 +328,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
               onClick={() => void generateMemo()}
               className="rounded-md border border-neutral-300 px-4 py-2 text-sm font-medium dark:border-neutral-700"
             >
-              Generate memo
+              Generate draft
             </button>
             <button
               type="button"
@@ -465,10 +445,15 @@ function sourceCategoriesFor(
   return [...new Set([
     ...(playbook?.default_source_categories ?? []),
     ...template.source_categories,
-    'filings',
-    'transcripts',
     'news',
-    'issuer_ir',
+    'prices',
+    'curves',
+    'inventories',
+    'licensed_reports',
+    'internal_forecasts',
+    'internal_notes',
+    'macro',
+    'port_stocks',
   ])]
 }
 

@@ -27,10 +27,10 @@ test('SUBJECT_KINDS matches backend shared identity and the block schema', () =>
 })
 
 test('web SubjectRef helpers accept only canonical UUID identity', () => {
-  const ref = { kind: 'issuer' as const, id: VALID_ID }
+  const ref = { kind: 'commodity' as const, id: VALID_ID }
   assert.equal(isSubjectRef(ref), true)
-  assert.equal(formatSubjectRef(ref), `issuer:${VALID_ID}`)
-  assert.deepEqual(parseSubjectRefString(`issuer:${VALID_ID}`), ref)
+  assert.equal(formatSubjectRef(ref), `commodity:${VALID_ID}`)
+  assert.deepEqual(parseSubjectRefString(`commodity:${VALID_ID}`), ref)
 })
 
 test('web SubjectRef parser rejects non-canonical route input', () => {
@@ -41,10 +41,22 @@ test('web SubjectRef parser rejects non-canonical route input', () => {
 })
 
 function parseBackendSubjectKinds(source: string): string[] {
-  const match = source.match(/export const SUBJECT_KINDS = \[([\s\S]*?)\] as const;/)
-  assert.ok(match, 'backend SUBJECT_KINDS constant should be parseable')
-  return match[1]
+  const constants = new Map<string, string[]>()
+  for (const match of source.matchAll(/export const (\w+) = \[([\s\S]*?)\] as const;/g)) {
+    constants.set(match[1], parseArrayBody(match[2], constants))
+  }
+  const subjectKinds = constants.get('SUBJECT_KINDS')
+  assert.ok(subjectKinds, 'backend SUBJECT_KINDS constant should be parseable')
+  return subjectKinds
+}
+
+function parseArrayBody(body: string, constants: ReadonlyMap<string, string[]>): string[] {
+  return body
     .split(',')
-    .map((part) => part.trim().replace(/^"|"$/g, ''))
-    .filter(Boolean)
+    .flatMap((part) => {
+      const token = part.trim()
+      if (!token) return []
+      if (token.startsWith('...')) return constants.get(token.slice(3)) ?? [token]
+      return [token.replace(/^"|"$/g, '')]
+    })
 }

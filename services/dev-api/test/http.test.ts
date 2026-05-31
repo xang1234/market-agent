@@ -70,7 +70,7 @@ test("GET /v1/analyze/playbooks returns built-in playbooks", async (t) => {
 
   assert.equal(response.status, 200);
   const body = await response.json() as { playbooks?: Array<{ playbook_id: string }> };
-  assert.ok(body.playbooks?.some((playbook) => playbook.playbook_id === "earnings_quality"));
+  assert.ok(body.playbooks?.some((playbook) => playbook.playbook_id === "daily_copper_call"));
 });
 
 test("POST /v1/analyze/runs returns a generated Block[] memo", async (t) => {
@@ -85,7 +85,7 @@ test("POST /v1/analyze/runs returns a generated Block[] memo", async (t) => {
     body: JSON.stringify({
       template_id: EARNINGS_TEMPLATE_ID,
       instructions: "Review margin quality",
-      source_categories: ["filings", "news"],
+      source_categories: ["prices", "news"],
     }),
   });
   const body = await response.json() as { blocks?: Array<Record<string, unknown>> };
@@ -107,9 +107,9 @@ test("POST /v1/analyze/runs accepts playbook_id and records it on the run", asyn
     },
     body: JSON.stringify({
       template_id: EARNINGS_TEMPLATE_ID,
-      playbook_id: "earnings_quality",
+      playbook_id: "daily_copper_call",
       instructions: "Focus on cash conversion.",
-      source_categories: ["filings"],
+      source_categories: ["prices"],
     }),
   });
 
@@ -128,15 +128,15 @@ test("POST /v1/analyze/runs accepts playbook_id and records it on the run", asyn
   };
   assert.equal(body.template_id, EARNINGS_TEMPLATE_ID);
   assert.equal(body.template_name, "Earnings template");
-  assert.equal(body.playbook_id, "earnings_quality");
-  assert.equal(body.playbook_name, "Earnings quality");
+  assert.equal(body.playbook_id, "daily_copper_call");
+  assert.equal(body.playbook_name, "Daily copper call");
   assert.equal(body.playbook_version, 1);
-  assert.equal(body.display_title, "Earnings quality");
+  assert.equal(body.display_title, "Daily copper call");
   assert.equal(body.can_rerun, true);
   assert.equal(body.rerun_unavailable_reason, null);
   assert.equal(body.run_metadata?.schema_version, 1);
-  assert.equal(body.blocks?.[0]?.title, "Earnings quality");
-  assert.equal(body.blocks?.[0]?.data_ref?.params?.playbook_section_id, "summary");
+  assert.equal(body.blocks?.[0]?.title, "Daily copper call");
+  assert.equal(body.blocks?.[0]?.data_ref?.params?.playbook_section_id, "narrative_summary");
 });
 
 test("POST /v1/analyze/runs/:id/rerun uses stored run metadata", async (t) => {
@@ -149,9 +149,9 @@ test("POST /v1/analyze/runs/:id/rerun uses stored run metadata", async (t) => {
     },
     body: JSON.stringify({
       template_id: EARNINGS_TEMPLATE_ID,
-      playbook_id: "earnings_quality",
+      playbook_id: "daily_copper_call",
       instructions: "Focus on cash conversion.",
-      source_categories: ["filings"],
+      source_categories: ["prices"],
     }),
   });
   const created = await createdResponse.json() as { run_id: string };
@@ -170,7 +170,7 @@ test("POST /v1/analyze/runs/:id/rerun uses stored run metadata", async (t) => {
     run_metadata?: { schema_version?: number; rerun_of_run_id?: string };
   };
   assert.notEqual(rerun.run_id, created.run_id);
-  assert.equal(rerun.display_title, "Earnings quality");
+  assert.equal(rerun.display_title, "Daily copper call");
   assert.equal(rerun.can_rerun, true);
   assert.equal(rerun.rerun_unavailable_reason, null);
   assert.equal(rerun.run_metadata?.schema_version, 1);
@@ -189,9 +189,9 @@ test("GET /v1/analyze/runs paginates user run history with an opaque cursor", as
       headers,
       body: JSON.stringify({
         template_id: EARNINGS_TEMPLATE_ID,
-        playbook_id: "earnings_quality",
+        playbook_id: "daily_copper_call",
         instructions,
-        source_categories: ["filings"],
+        source_categories: ["prices"],
       }),
     });
     assert.equal(response.status, 201);
@@ -208,7 +208,7 @@ test("GET /v1/analyze/runs paginates user run history with an opaque cursor", as
   assert.equal(firstPage.runs?.length, 1);
   assert.equal("blocks" in (firstPage.runs?.[0] ?? {}), false);
   assert.equal("run_metadata" in (firstPage.runs?.[0] ?? {}), false);
-  assert.equal(firstPage.runs?.[0]?.display_title, "Earnings quality");
+  assert.equal(firstPage.runs?.[0]?.display_title, "Daily copper call");
   assert.equal(typeof firstPage.next_cursor, "string");
 
   const secondPageResponse = await fetch(
@@ -231,9 +231,9 @@ test("GET /v1/analyze/runs/:id returns full run detail with blocks", async (t) =
     },
     body: JSON.stringify({
       template_id: EARNINGS_TEMPLATE_ID,
-      playbook_id: "earnings_quality",
+      playbook_id: "daily_copper_call",
       instructions: "Focus on cash conversion.",
-      source_categories: ["filings"],
+      source_categories: ["prices"],
     }),
   });
   const created = await createdResponse.json() as { run_id: string };
@@ -250,9 +250,9 @@ test("GET /v1/analyze/runs/:id returns full run detail with blocks", async (t) =
     blocks?: Array<{ title?: string }>;
   };
   assert.equal(detail.run_id, created.run_id);
-  assert.equal(detail.display_title, "Earnings quality");
+  assert.equal(detail.display_title, "Daily copper call");
   assert.equal(detail.run_metadata?.schema_version, 1);
-  assert.equal(detail.blocks?.[0]?.title, "Earnings quality");
+  assert.equal(detail.blocks?.[0]?.title, "Daily copper call");
 });
 
 test("POST /v1/evidence/inspect requires x-user-id", async (t) => {
@@ -655,7 +655,7 @@ test("Analyze and Agents BFF routes use durable adapters instead of server-local
     body: JSON.stringify({
       template_id: EARNINGS_TEMPLATE_ID,
       instructions: "Persist this memo",
-      source_categories: ["filings"],
+      source_categories: ["prices"],
     }),
   });
   assert.equal(analyzeRun.status, 201);
@@ -752,21 +752,21 @@ test("service Analyze adapter writes blocks with the sealed snapshot id", async 
     body: {
       template_id: templateId,
       instructions: "Use sealed snapshot",
-      source_categories: ["filings", "news"],
+      source_categories: ["prices", "news"],
       subject_ref: primarySubject,
     },
   });
 
   assert.ok(workflowInput);
-  assert.deepEqual(workflowInput.sourceCategories, ["filings", "news"]);
+  assert.deepEqual(workflowInput.sourceCategories, ["prices", "news"]);
   assert.deepEqual(workflowInput.subjectRefs, [primarySubject, addedSubject]);
-  assert.equal(workflowInput.playbookSectionId, "summary");
-  assert.match(workflowInput.playbookPrompt, /Earnings quality/);
-  assert.match(workflowInput.playbookPrompt, /Required sections: Summary/);
-  assert.equal(workflowInput.playbookName, "Earnings quality");
-  assert.ok(workflowInput.bundleIds.includes("analyze_template_run"));
-  assert.ok(workflowInput.bundleIds.includes("filing_research"));
-  assert.ok(workflowInput.bundleIds.includes("document_research"));
+  assert.equal(workflowInput.playbookSectionId, "narrative_summary");
+  assert.match(workflowInput.playbookPrompt, /Daily copper call/);
+  assert.match(workflowInput.playbookPrompt, /Required sections: Narrative summary/);
+  assert.equal(workflowInput.playbookName, "Daily copper call");
+  assert.ok(workflowInput.bundleIds.includes("commodity_quote_lookup"));
+  assert.ok(workflowInput.bundleIds.includes("curve_analysis"));
+  assert.ok(workflowInput.bundleIds.includes("event_impact_analysis"));
   assert.notEqual(run.snapshot_id, "pending");
   assert.equal((run.blocks[0] as { snapshot_id?: string }).snapshot_id, run.snapshot_id);
   assert.equal(JSON.stringify(run.blocks).includes("Use sealed snapshot"), false);
@@ -781,10 +781,10 @@ test("service Analyze adapter marks soft-deleted template runs as not rerunnable
     schema_version: 1,
     template_id: templateId,
     template_version: 3,
-    playbook_id: "earnings_quality",
+    playbook_id: "daily_copper_call",
     playbook_version: 1,
     instructions: "Review earnings quality.",
-    source_categories: ["filings"],
+    source_categories: ["prices"],
     subject_refs: [],
   };
   const db = fakeAnalyzeRunHistoryDb({
@@ -1094,7 +1094,7 @@ test("service Analyze adapter rejects unknown source categories before persisten
   await assert.rejects(
     adapters.analyze.createRun({
       userId,
-      body: { template_id: templateId, source_categories: ["filings", "unknown-feed"] },
+      body: { template_id: templateId, source_categories: ["prices", "unknown-feed"] },
     }),
     /unknown source category/,
   );
@@ -1128,7 +1128,7 @@ test("POST /v1/analyze/runs rejects unknown playbooks before workflow execution"
     body: JSON.stringify({
       template_id: templateId,
       playbook_id: "unknown-playbook",
-      source_categories: ["filings"],
+      source_categories: ["prices"],
     }),
   });
   const body = await response.json() as { error?: string };
@@ -1189,7 +1189,7 @@ test("service Analyze adapter honors explicit empty source categories as base bu
   assert.ok(workflowInput);
   assert.deepEqual(workflowInput.sourceCategories, []);
   assert.deepEqual(workflowInput.bundleIds, [ANALYZE_BASE_BUNDLE_ID]);
-  assert.equal(workflowInput.playbookSectionId, "summary");
+  assert.equal(workflowInput.playbookSectionId, "narrative_summary");
 });
 
 test("POST /v1/analyze/runs rejects verifier failures before persistence", async (t) => {
@@ -1291,7 +1291,7 @@ test("POST /v1/analyze/runs rejects durable adapter without workflow renderer", 
     },
     body: JSON.stringify({
       template_id: templateId,
-      source_categories: ["filings"],
+      source_categories: ["prices"],
     }),
   });
   const body = await response.json() as { error?: string };
@@ -1523,9 +1523,9 @@ function fakeAnalyzeDb(input: {
             {
               template_id: input.templateId,
               user_id: input.userId,
-              name: "Earnings quality",
-              prompt_template: "Review earnings quality",
-              source_categories: ["filings"],
+              name: "Daily copper call",
+              prompt_template: "Review daily copper call",
+              source_categories: ["prices"],
               added_subject_refs: input.addedSubjectRefs ?? [],
               block_layout_hint: null,
               peer_policy: null,
@@ -1582,9 +1582,9 @@ function fakeAnalyzeRunHistoryDb(input: {
   const runRow = {
     run_id: input.runId,
     template_id: input.templateId,
-    template_name: "Earnings quality",
+    template_name: "Daily copper call",
     template_version: 3,
-    playbook_id: "earnings_quality",
+    playbook_id: "daily_copper_call",
     run_metadata: input.runMetadata,
     snapshot_id: "33333333-3333-4333-8333-333333333333",
     blocks: [{ id: "block-1", kind: "rich_text" }],
@@ -1593,9 +1593,9 @@ function fakeAnalyzeRunHistoryDb(input: {
   const templateRow = {
     template_id: input.templateId,
     user_id: input.userId,
-    name: "Earnings quality",
-    prompt_template: "Review earnings quality",
-    source_categories: ["filings"],
+    name: "Daily copper call",
+    prompt_template: "Review daily copper call",
+    source_categories: ["prices"],
     added_subject_refs: [],
     block_layout_hint: null,
     peer_policy: null,
@@ -1910,17 +1910,17 @@ function fakeArtifactShareDb(input: {
                 {
                   run_id: input.runId,
                   template_id: "77777777-7777-4777-8777-777777777777",
-                  template_name: "Earnings quality",
+                  template_name: "Daily copper call",
                   template_version: 3,
-                  playbook_id: "earnings_quality",
+                  playbook_id: "daily_copper_call",
                   run_metadata: {
                     schema_version: 1,
                     template_id: "77777777-7777-4777-8777-777777777777",
                     template_version: 3,
-                    playbook_id: "earnings_quality",
+                    playbook_id: "daily_copper_call",
                     playbook_version: 1,
-                    instructions: "Review earnings quality.",
-                    source_categories: ["filings"],
+                    instructions: "Review daily copper call.",
+                    source_categories: ["prices"],
                     subject_refs: [],
                   },
                   snapshot_id: input.snapshotId,
@@ -1938,9 +1938,9 @@ function fakeArtifactShareDb(input: {
             {
               template_id: "77777777-7777-4777-8777-777777777777",
               user_id: input.userId,
-              name: "Earnings quality",
-              prompt_template: "Review earnings quality",
-              source_categories: ["filings"],
+              name: "Daily copper call",
+              prompt_template: "Review daily copper call",
+              source_categories: ["prices"],
               added_subject_refs: [],
               block_layout_hint: null,
               peer_policy: null,

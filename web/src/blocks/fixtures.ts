@@ -4,6 +4,11 @@ import type {
   EpsSurpriseBlock,
   FilingsListBlock,
   FindingCardBlock,
+  ForecastVsMarketBlock,
+  CurveChartBlock,
+  DriverBoardBlock,
+  ImpactMatrixBlock,
+  InventoryBridgeBlock,
   LineChartBlock,
   MentionVolumeBlock,
   MetricRowBlock,
@@ -11,6 +16,7 @@ import type {
   NewsClusterBlock,
   PerfComparisonBlock,
   PriceTargetRangeBlock,
+  ReportDeltaBlock,
   RevenueBarsBlock,
   RichTextBlock,
   SectionBlock,
@@ -18,7 +24,11 @@ import type {
   SegmentTrajectoryBlock,
   SentimentTrendBlock,
   SourcesBlock,
+  SourcePackBlock,
+  SpreadTableBlock,
   TableBlock,
+  DailyCallSummaryBlock,
+  WatchItemTableBlock,
 } from './types.ts'
 
 const FIXTURE_SNAPSHOT_ID = '11111111-1111-4111-9111-111111111111'
@@ -431,6 +441,196 @@ export const disclosureFixture: DisclosureBlock = {
   ],
 }
 
+export const dailyCallSummaryFixture: DailyCallSummaryBlock = {
+  id: 'dcs-1',
+  kind: 'daily_call_summary',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: { kind: 'daily_call_summary', id: 'dcs-1' },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  title: 'Copper and iron ore morning call',
+  commodity_refs: [
+    { kind: 'commodity', id: '99999999-9999-4999-9999-999999999994' },
+    { kind: 'commodity', id: '99999999-9999-4999-9999-999999999995' },
+  ],
+  horizons: ['1d', '1w', '1m', '3m'],
+  narrative: 'Copper is supported by visible inventory draws while iron ore waits for China steel demand confirmation.',
+  confidence: 0.74,
+}
+
+export const driverBoardFixture: DriverBoardBlock = {
+  id: 'db-1',
+  kind: 'driver_board',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: { kind: 'driver_board', id: 'db-1' },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  title: 'Copper driver board',
+  drivers: [
+    {
+      driver_id: 'driver-inventory-draw',
+      channel: 'inventory',
+      direction: 'positive',
+      horizon: '1w',
+      summary: 'Visible exchange stocks drew again, tightening prompt availability.',
+      confidence: 0.78,
+    },
+    {
+      driver_id: 'driver-demand-unclear',
+      channel: 'demand',
+      direction: 'mixed',
+      horizon: '1m',
+      summary: 'China construction demand remains uneven against stronger grid orders.',
+      confidence: 0.62,
+    },
+  ],
+}
+
+export const curveChartFixture: CurveChartBlock = {
+  id: 'cc-1',
+  kind: 'curve_chart',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: { kind: 'curve_chart', id: 'cc-1' },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  title: 'LME copper forward curve',
+  curve_ref: { kind: 'curve', id: '99999999-9999-4999-9999-999999999996' },
+  points: [
+    { tenor: 'Cash', price: 10340 },
+    { tenor: '3M', price: 10310 },
+    { tenor: 'Dec-26', price: 10220 },
+  ],
+  currency: 'USD',
+  unit: 't',
+}
+
+export const spreadTableFixture: SpreadTableBlock = {
+  id: 'sp-1',
+  kind: 'spread_table',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: { kind: 'spread_table', id: 'sp-1' },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  title: 'Key spreads',
+  spreads: [
+    { label: 'LME cash/3M copper', value: 30, currency: 'USD', unit: 't' },
+    { label: 'SGX 62% Fe Jun/Sep', value: -2.4, currency: 'USD', unit: 'dmt' },
+  ],
+}
+
+export const inventoryBridgeFixture: InventoryBridgeBlock = {
+  id: 'ib-1',
+  kind: 'inventory_bridge',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: { kind: 'inventory_bridge', id: 'ib-1' },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  title: 'Inventory bridge',
+  rows: [
+    { label: 'LME copper stocks', value: 105000, delta: -2400, unit: 't' },
+    { label: 'China port iron ore stocks', value: 142.5, delta: 1.1, unit: 'Mt' },
+  ],
+}
+
+export const impactMatrixFixture: ImpactMatrixBlock = {
+  id: 'im-1',
+  kind: 'impact_matrix',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: { kind: 'impact_matrix', id: 'im-1' },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  title: 'Event impact matrix',
+  rows: [
+    {
+      channel: 'supply',
+      direction: 'positive',
+      horizon: '1m',
+      confidence: 0.72,
+      summary: 'Mine disruption risk supports copper concentrate tightness.',
+    },
+    {
+      channel: 'macro_fx',
+      direction: 'negative',
+      horizon: '1d',
+      confidence: 0.55,
+      summary: 'Stronger USD caps near-term metals beta.',
+    },
+  ],
+}
+
+export const reportDeltaFixture: ReportDeltaBlock = {
+  id: 'rd-1',
+  kind: 'report_delta',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: { kind: 'report_delta', id: 'rd-1' },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  title: 'Report deltas',
+  deltas: [
+    {
+      source_id: FIXTURE_SOURCE_REF,
+      summary: 'Consultant revised copper mine disruption assumptions higher.',
+      horizon: '1m',
+      confidence: 0.81,
+    },
+  ],
+}
+
+export const watchItemTableFixture: WatchItemTableBlock = {
+  id: 'wit-1',
+  kind: 'watch_item_table',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: { kind: 'watch_item_table', id: 'wit-1' },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  title: 'Watch items',
+  items: [
+    { label: 'China steel margins', trigger: 'Margins fall below breakeven for three sessions', horizon: '1w' },
+    { label: 'Copper exchange stocks', trigger: 'Three-day draw above 10 kt', horizon: '1d' },
+  ],
+}
+
+export const forecastVsMarketFixture: ForecastVsMarketBlock = {
+  id: 'fvm-1',
+  kind: 'forecast_vs_market',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: { kind: 'forecast_vs_market', id: 'fvm-1' },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  title: 'Forecast versus market',
+  rows: [
+    {
+      label: 'Copper 3M',
+      market_ref: '99999999-1111-4111-9111-111111111111',
+      forecast_ref: '99999999-2222-4222-9222-222222222222',
+      gap_ref: '99999999-3333-4333-9333-333333333333',
+    },
+  ],
+}
+
+export const sourcePackFixture: SourcePackBlock = {
+  id: 'spp-1',
+  kind: 'source_pack',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: { kind: 'source_pack', id: 'spp-1' },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  title: 'Source pack',
+  sources: [
+    {
+      source_id: FIXTURE_SOURCE_REF,
+      label: 'Licensed copper market report',
+      entitlement: 'licensed_internal',
+    },
+    {
+      source_id: '44444444-4444-4444-9444-cccccccccccc',
+      label: 'Exchange inventory bulletin',
+      url: 'https://example.com/inventory',
+      entitlement: 'public',
+    },
+  ],
+}
+
 export const ALL_BLOCK_FIXTURES = [
   richTextFixture,
   sectionFixture,
@@ -452,4 +652,14 @@ export const ALL_BLOCK_FIXTURES = [
   findingCardFixture,
   sourcesFixture,
   disclosureFixture,
+  dailyCallSummaryFixture,
+  driverBoardFixture,
+  curveChartFixture,
+  spreadTableFixture,
+  inventoryBridgeFixture,
+  impactMatrixFixture,
+  reportDeltaFixture,
+  watchItemTableFixture,
+  forecastVsMarketFixture,
+  sourcePackFixture,
 ] as const

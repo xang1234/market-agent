@@ -1,11 +1,21 @@
 export const SUBJECT_KINDS = [
+  'commodity',
+  'benchmark',
+  'contract',
+  'curve',
+  'region',
+  'delivery_point',
+  'asset',
+  'producer',
+  'route',
+  'market_theme',
+  'portfolio',
+  'screen',
   'issuer',
   'instrument',
   'listing',
   'theme',
   'macro_topic',
-  'portfolio',
-  'screen',
 ] as const
 
 export type SubjectKind = (typeof SUBJECT_KINDS)[number]

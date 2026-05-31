@@ -43,6 +43,22 @@ export default defineConfig({
         target: process.env.MARKET_ORIGIN ?? 'http://127.0.0.1:4321',
         changeOrigin: true,
       },
+      '/v1/markets': {
+        target: process.env.MARKET_ORIGIN ?? 'http://127.0.0.1:4321',
+        changeOrigin: true,
+      },
+      '/v1/balances': {
+        target: process.env.DEV_API_ORIGIN ?? 'http://127.0.0.1:4312',
+        changeOrigin: true,
+      },
+      '/v1/impact': {
+        target: process.env.DEV_API_ORIGIN ?? 'http://127.0.0.1:4312',
+        changeOrigin: true,
+      },
+      '/v1/briefs': {
+        target: process.env.DEV_API_ORIGIN ?? 'http://127.0.0.1:4312',
+        changeOrigin: true,
+      },
       '/v1/fundamentals': {
         target: process.env.FUNDAMENTALS_ORIGIN ?? 'http://127.0.0.1:4322',
         changeOrigin: true,

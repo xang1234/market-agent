@@ -10,53 +10,46 @@ import {
   mapSourceCategoriesToBundles,
 } from "../src/source-category-mapping.ts";
 
-test("mapSourceCategoriesToBundles always includes the analyze base bundle", () => {
-  // The analyze_template_run bundle owns the prompt template + few-shots
-  // for the analyze surface. Every run needs it regardless of which
-  // source categories the user picked, so the mapping always
-  // unconditionally includes it. Without it, the orchestrator would
-  // have to remember to add the base bundle separately, which is the
-  // class of bug this bead is meant to make impossible.
+test("mapSourceCategoriesToBundles always includes the event-impact base bundle", () => {
   const result = mapSourceCategoriesToBundles({ categories: [] });
   assert.deepEqual([...result.bundle_ids], [ANALYZE_BASE_BUNDLE_ID]);
 });
 
 test("mapSourceCategoriesToBundles maps a single category to its declared bundles", () => {
   const result = mapSourceCategoriesToBundles({
-    categories: ["financials_quarterly"],
+    categories: ["licensed_reports"],
   });
-  assert.ok(result.bundle_ids.includes("financials_analysis"));
+  assert.ok(result.bundle_ids.includes("report_delta_analysis"));
   assert.ok(result.bundle_ids.includes(ANALYZE_BASE_BUNDLE_ID));
 });
 
-test("mapSourceCategoriesToBundles maps issuer_ir into document research without making a new bundle", () => {
+test("mapSourceCategoriesToBundles maps prices into quote and curve analysis", () => {
   const result = mapSourceCategoriesToBundles({
-    categories: ["issuer_ir"],
+    categories: ["prices"],
   });
-  assert.deepEqual([...result.bundle_ids], [ANALYZE_BASE_BUNDLE_ID, "document_research"].sort());
+  assert.deepEqual(
+    new Set(result.bundle_ids),
+    new Set([ANALYZE_BASE_BUNDLE_ID, "commodity_quote_lookup", "curve_analysis"]),
+  );
 });
 
-test("mapSourceCategoriesToBundles preserves distinct analysis granularity for focused sources", () => {
+test("mapSourceCategoriesToBundles preserves distinct commodities source granularity", () => {
   const result = mapSourceCategoriesToBundles({
-    categories: ["financials_quarterly", "estimates", "holders"],
+    categories: ["inventories", "internal_forecasts", "licensed_reports"],
   });
   assert.deepEqual(
     new Set(result.bundle_ids),
     new Set([
       ANALYZE_BASE_BUNDLE_ID,
-      "financials_analysis",
-      "estimates_analysis",
-      "ownership_analysis",
+      "balance_snapshot",
+      "curve_analysis",
+      "forecast_assumption_review",
+      "report_delta_analysis",
     ]),
   );
 });
 
 test("mapSourceCategoriesToBundles deduplicates duplicate categories in the input", () => {
-  // A template author who lists the same category twice in
-  // source_categories should get the same result as listing it once.
-  // The mapping is set-valued in spirit — the input is a list because
-  // postgres jsonb columns surface as arrays, not because order or
-  // multiplicity carries meaning.
   const single = mapSourceCategoriesToBundles({
     categories: ["news"],
   });
@@ -67,28 +60,20 @@ test("mapSourceCategoriesToBundles deduplicates duplicate categories in the inpu
 });
 
 test("mapSourceCategoriesToBundles returns deterministic bundle order across permutations", () => {
-  // The mapping is consumed by callers that hash the bundle list (e.g.
-  // prompt_cache_prefix in services/tools/src/bundle-selector.ts) — a
-  // non-deterministic order would break cache hits across re-runs of
-  // the same template.
   const a = mapSourceCategoriesToBundles({
-    categories: ["news", "financials_quarterly", "peers"],
+    categories: ["news", "licensed_reports", "prices"],
   });
   const b = mapSourceCategoriesToBundles({
-    categories: ["peers", "financials_quarterly", "news"],
+    categories: ["prices", "licensed_reports", "news"],
   });
   assert.deepEqual([...a.bundle_ids], [...b.bundle_ids]);
 });
 
 test("mapSourceCategoriesToBundles throws SourceCategoryMappingError on an unknown category", () => {
-  // Unknown source categories must fail closed — silently dropping
-  // them would hide template-author typos and produce memos with
-  // missing data. The error names the offending category so the
-  // analyze UI can surface a helpful validation message.
   assert.throws(
     () =>
       mapSourceCategoriesToBundles({
-        categories: ["financials_quarterly", "fictional_category"],
+        categories: ["prices", "fictional_category"],
       }),
     (err: unknown) =>
       err instanceof SourceCategoryMappingError &&
@@ -97,9 +82,6 @@ test("mapSourceCategoriesToBundles throws SourceCategoryMappingError on an unkno
 });
 
 test("mapSourceCategoriesToBundles rejects non-string category entries", () => {
-  // The repo layer validates source_categories shape on
-  // create/update, but a run that bypasses repo validation (or a row
-  // hand-edited in the DB) could still pass through here. Fail closed.
   assert.throws(
     () =>
       mapSourceCategoriesToBundles({
@@ -112,24 +94,14 @@ test("mapSourceCategoriesToBundles rejects non-string category entries", () => {
 });
 
 test("SOURCE_CATEGORIES enumerates every key in SOURCE_CATEGORY_BUNDLES", () => {
-  // The constant export and the table must stay in sync — a category
-  // listed in SOURCE_CATEGORIES but missing from SOURCE_CATEGORY_BUNDLES
-  // would map to an empty bundle list at runtime, silently degrading
-  // the analyze run. This invariant catches drift at module load time.
   const tableKeys = Object.keys(SOURCE_CATEGORY_BUNDLES).sort();
   const enumValues = [...SOURCE_CATEGORIES].sort();
   assert.deepEqual(enumValues, tableKeys);
 });
 
-test("every bundle id named in SOURCE_CATEGORY_BUNDLES exists in the tool registry (drift guard)", () => {
-  // The "auditable" half of the bead: if anyone ever renames a bundle
-  // in spec/finance_research_tool_registry.json without updating this
-  // table, the analyze runner would request a bundle the registry
-  // doesn't know about and fail at orchestration time. Catch it at
-  // test time instead.
+test("every bundle id named in SOURCE_CATEGORY_BUNDLES exists in the tool registry", () => {
   const registry = loadToolRegistry();
   const knownBundleIds = new Set(registry.bundleIds());
-  // Plus the base bundle, which must also exist in the registry.
   assert.ok(
     knownBundleIds.has(ANALYZE_BASE_BUNDLE_ID),
     `${ANALYZE_BASE_BUNDLE_ID} must be a real bundle in spec/finance_research_tool_registry.json`,
@@ -144,58 +116,41 @@ test("every bundle id named in SOURCE_CATEGORY_BUNDLES exists in the tool regist
   }
 });
 
-test("focused financial source categories do not all collapse to the broad single-subject bundle", () => {
-  const focusedCategories = [
-    "financials_annual",
-    "financials_quarterly",
-    "estimates",
-    "holders",
-  ] as const;
-  const focusedBundleSets = focusedCategories.map((category) =>
-    SOURCE_CATEGORY_BUNDLES[category].join(","),
-  );
-  assert.notEqual(
-    new Set(focusedBundleSets).size,
-    1,
-    "financials, estimates, and holders need auditable bundle granularity",
-  );
+test("all built-in playbook default source categories are mappable", async () => {
+  const { ANALYZE_PLAYBOOKS } = await import("../src/playbook.ts");
+  for (const playbook of ANALYZE_PLAYBOOKS) {
+    assert.doesNotThrow(
+      () => mapSourceCategoriesToBundles({ categories: playbook.default_source_categories }),
+      `playbook ${playbook.playbook_id} has unmapped source categories`,
+    );
+  }
 });
 
-test("golden template: quarterly earnings memo maps to expected bundles", () => {
-  // The bead's verification: "Golden templates map to expected
-  // bundles." A "Quarterly earnings memo" (per fra-7vn.2 description)
-  // would draw from financials_quarterly, estimates, and news. The
-  // expected bundle set is the auditable contract that downstream
-  // orchestration can rely on.
+test("golden template: daily copper call maps to expected bundles", () => {
   const result = mapSourceCategoriesToBundles({
-    categories: ["financials_quarterly", "estimates", "news"],
+    categories: ["prices", "curves", "inventories", "licensed_reports", "news", "internal_forecasts"],
   });
   const expected = new Set([
     ANALYZE_BASE_BUNDLE_ID,
-    "financials_analysis",
-    "estimates_analysis",
-    "document_research",
+    "commodity_quote_lookup",
+    "curve_analysis",
+    "balance_snapshot",
+    "report_delta_analysis",
+    "forecast_assumption_review",
   ]);
   assert.deepEqual(new Set(result.bundle_ids), expected);
-  // Pin order too — golden snapshots are the cache key for prompt
-  // prefixes downstream, so a future change to the sort would
-  // silently invalidate cached prompts in production.
   assert.deepEqual([...result.bundle_ids], [...expected].sort());
 });
 
-test("golden template: competitive snapshot maps to expected bundles", () => {
-  // A second golden — "Competitive snapshot" pulls company profile +
-  // peers + segments. Two distinct templates produce visibly
-  // different bundle sets, demonstrating the mapping discriminates.
+test("golden template: supply shock readout maps to expected bundles", () => {
   const result = mapSourceCategoriesToBundles({
-    categories: ["company_profile", "peers", "segments"],
+    categories: ["news", "licensed_reports", "internal_notes", "inventories"],
   });
   const expected = new Set([
     ANALYZE_BASE_BUNDLE_ID,
-    "quote_lookup",
-    "single_subject_analysis",
-    "peer_comparison",
-    "segment_deep_dive",
+    "report_delta_analysis",
+    "balance_snapshot",
+    "curve_analysis",
   ]);
   assert.deepEqual(new Set(result.bundle_ids), expected);
   assert.deepEqual([...result.bundle_ids], [...expected].sort());

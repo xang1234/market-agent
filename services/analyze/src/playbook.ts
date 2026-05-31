@@ -1,19 +1,16 @@
-export type AnalyzePlaybookSection = {
-  section_id: string;
-  title: string;
-  required: boolean;
-  block_hint: "rich_text" | "metric_row" | "table" | "line_chart" | "section";
-};
+import playbookCatalog from "../../../spec/commodities_analyze_playbooks.json" with { type: "json" };
+import {
+  AnalyzePlaybookCatalogError,
+  parseAnalyzePlaybookCatalog,
+  type AnalyzePlaybook,
+} from "../../../spec/commodities_analyze_catalog.ts";
 
-export type AnalyzePlaybook = {
-  playbook_id: string;
-  version: number;
-  name: string;
-  description: string;
-  default_instructions: string;
-  default_source_categories: ReadonlyArray<string>;
-  sections: ReadonlyArray<AnalyzePlaybookSection>;
-};
+export {
+  AnalyzePlaybookCatalogError,
+  parseAnalyzePlaybookCatalog,
+  type AnalyzePlaybook,
+  type AnalyzePlaybookSection,
+} from "../../../spec/commodities_analyze_catalog.ts";
 
 export type AnalyzePlaybookRunRequest = {
   playbook_id: string;
@@ -35,54 +32,7 @@ export class AnalyzePlaybookError extends Error {
   }
 }
 
-export const ANALYZE_PLAYBOOKS: ReadonlyArray<AnalyzePlaybook> = Object.freeze([
-  Object.freeze({
-    playbook_id: "earnings_quality",
-    version: 1,
-    name: "Earnings quality",
-    description: "Assess revenue quality, margins, cash conversion, and management commentary.",
-    default_instructions: "Assess revenue quality, margins, cash conversion, and management commentary.",
-    default_source_categories: Object.freeze(["filings", "transcripts", "news"]),
-    sections: Object.freeze([
-      section("summary", "Summary", true, "rich_text"),
-      section("quality_of_revenue", "Quality of revenue", true, "metric_row"),
-      section("margin_bridge", "Margin bridge", true, "table"),
-      section("cash_conversion", "Cash conversion", true, "metric_row"),
-      section("management_tone", "Management tone", true, "rich_text"),
-      section("watch_items", "Watch items", true, "table"),
-    ]),
-  }),
-  Object.freeze({
-    playbook_id: "variant_view",
-    version: 1,
-    name: "Variant view",
-    description: "Compare the market narrative with evidence-backed counterpoints.",
-    default_instructions: "Compare the market narrative with evidence-backed counterpoints.",
-    default_source_categories: Object.freeze(["filings", "news", "transcripts"]),
-    sections: Object.freeze([
-      section("summary", "Variant summary", true, "rich_text"),
-      section("consensus_view", "Consensus view", true, "rich_text"),
-      section("counter_evidence", "Counter-evidence", true, "table"),
-      section("disconfirming_signals", "Disconfirming signals", true, "table"),
-      section("decision_points", "Decision points", true, "table"),
-    ]),
-  }),
-  Object.freeze({
-    playbook_id: "peer_comparison",
-    version: 1,
-    name: "Peer comparison",
-    description: "Compare a subject against peers on fundamentals, estimates, and evidence-backed risks.",
-    default_instructions:
-      "Compare the subject against peers on growth, margins, valuation, estimates, and evidence-backed risks.",
-    default_source_categories: Object.freeze(["filings", "news", "peers"]),
-    sections: Object.freeze([
-      section("summary", "Comparison summary", true, "rich_text"),
-      section("peer_table", "Peer table", true, "table"),
-      section("relative_strengths", "Relative strengths", true, "table"),
-      section("relative_risks", "Relative risks", true, "table"),
-    ]),
-  }),
-]);
+export const ANALYZE_PLAYBOOKS: ReadonlyArray<AnalyzePlaybook> = parseAnalyzePlaybookCatalog(playbookCatalog);
 
 export function resolveAnalyzePlaybookRequest(
   input: AnalyzePlaybookRunRequest,
@@ -104,15 +54,6 @@ export function resolveAnalyzePlaybookRequest(
       `Source categories: ${sourceCategories.join(", ")}`,
     ].join("\n"),
   });
-}
-
-function section(
-  section_id: string,
-  title: string,
-  required: boolean,
-  block_hint: AnalyzePlaybookSection["block_hint"],
-): AnalyzePlaybookSection {
-  return Object.freeze({ section_id, title, required, block_hint });
 }
 
 function normalizeText(value: unknown): string | null {

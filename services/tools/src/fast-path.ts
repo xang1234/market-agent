@@ -1,7 +1,7 @@
 export const FAST_PATH_DETECTOR_VERSION = "v1";
 
-export const FAST_PATH_QUOTE_BUNDLE_ID = "quote_lookup";
-export const FAST_PATH_QUOTE_TOOL_NAME = "get_quote";
+export const FAST_PATH_QUOTE_BUNDLE_ID = "commodity_quote_lookup";
+export const FAST_PATH_QUOTE_TOOL_NAME = "get_commodity_latest";
 
 const QUOTE_INTENT_PATTERN = /\b(?:price|prices|priced|quote|quotes|quoted)\b/i;
 
@@ -24,9 +24,9 @@ const ANALYTICAL_SIGNAL_PATTERNS: ReadonlyArray<{
       /\b(?:earnings|filing|filings|report|news|analysis|summary|outlook|forecast|risk|growth|estimate|estimates|consensus)\b/i,
     signal: "analytical_topic",
   },
-  // `target` intentionally over-rejects: it blocks "AAPL price target" (an
-  // analyst-coverage request) at the cost of also rejecting "Target price"
-  // (NYSE: TGT). False-negative is preferred over silently routing analyst
+  // `target` intentionally over-rejects: it blocks "copper price target" (a
+  // forecast request) at the cost of also rejecting terse benchmark names that
+  // include "target". False-negative is preferred over silently routing analyst
   // requests to a quote tool. Do not relax without the integration layer
   // supplying disambiguating subject metadata.
   {
@@ -40,31 +40,31 @@ const ANALYTICAL_SIGNAL_PATTERNS: ReadonlyArray<{
     signal: "performance_metric",
   },
   { pattern: /%/, signal: "percent_sign" },
-  // Session qualifiers: get_quote returns last-trade and cannot
-  // session-discriminate. Routing pre/post-market, intraday, OHLC, or
-  // bid/ask requests to it silently returns last-trade and is wrong.
+  // Session qualifiers: the fast path returns latest normalized price only and
+  // cannot session-discriminate. Routing intraday, OHLC, or bid/ask requests to
+  // it silently returns the wrong market surface.
   {
     pattern:
       /\b(?:premarket|pre-market|afterhours|after-hours|intraday|opening|closing|open|close|bid|ask|high|low|volume|vwap)\b/i,
     signal: "session_qualifier",
   },
-  // Derivative-instrument signals: get_quote is equity-quote scoped; options
-  // and futures need a different tool surface entirely.
+  // Option-style derivative signals need a different tool surface. Futures are
+  // a normal commodity contract surface, so they are not rejected here.
   {
     pattern:
-      /\b(?:call|calls|put|puts|option|options|strike|future|futures|expiry|expiration)\b/i,
+      /\b(?:call|calls|put|puts|option|options|strike|expiry|expiration)\b/i,
     signal: "derivative_instrument",
   },
-  // Non-equity instrument cues: BTC/ETH/gold/oil/etc. Conservative keyword
-  // list; the structurally correct gate is subject-class metadata supplied
-  // by the upstream subject-extraction stage at integration time.
+  // Equity-intent cues: this terminal's quote fast path is commodity-scoped.
+  // The structurally correct gate is subject-class metadata supplied by the
+  // upstream subject-extraction stage at integration time; keyword rejection is
+  // only a conservative backstop.
   {
-    pattern:
-      /\b(?:bitcoin|ethereum|btc|eth|crypto|forex|fx|gold|silver|oil|crude|wti|brent|natgas)\b/i,
-    signal: "non_equity_instrument",
+    pattern: /\b(?:stock|stocks|share|shares|equity|equities)\b/i,
+    signal: "equity_instrument",
   },
   // Actionable intents map to side-effect tools (alerts) or different bundle
-  // surfaces (screening), not get_quote.
+  // surfaces (screening), not get_commodity_latest.
   {
     pattern:
       /\b(?:alert|alerts|notify|notification|screen|screener|scan|under|above|below|between)\b/i,
@@ -112,7 +112,7 @@ export type FastPathRejectionReason =
  *
  * `heuristic_ms` measures only the deterministic detector itself (regex /
  * length checks). It is NOT end-to-end fast-path latency: the caller is
- * responsible for measuring the eventual `get_quote` call and assembly to
+ * responsible for measuring the eventual `get_commodity_latest` call and assembly to
  * verify the <100ms turnaround contract.
  */
 export type FastPathDecision =

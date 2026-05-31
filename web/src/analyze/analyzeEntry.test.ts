@@ -11,39 +11,39 @@ import {
 } from './analyzeEntry.ts'
 import type { ResolvedSubject, SubjectRef } from '../symbol/search.ts'
 
-const APPLE_REF: SubjectRef = {
-  kind: 'issuer',
+const COPPER_REF: SubjectRef = {
+  kind: 'commodity',
   id: 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaa1',
 }
 
-const APPLE_SUBJECT: ResolvedSubject = {
-  subject_ref: APPLE_REF,
-  display_name: 'Apple Inc.',
+const COPPER_SUBJECT: ResolvedSubject = {
+  subject_ref: COPPER_REF,
+  display_name: 'Copper',
   confidence: 1,
-  display_labels: { primary: 'Apple Inc.', ticker: 'AAPL', mic: 'XNAS' },
+  display_labels: { primary: 'Copper' },
 }
 
 test('analyzePathForSubject encodes canonical SubjectRef into the analyze query', () => {
-  const path = analyzePathForSubject(APPLE_REF)
-  assert.equal(path, `${ANALYZE_PATH}?subject=issuer%3A${APPLE_REF.id}`)
+  const path = analyzePathForSubject(COPPER_REF)
+  assert.equal(path, `${ANALYZE_PATH}?subject=commodity%3A${COPPER_REF.id}`)
 })
 
 test('analyzePathForSubject appends an explicit intent when provided', () => {
-  const path = analyzePathForSubject(APPLE_REF, 'memo')
-  assert.equal(path, `${ANALYZE_PATH}?subject=issuer%3A${APPLE_REF.id}&intent=memo`)
+  const path = analyzePathForSubject(COPPER_REF, 'memo')
+  assert.equal(path, `${ANALYZE_PATH}?subject=commodity%3A${COPPER_REF.id}&intent=memo`)
 })
 
 test('analyzeEntryFromSubject pairs a canonical URL with the hydrated subject as state', () => {
-  const entry = analyzeEntryFromSubject(APPLE_SUBJECT, 'compare')
-  assert.equal(entry.to, `${ANALYZE_PATH}?subject=issuer%3A${APPLE_REF.id}&intent=compare`)
-  assert.equal(entry.state.subject, APPLE_SUBJECT)
+  const entry = analyzeEntryFromSubject(COPPER_SUBJECT, 'compare')
+  assert.equal(entry.to, `${ANALYZE_PATH}?subject=commodity%3A${COPPER_REF.id}&intent=compare`)
+  assert.equal(entry.state.subject, COPPER_SUBJECT)
 })
 
 test('parseAnalyzeQuery roundtrips subject_ref + intent built by analyzePathForSubject', () => {
-  const path = analyzePathForSubject(APPLE_REF, 'general')
+  const path = analyzePathForSubject(COPPER_REF, 'general')
   const params = new URLSearchParams(path.split('?')[1])
   const parsed = parseAnalyzeQuery(params)
-  assert.deepEqual(parsed.subject_ref, APPLE_REF)
+  assert.deepEqual(parsed.subject_ref, COPPER_REF)
   assert.equal(parsed.intent, 'general')
 })
 
@@ -54,9 +54,9 @@ test('parseAnalyzeQuery returns nulls for an empty query so callers fall back to
 })
 
 test('parseAnalyzeQuery rejects an unknown intent string instead of carrying it through unchecked', () => {
-  const params = new URLSearchParams(`subject=issuer:${APPLE_REF.id}&intent=mystery`)
+  const params = new URLSearchParams(`subject=commodity:${COPPER_REF.id}&intent=mystery`)
   const parsed = parseAnalyzeQuery(params)
-  assert.deepEqual(parsed.subject_ref, APPLE_REF)
+  assert.deepEqual(parsed.subject_ref, COPPER_REF)
   assert.equal(parsed.intent, null)
 })
 
@@ -73,16 +73,16 @@ test('parseAnalyzeQuery accepts intent without a subject (caller still falls bac
 })
 
 test('subjectFromAnalyzeEntry prefers the hydrated subject from React Router state', () => {
-  const query = parseAnalyzeQuery(new URLSearchParams(`subject=issuer:${APPLE_REF.id}`))
-  const subject = subjectFromAnalyzeEntry(query, { subject: APPLE_SUBJECT })
-  assert.equal(subject, APPLE_SUBJECT)
+  const query = parseAnalyzeQuery(new URLSearchParams(`subject=commodity:${COPPER_REF.id}`))
+  const subject = subjectFromAnalyzeEntry(query, { subject: COPPER_SUBJECT })
+  assert.equal(subject, COPPER_SUBJECT)
 })
 
 test('subjectFromAnalyzeEntry falls back to a minimal subject built from the URL when state is empty (deep-link / reload)', () => {
-  const query = parseAnalyzeQuery(new URLSearchParams(`subject=issuer:${APPLE_REF.id}`))
+  const query = parseAnalyzeQuery(new URLSearchParams(`subject=commodity:${COPPER_REF.id}`))
   const subject = subjectFromAnalyzeEntry(query, null)
   assert.ok(subject !== null)
-  assert.deepEqual(subject!.subject_ref, APPLE_REF)
+  assert.deepEqual(subject!.subject_ref, COPPER_REF)
 })
 
 test('subjectFromAnalyzeEntry returns null when neither state nor URL carry a subject', () => {
@@ -99,7 +99,7 @@ test('subjectFromAnalyzeEntry ignores garbage React Router state without crashin
 
 test('ANALYZE_INTENTS lists every value accepted by parseAnalyzeQuery, and analyzeIntentLabel covers every value', () => {
   for (const intent of ANALYZE_INTENTS) {
-    const params = new URLSearchParams(`subject=issuer:${APPLE_REF.id}&intent=${intent}`)
+    const params = new URLSearchParams(`subject=commodity:${COPPER_REF.id}&intent=${intent}`)
     assert.equal(parseAnalyzeQuery(params).intent, intent)
     assert.ok(analyzeIntentLabel(intent).length > 0)
   }

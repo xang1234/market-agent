@@ -1,5 +1,13 @@
 import type { SubjectKind, SubjectRef } from "../../shared/src/subject-ref.ts";
 import { SUBJECT_KINDS } from "../../shared/src/subject-ref.ts";
+import {
+  IMPACT_CHANNELS,
+  IMPACT_DIRECTIONS,
+  IMPACT_HORIZONS,
+  type ImpactChannel,
+  type ImpactDirection,
+  type ImpactHorizon,
+} from "../../shared/src/impact-vocabulary.ts";
 
 import type { QueryExecutor } from "./types.ts";
 import {
@@ -7,32 +15,11 @@ import {
   assertUuidV4,
 } from "./validators.ts";
 
-export const IMPACT_DIRECTIONS = Object.freeze([
-  "positive",
-  "negative",
-  "mixed",
-  "unknown",
-] as const);
+export { IMPACT_DIRECTIONS, IMPACT_HORIZONS };
+export type { ImpactDirection, ImpactHorizon };
 
-export const ENTITY_IMPACT_CHANNELS = Object.freeze([
-  "demand",
-  "pricing",
-  "supply_chain",
-  "regulation",
-  "competition",
-  "balance_sheet",
-  "sentiment",
-] as const);
-
-export const IMPACT_HORIZONS = Object.freeze([
-  "near_term",
-  "medium_term",
-  "long_term",
-] as const);
-
-export type ImpactDirection = (typeof IMPACT_DIRECTIONS)[number];
-export type EntityImpactChannel = (typeof ENTITY_IMPACT_CHANNELS)[number];
-export type ImpactHorizon = (typeof IMPACT_HORIZONS)[number];
+export const ENTITY_IMPACT_CHANNELS = IMPACT_CHANNELS;
+export type EntityImpactChannel = ImpactChannel;
 
 export type EntityImpactInput = {
   claim_id: string;

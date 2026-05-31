@@ -5,7 +5,10 @@ export type {
   Block,
   ChartComparisonBlock,
   ChartComparisonBlockKind,
+  CommodityImpactChannel,
+  CommodityImpactDirection,
   DataRef,
+  DecisionHorizon,
   DisclosureBlock,
   DisclosureTier,
   DonutSegment,
@@ -54,6 +57,9 @@ export type {
 } from './types.ts'
 export {
   CHART_COMPARISON_BLOCK_KINDS,
+  COMMODITY_IMPACT_CHANNELS,
+  COMMODITY_IMPACT_DIRECTIONS,
+  COMMODITIES_BLOCK_KINDS,
   DISCLOSURE_TIERS,
   FINDING_SEVERITIES,
   NARRATIVE_LAYOUT_BLOCK_KINDS,

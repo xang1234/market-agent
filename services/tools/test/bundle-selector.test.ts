@@ -51,33 +51,33 @@ test("selectToolBundle selects every registered bundle from pre-resolve classifi
 test("selectToolBundle builds stable production prompt prefixes across user turns", () => {
   const registry = loadToolRegistry();
 
-  const userTurn = "What changed in the filing?";
+  const userTurn = "What changed in the copper supply disruption?";
   const first = selectToolBundle({
     registry,
     audience: "analyst",
-    classification: classification("document_research"),
-    thread_summary: "Researching AAPL supplier risk.",
+    classification: classification("event_impact_analysis"),
+    thread_summary: "Preparing the copper morning call.",
     resolved_context: {
-      subjects: [{ kind: "listing", id: "00000000-0000-4000-8000-000000000001" }],
+      subjects: [{ kind: "commodity", id: "00000000-0000-4000-8000-000000000001" }],
     },
     user_turn: userTurn,
   });
   const second = selectToolBundle({
     registry,
     audience: "analyst",
-    classification: classification("document_research"),
-    thread_summary: "Researching AAPL supplier risk.",
+    classification: classification("event_impact_analysis"),
+    thread_summary: "Preparing the copper morning call.",
     resolved_context: {
-      subjects: [{ kind: "listing", id: "00000000-0000-4000-8000-000000000001" }],
+      subjects: [{ kind: "commodity", id: "00000000-0000-4000-8000-000000000001" }],
     },
-    user_turn: "Now compare risk factors.",
+    user_turn: "Now compare 1d and 1w impact.",
   });
 
   assert.equal(first.ok, true);
   assert.equal(second.ok, true);
   assert.equal(first.prompt_cache_prefix.cache_key, second.prompt_cache_prefix.cache_key);
-  assert.equal(first.prompt_cache_prefix.user_turn, "What changed in the filing?");
-  assert.equal(second.prompt_cache_prefix.user_turn, "Now compare risk factors.");
+  assert.equal(first.prompt_cache_prefix.user_turn, "What changed in the copper supply disruption?");
+  assert.equal(second.prompt_cache_prefix.user_turn, "Now compare 1d and 1w impact.");
   assert.equal(
     first.prompt_cache_prefix.messages.some((message) => message.content === userTurn),
     false,
@@ -90,11 +90,11 @@ test("selectToolBundle filters reader tools out of analyst bundle selections", (
   const selection = selectToolBundle({
     registry,
     audience: "analyst",
-    classification: classification("document_research"),
+    classification: classification("event_impact_analysis"),
   });
 
   assert.equal(selection.ok, true);
-  assert.equal(selection.tools.some((tool) => tool.name === "get_claims"), true);
+  assert.equal(selection.tools.some((tool) => tool.name === "get_impact_drivers"), true);
   assert.equal(
     selection.tools.some((tool) => tool.name === "fetch_raw_document"),
     false,
@@ -126,15 +126,15 @@ test("selectToolBundle preserves classification reason and returns frozen output
     registry,
     audience: "analyst",
     classification: {
-      bundle_id: "peer_comparison",
-      reason: "multiple resolved subjects require comparison tools",
+      bundle_id: "curve_analysis",
+      reason: "curve and spread request requires curve tools",
     },
   });
 
   assert.equal(selection.ok, true);
   assert.equal(
     selection.classification.reason,
-    "multiple resolved subjects require comparison tools",
+    "curve and spread request requires curve tools",
   );
   assert.equal(Object.isFrozen(selection), true);
   assert.equal(Object.isFrozen(selection.classification), true);
@@ -162,7 +162,7 @@ test("selectToolBundle rejects missing or invalid runtime audiences", () => {
     () =>
       selectToolBundle({
         registry,
-        classification: classification("document_research"),
+        classification: classification("event_impact_analysis"),
       }),
     /audience/,
   );
@@ -171,7 +171,7 @@ test("selectToolBundle rejects missing or invalid runtime audiences", () => {
       selectToolBundle({
         registry,
         audience: "portfolio_manager",
-        classification: classification("document_research"),
+        classification: classification("event_impact_analysis"),
       }),
     /audience/,
   );

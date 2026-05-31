@@ -19,11 +19,11 @@ function impactRow(overrides: Record<string, unknown> = {}) {
   return {
     entity_impact_id: ENTITY_IMPACT_ID,
     claim_id: CLAIM_ID,
-    subject_kind: "issuer",
+    subject_kind: "commodity",
     subject_id: SUBJECT_ID,
     direction: "negative",
-    channel: "supply_chain",
-    horizon: "near_term",
+    channel: "supply",
+    horizon: "1d",
     confidence: "0.82",
     created_at: new Date("2026-05-03T00:00:00.000Z"),
     ...overrides,
@@ -52,42 +52,42 @@ test("createEntityImpact inserts a routed subject impact", async () => {
 
   const impact = await createEntityImpact(db, {
     claim_id: CLAIM_ID,
-    subject_kind: "issuer",
+    subject_kind: "commodity",
     subject_id: SUBJECT_ID,
     direction: "negative",
-    channel: "supply_chain",
-    horizon: "near_term",
+    channel: "supply",
+    horizon: "1d",
     confidence: 0.82,
   });
 
   assert.equal(impact.entity_impact_id, ENTITY_IMPACT_ID);
-  assert.deepEqual(impact.subject_ref, { kind: "issuer", id: SUBJECT_ID });
+  assert.deepEqual(impact.subject_ref, { kind: "commodity", id: SUBJECT_ID });
   assert.equal(impact.direction, "negative");
-  assert.equal(impact.channel, "supply_chain");
-  assert.equal(impact.horizon, "near_term");
+  assert.equal(impact.channel, "supply");
+  assert.equal(impact.horizon, "1d");
   assert.equal(impact.confidence, 0.82);
   assert.match(queries[0]!.text, /insert into entity_impacts/);
   assert.deepEqual(queries[0]!.values, [
     CLAIM_ID,
-    "issuer",
+    "commodity",
     SUBJECT_ID,
     "negative",
-    "supply_chain",
-    "near_term",
+    "supply",
+    "1d",
     0.82,
   ]);
 });
 
 test("listEntityImpactsForClaim returns impacts ordered by subject and id", async () => {
   const { db, queries } = recordingDb([
-    impactRow({ entity_impact_id: "44444444-4444-4444-a444-444444444444", channel: "pricing" }),
-    impactRow({ entity_impact_id: ENTITY_IMPACT_ID, channel: "supply_chain" }),
+    impactRow({ entity_impact_id: "44444444-4444-4444-a444-444444444444", channel: "demand" }),
+    impactRow({ entity_impact_id: ENTITY_IMPACT_ID, channel: "supply" }),
   ]);
 
   const impacts = await listEntityImpactsForClaim(db, CLAIM_ID);
 
   assert.equal(impacts.length, 2);
-  assert.equal(impacts[0]!.channel, "pricing");
+  assert.equal(impacts[0]!.channel, "demand");
   assert.match(queries[0]!.text, /where claim_id = \$1/);
   assert.match(queries[0]!.text, /order by subject_kind/);
   assert.match(queries[0]!.text, /subject_id/);
@@ -99,11 +99,11 @@ test("createEntityImpact rejects invalid inputs before querying", async () => {
   const { db, queries } = recordingDb();
   const valid = {
     claim_id: CLAIM_ID,
-    subject_kind: "issuer" as const,
+    subject_kind: "commodity" as const,
     subject_id: SUBJECT_ID,
     direction: "negative" as const,
-    channel: "supply_chain" as const,
-    horizon: "near_term" as const,
+    channel: "supply" as const,
+    horizon: "1d" as const,
     confidence: 0.82,
   };
 
@@ -148,15 +148,17 @@ test("listEntityImpactsForClaim rejects stored values outside enum contracts", a
 test("impact enum arrays pin the P3.4 routing contract", () => {
   assert.deepEqual(IMPACT_DIRECTIONS, ["positive", "negative", "mixed", "unknown"]);
   assert.deepEqual(ENTITY_IMPACT_CHANNELS, [
+    "supply",
     "demand",
-    "pricing",
-    "supply_chain",
-    "regulation",
-    "competition",
-    "balance_sheet",
-    "sentiment",
+    "inventory",
+    "curve_structure",
+    "freight",
+    "policy",
+    "macro_fx",
+    "weather",
+    "disruption",
   ]);
-  assert.deepEqual(IMPACT_HORIZONS, ["near_term", "medium_term", "long_term"]);
+  assert.deepEqual(IMPACT_HORIZONS, ["1d", "1w", "1m", "3m"]);
   assert.equal(Object.isFrozen(IMPACT_DIRECTIONS), true);
   assert.equal(Object.isFrozen(ENTITY_IMPACT_CHANNELS), true);
   assert.equal(Object.isFrozen(IMPACT_HORIZONS), true);

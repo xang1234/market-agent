@@ -146,10 +146,10 @@ test("createReaderToolDispatcher rejects handlers wired to non-reader-audience t
         registry,
         handlers: {
           ...fullHandlerSet(),
-          get_claims: emptyHandler(),
+          get_report_deltas: emptyHandler(),
         } as unknown as ReaderToolHandlerMap,
       }),
-    /handler.*get_claims.*non-reader tool/,
+    /handler.*get_report_deltas.*non-reader tool/,
   );
 });
 
@@ -186,7 +186,7 @@ test("dispatch rejects analyst-audience invocations of reader tools (audience_mi
   });
 
   const result = await dispatcher.dispatch({
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "analyst",
     tool_name: "extract_mentions",
     arguments: { document_id: SAMPLE_DOC_UUID },
@@ -243,7 +243,7 @@ test("dispatch rejects unknown tool names", async () => {
   });
 
   const result = await dispatcher.dispatch({
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "reader",
     tool_name: "nonexistent_tool",
     arguments: { document_id: SAMPLE_DOC_UUID },
@@ -274,7 +274,7 @@ test("dispatch invokes fetch_raw_document through the reader document handler", 
   });
 
   const result = await dispatcher.dispatch({
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "reader",
     tool_name: "fetch_raw_document",
     arguments: { document_id: SAMPLE_DOC_UUID },
@@ -306,12 +306,12 @@ test("dispatch invokes search_raw_documents with parsed metadata filters", async
   });
 
   const result = await dispatcher.dispatch({
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "reader",
     tool_name: "search_raw_documents",
     arguments: {
       query: "Acme",
-      subject_refs: [{ kind: "issuer", id: SAMPLE_DOC_UUID }],
+      subject_refs: [{ kind: "commodity", id: SAMPLE_DOC_UUID }],
       range: { start: "2026-05-01T00:00:00Z", end: "2026-05-30T00:00:00Z" },
       domain: "reuters.com",
       kind: "article",
@@ -329,7 +329,7 @@ test("dispatch invokes search_raw_documents with parsed metadata filters", async
   }
   assert.deepEqual(receivedInput, {
     query: "Acme",
-    subject_refs: [{ kind: "issuer", id: SAMPLE_DOC_UUID }],
+    subject_refs: [{ kind: "commodity", id: SAMPLE_DOC_UUID }],
     range: { start: "2026-05-01T00:00:00Z", end: "2026-05-30T00:00:00Z" },
     domain: "reuters.com",
     kind: "article",
@@ -351,7 +351,7 @@ test("dispatch rejects source_policy on search_raw_documents until evidence sear
   });
 
   const result = await dispatcher.dispatch({
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "reader",
     tool_name: "search_raw_documents",
     arguments: {
@@ -384,7 +384,7 @@ test("dispatch returns INVALID_ARGUMENT when document_id is missing", async () =
   });
 
   const result = await dispatcher.dispatch({
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "reader",
     tool_name: "extract_claims",
     arguments: {},
@@ -407,7 +407,7 @@ test("dispatch returns INVALID_ARGUMENT when document_id is not a UUID v4", asyn
   });
 
   const result = await dispatcher.dispatch({
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "reader",
     tool_name: "extract_events",
     arguments: { document_id: "not-a-uuid" },
@@ -427,7 +427,7 @@ test("dispatch returns INVALID_ARGUMENT when arguments is not an object", async 
   });
 
   const result = await dispatcher.dispatch({
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "reader",
     tool_name: "extract_events",
     arguments: "not-an-object" as unknown as object,
@@ -458,7 +458,7 @@ test("dispatch invokes the registered handler with the parsed input on the succe
   });
 
   const result = await dispatcher.dispatch({
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "reader",
     tool_name: "extract_candidate_facts",
     arguments: {
@@ -493,7 +493,7 @@ test("dispatch passes only document_id when schema_hint is absent (no spurious u
   });
 
   await dispatcher.dispatch({
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "reader",
     tool_name: "extract_mentions",
     arguments: { document_id: SAMPLE_DOC_UUID },
@@ -524,7 +524,7 @@ test("dispatch maps a ReaderToolError(NOT_FOUND) thrown by the handler to a NOT_
   });
 
   const result = await dispatcher.dispatch({
-    bundle_id: "document_research",
+    bundle_id: "report_delta_analysis",
     audience: "reader",
     tool_name: "extract_claims",
     arguments: { document_id: SAMPLE_DOC_UUID },
@@ -555,7 +555,7 @@ test("dispatch propagates non-ReaderToolError throws (programmer bugs surface, n
   await assert.rejects(
     () =>
       dispatcher.dispatch({
-        bundle_id: "document_research",
+        bundle_id: "report_delta_analysis",
         audience: "reader",
         tool_name: "extract_events",
         arguments: { document_id: SAMPLE_DOC_UUID },
@@ -612,7 +612,7 @@ test("dispatch propagates handler-output-shape failures as throws (server bug, n
   await assert.rejects(
     () =>
       dispatcher.dispatch({
-        bundle_id: "document_research",
+        bundle_id: "report_delta_analysis",
         audience: "reader",
         tool_name: "classify_sentiment",
         arguments: { document_id: SAMPLE_DOC_UUID },
@@ -636,7 +636,7 @@ test("dispatch bubbles handler-output source_ids non-UUID failures as throws (de
   await assert.rejects(
     () =>
       dispatcher.dispatch({
-        bundle_id: "document_research",
+        bundle_id: "report_delta_analysis",
         audience: "reader",
         tool_name: "classify_sentiment",
         arguments: { document_id: SAMPLE_DOC_UUID },

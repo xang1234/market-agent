@@ -69,6 +69,7 @@ import {
   isLlmSettingsPath,
   type DevApiLlmSettingsOptions,
 } from "./llm-settings-http.ts";
+import { commodityDecisionRoute } from "./commodities-fixtures.ts";
 
 type DevAgent = {
   agent_id: string;
@@ -301,6 +302,12 @@ export function createDevApiServer(
 
     if (isLlmSettingsPath(url.pathname)) {
       await handleLlmSettingsRequest({ req, res, url, env, flags, options: llmOptions });
+      return;
+    }
+
+    const commodityDecision = commodityDecisionRoute(req.method ?? "GET", url.pathname);
+    if (commodityDecision) {
+      respondJson(res, commodityDecision.status, commodityDecision.body);
       return;
     }
 
@@ -955,7 +962,7 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
         }
         const snapshotId = randomUUID();
         const resolvedPlaybook = resolveAnalyzePlaybookRequestOrHttpError({
-          playbook_id: nonEmptyString(body.playbook_id) ?? "earnings_quality",
+          playbook_id: nonEmptyString(body.playbook_id) ?? "daily_copper_call",
           instructions: nonEmptyString(body.instructions) ?? undefined,
           source_categories: body.source_categories === undefined
             ? undefined
@@ -1960,7 +1967,7 @@ function resolveAnalyzePlaybookRequestOrHttpError(
 
 function resolveFixtureAnalyzePlaybook(body: Record<string, unknown>) {
   return resolveAnalyzePlaybookRequestOrHttpError({
-    playbook_id: nonEmptyString(body.playbook_id) ?? "earnings_quality",
+    playbook_id: nonEmptyString(body.playbook_id) ?? "daily_copper_call",
     instructions: nonEmptyString(body.instructions) ?? undefined,
     source_categories: Array.isArray(body.source_categories)
       ? body.source_categories.filter((category): category is string => typeof category === "string")

@@ -9,9 +9,9 @@ import {
 } from "../src/fast-path.ts";
 import { loadToolRegistry } from "../src/registry.ts";
 
-test("detectFastPath matches the canonical 'AAPL price' contract under 100ms", () => {
+test("detectFastPath matches the canonical 'copper price' contract under 100ms", () => {
   const decision = detectFastPath({
-    user_turn: "AAPL price",
+    user_turn: "copper price",
     resolved_subject_count: 1,
   });
 
@@ -32,11 +32,11 @@ test("detectFastPath matches the canonical 'AAPL price' contract under 100ms", (
 
 test("detectFastPath matches common quote-only natural-language phrasings", () => {
   for (const user_turn of [
-    "AAPL price",
-    "Show me MSFT quote",
-    "What's the current price of AAPL?",
-    "GOOG quote please",
-    "current MSFT price",
+    "copper price",
+    "Show me iron ore quote",
+    "What's the current price of copper?",
+    "LME copper quote please",
+    "current iron ore price",
   ]) {
     const decision = detectFastPath({ user_turn, resolved_subject_count: 1 });
     assert.equal(decision.ok, true, `expected match for: ${user_turn}`);
@@ -45,12 +45,12 @@ test("detectFastPath matches common quote-only natural-language phrasings", () =
 
 test("detectFastPath rejects analytical signals that imply more than a quote", () => {
   const cases: Array<{ user_turn: string; signal: string }> = [
-    { user_turn: "Why did AAPL price drop?", signal: "explanatory_question" },
-    { user_turn: "AAPL price vs MSFT price", signal: "comparison" },
-    { user_turn: "AAPL price history", signal: "temporal_range" },
-    { user_turn: "AAPL price and earnings", signal: "analytical_topic" },
-    { user_turn: "AAPL price change", signal: "performance_metric" },
-    { user_turn: "AAPL price 5%", signal: "percent_sign" },
+    { user_turn: "Why did copper price drop?", signal: "explanatory_question" },
+    { user_turn: "copper price vs iron ore price", signal: "comparison" },
+    { user_turn: "copper price history", signal: "temporal_range" },
+    { user_turn: "copper price and report", signal: "analytical_topic" },
+    { user_turn: "copper price change", signal: "performance_metric" },
+    { user_turn: "copper price 5%", signal: "percent_sign" },
   ];
 
   for (const { user_turn, signal } of cases) {
@@ -63,16 +63,16 @@ test("detectFastPath rejects analytical signals that imply more than a quote", (
 
 test("detectFastPath rejects analyst-opinion phrasings that look quote-shaped but want analyst coverage", () => {
   // These are short, structurally-similar inputs where the user is asking
-  // for analyst output (price targets, ratings, rec) — not a live quote.
-  // Routing them to get_quote silently returns the wrong answer.
+  // for analyst output (targets, ratings, recommendations) — not a latest price.
+  // Routing them to get_commodity_latest silently returns the wrong answer.
   for (const user_turn of [
-    "AAPL price target",
-    "AAPL price target 200",
-    "TSLA buy price",
-    "MSFT sell price",
-    "AAPL price rating",
-    "AAPL fair price",
-    "AAPL analyst price",
+    "copper price target",
+    "copper price target 10500",
+    "copper buy price",
+    "iron ore sell price",
+    "copper price rating",
+    "copper fair price",
+    "copper analyst price",
   ]) {
     const decision = detectFastPath({ user_turn, resolved_subject_count: 1 });
     assert.equal(decision.ok, false, `expected rejection for: ${user_turn}`);
@@ -81,20 +81,20 @@ test("detectFastPath rejects analyst-opinion phrasings that look quote-shaped bu
   }
 });
 
-test("detectFastPath rejects session-qualified phrasings that get_quote cannot session-discriminate", () => {
-  // get_quote returns last-trade only; routing pre/post-market, intraday,
-  // OHLC, or bid/ask requests silently returns wrong-session data.
+test("detectFastPath rejects session-qualified phrasings that latest-price lookup cannot session-discriminate", () => {
+  // get_commodity_latest returns latest normalized price only; routing intraday,
+  // OHLC, or bid/ask requests silently returns the wrong market surface.
   for (const user_turn of [
-    "AAPL premarket price",
-    "AAPL pre-market price",
-    "AAPL afterhours price",
-    "AAPL after-hours price",
-    "AAPL intraday price",
-    "AAPL opening price",
-    "AAPL closing price",
-    "AAPL bid price",
-    "AAPL ask price",
-    "AAPL price high",
+    "copper premarket price",
+    "copper pre-market price",
+    "copper afterhours price",
+    "copper after-hours price",
+    "copper intraday price",
+    "copper opening price",
+    "copper closing price",
+    "copper bid price",
+    "copper ask price",
+    "copper price high",
   ]) {
     const decision = detectFastPath({ user_turn, resolved_subject_count: 1 });
     assert.equal(decision.ok, false, `expected rejection for: ${user_turn}`);
@@ -103,14 +103,12 @@ test("detectFastPath rejects session-qualified phrasings that get_quote cannot s
   }
 });
 
-test("detectFastPath rejects derivative-instrument phrasings that need an options/futures tool surface", () => {
+test("detectFastPath rejects option-style derivative phrasings that need a different tool surface", () => {
   for (const user_turn of [
-    "AAPL call option price",
-    "AAPL put price",
-    "AAPL options price",
-    "AAPL strike price",
-    "AAPL futures price",
-    "ES futures price",
+    "copper call option price",
+    "copper put price",
+    "copper options price",
+    "copper strike price",
   ]) {
     const decision = detectFastPath({ user_turn, resolved_subject_count: 1 });
     assert.equal(decision.ok, false, `expected rejection for: ${user_turn}`);
@@ -119,20 +117,17 @@ test("detectFastPath rejects derivative-instrument phrasings that need an option
   }
 });
 
-test("detectFastPath rejects non-equity instrument phrasings that get_quote (equity-scoped) would mishandle", () => {
+test("detectFastPath rejects explicit equity phrasings that commodity lookup would mishandle", () => {
   for (const user_turn of [
-    "BTC price",
-    "bitcoin price",
-    "ETH price",
-    "ethereum price",
-    "gold price",
-    "oil price",
-    "WTI crude price",
+    "Apple stock price",
+    "Rio shares price",
+    "BHP equity price",
+    "mining stocks price",
   ]) {
     const decision = detectFastPath({ user_turn, resolved_subject_count: 1 });
     assert.equal(decision.ok, false, `expected rejection for: ${user_turn}`);
     assert.equal(decision.reason, "analytical_signal");
-    assert.equal(decision.detail, "non_equity_instrument");
+    assert.equal(decision.detail, "equity_instrument");
   }
 });
 
@@ -144,12 +139,12 @@ test("detectFastPath rejects actionable-intent phrasings (alerts, screening) tha
   // category. The contract this test pins is that actionable_intent IS a
   // dedicated signal class.
   for (const user_turn of [
-    "alert me on AAPL price",
-    "AAPL price alert",
+    "alert me on copper price",
+    "copper price alert",
     "screen by price",
-    "scan AAPL price",
-    "AAPL price above 200",
-    "AAPL price below 150",
+    "scan copper price",
+    "copper price above 10500",
+    "copper price below 9000",
   ]) {
     const decision = detectFastPath({ user_turn, resolved_subject_count: 1 });
     assert.equal(decision.ok, false, `expected rejection for: ${user_turn}`);
@@ -160,10 +155,10 @@ test("detectFastPath rejects actionable-intent phrasings (alerts, screening) tha
 
 test("detectFastPath rejects requests with no quote intent", () => {
   for (const user_turn of [
-    "AAPL",
-    "Tell me about Apple",
-    "Apple supplier risk",
-    "MSFT segment revenue",
+    "copper",
+    "Tell me about copper",
+    "Chile supply risk",
+    "iron ore steel margins",
   ]) {
     const decision = detectFastPath({ user_turn, resolved_subject_count: 1 });
     assert.equal(decision.ok, false, `expected rejection for: ${user_turn}`);
@@ -180,8 +175,8 @@ test("detectFastPath rejects empty or whitespace-only user turns", () => {
 });
 
 test("detectFastPath rejects long, many-token, and realistic multi-clause requests", () => {
-  const tooLong = "AAPL price " + "x".repeat(80);
-  const tooManyTokens = "give me the the the the the the the the AAPL price";
+  const tooLong = "copper price " + "x".repeat(80);
+  const tooManyTokens = "give me the the the the the the the the copper price";
 
   const longDecision = detectFastPath({ user_turn: tooLong, resolved_subject_count: 1 });
   assert.equal(longDecision.ok, false);
@@ -197,7 +192,7 @@ test("detectFastPath rejects long, many-token, and realistic multi-clause reques
   // Realistic multi-clause: a quote-shaped lead clause with a temporal
   // follow-on. This must NOT slip through — it should hit either the token
   // cap or the temporal_range signal, depending on which gate fires first.
-  const multiClause = "AAPL price and 52-week high yesterday";
+  const multiClause = "copper price and 52-week high yesterday";
   const multiClauseDecision = detectFastPath({
     user_turn: multiClause,
     resolved_subject_count: 1,
@@ -208,7 +203,7 @@ test("detectFastPath rejects long, many-token, and realistic multi-clause reques
 test("detectFastPath requires resolved_subject_count to be exactly 1", () => {
   for (const subject_count of [0, 2, 5]) {
     const decision = detectFastPath({
-      user_turn: "AAPL price",
+      user_turn: "copper price",
       resolved_subject_count: subject_count,
     });
     assert.equal(decision.ok, false);
@@ -217,7 +212,7 @@ test("detectFastPath requires resolved_subject_count to be exactly 1", () => {
   }
 
   const ok = detectFastPath({
-    user_turn: "AAPL price",
+    user_turn: "copper price",
     resolved_subject_count: 1,
   });
   assert.equal(ok.ok, true);
@@ -231,7 +226,7 @@ test("detectFastPath records heuristic_ms via the injected clock for instrumenta
   };
 
   const decision = detectFastPath({
-    user_turn: "AAPL price",
+    user_turn: "copper price",
     resolved_subject_count: 1,
     now: fakeNow,
   });
@@ -244,7 +239,7 @@ test("detectFastPath records heuristic_ms via the injected clock for instrumenta
 test("detectFastPath dispatches deterministically into the live tool registry", () => {
   const registry = loadToolRegistry();
   const decision = detectFastPath({
-    user_turn: "AAPL price",
+    user_turn: "copper price",
     resolved_subject_count: 1,
   });
 

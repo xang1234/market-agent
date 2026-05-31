@@ -3,6 +3,7 @@ import { registerNarrativeBlockRenderers } from './registerNarrativeBlocks.ts'
 import { registerChartBlockRenderers } from './registerChartBlocks.ts'
 import { registerResearchEvidenceBlockRenderers } from './registerResearchEvidenceBlocks.ts'
 import { registerTrustProvenanceBlockRenderers } from './registerTrustProvenanceBlocks.ts'
+import { registerCommoditiesBlockRenderers } from './registerCommoditiesBlocks.ts'
 
 export function createDefaultBlockRegistry(): BlockRegistry {
   const registry = createBlockRegistry()
@@ -10,5 +11,6 @@ export function createDefaultBlockRegistry(): BlockRegistry {
   registerChartBlockRenderers(registry)
   registerResearchEvidenceBlockRenderers(registry)
   registerTrustProvenanceBlockRenderers(registry)
+  registerCommoditiesBlockRenderers(registry)
   return registry
 }

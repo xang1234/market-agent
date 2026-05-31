@@ -26,7 +26,7 @@ export function quoteDirection(row: Pick<HomeQuoteRow, 'change_abs'>): QuoteDire
 }
 
 export function watchlistMoversEmptyState(reason: HomeWatchlistMoversReason): string | null {
-  if (reason === 'no_default_watchlist') return 'Add tickers to your watchlist to see movers.'
+  if (reason === 'no_default_watchlist') return 'Add commodity benchmarks or contracts to your watchlist to see movers.'
   if (reason === 'empty_watchlist') return 'Your watchlist is empty.'
   return null
 }

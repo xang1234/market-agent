@@ -8,7 +8,7 @@ import {
 import { hashJsonValue, toolCallArgsDigest } from "../../observability/src/tool-call.ts";
 import { serializeJsonValue, type JsonValue } from "../../observability/src/types.ts";
 import type { SnapshotManifestDraft, SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
-import { STAGED_SNAPSHOT_MANIFEST } from "../../snapshot/src/manifest-staging.ts";
+import { STAGED_SNAPSHOT_MANIFEST, isSnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
 import { sealSnapshotWithPool } from "../../snapshot/src/snapshot-sealer.ts";
 import {
   createRegistryBackedAnalystToolRuntime,
@@ -355,21 +355,6 @@ function isLocalRuntimeEvidence(value: unknown): value is LocalRuntimeEvidence {
     Array.isArray(value.verifier_sources) &&
     Array.isArray(value.verifier_documents) &&
     Array.isArray(value.verifier_claims);
-}
-
-function isSnapshotSubjectRef(value: unknown): value is SnapshotSubjectRef {
-  if (!isJsonObject(value)) return false;
-  return isSnapshotSubjectKind(value.kind) && typeof value.id === "string" && isUuid(value.id);
-}
-
-function isSnapshotSubjectKind(value: unknown): value is SnapshotSubjectRef["kind"] {
-  return value === "issuer" ||
-    value === "instrument" ||
-    value === "listing" ||
-    value === "theme" ||
-    value === "macro_topic" ||
-    value === "portfolio" ||
-    value === "screen";
 }
 
 function isUuid(value: string): boolean {

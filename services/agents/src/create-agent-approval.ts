@@ -56,7 +56,7 @@ export function createAgentApprovalIntent(
 
   const interception = interceptToolCall({
     registry: input.registry,
-    bundle_id: "agent_management",
+    bundle_id: "alert_management",
     audience: "analyst",
     tool_name: "create_agent",
     arguments: input.input as unknown as JsonValue,
@@ -125,8 +125,8 @@ function assertCreateAgentPendingAction(
   if (pendingAction.tool_name !== "create_agent") {
     throw new CreateAgentApprovalError("pending action must be for create_agent");
   }
-  if (pendingAction.bundle_id !== "agent_management") {
-    throw new CreateAgentApprovalError("create_agent pending action must use agent_management bundle");
+  if (pendingAction.bundle_id !== "alert_management") {
+    throw new CreateAgentApprovalError("create_agent pending action must use alert_management bundle");
   }
   if (pendingAction.approval_required !== true || pendingAction.read_only !== false) {
     throw new CreateAgentApprovalError("create_agent pending action must be approval-required write intent");

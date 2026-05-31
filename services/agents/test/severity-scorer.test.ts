@@ -6,10 +6,10 @@ import {
   scoreFindingSeverity,
 } from "../src/severity-scorer.ts";
 
-test("scoreFindingSeverity maps weak low-relevance evidence to low severity with explainable components", () => {
+test("scoreFindingSeverity maps weak low-relevance commodity evidence to low severity with explainable components", () => {
   const result = scoreFindingSeverity({
     evidence: { trust_tier: "tertiary", corroborating_source_count: 0, confidence: 0.45 },
-    impact: { direction: "unknown", channel: "sentiment", horizon: "long_term", confidence: 0.25 },
+    impact: { direction: "unknown", channel: "macro_fx", horizon: "3m", confidence: 0.25 },
     thesis_relevance: 0.2,
   });
 
@@ -27,7 +27,7 @@ test("scoreFindingSeverity maps weak low-relevance evidence to low severity with
 test("scoreFindingSeverity maps secondary corroborated medium-term impact to medium severity", () => {
   const result = scoreFindingSeverity({
     evidence: { trust_tier: "secondary", corroborating_source_count: 1, confidence: 0.72 },
-    impact: { direction: "mixed", channel: "competition", horizon: "medium_term", confidence: 0.65 },
+    impact: { direction: "mixed", channel: "freight", horizon: "1m", confidence: 0.65 },
     thesis_relevance: 0.58,
   });
 
@@ -38,7 +38,7 @@ test("scoreFindingSeverity maps secondary corroborated medium-term impact to med
 test("scoreFindingSeverity maps primary near-term demand impact to high severity", () => {
   const result = scoreFindingSeverity({
     evidence: { trust_tier: "primary", corroborating_source_count: 1, confidence: 0.86 },
-    impact: { direction: "positive", channel: "demand", horizon: "near_term", confidence: 0.82 },
+    impact: { direction: "positive", channel: "demand", horizon: "1w", confidence: 0.82 },
     thesis_relevance: 0.76,
   });
 
@@ -49,7 +49,7 @@ test("scoreFindingSeverity maps primary near-term demand impact to high severity
 test("scoreFindingSeverity maps highly corroborated thesis-critical impact to critical severity", () => {
   const result = scoreFindingSeverity({
     evidence: { trust_tier: "primary", corroborating_source_count: 3, confidence: 0.94 },
-    impact: { direction: "negative", channel: "balance_sheet", horizon: "near_term", confidence: 0.96 },
+    impact: { direction: "negative", channel: "supply", horizon: "1d", confidence: 0.96 },
     thesis_relevance: 0.95,
   });
 
@@ -67,7 +67,7 @@ test("scoreFindingSeverity rejects out-of-range confidence and unknown enum valu
     () =>
       scoreFindingSeverity({
         evidence: { trust_tier: "primary", corroborating_source_count: 1, confidence: 1.2 },
-        impact: { direction: "positive", channel: "demand", horizon: "near_term", confidence: 0.8 },
+        impact: { direction: "positive", channel: "demand", horizon: "1d", confidence: 0.8 },
         thesis_relevance: 0.8,
       }),
     SeverityScoringValidationError,
@@ -76,7 +76,7 @@ test("scoreFindingSeverity rejects out-of-range confidence and unknown enum valu
     () =>
       scoreFindingSeverity({
         evidence: { trust_tier: "primary", corroborating_source_count: -1, confidence: 0.8 },
-        impact: { direction: "positive", channel: "demand", horizon: "near_term", confidence: 0.8 },
+        impact: { direction: "positive", channel: "demand", horizon: "1d", confidence: 0.8 },
         thesis_relevance: 0.8,
       }),
     SeverityScoringValidationError,
@@ -85,7 +85,7 @@ test("scoreFindingSeverity rejects out-of-range confidence and unknown enum valu
     () =>
       scoreFindingSeverity({
         evidence: { trust_tier: "blog" as "primary", corroborating_source_count: 1, confidence: 0.8 },
-        impact: { direction: "positive", channel: "demand", horizon: "near_term", confidence: 0.8 },
+        impact: { direction: "positive", channel: "demand", horizon: "1d", confidence: 0.8 },
         thesis_relevance: 0.8,
       }),
     SeverityScoringValidationError,

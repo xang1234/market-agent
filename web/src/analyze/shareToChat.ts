@@ -21,7 +21,7 @@ export type AnalyzeRunShareResult = {
 export async function shareAnalyzeRunToChat(input: {
   userId: string
   sourceKind: 'memo'
-  run: AnalyzeRun
+  run: Pick<AnalyzeRun, 'run_id'>
   title: string
   primarySubjectRef?: unknown
 }): Promise<AnalyzeRunShareResult> {

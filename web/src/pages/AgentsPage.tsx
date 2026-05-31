@@ -55,16 +55,16 @@ type AgentActivityRow = {
 const DEMO_AGENTS: ReadonlyArray<AgentRow> = [
   {
     agent_id: 'demo-quality',
-    name: 'Quality monitor',
-    thesis: 'Find margin, cash conversion, and guidance changes in covered names.',
+    name: 'Copper disruption monitor',
+    thesis: 'Find copper supply, inventory, curve, and report-delta changes before the morning call.',
     cadence: 'daily',
     enabled: true,
-    universe: { mode: 'static', subject_refs: [{ kind: 'issuer', id: '99999999-9999-4999-8999-999999999999' }] },
+    universe: { mode: 'static', subject_refs: [{ kind: 'commodity', id: '99999999-9999-4999-8999-999999999999' }] },
     alert_rules: [
       {
-        rule_id: 'demo-margin',
+        rule_id: 'demo-disruption',
         severity_at_least: 'critical',
-        headline_contains: 'margin',
+        headline_contains: 'disruption',
         channels: ['email'],
       },
     ],
@@ -90,7 +90,7 @@ export function AgentsPage() {
   const [universeMode, setUniverseMode] = useState<AgentUniverse['mode']>('static')
   const [staticSubjectRefsText, setStaticSubjectRefsText] = useState('')
   const [dynamicUniverseId, setDynamicUniverseId] = useState('')
-  const [subjectKind, setSubjectKind] = useState<SubjectKind>('issuer')
+  const [subjectKind, setSubjectKind] = useState<SubjectKind>('commodity')
   const [subjectId, setSubjectId] = useState('')
   const [alertRuleId, setAlertRuleId] = useState('')
   const [alertSeverity, setAlertSeverity] = useState('high')
@@ -194,7 +194,7 @@ export function AgentsPage() {
     setUniverseMode('static')
     setStaticSubjectRefsText('')
     setDynamicUniverseId('')
-    setSubjectKind('issuer')
+    setSubjectKind('commodity')
     setSubjectId('')
     setAlertRuleId('')
     setAlertSeverity('high')
@@ -269,7 +269,7 @@ export function AgentsPage() {
     setUniverseMode(agent.universe?.mode ?? 'static')
     setStaticSubjectRefsText(subjectRefsText(universe?.subject_refs))
     setDynamicUniverseId(dynamicUniverseIdFor(agent.universe))
-    setSubjectKind(subject?.kind ?? 'issuer')
+    setSubjectKind(subject?.kind ?? 'commodity')
     setSubjectId(subject?.id ?? '')
     setAlertRuleId(alert?.rule_id ?? '')
     setAlertSeverity(alert?.severity_at_least ?? 'high')
@@ -421,7 +421,7 @@ export function AgentsPage() {
                   onChange={(event) => setStaticSubjectRefsText(event.currentTarget.value)}
                   disabled={preservesUnsupportedUniverse}
                   rows={4}
-                  placeholder="issuer:...\nlisting:..."
+                  placeholder="commodity:...\ncontract:..."
                   className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
                 />
               </label>
@@ -450,11 +450,18 @@ export function AgentsPage() {
                   disabled={preservesUnsupportedUniverse || universeMode !== 'static'}
                   className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-950"
                 >
-                  <option value="issuer">issuer</option>
-                  <option value="instrument">instrument</option>
-                  <option value="listing">listing</option>
-                  <option value="theme">theme</option>
-                  <option value="macro_topic">macro_topic</option>
+                  <option value="commodity">commodity</option>
+                  <option value="benchmark">benchmark</option>
+                  <option value="contract">contract</option>
+                  <option value="curve">curve</option>
+                  <option value="region">region</option>
+                  <option value="delivery_point">delivery_point</option>
+                  <option value="asset">asset</option>
+                  <option value="producer">producer</option>
+                  <option value="route">route</option>
+                  <option value="market_theme">market_theme</option>
+                  <option value="portfolio">portfolio</option>
+                  <option value="screen">screen</option>
                 </select>
               </label>
               <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">

@@ -10,7 +10,7 @@ const BASE_STATE = {
   universeMode: 'static' as const,
   staticSubjectRefsText: '',
   dynamicUniverseId: '',
-  subjectKind: 'issuer' as const,
+  subjectKind: 'commodity' as const,
   subjectId: '',
   alertRuleId: '',
   alertSeverity: 'medium',
@@ -26,15 +26,15 @@ test('buildAgentPayload trims manual static subject ids but rejects invalid line
   assert.deepEqual(
     buildAgentPayload({
       ...BASE_STATE,
-      staticSubjectRefsText: 'issuer: 11111111-1111-4111-8111-111111111111',
+      staticSubjectRefsText: 'commodity: 11111111-1111-4111-8111-111111111111',
     }).universe,
-    { mode: 'static', subject_refs: [{ kind: 'issuer', id: '11111111-1111-4111-8111-111111111111' }] },
+    { mode: 'static', subject_refs: [{ kind: 'commodity', id: '11111111-1111-4111-8111-111111111111' }] },
   )
 
   assert.throws(
     () => buildAgentPayload({
       ...BASE_STATE,
-      staticSubjectRefsText: 'issuer:11111111-1111-4111-8111-111111111111\nlisting:AAPL',
+      staticSubjectRefsText: 'commodity:11111111-1111-4111-8111-111111111111\ncontract:LME',
     }),
     (error: unknown) =>
       error instanceof AgentPayloadValidationError &&

@@ -59,102 +59,60 @@ export type AnalystPromptTemplateValidation = {
 export const ANALYST_PROMPT_TEMPLATES: ReadonlyArray<AnalystPromptTemplate> =
   Object.freeze([
     makeTemplate({
-      bundle_id: "quote_lookup",
+      bundle_id: "commodity_quote_lookup",
       system:
-        "Answer market quote requests with listing-oriented price, movement, session, and timestamp context.",
+        "Answer commodity_quote_lookup requests with benchmark or contract price, unit, currency, grade, location, delivery-month, freshness, and timestamp context.",
       policy:
-        "Use quote_lookup tools for lightweight market snapshots. Keep the answer compact, flag stale prices, and avoid long fundamentals or document analysis.",
+        "Use commodity_quote_lookup tools for lightweight copper and iron ore market snapshots. Keep the answer compact, flag stale or delayed prices, and never infer a grade, location, or delivery term that was not returned by a tool.",
     }),
     makeTemplate({
-      bundle_id: "single_subject_analysis",
+      bundle_id: "curve_analysis",
       system:
-        "Analyze one primary subject using normalized fundamentals, market context, claims, events, and facts.",
+        "Analyze curve_analysis requests through normalized commodity curves, spreads, inventory context, and source-bound market series.",
       policy:
-        "Use single_subject_analysis tools to build an evidence-backed view of one issuer, instrument, listing, or topic. Separate facts from interpretation.",
+        "Use curve_analysis tools to explain curve shape, cash-3m or inter-month spreads, basis moves, and inventory-sensitive structure. Preserve unit, currency, tenor, basis, and as-of boundaries.",
     }),
     makeTemplate({
-      bundle_id: "financials_analysis",
+      bundle_id: "report_delta_analysis",
       system:
-        "Analyze one primary issuer or instrument using statement facts, ratios, periods, and EPS context.",
+        "Analyze report_delta_analysis requests by comparing licensed report and internal-note deltas against prior assumptions.",
       policy:
-        "Use financials_analysis tools for annual or quarterly financial source categories. Resolve periods explicitly, compare like-for-like metrics, and call out stale or missing coverage.",
+        "Use report_delta_analysis tools to extract changed claims, changed assumptions, affected commodity subjects, horizon, confidence, and conflicts. Treat licensed report text as entitled evidence and preserve source controls.",
     }),
     makeTemplate({
-      bundle_id: "estimates_analysis",
+      bundle_id: "event_impact_analysis",
       system:
-        "Analyze one primary issuer or instrument using analyst consensus, targets, coverage, and EPS surprise context.",
+        "Analyze event_impact_analysis requests by mapping events and claims into the commodities event-impact graph.",
       policy:
-        "Use estimates_analysis tools for estimate and analyst-consensus source categories. Distinguish realized EPS facts from forward-looking estimates and flag coverage gaps.",
+        "Use event_impact_analysis tools to build the event-impact graph and rank drivers by channel, direction, confidence, magnitude, and 1d, 1w, 1m, and 3m horizons. Separate evidence from interpretation and stop short of autonomous trade instructions.",
     }),
     makeTemplate({
-      bundle_id: "ownership_analysis",
+      bundle_id: "balance_snapshot",
       system:
-        "Analyze one primary issuer or instrument using institutional and insider ownership context.",
+        "Analyze balance_snapshot requests through supply, demand, inventory, trade-flow, margin, freight, disruption, and house-forecast components.",
       policy:
-        "Use ownership_analysis tools for holders source categories. Separate institutional from insider ownership and report unavailable or stale holder coverage explicitly.",
+        "Use balance_snapshot tools to build a source-bound balance bridge. Keep units explicit, distinguish external evidence from internal forecasts, and call out unavailable or stale balance coverage.",
     }),
     makeTemplate({
-      bundle_id: "peer_comparison",
+      bundle_id: "daily_call_run",
       system:
-        "Compare multiple resolved subjects with consistent metrics, periods, and evidence-backed explanations.",
+        "Run daily_call_run workflows for copper and iron ore morning-call drafts with analyst signoff.",
       policy:
-        "Use peer_comparison tools to normalize periods and units before ranking peers. Prefer tables and call out missing or stale inputs.",
+        "Use daily_call_run tools to assemble drivers-first market calls across 1d, 1w, 1m, and 3m horizons. Draft a decision brief with citations, watch items, and confidence, but do not issue autonomous buy/sell instructions.",
     }),
     makeTemplate({
-      bundle_id: "theme_research",
+      bundle_id: "forecast_assumption_review",
       system:
-        "Research a theme by connecting subjects, claims, events, catalysts, and market or fundamental context.",
+        "Analyze forecast_assumption_review requests by comparing house forecasts, market curves, report deltas, and current event-impact evidence.",
       policy:
-        "Use theme_research tools to group evidence by driver, beneficiary, risk, and timeframe. Avoid over-weighting isolated claims.",
-    }),
-    makeTemplate({
-      bundle_id: "segment_deep_dive",
-      system:
-        "Explain business segments with segment facts, definitions, trends, and warnings before making conclusions.",
-      policy:
-        "Use segment_deep_dive tools for segment revenue, margin, mix, and disclosure changes. State when segment definitions are not comparable.",
-    }),
-    makeTemplate({
-      bundle_id: "document_research",
-      system:
-        "Research documents through structured claims, events, facts, and evidence bundles without exposing raw source text.",
-      policy:
-        "Use document_research tools for document metadata discovery, structured claims, events, facts, and evidence bundles. Treat issuer IR claims as first-party narrative evidence when the run selected issuer_ir, cite evidence, disclose discovery-only sources such as GDELT as metadata rather than canonical facts, and return a partial answer when sources are insufficient.",
-    }),
-    makeTemplate({
-      bundle_id: "filing_research",
-      system:
-        "Analyze filings through extracted filing facts, claims, events, periods, and section-level evidence.",
-      policy:
-        "Use filing_research tools to surface material changes, risks, accounting context, and cited filing evidence. Do not quote raw filing text unless it is structured evidence.",
-    }),
-    makeTemplate({
-      bundle_id: "screener",
-      system:
-        "Turn screening requests into explicit filter logic, ranked candidates, and concise rationale for inclusion or exclusion.",
-      policy:
-        "Use screener tools to validate fields, execute safe filters, and explain criteria. Treat missing fields as unknown rather than as passing filters.",
-    }),
-    makeTemplate({
-      bundle_id: "agent_management",
-      system:
-        "Help create, inspect, and manage research agents while keeping side effects explicit and approval mediated.",
-      policy:
-        "Use agent_management tools for agent lifecycle tasks. Approval-required actions must be staged, and generated agent instructions must be specific and bounded.",
+        "Use forecast_assumption_review tools to explain where house forecasts diverge from market pricing and why. Preserve assumptions, dates, units, and authorized internal-source boundaries.",
     }),
     makeTemplate({
       bundle_id: "alert_management",
       system:
-        "Help create, inspect, and manage alerts or watchlist updates with clear trigger semantics and side-effect boundaries.",
+        "Help create, inspect, and manage alert_management workflows for material commodity price, curve, report, balance, and event-impact changes.",
       policy:
-        "Use alert_management tools for alert and watchlist workflows. Stage approval-required writes and summarize exactly what would change.",
-    }),
-    makeTemplate({
-      bundle_id: "analyze_template_run",
-      system:
-        "Run saved analysis templates by honoring template scope, selected sources, added subjects, and block layout expectations.",
-      policy:
-        "Use analyze_template_run tools to keep output aligned with the saved template. Preserve template intent while noting unavailable data or skipped sources.",
+        "Use alert_management tools to stage approval-required writes and summarize exactly what alert, channel, subject, and trigger would change.",
     }),
   ]);
 

@@ -17,6 +17,16 @@ import {
 } from "./series-query.ts";
 import type { ListingSubjectRef } from "./subject-ref.ts";
 import { isUuidV4 } from "./validators.ts";
+import {
+  normalizeCommodityMarketQuote,
+  normalizeCurve,
+  normalizeSpread,
+  type CommodityCurve,
+  type CommodityMarketQuote,
+  type CommodityMarketSubjectKind,
+  type CommoditySpread,
+} from "./commodity-contract.ts";
+import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 
 export type MarketServerDeps = {
   adapter: MarketDataAdapter;
@@ -68,9 +78,49 @@ export type GetCacheAuditResponse = {
   dashboard: SeriesCacheAuditDashboard;
 };
 
+export type CommodityLatestResponse = {
+  quote: CommodityMarketQuote;
+  source_freshness: {
+    source_id: string;
+    delay_class: CommodityMarketQuote["freshness"];
+    as_of: string;
+  };
+};
+
+export type CommoditySeriesResponse = {
+  subject_ref: SubjectRef & { kind: CommodityMarketSubjectKind };
+  currency: string;
+  unit: string;
+  points: ReadonlyArray<{ ts: string; price: number }>;
+  source_id: string;
+  as_of: string;
+};
+
+export type CommodityCurveResponse = {
+  curve: CommodityCurve;
+};
+
+export type CommoditySpreadsResponse = {
+  curve_ref: SubjectRef & { kind: "curve" };
+  spreads: ReadonlyArray<CommoditySpread>;
+};
+
+export type CommodityInventoryResponse = {
+  commodity_ref: SubjectRef & { kind: "commodity" };
+  unit: string;
+  points: ReadonlyArray<{ ts: string; value: number }>;
+  source_id: string;
+  as_of: string;
+};
+
 const MAX_SERIES_BODY_BYTES = 64 * 1024;
 const DEFAULT_SERIES_CACHE_AUDIT_MAX_EVENTS = 1_000;
 const DEFAULT_SERIES_CACHE_MAX_ENTRIES = 256;
+const COMMODITY_SOURCE_ID = "44444444-4444-4444-8444-444444444444";
+const COPPER_CONTRACT_ID = "11111111-1111-4111-8111-111111111111";
+const COPPER_BENCHMARK_ID = "55555555-5555-4555-8555-555555555555";
+const COPPER_CURVE_ID = "22222222-2222-4222-8222-222222222222";
+const COPPER_COMMODITY_ID = "33333333-3333-4333-8333-333333333333";
 
 export function createMarketServer(deps: MarketServerDeps): Server {
   const clock = deps.clock ?? (() => new Date());
@@ -98,6 +148,51 @@ export function createMarketServer(deps: MarketServerDeps): Server {
             dashboard: buildSeriesCacheAuditDashboard(seriesCacheAuditEvents),
           } satisfies GetCacheAuditResponse);
           return;
+        case "get_commodity_latest": {
+          const response = commodityLatestResponse(route.subject_ref, clock());
+          if (response === null) {
+            respond(res, 404, { error: "commodity quote not found" });
+            return;
+          }
+          respond(res, 200, response);
+          return;
+        }
+        case "get_commodity_series": {
+          const response = commoditySeriesResponse(route.subject_ref, clock());
+          if (response === null) {
+            respond(res, 404, { error: "commodity series not found" });
+            return;
+          }
+          respond(res, 200, response);
+          return;
+        }
+        case "get_commodity_curve": {
+          const response = commodityCurveResponse(route.curve_id, clock());
+          if (response === null) {
+            respond(res, 404, { error: "commodity curve not found" });
+            return;
+          }
+          respond(res, 200, response);
+          return;
+        }
+        case "get_commodity_spreads": {
+          const response = commoditySpreadsResponse(route.curve_id, clock());
+          if (response === null) {
+            respond(res, 404, { error: "commodity spreads not found" });
+            return;
+          }
+          respond(res, 200, response);
+          return;
+        }
+        case "get_commodity_inventory": {
+          const response = commodityInventoryResponse(route.commodity_id, clock());
+          if (response === null) {
+            respond(res, 404, { error: "commodity inventory not found" });
+            return;
+          }
+          respond(res, 200, response);
+          return;
+        }
         case "get_quote": {
           const record = await deps.listings.find(route.subject_id);
           if (!record) {
@@ -262,6 +357,11 @@ function seriesResponseHasRetryableUnavailable(response: GetSeriesResponse): boo
 type Route =
   | { action: "healthz" }
   | { action: "get_cache_audit" }
+  | { action: "get_commodity_latest"; subject_ref: SubjectRef & { kind: CommodityMarketSubjectKind } }
+  | { action: "get_commodity_series"; subject_ref: SubjectRef & { kind: CommodityMarketSubjectKind } }
+  | { action: "get_commodity_curve"; curve_id: string }
+  | { action: "get_commodity_spreads"; curve_id: string }
+  | { action: "get_commodity_inventory"; commodity_id: string }
   | { action: "get_quote"; subject_id: string }
   | { action: "get_series" };
 
@@ -271,6 +371,31 @@ function matchRoute(method: string, rawUrl: string): Route | null {
 
   if (method === "GET" && pathname === "/healthz") return { action: "healthz" };
   if (method === "GET" && pathname === "/v1/market/cache-audit") return { action: "get_cache_audit" };
+
+  if (method === "GET" && pathname === "/v1/markets/latest") {
+    const subjectRef = commodityMarketSubjectFromQuery(searchParams);
+    return subjectRef === null ? null : { action: "get_commodity_latest", subject_ref: subjectRef };
+  }
+
+  if (method === "GET" && pathname === "/v1/markets/series") {
+    const subjectRef = commodityMarketSubjectFromQuery(searchParams);
+    return subjectRef === null ? null : { action: "get_commodity_series", subject_ref: subjectRef };
+  }
+
+  if (method === "GET" && pathname === "/v1/markets/curve") {
+    const curveId = searchParams.get("curve_id");
+    return isUuidV4(curveId) ? { action: "get_commodity_curve", curve_id: curveId } : null;
+  }
+
+  if (method === "GET" && pathname === "/v1/markets/spreads") {
+    const curveId = searchParams.get("curve_id");
+    return isUuidV4(curveId) ? { action: "get_commodity_spreads", curve_id: curveId } : null;
+  }
+
+  if (method === "GET" && pathname === "/v1/markets/inventory") {
+    const commodityId = searchParams.get("commodity_id");
+    return isUuidV4(commodityId) ? { action: "get_commodity_inventory", commodity_id: commodityId } : null;
+  }
 
   if (method === "GET" && pathname === "/v1/market/quote") {
     const subjectKind = searchParams.get("subject_kind");
@@ -285,6 +410,118 @@ function matchRoute(method: string, rawUrl: string): Route | null {
   }
 
   return null;
+}
+
+function commodityMarketSubjectFromQuery(
+  searchParams: URLSearchParams,
+): (SubjectRef & { kind: CommodityMarketSubjectKind }) | null {
+  const kind = searchParams.get("subject_kind");
+  const id = searchParams.get("subject_id");
+  if ((kind !== "benchmark" && kind !== "contract") || !isUuidV4(id)) return null;
+  return { kind, id };
+}
+
+function commodityLatestResponse(
+  subjectRef: SubjectRef & { kind: CommodityMarketSubjectKind },
+  asOf: Date,
+): CommodityLatestResponse | null {
+  if (!isKnownCopperMarketSubject(subjectRef)) return null;
+  const quote = normalizeCommodityMarketQuote({
+    subject_ref: subjectRef,
+    benchmark: subjectRef.kind === "contract" ? "LME Copper Cash" : "LME Copper Grade A",
+    price: 10350,
+    prev_close: 10225,
+    currency: "USD",
+    unit: "t",
+    grade: "Grade A copper cathode",
+    location: "LME warehouse",
+    delivery_month: "cash",
+    incoterm: "warehouse",
+    freshness: "real_time",
+    as_of: asOf.toISOString(),
+    source_id: COMMODITY_SOURCE_ID,
+  });
+  return Object.freeze({
+    quote,
+    source_freshness: Object.freeze({
+      source_id: quote.source_id,
+      delay_class: quote.freshness,
+      as_of: quote.as_of,
+    }),
+  });
+}
+
+function commoditySeriesResponse(
+  subjectRef: SubjectRef & { kind: CommodityMarketSubjectKind },
+  asOf: Date,
+): CommoditySeriesResponse | null {
+  if (!isKnownCopperMarketSubject(subjectRef)) return null;
+  return Object.freeze({
+    subject_ref: Object.freeze({ ...subjectRef }),
+    currency: "USD",
+    unit: "t",
+    points: Object.freeze([
+      Object.freeze({ ts: "2026-05-29T00:00:00.000Z", price: 10225 }),
+      Object.freeze({ ts: asOf.toISOString(), price: 10350 }),
+    ]),
+    source_id: COMMODITY_SOURCE_ID,
+    as_of: asOf.toISOString(),
+  });
+}
+
+function commodityCurveResponse(curveId: string, asOf: Date): CommodityCurveResponse | null {
+  if (curveId !== COPPER_CURVE_ID) return null;
+  return Object.freeze({
+    curve: normalizeCurve({
+      curve_ref: { kind: "curve", id: curveId },
+      as_of: asOf.toISOString(),
+      currency: "USD",
+      unit: "t",
+      source_id: COMMODITY_SOURCE_ID,
+      points: [
+        { tenor: "cash", tenor_rank: 0, price: 10350 },
+        { tenor: "3M", tenor_rank: 3, price: 10290 },
+      ],
+    }),
+  });
+}
+
+function commoditySpreadsResponse(curveId: string, asOf: Date): CommoditySpreadsResponse | null {
+  if (curveId !== COPPER_CURVE_ID) return null;
+  const spreads = Object.freeze([
+    normalizeSpread({
+      spread_id: "cash-3m",
+      first_leg: { tenor: "cash", price: 10350 },
+      second_leg: { tenor: "3M", price: 10290 },
+      currency: "USD",
+      unit: "t",
+      as_of: asOf.toISOString(),
+      source_id: COMMODITY_SOURCE_ID,
+    }),
+  ]);
+  return Object.freeze({
+    curve_ref: Object.freeze({ kind: "curve" as const, id: curveId }),
+    spreads,
+  });
+}
+
+function commodityInventoryResponse(commodityId: string, asOf: Date): CommodityInventoryResponse | null {
+  if (commodityId !== COPPER_COMMODITY_ID) return null;
+  return Object.freeze({
+    commodity_ref: Object.freeze({ kind: "commodity" as const, id: commodityId }),
+    unit: "t",
+    points: Object.freeze([
+      Object.freeze({ ts: "2026-05-29T00:00:00.000Z", value: 142500 }),
+      Object.freeze({ ts: asOf.toISOString(), value: 140900 }),
+    ]),
+    source_id: COMMODITY_SOURCE_ID,
+    as_of: asOf.toISOString(),
+  });
+}
+
+function isKnownCopperMarketSubject(subjectRef: SubjectRef & { kind: CommodityMarketSubjectKind }): boolean {
+  return (subjectRef.kind === "contract" && subjectRef.id === COPPER_CONTRACT_ID) ||
+    (subjectRef.kind === "benchmark" && subjectRef.id === COPPER_BENCHMARK_ID);
 }
 
 function listingContext(record: ListingRecord): GetQuoteResponse["listing_context"] {

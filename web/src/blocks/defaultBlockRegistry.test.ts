@@ -10,6 +10,7 @@ import {
   NARRATIVE_LAYOUT_BLOCK_KINDS,
   RESEARCH_EVIDENCE_BLOCK_KINDS,
   TRUST_PROVENANCE_BLOCK_KINDS,
+  COMMODITIES_BLOCK_KINDS,
 } from './types.ts'
 
 // Drift-checks the catalog by static text scan of the register*Blocks.ts
@@ -23,6 +24,7 @@ const ALL_CATALOG_KINDS = [
   ...CHART_COMPARISON_BLOCK_KINDS,
   ...RESEARCH_EVIDENCE_BLOCK_KINDS,
   ...TRUST_PROVENANCE_BLOCK_KINDS,
+  ...COMMODITIES_BLOCK_KINDS,
 ]
 
 type BlockSchemaShape = {
@@ -72,6 +74,11 @@ test('each register*Blocks helper covers exactly the kinds in its typed group', 
       expected: TRUST_PROVENANCE_BLOCK_KINDS,
       label: 'trust_provenance',
     },
+    {
+      filename: 'registerCommoditiesBlocks.ts',
+      expected: COMMODITIES_BLOCK_KINDS,
+      label: 'commodities',
+    },
   ]
 
   for (const { filename, expected, label } of cases) {
@@ -94,6 +101,7 @@ test('defaultBlockRegistry composer invokes every register*Blocks helper', () =>
     'registerChartBlockRenderers',
     'registerResearchEvidenceBlockRenderers',
     'registerTrustProvenanceBlockRenderers',
+    'registerCommoditiesBlockRenderers',
   ]) {
     assert.ok(
       composer.includes(`${helper}(registry)`),

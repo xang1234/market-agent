@@ -1,0 +1,105 @@
+[
+  {
+    "playbook_id": "daily_copper_call",
+    "version": 1,
+    "name": "Daily copper call",
+    "description": "Prepare the source-bound copper morning call across 1d, 1w, 1m, and 3m horizons.",
+    "default_instructions": "Lead with copper price and curve moves, then explain supply, demand, inventory, macro/FX, and report-driven changes.",
+    "default_source_categories": ["prices", "curves", "inventories", "licensed_reports", "news", "internal_forecasts"],
+    "sections": [
+      { "section_id": "narrative_summary", "title": "Narrative summary", "required": true, "block_hint": "daily_call_summary" },
+      { "section_id": "driver_board", "title": "Driver board", "required": true, "block_hint": "driver_board" },
+      { "section_id": "price_curve_moves", "title": "Price and curve moves", "required": true, "block_hint": "curve_chart" },
+      { "section_id": "inventory_balance", "title": "Inventory and balance", "required": true, "block_hint": "inventory_bridge" },
+      { "section_id": "event_impact_matrix", "title": "Event impact matrix", "required": true, "block_hint": "impact_matrix" },
+      { "section_id": "watch_items", "title": "Watch items", "required": true, "block_hint": "watch_item_table" }
+    ]
+  },
+  {
+    "playbook_id": "daily_iron_ore_call",
+    "version": 1,
+    "name": "Daily iron ore call",
+    "description": "Prepare the iron ore and steel-chain morning call across 1d, 1w, 1m, and 3m horizons.",
+    "default_instructions": "Lead with iron ore price and spread moves, then explain port stocks, steel margins, China demand, freight, and report-driven changes.",
+    "default_source_categories": ["prices", "curves", "port_stocks", "licensed_reports", "news", "internal_forecasts"],
+    "sections": [
+      { "section_id": "narrative_summary", "title": "Narrative summary", "required": true, "block_hint": "daily_call_summary" },
+      { "section_id": "driver_board", "title": "Driver board", "required": true, "block_hint": "driver_board" },
+      { "section_id": "price_spread_moves", "title": "Price and spread moves", "required": true, "block_hint": "spread_table" },
+      { "section_id": "port_stock_balance", "title": "Port stock and balance", "required": true, "block_hint": "inventory_bridge" },
+      { "section_id": "event_impact_matrix", "title": "Event impact matrix", "required": true, "block_hint": "impact_matrix" },
+      { "section_id": "watch_items", "title": "Watch items", "required": true, "block_hint": "watch_item_table" }
+    ]
+  },
+  {
+    "playbook_id": "report_change_digest",
+    "version": 1,
+    "name": "Report-change digest",
+    "description": "Compare newly ingested licensed report views with prior market assumptions and house forecasts.",
+    "default_instructions": "Extract changed calls, changed assumptions, affected commodities, horizon, confidence, and conflicts with other sources.",
+    "default_source_categories": ["licensed_reports", "internal_forecasts", "news"],
+    "sections": [
+      { "section_id": "summary", "title": "Digest summary", "required": true, "block_hint": "rich_text" },
+      { "section_id": "report_deltas", "title": "Report deltas", "required": true, "block_hint": "report_delta" },
+      { "section_id": "impact_matrix", "title": "Impact matrix", "required": true, "block_hint": "impact_matrix" },
+      { "section_id": "watch_items", "title": "Watch items", "required": true, "block_hint": "watch_item_table" }
+    ]
+  },
+  {
+    "playbook_id": "supply_shock_readout",
+    "version": 1,
+    "name": "Supply shock readout",
+    "description": "Assess mine, port, freight, weather, or policy disruption impact on near-term commodity availability.",
+    "default_instructions": "Map the event to affected assets, routes, regions, supply volumes, inventory buffers, and 1d/1w/1m/3m price channels.",
+    "default_source_categories": ["news", "licensed_reports", "internal_notes", "inventories"],
+    "sections": [
+      { "section_id": "summary", "title": "Shock summary", "required": true, "block_hint": "rich_text" },
+      { "section_id": "affected_stack", "title": "Affected market stack", "required": true, "block_hint": "table" },
+      { "section_id": "balance_bridge", "title": "Balance bridge", "required": true, "block_hint": "inventory_bridge" },
+      { "section_id": "impact_matrix", "title": "Impact matrix", "required": true, "block_hint": "impact_matrix" },
+      { "section_id": "watch_items", "title": "Watch items", "required": true, "block_hint": "watch_item_table" }
+    ]
+  },
+  {
+    "playbook_id": "china_demand_watch",
+    "version": 1,
+    "name": "China demand watch",
+    "description": "Track China property, infrastructure, manufacturing, steel, and grid demand signals for copper and iron ore.",
+    "default_instructions": "Separate realized activity data from survey signals and policy claims, then map to copper and iron ore demand horizons.",
+    "default_source_categories": ["macro", "news", "licensed_reports", "internal_forecasts"],
+    "sections": [
+      { "section_id": "summary", "title": "Demand summary", "required": true, "block_hint": "rich_text" },
+      { "section_id": "signal_table", "title": "Demand signals", "required": true, "block_hint": "table" },
+      { "section_id": "impact_matrix", "title": "Impact matrix", "required": true, "block_hint": "impact_matrix" },
+      { "section_id": "forecast_vs_market", "title": "Forecast vs market", "required": false, "block_hint": "forecast_vs_market" }
+    ]
+  },
+  {
+    "playbook_id": "curve_spread_explanation",
+    "version": 1,
+    "name": "Curve/spread move explanation",
+    "description": "Explain curve, basis, cash-3m, inter-month, and cross-market spread moves with evidence-backed drivers.",
+    "default_instructions": "Resolve the curve or spread precisely, explain what changed, distinguish inventory and financing drivers, and flag refresh needs.",
+    "default_source_categories": ["prices", "curves", "inventories", "news"],
+    "sections": [
+      { "section_id": "summary", "title": "Move summary", "required": true, "block_hint": "rich_text" },
+      { "section_id": "curve_chart", "title": "Curve chart", "required": true, "block_hint": "curve_chart" },
+      { "section_id": "spread_table", "title": "Spread table", "required": true, "block_hint": "spread_table" },
+      { "section_id": "driver_board", "title": "Driver board", "required": true, "block_hint": "driver_board" }
+    ]
+  },
+  {
+    "playbook_id": "forecast_vs_market_review",
+    "version": 1,
+    "name": "Forecast-vs-market review",
+    "description": "Compare house forecasts and assumptions against current prices, curves, reports, and event-impact evidence.",
+    "default_instructions": "Surface gaps between house forecasts and market pricing, name assumptions that moved, and define watch items for the next call.",
+    "default_source_categories": ["internal_forecasts", "prices", "curves", "licensed_reports"],
+    "sections": [
+      { "section_id": "summary", "title": "Forecast review summary", "required": true, "block_hint": "rich_text" },
+      { "section_id": "forecast_vs_market", "title": "Forecast vs market", "required": true, "block_hint": "forecast_vs_market" },
+      { "section_id": "assumption_deltas", "title": "Assumption deltas", "required": true, "block_hint": "table" },
+      { "section_id": "watch_items", "title": "Watch items", "required": true, "block_hint": "watch_item_table" }
+    ]
+  }
+]

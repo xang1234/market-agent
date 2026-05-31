@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.com/schemas/finance_research_block_schema.json",
-  "title": "Finance Research Block Schema",
+  "$id": "https://example.com/schemas/commodities_intelligence_block_schema.json",
+  "title": "Commodities Intelligence Block Schema",
   "description": "Typed assistant-response schema for structured Block[] artifacts rendered by Chat, Analyze, and findings surfaces.",
   "type": "object",
   "required": [
@@ -23,20 +23,30 @@
     },
     "SubjectKind": {
       "type": "string",
-      "description": "Canonical subject discriminator. Ticker is a listing locator, not canonical identity.",
+      "description": "Migration-wide subject discriminator. New commodities public contracts use commodity, benchmark, contract, curve, region, delivery_point, asset, producer, route, market_theme, portfolio, or screen; legacy finance kinds remain only for compatibility.",
       "enum": [
+        "commodity",
+        "benchmark",
+        "contract",
+        "curve",
+        "region",
+        "delivery_point",
+        "asset",
+        "producer",
+        "route",
+        "market_theme",
+        "portfolio",
+        "screen",
         "issuer",
         "instrument",
         "listing",
         "theme",
-        "macro_topic",
-        "portfolio",
-        "screen"
+        "macro_topic"
       ]
     },
     "SubjectRef": {
       "type": "object",
-      "description": "kind determines whether the id points to an issuer, instrument, listing, theme, macro topic, portfolio, or screen.",
+      "description": "kind/id canonical reference. Commodity blocks should use public commodities subject kinds and avoid legacy finance kinds unless rendering historical artifacts.",
       "required": [
         "kind",
         "id"
@@ -50,6 +60,44 @@
         }
       },
       "additionalProperties": false
+    },
+    "CommoditySubjectRef": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": {
+          "const": "commodity"
+        },
+        "id": {
+          "$ref": "#/$defs/UUID"
+        }
+      },
+      "additionalProperties": false
+    },
+    "CurveSubjectRef": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": {
+          "const": "curve"
+        },
+        "id": {
+          "$ref": "#/$defs/UUID"
+        }
+      },
+      "additionalProperties": false
+    },
+    "DecisionHorizon": {
+      "type": "string",
+      "enum": ["1d", "1w", "1m", "3m"]
+    },
+    "ImpactChannel": {
+      "type": "string",
+      "enum": ["supply", "demand", "inventory", "curve_structure", "freight", "policy", "macro_fx", "weather", "disruption"]
+    },
+    "ImpactDirection": {
+      "type": "string",
+      "enum": ["positive", "negative", "mixed", "unknown"]
     },
     "DisclosureTier": {
       "type": "string",
@@ -924,6 +972,333 @@
       ],
       "unevaluatedProperties": false
     },
+    "DailyCallSummary": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/BaseBlock"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "daily_call_summary"
+            },
+            "commodity_refs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CommoditySubjectRef"
+              },
+              "minItems": 1
+            },
+            "horizons": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/DecisionHorizon"
+              },
+              "minItems": 1
+            },
+            "narrative": {
+              "type": "string"
+            },
+            "confidence": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": ["commodity_refs", "horizons", "narrative", "confidence"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "DriverBoard": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/BaseBlock"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "driver_board"
+            },
+            "drivers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["driver_id", "channel", "direction", "horizon", "summary", "confidence"],
+                "properties": {
+                  "driver_id": { "type": "string" },
+                  "channel": { "$ref": "#/$defs/ImpactChannel" },
+                  "direction": { "$ref": "#/$defs/ImpactDirection" },
+                  "horizon": { "$ref": "#/$defs/DecisionHorizon" },
+                  "summary": { "type": "string" },
+                  "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["drivers"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "CurveChart": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/BaseBlock"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "curve_chart"
+            },
+            "curve_ref": {
+              "$ref": "#/$defs/CurveSubjectRef"
+            },
+            "points": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["tenor", "price"],
+                "properties": {
+                  "tenor": { "type": "string" },
+                  "price": { "type": "number" }
+                },
+                "additionalProperties": false
+              }
+            },
+            "currency": { "type": "string" },
+            "unit": { "type": "string" }
+          },
+          "required": ["curve_ref", "points", "currency", "unit"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "SpreadTable": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/BaseBlock"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "spread_table"
+            },
+            "spreads": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["label", "value", "currency", "unit"],
+                "properties": {
+                  "label": { "type": "string" },
+                  "value": { "type": "number" },
+                  "currency": { "type": "string" },
+                  "unit": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["spreads"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "InventoryBridge": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/BaseBlock"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "inventory_bridge"
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["label", "value", "unit"],
+                "properties": {
+                  "label": { "type": "string" },
+                  "value": { "type": "number" },
+                  "delta": { "type": "number" },
+                  "unit": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["rows"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "ImpactMatrix": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/BaseBlock"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "impact_matrix"
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["channel", "direction", "horizon", "confidence", "summary"],
+                "properties": {
+                  "channel": { "$ref": "#/$defs/ImpactChannel" },
+                  "direction": { "$ref": "#/$defs/ImpactDirection" },
+                  "horizon": { "$ref": "#/$defs/DecisionHorizon" },
+                  "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "summary": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["rows"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "ReportDelta": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/BaseBlock"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "report_delta"
+            },
+            "deltas": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["source_id", "summary", "horizon", "confidence"],
+                "properties": {
+                  "source_id": { "$ref": "#/$defs/UUID" },
+                  "summary": { "type": "string" },
+                  "horizon": { "$ref": "#/$defs/DecisionHorizon" },
+                  "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["deltas"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "WatchItemTable": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/BaseBlock"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "watch_item_table"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["label", "trigger", "horizon"],
+                "properties": {
+                  "label": { "type": "string" },
+                  "trigger": { "type": "string" },
+                  "horizon": { "$ref": "#/$defs/DecisionHorizon" }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["items"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "ForecastVsMarket": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/BaseBlock"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "forecast_vs_market"
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["label", "market_ref", "forecast_ref"],
+                "properties": {
+                  "label": { "type": "string" },
+                  "market_ref": { "$ref": "#/$defs/UUID" },
+                  "forecast_ref": { "$ref": "#/$defs/UUID" },
+                  "gap_ref": { "$ref": "#/$defs/UUID" }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["rows"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "SourcePack": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/BaseBlock"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "source_pack"
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["source_id", "label"],
+                "properties": {
+                  "source_id": { "$ref": "#/$defs/UUID" },
+                  "label": { "type": "string" },
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "pattern": "^https://"
+                  },
+                  "entitlement": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["sources"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
     "Sources": {
       "description": "Provenance block required whenever external evidence appears in the answer.",
       "allOf": [
@@ -1049,6 +1424,36 @@
         },
         {
           "$ref": "#/$defs/MentionVolume"
+        },
+        {
+          "$ref": "#/$defs/DailyCallSummary"
+        },
+        {
+          "$ref": "#/$defs/DriverBoard"
+        },
+        {
+          "$ref": "#/$defs/CurveChart"
+        },
+        {
+          "$ref": "#/$defs/SpreadTable"
+        },
+        {
+          "$ref": "#/$defs/InventoryBridge"
+        },
+        {
+          "$ref": "#/$defs/ImpactMatrix"
+        },
+        {
+          "$ref": "#/$defs/ReportDelta"
+        },
+        {
+          "$ref": "#/$defs/WatchItemTable"
+        },
+        {
+          "$ref": "#/$defs/ForecastVsMarket"
+        },
+        {
+          "$ref": "#/$defs/SourcePack"
         },
         {
           "$ref": "#/$defs/Sources"

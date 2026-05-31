@@ -1,25 +1,26 @@
+import {
+  IMPACT_CHANNELS,
+  IMPACT_DIRECTIONS,
+  IMPACT_HORIZONS,
+  type ImpactChannel,
+  type ImpactDirection,
+  type ImpactHorizon,
+} from "../../shared/src/impact-vocabulary.ts";
+
 export const FINDING_SEVERITIES = ["low", "medium", "high", "critical"] as const;
 export type FindingSeverity = (typeof FINDING_SEVERITIES)[number];
 
 export const SCORING_TRUST_TIERS = ["primary", "secondary", "tertiary", "user"] as const;
 export type ScoringTrustTier = (typeof SCORING_TRUST_TIERS)[number];
 
-export const SCORING_IMPACT_DIRECTIONS = ["positive", "negative", "mixed", "unknown"] as const;
-export type ScoringImpactDirection = (typeof SCORING_IMPACT_DIRECTIONS)[number];
+export const SCORING_IMPACT_DIRECTIONS = IMPACT_DIRECTIONS;
+export type ScoringImpactDirection = ImpactDirection;
 
-export const SCORING_IMPACT_CHANNELS = [
-  "demand",
-  "pricing",
-  "supply_chain",
-  "regulation",
-  "competition",
-  "balance_sheet",
-  "sentiment",
-] as const;
-export type ScoringImpactChannel = (typeof SCORING_IMPACT_CHANNELS)[number];
+export const SCORING_IMPACT_CHANNELS = IMPACT_CHANNELS;
+export type ScoringImpactChannel = ImpactChannel;
 
-export const SCORING_IMPACT_HORIZONS = ["near_term", "medium_term", "long_term"] as const;
-export type ScoringImpactHorizon = (typeof SCORING_IMPACT_HORIZONS)[number];
+export const SCORING_IMPACT_HORIZONS = IMPACT_HORIZONS;
+export type ScoringImpactHorizon = ImpactHorizon;
 
 export type SeverityScoringInput = {
   evidence: {
@@ -71,19 +72,22 @@ const DIRECTION_WEIGHT: Readonly<Record<ScoringImpactDirection, number>> = Objec
 });
 
 const CHANNEL_WEIGHT: Readonly<Record<ScoringImpactChannel, number>> = Object.freeze({
+  supply: 0.95,
   demand: 0.9,
-  pricing: 0.86,
-  supply_chain: 0.82,
-  regulation: 0.86,
-  competition: 0.78,
-  balance_sheet: 0.95,
-  sentiment: 0.42,
+  inventory: 0.88,
+  curve_structure: 0.86,
+  freight: 0.82,
+  policy: 0.86,
+  macro_fx: 0.42,
+  weather: 0.76,
+  disruption: 0.9,
 });
 
 const HORIZON_WEIGHT: Readonly<Record<ScoringImpactHorizon, number>> = Object.freeze({
-  near_term: 0.95,
-  medium_term: 0.75,
-  long_term: 0.52,
+  "1d": 0.95,
+  "1w": 0.86,
+  "1m": 0.75,
+  "3m": 0.52,
 });
 
 export function scoreFindingSeverity(input: SeverityScoringInput): SeverityScoringResult {

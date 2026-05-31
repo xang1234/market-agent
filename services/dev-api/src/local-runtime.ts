@@ -20,7 +20,11 @@ import { serializeJsonValue } from "../../observability/src/types.ts";
 import { writeRunActivity } from "../../observability/src/run-activity.ts";
 import { generateFinding, type FindingRow } from "../../agents/src/finding-generator.ts";
 import type { SnapshotManifestDraft, SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
-import { STAGED_SNAPSHOT_MANIFEST, stageSnapshotManifest } from "../../snapshot/src/manifest-staging.ts";
+import {
+  STAGED_SNAPSHOT_MANIFEST,
+  isSnapshotSubjectRef,
+  stageSnapshotManifest,
+} from "../../snapshot/src/manifest-staging.ts";
 import {
   sealSnapshotInTransaction,
   sealSnapshotWithPool,
@@ -703,7 +707,8 @@ function subjectRefsFromUniverse(universe: unknown): ReadonlyArray<SnapshotSubje
   if (typeof universe.mode === "string" && typeof universe[`${universe.mode}_id`] === "string") {
     const kind = universe.mode === "agent" ? "screen" : universe.mode;
     const id = universe[`${universe.mode}_id`];
-    if (isSnapshotSubjectKind(kind) && isUuid(id)) return [{ kind, id }];
+    const ref = { kind, id };
+    if (isSnapshotSubjectRef(ref)) return [ref];
   }
   return [];
 }
@@ -720,21 +725,6 @@ function maxBlockAsOf(blocks: ReadonlyArray<Record<string, unknown>>): string | 
     .filter((value): value is string => typeof value === "string" && value.length > 0)
     .sort();
   return values.at(-1) ?? null;
-}
-
-function isSnapshotSubjectRef(value: unknown): value is SnapshotSubjectRef {
-  if (!isJsonObject(value)) return false;
-  return isSnapshotSubjectKind(value.kind) && typeof value.id === "string" && isUuid(value.id);
-}
-
-function isSnapshotSubjectKind(value: unknown): value is SnapshotSubjectRef["kind"] {
-  return value === "issuer" ||
-    value === "instrument" ||
-    value === "listing" ||
-    value === "theme" ||
-    value === "macro_topic" ||
-    value === "portfolio" ||
-    value === "screen";
 }
 
 function isUuid(value: string): boolean {

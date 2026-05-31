@@ -9,7 +9,7 @@ export function TopBar() {
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-neutral-200 bg-white px-4 dark:border-neutral-800 dark:bg-neutral-900">
       <div className="text-sm font-semibold tracking-wide text-neutral-900 dark:text-neutral-100">
-        Finance Research
+        Commodities Intelligence
       </div>
       <div className="mx-2 h-6 w-px bg-neutral-200 dark:bg-neutral-800" aria-hidden="true" />
       <SymbolSearch placement="topbar" />

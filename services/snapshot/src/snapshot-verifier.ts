@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import blockSchema from "../../../spec/finance_research_block_schema.json" with { type: "json" };
 import type {
   JsonObject,
   JsonValue,
@@ -8,6 +9,7 @@ import type {
   SnapshotNormalization,
   SnapshotSubjectKind,
 } from "./manifest-staging.ts";
+import { blockKindsFromSchema } from "./block-schema-kinds.ts";
 import {
   SNAPSHOT_BASES,
   SNAPSHOT_NORMALIZATIONS,
@@ -191,28 +193,7 @@ const DISCLOSURE_TIER_RANK: Record<RequiredDisclosure["tier"], number> = {
   tertiary_source: 6,
 };
 
-const REGISTERED_BLOCK_KINDS = new Set([
-  "rich_text",
-  "section",
-  "metric_row",
-  "table",
-  "line_chart",
-  "revenue_bars",
-  "perf_comparison",
-  "segment_donut",
-  "segment_trajectory",
-  "metrics_comparison",
-  "analyst_consensus",
-  "price_target_range",
-  "eps_surprise",
-  "filings_list",
-  "news_cluster",
-  "finding_card",
-  "sentiment_trend",
-  "mention_volume",
-  "sources",
-  "disclosure",
-]);
+const REGISTERED_BLOCK_KINDS = new Set(blockKindsFromSchema(blockSchema));
 
 export async function verifySnapshotSeal(
   input: SnapshotVerificationInput,

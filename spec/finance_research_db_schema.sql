@@ -1,4 +1,4 @@
--- Finance Research App schema pack
+-- Commodities Intelligence App schema pack
 -- Target dialect: PostgreSQL 15+
 -- Notes:
 -- 1. App metadata may live in D1/Postgres. Evidence plane should live in Postgres.
@@ -10,13 +10,29 @@
 -- app metadata and orchestration tables support user state and workflow coordination.
 -- raw document bytes live outside the relational schema and are referenced by metadata.
 -- Identity contract:
--- issuer = reporting entity; instrument = tradable security definition; listing = venue-specific symbol.
--- ticker is a listing locator, not canonical identity.
+-- commodity subjects are the public V1 contract; legacy finance subjects remain
+-- accepted during fork migration so historical artifacts can still be read.
 
 create extension if not exists pgcrypto;
 
 create type subject_kind as enum (
-  'issuer', 'instrument', 'listing', 'theme', 'macro_topic', 'portfolio', 'screen'
+  'commodity',
+  'benchmark',
+  'contract',
+  'curve',
+  'region',
+  'delivery_point',
+  'asset',
+  'producer',
+  'route',
+  'market_theme',
+  'portfolio',
+  'screen',
+  'issuer',
+  'instrument',
+  'listing',
+  'theme',
+  'macro_topic'
 );
 
 create type asset_type as enum (
@@ -60,7 +76,7 @@ create type claim_modality as enum ('asserted', 'estimated', 'speculative', 'rum
 create type claim_status as enum ('extracted', 'corroborated', 'disputed', 'rejected');
 create type polarity as enum ('positive', 'negative', 'neutral', 'mixed');
 create type impact_direction as enum ('positive', 'negative', 'mixed', 'unknown');
-create type impact_horizon as enum ('near_term', 'medium_term', 'long_term');
+create type impact_horizon as enum ('1d', '1w', '1m', '3m');
 create type event_status as enum ('reported', 'confirmed', 'canceled');
 create type finding_severity as enum ('low', 'medium', 'high', 'critical');
 create type activity_stage as enum ('reading', 'investigating', 'found', 'dismissed');
@@ -477,7 +493,7 @@ create table entity_impacts (
   subject_kind subject_kind not null,
   subject_id uuid not null,
   direction impact_direction not null,
-  channel text not null check (channel in ('demand', 'pricing', 'supply_chain', 'regulation', 'competition', 'balance_sheet', 'sentiment')),
+  channel text not null check (channel in ('supply', 'demand', 'inventory', 'curve_structure', 'freight', 'policy', 'macro_fx', 'weather', 'disruption')),
   horizon impact_horizon not null,
   confidence numeric not null check (confidence >= 0 and confidence <= 1),
   created_at timestamptz not null default now()

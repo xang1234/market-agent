@@ -949,7 +949,7 @@ test("verifySnapshotSeal logs malformed late verifier inputs", async () => {
           subject_refs: [{ kind: "watchlist", id: subjectId }],
         },
       },
-      error: "verifySnapshotSeal.manifest.subject_refs[0].kind: must be one of issuer, instrument, listing, theme, macro_topic, portfolio, screen",
+      error: "verifySnapshotSeal.manifest.subject_refs[0].kind: must be one of commodity, benchmark, contract, curve, region, delivery_point, asset, producer, route, market_theme, portfolio, screen, issuer, instrument, listing, theme, macro_topic",
     },
     {
       name: "manifest basis",
@@ -1873,6 +1873,36 @@ test("verifySnapshotSeal accepts schema-native disclosure data refs", async () =
         ...baseInput.blocks[1],
         data_ref: { kind: "disclosure", id: "required" },
       },
+    ],
+  });
+
+  assert.deepEqual(result, {
+    ok: true,
+    failures: [],
+  });
+});
+
+test("verifySnapshotSeal accepts commodity subject refs and daily-call blocks", async () => {
+  const result = await verifySnapshotSeal({
+    ...baseInput,
+    manifest: {
+      ...baseInput.manifest,
+      subject_refs: [{ kind: "commodity", id: subjectId }],
+    },
+    blocks: [
+      {
+        id: "daily-call-summary",
+        kind: "daily_call_summary",
+        snapshot_id: snapshotId,
+        data_ref: { kind: "daily_call_summary", id: "daily-call-summary" },
+        source_refs: [sourceId],
+        as_of: "2026-04-29T00:00:00.000Z",
+        commodity_refs: [{ kind: "commodity", id: subjectId }],
+        horizons: ["1d", "1w", "1m", "3m"],
+        narrative: "Copper and iron ore drivers are mixed into the morning call.",
+        confidence: 0.78,
+      },
+      baseInput.blocks[1],
     ],
   });
 

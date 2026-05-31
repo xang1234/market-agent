@@ -30,7 +30,7 @@ test("analyst prompt templates cover every registered bundle exactly once", () =
     extra_bundle_ids: [],
     duplicate_bundle_ids: [],
   });
-  assert.equal(ANALYST_PROMPT_TEMPLATES.length, 14);
+  assert.equal(ANALYST_PROMPT_TEMPLATES.length, 8);
 });
 
 test("each analyst prompt template carries system and policy prompts in the cache prefix", () => {
@@ -54,35 +54,35 @@ test("each analyst prompt template carries system and policy prompts in the cach
 });
 
 test("analystPromptTemplateForBundle returns the immutable template for a bundle", () => {
-  const template = analystPromptTemplateForBundle("document_research");
+  const template = analystPromptTemplateForBundle("event_impact_analysis");
 
   assert.ok(template);
-  assert.equal(template.bundle_id, "document_research");
+  assert.equal(template.bundle_id, "event_impact_analysis");
   assert.equal(Object.isFrozen(template), true);
   assert.equal(
-    template.policy_prompt.includes("structured claims, events, facts, and evidence bundles"),
+    template.policy_prompt.includes("event-impact graph"),
     true,
   );
   assert.equal(
-    template.policy_prompt.includes("document metadata discovery"),
+    template.policy_prompt.includes("1d, 1w, 1m, and 3m"),
     true,
   );
 });
 
 test("buildPromptCachePrefix enforces cache-stable prompt ordering and excludes user turn", () => {
-  const template = analystPromptTemplateForBundle("document_research");
+  const template = analystPromptTemplateForBundle("event_impact_analysis");
   assert.ok(template);
   const userTurn = "What changed in the latest filing?";
 
   const prefix = buildPromptCachePrefix({
     template,
-    tools: [registryTool("get_claims"), registryTool("get_events")],
-    response_schema: { schema_id: "finance_research_blocks/v1" },
-    few_shots: [{ name: "document_example", content: "Use structured evidence only." }],
-    thread_summary: "User is researching AAPL supplier risk.",
+    tools: [registryTool("get_impact_drivers"), registryTool("get_market_events")],
+    response_schema: { schema_id: "commodities_research_blocks/v1" },
+    few_shots: [{ name: "event_graph_example", content: "Map the driver to channel and horizon." }],
+    thread_summary: "User is preparing the copper morning call.",
     resolved_context: {
-      subjects: [{ kind: "listing", id: "00000000-0000-4000-8000-000000000001" }],
-      period: "FY2026",
+      subjects: [{ kind: "commodity", id: "00000000-0000-4000-8000-000000000001" }],
+      horizons: ["1d", "1w", "1m", "3m"],
     },
     user_turn: userTurn,
   });
@@ -109,17 +109,17 @@ test("buildPromptCachePrefix enforces cache-stable prompt ordering and excludes 
 });
 
 test("prompt-cache prefix hash is stable across volatile user turns within a bundle", () => {
-  const template = analystPromptTemplateForBundle("single_subject_analysis");
+  const template = analystPromptTemplateForBundle("curve_analysis");
   assert.ok(template);
   const stableInput = {
     template,
-    tools: [registryTool("resolve_subjects"), registryTool("get_statement_facts")],
-    response_schema: { schema_id: "finance_research_blocks/v1" },
-    few_shots: [{ name: "facts_table", content: "Return metric_row blocks." }],
-    thread_summary: "User is tracking quarterly margin recovery.",
+    tools: [registryTool("resolve_subjects"), registryTool("get_curve")],
+    response_schema: { schema_id: "commodities_research_blocks/v1" },
+    few_shots: [{ name: "curve_chart", content: "Return curve_chart and spread_table blocks." }],
+    thread_summary: "User is tracking LME copper cash-3m tightness.",
     resolved_context: {
-      subjects: [{ kind: "listing", id: "00000000-0000-4000-8000-000000000001" }],
-      period: "FY2026",
+      subjects: [{ kind: "curve", id: "00000000-0000-4000-8000-000000000001" }],
+      period: "1w",
     },
   };
 
@@ -133,7 +133,7 @@ test("prompt-cache prefix hash is stable across volatile user turns within a bun
   });
   const changedBundle = buildPromptCachePrefix({
     ...stableInput,
-    template: analystPromptTemplateForBundle("peer_comparison")!,
+    template: analystPromptTemplateForBundle("daily_call_run")!,
     user_turn: "Now compare revenue growth.",
   });
 
@@ -145,16 +145,16 @@ test("prompt-cache prefix hash is stable across volatile user turns within a bun
 
 test("prompt-cache prefix hash changes when selected tool definitions change", () => {
   const registry = loadToolRegistry();
-  const template = analystPromptTemplateForBundle("document_research");
+  const template = analystPromptTemplateForBundle("event_impact_analysis");
   assert.ok(template);
-  const tool = registry.getTool("get_claims");
+  const tool = registry.getTool("get_impact_drivers");
   assert.ok(tool);
   const baseInput = {
     template,
-    response_schema: { schema_id: "finance_research_blocks/v1" },
-    thread_summary: "Researching supplier risk.",
+    response_schema: { schema_id: "commodities_research_blocks/v1" },
+    thread_summary: "Researching copper supply disruption risk.",
     resolved_context: {
-      subjects: [{ kind: "listing", id: "00000000-0000-4000-8000-000000000001" }],
+      subjects: [{ kind: "commodity", id: "00000000-0000-4000-8000-000000000001" }],
     },
   };
 
