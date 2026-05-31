@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from datetime import date, datetime
 from math import isfinite
 from typing import Any
@@ -55,18 +56,38 @@ def normalize_earnings_events(
     if not reported:
         return None
 
-    reported.sort(key=lambda row: row["release"], reverse=True)
     periods = sorted(
         [value for value in (_date_value(period) for period in period_ends) if value is not None],
         reverse=True,
     )
+    events = select_earnings_events(reported, periods, now_iso=now_iso, limit=limit)
+
+    if not events:
+        return None
+
+    return {"events": events, "as_of": now_iso}
+
+
+PeriodMatcher = Callable[[date, list[date], set[date]], date | None]
+
+
+def select_earnings_events(
+    reported: list[dict[str, Any]],
+    periods: list[date],
+    *,
+    now_iso: str,
+    limit: int,
+    period_matcher: PeriodMatcher | None = None,
+) -> list[dict[str, Any]]:
+    matcher = period_matcher or _period_end_for_release
+    ordered = sorted(reported, key=lambda row: row["release"], reverse=True)
     events: list[dict[str, Any]] = []
     used_periods: set[date] = set()
-    for row in reported:
+    for row in ordered:
         if len(events) >= limit:
             break
         release = row["release"]
-        period_end = _period_end_for_release(release, periods, used_periods)
+        period_end = matcher(release, periods, used_periods)
         if period_end is None:
             continue
         used_periods.add(period_end)
@@ -79,11 +100,7 @@ def normalize_earnings_events(
                 "as_of": now_iso,
             }
         )
-
-    if not events:
-        return None
-
-    return {"events": events, "as_of": now_iso}
+    return events
 
 
 def normalize_holders(

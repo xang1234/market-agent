@@ -1,11 +1,10 @@
 import unittest
 from datetime import date
-from unittest.mock import patch
 
-import dev_providers.yfinance_fundamentals as yfinance_fundamentals
 from dev_providers.yfinance_fundamentals import (
     normalize_earnings_events,
     normalize_holders,
+    select_earnings_events,
 )
 from dev_providers.yfinance_provider import (
     normalize_daily_bars,
@@ -193,34 +192,35 @@ class YFinanceProviderTests(unittest.TestCase):
 
         self.assertIsNone(earnings)
 
-    def test_earnings_normalization_applies_limit_after_observed_period_filtering(self):
-        with patch.object(
-            yfinance_fundamentals,
-            "_period_end_for_release",
-            side_effect=[None, date(2025, 12, 31)],
-        ):
-            earnings = normalize_earnings_events(
-                [
-                    {
-                        "Earnings Date": "2026-04-30 16:00:00-04:00",
-                        "EPS Estimate": 1.94,
-                        "Reported EPS": 2.01,
-                    },
-                    {
-                        "Earnings Date": "2026-01-29 16:00:00-05:00",
-                        "EPS Estimate": 2.67,
-                        "Reported EPS": 2.84,
-                    },
-                ],
-                ["2025-12-31"],
-                now_iso="2026-05-31T12:00:00.000Z",
-                limit=1,
-            )
+    def test_earnings_event_selection_applies_limit_after_observed_period_filtering(self):
+        calls: list[date] = []
 
-        self.assertIsNotNone(earnings)
-        self.assertEqual(len(earnings["events"]), 1)
-        self.assertEqual(earnings["events"][0]["release_date"], "2026-01-29")
-        self.assertEqual(earnings["events"][0]["period_end"], "2025-12-31")
+        def period_matcher(release: date, periods: list[date], used_periods: set[date]) -> date | None:
+            calls.append(release)
+            return None if len(calls) == 1 else date(2025, 12, 31)
+
+        events = select_earnings_events(
+            [
+                {
+                    "release": date(2026, 4, 30),
+                    "eps_actual": 2.01,
+                    "eps_estimate_at_release": 1.94,
+                },
+                {
+                    "release": date(2026, 1, 29),
+                    "eps_actual": 2.84,
+                    "eps_estimate_at_release": 2.67,
+                },
+            ],
+            [date(2025, 12, 31)],
+            now_iso="2026-05-31T12:00:00.000Z",
+            limit=1,
+            period_matcher=period_matcher,
+        )
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["release_date"], "2026-01-29")
+        self.assertEqual(events[0]["period_end"], "2025-12-31")
 
     def test_holder_normalization_maps_yfinance_institutional_and_insider_rows(self):
         institutional = normalize_holders(

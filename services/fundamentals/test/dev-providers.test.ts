@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  createDevProviderRuntime,
   createDevProvidersEarningsRepository,
   createDevProvidersHoldersRepository,
   createDevProvidersIssuerProfileRepository,
@@ -11,6 +12,22 @@ import type { IssuerProfileRecord, IssuerProfileRepository } from "../src/issuer
 
 const ISSUER_ID = "99999999-9999-4999-9999-999999999999";
 const LISTING_ID = "88888888-8888-4888-8888-888888888888";
+
+type DbQuery = (text: string, values?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>;
+
+function testDb(query: DbQuery) {
+  return {
+    query,
+    async connect() {
+      return {
+        query,
+        release() {
+          // Test double; pg clients expose release but have no useful behavior here.
+        },
+      };
+    },
+  };
+}
 
 function sparseProfile(overrides: Partial<IssuerProfileRecord> = {}): IssuerProfileRecord {
   return {
@@ -41,14 +58,14 @@ test("dev providers profile repository fills missing issuer profile fields from 
   const repo = createDevProvidersIssuerProfileRepository({
     primary,
     db: {
-      async query(text, values) {
+      ...testDb(async (text, values) => {
         if (text.includes("issuer_profile_enrichments")) {
           insertedEnrichments.push(values ?? []);
-        } else {
+        } else if (text.includes("update issuers")) {
           updates.push(values ?? []);
         }
         return { rows: [] };
-      },
+      }),
     },
     baseUrl: "http://dev-providers.test",
     fetchImpl: async (url, init) => {
@@ -84,8 +101,8 @@ test("dev providers profile repository fills missing issuer profile fields from 
   ]);
 });
 
-test("dev providers profile repository does not update issuers when provenance insert fails", async () => {
-  const updates: unknown[][] = [];
+test("dev providers profile repository rolls back and surfaces persistence failures", async () => {
+  const queries: string[] = [];
   const primaryProfile = sparseProfile();
   const repo = createDevProvidersIssuerProfileRepository({
     primary: {
@@ -94,13 +111,13 @@ test("dev providers profile repository does not update issuers when provenance i
       },
     },
     db: {
-      async query(text, values) {
-        if (text.includes("issuer_profile_enrichments")) {
-          throw new Error("missing source row");
+      ...testDb(async (text) => {
+        queries.push(text);
+        if (text.includes("update issuers")) {
+          throw new Error("issuer update failed");
         }
-        updates.push(values ?? []);
         return { rows: [] };
-      },
+      }),
     },
     baseUrl: "http://dev-providers.test",
     fetchImpl: async () => new Response(JSON.stringify({
@@ -109,8 +126,12 @@ test("dev providers profile repository does not update issuers when provenance i
     }), { status: 200, headers: { "content-type": "application/json" } }),
   });
 
-  assert.equal(await repo.find(ISSUER_ID), primaryProfile);
-  assert.deepEqual(updates, []);
+  await assert.rejects(() => repo.find(ISSUER_ID), /issuer update failed/);
+  assert.match(queries[0], /^begin$/i);
+  assert.ok(queries.some((text) => text.includes("issuer_profile_enrichments")));
+  assert.ok(queries.some((text) => text.includes("update issuers")));
+  assert.ok(queries.some((text) => /^rollback$/i.test(text)));
+  assert.ok(!queries.some((text) => /^commit$/i.test(text)));
 });
 
 test("dev providers profile repository fills nulls only and keeps primary provider values", async () => {
@@ -122,9 +143,9 @@ test("dev providers profile repository fills nulls only and keeps primary provid
   const repo = createDevProvidersIssuerProfileRepository({
     primary,
     db: {
-      async query() {
+      ...testDb(async () => {
         return { rows: [] };
-      },
+      }),
     },
     baseUrl: "http://dev-providers.test",
     fetchImpl: async () => new Response(JSON.stringify({
@@ -152,10 +173,10 @@ test("dev providers profile repository degrades unavailable Finviz responses to 
       },
     },
     db: {
-      async query() {
+      ...testDb(async () => {
         updates++;
         return { rows: [] };
-      },
+      }),
     },
     baseUrl: "http://dev-providers.test",
     fetchImpl: async () => new Response(JSON.stringify({
@@ -168,6 +189,75 @@ test("dev providers profile repository degrades unavailable Finviz responses to 
 
   assert.equal(await repo.find(ISSUER_ID), primaryProfile);
   assert.equal(updates, 0);
+});
+
+test("dev provider runtime keeps earnings and holders on the primary profile repository", async () => {
+  const paths: string[] = [];
+  let profileFinds = 0;
+  let dbQueries = 0;
+  const runtime = createDevProviderRuntime({
+    profiles: {
+      async find() {
+        profileFinds++;
+        return sparseProfile();
+      },
+    },
+    db: testDb(async () => {
+      dbQueries++;
+      return { rows: [] };
+    }),
+    baseUrl: "http://dev-providers.test",
+    sourceId: YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID,
+    fetchImpl: async (url, init) => {
+      paths.push(new URL(String(url)).pathname);
+      const body = JSON.parse(String(init?.body));
+      if (paths[paths.length - 1] === "/fundamentals/holders") {
+        return new Response(JSON.stringify({
+          status: "available",
+          data: {
+            currency: "USD",
+            as_of: "2026-05-31T12:00:00.000Z",
+            holders: [
+              {
+                holder_name: "Blackrock Inc.",
+                shares_held: 1_144_695_425,
+                market_value: 357_213_651_530,
+                percent_of_shares_outstanding: 7.79,
+                shares_change: -9_930_000,
+                filing_date: "2026-03-31",
+              },
+            ],
+          },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      assert.equal(body.ticker, "AMD");
+      return new Response(JSON.stringify({
+        status: "available",
+        data: {
+          currency: "USD",
+          as_of: "2026-05-31T12:00:00.000Z",
+          events: [
+            {
+              release_date: "2026-04-30",
+              period_end: "2026-03-31",
+              eps_actual: 2.01,
+              eps_estimate_at_release: 1.94,
+              as_of: "2026-05-31T12:00:00.000Z",
+            },
+          ],
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+
+  const earnings = await runtime.earnings.find(ISSUER_ID);
+  const holders = await runtime.holders.find(ISSUER_ID, "institutional");
+
+  assert.equal(earnings?.subject.id, ISSUER_ID);
+  assert.equal(holders?.subject.id, ISSUER_ID);
+  assert.deepEqual(paths, ["/fundamentals/earnings", "/fundamentals/holders"]);
+  assert.equal(profileFinds, 2);
+  assert.equal(dbQueries, 0);
 });
 
 test("dev providers earnings repository maps sidecar rows onto the requested issuer", async () => {

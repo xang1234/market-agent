@@ -8,6 +8,7 @@ import type {
   IssuerProfileQueryExecutor,
   IssuerProfileRepository,
 } from "./issuer-repository.ts";
+import { FundamentalsDataUnavailableError } from "./availability.ts";
 import {
   DEFAULT_DEV_PROVIDER_TIMEOUT_MS,
   postSidecar,
@@ -18,7 +19,15 @@ import type { UUID } from "./subject-ref.ts";
 
 export type DevProvidersIssuerProfileRepositoryOptions = DevProviderSidecarOptions & {
   primary: IssuerProfileRepository;
-  db: IssuerProfileQueryExecutor;
+  db: IssuerProfileTransactionalQueryExecutor;
+};
+
+export type IssuerProfileTransactionClient = IssuerProfileQueryExecutor & {
+  release(): void;
+};
+
+export type IssuerProfileTransactionalQueryExecutor = IssuerProfileQueryExecutor & {
+  connect(): Promise<IssuerProfileTransactionClient>;
 };
 
 type SidecarProfile = {
@@ -40,23 +49,24 @@ export function createDevProvidersIssuerProfileRepository(
       const exchange = primary.exchanges[0];
       if (!exchange) return primary;
 
+      let enrichment: Partial<IssuerProfileRecordInput> | null;
       try {
-        const enrichment = await fetchProfileEnrichment({
+        enrichment = await fetchProfileEnrichment({
           baseUrl: options.baseUrl,
           exchange,
           fetchImpl,
           timeoutMs,
         });
-        if (!enrichment) return primary;
-        const merged = mergeProfileNulls(primary, enrichment);
-        const changed = changedProfileFields(primary, merged);
-        if (!changed) return primary;
-        await persistProfileEnrichmentProvenance(options.db, primary.subject.id, changed);
-        await persistProfileEnrichment(options.db, primary.subject.id, changed);
-        return merged;
-      } catch {
+      } catch (error) {
+        if (!(error instanceof FundamentalsDataUnavailableError)) throw error;
         return primary;
       }
+      if (!enrichment) return primary;
+      const merged = mergeProfileNulls(primary, enrichment);
+      const changed = changedProfileFields(primary, merged);
+      if (!changed) return primary;
+      await persistProfileEnrichment(options.db, primary.subject.id, changed);
+      return merged;
     },
   };
 }
@@ -125,6 +135,29 @@ function changedProfileFields(
 }
 
 async function persistProfileEnrichment(
+  db: IssuerProfileTransactionalQueryExecutor,
+  issuerId: UUID,
+  fields: Pick<Partial<IssuerProfileRecord>, "domicile" | "sector" | "industry">,
+): Promise<void> {
+  const client = await db.connect();
+  try {
+    await client.query("begin");
+    await persistProfileEnrichmentProvenance(client, issuerId, fields);
+    await persistProfileEnrichmentFields(client, issuerId, fields);
+    await client.query("commit");
+  } catch (error) {
+    try {
+      await client.query("rollback");
+    } catch {
+      // Preserve the original persistence error.
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function persistProfileEnrichmentFields(
   db: IssuerProfileQueryExecutor,
   issuerId: UUID,
   fields: Pick<Partial<IssuerProfileRecord>, "domicile" | "sector" | "industry">,
@@ -155,7 +188,8 @@ async function persistProfileEnrichmentProvenance(
        on conflict (issuer_id, field_name, source_id)
        do update set field_value = excluded.field_value,
                      provider = excluded.provider,
-                     retrieved_at = excluded.retrieved_at`,
+                     retrieved_at = excluded.retrieved_at,
+                     updated_at = now()`,
       [issuerId, field, value, FINVIZ_DEV_REFERENCE_SOURCE_ID],
     );
   }

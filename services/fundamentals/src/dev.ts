@@ -1,8 +1,6 @@
 import { Pool } from "pg";
 import {
-  createDevProvidersEarningsRepository,
-  createDevProvidersHoldersRepository,
-  createDevProvidersIssuerProfileRepository,
+  createDevProviderRuntime,
 } from "./dev-providers.ts";
 import { createPostgresIssuerProfileRepository } from "./issuer-repository.ts";
 import { createSecCompanyFactsHttpFetcher } from "./sec-edgar-http.ts";
@@ -34,13 +32,15 @@ const pool = new Pool({ connectionString: databaseUrl });
 const postgresProfiles = createPostgresIssuerProfileRepository(pool);
 const unofficialDevProvidersEnabled = process.env.ENABLE_UNOFFICIAL_DEV_PROVIDERS === "true";
 const devProvidersBaseUrl = process.env.DEV_PROVIDERS_BASE_URL ?? process.env.DEV_PROVIDERS_ORIGIN;
-const profiles = unofficialDevProvidersEnabled && devProvidersBaseUrl
-  ? createDevProvidersIssuerProfileRepository({
-      primary: postgresProfiles,
+const devProviderRuntime = unofficialDevProvidersEnabled && devProvidersBaseUrl
+  ? createDevProviderRuntime({
+      profiles: postgresProfiles,
       db: pool,
       baseUrl: devProvidersBaseUrl,
+      sourceId: YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID,
     })
-  : postgresProfiles;
+  : null;
+const profiles = devProviderRuntime?.profiles ?? postgresProfiles;
 const secFetcher = process.env.SEC_EDGAR_USER_AGENT
   ? createSecCompanyFactsHttpFetcher({
       userAgent: process.env.SEC_EDGAR_USER_AGENT,
@@ -54,20 +54,8 @@ const statements = createSecBackedStatementRepository(pool, {
 const stats = createSecBackedStatsRepository(pool, { statements, fetcher: secFetcher });
 const segments = createUnsupportedSegmentsRepository();
 const consensus = createUnsupportedConsensusRepository();
-const earnings = unofficialDevProvidersEnabled && devProvidersBaseUrl
-  ? createDevProvidersEarningsRepository({
-      profiles,
-      baseUrl: devProvidersBaseUrl,
-      sourceId: YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID,
-    })
-  : createUnsupportedEarningsRepository();
-const holders = unofficialDevProvidersEnabled && devProvidersBaseUrl
-  ? createDevProvidersHoldersRepository({
-      profiles,
-      baseUrl: devProvidersBaseUrl,
-      sourceId: YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID,
-    })
-  : createUnsupportedHoldersRepository();
+const earnings = devProviderRuntime?.earnings ?? createUnsupportedEarningsRepository();
+const holders = devProviderRuntime?.holders ?? createUnsupportedHoldersRepository();
 const server = createFundamentalsServer({
   profiles,
   stats,

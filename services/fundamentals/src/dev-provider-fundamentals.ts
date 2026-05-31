@@ -6,10 +6,10 @@ import {
 import type { EarningsRepository } from "./earnings-repository.ts";
 import { FundamentalsDataUnavailableError } from "./availability.ts";
 import {
-  fiscalCalendarForIssuerProfile,
   fiscalQuarterLabelForPeriodEnd,
   type FiscalCalendar,
 } from "./fiscal-calendar.ts";
+import { fiscalCalendarForIssuerProfile } from "./issuer-fiscal-calendar.ts";
 import {
   freezeInsiderHoldersEnvelope,
   freezeInstitutionalHoldersEnvelope,

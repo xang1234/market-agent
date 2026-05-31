@@ -5,7 +5,6 @@
 // (ends 2025-12-31) would silently merge two different periods.
 
 import type { FiscalPeriod, PeriodKind } from "./statement.ts";
-import type { IssuerProfileRecord } from "./profile.ts";
 import { assertInteger, assertIsoDate, assertOneOf } from "./validators.ts";
 
 export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
@@ -66,17 +65,6 @@ export type FiscalLabel = {
 };
 
 const QUARTERS: ReadonlyArray<1 | 2 | 3 | 4> = [1, 2, 3, 4];
-
-const KNOWN_FISCAL_CALENDAR_BY_CIK: Readonly<Partial<Record<string, FiscalCalendar>>> = Object.freeze({
-  "320193": APPLE_FISCAL_CALENDAR,
-  "789019": MICROSOFT_FISCAL_CALENDAR,
-});
-
-export function fiscalCalendarForIssuerProfile(record: IssuerProfileRecord): FiscalCalendar {
-  const calendar = KNOWN_FISCAL_CALENDAR_BY_CIK[normalizeCik(record.cik)];
-  if (calendar) return calendar;
-  return CALENDAR_YEAR_FISCAL;
-}
 
 export function fiscalYearLabel(c: FiscalCalendar, fy: number): FiscalLabel {
   assertCalendar(c, "fiscalYearLabel.calendar");
@@ -248,12 +236,6 @@ function isoDateMs(s: string): number | null {
     return null;
   }
   return parseIsoDate(s).getTime();
-}
-
-function normalizeCik(cik: string | undefined): string {
-  const trimmed = cik?.trim();
-  if (!trimmed || !/^\d+$/.test(trimmed)) return "";
-  return trimmed.replace(/^0+/, "") || "0";
 }
 
 function formatIsoDate(d: Date): string {

@@ -5,7 +5,6 @@ import {
   CALENDAR_YEAR_FISCAL,
   MICROSOFT_FISCAL_CALENDAR,
   assertCalendar,
-  fiscalCalendarForIssuerProfile,
   fiscalQuarterLabel,
   fiscalQuarterLabelForPeriodEnd,
   fiscalYearEnd,
@@ -13,6 +12,7 @@ import {
   fiscalYearStart,
   type FiscalCalendar,
 } from "../src/fiscal-calendar.ts";
+import { fiscalCalendarForIssuerProfile } from "../src/issuer-fiscal-calendar.ts";
 import type { IssuerProfileRecord } from "../src/profile.ts";
 import { normalizedStatement } from "../src/statement.ts";
 import { aaplIssuer, SEC_EDGAR_SOURCE_ID } from "./fixtures.ts";
