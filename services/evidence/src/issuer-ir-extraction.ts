@@ -152,6 +152,9 @@ export function issuerIrTextFromBytes(input: {
   if (contentType === "application/pdf" || isPdfBytes(input.bytes)) {
     return Object.freeze({ status: "unsupported_binary", reason: "pdf" as const });
   }
+  if (isZipContainerBytes(input.bytes) || isOleCompoundBytes(input.bytes)) {
+    return Object.freeze({ status: "unsupported_binary", reason: "binary_content_type" as const });
+  }
   if (contentType && !isTextContentType(contentType)) {
     return Object.freeze({ status: "unsupported_binary", reason: "binary_content_type" as const });
   }
@@ -177,6 +180,26 @@ function isPdfBytes(bytes: Uint8Array): boolean {
     bytes[2] === 0x44 &&
     bytes[3] === 0x46 &&
     bytes[4] === 0x2d;
+}
+
+function isZipContainerBytes(bytes: Uint8Array): boolean {
+  return bytes.length >= 4 &&
+    bytes[0] === 0x50 &&
+    bytes[1] === 0x4b &&
+    bytes[2] === 0x03 &&
+    bytes[3] === 0x04;
+}
+
+function isOleCompoundBytes(bytes: Uint8Array): boolean {
+  return bytes.length >= 8 &&
+    bytes[0] === 0xd0 &&
+    bytes[1] === 0xcf &&
+    bytes[2] === 0x11 &&
+    bytes[3] === 0xe0 &&
+    bytes[4] === 0xa1 &&
+    bytes[5] === 0xb1 &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0xe1;
 }
 
 function isTextContentType(contentType: string): boolean {

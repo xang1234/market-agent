@@ -109,14 +109,15 @@ export async function ingestDocumentInTransaction(
   await db.query("select pg_advisory_xact_lock(hashtext($1))", [raw_blob_id]);
   await lockSourceForBlobIngest(db, input.source.source_id);
   const putResult = await deps.objectStore.put(input.bytes);
+  const storedRawBlobId = putResult.blob.raw_blob_id;
   let unregisterRollbackCleanup = () => {};
   if (putResult.status === "created") {
     unregisterRollbackCleanup = deps.tx.onRollback((error) =>
-      deleteCreatedBlobBestEffort(deps.objectStore, raw_blob_id, error)
+      deleteCreatedBlobBestEffort(deps.objectStore, storedRawBlobId, error)
     );
   }
   try {
-    if (putResult.blob.raw_blob_id !== raw_blob_id) {
+    if (storedRawBlobId !== raw_blob_id) {
       throw new Error("ingestDocument: object store returned a blob id that does not match the input bytes");
     }
     const result = await createDocument(db, {
@@ -134,7 +135,7 @@ export async function ingestDocumentInTransaction(
   } catch (error) {
     unregisterRollbackCleanup();
     if (putResult.status === "created") {
-      await deleteCreatedBlobBestEffort(deps.objectStore, raw_blob_id, error);
+      await deleteCreatedBlobBestEffort(deps.objectStore, storedRawBlobId, error);
     }
     throw error;
   }

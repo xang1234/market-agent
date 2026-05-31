@@ -320,6 +320,36 @@ test("ingestDocument does not delete a pre-existing blob when document creation 
   assert.equal(await objectStore.has(TWEET_HASH), true);
 });
 
+test("ingestDocument deletes the actual created blob id when object store returns a mismatched id", async () => {
+  const { db, queries } = recordingDb();
+  const objectStore = new RecordingObjectStore();
+  const mismatchedRawBlobId = `sha256:${"b".repeat(64)}`;
+  objectStore.put = async (bytes) => {
+    objectStore.putCalls += 1;
+    return Object.freeze({
+      status: "created" as const,
+      blob: Object.freeze({ raw_blob_id: mismatchedRawBlobId, size: bytes.byteLength }),
+    });
+  };
+
+  await assert.rejects(
+    ingestDocument(
+      { db, objectStore },
+      {
+        source: { source_id: SOURCE_ID, license_class: "public" },
+        bytes: TWEET_BYTES,
+        document: { kind: "social_post" },
+      },
+    ),
+    /object store returned a blob id/,
+  );
+
+  assert.equal(objectStore.putCalls, 1);
+  assert.equal(objectStore.deleteCalls, 1);
+  assert.deepEqual(objectStore.deletedRawBlobIds, [mismatchedRawBlobId]);
+  assert.match(queries.at(-1)?.text ?? "", /^rollback$/i);
+});
+
 test("ingestDocument does not delete a new blob when commit outcome is uncertain", async () => {
   const { db, queries } = recordingDb();
   const commitFailsDb: QueryExecutor = {

@@ -403,6 +403,17 @@ function readBoundedLimit(value: string | null, defaultLimit: number, maxLimit: 
 
 Return `400` for malformed `limit` or malformed cursor values. The cursor should be
 opaque to clients and encode the last row's `{ created_at, run_id }` position.
+Use the same `encodeAnalyzeRunCursor` / `decodeAnalyzeRunCursor` shape specified
+in task 8: base64url-encoded JSON with non-empty `created_at` and `run_id`
+fields. The HTTP layer may keep the adapter argument as the opaque cursor string,
+but fixture and durable adapters must decode it before applying pagination and
+must translate decode failures into `400 "cursor: invalid analyze run cursor"`.
+
+Example cursor payload before encoding:
+
+```json
+{ "created_at": "2026-05-30T12:00:00.000Z", "run_id": "11111111-1111-4111-8111-111111111111" }
+```
 
 Extend `DevApiAnalyzeAdapter`:
 

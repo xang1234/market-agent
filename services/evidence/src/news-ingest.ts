@@ -17,7 +17,7 @@ import {
   type SourceRow,
   type TrustTier,
 } from "./source-repo.ts";
-import type { TransactionContext } from "./transaction.ts";
+import { assertTransactionContext, type TransactionContext } from "./transaction.ts";
 import type { QueryExecutor } from "./types.ts";
 import {
   assertIso8601WithOffset,
@@ -332,6 +332,7 @@ async function persistKindedSourceInTransaction(
   deps: TransactionIngestDeps,
   input: PersistInput,
 ): Promise<IngestResult> {
+  assertTransactionContext(deps.tx, "persistKindedSourceInTransaction");
   const source = await createKindedSource(deps.tx.db, input);
   const ingest = await ingestDocumentInTransaction(
     { tx: deps.tx, objectStore: deps.objectStore },

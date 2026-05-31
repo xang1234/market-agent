@@ -28,4 +28,14 @@ test("issuer IR text extraction decodes text presentations and reports unsupport
     }),
     { status: "unsupported_binary", reason: "binary_content_type" },
   );
+  assert.deepEqual(
+    issuerIrTextFromBytes({ bytes: pptxBytes, contentType: null }),
+    { status: "unsupported_binary", reason: "binary_content_type" },
+  );
+
+  const oleBytes = new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0x00]);
+  assert.deepEqual(
+    issuerIrTextFromBytes({ bytes: oleBytes, contentType: null }),
+    { status: "unsupported_binary", reason: "binary_content_type" },
+  );
 });

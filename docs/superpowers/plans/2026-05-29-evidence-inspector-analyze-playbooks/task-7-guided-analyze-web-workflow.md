@@ -99,6 +99,39 @@ test("diffAnalyzeRuns ignores volatile block identity fields", () => {
   assert.equal(diff.rows[0]?.status, "unchanged");
 });
 
+test("diffAnalyzeRuns marks evidence reference changes as changed", () => {
+  const before = runDetail({
+    runId: "run-a",
+    snapshotId: "11111111-1111-4111-8111-111111111111",
+    blocks: [
+      {
+        id: "old-summary",
+        kind: "rich_text",
+        title: "Summary",
+        data_ref: { kind: "analyze_run", id: "old-summary", params: { playbook_section_id: "summary" } },
+        rich_text: { segments: [{ text: "Revenue grew 9%.", claim_refs: [{ kind: "claim", id: "claim-1" }] }] },
+        source_refs: [{ kind: "source", id: "source-1" }],
+      },
+    ],
+  });
+  const after = runDetail({
+    runId: "run-b",
+    snapshotId: "22222222-2222-4222-8222-222222222222",
+    blocks: [
+      {
+        id: "new-summary",
+        kind: "rich_text",
+        title: "Summary",
+        data_ref: { kind: "analyze_run", id: "new-summary", params: { playbook_section_id: "summary" } },
+        rich_text: { segments: [{ text: "Revenue grew 9%.", claim_refs: [{ kind: "claim", id: "claim-2" }] }] },
+        source_refs: [{ kind: "source", id: "source-2" }],
+      },
+    ],
+  });
+
+  assert.equal(diffAnalyzeRuns(before, after).rows[0]?.status, "changed");
+});
+
 test("diffAnalyzeRuns marks rich text content changes as changed", () => {
   const before = runDetail({
     runId: "run-a",

@@ -13,6 +13,7 @@ import {
   ingestEarningsTranscript,
   ingestNewsArticle,
   ingestPressRelease,
+  ingestPressReleaseInTransaction,
 } from "../src/news-ingest.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { RecordingObjectStore } from "./recording-object-store.ts";
@@ -262,6 +263,29 @@ test("ingestPressRelease rejects empty bytes and missing publisher before any si
       },
     ),
     /publisher: must be a non-empty string/,
+  );
+
+  assert.equal(queries.length, 0);
+  assert.equal(objectStore.putCalls, 0);
+});
+
+test("ingestPressReleaseInTransaction rejects malformed transaction context before source writes", async () => {
+  const { db, queries } = recordingDb();
+  const objectStore = new RecordingObjectStore();
+  const invalidDeps = { tx: { db }, objectStore } as unknown as Parameters<typeof ingestPressReleaseInTransaction>[0];
+
+  await assert.rejects(
+    ingestPressReleaseInTransaction(
+      invalidDeps,
+      {
+        bytes: new TextEncoder().encode("release"),
+        provider: "businesswire",
+        canonicalUrl: "https://www.businesswire.com/news/x",
+        publisher: "Apple, Inc.",
+        publishedAt: "2026-05-03T13:30:00Z",
+      },
+    ),
+    /TransactionContext/,
   );
 
   assert.equal(queries.length, 0);

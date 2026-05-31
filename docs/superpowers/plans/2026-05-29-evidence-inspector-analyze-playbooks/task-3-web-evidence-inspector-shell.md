@@ -126,7 +126,7 @@ export async function fetchEvidenceInspection(input: {
 Create `web/src/evidence/EvidenceInspectorProvider.tsx`:
 
 ```tsx
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { fetchEvidenceInspection } from "./inspectionClient.ts";
 import type { EvidenceInspection, EvidenceInspectionRef } from "./inspectionTypes.ts";
@@ -151,26 +151,42 @@ const EvidenceInspectorContext = createContext<EvidenceInspectorContextValue | n
 export function EvidenceInspectorProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth();
   const [state, setState] = useState<InspectorState>({ kind: "closed" });
+  const requestIdRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      requestIdRef.current += 1;
+    };
+  }, []);
 
   const value = useMemo<EvidenceInspectorContextValue>(() => ({
     openInspection({ snapshotId, ref }) {
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
       if (!session) {
         setState({ kind: "error", snapshotId, ref, message: "Sign in to inspect evidence." });
         return;
       }
       setState({ kind: "loading", snapshotId, ref });
       fetchEvidenceInspection({ userId: session.userId, snapshotId, ref })
-        .then((inspection) => setState({ kind: "ready", inspection }))
-        .catch((error) =>
+        .then((inspection) => {
+          if (!mountedRef.current || requestIdRef.current !== requestId) return;
+          setState({ kind: "ready", inspection });
+        })
+        .catch((error) => {
+          if (!mountedRef.current || requestIdRef.current !== requestId) return;
           setState({
             kind: "error",
             snapshotId,
             ref,
             message: inspectionErrorMessage(error),
-          }),
-        );
+          });
+        });
     },
     closeInspection() {
+      requestIdRef.current += 1;
       setState({ kind: "closed" });
     },
   }), [session]);
