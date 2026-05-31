@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, NavLink, Outlet, useLocation, useParams } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { analyzeEntryFromSubject } from '../analyze/analyzeEntry'
 import { QuoteSnapshot } from '../symbol/QuoteSnapshot'
 import { subjectDisplayName } from '../symbol/quote'
 import {
   fetchSubjectHydration,
   isCanonicalResolvedSubject,
+  isSymbolDetailTab,
+  planSymbolResolution,
+  resolveSubjects,
   subjectNeedsHydration,
   subjectFromRouteParam,
   subjectFromRouterState,
+  symbolDetailPathForSubject,
   type ResolvedSubject,
+  type SymbolDetailTab,
 } from '../symbol/search'
 import { SubjectMembershipBadges } from '../watchlists/SubjectMembershipBadges'
 import { useAuth } from './useAuth'
@@ -43,18 +48,40 @@ const SECTIONS = [
   { to: 'earnings', label: 'Earnings' },
   { to: 'holders', label: 'Holders' },
   { to: 'signals', label: 'Signals' },
-] as const
+] satisfies ReadonlyArray<{ to: SymbolDetailTab; label: string }>
 
 const HEADER_ACTION_CLASS =
   'inline-flex items-center gap-1 rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:border-neutral-400 hover:text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:border-neutral-500 dark:hover:text-neutral-50'
 
+type LegacyRouteResolutionState =
+  | { status: 'idle' }
+  | { status: 'ambiguous'; ticker: string; candidates: ReadonlyArray<ResolvedSubject> }
+  | { status: 'not_found'; ticker: string; message: string }
+  | { status: 'error'; ticker: string; message: string }
+
+type HydrationState =
+  | { status: 'idle' }
+  | { status: 'error'; key: string; message: string }
+
 export function SubjectDetailShell() {
   const { subjectRef } = useParams<{ subjectRef: string }>()
   const location = useLocation()
+  const navigate = useNavigate()
   const routeSubject = useMemo(() => subjectFromRouteParam(subjectRef), [subjectRef])
+  const currentTab = useMemo(() => tabFromPathname(location.pathname), [location.pathname])
   const baseSubject = subjectFromRouterState(location.state) ?? routeSubject
+  const legacyTicker =
+    routeSubject.subject_ref.kind === 'legacy_listing_route'
+      ? routeSubject.subject_ref.ticker
+      : null
+  const [legacyResolution, setLegacyResolution] = useState<LegacyRouteResolutionState>({
+    status: 'idle',
+  })
   const [hydratedSubject, setHydratedSubject] = useState<ResolvedSubject | null>(null)
+  const [hydrationState, setHydrationState] = useState<HydrationState>({ status: 'idle' })
   const canonicalBaseSubject = isCanonicalResolvedSubject(baseSubject) ? baseSubject : null
+  const canonicalBaseSubjectKey =
+    canonicalBaseSubject === null ? null : subjectKey(canonicalBaseSubject)
   const needsHydration = canonicalBaseSubject !== null && subjectNeedsHydration(canonicalBaseSubject)
   const { session } = useAuth()
   const userId = session?.userId ?? null
@@ -64,23 +91,93 @@ export function SubjectDetailShell() {
     hydratedSubject.subject_ref.id === canonicalBaseSubject.subject_ref.id
   const subject = needsHydration && hydratedSubjectMatchesBase ? hydratedSubject : baseSubject
   const canonicalSubject = isCanonicalResolvedSubject(subject) ? subject : null
+  const shouldBlockForHydration = needsHydration && !hydratedSubjectMatchesBase
+  const hydrationError =
+    hydrationState.status === 'error' && hydrationState.key === canonicalBaseSubjectKey
+      ? hydrationState.message
+      : null
+  const visibleLegacyResolution =
+    legacyTicker !== null &&
+    legacyResolution.status !== 'idle' &&
+    legacyResolution.ticker === legacyTicker.trim()
+      ? legacyResolution
+      : ({ status: 'idle' } as const)
 
   useEffect(() => {
-    if (!needsHydration) return
+    if (legacyTicker === null) {
+      return
+    }
+
+    const ticker = legacyTicker.trim()
+    if (!ticker) {
+      return
+    }
+
+    const controller = new AbortController()
+    resolveSubjects({ text: ticker, signal: controller.signal })
+      .then((response) => {
+        if (controller.signal.aborted) return
+        const plan = planSymbolResolution(response)
+        if (plan.state === 'enter_subject') {
+          navigate(symbolDetailPathForSubject(plan.subject.subject_ref, currentTab), {
+            replace: true,
+            state: { subject: plan.subject },
+          })
+          return
+        }
+        if (plan.state === 'needs_choice') {
+          setLegacyResolution({
+            status: 'ambiguous',
+            ticker,
+            candidates: plan.candidates,
+          })
+          return
+        }
+        setLegacyResolution({
+          status: 'not_found',
+          ticker,
+          message: `No subject found for ${plan.unresolved || ticker}.`,
+        })
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return
+        setLegacyResolution({
+          status: 'error',
+          ticker,
+          message: errorMessage(error, 'Subject resolve failed.'),
+        })
+      })
+
+    return () => controller.abort()
+  }, [currentTab, legacyTicker, navigate])
+
+  useEffect(() => {
+    if (!needsHydration || canonicalBaseSubject === null || canonicalBaseSubjectKey === null) {
+      return
+    }
 
     const controller = new AbortController()
     fetchSubjectHydration({
       subject_ref: canonicalBaseSubject.subject_ref,
       signal: controller.signal,
     })
-      .then((hydrated) => setHydratedSubject(hydrated))
+      .then((hydrated) => {
+        if (controller.signal.aborted) return
+        setHydratedSubject(hydrated)
+        setHydrationState({ status: 'idle' })
+      })
       .catch((error: unknown) => {
         if (error instanceof Error && error.name === 'AbortError') return
-        console.warn('subject hydration failed', error)
+        setHydratedSubject(null)
+        setHydrationState({
+          status: 'error',
+          key: canonicalBaseSubjectKey,
+          message: errorMessage(error, 'Subject hydration failed.'),
+        })
       })
 
     return () => controller.abort()
-  }, [canonicalBaseSubject, needsHydration])
+  }, [canonicalBaseSubject, canonicalBaseSubjectKey, needsHydration])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -124,10 +221,124 @@ export function SubjectDetailShell() {
         ))}
       </nav>
       <div className="flex min-h-0 flex-1 overflow-auto">
-        <Outlet context={{ subject } satisfies SubjectDetailOutletContext} />
+        {legacyTicker !== null ? (
+          <LegacyRouteResolutionView
+            ticker={legacyTicker}
+            state={visibleLegacyResolution}
+            currentTab={currentTab}
+          />
+        ) : shouldBlockForHydration ? (
+          <SubjectContextNotice
+            title={hydrationError ? 'Subject context unavailable' : 'Loading subject context'}
+            message={hydrationError ?? 'Loading issuer context for this subject.'}
+          />
+        ) : (
+          <Outlet context={{ subject } satisfies SubjectDetailOutletContext} />
+        )}
       </div>
     </div>
   )
+}
+
+function LegacyRouteResolutionView({
+  ticker,
+  state,
+  currentTab,
+}: {
+  ticker: string
+  state: LegacyRouteResolutionState
+  currentTab: SymbolDetailTab
+}) {
+  const normalizedTicker = ticker.trim()
+  if (!normalizedTicker) {
+    return (
+      <SubjectContextNotice
+        title="Subject context unavailable"
+        message="No subject found for this route."
+      />
+    )
+  }
+  if (state.status === 'ambiguous') {
+    return <LegacySubjectChoice state={state} currentTab={currentTab} />
+  }
+  if (state.status === 'not_found' || state.status === 'error') {
+    return <SubjectContextNotice title="Subject context unavailable" message={state.message} />
+  }
+  return (
+    <SubjectContextNotice
+      title="Loading subject context"
+      message={`Resolving ${normalizedTicker} before loading this section.`}
+    />
+  )
+}
+
+function LegacySubjectChoice({
+  state,
+  currentTab,
+}: {
+  state: Extract<LegacyRouteResolutionState, { status: 'ambiguous' }>
+  currentTab: SymbolDetailTab
+}) {
+  return (
+    <section className="flex w-full flex-col gap-4 p-8">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+          Choose a listing to continue
+        </h2>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">
+          Multiple matches were found for {state.ticker}. Select the listing to load this
+          section.
+        </p>
+      </div>
+      <ul className="grid gap-2 sm:max-w-xl">
+        {state.candidates.map((candidate) => (
+          <li key={`${candidate.subject_ref.kind}:${candidate.subject_ref.id}`}>
+            <Link
+              replace
+              to={symbolDetailPathForSubject(candidate.subject_ref, currentTab)}
+              state={{ subject: candidate }}
+              className="flex items-center justify-between rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-800 transition-colors hover:border-neutral-300 hover:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:border-neutral-700 dark:hover:bg-neutral-800"
+            >
+              <span>{subjectDisplayName(candidate)}</span>
+              <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                {candidate.subject_ref.kind}
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+function SubjectContextNotice({
+  title,
+  message,
+}: {
+  title: string
+  message: string
+}) {
+  return (
+    <section className="flex w-full flex-col gap-2 p-8">
+      <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+        {title}
+      </h2>
+      <p className="text-sm text-neutral-500 dark:text-neutral-400">{message}</p>
+    </section>
+  )
+}
+
+function tabFromPathname(pathname: string): SymbolDetailTab {
+  const maybeTab = pathname.split('/').filter(Boolean).at(-1)
+  return isSymbolDetailTab(maybeTab) ? maybeTab : 'overview'
+}
+
+function subjectKey(subject: ResolvedSubject): string {
+  return `${subject.subject_ref.kind}:${subject.subject_ref.id}`
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
 }
 
 // Public-route entry point for the watchlist save action. Unauth clicks

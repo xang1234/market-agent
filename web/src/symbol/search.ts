@@ -113,6 +113,15 @@ export type SymbolResolutionPlan =
       unresolved: string
     }
 
+export const SYMBOL_DETAIL_TABS = [
+  'overview',
+  'financials',
+  'earnings',
+  'holders',
+  'signals',
+] as const
+export type SymbolDetailTab = (typeof SYMBOL_DETAIL_TABS)[number]
+
 export type SymbolTypeaheadState = {
   candidates: ResolvedSubject[]
   highlightedIndex: number
@@ -122,8 +131,15 @@ export function subjectRouteParam(subjectRef: SubjectRef): string {
   return encodeURIComponent(formatSubjectRef(subjectRef))
 }
 
-export function symbolDetailPathForSubject(subjectRef: SubjectRef): string {
-  return `/symbol/${subjectRouteParam(subjectRef)}/overview`
+export function isSymbolDetailTab(value: string | undefined): value is SymbolDetailTab {
+  return typeof value === 'string' && (SYMBOL_DETAIL_TABS as ReadonlyArray<string>).includes(value)
+}
+
+export function symbolDetailPathForSubject(
+  subjectRef: SubjectRef,
+  tab: SymbolDetailTab = 'overview',
+): string {
+  return `/symbol/${subjectRouteParam(subjectRef)}/${tab}`
 }
 
 export function parseSubjectRouteParam(param: string | undefined): RouteSubjectRef {
