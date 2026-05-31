@@ -119,8 +119,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/CommodityLatestResponse'
   /v1/markets/series:
     get:
       tags: [Market]
@@ -145,8 +144,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/CommoditySeriesResponse'
   /v1/markets/curve:
     get:
       tags: [Market]
@@ -165,8 +163,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/CommodityCurveResponse'
   /v1/markets/spreads:
     get:
       tags: [Market]
@@ -185,8 +182,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/CommoditySpreadsResponse'
   /v1/markets/inventory:
     get:
       tags: [Market]
@@ -205,8 +201,33 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/CommodityInventoryResponse'
+  /v1/market/quote:
+    get:
+      tags: [Market]
+      summary: Get a normalized legacy listing quote
+      operationId: getLegacyListingQuote
+      deprecated: true
+      parameters:
+        - in: query
+          name: subject_kind
+          required: true
+          schema:
+            type: string
+            enum: [listing]
+        - in: query
+          name: subject_id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Provider-normalized listing quote with display listing context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegacyQuoteResponse'
   /v1/market/series:
     post:
       tags: [Market]
@@ -236,8 +257,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/BalanceSnapshotResponse'
   /v1/balances/changes:
     get:
       tags: [Market]
@@ -249,8 +269,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/BalanceChangesResponse'
   /v1/impact/events:
     get:
       tags: [Evidence]
@@ -262,8 +281,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/ImpactEventsResponse'
   /v1/impact/drivers:
     get:
       tags: [Evidence]
@@ -275,8 +293,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/ImpactDriversResponse'
   /v1/impact/graph:
     get:
       tags: [Evidence]
@@ -288,8 +305,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/ImpactGraphResponse'
   /v1/briefs/daily:
     get:
       tags: [Analyze]
@@ -301,8 +317,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/DailyBriefResponse'
   /v1/briefs/{briefId}:
     get:
       tags: [Analyze]
@@ -321,8 +336,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/DailyBriefResponse'
   /v1/briefs/{briefId}/publish:
     post:
       tags: [Analyze]
@@ -341,8 +355,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/DailyBriefResponse'
   /v1/briefs/{briefId}/outcomes:
     get:
       tags: [Analyze]
@@ -361,8 +374,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: '#/components/schemas/BriefOutcomesResponse'
   /v1/market/cache-audit:
     get:
       tags: [Market]
@@ -2086,6 +2098,632 @@ components:
       enum: [commodity, benchmark, contract, curve, region, delivery_point, asset, producer, route, market_theme, portfolio, screen, issuer, instrument, listing, theme, macro_topic]
     SubjectRef:
       $ref: './finance_research_block_schema.json#/$defs/SubjectRef'
+    CommodityMarketSubjectRef:
+      type: object
+      required: [kind, id]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [benchmark, contract]
+        id:
+          type: string
+          format: uuid
+    CommodityRef:
+      type: object
+      required: [kind, id]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [commodity]
+        id:
+          type: string
+          format: uuid
+    CurveRef:
+      type: object
+      required: [kind, id]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [curve]
+        id:
+          type: string
+          format: uuid
+    DelayClass:
+      type: string
+      enum: [real_time, delayed_15m, eod, unknown]
+    DecisionHorizon:
+      type: string
+      enum: [1d, 1w, 1m, 3m]
+    ImpactChannel:
+      type: string
+      enum: [supply, demand, inventory, curve_structure, freight, policy, macro_fx, weather, disruption]
+    ImpactDirection:
+      type: string
+      enum: [positive, negative, mixed, unknown]
+    ImpactDriverType:
+      type: string
+      enum: [price_move, report_delta, news_event, inventory_change, forecast_change, internal_note]
+    CommodityMarketQuote:
+      type: object
+      required:
+        - subject_ref
+        - benchmark
+        - price
+        - prev_close
+        - currency
+        - unit
+        - grade
+        - location
+        - delivery_month
+        - incoterm
+        - freshness
+        - as_of
+        - source_id
+        - change_abs
+        - change_pct
+      additionalProperties: false
+      properties:
+        subject_ref:
+          $ref: '#/components/schemas/CommodityMarketSubjectRef'
+        benchmark:
+          type: string
+        price:
+          type: number
+        prev_close:
+          type: number
+        currency:
+          type: string
+        unit:
+          type: string
+        grade:
+          type: string
+        location:
+          type: string
+        delivery_month:
+          type: string
+        incoterm:
+          type: string
+          enum: [warehouse, fob, cfr, cif, dap]
+        freshness:
+          $ref: '#/components/schemas/DelayClass'
+        as_of:
+          type: string
+          format: date-time
+        source_id:
+          type: string
+          format: uuid
+        change_abs:
+          type: number
+        change_pct:
+          type: number
+    CommodityLatestResponse:
+      type: object
+      required: [quote, source_freshness]
+      additionalProperties: false
+      properties:
+        quote:
+          $ref: '#/components/schemas/CommodityMarketQuote'
+        source_freshness:
+          type: object
+          required: [source_id, delay_class, as_of]
+          additionalProperties: false
+          properties:
+            source_id:
+              type: string
+              format: uuid
+            delay_class:
+              $ref: '#/components/schemas/DelayClass'
+            as_of:
+              type: string
+              format: date-time
+    CommoditySeriesPoint:
+      type: object
+      required: [ts, price]
+      additionalProperties: false
+      properties:
+        ts:
+          type: string
+          format: date-time
+        price:
+          type: number
+    CommoditySeriesResponse:
+      type: object
+      required: [subject_ref, currency, unit, points, source_id, as_of]
+      additionalProperties: false
+      properties:
+        subject_ref:
+          $ref: '#/components/schemas/CommodityMarketSubjectRef'
+        currency:
+          type: string
+        unit:
+          type: string
+        points:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CommoditySeriesPoint'
+        source_id:
+          type: string
+          format: uuid
+        as_of:
+          type: string
+          format: date-time
+    CommodityCurvePoint:
+      type: object
+      required: [tenor, tenor_rank, price]
+      additionalProperties: false
+      properties:
+        tenor:
+          type: string
+        tenor_rank:
+          type: integer
+          minimum: 0
+        price:
+          type: number
+    CommodityCurve:
+      type: object
+      required: [curve_ref, as_of, currency, unit, source_id, points]
+      additionalProperties: false
+      properties:
+        curve_ref:
+          $ref: '#/components/schemas/CurveRef'
+        as_of:
+          type: string
+          format: date-time
+        currency:
+          type: string
+        unit:
+          type: string
+        source_id:
+          type: string
+          format: uuid
+        points:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CommodityCurvePoint'
+    CommodityCurveResponse:
+      type: object
+      required: [curve]
+      additionalProperties: false
+      properties:
+        curve:
+          $ref: '#/components/schemas/CommodityCurve'
+    CommoditySpreadLeg:
+      type: object
+      required: [tenor, price]
+      additionalProperties: false
+      properties:
+        tenor:
+          type: string
+        price:
+          type: number
+    CommoditySpread:
+      type: object
+      required: [spread_id, first_leg, second_leg, currency, unit, as_of, source_id, label, value]
+      additionalProperties: false
+      properties:
+        spread_id:
+          type: string
+        first_leg:
+          $ref: '#/components/schemas/CommoditySpreadLeg'
+        second_leg:
+          $ref: '#/components/schemas/CommoditySpreadLeg'
+        currency:
+          type: string
+        unit:
+          type: string
+        as_of:
+          type: string
+          format: date-time
+        source_id:
+          type: string
+          format: uuid
+        label:
+          type: string
+        value:
+          type: number
+    CommoditySpreadsResponse:
+      type: object
+      required: [curve_ref, spreads]
+      additionalProperties: false
+      properties:
+        curve_ref:
+          $ref: '#/components/schemas/CurveRef'
+        spreads:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CommoditySpread'
+    CommodityInventoryPoint:
+      type: object
+      required: [ts, value]
+      additionalProperties: false
+      properties:
+        ts:
+          type: string
+          format: date-time
+        value:
+          type: number
+    CommodityInventoryResponse:
+      type: object
+      required: [commodity_ref, unit, points, source_id, as_of]
+      additionalProperties: false
+      properties:
+        commodity_ref:
+          $ref: '#/components/schemas/CommodityRef'
+        unit:
+          type: string
+        points:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CommodityInventoryPoint'
+        source_id:
+          type: string
+          format: uuid
+        as_of:
+          type: string
+          format: date-time
+    BalanceComponent:
+      type: object
+      required: [channel, label, value, delta, horizon, confidence]
+      additionalProperties: false
+      properties:
+        channel:
+          type: string
+          enum: [mine_supply, disruption, inventory, port_stock, smelter_margin, steel_margin, trade_flow, freight, house_forecast]
+        label:
+          type: string
+        value:
+          type: number
+        delta:
+          type: number
+        horizon:
+          $ref: '#/components/schemas/DecisionHorizon'
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+    BalanceSnapshot:
+      type: object
+      required: [commodity_ref, as_of, unit, source_refs, components, net_delta]
+      additionalProperties: false
+      properties:
+        commodity_ref:
+          $ref: '#/components/schemas/CommodityRef'
+        as_of:
+          type: string
+          format: date-time
+        unit:
+          type: string
+        source_refs:
+          type: array
+          items:
+            type: string
+            format: uuid
+        components:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/BalanceComponent'
+        net_delta:
+          type: number
+    BalanceSnapshotResponse:
+      type: object
+      required: [snapshot]
+      additionalProperties: false
+      properties:
+        snapshot:
+          $ref: '#/components/schemas/BalanceSnapshot'
+    BalanceChange:
+      type: object
+      required: [channel, label, delta, horizon, confidence]
+      additionalProperties: false
+      properties:
+        channel:
+          type: string
+        label:
+          type: string
+        delta:
+          type: number
+        horizon:
+          $ref: '#/components/schemas/DecisionHorizon'
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+    BalanceChangesResponse:
+      type: object
+      required: [changes]
+      additionalProperties: false
+      properties:
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/BalanceChange'
+    CommodityMarketEvent:
+      type: object
+      required: [event_id, occurred_at, subject_refs, source_refs, summary]
+      additionalProperties: false
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        occurred_at:
+          type: string
+          format: date-time
+        subject_refs:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/SubjectRef'
+        source_refs:
+          type: array
+          items:
+            type: string
+            format: uuid
+        summary:
+          type: string
+    ImpactEventsResponse:
+      type: object
+      required: [events]
+      additionalProperties: false
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/CommodityMarketEvent'
+    ImpactDriver:
+      type: object
+      required: [driver_id, subject_refs, event_refs, claim_refs, channel, direction, horizon, driver_type, confidence, magnitude, summary, priority_score]
+      additionalProperties: false
+      properties:
+        driver_id:
+          type: string
+        subject_refs:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/SubjectRef'
+        event_refs:
+          type: array
+          items:
+            type: string
+            format: uuid
+        claim_refs:
+          type: array
+          items:
+            type: string
+            format: uuid
+        channel:
+          $ref: '#/components/schemas/ImpactChannel'
+        direction:
+          $ref: '#/components/schemas/ImpactDirection'
+        horizon:
+          $ref: '#/components/schemas/DecisionHorizon'
+        driver_type:
+          $ref: '#/components/schemas/ImpactDriverType'
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        magnitude:
+          type: number
+          minimum: 0
+          maximum: 1
+        summary:
+          type: string
+        priority_score:
+          type: number
+    ImpactDriversResponse:
+      type: object
+      required: [drivers]
+      additionalProperties: false
+      properties:
+        drivers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImpactDriver'
+    ImpactGraphNode:
+      type: object
+      required: [id, kind, label]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [event, driver, commodity]
+        label:
+          type: string
+    ImpactGraphEdge:
+      type: object
+      required: [from, to]
+      additionalProperties: false
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+        channel:
+          $ref: '#/components/schemas/ImpactChannel'
+        direction:
+          $ref: '#/components/schemas/ImpactDirection'
+        horizon:
+          $ref: '#/components/schemas/DecisionHorizon'
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+    ImpactGraphResponse:
+      type: object
+      required: [nodes, edges]
+      additionalProperties: false
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImpactGraphNode'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImpactGraphEdge'
+    DailyCallBrief:
+      type: object
+      required: [brief_id, snapshot_id, status, as_of, commodity_refs, narrative, driver_ids, watch_items, horizons, requires_analyst_signoff]
+      additionalProperties: false
+      properties:
+        brief_id:
+          type: string
+        snapshot_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [draft, published]
+        as_of:
+          type: string
+          format: date-time
+        commodity_refs:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CommodityRef'
+        narrative:
+          type: string
+        driver_ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        watch_items:
+          type: array
+          items:
+            type: string
+        horizons:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/DecisionHorizon'
+        requires_analyst_signoff:
+          type: boolean
+        reviewer_user_id:
+          type: string
+          format: uuid
+        published_at:
+          type: string
+          format: date-time
+    DailyBriefResponse:
+      type: object
+      required: [brief]
+      additionalProperties: false
+      properties:
+        brief:
+          $ref: '#/components/schemas/DailyCallBrief'
+    BriefOutcome:
+      type: object
+      required: [horizon, observed_at, call_direction, realized_move, notes]
+      additionalProperties: false
+      properties:
+        horizon:
+          $ref: '#/components/schemas/DecisionHorizon'
+        observed_at:
+          type: string
+          format: date-time
+        call_direction:
+          $ref: '#/components/schemas/ImpactDirection'
+        realized_move:
+          type: number
+        notes:
+          type: string
+    BriefOutcomesResponse:
+      type: object
+      required: [brief_id, outcomes]
+      additionalProperties: false
+      properties:
+        brief_id:
+          type: string
+          format: uuid
+        outcomes:
+          type: array
+          items:
+            $ref: '#/components/schemas/BriefOutcome'
+    LegacyListingRef:
+      type: object
+      required: [kind, id]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [listing]
+        id:
+          type: string
+          format: uuid
+    LegacyNormalizedQuote:
+      type: object
+      required: [listing, price, prev_close, change_abs, change_pct, session_state, as_of, delay_class, currency, source_id]
+      additionalProperties: false
+      properties:
+        listing:
+          $ref: '#/components/schemas/LegacyListingRef'
+        price:
+          type: number
+        prev_close:
+          type: number
+        change_abs:
+          type: number
+        change_pct:
+          type: number
+        session_state:
+          type: string
+          enum: [pre_market, regular, post_market, closed]
+        as_of:
+          type: string
+          format: date-time
+        delay_class:
+          $ref: '#/components/schemas/DelayClass'
+        currency:
+          type: string
+        source_id:
+          type: string
+          format: uuid
+    LegacyQuoteResponse:
+      type: object
+      required: [quote, provenance, listing_context]
+      additionalProperties: false
+      properties:
+        quote:
+          $ref: '#/components/schemas/LegacyNormalizedQuote'
+        provenance:
+          type: object
+          required: [provider, source_id, delay_class, as_of]
+          additionalProperties: false
+          properties:
+            provider:
+              type: string
+            source_id:
+              type: string
+              format: uuid
+            delay_class:
+              $ref: '#/components/schemas/DelayClass'
+            as_of:
+              type: string
+              format: date-time
+        listing_context:
+          type: object
+          required: [ticker, mic, timezone]
+          additionalProperties: false
+          properties:
+            ticker:
+              type: string
+            mic:
+              type: string
+            timezone:
+              type: string
     ThemeMembershipRationale:
       type: object
       required:

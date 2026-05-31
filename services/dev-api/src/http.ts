@@ -69,7 +69,11 @@ import {
   isLlmSettingsPath,
   type DevApiLlmSettingsOptions,
 } from "./llm-settings-http.ts";
-import { commodityDecisionRoute } from "./commodities-fixtures.ts";
+import {
+  createDevCommodityDecisionAdapters,
+  commodityDecisionRoute,
+  type CommodityDecisionAdapters,
+} from "./commodities-fixtures.ts";
 
 type DevAgent = {
   agent_id: string;
@@ -261,6 +265,7 @@ export type DevApiAgentLoopStageFactory = (
 
 export type DevApiServerOptions = {
   adapters?: DevApiAdapters;
+  commodityDecisionAdapters?: CommodityDecisionAdapters;
   llm?: DevApiLlmSettingsOptions;
 };
 
@@ -270,6 +275,8 @@ export function createDevApiServer(
 ): Server {
   const flags = readDevFlags(env);
   const adapters = options.adapters;
+  const commodityDecisionAdapters =
+    options.commodityDecisionAdapters ?? createDevCommodityDecisionAdapters();
   const llmOptions = options.llm ?? {};
 
   return createServer(async (req, res) => {
@@ -305,7 +312,11 @@ export function createDevApiServer(
       return;
     }
 
-    const commodityDecision = commodityDecisionRoute(req.method ?? "GET", url.pathname);
+    const commodityDecision = commodityDecisionRoute(
+      commodityDecisionAdapters,
+      req.method ?? "GET",
+      url.pathname,
+    );
     if (commodityDecision) {
       respondJson(res, commodityDecision.status, commodityDecision.body);
       return;

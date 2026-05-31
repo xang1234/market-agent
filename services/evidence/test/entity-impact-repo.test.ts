@@ -164,21 +164,28 @@ test("impact enum arrays pin the P3.4 routing contract", () => {
   assert.equal(Object.isFrozen(IMPACT_HORIZONS), true);
 });
 
-test("entity_impacts.channel is constrained in the normative schema and forward migration", () => {
+test("entity_impacts.channel is constrained in the normative schema and commodities vocabulary migration", () => {
   const schema = readFileSync(
     new URL("../../../spec/finance_research_db_schema.sql", import.meta.url),
     "utf8",
   );
-  const forwardMigration = readFileSync(
+  const legacyMigration = readFileSync(
     new URL("../../../db/migrations/0014_entity_impacts_channel_constraint.up.sql", import.meta.url),
+    "utf8",
+  );
+  const commoditiesMigration = readFileSync(
+    new URL("../../../db/migrations/0030_commodities_subject_and_impact_vocab.up.sql", import.meta.url),
     "utf8",
   );
 
   assert.match(schema, /channel text not null check \(channel in \(/);
-  assert.match(forwardMigration, /add constraint entity_impacts_channel_check/);
-  assert.match(forwardMigration, /check \(channel in \(/);
+  assert.match(legacyMigration, /'pricing'/);
+  assert.doesNotMatch(legacyMigration, /'curve_structure'/);
+  assert.match(commoditiesMigration, /drop constraint if exists entity_impacts_channel_check/);
+  assert.match(commoditiesMigration, /add constraint entity_impacts_channel_check/);
+  assert.match(commoditiesMigration, /check \(channel in \(/);
   for (const channel of ENTITY_IMPACT_CHANNELS) {
     assert.match(schema, new RegExp(`'${channel}'`));
-    assert.match(forwardMigration, new RegExp(`'${channel}'`));
+    assert.match(commoditiesMigration, new RegExp(`'${channel}'`));
   }
 });

@@ -1060,6 +1060,7 @@
             },
             "points": {
               "type": "array",
+              "minItems": 1,
               "items": {
                 "type": "object",
                 "required": ["tenor", "price"],
@@ -1091,6 +1092,7 @@
             },
             "spreads": {
               "type": "array",
+              "minItems": 1,
               "items": {
                 "type": "object",
                 "required": ["label", "value", "currency", "unit"],
@@ -1122,6 +1124,7 @@
             },
             "rows": {
               "type": "array",
+              "minItems": 1,
               "items": {
                 "type": "object",
                 "required": ["label", "value", "unit"],
@@ -1153,6 +1156,7 @@
             },
             "rows": {
               "type": "array",
+              "minItems": 1,
               "items": {
                 "type": "object",
                 "required": ["channel", "direction", "horizon", "confidence", "summary"],
@@ -1185,6 +1189,7 @@
             },
             "deltas": {
               "type": "array",
+              "minItems": 1,
               "items": {
                 "type": "object",
                 "required": ["source_id", "summary", "horizon", "confidence"],
@@ -1216,6 +1221,7 @@
             },
             "items": {
               "type": "array",
+              "minItems": 1,
               "items": {
                 "type": "object",
                 "required": ["label", "trigger", "horizon"],
@@ -1246,6 +1252,7 @@
             },
             "rows": {
               "type": "array",
+              "minItems": 1,
               "items": {
                 "type": "object",
                 "required": ["label", "market_ref", "forecast_ref"],
@@ -1277,6 +1284,7 @@
             },
             "sources": {
               "type": "array",
+              "minItems": 1,
               "items": {
                 "type": "object",
                 "required": ["source_id", "label"],

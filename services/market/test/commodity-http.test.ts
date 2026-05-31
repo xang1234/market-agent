@@ -4,18 +4,26 @@ import type { AddressInfo } from "node:net";
 
 import {
   createMarketServer,
+  type MarketServerDeps,
+} from "../src/http.ts";
+import {
   type CommodityCurveResponse,
   type CommodityInventoryResponse,
   type CommodityLatestResponse,
   type CommoditySeriesResponse,
   type CommoditySpreadsResponse,
-  type MarketServerDeps,
-} from "../src/http.ts";
+} from "../src/commodity-market-adapter.ts";
 import { createPolygonAdapter } from "../src/adapters/polygon.ts";
 import {
   createInMemoryListingRepository,
   listingResolverFromRepository,
 } from "../src/listings.ts";
+import {
+  COPPER_COMMODITY_ID,
+  COPPER_CONTRACT_ID,
+  COPPER_CURVE_ID,
+  createDevCommodityMarketDataAdapter,
+} from "../src/dev-commodity-market-adapter.ts";
 import {
   createDevPolygonFetcher,
   DEV_LISTINGS,
@@ -23,11 +31,8 @@ import {
 } from "../src/dev-fixtures.ts";
 
 const FIXED_NOW = new Date("2026-05-31T00:00:00.000Z");
-const COPPER_CONTRACT_ID = "11111111-1111-4111-8111-111111111111";
-const COPPER_CURVE_ID = "22222222-2222-4222-8222-222222222222";
-const COPPER_COMMODITY_ID = "33333333-3333-4333-8333-333333333333";
 
-function buildDeps(): MarketServerDeps {
+function buildDeps(overrides: Partial<MarketServerDeps> = {}): MarketServerDeps {
   const listings = createInMemoryListingRepository(DEV_LISTINGS);
   const adapter = createPolygonAdapter({
     sourceId: DEV_POLYGON_SOURCE_ID,
@@ -35,16 +40,30 @@ function buildDeps(): MarketServerDeps {
     fetcher: createDevPolygonFetcher({ clock: () => FIXED_NOW }),
     resolveListing: listingResolverFromRepository(listings),
   });
-  return { adapter, listings, clock: () => FIXED_NOW };
+  return {
+    adapter,
+    listings,
+    clock: () => FIXED_NOW,
+    commodityAdapter: createDevCommodityMarketDataAdapter({ clock: () => FIXED_NOW }),
+    ...overrides,
+  };
 }
 
-async function startServer(t: TestContext): Promise<string> {
-  const server = createMarketServer(buildDeps());
+async function startServer(t: TestContext, deps: MarketServerDeps = buildDeps()): Promise<string> {
+  const server = createMarketServer(deps);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const { port } = server.address() as AddressInfo;
   return `http://127.0.0.1:${port}`;
 }
+
+test("GET /v1/markets/latest requires a configured commodity market adapter", async (t) => {
+  const base = await startServer(t, buildDeps({ commodityAdapter: undefined }));
+  const response = await fetch(`${base}/v1/markets/latest?subject_kind=contract&subject_id=${COPPER_CONTRACT_ID}`);
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: "commodity market adapter is not configured" });
+});
 
 test("GET /v1/markets/latest returns a normalized commodity quote contract", async (t) => {
   const base = await startServer(t);

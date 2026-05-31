@@ -1,11 +1,86 @@
-import { normalizeBalanceSnapshot } from "../../balances/src/balance-snapshot.ts";
-import { buildDailyCallDraft, publishDailyCall } from "../../briefs/src/daily-call.ts";
-import { normalizeImpactDriver, rankImpactDrivers } from "../../impact/src/event-impact.ts";
-import { isUuid } from "../../shared/src/subject-ref.ts";
+import {
+  normalizeBalanceSnapshot,
+  type BalanceComponent,
+  type BalanceSnapshot,
+} from "../../balances/src/balance-snapshot.ts";
+import { buildDailyCallDraft, publishDailyCall, type DailyCallBrief } from "../../briefs/src/daily-call.ts";
+import {
+  normalizeImpactDriver,
+  rankImpactDrivers,
+  type ImpactChannel,
+  type ImpactDirection,
+  type ImpactDriver,
+} from "../../impact/src/event-impact.ts";
+import { isUuid, type DecisionHorizon, type PublicSubjectRef } from "../../shared/src/subject-ref.ts";
 
 export type CommodityDecisionRouteResult = {
   status: number;
   body: Record<string, unknown>;
+};
+
+export type BalanceChange = Pick<
+  BalanceComponent,
+  "channel" | "label" | "delta" | "horizon" | "confidence"
+>;
+
+export type CommodityMarketEvent = {
+  event_id: string;
+  occurred_at: string;
+  subject_refs: ReadonlyArray<PublicSubjectRef>;
+  source_refs: ReadonlyArray<string>;
+  summary: string;
+};
+
+export type CommodityImpactGraphNode = {
+  id: string;
+  kind: "event" | "driver" | "commodity";
+  label: string;
+};
+
+export type CommodityImpactGraphEdge = {
+  from: string;
+  to: string;
+  channel?: ImpactChannel;
+  direction?: ImpactDirection;
+  horizon?: DecisionHorizon;
+  confidence?: number;
+};
+
+export type CommodityImpactGraph = {
+  nodes: ReadonlyArray<CommodityImpactGraphNode>;
+  edges: ReadonlyArray<CommodityImpactGraphEdge>;
+};
+
+export type BriefOutcome = {
+  horizon: DecisionHorizon;
+  observed_at: string;
+  call_direction: ImpactDirection;
+  realized_move: number;
+  notes: string;
+};
+
+export type CommodityBalanceAdapter = {
+  snapshot(): BalanceSnapshot;
+  changes(): ReadonlyArray<BalanceChange>;
+};
+
+export type CommodityImpactAdapter = {
+  events(): ReadonlyArray<CommodityMarketEvent>;
+  drivers(): ReadonlyArray<ImpactDriver>;
+  graph(): CommodityImpactGraph;
+};
+
+export type CommodityBriefAdapter = {
+  daily(): DailyCallBrief;
+  get(briefId: string): DailyCallBrief | null;
+  publish(briefId: string): DailyCallBrief | null;
+  outcomes(briefId: string): ReadonlyArray<BriefOutcome> | null;
+};
+
+export type CommodityDecisionAdapters = {
+  balances: CommodityBalanceAdapter;
+  impact: CommodityImpactAdapter;
+  briefs: CommodityBriefAdapter;
 };
 
 const AS_OF = "2026-05-31T00:00:00.000Z";
@@ -20,95 +95,72 @@ const SOURCE_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 const COMMODITY_REF = Object.freeze({ kind: "commodity" as const, id: COMMODITY_ID });
 
-export function commodityDecisionRoute(method: string, pathname: string): CommodityDecisionRouteResult | null {
+export function createDevCommodityDecisionAdapters(): CommodityDecisionAdapters {
+  return {
+    balances: {
+      snapshot: sampleBalanceSnapshot,
+      changes: sampleBalanceChanges,
+    },
+    impact: {
+      events: sampleEvents,
+      drivers: sampleDrivers,
+      graph: sampleImpactGraph,
+    },
+    briefs: {
+      daily: sampleBrief,
+      get: sampleBriefById,
+      publish: samplePublishedBrief,
+      outcomes: sampleBriefOutcomes,
+    },
+  };
+}
+
+export function commodityDecisionRoute(
+  adapters: CommodityDecisionAdapters,
+  method: string,
+  pathname: string,
+): CommodityDecisionRouteResult | null {
   if (method === "GET" && pathname === "/v1/balances/snapshot") {
-    return ok({ snapshot: sampleBalanceSnapshot() });
+    return ok({ snapshot: adapters.balances.snapshot() });
   }
   if (method === "GET" && pathname === "/v1/balances/changes") {
-    const snapshot = sampleBalanceSnapshot();
-    return ok({
-      changes: snapshot.components
-        .filter((component) => Math.abs(component.delta) > 0)
-        .map((component) => ({
-          channel: component.channel,
-          label: component.label,
-          delta: component.delta,
-          horizon: component.horizon,
-          confidence: component.confidence,
-        })),
-    });
+    return ok({ changes: adapters.balances.changes() });
   }
   if (method === "GET" && pathname === "/v1/impact/events") {
-    return ok({
-      events: [
-        {
-          event_id: EVENT_ID,
-          occurred_at: AS_OF,
-          subject_refs: [COMMODITY_REF],
-          source_refs: [SOURCE_ID],
-          summary: "Copper concentrate shipment disruption tightened nearby cathode availability.",
-        },
-      ],
-    });
+    return ok({ events: adapters.impact.events() });
   }
   if (method === "GET" && pathname === "/v1/impact/drivers") {
-    return ok({ drivers: sampleDrivers() });
+    return ok({ drivers: adapters.impact.drivers() });
   }
   if (method === "GET" && pathname === "/v1/impact/graph") {
-    return ok({
-      nodes: [
-        { id: EVENT_ID, kind: "event", label: "Shipment disruption" },
-        { id: DRIVER_ID, kind: "driver", label: "Supply tightness" },
-        { id: COMMODITY_ID, kind: "commodity", label: "Copper" },
-      ],
-      edges: [
-        { from: EVENT_ID, to: DRIVER_ID, channel: "supply", direction: "positive" },
-        { from: DRIVER_ID, to: COMMODITY_ID, horizon: "1w", confidence: 0.78 },
-      ],
-    });
+    return ok(adapters.impact.graph());
   }
   if (method === "GET" && pathname === "/v1/briefs/daily") {
-    return ok({ brief: sampleBrief() });
+    return ok({ brief: adapters.briefs.daily() });
   }
 
   const briefMatch = pathname.match(/^\/v1\/briefs\/([^/]+)$/);
   if (method === "GET" && briefMatch) {
-    if (!isUuid(briefMatch[1])) return { status: 404, body: { error: "brief not found" } };
-    return ok({ brief: sampleBrief(briefMatch[1]) });
+    const brief = adapters.briefs.get(briefMatch[1]);
+    return brief === null ? notFound("brief not found") : ok({ brief });
   }
 
   const publishMatch = pathname.match(/^\/v1\/briefs\/([^/]+)\/publish$/);
   if (method === "POST" && publishMatch) {
-    if (!isUuid(publishMatch[1])) return { status: 404, body: { error: "brief not found" } };
-    return ok({
-      brief: publishDailyCall(sampleBrief(publishMatch[1]), {
-        reviewer_user_id: REVIEWER_ID,
-        published_at: AS_OF,
-      }),
-    });
+    const brief = adapters.briefs.publish(publishMatch[1]);
+    return brief === null ? notFound("brief not found") : ok({ brief });
   }
 
   const outcomesMatch = pathname.match(/^\/v1\/briefs\/([^/]+)\/outcomes$/);
   if (method === "GET" && outcomesMatch) {
-    if (!isUuid(outcomesMatch[1])) return { status: 404, body: { error: "brief not found" } };
-    return ok({
-      brief_id: outcomesMatch[1],
-      outcomes: [
-        {
-          horizon: "1w",
-          observed_at: AS_OF,
-          call_direction: "positive",
-          realized_move: 0.012,
-          notes: "Nearby copper held firm against the supply-tightness call.",
-        },
-      ],
-    });
+    const outcomes = adapters.briefs.outcomes(outcomesMatch[1]);
+    return outcomes === null ? notFound("brief not found") : ok({ brief_id: outcomesMatch[1], outcomes });
   }
 
   return null;
 }
 
-function sampleBalanceSnapshot() {
+function sampleBalanceSnapshot(): BalanceSnapshot {
   return normalizeBalanceSnapshot({
     commodity_ref: COMMODITY_REF,
     as_of: AS_OF,
@@ -135,7 +187,31 @@ function sampleBalanceSnapshot() {
   });
 }
 
-function sampleDrivers() {
+function sampleBalanceChanges(): ReadonlyArray<BalanceChange> {
+  return Object.freeze(sampleBalanceSnapshot().components
+    .filter((component) => Math.abs(component.delta) > 0)
+    .map((component) => Object.freeze({
+      channel: component.channel,
+      label: component.label,
+      delta: component.delta,
+      horizon: component.horizon,
+      confidence: component.confidence,
+    })));
+}
+
+function sampleEvents(): ReadonlyArray<CommodityMarketEvent> {
+  return Object.freeze([
+    Object.freeze({
+      event_id: EVENT_ID,
+      occurred_at: AS_OF,
+      subject_refs: Object.freeze([COMMODITY_REF]),
+      source_refs: Object.freeze([SOURCE_ID]),
+      summary: "Copper concentrate shipment disruption tightened nearby cathode availability.",
+    }),
+  ]);
+}
+
+function sampleDrivers(): ReadonlyArray<ImpactDriver> {
   return rankImpactDrivers([
     normalizeImpactDriver({
       driver_id: DRIVER_ID,
@@ -153,7 +229,21 @@ function sampleDrivers() {
   ]);
 }
 
-function sampleBrief(briefId = BRIEF_ID) {
+function sampleImpactGraph(): CommodityImpactGraph {
+  return Object.freeze({
+    nodes: Object.freeze([
+      Object.freeze({ id: EVENT_ID, kind: "event", label: "Shipment disruption" }),
+      Object.freeze({ id: DRIVER_ID, kind: "driver", label: "Supply tightness" }),
+      Object.freeze({ id: COMMODITY_ID, kind: "commodity", label: "Copper" }),
+    ]),
+    edges: Object.freeze([
+      Object.freeze({ from: EVENT_ID, to: DRIVER_ID, channel: "supply", direction: "positive" }),
+      Object.freeze({ from: DRIVER_ID, to: COMMODITY_ID, horizon: "1w", confidence: 0.78 }),
+    ]),
+  });
+}
+
+function sampleBrief(briefId = BRIEF_ID): DailyCallBrief {
   return buildDailyCallDraft({
     brief_id: briefId,
     snapshot_id: SNAPSHOT_ID,
@@ -165,6 +255,37 @@ function sampleBrief(briefId = BRIEF_ID) {
   });
 }
 
+function sampleBriefById(briefId: string): DailyCallBrief | null {
+  if (!isUuid(briefId)) return null;
+  return sampleBrief(briefId);
+}
+
+function samplePublishedBrief(briefId: string): DailyCallBrief | null {
+  const brief = sampleBriefById(briefId);
+  if (brief === null) return null;
+  return publishDailyCall(brief, {
+    reviewer_user_id: REVIEWER_ID,
+    published_at: AS_OF,
+  });
+}
+
+function sampleBriefOutcomes(briefId: string): ReadonlyArray<BriefOutcome> | null {
+  if (!isUuid(briefId)) return null;
+  return Object.freeze([
+    Object.freeze({
+      horizon: "1w",
+      observed_at: AS_OF,
+      call_direction: "positive",
+      realized_move: 0.012,
+      notes: "Nearby copper held firm against the supply-tightness call.",
+    }),
+  ]);
+}
+
 function ok(body: Record<string, unknown>): CommodityDecisionRouteResult {
   return { status: 200, body };
+}
+
+function notFound(error: string): CommodityDecisionRouteResult {
+  return { status: 404, body: { error } };
 }

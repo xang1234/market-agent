@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { validateBlock } from './BlockValidator.ts'
-import { ALL_BLOCK_FIXTURES, dailyCallSummaryFixture, richTextFixture, sourcesFixture } from './fixtures.ts'
+import {
+  ALL_BLOCK_FIXTURES,
+  curveChartFixture,
+  dailyCallSummaryFixture,
+  richTextFixture,
+  sourcesFixture,
+} from './fixtures.ts'
 
 test('validateBlock accepts every canonical fixture', () => {
   for (const block of ALL_BLOCK_FIXTURES) {
@@ -45,6 +51,11 @@ test('validateBlock rejects invalid commodity impact vocabulary', () => {
       },
     ],
   })
+  assert.equal(result.valid, false)
+})
+
+test('validateBlock rejects empty commodity block data arrays', () => {
+  const result = validateBlock({ ...curveChartFixture, points: [] })
   assert.equal(result.valid, false)
 })
 
