@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   CLAIM_STANCES,
   EVIDENCE_SOURCE_KINDS,
+  SIGNALS_FIXTURE_AS_OF,
   loadSignalsFixture,
   sourceKindLabel,
   stanceLabel,
@@ -64,15 +65,14 @@ test('sentiment trend points are ordered oldest-first so a left-to-right chart r
   }
 })
 
-test('loadSignalsFixture anchors generated windows to the requested current date', () => {
-  const env = loadSignalsFixture(APPLE_ISSUER_ID, {
-    now: new Date('2026-05-31T12:00:00.000Z'),
-  })
+test('loadSignalsFixture keeps static fixture dates explicit instead of fabricating freshness', () => {
+  const env = loadSignalsFixture(APPLE_ISSUER_ID)
   const points = env.sentiment_trend.points
-  assert.equal(points.at(0)?.date, '2026-05-02')
-  assert.equal(points.at(-1)?.date, '2026-05-31')
-  assert.equal(env.as_of, '2026-05-31T12:00:00.000Z')
-  assert.equal(env.claim_clusters.clusters[0].last_observed <= '2026-05-31', true)
+  assert.equal(SIGNALS_FIXTURE_AS_OF, '2024-11-01T20:30:00.000Z')
+  assert.equal(points.at(0)?.date, '2024-10-02')
+  assert.equal(points.at(-1)?.date, '2024-10-31')
+  assert.equal(env.as_of, SIGNALS_FIXTURE_AS_OF)
+  assert.equal(env.claim_clusters.clusters[0].last_observed <= '2024-10-31', true)
 })
 
 test('claim clusters cover every defined stance category in the source-agnostic enum', () => {

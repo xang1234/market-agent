@@ -5,6 +5,7 @@ import {
   createDevProvidersHoldersRepository,
   createDevProvidersIssuerProfileRepository,
 } from "../src/dev-providers.ts";
+import { FundamentalsDataUnavailableError } from "../src/availability.ts";
 import { YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID } from "../src/provider-sources.ts";
 import type { IssuerProfileRecord, IssuerProfileRepository } from "../src/issuer-repository.ts";
 
@@ -190,8 +191,6 @@ test("dev providers earnings repository maps sidecar rows onto the requested iss
             {
               release_date: "2026-04-30",
               period_end: "2026-03-31",
-              fiscal_year: 2026,
-              fiscal_period: "Q2",
               eps_actual: 2.01,
               eps_estimate_at_release: 1.94,
               as_of: "2026-05-31T12:00:00.000Z",
@@ -207,6 +206,8 @@ test("dev providers earnings repository maps sidecar rows onto the requested iss
   assert.equal(envelope?.subject.id, ISSUER_ID);
   assert.equal(envelope?.events[0].source_id, YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID);
   assert.equal(envelope?.events[0].release_date, "2026-04-30");
+  assert.equal(envelope?.events[0].fiscal_year, 2026);
+  assert.equal(envelope?.events[0].fiscal_period, "Q1");
   assert.equal(calls[0].url, "http://dev-providers.test/fundamentals/earnings");
   assert.deepEqual(calls[0].body, {
     ticker: "AMD",
@@ -214,6 +215,104 @@ test("dev providers earnings repository maps sidecar rows onto the requested iss
     currency: "USD",
     timezone: "America/New_York",
   });
+});
+
+test("dev providers earnings repository preserves sidecar unavailable errors", async () => {
+  const repo = createDevProvidersEarningsRepository({
+    profiles: {
+      async find() {
+        return sparseProfile();
+      },
+    },
+    baseUrl: "http://dev-providers.test",
+    sourceId: YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID,
+    fetchImpl: async () => new Response(JSON.stringify({
+      status: "unavailable",
+      reason: "rate_limited",
+      retryable: true,
+      detail: "yfinance throttled earnings lookup",
+    }), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+
+  await assert.rejects(
+    () => repo.find(ISSUER_ID),
+    (error: unknown) =>
+      error instanceof FundamentalsDataUnavailableError &&
+      error.reason === "rate_limited" &&
+      error.retryable === true &&
+      /throttled/.test(error.message),
+  );
+});
+
+test("dev providers earnings repository labels yfinance period_end rows with issuer fiscal calendars", async () => {
+  const repo = createDevProvidersEarningsRepository({
+    profiles: {
+      async find() {
+        return sparseProfile({
+          legal_name: "Apple Inc.",
+          exchanges: [
+            {
+              listing: { kind: "listing", id: LISTING_ID },
+              mic: "XNAS",
+              ticker: "AAPL",
+              trading_currency: "USD",
+              timezone: "America/New_York",
+            },
+          ],
+        });
+      },
+    },
+    baseUrl: "http://dev-providers.test",
+    sourceId: YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID,
+    fetchImpl: async () => new Response(JSON.stringify({
+      status: "available",
+      data: {
+        currency: "USD",
+        as_of: "2026-05-31T12:00:00.000Z",
+        events: [
+          {
+            release_date: "2025-05-01",
+            period_end: "2025-03-31",
+            eps_actual: 1.65,
+            eps_estimate_at_release: 1.62,
+            as_of: "2026-05-31T12:00:00.000Z",
+          },
+        ],
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+
+  const envelope = await repo.find(ISSUER_ID);
+
+  assert.equal(envelope?.events[0].fiscal_year, 2025);
+  assert.equal(envelope?.events[0].fiscal_period, "Q2");
+});
+
+test("dev providers earnings repository rejects malformed available payloads as provider errors", async () => {
+  const repo = createDevProvidersEarningsRepository({
+    profiles: {
+      async find() {
+        return sparseProfile();
+      },
+    },
+    baseUrl: "http://dev-providers.test",
+    sourceId: YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID,
+    fetchImpl: async () => new Response(JSON.stringify({
+      status: "available",
+      data: {
+        as_of: "2026-05-31T12:00:00.000Z",
+        events: [{ release_date: "not-a-date" }],
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+
+  await assert.rejects(
+    () => repo.find(ISSUER_ID),
+    (error: unknown) =>
+      error instanceof FundamentalsDataUnavailableError &&
+      error.reason === "provider_error" &&
+      /malformed earnings/.test(error.message),
+  );
 });
 
 test("dev providers holders repository maps institutional and insider sidecar rows", async () => {
@@ -277,4 +376,31 @@ test("dev providers holders repository maps institutional and insider sidecar ro
   assert.equal(insider?.kind, "insider");
   assert.equal(insider?.holders[0].transaction_date, "2026-05-08");
   assert.deepEqual(requestedKinds, ["institutional", "insider"]);
+});
+
+test("dev providers holders repository preserves sidecar unavailable errors", async () => {
+  const repo = createDevProvidersHoldersRepository({
+    profiles: {
+      async find() {
+        return sparseProfile();
+      },
+    },
+    baseUrl: "http://dev-providers.test",
+    sourceId: YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID,
+    fetchImpl: async () => new Response(JSON.stringify({
+      status: "unavailable",
+      reason: "provider_error",
+      retryable: true,
+      detail: "yfinance holders endpoint changed shape",
+    }), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+
+  await assert.rejects(
+    () => repo.find(ISSUER_ID, "institutional"),
+    (error: unknown) =>
+      error instanceof FundamentalsDataUnavailableError &&
+      error.reason === "provider_error" &&
+      error.retryable === true &&
+      /changed shape/.test(error.message),
+  );
 });

@@ -30,7 +30,10 @@ import {
 import { DEV_SEGMENTS } from "../src/dev-segment-fixtures.ts";
 import { DEV_STATEMENTS } from "../src/dev-statement-fixtures.ts";
 import { DEV_STATS_INPUTS } from "../src/dev-stats-fixtures.ts";
-import type { UnavailableEnvelope } from "../src/availability.ts";
+import {
+  FundamentalsDataUnavailableError,
+  type UnavailableEnvelope,
+} from "../src/availability.ts";
 
 const FIXED_NOW = new Date("2026-04-26T15:30:00.000Z");
 const APPLE_ISSUER_ID = DEV_INSTITUTIONAL_HOLDERS_INPUTS[0].subject.id;
@@ -174,6 +177,28 @@ test("GET /v1/fundamentals/holders returns 502 when the holders repository throw
   assert.equal(res.status, 502);
   const body = (await res.json()) as { error: string };
   assert.equal(body.error, "upstream fundamentals data unavailable");
+});
+
+test("GET /v1/fundamentals/holders maps repository unavailability to a structured response", async (t) => {
+  const unavailableHolders: HoldersRepository = {
+    async find() {
+      throw new FundamentalsDataUnavailableError(
+        "provider_error",
+        "yfinance holders endpoint changed shape",
+        true,
+      );
+    },
+  };
+  const url = await startServer(t, buildDeps({ holders: unavailableHolders }));
+  const res = await fetch(
+    `${url}/v1/fundamentals/holders?subject_kind=issuer&subject_id=${APPLE_ISSUER_ID}&kind=institutional`,
+  );
+  assert.equal(res.status, 502);
+  const body = (await res.json()) as { error: string; unavailable: UnavailableEnvelope };
+  assert.equal(body.error, "fundamentals holders unavailable");
+  assert.equal(body.unavailable.reason, "provider_error");
+  assert.equal(body.unavailable.retryable, true);
+  assert.equal(body.unavailable.detail, "yfinance holders endpoint changed shape");
 });
 
 test("AAPL acceptance: holders endpoint surfaces top institutional + recent insider activity", async (t) => {

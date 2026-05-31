@@ -32,7 +32,10 @@ import {
 import { DEV_SEGMENTS } from "../src/dev-segment-fixtures.ts";
 import { DEV_STATEMENTS } from "../src/dev-statement-fixtures.ts";
 import { DEV_STATS_INPUTS } from "../src/dev-stats-fixtures.ts";
-import type { UnavailableEnvelope } from "../src/availability.ts";
+import {
+  FundamentalsDataUnavailableError,
+  type UnavailableEnvelope,
+} from "../src/availability.ts";
 
 const FIXED_NOW = new Date("2026-04-26T15:30:00.000Z");
 const APPLE_ISSUER_ID = DEV_EARNINGS_INPUTS[0].subject.id;
@@ -188,4 +191,26 @@ test("GET /v1/fundamentals/earnings returns 502 when the earnings repository thr
   assert.equal(res.status, 502);
   const body = (await res.json()) as { error: string };
   assert.equal(body.error, "upstream fundamentals data unavailable");
+});
+
+test("GET /v1/fundamentals/earnings maps repository unavailability to a structured response", async (t) => {
+  const unavailableEarnings: EarningsRepository = {
+    async find() {
+      throw new FundamentalsDataUnavailableError(
+        "rate_limited",
+        "yfinance throttled earnings lookup",
+        true,
+      );
+    },
+  };
+  const url = await startServer(t, buildDeps({ earnings: unavailableEarnings }));
+  const res = await fetch(
+    `${url}/v1/fundamentals/earnings?subject_kind=issuer&subject_id=${APPLE_ISSUER_ID}`,
+  );
+  assert.equal(res.status, 429);
+  const body = (await res.json()) as { error: string; unavailable: UnavailableEnvelope };
+  assert.equal(body.error, "fundamentals earnings unavailable");
+  assert.equal(body.unavailable.reason, "rate_limited");
+  assert.equal(body.unavailable.retryable, true);
+  assert.equal(body.unavailable.detail, "yfinance throttled earnings lookup");
 });

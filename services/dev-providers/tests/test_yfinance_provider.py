@@ -1,9 +1,11 @@
 import unittest
 
-from dev_providers.yfinance_provider import (
+from dev_providers.yfinance_fundamentals import (
     normalize_earnings_events,
-    normalize_daily_bars,
     normalize_holders,
+)
+from dev_providers.yfinance_provider import (
+    normalize_daily_bars,
     normalize_reference_listing,
     normalize_quote,
     yahoo_symbol_for_listing,
@@ -141,8 +143,6 @@ class YFinanceProviderTests(unittest.TestCase):
                 {
                     "release_date": "2026-04-30",
                     "period_end": "2026-03-31",
-                    "fiscal_year": 2026,
-                    "fiscal_period": "Q2",
                     "eps_actual": 2.01,
                     "eps_estimate_at_release": 1.94,
                     "as_of": "2026-05-31T12:00:00.000Z",
@@ -150,14 +150,29 @@ class YFinanceProviderTests(unittest.TestCase):
                 {
                     "release_date": "2026-01-29",
                     "period_end": "2025-12-31",
-                    "fiscal_year": 2026,
-                    "fiscal_period": "Q1",
                     "eps_actual": 2.84,
                     "eps_estimate_at_release": 2.67,
                     "as_of": "2026-05-31T12:00:00.000Z",
                 },
             ],
         )
+
+    def test_earnings_normalization_does_not_pair_a_release_with_a_future_period_end(self):
+        earnings = normalize_earnings_events(
+            [
+                {
+                    "Earnings Date": "2026-01-29 16:00:00-05:00",
+                    "EPS Estimate": 2.67,
+                    "Reported EPS": 2.84,
+                },
+            ],
+            ["2026-03-31", "2025-12-31"],
+            now_iso="2026-05-31T12:00:00.000Z",
+            limit=1,
+        )
+
+        self.assertIsNotNone(earnings)
+        self.assertEqual(earnings["events"][0]["period_end"], "2025-12-31")
 
     def test_holder_normalization_maps_yfinance_institutional_and_insider_rows(self):
         institutional = normalize_holders(

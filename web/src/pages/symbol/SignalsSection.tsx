@@ -5,6 +5,7 @@ import { formatCompactNumber } from '../../symbol/format.ts'
 import { issuerIdFromSubject } from '../../symbol/profile.ts'
 import {
   EVIDENCE_SOURCE_KINDS,
+  SIGNALS_FIXTURE_AS_OF,
   loadSignalsFixture,
   sourceKindLabel,
   stanceLabel,
@@ -145,9 +146,8 @@ export function SignalsSection() {
       </Card>
       <ThemeRationaleCard issuerId={issuerId} />
       <p className={`${PLACEHOLDER_CLASS} px-1`} data-testid="signals-provenance-note">
-        Source-agnostic surface: community, news, and filing-derived evidence compose shared
-        blocks. Real evidence-bundle wiring lands with the document/evidence plane (P3) and the
-        specialized social/news block renderers (P4.6).
+        Static dev signals fixture as of {SIGNALS_FIXTURE_AS_OF}; these sentiment and claim blocks
+        are not live market data.
       </p>
     </div>
   )

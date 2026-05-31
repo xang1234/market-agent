@@ -360,7 +360,12 @@ async function fetchEarningsOutcome(
   clock: () => Date,
   subject_id: UUID,
 ): Promise<FundamentalsOutcome<EarningsEventsEnvelope>> {
-  const envelope = await deps.earnings.find(subject_id);
+  let envelope: EarningsEventsEnvelope | null;
+  try {
+    envelope = await deps.earnings.find(subject_id);
+  } catch (error) {
+    return unavailableForError(deps, subject_id, clock().toISOString(), error);
+  }
   if (!envelope) {
     return missingCoverage(
       deps,
@@ -378,7 +383,12 @@ async function fetchHoldersOutcome(
   subject_id: UUID,
   kind: HolderKind,
 ): Promise<FundamentalsOutcome<HoldersEnvelope>> {
-  const envelope = await deps.holders.find(subject_id, kind);
+  let envelope: HoldersEnvelope | null;
+  try {
+    envelope = await deps.holders.find(subject_id, kind);
+  } catch (error) {
+    return unavailableForError(deps, subject_id, clock().toISOString(), error);
+  }
   if (!envelope) {
     return missingCoverage(
       deps,

@@ -29,6 +29,9 @@ export const EVIDENCE_SOURCE_KINDS = ['community', 'news', 'filing'] as const
 export type EvidenceSourceKind = (typeof EVIDENCE_SOURCE_KINDS)[number]
 
 export const SENTIMENT_WINDOW_DAYS = 30
+export const SIGNALS_FIXTURE_AS_OF = '2024-11-01T20:30:00.000Z'
+
+const SENTIMENT_FIXTURE_END_MS = Date.UTC(2024, 9, 31)
 
 export type SentimentPoint = {
   date: string
@@ -75,18 +78,8 @@ const PLACEHOLDER_SOURCE_REFS: ReadonlyArray<string> = Object.freeze([
   '00000000-0000-4000-a000-000000000010',
 ])
 
-export type SignalsFixtureOptions = {
-  now?: Date
-}
-
-export function loadSignalsFixture(
-  issuerId: string,
-  options: SignalsFixtureOptions = {},
-): SignalsEnvelope {
+export function loadSignalsFixture(issuerId: string): SignalsEnvelope {
   const subject = { kind: 'issuer' as const, id: issuerId }
-  const now = options.now ?? new Date()
-  const asOf = now.toISOString()
-  const endDateMs = utcDateMs(now)
   return {
     subject,
     family: 'signals',
@@ -97,9 +90,9 @@ export function loadSignalsFixture(
       snapshot_id: PLACEHOLDER_SNAPSHOT_ID,
       data_ref: PLACEHOLDER_DATA_REF,
       source_refs: PLACEHOLDER_SOURCE_REFS,
-      as_of: asOf,
+      as_of: SIGNALS_FIXTURE_AS_OF,
       window_days: SENTIMENT_WINDOW_DAYS,
-      points: deriveSentimentSeries(issuerId, SENTIMENT_WINDOW_DAYS, endDateMs),
+      points: deriveSentimentSeries(issuerId, SENTIMENT_WINDOW_DAYS, SENTIMENT_FIXTURE_END_MS),
     },
     claim_clusters: {
       id: `claim-clusters-${issuerId}`,
@@ -108,10 +101,10 @@ export function loadSignalsFixture(
       snapshot_id: PLACEHOLDER_SNAPSHOT_ID,
       data_ref: PLACEHOLDER_DATA_REF,
       source_refs: PLACEHOLDER_SOURCE_REFS,
-      as_of: asOf,
-      clusters: deriveClaimClusters(issuerId, endDateMs),
+      as_of: SIGNALS_FIXTURE_AS_OF,
+      clusters: deriveClaimClusters(issuerId, SENTIMENT_FIXTURE_END_MS),
     },
-    as_of: asOf,
+    as_of: SIGNALS_FIXTURE_AS_OF,
   }
 }
 
@@ -256,10 +249,6 @@ function round(value: number, places: number): number {
 
 function daysAgo(n: number, endDateMs: number): string {
   return new Date(endDateMs - n * ONE_DAY_MS).toISOString().slice(0, 10)
-}
-
-function utcDateMs(value: Date): number {
-  return Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate())
 }
 
 // FNV-1a-style hash so per-issuer fixtures are stable across reloads but
