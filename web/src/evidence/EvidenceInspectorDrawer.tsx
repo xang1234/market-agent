@@ -26,8 +26,8 @@ export function EvidenceInspectorDrawer({
     >
       <header className="flex items-start justify-between gap-3 border-b border-neutral-200 p-4 dark:border-neutral-800">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Evidence</h2>
-          <p className="mt-1 break-all text-xs text-neutral-500 dark:text-neutral-400">{snapshotId}</p>
+          <h2 className="text-sm font-semibold text-fg">Evidence</h2>
+          <p className="mt-1 break-all text-xs text-muted">{snapshotId}</p>
         </div>
         <button
           type="button"
@@ -39,10 +39,10 @@ export function EvidenceInspectorDrawer({
       </header>
       <div className="min-h-0 flex-1 overflow-auto p-4">
         {state.kind === 'loading' ? (
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading evidence.</p>
+          <p className="text-sm text-muted">Loading evidence.</p>
         ) : null}
         {state.kind === 'error' ? (
-          <p className="text-sm text-neutral-600 dark:text-neutral-300">{state.message}</p>
+          <p className="text-sm text-fg-soft">{state.message}</p>
         ) : null}
         {state.kind === 'ready' ? <InspectionBody inspection={state.inspection} /> : null}
         {state.kind === 'block' ? <BlockInspectionBody inspection={state.inspection} /> : null}
@@ -55,9 +55,9 @@ function InspectionBody({ inspection }: { inspection: EvidenceInspection }) {
   return (
     <div className="flex flex-col gap-4">
       <section>
-        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">{inspection.title}</h3>
+        <h3 className="text-base font-semibold text-fg">{inspection.title}</h3>
         {inspection.subtitle ? (
-          <p className="mt-1 break-words text-xs text-neutral-500 dark:text-neutral-400">{inspection.subtitle}</p>
+          <p className="mt-1 break-words text-xs text-muted">{inspection.subtitle}</p>
         ) : null}
         {inspection.badges.length > 0 ? (
           <div className="mt-3 flex flex-wrap gap-2">
@@ -75,8 +75,8 @@ function InspectionBody({ inspection }: { inspection: EvidenceInspection }) {
       <dl className="grid gap-2">
         {inspection.rows.map((row) => (
           <div key={`${row.label}:${row.value}`} className="grid gap-1 border-t border-neutral-200 pt-2 dark:border-neutral-800">
-            <dt className="text-xs uppercase text-neutral-500 dark:text-neutral-400">{row.label}</dt>
-            <dd className="break-words text-sm text-neutral-900 dark:text-neutral-100">{row.value}</dd>
+            <dt className="text-xs uppercase text-muted">{row.label}</dt>
+            <dd className="break-words text-sm text-fg">{row.value}</dd>
           </div>
         ))}
       </dl>
@@ -105,9 +105,9 @@ function BlockInspectionBody({ inspection }: { inspection: EvidenceBlockInspecti
   return (
     <div className="flex flex-col gap-4">
       <section>
-        <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Block metadata</h3>
+        <h3 className="text-base font-semibold text-fg">Block metadata</h3>
         {inspection.subtitle ? (
-          <p className="mt-1 break-words text-xs text-neutral-500 dark:text-neutral-400">{inspection.subtitle}</p>
+          <p className="mt-1 break-words text-xs text-muted">{inspection.subtitle}</p>
         ) : null}
         {inspection.badges.length > 0 ? (
           <div className="mt-3 flex flex-wrap gap-2">
@@ -125,8 +125,8 @@ function BlockInspectionBody({ inspection }: { inspection: EvidenceBlockInspecti
       <dl className="grid gap-2">
         {inspection.rows.map((row) => (
           <div key={`${row.label}:${row.value}`} className="grid gap-1 border-t border-neutral-200 pt-2 dark:border-neutral-800">
-            <dt className="text-xs uppercase text-neutral-500 dark:text-neutral-400">{row.label}</dt>
-            <dd className="break-words text-sm text-neutral-900 dark:text-neutral-100">{row.value}</dd>
+            <dt className="text-xs uppercase text-muted">{row.label}</dt>
+            <dd className="break-words text-sm text-fg">{row.value}</dd>
           </div>
         ))}
       </dl>
@@ -139,7 +139,7 @@ function RelatedRefs({ snapshotId, refs }: { snapshotId: string; refs: ReadonlyA
   if (refs.length === 0) return null
   return (
     <section className="grid gap-2">
-      <h4 className="text-xs font-semibold uppercase text-neutral-500 dark:text-neutral-400">Related refs</h4>
+      <h4 className="text-xs font-semibold uppercase text-muted">Related refs</h4>
       <ul className="flex flex-col gap-2">
         {refs.map((ref) => (
           <li key={`${ref.kind}:${ref.id}`}>

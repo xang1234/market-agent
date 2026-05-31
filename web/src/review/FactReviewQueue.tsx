@@ -67,8 +67,8 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactRevi
   if (items.length === 0) {
     return (
       <section className="rounded-md border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900">
-        <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Reviewer queue</h2>
-        <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">No candidate facts need review.</p>
+        <h2 className="text-sm font-semibold text-fg">Reviewer queue</h2>
+        <p className="mt-2 text-sm text-muted">No candidate facts need review.</p>
       </section>
     )
   }
@@ -76,8 +76,8 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactRevi
   return (
     <section className="flex flex-col gap-3">
       <header>
-        <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Reviewer queue</h2>
-        <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+        <h2 className="text-sm font-semibold text-fg">Reviewer queue</h2>
+        <p className="mt-1 text-xs text-muted">
           Oldest queued candidates are first.
         </p>
       </header>
@@ -95,10 +95,10 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactRevi
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+                  <div className="text-sm font-medium text-fg">
                     {item.reason.replaceAll('_', ' ')}
                   </div>
-                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-neutral-500 dark:text-neutral-400">
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
                     <span className="tabular-nums">Confidence {formatPercent(item.confidence)}</span>
                     <span className="tabular-nums">Threshold {formatPercent(item.threshold)}</span>
                     {isStale ? (
@@ -154,7 +154,7 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactRevi
                 </div>
               </div>
               <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(220px,320px)]">
-                <label className="flex min-w-0 flex-col gap-1 text-xs font-medium text-neutral-600 dark:text-neutral-300">
+                <label className="flex min-w-0 flex-col gap-1 text-xs font-medium text-fg-soft">
                   Candidate
                   <textarea
                     data-role="candidate"
@@ -166,7 +166,7 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactRevi
                   />
                 </label>
                 <div className="flex min-w-0 flex-col gap-3">
-                  <label className="flex flex-col gap-1 text-xs font-medium text-neutral-600 dark:text-neutral-300">
+                  <label className="flex flex-col gap-1 text-xs font-medium text-fg-soft">
                     Notes
                     <textarea
                       data-role="notes"
@@ -177,7 +177,7 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactRevi
                       }}
                     />
                   </label>
-                  <dl className="grid gap-1 text-xs text-neutral-500 dark:text-neutral-400">
+                  <dl className="grid gap-1 text-xs text-muted">
                     <MetaRow label="Source" value={item.source_id ?? 'none'} />
                     <MetaRow label="Metric" value={item.metric_id ?? 'none'} />
                   </dl>

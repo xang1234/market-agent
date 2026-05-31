@@ -240,11 +240,11 @@ export function SymbolSearch({
                 <span className="block truncate font-medium">
                   {candidate.display_labels?.primary ?? candidate.display_name}
                 </span>
-                <span className="block truncate text-xs text-neutral-500 dark:text-neutral-400">
+                <span className="block truncate text-xs text-muted">
                   {candidateListingLabel(candidate)}
                 </span>
               </span>
-              <span className="shrink-0 text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
+              <span className="shrink-0 text-xs tabular-nums text-muted">
                 {Math.round(candidate.confidence * 100)}%
               </span>
             </button>

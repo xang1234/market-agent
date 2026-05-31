@@ -157,12 +157,12 @@ export function SettingsView({
     ? uniqueStrings([...modelOptions, ...state.settings.fallbackModels])
     : []
   if (state.kind === 'loading') {
-    return <div className="p-6 text-sm text-neutral-600 dark:text-neutral-300">Loading settings...</div>
+    return <div className="p-6 text-sm text-fg-soft">Loading settings...</div>
   }
   if (state.kind === 'error') {
     return (
       <div className="p-6">
-        <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Settings unavailable</h1>
+        <h1 className="text-lg font-semibold text-fg">Settings unavailable</h1>
         <p className="mt-2 text-sm text-rose-600 dark:text-rose-300">{state.message}</p>
       </div>
     )
@@ -181,8 +181,8 @@ export function SettingsView({
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-5">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold text-neutral-950 dark:text-neutral-50">Settings</h1>
-            <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">AI model channels</p>
+            <h1 className="text-xl font-semibold text-fg">Settings</h1>
+            <p className="mt-1 text-sm text-muted">AI model channels</p>
           </div>
           <div className="flex gap-2">
             <button className={SECONDARY_BUTTON} disabled={busyAction !== null} onClick={() => onTest()} type="button">
@@ -219,7 +219,7 @@ export function SettingsView({
                 Base URL
                 <input className={INPUT_CLASS} value={channel.baseUrl ?? ''} onChange={(event) => updateChannel(index, { ...channel, baseUrl: event.target.value || null })} />
               </label>
-              <label className="flex items-center gap-2 self-end text-sm text-neutral-700 dark:text-neutral-200">
+              <label className="flex items-center gap-2 self-end text-sm text-fg">
                 <input checked={channel.enabled} onChange={(event) => updateChannel(index, { ...channel, enabled: event.target.checked })} type="checkbox" />
                 Enabled
               </label>
@@ -377,7 +377,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'settings request failed'
 }
 
-const FIELD_LABEL = 'flex flex-col gap-1 text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400'
+const FIELD_LABEL = 'flex flex-col gap-1 text-xs font-medium uppercase tracking-wide text-muted'
 const INPUT_CLASS = 'h-9 border border-neutral-300 bg-white px-2 text-sm normal-case tracking-normal text-neutral-900 outline-none focus:border-neutral-900 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100 dark:focus:border-neutral-100'
 const MULTI_SELECT_CLASS = 'min-h-24 border border-neutral-300 bg-white px-2 py-1 text-sm normal-case tracking-normal text-neutral-900 outline-none focus:border-neutral-900 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-100 dark:focus:border-neutral-100'
 const PRIMARY_BUTTON = 'h-9 border border-neutral-900 bg-neutral-900 px-3 text-sm font-medium text-white dark:border-neutral-100 dark:bg-neutral-100 dark:text-neutral-950'

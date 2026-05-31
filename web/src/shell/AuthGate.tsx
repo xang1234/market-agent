@@ -22,10 +22,10 @@ export function AuthGate({ destinationLabel }: { destinationLabel: string }) {
         data-testid="auth-gate"
         className="w-full max-w-md rounded-md border border-neutral-200 bg-white p-6 shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
       >
-        <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+        <h2 className="text-lg font-semibold text-fg">
           Sign in to continue to {destinationLabel}
         </h2>
-        <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+        <p className="mt-2 text-sm text-muted">
           {destinationLabel} is session-scoped. Public surfaces like Home, Screener,
           and Analyze entry remain available without a session.
         </p>
@@ -36,7 +36,7 @@ export function AuthGate({ destinationLabel }: { destinationLabel: string }) {
         >
           Sign in
         </button>
-        <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">
+        <p className="mt-3 text-xs text-muted">
           After sign-in you will return to <code>{location.pathname}</code>.
         </p>
       </div>

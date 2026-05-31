@@ -28,11 +28,11 @@ export function AuthInterrupt() {
         className="w-full max-w-md rounded-lg bg-white p-6 shadow-lg dark:bg-neutral-900 dark:shadow-neutral-950"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="auth-interrupt-title" className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+        <h2 id="auth-interrupt-title" className="text-lg font-semibold text-fg">
           {pending.title}
         </h2>
         {pending.description ? (
-          <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">{pending.description}</p>
+          <p className="mt-2 text-sm text-muted">{pending.description}</p>
         ) : null}
         <div className="mt-5 flex items-center justify-end gap-2">
           <button

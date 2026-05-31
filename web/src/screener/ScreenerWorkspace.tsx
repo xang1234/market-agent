@@ -263,14 +263,14 @@ export function ScreenerWorkspace() {
     <div className="flex flex-1 flex-col gap-6 overflow-auto p-6">
       <header>
         <h1 className="text-2xl font-semibold">Screener</h1>
-        <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+        <p className="mt-1 text-sm text-muted">
           Build, refine, and view one active screen. Saving requires a session.
         </p>
       </header>
 
       <form
         onSubmit={handleSubmit}
-        className="grid gap-4 rounded-md border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900 lg:grid-cols-3"
+        className="grid gap-4 rounded-lg border border-line bg-surface p-4 lg:grid-cols-3"
         aria-label="Screener query controls"
       >
         <UniverseControls draft={draft} onChange={setDraft} />
@@ -289,7 +289,7 @@ export function ScreenerWorkspace() {
           onChange={setDraft}
         />
         <SortLimitControls draft={draft} onChange={setDraft} />
-        <div className="lg:col-span-3 flex flex-wrap items-center justify-between gap-3 border-t border-neutral-200 pt-3 dark:border-neutral-800">
+        <div className="lg:col-span-3 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
           <RunStatus status={status} errorMessage={errorMessage} savedMessage={savedMessage} />
           <div className="flex items-center gap-2">
             <input
@@ -305,18 +305,18 @@ export function ScreenerWorkspace() {
               placeholder="Name this screen"
               aria-label="Screen name"
               maxLength={SCREEN_NAME_MAX_LENGTH}
-              className="w-48 rounded-md border border-neutral-200 bg-neutral-50 px-2 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+              className="w-48 rounded-lg border border-line bg-surface-2 px-2 py-2 text-sm"
             />
             <button
               type="button"
               onClick={handleSaveClick}
-              className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-800 shadow-sm hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800"
+              className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm font-medium text-fg shadow-sm hover:bg-surface-2"
             >
               Save
             </button>
             <button
               type="submit"
-              className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-neutral-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-700 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-300"
+              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent shadow-sm hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
               disabled={status === 'loading'}
             >
               {status === 'loading' ? 'Running…' : 'Run'}
@@ -361,15 +361,15 @@ function UniverseControls({
   onChange: (next: QueryDraft) => void
 }) {
   return (
-    <fieldset className="flex flex-col gap-3 rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
-      <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+    <fieldset className="flex flex-col gap-3 rounded-md border border-line p-3">
+      <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-muted">
         Universe
       </legend>
       {UNIVERSE_ENUM_FIELDS.map((spec) => {
         const selected = draft.universe[spec.field] ?? []
         return (
           <label key={spec.field} className="flex flex-col gap-1 text-xs">
-            <span className="text-neutral-600 dark:text-neutral-300">{spec.label}</span>
+            <span className="text-fg-soft">{spec.label}</span>
             <select
               multiple
               value={selected}
@@ -377,7 +377,7 @@ function UniverseControls({
                 const next = Array.from(event.target.selectedOptions).map((o) => o.value)
                 onChange(setUniverseSelection(draft, spec.field, next))
               }}
-              className="rounded-md border border-neutral-200 bg-neutral-50 px-2 py-1 text-sm text-neutral-800 outline-none focus:border-neutral-400 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+              className="rounded-lg border border-line bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-accent"
               size={Math.min(spec.options.length, 4)}
             >
               {spec.options.map((opt) => (
@@ -408,18 +408,18 @@ function NumericRangeControls({
 }) {
   const bag = dimension === 'market' ? draft.marketNumeric : draft.fundamentalsNumeric
   return (
-    <fieldset className="flex flex-col gap-3 rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
-      <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+    <fieldset className="flex flex-col gap-3 rounded-md border border-line p-3">
+      <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-muted">
         {legend}
       </legend>
       {fields.map((spec) => {
         const range = bag[spec.field] ?? emptyNumericRange()
         return (
           <div key={spec.field} className="flex flex-col gap-1 text-xs">
-            <span className="text-neutral-600 dark:text-neutral-300">
+            <span className="text-fg-soft">
               {spec.label}
               {spec.hint ? (
-                <span className="ml-1 text-neutral-400 dark:text-neutral-500">
+                <span className="ml-1 text-faint">
                   ({spec.hint})
                 </span>
               ) : null}
@@ -442,7 +442,7 @@ function NumericRangeControls({
                     )
                   }
                   aria-label={`${spec.label} ${bound}`}
-                  className="min-w-0 flex-1 rounded-md border border-neutral-200 bg-neutral-50 px-2 py-1 text-sm tabular-nums dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+                  className="min-w-0 flex-1 rounded-lg border border-line bg-surface-2 px-2 py-1 text-sm tabular-nums"
                 />
               ))}
             </div>
@@ -461,19 +461,19 @@ function SortLimitControls({
   onChange: (next: QueryDraft) => void
 }) {
   return (
-    <fieldset className="flex flex-col gap-3 rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
-      <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+    <fieldset className="flex flex-col gap-3 rounded-md border border-line p-3">
+      <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-muted">
         Sort &amp; page
       </legend>
       <label className="flex flex-col gap-1 text-xs">
-        <span className="text-neutral-600 dark:text-neutral-300">Sort by</span>
+        <span className="text-fg-soft">Sort by</span>
         <div className="flex gap-2">
           <select
             value={draft.sort.field}
             onChange={(event) =>
               onChange(setSort(draft, { ...draft.sort, field: event.target.value }))
             }
-            className="min-w-0 flex-1 rounded-md border border-neutral-200 bg-neutral-50 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+            className="min-w-0 flex-1 rounded-lg border border-line bg-surface-2 px-2 py-1 text-sm"
           >
             {SORTABLE_FIELDS.map((spec) => (
               <option key={spec.field} value={spec.field}>
@@ -491,7 +491,7 @@ function SortLimitControls({
                 }),
               )
             }
-            className="rounded-md border border-neutral-200 bg-neutral-50 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+            className="rounded-lg border border-line bg-surface-2 px-2 py-1 text-sm"
             aria-label="Sort direction"
           >
             <option value="desc">Descending</option>
@@ -500,7 +500,7 @@ function SortLimitControls({
         </div>
       </label>
       <label className="flex flex-col gap-1 text-xs">
-        <span className="text-neutral-600 dark:text-neutral-300">Page size</span>
+        <span className="text-fg-soft">Page size</span>
         <input
           type="number"
           min={SCREENER_LIMIT_MIN}
@@ -508,7 +508,7 @@ function SortLimitControls({
           step={1}
           value={draft.limit}
           onChange={(event) => onChange(setLimit(draft, Number(event.target.value)))}
-          className="rounded-md border border-neutral-200 bg-neutral-50 px-2 py-1 text-sm tabular-nums dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+          className="rounded-lg border border-line bg-surface-2 px-2 py-1 text-sm tabular-nums"
         />
       </label>
     </fieldset>
@@ -529,26 +529,26 @@ function RunStatus({
   // hint underneath is a steady-state affordance and can wait.
   if (savedMessage) {
     return (
-      <span className="text-xs text-red-600 dark:text-red-400" role="status">
+      <span className="text-xs text-negative" role="status">
         {savedMessage}
       </span>
     )
   }
   if (status === 'error') {
     return (
-      <span className="text-xs text-red-600 dark:text-red-400" role="status">
+      <span className="text-xs text-negative" role="status">
         {errorMessage ?? 'Search failed'}
       </span>
     )
   }
   if (status === 'loading') {
     return (
-      <span className="text-xs text-neutral-500 dark:text-neutral-400" role="status">
+      <span className="text-xs text-muted" role="status">
         Running screen…
       </span>
     )
   }
-  return <span className="text-xs text-neutral-400 dark:text-neutral-500">Edit a filter and run.</span>
+  return <span className="text-xs text-faint">Edit a filter and run.</span>
 }
 
 function SavedScreensPanel({
@@ -565,28 +565,28 @@ function SavedScreensPanel({
   return (
     <section
       aria-label="Saved screens"
-      className="rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
+      className="rounded-lg border border-line bg-surface p-3"
     >
-      <header className="flex items-center justify-between pb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+      <header className="flex items-center justify-between pb-2 text-xs font-semibold uppercase tracking-wide text-muted">
         <span>Saved screens</span>
         <span className="font-normal normal-case">{screens.length}</span>
       </header>
       {screens.length === 0 ? (
-        <p className="px-1 py-2 text-xs text-neutral-500 dark:text-neutral-400">
+        <p className="px-1 py-2 text-xs text-muted">
           No saved screens yet. Build one above and click Save.
         </p>
       ) : (
-        <ul className="divide-y divide-neutral-100 dark:divide-neutral-800">
+        <ul className="divide-y divide-line">
           {screens.map((screen) => (
             <li
               key={screen.screen_id}
               className="flex items-center justify-between gap-2 py-2 text-sm"
             >
               <div className="min-w-0">
-                <div className="truncate font-medium text-neutral-900 dark:text-neutral-100">
+                <div className="truncate font-medium text-fg">
                   {screen.name}
                 </div>
-                <div className="text-xs text-neutral-500 dark:text-neutral-400">
+                <div className="text-xs text-muted">
                   Updated {formatIsoTimestamp(screen.updated_at)}
                 </div>
               </div>
@@ -594,14 +594,14 @@ function SavedScreensPanel({
                 <button
                   type="button"
                   onClick={() => onOpen(screen)}
-                  className="rounded-md border border-neutral-200 px-2 py-1 text-xs hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                  className="rounded-md border border-line px-2 py-1 text-xs hover:bg-surface-2"
                 >
                   Open
                 </button>
                 <button
                   type="button"
                   onClick={() => onDelete(screen)}
-                  className="rounded-md border border-neutral-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 dark:border-neutral-700 dark:text-red-400 dark:hover:bg-red-950/30"
+                  className="rounded-md border border-line px-2 py-1 text-xs text-negative hover:bg-negative-soft"
                 >
                   Delete
                 </button>
@@ -611,7 +611,7 @@ function SavedScreensPanel({
         </ul>
       )}
       {message ? (
-        <p className="mt-2 text-xs text-red-600 dark:text-red-400">{message}</p>
+        <p className="mt-2 text-xs text-negative">{message}</p>
       ) : null}
     </section>
   )
@@ -642,7 +642,7 @@ function ScreenerResults({
 
   if (!response && status === 'loading') {
     return (
-      <div className="rounded-md border border-neutral-200 bg-white p-6 text-sm text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400">
+      <div className="rounded-lg border border-line bg-surface p-6 text-sm text-muted">
         Running initial screen…
       </div>
     )
@@ -658,13 +658,13 @@ function ScreenerResults({
   const hasPrev = offset > 0
 
   return (
-    <section className="flex flex-col gap-3 rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
-      <div className="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
+    <section className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-3">
+      <div className="flex items-center justify-between text-xs text-muted">
         <span>
           {response.total_count === 0
             ? 'No matches'
             : `Showing ${start}–${end} of ${response.total_count}`}
-          <span className="ml-2 text-neutral-400 dark:text-neutral-500">
+          <span className="ml-2 text-faint">
             as of {response.as_of}
           </span>
         </span>
@@ -673,7 +673,7 @@ function ScreenerResults({
             type="button"
             onClick={onPrev}
             disabled={!hasPrev || status === 'loading'}
-            className="rounded-md border border-neutral-200 px-2 py-1 disabled:opacity-40 dark:border-neutral-700"
+            className="rounded-md border border-line px-2 py-1 disabled:opacity-40"
           >
             Prev
           </button>
@@ -681,20 +681,20 @@ function ScreenerResults({
             type="button"
             onClick={onNext}
             disabled={!hasNext || status === 'loading'}
-            className="rounded-md border border-neutral-200 px-2 py-1 disabled:opacity-40 dark:border-neutral-700"
+            className="rounded-md border border-line px-2 py-1 disabled:opacity-40"
           >
             Next
           </button>
         </div>
       </div>
       {response.rows.length === 0 ? (
-        <p className="px-2 py-6 text-center text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="px-2 py-6 text-center text-sm text-muted">
           No subjects match this query. Loosen a filter and try again.
         </p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+            <thead className="text-xs uppercase tracking-wide text-muted">
               <tr>
                 <th scope="col" className="py-2 pr-3 text-right">#</th>
                 <th scope="col" className="py-2 pr-3">Subject</th>
@@ -709,7 +709,7 @@ function ScreenerResults({
               {formattedRows.map(({ row, cells }) => (
                 <tr
                   key={`${row.subject_ref.kind}:${row.subject_ref.id}`}
-                  className="cursor-pointer border-t border-neutral-100 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-800/60"
+                  className="cursor-pointer border-t border-line hover:bg-surface-2/60"
                   onClick={() => onRowSelect(row)}
                   role="button"
                   tabIndex={0}
@@ -720,12 +720,12 @@ function ScreenerResults({
                     }
                   }}
                 >
-                  <td className="py-2 pr-3 text-right tabular-nums text-neutral-500 dark:text-neutral-400">{row.rank}</td>
+                  <td className="py-2 pr-3 text-right tabular-nums text-muted">{row.rank}</td>
                   <td className="py-2 pr-3">
-                    <span className="block font-medium text-neutral-900 dark:text-neutral-100">
+                    <span className="block font-medium text-fg">
                       {row.display.ticker ?? row.display.primary}
                     </span>
-                    <span className="block text-xs text-neutral-500 dark:text-neutral-400">
+                    <span className="block text-xs text-muted">
                       {row.display.legal_name ?? row.display.primary}
                       {row.display.mic ? ` · ${row.display.mic}` : ''}
                     </span>

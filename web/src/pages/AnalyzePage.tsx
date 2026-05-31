@@ -77,7 +77,7 @@ export function AnalyzePage() {
     <div className="flex flex-1 flex-col gap-6 overflow-auto p-8">
       <header>
         <h1 className="text-2xl font-semibold">Analyze</h1>
-        <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+        <p className="mt-1 text-sm text-muted">
           Template-driven memo workflow with editable instructions, source controls, and
           chat handoff.
         </p>
@@ -255,7 +255,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
     <div className="flex flex-col gap-6">
       <section className="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
         <div className="flex flex-col gap-4 rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
-          <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+          <label className="flex flex-col gap-2 text-sm font-medium text-fg">
             Playbook
             <select
               value={selectedPlaybookId}
@@ -279,15 +279,15 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
           </label>
           {selectedPlaybook ? (
             <section className="rounded-md border border-neutral-200 p-3 text-sm dark:border-neutral-800">
-              <h3 className="font-medium text-neutral-900 dark:text-neutral-100">Sections</h3>
-              <ul className="mt-2 flex flex-col gap-1 text-neutral-600 dark:text-neutral-300">
+              <h3 className="font-medium text-fg">Sections</h3>
+              <ul className="mt-2 flex flex-col gap-1 text-fg-soft">
                 {selectedPlaybook.sections.map((section) => (
                   <li key={section.section_id}>{section.title}</li>
                 ))}
               </ul>
             </section>
           ) : null}
-          <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+          <label className="flex flex-col gap-2 text-sm font-medium text-fg">
             Template
             <select
               value={selectedTemplateId}
@@ -307,7 +307,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
               ))}
             </select>
           </label>
-        <label className="flex flex-col gap-2 text-sm font-medium text-neutral-700 dark:text-neutral-200">
+        <label className="flex flex-col gap-2 text-sm font-medium text-fg">
           Instructions
           <textarea
             value={instructions}
@@ -321,9 +321,9 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
           />
         </label>
         <fieldset className="flex flex-col gap-2">
-          <legend className="text-sm font-medium text-neutral-700 dark:text-neutral-200">Source controls</legend>
+          <legend className="text-sm font-medium text-fg">Source controls</legend>
           {availableSourceCategories.map((category) => (
-            <label key={category} className="flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-300">
+            <label key={category} className="flex items-center gap-2 text-sm text-fg-soft">
               <input
                 type="checkbox"
                 checked={sources.has(category)}
@@ -337,8 +337,8 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
       <div className="flex min-h-[420px] flex-col rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Memo canvas</h2>
-            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+            <h2 className="text-lg font-semibold text-fg">Memo canvas</h2>
+            <p className="mt-1 text-sm text-muted">
               {subject ? subjectDisplayName(subject) : 'No subject selected'} · {[...sources].join(', ') || 'no sources'}
             </p>
           </div>
@@ -359,14 +359,14 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
             </button>
           </div>
         </div>
-        <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">{status}</p>
+        <p className="mt-3 text-xs text-muted">{status}</p>
         <article className="mt-5 flex flex-1 flex-col gap-3 rounded-md border border-dashed border-neutral-300 p-4 dark:border-neutral-700">
           {memoRun ? (
             memoRun.blocks.map((block) => <BlockView key={blockKey(block)} block={block as Block} />)
           ) : (
             <>
-              <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{selectedPlaybook?.name ?? selectedTemplate.name}</h3>
-              <p className="text-sm leading-6 text-neutral-700 dark:text-neutral-200">{instructions}</p>
+              <h3 className="text-sm font-semibold text-fg">{selectedPlaybook?.name ?? selectedTemplate.name}</h3>
+              <p className="text-sm leading-6 text-fg">{instructions}</p>
             </>
           )}
         </article>
@@ -375,8 +375,8 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
       {runHistory.length > 0 ? (
         <section className="rounded-md border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Run history</h2>
-            <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-300">
+            <h2 className="text-sm font-semibold text-fg">Run history</h2>
+            <label className="flex items-center gap-2 text-xs text-fg-soft">
               Compare
               <select
                 value={compareRunId}
@@ -422,7 +422,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
             <section className="mt-4 rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
               <h3 className="text-sm font-semibold">Run diff</h3>
               {runDiffDriftLabels.length > 0 ? (
-                <ul className="mt-2 flex flex-wrap gap-2 text-xs text-neutral-600 dark:text-neutral-300">
+                <ul className="mt-2 flex flex-wrap gap-2 text-xs text-fg-soft">
                   {runDiffDriftLabels.map((label) => (
                     <li key={label} className="rounded border border-neutral-200 px-2 py-1 dark:border-neutral-800">{label}</li>
                   ))}
@@ -492,11 +492,11 @@ function CarriedSubjectContext({
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <span className="text-xs uppercase text-neutral-500 dark:text-neutral-400">Carried subject</span>
-          <h2 id="analyze-carried-subject-heading" className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
+          <span className="text-xs uppercase text-muted">Carried subject</span>
+          <h2 id="analyze-carried-subject-heading" className="text-lg font-semibold text-fg">
             {displayName}
           </h2>
-          <span data-testid="analyze-carried-subject-ref" className="font-mono text-xs text-neutral-500 dark:text-neutral-400">
+          <span data-testid="analyze-carried-subject-ref" className="font-mono text-xs text-muted">
             {subject.subject_ref.kind}:{subject.subject_ref.id}
           </span>
         </div>

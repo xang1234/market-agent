@@ -42,7 +42,7 @@ export function ChatLayout() {
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="border-b border-neutral-200 px-8 py-6 dark:border-neutral-800">
         <h1 className="text-2xl font-semibold">Chat</h1>
-        <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+        <p className="mt-1 text-sm text-muted">
           Thread-scoped research workspace with live analyst turns, strict Block[] rendering,
           and reusable artifacts.
         </p>
@@ -91,8 +91,8 @@ export function ChatEmptyState() {
   return (
     <div data-testid="chat-empty" className="flex min-h-full flex-col gap-6 p-8">
       <section className="rounded-md border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900">
-        <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Start research</h2>
-        <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-300">
+        <h2 className="text-lg font-semibold text-fg">Start research</h2>
+        <p className="mt-2 text-sm text-fg-soft">
           Create a thread, ask the analyst, and keep each answer pinned to its sealed
           snapshot.
         </p>
@@ -321,8 +321,8 @@ function ThreadList({ userId }: { userId: string }) {
   return (
     <nav aria-label="Thread list" className="flex min-h-0 flex-col gap-3">
       <div>
-        <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Thread list</h2>
-        <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+        <h2 className="text-sm font-semibold text-fg">Thread list</h2>
+        <p className="mt-1 text-xs text-muted">
           Persistent research threads scoped to your session.
         </p>
       </div>
@@ -340,10 +340,10 @@ function ThreadList({ userId }: { userId: string }) {
                 to={`/chat/${thread.thread_id}`}
                 className="block rounded-md border border-neutral-200 bg-white p-3 text-sm hover:border-neutral-400 dark:border-neutral-800 dark:bg-neutral-900"
               >
-                <span className="block font-medium text-neutral-900 dark:text-neutral-100">
+                <span className="block font-medium text-fg">
                   {thread.title ?? 'Untitled thread'}
                 </span>
-                <span className="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">
+                <span className="mt-1 block text-xs text-muted">
                   {new Date(thread.updated_at).toLocaleString()}
                 </span>
               </Link>

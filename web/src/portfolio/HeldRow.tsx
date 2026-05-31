@@ -40,8 +40,8 @@ export function HeldRow({ holding }: HeldRowProps) {
 
 function HoldingBadge({ quantity, costBasis }: { quantity: number; costBasis: number | null }) {
   return (
-    <span className="flex shrink-0 flex-col items-end justify-center px-2 text-[10px] tabular-nums text-neutral-500 dark:text-neutral-400">
-      <span className="font-medium text-neutral-700 dark:text-neutral-200">
+    <span className="flex shrink-0 flex-col items-end justify-center px-2 text-[10px] tabular-nums text-muted">
+      <span className="font-medium text-fg">
         {QUANTITY_FMT.format(quantity)}
       </span>
       {costBasis !== null ? <span>cost {COST_FMT.format(costBasis)}</span> : null}
