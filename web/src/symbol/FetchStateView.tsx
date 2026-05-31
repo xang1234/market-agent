@@ -8,7 +8,7 @@ type FetchStateViewProps<T> = {
   children: (data: T) => ReactNode
 }
 
-const PLACEHOLDER_CLASS = 'text-sm text-neutral-500 dark:text-neutral-400'
+const PLACEHOLDER_CLASS = 'text-sm text-muted'
 
 export function FetchStateView<T>({
   state,

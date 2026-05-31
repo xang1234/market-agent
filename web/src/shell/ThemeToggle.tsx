@@ -18,7 +18,7 @@ export function ThemeToggle() {
       role="radiogroup"
       aria-label="Theme"
       data-testid="theme-toggle"
-      className="flex items-center rounded-md border border-neutral-200 bg-white p-0.5 text-[11px] dark:border-neutral-800 dark:bg-neutral-900"
+      className="flex items-center rounded-md border border-line bg-surface p-0.5 text-[11px]"
     >
       {OPTIONS.map(({ mode: m, label }) => {
         const active = mode === m
@@ -32,8 +32,8 @@ export function ThemeToggle() {
             className={[
               'flex-1 rounded px-2 py-1 transition-colors',
               active
-                ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
-                : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800',
+                ? 'bg-accent-soft text-accent'
+                : 'text-muted hover:bg-surface-hover',
             ].join(' ')}
           >
             {label}

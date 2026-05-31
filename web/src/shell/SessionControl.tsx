@@ -13,13 +13,11 @@ export function SessionControl() {
   if (session) {
     return (
       <div className="flex items-center gap-2 text-xs">
-        <span className="hidden text-neutral-600 sm:inline dark:text-neutral-400">
-          {session.displayName}
-        </span>
+        <span className="truncate text-muted">{session.displayName}</span>
         <button
           type="button"
           onClick={signOut}
-          className="rounded border border-neutral-300 px-2 py-1 text-neutral-700 transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-800"
+          className="rounded-md border border-line-strong px-2 py-1 text-fg-soft transition-colors hover:bg-surface-hover"
         >
           Sign out
         </button>
@@ -30,7 +28,7 @@ export function SessionControl() {
     <button
       type="button"
       onClick={() => signIn()}
-      className="rounded bg-neutral-900 px-3 py-1.5 text-xs text-white transition-colors hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-300"
+      className="rounded-md bg-gradient-to-br from-accent to-accent-strong px-3 py-1.5 text-xs font-medium text-on-accent transition-opacity hover:opacity-90"
     >
       Sign in
     </button>
