@@ -47,10 +47,12 @@ import {
   type ObjectStore,
 } from "../object-store.ts";
 import {
-  documentTextFromBytes,
+  emptyIssuerIrExtractionResult,
   extractIssuerIrEvidence,
+  issuerIrTextFromBytes,
 } from "../issuer-ir-extraction.ts";
 import { getIrDocumentAssetForDocument } from "../issuer-ir-registry.ts";
+import { withTransaction } from "../transaction.ts";
 import {
   linkDocumentMentions,
   type DetectedMentionCandidate,
@@ -178,15 +180,15 @@ function makeExtractMentionsHandler(deps: EvidenceReaderToolDeps): ReaderToolHan
     let skipped: readonly SkippedMention[] = [];
     if (deps.extractMentionCandidates && deps.resolveMention) {
       const candidates = await deps.extractMentionCandidates(document);
-      const linked = await withTransaction(deps.db, async () => {
+      const linked = await withTransaction(deps.db, async (tx) => {
         const linkedMentions = await linkDocumentMentions({
-          db: deps.db,
+          db: tx.db,
           document_id: document.document_id,
           candidates,
           resolveMention: deps.resolveMention!,
         });
         await deleteMentionsForDocumentExcept(
-          deps.db,
+          tx.db,
           document.document_id,
           linkedMentions.mentions.map((mention) => ({
             subject_kind: mention.subject_ref.kind,
@@ -355,26 +357,21 @@ async function issuerIrExtractionForDocument(
       `raw_blob_id "${document.raw_blob_id}" not found in object store`,
     );
   }
+  const text = issuerIrTextFromBytes({
+    bytes: blob.bytes,
+    contentType: asset.content_type,
+  });
+  if (text.status !== "available") {
+    return emptyIssuerIrExtractionResult();
+  }
   return extractIssuerIrEvidence({
-    text: documentTextFromBytes(blob.bytes, asset.asset_kind),
+    text: text.text,
     document_id: document.document_id,
     source_id: document.source_id,
     subject_ref: { kind: "issuer", id: asset.issuer_id },
     asset,
     effective_time: document.published_at,
   });
-}
-
-async function withTransaction<T>(db: QueryExecutor, action: () => Promise<T>): Promise<T> {
-  await db.query("begin");
-  try {
-    const result = await action();
-    await db.query("commit");
-    return result;
-  } catch (error) {
-    await db.query("rollback");
-    throw error;
-  }
 }
 
 function mentionToToolItem(mention: MentionRow) {

@@ -5,8 +5,9 @@ import { createClaim, type ClaimRow } from "./claim-repo.ts";
 import type { DocumentRow } from "./document-repo.ts";
 import { createEvent, createEventSubject, type EventRow } from "./event-repo.ts";
 import {
-  documentTextFromBytes,
+  emptyIssuerIrExtractionResult,
   extractIssuerIrEvidence,
+  issuerIrTextFromBytes,
 } from "./issuer-ir-extraction.ts";
 import {
   createIrDocumentAsset,
@@ -16,11 +17,11 @@ import {
   type IrDocumentAssetRow,
   type IrSourceRegistryRow,
 } from "./issuer-ir-registry.ts";
-import { ingestDocument, type IngestDocumentResult } from "./ingest.ts";
+import { ingestDocumentInTransaction, type IngestDocumentResult } from "./ingest.ts";
 import { createMention } from "./mention-repo.ts";
 import {
-  ingestEarningsTranscript,
-  ingestPressRelease,
+  ingestEarningsTranscriptInTransaction,
+  ingestPressReleaseInTransaction,
 } from "./news-ingest.ts";
 import type { ObjectStore } from "./object-store.ts";
 import {
@@ -31,16 +32,24 @@ import {
 } from "./providers/issuer-ir.ts";
 import {
   createSource,
-  deleteSource,
   type SourceRow,
 } from "./source-repo.ts";
 import type { QueryExecutor } from "./types.ts";
+import {
+  type TransactionContext,
+  withTransaction,
+} from "./transaction.ts";
 import {
   assertNonEmptyString,
 } from "./validators.ts";
 
 export type IngestIssuerIrSourceDeps = DiscoverIssuerIrCandidatesConfig & {
   db: QueryExecutor;
+  objectStore: ObjectStore;
+};
+
+type IngestIssuerIrSourceTransactionDeps = DiscoverIssuerIrCandidatesConfig & {
+  tx: TransactionContext;
   objectStore: ObjectStore;
 };
 
@@ -121,137 +130,143 @@ async function persistIssuerIrCandidate(
   candidate: IssuerIrCandidate,
   fetched: { bytes: Uint8Array; contentType: string | null; fetchedAt: string },
 ): Promise<IssuerIrIngestRecord> {
+  return withTransaction(deps.db, (tx) =>
+    persistIssuerIrCandidateWithTx(transactionDeps(deps, tx), input, candidate, fetched)
+  );
+}
+
+async function persistIssuerIrCandidateWithTx(
+  deps: IngestIssuerIrSourceTransactionDeps,
+  input: IngestIssuerIrSourceInput,
+  candidate: IssuerIrCandidate,
+  fetched: { bytes: Uint8Array; contentType: string | null; fetchedAt: string },
+): Promise<IssuerIrIngestRecord> {
   const provider = sourceProvider(candidate);
-  const licenseClass = provider === "issuer_ir" ? "public" : "free";
-  let source: SourceRow;
-  let ingest: IngestDocumentResult;
+  const { source, ingest } = await persistIssuerIrDocument(deps, input, candidate, fetched, provider);
+
+  const document = ingest.document;
+  const asset = await createIrDocumentAsset(deps.tx.db, {
+    ir_source_id: input.registryEntry.ir_source_id,
+    issuer_id: input.registryEntry.issuer_id,
+    document_id: document.document_id,
+    source_id: source.source_id,
+    asset_kind: candidate.assetKind,
+    canonical_url: candidate.canonicalUrl,
+    hosted_provider: candidate.hostedProvider,
+    issuer_attested: provider === "issuer_ir",
+    content_type: fetched.contentType,
+    discovered_at: candidate.publishedAt ?? fetched.fetchedAt,
+    fetched_at: fetched.fetchedAt,
+  });
+  await createMention(deps.tx.db, {
+    document_id: document.document_id,
+    subject_kind: input.subjectRef.kind,
+    subject_id: input.subjectRef.id,
+    prominence: candidate.assetKind === "press_release" ? "headline" : "lead",
+    mention_count: 1,
+    confidence: provider === "issuer_ir" ? 0.95 : 0.82,
+  });
+  const text = issuerIrTextFromBytes({
+    bytes: fetched.bytes,
+    contentType: fetched.contentType,
+  });
+  const extracted = text.status === "available"
+    ? extractIssuerIrEvidence({
+      text: text.text,
+      document_id: document.document_id,
+      source_id: source.source_id,
+      subject_ref: input.subjectRef,
+      asset,
+      effective_time: candidate.publishedAt ?? fetched.fetchedAt,
+    })
+    : emptyIssuerIrExtractionResult();
+  const claims = await persistClaims(deps.tx.db, extracted.claims, input.subjectRef);
+  const events = await persistEvents(deps.tx.db, extracted.events, input.subjectRef, claims.map((claim) => claim.claim_id));
+  return Object.freeze({
+    candidate,
+    source,
+    document,
+    ingest,
+    asset,
+    claims,
+    events,
+    status: "created" as const,
+  });
+}
+
+async function persistIssuerIrDocument(
+  deps: IngestIssuerIrSourceTransactionDeps,
+  input: IngestIssuerIrSourceInput,
+  candidate: IssuerIrCandidate,
+  fetched: { bytes: Uint8Array; fetchedAt: string },
+  provider: string,
+): Promise<{ source: SourceRow; ingest: IngestDocumentResult }> {
+  const publishedAt = candidate.publishedAt ?? fetched.fetchedAt;
   if (candidate.assetKind === "press_release") {
-    const result = await ingestPressRelease(deps, {
+    return ingestPressReleaseInTransaction(deps, {
       bytes: fetched.bytes,
       provider,
       canonicalUrl: candidate.canonicalUrl,
       publisher: input.issuerName,
-      publishedAt: candidate.publishedAt ?? fetched.fetchedAt,
+      publishedAt,
       title: candidate.title,
       trustTier: provider === "issuer_ir" ? "primary" : "secondary",
-      licenseClass,
+      licenseClass: provider === "issuer_ir" ? "public" : "free",
       retrievedAt: fetched.fetchedAt,
       providerDocId: providerDocId(candidate),
     });
-    source = result.source;
-    ingest = result.ingest;
-  } else if (candidate.assetKind === "transcript") {
-    const result = await ingestEarningsTranscript(deps, {
+  }
+  if (candidate.assetKind === "transcript") {
+    return ingestEarningsTranscriptInTransaction(deps, {
       bytes: fetched.bytes,
       provider,
       canonicalUrl: candidate.canonicalUrl,
       publisher: input.issuerName,
-      publishedAt: candidate.publishedAt ?? fetched.fetchedAt,
-      fiscalPeriod: inferFiscalPeriod(candidate.title, candidate.publishedAt ?? fetched.fetchedAt),
+      publishedAt,
+      fiscalPeriod: inferFiscalPeriod(candidate.title, publishedAt),
       issuer: input.issuerName,
       trustTier: provider === "issuer_ir" ? "secondary" : "tertiary",
       licenseClass: provider === "issuer_ir" ? "public" : "licensed",
       retrievedAt: fetched.fetchedAt,
       providerDocId: providerDocId(candidate),
     });
-    source = result.source;
-    ingest = result.ingest;
-  } else {
-    const result = await ingestPresentation(deps, {
-      candidate,
-      bytes: fetched.bytes,
-      provider,
-      licenseClass,
-      issuerName: input.issuerName,
-      retrievedAt: fetched.fetchedAt,
-    });
-    source = result.source;
-    ingest = result.ingest;
   }
 
-  const document = ingest.document;
-  const persisted = await withTransaction(deps.db, async () => {
-    const asset = await createIrDocumentAsset(deps.db, {
-      ir_source_id: input.registryEntry.ir_source_id,
-      issuer_id: input.registryEntry.issuer_id,
-      document_id: document.document_id,
-      source_id: source.source_id,
-      asset_kind: candidate.assetKind,
-      canonical_url: candidate.canonicalUrl,
-      hosted_provider: candidate.hostedProvider,
-      issuer_attested: provider === "issuer_ir",
-      content_type: fetched.contentType,
-      discovered_at: candidate.publishedAt ?? fetched.fetchedAt,
-      fetched_at: fetched.fetchedAt,
-    });
-    await createMention(deps.db, {
-      document_id: document.document_id,
-      subject_kind: input.subjectRef.kind,
-      subject_id: input.subjectRef.id,
-      prominence: candidate.assetKind === "press_release" ? "headline" : "lead",
-      mention_count: 1,
-      confidence: provider === "issuer_ir" ? 0.95 : 0.82,
-    });
-    const extracted = extractIssuerIrEvidence({
-      text: documentTextFromBytes(fetched.bytes, candidate.assetKind),
-      document_id: document.document_id,
-      source_id: source.source_id,
-      subject_ref: input.subjectRef,
-      asset,
-      effective_time: candidate.publishedAt ?? fetched.fetchedAt,
-    });
-    const claims = await persistClaims(deps.db, extracted.claims, input.subjectRef);
-    const events = await persistEvents(deps.db, extracted.events, input.subjectRef, claims.map((claim) => claim.claim_id));
-    return Object.freeze({ asset, claims, events });
+  const licenseClass = provider === "issuer_ir" ? "public" : "free";
+  const source = await createSource(deps.tx.db, {
+    provider,
+    kind: "research_note",
+    canonical_url: candidate.canonicalUrl,
+    trust_tier: provider === "issuer_ir" ? "primary" : "secondary",
+    license_class: licenseClass,
+    retrieved_at: fetched.fetchedAt,
   });
-  return Object.freeze({
-    candidate,
-    source,
-    document,
-    ingest,
-    asset: persisted.asset,
-    claims: persisted.claims,
-    events: persisted.events,
-    status: "created" as const,
+  const ingest = await ingestDocumentInTransaction(deps, {
+    source: { source_id: source.source_id, license_class: source.license_class },
+    bytes: fetched.bytes,
+    document: {
+      provider_doc_id: providerDocId(candidate),
+      kind: "research_note",
+      title: candidate.title,
+      author: input.issuerName,
+      published_at: publishedAt,
+    },
   });
+  return Object.freeze({ source, ingest });
 }
 
-async function ingestPresentation(
+function transactionDeps(
   deps: IngestIssuerIrSourceDeps,
-  input: {
-    candidate: IssuerIrCandidate;
-    bytes: Uint8Array;
-    provider: string;
-    licenseClass: string;
-    issuerName: string;
-    retrievedAt: string;
-  },
-): Promise<{ source: SourceRow; ingest: IngestDocumentResult }> {
-  const source = await createSource(deps.db, {
-    provider: input.provider,
-    kind: "research_note",
-    canonical_url: input.candidate.canonicalUrl,
-    trust_tier: input.provider === "issuer_ir" ? "primary" : "secondary",
-    license_class: input.licenseClass,
-    retrieved_at: input.retrievedAt,
-  });
-  try {
-    const ingest = await ingestDocument(deps, {
-      source: { source_id: source.source_id, license_class: source.license_class },
-      bytes: input.bytes,
-      document: {
-        provider_doc_id: providerDocId(input.candidate),
-        kind: "research_note",
-        title: input.candidate.title,
-        author: input.issuerName,
-        published_at: input.candidate.publishedAt ?? input.retrievedAt,
-      },
-    });
-    return Object.freeze({ source, ingest });
-  } catch (error) {
-    await deleteSource(deps.db, source.source_id);
-    throw error;
-  }
+  tx: TransactionContext,
+): IngestIssuerIrSourceTransactionDeps {
+  return {
+    objectStore: deps.objectStore,
+    tx,
+    ...(deps.fetch ? { fetch: deps.fetch } : {}),
+    ...(deps.now ? { now: deps.now } : {}),
+    ...(deps.requestTimeoutMs !== undefined ? { requestTimeoutMs: deps.requestTimeoutMs } : {}),
+    ...(deps.maxCandidates !== undefined ? { maxCandidates: deps.maxCandidates } : {}),
+  };
 }
 
 async function persistClaims(
@@ -303,18 +318,6 @@ async function persistEvents(
     rows.push(event);
   }
   return Object.freeze(rows);
-}
-
-async function withTransaction<T>(db: QueryExecutor, action: () => Promise<T>): Promise<T> {
-  await db.query("begin");
-  try {
-    const result = await action();
-    await db.query("commit");
-    return result;
-  } catch (error) {
-    await db.query("rollback");
-    throw error;
-  }
 }
 
 function sourceProvider(candidate: IssuerIrCandidate): string {

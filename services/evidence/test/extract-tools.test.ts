@@ -12,6 +12,7 @@ import { loadToolRegistry } from "../../tools/src/registry.ts";
 import { createEvidenceReaderToolHandlers } from "../src/reader/extract-tools.ts";
 import { MemoryObjectStore, rawBlobIdFromBytes } from "../src/object-store.ts";
 import type { QueryExecutor } from "../src/types.ts";
+import { recordingPoolExecutor } from "./recording-query-executor.ts";
 
 const SAMPLE_DOC_UUID = "70a0cc2e-e198-4b59-a5c9-9bd2da4a359b";
 const SAMPLE_SOURCE_UUID = "11111111-1111-4111-a111-111111111111";
@@ -462,6 +463,95 @@ test("extract_mentions links and deletes stale mentions in one transaction", asy
   assert.ok(beginIndex < insertIndex);
   assert.ok(insertIndex < deleteIndex);
   assert.ok(deleteIndex < commitIndex);
+});
+
+test("extract_mentions uses an acquired client for transactional mention writes when available", async () => {
+  const mentionId = "22222222-2222-4222-a222-222222222222";
+  const issuerId = "33333333-3333-4333-a333-333333333333";
+  const { db, poolQueries, txQueries, releases } = recordingPoolExecutor(async <R extends Record<string, unknown>>(
+    target,
+    text: string,
+    values?: unknown[],
+  ) => {
+    if (
+      target === "pool" &&
+      (/^(begin|commit|rollback)$/i.test(text) || /insert into mentions|delete from mentions/.test(text))
+    ) {
+      throw new Error(`transactional mention write used the pool: ${text}`);
+    }
+    if (/from documents/.test(text)) {
+      return { rows: [fakeDocumentRow()] as unknown as R[], command: "SELECT", rowCount: 1, oid: 0, fields: [] };
+    }
+    if (/^(begin|commit|rollback)$/i.test(text)) {
+      return { rows: [] as R[], command: text.toUpperCase(), rowCount: null, oid: 0, fields: [] };
+    }
+    if (/insert into mentions/.test(text)) {
+      return {
+        rows: [{
+          mention_id: mentionId,
+          document_id: SAMPLE_DOC_UUID,
+          subject_kind: values?.[1],
+          subject_id: values?.[2],
+          prominence: values?.[3],
+          mention_count: values?.[4],
+          confidence: values?.[5],
+          created_at: new Date("2026-05-03T00:00:00.000Z"),
+        }] as R[],
+        command: "INSERT",
+        rowCount: 1,
+        oid: 0,
+        fields: [],
+      };
+    }
+    if (/delete from mentions/.test(text)) {
+      return { rows: [] as R[], command: "DELETE", rowCount: 0, oid: 0, fields: [] };
+    }
+    if (/from mentions/.test(text)) {
+      return {
+        rows: [{
+          mention_id: mentionId,
+          document_id: SAMPLE_DOC_UUID,
+          subject_kind: "issuer",
+          subject_id: issuerId,
+          prominence: "headline",
+          mention_count: 1,
+          confidence: 0.8,
+          created_at: new Date("2026-05-03T00:00:00.000Z"),
+        }] as R[],
+        command: "SELECT",
+        rowCount: 1,
+        oid: 0,
+        fields: [],
+      };
+    }
+    throw new Error(`unexpected query: ${text}`);
+  });
+  const handlers = createEvidenceReaderToolHandlers({
+    db,
+    extractMentionCandidates: async () => [
+      { text: "Apple", prominence: "headline", mention_count: 1, confidence: 0.8 },
+    ],
+    resolveMention: async () => ({
+      outcome: "resolved",
+      subject_ref: { kind: "issuer", id: issuerId },
+      display_name: "Apple Inc.",
+      confidence: 0.9,
+      canonical_kind: "issuer",
+    }),
+  });
+
+  await handlers.extract_mentions({ document_id: SAMPLE_DOC_UUID });
+
+  assert.equal(poolQueries.some((queryText) => /insert into mentions|delete from mentions/.test(queryText)), false);
+  const beginIndex = txQueries.findIndex((queryText) => /^begin$/i.test(queryText));
+  const insertIndex = txQueries.findIndex((queryText) => /insert into mentions/.test(queryText));
+  const deleteIndex = txQueries.findIndex((queryText) => /delete from mentions/.test(queryText));
+  const commitIndex = txQueries.findIndex((queryText) => /^commit$/i.test(queryText));
+  assert.ok(beginIndex >= 0);
+  assert.ok(beginIndex < insertIndex);
+  assert.ok(insertIndex < deleteIndex);
+  assert.ok(deleteIndex < commitIndex);
+  assert.deepEqual(releases, [false]);
 });
 
 test("extract_mentions rolls back when stale mention deletion fails", async () => {
