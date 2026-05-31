@@ -105,6 +105,25 @@ test("POST /v1/dev/llm-settings/test-channel uses the shared router", async () =
   assert.equal((response.body as { reply?: string }).reply, "Reply OK");
 });
 
+test("POST /v1/dev/llm-settings/test-channel gives reasoning models enough output budget", async () => {
+  const envFile = await seedEnvFile();
+  let observedMaxTokens: number | undefined;
+  const response = await invoke("/v1/dev/llm-settings/test-channel", {
+    method: "POST",
+    env: enabledEnv(envFile),
+    options: {
+      createClient: () => async (_deployment, request) => {
+        observedMaxTokens = request.maxTokens;
+        return { text: "Reply OK" };
+      },
+    },
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal((response.body as { ok?: boolean }).ok, true);
+  assert.equal(observedMaxTokens, 128);
+});
+
 test("POST /v1/dev/llm-settings/test-channel distinguishes provider failures", async () => {
   const envFile = await seedEnvFile();
   const response = await invoke("/v1/dev/llm-settings/test-channel", {
