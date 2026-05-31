@@ -1,6 +1,6 @@
 # market-agent
 
-> An evidence-backed finance research terminal with a tool-using analyst, a structured `Block[]` renderer, and background research agents — built around the rule that *no displayed number ever exists without a backing row of provenance*.
+> A finance-research terminal where you screen the market, dig into any company, put an AI analyst to work over the evidence, and let background agents watch your theses — and every number on screen traces back to a source you can click into.
 
 ![Home — findings feed, market pulse, watchlist movers, agent summaries, saved screens](docs/screenshots/home.png)
 
@@ -15,136 +15,110 @@
 
 ---
 
-## Table of contents
+## What it is
 
-1. [About](#about)
-2. [Features](#features)
-3. [Screenshots](#screenshots)
-4. [Architecture](#architecture)
-5. [Invariants](#invariants)
-6. [Project structure](#project-structure)
-7. [Getting started](#getting-started)
-8. [Usage walkthrough](#usage-walkthrough)
-9. [Architecture Decision Records](#architecture-decision-records)
-10. [Non-goals](#non-goals)
-11. [Roadmap](#roadmap)
-12. [Contributing](#contributing)
+`market-agent` is a desktop-style research terminal for investors and analysts. You search a company, pull up its fundamentals and price history, screen the broader universe for ideas, and ask questions of an AI analyst — all in one workspace, without juggling a dozen tabs and spreadsheets.
 
----
+Three things you can do with it:
 
-## About
+- **Explore markets and companies** on fast, deterministic surfaces — quotes, charts, SEC-normalized financials, earnings, holders, and signals.
+- **Ask an AI analyst** in a persistent chat workspace and get back structured, interactive answers — tables, charts, and metric rows with citations, not a wall of text.
+- **Run background agents** that monitor your investment theses around the clock, raise findings, and alert you when something changes.
 
-`market-agent` is the implementation of the architecture in [`stock-agent-v2.md`](stock-agent-v2.md): a desktop-first finance-research terminal whose central insight is that an app like this is **not "a chatbot with charts" — it is an evidence system plus a structured artifact renderer plus a tool-using analyst.**
+What sets it apart is the evidence promise: this is **not a chatbot with charts**. Every number you see — in a chart, a table, or a sentence of analysis — is pinned to a source you can click into and inspect. Open any figure and you get its provenance: where it came from, how it was computed, and the original document behind it.
 
-The system is built as three subsystems on one shared data plane:
-
-1. **Deterministic terminal surfaces** — watchlists, quotes, charts, symbol detail tabs, screener, portfolio overlay.
-2. **Interactive research chat** — strict `Block[]` responses, a tool-using analyst, citations and provenance, persistent threads, cross-thread artifacts.
-3. **Background thesis agents** — scheduled research, claim/event monitoring, finding generation, notifications, and a Home feed that is findings-first, not news-first.
-
-The model never emits HTML, JSX, or markdown for analyst replies. It emits a typed array of blocks (`RichText`, `Section`, `MetricRow`, `Table`, `LineChart`, `RevenueBars`, `PerfComparison`, `SegmentDonut`, `Sources`, `Disclosure`, …) that the frontend `BlockRegistry` renders. Every numeric reference inside prose is bound to a `Fact` or `Computation` by id, so the verifier can guarantee narrative and visuals can never disagree.
+![Chat — analyst replies stream as structured, interactive blocks with citations](docs/screenshots/chat-thread.png)
 
 ---
 
-## Features
+## What you can do
 
-Mapped to the build phases in [`stock-agent-v2.md` §23](stock-agent-v2.md):
+### Home
+Land on a findings-first feed that aggregates what your agents have surfaced (deduplicated so the same story doesn't repeat across agents), alongside a market-pulse strip, your watchlist movers, recent agent activity, and your saved screens. _(Pictured above.)_
 
-- ✅ **Phase 0 — Foundation** — app shell, route model, auth gate primitives, subject resolver (`issuer` / `instrument` / `listing` / `theme` / `macro_topic` / `portfolio` / `screen`), watchlists, symbol search, quotes.
-- ✅ **Phase 1 — Terminal core** — symbol detail surfaces (overview, financials, earnings, holders, signals), market data with adjusted-series caching, fundamentals with SEC normalization, screener, portfolio/watchlist basics.
-- ✅ **Phase 2 — Structured chat** — per-thread session coordinator with SSE replay, pre-resolve router with budget policy, versioned `BlockRegistry`, snapshot assembler & verifier, thread summaries/titles, durable-runtime parity with Durable-Object semantics ([ADR 0004](docs/adr/0004-session-coordinator-hosting.md)).
-- ✅ **Phase 3 — Document & evidence plane** — sources, documents, mentions, claims, claim arguments, entity impacts, events, candidate-fact promotion, evidence bundles, claim clustering, XBRL extension parsing, segment & non-GAAP extraction.
-- ✅ **Phase 4 — Product parity** — themes & macro subjects, Analyze template system, "Add results to chat" artifact flow, Home feed cluster-dedupe & ranking, right-rail activity stream (`Reading` / `Investigating` / `Found` / `Dismissed`), specialized social/news blocks, dynamic watchlists with portfolio overlays.
-- ✅ **Phase 5 — Background agents** — agent CRUD with scheduling and watermark storage, alert evaluation, finding generation, multi-channel notification delivery (email · push · digest).
-- 🚧 **Phase 6 — Hard cases & scale** — segment refinement, non-US coverage, reviewer queues, export/share policies, deeper drift monitoring. The drift command (`services/observability && npm run drift:monitor`) ships today; the rest is the active frontier.
+### Symbol detail
+Type any ticker into the top search and land on a full company workspace with five tabs:
 
-All 298 implementation issues tracked in [beads](https://github.com/scottfeldman/beads) are closed; the codebase is the source of truth.
-
----
-
-## Screenshots
+- **Overview** — KPI tiles and a performance chart with source provenance.
+- **Financials** — income statement (as reported / as restated) and segment revenue share, pivotable by business or geography.
+- **Earnings** — the last eight quarters, analyst consensus, and price targets.
+- **Holders** — institutional holders and insider transactions.
+- **Signals** — sentiment trend, recent claim clusters, and theme rationale.
 
 | | |
 |---|---|
-| ![Home](docs/screenshots/home.png) **Home** — findings feed deduped by `ClaimCluster`, market pulse, watchlist movers, agent summaries (last 24 h), saved screens. | ![Auth gate](docs/screenshots/agents-gate.png) **Auth gate** — protected surfaces collapse the main canvas to a session prompt; the shell chrome stays mounted ([§3.10](stock-agent-v2.md)). |
-| ![Agents](docs/screenshots/agents.png) **Agents** — durable thesis agents with name, thesis, cadence, universe (static / dynamic), run history, and live run activity. | ![Chat — empty](docs/screenshots/chat-empty.png) **Chat** — thread-scoped research workspace; each answer is pinned to a sealed snapshot. |
-| ![Chat — thread](docs/screenshots/chat-thread.png) **Chat thread** — analyst replies stream as `Block[]`, never raw markdown; old blocks remain interactive in their snapshot. | ![Screener](docs/screenshots/screener.png) **Screener** — universe + market + fundamentals filters; saved screens feed watchlists, agents, and template universes. |
-| ![Analyze](docs/screenshots/analyze.png) **Analyze** — template-driven memo workflow with editable instructions, selectable source categories, and chat handoff via shared snapshot provenance. | ![Symbol — overview](docs/screenshots/symbol-overview.png) **Symbol / Overview** — KPI tiles, sealed performance chart, source provenance. |
-| ![Symbol — financials](docs/screenshots/symbol-financials.png) **Symbol / Financials** — income statement (as reported / as restated) + segment revenue share with business / geography pivot. | ![Symbol — earnings](docs/screenshots/symbol-earnings.png) **Symbol / Earnings** — last 8 quarters, analyst consensus, price target. |
-| ![Symbol — holders](docs/screenshots/symbol-holders.png) **Symbol / Holders** — institutional holders and insider transactions. | ![Symbol — signals](docs/screenshots/symbol-signals.png) **Symbol / Signals** — sentiment trend, recent claim clusters, theme rationale (the supersession of the older `/reddit` route). |
+| ![Symbol / Overview](docs/screenshots/symbol-overview.png) **Overview** | ![Symbol / Financials](docs/screenshots/symbol-financials.png) **Financials** |
+| ![Symbol / Earnings](docs/screenshots/symbol-earnings.png) **Earnings** | ![Symbol / Signals](docs/screenshots/symbol-signals.png) **Signals** |
+
+### Chat
+Open a research thread and ask the analyst anything about a company, a comparison, or a theme. Replies stream in as structured, interactive blocks — tables, charts, metric rows — with citations attached, never raw markdown. Click any figure to open its evidence. Threads persist, so you can pick up where you left off.
+
+### Screener
+![Screener — filter the universe and save screens](docs/screenshots/screener.png)
+
+Filter the universe by asset type, sector, venue, price, change %, and volume, plus fundamentals like market cap, P/E, gross/operating/net margin, and revenue YoY. Sort, paginate, and save a screen — saved screens become reusable universes for watchlists, agents, and Analyze.
+
+### Analyze
+![Analyze — guided memo playbooks](docs/screenshots/analyze.png)
+
+Run guided memo playbooks such as *Earnings quality*, *Variant view*, or *Peer comparison*. Tune the instructions and the source categories, generate a memo, inspect the evidence behind it, rerun it, compare against earlier runs, and hand the result off into a chat thread.
+
+### Agents
+![Agents — thesis agents with cadence, universe, and run history](docs/screenshots/agents.png)
+
+Create a thesis agent: give it a name, a thesis, a cadence (daily / weekly / on-demand), and a universe (specific names, or a dynamic universe driven by a screen, theme, or portfolio). The agent ingests new evidence on its schedule, scores it against your thesis, raises findings to Home, and alerts you by email, web push, or digest. Run history and live activity are visible per agent.
+
+### Watchlists & Portfolio
+Build manual watchlists, or dynamic ones that track a screen, theme, or portfolio. Keep research-scoped holdings (not a brokerage account) and see them overlaid across the surfaces above.
+
+### Evidence inspector
+On any number, claim, event, or source, open the inspector to see provenance rows, quality badges, links to the original source, and related evidence — the receipts behind everything on screen.
 
 ---
 
-## Architecture
+## Getting started
 
-```text
-Client (Web · Electron-ready)
-        │
-        ▼
-API / BFF Layer
-(auth, thread routes, Home, Agents, Analyze, Screens, SSE bootstrap)
-        │
-        ▼
-Session Coordinator   (Node + Postgres today; Durable-Object-equivalent semantics — ADR 0004)
-        │
-        ▼
-Orchestrator
-(intent · bundle selection · budgets · approvals · snapshot staging)
-        │
-        ├──────────────────────────────┐
-        ▼                              ▼
-Deterministic Services         Model Services
-(resolver · calculators ·      Reader  · Analyst
- normalizer · verifier ·       Title/Summary
- snapshot sealer)
-        │
-        ▼
-Tool Gateway
-        │
-        ┌──────────────┬─────────────┬──────────────┬────────────────────┬──────────────────┐
-        ▼              ▼             ▼              ▼                    ▼                  ▼
-Identity / Resolver   Market Data   Fundamentals   Evidence Service    Screening / Alerts   Home Feed
-                                                  (docs · facts ·      / Notifications
-                                                   claims · events)
-        │
-        ▼
-Storage
-- App metadata (Postgres)
-- Evidence (Postgres, partitioned by time/class)
-- Raw documents & parsed artifacts (MinIO/S3 — `BLOB_STORE_BACKEND=memory|s3`)
-- Hot session cache (Redis)
+### Prerequisites
+
+- **Node ≥ 22.19**
+- **Docker + Docker Compose** (runs Postgres, Redis, and MinIO for you)
+- ~3 GB free for images and dependencies
+- *(Optional)* Python ≥ 3.11 or `uv`, only if you enable the unofficial local-dev data fallback
+
+### Setup
+
+```bash
+cp .env.dev.example .env.dev      # safe defaults; ports + flags
+./scripts/dev-shell.sh up         # first run installs packages, pulls images, runs migrations + seeds
+./scripts/dev-shell.sh status     # confirm everything is running
 ```
 
-The model topology has **five execution roles**, each with a different blast radius:
+When `up` completes, open **<http://localhost:5173>**.
 
-| Role | What it sees | What it can do |
-|---|---|---|
-| **Resolver / router** | user text, thread summary, auth state | extract subjects, resolve periods, pick a tool bundle, set budgets |
-| **Reader** | raw documents (HTML, PDF, transcripts, tweets) + extraction schema | emit structured claims, events, candidate facts, mentions, impacts |
-| **Analyst** | bundle tools, structured tool results, response schema — **never raw external text** | call read-only tools, emit a `Block[]` reply |
-| **Verifier** | the proposed `Block[]`, the manifest, the snapshot contract | accept/reject for schema validity, ref bindings, units, disclosures, approvals |
-| **Summary / title** | sealed turn | async summaries for thread titles, finding cards, Home headlines |
+### Bring your own keys & models
 
-The reader/analyst boundary is what contains prompt-injection risk from external content: only the reader sees raw text; the analyst consumes only typed extractions.
+The terminal works out of the box, but a few keys unlock live data and the AI features. Add them to `.env.dev`:
 
----
+- **`POLYGON_API_KEY`** — stock ticker discovery and live quotes/bars. Without it, unknown tickers resolve as not-found and market surfaces show as unavailable.
+- **`SEC_EDGAR_USER_AGENT`** — on-demand SEC company-facts ingestion for statements and key stats (use a string you control, e.g. `market-agent-dev you@example.com`).
+- **LLM models** — required for Chat, Analyze, and Agents. Configure channels in the in-app **Settings** page, or via the `.env.dev` fields `LLM_CHANNELS`, `LLM_<NAME>_*`, `LITELLM_MODEL`, `LITELLM_FALLBACK_MODELS`, and `AGENT_LITELLM_MODEL`. Settings-page changes are picked up without restarting.
+- **`ENABLE_UNOFFICIAL_DEV_PROVIDERS=true`** — optional yfinance/Finviz fallback for local dev when the primary provider misses.
 
-## Invariants
+### Signing in (dev)
 
-These eight rules govern the system. They are checked by code, not by convention.
+The "Sign in" button in the top bar (and inside the auth panel) sets a stable mock user in development, so your watchlists, threads, and portfolios persist across runs. Protected surfaces — **Chat**, **Analyze**, and **Agents** — require it; Home, Symbol detail, and Screener are browsable without signing in.
 
-| # | Rule |
-|---|---|
-| **I1** | No displayed number without a backing `Fact` or `Computation` row. |
-| **I2** | Narrative and visuals cannot disagree — prose binds facts by id, not by repetition. |
-| **I3** | Documents are evidence, not truth. Articles, tweets, transcripts, and uploads do not become canonical facts merely by being ingested. |
-| **I4** | The analyst never sees raw untrusted text — only structured reader output. |
-| **I5** | Every answer is pinned to an immutable `snapshot_id`. |
-| **I6** | Multi-entity reasoning happens through claim arguments and entity-impact edges, not document mentions. |
-| **I7** | Side effects (alerts, exports, agent creation) require explicit user approval. |
-| **I8** | Refresh is explicit — interactivity inside a sealed snapshot is allowed only for `allowed_transforms`. |
+### Tear down
 
-The snapshot contract (see [`stock-agent-v2.md` §15](stock-agent-v2.md)) is what lets a chart block inside an old assistant message stay interactive — its timeframe buttons resolve inside the snapshot's `allowed_transforms` against the same `as_of` and basis the message was sealed with.
+```bash
+./scripts/dev-shell.sh down
+```
+
+This stops the services and containers while keeping your Postgres and MinIO volumes. To wipe all local dev state:
+
+```bash
+docker compose -f docker-compose.dev.yml --env-file .env.dev down -v
+```
 
 ---
 
@@ -152,7 +126,7 @@ The snapshot contract (see [`stock-agent-v2.md` §15](stock-agent-v2.md)) is wha
 
 ```
 market-agent/
-├── web/                       React 19 + Vite frontend; BlockRegistry renderer
+├── web/                       React 19 + Vite frontend (the UI)
 ├── services/
 │   ├── resolver/              identity (issuer / instrument / listing / theme)
 │   ├── market/                quotes, bars, normalized & adjusted series
@@ -162,162 +136,32 @@ market-agent/
 │   ├── home/                  findings dedupe + ranking + market pulse
 │   ├── agents/                CRUD · scheduling · alert eval · finding generation
 │   ├── notifications/         email · web push · digest delivery
-│   ├── chat/                  SSE thread coordinator + analyst runtime
+│   ├── chat/                  thread coordinator + analyst runtime
 │   ├── snapshot/              manifest staging + verification
 │   ├── observability/         drift monitoring (npm run drift:monitor)
 │   ├── analyze/               Analyze tab memo workflow
 │   ├── artifact/              shared artifact model (add-to-chat)
 │   ├── themes/ summary/ portfolio/ watchlists/ tools/ shared/ dev-api/
 ├── db/                        schema pack, migrations, seeds
-├── spec/                      block schema, OpenAPI, tool registry, finance-research spec
-├── docs/
-│   ├── adr/                   Architecture Decision Records
-│   └── screenshots/           README assets
+├── docs/                      screenshots + reference docs
 ├── scripts/                   dev-shell.sh + helpers
 ├── docker-compose.dev.yml     Postgres 15 · Redis 7 · MinIO
-├── .env.dev.example           ports + flags
-└── stock-agent-v2.md          source-of-truth architecture document
+└── .env.dev.example           ports + flags
 ```
 
 ---
 
-## Getting started
+## What it isn't
 
-### Prerequisites
+`market-agent` is a **research** system, not a trading platform. It deliberately does not:
 
-- **Node ≥ 22.19** (the services use `node --experimental-strip-types` for direct `.ts` execution, and the shared LLM router uses `@earendil-works/pi-ai`)
-- **Docker + Docker Compose** (Postgres / Redis / MinIO containers)
-- ~3 GB free for images and dependencies
-
-### Setup
-
-```bash
-cp .env.dev.example .env.dev      # ports + flags; safe defaults
-./scripts/dev-shell.sh up         # first run installs packages, pulls images, runs migrations + reference seeds
-./scripts/dev-shell.sh status     # confirms all services are running
-```
-
-Set `POLYGON_API_KEY` in `.env.dev` to enable provider-backed stock ticker discovery and Polygon quote/bar caching. Dev no longer seeds ticker identities or fixture market data; without a key, unknown tickers resolve as `not_found` and market surfaces return unavailable. Set `SEC_EDGAR_USER_AGENT` to enable on-demand SEC companyfacts ingestion for statements and key stats.
-
-LLM channels are configured through the Settings page or the flat `.env.dev`
-fields `LLM_CHANNELS`, `LLM_<NAME>_*`, `LITELLM_MODEL`,
-`LITELLM_FALLBACK_MODELS`, and `AGENT_LITELLM_MODEL`. The dev shell exports
-`LLM_SETTINGS_ENV_FILE=$ROOT/.env.dev`, `MA_FLAG_LLM_SETTINGS=true`, and
-`VITE_MA_FLAG_LLM_SETTINGS=true` so local settings changes are picked up by
-chat/title generation without editing the shell environment manually.
-
-For local-only fallback coverage, set `ENABLE_UNOFFICIAL_DEV_PROVIDERS=true`. `dev-shell` then starts the Python `services/dev-providers` sidecar on `DEV_PROVIDERS_PORT`. Resolver/market may use yfinance after the primary provider path misses or is unavailable, and fundamentals may use Finviz to fill missing profile sector/industry/domicile fields. Successful fallback identities, quotes, daily adjusted bars, and profile enrichments are persisted in Postgres under dev-only source IDs where the schema has source fields.
-
-When `up` completes, the app is at **<http://localhost:5173>**.
-
-The dev shell brings up:
-
-| Surface | Address | What it serves |
-|---|---|---|
-| `web` | <http://localhost:5173> | Vite dev server (the UI) |
-| `chat` | <http://localhost:4310> | SSE thread coordinator + analyst runtime |
-| `resolver` | <http://localhost:4311> | identity / subject resolution |
-| `dev-api` | <http://localhost:4312> | local BFF (`/v1/agents`, `/v1/analyze`) |
-| `watchlists` | <http://localhost:4313> | manual + dynamic watchlists |
-| `market` | <http://localhost:4321> | quotes, bars |
-| `fundamentals` | <http://localhost:4322> | profile, statements, key stats |
-| `screener` | <http://localhost:4323> | filter/rank |
-| `portfolio` | <http://localhost:4333> | holdings, currency basis |
-| `home` | <http://localhost:4334> | findings feed + market pulse |
-| `evidence` | <http://localhost:4335> | docs, claims, events, facts |
-| `dev-providers` | <http://localhost:4336> | opt-in unofficial local-dev provider sidecar |
-| `postgres` | `127.0.0.1:54329` | metadata + evidence DB |
-| `redis` | `127.0.0.1:63791` | session cache |
-| `minio` | <http://localhost:9001> (console) | raw-document object store |
-
-`artifact`, `notifications`, `snapshot`, `tools`, `themes`, `summary` ship as in-process libraries — they don't bind their own dev HTTP ports.
-
-### Tear down
-
-```bash
-./scripts/dev-shell.sh down
-```
-
-This stops the service processes and Docker services while keeping the Postgres and MinIO dev volumes intact. To reset all local dev state, run `docker compose -f docker-compose.dev.yml --env-file .env.dev down -v`.
-
-### Dev-mode authentication
-
-Auth in development is an in-memory mock (`web/src/shell/AuthContext.tsx`). The "Sign in" button in the top bar — and the same button inside the AuthGate panel — sets a stable mock UUID so persistent surfaces (watchlists, threads, portfolios) round-trip the same `user_id` across runs. The real provider plugs in later without changing the `RouteScopeGate` / `AuthGate` contract.
-
-The matching `users` row is created automatically by `db/seed/00_dev_mock_user.sql`, which `npm run seed` (run by `./scripts/dev-shell.sh up`) applies on every start. The `users_default_manual_watchlist` trigger then creates the default manual watchlist with `is_default=true`. Both inserts are idempotent.
-
----
-
-## Usage walkthrough
-
-### Home
-Opens to the cross-agent findings feed deduped by `ClaimCluster`, plus a market-pulse strip (default tickers: AAPL, MSFT, GOOGL — configurable via `HOME_PULSE_TICKERS` in `.env.dev`), watchlist movers, last-24-h agent summaries grouped by severity, and pinned screens. No sign-in required to land; sign-in is required to load the user-scoped sections.
-
-### Symbol detail
-Type a ticker into the top search (e.g. `AAPL`). The resolver discovers and persists a provider-backed canonical `SubjectRef` like `listing:<uuid>` and lands at `/symbol/<ref>/overview`. The five tabs are **Overview · Financials · Earnings · Holders · Signals** (the source-agnostic supersession of the older `/reddit` draft route — community, news, and filing-derived evidence all compose through the same shared blocks). Charts and tables are sealed against an immutable snapshot per [§15](stock-agent-v2.md): timeframe buttons resolve inside the snapshot's `allowed_transforms`; anything else triggers a refresh.
-
-### Chat
-Protected surface — sign in via the top-bar button or the AuthGate panel. New threads are created from the empty state. Messages stream via SSE; the analyst's reply arrives as a `Block[]` (typed `RichText`, `Section`, `MetricRow`, `Table`, `LineChart`, etc.) — never raw markdown. Old blocks stay interactive in their sealed snapshot. The right rail shows the activity stream (`Reading` / `Investigating` / `Found` / `Dismissed`); the left rail lists threads scoped to the session.
-
-### Evidence inspector
-Snapshot-backed blocks expose inspectable refs. Selecting a number, claim, event, source, or block opens the Evidence inspector with the sealed `snapshot_id`, provenance rows, quality badges, source links, and related refs.
-
-### Analyze
-A guided playbook workflow. Pick a playbook such as *Earnings quality*, *Variant view*, or *Peer comparison*, tune instructions and source categories, generate a memo, inspect its evidence, rerun it, compare it with prior runs, and add the result to chat with shared snapshot provenance.
-
-### Screener
-Filter the universe across asset type, sector, venue (MIC), market metrics (price, change %, volume) and fundamentals (market cap, P/E, gross/operating/net margin, revenue YoY). Sort + paginate. Save the screen — saved screens feed watchlists, agent universes, and Analyze peer policies.
-
-### Agents
-Protected. Create a thesis agent with a name, thesis, cadence (daily / weekly / on-demand), and universe (static subjects, dynamic via screen / theme / portfolio). The agent's run loop ingests new evidence since its watermark, runs the reader extraction, scores claims against the thesis, emits findings, and updates the activity stream. Findings flow to Home; alerts deliver via email / web push / digest per the agent's rules. Run history and run activity are visible per agent.
-
----
-
-## Architecture Decision Records
-
-| ADR | Subject | Summary |
-|---|---|---|
-| [0001](docs/adr/0001-frontend-state-management.md) | Frontend state management | React-local state + focused shell contexts now; TanStack Query / Zustand deferred until shared-cache pressure justifies them. |
-| [0002](docs/adr/0002-chart-engine-strategy.md) | Chart engine strategy | Deterministic SVG/HTML chart blocks now; TradingView Lightweight Charts / Recharts / Visx remain migration options when triggers are met. |
-| [0003](docs/adr/0003-filing-extraction-boundary.md) | Filing extraction boundary | Filing extraction is an internal sub-boundary across Evidence + Fundamentals — not a standalone `services/filing-extraction` — until throughput or ownership demand a split. |
-| [0004](docs/adr/0004-session-coordinator-hosting.md) | Session coordinator hosting | Node + Postgres coordinator with sticky-routing parity to Cloudflare Durable Objects' per-thread serialization, SSE replay, durable run outputs, and idempotent queue handling. |
-
----
-
-## Non-goals
-
-The plan deliberately avoids:
-
-- live market streaming inside sealed assistant messages
-- raw web access by the analyst
-- brokerage execution and any implicit trading workflow
-- exposing model chain-of-thought
-- using document mentions as a proxy for entity impact
-- treating tweets or Reddit posts as authoritative facts
-
-This is a **research** system, not a trading platform.
-
----
-
-## Roadmap
-
-The active frontier is **Phase 6 — Hard cases & scale**:
-
-- segment-extraction refinement (non-standard XBRL extensions, redefinition events)
-- non-US issuer coverage (multi-domicile reporting, FX-aware fundamentals)
-- reviewer queues for low-confidence extractions
-- export / share policies with disclosure preservation
-- deeper evals & drift monitoring (the `eval_run_results` + drift report pipeline ships today; expand the golden set)
-
-Open ADR-trigger watch:
-
-- ADR 0001 — when shared cache / store pressure crosses its trigger, migrate to TanStack Query + Zustand.
-- ADR 0002 — when interactive chart density or perf demands exceed deterministic SVG/HTML, migrate to TradingView Lightweight Charts.
-- ADR 0003 — when filing-extraction throughput or ownership requires it, split into `services/filing-extraction`.
-- ADR 0004 — if a Cloudflare-centric deployment is preferred, swap the coordinator adapter to Durable Objects without changing the equivalence contract.
+- execute brokerage orders or run any trading workflow
+- stream live market data inside an already-answered chat message
+- let the analyst browse the open web
+- treat tweets, Reddit posts, or news articles as authoritative facts
 
 ---
 
 ## Contributing
 
-Conventions for AI-assisted contributions live in [`AGENTS.md`](AGENTS.md). The architectural source of truth is [`stock-agent-v2.md`](stock-agent-v2.md); changes that affect those invariants should land an ADR alongside the code.
+Conventions for AI-assisted contributions live in [`AGENTS.md`](AGENTS.md).

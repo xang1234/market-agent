@@ -238,7 +238,7 @@ async function testConfiguredRouter(
         { role: "user", content: "Connection test" },
       ],
       temperature: 0,
-      maxTokens: 16,
+      maxTokens: 128,
     });
     return {
       ok: result.text.trim() === "Reply OK",

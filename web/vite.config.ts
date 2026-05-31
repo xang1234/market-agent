@@ -27,6 +27,10 @@ export default defineConfig({
         target: process.env.DEV_API_ORIGIN ?? 'http://127.0.0.1:4312',
         changeOrigin: true,
       },
+      '/v1/dev': {
+        target: process.env.DEV_API_ORIGIN ?? 'http://127.0.0.1:4312',
+        changeOrigin: true,
+      },
       '/v1/themes': {
         target: process.env.DEV_API_ORIGIN ?? 'http://127.0.0.1:4312',
         changeOrigin: true,
