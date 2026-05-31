@@ -10,6 +10,7 @@ import {
 
 import { JumpToLatestButton } from './JumpToLatestButton.tsx'
 import { MessageItem } from './MessageItem.tsx'
+import { THREAD_COLUMN_CLASS } from './turnLayout.tsx'
 import type { ChatMessage } from './messageTypes.ts'
 import { isAtBottom } from './scrollTailing.ts'
 import { computeVirtualWindow } from './virtualWindow.ts'
@@ -124,7 +125,7 @@ export function VirtualizedMessageList({
         <div
           style={{ paddingTop: view.paddingTop, paddingBottom: view.paddingBottom }}
           data-testid="virtualized-message-list-content"
-          className="mx-auto w-full max-w-[780px]"
+          className={THREAD_COLUMN_CLASS}
         >
           {visibleMessages.map((message) => (
             <MessageItem

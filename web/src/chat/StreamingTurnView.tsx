@@ -2,6 +2,7 @@ import type { ReactElement } from 'react'
 
 import { StreamingBlockView } from './StreamingBlockView.tsx'
 import type { StreamState } from './streamReducer.ts'
+import { AssistantTurn } from './turnLayout.tsx'
 
 type StreamingTurnViewProps = {
   state: StreamState
@@ -17,11 +18,7 @@ export function StreamingTurnView({ state }: StreamingTurnViewProps): ReactEleme
   }
 
   return (
-    <div
-      data-testid="streaming-turn"
-      data-turn-status={state.turn_status}
-      className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-4 shadow-md"
-    >
+    <AssistantTurn data-testid="streaming-turn" data-turn-status={state.turn_status}>
       {state.block_order.map((block_id) => {
         const block = state.blocks_by_id.get(block_id)
         if (block === undefined) return null
@@ -32,6 +29,6 @@ export function StreamingTurnView({ state }: StreamingTurnViewProps): ReactEleme
           Stream error: {state.error ?? 'unknown'}
         </p>
       ) : null}
-    </div>
+    </AssistantTurn>
   )
 }

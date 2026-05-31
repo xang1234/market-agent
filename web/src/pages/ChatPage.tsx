@@ -7,6 +7,7 @@ import { openChatTurnStream } from '../chat/openChatTurnStream.ts'
 import { persistUserChatTurn } from '../chat/persistUserChatTurn.ts'
 import { INITIAL_STREAM_STATE, applyChatStreamEvent } from '../chat/streamReducer.ts'
 import { StreamingTurnView } from '../chat/StreamingTurnView.tsx'
+import { ThreadColumn } from '../chat/turnLayout.tsx'
 import { authenticatedFetch, authenticatedJson } from '../http/authFetch.ts'
 import { useAuth } from '../shell/useAuth.ts'
 
@@ -221,42 +222,42 @@ export function ChatThreadView() {
         <p className="num mt-0.5 text-xs text-faint">{threadId}</p>
       </section>
       <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
-        {visibleHistory.kind === 'loading' ? (
-          <p className="mx-auto w-full max-w-[780px] text-sm text-muted">
-            Loading message history.
-          </p>
-        ) : null}
-        {visibleHistory.kind === 'error' ? (
-          <p className="mx-auto w-full max-w-[780px] text-sm text-negative">
-            Message history unavailable: {visibleHistory.message}
-          </p>
-        ) : null}
         {visibleHistory.kind === 'ready' ? (
           <PersistedMessageHistory messages={visibleHistory.messages} />
         ) : null}
-        <div className="mx-auto w-full max-w-[780px]">
+        {/* Transient thread content shares one reading column; the persisted
+            list above owns its own column so its scrollbar stays edge-aligned. */}
+        <ThreadColumn className="flex flex-col gap-4">
+          {visibleHistory.kind === 'loading' ? (
+            <p className="text-sm text-muted">Loading message history.</p>
+          ) : null}
+          {visibleHistory.kind === 'error' ? (
+            <p className="text-sm text-negative">
+              Message history unavailable: {visibleHistory.message}
+            </p>
+          ) : null}
           <StreamingTurnView state={state} />
-        </div>
-        {streamError ? (
-          <div className="mx-auto flex w-full max-w-[780px] items-center gap-3 text-sm">
-            <p className="text-negative">{streamError}</p>
-            {failedTurn ? (
-              <button
-                type="button"
-                onClick={() => startPersistedTurn(failedTurn)}
-                className="rounded-md border border-negative px-3 py-1.5 text-xs font-medium text-negative"
-              >
-                Retry stream
-              </button>
-            ) : null}
-          </div>
-        ) : null}
+          {streamError ? (
+            <div className="flex items-center gap-3 text-sm">
+              <p className="text-negative">{streamError}</p>
+              {failedTurn ? (
+                <button
+                  type="button"
+                  onClick={() => startPersistedTurn(failedTurn)}
+                  className="rounded-md border border-negative px-3 py-1.5 text-xs font-medium text-negative"
+                >
+                  Retry stream
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </ThreadColumn>
       </div>
       <form
         onSubmit={submitPrompt}
         className="sticky bottom-0 border-t border-line bg-surface/70 p-4 backdrop-blur"
       >
-        <div className="mx-auto w-full max-w-[780px]">
+        <ThreadColumn>
           <label className="sr-only" htmlFor="chat-composer">
             Ask the analyst
           </label>
@@ -271,13 +272,13 @@ export function ChatThreadView() {
             />
             <button
               type="submit"
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-accent to-[#2f7fe0] text-base font-bold text-[#04121f]"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-accent to-accent-strong text-base font-bold text-on-accent"
               aria-label="Send"
             >
               ↑
             </button>
           </div>
-        </div>
+        </ThreadColumn>
       </form>
     </div>
   )

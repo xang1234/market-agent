@@ -29,8 +29,12 @@
 
   /* brand + semantic */
   --color-accent: #2f7fe0;
+  --color-accent-strong: #2563c9;
   --color-accent-soft: rgba(47, 127, 224, 0.1);
   --color-accent-border: rgba(47, 127, 224, 0.35);
+  /* Foreground for text/glyphs sitting on an accent/cyan fill (brand mark,
+     primary buttons). Near-black navy reads on both the light and dark accent. */
+  --color-on-accent: #04121f;
   --color-cyan: #0fb5ac;
   --color-violet: #7c5cf0;
   --color-positive: #0f9d63;
@@ -69,6 +73,7 @@
   --color-line-strong: #2e333d;
 
   --color-accent: #4da3ff;
+  --color-accent-strong: #2f7fe0;
   --color-accent-soft: rgba(77, 163, 255, 0.14);
   --color-accent-border: rgba(77, 163, 255, 0.35);
   --color-cyan: #38d0c8;
