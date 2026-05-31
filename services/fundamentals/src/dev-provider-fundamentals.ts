@@ -30,6 +30,7 @@ import {
   sidecarUnavailableReason,
   type DevProviderSidecarOptions,
 } from "./dev-provider-sidecar.ts";
+import type { IssuerProfileRecord } from "./profile.ts";
 import type { UUID } from "./subject-ref.ts";
 
 export type DevProvidersEarningsRepositoryOptions = DevProviderSidecarOptions & {
@@ -59,12 +60,16 @@ type SidecarHolders = {
   holders?: unknown;
 };
 
-type IssuerListingContext = {
+type ListingSidecarContext = {
   ticker: string;
   mic: string;
   currency: string;
   timezone: string;
-  fiscalCalendar: FiscalCalendar;
+};
+
+type IssuerSidecarContext = {
+  profile: IssuerProfileRecord;
+  listing: ListingSidecarContext;
 };
 
 export function createDevProvidersEarningsRepository(
@@ -75,12 +80,12 @@ export function createDevProvidersEarningsRepository(
 
   return {
     async find(issuer_id: UUID) {
-      const context = await issuerListingContext(options.profiles, issuer_id);
+      const context = await issuerSidecarContext(options.profiles, issuer_id);
       if (!context) return null;
       const envelope = await postSidecar({
         baseUrl: options.baseUrl,
         path: "/fundamentals/earnings",
-        body: sidecarListingBody(context),
+        body: sidecarListingBody(context.listing),
         fetchImpl,
         timeoutMs,
       });
@@ -91,8 +96,8 @@ export function createDevProvidersEarningsRepository(
       const input = sidecarEarningsInput(
         envelope.data,
         issuer_id,
-        context.currency,
-        context.fiscalCalendar,
+        context.listing.currency,
+        fiscalCalendarForIssuerProfile(context.profile),
         options.sourceId,
       );
       try {
@@ -112,12 +117,12 @@ export function createDevProvidersHoldersRepository(
 
   return {
     async find(issuer_id: UUID, kind: HolderKind) {
-      const context = await issuerListingContext(options.profiles, issuer_id);
+      const context = await issuerSidecarContext(options.profiles, issuer_id);
       if (!context) return null;
       const envelope = await postSidecar({
         baseUrl: options.baseUrl,
         path: "/fundamentals/holders",
-        body: { ...sidecarListingBody(context), kind },
+        body: { ...sidecarListingBody(context.listing), kind },
         fetchImpl,
         timeoutMs,
       });
@@ -131,7 +136,7 @@ export function createDevProvidersHoldersRepository(
             sidecarInstitutionalHoldersInput(
               envelope.data,
               issuer_id,
-              context.currency,
+              context.listing.currency,
               options.sourceId,
             ),
           );
@@ -140,7 +145,7 @@ export function createDevProvidersHoldersRepository(
           sidecarInsiderHoldersInput(
             envelope.data,
             issuer_id,
-            context.currency,
+            context.listing.currency,
             options.sourceId,
           ),
         );
@@ -152,23 +157,25 @@ export function createDevProvidersHoldersRepository(
   };
 }
 
-async function issuerListingContext(
+async function issuerSidecarContext(
   profiles: IssuerProfileRepository,
   issuerId: UUID,
-): Promise<IssuerListingContext | null> {
+): Promise<IssuerSidecarContext | null> {
   const profile = await profiles.find(issuerId);
   const exchange = profile?.exchanges[0];
   if (!profile || !exchange) return null;
   return {
-    ticker: exchange.ticker,
-    mic: exchange.mic,
-    currency: exchange.trading_currency,
-    timezone: exchange.timezone,
-    fiscalCalendar: fiscalCalendarForIssuerProfile(profile),
+    profile,
+    listing: {
+      ticker: exchange.ticker,
+      mic: exchange.mic,
+      currency: exchange.trading_currency,
+      timezone: exchange.timezone,
+    },
   };
 }
 
-function sidecarListingBody(context: IssuerListingContext): Record<string, unknown> {
+function sidecarListingBody(context: ListingSidecarContext): Record<string, unknown> {
   return {
     ticker: context.ticker,
     mic: context.mic,

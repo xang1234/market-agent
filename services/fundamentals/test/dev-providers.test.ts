@@ -250,6 +250,7 @@ test("dev providers earnings repository labels yfinance period_end rows with iss
       async find() {
         return sparseProfile({
           legal_name: "Apple Inc.",
+          cik: "0000320193",
           exchanges: [
             {
               listing: { kind: "listing", id: LISTING_ID },

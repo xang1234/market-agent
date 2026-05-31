@@ -121,9 +121,19 @@ test("MICROSOFT_FISCAL_CALENDAR (June fiscal year end) resolves quarters as last
 });
 
 test("fiscalCalendarForIssuerProfile centralizes known issuer calendar policy", () => {
-  assert.equal(fiscalCalendarForIssuerProfile(profileForTicker("AAPL")), APPLE_FISCAL_CALENDAR);
-  assert.equal(fiscalCalendarForIssuerProfile(profileForTicker("MSFT")), MICROSOFT_FISCAL_CALENDAR);
+  assert.equal(
+    fiscalCalendarForIssuerProfile(profileForTicker("AAPL", { cik: "0000320193" })),
+    APPLE_FISCAL_CALENDAR,
+  );
+  assert.equal(
+    fiscalCalendarForIssuerProfile(profileForTicker("MSFT", { cik: "0000789019" })),
+    MICROSOFT_FISCAL_CALENDAR,
+  );
   assert.equal(fiscalCalendarForIssuerProfile(profileForTicker("AMD")), CALENDAR_YEAR_FISCAL);
+});
+
+test("fiscalCalendarForIssuerProfile does not infer issuer policy from ticker collisions", () => {
+  assert.equal(fiscalCalendarForIssuerProfile(profileForTicker("AAPL")), CALENDAR_YEAR_FISCAL);
 });
 
 test("fiscalQuarterLabelForPeriodEnd labels provider month-end rows against issuer fiscal calendars", () => {
@@ -267,7 +277,10 @@ function inclusiveDayCount(startIso: string, endIso: string): number {
   return Math.round((end - start) / 86_400_000) + 1;
 }
 
-function profileForTicker(ticker: string): IssuerProfileRecord {
+function profileForTicker(
+  ticker: string,
+  overrides: Partial<IssuerProfileRecord> = {},
+): IssuerProfileRecord {
   return {
     subject: { kind: "issuer", id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaa1" },
     legal_name: `${ticker} issuer`,
@@ -281,5 +294,6 @@ function profileForTicker(ticker: string): IssuerProfileRecord {
         timezone: "America/New_York",
       },
     ],
+    ...overrides,
   };
 }

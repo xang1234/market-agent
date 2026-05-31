@@ -67,16 +67,14 @@ export type FiscalLabel = {
 
 const QUARTERS: ReadonlyArray<1 | 2 | 3 | 4> = [1, 2, 3, 4];
 
-const KNOWN_FISCAL_CALENDAR_BY_TICKER: Readonly<Record<string, FiscalCalendar>> = Object.freeze({
-  AAPL: APPLE_FISCAL_CALENDAR,
-  MSFT: MICROSOFT_FISCAL_CALENDAR,
+const KNOWN_FISCAL_CALENDAR_BY_CIK: Readonly<Partial<Record<string, FiscalCalendar>>> = Object.freeze({
+  "320193": APPLE_FISCAL_CALENDAR,
+  "789019": MICROSOFT_FISCAL_CALENDAR,
 });
 
 export function fiscalCalendarForIssuerProfile(record: IssuerProfileRecord): FiscalCalendar {
-  for (const exchange of record.exchanges) {
-    const calendar = KNOWN_FISCAL_CALENDAR_BY_TICKER[exchange.ticker.trim().toUpperCase()];
-    if (calendar) return calendar;
-  }
+  const calendar = KNOWN_FISCAL_CALENDAR_BY_CIK[normalizeCik(record.cik)];
+  if (calendar) return calendar;
   return CALENDAR_YEAR_FISCAL;
 }
 
@@ -250,6 +248,12 @@ function isoDateMs(s: string): number | null {
     return null;
   }
   return parseIsoDate(s).getTime();
+}
+
+function normalizeCik(cik: string | undefined): string {
+  const trimmed = cik?.trim();
+  if (!trimmed || !/^\d+$/.test(trimmed)) return "";
+  return trimmed.replace(/^0+/, "") || "0";
 }
 
 function formatIsoDate(d: Date): string {

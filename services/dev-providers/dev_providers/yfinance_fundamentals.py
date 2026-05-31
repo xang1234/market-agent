@@ -62,7 +62,9 @@ def normalize_earnings_events(
     )
     events: list[dict[str, Any]] = []
     used_periods: set[date] = set()
-    for row in reported[:limit]:
+    for row in reported:
+        if len(events) >= limit:
+            break
         release = row["release"]
         period_end = _period_end_for_release(release, periods, used_periods)
         if period_end is None:
