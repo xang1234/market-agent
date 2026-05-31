@@ -103,6 +103,30 @@ The terminal works out of the box, but a few keys unlock live data and the AI fe
 - **`SEC_EDGAR_USER_AGENT`** — on-demand SEC company-facts ingestion for statements and key stats (use a string you control, e.g. `market-agent-dev you@example.com`).
 - **LLM models** — required for Chat, Analyze, and Agents. Configure channels in the in-app **Settings** page, or via the `.env.dev` fields `LLM_CHANNELS`, `LLM_<NAME>_*`, `LITELLM_MODEL`, `LITELLM_FALLBACK_MODELS`, and `AGENT_LITELLM_MODEL`. Settings-page changes are picked up without restarting.
 - **`ENABLE_UNOFFICIAL_DEV_PROVIDERS=true`** — optional yfinance/Finviz fallback for local dev when the primary provider misses.
+- **Open datasource coverage** — optional fallback coverage when paid providers miss:
+  - `NASDAQ_TRADER_REFERENCE_ENABLED=true` validates unknown US-listed tickers from Nasdaq Trader symbol directories.
+  - `OPENFIGI_REFERENCE_ENABLED=true` enriches security identity with FIGI/ISIN metadata. `OPENFIGI_API_KEY` is optional but raises live rate limits.
+  - `GLEIF_REFERENCE_ENABLED=true` enriches LEI/legal-entity metadata when the legal-name match is unambiguous.
+  - `STOOQ_MARKET_ENABLED=true` enables Stooq daily EOD historical bars for eligible `1d` requests when paid market coverage is unavailable. Stooq is not a realtime quote or intraday source.
+
+Free public endpoints are quota-sensitive external references. Keep the gates off unless you intentionally want fallback coverage, prefer fixture tests over live checks for CI, and disclose that open reference sources fill missing identity fields without overwriting stronger SEC/Polygon/local values.
+
+### Open datasource coverage verification
+
+Run the fixture smoke test to verify the whole free-coverage path without live network calls:
+
+```bash
+node --experimental-strip-types --test scripts/open-datasource-coverage.test.ts
+```
+
+That smoke covers a paid reference miss falling through to Nasdaq/OpenFIGI/GLEIF enrichment, then a paid market-bars miss falling through to Stooq EOD bars. For broader coverage:
+
+```bash
+cd services/resolver && npm test
+cd services/market && npm test
+```
+
+Operator disclosure: Nasdaq Trader, OpenFIGI, and GLEIF are free reference enrichment sources for missing identity fields only; they are not stronger than existing SEC/Polygon/local identity. Stooq EOD bars are not realtime quotes or intraday bars.
 
 ### Signing in (dev)
 

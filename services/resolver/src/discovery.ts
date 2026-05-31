@@ -1,8 +1,15 @@
 import type { QueryResult } from "pg";
 import type { SubjectRef } from "./subject-ref.ts";
+import type { UUID } from "./subject-ref.ts";
 import { normalizeCik } from "./normalize.ts";
 
 export type DiscoveryAssetType = "common_stock" | "adr" | "etf";
+
+export type DiscoverySourceProvenance = {
+  provider: string;
+  source_id: UUID;
+  fields: string[];
+};
 
 export type DiscoveredListing = {
   ticker: string;
@@ -15,7 +22,11 @@ export type DiscoveredListing = {
   asset_type: DiscoveryAssetType;
   share_class?: string;
   cik?: string;
+  lei?: string;
+  domicile?: string;
+  isin?: string;
   figi_composite?: string;
+  source_provenance?: DiscoverySourceProvenance[];
 };
 
 export type TickerDiscoveryProvider = {
@@ -141,8 +152,17 @@ export async function upsertDiscoveredListing(
   db: QueryExecutor,
   listing: DiscoveredListing,
 ): Promise<SubjectRef & { kind: "listing" }> {
+  const instrumentIdentity = instrumentIdentityFromListing(listing);
+  const matchedInstrument = await findInstrumentByIdentity(db, instrumentIdentity);
+  if (matchedInstrument) {
+    await fillIssuerIdentityFields(db, matchedInstrument.issuer_id, issuerIdentityFromListing(listing));
+    await fillInstrumentIdentityFields(db, matchedInstrument.instrument_id, instrumentIdentity);
+    const listingId = await upsertListing(db, matchedInstrument.instrument_id, listing);
+    return { kind: "listing", id: listingId };
+  }
+
   const issuerId = await upsertIssuer(db, listing);
-  const instrumentId = await upsertInstrument(db, issuerId, listing);
+  const instrumentId = await upsertInstrument(db, issuerId, listing, instrumentIdentity);
   const listingId = await upsertListing(db, instrumentId, listing);
   return { kind: "listing", id: listingId };
 }
@@ -182,62 +202,169 @@ function discoveredListingFromPolygonRow(
   };
 }
 
+type IssuerIdentityFields = { cik?: string; lei?: string; domicile?: string };
+type InstrumentIdentityFields = { isin?: string; figiComposite?: string };
+type InstrumentIdentityMatch = { instrument_id: string; issuer_id: string };
+
+function issuerIdentityFromListing(listing: DiscoveredListing): IssuerIdentityFields {
+  return {
+    cik: listing.cik ? normalizeCik(listing.cik) : undefined,
+    lei: listing.lei ? normalizeLei(listing.lei) : undefined,
+    domicile: listing.domicile ? listing.domicile.trim().toUpperCase() : undefined,
+  };
+}
+
+function instrumentIdentityFromListing(listing: DiscoveredListing): InstrumentIdentityFields {
+  return {
+    isin: listing.isin ? normalizeIsin(listing.isin) : undefined,
+    figiComposite: listing.figi_composite?.trim() || undefined,
+  };
+}
+
 async function upsertIssuer(db: QueryExecutor, listing: DiscoveredListing): Promise<string> {
-  const cik = listing.cik ? normalizeCik(listing.cik) : undefined;
+  const { cik, lei, domicile } = issuerIdentityFromListing(listing);
   const byCik = cik
     ? await db.query<{ issuer_id: string }>("select issuer_id from issuers where cik = $1", [cik])
     : { rows: [] };
-  if (byCik.rows[0]) return byCik.rows[0].issuer_id;
+  if (byCik.rows[0]) {
+    await fillIssuerIdentityFields(db, byCik.rows[0].issuer_id, { cik, lei, domicile });
+    return byCik.rows[0].issuer_id;
+  }
 
-  if (!cik) {
-    const byName = await db.query<{ issuer_id: string }>(
-      "select issuer_id from issuers where legal_name = $1 order by created_at asc, issuer_id asc limit 1",
-      [listing.legal_name],
-    );
-    if (byName.rows[0]) return byName.rows[0].issuer_id;
+  const byLei = lei
+    ? await db.query<{ issuer_id: string }>("select issuer_id from issuers where upper(lei) = $1", [lei])
+    : { rows: [] };
+  if (byLei.rows[0]) {
+    await fillIssuerIdentityFields(db, byLei.rows[0].issuer_id, { cik, lei, domicile });
+    return byLei.rows[0].issuer_id;
+  }
+
+  const byExactName = await findUniqueIssuerByLegalName(db, listing.legal_name);
+  if (byExactName) {
+    await fillIssuerIdentityFields(db, byExactName, { cik, lei, domicile });
+    return byExactName;
   }
 
   const inserted = await db.query<{ issuer_id: string }>(
-    `insert into issuers (legal_name, cik)
-     values ($1, $2)
+    `insert into issuers (legal_name, cik, lei, domicile)
+     values ($1, $2, $3, $4)
      returning issuer_id`,
-    [listing.legal_name, cik ?? null],
+    [listing.legal_name, cik ?? null, lei ?? null, domicile ?? null],
   );
   return inserted.rows[0].issuer_id;
+}
+
+async function findUniqueIssuerByLegalName(db: QueryExecutor, legalName: string): Promise<string | null> {
+  const byName = await db.query<{ issuer_id: string }>(
+    "select issuer_id from issuers where legal_name = $1 order by created_at asc, issuer_id asc limit 2",
+    [legalName],
+  );
+  return byName.rows.length === 1 ? byName.rows[0].issuer_id : null;
+}
+
+async function fillIssuerIdentityFields(
+  db: QueryExecutor,
+  issuerId: string,
+  values: IssuerIdentityFields,
+): Promise<void> {
+  if (!values.cik && !values.lei && !values.domicile) return;
+  await db.query(
+    `update issuers
+        set cik = coalesce(cik, $2),
+            lei = coalesce(lei, $3),
+            domicile = coalesce(domicile, $4),
+            updated_at = now()
+      where issuer_id = $1`,
+    [issuerId, values.cik ?? null, values.lei ?? null, values.domicile ?? null],
+  );
+}
+
+async function findInstrumentByIdentity(
+  db: QueryExecutor,
+  values: InstrumentIdentityFields,
+): Promise<InstrumentIdentityMatch | null> {
+  if (values.isin) {
+    const byIsin = await db.query<InstrumentIdentityMatch>(
+      "select instrument_id, issuer_id from instruments where isin = $1",
+      [values.isin],
+    );
+    if (byIsin.rows[0]) return byIsin.rows[0];
+  }
+
+  if (values.figiComposite) {
+    const byFigi = await db.query<InstrumentIdentityMatch>(
+      "select instrument_id, issuer_id from instruments where figi_composite = $1",
+      [values.figiComposite],
+    );
+    if (byFigi.rows[0]) return byFigi.rows[0];
+  }
+
+  return null;
 }
 
 async function upsertInstrument(
   db: QueryExecutor,
   issuerId: string,
   listing: DiscoveredListing,
+  values: InstrumentIdentityFields = instrumentIdentityFromListing(listing),
 ): Promise<string> {
-  if (listing.figi_composite) {
-    const byFigi = await db.query<{ instrument_id: string }>(
-      "select instrument_id from instruments where figi_composite = $1",
-      [listing.figi_composite],
-    );
-    if (byFigi.rows[0]) return byFigi.rows[0].instrument_id;
-  } else {
-    const byShape = await db.query<{ instrument_id: string }>(
-      `select instrument_id
-         from instruments
-        where issuer_id = $1
-          and asset_type = $2::asset_type
-          and share_class is not distinct from $3::text
-        order by created_at asc, instrument_id asc
-        limit 1`,
-      [issuerId, listing.asset_type, listing.share_class ?? null],
-    );
-    if (byShape.rows[0]) return byShape.rows[0].instrument_id;
+  const byShape = await db.query<{ instrument_id: string }>(
+    `select instrument_id
+       from instruments
+      where issuer_id = $1
+        and asset_type = $2::asset_type
+        and share_class is not distinct from $3::text
+      order by created_at asc, instrument_id asc
+      limit 1`,
+    [issuerId, listing.asset_type, listing.share_class ?? null],
+  );
+  if (byShape.rows[0]) {
+    await fillInstrumentIdentityFields(db, byShape.rows[0].instrument_id, values);
+    return byShape.rows[0].instrument_id;
   }
 
   const inserted = await db.query<{ instrument_id: string }>(
-    `insert into instruments (issuer_id, asset_type, share_class, figi_composite)
-     values ($1, $2::asset_type, $3, $4)
+    `insert into instruments (issuer_id, asset_type, share_class, isin, figi_composite)
+     values ($1, $2::asset_type, $3, $4, $5)
      returning instrument_id`,
-    [issuerId, listing.asset_type, listing.share_class ?? null, listing.figi_composite ?? null],
+    [issuerId, listing.asset_type, listing.share_class ?? null, values.isin ?? null, values.figiComposite ?? null],
   );
   return inserted.rows[0].instrument_id;
+}
+
+async function fillInstrumentIdentityFields(
+  db: QueryExecutor,
+  instrumentId: string,
+  values: InstrumentIdentityFields,
+): Promise<void> {
+  if (!values.isin && !values.figiComposite) return;
+  await db.query(
+    `update instruments
+        set isin = case
+              when isin is null
+               and $2::text is not null
+               and not exists (
+                 select 1 from instruments other
+                  where other.isin = $2 and other.instrument_id <> instruments.instrument_id
+               )
+              then $2
+              else isin
+            end,
+            figi_composite = case
+              when figi_composite is null
+               and $3::text is not null
+               and not exists (
+                 select 1 from instruments other
+                  where other.figi_composite = $3
+                    and other.instrument_id <> instruments.instrument_id
+               )
+              then $3
+              else figi_composite
+            end,
+            updated_at = now()
+      where instrument_id = $1`,
+    [instrumentId, values.isin ?? null, values.figiComposite ?? null],
+  );
 }
 
 async function upsertListing(
@@ -286,6 +413,14 @@ function normalizeCurrency(value: unknown): string | null {
   const trimmed = raw.trim();
   if (/^[A-Za-z]{3}$/.test(trimmed)) return trimmed.toUpperCase();
   return CURRENCY_NAMES[trimmed.toLowerCase()] ?? null;
+}
+
+function normalizeIsin(value: string): string {
+  return value.trim().toUpperCase();
+}
+
+function normalizeLei(value: string): string {
+  return value.trim().toUpperCase();
 }
 
 function stringValue(value: unknown): string | null {

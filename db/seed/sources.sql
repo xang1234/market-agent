@@ -17,5 +17,9 @@ insert into sources (source_id, provider, kind, canonical_url, trust_tier, licen
   ('00000000-0000-4000-a000-00000000000a', 'yahoo_finance_dev_reference', 'reference_data', 'https://finance.yahoo.com', 'tertiary', 'free_dev', '2000-01-01T00:00:00Z'),
   ('00000000-0000-4000-a000-00000000000b', 'yahoo_finance_dev_market',    'market_data',    'https://finance.yahoo.com', 'tertiary', 'free_dev', '2000-01-01T00:00:00Z'),
   ('00000000-0000-4000-a000-00000000000c', 'finviz_dev_reference',        'reference_data', 'https://finviz.com',        'tertiary', 'free_dev', '2000-01-01T00:00:00Z'),
-  ('00000000-0000-4000-a000-00000000000d', 'gdelt_article_discovery',     'article',        'https://api.gdeltproject.org/api/v2/doc/doc', 'tertiary', 'ephemeral', '2000-01-01T00:00:00Z')
+  ('00000000-0000-4000-a000-00000000000d', 'gdelt_article_discovery',     'article',        'https://api.gdeltproject.org/api/v2/doc/doc', 'tertiary', 'ephemeral', '2000-01-01T00:00:00Z'),
+  ('00000000-0000-4000-a000-00000000000e', 'openfigi_reference',          'reference_data', 'https://api.openfigi.com/v3/mapping',         'secondary', 'free',   '2000-01-01T00:00:00Z'),
+  ('00000000-0000-4000-a000-00000000000f', 'gleif_reference',             'reference_data', 'https://api.gleif.org/api/v1/lei-records',     'primary',   'public', '2000-01-01T00:00:00Z'),
+  ('00000000-0000-4000-a000-000000000010', 'nasdaq_trader_reference',     'reference_data', 'https://www.nasdaqtrader.com/dynamic/symdir/nasdaqlisted.txt', 'primary', 'public', '2000-01-01T00:00:00Z'),
+  ('00000000-0000-4000-a000-000000000011', 'stooq_market',                'market_data',    'https://stooq.com/q/d/l/',                    'tertiary',  'free',   '2000-01-01T00:00:00Z')
 on conflict (source_id) do nothing;

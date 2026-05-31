@@ -115,4 +115,12 @@ test("promotion rules reject non-promotable sources before low-confidence review
     action: "reject",
     reason: "user_upload_requires_user_scope",
   });
+  assert.deepEqual(decide({ source_kind: "reference_data", extraction_confidence: 0.99 }), {
+    action: "reject",
+    reason: "non_document_source_not_promotable",
+  });
+  assert.deepEqual(decide({ source_kind: "market_data", extraction_confidence: 0.99 }), {
+    action: "reject",
+    reason: "non_document_source_not_promotable",
+  });
 });

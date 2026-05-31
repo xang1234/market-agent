@@ -48,7 +48,11 @@ export type CandidateFactPromotionDecision = Readonly<
     }
   | {
       action: "reject";
-      reason: "social_source_never_promotes_fact" | "user_upload_requires_user_scope" | "internal_source_not_promotable";
+      reason:
+        | "social_source_never_promotes_fact"
+        | "user_upload_requires_user_scope"
+        | "internal_source_not_promotable"
+        | "non_document_source_not_promotable";
     }
 >;
 
@@ -81,6 +85,12 @@ export function decideCandidateFactPromotion(
       return Object.freeze({
         action: "reject" as const,
         reason: "internal_source_not_promotable" as const,
+      });
+    case "reference_data":
+    case "market_data":
+      return Object.freeze({
+        action: "reject" as const,
+        reason: "non_document_source_not_promotable" as const,
       });
   }
 

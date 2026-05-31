@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
 import {
+  SOURCE_KINDS,
   createSource,
   getSource,
 } from "../src/source-repo.ts";
@@ -201,6 +202,63 @@ test("createSource rejects malformed source metadata before querying", async () 
   );
 
   assert.equal(queryCalls, 0);
+});
+
+test("SOURCE_KINDS accepts DB-supported reference and market source kinds", () => {
+  assert.deepEqual(
+    [...SOURCE_KINDS].filter((kind) => kind === "reference_data" || kind === "market_data"),
+    ["reference_data", "market_data"],
+  );
+});
+
+test("createSource accepts reference_data and market_data registry sources", async () => {
+  const queries: Array<{ text: string; values?: unknown[] }> = [];
+  const db: QueryExecutor = {
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      queries.push({ text, values });
+      return {
+        rows: [
+          {
+            source_id: "00000000-0000-4000-a000-00000000000e",
+            provider: values?.[0],
+            kind: values?.[1],
+            canonical_url: values?.[2],
+            trust_tier: values?.[3],
+            license_class: values?.[4],
+            retrieved_at: new Date(values?.[5] as string),
+            content_hash: values?.[6],
+            user_id: values?.[7],
+            created_at: new Date("2026-05-30T00:00:00.000Z"),
+          },
+        ] as R[],
+        command: "INSERT",
+        rowCount: 1,
+        oid: 0,
+        fields: [],
+      };
+    },
+  };
+
+  const reference = await createSource(db, {
+    provider: "openfigi_reference",
+    kind: "reference_data",
+    canonical_url: "https://api.openfigi.com/v3/mapping",
+    trust_tier: "secondary",
+    license_class: "free",
+    retrieved_at: "2026-05-30T00:00:00Z",
+  });
+  const market = await createSource(db, {
+    provider: "stooq_market",
+    kind: "market_data",
+    canonical_url: "https://stooq.com/q/d/l/",
+    trust_tier: "tertiary",
+    license_class: "free",
+    retrieved_at: "2026-05-30T00:00:00Z",
+  });
+
+  assert.equal(reference.kind, "reference_data");
+  assert.equal(market.kind, "market_data");
+  assert.deepEqual(queries.map((query) => query.values?.[1]), ["reference_data", "market_data"]);
 });
 
 test("source rows persist and documents cannot reference a missing source", { timeout: 120000 }, async (t) => {

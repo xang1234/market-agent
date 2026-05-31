@@ -54,6 +54,42 @@ canonical issuer/instrument/listing rows, then re-runs the normal resolver path.
 server in tests. Missing keys, provider failures, rate limits, and malformed
 provider rows degrade to the existing `not_found` response.
 
+## Open reference provider discovery
+
+The open datasource slice includes three resolver reference sources:
+`nasdaq_trader_reference`, `openfigi_reference`, and `gleif_reference`.
+`NASDAQ_TRADER_REFERENCE_ENABLED`, `OPENFIGI_REFERENCE_ENABLED`, and
+`GLEIF_REFERENCE_ENABLED` gate the discovery/enrichment path, with optional
+`OPENFIGI_API_KEY` support for OpenFIGI rate limits. The dev server tries
+Polygon reference discovery first, then the open reference provider when paid
+coverage is unavailable or returns no candidates.
+
+Nasdaq Trader validates active US listed tickers and supplies listing venue,
+currency, timezone, and asset-type hints. OpenFIGI may enrich a single
+unambiguous security match with FIGI/ISIN metadata. GLEIF may enrich a single
+unambiguous legal-name match with LEI and domicile metadata. These providers
+fill missing identity fields only; they do not overwrite existing
+SEC/Polygon/local issuer or instrument identifiers.
+
+Rate-limit expectation: Nasdaq Trader and GLEIF are unauthenticated public
+reference endpoints, while OpenFIGI has stricter unauthenticated limits and can
+use `OPENFIGI_API_KEY` for higher live quotas. Keep these providers opt-in,
+avoid live-network verification in CI, and prefer the fixture smoke test below
+for repeatable coverage checks.
+
+### Verification
+
+Run the fixture smoke from the repository root to prove the paid-miss path can
+fall through to Nasdaq Trader, OpenFIGI, and GLEIF without live network access:
+
+```bash
+node --experimental-strip-types --test scripts/open-datasource-coverage.test.ts
+```
+
+Run `cd services/resolver && npm test` for the resolver slice. The fixture tests
+cover successful enrichment, provider failures, ambiguous FIGI/LEI matches, and
+the rule that open reference providers fill missing identity fields only.
+
 ## Tests
 
 ```bash

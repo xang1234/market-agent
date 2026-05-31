@@ -5,6 +5,8 @@ import {
   createDevProvidersTickerDiscoveryProvider,
   createFallbackTickerDiscoveryProvider,
 } from "./dev-providers.ts";
+import { createOpenReferenceTickerDiscoveryProvider } from "./open-reference-providers.ts";
+import { openReferenceProviderConfigFromEnv } from "./provider-sources.ts";
 
 const host = process.env.RESOLVER_HOST ?? "127.0.0.1";
 const port = Number(process.env.RESOLVER_PORT ?? "4311");
@@ -20,14 +22,20 @@ const polygonTickerDiscoveryProvider = createPolygonTickerDiscoveryProvider({
   apiKey: polygonApiKey,
   baseUrl: process.env.RESOLVER_POLYGON_REFERENCE_BASE_URL,
 });
+const openReferenceConfig = openReferenceProviderConfigFromEnv(process.env);
+const openReferenceEnabled = openReferenceConfig.nasdaqTrader.enabled;
 const unofficialDevProvidersEnabled = process.env.ENABLE_UNOFFICIAL_DEV_PROVIDERS === "true";
 const devProvidersBaseUrl = process.env.DEV_PROVIDERS_BASE_URL ?? process.env.DEV_PROVIDERS_ORIGIN;
-const tickerDiscoveryProvider = unofficialDevProvidersEnabled && devProvidersBaseUrl
-  ? createFallbackTickerDiscoveryProvider([
-      polygonTickerDiscoveryProvider,
-      createDevProvidersTickerDiscoveryProvider({ baseUrl: devProvidersBaseUrl }),
-    ])
-  : polygonTickerDiscoveryProvider;
+const tickerDiscoveryProviders = [
+  polygonTickerDiscoveryProvider,
+  ...(openReferenceEnabled
+    ? [createOpenReferenceTickerDiscoveryProvider(openReferenceConfig)]
+    : []),
+  ...(unofficialDevProvidersEnabled && devProvidersBaseUrl
+    ? [createDevProvidersTickerDiscoveryProvider({ baseUrl: devProvidersBaseUrl })]
+    : []),
+];
+const tickerDiscoveryProvider = createFallbackTickerDiscoveryProvider(tickerDiscoveryProviders);
 const server = createResolverServer(pool, { tickerDiscoveryProvider });
 
 server.listen(port, host, () => {
