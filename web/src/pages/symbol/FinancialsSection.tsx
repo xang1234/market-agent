@@ -171,11 +171,11 @@ function StatementsTable({ response }: { response: GetStatementsResponse }) {
     <div className="-mx-2 overflow-x-auto">
       <table className="w-full min-w-[480px] text-sm">
         <thead>
-          <tr className="border-b border-neutral-200 dark:border-neutral-800">
-            <th className="px-2 py-2 text-left font-medium text-neutral-500 dark:text-neutral-400">
+          <tr className="border-b border-line">
+            <th className="px-2 py-2 text-left font-medium text-muted">
               Line item
               {reportingCurrency && (
-                <span className="ml-1 text-xs font-normal text-neutral-400 dark:text-neutral-500">
+                <span className="ml-1 text-xs font-normal text-faint">
                   ({reportingCurrency})
                 </span>
               )}
@@ -183,7 +183,7 @@ function StatementsTable({ response }: { response: GetStatementsResponse }) {
             {periods.map((entry) => (
               <th
                 key={entry.period}
-                className="px-2 py-2 text-right font-medium text-neutral-500 dark:text-neutral-400"
+                className="px-2 py-2 text-right font-medium text-muted"
                 scope="col"
               >
                 {entry.period}
@@ -197,15 +197,15 @@ function StatementsTable({ response }: { response: GetStatementsResponse }) {
               key={row.metric_key}
               className={
                 row.emphasis === 'subtotal'
-                  ? 'border-t border-neutral-100 font-medium dark:border-neutral-800'
+                  ? 'border-t border-line font-medium'
                   : 'border-t border-transparent'
               }
             >
-              <td className="px-2 py-1.5 text-neutral-700 dark:text-neutral-200">{row.label}</td>
+              <td className="px-2 py-1.5 text-fg">{row.label}</td>
               {periods.map((entry) => (
                 <td
                   key={`${row.metric_key}-${entry.period}`}
-                  className="px-2 py-1.5 text-right tabular-nums text-neutral-700 dark:text-neutral-200"
+                  className="px-2 py-1.5 text-right tabular-nums text-fg"
                 >
                   {formatLineCell(entry.outcome.outcome === 'available' ? entry.outcome.data : null, row)}
                 </td>
@@ -248,7 +248,7 @@ function SegmentsView({ envelope }: { envelope: SegmentFactsEnvelope }) {
   }))
 
   if (slices.length === 0) {
-    return <p className="text-sm text-neutral-500 dark:text-neutral-400">No revenue facts in this segment envelope.</p>
+    return <p className="text-sm text-muted">No revenue facts in this segment envelope.</p>
   }
 
   return (
@@ -258,7 +258,7 @@ function SegmentsView({ envelope }: { envelope: SegmentFactsEnvelope }) {
       {envelope.coverage_warnings.length > 0 && (
         <div
           data-testid="segments-warnings"
-          className="md:col-span-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700/40 dark:bg-amber-950/40 dark:text-amber-200"
+          className="md:col-span-2 rounded-md border border-warning bg-warning-soft px-3 py-2 text-xs text-warning"
         >
           {envelope.coverage_warnings.length} {pluralize(envelope.coverage_warnings.length, 'coverage warning')}
         </div>
@@ -344,11 +344,11 @@ function SegmentTrajectory({
             className="inline-block h-2.5 w-2.5 rounded-sm"
             style={{ backgroundColor: DONUT_PALETTE[i % DONUT_PALETTE.length] }}
           />
-          <span className="flex-1 truncate text-neutral-700 dark:text-neutral-200">{slice.label}</span>
-          <span className="tabular-nums text-neutral-500 dark:text-neutral-400">
+          <span className="flex-1 truncate text-fg">{slice.label}</span>
+          <span className="tabular-nums text-muted">
             {(slice.share * 100).toFixed(1)}%
           </span>
-          <span className="w-20 text-right tabular-nums text-neutral-500 dark:text-neutral-400">
+          <span className="w-20 text-right tabular-nums text-muted">
             {formatCompactDollars(slice.value)} {reportingCurrency}
           </span>
         </li>

@@ -30,7 +30,7 @@ import {
 import { Sparkline } from '../../symbol/Sparkline.tsx'
 import { fetchThemeMembershipRationales } from '../../symbol/themeRationale.ts'
 
-const PLACEHOLDER_CLASS = 'text-sm text-neutral-500 dark:text-neutral-400'
+const PLACEHOLDER_CLASS = 'text-sm text-muted'
 
 // Sentiment scores in (-NEUTRAL_BAND, +NEUTRAL_BAND) read as effectively flat.
 const NEUTRAL_BAND = 0.05
@@ -42,24 +42,24 @@ const SCORE_TEXT_CLASS: Readonly<Record<SignedDirection, string>> = {
 }
 
 const SCORE_STROKE_CLASS: Readonly<Record<SignedDirection, string>> = {
-  positive: 'stroke-emerald-600 dark:stroke-emerald-400',
-  negative: 'stroke-red-600 dark:stroke-red-400',
-  neutral: 'stroke-neutral-500',
+  positive: 'stroke-positive',
+  negative: 'stroke-negative',
+  neutral: 'stroke-muted',
 }
 
 const STANCE_BADGE_CLASS: Readonly<Record<ClaimStance, string>> = {
   bullish:
-    'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900',
+    'bg-positive-soft text-positive border-positive/40',
   bearish:
-    'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300 border-red-200 dark:border-red-900',
+    'bg-negative-soft text-negative border-negative/40',
   neutral:
-    'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200 border-neutral-200 dark:border-neutral-700',
+    'bg-surface-2 text-fg border-line',
 }
 
 const SOURCE_KIND_DOT_CLASS: Readonly<Record<EvidenceSourceKind, string>> = {
   community: 'bg-violet-500',
-  news: 'bg-sky-500',
-  filing: 'bg-amber-500',
+  news: 'bg-accent',
+  filing: 'bg-warning',
 }
 
 type ThemeRationaleState =
@@ -193,7 +193,7 @@ function SentimentTrendBody({ block }: { block: SentimentTrendBlock }) {
           <span className={`text-xs uppercase tracking-wide ${NEUTRAL_CLASS}`}>
             Mentions ({block.window_days}d)
           </span>
-          <span className="text-lg font-semibold tabular-nums text-neutral-900 dark:text-neutral-100">
+          <span className="text-lg font-semibold tabular-nums text-fg">
             {formatCompactNumber(totalMentions)}
           </span>
         </div>
@@ -232,10 +232,10 @@ function ClaimClusterRow({ cluster }: { cluster: ClaimCluster }) {
   return (
     <li
       data-testid={`claim-cluster-${cluster.cluster_id}`}
-      className="flex flex-col gap-2 rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
+      className="flex flex-col gap-2 rounded-lg border border-line bg-surface p-3 shadow-sm"
     >
       <div className="flex items-start justify-between gap-3">
-        <p className="text-sm text-neutral-800 dark:text-neutral-100">
+        <p className="text-sm text-fg">
           {cluster.representative_claim}
         </p>
         <StanceBadge stance={cluster.stance} />
@@ -277,7 +277,7 @@ function EvidenceMixLegend({ mix }: { mix: ClaimCluster['evidence_mix'] }) {
         >
           <span aria-hidden="true" className={`inline-block h-2 w-2 rounded-sm ${SOURCE_KIND_DOT_CLASS[kind]}`} />
           <span className={NEUTRAL_CLASS}>{sourceKindLabel(kind)}</span>
-          <span className="tabular-nums text-neutral-700 dark:text-neutral-200">{mix[kind]}</span>
+          <span className="tabular-nums text-fg">{mix[kind]}</span>
         </li>
       ))}
     </ul>

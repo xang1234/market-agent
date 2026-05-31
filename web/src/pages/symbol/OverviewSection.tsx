@@ -93,7 +93,7 @@ export function OverviewSection() {
           >
             {(bars) =>
               bars.length < 2 ? (
-                <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                <p className="text-sm text-muted">
                   Not enough bars in the requested range to draw a line.
                 </p>
               ) : (
@@ -138,7 +138,7 @@ function ProfileBody({ profile }: { profile: IssuerProfile }) {
       {profile.former_names.length > 0 && (
         <div className="sm:col-span-2">
           <ProfileLabel>Former names</ProfileLabel>
-          <p className="mt-1 text-neutral-700 dark:text-neutral-200">{profile.former_names.join(', ')}</p>
+          <p className="mt-1 text-fg">{profile.former_names.join(', ')}</p>
         </div>
       )}
     </dl>
@@ -152,8 +152,8 @@ function ProfileRow({ label, value, mono }: { label: string; value: string; mono
       <dd
         className={
           mono
-            ? 'mt-0.5 font-mono text-xs text-neutral-700 dark:text-neutral-200'
-            : 'mt-0.5 text-neutral-700 dark:text-neutral-200'
+            ? 'mt-0.5 font-mono text-xs text-fg'
+            : 'mt-0.5 text-fg'
         }
       >
         {value}
@@ -164,7 +164,7 @@ function ProfileRow({ label, value, mono }: { label: string; value: string; mono
 
 function ProfileLabel({ children }: { children: ReactNode }) {
   return (
-    <dt className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+    <dt className="text-xs uppercase tracking-wide text-muted">
       {children}
     </dt>
   )
@@ -172,11 +172,11 @@ function ProfileLabel({ children }: { children: ReactNode }) {
 
 function ExchangeBadge({ exchange }: { exchange: IssuerProfileExchange }) {
   return (
-    <li className="inline-flex items-center gap-1.5 rounded border border-neutral-200 px-2 py-0.5 text-xs text-neutral-700 dark:border-neutral-700 dark:text-neutral-200">
+    <li className="inline-flex items-center gap-1.5 rounded-md border border-line px-2 py-0.5 text-xs text-fg">
       <span className="font-medium">{exchange.ticker}</span>
-      <span className="text-neutral-500 dark:text-neutral-400">·</span>
+      <span className="text-muted">·</span>
       <span>{exchange.mic}</span>
-      <span className="text-neutral-500 dark:text-neutral-400">·</span>
+      <span className="text-muted">·</span>
       <span>{exchange.trading_currency}</span>
     </li>
   )
@@ -188,10 +188,10 @@ function PriceSparkline({ bars }: { bars: NormalizedBar[] }) {
   const last = bars[bars.length - 1].close
   const trendClass =
     last > first
-      ? 'stroke-emerald-600 dark:stroke-emerald-400'
+      ? 'stroke-positive'
       : last < first
-        ? 'stroke-red-600 dark:stroke-red-400'
-        : 'stroke-neutral-500'
+        ? 'stroke-negative'
+        : 'stroke-muted'
   return (
     <div className="flex flex-col gap-2">
       <Sparkline
@@ -199,7 +199,7 @@ function PriceSparkline({ bars }: { bars: NormalizedBar[] }) {
         ariaLabel={`30-day price line from ${formatPrice(first)} to ${formatPrice(last)}`}
         trendStrokeClass={trendClass}
       />
-      <div className="flex items-center justify-between text-xs tabular-nums text-neutral-500 dark:text-neutral-400">
+      <div className="flex items-center justify-between text-xs tabular-nums text-muted">
         <span>{formatPrice(first)}</span>
         <span>{bars.length} bars</span>
         <span>{formatPrice(last)}</span>
@@ -226,7 +226,7 @@ function KeyStatsBody({ envelope }: { envelope: KeyStatsEnvelope }) {
           )
         })}
       </div>
-      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+      <p className="text-xs text-muted">
         FY{envelope.fiscal_year} {envelope.fiscal_period} · {envelope.basis.replaceAll('_', ' ')} ·{' '}
         {envelope.reporting_currency}
       </p>
@@ -240,18 +240,18 @@ function KeyStatTile({ stat }: { stat: KeyStat }) {
   return (
     <div
       data-testid={`key-stat-${stat.stat_key}`}
-      className="flex flex-col gap-1 rounded-md border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
+      className="flex flex-col gap-1 rounded-lg border border-line bg-surface p-3 shadow-sm"
     >
-      <span className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+      <span className="text-xs uppercase tracking-wide text-muted">
         {statLabel(stat.stat_key)}
       </span>
-      <span className="text-lg font-semibold tabular-nums text-neutral-900 dark:text-neutral-100">
+      <span className="num text-lg font-semibold text-fg">
         {formatStatValue(stat)}
       </span>
       {hasWarning && (
         <span
           title={warningSummary}
-          className="text-xs text-amber-700 dark:text-amber-400"
+          className="text-xs text-warning"
         >
           {stat.warnings.length} {pluralize(stat.warnings.length, 'warning')}
         </span>
@@ -264,10 +264,10 @@ function KeyStatMissingTile({ statKey }: { statKey: KeyStatKey }) {
   return (
     <div
       data-testid={`key-stat-${statKey}`}
-      className="flex flex-col gap-1 rounded-md border border-dashed border-neutral-200 bg-white p-3 text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400"
+      className="flex flex-col gap-1 rounded-lg border border-dashed border-line bg-surface p-3 text-muted"
     >
       <span className="text-xs uppercase tracking-wide">{statLabel(statKey)}</span>
-      <span className="text-lg font-semibold tabular-nums">—</span>
+      <span className="num text-lg font-semibold">—</span>
     </div>
   )
 }

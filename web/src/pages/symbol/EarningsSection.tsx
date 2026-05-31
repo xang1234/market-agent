@@ -87,7 +87,7 @@ export function EarningsSection() {
               envelope.price_target ? (
                 <PriceTargetBody target={envelope.price_target} />
               ) : (
-                <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                <p className="text-sm text-muted">
                   No price target in this consensus envelope.
                 </p>
               )
@@ -101,13 +101,13 @@ export function EarningsSection() {
 
 function EarningsTable({ envelope }: { envelope: EarningsEventsEnvelope }) {
   if (envelope.events.length === 0) {
-    return <p className="text-sm text-neutral-500 dark:text-neutral-400">No earnings releases recorded.</p>
+    return <p className="text-sm text-muted">No earnings releases recorded.</p>
   }
   return (
     <div className="-mx-2 overflow-x-auto">
       <table className="w-full min-w-[520px] text-sm">
         <thead>
-          <tr className="border-b border-neutral-200 dark:border-neutral-800">
+          <tr className="border-b border-line">
             <Th>Period</Th>
             <Th>Release</Th>
             <Th align="right">Estimate</Th>
@@ -126,10 +126,10 @@ function EarningsTable({ envelope }: { envelope: EarningsEventsEnvelope }) {
 }
 
 const SURPRISE_TEXT_CLASS: Readonly<Record<EarningsSurpriseDirection | 'unknown', string>> = {
-  beat: 'text-emerald-700 dark:text-emerald-400',
-  miss: 'text-red-700 dark:text-red-400',
-  inline: 'text-neutral-500 dark:text-neutral-400',
-  unknown: 'text-neutral-500 dark:text-neutral-400',
+  beat: 'text-positive',
+  miss: 'text-negative',
+  inline: 'text-muted',
+  unknown: 'text-muted',
 }
 
 const SURPRISE_ARROW: Readonly<Record<EarningsSurpriseDirection, string>> = {
@@ -143,18 +143,18 @@ function EarningsRow({ event, currency }: { event: EarningsEvent; currency: stri
   return (
     <tr
       data-testid={`earnings-row-${event.fiscal_year}-${event.fiscal_period}`}
-      className="border-t border-neutral-100 dark:border-neutral-800"
+      className="border-t border-line"
     >
-      <td className="px-2 py-2 text-neutral-700 dark:text-neutral-200">
+      <td className="px-2 py-2 text-fg">
         FY{event.fiscal_year} {event.fiscal_period}
       </td>
-      <td className="px-2 py-2 text-neutral-500 dark:text-neutral-400 tabular-nums">
+      <td className="px-2 py-2 text-muted tabular-nums">
         {event.release_date}
       </td>
-      <td className="px-2 py-2 text-right tabular-nums text-neutral-700 dark:text-neutral-200">
+      <td className="px-2 py-2 text-right tabular-nums text-fg">
         {formatEps(event.eps_estimate_at_release, currency)}
       </td>
-      <td className="px-2 py-2 text-right tabular-nums text-neutral-700 dark:text-neutral-200">
+      <td className="px-2 py-2 text-right tabular-nums text-fg">
         {formatEps(event.eps_actual, currency)}
       </td>
       <td className={`px-2 py-2 text-right tabular-nums ${surpriseClass}`}>
@@ -189,7 +189,7 @@ function ConsensusBody({ envelope }: { envelope: AnalystConsensusEnvelope }) {
       {envelope.rating_distribution ? (
         <RatingDistributionBar distribution={envelope.rating_distribution} analystCount={envelope.analyst_count} />
       ) : (
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">No rating distribution available.</p>
+        <p className="text-sm text-muted">No rating distribution available.</p>
       )}
       {envelope.estimates.length > 0 && (
         <ul className="flex flex-col gap-1.5 text-sm">
@@ -244,8 +244,8 @@ function RatingDistributionBar({
               key={rating}
               className={
                 muted
-                  ? 'flex items-center gap-1.5 text-neutral-400 dark:text-neutral-500'
-                  : 'flex items-center gap-1.5 text-neutral-600 dark:text-neutral-300'
+                  ? 'flex items-center gap-1.5 text-faint'
+                  : 'flex items-center gap-1.5 text-fg-soft'
               }
             >
               <span
@@ -258,7 +258,7 @@ function RatingDistributionBar({
           )
         })}
       </ul>
-      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+      <p className="text-xs text-muted">
         {distribution.contributor_count} of {analystCount} analysts contributed.
       </p>
     </div>
@@ -271,10 +271,10 @@ function EstimateRow({ estimate }: { estimate: ConsensusEstimate }) {
       data-testid={`estimate-${estimate.metric_key}-${estimate.fiscal_year}`}
       className="flex items-center justify-between gap-3"
     >
-      <span className="text-neutral-600 dark:text-neutral-300">
+      <span className="text-fg-soft">
         {estimate.metric_key.replaceAll('_', ' ')} · FY{estimate.fiscal_year} {estimate.fiscal_period}
       </span>
-      <span className="tabular-nums text-neutral-700 dark:text-neutral-200">
+      <span className="tabular-nums text-fg">
         {formatEstimateValue(estimate)}
       </span>
     </li>
@@ -300,21 +300,21 @@ function PriceTargetBody({ target }: { target: PriceTarget }) {
         <PriceRow label="Mean" value={formatCurrency2(target.mean, target.currency)} emphasis />
         <PriceRow label="Median" value={formatCurrency2(target.median, target.currency)} />
       </dl>
-      <div className="relative h-2 rounded bg-neutral-200 dark:bg-neutral-800">
+      <div className="relative h-2 rounded bg-surface-2">
         <span
           aria-hidden="true"
           data-testid="price-target-mean-marker"
-          className="absolute top-1/2 h-3 w-1 -translate-x-1/2 -translate-y-1/2 rounded bg-blue-600 dark:bg-blue-400"
+          className="absolute top-1/2 h-3 w-1 -translate-x-1/2 -translate-y-1/2 rounded bg-accent"
           style={{ left: `${meanPct}%` }}
         />
         <span
           aria-hidden="true"
           data-testid="price-target-median-marker"
-          className="absolute top-1/2 h-3 w-1 -translate-x-1/2 -translate-y-1/2 rounded bg-neutral-500 dark:bg-neutral-300"
+          className="absolute top-1/2 h-3 w-1 -translate-x-1/2 -translate-y-1/2 rounded bg-fg"
           style={{ left: `${medianPct}%` }}
         />
       </div>
-      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+      <p className="text-xs text-muted">
         {target.contributor_count} contributors
       </p>
     </div>
@@ -324,12 +324,12 @@ function PriceTargetBody({ target }: { target: PriceTarget }) {
 function PriceRow({ label, value, emphasis }: { label: string; value: string; emphasis?: boolean }) {
   return (
     <>
-      <dt className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">{label}</dt>
+      <dt className="text-xs uppercase tracking-wide text-muted">{label}</dt>
       <dd
         className={
           emphasis
-            ? 'text-right font-semibold tabular-nums text-neutral-900 dark:text-neutral-100'
-            : 'text-right tabular-nums text-neutral-700 dark:text-neutral-200'
+            ? 'text-right font-semibold tabular-nums text-fg'
+            : 'text-right tabular-nums text-fg'
         }
       >
         {value}

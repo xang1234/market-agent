@@ -94,7 +94,7 @@ async function loadHolders<E extends HoldersEnvelope>(
 function InstitutionalTable({ envelope }: { envelope: InstitutionalHoldersEnvelope }) {
   if (envelope.holders.length === 0) {
     return (
-      <p className="text-sm text-neutral-500 dark:text-neutral-400">
+      <p className="text-sm text-muted">
         No institutional holders disclosed for this issuer.
       </p>
     )
@@ -103,7 +103,7 @@ function InstitutionalTable({ envelope }: { envelope: InstitutionalHoldersEnvelo
     <div className="-mx-2 overflow-x-auto">
       <table className="w-full min-w-[640px] text-sm">
         <thead>
-          <tr className="border-b border-neutral-200 dark:border-neutral-800">
+          <tr className="border-b border-line">
             <Th>Holder</Th>
             <Th align="right">Shares</Th>
             <Th align="right">Value</Th>
@@ -130,22 +130,22 @@ function InstitutionalRow({ holder, currency }: { holder: InstitutionalHolder; c
   return (
     <tr
       data-testid={`institutional-row-${slugify(holder.holder_name)}`}
-      className="border-t border-neutral-100 dark:border-neutral-800"
+      className="border-t border-line"
     >
-      <td className="px-2 py-2 text-neutral-700 dark:text-neutral-200">{holder.holder_name}</td>
-      <td className="px-2 py-2 text-right tabular-nums text-neutral-700 dark:text-neutral-200">
+      <td className="px-2 py-2 text-fg">{holder.holder_name}</td>
+      <td className="px-2 py-2 text-right tabular-nums text-fg">
         {formatCompactDollars(holder.shares_held)}
       </td>
-      <td className="px-2 py-2 text-right tabular-nums text-neutral-700 dark:text-neutral-200">
+      <td className="px-2 py-2 text-right tabular-nums text-fg">
         {formatCompactCurrency(holder.market_value, currency)}
       </td>
-      <td className="px-2 py-2 text-right tabular-nums text-neutral-700 dark:text-neutral-200">
+      <td className="px-2 py-2 text-right tabular-nums text-fg">
         {holder.percent_of_shares_outstanding.toFixed(2)}%
       </td>
       <td className={`px-2 py-2 text-right tabular-nums ${signedTextClass(holder.shares_change)}`}>
         {formatSignedCount(holder.shares_change)}
       </td>
-      <td className="px-2 py-2 text-right tabular-nums text-neutral-500 dark:text-neutral-400">
+      <td className="px-2 py-2 text-right tabular-nums text-muted">
         {holder.filing_date}
       </td>
     </tr>
@@ -155,7 +155,7 @@ function InstitutionalRow({ holder, currency }: { holder: InstitutionalHolder; c
 function InsiderTable({ envelope }: { envelope: InsiderHoldersEnvelope }) {
   if (envelope.holders.length === 0) {
     return (
-      <p className="text-sm text-neutral-500 dark:text-neutral-400">
+      <p className="text-sm text-muted">
         No recent insider transactions disclosed for this issuer.
       </p>
     )
@@ -164,7 +164,7 @@ function InsiderTable({ envelope }: { envelope: InsiderHoldersEnvelope }) {
     <div className="-mx-2 overflow-x-auto">
       <table className="w-full min-w-[640px] text-sm">
         <thead>
-          <tr className="border-b border-neutral-200 dark:border-neutral-800">
+          <tr className="border-b border-line">
             <Th>Insider</Th>
             <Th>Role</Th>
             <Th>Type</Th>
@@ -206,20 +206,20 @@ function InsiderRow({
   return (
     <tr
       data-testid={`insider-row-${slugify(transaction.insider_name)}-${transaction.transaction_date}`}
-      className="border-t border-neutral-100 dark:border-neutral-800"
+      className="border-t border-line"
     >
-      <td className="px-2 py-2 text-neutral-700 dark:text-neutral-200">{transaction.insider_name}</td>
+      <td className="px-2 py-2 text-fg">{transaction.insider_name}</td>
       <td className={`px-2 py-2 ${NEUTRAL_CLASS}`}>{transaction.insider_role}</td>
       <td className={`px-2 py-2 ${INSIDER_DIRECTION_CLASS[transaction.transaction_type]}`}>
         {insiderTransactionLabel(transaction.transaction_type)}
       </td>
-      <td className="px-2 py-2 text-right tabular-nums text-neutral-700 dark:text-neutral-200">
+      <td className="px-2 py-2 text-right tabular-nums text-fg">
         {formatCompactDollars(transaction.shares)}
       </td>
-      <td className="px-2 py-2 text-right tabular-nums text-neutral-700 dark:text-neutral-200">
+      <td className="px-2 py-2 text-right tabular-nums text-fg">
         {transaction.price === null ? '—' : formatCurrency2(transaction.price, currency)}
       </td>
-      <td className="px-2 py-2 text-right tabular-nums text-neutral-700 dark:text-neutral-200">
+      <td className="px-2 py-2 text-right tabular-nums text-fg">
         {transaction.value === null ? '—' : formatCompactCurrency(transaction.value, currency)}
       </td>
       <td className={`px-2 py-2 text-right tabular-nums ${NEUTRAL_CLASS}`}>
