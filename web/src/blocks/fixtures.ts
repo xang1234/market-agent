@@ -220,7 +220,28 @@ export const metricsComparisonFixture: MetricsComparisonBlock = {
     { kind: 'issuer', id: ISSUER_MSFT },
     { kind: 'issuer', id: ISSUER_GOOG },
   ],
-  metrics: ['Revenue (TTM)', 'Gross margin', 'EPS (TTM)', 'P/E'],
+  metrics: ['Revenue (TTM)', 'Gross margin', 'EPS (TTM)', 'P/E (fwd)'],
+  primary_subject_ref: { kind: 'issuer', id: ISSUER_AAPL },
+  cells: [
+    [
+      { value_ref: '33333333-3333-4333-9333-000000000001', format: '$385.7B' },
+      { value_ref: '33333333-3333-4333-9333-000000000002', format: '46.2%' },
+      { value_ref: '33333333-3333-4333-9333-000000000003', format: '$6.43' },
+      { value_ref: '33333333-3333-4333-9333-000000000004', format: '29.1×' },
+    ],
+    [
+      { value_ref: '33333333-3333-4333-9333-000000000005', format: '$245.1B' },
+      { value_ref: '33333333-3333-4333-9333-000000000006', format: '69.8%', tone: 'positive' },
+      { value_ref: '33333333-3333-4333-9333-000000000007', format: '$11.80' },
+      { value_ref: '33333333-3333-4333-9333-000000000008', format: '34.6×', tone: 'negative' },
+    ],
+    [
+      { value_ref: '33333333-3333-4333-9333-000000000009', format: '$339.9B' },
+      { value_ref: '33333333-3333-4333-9333-00000000000a', format: '57.0%' },
+      { value_ref: '33333333-3333-4333-9333-00000000000b', format: '$7.54' },
+      { value_ref: '33333333-3333-4333-9333-00000000000c', format: '23.8×', tone: 'positive' },
+    ],
+  ],
 }
 
 export const sentimentTrendFixture: SentimentTrendBlock = {

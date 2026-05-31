@@ -588,6 +588,29 @@
       ],
       "unevaluatedProperties": false
     },
+    "MetricsComparisonCell": {
+      "type": "object",
+      "required": [
+        "value_ref"
+      ],
+      "properties": {
+        "value_ref": {
+          "$ref": "#/$defs/UUID"
+        },
+        "format": {
+          "type": "string"
+        },
+        "tone": {
+          "type": "string",
+          "enum": [
+            "positive",
+            "negative",
+            "neutral"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "MetricsComparison": {
       "allOf": [
         {
@@ -610,6 +633,20 @@
               "items": {
                 "type": "string"
               }
+            },
+            "cells": {
+              "description": "Value matrix indexed [subjectIndex][metricIndex]. Optional: when absent the block renders metric labels with empty cells.",
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/MetricsComparisonCell"
+                }
+              }
+            },
+            "primary_subject_ref": {
+              "description": "The queried subject to emphasize among the compared peers.",
+              "$ref": "#/$defs/SubjectRef"
             }
           },
           "required": [
