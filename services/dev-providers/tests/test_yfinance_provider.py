@@ -1,7 +1,9 @@
 import unittest
 
 from dev_providers.yfinance_provider import (
+    normalize_earnings_events,
     normalize_daily_bars,
+    normalize_holders,
     normalize_reference_listing,
     normalize_quote,
     yahoo_symbol_for_listing,
@@ -107,6 +109,104 @@ class YFinanceProviderTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_earnings_normalization_uses_latest_reported_yfinance_rows(self):
+        earnings = normalize_earnings_events(
+            [
+                {
+                    "Earnings Date": "2026-07-30 16:00:00-04:00",
+                    "EPS Estimate": 1.90,
+                    "Reported EPS": None,
+                },
+                {
+                    "Earnings Date": "2026-04-30 16:00:00-04:00",
+                    "EPS Estimate": 1.94,
+                    "Reported EPS": 2.01,
+                },
+                {
+                    "Earnings Date": "2026-01-29 16:00:00-05:00",
+                    "EPS Estimate": 2.67,
+                    "Reported EPS": 2.84,
+                },
+            ],
+            ["2026-03-31", "2025-12-31"],
+            now_iso="2026-05-31T12:00:00.000Z",
+            limit=2,
+        )
+
+        self.assertEqual(earnings["as_of"], "2026-05-31T12:00:00.000Z")
+        self.assertEqual(
+            earnings["events"],
+            [
+                {
+                    "release_date": "2026-04-30",
+                    "period_end": "2026-03-31",
+                    "fiscal_year": 2026,
+                    "fiscal_period": "Q2",
+                    "eps_actual": 2.01,
+                    "eps_estimate_at_release": 1.94,
+                    "as_of": "2026-05-31T12:00:00.000Z",
+                },
+                {
+                    "release_date": "2026-01-29",
+                    "period_end": "2025-12-31",
+                    "fiscal_year": 2026,
+                    "fiscal_period": "Q1",
+                    "eps_actual": 2.84,
+                    "eps_estimate_at_release": 2.67,
+                    "as_of": "2026-05-31T12:00:00.000Z",
+                },
+            ],
+        )
+
+    def test_holder_normalization_maps_yfinance_institutional_and_insider_rows(self):
+        institutional = normalize_holders(
+            "institutional",
+            [
+                {
+                    "Date Reported": "2026-03-31",
+                    "Holder": "Blackrock Inc.",
+                    "Shares": 1_144_695_425,
+                    "Value": 357_213_651_530,
+                    "pctHeld": 0.0779,
+                    "pctChange": -0.0086,
+                }
+            ],
+            now_iso="2026-05-31T12:00:00.000Z",
+            limit=5,
+        )
+        self.assertEqual(institutional["as_of"], "2026-05-31T12:00:00.000Z")
+        self.assertEqual(institutional["holders"][0]["filing_date"], "2026-03-31")
+        self.assertEqual(institutional["holders"][0]["percent_of_shares_outstanding"], 7.79)
+        self.assertLess(institutional["holders"][0]["shares_change"], 0)
+
+        insider = normalize_holders(
+            "insider",
+            [
+                {
+                    "Insider": "BORDERS BEN",
+                    "Position": "Officer",
+                    "Start Date": "2026-05-08",
+                    "Text": "Sale at price 290.00 per share.",
+                    "Shares": 1274,
+                    "Value": 369460.0,
+                },
+                {
+                    "Insider": "LEVINSON ARTHUR D",
+                    "Position": "Director",
+                    "Transaction Start Date": "2026-05-06",
+                    "Text": "Stock Gift at price 0.00 per share.",
+                    "Shares": 5000,
+                    "Value": 0.0,
+                },
+            ],
+            now_iso="2026-05-31T12:00:00.000Z",
+            limit=5,
+        )
+        self.assertEqual(insider["holders"][0]["transaction_type"], "sell")
+        self.assertEqual(insider["holders"][0]["price"], 290.0)
+        self.assertEqual(insider["holders"][1]["transaction_type"], "gift")
+        self.assertEqual(insider["holders"][1]["value"], 0.0)
 
 
 if __name__ == "__main__":

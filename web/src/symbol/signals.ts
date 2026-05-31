@@ -74,10 +74,19 @@ const PLACEHOLDER_DATA_REF = 'dev-fixture'
 const PLACEHOLDER_SOURCE_REFS: ReadonlyArray<string> = Object.freeze([
   '00000000-0000-4000-a000-000000000010',
 ])
-const PLACEHOLDER_AS_OF = '2024-11-01T20:30:00.000Z'
 
-export function loadSignalsFixture(issuerId: string): SignalsEnvelope {
+export type SignalsFixtureOptions = {
+  now?: Date
+}
+
+export function loadSignalsFixture(
+  issuerId: string,
+  options: SignalsFixtureOptions = {},
+): SignalsEnvelope {
   const subject = { kind: 'issuer' as const, id: issuerId }
+  const now = options.now ?? new Date()
+  const asOf = now.toISOString()
+  const endDateMs = utcDateMs(now)
   return {
     subject,
     family: 'signals',
@@ -88,9 +97,9 @@ export function loadSignalsFixture(issuerId: string): SignalsEnvelope {
       snapshot_id: PLACEHOLDER_SNAPSHOT_ID,
       data_ref: PLACEHOLDER_DATA_REF,
       source_refs: PLACEHOLDER_SOURCE_REFS,
-      as_of: PLACEHOLDER_AS_OF,
+      as_of: asOf,
       window_days: SENTIMENT_WINDOW_DAYS,
-      points: deriveSentimentSeries(issuerId, SENTIMENT_WINDOW_DAYS),
+      points: deriveSentimentSeries(issuerId, SENTIMENT_WINDOW_DAYS, endDateMs),
     },
     claim_clusters: {
       id: `claim-clusters-${issuerId}`,
@@ -99,17 +108,20 @@ export function loadSignalsFixture(issuerId: string): SignalsEnvelope {
       snapshot_id: PLACEHOLDER_SNAPSHOT_ID,
       data_ref: PLACEHOLDER_DATA_REF,
       source_refs: PLACEHOLDER_SOURCE_REFS,
-      as_of: PLACEHOLDER_AS_OF,
-      clusters: deriveClaimClusters(issuerId),
+      as_of: asOf,
+      clusters: deriveClaimClusters(issuerId, endDateMs),
     },
-    as_of: PLACEHOLDER_AS_OF,
+    as_of: asOf,
   }
 }
 
-const SENTIMENT_FIXTURE_END = Date.UTC(2024, 9, 31)
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
 
-function deriveSentimentSeries(issuerId: string, days: number): ReadonlyArray<SentimentPoint> {
+function deriveSentimentSeries(
+  issuerId: string,
+  days: number,
+  endDateMs: number,
+): ReadonlyArray<SentimentPoint> {
   const seedA = hashSeed(issuerId, 'sentiment-amp')
   const seedB = hashSeed(issuerId, 'sentiment-phase')
   const seedV = hashSeed(issuerId, 'volume')
@@ -125,7 +137,7 @@ function deriveSentimentSeries(issuerId: string, days: number): ReadonlyArray<Se
     const drift = (t - 0.5) * 0.25
     const score = clamp(baseScore + wave + drift, -1, 1)
     const volumeWave = 1 + Math.sin(phase + i * 0.28) * 0.35
-    const date = new Date(SENTIMENT_FIXTURE_END - dayIndex * ONE_DAY_MS)
+    const date = new Date(endDateMs - dayIndex * ONE_DAY_MS)
       .toISOString()
       .slice(0, 10)
     points.push({
@@ -186,7 +198,7 @@ const CLUSTER_TEMPLATES: ReadonlyArray<{
   },
 ]
 
-function deriveClaimClusters(issuerId: string): ReadonlyArray<ClaimCluster> {
+function deriveClaimClusters(issuerId: string, endDateMs: number): ReadonlyArray<ClaimCluster> {
   const offset = hashSeed(issuerId, 'cluster-offset') % CLUSTER_TEMPLATES.length
   const ordered = [
     ...CLUSTER_TEMPLATES.slice(offset),
@@ -201,8 +213,8 @@ function deriveClaimClusters(issuerId: string): ReadonlyArray<ClaimCluster> {
       stance: template.stance,
       mention_count: totalEvidence * 4 + (hashSeed(issuerId, `cluster-${i}-mentions`) % 30),
       evidence_mix: template.evidence_mix,
-      first_observed: daysAgo(template.daysAgoFirst),
-      last_observed: daysAgo(template.daysAgoLast),
+      first_observed: daysAgo(template.daysAgoFirst, endDateMs),
+      last_observed: daysAgo(template.daysAgoLast, endDateMs),
     }
   })
   clusters.sort((a, b) => b.last_observed.localeCompare(a.last_observed))
@@ -242,8 +254,12 @@ function round(value: number, places: number): number {
   return Math.round(value * factor) / factor
 }
 
-function daysAgo(n: number): string {
-  return new Date(SENTIMENT_FIXTURE_END - n * ONE_DAY_MS).toISOString().slice(0, 10)
+function daysAgo(n: number, endDateMs: number): string {
+  return new Date(endDateMs - n * ONE_DAY_MS).toISOString().slice(0, 10)
+}
+
+function utcDateMs(value: Date): number {
+  return Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate())
 }
 
 // FNV-1a-style hash so per-issuer fixtures are stable across reloads but

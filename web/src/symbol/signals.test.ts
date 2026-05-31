@@ -64,6 +64,17 @@ test('sentiment trend points are ordered oldest-first so a left-to-right chart r
   }
 })
 
+test('loadSignalsFixture anchors generated windows to the requested current date', () => {
+  const env = loadSignalsFixture(APPLE_ISSUER_ID, {
+    now: new Date('2026-05-31T12:00:00.000Z'),
+  })
+  const points = env.sentiment_trend.points
+  assert.equal(points.at(0)?.date, '2026-05-02')
+  assert.equal(points.at(-1)?.date, '2026-05-31')
+  assert.equal(env.as_of, '2026-05-31T12:00:00.000Z')
+  assert.equal(env.claim_clusters.clusters[0].last_observed <= '2026-05-31', true)
+})
+
 test('claim clusters cover every defined stance category in the source-agnostic enum', () => {
   const env = loadSignalsFixture(APPLE_ISSUER_ID)
   const seenStances = new Set(env.claim_clusters.clusters.map((c) => c.stance))

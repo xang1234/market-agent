@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDevProvidersIssuerProfileRepository } from "../src/dev-providers.ts";
+import {
+  createDevProvidersEarningsRepository,
+  createDevProvidersHoldersRepository,
+  createDevProvidersIssuerProfileRepository,
+} from "../src/dev-providers.ts";
+import { YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID } from "../src/provider-sources.ts";
 import type { IssuerProfileRecord, IssuerProfileRepository } from "../src/issuer-repository.ts";
 
 const ISSUER_ID = "99999999-9999-4999-9999-999999999999";
@@ -162,4 +167,114 @@ test("dev providers profile repository degrades unavailable Finviz responses to 
 
   assert.equal(await repo.find(ISSUER_ID), primaryProfile);
   assert.equal(updates, 0);
+});
+
+test("dev providers earnings repository maps sidecar rows onto the requested issuer", async () => {
+  const calls: Array<{ url: string; body: unknown }> = [];
+  const repo = createDevProvidersEarningsRepository({
+    profiles: {
+      async find() {
+        return sparseProfile();
+      },
+    },
+    baseUrl: "http://dev-providers.test",
+    sourceId: YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID,
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+      return new Response(JSON.stringify({
+        status: "available",
+        data: {
+          currency: "USD",
+          as_of: "2026-05-31T12:00:00.000Z",
+          events: [
+            {
+              release_date: "2026-04-30",
+              period_end: "2026-03-31",
+              fiscal_year: 2026,
+              fiscal_period: "Q2",
+              eps_actual: 2.01,
+              eps_estimate_at_release: 1.94,
+              as_of: "2026-05-31T12:00:00.000Z",
+            },
+          ],
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+
+  const envelope = await repo.find(ISSUER_ID);
+
+  assert.equal(envelope?.subject.id, ISSUER_ID);
+  assert.equal(envelope?.events[0].source_id, YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID);
+  assert.equal(envelope?.events[0].release_date, "2026-04-30");
+  assert.equal(calls[0].url, "http://dev-providers.test/fundamentals/earnings");
+  assert.deepEqual(calls[0].body, {
+    ticker: "AMD",
+    mic: "XNAS",
+    currency: "USD",
+    timezone: "America/New_York",
+  });
+});
+
+test("dev providers holders repository maps institutional and insider sidecar rows", async () => {
+  const requestedKinds: unknown[] = [];
+  const repo = createDevProvidersHoldersRepository({
+    profiles: {
+      async find() {
+        return sparseProfile();
+      },
+    },
+    baseUrl: "http://dev-providers.test",
+    sourceId: YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID,
+    fetchImpl: async (url, init) => {
+      assert.equal(String(url), "http://dev-providers.test/fundamentals/holders");
+      const body = JSON.parse(String(init?.body));
+      requestedKinds.push(body.kind);
+      return new Response(JSON.stringify({
+        status: "available",
+        data: body.kind === "institutional"
+          ? {
+              currency: "USD",
+              as_of: "2026-05-31T12:00:00.000Z",
+              holders: [
+                {
+                  holder_name: "Blackrock Inc.",
+                  shares_held: 1_144_695_425,
+                  market_value: 357_213_651_530,
+                  percent_of_shares_outstanding: 7.79,
+                  shares_change: -9_930_000,
+                  filing_date: "2026-03-31",
+                },
+              ],
+            }
+          : {
+              currency: "USD",
+              as_of: "2026-05-31T12:00:00.000Z",
+              holders: [
+                {
+                  insider_name: "BORDERS BEN",
+                  insider_role: "Officer",
+                  transaction_date: "2026-05-08",
+                  transaction_type: "sell",
+                  shares: 1274,
+                  price: 290,
+                  value: 369460,
+                },
+              ],
+            },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+
+  const institutional = await repo.find(ISSUER_ID, "institutional");
+  const insider = await repo.find(ISSUER_ID, "insider");
+
+  assert.equal(institutional?.subject.id, ISSUER_ID);
+  assert.equal(institutional?.kind, "institutional");
+  assert.equal(institutional?.source_id, YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID);
+  assert.equal(institutional?.holders[0].filing_date, "2026-03-31");
+  assert.equal(insider?.subject.id, ISSUER_ID);
+  assert.equal(insider?.kind, "insider");
+  assert.equal(insider?.holders[0].transaction_date, "2026-05-08");
+  assert.deepEqual(requestedKinds, ["institutional", "insider"]);
 });

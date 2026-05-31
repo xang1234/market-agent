@@ -3,6 +3,20 @@ import {
   type IssuerProfileRecord,
   type IssuerProfileRecordInput,
 } from "./profile.ts";
+import {
+  freezeEarningsEventsEnvelope,
+  type EarningsEventInput,
+  type EarningsEventsEnvelopeInput,
+} from "./earnings.ts";
+import {
+  freezeInsiderHoldersEnvelope,
+  freezeInstitutionalHoldersEnvelope,
+  type HolderKind,
+  type InsiderHoldersEnvelopeInput,
+  type InstitutionalHoldersEnvelopeInput,
+} from "./holders.ts";
+import type { EarningsRepository } from "./earnings-repository.ts";
+import type { HoldersRepository } from "./holders-repository.ts";
 import type {
   IssuerProfileQueryExecutor,
   IssuerProfileRepository,
@@ -35,6 +49,38 @@ type SidecarProfile = {
   domicile?: unknown;
   sector?: unknown;
   industry?: unknown;
+};
+
+export type DevProvidersEarningsRepositoryOptions = {
+  profiles: IssuerProfileRepository;
+  baseUrl: string;
+  sourceId: UUID;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+};
+
+export type DevProvidersHoldersRepositoryOptions = DevProvidersEarningsRepositoryOptions;
+
+type SidecarEarnings = {
+  currency?: unknown;
+  as_of?: unknown;
+  events?: unknown;
+};
+
+type SidecarEarningsEvent = {
+  release_date?: unknown;
+  period_end?: unknown;
+  fiscal_year?: unknown;
+  fiscal_period?: unknown;
+  eps_actual?: unknown;
+  eps_estimate_at_release?: unknown;
+  as_of?: unknown;
+};
+
+type SidecarHolders = {
+  currency?: unknown;
+  as_of?: unknown;
+  holders?: unknown;
 };
 
 const DEFAULT_TIMEOUT_MS = 5_000;
@@ -73,6 +119,65 @@ export function createDevProvidersIssuerProfileRepository(
   };
 }
 
+export function createDevProvidersEarningsRepository(
+  options: DevProvidersEarningsRepositoryOptions,
+): EarningsRepository {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
+  return {
+    async find(issuer_id: UUID) {
+      const context = await issuerListingContext(options.profiles, issuer_id);
+      if (!context) return null;
+      try {
+        const envelope = await postSidecar({
+          baseUrl: options.baseUrl,
+          path: "/fundamentals/earnings",
+          body: sidecarListingBody(context),
+          fetchImpl,
+          timeoutMs,
+        });
+        if (envelope.status !== "available") return null;
+        const input = sidecarEarningsInput(envelope.data, issuer_id, context.currency, options.sourceId);
+        return input ? freezeEarningsEventsEnvelope(input) : null;
+      } catch {
+        return null;
+      }
+    },
+  };
+}
+
+export function createDevProvidersHoldersRepository(
+  options: DevProvidersHoldersRepositoryOptions,
+): HoldersRepository {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
+  return {
+    async find(issuer_id: UUID, kind: HolderKind) {
+      const context = await issuerListingContext(options.profiles, issuer_id);
+      if (!context) return null;
+      try {
+        const envelope = await postSidecar({
+          baseUrl: options.baseUrl,
+          path: "/fundamentals/holders",
+          body: { ...sidecarListingBody(context), kind },
+          fetchImpl,
+          timeoutMs,
+        });
+        if (envelope.status !== "available") return null;
+        const input = sidecarHoldersInput(envelope.data, issuer_id, kind, context.currency, options.sourceId);
+        if (!input) return null;
+        return kind === "institutional"
+          ? freezeInstitutionalHoldersEnvelope(input as InstitutionalHoldersEnvelopeInput)
+          : freezeInsiderHoldersEnvelope(input as InsiderHoldersEnvelopeInput);
+      } catch {
+        return null;
+      }
+    },
+  };
+}
+
 async function fetchProfileEnrichment(input: {
   baseUrl: string;
   exchange: IssuerProfileExchange;
@@ -101,6 +206,138 @@ async function fetchProfileEnrichment(input: {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function postSidecar(input: {
+  baseUrl: string;
+  path: string;
+  body: unknown;
+  fetchImpl: typeof fetch;
+  timeoutMs: number;
+}): Promise<SidecarEnvelope> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), input.timeoutMs);
+  try {
+    const response = await input.fetchImpl(new URL(input.path, input.baseUrl), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input.body),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`dev providers sidecar HTTP ${response.status}`);
+    const envelope = (await response.json()) as SidecarEnvelope;
+    if (envelope.status !== "available" && envelope.status !== "unavailable") {
+      throw new Error("dev providers sidecar returned malformed availability envelope");
+    }
+    return envelope;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+type IssuerListingContext = {
+  ticker: string;
+  mic: string;
+  currency: string;
+  timezone: string;
+};
+
+async function issuerListingContext(
+  profiles: IssuerProfileRepository,
+  issuerId: UUID,
+): Promise<IssuerListingContext | null> {
+  const profile = await profiles.find(issuerId);
+  const exchange = profile?.exchanges[0];
+  if (!exchange) return null;
+  return {
+    ticker: exchange.ticker,
+    mic: exchange.mic,
+    currency: exchange.trading_currency,
+    timezone: exchange.timezone,
+  };
+}
+
+function sidecarListingBody(context: IssuerListingContext): Record<string, unknown> {
+  return {
+    ticker: context.ticker,
+    mic: context.mic,
+    currency: context.currency,
+    timezone: context.timezone,
+  };
+}
+
+function sidecarEarningsInput(
+  value: unknown,
+  issuerId: UUID,
+  fallbackCurrency: string,
+  sourceId: UUID,
+): EarningsEventsEnvelopeInput | null {
+  if (!isRecord(value)) return null;
+  const data = value as SidecarEarnings;
+  const asOf = stringValue(data.as_of);
+  const events = Array.isArray(data.events) ? data.events : null;
+  if (!asOf || !events) return null;
+  const mapped: EarningsEventInput[] = [];
+  for (const event of events) {
+    const mappedEvent = sidecarEarningsEvent(event, asOf, sourceId);
+    if (!mappedEvent) return null;
+    mapped.push(mappedEvent);
+  }
+  return {
+    subject: { kind: "issuer", id: issuerId },
+    currency: stringValue(data.currency) ?? fallbackCurrency,
+    as_of: asOf,
+    events: mapped,
+  };
+}
+
+function sidecarEarningsEvent(
+  value: unknown,
+  fallbackAsOf: string,
+  sourceId: UUID,
+): EarningsEventInput | null {
+  if (!isRecord(value)) return null;
+  const event = value as SidecarEarningsEvent;
+  const releaseDate = stringValue(event.release_date);
+  const periodEnd = stringValue(event.period_end);
+  const fiscalYear = integerValue(event.fiscal_year);
+  const fiscalPeriod = stringValue(event.fiscal_period);
+  const epsActual = nullableNumber(event.eps_actual);
+  const epsEstimate = nullableNumber(event.eps_estimate_at_release);
+  if (!releaseDate || !periodEnd || fiscalYear === null || !fiscalPeriod || epsActual === undefined || epsEstimate === undefined) {
+    return null;
+  }
+  return {
+    release_date: releaseDate,
+    period_end: periodEnd,
+    fiscal_year: fiscalYear,
+    fiscal_period: fiscalPeriod as EarningsEventInput["fiscal_period"],
+    eps_actual: epsActual,
+    eps_estimate_at_release: epsEstimate,
+    source_id: sourceId,
+    as_of: stringValue(event.as_of) ?? fallbackAsOf,
+  };
+}
+
+function sidecarHoldersInput(
+  value: unknown,
+  issuerId: UUID,
+  kind: HolderKind,
+  fallbackCurrency: string,
+  sourceId: UUID,
+): InstitutionalHoldersEnvelopeInput | InsiderHoldersEnvelopeInput | null {
+  if (!isRecord(value)) return null;
+  const data = value as SidecarHolders;
+  const asOf = stringValue(data.as_of);
+  const holders = Array.isArray(data.holders) ? data.holders : null;
+  if (!asOf || !holders) return null;
+  return {
+    subject: { kind: "issuer", id: issuerId },
+    currency: stringValue(data.currency) ?? fallbackCurrency,
+    as_of: asOf,
+    source_id: sourceId,
+    holders: holders as InstitutionalHoldersEnvelopeInput["holders"] & InsiderHoldersEnvelopeInput["holders"],
+  };
 }
 
 function needsProfileEnrichment(record: IssuerProfileRecord): boolean {
@@ -182,4 +419,17 @@ async function persistProfileEnrichmentProvenance(
 
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function integerValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+
+function nullableNumber(value: unknown): number | null | undefined {
+  if (value === null) return null;
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

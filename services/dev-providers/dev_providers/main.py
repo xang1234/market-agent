@@ -169,6 +169,71 @@ async def reference_profile(request: Request) -> dict[str, Any]:
     return _available(profile)
 
 
+@app.post("/fundamentals/earnings")
+async def fundamentals_earnings(request: Request) -> dict[str, Any]:
+    body = await request.json()
+    ticker = str(body.get("ticker", "")).strip().upper()
+    mic = str(body.get("mic", "")).strip().upper()
+    currency = str(body.get("currency", "")).strip().upper()
+    key = f"fundamentals-earnings:{ticker}:{mic}"
+    cached = _negative_cache_get(key)
+    if cached:
+        return cached
+
+    try:
+        earnings = await _bounded_call(
+            "yfinance",
+            lambda: _provider.earnings(ticker=ticker, mic=mic, currency=currency),
+        )
+    except ValueError as exc:
+        return _cache_unavailable(key, ProviderUnavailable("missing_coverage", False, str(exc)))
+    except ProviderUnavailable as exc:
+        return _cache_unavailable(key, exc)
+    except Exception as exc:
+        return _cache_unavailable(key, ProviderUnavailable("provider_error", True, f"yfinance: {exc}"))
+
+    if not earnings:
+        return _cache_unavailable(
+            key,
+            ProviderUnavailable("missing_coverage", False, "yfinance: earnings unavailable"),
+        )
+
+    return _available(earnings)
+
+
+@app.post("/fundamentals/holders")
+async def fundamentals_holders(request: Request) -> dict[str, Any]:
+    body = await request.json()
+    ticker = str(body.get("ticker", "")).strip().upper()
+    mic = str(body.get("mic", "")).strip().upper()
+    currency = str(body.get("currency", "")).strip().upper()
+    kind = str(body.get("kind", "")).strip().lower()
+    key = f"fundamentals-holders:{ticker}:{mic}:{kind}"
+    cached = _negative_cache_get(key)
+    if cached:
+        return cached
+
+    try:
+        holders = await _bounded_call(
+            "yfinance",
+            lambda: _provider.holders(ticker=ticker, mic=mic, currency=currency, kind=kind),
+        )
+    except ValueError as exc:
+        return _cache_unavailable(key, ProviderUnavailable("missing_coverage", False, str(exc)))
+    except ProviderUnavailable as exc:
+        return _cache_unavailable(key, exc)
+    except Exception as exc:
+        return _cache_unavailable(key, ProviderUnavailable("provider_error", True, f"yfinance: {exc}"))
+
+    if not holders:
+        return _cache_unavailable(
+            key,
+            ProviderUnavailable("missing_coverage", False, f"yfinance: {kind} holders unavailable"),
+        )
+
+    return _available(holders)
+
+
 async def _bounded_call(provider_name: str, fn: Callable[[], Any]) -> Any:
     executor = _provider_executors[provider_name]
     loop = asyncio.get_running_loop()

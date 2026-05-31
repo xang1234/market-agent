@@ -1,12 +1,19 @@
 import { Pool } from "pg";
-import { createDevProvidersIssuerProfileRepository } from "./dev-providers.ts";
+import {
+  createDevProvidersEarningsRepository,
+  createDevProvidersHoldersRepository,
+  createDevProvidersIssuerProfileRepository,
+} from "./dev-providers.ts";
 import { createPostgresIssuerProfileRepository } from "./issuer-repository.ts";
 import { createSecCompanyFactsHttpFetcher } from "./sec-edgar-http.ts";
 import {
   createSecBackedStatementRepository,
   createSecBackedStatsRepository,
 } from "./sec-facts-repository.ts";
-import { SEC_EDGAR_FILING_SOURCE_ID } from "./provider-sources.ts";
+import {
+  SEC_EDGAR_FILING_SOURCE_ID,
+  YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID,
+} from "./provider-sources.ts";
 import {
   createUnsupportedConsensusRepository,
   createUnsupportedEarningsRepository,
@@ -47,8 +54,20 @@ const statements = createSecBackedStatementRepository(pool, {
 const stats = createSecBackedStatsRepository(pool, { statements, fetcher: secFetcher });
 const segments = createUnsupportedSegmentsRepository();
 const consensus = createUnsupportedConsensusRepository();
-const earnings = createUnsupportedEarningsRepository();
-const holders = createUnsupportedHoldersRepository();
+const earnings = unofficialDevProvidersEnabled && devProvidersBaseUrl
+  ? createDevProvidersEarningsRepository({
+      profiles,
+      baseUrl: devProvidersBaseUrl,
+      sourceId: YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID,
+    })
+  : createUnsupportedEarningsRepository();
+const holders = unofficialDevProvidersEnabled && devProvidersBaseUrl
+  ? createDevProvidersHoldersRepository({
+      profiles,
+      baseUrl: devProvidersBaseUrl,
+      sourceId: YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID,
+    })
+  : createUnsupportedHoldersRepository();
 const server = createFundamentalsServer({
   profiles,
   stats,
