@@ -15,6 +15,9 @@ export type SparklineGeometry = {
   // so callers can render a gradient/tinted area fill under the line without
   // recomputing points. Always present; render it only when an area is wanted.
   areaPath: string
+  // The last point's coordinates, so callers can anchor an end-of-line label
+  // (e.g. multi-series TradingView-style labels) without re-parsing the path.
+  end: { x: number; y: number }
   baselineY: number | null
 }
 
@@ -59,13 +62,18 @@ export function computeSparklineGeometry({
   const areaPath = `${path} L ${lastX.toFixed(2)},${floorY.toFixed(2)} L ${firstX.toFixed(
     2,
   )},${floorY.toFixed(2)} Z`
+  const lastValue = values[values.length - 1]
+  const end = {
+    x: lastX,
+    y: rawSpan === 0 ? midY : padY + (1 - (lastValue - lo) / span) * innerH,
+  }
   const baselineY =
     baseline === null
       ? null
       : rawSpan === 0
         ? midY
         : padY + (1 - (baseline - lo) / span) * innerH
-  return { path, areaPath, baselineY }
+  return { path, areaPath, end, baselineY }
 }
 
 function resolveDomain(

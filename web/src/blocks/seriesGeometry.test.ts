@@ -64,3 +64,15 @@ test('computeSeriesGeometry honors width/height overrides', () => {
   assert.equal(geom.width, 100)
   assert.equal(geom.height, 50)
 })
+
+test('each path carries an area fill closed to the floor and an end anchor at the right edge', () => {
+  const geom = computeSeriesGeometry([seriesA], { width: 100, height: 50 })
+  assert.ok(geom !== null)
+  const path = geom!.paths[0]
+  // Area path extends the line and closes back to a baseline (Z).
+  assert.ok(path.areaPath.startsWith(path.d), 'area path begins with the line path')
+  assert.ok(path.areaPath.trimEnd().endsWith('Z'), 'area path is a closed polygon')
+  // End anchor sits at the right edge (last x = width - padX) and within bounds.
+  assert.ok(path.end.x > 90 && path.end.x <= 100, `end.x near right edge, got ${path.end.x}`)
+  assert.ok(path.end.y >= 0 && path.end.y <= 50, `end.y within height, got ${path.end.y}`)
+})

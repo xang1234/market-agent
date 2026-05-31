@@ -10,6 +10,10 @@ export type SeriesPath = {
   name: string
   unit: string | undefined
   d: string
+  // Closed area path (down to the floor) for a single-series gradient fill.
+  areaPath: string
+  // End-of-line anchor for the series label.
+  end: { x: number; y: number }
 }
 
 export type SeriesGeometry = {
@@ -49,7 +53,7 @@ export function computeSeriesGeometry(
     const values = s.points.map((p) => p.y)
     const geom = computeSparklineGeometry({ values, domain: yDomain, width, height })
     if (geom === null) continue
-    paths.push({ name: s.name, unit: s.unit, d: geom.path })
+    paths.push({ name: s.name, unit: s.unit, d: geom.path, areaPath: geom.areaPath, end: geom.end })
   }
   if (paths.length === 0) return null
   return { paths, yDomain, width, height }
