@@ -24,7 +24,7 @@ export function PerfComparison({ block }: PerfComparisonProps): ReactElement {
         keyPrefix={`${block.id}-subj`}
         subjects={block.subject_refs}
       />
-      <dl className="grid grid-cols-3 gap-2 text-xs text-neutral-600 dark:text-neutral-400">
+      <dl className="grid grid-cols-3 gap-2 text-xs text-muted">
         <LabelValueCell label="Range">{block.default_range}</LabelValueCell>
         <LabelValueCell label="Basis">{block.basis}</LabelValueCell>
         <LabelValueCell label="Normalization">{perfNormalizationLabel(block.normalization)}</LabelValueCell>

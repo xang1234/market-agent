@@ -25,7 +25,7 @@ export function SubjectChipList({
           key={`${keyPrefix}-${subject.kind}-${subject.id}`}
           data-subject-kind={subject.kind}
           data-subject-id={subject.id}
-          className="rounded bg-neutral-100 px-2 py-0.5 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
+          className="rounded-md bg-surface-2 px-2 py-0.5 text-muted"
         >
           {formatSubjectRefShort(subject)}
         </li>

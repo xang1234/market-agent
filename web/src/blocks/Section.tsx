@@ -14,7 +14,7 @@ export function Section({ block }: SectionProps): ReactElement {
       data-testid={`block-section-${block.id}`}
       data-block-kind="section"
       data-collapsed={collapsible && !isOpen ? 'true' : 'false'}
-      className="flex flex-col gap-3 rounded-md border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
+      className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-4 shadow-sm"
     >
       <SectionHeader
         title={block.title}
@@ -48,12 +48,12 @@ function SectionHeader({ title, collapsible, isOpen, onToggle }: SectionHeaderPr
         type="button"
         onClick={onToggle}
         aria-expanded={isOpen}
-        className="flex items-center justify-between text-left text-sm font-medium text-neutral-700 dark:text-neutral-200"
+        className="flex items-center justify-between text-left text-sm font-medium text-fg"
       >
         <span>{title ?? 'Section'}</span>
-        <span aria-hidden className="text-neutral-400">{isOpen ? '▾' : '▸'}</span>
+        <span aria-hidden className="text-faint">{isOpen ? '▾' : '▸'}</span>
       </button>
     )
   }
-  return <h4 className="text-sm font-medium text-neutral-700 dark:text-neutral-200">{title}</h4>
+  return <h4 className="text-sm font-medium text-fg">{title}</h4>
 }

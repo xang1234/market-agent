@@ -26,7 +26,7 @@ export function AnalystConsensus({ block }: AnalystConsensusProps): ReactElement
         <p
           data-testid={`block-analyst-consensus-${block.id}-coverage`}
           role="alert"
-          className="text-xs text-amber-700 dark:text-amber-400"
+          className="text-xs text-warning"
         >
           {block.coverage_warning}
         </p>
@@ -48,8 +48,8 @@ function DistributionRow({ blockId, index, bucket }: DistributionRowProps): Reac
       data-count-ref={bucket.count_ref}
       className="flex items-center justify-between gap-3"
     >
-      <span className="text-neutral-800 dark:text-neutral-200">{bucket.bucket}</span>
-      <span className="text-xs text-neutral-500 dark:text-neutral-400">—</span>
+      <span className="text-fg">{bucket.bucket}</span>
+      <span className="num text-xs text-muted">—</span>
     </li>
   )
 }

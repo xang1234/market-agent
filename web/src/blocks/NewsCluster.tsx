@@ -15,10 +15,8 @@ export function NewsCluster({ block }: NewsClusterProps): ReactElement {
       title={block.title}
       dataAttrs={{ 'data-cluster-id': block.cluster_id }}
     >
-      <p className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
-        {block.headline}
-      </p>
-      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+      <p className="text-sm font-medium text-fg">{block.headline}</p>
+      <p className="num text-xs text-muted">
         <span data-testid={`block-news-cluster-${block.id}-claim-count`}>
           {claimCount} {pluralize(claimCount, 'claim')}
         </span>

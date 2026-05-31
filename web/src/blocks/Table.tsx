@@ -9,16 +9,16 @@ export function Table({ block }: TableProps): ReactElement {
     <div
       data-testid={`block-table-${block.id}`}
       data-block-kind="table"
-      className="overflow-x-auto rounded-md border border-neutral-200 dark:border-neutral-800"
+      className="overflow-x-auto rounded-lg border border-line"
     >
       <table className="w-full border-collapse text-left text-sm">
-        <thead className="bg-neutral-50 dark:bg-neutral-900">
+        <thead className="bg-surface-2">
           <tr>
             {block.columns.map((column, index) => (
               <th
                 key={`${block.id}-col-${index}`}
                 scope="col"
-                className="border-b border-neutral-200 px-3 py-2 text-xs font-medium uppercase tracking-wide text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"
+                className="border-b border-line px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted"
               >
                 {column}
               </th>
@@ -30,12 +30,12 @@ export function Table({ block }: TableProps): ReactElement {
             <tr
               key={`${block.id}-row-${rowIndex}`}
               data-testid={`block-table-${block.id}-row-${rowIndex}`}
-              className="border-t border-neutral-100 dark:border-neutral-800"
+              className="border-t border-line"
             >
               {row.map((cell, cellIndex) => (
                 <td
                   key={`${block.id}-row-${rowIndex}-cell-${cellIndex}`}
-                  className="px-3 py-2 text-neutral-800 dark:text-neutral-200"
+                  className="px-3 py-2 tabular-nums text-fg"
                 >
                   {formatTableCell(cell)}
                 </td>

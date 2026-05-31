@@ -13,7 +13,7 @@ export function EpsSurprise({ block }: EpsSurpriseProps): ReactElement {
     >
       <table className="w-full border-collapse text-left text-sm">
         <thead>
-          <tr className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+          <tr className="text-xs uppercase tracking-wide text-muted">
             <th scope="col" className="py-1 font-medium">Quarter</th>
             <th scope="col" className="py-1 font-medium">Estimate</th>
             <th scope="col" className="py-1 font-medium">Actual</th>
@@ -48,16 +48,14 @@ function QuarterRow({ blockId, index, quarter }: QuarterRowProps): ReactElement 
       data-estimate-ref={quarter.estimate_ref}
       data-actual-ref={quarter.actual_ref}
       data-surprise-ref={quarter.surprise_ref}
-      className="border-t border-neutral-100 dark:border-neutral-800"
+      className="border-t border-line"
     >
-      <th scope="row" className="py-1 text-left font-medium text-neutral-800 dark:text-neutral-200">
+      <th scope="row" className="py-1 text-left font-medium text-fg">
         {quarter.label}
       </th>
-      <td className="py-1 text-neutral-500 dark:text-neutral-400">—</td>
-      <td className="py-1 text-neutral-500 dark:text-neutral-400">—</td>
-      <td className="py-1 text-neutral-500 dark:text-neutral-400">
-        {quarter.surprise_ref ? '—' : null}
-      </td>
+      <td className="num py-1 text-muted">—</td>
+      <td className="num py-1 text-muted">—</td>
+      <td className="num py-1 text-muted">{quarter.surprise_ref ? '—' : null}</td>
     </tr>
   )
 }

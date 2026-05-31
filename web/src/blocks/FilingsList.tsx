@@ -30,8 +30,8 @@ function FilingRow({ blockId, index, item }: FilingRowProps): ReactElement {
       data-document-id={item.document_id}
       className="flex items-baseline justify-between gap-3"
     >
-      <span className="font-medium text-neutral-800 dark:text-neutral-200">{item.form}</span>
-      <span className="flex items-baseline gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+      <span className="font-medium text-fg">{item.form}</span>
+      <span className="flex items-baseline gap-2 text-xs text-muted">
         {item.period ? <span>{item.period}</span> : null}
         <time dateTime={item.filed_at}>{formatIsoTimestamp(item.filed_at)}</time>
       </span>

@@ -24,7 +24,7 @@ export function Disclosure({ block }: DisclosureProps): ReactElement {
           {disclosureTierLabel(tier)}
         </Badge>
       ) : null}
-      <ul className="flex list-none flex-col gap-1 p-0 text-xs text-neutral-700 dark:text-neutral-300">
+      <ul className="flex list-none flex-col gap-1 p-0 text-xs text-fg-soft">
         {block.items.map((item, index) => (
           <li
             key={`${block.id}-item-${index}`}

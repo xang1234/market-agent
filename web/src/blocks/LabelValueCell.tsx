@@ -17,12 +17,10 @@ export function LabelValueCell({
   dataAttrs,
   emphasis = false,
 }: LabelValueCellProps): ReactElement {
-  const valueClass = emphasis
-    ? 'text-sm font-medium text-neutral-800 dark:text-neutral-200'
-    : 'text-neutral-800 dark:text-neutral-200'
+  const valueClass = emphasis ? 'text-sm font-medium text-fg' : 'text-fg'
   return (
     <div data-testid={testId} {...dataAttrs} className="flex flex-col gap-0.5">
-      <dt className="uppercase tracking-wide text-neutral-500">{label}</dt>
+      <dt className="uppercase tracking-wide text-muted">{label}</dt>
       <dd className={valueClass}>{children}</dd>
     </div>
   )

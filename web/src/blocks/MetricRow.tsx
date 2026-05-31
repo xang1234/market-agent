@@ -43,21 +43,21 @@ function MetricChip({ snapshotId, valueRef, blockId, index, cell }: MetricChipPr
       data-testid={`block-metric-row-${blockId}-cell-${index}`}
       data-value-ref={cell.value_ref}
       data-delta-ref={cell.delta_ref}
-      className="flex flex-col gap-0.5 rounded border border-neutral-200 bg-neutral-50 px-3 py-2 dark:border-neutral-800 dark:bg-neutral-900"
+      className="flex flex-col gap-0.5 rounded-lg border border-line bg-surface-2 px-3 py-2"
     >
-      <span className="text-xs uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+      <span className="text-xs uppercase tracking-wide text-muted">
         {cell.label}
       </span>
       <InspectableRef
         snapshotId={snapshotId}
         inspectionRef={valueRef}
-        className="text-left text-sm font-medium text-neutral-900 underline decoration-dotted underline-offset-2 dark:text-neutral-100"
+        className="num text-left text-sm font-medium text-fg underline decoration-dotted underline-offset-2"
       >
         {metricCellDisplayValue(cell)}
       </InspectableRef>
       {metricCellHasDelta(cell) ? (
         <span
-          className="text-xs text-neutral-500 dark:text-neutral-400"
+          className="text-xs text-muted"
           data-testid={`block-metric-row-${blockId}-cell-${index}-delta`}
         >
           Δ pending

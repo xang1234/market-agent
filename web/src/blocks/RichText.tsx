@@ -13,7 +13,7 @@ export function RichText({ block }: RichTextProps): ReactElement {
     <p
       data-testid={`block-rich-text-${block.id}`}
       data-block-kind="rich_text"
-      className="text-sm leading-6 text-neutral-800 dark:text-neutral-200"
+      className="text-sm leading-6 text-fg-soft"
     >
       {block.segments.map((segment, index) => {
         if (isRefSegment(segment)) {
@@ -55,7 +55,7 @@ function RefSegmentSpan({ snapshotId, blockId, index, segment, manifest }: RefSe
         inspectionRef={inspectionRef}
         testId={`block-rich-text-${blockId}-ref-${index}`}
         dataAttrs={{ ...baseAttrs, 'data-ref-state': 'placeholder' }}
-        className="rounded bg-neutral-100 px-1 text-neutral-700 underline decoration-dotted dark:bg-neutral-800 dark:text-neutral-200"
+        className="rounded bg-surface-2 px-1 text-fg-soft underline decoration-dotted"
       >
         {refSegmentPlaceholder(segment)}
       </InspectableRef>
@@ -69,7 +69,7 @@ function RefSegmentSpan({ snapshotId, blockId, index, segment, manifest }: RefSe
         inspectionRef={inspectionRef}
         testId={`block-rich-text-${blockId}-ref-${index}`}
         dataAttrs={{ ...baseAttrs, 'data-ref-state': 'unresolved' }}
-        className="rounded bg-rose-100 px-1 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200"
+        className="rounded bg-negative-soft px-1 text-negative"
       >
         [unresolved {segment.ref_kind}]
       </InspectableRef>
@@ -81,7 +81,7 @@ function RefSegmentSpan({ snapshotId, blockId, index, segment, manifest }: RefSe
       inspectionRef={inspectionRef}
       testId={`block-rich-text-${blockId}-ref-${index}`}
       dataAttrs={{ ...baseAttrs, 'data-ref-state': 'resolved' }}
-      className="rounded px-1 text-neutral-800 underline decoration-dotted underline-offset-2 dark:text-neutral-200"
+      className="rounded px-1 text-fg-soft underline decoration-dotted underline-offset-2"
     >
       {resolved.value}
     </InspectableRef>
