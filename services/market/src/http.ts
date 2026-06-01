@@ -23,7 +23,7 @@ import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 
 export type MarketServerDeps = {
   adapter: MarketDataAdapter;
-  commodityAdapter?: CommodityMarketDataAdapter;
+  commodityAdapter: CommodityMarketDataAdapter;
   listings: ListingRepository;
   // Optional clock used when synthesizing per-listing unavailable envelopes
   // (e.g., basis mismatch, missing listing). Defaults to wall-clock; tests
@@ -75,9 +75,9 @@ export type GetCacheAuditResponse = {
 const MAX_SERIES_BODY_BYTES = 64 * 1024;
 const DEFAULT_SERIES_CACHE_AUDIT_MAX_EVENTS = 1_000;
 const DEFAULT_SERIES_CACHE_MAX_ENTRIES = 256;
-const COMMODITY_ADAPTER_NOT_CONFIGURED_ERROR = "commodity market adapter is not configured";
 
 export function createMarketServer(deps: MarketServerDeps): Server {
+  const commodityAdapter = requireCommodityAdapter(deps.commodityAdapter);
   const clock = deps.clock ?? (() => new Date());
   const seriesCacheAuditMaxEvents =
     deps.seriesCacheAuditMaxEvents ?? DEFAULT_SERIES_CACHE_AUDIT_MAX_EVENTS;
@@ -93,6 +93,10 @@ export function createMarketServer(deps: MarketServerDeps): Server {
         respond(res, 404, { error: "not found" });
         return;
       }
+      if (isCommodityRoute(route)) {
+        await handleCommodityRoute(commodityAdapter, route, res);
+        return;
+      }
 
       switch (route.action) {
         case "healthz":
@@ -103,61 +107,6 @@ export function createMarketServer(deps: MarketServerDeps): Server {
             dashboard: buildSeriesCacheAuditDashboard(seriesCacheAuditEvents),
           } satisfies GetCacheAuditResponse);
           return;
-        case "get_commodity_latest": {
-          const commodityAdapter = requireCommodityAdapter(deps, res);
-          if (!commodityAdapter) return;
-          const response = await commodityAdapter.latest(route.subject_ref);
-          if (response === null) {
-            respond(res, 404, { error: "commodity quote not found" });
-            return;
-          }
-          respond(res, 200, response);
-          return;
-        }
-        case "get_commodity_series": {
-          const commodityAdapter = requireCommodityAdapter(deps, res);
-          if (!commodityAdapter) return;
-          const response = await commodityAdapter.series(route.subject_ref);
-          if (response === null) {
-            respond(res, 404, { error: "commodity series not found" });
-            return;
-          }
-          respond(res, 200, response);
-          return;
-        }
-        case "get_commodity_curve": {
-          const commodityAdapter = requireCommodityAdapter(deps, res);
-          if (!commodityAdapter) return;
-          const response = await commodityAdapter.curve(route.curve_id);
-          if (response === null) {
-            respond(res, 404, { error: "commodity curve not found" });
-            return;
-          }
-          respond(res, 200, response);
-          return;
-        }
-        case "get_commodity_spreads": {
-          const commodityAdapter = requireCommodityAdapter(deps, res);
-          if (!commodityAdapter) return;
-          const response = await commodityAdapter.spreads(route.curve_id);
-          if (response === null) {
-            respond(res, 404, { error: "commodity spreads not found" });
-            return;
-          }
-          respond(res, 200, response);
-          return;
-        }
-        case "get_commodity_inventory": {
-          const commodityAdapter = requireCommodityAdapter(deps, res);
-          if (!commodityAdapter) return;
-          const response = await commodityAdapter.inventory(route.commodity_id);
-          if (response === null) {
-            respond(res, 404, { error: "commodity inventory not found" });
-            return;
-          }
-          respond(res, 200, response);
-          return;
-        }
         case "get_quote": {
           const record = await deps.listings.find(route.subject_id);
           if (!record) {
@@ -322,13 +271,16 @@ function seriesResponseHasRetryableUnavailable(response: GetSeriesResponse): boo
 type Route =
   | { action: "healthz" }
   | { action: "get_cache_audit" }
+  | CommodityRoute
+  | { action: "get_quote"; subject_id: string }
+  | { action: "get_series" };
+
+type CommodityRoute =
   | { action: "get_commodity_latest"; subject_ref: SubjectRef & { kind: CommodityMarketSubjectKind } }
   | { action: "get_commodity_series"; subject_ref: SubjectRef & { kind: CommodityMarketSubjectKind } }
   | { action: "get_commodity_curve"; curve_id: string }
   | { action: "get_commodity_spreads"; curve_id: string }
-  | { action: "get_commodity_inventory"; commodity_id: string }
-  | { action: "get_quote"; subject_id: string }
-  | { action: "get_series" };
+  | { action: "get_commodity_inventory"; commodity_id: string };
 
 function matchRoute(method: string, rawUrl: string): Route | null {
   const url = new URL(rawUrl, "http://localhost");
@@ -387,12 +339,69 @@ function commodityMarketSubjectFromQuery(
 }
 
 function requireCommodityAdapter(
-  deps: MarketServerDeps,
+  adapter: CommodityMarketDataAdapter | undefined,
+): CommodityMarketDataAdapter {
+  if (adapter) return adapter;
+  throw new Error("commodity market adapter is required");
+}
+
+function isCommodityRoute(route: Route): route is CommodityRoute {
+  switch (route.action) {
+    case "get_commodity_latest":
+    case "get_commodity_series":
+    case "get_commodity_curve":
+    case "get_commodity_spreads":
+    case "get_commodity_inventory":
+      return true;
+    default:
+      return false;
+  }
+}
+
+async function handleCommodityRoute(
+  adapter: CommodityMarketDataAdapter,
+  route: CommodityRoute,
   res: ServerResponse,
-): CommodityMarketDataAdapter | null {
-  if (deps.commodityAdapter) return deps.commodityAdapter;
-  respond(res, 503, { error: COMMODITY_ADAPTER_NOT_CONFIGURED_ERROR });
-  return null;
+): Promise<void> {
+  switch (route.action) {
+    case "get_commodity_latest": {
+      const response = await adapter.latest(route.subject_ref);
+      respondWithNullableCommodity(res, response, "commodity quote not found");
+      return;
+    }
+    case "get_commodity_series": {
+      const response = await adapter.series(route.subject_ref);
+      respondWithNullableCommodity(res, response, "commodity series not found");
+      return;
+    }
+    case "get_commodity_curve": {
+      const response = await adapter.curve(route.curve_id);
+      respondWithNullableCommodity(res, response, "commodity curve not found");
+      return;
+    }
+    case "get_commodity_spreads": {
+      const response = await adapter.spreads(route.curve_id);
+      respondWithNullableCommodity(res, response, "commodity spreads not found");
+      return;
+    }
+    case "get_commodity_inventory": {
+      const response = await adapter.inventory(route.commodity_id);
+      respondWithNullableCommodity(res, response, "commodity inventory not found");
+      return;
+    }
+  }
+}
+
+function respondWithNullableCommodity<T extends object>(
+  res: ServerResponse,
+  response: T | null,
+  notFoundError: string,
+): void {
+  if (response === null) {
+    respond(res, 404, { error: notFoundError });
+    return;
+  }
+  respond(res, 200, response);
 }
 
 function listingContext(record: ListingRecord): GetQuoteResponse["listing_context"] {

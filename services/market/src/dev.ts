@@ -4,6 +4,7 @@ import { createPolygonAdapter, createPolygonHttpFetcher } from "./adapters/polyg
 import { createStooqMarketDataAdapter } from "./adapters/stooq.ts";
 import { createCachedMarketDataAdapter } from "./cached-adapter.ts";
 import { createPostgresMarketCacheRepository } from "./cache-repository.ts";
+import { createDevCommodityMarketDataAdapter } from "./dev-commodity-market-adapter.ts";
 import { createMarketServer } from "./http.ts";
 import { createDailyBarsAwareFallbackMarketDataAdapter } from "./provider-composition.ts";
 import {
@@ -90,8 +91,9 @@ const provider = devProvidersAdapter || stooqAdapter
     })
   : polygonProvider;
 const adapter = createCachedMarketDataAdapter({ provider, cache });
+const commodityAdapter = createDevCommodityMarketDataAdapter();
 
-const server = createMarketServer({ adapter, listings });
+const server = createMarketServer({ adapter, commodityAdapter, listings });
 server.listen(port, host, () => {
   console.log(`market listening on http://${host}:${port}`);
 });

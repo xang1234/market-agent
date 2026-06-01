@@ -8,6 +8,7 @@ import {
 } from "../src/daily-call.ts";
 
 const SNAPSHOT_ID = "11111111-1111-4111-9111-111111111111";
+const BRIEF_ID = "55555555-5555-4555-9555-555555555555";
 const COPPER_ID = "22222222-2222-4222-9222-222222222222";
 const IRON_ORE_ID = "33333333-3333-4333-9333-333333333333";
 
@@ -15,7 +16,7 @@ test("buildDailyCallDraft creates an analyst-signoff brief for copper and iron o
   assert.deepEqual(DAILY_CALL_STATUSES, ["draft", "published"]);
 
   const brief = buildDailyCallDraft({
-    brief_id: "brief-1",
+    brief_id: BRIEF_ID,
     snapshot_id: SNAPSHOT_ID,
     as_of: "2026-05-31T00:00:00.000Z",
     commodity_refs: [
@@ -35,7 +36,7 @@ test("buildDailyCallDraft creates an analyst-signoff brief for copper and iron o
 
 test("publishDailyCall stamps reviewer and published timestamp without mutating draft", () => {
   const draft = buildDailyCallDraft({
-    brief_id: "brief-1",
+    brief_id: BRIEF_ID,
     snapshot_id: SNAPSHOT_ID,
     as_of: "2026-05-31T00:00:00.000Z",
     commodity_refs: [{ kind: "commodity", id: COPPER_ID }],
@@ -53,4 +54,19 @@ test("publishDailyCall stamps reviewer and published timestamp without mutating 
   assert.equal(published.status, "published");
   assert.equal(published.reviewer_user_id, "44444444-4444-4444-9444-444444444444");
   assert.equal(published.published_at, "2026-05-31T01:00:00.000Z");
+});
+
+test("buildDailyCallDraft rejects non-UUID resource ids", () => {
+  assert.throws(
+    () => buildDailyCallDraft({
+      brief_id: "brief-1",
+      snapshot_id: SNAPSHOT_ID,
+      as_of: "2026-05-31T00:00:00.000Z",
+      commodity_refs: [{ kind: "commodity", id: COPPER_ID }],
+      narrative: "Copper tone is constructive.",
+      driver_ids: ["driver-1"],
+      watch_items: [],
+    }),
+    /daily_call\.brief_id must be a UUID v4/,
+  );
 });

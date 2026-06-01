@@ -57,12 +57,16 @@ async function startServer(t: TestContext, deps: MarketServerDeps = buildDeps())
   return `http://127.0.0.1:${port}`;
 }
 
-test("GET /v1/markets/latest requires a configured commodity market adapter", async (t) => {
-  const base = await startServer(t, buildDeps({ commodityAdapter: undefined }));
-  const response = await fetch(`${base}/v1/markets/latest?subject_kind=contract&subject_id=${COPPER_CONTRACT_ID}`);
-
-  assert.equal(response.status, 503);
-  assert.deepEqual(await response.json(), { error: "commodity market adapter is not configured" });
+test("createMarketServer fails fast without the commodity market adapter", () => {
+  const base = buildDeps();
+  assert.throws(
+    () => createMarketServer({
+      adapter: base.adapter,
+      listings: base.listings,
+      clock: base.clock,
+    } as MarketServerDeps),
+    /commodity market adapter is required/,
+  );
 });
 
 test("GET /v1/markets/latest returns a normalized commodity quote contract", async (t) => {

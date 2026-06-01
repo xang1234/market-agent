@@ -1190,7 +1190,8 @@
         "type": "object",
         "properties": {
           "brief_id": {
-            "type": "string"
+            "type": "string",
+            "format": "uuid"
           },
           "reviewer_user_id": {
             "type": "string",

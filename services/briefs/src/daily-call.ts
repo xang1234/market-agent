@@ -44,7 +44,7 @@ export type PublishDailyCallInput = {
 };
 
 export function buildDailyCallDraft(input: DailyCallDraftInput): DailyCallBrief {
-  assertNonEmptyString(input.brief_id, "daily_call.brief_id");
+  assertUuid(input.brief_id, "daily_call.brief_id");
   assertUuid(input.snapshot_id, "daily_call.snapshot_id");
   assertIsoDateTime(input.as_of, "daily_call.as_of");
   const commodity_refs = freezeCommodityRefs(input.commodity_refs);

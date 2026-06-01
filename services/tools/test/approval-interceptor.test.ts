@@ -77,7 +77,7 @@ test("interceptToolCall routes publish_daily_call through a pending approval act
     audience: "analyst",
     tool_name: "publish_daily_call",
     arguments: {
-      brief_id: "daily-copper-iron-ore-2026-05-31",
+      brief_id: "55555555-5555-4555-9555-555555555555",
       reviewer_user_id: "70a0cc2e-e198-4b59-a5c9-9bd2da4a359b",
     },
     idempotency_key: "turn-2/tool-1",
@@ -88,7 +88,7 @@ test("interceptToolCall routes publish_daily_call through a pending approval act
   assert.equal(interception.pending_action.tool_name, "publish_daily_call");
   assert.equal(interception.pending_action.bundle_id, "daily_call_run");
   assert.deepEqual(interception.pending_action.arguments, {
-    brief_id: "daily-copper-iron-ore-2026-05-31",
+    brief_id: "55555555-5555-4555-9555-555555555555",
     reviewer_user_id: "70a0cc2e-e198-4b59-a5c9-9bd2da4a359b",
   });
 });

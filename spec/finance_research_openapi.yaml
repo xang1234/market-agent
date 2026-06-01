@@ -2579,6 +2579,7 @@ components:
       properties:
         brief_id:
           type: string
+          format: uuid
         snapshot_id:
           type: string
           format: uuid

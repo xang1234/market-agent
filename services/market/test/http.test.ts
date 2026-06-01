@@ -18,6 +18,7 @@ import {
   DEV_LISTINGS,
   DEV_POLYGON_SOURCE_ID,
 } from "../src/dev-fixtures.ts";
+import { createDevCommodityMarketDataAdapter } from "../src/dev-commodity-market-adapter.ts";
 import type { NormalizedSeriesQuery } from "../src/series-query.ts";
 
 const FIXED_NOW = new Date("2026-04-22T15:30:00.000Z");
@@ -30,7 +31,11 @@ function buildDeps(): MarketServerDeps {
     fetcher: createDevPolygonFetcher({ clock: () => FIXED_NOW }),
     resolveListing: listingResolverFromRepository(listings),
   });
-  return { adapter, listings, clock: () => FIXED_NOW };
+  return { adapter, commodityAdapter: buildCommodityAdapter(), listings, clock: () => FIXED_NOW };
+}
+
+function buildCommodityAdapter() {
+  return createDevCommodityMarketDataAdapter({ clock: () => FIXED_NOW });
 }
 
 async function startServer(t: TestContext, deps: MarketServerDeps): Promise<string> {
@@ -117,7 +122,7 @@ test("GET /v1/market/quote returns 502 when the upstream adapter throws", async 
     },
     resolveListing: listingResolverFromRepository(listings),
   });
-  const url = await startServer(t, { adapter, listings });
+  const url = await startServer(t, { adapter, commodityAdapter: buildCommodityAdapter(), listings });
   const res = await fetch(
     `${url}/v1/market/quote?subject_kind=listing&subject_id=${APPLE_LISTING_ID}`,
   );
@@ -357,7 +362,12 @@ test("POST /v1/market/series surfaces adapter failures as per-listing unavailabl
     },
     resolveListing: listingResolverFromRepository(listings),
   });
-  const url = await startServer(t, { adapter, listings, clock: () => FIXED_NOW });
+  const url = await startServer(t, {
+    adapter,
+    commodityAdapter: buildCommodityAdapter(),
+    listings,
+    clock: () => FIXED_NOW,
+  });
 
   const res = await postSeries(url, validSeriesQuery());
   assert.equal(res.status, 200);
@@ -379,7 +389,12 @@ test("POST /v1/market/series does not cache retryable unavailable outcomes", asy
       throw new Error("polygon: synthetic upstream failure");
     },
   };
-  const url = await startServer(t, { adapter, listings, clock: () => FIXED_NOW });
+  const url = await startServer(t, {
+    adapter,
+    commodityAdapter: buildCommodityAdapter(),
+    listings,
+    clock: () => FIXED_NOW,
+  });
   const query = validSeriesQuery();
 
   assert.equal((await postSeries(url, query)).status, 200);
