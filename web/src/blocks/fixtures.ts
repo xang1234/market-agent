@@ -244,6 +244,49 @@ export const metricsComparisonFixture: MetricsComparisonBlock = {
   ],
 }
 
+// Mirrors the shape the analyze emitter produces (metrics-comparison-emitter.ts):
+// data_ref.params.fact_bindings for every cell fact, a null gap cell (a peer
+// lacking a metric), tones, and primary_subject_ref. Used by the services↔web
+// E2E test that round-trips an emitted block through BlockValidator + renderer.
+const EMITTED_REV_AAPL = '55555555-5555-4555-9555-000000000001'
+const EMITTED_PE_AAPL = '55555555-5555-4555-9555-000000000002'
+const EMITTED_REV_MSFT = '55555555-5555-4555-9555-000000000003'
+const EMITTED_FY_BINDING = { period_kind: 'fiscal_y', fiscal_year: 2024, fiscal_period: 'FY' } as const
+
+export const emittedMetricsComparisonFixture: MetricsComparisonBlock = {
+  id: 'mc-emitted-1',
+  kind: 'metrics_comparison',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: {
+    kind: 'metrics_comparison',
+    id: 'mc-emitted-1',
+    params: {
+      fact_bindings: [
+        { fact_id: EMITTED_REV_AAPL, unit: 'currency', ...EMITTED_FY_BINDING },
+        { fact_id: EMITTED_PE_AAPL, unit: 'multiple', ...EMITTED_FY_BINDING },
+        { fact_id: EMITTED_REV_MSFT, unit: 'currency', ...EMITTED_FY_BINDING },
+      ],
+    },
+  },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  title: 'Peer comparison',
+  subjects: [
+    { kind: 'issuer', id: ISSUER_AAPL },
+    { kind: 'issuer', id: ISSUER_MSFT },
+  ],
+  metrics: ['Revenue', 'P/E'],
+  primary_subject_ref: { kind: 'issuer', id: ISSUER_AAPL },
+  cells: [
+    [
+      { value_ref: EMITTED_REV_AAPL, format: '$391.0B' },
+      { value_ref: EMITTED_PE_AAPL, format: '29.1×', tone: 'positive' },
+    ],
+    // MSFT lacks a P/E here — a null gap cell.
+    [{ value_ref: EMITTED_REV_MSFT, format: '$245.1B' }, null],
+  ],
+}
+
 export const sentimentTrendFixture: SentimentTrendBlock = {
   id: 'st-1',
   kind: 'sentiment_trend',

@@ -4,7 +4,8 @@ import test from 'node:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import { MetricsComparison } from './MetricsComparison.tsx'
-import { metricsComparisonFixture } from './fixtures.ts'
+import { emittedMetricsComparisonFixture, metricsComparisonFixture } from './fixtures.ts'
+import { validateBlock } from './BlockValidator.ts'
 import type { MetricsComparisonBlock } from './types.ts'
 
 test('MetricsComparison renders formatted cell values, tones, and the primary-subject row', () => {
@@ -69,4 +70,26 @@ test('MetricsComparison renders a null cell as a gap em-dash alongside present c
   assert.match(html, /\$385\.7B/)
   // The null P/E cell renders one em-dash; the present revenue cell does not.
   assert.equal(html.split('—').length - 1, 1)
+})
+
+// --- E2E: an emitted-shape block round-trips through the web contract ---
+
+test('the emitted metrics_comparison block passes the web BlockValidator (AJV/schema)', () => {
+  // Exercises the emitter's exact output shape: data_ref.params.fact_bindings,
+  // a null gap cell, tones, and primary_subject_ref.
+  const result = validateBlock(emittedMetricsComparisonFixture)
+  assert.equal(result.valid, true, result.valid ? '' : JSON.stringify(result.errors, null, 2))
+})
+
+test('the emitted metrics_comparison block renders cells, a tone, a gap, and an inspect affordance', () => {
+  const html = renderToStaticMarkup(<MetricsComparison block={emittedMetricsComparisonFixture} />)
+
+  assert.match(html, /\$391\.0B/)
+  assert.match(html, /29\.1×/)
+  // The toned P/E cell.
+  assert.match(html, /text-positive/)
+  // MSFT's missing P/E is the single gap.
+  assert.equal(html.split('—').length - 1, 1)
+  // Present cells link to their backing fact.
+  assert.match(html, /data-inspection-id="55555555-5555-4555-9555-000000000001"/)
 })

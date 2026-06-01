@@ -191,6 +191,14 @@ test("emitPeerComparisonBlock composes the chain into a sealable peer_table bloc
 
   // Manifest binds all four cell facts.
   assert.equal(sealInput.manifest.fact_refs.length, 4);
+
+  // The block declares a fact_binding per cell fact (what the web emitted-block
+  // fixture mirrors) — one for each manifest fact_ref.
+  const bindings = (block.data_ref.params?.fact_bindings ?? []) as ReadonlyArray<{ fact_id: string }>;
+  assert.deepEqual(
+    new Set(bindings.map((binding) => binding.fact_id)),
+    new Set(sealInput.manifest.fact_refs),
+  );
 });
 
 test("the emitted seal input passes the real snapshot verifier", async () => {
