@@ -16,6 +16,7 @@ import type {
 } from "./key-stats.ts";
 import { REVENUE_KEYS } from "./key-stats.ts";
 import type { StatsRepository } from "./stats-repository.ts";
+import type { CoverageLevel, FiscalPeriod, PeriodKind } from "./statement.ts";
 import { freezeIssuerRef, type IssuerSubjectRef, type UUID } from "./subject-ref.ts";
 
 // The v1 metric columns (design: Revenue TTM, gross/net margin, rev growth YoY,
@@ -28,6 +29,22 @@ export type PeerMetricKey =
   | "pe_ratio";
 
 export type PeerMetricFormat = "currency" | "percent" | "multiple";
+
+// Metrics that ARE a stored fact already (revenue is a reported statement line)
+// rather than a computed quantity. The materializer points a cell at the
+// existing fact instead of minting a derived duplicate. The ratios/growth are
+// computed and get a fresh method='derived' fact.
+export const REUSABLE_PEER_METRICS: ReadonlySet<PeerMetricKey> = new Set(["revenue"]);
+
+// The reporting period a value belongs to — needed to mint a fact (facts carry
+// a non-null period) and to align cells across peers.
+export type PeerMetricPeriod = {
+  period_kind: PeriodKind;
+  period_start: string | null;
+  period_end: string;
+  fiscal_year: number;
+  fiscal_period: FiscalPeriod;
+};
 
 // One materializable metric value for one issuer. value_num is always present
 // (absent/unavailable metrics are omitted, not carried as null) so the
@@ -42,6 +59,8 @@ export type PeerMetricValue = {
   // statement input (eps/revenue/…), falling back to the first input. A
   // blended metric like P/E still records every component in input_fact_ids.
   source_id: UUID;
+  period: PeerMetricPeriod;
+  coverage_level: CoverageLevel;
   // Lineage: the persisted facts this value was computed from. May be empty
   // when the envelope came from a not-yet-persisted statement (fact_id absent).
   input_fact_ids: ReadonlyArray<UUID>;
@@ -103,6 +122,8 @@ function metricsFromEnvelope(envelope: KeyStatsEnvelope): PeerMetricValue[] {
         format: column.format,
         as_of: stat.as_of,
         source_id: representativeSourceId(stat.inputs),
+        period: periodOf(stat),
+        coverage_level: stat.coverage_level,
         input_fact_ids: inputFactIds(stat.inputs),
       }),
     );
@@ -135,12 +156,26 @@ function revenueValue(envelope: KeyStatsEnvelope): PeerMetricValue | null {
           format: "currency",
           as_of: input.as_of,
           source_id: input.source_id,
+          period: periodOf(input),
+          coverage_level: input.coverage_level,
           input_fact_ids: input.fact_id !== undefined ? Object.freeze([input.fact_id]) : Object.freeze([]),
         });
       }
     }
   }
   return null;
+}
+
+// KeyStat and StatementLineInputRef both carry the same period fields; project
+// just those into the period the materializer needs.
+function periodOf(src: PeerMetricPeriod): PeerMetricPeriod {
+  return {
+    period_kind: src.period_kind,
+    period_start: src.period_start,
+    period_end: src.period_end,
+    fiscal_year: src.fiscal_year,
+    fiscal_period: src.fiscal_period,
+  };
 }
 
 function inputFactIds(inputs: ReadonlyArray<KeyStatInputRef>): ReadonlyArray<UUID> {

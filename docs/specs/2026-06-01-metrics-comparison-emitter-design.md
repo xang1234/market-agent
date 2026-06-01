@@ -61,6 +61,22 @@ to a real **fact** in a **sealed snapshot** (the verifier enforces this). Today:
 - **Snapshot scope:** one snapshot **per analyze run**, bundling all blocks +
   fact_refs for that run (not per-block).
 
+### Materializer (fra-wcj6) — implemented
+
+`services/analyze/src/metrics-comparison-materializer.ts`:
+`materializePeerMetricFacts(db, peers)` →`MaterializedPeer[]` (per-(subject,
+metric) `value_ref`). Reuse vs. derive is keyed off `REUSABLE_PEER_METRICS`
+(`{revenue}`): revenue points the cell at its existing reported fact (its single
+`input_fact_id`; dropped to a gap if lineage is absent), the four computed
+metrics mint a `method='derived'` fact via the canonical `createFact`. Derived
+metric_ids are resolved once per batch from the `metrics` table (the computed
+keys are seeded). v1 derived-fact quality policy: `verification_status =
+authoritative`, `freshness_class = filing_time`, `confidence = 1`,
+`coverage_level` = the metric's coverage; lineage `{ kind:'derivation', metric,
+input_fact_ids }` in `quality_flags`. (When price-backed P/E lands, `filing_time`
+must be revisited — it blends a delayed price.) Inserts run on the caller's
+executor (sequential; the caller owns the transaction + seal boundary).
+
 ## Architecture / data flow
 
 ```
