@@ -114,11 +114,17 @@ function metricsFromEnvelope(envelope: KeyStatsEnvelope): PeerMetricValue[] {
 // participates as a margin denominator / growth numerator. Reusing that input
 // keeps the revenue cell's fact identical to the one the margins divide by,
 // instead of re-loading the statement.
+//
+// Only the current-period revenue qualifies. The growth stat also carries a
+// `role: "prior"` revenue input (last year's); excluding it prevents surfacing
+// stale prior-year revenue when the current statement happens to lack its own
+// revenue line — independent of the order stats appear in the envelope.
 function revenueValue(envelope: KeyStatsEnvelope): PeerMetricValue | null {
   for (const stat of envelope.stats) {
     for (const input of stat.inputs) {
       if (
         input.kind === "statement_line" &&
+        input.role !== "prior" &&
         REVENUE_KEYS.includes(input.metric_key) &&
         input.value_num !== null
       ) {

@@ -28,12 +28,15 @@ const MISSING_ISSUER_ID = "99999999-9999-4999-8999-999999999999";
 function aaplMapped(
   factIdByKey: Readonly<Record<string, string>> = {},
   overrides: Partial<NormalizedStatementInput> = {},
+  omitKeys: ReadonlyArray<string> = [],
 ) {
   const input = aaplFy2024IncomeStatementInput();
-  const lines: StatementLine[] = input.lines.map((line) => {
-    const factId = factIdByKey[line.metric_key];
-    return factId === undefined ? line : { ...line, fact_id: factId };
-  });
+  const lines: StatementLine[] = input.lines
+    .filter((line) => !omitKeys.includes(line.metric_key))
+    .map((line) => {
+      const factId = factIdByKey[line.metric_key];
+      return factId === undefined ? line : { ...line, fact_id: factId };
+    });
   return mapStatement(
     aaplIncomeMetricRegistry(),
     normalizedStatement({ ...input, lines, ...overrides }),
@@ -152,4 +155,28 @@ test("fetchPeerMetrics surfaces revenue_growth_yoy lineage across current + prio
   assert.equal(growth.format, "percent");
   // current revenue then prior revenue — inputRefs builds current first.
   assert.deepEqual(growth.input_fact_ids, [REVENUE_FACT_ID, PRIOR_REVENUE_FACT_ID]);
+});
+
+test("fetchPeerMetrics never surfaces prior-year revenue when the current statement lacks it", async () => {
+  const PRIOR_REVENUE_FACT_ID = "f0000000-0000-4000-8000-0000000000b2";
+  // Current statement is missing its revenue line; only the prior carries one
+  // (as the growth stat's role:"prior" input). Revenue must be ABSENT, not stale.
+  const current = aaplMapped({}, {}, ["net_sales.total"]);
+  const prior = aaplMapped(
+    { "net_sales.total": PRIOR_REVENUE_FACT_ID },
+    {
+      fiscal_year: 2023,
+      period_start: "2022-09-25",
+      period_end: "2023-09-30",
+      as_of: "2023-11-03T20:30:00.000Z",
+      reported_at: "2023-11-03T20:30:00.000Z",
+    },
+  );
+
+  const repo = createInMemoryStatsRepository([
+    { subject_id: aaplIssuer.id, inputs: { statement: current, prior_statement: prior } },
+  ]);
+
+  const [aapl] = await fetchPeerMetrics(repo, [aaplIssuer.id]);
+  assert.equal(byMetric(aapl.metrics).has("revenue"), false);
 });
