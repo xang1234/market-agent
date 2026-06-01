@@ -2,7 +2,9 @@ import playbookCatalog from "../../../spec/commodities_analyze_playbooks.json" w
 import {
   AnalyzePlaybookCatalogError,
   parseAnalyzePlaybookCatalog,
+  SOURCE_CATEGORIES,
   type AnalyzePlaybook,
+  type SourceCategory,
 } from "../../../spec/commodities_analyze_catalog.ts";
 
 export {
@@ -15,13 +17,13 @@ export {
 export type AnalyzePlaybookRunRequest = {
   playbook_id: string;
   instructions?: string;
-  source_categories?: ReadonlyArray<string>;
+  source_categories?: unknown;
 };
 
 export type ResolvedAnalyzePlaybookRequest = {
   playbook: AnalyzePlaybook;
   instructions: string;
-  source_categories: ReadonlyArray<string>;
+  source_categories: ReadonlyArray<SourceCategory>;
   prompt: string;
 };
 
@@ -41,7 +43,9 @@ export function resolveAnalyzePlaybookRequest(
   if (!playbook) throw new AnalyzePlaybookError("playbook_id is unknown");
 
   const instructions = normalizeText(input.instructions) ?? playbook.default_instructions;
-  const sourceCategories = normalizeSourceCategories(input.source_categories) ?? playbook.default_source_categories;
+  const sourceCategories = input.source_categories === undefined
+    ? playbook.default_source_categories
+    : parseAnalyzeSourceCategories(input.source_categories);
 
   return Object.freeze({
     playbook,
@@ -60,10 +64,23 @@ function normalizeText(value: unknown): string | null {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
-function normalizeSourceCategories(value: unknown): ReadonlyArray<string> | null {
-  if (!Array.isArray(value)) return null;
-  const categories = value
-    .filter((item): item is string => typeof item === "string" && item.trim() !== "")
-    .map((item) => item.trim());
-  return categories.length === 0 ? null : Object.freeze([...new Set(categories)]);
+export function parseAnalyzeSourceCategories(value: unknown): ReadonlyArray<SourceCategory> {
+  if (!Array.isArray(value)) throw new AnalyzePlaybookError("source_categories must be an array");
+  const seen = new Set<SourceCategory>();
+  const categories: SourceCategory[] = [];
+  value.forEach((item, index) => {
+    if (typeof item !== "string" || item.trim() === "") {
+      throw new AnalyzePlaybookError(`source_categories[${index}] must be a non-empty string`);
+    }
+    const category = item.trim();
+    if (!SOURCE_CATEGORIES.includes(category as SourceCategory)) {
+      throw new AnalyzePlaybookError(`source_categories[${index}]: unknown source category "${category}"`);
+    }
+    const sourceCategory = category as SourceCategory;
+    if (!seen.has(sourceCategory)) {
+      seen.add(sourceCategory);
+      categories.push(sourceCategory);
+    }
+  });
+  return Object.freeze(categories);
 }

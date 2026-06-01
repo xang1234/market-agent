@@ -58,7 +58,7 @@ test("GET /v1/analyze/templates returns session-scoped template options", async 
 
   assert.equal(response.status, 200);
   assert.ok(Array.isArray(body.templates));
-  assert.match(JSON.stringify(body.templates), /Earnings template/);
+  assert.match(JSON.stringify(body.templates), /Daily copper call/);
 });
 
 test("GET /v1/analyze/playbooks returns built-in playbooks", async (t) => {
@@ -127,7 +127,7 @@ test("POST /v1/analyze/runs accepts playbook_id and records it on the run", asyn
     blocks?: Array<{ title?: string; data_ref?: { params?: { playbook_section_id?: string } } }>;
   };
   assert.equal(body.template_id, EARNINGS_TEMPLATE_ID);
-  assert.equal(body.template_name, "Earnings template");
+  assert.equal(body.template_name, "Daily copper call");
   assert.equal(body.playbook_id, "daily_copper_call");
   assert.equal(body.playbook_name, "Daily copper call");
   assert.equal(body.playbook_version, 1);

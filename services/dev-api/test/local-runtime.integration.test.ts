@@ -141,7 +141,7 @@ test(
       user_id: USER_ID,
       name: "Evidence-backed memo",
       prompt_template: "Summarize the evidence",
-      source_categories: ["filings", "news"],
+      source_categories: ["licensed_reports", "news"],
     });
 
     const snapshotId = "40000000-0000-4000-8000-000000000004";
@@ -153,8 +153,8 @@ test(
       instructions: "Summarize the evidence",
       playbookPrompt: "Earnings quality: Assess revenue quality.\nRequired sections: Summary",
       playbookName: "Earnings quality",
-      sourceCategories: ["filings"],
-      bundleIds: ["company_profile", "filings"],
+      sourceCategories: ["licensed_reports"],
+      bundleIds: ["report_delta_analysis"],
       subjectRefs: [{ kind: "issuer", id: SUBJECT_ID }],
       playbookSectionId: "summary",
     });
@@ -209,7 +209,7 @@ test(
       body: JSON.stringify({
         template_id: template.template_id,
         instructions: "Summarize the evidence",
-        source_categories: ["filings"],
+        source_categories: ["licensed_reports"],
         subject_ref: { kind: "issuer", id: SUBJECT_ID },
       }),
     });

@@ -16,6 +16,7 @@ Thumbs.db
 
 # Local package installs
 db/node_modules/
+spec/node_modules/
 services/*/node_modules/
 web/node_modules/
 

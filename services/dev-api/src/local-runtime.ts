@@ -460,7 +460,7 @@ function severityInputForClaims(claims: ReadonlyArray<LocalRuntimeClaimEvidence>
     impact: {
       direction: scoringDirection(representative.polarity),
       channel: "demand" as const,
-      horizon: "near_term" as const,
+      horizon: "1w" as const,
       confidence: 0.5,
     },
     thesis_relevance: 0.5,

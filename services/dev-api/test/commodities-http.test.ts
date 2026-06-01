@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
 import test, { type TestContext } from "node:test";
 
+import { createDevCommodityDecisionAdapters } from "../../commodities/src/index.ts";
 import { createDevApiServer, type DevApiServerOptions } from "../src/http.ts";
-import { createDevCommodityDecisionAdapters } from "../src/commodities-fixtures.ts";
 
 async function startServer(t: TestContext, options: DevApiServerOptions = {}): Promise<string> {
   const server = createDevApiServer(process.env, options);

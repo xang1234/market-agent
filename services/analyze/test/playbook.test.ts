@@ -57,6 +57,16 @@ test("resolveAnalyzePlaybookRequest overlays user instructions without dropping 
   assert.ok(request.prompt.includes("LME cash-3m tightness"));
 });
 
+test("resolveAnalyzePlaybookRequest rejects unknown source categories at the analyze boundary", () => {
+  assert.throws(
+    () => resolveAnalyzePlaybookRequest({
+      playbook_id: "daily_copper_call",
+      source_categories: ["prices", "filings"],
+    }),
+    /unknown source category "filings"/,
+  );
+});
+
 test("parseAnalyzePlaybookCatalog rejects unknown source categories and block hints", () => {
   const valid = ANALYZE_PLAYBOOKS[0];
   assert.ok(valid);

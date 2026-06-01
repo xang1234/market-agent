@@ -23,6 +23,11 @@ import {
   type AnalyzeTemplateRow,
 } from "../../analyze/src/index.ts";
 import {
+  createDevCommodityDecisionAdapters,
+  commodityDecisionRoute,
+  type CommodityDecisionAdapters,
+} from "../../commodities/src/index.ts";
+import {
   claimAgentRun,
   completeAgentRun,
   createAgent,
@@ -69,11 +74,6 @@ import {
   isLlmSettingsPath,
   type DevApiLlmSettingsOptions,
 } from "./llm-settings-http.ts";
-import {
-  createDevCommodityDecisionAdapters,
-  commodityDecisionRoute,
-  type CommodityDecisionAdapters,
-} from "./commodities-fixtures.ts";
 
 type DevAgent = {
   agent_id: string;
@@ -709,11 +709,7 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
         const resolvedPlaybook = resolveFixtureAnalyzePlaybook(body);
         const primarySubjectRef = readOptionalSubjectRef(body.subject_ref ?? body.primary_subject_ref);
         const subjectRefs = primarySubjectRef ? [primarySubjectRef] : [];
-        const sourceCategories = Array.isArray(body.source_categories)
-          ? body.source_categories
-            .filter((category): category is string => typeof category === "string" && category.trim() !== "")
-            .map((category) => category.trim())
-          : [...resolvedPlaybook.source_categories];
+        const sourceCategories = [...resolvedPlaybook.source_categories];
         const runId = stableUuid(`analyze-run:${userId}:${analyzeRuns.length}:${templateId}:${resolvedPlaybook.playbook.playbook_id}`);
         const snapshotId = stableUuid(`analyze-snapshot:${runId}`);
         const runMetadata = serializeAnalyzeRunMetadataV1({
@@ -975,13 +971,9 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
         const resolvedPlaybook = resolveAnalyzePlaybookRequestOrHttpError({
           playbook_id: nonEmptyString(body.playbook_id) ?? "daily_copper_call",
           instructions: nonEmptyString(body.instructions) ?? undefined,
-          source_categories: body.source_categories === undefined
-            ? undefined
-            : readAnalyzeSourceCategories(body.source_categories, []),
+          source_categories: body.source_categories,
         });
-        const sourceCategories = body.source_categories === undefined
-          ? [...resolvedPlaybook.source_categories]
-          : readAnalyzeSourceCategories(body.source_categories, []);
+        const sourceCategories = [...resolvedPlaybook.source_categories];
         const bundleIds = analyzeBundleIds(sourceCategories);
         const subjectRefs = analyzeSubjectRefs({
           primary: readOptionalSubjectRef(body.subject_ref ?? body.primary_subject_ref),
@@ -1412,22 +1404,6 @@ function toAnalyzeRunSummary(run: DevAnalyzeRun): DevAnalyzeRunSummary {
 
 function contentHash(value: JsonValue): string {
   return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
-}
-
-function readAnalyzeSourceCategories(
-  value: unknown,
-  fallback: ReadonlyArray<string>,
-): ReadonlyArray<string> {
-  if (value === undefined || value === null) return [...fallback];
-  if (!Array.isArray(value)) {
-    throw new DevApiHttpError(400, "source_categories must be an array");
-  }
-  const categories = value.map((category, index) => {
-    const text = nonEmptyString(category);
-    if (text === null) throw new DevApiHttpError(400, `source_categories[${index}] must be a non-empty string`);
-    return text;
-  });
-  return categories;
 }
 
 function analyzeBundleIds(sourceCategories: ReadonlyArray<string>): ReadonlyArray<string> {
@@ -1980,9 +1956,7 @@ function resolveFixtureAnalyzePlaybook(body: Record<string, unknown>) {
   return resolveAnalyzePlaybookRequestOrHttpError({
     playbook_id: nonEmptyString(body.playbook_id) ?? "daily_copper_call",
     instructions: nonEmptyString(body.instructions) ?? undefined,
-    source_categories: Array.isArray(body.source_categories)
-      ? body.source_categories.filter((category): category is string => typeof category === "string")
-      : undefined,
+    source_categories: body.source_categories,
   });
 }
 
@@ -2038,16 +2012,16 @@ function defaultAnalyzeTemplates(): DevAnalyzeTemplate[] {
   return [
     {
       template_id: EARNINGS_TEMPLATE_ID,
-      name: "Earnings template",
-      prompt_template: "Assess revenue quality, margins, cash conversion, and management commentary.",
-      source_categories: ["filings", "transcripts", "news"],
+      name: "Daily copper call",
+      prompt_template: "Assess copper price moves, curve structure, inventories, report deltas, and market events.",
+      source_categories: ["prices", "curves", "inventories", "licensed_reports", "news"],
       version: 1,
     },
     {
       template_id: VARIANT_TEMPLATE_ID,
-      name: "Variant view",
-      prompt_template: "Compare the market narrative with evidence-backed counterpoints.",
-      source_categories: ["filings", "news", "transcripts"],
+      name: "Report-change digest",
+      prompt_template: "Compare licensed report changes with house assumptions and market-impact evidence.",
+      source_categories: ["licensed_reports", "internal_forecasts", "news"],
       version: 1,
     },
   ];

@@ -1,10 +1,12 @@
 {
+  "name": "commodities",
   "private": true,
+  "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "scripts": {
     "test": "node --experimental-strip-types --test \"test/**/*.test.ts\""
-  },
-  "dependencies": {
-    "js-yaml": "^4.1.0"
   }
 }
