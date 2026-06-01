@@ -461,6 +461,9 @@ function lineFromFactRow(row: StatementFactRow): StatementLine {
     unit: row.unit,
     scale: Number(row.scale),
     coverage_level: row.coverage_level,
+    // Lineage anchor: this line was loaded from a persisted fact, so carry its
+    // id forward for derived-fact provenance (key-stat input refs).
+    fact_id: row.fact_id,
   };
   if (row.value_text !== null) out.value_text = row.value_text;
   if (row.currency !== null) out.currency = row.currency;

@@ -1,0 +1,160 @@
+// Per-issuer fetch of the v1 peer-comparison metric set, flattened from the
+// key-stats envelope into a shape the metrics_comparison emitter can hand to
+// the fact materializer. Each value carries the lineage (input fact_ids), the
+// representative source_id, and the as_of the materializer needs to mint a
+// derived fact.
+//
+// Loading is delegated to StatsRepository.find (the canonical per-issuer
+// key-stats orchestrator) so this layer never re-implements statement/price
+// loading — it only selects, reshapes, and exposes lineage.
+
+import type {
+  KeyStat,
+  KeyStatInputRef,
+  KeyStatsEnvelope,
+  StatementLineInputRef,
+} from "./key-stats.ts";
+import { REVENUE_KEYS } from "./key-stats.ts";
+import type { StatsRepository } from "./stats-repository.ts";
+import { freezeIssuerRef, type IssuerSubjectRef, type UUID } from "./subject-ref.ts";
+
+// The v1 metric columns (design: Revenue TTM, gross/net margin, rev growth YoY,
+// P/E). Operating margin is intentionally excluded from v1.
+export type PeerMetricKey =
+  | "revenue"
+  | "gross_margin"
+  | "net_margin"
+  | "revenue_growth_yoy"
+  | "pe_ratio";
+
+export type PeerMetricFormat = "currency" | "percent" | "multiple";
+
+// One materializable metric value for one issuer. value_num is always present
+// (absent/unavailable metrics are omitted, not carried as null) so the
+// materializer can mint a fact without re-checking.
+export type PeerMetricValue = {
+  metric: PeerMetricKey;
+  value_num: number;
+  unit: string;
+  format: PeerMetricFormat;
+  as_of: string;
+  // Source of record for the derived fact: the source backing the metric's
+  // statement input (eps/revenue/…), falling back to the first input. A
+  // blended metric like P/E still records every component in input_fact_ids.
+  source_id: UUID;
+  // Lineage: the persisted facts this value was computed from. May be empty
+  // when the envelope came from a not-yet-persisted statement (fact_id absent).
+  input_fact_ids: ReadonlyArray<UUID>;
+};
+
+export type PeerMetrics = {
+  subject: IssuerSubjectRef;
+  // Present metrics only; the block builder renders absent metrics as "—".
+  metrics: ReadonlyArray<PeerMetricValue>;
+};
+
+// Key-stat stat_keys that map 1:1 onto a peer-metric column, with their display
+// format. Revenue is handled separately (it is a raw statement fact, not a
+// computed stat).
+const STAT_COLUMNS: ReadonlyArray<{ stat_key: KeyStat["stat_key"]; metric: PeerMetricKey; format: PeerMetricFormat }> = [
+  { stat_key: "gross_margin", metric: "gross_margin", format: "percent" },
+  { stat_key: "net_margin", metric: "net_margin", format: "percent" },
+  { stat_key: "revenue_growth_yoy", metric: "revenue_growth_yoy", format: "percent" },
+  { stat_key: "pe_ratio", metric: "pe_ratio", format: "multiple" },
+];
+
+export async function fetchPeerMetrics(
+  stats: StatsRepository,
+  issuerIds: ReadonlyArray<UUID>,
+): Promise<ReadonlyArray<PeerMetrics>> {
+  // Independent per-issuer loads — run them concurrently.
+  return Promise.all(issuerIds.map((issuerId) => fetchOne(stats, issuerId)));
+}
+
+async function fetchOne(stats: StatsRepository, issuerId: UUID): Promise<PeerMetrics> {
+  const envelope = await stats.find(issuerId);
+  if (envelope === null) {
+    // Keep the peer in the comparison (renders all "—"); never drop it.
+    return Object.freeze({
+      subject: freezeIssuerRef({ kind: "issuer", id: issuerId }, "peerMetrics.subject"),
+      metrics: Object.freeze([]),
+    });
+  }
+  return Object.freeze({
+    subject: envelope.subject,
+    metrics: Object.freeze(metricsFromEnvelope(envelope)),
+  });
+}
+
+function metricsFromEnvelope(envelope: KeyStatsEnvelope): PeerMetricValue[] {
+  const out: PeerMetricValue[] = [];
+  const revenue = revenueValue(envelope);
+  if (revenue) out.push(revenue);
+
+  const byKey = new Map(envelope.stats.map((stat) => [stat.stat_key, stat]));
+  for (const column of STAT_COLUMNS) {
+    const stat = byKey.get(column.stat_key);
+    if (!stat || stat.value_num === null) continue;
+    out.push(
+      Object.freeze({
+        metric: column.metric,
+        value_num: stat.value_num,
+        unit: stat.unit,
+        format: column.format,
+        as_of: stat.as_of,
+        source_id: representativeSourceId(stat.inputs),
+        input_fact_ids: inputFactIds(stat.inputs),
+      }),
+    );
+  }
+  return out;
+}
+
+// Revenue is not a computed stat; it is the revenue statement line that already
+// participates as a margin denominator / growth numerator. Reusing that input
+// keeps the revenue cell's fact identical to the one the margins divide by,
+// instead of re-loading the statement.
+function revenueValue(envelope: KeyStatsEnvelope): PeerMetricValue | null {
+  for (const stat of envelope.stats) {
+    for (const input of stat.inputs) {
+      if (
+        input.kind === "statement_line" &&
+        REVENUE_KEYS.includes(input.metric_key) &&
+        input.value_num !== null
+      ) {
+        return Object.freeze({
+          metric: "revenue",
+          value_num: input.value_num,
+          unit: input.unit,
+          format: "currency",
+          as_of: input.as_of,
+          source_id: input.source_id,
+          input_fact_ids: input.fact_id !== undefined ? Object.freeze([input.fact_id]) : Object.freeze([]),
+        });
+      }
+    }
+  }
+  return null;
+}
+
+function inputFactIds(inputs: ReadonlyArray<KeyStatInputRef>): ReadonlyArray<UUID> {
+  const ids: UUID[] = [];
+  for (const input of inputs) {
+    // fact_id is required on market_fact inputs, optional on statement_line.
+    if (input.fact_id !== undefined) ids.push(input.fact_id);
+  }
+  return Object.freeze(ids);
+}
+
+// The derived fact's source_id: prefer a statement-line input's source (the
+// fundamentals definition the metric is anchored to), else the first input.
+function representativeSourceId(inputs: ReadonlyArray<KeyStatInputRef>): UUID {
+  const statementInput = inputs.find(
+    (input): input is StatementLineInputRef => input.kind === "statement_line",
+  );
+  const chosen = statementInput ?? inputs[0];
+  if (chosen === undefined) {
+    throw new Error("peer-metrics: stat has no inputs to source a derived fact from");
+  }
+  return chosen.source_id;
+}

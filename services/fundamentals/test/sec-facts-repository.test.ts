@@ -377,7 +377,9 @@ function factRow(metrics: MetricDefinition[], fact: FactRecord) {
 
 function factFromInsert(values: unknown[]): FactRecord {
   return {
-    fact_id: `fact-${values[1]}-${values[5]}-${values[6]}`,
+    // Real facts.fact_id is a gen_random_uuid() v4; mirror that so the
+    // load-from-facts path (which now validates line.fact_id as a UUID) accepts it.
+    fact_id: crypto.randomUUID(),
     subject_id: values[0] as string,
     metric_id: values[1] as string,
     period_kind: values[2] as string,
