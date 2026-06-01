@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'reac
 import { analyzeEntryFromSubject } from '../analyze/analyzeEntry'
 import { QuoteSnapshot } from '../symbol/QuoteSnapshot'
 import { subjectDisplayName } from '../symbol/quote'
+import { PANEL_CLASS } from '../symbol/surfaceStyles.ts'
 import {
   fetchSubjectHydration,
   isCanonicalResolvedSubject,
@@ -297,7 +298,7 @@ function LegacySubjectChoice({
               replace
               to={symbolDetailPathForSubject(candidate.subject_ref, currentTab)}
               state={{ subject: candidate }}
-              className="flex items-center justify-between rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg transition-colors hover:border-line-strong hover:bg-surface-hover"
+              className={`flex items-center justify-between ${PANEL_CLASS} px-3 py-2 text-sm text-fg transition-colors hover:border-line-strong hover:bg-surface-hover`}
             >
               <span>{subjectDisplayName(candidate)}</span>
               <span className="text-xs text-muted">

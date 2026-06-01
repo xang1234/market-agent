@@ -2,6 +2,8 @@ import type { ReactElement } from 'react'
 import type { MetricsComparisonBlock, MetricsComparisonCell, SubjectRef } from './types.ts'
 import { formatSubjectRefShort } from './subjectRef.ts'
 import { NEGATIVE_CLASS, POSITIVE_CLASS } from '../symbol/signedColor.ts'
+import { CARD_CLASS } from '../symbol/surfaceStyles.ts'
+import { InspectableRef } from '../evidence/InspectableRef.tsx'
 
 type MetricsComparisonProps = { block: MetricsComparisonBlock }
 
@@ -19,7 +21,7 @@ export function MetricsComparison({ block }: MetricsComparisonProps): ReactEleme
     <figure
       data-testid={`block-metrics-comparison-${block.id}`}
       data-block-kind="metrics_comparison"
-      className="overflow-x-auto rounded-lg border border-line bg-surface shadow-sm"
+      className={`overflow-x-auto ${CARD_CLASS}`}
     >
       {block.title ? (
         <figcaption className="border-b border-line p-3 text-sm font-medium text-fg">
@@ -67,6 +69,7 @@ export function MetricsComparison({ block }: MetricsComparisonProps): ReactEleme
                 {block.metrics.map((_metric, cellIndex) => (
                   <ComparisonCell
                     key={`${block.id}-row-${rowIndex}-cell-${cellIndex}`}
+                    snapshotId={block.snapshot_id}
                     cell={block.cells?.[rowIndex]?.[cellIndex]}
                   />
                 ))}
@@ -79,15 +82,31 @@ export function MetricsComparison({ block }: MetricsComparisonProps): ReactEleme
   )
 }
 
-// Cells render plain (mono, tone-colored). The contract carries value_ref for
-// evidence linkage, but per-cell inspection is deliberately deferred to the
-// same milestone as the emitter — until real snapshots exist, a value_ref
-// resolves to no fact, so wiring click-to-inspect now would open an empty
-// inspector. See fra-0clw notes.
-function ComparisonCell({ cell }: { cell: MetricsComparisonCell | undefined }): ReactElement {
-  if (cell === undefined) {
+// A present cell's value links to its backing fact via InspectableRef (the
+// emitter now seals these facts, so the inspector resolves). A null/absent cell
+// is a gap and renders a plain em-dash.
+function ComparisonCell({
+  cell,
+  snapshotId,
+}: {
+  cell: MetricsComparisonCell | null | undefined
+  snapshotId: string
+}): ReactElement {
+  // null = an explicit gap (subject lacks this metric); undefined = no cells
+  // matrix / short row. Both render as an em-dash.
+  if (cell == null) {
     return <td className="num px-3 py-2 text-right text-muted">—</td>
   }
   const toneClass = cell.tone ? TONE_CLASS[cell.tone] : 'text-fg'
-  return <td className={`num px-3 py-2 text-right ${toneClass}`}>{cell.format ?? '—'}</td>
+  return (
+    <td className={`num px-3 py-2 text-right ${toneClass}`}>
+      <InspectableRef
+        snapshotId={snapshotId}
+        inspectionRef={{ kind: 'fact', id: cell.value_ref }}
+        className="underline decoration-dotted underline-offset-2"
+      >
+        {cell.format ?? '—'}
+      </InspectableRef>
+    </td>
+  )
 }

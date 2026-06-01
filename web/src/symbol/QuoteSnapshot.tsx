@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { CARD_CLASS } from './surfaceStyles.ts'
 import {
   fetchQuoteSnapshot,
   formatQuotePrice,
@@ -114,7 +115,7 @@ export function QuoteSnapshot({ subject }: QuoteSnapshotProps) {
       </section>
       <section
         aria-label="Quote provenance"
-        className="flex min-h-28 flex-col justify-between rounded-lg border border-line bg-surface p-3 shadow-sm"
+        className={`flex min-h-28 flex-col justify-between ${CARD_CLASS} p-3`}
       >
         <div className="flex items-center justify-between text-xs text-muted">
           <span>Source</span>

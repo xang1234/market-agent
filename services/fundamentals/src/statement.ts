@@ -80,6 +80,11 @@ export type StatementLine = {
   currency?: string;
   scale: number;
   coverage_level: CoverageLevel;
+  // The persisted fact this line was loaded from, when known. Present only on
+  // the load-from-facts path (lineFromFactRow); absent on a freshly-fetched
+  // statement that hasn't been materialized yet. Threaded into key-stat input
+  // refs so a derived metric can record lineage to its component facts.
+  fact_id?: UUID;
 };
 
 export type NormalizedStatement = {
@@ -190,6 +195,7 @@ function freezeLines(
     // Avoid materializing explicit-undefined fields on the frozen output.
     if (line.value_text !== undefined) out.value_text = line.value_text;
     if (line.currency !== undefined) out.currency = line.currency;
+    if (line.fact_id !== undefined) out.fact_id = line.fact_id;
     frozen.push(Object.freeze(out));
   }
   return Object.freeze(frozen);
@@ -234,6 +240,10 @@ function assertStatementLine(
     throw new Error(
       `${label}: value_num=null requires coverage_level != "full" (got "full")`,
     );
+  }
+
+  if (l.fact_id !== undefined) {
+    assertUuid(l.fact_id, `${label}.fact_id`);
   }
 }
 

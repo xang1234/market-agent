@@ -1,4 +1,5 @@
 import type { ReactElement, ReactNode } from 'react'
+import { CARD_CLASS } from '../symbol/surfaceStyles.ts'
 
 type DataAttrs = { [K in `data-${string}`]?: string }
 
@@ -22,7 +23,7 @@ export function ChartCard({
       data-testid={testId}
       data-block-kind={blockKind}
       {...dataAttrs}
-      className="flex flex-col gap-2 rounded-lg border border-line bg-surface p-3 shadow-sm"
+      className={`flex flex-col gap-2 ${CARD_CLASS} p-3`}
     >
       {title ? (
         <figcaption className="text-sm font-medium text-fg">

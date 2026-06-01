@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react'
+import { CARD_CLASS } from './surfaceStyles.ts'
 
 export type ThemeMembershipMode = 'manual' | 'rule_based' | 'inferred'
 
@@ -38,7 +39,7 @@ function ThemeMembershipRationaleRow({
   membership: ThemeMembershipRationaleView
 }): ReactElement {
   return (
-    <li className="rounded-lg border border-line bg-surface p-3 shadow-sm">
+    <li className={`${CARD_CLASS} p-3`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <p className="text-sm font-medium text-fg">

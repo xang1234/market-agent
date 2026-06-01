@@ -143,6 +143,51 @@ test("verifySnapshotSeal accepts a fully bound snapshot artifact", async () => {
   });
 });
 
+const metricsComparisonBlock = {
+  id: "peer-table",
+  kind: "metrics_comparison",
+  snapshot_id: snapshotId,
+  data_ref: {
+    kind: "metrics_comparison",
+    id: "peer-table",
+    params: {
+      fact_bindings: [
+        { fact_id: factId, unit: "USD", period_kind: "fiscal_q", fiscal_year: 2026, fiscal_period: "Q1" },
+      ],
+    },
+  },
+  source_refs: [sourceId],
+  as_of: "2026-04-29T00:00:00.000Z",
+  subjects: [{ kind: "listing", id: subjectId }],
+  // A present cell (bound to factId) and a null gap cell.
+  cells: [[{ value_ref: factId }, null]],
+} as const;
+
+test("verifySnapshotSeal accepts a metrics_comparison block whose cells bind to sealed facts", async () => {
+  const result = await verifySnapshotSeal({
+    ...baseInput,
+    blocks: [metricsComparisonBlock, baseInput.blocks[1]],
+  });
+
+  assert.deepEqual(result, { ok: true, failures: [] });
+});
+
+test("verifySnapshotSeal flags a metrics_comparison cell fact missing from the manifest", async () => {
+  const result = await verifySnapshotSeal({
+    ...baseInput,
+    manifest: { ...baseInput.manifest, fact_refs: [] },
+    blocks: [metricsComparisonBlock, baseInput.blocks[1]],
+  });
+
+  assert.equal(result.ok, false);
+  assert.ok(
+    result.failures.some(
+      (failure) => failure.reason_code === "missing_fact_ref" && failure.details.block_id === "peer-table",
+    ),
+    JSON.stringify(result.failures, null, 2),
+  );
+});
+
 test("verifySnapshotSeal accepts valid point, range, and ttm period dates", async () => {
   const datedFacts = [
     {

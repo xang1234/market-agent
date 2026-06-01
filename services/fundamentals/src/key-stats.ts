@@ -52,6 +52,10 @@ export type StatementLineInputRef = {
   role: "numerator" | "denominator" | "current" | "prior";
   metric_key: string;
   metric_id: UUID;
+  // The persisted fact backing this line, when the statement was loaded from
+  // facts. Lets a derived metric (margin, growth) record lineage to its
+  // component facts. Absent when the statement was freshly fetched, not stored.
+  fact_id?: UUID;
   value_num: number | null;
   unit: string;
   currency?: string;
@@ -167,7 +171,7 @@ const MARGIN_SPECS: ReadonlyArray<RatioSpec> = [
   },
 ];
 
-const REVENUE_KEYS = Object.freeze(["revenue", "net_sales.total"]);
+export const REVENUE_KEYS = Object.freeze(["revenue", "net_sales.total"]);
 const EPS_DILUTED_KEYS = Object.freeze(["eps_diluted", "eps.diluted"]);
 
 export function buildKeyStats(input: BuildKeyStatsInput): KeyStatsEnvelope {
@@ -525,6 +529,7 @@ function inputRefs(
           as_of: statement.as_of,
         };
         if (line.currency !== undefined) out.currency = line.currency;
+        if (line.fact_id !== undefined) out.fact_id = line.fact_id;
         return Object.freeze(out);
       }),
   );

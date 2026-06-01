@@ -1,6 +1,7 @@
 import { useState, type ReactElement } from 'react'
 import type { SectionBlock } from './types.ts'
 import { BlockView } from './BlockView.tsx'
+import { CARD_CLASS } from '../symbol/surfaceStyles.ts'
 
 type SectionProps = { block: SectionBlock }
 
@@ -14,7 +15,7 @@ export function Section({ block }: SectionProps): ReactElement {
       data-testid={`block-section-${block.id}`}
       data-block-kind="section"
       data-collapsed={collapsible && !isOpen ? 'true' : 'false'}
-      className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-4 shadow-sm"
+      className={`flex flex-col gap-3 ${CARD_CLASS} p-4`}
     >
       <SectionHeader
         title={block.title}
