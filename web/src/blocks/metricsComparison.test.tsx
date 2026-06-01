@@ -41,3 +41,22 @@ test('MetricsComparison falls back to em-dashes when a block carries no cells', 
   // Two metric columns, no cells -> two em-dash placeholders.
   assert.equal(html.split('—').length - 1, 2)
 })
+
+test('MetricsComparison renders a null cell as a gap em-dash alongside present cells', () => {
+  const block: MetricsComparisonBlock = {
+    id: 'mc-gap',
+    kind: 'metrics_comparison',
+    snapshot_id: '11111111-1111-4111-9111-111111111111',
+    data_ref: { kind: 'metrics_comparison', id: 'mc-gap' },
+    source_refs: [],
+    as_of: '2024-09-30T00:00:00.000Z',
+    subjects: [{ kind: 'issuer', id: '99999999-9999-4999-9999-999999999991' }],
+    metrics: ['Revenue', 'P/E'],
+    cells: [[{ value_ref: '22222222-2222-4222-9222-000000000001', format: '$385.7B' }, null]],
+  }
+
+  const html = renderToStaticMarkup(<MetricsComparison block={block} />)
+  assert.match(html, /\$385\.7B/)
+  // The null P/E cell renders one em-dash; the present revenue cell does not.
+  assert.equal(html.split('—').length - 1, 1)
+})

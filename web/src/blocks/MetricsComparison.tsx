@@ -85,8 +85,10 @@ export function MetricsComparison({ block }: MetricsComparisonProps): ReactEleme
 // same milestone as the emitter — until real snapshots exist, a value_ref
 // resolves to no fact, so wiring click-to-inspect now would open an empty
 // inspector. See fra-0clw notes.
-function ComparisonCell({ cell }: { cell: MetricsComparisonCell | undefined }): ReactElement {
-  if (cell === undefined) {
+function ComparisonCell({ cell }: { cell: MetricsComparisonCell | null | undefined }): ReactElement {
+  // null = an explicit gap (subject lacks this metric); undefined = no cells
+  // matrix / short row. Both render as an em-dash.
+  if (cell == null) {
     return <td className="num px-3 py-2 text-right text-muted">—</td>
   }
   const toneClass = cell.tone ? TONE_CLASS[cell.tone] : 'text-fg'

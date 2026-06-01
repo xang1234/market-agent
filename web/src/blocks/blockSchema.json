@@ -635,12 +635,15 @@
               }
             },
             "cells": {
-              "description": "Value matrix indexed [subjectIndex][metricIndex]. Optional: when absent the block renders metric labels with empty cells.",
+              "description": "Value matrix indexed [subjectIndex][metricIndex]. Optional: when absent the block renders metric labels with empty cells. A null entry is a gap (the subject lacks that metric) and renders as an em-dash.",
               "type": "array",
               "items": {
                 "type": "array",
                 "items": {
-                  "$ref": "#/$defs/MetricsComparisonCell"
+                  "anyOf": [
+                    { "$ref": "#/$defs/MetricsComparisonCell" },
+                    { "type": "null" }
+                  ]
                 }
               }
             },

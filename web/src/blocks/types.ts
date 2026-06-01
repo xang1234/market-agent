@@ -200,8 +200,9 @@ export type MetricsComparisonBlock = BaseBlock & {
   subjects: ReadonlyArray<SubjectRef>
   metrics: ReadonlyArray<string>
   // Value matrix indexed [subjectIndex][metricIndex]. Optional: when absent the
-  // block renders metric labels with empty cells (the pre-values behavior).
-  cells?: ReadonlyArray<ReadonlyArray<MetricsComparisonCell>>
+  // block renders metric labels with empty cells (the pre-values behavior). A
+  // null entry is a gap (the subject lacks that metric) and renders as "—".
+  cells?: ReadonlyArray<ReadonlyArray<MetricsComparisonCell | null>>
   // The queried subject to emphasize among the compared peers.
   primary_subject_ref?: SubjectRef
 }
