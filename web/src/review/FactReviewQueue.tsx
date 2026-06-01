@@ -1,4 +1,6 @@
 import { useRef, useState } from 'react'
+import { SeverityBadge, type Severity } from '../blocks/SeverityBadge.tsx'
+import { isStaleItem, reviewSeverity } from './severity.ts'
 
 export type FactReviewCandidate = Record<string, unknown>
 
@@ -31,6 +33,24 @@ export type FactReviewQueueProps = {
   onApprove: (action: FactReviewQueueAction) => void | Promise<void>
   onEdit: (action: FactReviewQueueAction) => void | Promise<void>
   onReject: (action: FactReviewQueueRejectAction) => void | Promise<void>
+  // Optional bulk action: approve every low-severity candidate as-is. Surfaced
+  // as a header affordance only when the owner supplies it and lows exist.
+  onApproveAllLow?: () => void | Promise<void>
+}
+
+type DecoratedItem = {
+  item: FactReviewQueueItem
+  severity: Severity
+  isStale: boolean
+}
+
+function decorateItem(item: FactReviewQueueItem): DecoratedItem {
+  const isStale = isStaleItem(item)
+  return {
+    item,
+    isStale,
+    severity: reviewSeverity({ confidence: item.confidence, threshold: item.threshold, isStale }),
+  }
 }
 
 type DraftState = {
@@ -45,7 +65,7 @@ type DraftRefs = {
 
 type PendingReviewIds = Record<string, true>
 
-export function FactReviewQueue({ items, onApprove, onEdit, onReject }: FactReviewQueueProps) {
+export function FactReviewQueue({ items, onApprove, onEdit, onReject, onApproveAllLow }: FactReviewQueueProps) {
   const queueKey = items.map((item) => `${item.review_id}:${JSON.stringify(item.candidate)}`).join('|')
   return (
     <FactReviewQueueContent
@@ -54,11 +74,12 @@ export function FactReviewQueue({ items, onApprove, onEdit, onReject }: FactRevi
       onApprove={onApprove}
       onEdit={onEdit}
       onReject={onReject}
+      onApproveAllLow={onApproveAllLow}
     />
   )
 }
 
-function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactReviewQueueProps) {
+function FactReviewQueueContent({ items, onApprove, onEdit, onReject, onApproveAllLow }: FactReviewQueueProps) {
   const draftRefs = useRef<Record<string, DraftRefs>>({})
   const [validationErrors, setValidationErrors] = useState<Record<string, string | null>>({})
   const [actionErrors, setActionErrors] = useState<Record<string, string | null>>({})
@@ -73,21 +94,17 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactRevi
     )
   }
 
+  const decorated = items.map(decorateItem)
+
   return (
     <section className="flex flex-col gap-3">
-      <header>
-        <h2 className="text-sm font-semibold text-fg">Reviewer queue</h2>
-        <p className="mt-1 text-xs text-muted">
-          Oldest queued candidates are first.
-        </p>
-      </header>
+      <QueueSummary decorated={decorated} onApproveAllLow={onApproveAllLow} />
       <ul className="flex flex-col gap-3">
-        {items.map((item) => {
+        {decorated.map(({ item, severity, isStale }) => {
           const draft = draftFromItem(item)
           const validationError = validationErrors[item.review_id] ?? null
           const actionError = actionErrors[item.review_id] ?? null
           const isPending = pendingReviewIds[item.review_id] === true
-          const isStale = item.age_seconds != null && item.stale_after_seconds != null && item.age_seconds >= item.stale_after_seconds
           return (
             <li
               key={item.review_id}
@@ -95,14 +112,17 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactRevi
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-sm font-medium text-fg">
-                    {item.reason.replaceAll('_', ' ')}
+                  <div className="flex items-center gap-2">
+                    <SeverityBadge severity={severity} />
+                    <span className="text-sm font-medium text-fg">
+                      {item.reason.replaceAll('_', ' ')}
+                    </span>
                   </div>
-                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
-                    <span className="tabular-nums">Confidence {formatPercent(item.confidence)}</span>
-                    <span className="tabular-nums">Threshold {formatPercent(item.threshold)}</span>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+                    <ConfidenceChip label="Confidence" value={item.confidence} />
+                    <ConfidenceChip label="Threshold" value={item.threshold} />
                     {isStale ? (
-                      <span className="font-medium text-warning">
+                      <span className="rounded bg-warning-soft px-1.5 py-0.5 font-medium text-warning">
                         Stale {formatDuration(item.age_seconds!)}
                       </span>
                     ) : null}
@@ -190,6 +210,45 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject }: FactRevi
         })}
       </ul>
     </section>
+  )
+}
+
+function QueueSummary({
+  decorated,
+  onApproveAllLow,
+}: {
+  decorated: ReadonlyArray<DecoratedItem>
+  onApproveAllLow?: () => void | Promise<void>
+}) {
+  const counts: Record<Severity, number> = { high: 0, medium: 0, low: 0 }
+  for (const entry of decorated) counts[entry.severity] += 1
+  const total = decorated.length
+  return (
+    <header className="flex flex-wrap items-center gap-2">
+      <span className="rounded-md border border-line bg-surface-2 px-2 py-1 text-xs text-muted">
+        <span className="num text-fg-soft">{total}</span> {total === 1 ? 'claim' : 'claims'} awaiting review
+      </span>
+      {counts.high > 0 ? <SeverityBadge severity="high">{counts.high} high</SeverityBadge> : null}
+      {counts.medium > 0 ? <SeverityBadge severity="medium">{counts.medium} medium</SeverityBadge> : null}
+      {counts.low > 0 ? <SeverityBadge severity="low">{counts.low} low</SeverityBadge> : null}
+      {onApproveAllLow && counts.low > 0 ? (
+        <button
+          type="button"
+          onClick={() => void onApproveAllLow()}
+          className="ml-auto rounded-md border border-line-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg hover:bg-surface-2"
+        >
+          Approve all low
+        </button>
+      ) : null}
+    </header>
+  )
+}
+
+function ConfidenceChip({ label, value }: { label: string; value: number }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded bg-surface-2 px-1.5 py-0.5">
+      {label} <span className="num text-fg-soft">{formatPercent(value)}</span>
+    </span>
   )
 }
 

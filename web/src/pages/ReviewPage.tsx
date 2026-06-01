@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { FactReviewQueue, type FactReviewQueueAction, type FactReviewQueueItem, type FactReviewQueueRejectAction } from '../review/FactReviewQueue.tsx'
 import {
@@ -7,7 +7,10 @@ import {
   fetchFactReviewQueue,
   rejectFactReview,
 } from '../review/factReviewClient.ts'
+import { isStaleItem, reviewSeverity, type Severity } from '../review/severity.ts'
+import { SeverityBadge } from '../blocks/SeverityBadge.tsx'
 import { useAuth } from '../shell/useAuth.ts'
+import { useRightRailContent } from '../shell/useRightRailContent.ts'
 
 type ReviewLoadState =
   | { kind: 'loading' }
@@ -81,7 +84,28 @@ export function ReviewPage() {
     [refresh, reviewerId],
   )
 
+  // Bulk-approve every low-severity candidate as-is, then refresh once. Done in
+  // the page (not the queue component, which remounts on every approval) so the
+  // loop survives to completion against a stable owner.
+  const approveAllLow = useCallback(async () => {
+    if (reviewerId === null || state.kind !== 'ready') return
+    const lows = state.items.filter((item) => severityOf(item) === 'low')
+    for (const item of lows) {
+      await approveFactReview(reviewerId, {
+        review_id: item.review_id,
+        candidate: item.candidate,
+        notes: null,
+      })
+    }
+    await refresh()
+  }, [refresh, reviewerId, state])
+
   const visibleState: ReviewLoadState = reviewerId === null ? { kind: 'unauthenticated' } : state
+
+  // Push queue-health context into the shell-owned right rail; cleared when
+  // unauthenticated or on unmount.
+  const railItems = visibleState.kind === 'ready' ? visibleState.items : null
+  useRightRailContent(railItems ? <ReviewRail items={railItems} /> : null, [railItems])
 
   return (
     <div className="flex flex-1 flex-col gap-6 overflow-auto p-8">
@@ -98,8 +122,61 @@ export function ReviewPage() {
       ) : visibleState.kind === 'error' ? (
         <ReviewStatus title="Review queue unavailable" message={visibleState.message} tone="error" />
       ) : (
-        <FactReviewQueue items={visibleState.items} onApprove={approve} onEdit={edit} onReject={reject} />
+        <FactReviewQueue
+          items={visibleState.items}
+          onApprove={approve}
+          onEdit={edit}
+          onReject={reject}
+          onApproveAllLow={approveAllLow}
+        />
       )}
+    </div>
+  )
+}
+
+function severityOf(item: FactReviewQueueItem): Severity {
+  return reviewSeverity({
+    confidence: item.confidence,
+    threshold: item.threshold,
+    isStale: isStaleItem(item),
+  })
+}
+
+function ReviewRail({ items }: { items: ReadonlyArray<FactReviewQueueItem> }) {
+  const counts: Record<Severity, number> = { high: 0, medium: 0, low: 0 }
+  for (const item of items) counts[severityOf(item)] += 1
+  const stale = items.filter(isStaleItem).length
+  return (
+    <div className="flex flex-col gap-4 p-4">
+      <section>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Queue health</h2>
+        <dl className="mt-2 flex flex-col gap-2 text-sm">
+          <RailRow label="Awaiting">
+            <span className="num text-fg">{items.length}</span>
+          </RailRow>
+          <RailRow label="High severity">
+            <SeverityBadge severity="high">{counts.high}</SeverityBadge>
+          </RailRow>
+          <RailRow label="Medium severity">
+            <SeverityBadge severity="medium">{counts.medium}</SeverityBadge>
+          </RailRow>
+          <RailRow label="Low severity">
+            <SeverityBadge severity="low">{counts.low}</SeverityBadge>
+          </RailRow>
+          <RailRow label="Stale">
+            <span className={`num ${stale > 0 ? 'text-warning' : 'text-muted'}`}>{stale}</span>
+          </RailRow>
+        </dl>
+      </section>
+    </div>
+  )
+}
+
+function RailRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <dt className="text-muted">{label}</dt>
+      <dd>{children}</dd>
     </div>
   )
 }
