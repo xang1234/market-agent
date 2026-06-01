@@ -35,19 +35,19 @@ to a real **fact** in a **sealed snapshot** (the verifier enforces this). Today:
   which way is "good" per metric (margins/growth/EPS: higher = positive;
   valuation like P/E: lower = positive; leverage: higher = negative). Within a
   metric column, the best valid value → `positive`, worst → `negative`, others
-  → `neutral`. A metric with <2 comparable values gets no tone. The initial
-  direction table is authored here and needs product review (see Open).
+  → `neutral`. A metric with <2 comparable values gets no tone. v1 directions
+  (signed off): Revenue = none; gross/net margin, rev-growth, EPS = higher
+  positive; P/E (fwd) = lower positive.
 
-**Recommended (need sign-off):**
+**Signed off (2026-06-01):**
 - **Trigger / surface:** the **analyze `peer_comparison` playbook**
   (`services/analyze/src/playbook.ts` already declares a `peer_table` section).
   A deterministic emitter produces the `metrics_comparison` block for that
-  section during a template run, rather than LLM-generating it. (Alternatives:
-  a chat tool result, or a symbol-detail endpoint — heavier/less natural.)
+  section during a template run, rather than LLM-generating it.
 - **Peer selection (v1):** deterministic — primary = the analyzed subject;
-  peers = top *N=5* issuers in the same `sector` by market cap. `get_peer_set`
-  integration is a follow-up. Keep peer selection behind a small interface so
-  it can be swapped.
+  peers = top *N=5* issuers in the same **`industry`** by market cap.
+  `get_peer_set` integration is a follow-up. Keep peer selection behind a small
+  interface so it can be swapped.
 - **Metrics (v1):** reuse `key-stats.ts` — Revenue (TTM), Gross margin,
   Net margin, Rev growth YoY, P/E (fwd). Start narrow; widen later.
 - **Period alignment:** use each issuer's latest comparable period from
@@ -65,7 +65,7 @@ to a real **fact** in a **sealed snapshot** (the verifier enforces this). Today:
 
 ```
 analyze peer_comparison run
-  → peerSetResolver(primary, {criteria:'sector', n:5})      → issuer_ids[]
+  → peerSetResolver(primary, {criteria:'industry', n:5})    → issuer_ids[]
   → metricFetcher(issuer_ids, METRICS)                       → per-issuer KeyStat values (+ input fact_ids)
   → factMaterializer(values)                                 → derived fact_id per (issuer, metric)
   → blockBuilder(subjects, metrics, facts, primary)          → MetricsComparisonBlock
@@ -95,16 +95,14 @@ analyze peer_comparison run
 - **`services/analyze/src/template-runner.ts` / `playbook.ts`:** invoke the
   emitter for the `peer_table` section.
 
-## Open decisions (need product sign-off)
+## Decisions resolved (signed off 2026-06-01)
 
-1. **Trigger surface** — analyze playbook (recommended) vs chat tool vs endpoint.
-2. **`METRIC_DIRECTION` table** — confirm the good/bad direction per metric
-   (especially valuation/leverage, which are context-dependent).
-3. **Peer criteria + N** — sector + market-cap top-5 (recommended) vs
-   `get_peer_set` / themes.
-4. **Derived-fact lineage** — confirm acceptable to materialize derived facts
-   with `method='derived'` referencing input fact_ids (vs only referencing raw
-   statement-line facts, which a single-`value_ref` cell can't express).
+1. **Trigger surface** → analyze `peer_comparison` playbook (`peer_table` section).
+2. **`METRIC_DIRECTION` table** → approved as proposed (Revenue = no tone;
+   margins / growth / EPS higher = positive; P/E lower = positive).
+3. **Peer criteria + N** → same **`industry`**, top 5 by market cap.
+4. **Derived-fact lineage** → materialize derived facts (`method='derived'`)
+   **with** input `fact_id` lineage, so a cell traces back to its components.
 
 ## Verification strategy
 
