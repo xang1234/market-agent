@@ -14,12 +14,12 @@
 
 import { createFact, type FactInput } from "../../evidence/src/fact-repo.ts";
 import type { QueryExecutor } from "../../evidence/src/types.ts";
-import {
-  REUSABLE_PEER_METRICS,
-  type PeerMetricFormat,
-  type PeerMetricKey,
-  type PeerMetricValue,
-  type PeerMetrics,
+import type {
+  DerivedPeerMetric,
+  PeerMetricFormat,
+  PeerMetricKey,
+  PeerMetricValue,
+  PeerMetrics,
 } from "../../fundamentals/src/peer-metrics.ts";
 import type { IssuerSubjectRef, UUID } from "../../fundamentals/src/subject-ref.ts";
 
@@ -68,7 +68,6 @@ export async function materializePeerMetricFacts(
     const metrics: MaterializedMetric[] = [];
     for (const value of peer.metrics) {
       const valueRef = await materializeCell(db, peer.subject.id, value, metricIds, clock);
-      if (valueRef === null) continue;
       metrics.push({
         metric: value.metric,
         value_ref: valueRef,
@@ -87,13 +86,9 @@ async function materializeCell(
   value: PeerMetricValue,
   metricIds: ReadonlyMap<PeerMetricKey, UUID>,
   clock: () => Date,
-): Promise<UUID | null> {
-  if (REUSABLE_PEER_METRICS.has(value.metric)) {
-    // Revenue is a single reported fact; point the cell straight at it. With no
-    // lineage (statement not persisted) there is nothing to point at — drop the
-    // cell so it renders "—" rather than fabricating a derived duplicate.
-    return value.input_fact_ids[0] ?? null;
-  }
+): Promise<UUID> {
+  // A reused metric already IS a fact; point the cell straight at it.
+  if (value.kind === "reused") return value.fact_id;
 
   const metricId = metricIds.get(value.metric);
   if (metricId === undefined) {
@@ -108,7 +103,7 @@ async function materializeCell(
 
 function derivedFactInput(
   subjectId: UUID,
-  value: PeerMetricValue,
+  value: DerivedPeerMetric,
   metricId: UUID,
   clock: () => Date,
 ): FactInput {
@@ -139,7 +134,7 @@ function derivedFactInput(
 // computed from. Stored in quality_flags (no first-class lineage column — see
 // the fra-36y8 spike). A cell can trace back to its components without a schema
 // change; the snapshot seal does not enforce these (soft lineage).
-function derivationLineage(value: PeerMetricValue): Readonly<Record<string, unknown>> {
+function derivationLineage(value: DerivedPeerMetric): Readonly<Record<string, unknown>> {
   return Object.freeze({
     kind: "derivation",
     metric: value.metric,
@@ -157,7 +152,7 @@ async function resolveDerivedMetricIds(
   const keys = new Set<PeerMetricKey>();
   for (const peer of peers) {
     for (const value of peer.metrics) {
-      if (!REUSABLE_PEER_METRICS.has(value.metric)) keys.add(value.metric);
+      if (value.kind === "derived") keys.add(value.metric);
     }
   }
   if (keys.size === 0) return new Map();

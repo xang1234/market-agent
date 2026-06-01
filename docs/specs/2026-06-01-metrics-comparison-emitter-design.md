@@ -65,10 +65,12 @@ to a real **fact** in a **sealed snapshot** (the verifier enforces this). Today:
 
 `services/analyze/src/metrics-comparison-materializer.ts`:
 `materializePeerMetricFacts(db, peers)` →`MaterializedPeer[]` (per-(subject,
-metric) `value_ref`). Reuse vs. derive is keyed off `REUSABLE_PEER_METRICS`
-(`{revenue}`): revenue points the cell at its existing reported fact (its single
-`input_fact_id`; dropped to a gap if lineage is absent), the four computed
-metrics mint a `method='derived'` fact via the canonical `createFact`. Derived
+metric) `value_ref`). Reuse vs. derive is encoded in the fetcher's
+`PeerMetricValue` discriminated union: a `reused` value (revenue — a reported
+statement line) carries the `fact_id` the cell points straight at (the fetcher
+omits it when no persisted fact exists), while a `derived` value (the computed
+metrics) carries the period/coverage/source/lineage needed to mint a
+`method='derived'` fact via the canonical `createFact`. Derived
 metric_ids are resolved once per batch from the `metrics` table (the computed
 keys are seeded). v1 derived-fact quality policy: `verification_status =
 authoritative`, `freshness_class = filing_time`, `confidence = 1`,

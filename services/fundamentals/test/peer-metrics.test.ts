@@ -67,15 +67,14 @@ test("fetchPeerMetrics surfaces revenue + margins with lineage from persisted st
   const metrics = byMetric(aapl.metrics);
 
   const revenue = metrics.get("revenue");
-  assert.ok(revenue, "revenue metric present");
+  // Revenue is reused: it points straight at its own reported fact.
+  assert(revenue && revenue.kind === "reused", "revenue present + reused");
   assert.equal(revenue.value_num, AAPL_FY2024_KNOWN_VALUES.net_sales_total);
   assert.equal(revenue.format, "currency");
-  assert.equal(revenue.source_id, SEC_EDGAR_SOURCE_ID);
-  // Revenue is itself a fact: a single lineage id, the same one the margins divide by.
-  assert.deepEqual(revenue.input_fact_ids, [REVENUE_FACT_ID]);
+  assert.equal(revenue.fact_id, REVENUE_FACT_ID);
 
   const gross = metrics.get("gross_margin");
-  assert.ok(gross, "gross_margin present");
+  assert(gross && gross.kind === "derived", "gross_margin present + derived");
   assert.equal(
     gross.value_num,
     AAPL_FY2024_KNOWN_VALUES.gross_profit / AAPL_FY2024_KNOWN_VALUES.net_sales_total,
@@ -86,7 +85,7 @@ test("fetchPeerMetrics surfaces revenue + margins with lineage from persisted st
   assert.deepEqual(gross.input_fact_ids, [GROSS_PROFIT_FACT_ID, REVENUE_FACT_ID]);
 
   const net = metrics.get("net_margin");
-  assert.ok(net, "net_margin present");
+  assert(net && net.kind === "derived", "net_margin present + derived");
   assert.deepEqual(net.input_fact_ids, [NET_INCOME_FACT_ID, REVENUE_FACT_ID]);
 
   // operating_margin is excluded from the v1 set; P/E + growth are unavailable
@@ -110,21 +109,26 @@ test("fetchPeerMetrics keeps a peer with no data instead of dropping it", async 
   assert.deepEqual(missing.metrics, []);
 });
 
-test("fetchPeerMetrics returns soft (empty) lineage when the statement was not persisted", async () => {
-  // No fact_ids stamped → freshly-fetched statement; values still compute,
-  // lineage is just empty.
+test("fetchPeerMetrics: not-yet-persisted statement → derived metrics keep computing (empty lineage), reused revenue is omitted", async () => {
+  // No fact_ids stamped → freshly-fetched statement. Computed metrics still
+  // produce a value (lineage just empty); revenue, being a `reused` pointer to
+  // a fact that does not exist yet, is omitted rather than dangling.
   const repo = createInMemoryStatsRepository([
     { subject_id: aaplIssuer.id, inputs: { statement: aaplMapped() } },
   ]);
 
   const [aapl] = await fetchPeerMetrics(repo, [aaplIssuer.id]);
-  const gross = byMetric(aapl.metrics).get("gross_margin");
-  assert.ok(gross);
+  const metrics = byMetric(aapl.metrics);
+
+  const gross = metrics.get("gross_margin");
+  assert(gross && gross.kind === "derived");
   assert.equal(
     gross.value_num,
     AAPL_FY2024_KNOWN_VALUES.gross_profit / AAPL_FY2024_KNOWN_VALUES.net_sales_total,
   );
   assert.deepEqual(gross.input_fact_ids, []);
+
+  assert.equal(metrics.has("revenue"), false);
 });
 
 test("fetchPeerMetrics surfaces revenue_growth_yoy lineage across current + prior", async () => {
@@ -151,7 +155,7 @@ test("fetchPeerMetrics surfaces revenue_growth_yoy lineage across current + prio
 
   const [aapl] = await fetchPeerMetrics(repo, [aaplIssuer.id]);
   const growth = byMetric(aapl.metrics).get("revenue_growth_yoy");
-  assert.ok(growth, "revenue_growth_yoy present when a prior statement exists");
+  assert(growth && growth.kind === "derived", "revenue_growth_yoy present when a prior statement exists");
   assert.equal(growth.format, "percent");
   // current revenue then prior revenue — inputRefs builds current first.
   assert.deepEqual(growth.input_fact_ids, [REVENUE_FACT_ID, PRIOR_REVENUE_FACT_ID]);

@@ -30,12 +30,6 @@ export type PeerMetricKey =
 
 export type PeerMetricFormat = "currency" | "percent" | "multiple";
 
-// Metrics that ARE a stored fact already (revenue is a reported statement line)
-// rather than a computed quantity. The materializer points a cell at the
-// existing fact instead of minting a derived duplicate. The ratios/growth are
-// computed and get a fresh method='derived' fact.
-export const REUSABLE_PEER_METRICS: ReadonlySet<PeerMetricKey> = new Set(["revenue"]);
-
 // The reporting period a value belongs to — needed to mint a fact (facts carry
 // a non-null period) and to align cells across peers.
 export type PeerMetricPeriod = {
@@ -46,14 +40,28 @@ export type PeerMetricPeriod = {
   fiscal_period: FiscalPeriod;
 };
 
-// One materializable metric value for one issuer. value_num is always present
-// (absent/unavailable metrics are omitted, not carried as null) so the
-// materializer can mint a fact without re-checking.
-export type PeerMetricValue = {
+// A metric value for one issuer, tagged by how the materializer turns it into a
+// cell's fact reference:
+//   - `reused`  — the value already IS a stored fact (revenue, a reported
+//     statement line); the cell points straight at `fact_id`.
+//   - `derived` — a computed quantity (margins, growth, P/E) the materializer
+//     mints as a method='derived' fact, carrying the fields a fact needs.
+// Encoding the two cases in the type keeps the reuse/derive branch (and the
+// fields each case actually uses) out of ad-hoc conditionals downstream.
+type PeerMetricBase = {
   metric: PeerMetricKey;
   value_num: number;
-  unit: string;
   format: PeerMetricFormat;
+};
+
+export type ReusedPeerMetric = PeerMetricBase & {
+  kind: "reused";
+  fact_id: UUID;
+};
+
+export type DerivedPeerMetric = PeerMetricBase & {
+  kind: "derived";
+  unit: string;
   as_of: string;
   // Source of record for the derived fact: the source backing the metric's
   // statement input (eps/revenue/…), falling back to the first input. A
@@ -65,6 +73,8 @@ export type PeerMetricValue = {
   // when the envelope came from a not-yet-persisted statement (fact_id absent).
   input_fact_ids: ReadonlyArray<UUID>;
 };
+
+export type PeerMetricValue = ReusedPeerMetric | DerivedPeerMetric;
 
 export type PeerMetrics = {
   subject: IssuerSubjectRef;
@@ -116,6 +126,7 @@ function metricsFromEnvelope(envelope: KeyStatsEnvelope): PeerMetricValue[] {
     if (!stat || stat.value_num === null) continue;
     out.push(
       Object.freeze({
+        kind: "derived",
         metric: column.metric,
         value_num: stat.value_num,
         unit: stat.unit,
@@ -132,33 +143,34 @@ function metricsFromEnvelope(envelope: KeyStatsEnvelope): PeerMetricValue[] {
 }
 
 // Revenue is not a computed stat; it is the revenue statement line that already
-// participates as a margin denominator / growth numerator. Reusing that input
-// keeps the revenue cell's fact identical to the one the margins divide by,
-// instead of re-loading the statement.
+// participates as a margin denominator / growth numerator. Reusing that line's
+// fact keeps the revenue cell identical to the one the margins divide by,
+// instead of re-loading or re-deriving the statement.
+//
+// Requires a persisted fact_id: a `reused` metric is, by definition, a pointer
+// to an existing fact, so a revenue line without one (not-yet-persisted
+// statement) yields no cell rather than a value with nothing to point at.
 //
 // Only the current-period revenue qualifies. The growth stat also carries a
 // `role: "prior"` revenue input (last year's); excluding it prevents surfacing
 // stale prior-year revenue when the current statement happens to lack its own
 // revenue line — independent of the order stats appear in the envelope.
-function revenueValue(envelope: KeyStatsEnvelope): PeerMetricValue | null {
+function revenueValue(envelope: KeyStatsEnvelope): ReusedPeerMetric | null {
   for (const stat of envelope.stats) {
     for (const input of stat.inputs) {
       if (
         input.kind === "statement_line" &&
         input.role !== "prior" &&
         REVENUE_KEYS.includes(input.metric_key) &&
-        input.value_num !== null
+        input.value_num !== null &&
+        input.fact_id !== undefined
       ) {
         return Object.freeze({
+          kind: "reused",
           metric: "revenue",
           value_num: input.value_num,
-          unit: input.unit,
           format: "currency",
-          as_of: input.as_of,
-          source_id: input.source_id,
-          period: periodOf(input),
-          coverage_level: input.coverage_level,
-          input_fact_ids: input.fact_id !== undefined ? Object.freeze([input.fact_id]) : Object.freeze([]),
+          fact_id: input.fact_id,
         });
       }
     }

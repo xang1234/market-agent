@@ -7,9 +7,10 @@ import {
   type MaterializeOptions,
 } from "../src/metrics-comparison-materializer.ts";
 import type {
+  DerivedPeerMetric,
   PeerMetricPeriod,
   PeerMetrics,
-  PeerMetricValue,
+  ReusedPeerMetric,
 } from "../../fundamentals/src/peer-metrics.ts";
 
 const SUBJECT = { kind: "issuer", id: "22222222-2222-4222-a222-222222222222" } as const;
@@ -30,8 +31,9 @@ const PERIOD: PeerMetricPeriod = {
 
 const OPTS: MaterializeOptions = { clock: () => new Date(NOW) };
 
-function value(overrides: Partial<PeerMetricValue> & Pick<PeerMetricValue, "metric" | "value_num">): PeerMetricValue {
+function derived(overrides: Partial<DerivedPeerMetric> & Pick<DerivedPeerMetric, "metric" | "value_num">): DerivedPeerMetric {
   return {
+    kind: "derived",
     unit: "ratio",
     format: "percent",
     as_of: AS_OF,
@@ -43,15 +45,15 @@ function value(overrides: Partial<PeerMetricValue> & Pick<PeerMetricValue, "metr
   };
 }
 
-const REVENUE = value({
+const REVENUE: ReusedPeerMetric = {
+  kind: "reused",
   metric: "revenue",
   value_num: 391_035_000_000,
-  unit: "currency",
   format: "currency",
-  input_fact_ids: [REV_FACT],
-});
+  fact_id: REV_FACT,
+};
 
-const GROSS_MARGIN = value({
+const GROSS_MARGIN = derived({
   metric: "gross_margin",
   value_num: 0.462,
   input_fact_ids: [GP_FACT, REV_FACT],
@@ -149,17 +151,6 @@ test("revenue reuses its existing fact instead of minting a derived duplicate", 
   const revenue = out.metrics.find((m) => m.metric === "revenue");
   assert.ok(revenue);
   assert.equal(revenue.value_ref, REV_FACT);
-});
-
-test("a reusable metric with no lineage is dropped (renders as a gap)", async () => {
-  const { db, inserts } = mockDb();
-  const revenueNoFact = value({ metric: "revenue", value_num: 1, unit: "currency", format: "currency", input_fact_ids: [] });
-  const peers: PeerMetrics[] = [{ subject: SUBJECT, metrics: [revenueNoFact] }];
-
-  const [out] = await materializePeerMetricFacts(db, peers, OPTS);
-
-  assert.equal(inserts.length, 0);
-  assert.equal(out.metrics.length, 0);
 });
 
 test("metric_ids are resolved once for the whole batch", async () => {
