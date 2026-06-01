@@ -104,6 +104,57 @@ analyze peer_comparison run
 4. **Derived-fact lineage** → materialize derived facts (`method='derived'`)
    **with** input `fact_id` lineage, so a cell traces back to its components.
 
+## Spike findings — derived-fact materialization path (fra-36y8, 2026-06-01)
+
+Investigated `facts` schema (`spec/finance_research_db_schema.sql:548`), the canonical
+write path (`services/evidence/src/fact-repo.ts`), the fundamentals fact path
+(`services/fundamentals/src/sec-facts-repository.ts`), and the key-stats input
+shape (`services/fundamentals/src/key-stats.ts`). Conclusions:
+
+1. **Write path = `createFact()`** (`services/evidence/src/fact-repo.ts:307`). It
+   already accepts `method:'derived'` (the `fact_method` enum includes `derived`),
+   `value_num`, `unit`, `as_of`, `source_id`, `verification_status`, etc. **No new
+   write primitive is needed.** The materializer (fra-wcj6) must call this, **not**
+   add a raw insert. ⚠️ Drift to avoid: `sec-facts-repository.ts::persistStatementFacts`
+   (line 477) bypasses `createFact` with its own `insert into facts … 'reported'`.
+   Don't add a third insert path.
+
+2. **No first-class lineage column.** `facts.supersedes`/`superseded_by` is
+   *versioning* lineage only (same-identity supersession, guarded by
+   `assertFactIdentityMatches`), **not** derivation-input lineage. `createFact`'s
+   only lineage option is `{ supersedes }`. So decision #4's "link to input fact_ids"
+   has two implementations:
+   - **(A) — recommended for v1:** store lineage in `quality_flags` as a structured
+     provenance entry, e.g.
+     `{ kind: 'derivation', expression: 'gross_profit/revenue', inputs: [{ role, fact_id }] }`.
+     Zero migration; reuses the existing `reviewProvenanceFlag` precedent
+     (`fact-repo.ts:934`); verifier-safe (lineage lives on the *fact*, not the
+     block, so `extractBlockRefs`/`inspectableRefs` never try to resolve it). The
+     snapshot seal does **not** integrity-check these input fact_ids — lineage is
+     "soft" (traceable, not enforced).
+   - **(B) — follow-up if lineage must be queried/enforced:** a `fact_lineage`
+     join table (`derived_fact_id` FK, `input_fact_id` FK, `role`, `expression`)
+     written atomically alongside the derived fact. First-class + FK integrity,
+     but a migration + a transactional `createFact` variant. Defer unless a
+     consumer needs to query "what derives from fact X".
+
+3. **Input fact_ids are recoverable but not surfaced.** Statement lines *are*
+   persisted as `reported` facts (`persistStatementFacts`), but
+   `KeyStat.inputs` keeps the `fact_id` only for `MarketFactInputRef` (price);
+   `StatementLineInputRef` carries `metric_id`+`source_id`+period but **no
+   `fact_id`** (`lineFromFactRow`, `sec-facts-repository.ts:457`, discards the
+   `f.fact_id` the query already selects). Resolution for the fetcher (fra-nta8):
+   thread `fact_id` through the load-from-facts path — add an optional `fact_id?`
+   to `StatementLine`/`MappedStatementLine`, populate it in `lineFromFactRow`, and
+   copy it onto `StatementLineInputRef`. `fact_id` is inherently optional on a
+   statement line (absent on the freshly-fetched-not-yet-persisted path), but the
+   emitter reads already-persisted peer facts, so it will be present there.
+
+**Net:** decision #4 is buildable with **no schema migration** — `createFact(method:'derived')`
++ lineage in `quality_flags` (option A) + surfacing `fact_id` on the statement-line
+input ref. fra-36y8 is therefore unblocking fra-wcj6 (materializer) and informs
+fra-nta8 (fetcher).
+
 ## Verification strategy
 
 - Unit: `metric-direction` (tone selection incl. ties / <2 valid), peer
