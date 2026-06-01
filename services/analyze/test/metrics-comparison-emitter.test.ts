@@ -7,6 +7,7 @@ import type { PeerSetResolver } from "../../fundamentals/src/peer-set-resolver.t
 import type { StatsRepository } from "../../fundamentals/src/stats-repository.ts";
 import type { KeyStatsEnvelope } from "../../fundamentals/src/key-stats.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
+import type { MetricsComparisonBlock } from "../src/metrics-comparison-block-builder.ts";
 import { verifySnapshotSeal } from "../../snapshot/src/snapshot-verifier.ts";
 
 const SNAP = "11111111-1111-4111-a111-111111111111";
@@ -171,7 +172,10 @@ test("emitPeerComparisonBlock composes the chain into a sealable peer_table bloc
   );
 
   assert.ok(result, "a block was emitted");
-  const { block, sealInput } = result;
+  const sealInput = result;
+  // blocks[0] is the finalized metrics_comparison block; cast to inspect its
+  // mc-specific fields (the seal input types it as the opaque VerifierBlock).
+  const block = sealInput.blocks[0] as unknown as MetricsComparisonBlock;
 
   // Primary leads; the resolved peer follows.
   assert.deepEqual(block.subjects, [PRIMARY, PEER]);
@@ -197,7 +201,7 @@ test("the emitted seal input passes the real snapshot verifier", async () => {
   );
   assert.ok(result);
 
-  const verification = await verifySnapshotSeal(result.sealInput);
+  const verification = await verifySnapshotSeal(result);
   assert.equal(verification.ok, true, JSON.stringify(verification.failures, null, 2));
 });
 

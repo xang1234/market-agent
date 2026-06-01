@@ -14,7 +14,7 @@ import type { PeerSetResolver } from "../../fundamentals/src/peer-set-resolver.t
 import type { StatsRepository } from "../../fundamentals/src/stats-repository.ts";
 import type { IssuerSubjectRef, UUID } from "../../fundamentals/src/subject-ref.ts";
 import { materializePeerMetricFacts } from "./metrics-comparison-materializer.ts";
-import { buildMetricsComparisonBlock, type MetricsComparisonBlock } from "./metrics-comparison-block-builder.ts";
+import { buildMetricsComparisonBlock } from "./metrics-comparison-block-builder.ts";
 import {
   buildPeerComparisonSealInput,
   type PeerComparisonFactRow,
@@ -43,19 +43,15 @@ export type PeerComparisonEmitInput = {
   title?: string;
 };
 
-export type PeerComparisonEmitResult = {
-  // The finalized block (with data_ref.params.fact_bindings) to persist.
-  block: MetricsComparisonBlock;
-  // Seal input the run path passes to sealSnapshot within its transaction.
-  sealInput: SnapshotSealInput;
-};
-
-// Returns null when there is nothing to compare — no peers, or no metric facts
-// materialized for any subject — so the run path simply omits the peer_table.
+// The seal input is the whole deliverable: the run path seals it inside its
+// transaction and persists its blocks[0] (the finalized metrics_comparison
+// block, with fact_bindings). Returns null when there is nothing to compare —
+// no peers, or no metric facts materialized — so the run simply omits the
+// peer_table section.
 export async function emitPeerComparisonBlock(
   deps: PeerComparisonEmitterDeps,
   input: PeerComparisonEmitInput,
-): Promise<PeerComparisonEmitResult | null> {
+): Promise<SnapshotSealInput | null> {
   const clock = deps.clock ?? (() => new Date());
 
   const peerRefs = await deps.peers.resolvePeers(input.primary.id, { limit: input.peerLimit });
@@ -84,10 +80,9 @@ export async function emitPeerComparisonBlock(
     },
   });
 
-  const sealInput = buildPeerComparisonSealInput({ block, facts: factRows });
   // buildPeerComparisonSealInput finalizes the block (fact_bindings) into
-  // sealInput.blocks[0]; that is the block to persist.
-  return { block: sealInput.blocks[0] as unknown as MetricsComparisonBlock, sealInput };
+  // sealInput.blocks[0]; the run path persists that block and seals the input.
+  return buildPeerComparisonSealInput({ block, facts: factRows });
 }
 
 type FactDbRow = {
