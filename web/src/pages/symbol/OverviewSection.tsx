@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { pluralize } from '../../format/pluralize.ts'
 import { useSubjectDetailContext } from '../../shell/subjectDetailOutletContext.ts'
 import { Card } from '../../symbol/Card.tsx'
+import { CARD_CLASS } from '../../symbol/surfaceStyles.ts'
 import { FetchStateView } from '../../symbol/FetchStateView.tsx'
 import { useFetched } from '../../symbol/useFetched.ts'
 import {
@@ -240,7 +241,7 @@ function KeyStatTile({ stat }: { stat: KeyStat }) {
   return (
     <div
       data-testid={`key-stat-${stat.stat_key}`}
-      className="flex flex-col gap-1 rounded-lg border border-line bg-surface p-3 shadow-sm"
+      className={`flex flex-col gap-1 ${CARD_CLASS} p-3`}
     >
       <span className="text-xs uppercase tracking-wide text-muted">
         {statLabel(stat.stat_key)}

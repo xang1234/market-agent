@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { PRIMARY_BUTTON_CLASS } from '../shell/buttonStyles.ts'
+import { INSET_SURFACE_CLASS, PANEL_CLASS } from '../symbol/surfaceStyles.ts'
 import { useNavigate } from 'react-router-dom'
 import {
   ProtectedActionType,
@@ -271,7 +272,7 @@ export function ScreenerWorkspace() {
 
       <form
         onSubmit={handleSubmit}
-        className="grid gap-4 rounded-lg border border-line bg-surface p-4 lg:grid-cols-3"
+        className={`grid gap-4 ${PANEL_CLASS} p-4 lg:grid-cols-3`}
         aria-label="Screener query controls"
       >
         <UniverseControls draft={draft} onChange={setDraft} />
@@ -306,7 +307,7 @@ export function ScreenerWorkspace() {
               placeholder="Name this screen"
               aria-label="Screen name"
               maxLength={SCREEN_NAME_MAX_LENGTH}
-              className="w-48 rounded-lg border border-line bg-surface-2 px-2 py-2 text-sm"
+              className={`w-48 ${INSET_SURFACE_CLASS} px-2 py-2 text-sm`}
             />
             <button
               type="button"
@@ -378,7 +379,7 @@ function UniverseControls({
                 const next = Array.from(event.target.selectedOptions).map((o) => o.value)
                 onChange(setUniverseSelection(draft, spec.field, next))
               }}
-              className="rounded-lg border border-line bg-surface-2 px-2 py-1 text-sm text-fg outline-none focus:border-accent"
+              className={`${INSET_SURFACE_CLASS} px-2 py-1 text-sm text-fg outline-none focus:border-accent`}
               size={Math.min(spec.options.length, 4)}
             >
               {spec.options.map((opt) => (
@@ -443,7 +444,7 @@ function NumericRangeControls({
                     )
                   }
                   aria-label={`${spec.label} ${bound}`}
-                  className="min-w-0 flex-1 rounded-lg border border-line bg-surface-2 px-2 py-1 text-sm num"
+                  className={`min-w-0 flex-1 ${INSET_SURFACE_CLASS} px-2 py-1 text-sm num`}
                 />
               ))}
             </div>
@@ -474,7 +475,7 @@ function SortLimitControls({
             onChange={(event) =>
               onChange(setSort(draft, { ...draft.sort, field: event.target.value }))
             }
-            className="min-w-0 flex-1 rounded-lg border border-line bg-surface-2 px-2 py-1 text-sm"
+            className={`min-w-0 flex-1 ${INSET_SURFACE_CLASS} px-2 py-1 text-sm`}
           >
             {SORTABLE_FIELDS.map((spec) => (
               <option key={spec.field} value={spec.field}>
@@ -492,7 +493,7 @@ function SortLimitControls({
                 }),
               )
             }
-            className="rounded-lg border border-line bg-surface-2 px-2 py-1 text-sm"
+            className={`${INSET_SURFACE_CLASS} px-2 py-1 text-sm`}
             aria-label="Sort direction"
           >
             <option value="desc">Descending</option>
@@ -509,7 +510,7 @@ function SortLimitControls({
           step={1}
           value={draft.limit}
           onChange={(event) => onChange(setLimit(draft, Number(event.target.value)))}
-          className="rounded-lg border border-line bg-surface-2 px-2 py-1 text-sm num"
+          className={`${INSET_SURFACE_CLASS} px-2 py-1 text-sm num`}
         />
       </label>
     </fieldset>
@@ -566,7 +567,7 @@ function SavedScreensPanel({
   return (
     <section
       aria-label="Saved screens"
-      className="rounded-lg border border-line bg-surface p-3"
+      className={`${PANEL_CLASS} p-3`}
     >
       <header className="flex items-center justify-between pb-2 text-xs font-semibold uppercase tracking-wide text-muted">
         <span>Saved screens</span>
@@ -643,7 +644,7 @@ function ScreenerResults({
 
   if (!response && status === 'loading') {
     return (
-      <div className="rounded-lg border border-line bg-surface p-6 text-sm text-muted">
+      <div className={`${PANEL_CLASS} p-6 text-sm text-muted`}>
         Running initial screen…
       </div>
     )
@@ -659,7 +660,7 @@ function ScreenerResults({
   const hasPrev = offset > 0
 
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-3">
+    <section className={`flex flex-col gap-3 ${PANEL_CLASS} p-3`}>
       <div className="flex items-center justify-between text-xs text-muted">
         <span>
           {response.total_count === 0

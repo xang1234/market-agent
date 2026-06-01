@@ -4,6 +4,7 @@ import { extractInspectableRefs, type InspectableBlockRef } from '../evidence/in
 import type { EvidenceInspectionRef } from '../evidence/inspectionTypes.ts'
 import type { MetricCell, MetricRowBlock } from './types.ts'
 import { metricCellDisplayValue, metricCellHasDelta } from './metricRow.ts'
+import { INSET_SURFACE_CLASS } from '../symbol/surfaceStyles.ts'
 
 type MetricRowProps = { block: MetricRowBlock }
 
@@ -43,7 +44,7 @@ function MetricChip({ snapshotId, valueRef, blockId, index, cell }: MetricChipPr
       data-testid={`block-metric-row-${blockId}-cell-${index}`}
       data-value-ref={cell.value_ref}
       data-delta-ref={cell.delta_ref}
-      className="flex flex-col gap-0.5 rounded-lg border border-line bg-surface-2 px-3 py-2"
+      className={`flex flex-col gap-0.5 ${INSET_SURFACE_CLASS} px-3 py-2`}
     >
       <span className="text-xs uppercase tracking-wide text-muted">
         {cell.label}

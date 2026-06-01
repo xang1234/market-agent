@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { CARD_CLASS } from './surfaceStyles.ts'
 
 type CardProps = {
   testId: string
@@ -13,7 +14,7 @@ export function Card({ testId, headingId, heading, action, children }: CardProps
     <section
       data-testid={testId}
       aria-labelledby={headingId}
-      className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-5 shadow-sm"
+      className={`flex flex-col gap-3 ${CARD_CLASS} p-5`}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3

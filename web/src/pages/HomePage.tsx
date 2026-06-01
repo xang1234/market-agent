@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { webDevFlags } from '../devFlags'
+import { PANEL_CLASS } from '../symbol/surfaceStyles.ts'
 import { homeCardPath } from '../home/deepLinks.ts'
 import { authenticatedFetch } from '../http/authFetch.ts'
 import {
@@ -205,8 +206,7 @@ function FindingsSection({ cards }: { cards: ReadonlyArray<HomeFindingCardSummar
   )
 }
 
-const FINDING_ROW_BASE =
-  'block rounded-lg border border-line bg-surface p-3'
+const FINDING_ROW_BASE = `block ${PANEL_CLASS} p-3`
 const FINDING_ROW_LINKED = `${FINDING_ROW_BASE} hover:border-line-strong`
 
 function FindingRow({ card }: { card: HomeFindingCardSummary }) {
@@ -285,7 +285,7 @@ function QuoteCell({ row }: { row: HomeQuoteRow }) {
         ? 'text-negative'
         : 'text-muted'
   return (
-    <div className="rounded-lg border border-line bg-surface p-3">
+    <div className={`${PANEL_CLASS} p-3`}>
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-sm font-medium">
           {row.ticker}
@@ -315,7 +315,7 @@ function AgentSummariesSection({
       ) : (
         <ul className="flex flex-col gap-2">
           {rows.map((row) => (
-            <li key={row.agent_id} className="rounded-lg border border-line bg-surface p-3">
+            <li key={row.agent_id} className={`${PANEL_CLASS} p-3`}>
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-sm font-medium">{row.name}</span>
                 <span className="text-xs uppercase tracking-wide text-muted">{agentLastRunLabel(row)}</span>
@@ -342,7 +342,7 @@ function SavedScreensSection({ rows }: { rows: ReadonlyArray<HomeSavedScreenRow>
           {rows.map((row) => (
             <li
               key={row.screen_id}
-              className="rounded-lg border border-line bg-surface p-3"
+              className={`${PANEL_CLASS} p-3`}
             >
               <div className="text-sm font-medium">{row.name}</div>
               <div className="mt-1 text-xs text-muted">{savedScreenSubtitle(row)}</div>
@@ -395,7 +395,7 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
 
 function EmptyHint({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-line bg-surface p-4 text-sm text-muted">
+    <div className={`${PANEL_CLASS} p-4 text-sm text-muted`}>
       {children}
     </div>
   )

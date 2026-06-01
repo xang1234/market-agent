@@ -2,6 +2,7 @@ import type { ReactElement } from 'react'
 import type { MetricsComparisonBlock, MetricsComparisonCell, SubjectRef } from './types.ts'
 import { formatSubjectRefShort } from './subjectRef.ts'
 import { NEGATIVE_CLASS, POSITIVE_CLASS } from '../symbol/signedColor.ts'
+import { CARD_CLASS } from '../symbol/surfaceStyles.ts'
 
 type MetricsComparisonProps = { block: MetricsComparisonBlock }
 
@@ -19,7 +20,7 @@ export function MetricsComparison({ block }: MetricsComparisonProps): ReactEleme
     <figure
       data-testid={`block-metrics-comparison-${block.id}`}
       data-block-kind="metrics_comparison"
-      className="overflow-x-auto rounded-lg border border-line bg-surface shadow-sm"
+      className={`overflow-x-auto ${CARD_CLASS}`}
     >
       {block.title ? (
         <figcaption className="border-b border-line p-3 text-sm font-medium text-fg">
