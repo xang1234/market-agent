@@ -29,6 +29,26 @@ test('extractInspectableRefs derives schema-native refs from blocks', () => {
   ])
 })
 
+test('extractInspectableRefs extracts metrics_comparison cell facts and skips gaps', () => {
+  const refs = extractInspectableRefs({
+    id: 'mc-1',
+    kind: 'metrics_comparison',
+    snapshot_id: SNAPSHOT_ID,
+    data_ref: { kind: 'metrics_comparison', id: 'mc-1' },
+    source_refs: [SOURCE_ID],
+    as_of: '2026-05-29T00:00:00.000Z',
+    subjects: [{ kind: 'issuer', id: '99999999-9999-4999-8999-999999999991' }],
+    metrics: ['Revenue', 'P/E'],
+    // present cell + a null gap.
+    cells: [[{ value_ref: FACT_ID }, null]],
+  })
+
+  assert.deepEqual(refs.map((ref) => `${ref.ref.kind}:${ref.ref.id}`), [
+    `source:${SOURCE_ID}`,
+    `fact:${FACT_ID}`,
+  ])
+})
+
 test('extractInspectableRefs mirrors verifier refs for nested chart and research blocks', () => {
   const refs = extractInspectableRefs({
     id: 'section-1',

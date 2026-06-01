@@ -66,6 +66,15 @@ function collectBlockRefs(block: Record<string, unknown>, refs: InspectableBlock
     }
   }
 
+  if (block.kind === 'metrics_comparison') {
+    for (const row of arrayValue(block.cells)) {
+      for (const cell of arrayValue(row)) {
+        // null = a gap cell; only a present cell carries a fact ref.
+        if (isRecord(cell)) push('fact', cell.value_ref)
+      }
+    }
+  }
+
   if (block.kind === 'analyst_consensus') {
     push('fact', block.analyst_count_ref)
     for (const item of arrayValue(block.distribution)) {

@@ -24,6 +24,16 @@ test('MetricsComparison renders formatted cell values, tones, and the primary-su
   assert.match(html, /bg-accent-soft/)
 })
 
+test('MetricsComparison wires present cells to their backing fact via InspectableRef', () => {
+  const html = renderToStaticMarkup(<MetricsComparison block={metricsComparisonFixture} />)
+
+  // A present cell exposes its fact for inspection; a gap cell does not.
+  const firstCellRef = metricsComparisonFixture.cells?.[0]?.[0]
+  assert.ok(firstCellRef)
+  assert.match(html, /data-inspection-kind="fact"/)
+  assert.match(html, new RegExp(`data-inspection-id="${firstCellRef.value_ref}"`))
+})
+
 test('MetricsComparison falls back to em-dashes when a block carries no cells', () => {
   const block: MetricsComparisonBlock = {
     id: 'mc-empty',
