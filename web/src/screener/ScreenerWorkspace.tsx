@@ -234,22 +234,19 @@ export function ScreenerWorkspace() {
     })
   }
 
-  const handleOpenSaved = (screen: ScreenSubject) => {
-    const next = queryToDraft(screen.definition)
+  // Load a query into the workspace and run it immediately — shared by
+  // reopening a saved screen and applying a starter template, which differ only
+  // in the name they restore (a template is unsaved, so its name is blank).
+  const loadDraft = (query: ScreenerQuery, name: string) => {
+    const next = queryToDraft(query)
     setDraft(next)
-    setScreenName(screen.name)
+    setScreenName(name)
     runSearch(next)
   }
 
-  // A starter template seeds the draft through the same projection as a saved
-  // screen, then runs immediately so the user sees results without a second
-  // click. The name is cleared — a template is an unsaved starting point.
-  const handleApplyTemplate = (template: QueryTemplate) => {
-    const next = queryToDraft(template.query)
-    setDraft(next)
-    setScreenName('')
-    runSearch(next)
-  }
+  const handleOpenSaved = (screen: ScreenSubject) => loadDraft(screen.definition, screen.name)
+
+  const handleApplyTemplate = (template: QueryTemplate) => loadDraft(template.query, '')
 
   const handleDeleteSaved = async (screen: ScreenSubject) => {
     if (sessionUserId == null) return

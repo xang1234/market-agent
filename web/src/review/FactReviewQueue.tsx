@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
-import { SeverityBadge, type Severity } from '../blocks/SeverityBadge.tsx'
-import { isStaleItem, reviewSeverity } from './severity.ts'
+import { SeverityBadge } from '../blocks/SeverityBadge.tsx'
+import { isStaleItem, severityForItem, tallySeverities, type ReviewSeverity } from './severity.ts'
 
 export type FactReviewCandidate = Record<string, unknown>
 
@@ -40,17 +40,12 @@ export type FactReviewQueueProps = {
 
 type DecoratedItem = {
   item: FactReviewQueueItem
-  severity: Severity
+  severity: ReviewSeverity
   isStale: boolean
 }
 
 function decorateItem(item: FactReviewQueueItem): DecoratedItem {
-  const isStale = isStaleItem(item)
-  return {
-    item,
-    isStale,
-    severity: reviewSeverity({ confidence: item.confidence, threshold: item.threshold, isStale }),
-  }
+  return { item, isStale: isStaleItem(item), severity: severityForItem(item) }
 }
 
 type DraftState = {
@@ -98,7 +93,11 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject, onApproveA
 
   return (
     <section className="flex flex-col gap-3">
-      <QueueSummary decorated={decorated} onApproveAllLow={onApproveAllLow} />
+      <QueueSummary
+        counts={tallySeverities(items)}
+        total={items.length}
+        onApproveAllLow={onApproveAllLow}
+      />
       <ul className="flex flex-col gap-3">
         {decorated.map(({ item, severity, isStale }) => {
           const draft = draftFromItem(item)
@@ -214,15 +213,14 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject, onApproveA
 }
 
 function QueueSummary({
-  decorated,
+  counts,
+  total,
   onApproveAllLow,
 }: {
-  decorated: ReadonlyArray<DecoratedItem>
+  counts: Record<ReviewSeverity, number>
+  total: number
   onApproveAllLow?: () => void | Promise<void>
 }) {
-  const counts: Record<Severity, number> = { high: 0, medium: 0, low: 0 }
-  for (const entry of decorated) counts[entry.severity] += 1
-  const total = decorated.length
   return (
     <header className="flex flex-wrap items-center gap-2">
       <span className="rounded-md border border-line bg-surface-2 px-2 py-1 text-xs text-muted">

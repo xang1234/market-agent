@@ -7,7 +7,7 @@ import {
   fetchFactReviewQueue,
   rejectFactReview,
 } from '../review/factReviewClient.ts'
-import { isStaleItem, reviewSeverity, type Severity } from '../review/severity.ts'
+import { isStaleItem, severityForItem, tallySeverities } from '../review/severity.ts'
 import { SeverityBadge } from '../blocks/SeverityBadge.tsx'
 import { useAuth } from '../shell/useAuth.ts'
 import { useRightRailContent } from '../shell/useRightRailContent.ts'
@@ -22,6 +22,9 @@ export function ReviewPage() {
   const { session } = useAuth()
   const reviewerId = session?.userId ?? null
   const [state, setState] = useState<ReviewLoadState>({ kind: 'loading' })
+  // Transient feedback for bulk actions (which don't go through the queue's
+  // per-item error channel). Cleared on the next successful bulk run.
+  const [notice, setNotice] = useState<string | null>(null)
   const refreshTokenRef = useRef(0)
 
   const refresh = useCallback(async () => {
@@ -86,18 +89,26 @@ export function ReviewPage() {
 
   // Bulk-approve every low-severity candidate as-is, then refresh once. Done in
   // the page (not the queue component, which remounts on every approval) so the
-  // loop survives to completion against a stable owner.
+  // loop survives to completion against a stable owner. A failure stops the
+  // batch and surfaces a notice; the finally-refresh reconciles with the server
+  // so the queue reflects whatever did get approved rather than a stale view.
   const approveAllLow = useCallback(async () => {
     if (reviewerId === null || state.kind !== 'ready') return
-    const lows = state.items.filter((item) => severityOf(item) === 'low')
-    for (const item of lows) {
-      await approveFactReview(reviewerId, {
-        review_id: item.review_id,
-        candidate: item.candidate,
-        notes: null,
-      })
+    const lows = state.items.filter((item) => severityForItem(item) === 'low')
+    try {
+      for (const item of lows) {
+        await approveFactReview(reviewerId, {
+          review_id: item.review_id,
+          candidate: item.candidate,
+          notes: null,
+        })
+      }
+      setNotice(null)
+    } catch (error) {
+      setNotice(`Bulk approve stopped: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      await refresh()
     }
-    await refresh()
   }, [refresh, reviewerId, state])
 
   const visibleState: ReviewLoadState = reviewerId === null ? { kind: 'unauthenticated' } : state
@@ -122,29 +133,27 @@ export function ReviewPage() {
       ) : visibleState.kind === 'error' ? (
         <ReviewStatus title="Review queue unavailable" message={visibleState.message} tone="error" />
       ) : (
-        <FactReviewQueue
-          items={visibleState.items}
-          onApprove={approve}
-          onEdit={edit}
-          onReject={reject}
-          onApproveAllLow={approveAllLow}
-        />
+        <>
+          {notice ? (
+            <p role="status" className="text-sm text-negative">
+              {notice}
+            </p>
+          ) : null}
+          <FactReviewQueue
+            items={visibleState.items}
+            onApprove={approve}
+            onEdit={edit}
+            onReject={reject}
+            onApproveAllLow={approveAllLow}
+          />
+        </>
       )}
     </div>
   )
 }
 
-function severityOf(item: FactReviewQueueItem): Severity {
-  return reviewSeverity({
-    confidence: item.confidence,
-    threshold: item.threshold,
-    isStale: isStaleItem(item),
-  })
-}
-
 function ReviewRail({ items }: { items: ReadonlyArray<FactReviewQueueItem> }) {
-  const counts: Record<Severity, number> = { high: 0, medium: 0, low: 0 }
-  for (const item of items) counts[severityOf(item)] += 1
+  const counts = tallySeverities(items)
   const stale = items.filter(isStaleItem).length
   return (
     <div className="flex flex-col gap-4 p-4">

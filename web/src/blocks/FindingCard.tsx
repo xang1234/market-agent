@@ -3,7 +3,7 @@ import type { FindingCardBlock } from './types.ts'
 import { Badge } from './Badge.tsx'
 import { ChartCard } from './ChartCard.tsx'
 import { SubjectChipList } from './SubjectChipList.tsx'
-import { findingSeverityBadgeClass } from './findingCard.ts'
+import { severityBadgeClass } from './severityTone.ts'
 
 type FindingCardProps = { block: FindingCardBlock }
 
@@ -22,7 +22,7 @@ export function FindingCard({ block }: FindingCardProps): ReactElement {
         <p className="text-sm font-medium text-fg">{block.headline}</p>
         <Badge
           testId={`block-finding-card-${block.id}-severity`}
-          toneClass={findingSeverityBadgeClass(block.severity)}
+          toneClass={severityBadgeClass(block.severity)}
           layoutClass="shrink-0"
         >
           {block.severity[0].toUpperCase() + block.severity.slice(1)}

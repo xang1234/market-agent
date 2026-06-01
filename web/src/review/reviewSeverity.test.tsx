@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import { renderToString } from 'react-dom/server'
 
-import { reviewSeverity, isStaleItem } from './severity.ts'
+import { reviewSeverity, isStaleItem, severityForItem, tallySeverities } from './severity.ts'
 import { FactReviewQueue, type FactReviewQueueItem } from './FactReviewQueue.tsx'
 
 test('reviewSeverity tracks the shortfall below the approval threshold', () => {
@@ -24,6 +24,18 @@ test('isStaleItem requires both age and freshness window to be present and excee
   assert.equal(isStaleItem({ age_seconds: 30, stale_after_seconds: 60 }), false)
   assert.equal(isStaleItem({ age_seconds: 100 }), false)
   assert.equal(isStaleItem({}), false)
+})
+
+test('severityForItem derives severity from an item, and tallySeverities counts a set', () => {
+  const items = [
+    { confidence: 0.4, threshold: 0.7 }, // high
+    { confidence: 0.62, threshold: 0.7 }, // medium
+    { confidence: 0.9, threshold: 0.7 }, // low
+    { confidence: 0.99, threshold: 0.7, age_seconds: 100, stale_after_seconds: 60 }, // stale -> high
+  ]
+  assert.equal(severityForItem(items[0]), 'high')
+  assert.equal(severityForItem(items[3]), 'high')
+  assert.deepEqual(tallySeverities(items), { high: 2, medium: 1, low: 1 })
 })
 
 const noop = () => undefined
