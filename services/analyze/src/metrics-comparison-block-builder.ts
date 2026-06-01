@@ -43,7 +43,6 @@ export type MetricsComparisonBlockBase = {
   snapshot_id: UUID;
   as_of: string;
   source_refs: ReadonlyArray<UUID>;
-  data_ref?: { kind: string; id: string };
   title?: string;
 };
 
@@ -51,7 +50,9 @@ export type MetricsComparisonBlock = {
   id: string;
   kind: "metrics_comparison";
   snapshot_id: UUID;
-  data_ref: { kind: string; id: string };
+  // params is added at seal time (fact_bindings need the loaded facts' unit /
+  // period metadata — see metrics-comparison-snapshot.ts).
+  data_ref: { kind: string; id: string; params?: Readonly<Record<string, unknown>> };
   source_refs: ReadonlyArray<UUID>;
   as_of: string;
   title?: string;
@@ -96,7 +97,7 @@ export function buildMetricsComparisonBlock(input: {
     id: base.id,
     kind: "metrics_comparison",
     snapshot_id: base.snapshot_id,
-    data_ref: base.data_ref ?? { kind: "metrics_comparison", id: base.id },
+    data_ref: { kind: "metrics_comparison", id: base.id },
     source_refs: base.source_refs,
     as_of: base.as_of,
     ...(base.title === undefined ? {} : { title: base.title }),

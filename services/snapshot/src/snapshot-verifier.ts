@@ -103,6 +103,9 @@ export type VerifierBlock = {
   upside_ref?: string;
   subject_refs?: ReadonlyArray<VerifierSubjectRef>;
   subjects?: ReadonlyArray<VerifierSubjectRef>;
+  // metrics_comparison value matrix; a null entry is a gap. Only value_ref
+  // matters to verification (each is a sealed fact ref).
+  cells?: ReadonlyArray<ReadonlyArray<{ value_ref: string } | null>>;
 };
 
 export type VerifierToolAction = {
@@ -511,6 +514,7 @@ function normalizeBlock(block: VerifierBlock, index: number): VerifierBlock {
           block.data_ref.params,
           `verifySnapshotSeal.blocks[${index}].data_ref.params`,
         );
+  const cells = normalizeCells(block.cells, `verifySnapshotSeal.blocks[${index}].cells`);
 
   return Object.freeze({
     id: assertNonEmptyString(block.id, `verifySnapshotSeal.blocks[${index}].id`),
@@ -574,7 +578,37 @@ function normalizeBlock(block: VerifierBlock, index: number): VerifierBlock {
     ...(documentRefs === undefined
       ? {}
       : { document_refs: Object.freeze(documentRefs.map((ref, refIndex) => assertUuidV4(ref, `verifySnapshotSeal.blocks[${index}].document_refs[${refIndex}]`))) }),
+    ...(cells === undefined ? {} : { cells }),
   });
+}
+
+// metrics_comparison cells: keep just the sealed value_ref of each non-null
+// cell so extractBlockRefs can bind them; a null entry is a rendered gap.
+function normalizeCells(
+  value: unknown,
+  label: string,
+): ReadonlyArray<ReadonlyArray<{ value_ref: string } | null>> | undefined {
+  const rows = optionalArray<unknown>(value, label);
+  if (rows === undefined) return undefined;
+  return Object.freeze(
+    rows.map((row, rowIndex) => {
+      assertArray<unknown>(row, `${label}[${rowIndex}]`);
+      return Object.freeze(
+        row.map((cell, cellIndex) => {
+          if (cell === null) return null;
+          if (cell === undefined || typeof cell !== "object") {
+            throw new Error(`${label}[${rowIndex}][${cellIndex}]: must be an object or null`);
+          }
+          return Object.freeze({
+            value_ref: assertUuidV4(
+              (cell as { value_ref?: unknown }).value_ref,
+              `${label}[${rowIndex}][${cellIndex}].value_ref`,
+            ),
+          });
+        }),
+      );
+    }),
+  );
 }
 
 function normalizeFact(fact: VerifierFact, index: number): VerifierFact {
@@ -1398,6 +1432,15 @@ function extractBlockRefs(block: VerifierBlock): ReadonlyArray<ExtractedBlockRef
     for (const segment of block.segments ?? []) {
       if (!isRecord(segment)) continue;
       pushTypedRef(refs, "fact", segment.value_ref);
+    }
+  }
+
+  if (block.kind === "metrics_comparison") {
+    for (const row of block.cells ?? []) {
+      for (const cell of row ?? []) {
+        // null = a gap cell; only a present cell carries a fact ref.
+        if (isRecord(cell)) pushTypedRef(refs, "fact", cell.value_ref);
+      }
     }
   }
 
