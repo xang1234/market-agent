@@ -62,10 +62,14 @@ export function ReviewPage() {
     }
   }, [reviewerId])
 
+  // A successful per-item action supersedes any lingering bulk-action notice,
+  // so each clears it before refreshing. (Clearing in `refresh` itself would
+  // race approveAllLow's own finally-refresh and swallow its error banner.)
   const approve = useCallback(
     async (action: FactReviewQueueAction) => {
       if (reviewerId === null) return
       await approveFactReview(reviewerId, action)
+      setNotice(null)
       await refresh()
     },
     [refresh, reviewerId],
@@ -74,6 +78,7 @@ export function ReviewPage() {
     async (action: FactReviewQueueAction) => {
       if (reviewerId === null) return
       await editFactReviewCandidate(reviewerId, action)
+      setNotice(null)
       await refresh()
     },
     [refresh, reviewerId],
@@ -82,6 +87,7 @@ export function ReviewPage() {
     async (action: FactReviewQueueRejectAction) => {
       if (reviewerId === null) return
       await rejectFactReview(reviewerId, action)
+      setNotice(null)
       await refresh()
     },
     [refresh, reviewerId],
