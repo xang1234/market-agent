@@ -81,7 +81,7 @@ executor (sequential; the caller owns the transaction + seal boundary).
 
 ## Architecture / data flow
 
-```
+```text
 analyze peer_comparison run
   → peerSetResolver(primary, {criteria:'industry', n:5})    → issuer_ids[]
   → metricFetcher(issuer_ids, METRICS)                       → per-issuer KeyStat values (+ input fact_ids)

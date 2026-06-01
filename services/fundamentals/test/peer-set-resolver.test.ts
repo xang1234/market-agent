@@ -14,9 +14,13 @@ const PEER_B = "44444444-4444-4444-a444-444444444444";
 function mockDb(rows: ReadonlyArray<{ issuer_id: string }>) {
   const calls: Array<{ text: string; values: unknown[] }> = [];
   const db: FundamentalsQueryExecutor = {
-    async query(text: string, values?: unknown[]) {
+    // A concrete mock can't satisfy the generic query<R> return precisely; use
+    // the codebase's mock-executor convention (Promise<any>) rather than an
+    // `as never[]` cast on the rows.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async query(text: string, values?: unknown[]): Promise<any> {
       calls.push({ text, values: values ?? [] });
-      return { rows: rows as never[] };
+      return { rows };
     },
   };
   return { db, calls };
