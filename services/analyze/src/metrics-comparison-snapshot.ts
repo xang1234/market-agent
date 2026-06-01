@@ -4,17 +4,17 @@
 // checks against. The caller (the peer_comparison trigger) loads the fact rows
 // from the DB and calls sealSnapshot with the result.
 //
-// fact_refs are taken straight from the cells rather than via the verifier's
-// extractBlockRefs (which does not handle metrics_comparison until fra-xg4o).
-// Populating them now means the seal is correct today AND once that extraction
-// turns on the cell-fact enforcement — no rework.
+// This module authors the manifest: it derives fact_refs straight from the
+// cells (and sources from the loaded fact rows). The verifier's extractBlockRefs
+// independently re-derives the same cell refs to cross-check the manifest — the
+// two must agree, but neither is generated from the other.
 
 import {
   STAGED_SNAPSHOT_MANIFEST,
   type SnapshotManifestDraft,
 } from "../../snapshot/src/manifest-staging.ts";
 import type { SnapshotSealInput } from "../../snapshot/src/snapshot-sealer.ts";
-import type { VerifierBlock, VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
+import type { VerifierBlock, VerifierFact, VerifierFactBinding } from "../../snapshot/src/snapshot-verifier.ts";
 import type { MetricsComparisonBlock } from "./metrics-comparison-block-builder.ts";
 import type { UUID } from "../../fundamentals/src/subject-ref.ts";
 
@@ -82,7 +82,7 @@ export function buildPeerComparisonSealInput(input: {
 
 // A fact's binding for data_ref.params: the fact_id plus the unit/period fields
 // the verifier matches against (everything on the row except its source_id).
-function factBinding(fact: PeerComparisonFactRow): Record<string, unknown> {
+function factBinding(fact: PeerComparisonFactRow): VerifierFactBinding {
   const { source_id: _source_id, ...binding } = fact;
   return binding;
 }
