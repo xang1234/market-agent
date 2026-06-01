@@ -45,6 +45,8 @@ test("resolvePeers query ranks same-industry peers by market cap and excludes th
   const sql = calls[0].text;
 
   assert.match(sql, /m\.metric_key = 'market_cap'/);
+  // Latest market_cap is picked deterministically (co-dated facts tie-broken).
+  assert.match(sql, /order by f\.as_of desc, f\.created_at desc/);
   assert.match(sql, /peer\.industry = primary_issuer\.industry/);
   assert.match(sql, /peer\.issuer_id <> \$1/);
   assert.match(sql, /order by cap\.value_num desc nulls last/);

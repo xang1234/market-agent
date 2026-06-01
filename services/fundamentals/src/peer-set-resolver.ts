@@ -40,7 +40,7 @@ export function createSqlPeerSetResolver(db: FundamentalsQueryExecutor): PeerSet
                 and m.metric_key = 'market_cap'
                 and f.invalidated_at is null
                 and f.superseded_by is null
-              order by f.as_of desc
+              order by f.as_of desc, f.created_at desc
               limit 1
            ) cap on true
           where peer.issuer_id <> $1
