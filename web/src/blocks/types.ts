@@ -189,10 +189,21 @@ export type SegmentTrajectoryBlock = BaseBlock & {
   series: ReadonlyArray<Series>
 }
 
+export type MetricsComparisonCell = {
+  value_ref: string
+  format?: string
+  tone?: 'positive' | 'negative' | 'neutral'
+}
+
 export type MetricsComparisonBlock = BaseBlock & {
   kind: 'metrics_comparison'
   subjects: ReadonlyArray<SubjectRef>
   metrics: ReadonlyArray<string>
+  // Value matrix indexed [subjectIndex][metricIndex]. Optional: when absent the
+  // block renders metric labels with empty cells (the pre-values behavior).
+  cells?: ReadonlyArray<ReadonlyArray<MetricsComparisonCell>>
+  // The queried subject to emphasize among the compared peers.
+  primary_subject_ref?: SubjectRef
 }
 
 export type SentimentTrendBlock = BaseBlock & {

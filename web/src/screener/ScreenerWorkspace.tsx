@@ -443,7 +443,7 @@ function NumericRangeControls({
                     )
                   }
                   aria-label={`${spec.label} ${bound}`}
-                  className="min-w-0 flex-1 rounded-lg border border-line bg-surface-2 px-2 py-1 text-sm tabular-nums"
+                  className="min-w-0 flex-1 rounded-lg border border-line bg-surface-2 px-2 py-1 text-sm num"
                 />
               ))}
             </div>
@@ -509,7 +509,7 @@ function SortLimitControls({
           step={1}
           value={draft.limit}
           onChange={(event) => onChange(setLimit(draft, Number(event.target.value)))}
-          className="rounded-lg border border-line bg-surface-2 px-2 py-1 text-sm tabular-nums"
+          className="rounded-lg border border-line bg-surface-2 px-2 py-1 text-sm num"
         />
       </label>
     </fieldset>
@@ -721,7 +721,7 @@ function ScreenerResults({
                     }
                   }}
                 >
-                  <td className="py-2 pr-3 text-right tabular-nums text-muted">{row.rank}</td>
+                  <td className="py-2 pr-3 text-right num text-muted">{row.rank}</td>
                   <td className="py-2 pr-3">
                     <span className="block font-medium text-fg">
                       {row.display.ticker ?? row.display.primary}
@@ -731,15 +731,15 @@ function ScreenerResults({
                       {row.display.mic ? ` · ${row.display.mic}` : ''}
                     </span>
                   </td>
-                  <td className="py-2 pr-3 text-right tabular-nums">{cells.lastPrice}</td>
+                  <td className="py-2 pr-3 text-right num">{cells.lastPrice}</td>
                   <td
-                    className={`py-2 pr-3 text-right tabular-nums ${cells.changeClass}`}
+                    className={`py-2 pr-3 text-right num ${cells.changeClass}`}
                   >
                     {cells.changePct}
                   </td>
-                  <td className="py-2 pr-3 text-right tabular-nums">{cells.volume}</td>
-                  <td className="py-2 pr-3 text-right tabular-nums">{cells.marketCap}</td>
-                  <td className="py-2 pr-3 text-right tabular-nums">{cells.peRatio}</td>
+                  <td className="py-2 pr-3 text-right num">{cells.volume}</td>
+                  <td className="py-2 pr-3 text-right num">{cells.marketCap}</td>
+                  <td className="py-2 pr-3 text-right num">{cells.peRatio}</td>
                 </tr>
               ))}
             </tbody>

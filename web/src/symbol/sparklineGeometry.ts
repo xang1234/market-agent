@@ -15,6 +15,9 @@ export type SparklineGeometry = {
   // so callers can render a gradient/tinted area fill under the line without
   // recomputing points. Always present; render it only when an area is wanted.
   areaPath: string
+  // The last point's coordinates, so callers can anchor an end-of-line label
+  // (e.g. multi-series TradingView-style labels) without re-parsing the path.
+  end: { x: number; y: number }
   baselineY: number | null
 }
 
@@ -45,11 +48,15 @@ export function computeSparklineGeometry({
   // happens to coincide with the flat value) on the mid-line instead.
   const span = rawSpan === 0 ? 1 : rawSpan
   const midY = padY + innerH / 2
+  // Single projection of a value onto the chart's y-axis, with the flat-series
+  // guard in one place. Used for the line points, the end anchor, and the
+  // baseline so the three can't drift apart.
+  const projectY = (value: number) =>
+    rawSpan === 0 ? midY : padY + (1 - (value - lo) / span) * innerH
   const path = values
     .map((value, i) => {
       const x = padX + (i / (values.length - 1)) * innerW
-      const y = rawSpan === 0 ? midY : padY + (1 - (value - lo) / span) * innerH
-      return `${i === 0 ? 'M' : 'L'} ${x.toFixed(2)},${y.toFixed(2)}`
+      return `${i === 0 ? 'M' : 'L'} ${x.toFixed(2)},${projectY(value).toFixed(2)}`
     })
     .join(' ')
   // Close the line down to the chart floor and back to the start for area fills.
@@ -59,13 +66,9 @@ export function computeSparklineGeometry({
   const areaPath = `${path} L ${lastX.toFixed(2)},${floorY.toFixed(2)} L ${firstX.toFixed(
     2,
   )},${floorY.toFixed(2)} Z`
-  const baselineY =
-    baseline === null
-      ? null
-      : rawSpan === 0
-        ? midY
-        : padY + (1 - (baseline - lo) / span) * innerH
-  return { path, areaPath, baselineY }
+  const end = { x: lastX, y: projectY(values[values.length - 1]) }
+  const baselineY = baseline === null ? null : projectY(baseline)
+  return { path, areaPath, end, baselineY }
 }
 
 function resolveDomain(

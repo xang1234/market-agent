@@ -205,7 +205,7 @@ function StatementsTable({ response }: { response: GetStatementsResponse }) {
               {periods.map((entry) => (
                 <td
                   key={`${row.metric_key}-${entry.period}`}
-                  className="px-2 py-1.5 text-right tabular-nums text-fg"
+                  className="px-2 py-1.5 text-right num text-fg"
                 >
                   {formatLineCell(entry.outcome.outcome === 'available' ? entry.outcome.data : null, row)}
                 </td>
@@ -345,10 +345,10 @@ function SegmentTrajectory({
             style={{ backgroundColor: DONUT_PALETTE[i % DONUT_PALETTE.length] }}
           />
           <span className="flex-1 truncate text-fg">{slice.label}</span>
-          <span className="tabular-nums text-muted">
+          <span className="num text-muted">
             {(slice.share * 100).toFixed(1)}%
           </span>
-          <span className="w-20 text-right tabular-nums text-muted">
+          <span className="w-20 text-right num text-muted">
             {formatCompactDollars(slice.value)} {reportingCurrency}
           </span>
         </li>

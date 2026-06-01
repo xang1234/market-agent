@@ -133,19 +133,19 @@ function InstitutionalRow({ holder, currency }: { holder: InstitutionalHolder; c
       className="border-t border-line"
     >
       <td className="px-2 py-2 text-fg">{holder.holder_name}</td>
-      <td className="px-2 py-2 text-right tabular-nums text-fg">
+      <td className="px-2 py-2 text-right num text-fg">
         {formatCompactDollars(holder.shares_held)}
       </td>
-      <td className="px-2 py-2 text-right tabular-nums text-fg">
+      <td className="px-2 py-2 text-right num text-fg">
         {formatCompactCurrency(holder.market_value, currency)}
       </td>
-      <td className="px-2 py-2 text-right tabular-nums text-fg">
+      <td className="px-2 py-2 text-right num text-fg">
         {holder.percent_of_shares_outstanding.toFixed(2)}%
       </td>
-      <td className={`px-2 py-2 text-right tabular-nums ${signedTextClass(holder.shares_change)}`}>
+      <td className={`px-2 py-2 text-right num ${signedTextClass(holder.shares_change)}`}>
         {formatSignedCount(holder.shares_change)}
       </td>
-      <td className="px-2 py-2 text-right tabular-nums text-muted">
+      <td className="px-2 py-2 text-right num text-muted">
         {holder.filing_date}
       </td>
     </tr>
@@ -213,16 +213,16 @@ function InsiderRow({
       <td className={`px-2 py-2 ${INSIDER_DIRECTION_CLASS[transaction.transaction_type]}`}>
         {insiderTransactionLabel(transaction.transaction_type)}
       </td>
-      <td className="px-2 py-2 text-right tabular-nums text-fg">
+      <td className="px-2 py-2 text-right num text-fg">
         {formatCompactDollars(transaction.shares)}
       </td>
-      <td className="px-2 py-2 text-right tabular-nums text-fg">
+      <td className="px-2 py-2 text-right num text-fg">
         {transaction.price === null ? '—' : formatCurrency2(transaction.price, currency)}
       </td>
-      <td className="px-2 py-2 text-right tabular-nums text-fg">
+      <td className="px-2 py-2 text-right num text-fg">
         {transaction.value === null ? '—' : formatCompactCurrency(transaction.value, currency)}
       </td>
-      <td className={`px-2 py-2 text-right tabular-nums ${NEUTRAL_CLASS}`}>
+      <td className={`px-2 py-2 text-right num ${NEUTRAL_CLASS}`}>
         {transaction.transaction_date}
       </td>
     </tr>
