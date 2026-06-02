@@ -15,7 +15,7 @@ import { MessageItem } from './MessageItem.tsx'
 const USER_ID = '00000000-0000-4000-8000-000000000001'
 const SNAPSHOT_ID = '11111111-1111-4111-8111-111111111111'
 
-// A minimal rich_text block (prose — should get max-w-[680px])
+// A minimal rich_text block (prose — should get max-w-[820px])
 const richTextBlock: RichTextBlock = {
   id: 'block-rich-text-1',
   kind: 'rich_text',
@@ -86,7 +86,7 @@ function installDomGlobals(domWindow: Window): () => void {
   }
 }
 
-test('MessageItem assistant: prose block gets max-w-[680px], wide block gets max-w-[960px]', async () => {
+test('MessageItem assistant: prose block gets max-w-[820px], wide block gets max-w-[960px]', async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
   const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
   try {
@@ -114,8 +114,8 @@ test('MessageItem assistant: prose block gets max-w-[680px], wide block gets max
 
     const html = dom.window.document.body.innerHTML
     assert.ok(
-      html.includes('max-w-[680px]'),
-      `Expected max-w-[680px] for prose block, got: ${html.slice(0, 400)}`,
+      html.includes('max-w-[820px]'),
+      `Expected max-w-[820px] for prose block, got: ${html.slice(0, 400)}`,
     )
     assert.ok(
       html.includes('max-w-[960px]'),

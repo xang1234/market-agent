@@ -55,8 +55,8 @@ test("isWideBlock('unknown_kind') === false", () => {
 
 // ── column class strings ──────────────────────────────────────────────────────
 
-test('PROSE_COLUMN_CLASS contains max-w-[680px]', () => {
-  assert.ok(PROSE_COLUMN_CLASS.includes('max-w-[680px]'), `Got: ${PROSE_COLUMN_CLASS}`)
+test('PROSE_COLUMN_CLASS contains max-w-[820px]', () => {
+  assert.ok(PROSE_COLUMN_CLASS.includes('max-w-[820px]'), `Got: ${PROSE_COLUMN_CLASS}`)
 })
 
 test('PROSE_COLUMN_CLASS does NOT contain mx-auto', () => {
