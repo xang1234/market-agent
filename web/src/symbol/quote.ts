@@ -43,6 +43,11 @@ export type QuoteSnapshot = {
   delay_class: QuoteDelayClass
   session_state: QuoteSessionState
   source_id: string
+  // Human-readable data provider (e.g. "polygon_market"), carried alongside the
+  // opaque source_id so provenance surfaces can show a meaningful name. The
+  // source UUIDs all share the 00000000-0000-4000-a000-* prefix, so the id
+  // itself is useless for display — the provider name is what users recognise.
+  provider: string
 }
 
 // Mirrors GetQuoteResponse in services/market/src/http.ts. We type the wire
@@ -63,6 +68,10 @@ type WireNormalizedQuote = {
 
 type WireGetQuoteResponse = {
   quote: WireNormalizedQuote
+  provenance: {
+    provider: string
+    source_id: string
+  }
   listing_context: {
     ticker: string
     mic: string
@@ -138,7 +147,7 @@ function unavailableDetail(body: unknown): string | null {
 }
 
 export function snapshotFromWire(body: WireGetQuoteResponse): QuoteSnapshot {
-  const { quote, listing_context } = body
+  const { quote, provenance, listing_context } = body
   return {
     subject_ref: { kind: 'listing', id: quote.listing.id },
     listing: { ...listing_context },
@@ -151,7 +160,30 @@ export function snapshotFromWire(body: WireGetQuoteResponse): QuoteSnapshot {
     delay_class: quote.delay_class,
     session_state: quote.session_state,
     source_id: quote.source_id,
+    provider: provenance.provider,
   }
+}
+
+// Display names for the known market-data providers. The wire `provider` is an
+// internal identifier (e.g. "yahoo_finance_dev_market"); these map it to a clean
+// brand label while preserving the "(dev)" distinction — dev/free feeds are not
+// licensed real-time data, so the provenance card must not pass them off as the
+// production source.
+const PROVIDER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  polygon_market: 'Polygon',
+  yahoo_finance_dev_market: 'Yahoo Finance (dev)',
+  stooq_market: 'Stooq',
+}
+
+// Resolves the snake_case wire provider to its display label. Known providers
+// get a curated brand name; unknown ones fall back to a humanized form
+// (underscores → spaces) so a newly-added provider still renders legibly. Falls
+// back to the supplied source_id only when no provider name is available, so the
+// provenance card never renders an empty source.
+export function formatProviderName(provider: string, fallbackSourceId = ''): string {
+  const name = provider.trim()
+  if (name.length === 0) return fallbackSourceId
+  return PROVIDER_DISPLAY_NAMES[name] ?? name.replaceAll('_', ' ')
 }
 
 export function formatSignedNumber(value: number): string {

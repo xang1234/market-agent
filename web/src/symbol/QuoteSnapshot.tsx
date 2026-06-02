@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { CARD_CLASS } from './surfaceStyles.ts'
 import {
   fetchQuoteSnapshot,
+  formatProviderName,
   formatQuotePrice,
   formatSignedNumber,
   formatSignedPercent,
@@ -119,7 +120,7 @@ export function QuoteSnapshot({ subject }: QuoteSnapshotProps) {
       >
         <div className="flex items-center justify-between text-xs text-muted">
           <span>Source</span>
-          <span className="num truncate" title={quote.source_id}>{quote.source_id.slice(0, 8)}…</span>
+          <span className="truncate" title={quote.source_id}>{formatProviderName(quote.provider, quote.source_id)}</span>
         </div>
         <div className="mt-2 text-xs text-muted">
           Prev close: <span className="num">{formatQuotePrice(quote.prev_close, quote.currency)}</span>
