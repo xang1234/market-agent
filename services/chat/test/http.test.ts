@@ -383,10 +383,12 @@ test("stream route schedules configured thread title generation from real server
   ]);
 });
 
-test("stream route passes user_intent without invoking subject pre-resolution", async (t) => {
+test("stream route mines user_intent for a subject and still answers when none resolves", async (t) => {
+  const resolveCalls: string[] = [];
   const base = await startServer(t, {
-    preResolveSubject: async () => {
-      throw new Error("user_intent must not be routed through subject resolution");
+    preResolveSubject: async ({ text }) => {
+      resolveCalls.push(text);
+      return { status: "not_found", input_text: text, normalized_input: text, message: `no match for ${text}` };
     },
   });
 
@@ -401,6 +403,10 @@ test("stream route passes user_intent without invoking subject pre-resolution", 
     JSON.stringify(events),
     /Review AAPL earnings quality/,
   );
+  // With no explicit subject, the message is mined for candidates (the AAPL
+  // token among them); none resolve here, so the turn still completes on the
+  // default bundle rather than erroring.
+  assert.ok(resolveCalls.includes("AAPL"));
 });
 
 test("run activity stream replays retained events after Last-Event-ID", async (t) => {

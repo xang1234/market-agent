@@ -22,6 +22,7 @@ const APPLE_QUOTE: QuoteSnapshot = {
   delay_class: 'delayed_15m',
   session_state: 'regular',
   source_id: '00000000-0000-4000-a000-000000000001',
+  provider: 'polygon_market',
 }
 
 const READY_STATE: QuoteRowState = { status: 'ready', data: APPLE_QUOTE }

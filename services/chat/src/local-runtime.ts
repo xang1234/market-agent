@@ -23,6 +23,12 @@ import {
   composeAnalystBlocksWithLlm,
   createLlmThreadTitleModel,
 } from "./llm-runtime.ts";
+import {
+  loadStructuredSubjectContext,
+  NO_STRUCTURED_REFS,
+  structuredEvidenceStatus,
+  structuredRefsFromHandoff,
+} from "./local-runtime-structured.ts";
 import { createChatMessagePersistence } from "./messages.ts";
 import { createThreadTitleGenerationJob } from "./thread-title.ts";
 
@@ -30,26 +36,52 @@ let localPool: Pool | null = null;
 
 export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const asOf = new Date().toISOString();
-  const subjectRefs = context.subjectPreResolution?.status === "resolved"
-    ? [context.subjectPreResolution.subject_ref]
+  const resolved = context.subjectPreResolution?.status === "resolved"
+    ? context.subjectPreResolution
+    : null;
+  const subjectRefs = resolved
+    ? [resolved.subject_ref]
     : [{ kind: "screen" as const, id: context.threadId }];
+  // Structured loaders key off the resolver's already-hydrated issuer/listings,
+  // not the raw subject_ref — no SQL re-derivation of the subject graph.
+  const structuredRefs = resolved ? structuredRefsFromHandoff(resolved.handoff) : NO_STRUCTURED_REFS;
   const registryRuntime = createRegistryBackedAnalystToolRuntime({
     executeTool: async ({ toolName, arguments: args }) => {
-      const evidence = await loadLocalRuntimeEvidence(pool(), {
-        subject_refs: subjectRefs,
-        user_id: context.userId ?? null,
-      });
+      // Research claims are only one evidence type. A subject often has a live
+      // quote and issuer fundamentals but no extracted claims (every subject in
+      // dev, and any freshly-covered name in prod); gating solely on claims made
+      // the analyst answer "insufficient data" for those. Load the structured
+      // context too so the analyst can ground an answer in price + fundamentals,
+      // and only report insufficient_evidence when nothing at all exists.
+      const [evidence, structured] = await Promise.all([
+        loadLocalRuntimeEvidence(pool(), {
+          subject_refs: subjectRefs,
+          user_id: context.userId ?? null,
+        }),
+        loadStructuredSubjectContext(pool(), structuredRefs),
+      ]);
       return {
         kind: "local_evidence_tool_result",
         status: "ok",
         tool_name: toolName,
         arguments: args,
-        evidence_status: evidence.claim_refs.length > 0 ? "available" : "insufficient_evidence",
+        evidence_status: structuredEvidenceStatus({
+          claimCount: evidence.claim_refs.length,
+          factCount: structured.facts.length,
+          quote: structured.quote,
+        }),
         manifest_contribution: {
           subject_refs: subjectRefs,
           claim_refs: evidence.claim_refs,
           document_refs: evidence.document_refs,
           source_ids: evidence.source_ids,
+        },
+        // Surfaced to the analyst LLM via summarizeToolCall(result) so it can
+        // compose from price + fundamentals, not just research claims.
+        structured_context: {
+          quote: structured.quote,
+          facts: structured.facts,
+          source_ids: structured.source_ids,
         },
         evidence,
       };

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   fetchQuoteSnapshot,
+  formatProviderName,
   formatSignedNumber,
   issuerProfileFromSubject,
   listingIdForQuote,
@@ -67,6 +68,10 @@ const baseWireResponse = {
     currency: 'USD',
     source_id: POLYGON_SOURCE_ID,
   },
+  provenance: {
+    provider: 'polygon_market',
+    source_id: POLYGON_SOURCE_ID,
+  },
   listing_context: { ticker: 'AAPL', mic: 'XNAS', timezone: 'America/New_York' },
 }
 
@@ -88,6 +93,19 @@ test('snapshotFromWire converts a backend GetQuoteResponse into a QuoteSnapshot'
   // Verification clause: the live source_id surfaces in the snapshot.
   assert.equal(snapshot.source_id, POLYGON_SOURCE_ID)
   assert.notEqual(snapshot.source_id, 'p1.1-stub')
+  // The human-readable provider (from provenance) surfaces so the UI can show a
+  // meaningful source name instead of a slice of the all-zero-prefixed UUID.
+  assert.equal(snapshot.provider, 'polygon_market')
+})
+
+test('formatProviderName maps known providers to clean brand names, keeping the dev marker', () => {
+  assert.equal(formatProviderName('polygon_market'), 'Polygon')
+  assert.equal(formatProviderName('yahoo_finance_dev_market'), 'Yahoo Finance (dev)')
+  assert.equal(formatProviderName('stooq_market'), 'Stooq')
+  // Unknown providers fall back to a humanized form so they still render legibly.
+  assert.equal(formatProviderName('some_new_market'), 'some new market')
+  // Falls back to the source_id only when no provider name is available.
+  assert.equal(formatProviderName('', POLYGON_SOURCE_ID), POLYGON_SOURCE_ID)
 })
 
 test('listingIdForQuote uses subject_ref.id directly for listing-kind subjects', () => {

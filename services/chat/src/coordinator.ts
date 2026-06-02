@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { DEFAULT_BUNDLE_ID, chooseBundleIdForSubjectKind } from "./bundle-routing.ts";
+import { extractSubjectCandidates } from "./subject-extraction.ts";
 import {
   createChatSseSequencer,
   type ChatSseEvent,
@@ -710,45 +711,65 @@ function subjectAwareRunner(
   } = {},
 ): ChatTurnRunner {
   return async (context) => {
-    const subjectText = nonEmptySubjectText(context.subjectText);
-    if (!subjectText) {
-      // No subject yet (brand-new thread or follow-up turn without a subject
-      // change) — route to the default analyst bundle.
-      await runner({ ...context, bundleId: DEFAULT_BUNDLE_ID });
+    const explicitSubject = nonEmptySubjectText(context.subjectText);
+
+    // An explicit subject (e.g. a thread opened from a ticker page) must resolve;
+    // an unresolved one is a clarification, not a silent fallback.
+    if (explicitSubject) {
+      if (!options.preResolveSubject) {
+        throw new Error("subject pre-resolver is not configured");
+      }
+      const preResolution = await options.preResolveSubject({ text: explicitSubject });
+      if (preResolution.status !== "resolved") {
+        await emitSubjectClarificationTurn(context, preResolution, {
+          persistAssistantMessage: options.persistAssistantMessage,
+          renderSubjectClarification: options.renderSubjectClarification,
+        });
+        return;
+      }
+      await runResolvedSubjectTurn(runner, context, preResolution);
       return;
     }
 
-    if (!options.preResolveSubject) {
-      throw new Error("subject pre-resolver is not configured");
+    // The chat UI attaches no subject, so ground the turn by extracting a
+    // resolvable ticker from the user's message ("tell me about MU" -> MU).
+    // Messages with no resolvable subject fall through to the default analyst
+    // bundle — exactly as before, and without nagging for clarification.
+    if (options.preResolveSubject) {
+      for (const candidate of extractSubjectCandidates(nonEmptySubjectText(context.userIntent))) {
+        const preResolution = await options.preResolveSubject({ text: candidate });
+        if (preResolution.status === "resolved") {
+          await runResolvedSubjectTurn(runner, context, preResolution);
+          return;
+        }
+      }
     }
 
-    const preResolution = await options.preResolveSubject({ text: subjectText });
-    if (preResolution.status !== "resolved") {
-      await emitSubjectClarificationTurn(context, preResolution, {
-        persistAssistantMessage: options.persistAssistantMessage,
-        renderSubjectClarification: options.renderSubjectClarification,
-      });
-      return;
-    }
-
-    const bundleId = chooseBundleIdForSubjectKind(preResolution.subject_ref.kind);
-    // Emit turn.started with the resolved bundle_id BEFORE any tool
-    // events. The runner's emit wrapper auto-fabricates an empty
-    // turn.started on the first non-turn.started emit; if we let the
-    // tool events fire first, that auto-fabricated event would land
-    // on the SSE stream without a bundle_id, breaking consumers that
-    // key setup off turn.started.
-    context.emit("turn.started", { bundle_id: bundleId });
-
-    const toolCallId = subjectResolutionToolCallId(context);
-    emitSubjectResolutionToolEvents(context.emit, preResolution, toolCallId);
-
-    await runner({
-      ...context,
-      subjectPreResolution: preResolution,
-      bundleId,
-    });
+    await runner({ ...context, bundleId: DEFAULT_BUNDLE_ID });
   };
+}
+
+async function runResolvedSubjectTurn(
+  runner: ChatTurnRunner,
+  context: ChatTurnRunContext,
+  preResolution: ChatResolvedSubjectPreResolution,
+): Promise<void> {
+  const bundleId = chooseBundleIdForSubjectKind(preResolution.subject_ref.kind);
+  // Emit turn.started with the resolved bundle_id BEFORE any tool events. The
+  // runner's emit wrapper auto-fabricates an empty turn.started on the first
+  // non-turn.started emit; if tool events fired first, that fabricated event
+  // would land on the SSE stream without a bundle_id, breaking consumers that
+  // key setup off turn.started.
+  context.emit("turn.started", { bundle_id: bundleId });
+
+  const toolCallId = subjectResolutionToolCallId(context);
+  emitSubjectResolutionToolEvents(context.emit, preResolution, toolCallId);
+
+  await runner({
+    ...context,
+    subjectPreResolution: preResolution,
+    bundleId,
+  });
 }
 
 async function emitSubjectClarificationTurn(
