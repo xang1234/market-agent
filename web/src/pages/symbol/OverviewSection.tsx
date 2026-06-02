@@ -30,11 +30,7 @@ import {
 } from '../../symbol/series.ts'
 import { Sparkline } from '../../symbol/Sparkline.tsx'
 import { SectorChip } from '../../symbol/SectorChip.tsx'
-import {
-  consensusBelongsToIssuer,
-  fetchConsensus,
-  type AnalystConsensusEnvelope,
-} from '../../symbol/consensus.ts'
+import { useConsensus } from '../../symbol/useConsensus.ts'
 import { ConsensusBody, PriceTargetBody } from '../../symbol/consensusViews.tsx'
 
 const STAT_ORDER: ReadonlyArray<KeyStatKey> = [
@@ -79,15 +75,8 @@ export function OverviewSection() {
   })
 
   // Analyst consensus + price target are surfaced on the landing tab (not only
-  // under Earnings), matching the reference design. Same envelope, same
-  // ownership check the Earnings tab uses.
-  const consensus = useFetched<AnalystConsensusEnvelope>(issuerId, async (id, signal) => {
-    const data = await fetchConsensus(id, { signal })
-    if (!consensusBelongsToIssuer(data, id)) {
-      return { kind: 'unavailable', reason: 'consensus response did not match requested issuer' }
-    }
-    return { kind: 'ready', data }
-  })
+  // under Earnings), matching the reference design — same shared fetch.
+  const consensus = useConsensus(issuerId)
 
   return (
     <div
