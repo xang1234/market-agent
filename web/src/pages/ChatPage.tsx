@@ -38,6 +38,8 @@ type MessageHistoryState =
 export function ChatLayout() {
   const { session } = useAuth()
   const userId = session?.userId ?? ''
+  const [refreshKey, setRefreshKey] = useState(0)
+  const bumpRefreshKey = () => setRefreshKey((k) => k + 1)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -50,7 +52,7 @@ export function ChatLayout() {
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)] overflow-hidden">
         <aside className="min-h-0 border-r border-line bg-surface-2/70 p-4/40">
-          <ThreadList userId={userId} />
+          <ThreadList userId={userId} refreshKey={refreshKey} onChanged={bumpRefreshKey} />
         </aside>
         <div className="min-h-0 overflow-auto">
           <Outlet />
@@ -305,7 +307,18 @@ function PersistedMessageHistory({ messages }: { messages: ReadonlyArray<Persist
   )
 }
 
-function ThreadList({ userId }: { userId: string }) {
+export async function createThreadAndOpen(userId: string, navigate: (to: string) => void): Promise<void> {
+  const thread = await authenticatedJson<ChatThread>('/v1/chat/threads', {
+    userId,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ title: null }),
+  })
+  navigate(`/chat/${thread.thread_id}`)
+}
+
+function ThreadList({ userId, refreshKey, onChanged }: { userId: string; refreshKey: number; onChanged: () => void }) {
+  const navigate = useNavigate()
   const [state, setState] = useState<ThreadListState>({ kind: 'loading' })
 
   useEffect(() => {
@@ -326,12 +339,19 @@ function ThreadList({ userId }: { userId: string }) {
         }
       })
     return () => controller.abort()
-  }, [userId])
+  }, [userId, refreshKey])
 
   const rows = useMemo(() => (state.kind === 'ready' ? state.threads : []), [state])
 
   return (
     <nav aria-label="Thread list" className="flex min-h-0 flex-col gap-3">
+      <button
+        type="button"
+        onClick={() => { void createThreadAndOpen(userId, navigate).then(onChanged) }}
+        className={`${PRIMARY_BUTTON_CLASS} w-full justify-center`}
+      >
+        + New chat
+      </button>
       <div>
         <h2 className="text-sm font-semibold text-fg">Thread list</h2>
         <p className="mt-1 text-xs text-muted">
@@ -347,7 +367,7 @@ function ThreadList({ userId }: { userId: string }) {
       ) : (
         <ul className="flex min-h-0 flex-col gap-2 overflow-auto">
           {rows.map((thread) => (
-            <li key={thread.thread_id}>
+            <li key={thread.thread_id} className="group relative">
               <Link
                 to={`/chat/${thread.thread_id}`}
                 className="block rounded-md border border-line bg-surface p-3 text-sm hover:border-line-strong"
