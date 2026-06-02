@@ -95,7 +95,7 @@ test('Chat thread route renders message stream and composer workflow copy', () =
     </MemoryRouter>,
   )
 
-  assert.match(html, /Message stream/)
+  assert.match(html, /Collapse sidebar/)
   assert.match(html, /Ask the analyst/)
   assert.doesNotMatch(html, /ships with P2\.1/i)
 })
