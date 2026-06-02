@@ -1,4 +1,5 @@
 import {
+  cachedQuoteIsFresh,
   createPostgresMarketCacheRepository,
   type CachedQuote,
 } from "../../market/src/cache-repository.ts";
@@ -45,6 +46,11 @@ export type QuoteSummary = {
   currency: string;
   as_of: string;
   source_id: string;
+  // When this cache entry expires. The chat path reads the latest cached quote
+  // (it does not fetch live), so these two fields let the analyst tell a current
+  // price from a stale one instead of presenting an old quote as live.
+  expires_at: string;
+  stale: boolean;
 };
 
 export type StructuredSubjectContext = {
@@ -64,6 +70,14 @@ export type StructuredSubjectRefs = {
 export const NO_STRUCTURED_REFS: StructuredSubjectRefs = Object.freeze({
   issuer: null,
   listings: Object.freeze([]),
+});
+
+// The degraded structured context: used when there is no resolved subject, or
+// when the structured load fails and the turn falls back rather than throwing.
+export const NO_STRUCTURED_CONTEXT: StructuredSubjectContext = Object.freeze({
+  facts: Object.freeze([]),
+  quote: null,
+  source_ids: Object.freeze([]),
 });
 
 type FactRow = {
@@ -101,11 +115,12 @@ export function structuredRefsFromHandoff(handoff: HydratedSubjectHandoff): Stru
 export async function loadStructuredSubjectContext(
   db: QueryExecutor,
   refs: StructuredSubjectRefs,
-  options: { factLimit?: number } = {},
+  options: { factLimit?: number; now?: string } = {},
 ): Promise<StructuredSubjectContext> {
+  const now = options.now ?? new Date().toISOString();
   const [facts, quote] = await Promise.all([
     loadIssuerFacts(db, refs.issuer, options.factLimit ?? DEFAULT_FACT_LIMIT),
-    loadLatestListingQuote(db, refs.listings),
+    loadLatestListingQuote(db, refs.listings, now),
   ]);
 
   const sourceIds = unique([
@@ -160,13 +175,14 @@ async function loadIssuerFacts(
 async function loadLatestListingQuote(
   db: QueryExecutor,
   listings: StructuredSubjectRefs["listings"],
+  now: string,
 ): Promise<QuoteSummary | null> {
   if (listings.length === 0) return null;
   const cache = createPostgresMarketCacheRepository(db);
   const quotes = await Promise.all(
     listings.map(async (listing) => {
       const cached = await cache.findLatestQuote(listing.ref);
-      return cached ? quoteSummaryFromCachedQuote(cached, listing.ticker) : null;
+      return cached ? quoteSummaryFromCachedQuote(cached, listing.ticker, now) : null;
     }),
   );
   return quotes.reduce<QuoteSummary | null>(
@@ -191,7 +207,11 @@ export function factSummaryFromRow(row: FactRow): IssuerFactSummary {
   });
 }
 
-export function quoteSummaryFromCachedQuote(cached: CachedQuote, ticker: string | null): QuoteSummary {
+export function quoteSummaryFromCachedQuote(
+  cached: CachedQuote,
+  ticker: string | null,
+  now: string = new Date().toISOString(),
+): QuoteSummary {
   const quote = cached.quote;
   return Object.freeze({
     listing_id: quote.listing.id,
@@ -206,6 +226,8 @@ export function quoteSummaryFromCachedQuote(cached: CachedQuote, ticker: string 
     currency: quote.currency,
     as_of: quote.as_of,
     source_id: quote.source_id,
+    expires_at: cached.expires_at,
+    stale: !cachedQuoteIsFresh(cached, now),
   });
 }
 

@@ -83,7 +83,8 @@ test("factSummaryFromRow keeps text-only facts and normalizes Date columns to IS
 });
 
 test("quoteSummaryFromCachedQuote maps the canonical quote and the supplied ticker", () => {
-  const summary = quoteSummaryFromCachedQuote(cachedQuote(), "AAOI");
+  // `now` before expires_at (2026-06-02T08:59:01Z) → fresh.
+  const summary = quoteSummaryFromCachedQuote(cachedQuote(), "AAOI", "2026-06-02T08:50:00.000Z");
 
   assert.equal(summary.listing_id, LISTING_ID);
   assert.equal(summary.ticker, "AAOI");
@@ -98,6 +99,18 @@ test("quoteSummaryFromCachedQuote maps the canonical quote and the supplied tick
   assert.equal(summary.delay_class, "delayed_15m");
   assert.equal(summary.currency, "USD");
   assert.equal(summary.source_id, POLYGON_SOURCE_ID);
+  // Freshness is surfaced so the analyst can present the price honestly.
+  assert.equal(summary.expires_at, "2026-06-02T08:59:01.000Z");
+  assert.equal(summary.stale, false);
+});
+
+test("quoteSummaryFromCachedQuote flags a quote whose cache entry has expired as stale", () => {
+  // `now` past expires_at (2026-06-02T08:59:01Z) → the cached price is stale and
+  // must not be presented to the analyst as if it were current.
+  const summary = quoteSummaryFromCachedQuote(cachedQuote(), "AAOI", "2026-06-03T00:00:00.000Z");
+
+  assert.equal(summary.stale, true);
+  assert.equal(summary.expires_at, "2026-06-02T08:59:01.000Z");
 });
 
 test("structuredRefsFromHandoff reads issuer + listing from a listing-resolved handoff", () => {

@@ -1,6 +1,7 @@
 import { Pool } from "pg";
 
 import {
+  emptyEvidence,
   loadLocalRuntimeEvidence,
   loadVerifierRowsForRefs,
   type LocalRuntimeEvidence,
@@ -25,9 +26,11 @@ import {
 } from "./llm-runtime.ts";
 import {
   loadStructuredSubjectContext,
+  NO_STRUCTURED_CONTEXT,
   NO_STRUCTURED_REFS,
   structuredEvidenceStatus,
   structuredRefsFromHandoff,
+  type StructuredSubjectContext,
 } from "./local-runtime-structured.ts";
 import { createChatMessagePersistence } from "./messages.ts";
 import {
@@ -49,6 +52,35 @@ export function preResolveSubject(
   return preResolveChatSubjectWithResolver(pool(), request);
 }
 
+export type SettledEvidenceLoads = {
+  evidence: LocalRuntimeEvidence;
+  structured: StructuredSubjectContext;
+};
+
+// Collapses the two settled evidence loads into a usable pair, degrading each
+// independently: a rejected loader falls back to empty (preserving subject refs)
+// rather than failing the whole turn. Pure and clock-free so the degradation
+// policy is unit-testable without a database.
+export function settleEvidenceLoads(
+  evidenceResult: PromiseSettledResult<LocalRuntimeEvidence>,
+  structuredResult: PromiseSettledResult<StructuredSubjectContext>,
+  subjectRefs: ReadonlyArray<SnapshotSubjectRef>,
+  onReject: (loader: "evidence" | "structured_context", reason: unknown) => void = logLoaderRejection,
+): SettledEvidenceLoads {
+  if (evidenceResult.status === "rejected") onReject("evidence", evidenceResult.reason);
+  if (structuredResult.status === "rejected") onReject("structured_context", structuredResult.reason);
+  return {
+    evidence:
+      evidenceResult.status === "fulfilled" ? evidenceResult.value : emptyEvidence(subjectRefs),
+    structured:
+      structuredResult.status === "fulfilled" ? structuredResult.value : NO_STRUCTURED_CONTEXT,
+  };
+}
+
+function logLoaderRejection(loader: "evidence" | "structured_context", reason: unknown): void {
+  console.warn(`[chat] ${loader} load failed; degrading turn to partial evidence`, reason);
+}
+
 export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const asOf = new Date().toISOString();
   const resolved = context.subjectPreResolution?.status === "resolved"
@@ -68,13 +100,23 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
       // the analyst answer "insufficient data" for those. Load the structured
       // context too so the analyst can ground an answer in price + fundamentals,
       // and only report insufficient_evidence when nothing at all exists.
-      const [evidence, structured] = await Promise.all([
+      //
+      // The two loads degrade independently: if one throws (a DB hiccup, a single
+      // malformed row), the turn keeps the surviving half rather than failing with
+      // a 500 — and when both fail the analyst still gets a clean
+      // insufficient_evidence signal.
+      const [evidenceResult, structuredResult] = await Promise.allSettled([
         loadLocalRuntimeEvidence(pool(), {
           subject_refs: subjectRefs,
           user_id: context.userId ?? null,
         }),
         loadStructuredSubjectContext(pool(), structuredRefs),
       ]);
+      const { evidence, structured } = settleEvidenceLoads(
+        evidenceResult,
+        structuredResult,
+        subjectRefs,
+      );
       return {
         kind: "local_evidence_tool_result",
         status: "ok",

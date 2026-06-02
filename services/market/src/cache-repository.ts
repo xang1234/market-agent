@@ -22,6 +22,14 @@ export type CachedQuote = {
   expires_at: string;
 };
 
+// Canonical freshness rule for a cached quote, mirroring findFreshQuote's SQL
+// (`expires_at > now`). Exposed so consumers that read the latest cached quote
+// directly (e.g. the chat structured-context loader) can apply the SAME notion
+// of freshness instead of inventing their own age threshold.
+export function cachedQuoteIsFresh(cached: CachedQuote, now: string): boolean {
+  return Date.parse(cached.expires_at) > Date.parse(now);
+}
+
 export type CachedBars = {
   bars: NormalizedBars;
   provider: string;
