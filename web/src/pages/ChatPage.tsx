@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useState, type FormEvent } from 'react'
+import React, { useEffect, useMemo, useReducer, useState, type FormEvent } from 'react'
 import { PRIMARY_BUTTON_CLASS } from '../shell/buttonStyles.ts'
 import { Link, Outlet, useNavigate, useParams } from 'react-router-dom'
 
@@ -119,6 +119,13 @@ export function ChatEmptyState() {
   )
 }
 
+export function handleComposerKeyDownEvent(event: React.KeyboardEvent<HTMLTextAreaElement>): void {
+  if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+    event.preventDefault()
+    event.currentTarget.form?.requestSubmit()
+  }
+}
+
 export function ChatThreadView() {
   const { session } = useAuth()
   const { threadId = '' } = useParams<{ threadId: string }>()
@@ -179,6 +186,8 @@ export function ChatThreadView() {
       },
     })
   }
+
+  const handleComposerKeyDown = handleComposerKeyDownEvent
 
   const submitPrompt = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -267,6 +276,7 @@ export function ChatThreadView() {
               id="chat-composer"
               value={prompt}
               onChange={(event) => setPrompt(event.currentTarget.value)}
+              onKeyDown={handleComposerKeyDown}
               rows={2}
               className="min-w-0 flex-1 resize-none border-none bg-transparent text-sm text-fg outline-none placeholder:text-faint"
               placeholder="Ask about a company, theme, screen, or prior artifact"
@@ -279,6 +289,7 @@ export function ChatThreadView() {
               ↑
             </button>
           </div>
+          <p className="mt-1.5 text-[11px] text-faint">Press <span className="font-medium text-muted">Enter</span> to send · <span className="font-medium text-muted">Shift+Enter</span> for a newline</p>
         </ThreadColumn>
       </form>
     </div>
