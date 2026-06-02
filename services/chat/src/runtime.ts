@@ -34,6 +34,8 @@ export async function loadChatServerOptionsFromEnv(
     (databaseUrl ? DEFAULT_CHAT_RUNTIME_MODULE : "");
   const threadTitleModule = env.CHAT_THREAD_TITLE_MODULE?.trim() ||
     (databaseUrl ? DEFAULT_CHAT_RUNTIME_MODULE : "");
+  const subjectResolverModule = env.CHAT_SUBJECT_RESOLVER_MODULE?.trim() ||
+    (databaseUrl ? DEFAULT_CHAT_RUNTIME_MODULE : "");
 
   if (persistenceModule !== "") {
     const module = await import(moduleSpecifier(persistenceModule, cwd));
@@ -44,8 +46,8 @@ export async function loadChatServerOptionsFromEnv(
     options.persistAssistantMessage = module.persistAssistantMessage as ChatAssistantMessagePersistence;
   }
 
-  if (env.CHAT_SUBJECT_RESOLVER_MODULE != null && env.CHAT_SUBJECT_RESOLVER_MODULE.trim() !== "") {
-    const module = await import(moduleSpecifier(env.CHAT_SUBJECT_RESOLVER_MODULE, cwd));
+  if (subjectResolverModule !== "") {
+    const module = await import(moduleSpecifier(subjectResolverModule, cwd));
     if (typeof module.preResolveSubject !== "function") {
       throw new Error("CHAT_SUBJECT_RESOLVER_MODULE must export preResolveSubject");
     }
