@@ -15,7 +15,8 @@ import { createRoot } from 'react-dom/client'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 import { AuthContext } from '../shell/authTypes.ts'
-import { ChatLayout, createThreadAndOpen, deleteThread } from './ChatPage.tsx'
+import { createThreadAndOpen, deleteThread } from '../chat/threadActions.ts'
+import { ChatLayout } from './ChatPage.tsx'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

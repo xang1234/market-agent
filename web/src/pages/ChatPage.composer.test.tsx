@@ -14,8 +14,14 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
+import { Outlet } from 'react-router-dom'
 import { AuthContext } from '../shell/authTypes.ts'
-import { ChatThreadView, handleComposerKeyDownEvent } from './ChatPage.tsx'
+import { handleComposerKeyDownEvent } from '../chat/composer.ts'
+import { ChatThreadView } from './ChatPage.tsx'
+
+function OutletCtx({ value }: { value: { collapsed: boolean; setCollapsed: () => void } }) {
+  return <Outlet context={value} />
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -173,7 +179,9 @@ test('ChatThreadView: renders hint text below the composer', async () => {
         <AuthContext.Provider value={makeAuthContextValue()}>
           <MemoryRouter initialEntries={['/chat/THREAD-1']}>
             <Routes>
-              <Route path="/chat/:threadId" element={<ChatThreadView />} />
+              <Route element={<OutletCtx value={{ collapsed: false, setCollapsed: () => {} }} />}>
+                <Route path="/chat/:threadId" element={<ChatThreadView />} />
+              </Route>
             </Routes>
           </MemoryRouter>
         </AuthContext.Provider>,
