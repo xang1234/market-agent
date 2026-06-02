@@ -1,6 +1,9 @@
+// The helper exports (createThreadAndOpen, deleteThread, handleComposerKeyDownEvent,
+// useChatLayoutContext) are test seams. Fast Refresh still works; the rule is advisory here.
+/* eslint-disable react-refresh/only-export-components */
 import React, { useEffect, useMemo, useReducer, useState, type FormEvent } from 'react'
 import { PRIMARY_BUTTON_CLASS } from '../shell/buttonStyles.ts'
-import { Link, Outlet, useNavigate, useParams } from 'react-router-dom'
+import { Link, Outlet, useNavigate, useOutletContext, useParams } from 'react-router-dom'
 
 import { VirtualizedMessageList } from '../chat'
 import type { ChatMessage as PersistedChatMessage } from '../chat/messageTypes.ts'
@@ -16,6 +19,20 @@ type ChatThread = {
   thread_id: string
   title: string | null
   updated_at: string
+}
+
+type ChatLayoutContext = {
+  collapsed: boolean
+  setCollapsed: React.Dispatch<React.SetStateAction<boolean>>
+}
+
+const DEFAULT_CHAT_LAYOUT_CONTEXT: ChatLayoutContext = {
+  collapsed: false,
+  setCollapsed: () => undefined,
+}
+
+export function useChatLayoutContext(): ChatLayoutContext {
+  return useOutletContext<ChatLayoutContext>() ?? DEFAULT_CHAT_LAYOUT_CONTEXT
 }
 
 type ThreadListState =
@@ -40,22 +57,21 @@ export function ChatLayout() {
   const userId = session?.userId ?? ''
   const [refreshKey, setRefreshKey] = useState(0)
   const bumpRefreshKey = () => setRefreshKey((k) => k + 1)
+  const [collapsed, setCollapsed] = useState(false)
+  const outletContext: ChatLayoutContext = { collapsed, setCollapsed }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="border-b border-line px-8 py-6">
-        <h1 className="text-2xl font-semibold">Chat</h1>
-        <p className="mt-1 text-sm text-muted">
-          Thread-scoped research workspace with live analyst turns, strict Block[] rendering,
-          and reusable artifacts.
-        </p>
-      </header>
-      <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)] overflow-hidden">
-        <aside className="min-h-0 border-r border-line bg-surface-2/70 p-4/40">
-          <ThreadList userId={userId} refreshKey={refreshKey} onChanged={bumpRefreshKey} />
-        </aside>
+      <div
+        className={`grid min-h-0 flex-1 overflow-hidden ${collapsed ? 'grid-cols-[0px_minmax(0,1fr)]' : 'grid-cols-[260px_minmax(0,1fr)]'}`}
+      >
+        {collapsed ? null : (
+          <aside className="min-h-0 border-r border-line bg-surface-2/70 p-4">
+            <ThreadList userId={userId} refreshKey={refreshKey} onChanged={bumpRefreshKey} />
+          </aside>
+        )}
         <div className="min-h-0 overflow-auto">
-          <Outlet />
+          <Outlet context={outletContext} />
         </div>
       </div>
     </div>
@@ -131,6 +147,7 @@ export function handleComposerKeyDownEvent(event: React.KeyboardEvent<HTMLTextAr
 export function ChatThreadView() {
   const { session } = useAuth()
   const { threadId = '' } = useParams<{ threadId: string }>()
+  const { collapsed, setCollapsed } = useChatLayoutContext()
   const [prompt, setPrompt] = useState('')
   const [history, setHistory] = useState<MessageHistoryState>({ kind: 'idle' })
   const [historyReloadKey, setHistoryReloadKey] = useState(0)
@@ -227,12 +244,17 @@ export function ChatThreadView() {
 
   return (
     <div data-testid="chat-thread" className="flex min-h-full flex-col">
-      <section className="border-b border-line px-6 py-3">
-        <h2 className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-          Message stream
-        </h2>
-        <p className="num mt-0.5 text-xs text-faint">{threadId}</p>
-      </section>
+      <div className="flex items-center gap-3 border-b border-line px-4 py-2">
+        <button
+          type="button"
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          onClick={() => setCollapsed((c) => !c)}
+          className="text-sm text-muted hover:text-fg"
+        >
+          {collapsed ? '☰' : '⟨'}
+        </button>
+        <span className="text-xs text-faint">{threadId}</span>
+      </div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
         {visibleHistory.kind === 'ready' ? (
           <PersistedMessageHistory messages={visibleHistory.messages} />
