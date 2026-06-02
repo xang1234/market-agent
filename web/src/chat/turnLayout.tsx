@@ -1,4 +1,4 @@
-import type { HTMLAttributes, ReactNode } from 'react'
+import type { HTMLAttributes, ReactElement, ReactNode } from 'react'
 
 // Single source of truth for chat turn presentation. A streaming turn and the
 // persisted turn it becomes are the SAME message at two moments in its life —
@@ -6,10 +6,52 @@ import type { HTMLAttributes, ReactNode } from 'react'
 // keeps the two paths pixel-identical, so the turn doesn't visually jump at the
 // seal moment, and the width/card styling can't drift between them.
 
-// Centered reading column for the thread (mockup ~780px). Exported as a class
-// too so VirtualizedMessageList can apply it to its own scroll-content div
-// (which carries virtualization padding + a test id) without a wrapper element.
-export const THREAD_COLUMN_CLASS = 'mx-auto w-full max-w-[780px]'
+// Outer thread column — left-aligned, wide enough to host breakout data blocks.
+export const THREAD_COLUMN_CLASS = 'w-full max-w-[960px]'
+
+// Prose blocks (rich_text, section, metric_row, text-ish evidence cards) get a
+// narrower reading column that left-aligns within the thread column.
+export const PROSE_COLUMN_CLASS = 'w-full max-w-[680px]'
+
+// Data artifacts (charts, tables, comparisons, consensus) break out to the
+// full thread column width for comfortable data display.
+export const BREAKOUT_COLUMN_CLASS = 'w-full max-w-[960px]'
+
+// The set of block kinds that should render at breakout (960px) width.
+// All other kinds fall back to PROSE_COLUMN_CLASS (680px).
+export const WIDE_BLOCK_KINDS: ReadonlySet<string> = new Set<string>([
+  // Chart / comparison kinds
+  'line_chart',
+  'revenue_bars',
+  'perf_comparison',
+  'segment_donut',
+  'segment_trajectory',
+  'metrics_comparison',
+  'sentiment_trend',
+  'mention_volume',
+  // Tabular narrative layout
+  'table',
+  // Research evidence blocks that are data-dense
+  'analyst_consensus',
+  'price_target_range',
+  'eps_surprise',
+  'filings_list',
+])
+
+export function isWideBlock(kind: string): boolean {
+  return WIDE_BLOCK_KINDS.has(kind)
+}
+
+/** Wraps a block in the column width appropriate for its kind. */
+export function BlockColumn({
+  kind,
+  children,
+}: {
+  kind: string
+  children: ReactNode
+}): ReactElement {
+  return <div className={isWideBlock(kind) ? BREAKOUT_COLUMN_CLASS : PROSE_COLUMN_CLASS}>{children}</div>
+}
 
 export function ThreadColumn({
   children,
