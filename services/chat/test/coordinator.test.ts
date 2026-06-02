@@ -10,6 +10,7 @@ import {
   type ChatTurnRunner,
 } from "../src/coordinator.ts";
 import type { ChatResolvedSubjectPreResolution } from "../src/subjects.ts";
+import { DEFAULT_BUNDLE_ID } from "../src/bundle-routing.ts";
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -854,6 +855,66 @@ test("subject pre-resolution emits resolved handoff before custom runner failure
   assert.equal(turn.events[2].resolution_status, "resolved");
   assert.equal((turn.events[2].handoff as Record<string, unknown>).display_label, "AAPL · XNAS — Apple Inc.");
   assert.equal(turn.events[3].message, "model failed before first emit");
+});
+
+test("grounds the turn by extracting a ticker from the message when no subject is attached", async () => {
+  let observed: ChatTurnRunContext | null = null;
+  const resolveCalls: string[] = [];
+  const coordinator = createChatCoordinator({
+    preResolveSubject: async ({ text }) => {
+      resolveCalls.push(text);
+      return text === "MU"
+        ? resolvedAaplPreResolution()
+        : { status: "not_found", input_text: text, normalized_input: text, message: `no match for ${text}` };
+    },
+    runner: (context) => {
+      observed = context;
+      context.emit("turn.completed", {
+        message_id: "message-1",
+        subject_ref: context.subjectPreResolution?.subject_ref,
+      });
+    },
+  });
+
+  const turn = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    userIntent: "tell me about MU",
+  });
+  await turn.completed;
+
+  assert.equal(observed?.subjectPreResolution?.status, "resolved");
+  // The whole message is tried first, then the extracted uppercase ticker.
+  assert.deepEqual(resolveCalls, ["tell me about MU", "MU"]);
+});
+
+test("falls through to the default bundle when the message has no resolvable subject", async () => {
+  let observed: ChatTurnRunContext | null = null;
+  const coordinator = createChatCoordinator({
+    preResolveSubject: async ({ text }) => ({
+      status: "not_found",
+      input_text: text,
+      normalized_input: text,
+      message: `no match for ${text}`,
+    }),
+    runner: (context) => {
+      observed = context;
+      context.emit("turn.completed", { message_id: "message-1" });
+    },
+  });
+
+  const turn = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    userIntent: "what is a good stock?",
+  });
+  await turn.completed;
+
+  // No subject resolved → analyst runs on the default bundle, and crucially we do
+  // NOT nag the user with a clarification turn for a subjectless question.
+  assert.equal(observed?.subjectPreResolution, undefined);
+  assert.equal(observed?.bundleId, DEFAULT_BUNDLE_ID);
+  assert.deepEqual(turn.events.map((event) => event.type), ["turn.started", "turn.completed"]);
 });
 
 test("subject clarification turns use the injected renderer before persistence", async () => {
