@@ -241,6 +241,9 @@ export function ScreenerWorkspace() {
     const next = queryToDraft(query)
     setDraft(next)
     setScreenName(name)
+    // RunStatus shows savedMessage with priority over run state, so clear any
+    // lingering save/delete feedback — it no longer reflects the loaded screen.
+    setSavedMessage(null)
     runSearch(next)
   }
 

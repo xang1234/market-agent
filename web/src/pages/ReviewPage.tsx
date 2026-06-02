@@ -26,6 +26,9 @@ export function ReviewPage() {
   // per-item error channel). Cleared on the next successful bulk run.
   const [notice, setNotice] = useState<string | null>(null)
   const refreshTokenRef = useRef(0)
+  // Re-entry guard: a second click while a bulk approve is mid-flight would run
+  // a concurrent loop over the same item snapshot (double-approving).
+  const bulkInFlightRef = useRef(false)
 
   const refresh = useCallback(async () => {
     const token = refreshTokenRef.current + 1
@@ -100,6 +103,8 @@ export function ReviewPage() {
   // so the queue reflects whatever did get approved rather than a stale view.
   const approveAllLow = useCallback(async () => {
     if (reviewerId === null || state.kind !== 'ready') return
+    if (bulkInFlightRef.current) return
+    bulkInFlightRef.current = true
     const lows = state.items.filter((item) => severityForItem(item) === 'low')
     try {
       for (const item of lows) {
@@ -114,6 +119,7 @@ export function ReviewPage() {
       setNotice(`Bulk approve stopped: ${error instanceof Error ? error.message : String(error)}`)
     } finally {
       await refresh()
+      bulkInFlightRef.current = false
     }
   }, [refresh, reviewerId, state])
 

@@ -57,6 +57,12 @@ function RatingDistributionBar({
   analystCount: number
 }) {
   const total = distribution.contributor_count
+  // total is the width denominator; a non-positive total (malformed payload)
+  // would produce NaN widths and a "0 contributors" label, so bail to the same
+  // fallback the null-distribution case uses.
+  if (total <= 0) {
+    return <p className="text-sm text-muted">No rating distribution available.</p>
+  }
   return (
     <div className="flex flex-col gap-2">
       <div
@@ -135,8 +141,11 @@ function formatEstimateValue(estimate: ConsensusEstimate): string {
 
 export function PriceTargetBody({ target }: { target: PriceTarget }) {
   const span = target.high - target.low || 1
-  const meanPct = ((target.mean - target.low) / span) * 100
-  const medianPct = ((target.median - target.low) / span) * 100
+  // Provider data can put mean/median outside [low, high]; clamp so the markers
+  // stay on the visible track instead of overflowing it.
+  const clamp = (pct: number) => Math.min(100, Math.max(0, pct))
+  const meanPct = clamp(((target.mean - target.low) / span) * 100)
+  const medianPct = clamp(((target.median - target.low) / span) * 100)
   return (
     <div className="flex flex-col gap-3">
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
