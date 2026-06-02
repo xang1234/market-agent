@@ -317,6 +317,14 @@ export async function createThreadAndOpen(userId: string, navigate: (to: string)
   navigate(`/chat/${thread.thread_id}`)
 }
 
+export async function deleteThread(userId: string, threadId: string): Promise<void> {
+  const res = await authenticatedFetch(`/v1/chat/threads/${encodeURIComponent(threadId)}`, {
+    userId,
+    method: 'DELETE',
+  })
+  if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`)
+}
+
 function ThreadList({ userId, refreshKey, onChanged }: { userId: string; refreshKey: number; onChanged: () => void }) {
   const navigate = useNavigate()
   const [state, setState] = useState<ThreadListState>({ kind: 'loading' })
@@ -379,6 +387,21 @@ function ThreadList({ userId, refreshKey, onChanged }: { userId: string; refresh
                   {new Date(thread.updated_at).toLocaleString()}
                 </span>
               </Link>
+              <button
+                type="button"
+                aria-label={`Delete ${thread.title ?? 'thread'}`}
+                className="absolute right-2 top-2 opacity-0 transition group-hover:opacity-100 text-muted hover:text-negative"
+                onClick={(e) => {
+                  e.preventDefault()
+                  if (!window.confirm('Delete this chat? This cannot be undone.')) return
+                  void deleteThread(userId, thread.thread_id).then(() => {
+                    onChanged()
+                    if (window.location.pathname.includes(thread.thread_id)) navigate('/chat')
+                  })
+                }}
+              >
+                🗑
+              </button>
             </li>
           ))}
         </ul>

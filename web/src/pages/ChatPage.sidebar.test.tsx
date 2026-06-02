@@ -15,7 +15,7 @@ import { createRoot } from 'react-dom/client'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 import { AuthContext } from '../shell/authTypes.ts'
-import { ChatLayout, createThreadAndOpen } from './ChatPage.tsx'
+import { ChatLayout, createThreadAndOpen, deleteThread } from './ChatPage.tsx'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -129,6 +129,95 @@ test('ChatLayout: renders "+ New chat" button in sidebar', async () => {
     const html = container.innerHTML
     assert.ok(html.includes('New chat'), 'sidebar should contain "+ New chat" button')
     assert.ok(html.includes('Alpha research'), 'thread 1 should appear')
+
+    await act(async () => root.unmount())
+  } finally {
+    globalThis.fetch = savedFetch
+    restoreGlobals()
+  }
+})
+
+// ── Task 7: deleteThread unit test ────────────────────────────────────────────
+
+test('deleteThread: calls DELETE /v1/chat/threads/:id', async () => {
+  let deletedUrl: string | undefined
+  const savedFetch = globalThis.fetch
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url
+    if (init?.method === 'DELETE') {
+      deletedUrl = url
+      return new Response(null, { status: 200 })
+    }
+    return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  try {
+    await deleteThread(USER_ID, 'thread-001')
+    assert.ok(deletedUrl?.includes('thread-001'), 'should DELETE /v1/chat/threads/thread-001')
+  } finally {
+    globalThis.fetch = savedFetch
+  }
+})
+
+test('deleteThread: treats 404 as success (already gone)', async () => {
+  const savedFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response('', { status: 404 })
+  try {
+    // Should not throw
+    await deleteThread(USER_ID, 'thread-gone')
+  } finally {
+    globalThis.fetch = savedFetch
+  }
+})
+
+test('deleteThread: throws on unexpected error status', async () => {
+  const savedFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response('', { status: 500 })
+  try {
+    await assert.rejects(() => deleteThread(USER_ID, 'thread-001'), /HTTP 500/)
+  } finally {
+    globalThis.fetch = savedFetch
+  }
+})
+
+// ── Task 7: delete button rendered per thread row ─────────────────────────────
+
+test('ChatLayout: renders delete button for each thread row', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
+  const savedFetch = globalThis.fetch
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url
+    if (url.includes('/v1/chat/threads') && (!init?.method || init.method === 'GET')) {
+      return new Response(JSON.stringify({ threads: [THREAD_1, THREAD_2] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+    return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+
+  try {
+    const container = dom.window.document.getElementById('root')!
+    const root = createRoot(container)
+    await act(async () => {
+      root.render(
+        <AuthContext.Provider value={makeAuthContextValue()}>
+          <MemoryRouter initialEntries={['/chat']}>
+            <Routes>
+              <Route path="/chat" element={<ChatLayout />} />
+            </Routes>
+          </MemoryRouter>
+        </AuthContext.Provider>,
+      )
+    })
+
+    // Each thread row should have a delete button with aria-label
+    const deleteButtons = container.querySelectorAll('button[aria-label^="Delete"]')
+    assert.equal(deleteButtons.length, 2, 'should render a delete button for each thread')
+    assert.ok(
+      (deleteButtons[0] as HTMLElement).getAttribute('aria-label')?.includes('Alpha research'),
+      'first delete button should label the thread title',
+    )
 
     await act(async () => root.unmount())
   } finally {
