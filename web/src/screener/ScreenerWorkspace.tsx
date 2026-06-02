@@ -18,7 +18,8 @@ import {
   formatIsoTimestamp,
 } from '../symbol/format.ts'
 import { symbolDetailPathForSubject } from '../symbol/search.ts'
-import { signedTextClass } from '../symbol/signedColor.ts'
+import { ChangePill } from '../symbol/ChangePill.tsx'
+import { signedDirection, type SignedDirection } from '../symbol/signedColor.ts'
 import {
   FUNDAMENTALS_NUMERIC_FIELDS,
   MARKET_NUMERIC_FIELDS,
@@ -31,6 +32,7 @@ import {
   type ScreenerResultRow,
   type SortDirection,
 } from './contracts.ts'
+import { QUERY_TEMPLATES, type QueryTemplate } from './queryTemplates.ts'
 import {
   createDefaultQueryDraft,
   draftToQuery,
@@ -232,12 +234,22 @@ export function ScreenerWorkspace() {
     })
   }
 
-  const handleOpenSaved = (screen: ScreenSubject) => {
-    const next = queryToDraft(screen.definition)
+  // Load a query into the workspace and run it immediately — shared by
+  // reopening a saved screen and applying a starter template, which differ only
+  // in the name they restore (a template is unsaved, so its name is blank).
+  const loadDraft = (query: ScreenerQuery, name: string) => {
+    const next = queryToDraft(query)
     setDraft(next)
-    setScreenName(screen.name)
+    setScreenName(name)
+    // RunStatus shows savedMessage with priority over run state, so clear any
+    // lingering save/delete feedback — it no longer reflects the loaded screen.
+    setSavedMessage(null)
     runSearch(next)
   }
+
+  const handleOpenSaved = (screen: ScreenSubject) => loadDraft(screen.definition, screen.name)
+
+  const handleApplyTemplate = (template: QueryTemplate) => loadDraft(template.query, '')
 
   const handleDeleteSaved = async (screen: ScreenSubject) => {
     if (sessionUserId == null) return
@@ -269,6 +281,8 @@ export function ScreenerWorkspace() {
           Build, refine, and view one active screen. Saving requires a session.
         </p>
       </header>
+
+      <QueryTemplates onApply={handleApplyTemplate} />
 
       <form
         onSubmit={handleSubmit}
@@ -351,6 +365,24 @@ export function ScreenerWorkspace() {
           goToOffset(offset + response.page.limit)
         }}
       />
+    </div>
+  )
+}
+
+function QueryTemplates({ onApply }: { onApply: (template: QueryTemplate) => void }) {
+  return (
+    <div className="flex flex-wrap gap-2" aria-label="Starter screens">
+      {QUERY_TEMPLATES.map((template) => (
+        <button
+          key={template.name}
+          type="button"
+          onClick={() => onApply(template)}
+          className={`min-w-[180px] flex-1 rounded-lg border border-line bg-surface p-3 text-left shadow-sm transition-colors hover:border-accent-border hover:bg-surface-hover`}
+        >
+          <span className="block text-sm font-semibold text-fg">{template.name}</span>
+          <span className="mt-0.5 block text-xs text-muted">{template.description}</span>
+        </button>
+      ))}
     </div>
   )
 }
@@ -733,10 +765,14 @@ function ScreenerResults({
                     </span>
                   </td>
                   <td className="py-2 pr-3 text-right num">{cells.lastPrice}</td>
-                  <td
-                    className={`py-2 pr-3 text-right num ${cells.changeClass}`}
-                  >
-                    {cells.changePct}
+                  <td className="py-2 pr-3 text-right">
+                    {cells.change === null ? (
+                      <span className="num text-muted">—</span>
+                    ) : (
+                      <ChangePill direction={cells.change.direction}>
+                        {cells.change.text}
+                      </ChangePill>
+                    )}
                   </td>
                   <td className="py-2 pr-3 text-right num">{cells.volume}</td>
                   <td className="py-2 pr-3 text-right num">{cells.marketCap}</td>
@@ -751,10 +787,13 @@ function ScreenerResults({
   )
 }
 
+type ChangeCell = { direction: SignedDirection; text: string }
+
 type FormattedCells = {
   lastPrice: string
-  changePct: string
-  changeClass: string
+  // null when the quote carries no change — rendered as a plain em-dash rather
+  // than a (misleadingly neutral) pill.
+  change: ChangeCell | null
   volume: string
   marketCap: string
   peRatio: string
@@ -764,8 +803,11 @@ function formatRowCells(row: ScreenerResultRow): { row: ScreenerResultRow; cells
   const last = row.quote.last_price
   const change = row.quote.change_pct
   const lastPrice = last === null ? '—' : formatCurrency2(last, row.quote.currency)
-  const changePct = change === null ? '—' : `${(change * 100).toFixed(2)}%`
-  const changeClass = signedTextClass(change ?? 0)
+  // The pill's arrow carries the sign, so the text shows the unsigned magnitude.
+  const changeCell: ChangeCell | null =
+    change === null
+      ? null
+      : { direction: signedDirection(change), text: `${(Math.abs(change) * 100).toFixed(2)}%` }
   const volume = row.quote.volume === null ? '—' : formatCompactNumber(row.quote.volume)
   const marketCap =
     row.fundamentals.market_cap === null
@@ -775,6 +817,6 @@ function formatRowCells(row: ScreenerResultRow): { row: ScreenerResultRow; cells
     row.fundamentals.pe_ratio === null ? '—' : row.fundamentals.pe_ratio.toFixed(1)
   return {
     row,
-    cells: { lastPrice, changePct, changeClass, volume, marketCap, peRatio },
+    cells: { lastPrice, change: changeCell, volume, marketCap, peRatio },
   }
 }

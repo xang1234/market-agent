@@ -37,6 +37,7 @@
   --color-on-accent: #04121f;
   --color-cyan: #0fb5ac;
   --color-violet: #7c5cf0;
+  --color-violet-soft: rgba(124, 92, 240, 0.1);
   --color-positive: #0f9d63;
   --color-positive-soft: rgba(15, 157, 99, 0.12);
   --color-negative: #d33a52;
@@ -78,6 +79,7 @@
   --color-accent-border: rgba(77, 163, 255, 0.35);
   --color-cyan: #38d0c8;
   --color-violet: #a78bfa;
+  --color-violet-soft: rgba(167, 139, 250, 0.13);
   --color-positive: #27c281;
   --color-positive-soft: rgba(39, 194, 129, 0.13);
   --color-negative: #f0556d;

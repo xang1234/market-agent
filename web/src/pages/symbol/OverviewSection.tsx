@@ -29,6 +29,9 @@ import {
   type NormalizedBar,
 } from '../../symbol/series.ts'
 import { Sparkline } from '../../symbol/Sparkline.tsx'
+import { SectorChip } from '../../symbol/SectorChip.tsx'
+import { useConsensus } from '../../symbol/useConsensus.ts'
+import { ConsensusBody, PriceTargetBody } from '../../symbol/consensusViews.tsx'
 
 const STAT_ORDER: ReadonlyArray<KeyStatKey> = [
   'gross_margin',
@@ -70,6 +73,10 @@ export function OverviewSection() {
     }
     return { kind: 'ready', data: outcome.data.bars }
   })
+
+  // Analyst consensus + price target are surfaced on the landing tab (not only
+  // under Earnings), matching the reference design — same shared fetch.
+  const consensus = useConsensus(issuerId)
 
   return (
     <div
@@ -113,6 +120,40 @@ export function OverviewSection() {
           {(envelope) => <KeyStatsBody envelope={envelope} />}
         </FetchStateView>
       </Card>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+        <Card
+          testId="overview-consensus"
+          headingId="overview-consensus-heading"
+          heading="Analyst consensus"
+        >
+          <FetchStateView
+            state={consensus}
+            noun="consensus"
+            idleMessage="Issuer context unavailable for this entry. Open this symbol from search to load consensus."
+          >
+            {(envelope) => <ConsensusBody envelope={envelope} />}
+          </FetchStateView>
+        </Card>
+        <Card
+          testId="overview-price-target"
+          headingId="overview-price-target-heading"
+          heading="Price target"
+        >
+          <FetchStateView
+            state={consensus}
+            noun="price target"
+            idleMessage="Issuer context unavailable for this entry."
+          >
+            {(envelope) =>
+              envelope.price_target ? (
+                <PriceTargetBody target={envelope.price_target} />
+              ) : (
+                <p className="text-sm text-muted">No price target in this consensus envelope.</p>
+              )
+            }
+          </FetchStateView>
+        </Card>
+      </div>
     </div>
   )
 }
@@ -121,7 +162,14 @@ function ProfileBody({ profile }: { profile: IssuerProfile }) {
   return (
     <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
       <ProfileRow label="Legal name" value={profile.legal_name} />
-      {profile.sector && <ProfileRow label="Sector" value={profile.sector} />}
+      {profile.sector && (
+        <div className="flex flex-col">
+          <ProfileLabel>Sector</ProfileLabel>
+          <dd className="mt-1">
+            <SectorChip>{profile.sector}</SectorChip>
+          </dd>
+        </div>
+      )}
       {profile.industry && <ProfileRow label="Industry" value={profile.industry} />}
       {profile.domicile && <ProfileRow label="Domicile" value={profile.domicile} />}
       {profile.cik && <ProfileRow label="CIK" value={profile.cik} mono />}

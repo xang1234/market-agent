@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { FactReviewQueue, type FactReviewQueueAction, type FactReviewQueueItem, type FactReviewQueueRejectAction } from '../review/FactReviewQueue.tsx'
 import {
@@ -7,7 +7,10 @@ import {
   fetchFactReviewQueue,
   rejectFactReview,
 } from '../review/factReviewClient.ts'
+import { isStaleItem, severityForItem, tallySeverities } from '../review/severity.ts'
+import { SeverityBadge } from '../blocks/SeverityBadge.tsx'
 import { useAuth } from '../shell/useAuth.ts'
+import { useRightRailContent } from '../shell/useRightRailContent.ts'
 
 type ReviewLoadState =
   | { kind: 'loading' }
@@ -19,7 +22,13 @@ export function ReviewPage() {
   const { session } = useAuth()
   const reviewerId = session?.userId ?? null
   const [state, setState] = useState<ReviewLoadState>({ kind: 'loading' })
+  // Transient feedback for bulk actions (which don't go through the queue's
+  // per-item error channel). Cleared on the next successful bulk run.
+  const [notice, setNotice] = useState<string | null>(null)
   const refreshTokenRef = useRef(0)
+  // Re-entry guard: a second click while a bulk approve is mid-flight would run
+  // a concurrent loop over the same item snapshot (double-approving).
+  const bulkInFlightRef = useRef(false)
 
   const refresh = useCallback(async () => {
     const token = refreshTokenRef.current + 1
@@ -56,10 +65,14 @@ export function ReviewPage() {
     }
   }, [reviewerId])
 
+  // A successful per-item action supersedes any lingering bulk-action notice,
+  // so each clears it before refreshing. (Clearing in `refresh` itself would
+  // race approveAllLow's own finally-refresh and swallow its error banner.)
   const approve = useCallback(
     async (action: FactReviewQueueAction) => {
       if (reviewerId === null) return
       await approveFactReview(reviewerId, action)
+      setNotice(null)
       await refresh()
     },
     [refresh, reviewerId],
@@ -68,6 +81,7 @@ export function ReviewPage() {
     async (action: FactReviewQueueAction) => {
       if (reviewerId === null) return
       await editFactReviewCandidate(reviewerId, action)
+      setNotice(null)
       await refresh()
     },
     [refresh, reviewerId],
@@ -76,12 +90,45 @@ export function ReviewPage() {
     async (action: FactReviewQueueRejectAction) => {
       if (reviewerId === null) return
       await rejectFactReview(reviewerId, action)
+      setNotice(null)
       await refresh()
     },
     [refresh, reviewerId],
   )
 
+  // Bulk-approve every low-severity candidate as-is, then refresh once. Done in
+  // the page (not the queue component, which remounts on every approval) so the
+  // loop survives to completion against a stable owner. A failure stops the
+  // batch and surfaces a notice; the finally-refresh reconciles with the server
+  // so the queue reflects whatever did get approved rather than a stale view.
+  const approveAllLow = useCallback(async () => {
+    if (reviewerId === null || state.kind !== 'ready') return
+    if (bulkInFlightRef.current) return
+    bulkInFlightRef.current = true
+    const lows = state.items.filter((item) => severityForItem(item) === 'low')
+    try {
+      for (const item of lows) {
+        await approveFactReview(reviewerId, {
+          review_id: item.review_id,
+          candidate: item.candidate,
+          notes: null,
+        })
+      }
+      setNotice(null)
+    } catch (error) {
+      setNotice(`Bulk approve stopped: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      await refresh()
+      bulkInFlightRef.current = false
+    }
+  }, [refresh, reviewerId, state])
+
   const visibleState: ReviewLoadState = reviewerId === null ? { kind: 'unauthenticated' } : state
+
+  // Push queue-health context into the shell-owned right rail; cleared when
+  // unauthenticated or on unmount.
+  const railItems = visibleState.kind === 'ready' ? visibleState.items : null
+  useRightRailContent(railItems ? <ReviewRail items={railItems} /> : null, [railItems])
 
   return (
     <div className="flex flex-1 flex-col gap-6 overflow-auto p-8">
@@ -98,8 +145,59 @@ export function ReviewPage() {
       ) : visibleState.kind === 'error' ? (
         <ReviewStatus title="Review queue unavailable" message={visibleState.message} tone="error" />
       ) : (
-        <FactReviewQueue items={visibleState.items} onApprove={approve} onEdit={edit} onReject={reject} />
+        <>
+          {notice ? (
+            <p role="status" className="text-sm text-negative">
+              {notice}
+            </p>
+          ) : null}
+          <FactReviewQueue
+            items={visibleState.items}
+            onApprove={approve}
+            onEdit={edit}
+            onReject={reject}
+            onApproveAllLow={approveAllLow}
+          />
+        </>
       )}
+    </div>
+  )
+}
+
+function ReviewRail({ items }: { items: ReadonlyArray<FactReviewQueueItem> }) {
+  const counts = tallySeverities(items)
+  const stale = items.filter(isStaleItem).length
+  return (
+    <div className="flex flex-col gap-4 p-4">
+      <section>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Queue health</h2>
+        <dl className="mt-2 flex flex-col gap-2 text-sm">
+          <RailRow label="Awaiting">
+            <span className="num text-fg">{items.length}</span>
+          </RailRow>
+          <RailRow label="High severity">
+            <SeverityBadge severity="high">{counts.high}</SeverityBadge>
+          </RailRow>
+          <RailRow label="Medium severity">
+            <SeverityBadge severity="medium">{counts.medium}</SeverityBadge>
+          </RailRow>
+          <RailRow label="Low severity">
+            <SeverityBadge severity="low">{counts.low}</SeverityBadge>
+          </RailRow>
+          <RailRow label="Stale">
+            <span className={`num ${stale > 0 ? 'text-warning' : 'text-muted'}`}>{stale}</span>
+          </RailRow>
+        </dl>
+      </section>
+    </div>
+  )
+}
+
+function RailRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <dt className="text-muted">{label}</dt>
+      <dd>{children}</dd>
     </div>
   )
 }
