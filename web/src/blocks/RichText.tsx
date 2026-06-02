@@ -4,13 +4,14 @@ import type { RefSegment, RichTextBlock } from './types.ts'
 import { isRefSegment, refSegmentPlaceholder } from './richText.ts'
 import { resolveRefSegment, type SnapshotManifest } from './snapshotManifest.ts'
 import { useSnapshotManifest } from './snapshotManifestContext.ts'
+import { Markdown } from './Markdown.tsx'
 
 type RichTextProps = { block: RichTextBlock }
 
 export function RichText({ block }: RichTextProps): ReactElement {
   const manifest = useSnapshotManifest()
   return (
-    <p
+    <div
       data-testid={`block-rich-text-${block.id}`}
       data-block-kind="rich_text"
       className="text-sm leading-6 text-fg-soft"
@@ -28,9 +29,9 @@ export function RichText({ block }: RichTextProps): ReactElement {
             />
           )
         }
-        return <span key={`${block.id}-seg-${index}`}>{segment.text}</span>
+        return <Markdown key={`${block.id}-seg-${index}`} text={segment.text} />
       })}
-    </p>
+    </div>
   )
 }
 
