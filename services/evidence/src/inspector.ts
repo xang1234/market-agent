@@ -436,6 +436,14 @@ async function inspectFact(
     provider: string;
     canonical_url: string | null;
   }>(
+    // Provenance lookup by fact_id for a ref that assertRefBelongsToSnapshot has
+    // already confirmed belongs to this sealed (immutable) snapshot. This is
+    // deliberately NOT guarded by method='reported'/superseded_by/invalidated_at:
+    // a snapshot must always be able to show the exact fact it cited at seal time,
+    // even after that fact is later superseded or invalidated. The guards that
+    // apply here are access guards — snapshot visibility, entitlement_channels,
+    // and user scoping (below) — not the freshness/selection guard used by readers
+    // that pick the current authoritative fact among candidates.
     `select f.fact_id::text as fact_id,
             f.source_id::text as source_id,
             coalesce(f.value_text, f.value_num::text, '') as value,
