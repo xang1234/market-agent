@@ -22,6 +22,10 @@ import { verifySnapshotSeal } from "../../snapshot/src/snapshot-verifier.ts";
 // via PEER_COMPARISON_E2E_DATABASE_URL to run it; it skips otherwise.
 //   PEER_COMPARISON_E2E_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54329/market_agent \
 //     node --experimental-strip-types --test test/peer-comparison-run.integration.test.ts
+//
+// Everything runs inside one transaction that is rolled back, so neither the
+// industry edit nor the emitter's materialized derived facts touch the shared DB
+// (the materializer expects the caller to own the transaction boundary).
 const E2E_URL = process.env.PEER_COMPARISON_E2E_DATABASE_URL;
 const E2E_INDUSTRY = "__peer_comparison_e2e__";
 
@@ -30,23 +34,18 @@ test(
   { skip: !E2E_URL, timeout: 120_000 },
   async (t: TestContext) => {
     const pool = new Pool({ connectionString: E2E_URL });
-    // Single teardown (after-hooks run FIFO): restore any industry edits, then end
-    // the pool last.
-    let restoreIndustries: ReadonlyArray<{ issuer_id: string; industry: string | null }> = [];
+    const db = await pool.connect();
     t.after(async () => {
-      for (const row of restoreIndustries) {
-        await pool.query(`update issuers set industry = $2 where issuer_id = $1`, [
-          row.issuer_id,
-          row.industry,
-        ]);
-      }
+      await db.query("ROLLBACK");
+      db.release();
       await pool.end();
     });
+    await db.query("BEGIN");
 
     // Two issuers that already have revenue + gross_profit facts (so the stats
     // repo can materialize the comparison metrics).
     const candidates = (
-      await pool.query<{ issuer_id: string }>(
+      await db.query<{ issuer_id: string }>(
         `select i.issuer_id
            from issuers i
            join facts f on f.subject_id = i.issuer_id and f.subject_kind = 'issuer'
@@ -64,28 +63,22 @@ test(
     }
     const [primaryId, peerId] = candidates.map((r) => r.issuer_id);
 
-    // Align both to a private industry so they resolve as same-industry peers;
-    // restore afterwards (this DB is shared, not ephemeral).
-    restoreIndustries = (
-      await pool.query<{ issuer_id: string; industry: string | null }>(
-        `select issuer_id, industry from issuers where issuer_id = any($1::uuid[])`,
-        [[primaryId, peerId]],
-      )
-    ).rows;
-    await pool.query(`update issuers set industry = $2 where issuer_id = any($1::uuid[])`, [
+    // Align both to a private industry so they resolve as same-industry peers.
+    // The surrounding transaction is rolled back, so this never persists.
+    await db.query(`update issuers set industry = $2 where issuer_id = any($1::uuid[])`, [
       [primaryId, peerId],
       E2E_INDUSTRY,
     ]);
 
-    const statements = createSecBackedStatementRepository(pool, {
+    const statements = createSecBackedStatementRepository(db, {
       fetcher: null,
       sourceId: SEC_EDGAR_FILING_SOURCE_ID,
     });
-    const stats = createSecBackedStatsRepository(pool, { statements, fetcher: null });
+    const stats = createSecBackedStatsRepository(db, { statements, fetcher: null });
     const playbook = ANALYZE_PLAYBOOKS.find((p) => p.playbook_id === "peer_comparison")!;
 
     const seals = await runDeterministicSections(
-      { db: pool, peers: createSqlPeerSetResolver(pool), stats },
+      { db, peers: createSqlPeerSetResolver(db), stats },
       {
         playbook,
         primary: { kind: "issuer", id: primaryId },
