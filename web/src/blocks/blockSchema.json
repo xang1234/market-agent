@@ -460,6 +460,14 @@
                   },
                   "delta_ref": {
                     "$ref": "#/$defs/UUID"
+                  },
+                  "magnitude": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "format": {
+                    "type": "string"
                   }
                 },
                 "additionalProperties": false
