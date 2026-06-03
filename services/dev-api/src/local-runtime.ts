@@ -25,6 +25,7 @@ import {
   sealSnapshotInTransaction,
   sealSnapshotWithPool,
   snapshotTransactionClient,
+  type SnapshotSealInput,
 } from "../../snapshot/src/snapshot-sealer.ts";
 import type {
   DevApiAgentLoopStageFactory,
@@ -107,11 +108,15 @@ export async function runAnalyzeWorkflow(
   };
 }
 
-export async function sealAnalyzeSnapshot(
-  input: Parameters<DevApiServiceAdapterDeps["sealAnalyzeSnapshot"]>[0],
-) {
-  const blocks = input.blocks as ReadonlyArray<Record<string, unknown>>;
-  const snapshotId = input.snapshotId;
+// Builds the narrative memo's seal input from its blocks (fact_refs: []). Shared
+// with the per-section run path so the memo and deterministic-section seal inputs
+// merge through one uniform SnapshotSealInput shape.
+export async function buildMemoSealInput(input: {
+  snapshotId: string;
+  userId: string;
+  blocks: ReadonlyArray<Record<string, unknown>>;
+}): Promise<SnapshotSealInput> {
+  const blocks = input.blocks;
   const asOf = maxBlockAsOf(blocks) ?? new Date().toISOString();
   const subjectRefs = subjectRefsFromBlocks(blocks);
   const manifest = await manifestFromBlockRefs({
@@ -126,14 +131,25 @@ export async function sealAnalyzeSnapshot(
     claim_refs: manifest.claim_refs,
     user_id: input.userId,
   });
-  return sealSnapshotWithPool(pool(), {
-    snapshot_id: snapshotId,
+  return {
+    snapshot_id: input.snapshotId,
     manifest,
     blocks: blocks as never,
     sources: verifierRows.sources,
     documents: verifierRows.documents,
     claims: verifierRows.claims,
+  };
+}
+
+export async function sealAnalyzeSnapshot(
+  input: Parameters<DevApiServiceAdapterDeps["sealAnalyzeSnapshot"]>[0],
+) {
+  const sealInput = await buildMemoSealInput({
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+    blocks: input.blocks as ReadonlyArray<Record<string, unknown>>,
   });
+  return sealSnapshotWithPool(pool(), sealInput);
 }
 
 export async function inspectEvidence(
