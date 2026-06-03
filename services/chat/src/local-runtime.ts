@@ -5,7 +5,9 @@ import {
   loadLocalRuntimeEvidence,
   loadVerifierRowsForRefs,
   type LocalRuntimeEvidence,
+  type LocalRuntimeEvidenceInput,
 } from "../../evidence/src/local-runtime-evidence.ts";
+import type { QueryExecutor } from "../../evidence/src/types.ts";
 import { hashJsonValue, toolCallArgsDigest } from "../../observability/src/tool-call.ts";
 import { serializeJsonValue, type JsonValue } from "../../observability/src/types.ts";
 import type { SnapshotManifestDraft, SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
@@ -26,11 +28,9 @@ import {
 } from "./llm-runtime.ts";
 import {
   loadStructuredSubjectContext,
-  NO_STRUCTURED_CONTEXT,
   NO_STRUCTURED_REFS,
   structuredEvidenceStatus,
   structuredRefsFromHandoff,
-  type StructuredSubjectContext,
 } from "./local-runtime-structured.ts";
 import { createChatMessagePersistence } from "./messages.ts";
 import {
@@ -52,33 +52,22 @@ export function preResolveSubject(
   return preResolveChatSubjectWithResolver(pool(), request);
 }
 
-export type SettledEvidenceLoads = {
-  evidence: LocalRuntimeEvidence;
-  structured: StructuredSubjectContext;
-};
-
-// Collapses the two settled evidence loads into a usable pair, degrading each
-// independently: a rejected loader falls back to empty (preserving subject refs)
-// rather than failing the whole turn. Pure and clock-free so the degradation
-// policy is unit-testable without a database.
-export function settleEvidenceLoads(
-  evidenceResult: PromiseSettledResult<LocalRuntimeEvidence>,
-  structuredResult: PromiseSettledResult<StructuredSubjectContext>,
-  subjectRefs: ReadonlyArray<SnapshotSubjectRef>,
-  onReject: (loader: "evidence" | "structured_context", reason: unknown) => void = logLoaderRejection,
-): SettledEvidenceLoads {
-  if (evidenceResult.status === "rejected") onReject("evidence", evidenceResult.reason);
-  if (structuredResult.status === "rejected") onReject("structured_context", structuredResult.reason);
-  return {
-    evidence:
-      evidenceResult.status === "fulfilled" ? evidenceResult.value : emptyEvidence(subjectRefs),
-    structured:
-      structuredResult.status === "fulfilled" ? structuredResult.value : NO_STRUCTURED_CONTEXT,
-  };
-}
-
-function logLoaderRejection(loader: "evidence" | "structured_context", reason: unknown): void {
-  console.warn(`[chat] ${loader} load failed; degrading turn to partial evidence`, reason);
+// Chat tolerates a missing research-claims read: a freshly-covered subject (or a
+// transient DB hiccup) should still answer from price + fundamentals rather than
+// failing the turn. This is the chat-specific policy boundary — the shared
+// evidence loader keeps throwing for callers that don't want to degrade.
+// loadStructuredSubjectContext already self-degrades, so both loads are now
+// uniformly empty-on-failure and the caller just Promise.all's them.
+export async function loadEvidenceOrEmpty(
+  db: QueryExecutor,
+  input: LocalRuntimeEvidenceInput,
+): Promise<LocalRuntimeEvidence> {
+  try {
+    return await loadLocalRuntimeEvidence(db, input);
+  } catch (reason) {
+    console.warn("[chat] evidence load failed; serving without research claims", reason);
+    return emptyEvidence(input.subject_refs);
+  }
 }
 
 export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
@@ -101,22 +90,18 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
       // context too so the analyst can ground an answer in price + fundamentals,
       // and only report insufficient_evidence when nothing at all exists.
       //
-      // The two loads degrade independently: if one throws (a DB hiccup, a single
-      // malformed row), the turn keeps the surviving half rather than failing with
-      // a 500 — and when both fail the analyst still gets a clean
-      // insufficient_evidence signal.
-      const [evidenceResult, structuredResult] = await Promise.allSettled([
-        loadLocalRuntimeEvidence(pool(), {
+      // Both loaders are empty-on-failure (loadEvidenceOrEmpty wraps the claims
+      // read; loadStructuredSubjectContext self-degrades its facts/quote reads),
+      // so a DB hiccup or one malformed row keeps the surviving evidence instead
+      // of failing the turn — and when nothing loads, the analyst gets a clean
+      // insufficient_evidence signal rather than a 500.
+      const [evidence, structured] = await Promise.all([
+        loadEvidenceOrEmpty(pool(), {
           subject_refs: subjectRefs,
           user_id: context.userId ?? null,
         }),
         loadStructuredSubjectContext(pool(), structuredRefs, { now: asOf }),
       ]);
-      const { evidence, structured } = settleEvidenceLoads(
-        evidenceResult,
-        structuredResult,
-        subjectRefs,
-      );
       return {
         kind: "local_evidence_tool_result",
         status: "ok",

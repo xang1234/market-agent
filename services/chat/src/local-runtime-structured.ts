@@ -72,14 +72,6 @@ export const NO_STRUCTURED_REFS: StructuredSubjectRefs = Object.freeze({
   listings: Object.freeze([]),
 });
 
-// The degraded structured context: used when there is no resolved subject, or
-// when the structured load fails and the turn falls back rather than throwing.
-export const NO_STRUCTURED_CONTEXT: StructuredSubjectContext = Object.freeze({
-  facts: Object.freeze([]),
-  quote: null,
-  source_ids: Object.freeze([]),
-});
-
 type FactRow = {
   metric_key: string;
   display_name: string | null;
