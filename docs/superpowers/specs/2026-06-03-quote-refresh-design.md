@@ -33,20 +33,23 @@ services/market/src/
 
 ### Unit 1 — `listStaleActiveListings({ now, activeSince, limit })`
 
-A new method on `MarketCacheRepository` (db is captured by the repository, as with `findLatestQuote`). Returns `ReadonlyArray<ListingSubjectRef>` (the `{ kind: "listing", id }` shape `adapter.getQuote` expects). One query against the existing table:
+A new method on `MarketCacheRepository` (db is captured by the repository, as with `findLatestQuote`). Returns `ReadonlyArray<ListingSubjectRef>` (the `{ kind: "listing", id }` shape `adapter.getQuote` expects). The predicate is **"the listing's most-recent row is expired and was fetched recently"** — we dedup to each listing's latest row *first*, then filter, so a listing that already has a fresh latest quote is never targeted even if it also has older expired rows:
 
 ```sql
-select distinct on (listing_id) listing_id
-  from market_quote_snapshots
- where expires_at < $1::timestamptz     -- stale
-   and fetched_at > $2::timestamptz     -- recently active
- order by listing_id, fetched_at desc
+select listing_id
+  from (
+    select distinct on (listing_id) listing_id, expires_at, fetched_at
+      from market_quote_snapshots
+     order by listing_id, fetched_at desc, as_of desc
+  ) latest
+ where latest.expires_at < $1::timestamptz   -- latest row is stale
+   and latest.fetched_at > $2::timestamptz   -- and was fetched recently (active)
+ order by latest.fetched_at desc
  limit $3
 ```
 
 - Lives in `cache-repository.ts` because it reads the cache table the repository already owns.
-- Added to the `MarketCacheRepository` interface and both implementations (postgres + in-memory) so the orchestrator can be unit-tested against the in-memory repo.
-- `distinct on (listing_id)` collapses a listing's multiple per-source rows to one target (we refresh the listing, the adapter picks the source).
+- Added to the `MarketCacheRepository` interface and both implementations (postgres + in-memory) so the orchestrator can be unit-tested against the in-memory repo. The in-memory impl mirrors the SQL: per listing, take the row with the greatest `fetched_at`, include the listing only if that row is stale and active.
 
 ### Unit 2 — `runQuoteRefreshOnce(deps)`
 
@@ -106,8 +109,9 @@ Cadence is set by the external invoker (dev-shell/cron), not configured in code.
   - Fake adapter returning `available` → asserts `refreshed` increments and a new quote is stored.
   - Fake adapter returning `unavailable` → asserts `failed` increments, the old quote is left untouched, and the failure is logged.
   - Empty target set → summary `{ scanned: 0, refreshed: 0, failed: 0 }`, adapter never called.
-- **Integration** (`services/market/test/quote-refresh.integration.test.ts`, real pg):
-  - Seeds rows with varied `expires_at`/`fetched_at`; asserts `listStaleActiveListings` returns exactly the stale-and-recently-active listing_ids, deduped per listing, ordered by `fetched_at desc`, and respects `limit`.
+- **Repository** (`services/market/test/cache-repository.test.ts`, extends the existing file — market convention is in-memory + fake-executor, no real pg):
+  - *In-memory impl (semantics):* seed via `storeQuote` with varied `fetched_at`/`expires_at`; assert `listStaleActiveListings` returns only listings whose **latest** row is stale-and-recently-active (a listing with a fresh latest row is excluded even if it has older expired rows), ordered by `fetched_at desc`, respecting `limit`.
+  - *Postgres impl (contract):* a fake `MarketCacheQueryExecutor` returning canned `{ listing_id }` rows; assert the method passes `[now, activeSince, limit]` and maps rows to `{ kind: "listing", id }`. (The SQL is trusted as the rest of the postgres impl is — `findFreshQuote` is covered the same way.)
 
 ## Out of scope (YAGNI)
 
