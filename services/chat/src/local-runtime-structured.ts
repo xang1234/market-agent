@@ -53,6 +53,14 @@ export type QuoteSummary = {
   stale: boolean;
 };
 
+export type FactRecency = {
+  latest_as_of: string;
+  fiscal_year: number | null;
+  fiscal_period: string | null;
+  age_days: number;
+  stale: boolean;
+};
+
 export type StructuredSubjectContext = {
   facts: ReadonlyArray<IssuerFactSummary>;
   quote: QuoteSummary | null;
@@ -207,6 +215,41 @@ export function factSummaryFromRow(row: FactRow): IssuerFactSummary {
     fiscal_period: row.fiscal_period,
     as_of: isoString(row.as_of),
     source_id: row.source_id,
+  });
+}
+
+// Even an annual-only filer reports within ~365 days plus a filing lag; a newest
+// reported fact older than this means the issuer has effectively stopped
+// reporting (or ingestion is behind), not a normal quarterly gap.
+export const STALE_FACT_AGE_DAYS = 400;
+
+const FACT_RECENCY_DAY_MS = 86_400_000;
+
+// Set-level recency for a loaded fact set: how old is the NEWEST reported fact.
+// A fact set deliberately spans old comparison years, so freshness is a property
+// of the newest fact, not each row. Pure and clock-injected for testing.
+export function factRecencyFrom(
+  facts: ReadonlyArray<IssuerFactSummary>,
+  now: string,
+): FactRecency | null {
+  let latest: IssuerFactSummary | null = null;
+  let latestMs = Number.NEGATIVE_INFINITY;
+  for (const fact of facts) {
+    const ms = Date.parse(fact.as_of);
+    if (!Number.isFinite(ms)) continue;
+    if (ms > latestMs) {
+      latestMs = ms;
+      latest = fact;
+    }
+  }
+  if (latest === null) return null;
+  const age_days = Math.max(0, Math.floor((Date.parse(now) - latestMs) / FACT_RECENCY_DAY_MS));
+  return Object.freeze({
+    latest_as_of: latest.as_of,
+    fiscal_year: latest.fiscal_year,
+    fiscal_period: latest.fiscal_period,
+    age_days,
+    stale: age_days > STALE_FACT_AGE_DAYS,
   });
 }
 
