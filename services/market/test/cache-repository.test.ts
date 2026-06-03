@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createInMemoryMarketCacheRepository } from "../src/cache-repository.ts";
+import {
+  createInMemoryMarketCacheRepository,
+  createPostgresMarketCacheRepository,
+} from "../src/cache-repository.ts";
 import { normalizedQuote } from "../src/quote.ts";
 import { normalizedBars } from "../src/bar.ts";
 
@@ -167,4 +170,41 @@ test("listStaleActiveListings orders by fetched_at desc and respects limit", asy
 
   // NEWER has the greater fetched_at, so it wins the single slot.
   assert.deepEqual(result, [{ kind: "listing", id: NEWER }]);
+});
+
+test("postgres listStaleActiveListings passes [now, activeSince, limit] and maps rows", async () => {
+  const calls: { text: string; values?: unknown[] }[] = [];
+  const fakeDb = {
+    async query<R>(text: string, values?: unknown[]) {
+      calls.push({ text, values });
+      return {
+        rows: [
+          { listing_id: "11111111-1111-4111-a111-111111111111" },
+          { listing_id: "22222222-2222-4222-a222-222222222222" },
+        ] as unknown as R[],
+      };
+    },
+  };
+  const repo = createPostgresMarketCacheRepository(fakeDb);
+
+  const result = await repo.listStaleActiveListings({
+    now: "2026-06-03T00:00:00.000Z",
+    activeSince: "2026-05-27T00:00:00.000Z",
+    limit: 200,
+  });
+
+  assert.deepEqual(result, [
+    { kind: "listing", id: "11111111-1111-4111-a111-111111111111" },
+    { kind: "listing", id: "22222222-2222-4222-a222-222222222222" },
+  ]);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].values, [
+    "2026-06-03T00:00:00.000Z",
+    "2026-05-27T00:00:00.000Z",
+    200,
+  ]);
+  // The query dedups to each listing's latest row before filtering.
+  assert.match(calls[0].text, /distinct on \(listing_id\)/);
+  assert.match(calls[0].text, /expires_at < \$1/);
+  assert.match(calls[0].text, /fetched_at > \$2/);
 });

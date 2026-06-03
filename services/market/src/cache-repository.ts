@@ -246,6 +246,22 @@ export function createPostgresMarketCacheRepository(
         await insertBars(tx, barRangeId, value.bars);
       });
     },
+    async listStaleActiveListings({ now, activeSince, limit }) {
+      const { rows } = await db.query<{ listing_id: string }>(
+        `select listing_id
+           from (
+             select distinct on (listing_id) listing_id, expires_at, fetched_at
+               from market_quote_snapshots
+              order by listing_id, fetched_at desc, as_of desc
+           ) latest
+          where latest.expires_at < $1::timestamptz
+            and latest.fetched_at > $2::timestamptz
+          order by latest.fetched_at desc
+          limit $3`,
+        [now, activeSince, limit],
+      );
+      return rows.map((row) => Object.freeze({ kind: "listing" as const, id: row.listing_id }));
+    },
   };
 }
 
