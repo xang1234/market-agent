@@ -57,6 +57,11 @@ export type MarketCacheRepository = {
     adjustment_basis: AdjustmentBasis,
   ): Promise<CachedBars | null>;
   storeBars(bars: NormalizedBars, metadata: MarketCacheMetadata): Promise<void>;
+  listStaleActiveListings(input: {
+    now: string;
+    activeSince: string;
+    limit: number;
+  }): Promise<ReadonlyArray<ListingSubjectRef>>;
 };
 
 export type MarketCacheQueryExecutor = {
@@ -108,6 +113,27 @@ export function createInMemoryMarketCacheRepository(): MarketCacheRepository {
         barsKey(value.listing, value.interval, value.range, value.adjustment_basis),
         freezeCachedBars(value, metadata),
       );
+    },
+    async listStaleActiveListings({ now, activeSince, limit }) {
+      const nowMs = Date.parse(now);
+      const activeSinceMs = Date.parse(activeSince);
+      const matches: { id: string; fetchedMs: number }[] = [];
+      for (const entries of quotes.values()) {
+        if (entries.length === 0) continue;
+        // Per-listing latest row by fetched_at (mirrors the SQL distinct-on).
+        const latest = entries.reduce((a, b) =>
+          Date.parse(b.fetched_at) > Date.parse(a.fetched_at) ? b : a,
+        );
+        const expiresMs = Date.parse(latest.expires_at);
+        const fetchedMs = Date.parse(latest.fetched_at);
+        if (expiresMs < nowMs && fetchedMs > activeSinceMs) {
+          matches.push({ id: latest.quote.listing.id, fetchedMs });
+        }
+      }
+      matches.sort((a, b) => b.fetchedMs - a.fetchedMs);
+      return matches
+        .slice(0, limit)
+        .map((m) => Object.freeze({ kind: "listing" as const, id: m.id }));
     },
   };
 }
