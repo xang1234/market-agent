@@ -907,6 +907,19 @@ export type DevApiServiceAdapterDeps = {
     body: Record<string, unknown>;
     blocks: ReadonlyArray<Record<string, unknown>>;
   }): Promise<SnapshotSealResult>;
+  // Optional per-section run: merges deterministic section blocks (peer_table)
+  // into the run. When absent, createRun falls back to the narrative memo only.
+  buildAnalyzeRunSeals?(input: {
+    snapshotId: string;
+    userId: string;
+    memoBlocks: ReadonlyArray<Record<string, unknown>>;
+    playbook: import("../../analyze/src/playbook.ts").AnalyzePlaybook;
+    subjectRefs: ReadonlyArray<{ kind: string; id: string }>;
+    asOf: string;
+  }): Promise<{
+    blocks: ReadonlyArray<Record<string, unknown>>;
+    sealSnapshot: () => Promise<SnapshotSealResult>;
+  }>;
   inspectEvidence?(input: {
     userId: string;
     snapshotId: string;
@@ -995,7 +1008,29 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
           subjectRefs,
           playbookSectionId: resolvedPlaybook.playbook.sections[0]?.section_id ?? null,
         });
-        const blocks = Object.freeze(rendered.blocks.map((block) => Object.freeze({ ...block })));
+        // When the per-section runner is wired, it runs the deterministic section
+        // producers (e.g. peer_table) and merges their blocks + seal into the run;
+        // otherwise the run is the narrative memo only.
+        const memoBlocks = rendered.blocks.map((block) => ({ ...block }));
+        const runAsOf = (memoBlocks[0]?.as_of as string | undefined) ?? new Date().toISOString();
+        let blocks: ReadonlyArray<Record<string, unknown>>;
+        let sealRun: () => Promise<SnapshotSealResult>;
+        if (deps.buildAnalyzeRunSeals) {
+          const runSeals = await deps.buildAnalyzeRunSeals({
+            snapshotId,
+            userId,
+            memoBlocks,
+            playbook: resolvedPlaybook.playbook,
+            subjectRefs,
+            asOf: runAsOf,
+          });
+          blocks = Object.freeze(runSeals.blocks.map((block) => Object.freeze({ ...block })));
+          sealRun = runSeals.sealSnapshot;
+        } else {
+          blocks = Object.freeze(memoBlocks.map((block) => Object.freeze({ ...block })));
+          sealRun = () =>
+            deps.sealAnalyzeSnapshot({ snapshotId, userId, templateId: template.template_id, body, blocks });
+        }
         const persisted = await persistAnalyzeTemplateRunAfterSnapshotSealWithPool(deps.db, {
           template_id: template.template_id,
           template_version: template.version,
@@ -1003,13 +1038,7 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
           playbook_id: resolvedPlaybook.playbook.playbook_id,
           run_metadata: runMetadata as unknown as JsonValue,
           sealSnapshot: async () => {
-            const seal = await deps.sealAnalyzeSnapshot({
-              snapshotId,
-              userId,
-              templateId: template.template_id,
-              body,
-              blocks,
-            });
+            const seal = await sealRun();
             if (seal.ok && seal.snapshot.snapshot_id !== snapshotId) {
               return {
                 ok: false,
