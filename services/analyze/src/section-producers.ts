@@ -4,6 +4,7 @@ import type { StatsRepository } from "../../fundamentals/src/stats-repository.ts
 import type { IssuerSubjectRef, UUID } from "../../fundamentals/src/subject-ref.ts";
 import type { SnapshotSealInput } from "../../snapshot/src/snapshot-sealer.ts";
 import { emitPeerComparisonBlock } from "./metrics-comparison-emitter.ts";
+import { emitRevenueBarsBlock } from "./revenue-bars-emitter.ts";
 
 export type SectionProducerDeps = {
   db: QueryExecutor;
@@ -39,10 +40,22 @@ const PEER_TABLE_PRODUCER: SectionProducer = (deps, ctx) =>
     },
   );
 
+const REVENUE_BARS_PRODUCER: SectionProducer = (deps, ctx) =>
+  emitRevenueBarsBlock(
+    { db: deps.db },
+    {
+      primary: ctx.primary,
+      snapshotId: ctx.snapshotId,
+      blockId: sectionBlockId("revenue_trend"),
+      asOf: ctx.asOf,
+    },
+  );
+
 // Registry keyed by `${playbook_id}:${section_id}`. Sections absent here have no
 // deterministic producer and are covered by the narrative memo.
 const SECTION_PRODUCERS: ReadonlyMap<string, SectionProducer> = new Map([
   ["peer_comparison:peer_table", PEER_TABLE_PRODUCER],
+  ["earnings_quality:revenue_trend", REVENUE_BARS_PRODUCER],
 ]);
 
 export function lookupSectionProducer(

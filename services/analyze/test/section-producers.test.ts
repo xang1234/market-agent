@@ -13,6 +13,10 @@ test("lookupSectionProducer returns undefined for narrative sections and unknown
   assert.equal(lookupSectionProducer("nope", "peer_table"), undefined);
 });
 
+test("the earnings_quality revenue_trend section resolves to a producer", () => {
+  assert.notEqual(lookupSectionProducer("earnings_quality", "revenue_trend"), undefined);
+});
+
 test("sectionBlockId is stable and section-scoped", () => {
   assert.equal(sectionBlockId("peer_table"), "peer_table-1");
 });

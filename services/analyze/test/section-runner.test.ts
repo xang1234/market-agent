@@ -7,7 +7,9 @@ import type { QueryExecutor } from "../../evidence/src/types.ts";
 import { AS_OF, fakeDb, PRIMARY, resolver, SNAP, stats } from "./peer-comparison-fixtures.ts";
 
 const peerComparison = ANALYZE_PLAYBOOKS.find((p) => p.playbook_id === "peer_comparison")!;
-const earningsQuality = ANALYZE_PLAYBOOKS.find((p) => p.playbook_id === "earnings_quality")!;
+// variant_view has no registered deterministic producer (earnings_quality now
+// owns the revenue_trend section, so it is no longer producer-free).
+const variantView = ANALYZE_PLAYBOOKS.find((p) => p.playbook_id === "variant_view")!;
 const CLOCK = () => new Date("2025-01-15T12:00:00.000Z");
 
 test("runDeterministicSections emits a metrics_comparison seal input for peer_comparison", async () => {
@@ -26,7 +28,7 @@ test("runDeterministicSections returns [] when the playbook has no deterministic
   const { db } = fakeDb();
   const seals = await runDeterministicSections(
     { db: db as unknown as QueryExecutor, peers: resolver, stats },
-    { playbook: earningsQuality, primary: PRIMARY, snapshotId: SNAP, asOf: AS_OF },
+    { playbook: variantView, primary: PRIMARY, snapshotId: SNAP, asOf: AS_OF },
   );
   assert.deepEqual(seals, []);
 });

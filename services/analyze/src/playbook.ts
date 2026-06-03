@@ -46,6 +46,7 @@ export const ANALYZE_PLAYBOOKS: ReadonlyArray<AnalyzePlaybook> = Object.freeze([
     sections: Object.freeze([
       section("summary", "Summary", true, "rich_text"),
       section("quality_of_revenue", "Quality of revenue", true, "metric_row"),
+      section("revenue_trend", "Revenue trend", false, "line_chart"),
       section("margin_bridge", "Margin bridge", true, "table"),
       section("cash_conversion", "Cash conversion", true, "metric_row"),
       section("management_tone", "Management tone", true, "rich_text"),

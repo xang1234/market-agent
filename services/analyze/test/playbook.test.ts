@@ -14,6 +14,7 @@ test("built-in playbooks expose analyst-facing source policies and sections", ()
   assert.deepEqual(earningsQuality.sections.map((section) => section.section_id), [
     "summary",
     "quality_of_revenue",
+    "revenue_trend",
     "margin_bridge",
     "cash_conversion",
     "management_tone",
