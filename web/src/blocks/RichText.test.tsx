@@ -72,3 +72,48 @@ test('RichText renders markdown table for text segments', async () => {
     restoreGlobals()
   }
 })
+
+const interleavedBlock: RichTextBlock = {
+  id: 'rich-text-inline-1',
+  kind: 'rich_text',
+  snapshot_id: SNAPSHOT_ID,
+  data_ref: { kind: 'rich_text', id: 'rich-text-inline-1' },
+  source_refs: [],
+  as_of: '2026-06-01T00:00:00.000Z',
+  segments: [
+    { type: 'text', text: 'Revenue grew ' },
+    { type: 'ref', ref_kind: 'fact', ref_id: '22222222-2222-4222-8222-222222222222' },
+    { type: 'text', text: ' last quarter.' },
+  ],
+}
+
+test('RichText keeps interleaved text and ref segments inline', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
+  try {
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(
+        <SnapshotManifestContext.Provider value={null}>
+          <RichText block={interleavedBlock} />
+        </SnapshotManifestContext.Provider>,
+      )
+    })
+
+    const html = dom.window.document.getElementById('root')!.innerHTML
+    // A cited sentence must stay in inline flow — text segments must NOT render as
+    // block-level <p> (the redesign regression that split refs onto their own line).
+    assert.doesNotMatch(html, /<p[\s>]/, 'interleaved text must not render as block <p>')
+    assert.match(html, /Revenue grew/, 'leading text fragment present')
+    assert.match(html, /last quarter/, 'trailing text fragment present')
+    assert.match(
+      html,
+      /data-ref-id="22222222-2222-4222-8222-222222222222"/,
+      'ref renders inline between the text fragments',
+    )
+
+    await act(async () => root.unmount())
+  } finally {
+    restoreGlobals()
+  }
+})

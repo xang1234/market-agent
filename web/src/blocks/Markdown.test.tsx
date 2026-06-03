@@ -69,3 +69,17 @@ test('Markdown renders heading and bold text', async () => {
   assert.match(html, /<h1[^>]*>GLW<\/h1>/)
   assert.match(html, /<strong[^>]*>\$176\.70<\/strong>/)
 })
+
+test('Markdown styles inline code as a pill but not fenced code blocks', async () => {
+  const html = await renderHtml(<Markdown text={'use `inlineCode` here'} />)
+  // Inline code gets the rounded/background pill.
+  assert.match(html, /<code class="rounded bg-surface-2[^"]*">inlineCode<\/code>/)
+})
+
+test('Markdown does not apply inline-pill styling to fenced code blocks', async () => {
+  const html = await renderHtml(<Markdown text={'```sql\nselect 1\n```'} />)
+  // Fenced code is wrapped in <pre> and the inner <code> keeps its language
+  // class — it must NOT carry the inline pill background.
+  assert.match(html, /<pre[^>]*><code class="language-sql">/)
+  assert.doesNotMatch(html, /<code class="rounded bg-surface-2/)
+})

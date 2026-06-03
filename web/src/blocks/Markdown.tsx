@@ -19,7 +19,14 @@ export function Markdown({ text }: { text: string }): ReactElement {
           li: ({ children }) => <li className="my-0.5">{children}</li>,
           strong: ({ children }) => <strong className="font-semibold text-fg">{children}</strong>,
           a: ({ children, href }) => <a href={href} target="_blank" rel="noreferrer" className="text-accent underline">{children}</a>,
-          code: ({ children }) => <code className="rounded bg-surface-2 px-1 py-0.5 text-[0.85em]">{children}</code>,
+          // react-markdown v9 no longer passes an `inline` flag: fenced blocks
+          // arrive here too (wrapped by `pre`, carrying a `language-*` class).
+          // Only inline code gets the rounded/background pill; fenced code keeps
+          // its class and inherits the `pre` block styling.
+          code: ({ children, className }) =>
+            className
+              ? <code className={className}>{children}</code>
+              : <code className="rounded bg-surface-2 px-1 py-0.5 text-[0.85em]">{children}</code>,
           pre: ({ children }) => <pre className="my-2 overflow-x-auto rounded-md bg-surface-2 p-3 text-xs">{children}</pre>,
           table: ({ children }) => <div className="my-2 overflow-x-auto"><table className="w-full border-collapse text-xs">{children}</table></div>,
           thead: ({ children }) => <thead className="bg-surface-2">{children}</thead>,
