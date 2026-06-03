@@ -1,4 +1,5 @@
 import {
+  cachedQuoteIsFresh,
   createPostgresMarketCacheRepository,
   type CachedQuote,
 } from "../../market/src/cache-repository.ts";
@@ -45,6 +46,11 @@ export type QuoteSummary = {
   currency: string;
   as_of: string;
   source_id: string;
+  // When this cache entry expires. The chat path reads the latest cached quote
+  // (it does not fetch live), so these two fields let the analyst tell a current
+  // price from a stale one instead of presenting an old quote as live.
+  expires_at: string;
+  stale: boolean;
 };
 
 export type StructuredSubjectContext = {
@@ -101,12 +107,24 @@ export function structuredRefsFromHandoff(handoff: HydratedSubjectHandoff): Stru
 export async function loadStructuredSubjectContext(
   db: QueryExecutor,
   refs: StructuredSubjectRefs,
-  options: { factLimit?: number } = {},
+  options: { factLimit?: number; now?: string } = {},
 ): Promise<StructuredSubjectContext> {
-  const [facts, quote] = await Promise.all([
+  const now = options.now ?? new Date().toISOString();
+  // facts and quote are independent DB reads; settle them separately so a failing
+  // facts query doesn't discard a good quote (or vice-versa). The caller degrades
+  // the whole structured context only when it truly has nothing.
+  const [factsResult, quoteResult] = await Promise.allSettled([
     loadIssuerFacts(db, refs.issuer, options.factLimit ?? DEFAULT_FACT_LIMIT),
-    loadLatestListingQuote(db, refs.listings),
+    loadLatestListingQuote(db, refs.listings, now),
   ]);
+  if (factsResult.status === "rejected") {
+    console.warn("[chat] issuer facts load failed; serving without fundamentals", factsResult.reason);
+  }
+  if (quoteResult.status === "rejected") {
+    console.warn("[chat] quote load failed; serving without a price", quoteResult.reason);
+  }
+  const facts = factsResult.status === "fulfilled" ? factsResult.value : [];
+  const quote = quoteResult.status === "fulfilled" ? quoteResult.value : null;
 
   const sourceIds = unique([
     ...facts.map((fact) => fact.source_id),
@@ -160,13 +178,14 @@ async function loadIssuerFacts(
 async function loadLatestListingQuote(
   db: QueryExecutor,
   listings: StructuredSubjectRefs["listings"],
+  now: string,
 ): Promise<QuoteSummary | null> {
   if (listings.length === 0) return null;
   const cache = createPostgresMarketCacheRepository(db);
   const quotes = await Promise.all(
     listings.map(async (listing) => {
       const cached = await cache.findLatestQuote(listing.ref);
-      return cached ? quoteSummaryFromCachedQuote(cached, listing.ticker) : null;
+      return cached ? quoteSummaryFromCachedQuote(cached, listing.ticker, now) : null;
     }),
   );
   return quotes.reduce<QuoteSummary | null>(
@@ -191,7 +210,11 @@ export function factSummaryFromRow(row: FactRow): IssuerFactSummary {
   });
 }
 
-export function quoteSummaryFromCachedQuote(cached: CachedQuote, ticker: string | null): QuoteSummary {
+export function quoteSummaryFromCachedQuote(
+  cached: CachedQuote,
+  ticker: string | null,
+  now: string = new Date().toISOString(),
+): QuoteSummary {
   const quote = cached.quote;
   return Object.freeze({
     listing_id: quote.listing.id,
@@ -206,6 +229,8 @@ export function quoteSummaryFromCachedQuote(cached: CachedQuote, ticker: string 
     currency: quote.currency,
     as_of: quote.as_of,
     source_id: quote.source_id,
+    expires_at: cached.expires_at,
+    stale: !cachedQuoteIsFresh(cached, now),
   });
 }
 

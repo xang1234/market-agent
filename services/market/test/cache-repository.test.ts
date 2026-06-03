@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createInMemoryMarketCacheRepository } from "../src/cache-repository.ts";
+import {
+  createInMemoryMarketCacheRepository,
+  createPostgresMarketCacheRepository,
+} from "../src/cache-repository.ts";
 import { normalizedQuote } from "../src/quote.ts";
 import { normalizedBars } from "../src/bar.ts";
 
@@ -77,4 +80,131 @@ test("market cache repository stores bars by canonical interval, basis, and rang
     }),
     null,
   );
+});
+
+// ── listStaleActiveListings ───────────────────────────────────────────────────
+
+const STALE_ACTIVE = "11111111-1111-4111-a111-111111111111";
+const FRESH_LATEST = "22222222-2222-4222-a222-222222222222";
+const STALE_INACTIVE = "33333333-3333-4333-a333-333333333333";
+
+// now = 2026-06-03T00:00Z, activeSince = 2026-05-27T00:00Z (7-day window)
+const NOW_ISO = "2026-06-03T00:00:00.000Z";
+const ACTIVE_SINCE_ISO = "2026-05-27T00:00:00.000Z";
+
+async function storeQuoteRow(
+  repo: ReturnType<typeof createInMemoryMarketCacheRepository>,
+  id: string,
+  opts: { as_of: string; fetched_at: string; expires_at: string },
+): Promise<void> {
+  await repo.storeQuote(
+    normalizedQuote({
+      listing: { kind: "listing", id },
+      price: 10,
+      prev_close: 9,
+      session_state: "regular",
+      as_of: opts.as_of,
+      delay_class: "delayed_15m",
+      currency: "USD",
+      source_id: SOURCE_ID,
+    }),
+    { provider: "polygon_market", fetched_at: opts.fetched_at, expires_at: opts.expires_at },
+  );
+}
+
+test("listStaleActiveListings returns listings whose latest row is stale and recently active", async () => {
+  const repo = createInMemoryMarketCacheRepository();
+  // STALE_ACTIVE: latest row expired, fetched within window → included.
+  await storeQuoteRow(repo, STALE_ACTIVE, {
+    as_of: "2026-06-02T00:00:00.000Z",
+    fetched_at: "2026-06-02T12:00:00.000Z",
+    expires_at: "2026-06-02T12:30:00.000Z",
+  });
+  // FRESH_LATEST: an old expired row AND a newer fresh row → latest is fresh → excluded.
+  await storeQuoteRow(repo, FRESH_LATEST, {
+    as_of: "2026-06-01T00:00:00.000Z",
+    fetched_at: "2026-06-01T12:00:00.000Z",
+    expires_at: "2026-06-01T12:30:00.000Z",
+  });
+  await storeQuoteRow(repo, FRESH_LATEST, {
+    as_of: "2026-06-02T23:00:00.000Z",
+    fetched_at: "2026-06-02T23:00:00.000Z",
+    expires_at: "2026-06-03T05:00:00.000Z",
+  });
+  // STALE_INACTIVE: expired and fetched before the window → excluded.
+  await storeQuoteRow(repo, STALE_INACTIVE, {
+    as_of: "2026-05-20T00:00:00.000Z",
+    fetched_at: "2026-05-20T12:00:00.000Z",
+    expires_at: "2026-05-20T12:30:00.000Z",
+  });
+
+  const result = await repo.listStaleActiveListings({
+    now: NOW_ISO,
+    activeSince: ACTIVE_SINCE_ISO,
+    limit: 200,
+  });
+
+  assert.deepEqual(result, [{ kind: "listing", id: STALE_ACTIVE }]);
+});
+
+test("listStaleActiveListings orders by fetched_at desc and respects limit", async () => {
+  const repo = createInMemoryMarketCacheRepository();
+  const OLDER = "44444444-4444-4444-a444-444444444444";
+  const NEWER = "55555555-5555-4555-a555-555555555555";
+  await storeQuoteRow(repo, OLDER, {
+    as_of: "2026-06-01T00:00:00.000Z",
+    fetched_at: "2026-06-01T00:00:00.000Z",
+    expires_at: "2026-06-01T00:30:00.000Z",
+  });
+  await storeQuoteRow(repo, NEWER, {
+    as_of: "2026-06-02T00:00:00.000Z",
+    fetched_at: "2026-06-02T00:00:00.000Z",
+    expires_at: "2026-06-02T00:30:00.000Z",
+  });
+
+  const result = await repo.listStaleActiveListings({
+    now: NOW_ISO,
+    activeSince: ACTIVE_SINCE_ISO,
+    limit: 1,
+  });
+
+  // NEWER has the greater fetched_at, so it wins the single slot.
+  assert.deepEqual(result, [{ kind: "listing", id: NEWER }]);
+});
+
+test("postgres listStaleActiveListings passes [now, activeSince, limit] and maps rows", async () => {
+  const calls: { text: string; values?: unknown[] }[] = [];
+  const fakeDb = {
+    async query<R>(text: string, values?: unknown[]) {
+      calls.push({ text, values });
+      return {
+        rows: [
+          { listing_id: "11111111-1111-4111-a111-111111111111" },
+          { listing_id: "22222222-2222-4222-a222-222222222222" },
+        ] as unknown as R[],
+      };
+    },
+  };
+  const repo = createPostgresMarketCacheRepository(fakeDb);
+
+  const result = await repo.listStaleActiveListings({
+    now: "2026-06-03T00:00:00.000Z",
+    activeSince: "2026-05-27T00:00:00.000Z",
+    limit: 200,
+  });
+
+  assert.deepEqual(result, [
+    { kind: "listing", id: "11111111-1111-4111-a111-111111111111" },
+    { kind: "listing", id: "22222222-2222-4222-a222-222222222222" },
+  ]);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].values, [
+    "2026-06-03T00:00:00.000Z",
+    "2026-05-27T00:00:00.000Z",
+    200,
+  ]);
+  // The query dedups to each listing's latest row before filtering.
+  assert.match(calls[0].text, /distinct on \(listing_id\)/);
+  assert.match(calls[0].text, /expires_at < \$1/);
+  assert.match(calls[0].text, /fetched_at > \$2/);
 });

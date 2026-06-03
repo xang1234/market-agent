@@ -22,6 +22,14 @@ export type CachedQuote = {
   expires_at: string;
 };
 
+// Canonical freshness rule for a cached quote, mirroring findFreshQuote's SQL
+// (`expires_at > now`). Exposed so consumers that read the latest cached quote
+// directly (e.g. the chat structured-context loader) can apply the SAME notion
+// of freshness instead of inventing their own age threshold.
+export function cachedQuoteIsFresh(cached: CachedQuote, now: string): boolean {
+  return Date.parse(cached.expires_at) > Date.parse(now);
+}
+
 export type CachedBars = {
   bars: NormalizedBars;
   provider: string;
@@ -49,6 +57,11 @@ export type MarketCacheRepository = {
     adjustment_basis: AdjustmentBasis,
   ): Promise<CachedBars | null>;
   storeBars(bars: NormalizedBars, metadata: MarketCacheMetadata): Promise<void>;
+  listStaleActiveListings(input: {
+    now: string;
+    activeSince: string;
+    limit: number;
+  }): Promise<ReadonlyArray<ListingSubjectRef>>;
 };
 
 export type MarketCacheQueryExecutor = {
@@ -100,6 +113,27 @@ export function createInMemoryMarketCacheRepository(): MarketCacheRepository {
         barsKey(value.listing, value.interval, value.range, value.adjustment_basis),
         freezeCachedBars(value, metadata),
       );
+    },
+    async listStaleActiveListings({ now, activeSince, limit }) {
+      const nowMs = Date.parse(now);
+      const activeSinceMs = Date.parse(activeSince);
+      const matches: { id: string; fetchedMs: number }[] = [];
+      for (const entries of quotes.values()) {
+        if (entries.length === 0) continue;
+        // Per-listing latest row by fetched_at (mirrors the SQL distinct-on).
+        const latest = entries.reduce((a, b) =>
+          Date.parse(b.fetched_at) > Date.parse(a.fetched_at) ? b : a,
+        );
+        const expiresMs = Date.parse(latest.expires_at);
+        const fetchedMs = Date.parse(latest.fetched_at);
+        if (expiresMs < nowMs && fetchedMs > activeSinceMs) {
+          matches.push({ id: latest.quote.listing.id, fetchedMs });
+        }
+      }
+      matches.sort((a, b) => b.fetchedMs - a.fetchedMs);
+      return matches
+        .slice(0, limit)
+        .map((m) => Object.freeze({ kind: "listing" as const, id: m.id }));
     },
   };
 }
@@ -211,6 +245,22 @@ export function createPostgresMarketCacheRepository(
         await tx.query(`delete from market_bars where bar_range_id = $1::uuid`, [barRangeId]);
         await insertBars(tx, barRangeId, value.bars);
       });
+    },
+    async listStaleActiveListings({ now, activeSince, limit }) {
+      const { rows } = await db.query<{ listing_id: string }>(
+        `select listing_id
+           from (
+             select distinct on (listing_id) listing_id, expires_at, fetched_at
+               from market_quote_snapshots
+              order by listing_id, fetched_at desc, as_of desc
+           ) latest
+          where latest.expires_at < $1::timestamptz
+            and latest.fetched_at > $2::timestamptz
+          order by latest.fetched_at desc
+          limit $3`,
+        [now, activeSince, limit],
+      );
+      return rows.map((row) => Object.freeze({ kind: "listing" as const, id: row.listing_id }));
     },
   };
 }
@@ -427,8 +477,7 @@ function barsFromRows(row: BarRangeRow, bars: BarRow[]): CachedBars {
 }
 
 function latestFreshQuote(entries: CachedQuote[], now: string): CachedQuote | null {
-  const nowMs = Date.parse(now);
-  return latestQuote(entries.filter((entry) => Date.parse(entry.expires_at) > nowMs));
+  return latestQuote(entries.filter((entry) => cachedQuoteIsFresh(entry, now)));
 }
 
 function latestQuote(entries: CachedQuote[]): CachedQuote | null {

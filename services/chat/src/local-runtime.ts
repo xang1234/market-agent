@@ -1,10 +1,13 @@
 import { Pool } from "pg";
 
 import {
+  emptyEvidence,
   loadLocalRuntimeEvidence,
   loadVerifierRowsForRefs,
   type LocalRuntimeEvidence,
+  type LocalRuntimeEvidenceInput,
 } from "../../evidence/src/local-runtime-evidence.ts";
+import type { QueryExecutor } from "../../evidence/src/types.ts";
 import { hashJsonValue, toolCallArgsDigest } from "../../observability/src/tool-call.ts";
 import { serializeJsonValue, type JsonValue } from "../../observability/src/types.ts";
 import type { SnapshotManifestDraft, SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
@@ -30,9 +33,42 @@ import {
   structuredRefsFromHandoff,
 } from "./local-runtime-structured.ts";
 import { createChatMessagePersistence } from "./messages.ts";
+import {
+  preResolveChatSubjectWithResolver,
+  type ChatSubjectPreResolution,
+  type ChatSubjectPreResolveRequest,
+} from "./subjects.ts";
 import { createThreadTitleGenerationJob } from "./thread-title.ts";
 
 let localPool: Pool | null = null;
+
+// The default chat runtime resolves subjects in-process against the same pool,
+// so the dev/default server grounds turns without a separately-configured
+// CHAT_SUBJECT_RESOLVER_MODULE. Wired by loadChatServerOptionsFromEnv alongside
+// the analyst runtime and persistence.
+export function preResolveSubject(
+  request: ChatSubjectPreResolveRequest,
+): Promise<ChatSubjectPreResolution> {
+  return preResolveChatSubjectWithResolver(pool(), request);
+}
+
+// Chat tolerates a missing research-claims read: a freshly-covered subject (or a
+// transient DB hiccup) should still answer from price + fundamentals rather than
+// failing the turn. This is the chat-specific policy boundary — the shared
+// evidence loader keeps throwing for callers that don't want to degrade.
+// loadStructuredSubjectContext already self-degrades, so both loads are now
+// uniformly empty-on-failure and the caller just Promise.all's them.
+export async function loadEvidenceOrEmpty(
+  db: QueryExecutor,
+  input: LocalRuntimeEvidenceInput,
+): Promise<LocalRuntimeEvidence> {
+  try {
+    return await loadLocalRuntimeEvidence(db, input);
+  } catch (reason) {
+    console.warn("[chat] evidence load failed; serving without research claims", reason);
+    return emptyEvidence(input.subject_refs);
+  }
+}
 
 export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const asOf = new Date().toISOString();
@@ -53,12 +89,18 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
       // the analyst answer "insufficient data" for those. Load the structured
       // context too so the analyst can ground an answer in price + fundamentals,
       // and only report insufficient_evidence when nothing at all exists.
+      //
+      // Both loaders are empty-on-failure (loadEvidenceOrEmpty wraps the claims
+      // read; loadStructuredSubjectContext self-degrades its facts/quote reads),
+      // so a DB hiccup or one malformed row keeps the surviving evidence instead
+      // of failing the turn — and when nothing loads, the analyst gets a clean
+      // insufficient_evidence signal rather than a 500.
       const [evidence, structured] = await Promise.all([
-        loadLocalRuntimeEvidence(pool(), {
+        loadEvidenceOrEmpty(pool(), {
           subject_refs: subjectRefs,
           user_id: context.userId ?? null,
         }),
-        loadStructuredSubjectContext(pool(), structuredRefs),
+        loadStructuredSubjectContext(pool(), structuredRefs, { now: asOf }),
       ]);
       return {
         kind: "local_evidence_tool_result",

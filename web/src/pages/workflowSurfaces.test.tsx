@@ -5,7 +5,7 @@ import { JSDOM } from 'jsdom'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
-import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from 'react-router-dom'
+import { createMemoryRouter, MemoryRouter, Outlet, Route, RouterProvider, Routes } from 'react-router-dom'
 
 import { AgentPayloadValidationError, buildAgentPayload } from '../agents/agentPayload.ts'
 import { persistUserChatTurn } from '../chat/persistUserChatTurn.ts'
@@ -22,6 +22,12 @@ import { WorkspaceShell } from '../shell/WorkspaceShell.tsx'
 
 const USER_ID = '00000000-0000-4000-8000-000000000001'
 const SNAPSHOT_ID = '11111111-1111-4111-8111-111111111111'
+
+function OutletCtx({ value }: { value: { collapsed: boolean; setCollapsed: () => void } }) {
+  return <Outlet context={value} />
+}
+
+const DEFAULT_LAYOUT_CTX = { collapsed: false, setCollapsed: () => {} }
 
 const IMPORTED_MEMO_BLOCK: Block = {
   id: 'memo-block',
@@ -95,7 +101,7 @@ test('Chat thread route renders message stream and composer workflow copy', () =
     </MemoryRouter>,
   )
 
-  assert.match(html, /Message stream/)
+  assert.match(html, /Collapse sidebar/)
   assert.match(html, /Ask the analyst/)
   assert.doesNotMatch(html, /ships with P2\.1/i)
 })
@@ -118,7 +124,9 @@ test('Chat thread route does not render imported Analyze memo from Router state'
         ]}
       >
         <Routes>
-          <Route path="/chat/:threadId" element={<ChatThreadView />} />
+          <Route element={<OutletCtx value={DEFAULT_LAYOUT_CTX} />}>
+            <Route path="/chat/:threadId" element={<ChatThreadView />} />
+          </Route>
         </Routes>
       </MemoryRouter>
     </BlockRegistryProvider>,
@@ -184,7 +192,9 @@ test('Chat thread route loads persisted user and assistant messages on direct na
         <BlockRegistryProvider registry={createDefaultBlockRegistry()}>
           <MemoryRouter initialEntries={['/chat/thread-123']}>
             <Routes>
-              <Route path="/chat/:threadId" element={<ChatThreadView />} />
+              <Route element={<OutletCtx value={DEFAULT_LAYOUT_CTX} />}>
+                <Route path="/chat/:threadId" element={<ChatThreadView />} />
+              </Route>
             </Routes>
           </MemoryRouter>
         </BlockRegistryProvider>,
@@ -219,7 +229,9 @@ test('Chat thread route virtualizes long persisted histories while preserving re
         <BlockRegistryProvider registry={createDefaultBlockRegistry()}>
           <MemoryRouter initialEntries={['/chat/thread-123']}>
             <Routes>
-              <Route path="/chat/:threadId" element={<ChatThreadView />} />
+              <Route element={<OutletCtx value={DEFAULT_LAYOUT_CTX} />}>
+                <Route path="/chat/:threadId" element={<ChatThreadView />} />
+              </Route>
             </Routes>
           </MemoryRouter>
         </BlockRegistryProvider>,

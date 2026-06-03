@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useReducer, useState, type FormEvent } from 'react'
 import { PRIMARY_BUTTON_CLASS } from '../shell/buttonStyles.ts'
-import { Link, Outlet, useNavigate, useParams } from 'react-router-dom'
+import { Link, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import { VirtualizedMessageList } from '../chat'
 import type { ChatMessage as PersistedChatMessage } from '../chat/messageTypes.ts'
@@ -11,6 +11,9 @@ import { StreamingTurnView } from '../chat/StreamingTurnView.tsx'
 import { ThreadColumn } from '../chat/turnLayout.tsx'
 import { authenticatedFetch, authenticatedJson } from '../http/authFetch.ts'
 import { useAuth } from '../shell/useAuth.ts'
+import { createThreadAndOpen, deleteThread } from '../chat/threadActions.ts'
+import { handleComposerKeyDownEvent } from '../chat/composer.ts'
+import { useChatLayoutContext, type ChatLayoutContext } from '../chat/chatLayoutContext.ts'
 
 type ChatThread = {
   thread_id: string
@@ -38,22 +41,23 @@ type MessageHistoryState =
 export function ChatLayout() {
   const { session } = useAuth()
   const userId = session?.userId ?? ''
+  const [refreshKey, setRefreshKey] = useState(0)
+  const bumpRefreshKey = () => setRefreshKey((k) => k + 1)
+  const [collapsed, setCollapsed] = useState(false)
+  const outletContext: ChatLayoutContext = { collapsed, setCollapsed }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="border-b border-line px-8 py-6">
-        <h1 className="text-2xl font-semibold">Chat</h1>
-        <p className="mt-1 text-sm text-muted">
-          Thread-scoped research workspace with live analyst turns, strict Block[] rendering,
-          and reusable artifacts.
-        </p>
-      </header>
-      <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)] overflow-hidden">
-        <aside className="min-h-0 border-r border-line bg-surface-2/70 p-4/40">
-          <ThreadList userId={userId} />
-        </aside>
+      <div
+        className={`grid min-h-0 flex-1 overflow-hidden ${collapsed ? 'grid-cols-[0px_minmax(0,1fr)]' : 'grid-cols-[260px_minmax(0,1fr)]'}`}
+      >
+        {collapsed ? null : (
+          <aside className="min-h-0 border-r border-line bg-surface-2/70 p-4">
+            <ThreadList userId={userId} refreshKey={refreshKey} onChanged={bumpRefreshKey} />
+          </aside>
+        )}
         <div className="min-h-0 overflow-auto">
-          <Outlet />
+          <Outlet context={outletContext} />
         </div>
       </div>
     </div>
@@ -73,15 +77,7 @@ export function ChatEmptyState() {
     setPending(true)
     setError(null)
     try {
-      const thread = await authenticatedJson<ChatThread>('/v1/chat/threads', {
-        userId: session.userId,
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ title: title.trim() || null }),
-      })
-      navigate(`/chat/${thread.thread_id}`)
+      await createThreadAndOpen(session.userId, navigate, title.trim() || null)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught))
     } finally {
@@ -122,6 +118,7 @@ export function ChatEmptyState() {
 export function ChatThreadView() {
   const { session } = useAuth()
   const { threadId = '' } = useParams<{ threadId: string }>()
+  const { collapsed, setCollapsed } = useChatLayoutContext()
   const [prompt, setPrompt] = useState('')
   const [history, setHistory] = useState<MessageHistoryState>({ kind: 'idle' })
   const [historyReloadKey, setHistoryReloadKey] = useState(0)
@@ -216,12 +213,17 @@ export function ChatThreadView() {
 
   return (
     <div data-testid="chat-thread" className="flex min-h-full flex-col">
-      <section className="border-b border-line px-6 py-3">
-        <h2 className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-          Message stream
-        </h2>
-        <p className="num mt-0.5 text-xs text-faint">{threadId}</p>
-      </section>
+      <div className="flex items-center gap-3 border-b border-line px-4 py-2">
+        <button
+          type="button"
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          onClick={() => setCollapsed((c) => !c)}
+          className="text-sm text-muted hover:text-fg"
+        >
+          {collapsed ? '☰' : '⟨'}
+        </button>
+        <span className="text-xs text-faint">{threadId}</span>
+      </div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
         {visibleHistory.kind === 'ready' ? (
           <PersistedMessageHistory messages={visibleHistory.messages} />
@@ -267,6 +269,7 @@ export function ChatThreadView() {
               id="chat-composer"
               value={prompt}
               onChange={(event) => setPrompt(event.currentTarget.value)}
+              onKeyDown={handleComposerKeyDownEvent}
               rows={2}
               className="min-w-0 flex-1 resize-none border-none bg-transparent text-sm text-fg outline-none placeholder:text-faint"
               placeholder="Ask about a company, theme, screen, or prior artifact"
@@ -279,6 +282,7 @@ export function ChatThreadView() {
               ↑
             </button>
           </div>
+          <p className="mt-1.5 text-[11px] text-faint">Press <span className="font-medium text-muted">Enter</span> to send · <span className="font-medium text-muted">Shift+Enter</span> for a newline</p>
         </ThreadColumn>
       </form>
     </div>
@@ -294,8 +298,11 @@ function PersistedMessageHistory({ messages }: { messages: ReadonlyArray<Persist
   )
 }
 
-function ThreadList({ userId }: { userId: string }) {
+function ThreadList({ userId, refreshKey, onChanged }: { userId: string; refreshKey: number; onChanged: () => void }) {
+  const navigate = useNavigate()
+  const location = useLocation()
   const [state, setState] = useState<ThreadListState>({ kind: 'loading' })
+  const [actionError, setActionError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!userId) return
@@ -315,12 +322,27 @@ function ThreadList({ userId }: { userId: string }) {
         }
       })
     return () => controller.abort()
-  }, [userId])
+  }, [userId, refreshKey])
 
   const rows = useMemo(() => (state.kind === 'ready' ? state.threads : []), [state])
 
   return (
     <nav aria-label="Thread list" className="flex min-h-0 flex-col gap-3">
+      <button
+        type="button"
+        onClick={() => {
+          setActionError(null)
+          void createThreadAndOpen(userId, navigate)
+            .then(onChanged)
+            .catch((e) => setActionError(e instanceof Error ? e.message : String(e)))
+        }}
+        className={`${PRIMARY_BUTTON_CLASS} w-full justify-center`}
+      >
+        + New chat
+      </button>
+      {actionError ? (
+        <p className="text-xs text-negative">{actionError}</p>
+      ) : null}
       <div>
         <h2 className="text-sm font-semibold text-fg">Thread list</h2>
         <p className="mt-1 text-xs text-muted">
@@ -336,7 +358,7 @@ function ThreadList({ userId }: { userId: string }) {
       ) : (
         <ul className="flex min-h-0 flex-col gap-2 overflow-auto">
           {rows.map((thread) => (
-            <li key={thread.thread_id}>
+            <li key={thread.thread_id} className="group relative">
               <Link
                 to={`/chat/${thread.thread_id}`}
                 className="block rounded-md border border-line bg-surface p-3 text-sm hover:border-line-strong"
@@ -348,6 +370,24 @@ function ThreadList({ userId }: { userId: string }) {
                   {new Date(thread.updated_at).toLocaleString()}
                 </span>
               </Link>
+              <button
+                type="button"
+                aria-label={`Delete ${thread.title ?? 'thread'}`}
+                className="absolute right-2 top-2 opacity-0 transition group-hover:opacity-100 text-muted hover:text-negative"
+                onClick={(e) => {
+                  e.preventDefault()
+                  if (!window.confirm('Delete this chat? This cannot be undone.')) return
+                  setActionError(null)
+                  void deleteThread(userId, thread.thread_id)
+                    .then(() => {
+                      onChanged()
+                      if (location.pathname === `/chat/${thread.thread_id}`) navigate('/chat')
+                    })
+                    .catch((e) => setActionError(e instanceof Error ? e.message : String(e)))
+                }}
+              >
+                🗑
+              </button>
             </li>
           ))}
         </ul>

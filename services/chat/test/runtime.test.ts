@@ -20,6 +20,11 @@ test("runtime config wires in-repo analyst runtime and persistence when DATABASE
   assert.equal(typeof options.analystToolRuntime, "function");
   assert.equal(typeof options.persistAssistantMessage, "function");
   assert.equal(typeof options.generateThreadTitle, "function");
+  // The subject pre-resolver defaults to the in-repo runtime too, so the dev /
+  // default server grounds turns without a separately-configured
+  // CHAT_SUBJECT_RESOLVER_MODULE. Without this, no subject ever resolves and
+  // every chat answer falls back to the ungrounded screen bundle.
+  assert.equal(typeof options.preResolveSubject, "function");
 });
 
 test("runtime config resolves in-repo default runtime when loader cwd is the repo root", async () => {

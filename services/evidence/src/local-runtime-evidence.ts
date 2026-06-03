@@ -267,7 +267,7 @@ function evidenceFromClaimRows(
   });
 }
 
-function emptyEvidence(subjectRefs: ReadonlyArray<SnapshotSubjectRef>): LocalRuntimeEvidence {
+export function emptyEvidence(subjectRefs: ReadonlyArray<SnapshotSubjectRef>): LocalRuntimeEvidence {
   return Object.freeze({
     claims: Object.freeze([]),
     source_ids: Object.freeze([]),

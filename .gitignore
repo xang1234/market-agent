@@ -25,3 +25,6 @@ web/node_modules/
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# Brainstorming visual companion (local, not committed)
+.superpowers/

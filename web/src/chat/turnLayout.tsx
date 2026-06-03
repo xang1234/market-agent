@@ -1,4 +1,6 @@
-import type { HTMLAttributes, ReactNode } from 'react'
+import type { HTMLAttributes, ReactElement, ReactNode } from 'react'
+
+import { isWideBlock, PROSE_COLUMN_CLASS, BREAKOUT_COLUMN_CLASS } from './blockColumns.ts'
 
 // Single source of truth for chat turn presentation. A streaming turn and the
 // persisted turn it becomes are the SAME message at two moments in its life —
@@ -6,10 +8,19 @@ import type { HTMLAttributes, ReactNode } from 'react'
 // keeps the two paths pixel-identical, so the turn doesn't visually jump at the
 // seal moment, and the width/card styling can't drift between them.
 
-// Centered reading column for the thread (mockup ~780px). Exported as a class
-// too so VirtualizedMessageList can apply it to its own scroll-content div
-// (which carries virtualization padding + a test id) without a wrapper element.
-export const THREAD_COLUMN_CLASS = 'mx-auto w-full max-w-[780px]'
+// Outer thread column — left-aligned, wide enough to host breakout data blocks.
+export const THREAD_COLUMN_CLASS = 'w-full max-w-[960px]'
+
+/** Wraps a block in the column width appropriate for its kind. */
+export function BlockColumn({
+  kind,
+  children,
+}: {
+  kind: string
+  children: ReactNode
+}): ReactElement {
+  return <div className={isWideBlock(kind) ? BREAKOUT_COLUMN_CLASS : PROSE_COLUMN_CLASS}>{children}</div>
+}
 
 export function ThreadColumn({
   children,

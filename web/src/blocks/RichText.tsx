@@ -4,13 +4,32 @@ import type { RefSegment, RichTextBlock } from './types.ts'
 import { isRefSegment, refSegmentPlaceholder } from './richText.ts'
 import { resolveRefSegment, type SnapshotManifest } from './snapshotManifest.ts'
 import { useSnapshotManifest } from './snapshotManifestContext.ts'
+import { Markdown } from './Markdown.tsx'
 
 type RichTextProps = { block: RichTextBlock }
 
 export function RichText({ block }: RichTextProps): ReactElement {
   const manifest = useSnapshotManifest()
+  // A block that is a single text segment is whole-block prose — render it as
+  // block-level Markdown so GFM tables, headings, and lists work (the redesign's
+  // goal). A block that interleaves text and ref segments is an inline cited
+  // sentence; rendering each text run as block Markdown (<div>/<p>) would split
+  // the refs onto their own lines, so render those text runs inline instead and
+  // keep the refs in flow.
+  const onlySegment = block.segments.length === 1 ? block.segments[0] : null
+  if (onlySegment && !isRefSegment(onlySegment)) {
+    return (
+      <div
+        data-testid={`block-rich-text-${block.id}`}
+        data-block-kind="rich_text"
+        className="text-sm leading-6 text-fg-soft"
+      >
+        <Markdown text={onlySegment.text} />
+      </div>
+    )
+  }
   return (
-    <p
+    <div
       data-testid={`block-rich-text-${block.id}`}
       data-block-kind="rich_text"
       className="text-sm leading-6 text-fg-soft"
@@ -30,7 +49,7 @@ export function RichText({ block }: RichTextProps): ReactElement {
         }
         return <span key={`${block.id}-seg-${index}`}>{segment.text}</span>
       })}
-    </p>
+    </div>
   )
 }
 
