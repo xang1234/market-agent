@@ -435,8 +435,7 @@ function barsFromRows(row: BarRangeRow, bars: BarRow[]): CachedBars {
 }
 
 function latestFreshQuote(entries: CachedQuote[], now: string): CachedQuote | null {
-  const nowMs = Date.parse(now);
-  return latestQuote(entries.filter((entry) => Date.parse(entry.expires_at) > nowMs));
+  return latestQuote(entries.filter((entry) => cachedQuoteIsFresh(entry, now)));
 }
 
 function latestQuote(entries: CachedQuote[]): CachedQuote | null {

@@ -118,10 +118,21 @@ export async function loadStructuredSubjectContext(
   options: { factLimit?: number; now?: string } = {},
 ): Promise<StructuredSubjectContext> {
   const now = options.now ?? new Date().toISOString();
-  const [facts, quote] = await Promise.all([
+  // facts and quote are independent DB reads; settle them separately so a failing
+  // facts query doesn't discard a good quote (or vice-versa). The caller degrades
+  // the whole structured context only when it truly has nothing.
+  const [factsResult, quoteResult] = await Promise.allSettled([
     loadIssuerFacts(db, refs.issuer, options.factLimit ?? DEFAULT_FACT_LIMIT),
     loadLatestListingQuote(db, refs.listings, now),
   ]);
+  if (factsResult.status === "rejected") {
+    console.warn("[chat] issuer facts load failed; serving without fundamentals", factsResult.reason);
+  }
+  if (quoteResult.status === "rejected") {
+    console.warn("[chat] quote load failed; serving without a price", quoteResult.reason);
+  }
+  const facts = factsResult.status === "fulfilled" ? factsResult.value : [];
+  const quote = quoteResult.status === "fulfilled" ? quoteResult.value : null;
 
   const sourceIds = unique([
     ...facts.map((fact) => fact.source_id),

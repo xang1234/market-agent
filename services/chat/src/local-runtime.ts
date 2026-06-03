@@ -110,7 +110,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
           subject_refs: subjectRefs,
           user_id: context.userId ?? null,
         }),
-        loadStructuredSubjectContext(pool(), structuredRefs),
+        loadStructuredSubjectContext(pool(), structuredRefs, { now: asOf }),
       ]);
       const { evidence, structured } = settleEvidenceLoads(
         evidenceResult,
