@@ -23,6 +23,9 @@ export function RevenueBars({ block }: RevenueBarsProps): ReactElement {
 type RevenueBarColumnProps = { blockId: string; index: number; bar: RevenueBar }
 
 function RevenueBarColumn({ blockId, index, bar }: RevenueBarColumnProps): ReactElement {
+  // Pre-computed magnitude (0..1, peak bar = 1) drives the height; absent ->
+  // the equal-height stub. The format string is the rendered value label.
+  const heightPct = bar.magnitude == null ? 60 : Math.max(0, Math.min(1, bar.magnitude)) * 100
   return (
     <div
       data-testid={`block-revenue-bars-${blockId}-bar-${index}`}
@@ -33,10 +36,9 @@ function RevenueBarColumn({ blockId, index, bar }: RevenueBarColumnProps): React
       <div
         aria-hidden
         className="w-full rounded-sm bg-accent-soft"
-        // Equal-height placeholder bars until the value resolver fills in
-        // real heights from the value_ref UUIDs.
-        style={{ height: '60%' }}
+        style={{ height: `${heightPct}%` }}
       />
+      <span className="num text-xs text-fg">{bar.format ?? '—'}</span>
       <span className="text-xs text-muted">{bar.label}</span>
     </div>
   )

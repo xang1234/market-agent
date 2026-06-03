@@ -136,10 +136,10 @@ export const revenueBarsFixture: RevenueBarsBlock = {
   as_of: FIXTURE_AS_OF,
   title: 'Quarterly revenue',
   bars: [
-    { label: 'Q1 FY24', value_ref: '11111111-1111-4111-9111-aaaaaaaaaaaa' },
-    { label: 'Q2 FY24', value_ref: '11111111-1111-4111-9111-bbbbbbbbbbbb' },
-    { label: 'Q3 FY24', value_ref: '11111111-1111-4111-9111-cccccccccccc', delta_ref: '11111111-1111-4111-9111-dddddddddddd' },
-    { label: 'Q4 FY24', value_ref: '11111111-1111-4111-9111-eeeeeeeeeeee' },
+    { label: 'Q1 FY24', value_ref: '11111111-1111-4111-9111-aaaaaaaaaaaa', magnitude: 0.6, format: '$3.0B' },
+    { label: 'Q2 FY24', value_ref: '11111111-1111-4111-9111-bbbbbbbbbbbb', magnitude: 0.75, format: '$3.8B' },
+    { label: 'Q3 FY24', value_ref: '11111111-1111-4111-9111-cccccccccccc', delta_ref: '11111111-1111-4111-9111-dddddddddddd', magnitude: 1, format: '$5.0B' },
+    { label: 'Q4 FY24', value_ref: '11111111-1111-4111-9111-eeeeeeeeeeee', magnitude: 0.8, format: '$4.0B' },
   ],
 }
 

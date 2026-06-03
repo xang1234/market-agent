@@ -154,6 +154,8 @@ export type RevenueBar = {
   label: string
   value_ref: string
   delta_ref?: string
+  magnitude?: number
+  format?: string
 }
 
 export type RevenueBarsBlock = BaseBlock & {
