@@ -124,6 +124,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
           quote: structured.quote,
           facts: structured.facts,
           source_ids: structured.source_ids,
+          fact_recency: structured.fact_recency,
         },
         evidence,
       };
