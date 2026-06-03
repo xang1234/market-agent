@@ -3,9 +3,6 @@ import { fileURLToPath } from "node:url";
 import { runQuoteRefreshOnce } from "./quote-refresh.ts";
 import { createMarketStackFromEnv } from "./stack.ts";
 
-const DEFAULT_ACTIVE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const DEFAULT_LIMIT = 200;
-
 function integerEnv(name: string): number | undefined {
   const value = process.env[name]?.trim();
   if (!value) return undefined;
@@ -16,11 +13,13 @@ function integerEnv(name: string): number | undefined {
 async function main(): Promise<void> {
   const stack = createMarketStackFromEnv(process.env);
   try {
+    // No defaults here: runQuoteRefreshOnce owns the fallback values, and
+    // integerEnv yields undefined when a var is unset — single source of truth.
     const summary = await runQuoteRefreshOnce({
       cache: stack.cache,
       adapter: stack.adapter,
-      activeWindowMs: integerEnv("QUOTE_REFRESH_ACTIVE_WINDOW_MS") ?? DEFAULT_ACTIVE_WINDOW_MS,
-      limit: integerEnv("QUOTE_REFRESH_LIMIT") ?? DEFAULT_LIMIT,
+      activeWindowMs: integerEnv("QUOTE_REFRESH_ACTIVE_WINDOW_MS"),
+      limit: integerEnv("QUOTE_REFRESH_LIMIT"),
     });
     console.log(JSON.stringify(summary));
   } finally {

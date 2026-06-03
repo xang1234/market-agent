@@ -17,26 +17,11 @@ export function RichText({ block }: RichTextProps): ReactElement {
   // the refs onto their own lines, so render those text runs inline instead and
   // keep the refs in flow.
   const onlySegment = block.segments.length === 1 ? block.segments[0] : null
-  if (onlySegment && !isRefSegment(onlySegment)) {
-    return (
-      <div
-        data-testid={`block-rich-text-${block.id}`}
-        data-block-kind="rich_text"
-        className="text-sm leading-6 text-fg-soft"
-      >
-        <Markdown text={onlySegment.text} />
-      </div>
-    )
-  }
-  return (
-    <div
-      data-testid={`block-rich-text-${block.id}`}
-      data-block-kind="rich_text"
-      className="text-sm leading-6 text-fg-soft"
-    >
-      {block.segments.map((segment, index) => {
-        if (isRefSegment(segment)) {
-          return (
+  const children = onlySegment && !isRefSegment(onlySegment)
+    ? <Markdown text={onlySegment.text} />
+    : block.segments.map((segment, index) =>
+        isRefSegment(segment)
+          ? (
             <RefSegmentSpan
               key={`${block.id}-seg-${index}`}
               snapshotId={block.snapshot_id}
@@ -46,9 +31,15 @@ export function RichText({ block }: RichTextProps): ReactElement {
               manifest={manifest}
             />
           )
-        }
-        return <span key={`${block.id}-seg-${index}`}>{segment.text}</span>
-      })}
+          : <span key={`${block.id}-seg-${index}`}>{segment.text}</span>,
+      )
+  return (
+    <div
+      data-testid={`block-rich-text-${block.id}`}
+      data-block-kind="rich_text"
+      className="text-sm leading-6 text-fg-soft"
+    >
+      {children}
     </div>
   )
 }

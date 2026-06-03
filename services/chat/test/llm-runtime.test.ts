@@ -77,6 +77,25 @@ test("composeAnalystBlocksWithLlm rewrites the first rich text block", async () 
   ]);
 });
 
+test("composeAnalystBlocksWithLlm instructs the analyst to caveat stale data", async () => {
+  let systemPrompt = "";
+  await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
+    blocks: [richTextBlock("Deterministic note")],
+    toolCalls: [],
+    createClient: () => async (_deployment, request) => {
+      systemPrompt = request.messages[0]?.content ?? "";
+      return { text: "answer" };
+    },
+  });
+
+  // The stale signals (quote.stale, fact_recency.stale) are inert unless the
+  // prompt tells the analyst to honor them.
+  assert.match(systemPrompt, /stale/i);
+  assert.match(systemPrompt, /fact_recency|out of date|age_days/i);
+});
+
 test("composeAnalystBlocksWithLlm falls back through shared router deployments", async () => {
   const calls: string[] = [];
   const result = await composeAnalystBlocksWithLlm({
