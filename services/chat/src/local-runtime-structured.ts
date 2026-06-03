@@ -65,6 +65,7 @@ export type StructuredSubjectContext = {
   facts: ReadonlyArray<IssuerFactSummary>;
   quote: QuoteSummary | null;
   source_ids: ReadonlyArray<string>;
+  fact_recency: FactRecency | null;
 };
 
 // The resolved identity the structured loaders key off: an issuer for facts and
@@ -143,6 +144,7 @@ export async function loadStructuredSubjectContext(
     facts: Object.freeze(facts),
     quote,
     source_ids: Object.freeze(sourceIds),
+    fact_recency: factRecencyFrom(facts, now),
   });
 }
 
