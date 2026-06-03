@@ -48,7 +48,7 @@ artifacts"**, with assistant content **left-aligned**.
 
 Replace the single centered `THREAD_COLUMN_CLASS` with two left-aligned widths:
 
-- **Prose column** — `max-w-[680px]` for rich-text answers and user/system text.
+- **Prose column** — `max-w-[820px]` for rich-text answers and user/system text (widened from 680px during implementation to fit GFM tables).
 - **Breakout column** — `max-w-[960px]` for artifact blocks (markdown tables,
   `metrics_comparison`, `SeriesChart`, `SegmentDonut`, etc.) so data has room.
 

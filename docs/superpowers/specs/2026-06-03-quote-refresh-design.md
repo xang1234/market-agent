@@ -23,7 +23,7 @@ Rejected alternatives: in-process interval loop (introduces a long-running-timer
 
 One new module + one thin entry, plus one query added to the existing cache repository.
 
-```
+```text
 services/market/src/
   quote-refresh.ts          (NEW) runQuoteRefreshOnce(deps): pure, dependency-injected, testable
   cache-repository.ts       (+)   listStaleActiveListings(db, { now, activeSince, limit })
@@ -72,7 +72,7 @@ async function runQuoteRefreshOnce(deps: QuoteRefreshDeps): Promise<QuoteRefresh
 
 Flow:
 
-```
+```text
 now = clock(); activeSince = new Date(now - activeWindowMs)
 targets = cache.listStaleActiveListings({ now, activeSince, limit })
 for each listing in targets (sequential — respects provider rate limits):
