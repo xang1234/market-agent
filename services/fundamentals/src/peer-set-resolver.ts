@@ -38,6 +38,7 @@ export function createSqlPeerSetResolver(db: FundamentalsQueryExecutor): PeerSet
               where f.subject_kind = 'issuer'
                 and f.subject_id = peer.issuer_id
                 and m.metric_key = 'market_cap'
+                and f.method = 'reported'
                 and f.invalidated_at is null
                 and f.superseded_by is null
               order by f.as_of desc, f.created_at desc
