@@ -40,7 +40,7 @@ export async function emitRevenueBarsBlock(
     fiscal_year: row.fiscal_year,
     fiscal_period: row.fiscal_period,
     value_num: Number(row.value_num),
-    scale: row.scale === null ? 1 : Number(row.scale),
+    scale: Number(row.scale),
     currency: row.currency,
   }));
 
@@ -55,7 +55,6 @@ export async function emitRevenueBarsBlock(
       ...(input.title === undefined ? {} : { title: input.title }),
     },
   });
-  if (block.bars.length === 0) return null;
 
   const factRows: RevenueBarsFactRow[] = usable.map((row) => ({
     fact_id: row.fact_id,
@@ -81,7 +80,7 @@ type RevenueFactDbRow = {
   fiscal_year: number | null;
   fiscal_period: string | null;
   value_num: string | number | null;
-  scale: string | number | null;
+  scale: string | number; // facts.scale is NOT NULL DEFAULT 1
   currency: string | null;
 };
 

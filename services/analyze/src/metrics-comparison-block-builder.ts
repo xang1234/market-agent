@@ -11,6 +11,7 @@
 // dropped.
 
 import { columnTones, type MetricTone } from "./metric-direction.ts";
+import { formatCompactCurrency } from "./block-format.ts";
 import type {
   MaterializedMetric,
   MaterializedPeer,
@@ -140,12 +141,6 @@ function formatValue(value: number, format: PeerMetricFormat): string {
     case "multiple":
       return `${value.toFixed(1)}×`;
     case "currency":
-      return new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency: V1_DISPLAY_CURRENCY,
-        notation: "compact",
-        minimumFractionDigits: 1,
-        maximumFractionDigits: 1,
-      }).format(value);
+      return formatCompactCurrency(value, V1_DISPLAY_CURRENCY);
   }
 }

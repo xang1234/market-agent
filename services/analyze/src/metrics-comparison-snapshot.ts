@@ -17,24 +17,17 @@ export function buildPeerComparisonSealInput(input: {
   modelVersion?: string | null;
 }): SnapshotSealInput {
   return buildFactBackedSealInput({
-    block: input.block as unknown as Parameters<typeof buildFactBackedSealInput>[0]["block"],
-    factRefs: distinctCellValueRefs(input.block),
+    block: input.block,
+    factRefs: cellValueRefs(input.block),
     subjectRefs: input.block.subjects.map((subject) => ({ kind: subject.kind, id: subject.id })),
     facts: input.facts,
     ...(input.modelVersion === undefined ? {} : { modelVersion: input.modelVersion }),
   });
 }
 
-// Distinct non-null cell value_refs, in row-major order.
-function distinctCellValueRefs(block: MetricsComparisonBlock): UUID[] {
-  const refs: UUID[] = [];
-  const seen = new Set<UUID>();
-  for (const row of block.cells) {
-    for (const cell of row) {
-      if (cell === null || seen.has(cell.value_ref)) continue;
-      seen.add(cell.value_ref);
-      refs.push(cell.value_ref);
-    }
-  }
-  return refs;
+// All non-null cell value_refs in row-major order (the core dedups).
+function cellValueRefs(block: MetricsComparisonBlock): UUID[] {
+  return block.cells.flatMap((row) =>
+    row.flatMap((cell) => (cell === null ? [] : [cell.value_ref])),
+  );
 }

@@ -23,14 +23,15 @@ import type { UUID } from "../../fundamentals/src/subject-ref.ts";
 export type FactRow = VerifierFact & { source_id: UUID };
 
 // The minimal block shape the core finalizes. Concrete builders (metrics_comparison,
-// revenue_bars) are structurally compatible and pass through unchanged except for
-// the data_ref.params.fact_bindings the core injects.
+// revenue_bars) structurally satisfy this and pass through unchanged except for the
+// data_ref.params.fact_bindings the core injects — no index signature, so callers
+// hand their concrete block straight in without a cast.
 export type SealableBlock = {
   id: string;
   snapshot_id: UUID;
   as_of: string;
   data_ref: { kind: string; id: string; params?: Readonly<Record<string, unknown>> };
-} & Record<string, unknown>;
+};
 
 export function buildFactBackedSealInput(input: {
   block: SealableBlock;
@@ -39,7 +40,9 @@ export function buildFactBackedSealInput(input: {
   facts: ReadonlyArray<FactRow>;
   modelVersion?: string | null;
 }): SnapshotSealInput {
-  const { block, factRefs, subjectRefs, facts } = input;
+  const { block, subjectRefs, facts } = input;
+  // The core owns dedup, so callers pass raw refs (possibly with repeats).
+  const factRefs = distinct(input.factRefs);
 
   const factById = new Map(facts.map((fact) => [fact.fact_id, fact]));
   const missing = factRefs.filter((ref) => !factById.has(ref));

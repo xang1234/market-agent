@@ -4,6 +4,7 @@
 // pre-rendered compact-currency label. The block contract carries display-ready
 // data so the web stays a dumb renderer (like metrics_comparison's cell.format).
 
+import { formatCompactCurrency } from "./block-format.ts";
 import type { UUID } from "../../fundamentals/src/subject-ref.ts";
 
 export type QuarterlyRevenueFact = {
@@ -56,7 +57,7 @@ export function buildRevenueBarsBlock(input: {
     label: barLabel(fact),
     value_ref: fact.fact_id,
     magnitude: max > 0 ? natives[index] / max : 0,
-    format: formatCurrency(natives[index], fact.currency ?? "USD"),
+    format: formatCompactCurrency(natives[index], fact.currency ?? "USD"),
   }));
 
   return {
@@ -79,14 +80,4 @@ function comparePeriod(a: QuarterlyRevenueFact, b: QuarterlyRevenueFact): number
 
 function barLabel(fact: QuarterlyRevenueFact): string {
   return `${fact.fiscal_period ?? "?"} ${fact.fiscal_year ?? "?"}`;
-}
-
-function formatCurrency(value: number, currency: string): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
-    notation: "compact",
-    minimumFractionDigits: 1,
-    maximumFractionDigits: 1,
-  }).format(value);
 }
