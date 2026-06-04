@@ -53,7 +53,7 @@ const statements = createSecBackedStatementRepository(pool, {
 });
 const stats = createSecBackedStatsRepository(pool, { statements, fetcher: secFetcher });
 const segments = createUnsupportedSegmentsRepository();
-const consensus = createUnsupportedConsensusRepository();
+const consensus = devProviderRuntime?.consensus ?? createUnsupportedConsensusRepository();
 const earnings = devProviderRuntime?.earnings ?? createUnsupportedEarningsRepository();
 const holders = devProviderRuntime?.holders ?? createUnsupportedHoldersRepository();
 const server = createFundamentalsServer({

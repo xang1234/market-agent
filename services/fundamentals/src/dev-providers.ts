@@ -12,6 +12,7 @@ import {
   type DevProvidersIssuerProfileRepositoryOptions,
   type IssuerProfileTransactionalQueryExecutor,
 } from "./dev-provider-profile.ts";
+import type { ConsensusRepository } from "./consensus-repository.ts";
 import type { DevProviderSidecarOptions } from "./dev-provider-sidecar.ts";
 import type { HoldersRepository } from "./holders-repository.ts";
 import type { IssuerProfileRepository } from "./issuer-repository.ts";
@@ -39,6 +40,7 @@ export type DevProviderRuntime = {
   profiles: IssuerProfileRepository;
   earnings: EarningsRepository;
   holders: HoldersRepository;
+  consensus: ConsensusRepository;
 };
 
 export function createDevProviderRuntime(options: DevProviderRuntimeOptions): DevProviderRuntime {
@@ -59,6 +61,11 @@ export function createDevProviderRuntime(options: DevProviderRuntimeOptions): De
       ...sidecarOptions,
     }),
     holders: createDevProvidersHoldersRepository({
+      profiles: options.profiles,
+      sourceId: options.sourceId,
+      ...sidecarOptions,
+    }),
+    consensus: createDevProvidersConsensusRepository({
       profiles: options.profiles,
       sourceId: options.sourceId,
       ...sidecarOptions,
