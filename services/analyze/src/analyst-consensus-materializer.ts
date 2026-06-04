@@ -6,7 +6,7 @@
 
 import { createFact, type FactInput } from "../../evidence/src/fact-repo.ts";
 import type { QueryExecutor } from "../../evidence/src/types.ts";
-import type { FactRow } from "./block-seal-input.ts";
+import { toSealFactRow, type FactRow } from "./block-seal-input.ts";
 import {
   ANALYST_RATINGS,
   type AnalystConsensusEnvelope,
@@ -65,10 +65,8 @@ export async function materializeConsensusFacts(
     ...ANALYST_RATINGS.map((rating) => RATING_METRIC_KEY[rating]),
   ]);
 
-  // Mint the fact, then project to the lean seal-row shape (only the
-  // binding fields). The full row carries freshness_class, which would make the
-  // verifier derive a freshness disclosure; the sealed projection omits it, the
-  // same way peer_table's loadFactRows does.
+  // Mint the fact, then project to the lean seal-row shape via toSealFactRow
+  // (which drops freshness_class so no freshness disclosure is demanded).
   const mint = async (metricKey: string, value: number): Promise<FactRow> => {
     const metricId = metricIds.get(metricKey);
     if (metricId === undefined) {
@@ -91,16 +89,7 @@ export async function materializeConsensusFacts(
       coverage_level: "full",
       confidence: 1,
     } satisfies FactInput);
-    return {
-      fact_id: fact.fact_id,
-      source_id: fact.source_id,
-      unit: fact.unit,
-      period_kind: fact.period_kind,
-      period_start: fact.period_start,
-      period_end: fact.period_end,
-      fiscal_year: fact.fiscal_year,
-      fiscal_period: fact.fiscal_period,
-    };
+    return toSealFactRow(fact);
   };
 
   const factRows: FactRow[] = [];

@@ -22,6 +22,33 @@ import type { UUID } from "../../fundamentals/src/subject-ref.ts";
 // unit/period fields feed the fact-binding check.
 export type FactRow = VerifierFact & { source_id: UUID };
 
+// Project a full fact row down to the fields that seal into a snapshot. This is
+// a load-bearing narrowing: it deliberately drops freshness_class (and the other
+// non-binding columns), because surfacing freshness on the sealed VerifierFact
+// makes the verifier demand a freshness disclosure block. peer_table achieves
+// the same lean shape via its loadFactRows SELECT; minted facts go through here.
+export function toSealFactRow(row: {
+  fact_id: string;
+  source_id: string;
+  unit: string;
+  period_kind: string;
+  period_start: string | null;
+  period_end: string | null;
+  fiscal_year: number | null;
+  fiscal_period: string | null;
+}): FactRow {
+  return {
+    fact_id: row.fact_id,
+    source_id: row.source_id,
+    unit: row.unit,
+    period_kind: row.period_kind,
+    period_start: row.period_start,
+    period_end: row.period_end,
+    fiscal_year: row.fiscal_year,
+    fiscal_period: row.fiscal_period,
+  };
+}
+
 // The minimal block shape the core finalizes. Concrete builders (metrics_comparison,
 // revenue_bars) structurally satisfy this and pass through unchanged except for the
 // data_ref.params.fact_bindings the core injects — no index signature, so callers

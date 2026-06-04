@@ -15,8 +15,44 @@ import {
 import type { ConsensusRepository } from "./consensus-repository.ts";
 import type { DevProviderSidecarOptions } from "./dev-provider-sidecar.ts";
 import type { HoldersRepository } from "./holders-repository.ts";
-import type { IssuerProfileRepository } from "./issuer-repository.ts";
+import {
+  createPostgresIssuerProfileRepository,
+  type IssuerProfileQueryExecutor,
+  type IssuerProfileRepository,
+} from "./issuer-repository.ts";
+import { YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID } from "./provider-sources.ts";
+import { createUnsupportedConsensusRepository } from "./unsupported-repositories.ts";
 import type { UUID } from "./subject-ref.ts";
+
+type DevProviderEnv = {
+  ENABLE_UNOFFICIAL_DEV_PROVIDERS?: string;
+  DEV_PROVIDERS_BASE_URL?: string;
+  DEV_PROVIDERS_ORIGIN?: string;
+};
+
+// The dev-providers sidecar base URL, but only when unofficial dev providers are
+// enabled — the single gate both the fundamentals service and the analyze run
+// path consult before reaching for sidecar-backed data.
+export function devProvidersBaseUrlFromEnv(env: DevProviderEnv = process.env): string | null {
+  if (env.ENABLE_UNOFFICIAL_DEV_PROVIDERS !== "true") return null;
+  return env.DEV_PROVIDERS_BASE_URL ?? env.DEV_PROVIDERS_ORIGIN ?? null;
+}
+
+// Resolve the consensus repository from the environment: the sidecar-backed repo
+// when unofficial dev providers are enabled, else the unsupported (null) repo.
+// Owns the profiles + source-id wiring so callers don't reassemble it.
+export function consensusRepositoryFromEnv(
+  db: IssuerProfileQueryExecutor,
+  env: DevProviderEnv = process.env,
+): ConsensusRepository {
+  const baseUrl = devProvidersBaseUrlFromEnv(env);
+  if (baseUrl === null) return createUnsupportedConsensusRepository();
+  return createDevProvidersConsensusRepository({
+    profiles: createPostgresIssuerProfileRepository(db),
+    baseUrl,
+    sourceId: YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID,
+  });
+}
 
 export {
   createDevProvidersConsensusRepository,

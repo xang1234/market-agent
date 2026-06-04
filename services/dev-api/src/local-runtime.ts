@@ -37,13 +37,8 @@ import {
   createSecBackedStatsRepository,
 } from "../../fundamentals/src/sec-facts-repository.ts";
 import { createSecCompanyFactsHttpFetcher } from "../../fundamentals/src/sec-edgar-http.ts";
-import { createPostgresIssuerProfileRepository } from "../../fundamentals/src/issuer-repository.ts";
-import { createDevProvidersConsensusRepository } from "../../fundamentals/src/dev-providers.ts";
-import { createUnsupportedConsensusRepository } from "../../fundamentals/src/unsupported-repositories.ts";
-import {
-  SEC_EDGAR_FILING_SOURCE_ID,
-  YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID,
-} from "../../fundamentals/src/provider-sources.ts";
+import { consensusRepositoryFromEnv } from "../../fundamentals/src/dev-providers.ts";
+import { SEC_EDGAR_FILING_SOURCE_ID } from "../../fundamentals/src/provider-sources.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import type {
   DevApiAgentLoopStageFactory,
@@ -187,16 +182,12 @@ function analyzeSectionDeps() {
     sourceId: SEC_EDGAR_FILING_SOURCE_ID,
   });
   const stats = createSecBackedStatsRepository(db, { statements, fetcher: secFetcher });
-  const devProvidersBaseUrl = process.env.DEV_PROVIDERS_BASE_URL ?? process.env.DEV_PROVIDERS_ORIGIN;
-  const consensus =
-    process.env.ENABLE_UNOFFICIAL_DEV_PROVIDERS === "true" && devProvidersBaseUrl
-      ? createDevProvidersConsensusRepository({
-          profiles: createPostgresIssuerProfileRepository(db),
-          baseUrl: devProvidersBaseUrl,
-          sourceId: YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID,
-        })
-      : createUnsupportedConsensusRepository();
-  return { db, peers: createSqlPeerSetResolver(db), stats, consensus };
+  return {
+    db,
+    peers: createSqlPeerSetResolver(db),
+    stats,
+    consensus: consensusRepositoryFromEnv(db),
+  };
 }
 
 export function primaryIssuerRef(
