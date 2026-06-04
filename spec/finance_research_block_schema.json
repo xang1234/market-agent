@@ -696,6 +696,10 @@
                   },
                   "count_ref": {
                     "$ref": "#/$defs/UUID"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 0
                   }
                 },
                 "additionalProperties": false
