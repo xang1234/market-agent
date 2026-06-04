@@ -9,6 +9,7 @@ from .yfinance_fundamentals import (
     HOLDER_KINDS,
     frame_columns,
     frame_rows,
+    normalize_analyst_consensus,
     normalize_earnings_events,
     normalize_holders,
 )
@@ -223,6 +224,25 @@ class YFinanceProvider:
             frame_columns(getattr(yf_ticker, "quarterly_income_stmt", None)),
             now_iso=_iso_utc_millis(datetime.now(UTC)),
             limit=limit,
+        )
+        if normalized is None:
+            return None
+        normalized["currency"] = _currency(currency) or currency
+        return normalized
+
+    def analyst_consensus(self, *, ticker: str, mic: str, currency: str) -> dict[str, Any] | None:
+        symbol = yahoo_symbol_for_listing(ticker, mic)
+        import yfinance as yf
+
+        yf_ticker = yf.Ticker(symbol)
+        info = self._ticker_info(symbol)
+        recommendations = getattr(yf_ticker, "recommendations_summary", None)
+        if recommendations is None:
+            recommendations = getattr(yf_ticker, "recommendations", None)
+        normalized = normalize_analyst_consensus(
+            info,
+            frame_rows(recommendations),
+            now_iso=_iso_utc_millis(datetime.now(UTC)),
         )
         if normalized is None:
             return None

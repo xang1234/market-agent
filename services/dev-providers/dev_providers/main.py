@@ -201,6 +201,38 @@ async def fundamentals_earnings(request: Request) -> dict[str, Any]:
     return _available(earnings)
 
 
+@app.post("/fundamentals/consensus")
+async def fundamentals_consensus(request: Request) -> dict[str, Any]:
+    body = await request.json()
+    ticker = str(body.get("ticker", "")).strip().upper()
+    mic = str(body.get("mic", "")).strip().upper()
+    currency = str(body.get("currency", "")).strip().upper()
+    key = f"fundamentals-consensus:{ticker}:{mic}"
+    cached = _negative_cache_get(key)
+    if cached:
+        return cached
+
+    try:
+        consensus = await _bounded_call(
+            "yfinance",
+            lambda: _provider.analyst_consensus(ticker=ticker, mic=mic, currency=currency),
+        )
+    except ValueError as exc:
+        return _cache_unavailable(key, ProviderUnavailable("missing_coverage", False, str(exc)))
+    except ProviderUnavailable as exc:
+        return _cache_unavailable(key, exc)
+    except Exception as exc:
+        return _cache_unavailable(key, ProviderUnavailable("provider_error", True, f"yfinance: {exc}"))
+
+    if not consensus:
+        return _cache_unavailable(
+            key,
+            ProviderUnavailable("missing_coverage", False, "yfinance: consensus unavailable"),
+        )
+
+    return _available(consensus)
+
+
 @app.post("/fundamentals/holders")
 async def fundamentals_holders(request: Request) -> dict[str, Any]:
     body = await request.json()
