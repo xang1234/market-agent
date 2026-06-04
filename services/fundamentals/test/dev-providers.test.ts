@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createDevProviderRuntime,
+  createDevProvidersConsensusRepository,
   createDevProvidersEarningsRepository,
   createDevProvidersHoldersRepository,
   createDevProvidersIssuerProfileRepository,
@@ -494,4 +495,84 @@ test("dev providers holders repository preserves sidecar unavailable errors", as
       error.retryable === true &&
       /changed shape/.test(error.message),
   );
+});
+
+test("dev providers consensus repository maps a sidecar envelope onto the issuer", async () => {
+  const calls: Array<{ url: string; body: unknown }> = [];
+  const repo = createDevProvidersConsensusRepository({
+    profiles: { async find() { return sparseProfile(); } },
+    baseUrl: "http://dev-providers.test",
+    sourceId: YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID,
+    fetchImpl: async (url, init) => {
+      calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+      return new Response(
+        JSON.stringify({
+          status: "available",
+          data: {
+            as_of: "2026-06-04T12:00:00.000Z",
+            currency: "USD",
+            analyst_count: 41,
+            rating_distribution: { strong_buy: 14, buy: 17, hold: 8, sell: 1, strong_sell: 1 },
+            price_target: { low: 170, mean: 220.5, median: 215, high: 280 },
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    },
+  });
+
+  const envelope = await repo.find(ISSUER_ID);
+  assert.equal(envelope?.subject.id, ISSUER_ID);
+  assert.equal(envelope?.analyst_count, 41);
+  assert.equal(envelope?.rating_distribution?.counts.strong_buy, 14);
+  assert.equal(envelope?.rating_distribution?.contributor_count, 41);
+  assert.equal(envelope?.rating_distribution?.source_id, YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID);
+  assert.equal(envelope?.price_target?.high, 280);
+  assert.equal(envelope?.price_target?.currency, "USD");
+  assert.equal(calls[0].url, "http://dev-providers.test/fundamentals/consensus");
+  assert.deepEqual(calls[0].body, {
+    ticker: "AMD",
+    mic: "XNAS",
+    currency: "USD",
+    timezone: "America/New_York",
+  });
+});
+
+test("dev providers consensus repository keeps a price target when ratings are absent", async () => {
+  const repo = createDevProvidersConsensusRepository({
+    profiles: { async find() { return sparseProfile(); } },
+    baseUrl: "http://dev-providers.test",
+    sourceId: YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID,
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({
+          status: "available",
+          data: {
+            as_of: "2026-06-04T12:00:00.000Z",
+            currency: "USD",
+            analyst_count: 5,
+            rating_distribution: null,
+            price_target: { low: 100, mean: 120, median: 118, high: 140 },
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+  });
+  const envelope = await repo.find(ISSUER_ID);
+  assert.equal(envelope?.rating_distribution, null);
+  assert.equal(envelope?.price_target?.mean, 120);
+});
+
+test("dev providers consensus repository returns null when coverage is missing", async () => {
+  const repo = createDevProvidersConsensusRepository({
+    profiles: { async find() { return sparseProfile(); } },
+    baseUrl: "http://dev-providers.test",
+    sourceId: YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID,
+    fetchImpl: async () =>
+      new Response(
+        JSON.stringify({ status: "unavailable", reason: "missing_coverage", retryable: false, detail: "none" }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+  });
+  assert.equal(await repo.find(ISSUER_ID), null);
 });

@@ -1,7 +1,9 @@
 import type { EarningsRepository } from "./earnings-repository.ts";
 import {
+  createDevProvidersConsensusRepository,
   createDevProvidersEarningsRepository,
   createDevProvidersHoldersRepository,
+  type DevProvidersConsensusRepositoryOptions,
   type DevProvidersEarningsRepositoryOptions,
   type DevProvidersHoldersRepositoryOptions,
 } from "./dev-provider-fundamentals.ts";
@@ -16,9 +18,11 @@ import type { IssuerProfileRepository } from "./issuer-repository.ts";
 import type { UUID } from "./subject-ref.ts";
 
 export {
+  createDevProvidersConsensusRepository,
   createDevProvidersEarningsRepository,
   createDevProvidersHoldersRepository,
   createDevProvidersIssuerProfileRepository,
+  type DevProvidersConsensusRepositoryOptions,
   type DevProvidersEarningsRepositoryOptions,
   type DevProvidersHoldersRepositoryOptions,
   type DevProvidersIssuerProfileRepositoryOptions,
