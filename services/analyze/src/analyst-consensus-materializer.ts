@@ -4,8 +4,9 @@
 // via the canonical createFact path. createFact returns the row, so the emitter
 // seals straight from these rows with no load query.
 
-import { createFact, type FactInput, type FactRow } from "../../evidence/src/fact-repo.ts";
+import { createFact, type FactInput } from "../../evidence/src/fact-repo.ts";
 import type { QueryExecutor } from "../../evidence/src/types.ts";
+import type { FactRow } from "./block-seal-input.ts";
 import {
   ANALYST_RATINGS,
   type AnalystConsensusEnvelope,
@@ -29,7 +30,10 @@ const RATING_LABEL: Readonly<Record<AnalystRating, string>> = {
   strong_sell: "Strong Sell",
 };
 const VENDOR_VERIFICATION_STATUS = "authoritative" as const;
-const VENDOR_FRESHNESS_CLASS = "eod" as const;
+// Point-in-time, source-reported standing (same as peer_table's minted facts).
+// NOT 'eod' — that tier triggers a market-price EOD disclosure, which is wrong
+// for analyst rating counts (they aren't market prices).
+const VENDOR_FRESHNESS_CLASS = "filing_time" as const;
 
 export type MaterializedConsensusBucket = {
   rating: AnalystRating;
@@ -61,12 +65,16 @@ export async function materializeConsensusFacts(
     ...ANALYST_RATINGS.map((rating) => RATING_METRIC_KEY[rating]),
   ]);
 
+  // Mint the fact, then project to the lean seal-row shape (only the
+  // binding fields). The full row carries freshness_class, which would make the
+  // verifier derive a freshness disclosure; the sealed projection omits it, the
+  // same way peer_table's loadFactRows does.
   const mint = async (metricKey: string, value: number): Promise<FactRow> => {
     const metricId = metricIds.get(metricKey);
     if (metricId === undefined) {
       throw new Error(`analyst-consensus-materializer: no metric_id registered for "${metricKey}"`);
     }
-    return createFact(db, {
+    const fact = await createFact(db, {
       subject_kind: "issuer",
       subject_id: input.issuer.id,
       metric_id: metricId,
@@ -83,6 +91,16 @@ export async function materializeConsensusFacts(
       coverage_level: "full",
       confidence: 1,
     } satisfies FactInput);
+    return {
+      fact_id: fact.fact_id,
+      source_id: fact.source_id,
+      unit: fact.unit,
+      period_kind: fact.period_kind,
+      period_start: fact.period_start,
+      period_end: fact.period_end,
+      fiscal_year: fact.fiscal_year,
+      fiscal_period: fact.fiscal_period,
+    };
   };
 
   const factRows: FactRow[] = [];

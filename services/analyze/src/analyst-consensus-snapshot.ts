@@ -1,9 +1,8 @@
 // Derives the cited consensus facts (analyst_count + bucket counts) + the issuer
 // subject and delegates to the shared fact-backed seal-input core.
 
-import { buildFactBackedSealInput } from "./block-seal-input.ts";
+import { buildFactBackedSealInput, type FactRow } from "./block-seal-input.ts";
 import type { AnalystConsensusBlock } from "./analyst-consensus-block-builder.ts";
-import type { FactRow } from "../../evidence/src/fact-repo.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import type { SnapshotSealInput } from "../../snapshot/src/snapshot-sealer.ts";
 
