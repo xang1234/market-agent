@@ -1,12 +1,16 @@
 import type { EarningsRepository } from "./earnings-repository.ts";
 import {
   createDevProvidersConsensusRepository,
-  createDevProvidersEarningsRepository,
-  createDevProvidersHoldersRepository,
   type DevProvidersConsensusRepositoryOptions,
+} from "./dev-provider-consensus.ts";
+import {
+  createDevProvidersEarningsRepository,
   type DevProvidersEarningsRepositoryOptions,
+} from "./dev-provider-earnings.ts";
+import {
+  createDevProvidersHoldersRepository,
   type DevProvidersHoldersRepositoryOptions,
-} from "./dev-provider-fundamentals.ts";
+} from "./dev-provider-holders.ts";
 import {
   createDevProvidersIssuerProfileRepository,
   type DevProvidersIssuerProfileRepositoryOptions,
