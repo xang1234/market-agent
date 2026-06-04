@@ -232,6 +232,7 @@ export type ChartComparisonBlock =
 export type AnalystDistributionBucket = {
   bucket: string
   count_ref: string
+  count?: number
 }
 
 export type AnalystConsensusBlock = BaseBlock & {

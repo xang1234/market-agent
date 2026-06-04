@@ -357,11 +357,11 @@ export const analystConsensusFixture: AnalystConsensusBlock = {
   title: 'Analyst recommendations',
   analyst_count_ref: 'dddddddd-1111-4111-9111-111111111111',
   distribution: [
-    { bucket: 'Strong Buy', count_ref: 'dddddddd-1111-4111-9111-111111111aaa' },
-    { bucket: 'Buy', count_ref: 'dddddddd-1111-4111-9111-111111111bbb' },
-    { bucket: 'Hold', count_ref: 'dddddddd-1111-4111-9111-111111111ccc' },
-    { bucket: 'Sell', count_ref: 'dddddddd-1111-4111-9111-111111111ddd' },
-    { bucket: 'Strong Sell', count_ref: 'dddddddd-1111-4111-9111-111111111eee' },
+    { bucket: 'Strong Buy', count_ref: 'dddddddd-1111-4111-9111-111111111aaa', count: 14 },
+    { bucket: 'Buy', count_ref: 'dddddddd-1111-4111-9111-111111111bbb', count: 17 },
+    { bucket: 'Hold', count_ref: 'dddddddd-1111-4111-9111-111111111ccc', count: 8 },
+    { bucket: 'Sell', count_ref: 'dddddddd-1111-4111-9111-111111111ddd', count: 1 },
+    { bucket: 'Strong Sell', count_ref: 'dddddddd-1111-4111-9111-111111111eee', count: 1 },
   ],
   coverage_warning: 'Coverage thinned in FY24 — 3 of 12 prior analysts dropped the name.',
 }
