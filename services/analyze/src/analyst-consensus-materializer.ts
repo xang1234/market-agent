@@ -5,6 +5,7 @@
 // seals straight from these rows with no load query.
 
 import { createFact, type FactInput } from "../../evidence/src/fact-repo.ts";
+import { resolveMetricIds } from "../../evidence/src/metric-repo.ts";
 import type { QueryExecutor } from "../../evidence/src/types.ts";
 import { toSealFactRow, type FactRow } from "./block-seal-input.ts";
 import {
@@ -109,19 +110,4 @@ export async function materializeConsensusFacts(
     buckets,
     factRows,
   };
-}
-
-async function resolveMetricIds(
-  db: QueryExecutor,
-  keys: ReadonlyArray<string>,
-): Promise<ReadonlyMap<string, UUID>> {
-  const { rows } = await db.query<{ metric_key: string; metric_id: string }>(
-    `select metric_key, metric_id::text as metric_id
-       from metrics
-      where metric_key = any($1::text[])`,
-    [[...keys]],
-  );
-  const map = new Map<string, UUID>();
-  for (const row of rows) map.set(row.metric_key, row.metric_id);
-  return map;
 }

@@ -31,7 +31,7 @@ function fakeDb() {
   const db: QueryExecutor = {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     async query(text: string, params?: unknown[]): Promise<any> {
-      if (/from metrics/i.test(text)) return { rows: [{ metric_id: PRICE_METRIC_ID }] };
+      if (/from metrics/i.test(text)) return { rows: [{ metric_key: "price", metric_id: PRICE_METRIC_ID }] };
       if (/insert into facts/i.test(text)) {
         const v = params ?? [];
         const row = {

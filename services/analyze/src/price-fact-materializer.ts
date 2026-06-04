@@ -6,6 +6,7 @@
 // require an eod/delayed pricing disclosure.
 
 import { createFact, type FactInput, type FactRow, type FreshnessClass } from "../../evidence/src/fact-repo.ts";
+import { resolveMetricIds } from "../../evidence/src/metric-repo.ts";
 import type { QueryExecutor } from "../../evidence/src/types.ts";
 import type { DelayClass, NormalizedQuote } from "../../market/src/quote.ts";
 
@@ -53,11 +54,7 @@ export async function materializePriceFact(
 }
 
 async function resolvePriceMetricId(db: QueryExecutor): Promise<string> {
-  const { rows } = await db.query<{ metric_id: string }>(
-    `select metric_id::text as metric_id from metrics where metric_key = $1`,
-    [PRICE_METRIC_KEY],
-  );
-  const id = rows[0]?.metric_id;
+  const id = (await resolveMetricIds(db, [PRICE_METRIC_KEY])).get(PRICE_METRIC_KEY);
   if (id === undefined) {
     throw new Error(`price-fact-materializer: no metric_id registered for "${PRICE_METRIC_KEY}"`);
   }
