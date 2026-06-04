@@ -70,5 +70,13 @@ insert into metrics (metric_key, display_name, unit_class, aggregation, interpre
 
   -- Growth
   ('revenue_growth_yoy',    'Revenue Growth (YoY)',       'percent',  'yoy',          'higher_is_better', 'derived', 1, 'Year-over-year percentage change in revenue.'),
-  ('eps_growth_yoy',        'EPS Growth (YoY)',           'percent',  'yoy',          'higher_is_better', 'derived', 1, 'Year-over-year percentage change in diluted EPS.')
+  ('eps_growth_yoy',        'EPS Growth (YoY)',           'percent',  'yoy',          'higher_is_better', 'derived', 1, 'Year-over-year percentage change in diluted EPS.'),
+
+  -- Analyst consensus (vendor)
+  ('analyst_count',              'Analyst Count',  'count', 'point_in_time', 'neutral', 'vendor', 1, 'Number of analysts providing coverage.'),
+  ('analyst_rating_strong_buy',  'Strong Buy',     'count', 'point_in_time', 'neutral', 'vendor', 1, 'Count of analysts rating strong buy.'),
+  ('analyst_rating_buy',         'Buy',            'count', 'point_in_time', 'neutral', 'vendor', 1, 'Count of analysts rating buy.'),
+  ('analyst_rating_hold',        'Hold',           'count', 'point_in_time', 'neutral', 'vendor', 1, 'Count of analysts rating hold.'),
+  ('analyst_rating_sell',        'Sell',           'count', 'point_in_time', 'neutral', 'vendor', 1, 'Count of analysts rating sell.'),
+  ('analyst_rating_strong_sell', 'Strong Sell',    'count', 'point_in_time', 'neutral', 'vendor', 1, 'Count of analysts rating strong sell.')
 on conflict (metric_key) do nothing;
