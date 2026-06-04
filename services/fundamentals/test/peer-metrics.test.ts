@@ -72,6 +72,8 @@ test("fetchPeerMetrics surfaces revenue + margins with lineage from persisted st
   assert.equal(revenue.value_num, AAPL_FY2024_KNOWN_VALUES.net_sales_total);
   assert.equal(revenue.format, "currency");
   assert.equal(revenue.fact_id, REVENUE_FACT_ID);
+  // fra-q840: revenue carries its reporting currency for data-driven display.
+  assert.equal(revenue.currency, "USD");
 
   const gross = metrics.get("gross_margin");
   assert(gross && gross.kind === "derived", "gross_margin present + derived");

@@ -29,9 +29,9 @@ const COLUMNS: ReadonlyArray<{ metric: PeerMetricKey; label: string }> = [
   { metric: "pe_ratio", label: "P/E" },
 ];
 
-// The v1 peer set is same-industry S&P-100 issuers, which report in USD. Real
-// currency is not threaded to the block builder yet — see fra-q840.
-const V1_DISPLAY_CURRENCY = "USD";
+// Currency is data-driven from each metric's reporting currency (fra-q840);
+// this is only the fallback when a currency-format metric carries none.
+const FALLBACK_DISPLAY_CURRENCY = "USD";
 
 export type MetricsComparisonCell = {
   value_ref: UUID;
@@ -87,7 +87,7 @@ export function buildMetricsComparisonBlock(input: {
       const tone = tonesByColumn.get(col.metric)?.get(subjectIndex);
       const cell: MetricsComparisonCell = {
         value_ref: metric.value_ref,
-        format: formatValue(metric.value_num, metric.format),
+        format: formatValue(metric.value_num, metric.format, metric.currency),
       };
       if (tone !== undefined) cell.tone = tone;
       return cell;
@@ -134,13 +134,13 @@ function columnToneBySubject(
   return byIndex;
 }
 
-function formatValue(value: number, format: PeerMetricFormat): string {
+function formatValue(value: number, format: PeerMetricFormat, currency?: string): string {
   switch (format) {
     case "percent":
       return `${(value * 100).toFixed(1)}%`;
     case "multiple":
       return `${value.toFixed(1)}×`;
     case "currency":
-      return formatCompactCurrency(value, V1_DISPLAY_CURRENCY);
+      return formatCompactCurrency(value, currency ?? FALLBACK_DISPLAY_CURRENCY);
   }
 }

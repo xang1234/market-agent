@@ -52,6 +52,9 @@ type PeerMetricBase = {
   metric: PeerMetricKey;
   value_num: number;
   format: PeerMetricFormat;
+  // Reporting currency for currency-format metrics (fra-q840); undefined for
+  // dimensionless ratios.
+  currency?: string;
 };
 
 export type ReusedPeerMetric = PeerMetricBase & {
@@ -170,6 +173,7 @@ function revenueValue(envelope: KeyStatsEnvelope): ReusedPeerMetric | null {
           metric: "revenue",
           value_num: input.value_num,
           format: "currency",
+          currency: input.currency ?? envelope.reporting_currency,
           fact_id: input.fact_id,
         });
       }

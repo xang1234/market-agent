@@ -30,6 +30,9 @@ export type MaterializedMetric = {
   value_ref: UUID;
   value_num: number;
   format: PeerMetricFormat;
+  // Reporting currency for currency-format metrics (fra-q840); undefined for
+  // dimensionless ratios.
+  currency?: string;
 };
 
 export type MaterializedPeer = {
@@ -73,6 +76,7 @@ export async function materializePeerMetricFacts(
         value_ref: valueRef,
         value_num: value.value_num,
         format: value.format,
+        ...(value.currency === undefined ? {} : { currency: value.currency }),
       });
     }
     out.push({ subject: peer.subject, metrics });
