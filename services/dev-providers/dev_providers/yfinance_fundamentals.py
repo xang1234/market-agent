@@ -264,3 +264,68 @@ def _nonnegative_number(*values: Any) -> float | None:
         if number is not None and number >= 0:
             return number
     return None
+
+
+def _nonnegative_int(value: Any) -> int | None:
+    number = _nonnegative_number(value)
+    if number is None:
+        return None
+    return int(round(number))
+
+
+def normalize_analyst_consensus(
+    info: dict[str, Any],
+    recommendation_rows: list[dict[str, Any]],
+    *,
+    now_iso: str,
+) -> dict[str, Any] | None:
+    analyst_count = _nonnegative_int(info.get("numberOfAnalystOpinions"))
+    price_target = _consensus_price_target(info)
+    rating_distribution = _consensus_rating_distribution(recommendation_rows)
+    if analyst_count is None and price_target is None and rating_distribution is None:
+        return None
+    return {
+        "as_of": now_iso,
+        "analyst_count": analyst_count or 0,
+        "rating_distribution": rating_distribution,
+        "price_target": price_target,
+    }
+
+
+def _consensus_price_target(info: dict[str, Any]) -> dict[str, float] | None:
+    low = _number(info.get("targetLowPrice"))
+    mean = _number(info.get("targetMeanPrice"))
+    median = _number(info.get("targetMedianPrice"))
+    high = _number(info.get("targetHighPrice"))
+    if low is None or mean is None or high is None:
+        return None
+    return {
+        "low": low,
+        "mean": mean,
+        "median": median if median is not None else mean,
+        "high": high,
+    }
+
+
+def _consensus_rating_distribution(rows: list[dict[str, Any]]) -> dict[str, int] | None:
+    row = _latest_recommendation_row(rows)
+    if row is None:
+        return None
+    counts = {
+        "strong_buy": _nonnegative_int(_field(row, "strongBuy", "strong_buy")) or 0,
+        "buy": _nonnegative_int(_field(row, "buy")) or 0,
+        "hold": _nonnegative_int(_field(row, "hold")) or 0,
+        "sell": _nonnegative_int(_field(row, "sell")) or 0,
+        "strong_sell": _nonnegative_int(_field(row, "strongSell", "strong_sell")) or 0,
+    }
+    return counts if sum(counts.values()) > 0 else None
+
+
+def _latest_recommendation_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not rows:
+        return None
+    # yfinance recommendations_summary: the most recent window is period '0m'.
+    for row in rows:
+        if str(_field(row, "period", "Period") or "").strip() == "0m":
+            return row
+    return rows[0]
