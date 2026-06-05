@@ -11,3 +11,14 @@ export function formatCompactCurrency(value: number, currency: string): string {
     maximumFractionDigits: 1,
   }).format(value);
 }
+
+// Precise currency for price points (e.g. "$214.50") — unlike formatCompactCurrency,
+// which compacts large statement values (e.g. "$3.2B").
+export function formatCurrency(value: number, currency: string): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
