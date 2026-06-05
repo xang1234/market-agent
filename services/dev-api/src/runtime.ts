@@ -44,6 +44,9 @@ export async function createDevApiAdaptersFromEnv(
   if (module.inspectEvidence !== undefined && typeof module.inspectEvidence !== "function") {
     throw new Error("DEV_API_RUNTIME_MODULE inspectEvidence export must be a function");
   }
+  if (module.buildAnalyzeRunSeals !== undefined && typeof module.buildAnalyzeRunSeals !== "function") {
+    throw new Error("DEV_API_RUNTIME_MODULE buildAnalyzeRunSeals export must be a function");
+  }
 
   const { Pool } = await import("pg");
   const pool = new Pool({ connectionString: databaseUrl });
