@@ -44,12 +44,16 @@ export async function createDevApiAdaptersFromEnv(
   if (module.inspectEvidence !== undefined && typeof module.inspectEvidence !== "function") {
     throw new Error("DEV_API_RUNTIME_MODULE inspectEvidence export must be a function");
   }
+  if (module.buildAnalyzeRunSeals !== undefined && typeof module.buildAnalyzeRunSeals !== "function") {
+    throw new Error("DEV_API_RUNTIME_MODULE buildAnalyzeRunSeals export must be a function");
+  }
 
   const { Pool } = await import("pg");
   const pool = new Pool({ connectionString: databaseUrl });
   return createServiceDevApiAdapters({
     db: pool,
     sealAnalyzeSnapshot: module.sealAnalyzeSnapshot as DevApiServiceAdapterDeps["sealAnalyzeSnapshot"],
+    buildAnalyzeRunSeals: module.buildAnalyzeRunSeals as DevApiServiceAdapterDeps["buildAnalyzeRunSeals"],
     runAnalyzeWorkflow: module.runAnalyzeWorkflow as DevApiServiceAdapterDeps["runAnalyzeWorkflow"],
     createAgentLoopStages: module.createAgentLoopStages as DevApiServiceAdapterDeps["createAgentLoopStages"],
     inspectEvidence: module.inspectEvidence as DevApiServiceAdapterDeps["inspectEvidence"],

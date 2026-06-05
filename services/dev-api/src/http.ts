@@ -907,12 +907,104 @@ export type DevApiServiceAdapterDeps = {
     body: Record<string, unknown>;
     blocks: ReadonlyArray<Record<string, unknown>>;
   }): Promise<SnapshotSealResult>;
+  // Optional per-section run: merges deterministic section blocks (peer_table)
+  // into the run. When absent, createRun falls back to the narrative memo only.
+  buildAnalyzeRunSeals?(input: {
+    snapshotId: string;
+    userId: string;
+    memoBlocks: ReadonlyArray<Record<string, unknown>>;
+    playbook: import("../../analyze/src/playbook.ts").AnalyzePlaybook;
+    subjectRefs: ReadonlyArray<{ kind: string; id: string }>;
+    asOf: string;
+  }): Promise<{
+    blocks: ReadonlyArray<Record<string, unknown>>;
+    sealSnapshot: () => Promise<SnapshotSealResult>;
+  }>;
   inspectEvidence?(input: {
     userId: string;
     snapshotId: string;
     ref: EvidenceInspectionRef;
   }): Promise<EvidenceInspection>;
 };
+
+// Shared persist+seal tail for both createRun and rerun. When the per-section
+// runner is wired AND the run has a playbook, it runs the deterministic section
+// producers (e.g. peer_table) and merges their blocks + seal; otherwise the run
+// is the narrative memo only. Seals with the snapshot-id mismatch guard and
+// persists the run row.
+async function persistAnalyzeRun(
+  deps: DevApiServiceAdapterDeps,
+  input: {
+    template: { template_id: string; version: number; name: string };
+    snapshotId: string;
+    userId: string;
+    body: Record<string, unknown>;
+    memoBlocks: ReadonlyArray<Record<string, unknown>>;
+    playbook: import("../../analyze/src/playbook.ts").AnalyzePlaybook | undefined;
+    playbookId: string | null;
+    subjectRefs: ReadonlyArray<{ kind: string; id: string }>;
+    runMetadata: JsonValue;
+  },
+): Promise<DevAnalyzeRun> {
+  const runAsOf = (input.memoBlocks[0]?.as_of as string | undefined) ?? new Date().toISOString();
+  let blocks: ReadonlyArray<Record<string, unknown>>;
+  let sealRun: () => Promise<SnapshotSealResult>;
+  if (deps.buildAnalyzeRunSeals && input.playbook) {
+    const runSeals = await deps.buildAnalyzeRunSeals({
+      snapshotId: input.snapshotId,
+      userId: input.userId,
+      memoBlocks: input.memoBlocks,
+      playbook: input.playbook,
+      subjectRefs: input.subjectRefs,
+      asOf: runAsOf,
+    });
+    blocks = Object.freeze(runSeals.blocks.map((block) => Object.freeze({ ...block })));
+    sealRun = runSeals.sealSnapshot;
+  } else {
+    blocks = Object.freeze(input.memoBlocks.map((block) => Object.freeze({ ...block })));
+    sealRun = () =>
+      deps.sealAnalyzeSnapshot({
+        snapshotId: input.snapshotId,
+        userId: input.userId,
+        templateId: input.template.template_id,
+        body: input.body,
+        blocks,
+      });
+  }
+  const persisted = await persistAnalyzeTemplateRunAfterSnapshotSealWithPool(deps.db, {
+    template_id: input.template.template_id,
+    template_version: input.template.version,
+    blocks: blocks as JsonValue,
+    playbook_id: input.playbookId,
+    run_metadata: input.runMetadata,
+    sealSnapshot: async () => {
+      const seal = await sealRun();
+      if (seal.ok && seal.snapshot.snapshot_id !== input.snapshotId) {
+        return {
+          ok: false,
+          verification: {
+            ok: false,
+            failures: [
+              {
+                reason_code: "invalid_block_binding",
+                details: {
+                  reason: "analyze_snapshot_id_mismatch",
+                  expected_snapshot_id: input.snapshotId,
+                  actual_snapshot_id: seal.snapshot.snapshot_id,
+                },
+              },
+            ],
+          },
+        };
+      }
+      return seal;
+    },
+  });
+  if (!persisted.ok) {
+    throw new DevApiHttpError(422, "snapshot seal failed");
+  }
+  return toDevAnalyzeRun(deps.db, persisted.run, input.template.name);
+}
 
 export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): DevApiAdapters {
   return {
@@ -995,46 +1087,17 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
           subjectRefs,
           playbookSectionId: resolvedPlaybook.playbook.sections[0]?.section_id ?? null,
         });
-        const blocks = Object.freeze(rendered.blocks.map((block) => Object.freeze({ ...block })));
-        const persisted = await persistAnalyzeTemplateRunAfterSnapshotSealWithPool(deps.db, {
-          template_id: template.template_id,
-          template_version: template.version,
-          blocks: blocks as JsonValue,
-          playbook_id: resolvedPlaybook.playbook.playbook_id,
-          run_metadata: runMetadata as unknown as JsonValue,
-          sealSnapshot: async () => {
-            const seal = await deps.sealAnalyzeSnapshot({
-              snapshotId,
-              userId,
-              templateId: template.template_id,
-              body,
-              blocks,
-            });
-            if (seal.ok && seal.snapshot.snapshot_id !== snapshotId) {
-              return {
-                ok: false,
-                verification: {
-                  ok: false,
-                  failures: [
-                    {
-                      reason_code: "invalid_block_binding",
-                      details: {
-                        reason: "analyze_snapshot_id_mismatch",
-                        expected_snapshot_id: snapshotId,
-                        actual_snapshot_id: seal.snapshot.snapshot_id,
-                      },
-                    },
-                  ],
-                },
-              };
-            }
-            return seal;
-          },
+        return persistAnalyzeRun(deps, {
+          template,
+          snapshotId,
+          userId,
+          body,
+          memoBlocks: rendered.blocks.map((block) => ({ ...block })),
+          playbook: resolvedPlaybook.playbook,
+          playbookId: resolvedPlaybook.playbook.playbook_id,
+          subjectRefs,
+          runMetadata: runMetadata as unknown as JsonValue,
         });
-        if (!persisted.ok) {
-          throw new DevApiHttpError(422, "snapshot seal failed");
-        }
-        return toDevAnalyzeRun(deps.db, persisted.run, template.name);
       },
       async rerun({ userId, runId }) {
         const original = await getAnalyzeTemplateRunForUser(deps.db, { userId, runId });
@@ -1094,46 +1157,17 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
           subjectRefs,
           playbookSectionId: playbook?.sections[0]?.section_id ?? null,
         });
-        const blocks = Object.freeze(rendered.blocks.map((block) => Object.freeze({ ...block })));
-        const persisted = await persistAnalyzeTemplateRunAfterSnapshotSealWithPool(deps.db, {
-          template_id: template.template_id,
-          template_version: template.version,
-          blocks: blocks as JsonValue,
-          playbook_id: metadata.playbook_id,
-          run_metadata: rerunMetadata as unknown as JsonValue,
-          sealSnapshot: async () => {
-            const seal = await deps.sealAnalyzeSnapshot({
-              snapshotId,
-              userId,
-              templateId: template.template_id,
-              body,
-              blocks,
-            });
-            if (seal.ok && seal.snapshot.snapshot_id !== snapshotId) {
-              return {
-                ok: false,
-                verification: {
-                  ok: false,
-                  failures: [
-                    {
-                      reason_code: "invalid_block_binding",
-                      details: {
-                        reason: "analyze_snapshot_id_mismatch",
-                        expected_snapshot_id: snapshotId,
-                        actual_snapshot_id: seal.snapshot.snapshot_id,
-                      },
-                    },
-                  ],
-                },
-              };
-            }
-            return seal;
-          },
+        return persistAnalyzeRun(deps, {
+          template,
+          snapshotId,
+          userId,
+          body,
+          memoBlocks: rendered.blocks.map((block) => ({ ...block })),
+          playbook,
+          playbookId: metadata.playbook_id,
+          subjectRefs,
+          runMetadata: rerunMetadata as unknown as JsonValue,
         });
-        if (!persisted.ok) {
-          throw new DevApiHttpError(422, "snapshot seal failed");
-        }
-        return toDevAnalyzeRun(deps.db, persisted.run, template.name);
       },
       async shareRunToChat({ userId, runId, body }) {
         const run = await getAnalyzeTemplateRunForUser(deps.db, { userId, runId });

@@ -25,7 +25,20 @@ import {
   sealSnapshotInTransaction,
   sealSnapshotWithPool,
   snapshotTransactionClient,
+  type SnapshotSealInput,
+  type SnapshotSealResult,
 } from "../../snapshot/src/snapshot-sealer.ts";
+import { mergeSealInputs } from "../../analyze/src/seal-input-merge.ts";
+import { runDeterministicSections } from "../../analyze/src/section-runner.ts";
+import type { AnalyzePlaybook } from "../../analyze/src/playbook.ts";
+import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolver.ts";
+import {
+  createSecBackedStatementRepository,
+  createSecBackedStatsRepository,
+} from "../../fundamentals/src/sec-facts-repository.ts";
+import { createSecCompanyFactsHttpFetcher } from "../../fundamentals/src/sec-edgar-http.ts";
+import { SEC_EDGAR_FILING_SOURCE_ID } from "../../fundamentals/src/provider-sources.ts";
+import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import type {
   DevApiAgentLoopStageFactory,
   DevApiAnalyzeWorkflowInput,
@@ -107,11 +120,15 @@ export async function runAnalyzeWorkflow(
   };
 }
 
-export async function sealAnalyzeSnapshot(
-  input: Parameters<DevApiServiceAdapterDeps["sealAnalyzeSnapshot"]>[0],
-) {
-  const blocks = input.blocks as ReadonlyArray<Record<string, unknown>>;
-  const snapshotId = input.snapshotId;
+// Builds the narrative memo's seal input from its blocks (fact_refs: []). Shared
+// with the per-section run path so the memo and deterministic-section seal inputs
+// merge through one uniform SnapshotSealInput shape.
+export async function buildMemoSealInput(input: {
+  snapshotId: string;
+  userId: string;
+  blocks: ReadonlyArray<Record<string, unknown>>;
+}): Promise<SnapshotSealInput> {
+  const blocks = input.blocks;
   const asOf = maxBlockAsOf(blocks) ?? new Date().toISOString();
   const subjectRefs = subjectRefsFromBlocks(blocks);
   const manifest = await manifestFromBlockRefs({
@@ -126,14 +143,85 @@ export async function sealAnalyzeSnapshot(
     claim_refs: manifest.claim_refs,
     user_id: input.userId,
   });
-  return sealSnapshotWithPool(pool(), {
-    snapshot_id: snapshotId,
+  return {
+    snapshot_id: input.snapshotId,
     manifest,
     blocks: blocks as never,
     sources: verifierRows.sources,
     documents: verifierRows.documents,
     claims: verifierRows.claims,
+  };
+}
+
+export async function sealAnalyzeSnapshot(
+  input: Parameters<DevApiServiceAdapterDeps["sealAnalyzeSnapshot"]>[0],
+) {
+  const sealInput = await buildMemoSealInput({
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+    blocks: input.blocks as ReadonlyArray<Record<string, unknown>>,
   });
+  return sealSnapshotWithPool(pool(), sealInput);
+}
+
+// SEC-backed stats + same-industry peers for the section producers, built from
+// the pool + SEC env exactly as services/fundamentals/src/dev.ts does. The stats
+// repo reads persisted facts; the optional fetcher only fires on a cache miss
+// when SEC_EDGAR_USER_AGENT is set.
+function analyzeSectionDeps() {
+  const db = pool();
+  const secFetcher = process.env.SEC_EDGAR_USER_AGENT
+    ? createSecCompanyFactsHttpFetcher({
+        userAgent: process.env.SEC_EDGAR_USER_AGENT,
+        baseUrl: process.env.SEC_EDGAR_BASE_URL,
+      })
+    : null;
+  const statements = createSecBackedStatementRepository(db, {
+    fetcher: secFetcher,
+    sourceId: SEC_EDGAR_FILING_SOURCE_ID,
+  });
+  const stats = createSecBackedStatsRepository(db, { statements, fetcher: secFetcher });
+  return { db, peers: createSqlPeerSetResolver(db), stats };
+}
+
+export function primaryIssuerRef(
+  subjectRefs: ReadonlyArray<{ kind: string; id: string }>,
+): IssuerSubjectRef | null {
+  const issuer = subjectRefs.find((ref) => ref.kind === "issuer");
+  return issuer ? { kind: "issuer", id: issuer.id } : null;
+}
+
+// The per-section run: build the memo seal input, run the deterministic section
+// producers (peer_table → emitPeerComparisonBlock, writing derived facts to the
+// pool), merge into one seal input, and hand back the combined blocks (for the
+// persisted run row) plus a sealSnapshot closure that seals the merged input.
+export async function buildAnalyzeRunSeals(input: {
+  snapshotId: string;
+  userId: string;
+  memoBlocks: ReadonlyArray<Record<string, unknown>>;
+  playbook: AnalyzePlaybook;
+  subjectRefs: ReadonlyArray<{ kind: string; id: string }>;
+  asOf: string;
+}): Promise<{
+  blocks: ReadonlyArray<Record<string, unknown>>;
+  sealSnapshot: () => Promise<SnapshotSealResult>;
+}> {
+  const memoSeal = await buildMemoSealInput({
+    snapshotId: input.snapshotId,
+    userId: input.userId,
+    blocks: input.memoBlocks,
+  });
+  const sectionSeals = await runDeterministicSections(analyzeSectionDeps(), {
+    playbook: input.playbook,
+    primary: primaryIssuerRef(input.subjectRefs),
+    snapshotId: input.snapshotId,
+    asOf: input.asOf,
+  });
+  const merged = mergeSealInputs(memoSeal, sectionSeals);
+  return {
+    blocks: merged.blocks as ReadonlyArray<Record<string, unknown>>,
+    sealSnapshot: () => sealSnapshotWithPool(pool(), merged),
+  };
 }
 
 export async function inspectEvidence(
