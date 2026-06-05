@@ -9,6 +9,7 @@ import {
   STAGED_SNAPSHOT_MANIFEST,
   type SnapshotManifestDraft,
 } from "../../snapshot/src/manifest-staging.ts";
+import { compileDisclosurePolicy, type FreshnessClass } from "../../snapshot/src/disclosure-policy.ts";
 import type { SnapshotSealInput } from "../../snapshot/src/snapshot-sealer.ts";
 import type {
   VerifierBlock,
@@ -125,4 +126,34 @@ function factBinding(fact: FactRow): VerifierFactBinding {
 
 function distinct(values: ReadonlyArray<UUID>): UUID[] {
   return [...new Set(values)];
+}
+
+// Append the disclosure blocks the seal's facts require (delayed/eod pricing,
+// filing-time basis). compileDisclosurePolicy generates sealable disclosure
+// blocks from the facts' freshness; the verifier re-derives the same requirement
+// from the same facts, so coverage matches by construction. A no-op when no fact
+// surfaces freshness (lean rows / non-market facts), so it is safe to wrap any
+// seal. FactRow omits freshness_class (not a binding field), but materializers
+// that mint market facts leave it on the row at runtime — read it here.
+export function withRequiredDisclosures(seal: SnapshotSealInput): SnapshotSealInput {
+  const compiled = compileDisclosurePolicy({
+    snapshot_id: seal.snapshot_id,
+    manifest: {
+      subject_refs: seal.manifest.subject_refs,
+      source_ids: seal.manifest.source_ids,
+      as_of: seal.manifest.as_of,
+      basis: seal.manifest.basis,
+      normalization: seal.manifest.normalization,
+    },
+    facts: seal.facts.map((fact) => ({
+      fact_id: fact.fact_id,
+      source_id: fact.source_id ?? null,
+      freshness_class: (fact as { freshness_class?: FreshnessClass }).freshness_class,
+    })),
+  });
+  if (compiled.required_disclosure_blocks.length === 0) return seal;
+  return {
+    ...seal,
+    blocks: [...seal.blocks, ...compiled.required_disclosure_blocks],
+  };
 }
