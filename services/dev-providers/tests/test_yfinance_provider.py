@@ -2,6 +2,7 @@ import unittest
 from datetime import date
 
 from dev_providers.yfinance_fundamentals import (
+    normalize_analyst_consensus,
     normalize_earnings_events,
     normalize_holders,
     select_earnings_events,
@@ -270,6 +271,43 @@ class YFinanceProviderTests(unittest.TestCase):
         self.assertEqual(insider["holders"][0]["price"], 290.0)
         self.assertEqual(insider["holders"][1]["transaction_type"], "gift")
         self.assertEqual(insider["holders"][1]["value"], 0.0)
+
+    def test_consensus_full_payload(self):
+        result = normalize_analyst_consensus(
+            {
+                "numberOfAnalystOpinions": 41,
+                "targetLowPrice": 170,
+                "targetMeanPrice": 220.5,
+                "targetMedianPrice": 215,
+                "targetHighPrice": 280,
+            },
+            [{"period": "0m", "strongBuy": 14, "buy": 17, "hold": 8, "sell": 1, "strongSell": 1}],
+            now_iso="2026-06-04T12:00:00.000Z",
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["analyst_count"], 41)
+        self.assertEqual(
+            result["rating_distribution"],
+            {"strong_buy": 14, "buy": 17, "hold": 8, "sell": 1, "strong_sell": 1},
+        )
+        self.assertEqual(result["price_target"]["high"], 280)
+        self.assertEqual(result["as_of"], "2026-06-04T12:00:00.000Z")
+
+    def test_consensus_targets_only_defaults_median_to_mean(self):
+        result = normalize_analyst_consensus(
+            {"targetLowPrice": 100, "targetMeanPrice": 120, "targetHighPrice": 140},
+            [],
+            now_iso="2026-06-04T12:00:00.000Z",
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["analyst_count"], 0)
+        self.assertIsNone(result["rating_distribution"])
+        self.assertEqual(result["price_target"]["median"], 120)
+
+    def test_consensus_no_coverage_returns_none(self):
+        self.assertIsNone(
+            normalize_analyst_consensus({}, [], now_iso="2026-06-04T12:00:00.000Z")
+        )
 
 
 if __name__ == "__main__":

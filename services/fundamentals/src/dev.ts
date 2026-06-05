@@ -1,6 +1,7 @@
 import { Pool } from "pg";
 import {
   createDevProviderRuntime,
+  devProvidersBaseUrlFromEnv,
 } from "./dev-providers.ts";
 import { createPostgresIssuerProfileRepository } from "./issuer-repository.ts";
 import { createSecCompanyFactsHttpFetcher } from "./sec-edgar-http.ts";
@@ -30,9 +31,8 @@ if (!databaseUrl) {
 
 const pool = new Pool({ connectionString: databaseUrl });
 const postgresProfiles = createPostgresIssuerProfileRepository(pool);
-const unofficialDevProvidersEnabled = process.env.ENABLE_UNOFFICIAL_DEV_PROVIDERS === "true";
-const devProvidersBaseUrl = process.env.DEV_PROVIDERS_BASE_URL ?? process.env.DEV_PROVIDERS_ORIGIN;
-const devProviderRuntime = unofficialDevProvidersEnabled && devProvidersBaseUrl
+const devProvidersBaseUrl = devProvidersBaseUrlFromEnv();
+const devProviderRuntime = devProvidersBaseUrl
   ? createDevProviderRuntime({
       profiles: postgresProfiles,
       db: pool,
@@ -53,7 +53,7 @@ const statements = createSecBackedStatementRepository(pool, {
 });
 const stats = createSecBackedStatsRepository(pool, { statements, fetcher: secFetcher });
 const segments = createUnsupportedSegmentsRepository();
-const consensus = createUnsupportedConsensusRepository();
+const consensus = devProviderRuntime?.consensus ?? createUnsupportedConsensusRepository();
 const earnings = devProviderRuntime?.earnings ?? createUnsupportedEarningsRepository();
 const holders = devProviderRuntime?.holders ?? createUnsupportedHoldersRepository();
 const server = createFundamentalsServer({

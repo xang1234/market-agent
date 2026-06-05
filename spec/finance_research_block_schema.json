@@ -460,6 +460,14 @@
                   },
                   "delta_ref": {
                     "$ref": "#/$defs/UUID"
+                  },
+                  "magnitude": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "format": {
+                    "type": "string"
                   }
                 },
                 "additionalProperties": false
@@ -688,6 +696,10 @@
                   },
                   "count_ref": {
                     "$ref": "#/$defs/UUID"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 0
                   }
                 },
                 "additionalProperties": false
@@ -730,6 +742,22 @@
             },
             "upside_ref": {
               "$ref": "#/$defs/UUID"
+            },
+            "display": {
+              "type": "object",
+              "required": [
+                "current",
+                "low",
+                "avg",
+                "high"
+              ],
+              "properties": {
+                "current": { "$ref": "#/$defs/PriceTargetPoint" },
+                "low": { "$ref": "#/$defs/PriceTargetPoint" },
+                "avg": { "$ref": "#/$defs/PriceTargetPoint" },
+                "high": { "$ref": "#/$defs/PriceTargetPoint" }
+              },
+              "additionalProperties": false
             }
           },
           "required": [
@@ -741,6 +769,24 @@
         }
       ],
       "unevaluatedProperties": false
+    },
+    "PriceTargetPoint": {
+      "type": "object",
+      "required": [
+        "position",
+        "format"
+      ],
+      "properties": {
+        "position": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "format": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     },
     "EpsSurprise": {
       "allOf": [

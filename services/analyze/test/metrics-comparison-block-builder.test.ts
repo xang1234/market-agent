@@ -17,8 +17,13 @@ function ref(): string {
   return `f0000000-0000-4000-8000-${String(factSeq).padStart(12, "0")}`;
 }
 
-function m(metric: MaterializedMetric["metric"], value_num: number, format: MaterializedMetric["format"]): MaterializedMetric {
-  return { metric, value_ref: ref(), value_num, format };
+function m(
+  metric: MaterializedMetric["metric"],
+  value_num: number,
+  format: MaterializedMetric["format"],
+  currency?: string,
+): MaterializedMetric {
+  return { metric, value_ref: ref(), value_num, format, ...(currency === undefined ? {} : { currency }) };
 }
 
 const BASE = {
@@ -101,4 +106,20 @@ test("buildMetricsComparisonBlock carries a title only when provided", () => {
 
   const titled = buildMetricsComparisonBlock({ peers, primary: AAPL, base: { ...BASE, title: "Peers" } });
   assert.equal(titled.title, "Peers");
+});
+
+test("buildMetricsComparisonBlock formats revenue in the metric's own currency", () => {
+  const peers: MaterializedPeer[] = [
+    { subject: AAPL, metrics: [m("revenue", 391_035_000_000, "currency", "USD")] },
+    { subject: MSFT, metrics: [m("revenue", 80_000_000_000, "currency", "EUR")] },
+  ];
+  const block = buildMetricsComparisonBlock({ peers, primary: AAPL, base: BASE });
+  assert.equal(block.cells[0][0]?.format, "$391.0B");
+  assert.match(block.cells[1][0]?.format ?? "", /^€80\.0B$/);
+});
+
+test("buildMetricsComparisonBlock falls back to USD when a currency metric carries no currency", () => {
+  const peers: MaterializedPeer[] = [{ subject: AAPL, metrics: [m("revenue", 1_000_000_000, "currency")] }];
+  const block = buildMetricsComparisonBlock({ peers, primary: AAPL, base: BASE });
+  assert.equal(block.cells[0][0]?.format, "$1.0B");
 });

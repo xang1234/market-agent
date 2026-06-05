@@ -1,15 +1,7 @@
-import {
-  freezeEarningsEventsEnvelope,
-  type EarningsEventInput,
-  type EarningsEventsEnvelopeInput,
-} from "./earnings.ts";
-import type { EarningsRepository } from "./earnings-repository.ts";
+// Dev-provider holders repository: fetch institutional or insider holders from
+// the sidecar and map them onto the normalized holders envelope.
+
 import { FundamentalsDataUnavailableError } from "./availability.ts";
-import {
-  fiscalQuarterLabelForPeriodEnd,
-  type FiscalCalendar,
-} from "./fiscal-calendar.ts";
-import { fiscalCalendarForIssuerProfile } from "./issuer-fiscal-calendar.ts";
 import {
   freezeInsiderHoldersEnvelope,
   freezeInstitutionalHoldersEnvelope,
@@ -21,93 +13,33 @@ import {
   type InstitutionalHoldersEnvelopeInput,
 } from "./holders.ts";
 import type { HoldersRepository } from "./holders-repository.ts";
-import type { IssuerProfileRepository } from "./issuer-repository.ts";
 import {
   DEFAULT_DEV_PROVIDER_TIMEOUT_MS,
   postSidecar,
   providerPayloadError,
   sidecarUnavailableError,
   sidecarUnavailableReason,
-  type DevProviderSidecarOptions,
 } from "./dev-provider-sidecar.ts";
-import type { IssuerProfileRecord } from "./profile.ts";
+import {
+  errorMessage,
+  finiteNumber,
+  integerValue,
+  isRecord,
+  issuerSidecarContext,
+  nullableNumber,
+  sidecarListingBody,
+  stringValue,
+  type DevProvidersRepositoryOptions,
+} from "./dev-provider-shared.ts";
 import type { UUID } from "./subject-ref.ts";
 
-export type DevProvidersEarningsRepositoryOptions = DevProviderSidecarOptions & {
-  profiles: IssuerProfileRepository;
-  sourceId: UUID;
-};
-
-export type DevProvidersHoldersRepositoryOptions = DevProvidersEarningsRepositoryOptions;
-
-type SidecarEarnings = {
-  currency?: unknown;
-  as_of?: unknown;
-  events?: unknown;
-};
-
-type SidecarEarningsEvent = {
-  release_date?: unknown;
-  period_end?: unknown;
-  eps_actual?: unknown;
-  eps_estimate_at_release?: unknown;
-  as_of?: unknown;
-};
+export type DevProvidersHoldersRepositoryOptions = DevProvidersRepositoryOptions;
 
 type SidecarHolders = {
   currency?: unknown;
   as_of?: unknown;
   holders?: unknown;
 };
-
-type ListingSidecarContext = {
-  ticker: string;
-  mic: string;
-  currency: string;
-  timezone: string;
-};
-
-type IssuerSidecarContext = {
-  profile: IssuerProfileRecord;
-  listing: ListingSidecarContext;
-};
-
-export function createDevProvidersEarningsRepository(
-  options: DevProvidersEarningsRepositoryOptions,
-): EarningsRepository {
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const timeoutMs = options.timeoutMs ?? DEFAULT_DEV_PROVIDER_TIMEOUT_MS;
-
-  return {
-    async find(issuer_id: UUID) {
-      const context = await issuerSidecarContext(options.profiles, issuer_id);
-      if (!context) return null;
-      const envelope = await postSidecar({
-        baseUrl: options.baseUrl,
-        path: "/fundamentals/earnings",
-        body: sidecarListingBody(context.listing),
-        fetchImpl,
-        timeoutMs,
-      });
-      if (envelope.status !== "available") {
-        if (sidecarUnavailableReason(envelope) === "missing_coverage") return null;
-        throw sidecarUnavailableError(envelope, "yfinance earnings");
-      }
-      const input = sidecarEarningsInput(
-        envelope.data,
-        issuer_id,
-        context.listing.currency,
-        fiscalCalendarForIssuerProfile(context.profile),
-        options.sourceId,
-      );
-      try {
-        return freezeEarningsEventsEnvelope(input);
-      } catch (error) {
-        throw providerPayloadError("yfinance earnings", errorMessage(error));
-      }
-    },
-  };
-}
 
 export function createDevProvidersHoldersRepository(
   options: DevProvidersHoldersRepositoryOptions,
@@ -154,84 +86,6 @@ export function createDevProvidersHoldersRepository(
         throw providerPayloadError(`yfinance ${kind} holders`, errorMessage(error));
       }
     },
-  };
-}
-
-async function issuerSidecarContext(
-  profiles: IssuerProfileRepository,
-  issuerId: UUID,
-): Promise<IssuerSidecarContext | null> {
-  const profile = await profiles.find(issuerId);
-  const exchange = profile?.exchanges[0];
-  if (!profile || !exchange) return null;
-  return {
-    profile,
-    listing: {
-      ticker: exchange.ticker,
-      mic: exchange.mic,
-      currency: exchange.trading_currency,
-      timezone: exchange.timezone,
-    },
-  };
-}
-
-function sidecarListingBody(context: ListingSidecarContext): Record<string, unknown> {
-  return {
-    ticker: context.ticker,
-    mic: context.mic,
-    currency: context.currency,
-    timezone: context.timezone,
-  };
-}
-
-function sidecarEarningsInput(
-  value: unknown,
-  issuerId: UUID,
-  fallbackCurrency: string,
-  fiscalCalendar: FiscalCalendar,
-  sourceId: UUID,
-): EarningsEventsEnvelopeInput {
-  if (!isRecord(value)) throw providerPayloadError("yfinance earnings", "earnings payload");
-  const data = value as SidecarEarnings;
-  const asOf = stringValue(data.as_of);
-  const events = Array.isArray(data.events) ? data.events : null;
-  if (!asOf || !events) {
-    throw providerPayloadError("yfinance earnings", "earnings payload");
-  }
-  return {
-    subject: { kind: "issuer", id: issuerId },
-    currency: stringValue(data.currency) ?? fallbackCurrency,
-    as_of: asOf,
-    events: events.map((event) => sidecarEarningsEvent(event, asOf, fiscalCalendar, sourceId)),
-  };
-}
-
-function sidecarEarningsEvent(
-  value: unknown,
-  fallbackAsOf: string,
-  fiscalCalendar: FiscalCalendar,
-  sourceId: UUID,
-): EarningsEventInput {
-  if (!isRecord(value)) throw providerPayloadError("yfinance earnings", "earnings event");
-  const event = value as SidecarEarningsEvent;
-  const releaseDate = stringValue(event.release_date);
-  const periodEnd = stringValue(event.period_end);
-  const epsActual = nullableNumber(event.eps_actual);
-  const epsEstimate = nullableNumber(event.eps_estimate_at_release);
-  if (!releaseDate || !periodEnd || epsActual === undefined || epsEstimate === undefined) {
-    throw providerPayloadError("yfinance earnings", "earnings event");
-  }
-  const fiscal = fiscalQuarterLabelForPeriodEnd(fiscalCalendar, periodEnd);
-  if (!fiscal) throw providerPayloadError("yfinance earnings", "earnings event period_end");
-  return {
-    release_date: releaseDate,
-    period_end: periodEnd,
-    fiscal_year: fiscal.fiscal_year,
-    fiscal_period: fiscal.fiscal_period,
-    eps_actual: epsActual,
-    eps_estimate_at_release: epsEstimate,
-    source_id: sourceId,
-    as_of: stringValue(event.as_of) ?? fallbackAsOf,
   };
 }
 
@@ -341,31 +195,6 @@ function sidecarInsiderTransaction(value: unknown): InsiderTransaction {
   };
 }
 
-function stringValue(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-}
-
-function integerValue(value: unknown): number | null {
-  return typeof value === "number" && Number.isInteger(value) ? value : null;
-}
-
-function finiteNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
 function isInsiderTransactionType(value: string): value is InsiderTransaction["transaction_type"] {
   return (INSIDER_TRANSACTION_TYPES as ReadonlyArray<string>).includes(value);
-}
-
-function nullableNumber(value: unknown): number | null | undefined {
-  if (value === null) return null;
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }

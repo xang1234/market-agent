@@ -116,6 +116,6 @@ test("missing a fact row for a cell value_ref fails loudly", () => {
   const block = blockWith(TWO_PEERS);
   assert.throws(
     () => buildPeerComparisonSealInput({ block, facts: [RV_A, GM_A, RV_M].map(factRow) }), // GM_M missing
-    /missing fact rows for cell value_refs.*000000000004/,
+    /missing fact rows for value_refs.*000000000004/,
   );
 });

@@ -13,6 +13,7 @@
 // needs, plus the value/format it carries through for tone + display.
 
 import { createFact, type FactInput } from "../../evidence/src/fact-repo.ts";
+import { resolveMetricIds } from "../../evidence/src/metric-repo.ts";
 import type { QueryExecutor } from "../../evidence/src/types.ts";
 import type {
   DerivedPeerMetric,
@@ -30,6 +31,9 @@ export type MaterializedMetric = {
   value_ref: UUID;
   value_num: number;
   format: PeerMetricFormat;
+  // Reporting currency for currency-format metrics (fra-q840); undefined for
+  // dimensionless ratios.
+  currency?: string;
 };
 
 export type MaterializedPeer = {
@@ -73,6 +77,7 @@ export async function materializePeerMetricFacts(
         value_ref: valueRef,
         value_num: value.value_num,
         format: value.format,
+        ...(value.currency === undefined ? {} : { currency: value.currency }),
       });
     }
     out.push({ subject: peer.subject, metrics });
@@ -84,7 +89,7 @@ async function materializeCell(
   db: QueryExecutor,
   subjectId: UUID,
   value: PeerMetricValue,
-  metricIds: ReadonlyMap<PeerMetricKey, UUID>,
+  metricIds: ReadonlyMap<string, string>,
   clock: () => Date,
 ): Promise<UUID> {
   // A reused metric already IS a fact; point the cell straight at it.
@@ -148,22 +153,12 @@ function derivationLineage(value: DerivedPeerMetric): Readonly<Record<string, un
 async function resolveDerivedMetricIds(
   db: QueryExecutor,
   peers: ReadonlyArray<PeerMetrics>,
-): Promise<ReadonlyMap<PeerMetricKey, UUID>> {
+): Promise<ReadonlyMap<string, string>> {
   const keys = new Set<PeerMetricKey>();
   for (const peer of peers) {
     for (const value of peer.metrics) {
       if (value.kind === "derived") keys.add(value.metric);
     }
   }
-  if (keys.size === 0) return new Map();
-
-  const { rows } = await db.query<{ metric_key: string; metric_id: string }>(
-    `select metric_key, metric_id::text as metric_id
-       from metrics
-      where metric_key = any($1::text[])`,
-    [[...keys]],
-  );
-  const map = new Map<PeerMetricKey, UUID>();
-  for (const row of rows) map.set(row.metric_key as PeerMetricKey, row.metric_id);
-  return map;
+  return resolveMetricIds(db, [...keys]);
 }

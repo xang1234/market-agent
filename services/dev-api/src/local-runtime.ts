@@ -37,6 +37,10 @@ import {
   createSecBackedStatsRepository,
 } from "../../fundamentals/src/sec-facts-repository.ts";
 import { createSecCompanyFactsHttpFetcher } from "../../fundamentals/src/sec-edgar-http.ts";
+import { consensusRepositoryFromEnv } from "../../fundamentals/src/dev-providers.ts";
+import { createPostgresIssuerProfileRepository } from "../../fundamentals/src/issuer-repository.ts";
+import { createPostgresMarketCacheRepository } from "../../market/src/cache-repository.ts";
+import { createCurrentPriceSource } from "../../analyze/src/current-price-source.ts";
 import { SEC_EDGAR_FILING_SOURCE_ID } from "../../fundamentals/src/provider-sources.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import type {
@@ -181,7 +185,17 @@ function analyzeSectionDeps() {
     sourceId: SEC_EDGAR_FILING_SOURCE_ID,
   });
   const stats = createSecBackedStatsRepository(db, { statements, fetcher: secFetcher });
-  return { db, peers: createSqlPeerSetResolver(db), stats };
+  const price = createCurrentPriceSource(
+    createPostgresIssuerProfileRepository(db),
+    createPostgresMarketCacheRepository(db),
+  );
+  return {
+    db,
+    peers: createSqlPeerSetResolver(db),
+    stats,
+    consensus: consensusRepositoryFromEnv(db),
+    price,
+  };
 }
 
 export function primaryIssuerRef(
