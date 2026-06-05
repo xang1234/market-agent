@@ -16,6 +16,7 @@ test("built-in playbooks expose analyst-facing source policies and sections", ()
     "quality_of_revenue",
     "revenue_trend",
     "analyst_overview",
+    "price_targets",
     "margin_bridge",
     "cash_conversion",
     "management_tone",

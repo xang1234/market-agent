@@ -21,6 +21,10 @@ test("the earnings_quality analyst_overview section resolves to a producer", () 
   assert.notEqual(lookupSectionProducer("earnings_quality", "analyst_overview"), undefined);
 });
 
+test("the earnings_quality price_targets section resolves to a producer", () => {
+  assert.notEqual(lookupSectionProducer("earnings_quality", "price_targets"), undefined);
+});
+
 test("sectionBlockId is stable and section-scoped", () => {
   assert.equal(sectionBlockId("peer_table"), "peer_table-1");
 });
