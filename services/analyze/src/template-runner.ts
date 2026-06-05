@@ -1,4 +1,4 @@
-import { serializeJsonValue, type JsonValue } from "../../observability/src/types.ts";
+import { serializeJsonLike, type JsonValue } from "../../observability/src/types.ts";
 import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
 import {
   AnalyzeRunMetadataError,
@@ -346,15 +346,12 @@ async function persistSealedAnalyzeTemplateRun(
         input.template_id,
         input.template_version,
         input.playbook_id ?? null,
-        // AnalyzeRunMetadataV1 is structurally a JSON object, but its readonly
-        // arrays + optional rerun_of_run_id don't match the JsonValue alias.
-        // Cast at the serialization boundary (same as `blocks`).
-        serializeJsonValue(input.run_metadata as JsonValue),
+        // run_metadata (readonly arrays + optional field) and blocks
+        // (ReadonlyArray) are JSON at runtime but not structurally JsonValue;
+        // serializeJsonLike validates + stringifies without a boundary cast.
+        serializeJsonLike(input.run_metadata),
         snapshotId,
-        // ReadonlyArray<JsonValue> is structurally a JsonValue (a JSON array)
-        // for serialization purposes, but the JsonValue alias spells the
-        // array branch as mutable. Cast at the boundary.
-        serializeJsonValue(input.blocks as JsonValue),
+        serializeJsonLike(input.blocks),
       ],
     );
     const row = rows[0];
@@ -400,7 +397,7 @@ function validatePersistInput(input: PersistAnalyzeTemplateRunInput): void {
     assertNonEmptyString(input.playbook_id, "playbook_id");
   }
   try {
-    serializeJsonValue(input.run_metadata as JsonValue);
+    serializeJsonLike(input.run_metadata);
   } catch (error) {
     throw new AnalyzeTemplateRunPersistenceError(`run_metadata: ${errorMessage(error)}`);
   }
@@ -520,7 +517,7 @@ function parseBlocks(value: unknown): ReadonlyArray<JsonValue> {
 
 function parseJsonValue(value: unknown, label: string): JsonValue {
   try {
-    serializeJsonValue(value as JsonValue);
+    serializeJsonLike(value);
   } catch (error) {
     throw new Error(`${label}: ${errorMessage(error)}`);
   }

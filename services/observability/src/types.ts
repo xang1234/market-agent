@@ -68,6 +68,15 @@ function assertJsonValue(value: unknown, path: string, seen: Set<object>): asser
 }
 
 export function serializeJsonValue(value: JsonValue): string {
+  return serializeJsonLike(value);
+}
+
+// Serialize a value that is JSON-shaped at runtime but whose *static* type isn't
+// structurally JsonValue — e.g. domain types using ReadonlyArray (which the
+// JsonValue alias spells as mutable) or optional fields. Same runtime assertion
+// as serializeJsonValue, so callers get the validation without an
+// `as unknown as JsonValue` cast at the serialization boundary.
+export function serializeJsonLike(value: unknown): string {
   assertJsonValue(value, "$", new Set<object>());
   return JSON.stringify(value);
 }
