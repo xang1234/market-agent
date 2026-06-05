@@ -5,11 +5,14 @@ import type { QueryExecutor } from "../../evidence/src/types.ts";
 import type { CachedQuote } from "../../market/src/cache-repository.ts";
 import type { HydratedSubjectHandoff } from "../../resolver/src/flow.ts";
 import {
+  factRecencyFrom,
   factSummaryFromRow,
   loadStructuredSubjectContext,
   quoteSummaryFromCachedQuote,
+  STALE_FACT_AGE_DAYS,
   structuredEvidenceStatus,
   structuredRefsFromHandoff,
+  type IssuerFactSummary,
   type StructuredSubjectRefs,
 } from "../src/local-runtime-structured.ts";
 
@@ -286,3 +289,113 @@ function handoffIssuerNoListings(): HydratedSubjectHandoff {
     },
   };
 }
+
+// ── factRecencyFrom ───────────────────────────────────────────────────────────
+
+const RECENCY_NOW = "2026-06-03T00:00:00.000Z";
+const DAY = 86_400_000;
+
+function factAt(as_of: string, fiscal_year: number | null, fiscal_period: string | null): IssuerFactSummary {
+  return factSummaryFromRow({
+    metric_key: "revenue",
+    display_name: "Revenue",
+    value_num: "100",
+    value_text: null,
+    unit: "currency",
+    currency: "USD",
+    fiscal_year,
+    fiscal_period,
+    as_of,
+    source_id: POLYGON_SOURCE_ID,
+  });
+}
+
+function isoDaysBefore(now: string, days: number): string {
+  return new Date(Date.parse(now) - days * DAY).toISOString();
+}
+
+test("factRecencyFrom returns null for an empty fact set", () => {
+  assert.equal(factRecencyFrom([], RECENCY_NOW), null);
+});
+
+test("factRecencyFrom reports a fresh set as not stale with the right age and period", () => {
+  const recency = factRecencyFrom([factAt(isoDaysBefore(RECENCY_NOW, 30), 2026, "Q1")], RECENCY_NOW);
+  assert.ok(recency);
+  assert.equal(recency?.age_days, 30);
+  assert.equal(recency?.stale, false);
+  assert.equal(recency?.fiscal_year, 2026);
+  assert.equal(recency?.fiscal_period, "Q1");
+});
+
+test("factRecencyFrom flags a set whose newest fact is over the threshold as stale", () => {
+  const recency = factRecencyFrom([factAt(isoDaysBefore(RECENCY_NOW, 500), 2024, "FY")], RECENCY_NOW);
+  assert.equal(recency?.age_days, 500);
+  assert.equal(recency?.stale, true);
+});
+
+test("factRecencyFrom picks the newest as_of, not the first row", () => {
+  // First row is an older comparison year; the newest fact is last in the array.
+  const recency = factRecencyFrom(
+    [
+      factAt(isoDaysBefore(RECENCY_NOW, 800), 2022, "FY"),
+      factAt(isoDaysBefore(RECENCY_NOW, 60), 2026, "Q1"),
+    ],
+    RECENCY_NOW,
+  );
+  assert.equal(recency?.age_days, 60);
+  assert.equal(recency?.fiscal_year, 2026);
+  assert.equal(recency?.stale, false);
+});
+
+test("factRecencyFrom treats the threshold boundary as not stale and one day past as stale", () => {
+  const atThreshold = factRecencyFrom([factAt(isoDaysBefore(RECENCY_NOW, STALE_FACT_AGE_DAYS), 2025, "FY")], RECENCY_NOW);
+  assert.equal(atThreshold?.age_days, STALE_FACT_AGE_DAYS);
+  assert.equal(atThreshold?.stale, false);
+  const pastThreshold = factRecencyFrom([factAt(isoDaysBefore(RECENCY_NOW, STALE_FACT_AGE_DAYS + 1), 2025, "FY")], RECENCY_NOW);
+  assert.equal(pastThreshold?.stale, true);
+});
+
+test("factRecencyFrom clamps a future filing date to age 0", () => {
+  const recency = factRecencyFrom([factAt(isoDaysBefore(RECENCY_NOW, -5), 2026, "Q2")], RECENCY_NOW);
+  assert.equal(recency?.age_days, 0);
+  assert.equal(recency?.stale, false);
+});
+
+test("factRecencyFrom returns null when no fact has a parseable as_of", () => {
+  assert.equal(factRecencyFrom([factAt("not-a-date", 2025, "FY")], RECENCY_NOW), null);
+});
+
+test("loadStructuredSubjectContext derives fact_recency from the loaded facts", async () => {
+  const oldFactRow = {
+    metric_key: "revenue",
+    display_name: "Revenue",
+    value_num: "190872000",
+    value_text: null,
+    unit: "currency",
+    currency: "USD",
+    fiscal_year: 2024,
+    fiscal_period: "FY",
+    as_of: "2025-01-01T00:00:00.000Z", // ~518 days before the now below
+    source_id: "00000000-0000-4000-a000-000000000002",
+  };
+  const ctx = await loadStructuredSubjectContext(
+    routedDb({ facts: () => [oldFactRow], quote: () => [QUOTE_ROW] }),
+    REFS_WITH_LISTING,
+    { now: "2026-06-03T00:00:00.000Z" },
+  );
+
+  assert.ok(ctx.fact_recency);
+  assert.equal(ctx.fact_recency?.fiscal_year, 2024);
+  assert.equal(ctx.fact_recency?.latest_as_of, "2025-01-01T00:00:00.000Z");
+  assert.equal(ctx.fact_recency?.stale, true);
+});
+
+test("loadStructuredSubjectContext yields null fact_recency when the issuer has no facts", async () => {
+  const ctx = await loadStructuredSubjectContext(
+    routedDb({ facts: () => [], quote: () => [QUOTE_ROW] }),
+    REFS_WITH_LISTING,
+    { now: "2026-06-03T00:00:00.000Z" },
+  );
+
+  assert.equal(ctx.fact_recency, null);
+});

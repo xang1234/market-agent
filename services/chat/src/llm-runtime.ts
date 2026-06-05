@@ -66,6 +66,9 @@ export async function composeAnalystBlocksWithLlm(input: {
         content: [
           "Write a concise investment research answer for the chat user.",
           "Use the provided tool context only; do not invent citations or data.",
+          "If the tool context flags data as stale (quote.stale, or",
+          "fact_recency.stale / a large fact_recency.age_days), explicitly note",
+          "that the figure may be out of date and say how old it is.",
           "Return plain text suitable for a rich_text block.",
         ].join(" "),
       },
