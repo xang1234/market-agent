@@ -379,6 +379,12 @@ export const priceTargetRangeFixture: PriceTargetRangeBlock = {
   avg_ref: 'eeeeeeee-1111-4111-9111-cccccccccccc',
   high_ref: 'eeeeeeee-1111-4111-9111-dddddddddddd',
   upside_ref: 'eeeeeeee-1111-4111-9111-eeeeeeeeeeee',
+  display: {
+    current: { position: 0.4045, format: '$214.50' },
+    low: { position: 0, format: '$170.00' },
+    avg: { position: 0.4545, format: '$220.00' },
+    high: { position: 1, format: '$280.00' },
+  },
 }
 
 export const epsSurpriseFixture: EpsSurpriseBlock = {

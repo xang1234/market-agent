@@ -242,6 +242,15 @@ export type AnalystConsensusBlock = BaseBlock & {
   coverage_warning?: string
 }
 
+export type PriceTargetPoint = { position: number; format: string }
+
+export type PriceTargetRangeDisplay = {
+  current: PriceTargetPoint
+  low: PriceTargetPoint
+  avg: PriceTargetPoint
+  high: PriceTargetPoint
+}
+
 export type PriceTargetRangeBlock = BaseBlock & {
   kind: 'price_target_range'
   current_price_ref: string
@@ -249,6 +258,7 @@ export type PriceTargetRangeBlock = BaseBlock & {
   avg_ref: string
   high_ref: string
   upside_ref?: string
+  display?: PriceTargetRangeDisplay
 }
 
 export type EpsSurpriseQuarter = {
