@@ -20,6 +20,7 @@ import {
   serializeAnalyzeRunMetadataV1,
   SourceCategoryMappingError,
   type AnalyzeRunMetadataV1,
+  type AnalyzeTemplateRow,
   type AnalyzeTemplateRunRow,
   type AnalyzeTemplateRunSummaryRow,
   type AnalyzeTemplateRunWithTemplateRow,
@@ -33,6 +34,7 @@ import {
 import {
   persistImportedArtifactMessage,
   type ChatMessagePersistenceDb,
+  type ChatMessageRow,
 } from "../../chat/src/messages.ts";
 import {
   createThread,
@@ -78,7 +80,7 @@ export type DevAnalyzeTemplate = {
 
 export type DevArtifactShareResult = {
   thread: ChatThread;
-  message: import("../../chat/src/messages.ts").ChatMessageRow;
+  message: ChatMessageRow;
   origin_snapshot_ids: ReadonlyArray<string>;
 };
 
@@ -106,7 +108,7 @@ export type DevApiAnalyzeAdapter = {
 
 export type DevApiAnalyzeWorkflowInput = {
   userId: string;
-  template: import("../../analyze/src/index.ts").AnalyzeTemplateRow;
+  template: AnalyzeTemplateRow;
   body: Record<string, unknown>;
   snapshotId: string;
   instructions: string;
@@ -495,13 +497,6 @@ function readBoundedLimit(value: string | null, defaultLimit: number, maxLimit: 
   return Math.min(parsed, maxLimit);
 }
 
-export function encodeAnalyzeRunCursor(run: Pick<DevAnalyzeRunSummary, "created_at" | "run_id">): string {
-  return Buffer.from(JSON.stringify({
-    created_at: run.created_at,
-    run_id: run.run_id,
-  })).toString("base64url");
-}
-
 function decodeAnalyzeRunCursor(value: string): { created_at: string; run_id: string } {
   try {
     const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Record<string, unknown>;
@@ -512,16 +507,6 @@ function decodeAnalyzeRunCursor(value: string): { created_at: string; run_id: st
   } catch {
     throw new DevApiHttpError(400, "cursor is invalid");
   }
-}
-
-export function compareAnalyzeRunsNewestFirst(a: DevAnalyzeRunSummary, b: DevAnalyzeRunSummary): number {
-  const created = b.created_at.localeCompare(a.created_at);
-  return created === 0 ? b.run_id.localeCompare(a.run_id) : created;
-}
-
-export function toAnalyzeRunSummary(run: DevAnalyzeRun): DevAnalyzeRunSummary {
-  const { blocks: _blocks, run_metadata: _runMetadata, ...summary } = run;
-  return summary;
 }
 
 function readAnalyzeSourceCategories(

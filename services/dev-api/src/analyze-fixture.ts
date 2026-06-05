@@ -21,14 +21,12 @@ import {
   stableUuid,
 } from "./dev-api-shared.ts";
 import {
-  compareAnalyzeRunsNewestFirst,
   contentHash,
-  encodeAnalyzeRunCursor,
   enrichAnalyzeRunBlocks,
   readOptionalSubjectRef,
   resolveAnalyzePlaybookRequestOrHttpError,
-  toAnalyzeRunSummary,
   type DevAnalyzeRun,
+  type DevAnalyzeRunSummary,
   type DevAnalyzeTemplate,
   type DevApiAnalyzeAdapter,
 } from "./analyze-adapter.ts";
@@ -178,6 +176,27 @@ export function createFixtureAnalyzeAdapter(): DevApiAnalyzeAdapter {
       };
     },
   };
+}
+
+// In-memory pagination for the fixture's run list: newest-first sort, opaque
+// base64 cursor, and the summary projection (drop blocks + run_metadata). The
+// durable adapter paginates through the analyze package instead, so these are
+// fixture-only.
+function compareAnalyzeRunsNewestFirst(a: DevAnalyzeRunSummary, b: DevAnalyzeRunSummary): number {
+  const created = b.created_at.localeCompare(a.created_at);
+  return created === 0 ? b.run_id.localeCompare(a.run_id) : created;
+}
+
+function encodeAnalyzeRunCursor(run: Pick<DevAnalyzeRunSummary, "created_at" | "run_id">): string {
+  return Buffer.from(JSON.stringify({
+    created_at: run.created_at,
+    run_id: run.run_id,
+  })).toString("base64url");
+}
+
+function toAnalyzeRunSummary(run: DevAnalyzeRun): DevAnalyzeRunSummary {
+  const { blocks: _blocks, run_metadata: _runMetadata, ...summary } = run;
+  return summary;
 }
 
 function fixtureThread(input: {
