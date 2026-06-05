@@ -13,7 +13,7 @@ import {
   SNAPSHOT_NORMALIZATIONS,
   SNAPSHOT_SUBJECT_KINDS,
 } from "./manifest-staging.ts";
-import { compileDisclosurePolicy, type RequiredDisclosure } from "./disclosure-policy.ts";
+import { compileDisclosurePolicy, type FreshnessClass, type RequiredDisclosure } from "./disclosure-policy.ts";
 import { validateSnapshotTransformManifest } from "./snapshot-transform.ts";
 
 export type SnapshotVerifierManifest = {
@@ -39,6 +39,9 @@ export type VerifierFact = {
   period_end?: string | null;
   fiscal_year?: number | null;
   fiscal_period?: string | null;
+  // Surfaced only by facts that carry freshness into the seal (market facts);
+  // the disclosure policy reads it to require eod/delayed pricing disclosures.
+  freshness_class?: FreshnessClass;
 };
 
 export type VerifierClaim = {

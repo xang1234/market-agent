@@ -3,17 +3,16 @@
 // analyst targets are opinion, not a market price, so they surface no freshness
 // disclosure (the current-price fact does that).
 
-import { createFact, type FactInput } from "../../evidence/src/fact-repo.ts";
 import { resolveMetricIds } from "../../evidence/src/metric-repo.ts";
 import type { QueryExecutor } from "../../evidence/src/types.ts";
 import type { PriceTarget } from "../../fundamentals/src/analyst-consensus.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import { toSealFactRow, type FactRow } from "./block-seal-input.ts";
+import { mintVendorPointFact } from "./vendor-fact.ts";
 
 const LOW_KEY = "price_target_low";
 const MEAN_KEY = "price_target_mean";
 const HIGH_KEY = "price_target_high";
-const VENDOR_VERIFICATION_STATUS = "authoritative" as const;
 const VENDOR_FRESHNESS_CLASS = "eod" as const;
 
 export type MaterializedPriceTargets = {
@@ -31,7 +30,6 @@ export async function materializePriceTargetFacts(
   const clock = input.clock ?? (() => new Date());
   const observedAt = clock().toISOString();
   const pt = input.priceTarget;
-  const periodEnd = pt.as_of.slice(0, 10);
   const metricIds = await resolveMetricIds(db, [LOW_KEY, MEAN_KEY, HIGH_KEY]);
   const factRows: FactRow[] = [];
 
@@ -40,25 +38,18 @@ export async function materializePriceTargetFacts(
     if (metricId === undefined) {
       throw new Error(`price-target-materializer: no metric_id registered for "${metricKey}"`);
     }
-    const fact = await createFact(db, {
-      subject_kind: "issuer",
-      subject_id: input.issuer.id,
-      metric_id: metricId,
-      period_kind: "point",
-      period_end: periodEnd,
-      value_num: value,
+    const fact = await mintVendorPointFact(db, {
+      subject: input.issuer,
+      metricId,
+      value,
       unit: "currency",
       currency: pt.currency,
-      as_of: pt.as_of,
-      observed_at: observedAt,
-      source_id: pt.source_id,
-      method: "vendor",
-      verification_status: VENDOR_VERIFICATION_STATUS,
-      freshness_class: VENDOR_FRESHNESS_CLASS,
-      coverage_level: "full",
-      confidence: 1,
-    } satisfies FactInput);
-    const lean = toSealFactRow(fact);
+      asOf: pt.as_of,
+      sourceId: pt.source_id,
+      freshnessClass: VENDOR_FRESHNESS_CLASS,
+      observedAt,
+    });
+    const lean = toSealFactRow(fact); // analyst opinion → no freshness disclosure
     factRows.push(lean);
     return lean.fact_id;
   };

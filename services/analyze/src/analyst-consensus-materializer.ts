@@ -4,10 +4,10 @@
 // via the canonical createFact path. createFact returns the row, so the emitter
 // seals straight from these rows with no load query.
 
-import { createFact, type FactInput } from "../../evidence/src/fact-repo.ts";
 import { resolveMetricIds } from "../../evidence/src/metric-repo.ts";
 import type { QueryExecutor } from "../../evidence/src/types.ts";
 import { toSealFactRow, type FactRow } from "./block-seal-input.ts";
+import { mintVendorPointFact } from "./vendor-fact.ts";
 import {
   ANALYST_RATINGS,
   type AnalystConsensusEnvelope,
@@ -30,7 +30,6 @@ const RATING_LABEL: Readonly<Record<AnalystRating, string>> = {
   sell: "Sell",
   strong_sell: "Strong Sell",
 };
-const VENDOR_VERIFICATION_STATUS = "authoritative" as const;
 // Point-in-time, source-reported standing (same as peer_table's minted facts).
 // NOT 'eod' — that tier triggers a market-price EOD disclosure, which is wrong
 // for analyst rating counts (they aren't market prices).
@@ -59,7 +58,6 @@ export async function materializeConsensusFacts(
   const clock = input.clock ?? (() => new Date());
   const observedAt = clock().toISOString();
   const asOf = dist.as_of;
-  const periodEnd = asOf.slice(0, 10);
 
   const metricIds = await resolveMetricIds(db, [
     ANALYST_COUNT_METRIC_KEY,
@@ -67,29 +65,23 @@ export async function materializeConsensusFacts(
   ]);
 
   // Mint the fact, then project to the lean seal-row shape via toSealFactRow
-  // (which drops freshness_class so no freshness disclosure is demanded).
+  // (which drops freshness_class so no freshness disclosure is demanded —
+  // analyst counts aren't market prices).
   const mint = async (metricKey: string, value: number): Promise<FactRow> => {
     const metricId = metricIds.get(metricKey);
     if (metricId === undefined) {
       throw new Error(`analyst-consensus-materializer: no metric_id registered for "${metricKey}"`);
     }
-    const fact = await createFact(db, {
-      subject_kind: "issuer",
-      subject_id: input.issuer.id,
-      metric_id: metricId,
-      period_kind: "point",
-      period_end: periodEnd,
-      value_num: value,
+    const fact = await mintVendorPointFact(db, {
+      subject: input.issuer,
+      metricId,
+      value,
       unit: "count",
-      as_of: asOf,
-      observed_at: observedAt,
-      source_id: dist.source_id,
-      method: "vendor",
-      verification_status: VENDOR_VERIFICATION_STATUS,
-      freshness_class: VENDOR_FRESHNESS_CLASS,
-      coverage_level: "full",
-      confidence: 1,
-    } satisfies FactInput);
+      asOf,
+      sourceId: dist.source_id,
+      freshnessClass: VENDOR_FRESHNESS_CLASS,
+      observedAt,
+    });
     return toSealFactRow(fact);
   };
 

@@ -9,7 +9,7 @@ import {
   STAGED_SNAPSHOT_MANIFEST,
   type SnapshotManifestDraft,
 } from "../../snapshot/src/manifest-staging.ts";
-import { compileDisclosurePolicy, type FreshnessClass } from "../../snapshot/src/disclosure-policy.ts";
+import { compileDisclosurePolicy } from "../../snapshot/src/disclosure-policy.ts";
 import type { SnapshotSealInput } from "../../snapshot/src/snapshot-sealer.ts";
 import type {
   VerifierBlock,
@@ -20,7 +20,10 @@ import type { UUID } from "../../fundamentals/src/subject-ref.ts";
 
 // A fact row backing a cited ref, loaded from the facts table. source_id is
 // required (the verifier binds every referenced fact to a source); the
-// unit/period fields feed the fact-binding check.
+// unit/period fields feed the fact-binding check. freshness_class (inherited
+// from VerifierFact) is only set on rows that deliberately surface freshness
+// (market facts); lean rows (toSealFactRow) omit it, so withRequiredDisclosures
+// demands a pricing disclosure only for the facts that carry one.
 export type FactRow = VerifierFact & { source_id: UUID };
 
 // Project a full fact row down to the fields that seal into a snapshot. This is
@@ -148,7 +151,7 @@ export function withRequiredDisclosures(seal: SnapshotSealInput): SnapshotSealIn
     facts: seal.facts.map((fact) => ({
       fact_id: fact.fact_id,
       source_id: fact.source_id ?? null,
-      freshness_class: (fact as { freshness_class?: FreshnessClass }).freshness_class,
+      freshness_class: fact.freshness_class,
     })),
   });
   if (compiled.required_disclosure_blocks.length === 0) return seal;
