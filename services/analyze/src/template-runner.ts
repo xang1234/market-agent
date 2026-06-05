@@ -1,6 +1,10 @@
 import { serializeJsonValue, type JsonValue } from "../../observability/src/types.ts";
 import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
-import { AnalyzeRunMetadataError, parseAnalyzeRunMetadata } from "./runMetadata.ts";
+import {
+  AnalyzeRunMetadataError,
+  parseAnalyzeRunMetadata,
+  type AnalyzeRunMetadataV1,
+} from "./runMetadata.ts";
 
 // Mirrors services/chat/src/messages.ts. The persistence layer is
 // snapshot-aware but does NOT itself stage manifests or seal — those are
@@ -103,7 +107,12 @@ export type PersistAnalyzeTemplateRunInput = {
   // so a future rerun can reconstruct the original request without scraping
   // rendered blocks.
   playbook_id?: string | null;
-  run_metadata: JsonValue;
+  // The normalized, validated run metadata (always analyze run metadata — this
+  // is the analyze template-run persister). Typed as the domain shape rather
+  // than bare JsonValue so callers pass serializeAnalyzeRunMetadataV1(...)
+  // without a cast; the JsonValue conversion happens once at the serialization
+  // boundary below (same as `blocks`).
+  run_metadata: AnalyzeRunMetadataV1;
   // Caller-supplied seal callback. The persistence layer doesn't stage
   // manifests or call sealSnapshot directly so unit tests can drive this
   // path without dragging in the verifier or the snapshots table.
@@ -337,7 +346,10 @@ async function persistSealedAnalyzeTemplateRun(
         input.template_id,
         input.template_version,
         input.playbook_id ?? null,
-        serializeJsonValue(input.run_metadata),
+        // AnalyzeRunMetadataV1 is structurally a JSON object, but its readonly
+        // arrays + optional rerun_of_run_id don't match the JsonValue alias.
+        // Cast at the serialization boundary (same as `blocks`).
+        serializeJsonValue(input.run_metadata as JsonValue),
         snapshotId,
         // ReadonlyArray<JsonValue> is structurally a JsonValue (a JSON array)
         // for serialization purposes, but the JsonValue alias spells the
@@ -388,7 +400,7 @@ function validatePersistInput(input: PersistAnalyzeTemplateRunInput): void {
     assertNonEmptyString(input.playbook_id, "playbook_id");
   }
   try {
-    serializeJsonValue(input.run_metadata);
+    serializeJsonValue(input.run_metadata as JsonValue);
   } catch (error) {
     throw new AnalyzeTemplateRunPersistenceError(`run_metadata: ${errorMessage(error)}`);
   }

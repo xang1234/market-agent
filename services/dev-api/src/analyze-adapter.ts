@@ -190,7 +190,7 @@ async function persistAnalyzeRun(
     playbook: AnalyzePlaybook | undefined;
     playbookId: string | null;
     subjectRefs: ReadonlyArray<{ kind: string; id: string }>;
-    runMetadata: JsonValue;
+    runMetadata: AnalyzeRunMetadataV1;
   },
 ): Promise<DevAnalyzeRun> {
   const runAsOf = (input.memoBlocks[0]?.as_of as string | undefined) ?? new Date().toISOString();
@@ -342,7 +342,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         playbook: resolvedPlaybook.playbook,
         playbookId: resolvedPlaybook.playbook.playbook_id,
         subjectRefs,
-        runMetadata: runMetadata as unknown as JsonValue,
+        runMetadata,
       });
     },
     async rerun({ userId, runId }) {
@@ -412,7 +412,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         playbook,
         playbookId: metadata.playbook_id,
         subjectRefs,
-        runMetadata: rerunMetadata as unknown as JsonValue,
+        runMetadata: rerunMetadata,
       });
     },
     async shareRunToChat({ userId, runId, body }) {
