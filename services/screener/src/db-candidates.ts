@@ -9,8 +9,9 @@ import {
   type IssuerFundamentalFact,
 } from "../../fundamentals/src/issuer-fundamentals-reader.ts";
 
-// The six annual reported metrics the screener derives ratios from. Kept in sync
-// with emptyFacts() below.
+// The six annual reported metrics the screener derives ratios from. This is the
+// single source of truth: it bounds the reader query and shapes the empty fact
+// buckets (see emptyFacts).
 const SCREENER_FUNDAMENTAL_METRICS = [
   "revenue",
   "gross_profit",
@@ -211,14 +212,7 @@ function pickCurrentPriorFundamentals(facts: ReadonlyArray<IssuerFundamentalFact
 }
 
 function emptyFacts(): Record<string, number | null> {
-  return {
-    revenue: null,
-    gross_profit: null,
-    operating_income: null,
-    net_income: null,
-    eps_diluted: null,
-    shares_outstanding_diluted: null,
-  };
+  return Object.fromEntries(SCREENER_FUNDAMENTAL_METRICS.map((key) => [key, null]));
 }
 
 function ratio(numerator: number | null, denominator: number | null): number | null {
