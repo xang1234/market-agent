@@ -15,12 +15,41 @@ const MINIO_IMAGE = "minio/minio:RELEASE.2025-09-07T16-13-09Z";
 const MINIO_USER = "minioadmin";
 const MINIO_PASSWORD = "minioadmin";
 
-function run(command: string, args: string[]) {
-  return spawnSync(command, args, { encoding: "utf8" });
+const DOCKER_PROBE_TIMEOUT_MS = 10_000; // `docker version` probe (dockerAvailable)
+const DOCKER_CMD_TIMEOUT_MS = 15_000; // `docker port` / `docker rm` — fast commands
+const DOCKER_RUN_TIMEOUT_MS = 90_000; // `docker run` — may pull the pinned image
+
+type SpawnResult = {
+  status: number | null;
+  error?: Error;
+  stdout?: string;
+  stderr?: string;
+};
+
+type SpawnFn = (command: string, args: string[], timeoutMs: number) => SpawnResult;
+
+const defaultSpawn: SpawnFn = (command, args, timeoutMs) =>
+  spawnSync(command, args, { encoding: "utf8", timeout: timeoutMs });
+
+function run(command: string, args: string[], timeoutMs: number): SpawnResult {
+  return defaultSpawn(command, args, timeoutMs);
 }
 
-export function dockerAvailable(): boolean {
-  return run("docker", ["version", "--format", "{{.Server.Version}}"]).status === 0;
+// Turn a spawnSync result into a clear failure. A timed-out command parks the
+// event loop until killed, so it surfaces here as `error` (ETIMEDOUT) with a
+// null status; a normal failure surfaces as a non-zero status.
+export function interpretDockerResult(result: SpawnResult, action: string, timeoutMs: number): void {
+  if (result.error) {
+    const timedOut = (result.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
+    const reason = timedOut ? `timed out after ${timeoutMs}ms` : result.error.message;
+    throw new Error(`docker ${action} failed: ${reason}`);
+  }
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+}
+
+export function dockerAvailable(spawn: SpawnFn = defaultSpawn): boolean {
+  const result = spawn("docker", ["version", "--format", "{{.Server.Version}}"], DOCKER_PROBE_TIMEOUT_MS);
+  return !result.error && result.status === 0;
 }
 
 function createContainerName(prefix: string): string {
