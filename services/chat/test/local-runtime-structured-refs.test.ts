@@ -17,7 +17,7 @@ test("combinedDefaultRefs unions evidence + structured source_ids and collects f
   assert.deepEqual(refs.source_refs, ["s-evi-1", "s-shared", "s-fact-1", "s-quote-1"]);
   assert.deepEqual(refs.claim_refs, ["c-1"]);
   assert.deepEqual(refs.document_refs, ["d-1"]);
-  assert.deepEqual(refs.fact_refs, ["f-1", "f-2"]);
+  assert.deepEqual(refs.provenance_fact_refs, ["f-1", "f-2"]);
 });
 
 test("combinedDefaultRefs with no structured context equals the evidence-only refs", () => {
@@ -26,5 +26,5 @@ test("combinedDefaultRefs with no structured context equals the evidence-only re
     [],
   );
   assert.deepEqual(refs.source_refs, ["s-1"]);
-  assert.deepEqual(refs.fact_refs, []);
+  assert.deepEqual(refs.provenance_fact_refs, []);
 });

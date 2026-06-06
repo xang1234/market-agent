@@ -267,9 +267,13 @@ function defaultEvidenceRefs(evidence: ReadonlyArray<LocalRuntimeEvidence>): {
 }
 
 // Block default-refs: research-claim evidence plus the structured context. The
-// structured source_ids (fact + quote sources) union into source_refs; the
-// fundamentals fact_ids become fact_refs. Both then flow through the blocks ->
-// manifest -> verifier pipeline so the sealed snapshot is provenance-linked.
+// structured source_ids (fact + quote sources) union into source_refs (a passive
+// citation). The fundamentals fact_ids become provenance_fact_refs — NOT block
+// fact_refs: the verifier treats a block.fact_refs entry as a rendering binding
+// (the block must bind that fact's value), but these facts only informed the
+// prose. provenance_fact_refs is a non-extracted carrier that manifestFromBlockRefs
+// promotes to manifest.fact_refs, where the verifier accepts them as manifest-only
+// (metadata-checked, no per-block binding).
 export function combinedDefaultRefs(
   evidence: ReadonlyArray<LocalRuntimeEvidence>,
   structured: ReadonlyArray<StructuredContextRefs>,
@@ -277,14 +281,14 @@ export function combinedDefaultRefs(
   source_refs: ReadonlyArray<string>;
   claim_refs: ReadonlyArray<string>;
   document_refs: ReadonlyArray<string>;
-  fact_refs: ReadonlyArray<string>;
+  provenance_fact_refs: ReadonlyArray<string>;
 } {
   const base = defaultEvidenceRefs(evidence);
   return {
     source_refs: firstSeen([...base.source_refs, ...structured.flatMap((s) => s.source_ids)]),
     claim_refs: base.claim_refs,
     document_refs: base.document_refs,
-    fact_refs: firstSeen(structured.flatMap((s) => s.facts.map((f) => f.fact_id))),
+    provenance_fact_refs: firstSeen(structured.flatMap((s) => s.facts.map((f) => f.fact_id))),
   };
 }
 
@@ -299,7 +303,7 @@ async function manifestFromBlockRefs(input: {
   return Object.freeze({
     [STAGED_SNAPSHOT_MANIFEST]: true,
     subject_refs: Object.freeze([...input.subjectRefs]),
-    fact_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "fact_refs")),
+    fact_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "provenance_fact_refs")),
     claim_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "claim_refs")),
     event_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "event_refs")),
     document_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "document_refs")),
@@ -397,7 +401,7 @@ function normalizeAssistantBlock(
       source_refs: ReadonlyArray<string>;
       claim_refs: ReadonlyArray<string>;
       document_refs: ReadonlyArray<string>;
-      fact_refs: ReadonlyArray<string>;
+      provenance_fact_refs: ReadonlyArray<string>;
     };
     toolCallIds: ReadonlyArray<string>;
   },
@@ -417,9 +421,12 @@ function normalizeAssistantBlock(
     document_refs: Array.isArray(block.document_refs) && block.document_refs.length > 0
       ? block.document_refs
       : input.defaultRefs.document_refs,
-    fact_refs: Array.isArray(block.fact_refs) && block.fact_refs.length > 0
-      ? block.fact_refs
-      : input.defaultRefs.fact_refs,
+    // Provenance facts (informed the answer, not rendered by this block). Carried
+    // in a non-`fact_refs` field so the verifier does not demand a per-block fact
+    // binding; manifestFromBlockRefs promotes these to manifest.fact_refs.
+    provenance_fact_refs: Array.isArray(block.provenance_fact_refs) && block.provenance_fact_refs.length > 0
+      ? block.provenance_fact_refs
+      : input.defaultRefs.provenance_fact_refs,
     tool_call_ids: input.toolCallIds,
     as_of: input.asOf,
     subject_refs: input.subjectRefs,
