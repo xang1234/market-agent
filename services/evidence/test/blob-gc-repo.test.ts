@@ -16,6 +16,11 @@ import {
   type StoredBlob,
 } from "../src/object-store.ts";
 import type { QueryExecutor } from "../src/types.ts";
+import {
+  bootstrapDatabase,
+  connectedPool,
+  dockerAvailable,
+} from "../../../db/test/docker-pg.ts";
 
 type Query = { text: string; values?: unknown[] };
 
@@ -75,6 +80,9 @@ class FakeDb implements QueryExecutor {
     }
     if (/set attempts = attempts \+ 1/i.test(text)) {
       return { rows: [], rowCount: 1 } as never;
+    }
+    if (/delete from analyze_template_runs/i.test(text)) {
+      return { rows: [{ run_id: "run-1" }] as R[], rowCount: 1 } as never;
     }
     return { rows: [], rowCount: 0 } as never;
   }
@@ -137,8 +145,11 @@ test("deleteUserAndQueueObjectBlobs queues sha256 user document blobs before del
   assert.match(db.queries[3].text, /sources\.user_id = \$1/i);
   assert.match(db.queries[3].text, /raw_blob_id ~ '\^sha256:\[0-9a-f\]\{64\}\$'/i);
   assert.match(db.queries[3].text, /deleted_at = null/i);
-  assert.match(db.queries[4].text, /delete from users where user_id = \$1/i);
+  assert.match(db.queries[4].text, /delete from analyze_template_runs/i);
+  assert.match(db.queries[4].text, /template_id in \(select template_id from analyze_templates where user_id = \$1\)/i);
+  assert.match(db.queries[5].text, /delete from users where user_id = \$1/i);
   assert.match(db.queries.at(-1)?.text ?? "", /^commit$/i);
+  assert.deepEqual(result.purged_analyze_run_ids, ["run-1"]);
 });
 
 test("deleteUserAndQueueObjectBlobs revives a previously deleted tombstone on requeue", async () => {
@@ -272,3 +283,65 @@ test("object blob GC worker exposes a production polling path", async () => {
   assert.deepEqual(objectStore.deleted, [STORED_BLOB_ID]);
   assert.equal(client.released, true);
 });
+
+test(
+  "deleteUserAndQueueObjectBlobs purges the user's analyze runs so the template cascade is not FK-blocked",
+  { skip: !dockerAvailable(), timeout: 120000 },
+  async (t) => {
+    const { databaseUrl } = await bootstrapDatabase(t, "blob-gc-analyze-purge");
+    const pool = await connectedPool(t, databaseUrl);
+
+    const { rows: userRows } = await pool.query<{ user_id: string }>(
+      `insert into users (email) values ('erase-me@example.com') returning user_id::text as user_id`,
+    );
+    const userId = userRows[0].user_id;
+
+    const { rows: templateRows } = await pool.query<{ template_id: string }>(
+      `insert into analyze_templates (user_id, name, prompt_template)
+       values ($1::uuid, 'T', 'P')
+       returning template_id::text as template_id`,
+      [userId],
+    );
+    const templateId = templateRows[0].template_id;
+
+    const { rows: snapshotRows } = await pool.query<{ snapshot_id: string }>(
+      `insert into snapshots (subject_refs, as_of, basis, normalization, allowed_transforms)
+       values ('[]'::jsonb, now(), 'as_reported', 'none', '[]'::jsonb)
+       returning snapshot_id::text as snapshot_id`,
+    );
+    const snapshotId = snapshotRows[0].snapshot_id;
+
+    const { rows: runRows } = await pool.query<{ run_id: string }>(
+      `insert into analyze_template_runs (template_id, template_version, snapshot_id, blocks)
+       values ($1::uuid, 1, $2::uuid, '[]'::jsonb)
+       returning run_id::text as run_id`,
+      [templateId, snapshotId],
+    );
+    const runId = runRows[0].run_id;
+
+    // Before the fix, this throws a foreign-key violation: deleting the user
+    // cascades to hard-delete the template, which the surviving run blocks.
+    const result = await deleteUserAndQueueObjectBlobsWithPool(pool, userId);
+
+    assert.equal(result.deleted_user, true);
+    assert.deepEqual(result.purged_analyze_run_ids, [runId]);
+
+    const runCount = await pool.query<{ n: string }>(
+      `select count(*)::text as n from analyze_template_runs where run_id = $1::uuid`,
+      [runId],
+    );
+    assert.equal(runCount.rows[0].n, "0", "the analyze run is purged");
+
+    const userCount = await pool.query<{ n: string }>(
+      `select count(*)::text as n from users where user_id = $1::uuid`,
+      [userId],
+    );
+    assert.equal(userCount.rows[0].n, "0", "the user is deleted");
+
+    const templateCount = await pool.query<{ n: string }>(
+      `select count(*)::text as n from analyze_templates where template_id = $1::uuid`,
+      [templateId],
+    );
+    assert.equal(templateCount.rows[0].n, "0", "the template is cascade-deleted");
+  },
+);

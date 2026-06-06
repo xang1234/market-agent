@@ -22,6 +22,7 @@ export type ObjectBlobGcClientPool = {
 
 export type DeleteUserBlobQueueResult = Readonly<{
   queued_raw_blob_ids: readonly string[];
+  purged_analyze_run_ids: readonly string[];
   deleted_user: boolean;
 }>;
 
@@ -101,6 +102,7 @@ export async function deleteUserAndQueueObjectBlobs(
        returning raw_blob_id`,
       [userId],
     );
+    const purgedRunIds = await purgeAnalyzeTemplateRunsForUser(db, userId);
     const deleted = await db.query<{ user_id: string }>(
       `delete from users where user_id = $1 returning user_id`,
       [userId],
@@ -108,6 +110,7 @@ export async function deleteUserAndQueueObjectBlobs(
     await db.query("commit");
     return Object.freeze({
       queued_raw_blob_ids: Object.freeze(queued.rows.map((row) => row.raw_blob_id)),
+      purged_analyze_run_ids: Object.freeze(purgedRunIds),
       deleted_user: deleted.rowCount === 1,
     });
   } catch (error) {
@@ -282,6 +285,22 @@ async function blobStillReferenced(db: QueryExecutor, rawBlobId: string): Promis
     [rawBlobId],
   );
   return result.rows[0]?.referenced === true;
+}
+
+// Analyze runs are owned via user → analyze_templates → analyze_template_runs (runs
+// carry no user_id). Migration 0028 dropped the runs→template ON DELETE CASCADE so
+// runs stay inspectable after a template *soft* delete, but that leaves surviving runs
+// blocking the user→template hard-delete cascade during erasure. Purge them first.
+// Lives here (not in services/analyze) because analyze imports evidence — evidence
+// cannot import analyze — and this must share the user-delete's transaction.
+async function purgeAnalyzeTemplateRunsForUser(db: QueryExecutor, userId: string): Promise<string[]> {
+  const { rows } = await db.query<{ run_id: string }>(
+    `delete from analyze_template_runs
+      where template_id in (select template_id from analyze_templates where user_id = $1)
+      returning run_id::text as run_id`,
+    [userId],
+  );
+  return rows.map((row) => row.run_id);
 }
 
 async function lockUserBlobScope(db: QueryExecutor, userId: string): Promise<void> {
