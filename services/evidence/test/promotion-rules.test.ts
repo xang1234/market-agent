@@ -3,9 +3,20 @@ import assert from "node:assert/strict";
 
 import {
   decideCandidateFactPromotion,
+  DISPLAYABLE_VERIFICATION_STATUSES,
   PROMOTION_REVIEW_CONFIDENCE_THRESHOLD,
+  PROMOTION_VERIFICATION_STATUSES,
   type CandidateFactPromotionInput,
 } from "../src/promotion-rules.ts";
+
+test("DISPLAYABLE_VERIFICATION_STATUSES is the promoted subset, excluding candidate/disputed", () => {
+  assert.deepEqual([...DISPLAYABLE_VERIFICATION_STATUSES], ["authoritative", "corroborated"]);
+  for (const status of DISPLAYABLE_VERIFICATION_STATUSES) {
+    assert.ok(PROMOTION_VERIFICATION_STATUSES.includes(status));
+  }
+  assert.ok(!DISPLAYABLE_VERIFICATION_STATUSES.includes("candidate" as never));
+  assert.ok(!DISPLAYABLE_VERIFICATION_STATUSES.includes("disputed" as never));
+});
 
 function decide(input: Partial<CandidateFactPromotionInput>) {
   return decideCandidateFactPromotion({

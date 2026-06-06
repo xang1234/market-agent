@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import {
   emptyEvidence,
   loadLocalRuntimeEvidence,
+  loadVerifierFactsForRefs,
   loadVerifierRowsForRefs,
   type LocalRuntimeEvidence,
   type LocalRuntimeEvidenceInput,
@@ -133,7 +134,8 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const result = await registryRuntime(context);
   const evidence = evidenceForToolCalls(result.tool_calls);
   await writeLocalToolCallLogs(context.threadId, result.tool_calls);
-  const defaultRefs = defaultEvidenceRefs(evidence);
+  const structured = structuredContextForToolCalls(result.tool_calls ?? []);
+  const defaultRefs = combinedDefaultRefs(evidence, structured);
   const toolCallIds = result.tool_calls
     ?.filter((toolCall) => toolCall.status === "ok")
     .map((toolCall) => toolCall.tool_call_id) ?? [];
@@ -179,17 +181,23 @@ async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersisten
     modelVersion: "chat-local-runtime",
     blocks,
   });
-  const verifierRows = await loadVerifierRowsForRefs(pool(), {
-    source_ids: manifest.source_ids,
-    document_refs: manifest.document_refs,
-    claim_refs: manifest.claim_refs,
-    user_id: userId,
-  });
+  // Independent reads off the built manifest — load the source/doc/claim rows
+  // and the fact rows the verifier needs in parallel.
+  const [verifierRows, facts] = await Promise.all([
+    loadVerifierRowsForRefs(pool(), {
+      source_ids: manifest.source_ids,
+      document_refs: manifest.document_refs,
+      claim_refs: manifest.claim_refs,
+      user_id: userId,
+    }),
+    loadVerifierFactsForRefs(pool(), { fact_refs: manifest.fact_refs }),
+  ]);
   return sealSnapshotWithPool(pool(), {
     snapshot_id: snapshotId,
     thread_id: input.threadId,
     manifest,
     blocks: blocks as never,
+    facts,
     sources: verifierRows.sources,
     documents: verifierRows.documents,
     claims: verifierRows.claims,
@@ -217,6 +225,36 @@ function evidenceForToolCalls(
   );
 }
 
+// The structured-context provenance carried in a tool result: the quote +
+// fundamentals source_ids, and the fundamentals fact_ids. Mirrors
+// evidenceForToolCalls — extracted so the sealed manifest can cite them
+// (fra-eegq), instead of dropping them after the LLM composes its answer.
+type StructuredContextRefs = {
+  source_ids: ReadonlyArray<string>;
+  facts: ReadonlyArray<{ fact_id: string }>;
+};
+
+function structuredContextForToolCalls(
+  toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>,
+): ReadonlyArray<StructuredContextRefs> {
+  return Object.freeze(
+    toolCalls.flatMap((toolCall) => {
+      if (toolCall.status !== "ok" || !isJsonObject(toolCall.result)) return [];
+      const ctx = toolCall.result.structured_context;
+      if (!isJsonObject(ctx)) return [];
+      const source_ids = Array.isArray(ctx.source_ids)
+        ? ctx.source_ids.filter((id): id is string => typeof id === "string")
+        : [];
+      const facts = Array.isArray(ctx.facts)
+        ? ctx.facts.flatMap((fact) =>
+            isJsonObject(fact) && typeof fact.fact_id === "string" ? [{ fact_id: fact.fact_id }] : [],
+          )
+        : [];
+      return [{ source_ids, facts }];
+    }),
+  );
+}
+
 function defaultEvidenceRefs(evidence: ReadonlyArray<LocalRuntimeEvidence>): {
   source_refs: ReadonlyArray<string>;
   claim_refs: ReadonlyArray<string>;
@@ -226,6 +264,32 @@ function defaultEvidenceRefs(evidence: ReadonlyArray<LocalRuntimeEvidence>): {
     source_refs: firstSeen(evidence.flatMap((item) => item.source_ids)),
     claim_refs: firstSeen(evidence.flatMap((item) => item.claim_refs)),
     document_refs: firstSeen(evidence.flatMap((item) => item.document_refs)),
+  };
+}
+
+// Block default-refs: research-claim evidence plus the structured context. The
+// structured source_ids (fact + quote sources) union into source_refs (a passive
+// citation). The fundamentals fact_ids become provenance_fact_refs — NOT block
+// fact_refs: the verifier treats a block.fact_refs entry as a rendering binding
+// (the block must bind that fact's value), but these facts only informed the
+// prose. provenance_fact_refs is a non-extracted carrier that manifestFromBlockRefs
+// promotes to manifest.fact_refs, where the verifier accepts them as manifest-only
+// (metadata-checked, no per-block binding).
+export function combinedDefaultRefs(
+  evidence: ReadonlyArray<LocalRuntimeEvidence>,
+  structured: ReadonlyArray<StructuredContextRefs>,
+): {
+  source_refs: ReadonlyArray<string>;
+  claim_refs: ReadonlyArray<string>;
+  document_refs: ReadonlyArray<string>;
+  provenance_fact_refs: ReadonlyArray<string>;
+} {
+  const base = defaultEvidenceRefs(evidence);
+  return {
+    source_refs: firstSeen([...base.source_refs, ...structured.flatMap((s) => s.source_ids)]),
+    claim_refs: base.claim_refs,
+    document_refs: base.document_refs,
+    provenance_fact_refs: firstSeen(structured.flatMap((s) => s.facts.map((f) => f.fact_id))),
   };
 }
 
@@ -240,7 +304,7 @@ async function manifestFromBlockRefs(input: {
   return Object.freeze({
     [STAGED_SNAPSHOT_MANIFEST]: true,
     subject_refs: Object.freeze([...input.subjectRefs]),
-    fact_refs: Object.freeze([]),
+    fact_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "provenance_fact_refs")),
     claim_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "claim_refs")),
     event_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "event_refs")),
     document_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "document_refs")),
@@ -338,6 +402,7 @@ function normalizeAssistantBlock(
       source_refs: ReadonlyArray<string>;
       claim_refs: ReadonlyArray<string>;
       document_refs: ReadonlyArray<string>;
+      provenance_fact_refs: ReadonlyArray<string>;
     };
     toolCallIds: ReadonlyArray<string>;
   },
@@ -357,6 +422,12 @@ function normalizeAssistantBlock(
     document_refs: Array.isArray(block.document_refs) && block.document_refs.length > 0
       ? block.document_refs
       : input.defaultRefs.document_refs,
+    // Provenance facts (informed the answer, not rendered by this block). Carried
+    // in a non-`fact_refs` field so the verifier does not demand a per-block fact
+    // binding; manifestFromBlockRefs promotes these to manifest.fact_refs.
+    provenance_fact_refs: Array.isArray(block.provenance_fact_refs) && block.provenance_fact_refs.length > 0
+      ? block.provenance_fact_refs
+      : input.defaultRefs.provenance_fact_refs,
     tool_call_ids: input.toolCallIds,
     as_of: input.asOf,
     subject_refs: input.subjectRefs,

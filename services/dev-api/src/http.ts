@@ -1,27 +1,6 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
-import { createHash, randomUUID } from "node:crypto";
-import {
-  ANALYZE_PLAYBOOKS,
-  AnalyzePlaybookError,
-  AnalyzeRunMetadataError,
-  getAnalyzeTemplate,
-  getAnalyzeTemplateRunForUser,
-  listAnalyzeTemplateRunsByUser,
-  listAnalyzeTemplatesByUser,
-  mapSourceCategoriesToBundles,
-  parseAnalyzeRunMetadata,
-  persistAnalyzeTemplateRunAfterSnapshotSealWithPool,
-  resolveAnalyzePlaybookRequest,
-  serializeAnalyzeRunMetadataV1,
-  SourceCategoryMappingError,
-  withRerunOfRunId,
-  type AnalyzeRunMetadataV1,
-  type AnalyzeTemplateRunRow,
-  type AnalyzeTemplateRunSummaryRow,
-  type AnalyzeTemplateRunWithTemplateRow,
-  type AnalyzeTemplateRunClientPool,
-  type AnalyzeTemplateRow,
-} from "../../analyze/src/index.ts";
+import { randomUUID } from "node:crypto";
+import { ANALYZE_PLAYBOOKS } from "../../analyze/src/index.ts";
 import {
   claimAgentRun,
   completeAgentRun,
@@ -37,24 +16,27 @@ import {
   type AgentUniverse,
   type QueryExecutor,
 } from "../../agents/src/index.ts";
-import {
-  shareArtifactToChat,
-  type ShareableArtifactBlock,
-} from "../../artifact/src/index.ts";
-import {
-  persistImportedArtifactMessage,
-  type ChatMessagePersistenceDb,
-  type ChatMessageRow,
-} from "../../chat/src/messages.ts";
-import {
-  createThread,
-  type ChatThread,
-  type ChatThreadsDb,
-} from "../../chat/src/threads-repo.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
 import { isSubjectRef, isUuid, type SubjectRef } from "../../shared/src/subject-ref.ts";
-import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
 import { readDevFlags } from "../../shared/src/devFlags.ts";
+import {
+  DevApiHttpError,
+  isObjectRecord,
+  nonEmptyString,
+  readRequiredUuidValue,
+  stableUuid,
+} from "./dev-api-shared.ts";
+import {
+  createServiceAnalyzeAdapter,
+  readAnalyzeRunPagination,
+  type AnalyzeServiceDeps,
+  type DevApiAnalyzeAdapter,
+} from "./analyze-adapter.ts";
+import { createFixtureAnalyzeAdapter } from "./analyze-fixture.ts";
+export type {
+  DevApiAnalyzeWorkflowInput,
+  DevApiAnalyzeWorkflowResult,
+} from "./analyze-adapter.ts";
 import {
   listThemeMembershipRationalesBySubject,
   type ThemeMembershipRationaleRow,
@@ -113,40 +95,6 @@ type DevAgentActivity = {
   ts: string;
 };
 
-type DevAnalyzeRunSummary = {
-  run_id: string;
-  template_id: string;
-  template_name: string;
-  template_version: number;
-  playbook_id: string | null;
-  playbook_name: string | null;
-  playbook_version: number | null;
-  display_title: string;
-  can_rerun: boolean;
-  rerun_unavailable_reason: string | null;
-  snapshot_id: string;
-  created_at: string;
-};
-
-type DevAnalyzeRun = DevAnalyzeRunSummary & {
-  run_metadata: unknown;
-  blocks: ReadonlyArray<Record<string, unknown>>;
-};
-
-type DevAnalyzeTemplate = {
-  template_id: string;
-  name: string;
-  prompt_template: string;
-  source_categories: string[];
-  version: number;
-};
-
-type DevArtifactShareResult = {
-  thread: ChatThread;
-  message: ChatMessageRow;
-  origin_snapshot_ids: ReadonlyArray<string>;
-};
-
 type DevThemeMembershipRationale = {
   theme_id: string;
   theme_name: string;
@@ -155,28 +103,6 @@ type DevThemeMembershipRationale = {
   score: number | null;
   rationale_supported: boolean;
   rationale_claim_ids: ReadonlyArray<string>;
-};
-
-export type DevApiAnalyzeAdapter = {
-  listTemplates(input: { userId: string }): Promise<{
-    templates: DevAnalyzeTemplate[];
-    runs?: DevAnalyzeRunSummary[];
-  }>;
-  listRuns(input: { userId: string; limit: number; cursor: string | null }): Promise<{
-    runs: DevAnalyzeRunSummary[];
-    next_cursor: string | null;
-  }>;
-  getRun(input: { userId: string; runId: string }): Promise<DevAnalyzeRun>;
-  createRun(input: {
-    userId: string;
-    body: Record<string, unknown>;
-  }): Promise<DevAnalyzeRun>;
-  rerun(input: { userId: string; runId: string }): Promise<DevAnalyzeRun>;
-  shareRunToChat(input: {
-    userId: string;
-    runId: string;
-    body: Record<string, unknown>;
-  }): Promise<DevArtifactShareResult>;
 };
 
 export type DevApiAgentsAdapter = {
@@ -227,24 +153,6 @@ export type DevApiAdapters = {
   agents: DevApiAgentsAdapter;
   themes: DevApiThemesAdapter;
   evidence: DevApiEvidenceAdapter;
-};
-
-export type DevApiAnalyzeWorkflowInput = {
-  userId: string;
-  template: AnalyzeTemplateRow;
-  body: Record<string, unknown>;
-  snapshotId: string;
-  instructions: string;
-  playbookPrompt: string;
-  playbookName?: string | null;
-  sourceCategories: ReadonlyArray<string>;
-  bundleIds: ReadonlyArray<string>;
-  subjectRefs: ReadonlyArray<SubjectRef>;
-  playbookSectionId?: string | null;
-};
-
-export type DevApiAnalyzeWorkflowResult = {
-  blocks: ReadonlyArray<Record<string, unknown>>;
 };
 
 export type DevApiAgentLoopStageFactoryInput = {
@@ -633,9 +541,6 @@ export function createDevApiServer(
 export function createFixtureDevApiAdapters(): DevApiAdapters {
   const agents = new Map<string, DevAgent>();
   const agentRuns: DevAgentRun[] = [];
-  const analyzeRuns: DevAnalyzeRun[] = [];
-  const analyzeRunOwners = new Map<string, string>();
-  const runOwner = (runId: string) => analyzeRunOwners.get(runId) ?? null;
   const seedAgent = {
     agent_id: "11111111-1111-4111-8111-111111111111",
     user_id: "00000000-0000-4000-8000-000000000001",
@@ -657,146 +562,7 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
   agents.set(seedAgent.agent_id, seedAgent);
 
   return {
-    analyze: {
-      async listTemplates({ userId }) {
-        return {
-          templates: defaultAnalyzeTemplates(),
-          runs: analyzeRuns
-            .filter((run) => runOwner(run.run_id) === userId)
-            .map(toAnalyzeRunSummary),
-        };
-      },
-      async listRuns({ userId, limit, cursor }) {
-        const runs = analyzeRuns
-          .filter((run) => runOwner(run.run_id) === userId)
-          .sort(compareAnalyzeRunsNewestFirst);
-        const startIndex = cursor
-          ? Math.max(0, runs.findIndex((run) => encodeAnalyzeRunCursor(run) === cursor) + 1)
-          : 0;
-        const page = runs.slice(startIndex, startIndex + limit);
-        return {
-          runs: page.map(toAnalyzeRunSummary),
-          next_cursor: runs[startIndex + limit] && page.length > 0
-            ? encodeAnalyzeRunCursor(page[page.length - 1])
-            : null,
-        };
-      },
-      async getRun({ userId, runId }) {
-        const run = analyzeRuns.find((item) => item.run_id === runId && runOwner(item.run_id) === userId);
-        if (!run) throw new DevApiHttpError(404, "analyze run not found");
-        return run;
-      },
-      async createRun({ userId, body }) {
-        const templateId = nonEmptyString(body.template_id) ?? EARNINGS_TEMPLATE_ID;
-        const resolvedPlaybook = resolveFixtureAnalyzePlaybook(body);
-        const primarySubjectRef = readOptionalSubjectRef(body.subject_ref ?? body.primary_subject_ref);
-        const subjectRefs = primarySubjectRef ? [primarySubjectRef] : [];
-        const sourceCategories = Array.isArray(body.source_categories)
-          ? body.source_categories
-            .filter((category): category is string => typeof category === "string" && category.trim() !== "")
-            .map((category) => category.trim())
-          : [...resolvedPlaybook.source_categories];
-        const runId = stableUuid(`analyze-run:${userId}:${analyzeRuns.length}:${templateId}:${resolvedPlaybook.playbook.playbook_id}`);
-        const snapshotId = stableUuid(`analyze-snapshot:${runId}`);
-        const runMetadata = serializeAnalyzeRunMetadataV1({
-          template_id: templateId,
-          template_version: 1,
-          playbook_id: resolvedPlaybook.playbook.playbook_id,
-          playbook_version: resolvedPlaybook.playbook.version,
-          instructions: resolvedPlaybook.instructions,
-          source_categories: sourceCategories,
-          subject_refs: subjectRefs,
-        });
-        const run: DevAnalyzeRun = {
-          run_id: runId,
-          template_id: templateId,
-          template_name: fixtureTemplateName(templateId),
-          template_version: 1,
-          playbook_id: resolvedPlaybook.playbook.playbook_id,
-          playbook_name: resolvedPlaybook.playbook.name,
-          playbook_version: resolvedPlaybook.playbook.version,
-          display_title: resolvedPlaybook.playbook.name,
-          run_metadata: runMetadata,
-          can_rerun: true,
-          rerun_unavailable_reason: null,
-          snapshot_id: snapshotId,
-          blocks: [
-            richTextBlock({
-              id: stableUuid(`analyze-block:${runId}`),
-              snapshotId,
-              title: resolvedPlaybook.playbook.name,
-              text: `${resolvedPlaybook.instructions} Sources: ${sourceCategories.join(", ")}.`,
-              playbookSectionId: resolvedPlaybook.playbook.sections[0]?.section_id ?? "summary",
-            }),
-          ],
-          created_at: new Date().toISOString(),
-        };
-        analyzeRuns.unshift(run);
-        analyzeRunOwners.set(run.run_id, userId);
-        return run;
-      },
-      async rerun({ userId, runId }) {
-        const original = analyzeRuns.find((run) => run.run_id === runId && runOwner(run.run_id) === userId);
-        if (!original) throw new DevApiHttpError(404, "analyze run not found");
-        const metadata = parseAnalyzeRunMetadata(original.run_metadata);
-        const rerunId = stableUuid(`analyze-rerun:${userId}:${runId}:${analyzeRuns.length}`);
-        const snapshotId = stableUuid(`analyze-snapshot:${rerunId}`);
-        const rerun: DevAnalyzeRun = {
-          ...original,
-          run_id: rerunId,
-          snapshot_id: snapshotId,
-          blocks: original.blocks.map((block, index) => cloneAnalyzeRunBlockForRerun(block, rerunId, snapshotId, index)),
-          created_at: new Date().toISOString(),
-          run_metadata: withRerunOfRunId(metadata, original.run_id),
-          can_rerun: true,
-          rerun_unavailable_reason: null,
-        };
-        analyzeRuns.unshift(rerun);
-        analyzeRunOwners.set(rerun.run_id, userId);
-        return rerun;
-      },
-      async shareRunToChat({ userId, runId, body }) {
-        const run = analyzeRuns.find((candidate) => candidate.run_id === runId);
-        if (!run || runOwner(run.run_id) !== userId) {
-          throw new DevApiHttpError(404, "analyze run not found");
-        }
-        const thread = fixtureThread({
-          userId,
-          title: nonEmptyString(body.title) ?? "Research memo",
-          primarySubjectRef: readOptionalSubjectRef(body.primary_subject_ref),
-        });
-        const blocks = enrichAnalyzeRunBlocks(run.blocks, run);
-        const shared = await shareArtifactToChat({
-          sources: [
-            {
-              source_kind: "memo",
-              origin_snapshot_id: run.snapshot_id,
-              blocks,
-            },
-          ],
-          egress: {
-            db: emptyEgressDb(),
-            listFactsForEgress: async (_db, input) =>
-              input.fact_ids.map((factId) => ({ fact_id: factId }) as never),
-          },
-        });
-        if (!shared.ok) throw new DevApiHttpError(422, "artifact share rejected", shared.rejections);
-        const sharedBlocks = shared.blocks as JsonValue;
-        return {
-          thread,
-          message: {
-            message_id: stableUuid(`artifact-message:${thread.thread_id}:${contentHash(sharedBlocks)}`),
-            thread_id: thread.thread_id,
-            role: "assistant",
-            snapshot_id: shared.origin_snapshot_ids[0] ?? run.snapshot_id,
-            blocks: sharedBlocks,
-            content_hash: contentHash(sharedBlocks),
-            created_at: new Date().toISOString(),
-          },
-          origin_snapshot_ids: shared.origin_snapshot_ids,
-        };
-      },
-    },
+    analyze: createFixtureAnalyzeAdapter(),
     agents: {
       async list({ userId }) {
         const visibleAgentIds = new Set(
@@ -894,32 +660,8 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
   };
 }
 
-export type DevApiServiceAdapterDeps = {
-  db: QueryExecutor & AnalyzeTemplateRunClientPool & ChatMessagePersistenceDb & ChatThreadsDb;
-  runAnalyzeWorkflow?(
-    input: DevApiAnalyzeWorkflowInput,
-  ): Promise<DevApiAnalyzeWorkflowResult> | DevApiAnalyzeWorkflowResult;
+export type DevApiServiceAdapterDeps = AnalyzeServiceDeps & {
   createAgentLoopStages?: DevApiAgentLoopStageFactory;
-  sealAnalyzeSnapshot(input: {
-    snapshotId: string;
-    userId: string;
-    templateId: string;
-    body: Record<string, unknown>;
-    blocks: ReadonlyArray<Record<string, unknown>>;
-  }): Promise<SnapshotSealResult>;
-  // Optional per-section run: merges deterministic section blocks (peer_table)
-  // into the run. When absent, createRun falls back to the narrative memo only.
-  buildAnalyzeRunSeals?(input: {
-    snapshotId: string;
-    userId: string;
-    memoBlocks: ReadonlyArray<Record<string, unknown>>;
-    playbook: import("../../analyze/src/playbook.ts").AnalyzePlaybook;
-    subjectRefs: ReadonlyArray<{ kind: string; id: string }>;
-    asOf: string;
-  }): Promise<{
-    blocks: ReadonlyArray<Record<string, unknown>>;
-    sealSnapshot: () => Promise<SnapshotSealResult>;
-  }>;
   inspectEvidence?(input: {
     userId: string;
     snapshotId: string;
@@ -927,302 +669,9 @@ export type DevApiServiceAdapterDeps = {
   }): Promise<EvidenceInspection>;
 };
 
-// Shared persist+seal tail for both createRun and rerun. When the per-section
-// runner is wired AND the run has a playbook, it runs the deterministic section
-// producers (e.g. peer_table) and merges their blocks + seal; otherwise the run
-// is the narrative memo only. Seals with the snapshot-id mismatch guard and
-// persists the run row.
-async function persistAnalyzeRun(
-  deps: DevApiServiceAdapterDeps,
-  input: {
-    template: { template_id: string; version: number; name: string };
-    snapshotId: string;
-    userId: string;
-    body: Record<string, unknown>;
-    memoBlocks: ReadonlyArray<Record<string, unknown>>;
-    playbook: import("../../analyze/src/playbook.ts").AnalyzePlaybook | undefined;
-    playbookId: string | null;
-    subjectRefs: ReadonlyArray<{ kind: string; id: string }>;
-    runMetadata: JsonValue;
-  },
-): Promise<DevAnalyzeRun> {
-  const runAsOf = (input.memoBlocks[0]?.as_of as string | undefined) ?? new Date().toISOString();
-  let blocks: ReadonlyArray<Record<string, unknown>>;
-  let sealRun: () => Promise<SnapshotSealResult>;
-  if (deps.buildAnalyzeRunSeals && input.playbook) {
-    const runSeals = await deps.buildAnalyzeRunSeals({
-      snapshotId: input.snapshotId,
-      userId: input.userId,
-      memoBlocks: input.memoBlocks,
-      playbook: input.playbook,
-      subjectRefs: input.subjectRefs,
-      asOf: runAsOf,
-    });
-    blocks = Object.freeze(runSeals.blocks.map((block) => Object.freeze({ ...block })));
-    sealRun = runSeals.sealSnapshot;
-  } else {
-    blocks = Object.freeze(input.memoBlocks.map((block) => Object.freeze({ ...block })));
-    sealRun = () =>
-      deps.sealAnalyzeSnapshot({
-        snapshotId: input.snapshotId,
-        userId: input.userId,
-        templateId: input.template.template_id,
-        body: input.body,
-        blocks,
-      });
-  }
-  const persisted = await persistAnalyzeTemplateRunAfterSnapshotSealWithPool(deps.db, {
-    template_id: input.template.template_id,
-    template_version: input.template.version,
-    blocks: blocks as JsonValue,
-    playbook_id: input.playbookId,
-    run_metadata: input.runMetadata,
-    sealSnapshot: async () => {
-      const seal = await sealRun();
-      if (seal.ok && seal.snapshot.snapshot_id !== input.snapshotId) {
-        return {
-          ok: false,
-          verification: {
-            ok: false,
-            failures: [
-              {
-                reason_code: "invalid_block_binding",
-                details: {
-                  reason: "analyze_snapshot_id_mismatch",
-                  expected_snapshot_id: input.snapshotId,
-                  actual_snapshot_id: seal.snapshot.snapshot_id,
-                },
-              },
-            ],
-          },
-        };
-      }
-      return seal;
-    },
-  });
-  if (!persisted.ok) {
-    throw new DevApiHttpError(422, "snapshot seal failed");
-  }
-  return toDevAnalyzeRun(deps.db, persisted.run, input.template.name);
-}
-
 export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): DevApiAdapters {
   return {
-    analyze: {
-      async listTemplates({ userId }) {
-        const templates = await listAnalyzeTemplatesByUser(deps.db, userId);
-        const runs = (
-          await Promise.all(
-            templates.map((template) => listAnalyzeRunsForTemplate(deps.db, template.template_id, template.name)),
-          )
-        ).flat();
-        return {
-          templates: templates.map((template) => ({
-            template_id: template.template_id,
-            name: template.name,
-            prompt_template: template.prompt_template,
-            source_categories: [...template.source_categories],
-            version: template.version,
-          })),
-          runs,
-        };
-      },
-      async listRuns({ userId, limit, cursor }) {
-        const page = await listAnalyzeTemplateRunsByUser(deps.db, { userId, limit, cursor });
-        return {
-          runs: await Promise.all(page.runs.map((run) => toDevAnalyzeRunSummary(deps.db, run))),
-          next_cursor: page.next_cursor,
-        };
-      },
-      async getRun({ userId, runId }) {
-        const run = await getAnalyzeTemplateRunForUser(deps.db, { userId, runId });
-        if (run === null) throw new DevApiHttpError(404, "analyze run not found");
-        return toDevAnalyzeRun(deps.db, run, run.template_name);
-      },
-      async createRun({ userId, body }) {
-        const templateId = requireNonEmpty(body.template_id, "template_id");
-        const template = await getAnalyzeTemplate(deps.db, templateId);
-        if (template === null || template.user_id !== userId) {
-          throw new DevApiHttpError(404, "analyze template not found");
-        }
-        const snapshotId = randomUUID();
-        const resolvedPlaybook = resolveAnalyzePlaybookRequestOrHttpError({
-          playbook_id: nonEmptyString(body.playbook_id) ?? "earnings_quality",
-          instructions: nonEmptyString(body.instructions) ?? undefined,
-          source_categories: body.source_categories === undefined
-            ? undefined
-            : readAnalyzeSourceCategories(body.source_categories, []),
-        });
-        const sourceCategories = body.source_categories === undefined
-          ? [...resolvedPlaybook.source_categories]
-          : readAnalyzeSourceCategories(body.source_categories, []);
-        const bundleIds = analyzeBundleIds(sourceCategories);
-        const subjectRefs = analyzeSubjectRefs({
-          primary: readOptionalSubjectRef(body.subject_ref ?? body.primary_subject_ref),
-          added: template.added_subject_refs,
-        });
-        const instructions = resolvedPlaybook.instructions;
-        const runMetadata = serializeAnalyzeRunMetadataV1({
-          template_id: template.template_id,
-          template_version: template.version,
-          playbook_id: resolvedPlaybook.playbook.playbook_id,
-          playbook_version: resolvedPlaybook.playbook.version,
-          instructions,
-          source_categories: sourceCategories,
-          subject_refs: subjectRefs,
-        });
-        if (!deps.runAnalyzeWorkflow) {
-          throw new DevApiHttpError(503, "durable analyze workflow is not configured");
-        }
-        const rendered = await deps.runAnalyzeWorkflow({
-          userId,
-          template,
-          body,
-          snapshotId,
-          instructions,
-          playbookPrompt: resolvedPlaybook.prompt,
-          playbookName: resolvedPlaybook.playbook.name,
-          sourceCategories,
-          bundleIds,
-          subjectRefs,
-          playbookSectionId: resolvedPlaybook.playbook.sections[0]?.section_id ?? null,
-        });
-        return persistAnalyzeRun(deps, {
-          template,
-          snapshotId,
-          userId,
-          body,
-          memoBlocks: rendered.blocks.map((block) => ({ ...block })),
-          playbook: resolvedPlaybook.playbook,
-          playbookId: resolvedPlaybook.playbook.playbook_id,
-          subjectRefs,
-          runMetadata: runMetadata as unknown as JsonValue,
-        });
-      },
-      async rerun({ userId, runId }) {
-        const original = await getAnalyzeTemplateRunForUser(deps.db, { userId, runId });
-        if (original === null) throw new DevApiHttpError(404, "analyze run not found");
-        const metadata = parseStoredAnalyzeRunMetadata(original.run_metadata);
-        if (metadata.template_id !== original.template_id) {
-          throw new DevApiHttpError(409, "analyze run metadata is not rerunnable");
-        }
-        const template = await getAnalyzeTemplate(deps.db, original.template_id);
-        if (template === null || template.user_id !== userId) {
-          throw new DevApiHttpError(409, "analyze template is no longer runnable");
-        }
-        if (!deps.runAnalyzeWorkflow) {
-          throw new DevApiHttpError(503, "durable analyze workflow is not configured");
-        }
-        const sourceCategories = [...metadata.source_categories];
-        const bundleIds = analyzeBundleIds(sourceCategories);
-        const subjectRefs = metadata.subject_refs.map((ref) => analyzeSubjectRefFromMetadata(ref));
-        const playbook = metadata.playbook_id === null
-          ? undefined
-          : ANALYZE_PLAYBOOKS.find((candidate) => candidate.playbook_id === metadata.playbook_id);
-        const playbookPrompt = playbook
-          ? resolveAnalyzePlaybookRequest({
-            playbook_id: playbook.playbook_id,
-            instructions: metadata.instructions,
-            source_categories: metadata.source_categories,
-          }).prompt
-          : metadata.instructions;
-        const rerunMetadata = serializeAnalyzeRunMetadataV1({
-          template_id: template.template_id,
-          template_version: template.version,
-          playbook_id: metadata.playbook_id,
-          playbook_version: metadata.playbook_version,
-          instructions: metadata.instructions,
-          source_categories: sourceCategories,
-          subject_refs: subjectRefs,
-          rerun_of_run_id: original.run_id,
-        });
-        const snapshotId = randomUUID();
-        const body = {
-          template_id: template.template_id,
-          ...(metadata.playbook_id ? { playbook_id: metadata.playbook_id } : {}),
-          instructions: metadata.instructions,
-          source_categories: sourceCategories,
-          ...(subjectRefs[0] ? { subject_ref: subjectRefs[0] } : {}),
-        };
-        const rendered = await deps.runAnalyzeWorkflow({
-          userId,
-          template,
-          body,
-          snapshotId,
-          instructions: metadata.instructions,
-          playbookPrompt,
-          playbookName: playbook?.name ?? null,
-          sourceCategories,
-          bundleIds,
-          subjectRefs,
-          playbookSectionId: playbook?.sections[0]?.section_id ?? null,
-        });
-        return persistAnalyzeRun(deps, {
-          template,
-          snapshotId,
-          userId,
-          body,
-          memoBlocks: rendered.blocks.map((block) => ({ ...block })),
-          playbook,
-          playbookId: metadata.playbook_id,
-          subjectRefs,
-          runMetadata: rerunMetadata as unknown as JsonValue,
-        });
-      },
-      async shareRunToChat({ userId, runId, body }) {
-        const run = await getAnalyzeTemplateRunForUser(deps.db, { userId, runId });
-        if (run === null) throw new DevApiHttpError(404, "analyze run not found");
-        const blocks = enrichAnalyzeRunBlocks(run.blocks, run);
-        const shared = await shareArtifactToChat({
-          sources: [
-            {
-              source_kind: "memo",
-              origin_snapshot_id: run.snapshot_id,
-              blocks,
-            },
-          ],
-          egress: { db: deps.db },
-        });
-        if (!shared.ok) throw new DevApiHttpError(422, "artifact share rejected", shared.rejections);
-        const snapshotId = shared.origin_snapshot_ids[0];
-        if (snapshotId === undefined) throw new DevApiHttpError(422, "artifact share rejected");
-
-        const client = await deps.db.connect();
-        try {
-          await client.query("begin");
-          const thread = await createThread(client, userId, {
-            title: nonEmptyString(body.title) ?? "Research memo",
-            primary_subject_ref: readOptionalSubjectRef(body.primary_subject_ref) ?? undefined,
-          });
-          const message = await persistImportedArtifactMessage(client, {
-            thread_id: thread.thread_id,
-            user_id: userId,
-            role: "assistant",
-            snapshot_id: snapshotId,
-            blocks: shared.blocks as JsonValue,
-            content_hash: contentHash(shared.blocks as JsonValue),
-          });
-          if (message === null) throw new DevApiHttpError(404, "chat thread not found");
-          await client.query("commit");
-          return {
-            thread,
-            message,
-            origin_snapshot_ids: shared.origin_snapshot_ids,
-          };
-        } catch (error) {
-          try {
-            await client.query("rollback");
-          } catch (rollbackError) {
-            if (error !== null && typeof error === "object") {
-              (error as { rollback_error?: unknown }).rollback_error = rollbackError;
-            }
-          }
-          throw error;
-        } finally {
-          client.release();
-        }
-      },
-    },
+    analyze: createServiceAnalyzeAdapter(deps),
     agents: {
       async list({ userId }) {
         const rows = await listAgentsByUser(deps.db, userId);
@@ -1353,124 +802,6 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
   };
 }
 
-class DevApiHttpError extends Error {
-  readonly status: number;
-  readonly details: unknown;
-
-  constructor(status: number, message: string, details?: unknown) {
-    super(message);
-    this.name = "DevApiHttpError";
-    this.status = status;
-    this.details = details;
-  }
-}
-
-function requireNonEmpty(value: unknown, label: string): string {
-  const text = nonEmptyString(value);
-  if (text === null) throw new DevApiHttpError(400, `${label} is required`);
-  return text;
-}
-
-const DEFAULT_ANALYZE_RUN_LIMIT = 25;
-const MAX_ANALYZE_RUN_LIMIT = 100;
-
-type AnalyzeRunPaginationInput = {
-  limit: number;
-  cursor: string | null;
-};
-
-function readAnalyzeRunPagination(params: URLSearchParams): AnalyzeRunPaginationInput {
-  const cursor = nonEmptyString(params.get("cursor"));
-  if (cursor !== null) decodeAnalyzeRunCursor(cursor);
-  return {
-    limit: readBoundedLimit(params.get("limit"), DEFAULT_ANALYZE_RUN_LIMIT, MAX_ANALYZE_RUN_LIMIT),
-    cursor,
-  };
-}
-
-function readBoundedLimit(value: string | null, defaultLimit: number, maxLimit: number): number {
-  if (value === null || value.trim() === "") return defaultLimit;
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new DevApiHttpError(400, "limit must be a positive integer");
-  }
-  return Math.min(parsed, maxLimit);
-}
-
-function encodeAnalyzeRunCursor(run: Pick<DevAnalyzeRunSummary, "created_at" | "run_id">): string {
-  return Buffer.from(JSON.stringify({
-    created_at: run.created_at,
-    run_id: run.run_id,
-  })).toString("base64url");
-}
-
-function decodeAnalyzeRunCursor(value: string): { created_at: string; run_id: string } {
-  try {
-    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Record<string, unknown>;
-    const createdAt = nonEmptyString(parsed.created_at);
-    const runId = nonEmptyString(parsed.run_id);
-    if (createdAt === null || runId === null) throw new Error("invalid cursor payload");
-    return { created_at: createdAt, run_id: runId };
-  } catch {
-    throw new DevApiHttpError(400, "cursor is invalid");
-  }
-}
-
-function compareAnalyzeRunsNewestFirst(a: DevAnalyzeRunSummary, b: DevAnalyzeRunSummary): number {
-  const created = b.created_at.localeCompare(a.created_at);
-  return created === 0 ? b.run_id.localeCompare(a.run_id) : created;
-}
-
-function toAnalyzeRunSummary(run: DevAnalyzeRun): DevAnalyzeRunSummary {
-  const { blocks: _blocks, run_metadata: _runMetadata, ...summary } = run;
-  return summary;
-}
-
-function contentHash(value: JsonValue): string {
-  return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
-}
-
-function readAnalyzeSourceCategories(
-  value: unknown,
-  fallback: ReadonlyArray<string>,
-): ReadonlyArray<string> {
-  if (value === undefined || value === null) return [...fallback];
-  if (!Array.isArray(value)) {
-    throw new DevApiHttpError(400, "source_categories must be an array");
-  }
-  const categories = value.map((category, index) => {
-    const text = nonEmptyString(category);
-    if (text === null) throw new DevApiHttpError(400, `source_categories[${index}] must be a non-empty string`);
-    return text;
-  });
-  return categories;
-}
-
-function analyzeBundleIds(sourceCategories: ReadonlyArray<string>): ReadonlyArray<string> {
-  try {
-    return mapSourceCategoriesToBundles({ categories: sourceCategories }).bundle_ids;
-  } catch (error) {
-    if (error instanceof SourceCategoryMappingError) {
-      throw new DevApiHttpError(400, error.message);
-    }
-    throw error;
-  }
-}
-
-function analyzeSubjectRefs(input: {
-  primary: SubjectRef | null;
-  added: ReadonlyArray<SubjectRef>;
-}): ReadonlyArray<SubjectRef> {
-  const byKey = new Map<string, SubjectRef>();
-  for (const ref of [
-    ...(input.primary ? [input.primary] : []),
-    ...input.added,
-  ]) {
-    byKey.set(`${ref.kind}:${ref.id}`, { kind: ref.kind, id: ref.id });
-  }
-  return Object.freeze([...byKey.values()]);
-}
-
 const EVIDENCE_INSPECTION_UNAVAILABLE_ERROR = "evidence is not available for this artifact";
 
 function readEvidenceInspectionBody(value: unknown): { snapshotId: string; ref: EvidenceInspectionRef } {
@@ -1499,28 +830,6 @@ function readEvidenceInspectionRefValue(value: unknown): EvidenceInspectionRef {
     throw new DevApiHttpError(400, "ref.kind is invalid");
   }
   return { kind, id };
-}
-
-function readRequiredUuidValue(value: unknown, label: string): string {
-  if (typeof value !== "string" || !isUuid(value)) {
-    throw new DevApiHttpError(400, `${label} must be a UUID`);
-  }
-  return value;
-}
-
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function readOptionalSubjectRef(value: unknown): SubjectRef | null {
-  if (value === undefined || value === null) return null;
-  if (typeof value !== "object" || Array.isArray(value)) {
-    throw new DevApiHttpError(400, "primary_subject_ref is invalid");
-  }
-  if (!isSubjectRef(value)) {
-    throw new DevApiHttpError(400, "primary_subject_ref is invalid");
-  }
-  return value;
 }
 
 function readSubjectRefFromQuery(url: URL): SubjectRef {
@@ -1555,66 +864,6 @@ function readOptionalIsoTimestamp(value: string | null, label: string): string |
 }
 
 const ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
-
-function enrichAnalyzeRunBlocks(
-  blocks: ReadonlyArray<Record<string, unknown> | JsonValue>,
-  run: Pick<AnalyzeTemplateRunRow | DevAnalyzeRun, "run_id" | "template_id" | "template_version" | "snapshot_id" | "created_at">,
-): ShareableArtifactBlock[] {
-  return blocks.map((block) => {
-    if (block === null || typeof block !== "object" || Array.isArray(block)) {
-      return block as ShareableArtifactBlock;
-    }
-    const record = block as Record<string, JsonValue>;
-    const dataRef = record.data_ref;
-    const dataRefRecord = dataRef !== null && typeof dataRef === "object" && !Array.isArray(dataRef)
-      ? dataRef as Record<string, JsonValue>
-      : { kind: "analyze_run", id: run.run_id };
-    const params = dataRefRecord.params;
-    const paramsRecord = params !== null && typeof params === "object" && !Array.isArray(params)
-      ? params as Record<string, JsonValue>
-      : {};
-    return {
-      ...record,
-      data_ref: {
-        ...dataRefRecord,
-        params: {
-          ...paramsRecord,
-          analyze_run_id: run.run_id,
-          analyze_template_id: run.template_id,
-          analyze_template_version: run.template_version,
-          analyze_run_created_at: run.created_at,
-          origin_snapshot_id: run.snapshot_id,
-        },
-      },
-    } as ShareableArtifactBlock;
-  });
-}
-
-function fixtureThread(input: {
-  userId: string;
-  title: string | null;
-  primarySubjectRef: SubjectRef | null;
-}): ChatThread {
-  const now = new Date().toISOString();
-  return {
-    thread_id: stableUuid(`thread:${input.userId}:${input.title ?? ""}:${now}`),
-    user_id: input.userId,
-    title: input.title,
-    primary_subject_ref: input.primarySubjectRef,
-    latest_snapshot_id: null,
-    archived_at: null,
-    created_at: now,
-    updated_at: now,
-  };
-}
-
-function emptyEgressDb(): QueryExecutor {
-  return {
-    async query() {
-      return { rows: [], rowCount: 0 };
-    },
-  };
-}
 
 function readUniverse(value: unknown): AgentUniverse {
   if (value === undefined || value === null) return { mode: "static", subject_refs: [] };
@@ -1666,141 +915,6 @@ function jsonObjectOrEmpty(value: JsonValue | null | undefined): Record<string, 
 
 function jsonArrayOrEmpty(value: JsonValue | null | undefined): JsonValue {
   return Array.isArray(value) ? value : [];
-}
-
-async function listAnalyzeRunsForTemplate(
-  db: AnalyzeTemplateRunClientPool & QueryExecutor,
-  templateId: string,
-  templateName = "Analyze template",
-): Promise<DevAnalyzeRunSummary[]> {
-  const { listAnalyzeTemplateRunsByTemplate } = await import("../../analyze/src/index.ts");
-  const rows = await listAnalyzeTemplateRunsByTemplate(db, templateId);
-  return Promise.all(rows.map((row) => toDevAnalyzeRunSummary(db, row, templateName)));
-}
-
-async function toDevAnalyzeRunSummary(
-  db: QueryExecutor,
-  row: AnalyzeTemplateRunSummarySource,
-  templateName = "template_name" in row ? row.template_name : "Analyze template",
-): Promise<DevAnalyzeRunSummary> {
-  return withDurableAnalyzeRerunEligibility(db, toDevAnalyzeRunSummaryFields(row, templateName), row);
-}
-
-async function toDevAnalyzeRun(
-  db: QueryExecutor,
-  row: AnalyzeTemplateRunRow | AnalyzeTemplateRunWithTemplateRow,
-  templateName = "template_name" in row ? row.template_name : "Analyze template",
-): Promise<DevAnalyzeRun> {
-  const summary = await withDurableAnalyzeRerunEligibility(
-    db,
-    toDevAnalyzeRunSummaryFields(row, templateName),
-    row,
-  );
-  return {
-    ...summary,
-    run_metadata: row.run_metadata,
-    blocks: row.blocks as ReadonlyArray<Record<string, unknown>>,
-  };
-}
-
-type AnalyzeTemplateRunSummarySource =
-  | AnalyzeTemplateRunSummaryRow
-  | AnalyzeTemplateRunRow
-  | AnalyzeTemplateRunWithTemplateRow;
-
-function toDevAnalyzeRunSummaryFields(
-  row: AnalyzeTemplateRunSummarySource,
-  templateName: string,
-): DevAnalyzeRunSummary {
-  const metadata = hasAnalyzeRunMetadata(row)
-    ? safeParseStoredAnalyzeRunMetadata(row.run_metadata)
-    : null;
-  const playbookId = metadata?.playbook_id ?? row.playbook_id;
-  const playbook = playbookId === null
-    ? undefined
-    : ANALYZE_PLAYBOOKS.find((candidate) => candidate.playbook_id === playbookId);
-  const summaryRerunFields = hasAnalyzeRunSummaryRerunFields(row);
-  return {
-    run_id: row.run_id,
-    template_id: row.template_id,
-    template_name: templateName,
-    template_version: row.template_version,
-    playbook_id: playbookId,
-    playbook_name: playbook?.name ?? null,
-    playbook_version: summaryRerunFields ? row.playbook_version : metadata?.playbook_version ?? null,
-    display_title: playbook?.name ?? templateName,
-    can_rerun: summaryRerunFields ? row.can_rerun : metadata !== null,
-    rerun_unavailable_reason: summaryRerunFields ? row.rerun_unavailable_reason : metadata === null
-      ? "This run's metadata is not rerunnable."
-      : null,
-    snapshot_id: row.snapshot_id,
-    created_at: row.created_at,
-  };
-}
-
-function hasAnalyzeRunMetadata(
-  row: AnalyzeTemplateRunSummarySource,
-): row is AnalyzeTemplateRunRow | AnalyzeTemplateRunWithTemplateRow {
-  return "run_metadata" in row;
-}
-
-function hasAnalyzeRunSummaryRerunFields(
-  row: AnalyzeTemplateRunSummarySource,
-): row is AnalyzeTemplateRunSummaryRow {
-  return "can_rerun" in row;
-}
-
-async function withDurableAnalyzeRerunEligibility(
-  db: QueryExecutor,
-  summary: DevAnalyzeRunSummary,
-  row: AnalyzeTemplateRunSummarySource,
-): Promise<DevAnalyzeRunSummary> {
-  if (!summary.can_rerun) return summary;
-  const metadata = hasAnalyzeRunMetadata(row)
-    ? safeParseStoredAnalyzeRunMetadata(row.run_metadata)
-    : null;
-  if (metadata !== null && metadata.template_id !== row.template_id) {
-    return {
-      ...summary,
-      can_rerun: false,
-      rerun_unavailable_reason: "This run's metadata is not rerunnable.",
-    };
-  }
-  const template = await getAnalyzeTemplate(db, metadata?.template_id ?? row.template_id);
-  if (template === null) {
-    return {
-      ...summary,
-      can_rerun: false,
-      rerun_unavailable_reason: "The template used by this run is no longer runnable.",
-    };
-  }
-  return summary;
-}
-
-function parseStoredAnalyzeRunMetadata(value: unknown): AnalyzeRunMetadataV1 {
-  try {
-    return parseAnalyzeRunMetadata(value);
-  } catch (error) {
-    if (error instanceof AnalyzeRunMetadataError) {
-      throw new DevApiHttpError(409, "analyze run metadata is not rerunnable");
-    }
-    throw error;
-  }
-}
-
-function safeParseStoredAnalyzeRunMetadata(value: unknown): AnalyzeRunMetadataV1 | null {
-  try {
-    return parseAnalyzeRunMetadata(value);
-  } catch {
-    return null;
-  }
-}
-
-function analyzeSubjectRefFromMetadata(ref: { kind: string; id: string }): SubjectRef {
-  if (!isSubjectRef(ref)) {
-    throw new DevApiHttpError(409, "analyze run metadata is not rerunnable");
-  }
-  return Object.freeze({ kind: ref.kind, id: ref.id });
 }
 
 async function listRunsForAgents(db: QueryExecutor, agentIds: string[]): Promise<DevAgentRun[]> {
@@ -1961,112 +1075,9 @@ async function readJson(req: AsyncIterable<Uint8Array | string>): Promise<unknow
   return JSON.parse(text);
 }
 
-function nonEmptyString(value: unknown): string | null {
-  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
-}
-
 function readUserIdHeader(value: string | string[] | undefined): string | null {
   if (typeof value !== "string") return null;
   return nonEmptyString(value);
-}
-
-function stableUuid(seed: string): string {
-  let hash = 0;
-  for (let index = 0; index < seed.length; index += 1) {
-    hash = (hash * 31 + seed.charCodeAt(index)) >>> 0;
-  }
-  const suffix = hash.toString(16).padStart(12, "0").slice(-12);
-  return `00000000-0000-4000-8000-${suffix}`;
-}
-
-function resolveAnalyzePlaybookRequestOrHttpError(
-  input: Parameters<typeof resolveAnalyzePlaybookRequest>[0],
-) {
-  try {
-    return resolveAnalyzePlaybookRequest(input);
-  } catch (error) {
-    if (error instanceof AnalyzePlaybookError) {
-      throw new DevApiHttpError(400, error.message);
-    }
-    throw error;
-  }
-}
-
-function resolveFixtureAnalyzePlaybook(body: Record<string, unknown>) {
-  return resolveAnalyzePlaybookRequestOrHttpError({
-    playbook_id: nonEmptyString(body.playbook_id) ?? "earnings_quality",
-    instructions: nonEmptyString(body.instructions) ?? undefined,
-    source_categories: Array.isArray(body.source_categories)
-      ? body.source_categories.filter((category): category is string => typeof category === "string")
-      : undefined,
-  });
-}
-
-function cloneAnalyzeRunBlockForRerun(
-  block: Record<string, unknown>,
-  rerunId: string,
-  snapshotId: string,
-  index: number,
-): Record<string, unknown> {
-  const id = stableUuid(`analyze-rerun-block:${rerunId}:${index}`);
-  const dataRef = block.data_ref;
-  const dataRefRecord = isObjectRecord(dataRef) ? dataRef : { kind: "analyze_run" };
-  return {
-    ...block,
-    id,
-    snapshot_id: snapshotId,
-    data_ref: {
-      ...dataRefRecord,
-      id,
-    },
-  };
-}
-
-function richTextBlock(input: {
-  id: string;
-  snapshotId: string;
-  title: string;
-  text: string;
-  playbookSectionId?: string;
-}): Record<string, unknown> {
-  return {
-    id: input.id,
-    kind: "rich_text",
-    snapshot_id: input.snapshotId,
-    data_ref: input.playbookSectionId
-      ? { kind: "analyze_run", id: input.id, params: { playbook_section_id: input.playbookSectionId } }
-      : { kind: "analyze_run", id: input.id },
-    source_refs: [],
-    as_of: new Date(0).toISOString(),
-    title: input.title,
-    segments: [{ type: "text", text: input.text }],
-  };
-}
-
-const EARNINGS_TEMPLATE_ID = "11111111-1111-4111-8111-111111111111";
-const VARIANT_TEMPLATE_ID = "22222222-2222-4222-8222-222222222222";
-
-function fixtureTemplateName(templateId: string): string {
-  return defaultAnalyzeTemplates().find((template) => template.template_id === templateId)?.name ?? "Analyze template";
-}
-
-function defaultAnalyzeTemplates(): DevAnalyzeTemplate[] {
-  return [
-    {
-      template_id: EARNINGS_TEMPLATE_ID,
-      name: "Earnings template",
-      prompt_template: "Assess revenue quality, margins, cash conversion, and management commentary.",
-      source_categories: ["filings", "transcripts", "news"],
-      version: 1,
-    },
-    {
-      template_id: VARIANT_TEMPLATE_ID,
-      name: "Variant view",
-      prompt_template: "Compare the market narrative with evidence-backed counterpoints.",
-      source_categories: ["filings", "news", "transcripts"],
-      version: 1,
-    },
-  ];
 }
 
 function serviceCatalog(env: Record<string, string | undefined>, hasAdapters: boolean) {

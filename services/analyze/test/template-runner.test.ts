@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { JsonValue } from "../../observability/src/types.ts";
+import type { AnalyzeRunMetadataV1 } from "../src/runMetadata.ts";
 import type { SnapshotSealResult, SealedSnapshot } from "../../snapshot/src/snapshot-sealer.ts";
 import {
   AnalyzeTemplateRunPersistenceError,
@@ -108,7 +109,7 @@ const sampleBlocks: JsonValue = [
   { id: "block-1", kind: "section", title: "Overview", children: [], snapshot_id: SNAPSHOT_ID },
 ];
 
-const sampleRunMetadata: JsonValue = {
+const sampleRunMetadata: AnalyzeRunMetadataV1 = {
   schema_version: 1,
   template_id: TEMPLATE_ID,
   template_version: 1,

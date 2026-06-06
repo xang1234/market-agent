@@ -7,6 +7,10 @@ import type { ListingSubjectRef } from "../../market/src/subject-ref.ts";
 import type { HydratedSubjectHandoff } from "../../resolver/src/flow.ts";
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import type { QueryExecutor } from "../../evidence/src/types.ts";
+import {
+  loadRecentIssuerFundamentals,
+  type IssuerFundamentalFact,
+} from "../../fundamentals/src/issuer-fundamentals-reader.ts";
 
 // Structured (non-research) context for the chat analyst. The local runtime
 // historically grounded answers only on research claims, so subjects with price
@@ -19,18 +23,10 @@ import type { QueryExecutor } from "../../evidence/src/types.ts";
 // than re-derived with SQL joins, and the quote is read through the canonical
 // market cache repository instead of a bespoke query.
 
-export type IssuerFactSummary = {
-  metric_key: string;
-  display_name: string | null;
-  value_num: number | null;
-  value_text: string | null;
-  unit: string | null;
-  currency: string | null;
-  fiscal_year: number | null;
-  fiscal_period: string | null;
-  as_of: string;
-  source_id: string;
-};
+// The canonical reader (services/fundamentals/src/issuer-fundamentals-reader.ts)
+// owns this shape now. Kept as an alias so the chat module + its test reference
+// one local name.
+export type IssuerFactSummary = IssuerFundamentalFact;
 
 export type QuoteSummary = {
   listing_id: string;
@@ -80,19 +76,6 @@ export const NO_STRUCTURED_REFS: StructuredSubjectRefs = Object.freeze({
   issuer: null,
   listings: Object.freeze([]),
 });
-
-type FactRow = {
-  metric_key: string;
-  display_name: string | null;
-  value_num: number | string | null;
-  value_text: string | null;
-  unit: string | null;
-  currency: string | null;
-  fiscal_year: number | null;
-  fiscal_period: string | null;
-  as_of: Date | string;
-  source_id: string;
-};
 
 const DEFAULT_FACT_LIMIT = 24;
 
@@ -154,33 +137,9 @@ async function loadIssuerFacts(
   limit: number,
 ): Promise<IssuerFactSummary[]> {
   if (issuer === null) return [];
-  const { rows } = await db.query<FactRow>(
-    // method = 'reported' matches every canonical fact reader (sec-facts-repository,
-    // screener db-candidates) so derived/estimated facts never leak into the answer.
-    `select m.metric_key,
-            m.display_name,
-            f.value_num,
-            f.value_text,
-            f.unit,
-            f.currency,
-            f.fiscal_year,
-            f.fiscal_period,
-            f.as_of,
-            f.source_id::text as source_id
-       from facts f
-       join metrics m on m.metric_id = f.metric_id
-      where f.subject_kind = 'issuer'
-        and f.subject_id = $1::uuid
-        and f.method = 'reported'
-        and f.superseded_by is null
-        and f.invalidated_at is null
-      order by f.fiscal_year desc nulls last,
-               f.as_of desc,
-               m.metric_key
-      limit $2`,
-    [issuer.id, limit],
-  );
-  return rows.map(factSummaryFromRow);
+  // The canonical reader owns the eligibility filter (reported, active, entitled
+  // for the "app" channel, display-verified). Chat answers render on "app".
+  return loadRecentIssuerFundamentals(db, issuer, { channel: "app", limit });
 }
 
 // Reads each listing's latest quote through the canonical market cache repository
@@ -203,21 +162,6 @@ async function loadLatestListingQuote(
       quote && (freshest === null || quote.as_of > freshest.as_of) ? quote : freshest,
     null,
   );
-}
-
-export function factSummaryFromRow(row: FactRow): IssuerFactSummary {
-  return Object.freeze({
-    metric_key: row.metric_key,
-    display_name: row.display_name,
-    value_num: numericOrNull(row.value_num),
-    value_text: row.value_text,
-    unit: row.unit,
-    currency: row.currency,
-    fiscal_year: row.fiscal_year,
-    fiscal_period: row.fiscal_period,
-    as_of: isoString(row.as_of),
-    source_id: row.source_id,
-  });
 }
 
 // Even an annual-only filer reports within ~365 days plus a filing lag; a newest
@@ -288,16 +232,7 @@ export function structuredEvidenceStatus(input: {
   return hasAny ? "available" : "insufficient_evidence";
 }
 
-function numericOrNull(value: number | string | null): number | null {
-  if (value === null) return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 function unique(values: ReadonlyArray<string>): string[] {
   return [...new Set(values)];
 }
 
-function isoString(value: Date | string): string {
-  return value instanceof Date ? value.toISOString() : value;
-}

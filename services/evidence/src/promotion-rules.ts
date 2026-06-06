@@ -12,6 +12,16 @@ export const PROMOTION_VERIFICATION_STATUSES = Object.freeze([
 
 export type PromotionVerificationStatus = (typeof PROMOTION_VERIFICATION_STATUSES)[number];
 
+// The verification statuses a fact must hold to ground a user-facing answer —
+// the outcomes of a "promote" decision (see CandidateFactPromotionDecision).
+// candidate (unverified) and disputed (contested) are not display-worthy.
+export const DISPLAYABLE_VERIFICATION_STATUSES = Object.freeze([
+  "authoritative",
+  "corroborated",
+] as const);
+export type DisplayableVerificationStatus =
+  (typeof DISPLAYABLE_VERIFICATION_STATUSES)[number];
+
 export type CandidateFactPromotionInput = Readonly<{
   source_kind: SourceKind;
   extraction_confidence: number;

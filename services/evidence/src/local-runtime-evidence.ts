@@ -1,4 +1,5 @@
 import type { SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
+import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 
 import { sourceDisclosure } from "./source-disclosure.ts";
 import type { QueryExecutor } from "./types.ts";
@@ -221,6 +222,58 @@ export async function loadVerifierRowsForRefs(
     ),
     claims: Object.freeze(claims.rows.map((row) => Object.freeze({ claim_id: row.claim_id, source_id: row.source_id }))),
   });
+}
+
+// Loads the facts the snapshot verifier needs for manifest.fact_refs. The chat
+// seal cites fundamentals facts (fra-eegq) but never loaded them; this is the
+// fact-side sibling of loadVerifierRowsForRefs. No user filter: the fact_ids are
+// already entitlement-scoped to the caller (they came from the user's structured
+// context), and the verifier rejects any fact whose source the user-filtered
+// source load did not surface — so the source load is the entitlement gate.
+export async function loadVerifierFactsForRefs(
+  db: QueryExecutor,
+  input: { fact_refs: ReadonlyArray<string> },
+): Promise<ReadonlyArray<VerifierFact>> {
+  const factIds = unique(input.fact_refs);
+  if (factIds.length === 0) return Object.freeze([]);
+  const { rows } = await db.query<{
+    fact_id: string;
+    source_id: string;
+    unit: string | null;
+    period_kind: string | null;
+    period_start: string | null;
+    period_end: string | null;
+    fiscal_year: number | null;
+    fiscal_period: string | null;
+  }>(
+    `select fact_id::text as fact_id,
+            source_id::text as source_id,
+            unit,
+            period_kind,
+            period_start::text as period_start,
+            period_end::text as period_end,
+            fiscal_year,
+            fiscal_period
+       from facts
+      where fact_id = any($1::uuid[])
+        and superseded_by is null
+        and invalidated_at is null`,
+    [factIds],
+  );
+  return Object.freeze(
+    rows.map((row) =>
+      Object.freeze({
+        fact_id: row.fact_id,
+        source_id: row.source_id,
+        unit: row.unit ?? undefined,
+        period_kind: row.period_kind ?? undefined,
+        period_start: row.period_start,
+        period_end: row.period_end,
+        fiscal_year: row.fiscal_year,
+        fiscal_period: row.fiscal_period,
+      }),
+    ),
+  );
 }
 
 function evidenceFromClaimRows(
