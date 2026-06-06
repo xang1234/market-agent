@@ -181,16 +181,17 @@ async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersisten
     modelVersion: "chat-local-runtime",
     blocks,
   });
-  const verifierRows = await loadVerifierRowsForRefs(pool(), {
-    source_ids: manifest.source_ids,
-    document_refs: manifest.document_refs,
-    claim_refs: manifest.claim_refs,
-    user_id: userId,
-  });
-  const facts = await loadVerifierFactsForRefs(pool(), {
-    fact_refs: manifest.fact_refs,
-    user_id: userId,
-  });
+  // Independent reads off the built manifest — load the source/doc/claim rows
+  // and the fact rows the verifier needs in parallel.
+  const [verifierRows, facts] = await Promise.all([
+    loadVerifierRowsForRefs(pool(), {
+      source_ids: manifest.source_ids,
+      document_refs: manifest.document_refs,
+      claim_refs: manifest.claim_refs,
+      user_id: userId,
+    }),
+    loadVerifierFactsForRefs(pool(), { fact_refs: manifest.fact_refs }),
+  ]);
   return sealSnapshotWithPool(pool(), {
     snapshot_id: snapshotId,
     thread_id: input.threadId,

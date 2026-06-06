@@ -226,12 +226,13 @@ export async function loadVerifierRowsForRefs(
 
 // Loads the facts the snapshot verifier needs for manifest.fact_refs. The chat
 // seal cites fundamentals facts (fra-eegq) but never loaded them; this is the
-// fact-side sibling of loadVerifierRowsForRefs. Source entitlement is enforced
-// by the source load; this loads active facts by id and surfaces the binding
-// fields the verifier checks per period_kind.
+// fact-side sibling of loadVerifierRowsForRefs. No user filter: the fact_ids are
+// already entitlement-scoped to the caller (they came from the user's structured
+// context), and the verifier rejects any fact whose source the user-filtered
+// source load did not surface — so the source load is the entitlement gate.
 export async function loadVerifierFactsForRefs(
   db: QueryExecutor,
-  input: { fact_refs: ReadonlyArray<string>; user_id?: string | null },
+  input: { fact_refs: ReadonlyArray<string> },
 ): Promise<ReadonlyArray<VerifierFact>> {
   const factIds = unique(input.fact_refs);
   if (factIds.length === 0) return Object.freeze([]);
