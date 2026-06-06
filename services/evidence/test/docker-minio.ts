@@ -5,6 +5,7 @@ import {
   ListBucketsCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
 
 type Cleanup = () => void | Promise<void>;
 type TestContextLike = { after(callback: Cleanup): void };
@@ -113,6 +114,9 @@ export async function bootstrapMinio(
     region: "us-east-1",
     credentials: { accessKeyId: MINIO_USER, secretAccessKey: MINIO_PASSWORD },
     forcePathStyle: true,
+    // Bound each request so a black-holed endpoint makes waitForMinio's poll
+    // loop reject within seconds instead of stalling.
+    requestHandler: new NodeHttpHandler({ connectionTimeout: 2_000, requestTimeout: 5_000 }),
   });
 
   // node:test runs t.after() hooks in registration order (FIFO), not LIFO.
