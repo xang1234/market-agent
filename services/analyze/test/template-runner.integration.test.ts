@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import type { Client } from "pg";
 
-import type { JsonValue } from "../../observability/src/types.ts";
+import type { AnalyzeRunMetadataV1 } from "../src/runMetadata.ts";
 import { createAnalyzeTemplate, deleteAnalyzeTemplate } from "../src/template-repo.ts";
 import {
   getAnalyzeTemplateRun,
@@ -109,7 +109,7 @@ function okSeal(snapshotId: string, asOf: string): SnapshotSealResult & { ok: tr
   });
 }
 
-function runMetadata(templateId: string, templateVersion: number): JsonValue {
+function runMetadata(templateId: string, templateVersion: number): AnalyzeRunMetadataV1 {
   return {
     schema_version: 1,
     template_id: templateId,
