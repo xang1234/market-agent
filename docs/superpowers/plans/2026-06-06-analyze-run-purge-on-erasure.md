@@ -31,10 +31,12 @@ At the top of the file, after the existing `import type { QueryExecutor } from "
 ```ts
 import {
   bootstrapDatabase,
-  connectedClient,
+  connectedPool,
   dockerAvailable,
 } from "../../../db/test/docker-pg.ts";
 ```
+
+(Use `connectedPool` + the `WithPool` helper, not a raw `connectedClient`: `objectBlobGcTransactionClient` rejects a bare `pg.Client` as "pool-like" — `isPoolLike` = has `.connect`, no `.release` — so real-DB callers must go through `deleteUserAndQueueObjectBlobsWithPool`, which acquires a releasable pool client.)
 
 - [ ] **Step 2: Append the integration test**
 
@@ -46,14 +48,14 @@ test(
   { skip: !dockerAvailable(), timeout: 120000 },
   async (t) => {
     const { databaseUrl } = await bootstrapDatabase(t, "blob-gc-analyze-purge");
-    const client = await connectedClient(t, databaseUrl);
+    const pool = await connectedPool(t, databaseUrl);
 
-    const { rows: userRows } = await client.query<{ user_id: string }>(
+    const { rows: userRows } = await pool.query<{ user_id: string }>(
       `insert into users (email) values ('erase-me@example.com') returning user_id::text as user_id`,
     );
     const userId = userRows[0].user_id;
 
-    const { rows: templateRows } = await client.query<{ template_id: string }>(
+    const { rows: templateRows } = await pool.query<{ template_id: string }>(
       `insert into analyze_templates (user_id, name, prompt_template)
        values ($1::uuid, 'T', 'P')
        returning template_id::text as template_id`,
@@ -61,14 +63,14 @@ test(
     );
     const templateId = templateRows[0].template_id;
 
-    const { rows: snapshotRows } = await client.query<{ snapshot_id: string }>(
+    const { rows: snapshotRows } = await pool.query<{ snapshot_id: string }>(
       `insert into snapshots (subject_refs, as_of, basis, normalization, allowed_transforms)
        values ('[]'::jsonb, now(), 'as_reported', 'none', '[]'::jsonb)
        returning snapshot_id::text as snapshot_id`,
     );
     const snapshotId = snapshotRows[0].snapshot_id;
 
-    const { rows: runRows } = await client.query<{ run_id: string }>(
+    const { rows: runRows } = await pool.query<{ run_id: string }>(
       `insert into analyze_template_runs (template_id, template_version, snapshot_id, blocks)
        values ($1::uuid, 1, $2::uuid, '[]'::jsonb)
        returning run_id::text as run_id`,
@@ -78,24 +80,24 @@ test(
 
     // Before the fix, this throws a foreign-key violation: deleting the user
     // cascades to hard-delete the template, which the surviving run blocks.
-    const result = await deleteUserAndQueueObjectBlobs(objectBlobGcTransactionClient(client), userId);
+    const result = await deleteUserAndQueueObjectBlobsWithPool(pool, userId);
 
     assert.equal(result.deleted_user, true);
     assert.deepEqual(result.purged_analyze_run_ids, [runId]);
 
-    const runCount = await client.query<{ n: string }>(
+    const runCount = await pool.query<{ n: string }>(
       `select count(*)::text as n from analyze_template_runs where run_id = $1::uuid`,
       [runId],
     );
     assert.equal(runCount.rows[0].n, "0", "the analyze run is purged");
 
-    const userCount = await client.query<{ n: string }>(
+    const userCount = await pool.query<{ n: string }>(
       `select count(*)::text as n from users where user_id = $1::uuid`,
       [userId],
     );
     assert.equal(userCount.rows[0].n, "0", "the user is deleted");
 
-    const templateCount = await client.query<{ n: string }>(
+    const templateCount = await pool.query<{ n: string }>(
       `select count(*)::text as n from analyze_templates where template_id = $1::uuid`,
       [templateId],
     );
