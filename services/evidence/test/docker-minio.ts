@@ -72,18 +72,18 @@ function startMinio(containerName: string): { hostPort: string } {
     MINIO_IMAGE,
     "server",
     "/data",
-  ]);
-  assert.equal(result.status, 0, result.stderr || result.stdout);
+  ], DOCKER_RUN_TIMEOUT_MS);
+  interpretDockerResult(result, "run", DOCKER_RUN_TIMEOUT_MS);
 
-  const portResult = run("docker", ["port", containerName, "9000/tcp"]);
-  assert.equal(portResult.status, 0, portResult.stderr || portResult.stdout);
-  const match = portResult.stdout.trim().match(/:(\d+)$/);
-  assert.ok(match, `expected docker port output to include a host port, got: ${portResult.stdout.trim()}`);
+  const portResult = run("docker", ["port", containerName, "9000/tcp"], DOCKER_CMD_TIMEOUT_MS);
+  interpretDockerResult(portResult, "port", DOCKER_CMD_TIMEOUT_MS);
+  const match = portResult.stdout?.trim().match(/:(\d+)$/);
+  assert.ok(match, `expected docker port output to include a host port, got: ${portResult.stdout?.trim()}`);
   return { hostPort: match[1] };
 }
 
 function stopMinio(containerName: string): void {
-  run("docker", ["rm", "--force", containerName]);
+  run("docker", ["rm", "--force", containerName], DOCKER_CMD_TIMEOUT_MS);
 }
 
 async function waitForMinio(client: S3Client, maxAttempts = 120): Promise<void> {
