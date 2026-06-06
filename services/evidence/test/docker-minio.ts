@@ -27,14 +27,13 @@ type SpawnResult = {
   stderr?: string;
 };
 
-type SpawnFn = (command: string, args: string[], timeoutMs: number) => SpawnResult;
+// Runs a `docker` subcommand with a hard timeout so a blocking call (unresponsive
+// daemon, stuck image pull) can't park the event loop indefinitely. Injectable
+// so dockerAvailable's skip-on-timeout path is unit-testable.
+type DockerRunner = (args: string[], timeoutMs: number) => SpawnResult;
 
-const defaultSpawn: SpawnFn = (command, args, timeoutMs) =>
-  spawnSync(command, args, { encoding: "utf8", timeout: timeoutMs });
-
-function run(command: string, args: string[], timeoutMs: number): SpawnResult {
-  return defaultSpawn(command, args, timeoutMs);
-}
+const runDocker: DockerRunner = (args, timeoutMs) =>
+  spawnSync("docker", args, { encoding: "utf8", timeout: timeoutMs });
 
 // Turn a spawnSync result into a clear failure. A timed-out command parks the
 // event loop until killed, so it surfaces here as `error` (ETIMEDOUT) with a
@@ -48,8 +47,8 @@ export function interpretDockerResult(result: SpawnResult, action: string, timeo
   assert.equal(result.status, 0, result.stderr || result.stdout);
 }
 
-export function dockerAvailable(spawn: SpawnFn = defaultSpawn): boolean {
-  const result = spawn("docker", ["version", "--format", "{{.Server.Version}}"], DOCKER_PROBE_TIMEOUT_MS);
+export function dockerAvailable(run: DockerRunner = runDocker): boolean {
+  const result = run(["version", "--format", "{{.Server.Version}}"], DOCKER_PROBE_TIMEOUT_MS);
   return !result.error && result.status === 0;
 }
 
@@ -58,7 +57,7 @@ function createContainerName(prefix: string): string {
 }
 
 function startMinio(containerName: string): { hostPort: string } {
-  const result = run("docker", [
+  const result = runDocker([
     "run",
     "--detach",
     "--rm",
@@ -76,7 +75,7 @@ function startMinio(containerName: string): { hostPort: string } {
   ], DOCKER_RUN_TIMEOUT_MS);
   interpretDockerResult(result, "run", DOCKER_RUN_TIMEOUT_MS);
 
-  const portResult = run("docker", ["port", containerName, "9000/tcp"], DOCKER_CMD_TIMEOUT_MS);
+  const portResult = runDocker(["port", containerName, "9000/tcp"], DOCKER_CMD_TIMEOUT_MS);
   interpretDockerResult(portResult, "port", DOCKER_CMD_TIMEOUT_MS);
   const match = portResult.stdout?.trim().match(/:(\d+)$/);
   assert.ok(match, `expected docker port output to include a host port, got: ${portResult.stdout?.trim()}`);
@@ -84,7 +83,7 @@ function startMinio(containerName: string): { hostPort: string } {
 }
 
 function stopMinio(containerName: string): void {
-  run("docker", ["rm", "--force", containerName], DOCKER_CMD_TIMEOUT_MS);
+  runDocker(["rm", "--force", containerName], DOCKER_CMD_TIMEOUT_MS);
 }
 
 async function waitForMinio(client: S3Client, maxAttempts = 120): Promise<void> {
