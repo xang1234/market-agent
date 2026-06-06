@@ -6,7 +6,6 @@ import type { CachedQuote } from "../../market/src/cache-repository.ts";
 import type { HydratedSubjectHandoff } from "../../resolver/src/flow.ts";
 import {
   factRecencyFrom,
-  factSummaryFromRow,
   loadStructuredSubjectContext,
   quoteSummaryFromCachedQuote,
   STALE_FACT_AGE_DAYS,
@@ -41,52 +40,6 @@ function cachedQuote(overrides: Partial<CachedQuote["quote"]> = {}): CachedQuote
     expires_at: "2026-06-02T08:59:01.000Z",
   };
 }
-
-test("factSummaryFromRow coerces numeric/text columns and preserves provenance", () => {
-  const summary = factSummaryFromRow({
-    metric_key: "revenue",
-    display_name: "Revenue",
-    value_num: "190872000",
-    value_text: null,
-    unit: "currency",
-    currency: "USD",
-    fiscal_year: 2021,
-    fiscal_period: "FY",
-    as_of: "2026-05-08T16:57:05.951Z",
-    source_id: POLYGON_SOURCE_ID,
-  });
-
-  assert.equal(summary.metric_key, "revenue");
-  assert.equal(summary.display_name, "Revenue");
-  // pg returns numeric as string; the summary exposes a real number for the LLM.
-  assert.equal(summary.value_num, 190872000);
-  assert.equal(summary.value_text, null);
-  assert.equal(summary.unit, "currency");
-  assert.equal(summary.currency, "USD");
-  assert.equal(summary.fiscal_year, 2021);
-  assert.equal(summary.fiscal_period, "FY");
-  assert.equal(summary.as_of, "2026-05-08T16:57:05.951Z");
-  assert.equal(summary.source_id, POLYGON_SOURCE_ID);
-});
-
-test("factSummaryFromRow keeps text-only facts and normalizes Date columns to ISO", () => {
-  const summary = factSummaryFromRow({
-    metric_key: "auditor",
-    display_name: null,
-    value_num: null,
-    value_text: "Deloitte",
-    unit: null,
-    currency: null,
-    fiscal_year: null,
-    fiscal_period: null,
-    as_of: new Date("2026-05-08T16:57:05.951Z"),
-    source_id: "00000000-0000-4000-a000-000000000002",
-  });
-
-  assert.equal(summary.value_num, null);
-  assert.equal(summary.value_text, "Deloitte");
-  assert.equal(summary.as_of, "2026-05-08T16:57:05.951Z");
-});
 
 test("quoteSummaryFromCachedQuote maps the canonical quote and the supplied ticker", () => {
   // `now` before expires_at (2026-06-02T08:59:01Z) → fresh.
@@ -296,10 +249,10 @@ const RECENCY_NOW = "2026-06-03T00:00:00.000Z";
 const DAY = 86_400_000;
 
 function factAt(as_of: string, fiscal_year: number | null, fiscal_period: string | null): IssuerFactSummary {
-  return factSummaryFromRow({
+  return {
     metric_key: "revenue",
     display_name: "Revenue",
-    value_num: "100",
+    value_num: 100,
     value_text: null,
     unit: "currency",
     currency: "USD",
@@ -307,7 +260,7 @@ function factAt(as_of: string, fiscal_year: number | null, fiscal_period: string
     fiscal_period,
     as_of,
     source_id: POLYGON_SOURCE_ID,
-  });
+  };
 }
 
 function isoDaysBefore(now: string, days: number): string {
