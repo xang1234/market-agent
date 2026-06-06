@@ -81,6 +81,9 @@ class FakeDb implements QueryExecutor {
     if (/set attempts = attempts \+ 1/i.test(text)) {
       return { rows: [], rowCount: 1 } as never;
     }
+    if (/delete from analyze_template_runs/i.test(text)) {
+      return { rows: [{ run_id: "run-1" }] as R[], rowCount: 1 } as never;
+    }
     return { rows: [], rowCount: 0 } as never;
   }
 
@@ -142,8 +145,11 @@ test("deleteUserAndQueueObjectBlobs queues sha256 user document blobs before del
   assert.match(db.queries[3].text, /sources\.user_id = \$1/i);
   assert.match(db.queries[3].text, /raw_blob_id ~ '\^sha256:\[0-9a-f\]\{64\}\$'/i);
   assert.match(db.queries[3].text, /deleted_at = null/i);
-  assert.match(db.queries[4].text, /delete from users where user_id = \$1/i);
+  assert.match(db.queries[4].text, /delete from analyze_template_runs/i);
+  assert.match(db.queries[4].text, /template_id in \(select template_id from analyze_templates where user_id = \$1\)/i);
+  assert.match(db.queries[5].text, /delete from users where user_id = \$1/i);
   assert.match(db.queries.at(-1)?.text ?? "", /^commit$/i);
+  assert.deepEqual(result.purged_analyze_run_ids, ["run-1"]);
 });
 
 test("deleteUserAndQueueObjectBlobs revives a previously deleted tombstone on requeue", async () => {
