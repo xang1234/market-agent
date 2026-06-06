@@ -4,6 +4,21 @@ import type {
   ScreenerCandidateUniverse,
 } from "./candidate.ts";
 import type { AssetType } from "./fields.ts";
+import {
+  loadRecentIssuerFundamentals,
+  type IssuerFundamentalFact,
+} from "../../fundamentals/src/issuer-fundamentals-reader.ts";
+
+// The six annual reported metrics the screener derives ratios from. Kept in sync
+// with emptyFacts() below.
+const SCREENER_FUNDAMENTAL_METRICS = [
+  "revenue",
+  "gross_profit",
+  "operating_income",
+  "net_income",
+  "eps_diluted",
+  "shares_outstanding_diluted",
+] as const;
 
 export type ScreenerCandidateQueryExecutor = {
   query<R extends Record<string, unknown> = Record<string, unknown>>(
@@ -46,12 +61,6 @@ type CandidateRow = {
   delay_class: string;
   currency: string;
   as_of: Date | string;
-};
-
-type FactRow = {
-  metric_key: string;
-  fiscal_year: number;
-  value_num: string | number | null;
 };
 
 export async function loadPostgresScreenerCandidates(
@@ -100,7 +109,17 @@ export async function loadPostgresScreenerCandidates(
     if (!universe) continue;
     const price = Number(row.price);
     const prevClose = Number(row.prev_close);
-    const facts = await loadLatestFundamentals(db, row.issuer_id);
+    const facts = pickCurrentPriorFundamentals(
+      await loadRecentIssuerFundamentals(
+        db,
+        { kind: "issuer", id: row.issuer_id },
+        {
+          channel: "app",
+          periodKind: "fiscal_y",
+          metricKeys: SCREENER_FUNDAMENTAL_METRICS,
+        },
+      ),
+    );
     const latest = facts.current;
     const prior = facts.prior;
     const revenue = latest.revenue;
@@ -157,69 +176,35 @@ function universeFromRow(row: CandidateRow): ScreenerCandidateUniverse | null {
   };
 }
 
-async function loadLatestFundamentals(
-  db: ScreenerCandidateQueryExecutor,
-  issuerId: string,
-): Promise<{
+function pickCurrentPriorFundamentals(facts: ReadonlyArray<IssuerFundamentalFact>): {
   current: Record<string, number | null>;
   prior: Record<string, number | null>;
-}> {
-  const result = await db.query<FactRow>(
-    `with latest_year as (
-       select max(f.fiscal_year)::int as fiscal_year
-         from facts f
-         join metrics m on m.metric_id = f.metric_id
-        where f.subject_kind = 'issuer'
-          and f.subject_id = $1
-          and f.period_kind = 'fiscal_y'
-          and f.fiscal_period = 'FY'
-          and f.method = 'reported'
-          and f.invalidated_at is null
-          and f.superseded_by is null
-          and m.metric_key = 'revenue'
-     )
-     select m.metric_key,
-            f.fiscal_year,
-            f.value_num
-       from facts f
-       join metrics m on m.metric_id = f.metric_id
-       join latest_year ly on f.fiscal_year in (ly.fiscal_year, ly.fiscal_year - 1)
-      where f.subject_kind = 'issuer'
-        and f.subject_id = $1
-        and f.period_kind = 'fiscal_y'
-        and f.fiscal_period = 'FY'
-        and f.method = 'reported'
-        and f.invalidated_at is null
-        and f.superseded_by is null
-        and m.metric_key = any($2::text[])
-      order by f.fiscal_year desc, m.metric_key, f.as_of desc`,
-    [
-      issuerId,
-      [
-        "revenue",
-        "gross_profit",
-        "operating_income",
-        "net_income",
-        "eps_diluted",
-        "shares_outstanding_diluted",
-      ],
-    ],
-  );
-
-  const latestYear = result.rows[0]?.fiscal_year;
-  const current = emptyFacts();
-  const prior = emptyFacts();
-  if (latestYear === undefined) {
-    return { current, prior };
+} {
+  // Revenue-anchored: current = latest fiscal year that has a revenue fact;
+  // prior = current - 1. Keeps margins' numerator and denominator in the same
+  // year and matches the pre-migration latest_year CTE behavior.
+  let currentYear: number | null = null;
+  for (const fact of facts) {
+    if (fact.metric_key === "revenue" && fact.fiscal_year !== null) {
+      if (currentYear === null || fact.fiscal_year > currentYear) {
+        currentYear = fact.fiscal_year;
+      }
+    }
   }
 
+  const current = emptyFacts();
+  const prior = emptyFacts();
+  if (currentYear === null) return { current, prior };
+
+  const priorYear = currentYear - 1;
   const seen = new Set<string>();
-  for (const row of result.rows) {
-    const bucket = row.fiscal_year === latestYear ? current : prior;
-    const key = `${row.fiscal_year}:${row.metric_key}`;
-    if (seen.has(key)) continue;
+  for (const fact of facts) {
+    if (fact.fiscal_year !== currentYear && fact.fiscal_year !== priorYear) continue;
+    if (!(fact.metric_key in current)) continue; // ignore metrics outside the set
+    const key = `${fact.fiscal_year}:${fact.metric_key}`;
+    if (seen.has(key)) continue; // reader orders as_of desc ⇒ first write is newest
     seen.add(key);
-    bucket[row.metric_key] = row.value_num === null ? null : Number(row.value_num);
+    (fact.fiscal_year === currentYear ? current : prior)[fact.metric_key] = fact.value_num;
   }
 
   return { current, prior };
