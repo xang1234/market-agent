@@ -8,6 +8,7 @@ import type { IssuerSubjectRef } from "./subject-ref.ts";
 // entitled for the egress channel, and display-verified. Chat reads through
 // this; the screener follow-up (fra-savt sibling) will reuse it.
 export type IssuerFundamentalFact = {
+  fact_id: string;
   metric_key: string;
   display_name: string | null;
   value_num: number | null;
@@ -28,6 +29,7 @@ export type LoadRecentIssuerFundamentalsOptions = {
 };
 
 type FactRow = {
+  fact_id: string;
   metric_key: string;
   display_name: string | null;
   value_num: number | string | null;
@@ -51,7 +53,8 @@ export async function loadRecentIssuerFundamentals(
     // keeps derived/estimated out; entitlement_channels and verification_status
     // give parity with the egress guard (fact-repo.listFactsForEgress) and the
     // promotion rules (only promoted facts ground answers).
-    `select m.metric_key,
+    `select f.fact_id::text as fact_id,
+            m.metric_key,
             m.display_name,
             f.value_num,
             f.value_text,
@@ -81,6 +84,7 @@ export async function loadRecentIssuerFundamentals(
 
 function factFromRow(row: FactRow): IssuerFundamentalFact {
   return Object.freeze({
+    fact_id: row.fact_id,
     metric_key: row.metric_key,
     display_name: row.display_name,
     value_num: numericOrNull(row.value_num),

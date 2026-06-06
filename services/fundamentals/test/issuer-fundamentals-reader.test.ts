@@ -25,6 +25,8 @@ test("loadRecentIssuerFundamentals filters on channel + displayable verification
 
   assert.equal(calls.length, 1);
   const { text, values } = calls[0];
+  // fact_id is selected for provenance (fra-eegq).
+  assert.match(text, /f\.fact_id::text as fact_id/);
   // The two new eligibility predicates are present...
   assert.match(text, /entitlement_channels \? \$2/);
   assert.match(text, /verification_status = any\(\$3::verification_status\[\]\)/);
@@ -55,6 +57,7 @@ test("loadRecentIssuerFundamentals honors an explicit channel", async () => {
 test("loadRecentIssuerFundamentals coerces numeric/Date columns and preserves provenance", async () => {
   const { db } = recordingDb([
     {
+      fact_id: "99999999-9999-4999-8999-999999999999",
       metric_key: "revenue",
       display_name: "Revenue",
       value_num: "190872000", // pg returns numeric as string
@@ -68,6 +71,7 @@ test("loadRecentIssuerFundamentals coerces numeric/Date columns and preserves pr
     },
   ]);
   const [fact] = await loadRecentIssuerFundamentals(db, ISSUER, { limit: 24 });
+  assert.equal(fact.fact_id, "99999999-9999-4999-8999-999999999999");
   assert.equal(fact.value_num, 190872000);
   assert.equal(fact.as_of, "2026-05-08T16:57:05.951Z");
   assert.equal(fact.display_name, "Revenue");
