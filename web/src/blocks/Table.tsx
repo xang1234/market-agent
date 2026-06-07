@@ -35,7 +35,7 @@ export function Table({ block }: TableProps): ReactElement {
               {row.map((cell, cellIndex) => (
                 <td
                   key={`${block.id}-row-${rowIndex}-cell-${cellIndex}`}
-                  className="px-3 py-2 tabular-nums text-fg"
+                  className="num px-3 py-2 text-fg"
                 >
                   {formatTableCell(cell)}
                 </td>

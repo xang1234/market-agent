@@ -1,5 +1,16 @@
 import { REF_SEGMENT_KINDS, type RefSegmentKind, type RichTextSegment } from '../blocks/types.ts'
 import type { ChatSseEvent } from './sseEventTypes.ts'
+import {
+  markPlanStepDone,
+  markRunningPlanStepsError,
+  planStepsForBlockBegan,
+  planStepsForSnapshotSealed,
+  planStepsForSnapshotStaged,
+  planStepsForToolCompleted,
+  planStepsForToolStarted,
+  planStepsForTurnStarted,
+  type StreamPlanStep,
+} from './streamPlan.ts'
 
 export type StreamingBlockStatus = 'pending' | 'streaming' | 'completed'
 
@@ -28,6 +39,7 @@ export type StreamState = {
   turn_status: StreamingTurnStatus
   blocks_by_id: ReadonlyMap<string, StreamingBlock>
   block_order: ReadonlyArray<string>
+  plan_steps: ReadonlyArray<StreamPlanStep>
   // Captured from turn.completed so the consumer can fetch the canonical
   // sealed message once the snapshot has landed.
   completed_message_id: string | null
@@ -39,6 +51,7 @@ export const INITIAL_STREAM_STATE: StreamState = Object.freeze({
   turn_status: 'idle',
   blocks_by_id: new Map<string, StreamingBlock>(),
   block_order: [],
+  plan_steps: [],
   completed_message_id: null,
   error: null,
 })
@@ -53,6 +66,7 @@ export function applyChatStreamEvent(state: StreamState, event: ChatSseEvent): S
         turn_status: 'started',
         blocks_by_id: new Map(),
         block_order: [],
+        plan_steps: planStepsForTurnStarted(event),
         completed_message_id: null,
         error: null,
       }
@@ -66,12 +80,18 @@ export function applyChatStreamEvent(state: StreamState, event: ChatSseEvent): S
       // visible and surfaces the wire-level break.
       const completedId = readString(event.message_id)
       if (completedId === null) {
-        return { ...state, turn_status: 'error', error: 'turn.completed missing message_id' }
+        return {
+          ...state,
+          turn_status: 'error',
+          plan_steps: markRunningPlanStepsError(state.plan_steps),
+          error: 'turn.completed missing message_id',
+        }
       }
       return {
         turn_status: 'completed',
         blocks_by_id: new Map(),
         block_order: [],
+        plan_steps: [],
         completed_message_id: completedId,
         error: null,
       }
@@ -81,8 +101,21 @@ export function applyChatStreamEvent(state: StreamState, event: ChatSseEvent): S
       return {
         ...state,
         turn_status: 'error',
-        error: typeof event.error === 'string' ? event.error : 'unknown stream error',
+        plan_steps: markRunningPlanStepsError(state.plan_steps),
+        error: readString(event.error) ?? readString(event.message) ?? 'unknown stream error',
       }
+
+    case 'tool.started':
+      return withPlanSteps(state, planStepsForToolStarted(state.plan_steps, event))
+
+    case 'tool.completed':
+      return withPlanSteps(state, planStepsForToolCompleted(state.plan_steps, event))
+
+    case 'snapshot.staged':
+      return withPlanSteps(state, planStepsForSnapshotStaged(state.plan_steps, event))
+
+    case 'snapshot.sealed':
+      return withPlanSteps(state, planStepsForSnapshotSealed(state.plan_steps, event))
 
     case 'block.began':
       return applyBlockBegan(state, event)
@@ -94,9 +127,12 @@ export function applyChatStreamEvent(state: StreamState, event: ChatSseEvent): S
       return applyBlockCompleted(state, event)
 
     default:
-      // tool.* and snapshot.* events don't affect block rendering state.
       return state
   }
+}
+
+function withPlanSteps(state: StreamState, plan_steps: ReadonlyArray<StreamPlanStep>): StreamState {
+  return plan_steps === state.plan_steps ? state : { ...state, plan_steps }
 }
 
 function applyBlockBegan(state: StreamState, event: ChatSseEvent): StreamState {
@@ -118,6 +154,7 @@ function applyBlockBegan(state: StreamState, event: ChatSseEvent): StreamState {
     ...state,
     blocks_by_id,
     block_order: [...state.block_order, block_id],
+    plan_steps: planStepsForBlockBegan(state.plan_steps),
   }
 }
 
@@ -156,7 +193,15 @@ function applyBlockCompleted(state: StreamState, event: ChatSseEvent): StreamSta
 
   const blocks_by_id = new Map(state.blocks_by_id)
   blocks_by_id.set(block_id, { ...existing, status: 'completed' })
-  return { ...state, blocks_by_id }
+  const allKnownBlocksCompleted = [...blocks_by_id.values()].every((block) => block.status === 'completed')
+  const canCompleteComposer = state.turn_status !== 'error' && allKnownBlocksCompleted
+  return {
+    ...state,
+    blocks_by_id,
+    plan_steps: canCompleteComposer
+      ? markPlanStepDone(state.plan_steps, 'composer')
+      : state.plan_steps,
+  }
 }
 
 function readString(value: unknown): string | null {

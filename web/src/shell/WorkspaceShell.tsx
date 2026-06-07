@@ -44,11 +44,17 @@ export function WorkspaceShell() {
         <WatchlistProvider userId={userId}>
           <EvidenceInspectorProvider>
             <div className="flex h-full w-full bg-bg text-fg">
+              <a
+                href="#workspace-main"
+                className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:border focus:border-line-strong focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-fg focus:shadow-md"
+              >
+                Skip to main content
+              </a>
               <Sidebar />
               <div className="flex min-w-0 flex-1 flex-col">
                 <TopBar />
                 <div className="flex min-h-0 flex-1">
-                  <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                  <main id="workspace-main" className="flex min-w-0 flex-1 flex-col overflow-hidden">
                     <RouteScopeGate />
                   </main>
                   <RightRailSlot />

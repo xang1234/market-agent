@@ -10,12 +10,47 @@ import { issuerIdFromSubject } from '../symbol/profile.ts'
 import type { ResolvedSubject } from '../symbol/search.ts'
 import { AuthInterruptContext } from './authInterruptTypes.ts'
 import { AuthContext } from './authTypes.ts'
+import { RightRailProvider } from './RightRailProvider.tsx'
+import { RightRailSlot } from './RightRailSlot.tsx'
 import { SubjectDetailShell } from './SubjectDetailShell.tsx'
 import { useSubjectDetailContext } from './subjectDetailOutletContext.ts'
 
 const LISTING_ID = '11111111-1111-4111-a111-111111111111'
 const ALT_LISTING_ID = '44444444-4444-4444-a444-444444444444'
 const ISSUER_ID = '33333333-3333-4333-a333-333333333333'
+
+const CONSENSUS_RESPONSE = {
+  consensus: {
+    subject: { kind: 'issuer', id: ISSUER_ID },
+    family: 'analyst_consensus',
+    analyst_count: 41,
+    as_of: '2026-06-01',
+    rating_distribution: {
+      counts: {
+        strong_buy: 10,
+        buy: 20,
+        hold: 9,
+        sell: 2,
+        strong_sell: 0,
+      },
+      contributor_count: 41,
+      as_of: '2026-06-01',
+      source_id: 'source-1',
+    },
+    price_target: {
+      currency: 'USD',
+      low: 120,
+      mean: 210.25,
+      median: 205,
+      high: 260,
+      contributor_count: 31,
+      as_of: '2026-06-01',
+      source_id: 'source-1',
+    },
+    estimates: [],
+    coverage_warnings: [],
+  },
+}
 
 const HYDRATED_LISTING: ResolvedSubject = {
   subject_ref: { kind: 'listing', id: LISTING_ID },
@@ -106,7 +141,10 @@ function wrapShell(element: React.ReactElement): React.ReactElement {
           requestProtectedAction: () => undefined,
         }}
       >
-        {element}
+        <RightRailProvider>
+          {element}
+          <RightRailSlot />
+        </RightRailProvider>
       </AuthInterruptContext.Provider>
     </AuthContext.Provider>
   )
@@ -184,6 +222,73 @@ test('SubjectDetailShell hydrates a bare listing route before child sections nee
 
     assert.match(dom.window.document.body.innerHTML, new RegExp(ISSUER_ID))
     assert.ok(calls.includes('/v1/subjects/hydrate'))
+    await act(async () => root.unmount())
+  } finally {
+    globalThis.fetch = originalFetch
+    restoreGlobals()
+  }
+})
+
+test('SubjectDetailShell surfaces issuer consensus in the persistent right rail', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
+  const originalFetch = globalThis.fetch
+  const calls: string[] = []
+
+  try {
+    globalThis.fetch = async (input) => {
+      const url = String(input)
+      calls.push(url)
+      if (url.startsWith('/v1/fundamentals/consensus?')) {
+        return new Response(JSON.stringify(CONSENSUS_RESPONSE), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ unavailable: { detail: 'test quote unavailable' } }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(
+        wrapShell(
+          <MemoryRouter
+            initialEntries={[
+              {
+                pathname: `/symbol/listing%3A${LISTING_ID}/overview`,
+                state: { subject: HYDRATED_LISTING },
+              },
+            ]}
+          >
+            <Routes>
+              <Route path="/symbol/:subjectRef" element={<SubjectDetailShell />}>
+                <Route path="overview" element={<ChildMountedProbe />} />
+              </Route>
+            </Routes>
+          </MemoryRouter>,
+        ),
+      )
+    })
+
+    for (
+      let attempt = 0;
+      attempt < 5 && !dom.window.document.body.innerHTML.includes('Street view');
+      attempt += 1
+    ) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+    }
+
+    assert.match(dom.window.document.body.innerHTML, /Street view/)
+    assert.match(dom.window.document.body.innerHTML, /Buy/)
+    assert.match(dom.window.document.body.innerHTML, /\$210\.25/)
+    assert.ok(
+      calls.includes(`/v1/fundamentals/consensus?subject_kind=issuer&subject_id=${ISSUER_ID}`),
+    )
     await act(async () => root.unmount())
   } finally {
     globalThis.fetch = originalFetch

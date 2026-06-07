@@ -23,6 +23,7 @@ test('INITIAL_STREAM_STATE is idle with no blocks', () => {
   assert.equal(INITIAL_STREAM_STATE.turn_status, 'idle')
   assert.equal(INITIAL_STREAM_STATE.blocks_by_id.size, 0)
   assert.equal(INITIAL_STREAM_STATE.block_order.length, 0)
+  assert.equal(INITIAL_STREAM_STATE.plan_steps.length, 0)
 })
 
 test('turn.started resets the state to a fresh started turn', () => {
@@ -36,6 +37,10 @@ test('turn.started resets the state to a fresh started turn', () => {
   assert.equal(state.turn_status, 'started')
   assert.equal(state.blocks_by_id.size, 0)
   assert.equal(state.block_order.length, 0)
+  assert.deepEqual(state.plan_steps.map((step) => [step.label, step.status]), [
+    ['Planner', 'running'],
+    ['Composer', 'waiting'],
+  ])
   assert.equal(state.completed_message_id, null)
   assert.equal(state.error, null)
 })
@@ -222,6 +227,7 @@ test('turn.completed clears blocks_by_id and block_order so memory does not grow
 
   assert.equal(state.blocks_by_id.size, 0)
   assert.deepEqual(state.block_order, [])
+  assert.deepEqual(state.plan_steps, [])
   assert.equal(state.completed_message_id, 'msg-1')
 })
 
@@ -242,6 +248,7 @@ test('turn.completed without a message_id flips to error and preserves the strea
     assert.equal(after.completed_message_id, null)
     assert.equal(after.blocks_by_id.size, 1, `${JSON.stringify(malformed)}: streaming graph must stay visible`)
     assert.deepEqual(after.block_order, ['b1'])
+    assert.equal(after.plan_steps.find((step) => step.step_id === 'composer')?.status, 'error')
     assert.match(after.error ?? '', /message_id/)
   }
 })
@@ -261,6 +268,33 @@ test('turn.error mid-stream preserves partial blocks for the inline error notice
   assert.equal(state.error, 'upstream_500')
   assert.equal(state.blocks_by_id.size, 1)
   assert.deepEqual(state.block_order, ['b1'])
+})
+
+test('turn.error accepts backend message payloads and marks running plan steps failed', () => {
+  let state: StreamState = INITIAL_STREAM_STATE
+  state = applyChatStreamEvent(state, event('turn.started', 1))
+  state = applyChatStreamEvent(state, event('turn.error', 2, { message: 'snapshot verification failed' }))
+
+  assert.equal(state.turn_status, 'error')
+  assert.equal(state.error, 'snapshot verification failed')
+  assert.equal(state.plan_steps.find((step) => step.step_id === 'planner')?.status, 'error')
+})
+
+test('late block.completed after turn.error does not flip composer back to done', () => {
+  let state: StreamState = INITIAL_STREAM_STATE
+  state = applyChatStreamEvent(state, event('turn.started', 1))
+  state = applyChatStreamEvent(state, event('block.began', 2, { block_id: 'b1', kind: 'rich_text' }))
+  state = applyChatStreamEvent(state, event('turn.error', 3, { message: 'snapshot verification failed' }))
+
+  assert.equal(state.turn_status, 'error')
+  assert.equal(state.error, 'snapshot verification failed')
+  assert.equal(state.plan_steps.find((step) => step.step_id === 'composer')?.status, 'error')
+
+  state = applyChatStreamEvent(state, event('block.completed', 4, { block_id: 'b1', content_hash: 'h1' }))
+
+  assert.equal(state.turn_status, 'error')
+  assert.equal(state.error, 'snapshot verification failed')
+  assert.equal(state.plan_steps.find((step) => step.step_id === 'composer')?.status, 'error')
 })
 
 test('block.delta after block.completed is a no-op (sealed block stays sealed)', () => {
@@ -301,14 +335,51 @@ test('turn.completed followed by turn.error flips status to error (terminal-afte
   assert.equal(state.error, 'late_failure')
 })
 
-test('tool.* and snapshot.* events return the same state reference', () => {
+test('tool and snapshot events update the streamed agent plan from real SSE payloads', () => {
   let state: StreamState = INITIAL_STREAM_STATE
-  state = applyChatStreamEvent(state, event('block.began', 1, { block_id: 'b1', kind: 'rich_text' }))
+  state = applyChatStreamEvent(state, event('turn.started', 1, { bundle_id: 'single_subject_analysis' }))
+  state = applyChatStreamEvent(state, event('tool.started', 2, {
+    tool_call_id: 'resolve-1',
+    tool_name: 'resolve_subjects',
+  }))
+  assert.deepEqual(state.plan_steps.map((step) => [step.label, step.status]), [
+    ['Planner', 'running'],
+    ['Composer', 'waiting'],
+  ])
 
-  for (const type of ['tool.started', 'tool.completed', 'snapshot.staged', 'snapshot.sealed'] as const) {
-    const after = applyChatStreamEvent(state, event(type, 99, { tool_call_id: 't1', tool_name: 'x', snapshot_id: 's1' }))
-    assert.equal(after, state, `${type} must return same state reference`)
-  }
+  state = applyChatStreamEvent(state, event('tool.completed', 3, {
+    tool_call_id: 'resolve-1',
+    tool_name: 'resolve_subjects',
+    resolution_status: 'resolved',
+  }))
+  state = applyChatStreamEvent(state, event('tool.started', 4, {
+    tool_call_id: 'fundamentals-1',
+    tool_name: 'compose_analyst_blocks',
+  }))
+  assert.deepEqual(state.plan_steps.map((step) => [step.label, step.status]), [
+    ['Planner', 'done'],
+    ['Composer', 'waiting'],
+    ['Fundamentals', 'running'],
+  ])
+
+  state = applyChatStreamEvent(state, event('tool.completed', 5, {
+    tool_call_id: 'fundamentals-1',
+    tool_name: 'compose_analyst_blocks',
+    status: 'ok',
+  }))
+  state = applyChatStreamEvent(state, event('snapshot.staged', 6, { snapshot_id: 'snap-1' }))
+  state = applyChatStreamEvent(state, event('snapshot.sealed', 7, { snapshot_id: 'snap-1' }))
+  assert.deepEqual(state.plan_steps.map((step) => [step.label, step.status]), [
+    ['Planner', 'done'],
+    ['Composer', 'waiting'],
+    ['Fundamentals', 'done'],
+    ['Snapshot', 'done'],
+  ])
+
+  state = applyChatStreamEvent(state, event('block.began', 8, { block_id: 'b1', kind: 'rich_text' }))
+  assert.equal(state.plan_steps.find((step) => step.step_id === 'composer')?.status, 'running')
+  state = applyChatStreamEvent(state, event('block.completed', 9, { block_id: 'b1', content_hash: 'h1' }))
+  assert.equal(state.plan_steps.find((step) => step.step_id === 'composer')?.status, 'done')
 })
 
 test('multi-block sequence preserves block_order and per-block segments through to block.completed', () => {

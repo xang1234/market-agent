@@ -215,7 +215,7 @@ function FindingRow({ card }: { card: HomeFindingCardSummary }) {
     <div className="flex flex-col">
       <span className="text-sm font-medium">{card.headline}</span>
       <span className="text-xs uppercase tracking-wide text-muted">
-        {card.severity} · {card.support_count} sources · {card.created_at}
+        {card.severity} · <span className="num">{card.support_count}</span> sources · {card.created_at}
       </span>
     </div>
   )
@@ -291,10 +291,10 @@ function QuoteCell({ row }: { row: HomeQuoteRow }) {
           {row.ticker}
           <span className="ml-1 text-xs font-normal text-faint">{row.mic}</span>
         </span>
-        <span className={`text-sm font-semibold ${tone}`}>{formatChangePercent(row.change_pct)}</span>
+        <span className={`num text-sm font-semibold ${tone}`}>{formatChangePercent(row.change_pct)}</span>
       </div>
       <div className="mt-1 flex items-baseline justify-between gap-2 text-xs text-muted">
-        <span>{formatPrice(row.price, row.currency)}</span>
+        <span className="num">{formatPrice(row.price, row.currency)}</span>
         <span className="uppercase">{row.delay_class.replace('_', ' ')}</span>
       </div>
     </div>
@@ -322,7 +322,9 @@ function AgentSummariesSection({
               </div>
               <div className="mt-1 text-sm text-fg">{agentSummaryHeadline(row)}</div>
               <div className="mt-1 text-xs text-muted">
-                {row.finding_counts.total} total · {row.finding_counts.high_or_critical} high+ · {row.finding_counts.critical} critical
+                <span className="num">{row.finding_counts.total}</span> total ·{' '}
+                <span className="num">{row.finding_counts.high_or_critical}</span> high+ ·{' '}
+                <span className="num">{row.finding_counts.critical}</span> critical
               </div>
             </li>
           ))}

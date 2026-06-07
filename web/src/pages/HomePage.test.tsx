@@ -124,6 +124,58 @@ test('UserHomeView renders all five sections when state.kind is ready', () => {
   assert.match(html, /Pinned screens/)
 })
 
+test('UserHomeView applies tabular numerals to quote and count metrics', () => {
+  const summary: HomeSummary = {
+    ...EMPTY_SUMMARY,
+    findings: {
+      cards: [{
+        home_card_id: 'card-1',
+        headline: 'Revenue acceleration',
+        severity: 'high',
+        support_count: 12,
+        contributing_finding_count: 3,
+        created_at: '2026-05-05T12:00:00.000Z',
+        destination: { kind: 'none', reason: 'fixture' },
+        subject_refs: [],
+      }],
+    },
+    market_pulse: {
+      rows: [{
+        listing: { kind: 'listing', id: '22222222-2222-4222-8222-222222222222' },
+        ticker: 'AAPL',
+        mic: 'XNAS',
+        price: 191.42,
+        prev_close: 189.07,
+        change_abs: 2.35,
+        currency: 'USD',
+        change_pct: 0.0124,
+        session_state: 'regular',
+        delay_class: 'delayed_15m',
+        as_of: '2026-05-05T12:00:00.000Z',
+      }],
+      omitted: [],
+    },
+    agent_summaries: {
+      window_hours: 24,
+      rows: [{
+        agent_id: 'agent-1',
+        name: 'Earnings monitor',
+        enabled: true,
+        last_run: null,
+        finding_counts: { total: 7, high_or_critical: 2, critical: 1 },
+        latest_high_or_critical_finding: null,
+      }],
+    },
+  }
+
+  const html = renderToString(<UserHomeView state={{ kind: 'ready', summary }} />)
+
+  assert.match(html, /class="[^"]*\bnum\b[^"]*"[^>]*>\+1\.24%/)
+  assert.match(html, /class="[^"]*\bnum\b[^"]*"[^>]*>\$191\.42/)
+  assert.match(html, /class="num">12<\/span> sources/)
+  assert.match(html, /class="num">7<\/span> total/)
+})
+
 test('UserHomeContent fetches the summary on mount and renders ready state', async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
   const document = dom.window.document
