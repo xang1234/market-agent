@@ -28,11 +28,7 @@ import {
 } from "../src/dev-fixtures.ts";
 import { DEV_SEGMENTS } from "../src/dev-segment-fixtures.ts";
 import { DEV_STATEMENTS } from "../src/dev-statement-fixtures.ts";
-import {
-  DEV_PRICE_SOURCE_ID,
-  DEV_STATEMENT_SOURCE_ID,
-  DEV_STATS_INPUTS,
-} from "../src/dev-stats-fixtures.ts";
+import { DEV_STATS_INPUTS } from "../src/dev-stats-fixtures.ts";
 import type { KeyStat } from "../src/key-stats.ts";
 import type { UnavailableEnvelope } from "../src/availability.ts";
 
@@ -132,28 +128,30 @@ test("GET /v1/fundamentals/stats exposes basis/period/as_of on every stat (deriv
   }
 });
 
-test("GET /v1/fundamentals/stats exposes per-input source_id on every stat input (provenance)", async (t) => {
+test("GET /v1/fundamentals/stats projects per-input provenance off the public wire", async (t) => {
   const url = await startServer(t, buildDeps());
   const res = await fetch(
     `${url}/v1/fundamentals/stats?subject_kind=issuer&subject_id=${APPLE_ISSUER_ID}`,
   );
   const body = (await res.json()) as GetStatsResponse;
 
+  assert.ok(body.stats.stats.length > 0, "envelope should carry stats");
   for (const stat of body.stats.stats) {
-    assert.ok(stat.inputs.length > 0, `${stat.stat_key} should cite its inputs`);
-    for (const input of stat.inputs) {
-      assert.ok(typeof input.source_id === "string" && input.source_id.length > 0,
-        `${stat.stat_key} input missing source_id`);
-      assert.ok(typeof input.as_of === "string" && input.as_of.length > 0,
-        `${stat.stat_key} input missing as_of`);
-    }
+    // Provenance (internal metric_id/source_id + evidence-plane fact_id) is not on the wire.
+    assert.equal(
+      (stat as { inputs?: unknown }).inputs,
+      undefined,
+      `${stat.stat_key} should not ship inputs on the public wire`,
+    );
+    // The headline fields a wire client actually consumes remain present.
+    assert.ok(typeof stat.stat_key === "string" && stat.stat_key.length > 0);
+    assert.ok("value_num" in stat, `${stat.stat_key} should carry value_num`);
+    assert.ok(
+      stat.computation !== undefined && typeof stat.computation.expression === "string",
+      `${stat.stat_key} should carry its computation`,
+    );
+    assert.ok(Array.isArray(stat.warnings), `${stat.stat_key} should carry warnings`);
   }
-
-  const peRatio = statByKey(body.stats.stats, "pe_ratio");
-  const priceInput = peRatio.inputs.find((i) => i.kind === "market_fact");
-  const epsInput = peRatio.inputs.find((i) => i.kind === "statement_line" && i.metric_key === "eps_diluted");
-  assert.equal(priceInput?.source_id, DEV_PRICE_SOURCE_ID);
-  assert.equal(epsInput?.source_id, DEV_STATEMENT_SOURCE_ID);
 });
 
 test("GET /v1/fundamentals/stats: sparse inputs flow warnings through unmodified instead of fabricating values", async (t) => {
