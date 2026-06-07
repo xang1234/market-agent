@@ -280,6 +280,23 @@ test('turn.error accepts backend message payloads and marks running plan steps f
   assert.equal(state.plan_steps.find((step) => step.step_id === 'planner')?.status, 'error')
 })
 
+test('late block.completed after turn.error does not flip composer back to done', () => {
+  let state: StreamState = INITIAL_STREAM_STATE
+  state = applyChatStreamEvent(state, event('turn.started', 1))
+  state = applyChatStreamEvent(state, event('block.began', 2, { block_id: 'b1', kind: 'rich_text' }))
+  state = applyChatStreamEvent(state, event('turn.error', 3, { message: 'snapshot verification failed' }))
+
+  assert.equal(state.turn_status, 'error')
+  assert.equal(state.error, 'snapshot verification failed')
+  assert.equal(state.plan_steps.find((step) => step.step_id === 'composer')?.status, 'error')
+
+  state = applyChatStreamEvent(state, event('block.completed', 4, { block_id: 'b1', content_hash: 'h1' }))
+
+  assert.equal(state.turn_status, 'error')
+  assert.equal(state.error, 'snapshot verification failed')
+  assert.equal(state.plan_steps.find((step) => step.step_id === 'composer')?.status, 'error')
+})
+
 test('block.delta after block.completed is a no-op (sealed block stays sealed)', () => {
   // A late delta arriving after the seal would otherwise silently undo the
   // completed status and append more content to a "finalized" block.

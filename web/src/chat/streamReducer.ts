@@ -194,10 +194,11 @@ function applyBlockCompleted(state: StreamState, event: ChatSseEvent): StreamSta
   const blocks_by_id = new Map(state.blocks_by_id)
   blocks_by_id.set(block_id, { ...existing, status: 'completed' })
   const allKnownBlocksCompleted = [...blocks_by_id.values()].every((block) => block.status === 'completed')
+  const canCompleteComposer = state.turn_status !== 'error' && allKnownBlocksCompleted
   return {
     ...state,
     blocks_by_id,
-    plan_steps: allKnownBlocksCompleted
+    plan_steps: canCompleteComposer
       ? markPlanStepDone(state.plan_steps, 'composer')
       : state.plan_steps,
   }

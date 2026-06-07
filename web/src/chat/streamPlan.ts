@@ -172,10 +172,11 @@ function upsertPlanStep(
   steps: ReadonlyArray<StreamPlanStep>,
   step: StreamPlanStep,
 ): ReadonlyArray<StreamPlanStep> {
+  const frozenStep = Object.freeze({ ...step })
   const index = steps.findIndex((existing) => existing.step_id === step.step_id)
-  if (index === -1) return Object.freeze([...steps, step])
+  if (index === -1) return Object.freeze([...steps, frozenStep])
   const next = [...steps]
-  next[index] = step
+  next[index] = frozenStep
   return Object.freeze(next)
 }
 
