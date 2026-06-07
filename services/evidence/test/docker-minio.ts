@@ -5,6 +5,7 @@ import {
   ListBucketsCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
 
 type Cleanup = () => void | Promise<void>;
 type TestContextLike = { after(callback: Cleanup): void };
@@ -15,12 +16,40 @@ const MINIO_IMAGE = "minio/minio:RELEASE.2025-09-07T16-13-09Z";
 const MINIO_USER = "minioadmin";
 const MINIO_PASSWORD = "minioadmin";
 
-function run(command: string, args: string[]) {
-  return spawnSync(command, args, { encoding: "utf8" });
+const DOCKER_PROBE_TIMEOUT_MS = 10_000; // `docker version` probe (dockerAvailable)
+const DOCKER_CMD_TIMEOUT_MS = 15_000; // `docker port` / `docker rm` — fast commands
+const DOCKER_RUN_TIMEOUT_MS = 90_000; // `docker run` — may pull the pinned image
+
+type SpawnResult = {
+  status: number | null;
+  error?: Error;
+  stdout?: string;
+  stderr?: string;
+};
+
+// Runs a `docker` subcommand with a hard timeout so a blocking call (unresponsive
+// daemon, stuck image pull) can't park the event loop indefinitely. Injectable
+// so dockerAvailable's skip-on-timeout path is unit-testable.
+type DockerRunner = (args: string[], timeoutMs: number) => SpawnResult;
+
+const runDocker: DockerRunner = (args, timeoutMs) =>
+  spawnSync("docker", args, { encoding: "utf8", timeout: timeoutMs });
+
+// Turn a spawnSync result into a clear failure. A timed-out command parks the
+// event loop until killed, so it surfaces here as `error` (ETIMEDOUT) with a
+// null status; a normal failure surfaces as a non-zero status.
+export function interpretDockerResult(result: SpawnResult, action: string, timeoutMs: number): void {
+  if (result.error) {
+    const timedOut = (result.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
+    const reason = timedOut ? `timed out after ${timeoutMs}ms` : result.error.message;
+    throw new Error(`docker ${action} failed: ${reason}`);
+  }
+  assert.equal(result.status, 0, result.stderr || result.stdout);
 }
 
-export function dockerAvailable(): boolean {
-  return run("docker", ["version", "--format", "{{.Server.Version}}"]).status === 0;
+export function dockerAvailable(run: DockerRunner = runDocker): boolean {
+  const result = run(["version", "--format", "{{.Server.Version}}"], DOCKER_PROBE_TIMEOUT_MS);
+  return !result.error && result.status === 0;
 }
 
 function createContainerName(prefix: string): string {
@@ -28,7 +57,7 @@ function createContainerName(prefix: string): string {
 }
 
 function startMinio(containerName: string): { hostPort: string } {
-  const result = run("docker", [
+  const result = runDocker([
     "run",
     "--detach",
     "--rm",
@@ -43,18 +72,18 @@ function startMinio(containerName: string): { hostPort: string } {
     MINIO_IMAGE,
     "server",
     "/data",
-  ]);
-  assert.equal(result.status, 0, result.stderr || result.stdout);
+  ], DOCKER_RUN_TIMEOUT_MS);
+  interpretDockerResult(result, "run", DOCKER_RUN_TIMEOUT_MS);
 
-  const portResult = run("docker", ["port", containerName, "9000/tcp"]);
-  assert.equal(portResult.status, 0, portResult.stderr || portResult.stdout);
-  const match = portResult.stdout.trim().match(/:(\d+)$/);
-  assert.ok(match, `expected docker port output to include a host port, got: ${portResult.stdout.trim()}`);
+  const portResult = runDocker(["port", containerName, "9000/tcp"], DOCKER_CMD_TIMEOUT_MS);
+  interpretDockerResult(portResult, "port", DOCKER_CMD_TIMEOUT_MS);
+  const match = portResult.stdout?.trim().match(/:(\d+)$/);
+  assert.ok(match, `expected docker port output to include a host port, got: ${portResult.stdout?.trim()}`);
   return { hostPort: match[1] };
 }
 
 function stopMinio(containerName: string): void {
-  run("docker", ["rm", "--force", containerName]);
+  runDocker(["rm", "--force", containerName], DOCKER_CMD_TIMEOUT_MS);
 }
 
 async function waitForMinio(client: S3Client, maxAttempts = 120): Promise<void> {
@@ -84,6 +113,9 @@ export async function bootstrapMinio(
     region: "us-east-1",
     credentials: { accessKeyId: MINIO_USER, secretAccessKey: MINIO_PASSWORD },
     forcePathStyle: true,
+    // Bound each request so a black-holed endpoint makes waitForMinio's poll
+    // loop reject within seconds instead of stalling.
+    requestHandler: new NodeHttpHandler({ connectionTimeout: 2_000, requestTimeout: 5_000 }),
   });
 
   // node:test runs t.after() hooks in registration order (FIFO), not LIFO.
