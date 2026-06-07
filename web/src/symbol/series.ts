@@ -102,13 +102,24 @@ export async function fetchSeries(
   return (await res.json()) as GetSeriesResponse
 }
 
+// Ranges behind the Overview price-range toggle. 1M preserves the prior fixed
+// 30-day window, so the default view is unchanged when no selection is made.
+export type PriceWindow = '1M' | '6M' | '1Y'
+
+export const PRICE_WINDOW_DAYS: Record<PriceWindow, number> = {
+  '1M': 30,
+  '6M': 180,
+  '1Y': 365,
+}
+
 // split_and_div_adjusted is the only basis the market service emits today.
-export function recentDailyQuery(
+export function windowedDailyQuery(
   listingId: string,
+  days: number,
   endIso: string = new Date().toISOString(),
 ): NormalizedSeriesQuery {
   const endMs = Date.parse(endIso)
-  const startMs = endMs - 30 * 24 * 60 * 60 * 1000
+  const startMs = endMs - days * 24 * 60 * 60 * 1000
   return {
     subject_refs: [{ kind: 'listing', id: listingId }],
     range: { start: new Date(startMs).toISOString(), end: new Date(endMs).toISOString() },
