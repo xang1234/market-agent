@@ -12,7 +12,7 @@ import type { EarningsEventsEnvelope } from "./earnings.ts";
 import type { EarningsRepository } from "./earnings-repository.ts";
 import { HOLDER_KINDS, type HolderKind, type HoldersEnvelope } from "./holders.ts";
 import type { HoldersRepository } from "./holders-repository.ts";
-import type { KeyStatsEnvelope } from "./key-stats.ts";
+import type { KeyStat, KeyStatsEnvelope } from "./key-stats.ts";
 import type { IssuerProfile } from "./profile.ts";
 import type { IssuerProfileRepository } from "./issuer-repository.ts";
 import {
@@ -53,9 +53,20 @@ export type GetProfileResponse = {
   profile: IssuerProfile;
 };
 
-export type GetStatsResponse = {
-  stats: KeyStatsEnvelope;
+// Public wire shape: the provenance-rich `inputs` array stays internal (peer-metrics
+// reads it in-process via StatsRepository); it is projected off the HTTP response.
+export type PublicKeyStat = Omit<KeyStat, "inputs">;
+export type PublicKeyStatsEnvelope = Omit<KeyStatsEnvelope, "stats"> & {
+  stats: ReadonlyArray<PublicKeyStat>;
 };
+
+export type GetStatsResponse = {
+  stats: PublicKeyStatsEnvelope;
+};
+
+function toPublicStatsEnvelope(envelope: KeyStatsEnvelope): PublicKeyStatsEnvelope {
+  return { ...envelope, stats: envelope.stats.map(({ inputs, ...stat }) => stat) };
+}
 
 export type GetStatementsRequest = {
   subject_ref: IssuerSubjectRef;
@@ -136,7 +147,7 @@ export function createFundamentalsServer(deps: FundamentalsServerDeps): Server {
             });
             return;
           }
-          const response: GetStatsResponse = { stats: outcome.data };
+          const response: GetStatsResponse = { stats: toPublicStatsEnvelope(outcome.data) };
           respond(res, 200, response);
           return;
         }
