@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   fetchSeries,
-  recentDailyQuery,
+  windowedDailyQuery,
   SeriesFetchError,
   singleListingOutcome,
   type GetSeriesResponse,
@@ -15,19 +15,25 @@ const POLYGON_SOURCE_ID = '00000000-0000-4000-a000-000000000001'
 
 const FIXED_END = '2026-04-26T15:30:00.000Z'
 
-test('recentDailyQuery binds all five dimensions of the spec series query', () => {
-  const q = recentDailyQuery(APPLE_LISTING_ID, FIXED_END)
+test('windowedDailyQuery binds all five dimensions of the spec series query', () => {
+  const q = windowedDailyQuery(APPLE_LISTING_ID, 30, FIXED_END)
   assert.deepEqual(q.subject_refs, [{ kind: 'listing', id: APPLE_LISTING_ID }])
   assert.equal(q.interval, '1d')
   assert.equal(q.basis, 'split_and_div_adjusted')
   assert.equal(q.normalization, 'raw')
   assert.equal(q.range.end, FIXED_END)
-  const span = Date.parse(q.range.end) - Date.parse(q.range.start)
-  assert.equal(span, 30 * 24 * 60 * 60 * 1000)
+})
+
+test('windowedDailyQuery sizes the range span from the day window', () => {
+  for (const days of [30, 180, 365]) {
+    const q = windowedDailyQuery(APPLE_LISTING_ID, days, FIXED_END)
+    const span = Date.parse(q.range.end) - Date.parse(q.range.start)
+    assert.equal(span, days * 24 * 60 * 60 * 1000, `span for ${days}d`)
+  }
 })
 
 test('fetchSeries POSTs JSON, sends the binding query, and returns the GetSeriesResponse verbatim', async () => {
-  const query = recentDailyQuery(APPLE_LISTING_ID, FIXED_END)
+  const query = windowedDailyQuery(APPLE_LISTING_ID, 30, FIXED_END)
   const wireResponse: GetSeriesResponse = {
     query,
     results: [
@@ -72,7 +78,7 @@ test('fetchSeries POSTs JSON, sends the binding query, and returns the GetSeries
 })
 
 test('fetchSeries throws SeriesFetchError on non-2xx with the status code', async () => {
-  const query: NormalizedSeriesQuery = recentDailyQuery(APPLE_LISTING_ID, FIXED_END)
+  const query: NormalizedSeriesQuery = windowedDailyQuery(APPLE_LISTING_ID, 30, FIXED_END)
   const fetchImpl: typeof fetch = async () =>
     new Response(JSON.stringify({ error: 'boom' }), { status: 400 })
   await assert.rejects(
@@ -82,7 +88,7 @@ test('fetchSeries throws SeriesFetchError on non-2xx with the status code', asyn
 })
 
 test('singleListingOutcome returns the matching per-listing outcome', () => {
-  const query = recentDailyQuery(APPLE_LISTING_ID, FIXED_END)
+  const query = windowedDailyQuery(APPLE_LISTING_ID, 30, FIXED_END)
   const response: GetSeriesResponse = {
     query,
     results: [
@@ -106,7 +112,7 @@ test('singleListingOutcome returns the matching per-listing outcome', () => {
 })
 
 test('singleListingOutcome returns null when the listing is not in the response', () => {
-  const query: NormalizedSeriesQuery = recentDailyQuery(MSFT_LISTING_ID, FIXED_END)
+  const query: NormalizedSeriesQuery = windowedDailyQuery(MSFT_LISTING_ID, 30, FIXED_END)
   const response: GetSeriesResponse = { query, results: [] }
   assert.equal(singleListingOutcome(response, APPLE_LISTING_ID), null)
 })

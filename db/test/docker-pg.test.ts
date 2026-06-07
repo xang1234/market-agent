@@ -119,6 +119,45 @@ test("applySchemaWithRetry does not retry non-startup failures", async () => {
   assert.equal(calls, 1);
 });
 
+// Timeout-hardening contract: a wedged daemon must surface as a clear, bounded
+// error rather than a bare `null !== 0` assertion or an unbounded hang.
+// (Mirrors services/evidence/test/docker-minio.ts; both collapse when the
+// docker test harnesses are consolidated.)
+test("interpretDockerResult throws a clear timeout error on an ETIMEDOUT result", () => {
+  const api = dockerPg as Record<string, unknown>;
+  const interpretDockerResult = api.interpretDockerResult as (
+    result: { status: number | null; error?: Error; stdout?: string; stderr?: string },
+    action: string,
+    timeoutMs: number,
+  ) => void;
+
+  const result = {
+    status: null,
+    error: Object.assign(new Error("spawnSync docker ETIMEDOUT"), { code: "ETIMEDOUT" }),
+  };
+  assert.throws(
+    () => interpretDockerResult(result, "run", 120_000),
+    /docker run failed: timed out after 120000ms/,
+  );
+});
+
+test("interpretDockerResult surfaces stderr on a non-zero exit and is a no-op on success", () => {
+  const api = dockerPg as Record<string, unknown>;
+  const interpretDockerResult = api.interpretDockerResult as (
+    result: { status: number | null; error?: Error; stdout?: string; stderr?: string },
+    action: string,
+    timeoutMs: number,
+  ) => void;
+
+  assert.throws(
+    () => interpretDockerResult({ status: 1, stderr: "boom", stdout: "" }, "port", 15_000),
+    /boom/,
+  );
+  assert.doesNotThrow(() =>
+    interpretDockerResult({ status: 0, stdout: "ok" }, "run", 120_000),
+  );
+});
+
 test("waitForDatabaseConnection retries transient connection resets before succeeding", async () => {
   const api = dockerPg as Record<string, unknown>;
   assert.equal(typeof api.waitForDatabaseConnection, "function");

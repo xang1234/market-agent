@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { pluralize } from '../../format/pluralize.ts'
 import { useSubjectDetailContext } from '../../shell/subjectDetailOutletContext.ts'
 import { Card } from '../../symbol/Card.tsx'
@@ -24,11 +24,14 @@ import {
 import { listingIdForQuote } from '../../symbol/quote.ts'
 import {
   fetchSeries,
-  recentDailyQuery,
+  windowedDailyQuery,
+  PRICE_WINDOW_DAYS,
   singleListingOutcome,
   type NormalizedBar,
+  type PriceWindow,
 } from '../../symbol/series.ts'
 import { Sparkline } from '../../symbol/Sparkline.tsx'
+import { SegmentedToggle } from '../../symbol/SegmentedToggle.tsx'
 import { SectorChip } from '../../symbol/SectorChip.tsx'
 import { useConsensus } from '../../symbol/useConsensus.ts'
 import { ConsensusBody, PriceTargetBody } from '../../symbol/consensusViews.tsx'
@@ -39,6 +42,12 @@ const STAT_ORDER: ReadonlyArray<KeyStatKey> = [
   'net_margin',
   'revenue_growth_yoy',
   'pe_ratio',
+]
+
+const PRICE_WINDOW_OPTIONS: ReadonlyArray<{ value: PriceWindow; label: string }> = [
+  { value: '1M', label: '1M' },
+  { value: '6M', label: '6M' },
+  { value: '1Y', label: '1Y' },
 ]
 
 export function OverviewSection() {
@@ -62,9 +71,20 @@ export function OverviewSection() {
     return { kind: 'ready', data }
   })
 
-  const series = useFetched<NormalizedBar[]>(listingId, async (id, signal) => {
-    const response = await fetchSeries(recentDailyQuery(id), { signal })
-    const outcome = singleListingOutcome(response, id)
+  const [priceWindow, setPriceWindow] = useState<PriceWindow>('1M')
+  // Window lives in the key so a toggle is one intentional re-fetch and a
+  // return visit to the same window is a cache hit — not a per-render re-key.
+  const seriesKey = listingId === null ? null : `${listingId}|${priceWindow}`
+
+  const series = useFetched<NormalizedBar[]>(seriesKey, async (_key, signal) => {
+    if (listingId === null) {
+      return { kind: 'unavailable', reason: 'no listing context for this subject' }
+    }
+    const response = await fetchSeries(
+      windowedDailyQuery(listingId, PRICE_WINDOW_DAYS[priceWindow]),
+      { signal },
+    )
+    const outcome = singleListingOutcome(response, listingId)
     if (outcome === null) {
       return { kind: 'unavailable', reason: 'series response did not include this listing' }
     }
@@ -93,7 +113,20 @@ export function OverviewSection() {
             {(data) => <ProfileBody profile={data} />}
           </FetchStateView>
         </Card>
-        <Card testId="overview-performance" headingId="overview-performance-heading" heading="Performance · 30d">
+        <Card
+          testId="overview-performance"
+          headingId="overview-performance-heading"
+          heading={`Performance · ${priceWindow}`}
+          action={
+            <SegmentedToggle
+              options={PRICE_WINDOW_OPTIONS}
+              value={priceWindow}
+              onChange={setPriceWindow}
+              ariaLabel="Price range"
+              testIdPrefix="price-window"
+            />
+          }
+        >
           <FetchStateView
             state={series}
             noun="series"
@@ -105,7 +138,7 @@ export function OverviewSection() {
                   Not enough bars in the requested range to draw a line.
                 </p>
               ) : (
-                <PriceSparkline bars={bars} />
+                <PriceSparkline bars={bars} windowLabel={priceWindow} />
               )
             }
           </FetchStateView>
@@ -231,7 +264,7 @@ function ExchangeBadge({ exchange }: { exchange: IssuerProfileExchange }) {
   )
 }
 
-function PriceSparkline({ bars }: { bars: NormalizedBar[] }) {
+function PriceSparkline({ bars, windowLabel }: { bars: NormalizedBar[]; windowLabel: string }) {
   const closes = bars.map((b) => b.close)
   const first = bars[0].close
   const last = bars[bars.length - 1].close
@@ -245,7 +278,7 @@ function PriceSparkline({ bars }: { bars: NormalizedBar[] }) {
     <div className="flex flex-col gap-2">
       <Sparkline
         values={closes}
-        ariaLabel={`30-day price line from ${formatPrice(first)} to ${formatPrice(last)}`}
+        ariaLabel={`${windowLabel} price line from ${formatPrice(first)} to ${formatPrice(last)}`}
         trendStrokeClass={trendClass}
       />
       <div className="flex items-center justify-between text-xs num text-muted">
