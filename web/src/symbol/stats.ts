@@ -40,7 +40,6 @@ export type KeyStat = {
   fiscal_period: string
   as_of: string
   computation: { kind: string; expression: string }
-  inputs: ReadonlyArray<unknown>
   warnings: ReadonlyArray<KeyStatWarning>
 }
 
