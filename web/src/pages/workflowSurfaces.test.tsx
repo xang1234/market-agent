@@ -71,6 +71,8 @@ test('Analyze playbooks and inspectable evidence controls are present in workflo
   )
 
   assert.match(html, /Finance Research/)
+  assert.match(html, /href="#workspace-main"/)
+  assert.match(html, /id="workspace-main"/)
   assert.doesNotMatch(html, /raw provider payload/i)
 })
 

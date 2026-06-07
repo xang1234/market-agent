@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { analyzeEntryFromSubject } from '../analyze/analyzeEntry'
+import { issuerIdFromSubject } from '../symbol/profile.ts'
 import { QuoteSnapshot } from '../symbol/QuoteSnapshot'
 import { subjectDisplayName } from '../symbol/quote'
 import { PANEL_CLASS } from '../symbol/surfaceStyles.ts'
@@ -20,8 +21,10 @@ import {
 import { SubjectMembershipBadges } from '../watchlists/SubjectMembershipBadges'
 import { useAuth } from './useAuth'
 import { ProtectedActionType } from './authInterruptState'
+import { SubjectConsensusRail } from './SubjectConsensusRail.tsx'
 import type { SubjectDetailOutletContext } from './subjectDetailOutletContext'
 import { useRequestProtectedAction } from './useAuthInterrupt'
+import { useRightRailContent } from './useRightRailContent.ts'
 
 // Entered subject-detail shell. Swapped into the workspace shell's main
 // canvas at `/symbol/:subjectRef/...`, owning:
@@ -92,6 +95,7 @@ export function SubjectDetailShell() {
     hydratedSubject.subject_ref.id === canonicalBaseSubject.subject_ref.id
   const subject = needsHydration && hydratedSubjectMatchesBase ? hydratedSubject : baseSubject
   const canonicalSubject = isCanonicalResolvedSubject(subject) ? subject : null
+  const issuerId = issuerIdFromSubject(subject)
   const shouldBlockForHydration = needsHydration && !hydratedSubjectMatchesBase
   const hydrationError =
     hydrationState.status === 'error' && hydrationState.key === canonicalBaseSubjectKey
@@ -103,6 +107,11 @@ export function SubjectDetailShell() {
     legacyResolution.ticker === legacyTicker.trim()
       ? legacyResolution
       : ({ status: 'idle' } as const)
+
+  useRightRailContent(
+    issuerId === null ? null : <SubjectConsensusRail issuerId={issuerId} />,
+    [issuerId],
+  )
 
   useEffect(() => {
     if (legacyTicker === null) {

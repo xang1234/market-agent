@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 
+import { AgentPlanPanel } from './AgentPlanPanel.tsx'
 import { StreamingBlockView } from './StreamingBlockView.tsx'
 import type { StreamState } from './streamReducer.ts'
 import { AssistantTurn, BlockColumn } from './turnLayout.tsx'
@@ -18,7 +19,13 @@ export function StreamingTurnView({ state }: StreamingTurnViewProps): ReactEleme
   }
 
   return (
-    <div data-testid="streaming-turn" data-turn-status={state.turn_status} className="flex w-full flex-col gap-3">
+    <div
+      data-testid="streaming-turn"
+      data-turn-status={state.turn_status}
+      aria-live="polite"
+      className="flex w-full flex-col gap-3"
+    >
+      <AgentPlanPanel steps={state.plan_steps} />
       {state.block_order.map((block_id) => {
         const block = state.blocks_by_id.get(block_id)
         if (block === undefined) return null

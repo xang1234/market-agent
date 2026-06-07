@@ -38,11 +38,11 @@
   --color-cyan: #0fb5ac;
   --color-violet: #7c5cf0;
   --color-violet-soft: rgba(124, 92, 240, 0.1);
-  --color-positive: #0f9d63;
+  --color-positive: #0b7a4b;
   --color-positive-soft: rgba(15, 157, 99, 0.12);
-  --color-negative: #d33a52;
+  --color-negative: #a82038;
   --color-negative-soft: rgba(211, 58, 82, 0.12);
-  --color-warning: #c07a12;
+  --color-warning: #855607;
   --color-warning-soft: rgba(192, 122, 18, 0.13);
 
   /* type */
