@@ -14,15 +14,27 @@ type Sleep = (ms: number) => Promise<void>;
 const cleanupStacks = new WeakMap<TestContext, Cleanup[]>();
 let cachedDockerAvailable: boolean | undefined;
 
+// Hard timeouts so a blocking `docker` call (unresponsive daemon, stuck image
+// pull) can't park a test run indefinitely — an unbounded run was observed
+// deadlocking for ~1h49m against a wedged daemon. `docker run` may pull the
+// pinned image, so it gets the long bound; everything else is fast.
+const DOCKER_PROBE_TIMEOUT_MS = 10_000; // `docker version` (dockerAvailable)
+const DOCKER_CMD_TIMEOUT_MS = 15_000; // `docker port` / `rm` / `exec` — fast
+const DOCKER_RUN_TIMEOUT_MS = 120_000; // `docker run` — may pull the image
+
 export function run(
   command: string,
   args: string[],
   options: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {},
 ) {
+  // Any `docker` call is bounded even when a caller forgets to pass a timeout,
+  // so a wedged daemon can never park the run forever (npm stays unbounded).
+  const timeout =
+    options.timeoutMs ?? (command === "docker" ? DOCKER_RUN_TIMEOUT_MS : undefined);
   return spawnSync(command, args, {
     cwd: options.cwd ?? workspaceRoot,
     encoding: "utf8",
-    timeout: options.timeoutMs,
+    timeout,
     env: {
       ...process.env,
       ...options.env,
@@ -30,13 +42,32 @@ export function run(
   });
 }
 
+// Turn a run() result into a clear failure. A timed-out command surfaces as
+// `error` (ETIMEDOUT) with a null status; a normal failure as a non-zero status.
+// NOTE: a near-identical copy lives in services/evidence/test/docker-minio.ts;
+// both collapse into one shared helper when the harnesses are consolidated.
+export function interpretDockerResult(
+  result: Pick<CommandResult, "status" | "error" | "stdout" | "stderr">,
+  action: string,
+  timeoutMs: number,
+): void {
+  if (result.error) {
+    const timedOut = (result.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
+    const reason = timedOut ? `timed out after ${timeoutMs}ms` : result.error.message;
+    throw new Error(`docker ${action} failed: ${reason}`);
+  }
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+}
+
 export function dockerAvailable() {
   if (cachedDockerAvailable !== undefined) {
     return cachedDockerAvailable;
   }
 
-  const result = run("docker", ["version", "--format", "{{.Server.Version}}"], { timeoutMs: 2000 });
-  cachedDockerAvailable = result.status === 0;
+  const result = run("docker", ["version", "--format", "{{.Server.Version}}"], {
+    timeoutMs: DOCKER_PROBE_TIMEOUT_MS,
+  });
+  cachedDockerAvailable = !result.error && result.status === 0;
   return cachedDockerAvailable;
 }
 
@@ -45,8 +76,10 @@ export function createContainerName(prefix: string) {
 }
 
 export function lookupPublishedHostPort(containerName: string) {
-  const result = run("docker", ["port", containerName, "5432/tcp"]);
-  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const result = run("docker", ["port", containerName, "5432/tcp"], {
+    timeoutMs: DOCKER_CMD_TIMEOUT_MS,
+  });
+  interpretDockerResult(result, "port", DOCKER_CMD_TIMEOUT_MS);
   const mapping = result.stdout.trim();
   const match = mapping.match(/:(\d+)$/);
   assert.ok(match, `expected docker port output to include a host port, got: ${mapping}`);
@@ -65,14 +98,14 @@ export function startPostgres(containerName: string, password: string) {
     "-p",
     "127.0.0.1::5432",
     "postgres:15",
-  ]);
+  ], { timeoutMs: DOCKER_RUN_TIMEOUT_MS });
 
-  assert.equal(result.status, 0, result.stderr || result.stdout);
+  interpretDockerResult(result, "run", DOCKER_RUN_TIMEOUT_MS);
   return lookupPublishedHostPort(containerName);
 }
 
 export function stopPostgres(containerName: string) {
-  run("docker", ["rm", "--force", containerName]);
+  run("docker", ["rm", "--force", containerName], { timeoutMs: DOCKER_CMD_TIMEOUT_MS });
 }
 
 function isTransientConnectionFailure(error: unknown) {
@@ -138,7 +171,9 @@ async function probeDatabaseConnection(databaseUrl: string) {
 
 export async function waitForPostgres(containerName: string, databaseUrl?: string) {
   for (let attempt = 0; attempt < 60; attempt += 1) {
-    const result = run("docker", ["exec", containerName, "pg_isready", "-U", "postgres"]);
+    const result = run("docker", ["exec", containerName, "pg_isready", "-U", "postgres"], {
+      timeoutMs: DOCKER_CMD_TIMEOUT_MS,
+    });
     if (result.status === 0) {
       if (databaseUrl) {
         await waitForDatabaseConnection(databaseUrl);
@@ -169,9 +204,9 @@ export function queryValue(containerName: string, sql: string) {
     "postgres",
     "-tAc",
     sql,
-  ]);
+  ], { timeoutMs: DOCKER_CMD_TIMEOUT_MS });
 
-  assert.equal(result.status, 0, result.stderr || result.stdout);
+  interpretDockerResult(result, "exec", DOCKER_CMD_TIMEOUT_MS);
   return result.stdout.trim();
 }
 
