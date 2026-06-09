@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { QueryResult } from "pg";
 
 import { createGrid, getGrid, listGrids } from "../src/queries.ts";
+import { createRun, insertRow, insertPendingCell, updateCellResult } from "../src/queries.ts";
 import { GridNotFoundError, type QueryExecutor } from "../src/types.ts";
 
 const USER_ID = "11111111-1111-4111-a111-111111111111";
@@ -57,4 +58,38 @@ test("listGrids returns the user's grids", async () => {
   const grids = await listGrids(db, USER_ID);
   assert.equal(grids.length, 1);
   assert.equal(grids[0].grid_id, GRID_ID);
+});
+
+const RUN_ID = "44444444-4444-4444-a444-444444444444";
+const ROW_ID = "55555555-5555-4555-a555-555555555555";
+const SNAP_ID = "66666666-6666-4666-a666-666666666666";
+
+test("createRun inserts a pending run and returns its id", async () => {
+  const { db, queries } = fakeDb((text) =>
+    text.startsWith("insert into grid_runs") ? [{ grid_run_id: RUN_ID }] : [],
+  );
+  const runId = await createRun(db, {
+    gridId: GRID_ID,
+    userId: USER_ID,
+    asOf: "2026-06-09T00:00:00.000Z",
+    cellTotal: 6,
+    droppedRowCount: 0,
+  });
+  assert.equal(runId, RUN_ID);
+  assert.ok(queries[0].values?.includes(6));
+});
+
+test("updateCellResult writes status, display, snapshot and primary_ref", async () => {
+  const { db, queries } = fakeDb(() => []);
+  await updateCellResult(db, {
+    gridRowId: ROW_ID,
+    columnKey: "latest_market_cap",
+    status: "ok",
+    display: { value: "$3.2T", tone: null },
+    snapshotId: SNAP_ID,
+    primaryRef: { kind: "fact", id: "77777777-7777-4777-a777-777777777777" },
+    coverageFlag: null,
+  });
+  assert.ok(queries[0].text.startsWith("update grid_cells"));
+  assert.ok(queries[0].values?.includes(SNAP_ID));
 });
