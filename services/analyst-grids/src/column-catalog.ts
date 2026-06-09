@@ -8,13 +8,18 @@ import {
 import { formatCompactCurrency } from "../../analyze/src/block-format.ts";
 import type { CellDisplay, CellRef, CellResultStatus, QueryExecutor } from "./types.ts";
 
-// A grid cell's period context. Plan 1 producers ignore it (null); Plan 2 adds
-// the per-row resolver and period-sensitive columns.
-export type PeriodContext = null | {
+// A grid cell's period context. Plan 2 fills the fiscal period from the
+// subject's latest fact; document_refs stays [] until Plan 3 wires
+// document→issuer linkage. null means "no period resolved" (non-issuer rows).
+export type ResolvedPeriod = {
   period_kind: string;
   fiscal_year: number | null;
   fiscal_period: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  document_refs: ReadonlyArray<{ kind: "document"; id: string; doc_kind: string }>;
 };
+export type PeriodContext = null | ResolvedPeriod;
 
 export type GridColumnContext = {
   subject: SubjectRef;
