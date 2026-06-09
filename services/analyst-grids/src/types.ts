@@ -45,6 +45,12 @@ export type CreateGridInput = {
 
 export type CellStatus = "pending" | "ok" | "missing_data" | "no_coverage" | "error";
 
+// Shared cell-value shapes, reused across the producer result, the persistence
+// helper, and the cell runner so the contract is declared once.
+export type Tone = "best" | "worst" | null;
+export type CellDisplay = { value: string; tone: Tone };
+export type CellRef = { kind: "fact" | "claim"; id: string };
+
 export class GridNotFoundError extends Error {
   constructor(message = "grid not found") {
     super(message);

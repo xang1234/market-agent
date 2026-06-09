@@ -1,5 +1,7 @@
 import {
   GridNotFoundError,
+  type CellDisplay,
+  type CellRef,
   type CellStatus,
   type CreateGridInput,
   type QueryExecutor,
@@ -141,9 +143,9 @@ export async function updateCellResult(
     gridRowId: string;
     columnKey: string;
     status: CellStatus;
-    display: { value: string; tone: "best" | "worst" | null } | null;
+    display: CellDisplay | null;
     snapshotId: string | null;
-    primaryRef: { kind: "fact" | "claim"; id: string } | null;
+    primaryRef: CellRef | null;
     coverageFlag: string | null;
   },
 ): Promise<void> {

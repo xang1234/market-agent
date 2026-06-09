@@ -5,7 +5,7 @@ import {
 } from "../../snapshot/src/snapshot-sealer.ts";
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import { updateCellResult } from "./queries.ts";
-import type { ColumnCatalogEntry, PeriodContext } from "./column-catalog.ts";
+import { EMPTY_DISPLAY, type ColumnCatalogEntry, type GridCellResult, type PeriodContext } from "./column-catalog.ts";
 import type { QueryExecutor } from "./types.ts";
 
 export type CellRunnerDeps = { db: QueryExecutor; pool: SnapshotClientPool };
@@ -22,23 +22,30 @@ export async function computeAndPersistCell(
   deps: CellRunnerDeps,
   input: ComputeCellInput,
 ): Promise<void> {
+  const persist = (fields: {
+    status: "ok" | "missing_data" | "no_coverage" | "error";
+    display: { value: string; tone: "best" | "worst" | null };
+    snapshotId: string | null;
+    primaryRef: { kind: "fact" | "claim"; id: string } | null;
+    coverageFlag: string | null;
+  }) =>
+    updateCellResult(deps.db, {
+      gridRowId: input.gridRowId,
+      columnKey: input.column.column_key,
+      ...fields,
+    });
+  const persistError = () =>
+    persist({ status: "error", display: EMPTY_DISPLAY, snapshotId: null, primaryRef: null, coverageFlag: null });
+
   const snapshotId = randomUUID();
-  let result;
+  let result: GridCellResult;
   try {
     result = await input.column.producer(
       { db: deps.db },
       { subject: input.subject, period: input.period, snapshotId, asOf: input.asOf },
     );
   } catch {
-    await updateCellResult(deps.db, {
-      gridRowId: input.gridRowId,
-      columnKey: input.column.column_key,
-      status: "error",
-      display: { value: "—", tone: null },
-      snapshotId: null,
-      primaryRef: null,
-      coverageFlag: null,
-    });
+    await persistError();
     return;
   }
 
@@ -46,23 +53,13 @@ export async function computeAndPersistCell(
   if (result.seal) {
     const sealResult = await sealSnapshotWithPool(deps.pool, result.seal);
     if (!sealResult.ok) {
-      await updateCellResult(deps.db, {
-        gridRowId: input.gridRowId,
-        columnKey: input.column.column_key,
-        status: "error",
-        display: { value: "—", tone: null },
-        snapshotId: null,
-        primaryRef: null,
-        coverageFlag: null,
-      });
+      await persistError();
       return;
     }
     sealedSnapshotId = sealResult.snapshot.snapshot_id;
   }
 
-  await updateCellResult(deps.db, {
-    gridRowId: input.gridRowId,
-    columnKey: input.column.column_key,
+  await persist({
     status: result.status,
     display: result.display,
     snapshotId: sealedSnapshotId,

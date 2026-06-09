@@ -5,7 +5,8 @@ import {
   buildFactBackedSealInput,
   toSealFactRow,
 } from "../../analyze/src/block-seal-input.ts";
-import type { QueryExecutor } from "./types.ts";
+import { formatCompactCurrency } from "../../analyze/src/block-format.ts";
+import type { CellDisplay, CellRef, QueryExecutor } from "./types.ts";
 
 // A grid cell's period context. Plan 1 producers ignore it (null); Plan 2 adds
 // the per-row resolver and period-sensitive columns.
@@ -24,8 +25,8 @@ export type GridColumnContext = {
 
 export type GridCellResult = {
   status: "ok" | "missing_data" | "no_coverage" | "error";
-  display: { value: string; tone: "best" | "worst" | null };
-  primaryRef?: { kind: "fact" | "claim"; id: string };
+  display: CellDisplay;
+  primaryRef?: CellRef;
   seal?: SnapshotSealInput;
   coverageFlag?: string;
 };
@@ -44,21 +45,10 @@ export type ColumnCatalogEntry = {
   producer: GridColumnProducer;
 };
 
-const MISSING: GridCellResult = { status: "missing_data", display: { value: "—", tone: null } };
+// The empty/placeholder cell display, shared with the cell runner's error path.
+export const EMPTY_DISPLAY: CellDisplay = { value: "—", tone: null };
 
-// Format a USD currency value compactly, e.g. 3_200_000_000_000 -> "$3.2T".
-function formatCompactUsd(value: number): string {
-  const abs = Math.abs(value);
-  const units: ReadonlyArray<[number, string]> = [
-    [1e12, "T"],
-    [1e9, "B"],
-    [1e6, "M"],
-  ];
-  for (const [scale, suffix] of units) {
-    if (abs >= scale) return `$${(value / scale).toFixed(1)}${suffix}`;
-  }
-  return `$${value.toFixed(0)}`;
-}
+const MISSING: GridCellResult = { status: "missing_data", display: EMPTY_DISPLAY };
 
 const latestMarketCapProducer: GridColumnProducer = async (deps, ctx) => {
   if (ctx.subject.kind !== "issuer") return MISSING;
@@ -123,7 +113,7 @@ const latestMarketCapProducer: GridColumnProducer = async (deps, ctx) => {
 
   return {
     status: "ok",
-    display: { value: formatCompactUsd(valueNum), tone: null },
+    display: { value: formatCompactCurrency(valueNum, "USD"), tone: null },
     primaryRef: { kind: "fact", id: row.fact_id },
     seal,
   };
