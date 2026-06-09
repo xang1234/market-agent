@@ -6,6 +6,7 @@
 // staged manifest. The caller seals the returned input inside its transaction.
 
 import {
+  DETERMINISTIC_SNAPSHOT_MANIFEST,
   STAGED_SNAPSHOT_MANIFEST,
   type SnapshotManifestDraft,
 } from "../../snapshot/src/manifest-staging.ts";
@@ -95,6 +96,7 @@ export function buildFactBackedSealInput(input: {
 
   const manifest: SnapshotManifestDraft = Object.freeze({
     [STAGED_SNAPSHOT_MANIFEST]: true,
+    [DETERMINISTIC_SNAPSHOT_MANIFEST]: true,
     subject_refs: Object.freeze(subjectRefs.map((subject) => ({ kind: subject.kind, id: subject.id }))),
     fact_refs: Object.freeze([...factRefs]),
     claim_refs: Object.freeze([]),
