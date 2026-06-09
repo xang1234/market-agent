@@ -18,10 +18,11 @@ test("createRun posts to the grid's runs route and returns the run id", async ()
   let calledUrl = "";
   const fetchImpl = async (input: RequestInfo | URL) => {
     calledUrl = String(input);
-    return jsonResponse({ run_id: "99999999-9999-4999-a999-999999999999", status: "pending" }, 202);
+    return jsonResponse({ runId: "99999999-9999-4999-a999-999999999999", status: "pending" }, 202);
   };
   const result = await createRun({ userId: USER, gridId: "g1", fetchImpl });
   assert.match(calledUrl, /\/v1\/analyst-grids\/g1\/runs$/);
+  assert.equal(result.runId, "99999999-9999-4999-a999-999999999999");
   assert.equal(result.status, "pending");
 });
 

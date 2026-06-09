@@ -9,7 +9,7 @@ export async function fetchColumns(args: { userId: string; fetchImpl?: FetchImpl
   return body.columns;
 }
 
-export async function createRun(args: { userId: string; gridId: string; fetchImpl?: FetchImpl }): Promise<{ run_id: string; status: "pending" }> {
+export async function createRun(args: { userId: string; gridId: string; fetchImpl?: FetchImpl }): Promise<{ runId: string; status: "pending" }> {
   return authenticatedJson(`/v1/analyst-grids/${args.gridId}/runs`, {
     method: "POST",
     userId: args.userId,
@@ -32,8 +32,24 @@ export type CreateGridBody = {
   column_specs: Array<{ column_key: string }>;
 };
 
-export async function createGrid(args: { userId: string; body: CreateGridBody; fetchImpl?: FetchImpl }): Promise<{ grid_id: string }> {
-  return authenticatedJson<{ grid_id: string }>("/v1/analyst-grids", {
+export async function createGrid(args: { userId: string; body: CreateGridBody; fetchImpl?: FetchImpl }): Promise<{
+  grid_id: string;
+  name: string;
+  description: string | null;
+  universe_spec: unknown;
+  column_specs: ReadonlyArray<{ column_key: string }>;
+  created_at: string;
+  updated_at: string;
+}> {
+  return authenticatedJson<{
+    grid_id: string;
+    name: string;
+    description: string | null;
+    universe_spec: unknown;
+    column_specs: ReadonlyArray<{ column_key: string }>;
+    created_at: string;
+    updated_at: string;
+  }>("/v1/analyst-grids", {
     method: "POST",
     userId: args.userId,
     headers: { "content-type": "application/json" },
