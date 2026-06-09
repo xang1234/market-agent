@@ -11,6 +11,9 @@ export type JsonValue =
   | JsonObject;
 
 export const STAGED_SNAPSHOT_MANIFEST: unique symbol = Symbol("snapshot.stagedManifest");
+// Marks a manifest built by a deterministic (non-LLM) producer. Such manifests
+// have no tool_call_ids by design and skip the tool-call provenance audit.
+export const DETERMINISTIC_SNAPSHOT_MANIFEST: unique symbol = Symbol("snapshot.deterministicManifest");
 
 export type QueryExecutor = {
   query<R extends Record<string, unknown> = Record<string, unknown>>(
@@ -57,6 +60,7 @@ export type SnapshotNormalization = (typeof SNAPSHOT_NORMALIZATIONS)[number];
 
 export type SnapshotManifestDraft = {
   readonly [STAGED_SNAPSHOT_MANIFEST]?: true;
+  readonly [DETERMINISTIC_SNAPSHOT_MANIFEST]?: true;
   subject_refs: ReadonlyArray<SnapshotSubjectRef>;
   fact_refs: ReadonlyArray<string>;
   claim_refs: ReadonlyArray<string>;
@@ -266,7 +270,14 @@ export async function auditManifestToolCallLog(
     Partial<
       Pick<
         SnapshotManifestDraft,
-        "fact_refs" | "claim_refs" | "event_refs" | "document_refs" | "series_specs" | "source_ids"
+        | "fact_refs"
+        | "claim_refs"
+        | "event_refs"
+        | "document_refs"
+        | "series_specs"
+        | "source_ids"
+        | typeof STAGED_SNAPSHOT_MANIFEST
+        | typeof DETERMINISTIC_SNAPSHOT_MANIFEST
       >
     >,
   options: ToolCallLogAuditOptions = {},
@@ -311,8 +322,14 @@ export async function auditManifestToolCallLog(
     ...duplicateHashToolCallIds,
   ]);
   const missingHashToolCallIds = uniqueToolCallIds.filter((toolCallId) => !expectedHashes.has(toolCallId));
+  // Deterministic (non-LLM) producers build manifests with no tool_call_ids by
+  // design; the DETERMINISTIC_SNAPSHOT_MANIFEST symbol opts them out of the
+  // tool-call provenance requirement.
+  const deterministicFactOnly =
+    isDeterministicSnapshotManifest(manifest) && isFactOnlyManifest(manifest);
   const missingProvenance =
     hasProvenanceBearingRefs(manifest) &&
+    !deterministicFactOnly &&
     (uniqueToolCallIds.length === 0 || !isStagedSnapshotManifest(manifest));
 
   if (uniqueToolCallIds.length === 0 || missingProvenance) {
@@ -385,6 +402,31 @@ function isStagedSnapshotManifest(
   manifest: Pick<SnapshotManifestDraft, typeof STAGED_SNAPSHOT_MANIFEST>,
 ): boolean {
   return manifest[STAGED_SNAPSHOT_MANIFEST] === true;
+}
+
+function isDeterministicSnapshotManifest(
+  manifest: Pick<SnapshotManifestDraft, typeof DETERMINISTIC_SNAPSHOT_MANIFEST>,
+): boolean {
+  return manifest[DETERMINISTIC_SNAPSHOT_MANIFEST] === true;
+}
+
+// The deterministic tool-call-audit bypass is justified only for fact-backed
+// seals, whose provenance is the fact's source (enforced by the verifier's
+// fact→source binding). Claims/events/documents/series have no such guarantee,
+// so a manifest carrying any of those must NOT skip the audit even if marked
+// deterministic. (Today buildFactBackedSealInput only ever emits fact-only
+// manifests; this keeps the bypass honest if that ever changes.)
+function isFactOnlyManifest(
+  manifest: Partial<
+    Pick<SnapshotManifestDraft, "claim_refs" | "event_refs" | "document_refs" | "series_specs">
+  >,
+): boolean {
+  return [
+    manifest.claim_refs,
+    manifest.event_refs,
+    manifest.document_refs,
+    manifest.series_specs,
+  ].every((refs) => !Array.isArray(refs) || refs.length === 0);
 }
 
 function hasProvenanceBearingRefs(
