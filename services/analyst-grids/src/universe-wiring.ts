@@ -15,6 +15,10 @@ import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolv
 import type { FundamentalsQueryExecutor } from "../../fundamentals/src/sec-facts-repository.ts";
 import type { UniverseResolverDeps } from "./universe.ts";
 import { GridValidationError, type QueryExecutor } from "./types.ts";
+import { createPostgresScreenRepository } from "../../screener/src/screen-repository.ts";
+import { createPostgresCandidateRepository } from "../../screener/src/db-candidates.ts";
+import { replayScreen, type ScreenSubject } from "../../screener/src/screen-subject.ts";
+import { executeScreenerQuery } from "../../screener/src/executor.ts";
 
 // Resolve ownership through the owning service's canonical user-scoped getter,
 // and translate its "not found / not owned" error into the grid domain's single
@@ -31,16 +35,44 @@ async function requireUniverseAccess(label: string, lookup: Promise<unknown>): P
   }
 }
 
+// The minimal screener surface resolveScreen needs, injected so the mapping +
+// ownership logic is unit-testable without Postgres.
+export type ScreenResolverPorts = {
+  find: (screenId: string) => Promise<ScreenSubject | null>;
+  execute: (screen: ScreenSubject) => Promise<{ rows: ReadonlyArray<{ subject_ref: { kind: string; id: string } }> }>;
+};
+
+export async function resolveScreenWith(
+  ports: ScreenResolverPorts,
+  userId: string,
+  screenId: string,
+): Promise<ReadonlyArray<SubjectRef>> {
+  const screen = await ports.find(screenId);
+  if (!screen || screen.user_id !== userId) {
+    throw new GridValidationError("screen not found or not accessible");
+  }
+  const result = await ports.execute(screen);
+  return result.rows.map((r) => ({ kind: r.subject_ref.kind, id: r.subject_ref.id }) as SubjectRef);
+}
+
 // Binds the grid service's injected universe resolvers to the real services. The
 // per-service QueryExecutor types are structurally identical to ours but nominally
 // distinct, so each call asserts the specific target type (a canonical shared
-// QueryExecutor would remove these casts — tracked for Plan 2). resolveScreen throws
-// in Plan 1 (screen execution needs the screener candidate registry, wired in Plan 2).
+// QueryExecutor would remove these casts — tracked for Plan 2).
 export function createUniverseResolverDeps(db: QueryExecutor): UniverseResolverDeps {
   const peers = createSqlPeerSetResolver(db as FundamentalsQueryExecutor);
   return {
-    resolveScreen: async () => {
-      throw new Error("screen universe resolution is not wired until Plan 2");
+    resolveScreen: async (userId: string, screenId: string): Promise<ReadonlyArray<SubjectRef>> => {
+      const screens = createPostgresScreenRepository(db as never);
+      const candidates = createPostgresCandidateRepository(db as never);
+      return resolveScreenWith(
+        {
+          find: (id) => screens.find(id),
+          execute: (screen) => executeScreenerQuery({ candidates, clock: () => new Date() }, replayScreen(screen)),
+        },
+        userId,
+        screenId,
+      );
     },
     resolveWatchlist: async (userId: string, watchlistId: string): Promise<ReadonlyArray<SubjectRef>> => {
       await requireUniverseAccess("watchlist", getWatchlist(db as WatchlistsQueryExecutor, userId, watchlistId));
