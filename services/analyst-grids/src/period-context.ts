@@ -3,9 +3,14 @@ import type { QueryExecutor } from "./types.ts";
 import type { ResolvedPeriod } from "./column-catalog.ts";
 
 // Resolves the subject's most recently reported fiscal period from facts.
-// Only issuers carry fiscal periods; everything else resolves to null. The
-// "latest" fact is the one with the newest as_of among live facts.
-// document_refs is intentionally empty in Plan 2 — documents have no
+// Only issuers carry fiscal periods; everything else resolves to null. We
+// select the latest reported period-bearing fact — period_kind in
+// ('fiscal_q','fiscal_y','ttm') — so point facts (e.g. market_cap, which
+// has NULL fiscal_year/fiscal_period and a continuously-updated as_of) can't
+// win and defeat the resolver. Ties are broken deterministically with the
+// repo's canonical live-fact ordering (as_of desc, period_end desc nulls
+// last, created_at desc, fact_id desc; see 0026_sec_fact_identity).
+// document_refs is intentionally empty in Plan 2/3 — documents have no
 // subject linkage yet (resolving the backing document is a Plan-3 concern).
 export async function resolvePeriodContext(
   db: QueryExecutor,
@@ -29,7 +34,8 @@ export async function resolvePeriodContext(
         and f.subject_id = $1
         and f.invalidated_at is null
         and f.superseded_by is null
-      order by f.as_of desc, f.period_end desc nulls last
+        and f.period_kind in ('fiscal_q','fiscal_y','ttm')
+      order by f.as_of desc, f.period_end desc nulls last, f.created_at desc, f.fact_id desc
       limit 1`,
     [subject.id],
   );

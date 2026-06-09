@@ -9,6 +9,7 @@ const SOURCE = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
 async function seedFact(
   db: { query: (t: string, v?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }> },
   period: { period_kind: string; fiscal_year: number | null; fiscal_period: string | null; period_end: string | null; as_of: string },
+  metricKey = "revenue",
 ) {
   await db.query(
     `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at, content_hash)
@@ -18,9 +19,10 @@ async function seedFact(
   );
   const metric = await db.query(
     `insert into metrics (metric_key, display_name, unit_class, aggregation, interpretation, canonical_source_class)
-     values ('revenue', 'Revenue', 'currency', 'last', 'higher_is_better', 'filing')
+     values ($1, $1, 'currency', 'last', 'higher_is_better', 'filing')
      on conflict (metric_key) do update set display_name = excluded.display_name
      returning metric_id::text as metric_id`,
+    [metricKey],
   );
   await db.query(
     `insert into facts (subject_kind, subject_id, metric_id, period_kind, period_end, fiscal_year, fiscal_period,
@@ -36,6 +38,26 @@ test("resolvePeriodContext returns the latest reported fiscal period for an issu
   const db = await connectedClient(t, databaseUrl);
   await seedFact(db, { period_kind: "fiscal_q", fiscal_year: 2025, fiscal_period: "Q1", period_end: "2025-03-31", as_of: "2025-04-15T00:00:00.000Z" });
   await seedFact(db, { period_kind: "fiscal_q", fiscal_year: 2025, fiscal_period: "Q2", period_end: "2025-06-30", as_of: "2025-07-15T00:00:00.000Z" });
+
+  const period = await resolvePeriodContext(db, { kind: "issuer", id: ISSUER });
+  assert.equal(period?.fiscal_year, 2025);
+  assert.equal(period?.fiscal_period, "Q2");
+  assert.equal(period?.period_kind, "fiscal_q");
+  assert.equal(period?.period_end, "2025-06-30");
+  assert.deepEqual(period?.document_refs, []);
+});
+
+test("resolvePeriodContext ignores a newer point fact and returns the latest fiscal period", async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "grid-period-point");
+  const db = await connectedClient(t, databaseUrl);
+  await seedFact(db, { period_kind: "fiscal_q", fiscal_year: 2025, fiscal_period: "Q1", period_end: "2025-03-31", as_of: "2025-04-15T00:00:00.000Z" });
+  await seedFact(db, { period_kind: "fiscal_q", fiscal_year: 2025, fiscal_period: "Q2", period_end: "2025-06-30", as_of: "2025-07-15T00:00:00.000Z" });
+  // A newer point fact (e.g. market_cap) with NULL fiscal fields must NOT win.
+  await seedFact(
+    db,
+    { period_kind: "point", fiscal_year: null, fiscal_period: null, period_end: null, as_of: "2025-08-01T00:00:00.000Z" },
+    "market_cap",
+  );
 
   const period = await resolvePeriodContext(db, { kind: "issuer", id: ISSUER });
   assert.equal(period?.fiscal_year, 2025);
