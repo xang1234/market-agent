@@ -1,0 +1,76 @@
+import type { ReactElement } from "react";
+import { useEvidenceInspector } from "../evidence/useEvidenceInspector.ts";
+import type { EvidenceInspectionRef } from "../evidence/inspectionTypes.ts";
+import type { GridColumn, GridCellDetail, GridRunDetail } from "./gridsTypes.ts";
+
+function cellKey(rowId: string, columnKey: string): string {
+  return `${rowId}::${columnKey}`;
+}
+
+function cellText(cell: GridCellDetail | undefined): string {
+  if (!cell || cell.status === "pending") return "…";
+  if (cell.status === "error") return "error";
+  return cell.display?.value ?? "—";
+}
+
+function toneClass(cell: GridCellDetail | undefined): string {
+  if (cell?.display?.tone === "best") return " text-positive";
+  if (cell?.display?.tone === "worst") return " text-negative";
+  return "";
+}
+
+type GridTableProps = { columns: ReadonlyArray<GridColumn>; detail: GridRunDetail };
+
+export function GridTable({ columns, detail }: GridTableProps): ReactElement {
+  const inspector = useEvidenceInspector();
+  const byKey = new Map<string, GridCellDetail>();
+  for (const c of detail.cells) byKey.set(cellKey(c.grid_row_id, c.column_key), c);
+
+  return (
+    <div data-testid="analyst-grid-table" className="overflow-x-auto rounded-lg border border-line">
+      <table className="w-full border-collapse text-left text-sm">
+        <thead className="bg-surface-2">
+          <tr>
+            <th scope="col" className="border-b border-line px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted">Subject</th>
+            {columns.map((col) => (
+              <th key={col.column_key} scope="col" className="border-b border-line px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted">
+                {col.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {detail.rows.map((row) => (
+            <tr key={row.grid_row_id} className="border-t border-line">
+              <td className="px-3 py-2 text-fg">{row.subject_ref.id}</td>
+              {columns.map((col) => {
+                const cell = byKey.get(cellKey(row.grid_row_id, col.column_key));
+                const inspectable = Boolean(cell && cell.snapshot_id && cell.primary_ref);
+                return (
+                  <td
+                    key={col.column_key}
+                    className={`num px-3 py-2 text-fg${toneClass(cell)}${inspectable ? " cursor-pointer underline decoration-dotted" : ""}`}
+                    data-cell-status={cell?.status ?? "pending"}
+                    data-cell-inspectable={inspectable ? "true" : "false"}
+                    data-snapshot-id={cell?.snapshot_id ?? undefined}
+                    onClick={
+                      inspectable && cell?.snapshot_id && cell.primary_ref
+                        ? () =>
+                            inspector?.openInspection({
+                              snapshotId: cell.snapshot_id as string,
+                              ref: cell.primary_ref as EvidenceInspectionRef,
+                            })
+                        : undefined
+                    }
+                  >
+                    {cellText(cell)}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
