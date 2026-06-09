@@ -954,11 +954,21 @@ const latestMarketCapProducer: GridColumnProducer = async (deps, ctx) => {
     fiscal_period: row.fiscal_period,
   } as FactRow;
 
+  // The seal's provenance block MUST use a REGISTERED block kind whose body the
+  // verifier can extract the fact from — `buildFactBackedSealInput` passes
+  // `kind`/`source_refs`/`items` through untouched, and the snapshot verifier
+  // requires block.kind ∈ REGISTERED_BLOCK_KINDS, a source_refs array, and
+  // data_ref.kind === block.kind. We reuse `metric_row` (extracts items[].value_ref
+  // as a fact) — the same fact-backed pattern revenue_bars uses. Do NOT invent a
+  // "grid_cell" kind (it would require editing the shared snapshot verifier).
   const block = {
     id: randomUUID(),
+    kind: "metric_row" as const,
     snapshot_id: ctx.snapshotId,
     as_of: ctx.asOf,
-    data_ref: { kind: "grid_cell", id: row.fact_id, params: { column_key: "latest_market_cap" } },
+    source_refs: [row.source_id],
+    data_ref: { kind: "metric_row", id: row.fact_id, params: { column_key: "latest_market_cap" } },
+    items: [{ value_ref: row.fact_id }],
   };
 
   const seal = buildFactBackedSealInput({
