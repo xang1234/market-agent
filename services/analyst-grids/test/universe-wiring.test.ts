@@ -42,13 +42,23 @@ const PORTFOLIO = {
   created_at: "x",
   updated_at: "x",
 };
+const WATCHLIST = {
+  watchlist_id: "w1",
+  user_id: USER_ID,
+  name: "wl",
+  mode: "manual",
+  is_default: false,
+  membership_spec: null,
+  created_at: "x",
+  updated_at: "x",
+};
 
 test("resolveWatchlist reads watchlist_members as subject refs when the user owns the list", async () => {
   const db = fakeDb((text) =>
     text.includes("watchlist_members")
       ? [WATCHLIST_MEMBER]
-      : text.includes("from watchlists") // ownership check
-        ? [{ ok: 1 }]
+      : text.includes("from watchlists") // getWatchlist ownership check
+        ? [WATCHLIST]
         : [],
   );
   const deps = createUniverseResolverDeps(db);
@@ -57,7 +67,7 @@ test("resolveWatchlist reads watchlist_members as subject refs when the user own
 });
 
 test("resolveWatchlist rejects a watchlist the user does not own", async () => {
-  // Ownership query returns no rows -> deny without reading members.
+  // getWatchlist finds no owned row -> denied as GridValidationError before reading members.
   const db = fakeDb((text) => (text.includes("watchlist_members") ? [WATCHLIST_MEMBER] : []));
   const deps = createUniverseResolverDeps(db);
   await assert.rejects(() => deps.resolveWatchlist(USER_ID, "w-other"), GridValidationError);
@@ -77,8 +87,8 @@ test("resolvePortfolio maps holdings to subject refs when the user owns the port
 });
 
 test("resolvePortfolio rejects a portfolio the user does not own", async () => {
-  // getPortfolio finds no owned row -> throws before reading holdings.
+  // getPortfolio finds no owned row -> denied as GridValidationError before reading holdings.
   const db = fakeDb((text) => (text.includes("portfolio_holdings") ? [HOLDING] : []));
   const deps = createUniverseResolverDeps(db);
-  await assert.rejects(() => deps.resolvePortfolio(USER_ID, "p-other"));
+  await assert.rejects(() => deps.resolvePortfolio(USER_ID, "p-other"), GridValidationError);
 });

@@ -1,6 +1,12 @@
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
-import { listMembers, type QueryExecutor as WatchlistsQueryExecutor } from "../../watchlists/src/queries.ts";
 import {
+  WatchlistNotFoundError,
+  getWatchlist,
+  listMembers,
+  type QueryExecutor as WatchlistsQueryExecutor,
+} from "../../watchlists/src/queries.ts";
+import {
+  PortfolioNotFoundError,
   getPortfolio,
   listHoldings,
   type QueryExecutor as PortfolioQueryExecutor,
@@ -10,21 +16,18 @@ import type { FundamentalsQueryExecutor } from "../../fundamentals/src/sec-facts
 import type { UniverseResolverDeps } from "./universe.ts";
 import { GridValidationError, type QueryExecutor } from "./types.ts";
 
-// Assert the watchlist belongs to the requesting user before resolving its
-// members. Without this, a grid could name another user's watchlist_id and leak
-// its members when the run engine wires these resolvers (Plan 2). Portfolios get
-// the same guarantee via getPortfolio, which is already user-scoped.
-async function assertOwnsWatchlist(
-  db: QueryExecutor,
-  userId: string,
-  watchlistId: string,
-): Promise<void> {
-  const { rows } = await db.query<{ ok: number }>(
-    `select 1 as ok from watchlists where watchlist_id = $1 and user_id = $2`,
-    [watchlistId, userId],
-  );
-  if (rows.length === 0) {
-    throw new GridValidationError("watchlist not found or not accessible");
+// Resolve ownership through the owning service's canonical user-scoped getter,
+// and translate its "not found / not owned" error into the grid domain's single
+// access-denied error so callers handle one type. Any other failure (e.g. a
+// transient DB error) propagates unchanged rather than being masked as denied.
+async function requireUniverseAccess(label: string, lookup: Promise<unknown>): Promise<void> {
+  try {
+    await lookup;
+  } catch (error) {
+    if (error instanceof WatchlistNotFoundError || error instanceof PortfolioNotFoundError) {
+      throw new GridValidationError(`${label} not found or not accessible`);
+    }
+    throw error;
   }
 }
 
@@ -40,13 +43,12 @@ export function createUniverseResolverDeps(db: QueryExecutor): UniverseResolverD
       throw new Error("screen universe resolution is not wired until Plan 2");
     },
     resolveWatchlist: async (userId: string, watchlistId: string): Promise<ReadonlyArray<SubjectRef>> => {
-      await assertOwnsWatchlist(db, userId, watchlistId);
+      await requireUniverseAccess("watchlist", getWatchlist(db as WatchlistsQueryExecutor, userId, watchlistId));
       const members = await listMembers(db as WatchlistsQueryExecutor, watchlistId);
       return members.map((m) => m.subject_ref);
     },
     resolvePortfolio: async (userId: string, portfolioId: string): Promise<ReadonlyArray<SubjectRef>> => {
-      // getPortfolio is user-scoped and throws if the portfolio isn't owned.
-      await getPortfolio(db as PortfolioQueryExecutor, userId, portfolioId);
+      await requireUniverseAccess("portfolio", getPortfolio(db as PortfolioQueryExecutor, userId, portfolioId));
       const holdings = await listHoldings(db as PortfolioQueryExecutor, portfolioId);
       return holdings.map((h) => h.subject_ref as SubjectRef);
     },

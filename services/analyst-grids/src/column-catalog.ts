@@ -6,7 +6,7 @@ import {
   toSealFactRow,
 } from "../../analyze/src/block-seal-input.ts";
 import { formatCompactCurrency } from "../../analyze/src/block-format.ts";
-import type { CellDisplay, CellRef, QueryExecutor } from "./types.ts";
+import type { CellDisplay, CellRef, CellResultStatus, QueryExecutor } from "./types.ts";
 
 // A grid cell's period context. Plan 1 producers ignore it (null); Plan 2 adds
 // the per-row resolver and period-sensitive columns.
@@ -24,7 +24,7 @@ export type GridColumnContext = {
 };
 
 export type GridCellResult = {
-  status: "ok" | "missing_data" | "no_coverage" | "error";
+  status: CellResultStatus;
   display: CellDisplay;
   primaryRef?: CellRef;
   seal?: SnapshotSealInput;

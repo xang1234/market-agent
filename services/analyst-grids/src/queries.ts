@@ -1,8 +1,6 @@
 import {
   GridNotFoundError,
-  type CellDisplay,
-  type CellRef,
-  type CellStatus,
+  type CellWrite,
   type CreateGridInput,
   type QueryExecutor,
   type ResearchGridRow,
@@ -139,15 +137,7 @@ export async function insertPendingCell(
 
 export async function updateCellResult(
   db: QueryExecutor,
-  input: {
-    gridRowId: string;
-    columnKey: string;
-    status: CellStatus;
-    display: CellDisplay | null;
-    snapshotId: string | null;
-    primaryRef: CellRef | null;
-    coverageFlag: string | null;
-  },
+  input: CellWrite & { gridRowId: string; columnKey: string },
 ): Promise<void> {
   const result = await db.query(
     `update grid_cells
@@ -162,7 +152,7 @@ export async function updateCellResult(
       input.gridRowId,
       input.columnKey,
       input.status,
-      input.display === null ? null : JSON.stringify(input.display),
+      JSON.stringify(input.display),
       input.snapshotId,
       input.primaryRef === null ? null : JSON.stringify(input.primaryRef),
       input.coverageFlag,

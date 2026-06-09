@@ -112,6 +112,24 @@ export async function listWatchlists(
   return Object.freeze(result.rows.map(watchlistRowFromDb));
 }
 
+// Fetches a single watchlist scoped to its owner. Mirrors portfolio's
+// getPortfolio: throws WatchlistNotFoundError when the list is missing or owned
+// by another user, so callers can use it as an ownership guard.
+export async function getWatchlist(
+  db: QueryExecutor,
+  userId: string,
+  watchlistId: string,
+): Promise<WatchlistRow> {
+  const result = await db.query<WatchlistDbRow>(
+    `select ${WATCHLIST_SELECT_COLUMNS}
+       from watchlists
+      where watchlist_id = $1 and user_id = $2`,
+    [watchlistId, userId],
+  );
+  if (!result.rows[0]) throw new WatchlistNotFoundError(`watchlist ${watchlistId} not found`);
+  return watchlistRowFromDb(result.rows[0]);
+}
+
 export async function createWatchlist(
   db: QueryExecutor,
   userId: string,

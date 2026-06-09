@@ -6,7 +6,7 @@ import {
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import { updateCellResult } from "./queries.ts";
 import { EMPTY_DISPLAY, type ColumnCatalogEntry, type GridCellResult, type PeriodContext } from "./column-catalog.ts";
-import type { QueryExecutor } from "./types.ts";
+import type { CellWrite, QueryExecutor } from "./types.ts";
 
 export type CellRunnerDeps = { db: QueryExecutor; pool: SnapshotClientPool };
 
@@ -22,13 +22,7 @@ export async function computeAndPersistCell(
   deps: CellRunnerDeps,
   input: ComputeCellInput,
 ): Promise<void> {
-  const persist = (fields: {
-    status: "ok" | "missing_data" | "no_coverage" | "error";
-    display: { value: string; tone: "best" | "worst" | null };
-    snapshotId: string | null;
-    primaryRef: { kind: "fact" | "claim"; id: string } | null;
-    coverageFlag: string | null;
-  }) =>
+  const persist = (fields: CellWrite) =>
     updateCellResult(deps.db, {
       gridRowId: input.gridRowId,
       columnKey: input.column.column_key,

@@ -44,12 +44,24 @@ export type CreateGridInput = {
 };
 
 export type CellStatus = "pending" | "ok" | "missing_data" | "no_coverage" | "error";
+// The status a computed cell can carry; `pending` is the insert-time default only.
+export type CellResultStatus = Exclude<CellStatus, "pending">;
 
 // Shared cell-value shapes, reused across the producer result, the persistence
 // helper, and the cell runner so the contract is declared once.
 export type Tone = "best" | "worst" | null;
 export type CellDisplay = { value: string; tone: Tone };
 export type CellRef = { kind: "fact" | "claim"; id: string };
+
+// The fields written when a cell's result is persisted — declared once and
+// reused by updateCellResult (queries) and the cell runner's persist closure.
+export type CellWrite = {
+  status: CellResultStatus;
+  display: CellDisplay;
+  snapshotId: string | null;
+  primaryRef: CellRef | null;
+  coverageFlag: string | null;
+};
 
 export class GridNotFoundError extends Error {
   constructor(message = "grid not found") {
