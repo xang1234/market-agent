@@ -193,19 +193,33 @@ const RUN_COLUMNS = `grid_run_id::text as grid_run_id,
        status, as_of, cell_total, cell_done, dropped_row_count,
        error_message, started_at, completed_at`;
 
-function runFromDb(row: Record<string, unknown>): GridRunRow {
+type GridRunDbRow = {
+  grid_run_id: string;
+  grid_id: string;
+  user_id: string;
+  status: RunStatus;
+  as_of: Date | string;
+  cell_total: number | string;
+  cell_done: number | string;
+  dropped_row_count: number | string;
+  error_message: string | null;
+  started_at: Date | string;
+  completed_at: Date | string | null;
+};
+
+function runFromDb(row: GridRunDbRow): GridRunRow {
   return {
-    grid_run_id: String(row.grid_run_id),
-    grid_id: String(row.grid_id),
-    user_id: String(row.user_id),
-    status: row.status as RunStatus,
-    as_of: iso(row.as_of as Date | string),
+    grid_run_id: row.grid_run_id,
+    grid_id: row.grid_id,
+    user_id: row.user_id,
+    status: row.status,
+    as_of: iso(row.as_of),
     cell_total: Number(row.cell_total),
     cell_done: Number(row.cell_done),
     dropped_row_count: Number(row.dropped_row_count),
-    error_message: (row.error_message as string | null) ?? null,
-    started_at: iso(row.started_at as Date | string),
-    completed_at: row.completed_at == null ? null : iso(row.completed_at as Date | string),
+    error_message: row.error_message ?? null,
+    started_at: iso(row.started_at),
+    completed_at: row.completed_at == null ? null : iso(row.completed_at),
   };
 }
 
@@ -216,7 +230,7 @@ export async function loadRunForUser(
   userId: string,
   runId: string,
 ): Promise<GridRunRow | null> {
-  const result = await db.query(
+  const result = await db.query<GridRunDbRow>(
     `select ${RUN_COLUMNS} from grid_runs where grid_run_id = $1 and user_id = $2`,
     [runId, userId],
   );
@@ -254,8 +268,9 @@ export async function markRowFailed(db: QueryExecutor, gridRowId: string): Promi
   await db.query(`update grid_rows set status = 'failed' where grid_row_id = $1`, [gridRowId]);
 }
 
-// Atomic increment; the (cell_done <= cell_total) CHECK on grid_runs guards
-// against over-counting.
+// Atomic single-increment. The run engine bumps exactly once per cell, so the
+// (cell_done <= cell_total) CHECK on grid_runs is a fail-fast backstop: a
+// double-bump would raise a constraint error (a logic bug surfaced, not capped).
 export async function bumpCellDone(db: QueryExecutor, runId: string): Promise<void> {
   await db.query(`update grid_runs set cell_done = cell_done + 1 where grid_run_id = $1`, [runId]);
 }
@@ -282,7 +297,7 @@ export type GridCellDetail = {
 export type GridRunDetail = { run: GridRunRow; rows: GridRowDetail[]; cells: GridCellDetail[] };
 
 export async function getRunDetail(db: QueryExecutor, runId: string): Promise<GridRunDetail> {
-  const runRes = await db.query(`select ${RUN_COLUMNS} from grid_runs where grid_run_id = $1`, [runId]);
+  const runRes = await db.query<GridRunDbRow>(`select ${RUN_COLUMNS} from grid_runs where grid_run_id = $1`, [runId]);
   if (!runRes.rows[0]) throw new GridNotFoundError("grid run not found");
   const rowsRes = await db.query(
     `select grid_row_id::text as grid_row_id, row_number, subject_ref, period_context, status
