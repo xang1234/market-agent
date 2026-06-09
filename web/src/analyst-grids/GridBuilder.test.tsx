@@ -19,20 +19,16 @@ test("GridBuilder assembles a manual universe + selected columns and emits them"
       root.render(<GridBuilder columns={COLUMNS} onSubmit={(spec) => { emitted = spec; }} />);
     });
     const doc = dom.window.document;
-    const ta = doc.querySelector('[data-testid="grid-builder-manual-input"]') as HTMLTextAreaElement;
-    await act(async () => {
-      // React 19 in Node.js: isInputEventSupported=false at module-load (no window yet),
-      // so bubbling `input` events don't reach React's onChange via the polyfill path.
-      // Use the prototype setter to set the DOM value, then invoke the React onChange
-      // prop directly so state flushes correctly inside act().
-      const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value")!.set!;
-      setter.call(ta, "AAA, BBB");
-      const propsKey = Object.keys(ta).find((k) => k.startsWith("__reactProps"));
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (propsKey && (ta as any)[propsKey]?.onChange?.({ target: ta }));
-    });
+    // Uncontrolled: set the textarea value directly; FormData reads the live DOM value at submit.
+    (doc.querySelector('[data-testid="grid-builder-manual-input"]') as HTMLTextAreaElement).value = "AAA, BBB";
     await act(async () => { (doc.querySelector('[data-testid="grid-builder-col-latest_market_cap"]') as HTMLInputElement).click(); });
-    await act(async () => { (doc.querySelector('[data-testid="grid-builder-submit"]') as HTMLButtonElement).click(); });
+    await act(async () => {
+      const form = doc.querySelector('[data-testid="grid-builder"]') as HTMLFormElement;
+      // Prefer a real submit; fall back to dispatching the submit event if the JSDOM
+      // button click doesn't trigger form submission.
+      if (typeof form.requestSubmit === "function") form.requestSubmit();
+      else form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+    });
     await act(async () => root.unmount());
   } finally {
     restore();
