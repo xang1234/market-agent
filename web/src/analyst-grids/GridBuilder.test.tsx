@@ -20,9 +20,18 @@ test("GridBuilder assembles a manual universe + selected columns and emits them"
     });
     const doc = dom.window.document;
     const ta = doc.querySelector('[data-testid="grid-builder-manual-input"]') as HTMLTextAreaElement;
-    ta.value = "AAA, BBB";
-    ta.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
-    (doc.querySelector('[data-testid="grid-builder-col-latest_market_cap"]') as HTMLInputElement).click();
+    await act(async () => {
+      // React 19 in Node.js: isInputEventSupported=false at module-load (no window yet),
+      // so bubbling `input` events don't reach React's onChange via the polyfill path.
+      // Use the prototype setter to set the DOM value, then invoke the React onChange
+      // prop directly so state flushes correctly inside act().
+      const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value")!.set!;
+      setter.call(ta, "AAA, BBB");
+      const propsKey = Object.keys(ta).find((k) => k.startsWith("__reactProps"));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (propsKey && (ta as any)[propsKey]?.onChange?.({ target: ta }));
+    });
+    await act(async () => { (doc.querySelector('[data-testid="grid-builder-col-latest_market_cap"]') as HTMLInputElement).click(); });
     await act(async () => { (doc.querySelector('[data-testid="grid-builder-submit"]') as HTMLButtonElement).click(); });
     await act(async () => root.unmount());
   } finally {
