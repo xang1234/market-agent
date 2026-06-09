@@ -75,9 +75,10 @@ const latestMarketCapProducer: GridColumnProducer = async (deps, ctx) => {
         and f.value_num is not null
         and f.invalidated_at is null
         and f.superseded_by is null
+        and f.entitlement_channels ? $2
       order by f.as_of desc
       limit 1`,
-    [ctx.subject.id],
+    [ctx.subject.id, "app"],
   );
   const row = rows[0];
   if (!row || row.value_num === null) return MISSING;

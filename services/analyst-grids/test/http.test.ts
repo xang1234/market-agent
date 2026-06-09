@@ -99,3 +99,33 @@ test("unknown universe_spec.source returns 400", async () => {
     server.close();
   }
 });
+
+test("unknown column_key returns 400", async () => {
+  const { server, base } = await startServer(fakeDb(() => []));
+  try {
+    const res = await fetch(`${base}/v1/analyst-grids`, {
+      method: "POST",
+      headers: { "x-user-id": USER_ID, "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "g",
+        universe_spec: { source: "manual", subject_refs: [] },
+        column_specs: [{ column_key: "does_not_exist" }],
+      }),
+    });
+    assert.equal(res.status, 400);
+  } finally {
+    server.close();
+  }
+});
+
+test("GET a missing grid returns 404", async () => {
+  const { server, base } = await startServer(fakeDb(() => [])); // no rows -> GridNotFoundError
+  try {
+    const res = await fetch(`${base}/v1/analyst-grids/99999999-9999-4999-a999-999999999999`, {
+      headers: { "x-user-id": USER_ID },
+    });
+    assert.equal(res.status, 404);
+  } finally {
+    server.close();
+  }
+});
