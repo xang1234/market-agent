@@ -11,6 +11,7 @@ export type UniverseResolverDeps = {
 };
 
 export const DEFAULT_PEER_LIMIT = 5;
+export const MAX_PEER_LIMIT = 50;
 
 export async function resolveUniverse(
   deps: UniverseResolverDeps,
@@ -32,8 +33,15 @@ export async function resolveUniverse(
       return deps.resolveWatchlist(userId, spec.watchlist_id);
     case "portfolio":
       return deps.resolvePortfolio(userId, spec.portfolio_id);
-    case "peers":
-      return deps.resolvePeers(spec.issuer_id, spec.limit ?? DEFAULT_PEER_LIMIT);
+    case "peers": {
+      // spec.limit is user-controlled; clamp to a bounded, positive integer range
+      // so a huge or non-positive value can't trigger runaway peer fan-out.
+      const requested = spec.limit ?? DEFAULT_PEER_LIMIT;
+      const limit = Number.isFinite(requested)
+        ? Math.min(Math.max(1, Math.floor(requested)), MAX_PEER_LIMIT)
+        : DEFAULT_PEER_LIMIT;
+      return deps.resolvePeers(spec.issuer_id, limit);
+    }
     default: {
       const _exhaustive: never = spec;
       throw new GridValidationError(`unknown universe source: ${(_exhaustive as UniverseSpec).source}`);

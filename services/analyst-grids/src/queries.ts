@@ -149,7 +149,7 @@ export async function updateCellResult(
     coverageFlag: string | null;
   },
 ): Promise<void> {
-  await db.query(
+  const result = await db.query(
     `update grid_cells
         set status = $3,
             display = $4::jsonb,
@@ -168,4 +168,12 @@ export async function updateCellResult(
       input.coverageFlag,
     ],
   );
+  // Fail fast: the cell row is always pre-inserted (insertPendingCell) before a
+  // result is written, so a zero-row update signals a logic bug (wrong refs),
+  // not a benign no-op — surface it instead of silently dropping the result.
+  if ((result.rowCount ?? 0) === 0) {
+    throw new Error(
+      `updateCellResult matched no cell for grid_row_id=${input.gridRowId} column_key=${input.columnKey}`,
+    );
+  }
 }

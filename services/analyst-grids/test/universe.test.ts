@@ -38,3 +38,20 @@ test("invalid manual subject_refs raise GridValidationError", async () => {
     GridValidationError,
   );
 });
+
+test("peers limit is clamped to a bounded positive integer range", async () => {
+  let captured: number | undefined;
+  const d = deps({
+    resolvePeers: async (_issuerId, limit) => {
+      captured = limit;
+      return [REF_A];
+    },
+  });
+  const base = { source: "peers", issuer_id: REF_A.id } as const;
+  await resolveUniverse(d, USER_ID, { ...base, limit: 9999 });
+  assert.equal(captured, 50); // clamped to MAX_PEER_LIMIT
+  await resolveUniverse(d, USER_ID, { ...base, limit: 0 });
+  assert.equal(captured, 1); // raised to the minimum
+  await resolveUniverse(d, USER_ID, base);
+  assert.equal(captured, 5); // DEFAULT_PEER_LIMIT when unspecified
+});

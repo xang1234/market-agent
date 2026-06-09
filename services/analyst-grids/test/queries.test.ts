@@ -19,7 +19,8 @@ function fakeDb(responder: (text: string, values?: unknown[]) => unknown[]): {
   const db: QueryExecutor = {
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       queries.push({ text, values });
-      return { rows: responder(text, values) as R[], rowCount: 0, command: "", oid: 0, fields: [] } satisfies QueryResult<R>;
+      const rows = responder(text, values) as R[];
+      return { rows, rowCount: rows.length, command: "", oid: 0, fields: [] } satisfies QueryResult<R>;
     },
   };
   return { db, queries };
@@ -80,7 +81,8 @@ test("createRun inserts a pending run and returns its id", async () => {
 });
 
 test("updateCellResult writes status, display, snapshot and primary_ref", async () => {
-  const { db, queries } = fakeDb(() => []);
+  // The update affects one row; `[{}]` drives rowCount=1 so the fail-fast guard passes.
+  const { db, queries } = fakeDb(() => [{}]);
   await updateCellResult(db, {
     gridRowId: ROW_ID,
     columnKey: "latest_market_cap",
@@ -92,4 +94,21 @@ test("updateCellResult writes status, display, snapshot and primary_ref", async 
   });
   assert.ok(queries[0].text.startsWith("update grid_cells"));
   assert.ok(queries[0].values?.includes(SNAP_ID));
+});
+
+test("updateCellResult throws when no cell row matched", async () => {
+  const { db } = fakeDb(() => []); // rowCount 0
+  await assert.rejects(
+    () =>
+      updateCellResult(db, {
+        gridRowId: ROW_ID,
+        columnKey: "latest_market_cap",
+        status: "ok",
+        display: { value: "$3.2T", tone: null },
+        snapshotId: SNAP_ID,
+        primaryRef: null,
+        coverageFlag: null,
+      }),
+    /matched no cell/,
+  );
 });

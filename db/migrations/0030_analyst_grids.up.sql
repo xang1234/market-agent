@@ -16,18 +16,20 @@ create table grid_runs (
   user_id uuid not null references users(user_id) on delete cascade,
   status text not null check (status in ('pending','running','partial','completed','failed')),
   as_of timestamptz not null,
-  cell_total integer not null default 0,
-  cell_done integer not null default 0,
-  dropped_row_count integer not null default 0,
+  cell_total integer not null default 0 check (cell_total >= 0),
+  cell_done integer not null default 0 check (cell_done >= 0),
+  dropped_row_count integer not null default 0 check (dropped_row_count >= 0),
   error_message text,
   started_at timestamptz not null default now(),
-  completed_at timestamptz
+  completed_at timestamptz,
+  check (cell_done <= cell_total),
+  check (completed_at is null or completed_at >= started_at)
 );
 
 create table grid_rows (
   grid_row_id uuid primary key default gen_random_uuid(),
   grid_run_id uuid not null references grid_runs(grid_run_id) on delete cascade,
-  row_number integer not null,
+  row_number integer not null check (row_number >= 0),
   subject_ref jsonb not null,
   period_context jsonb,
   status text not null check (status in ('pending','resolved','failed')),

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  DETERMINISTIC_SNAPSHOT_MANIFEST,
   STAGED_SNAPSHOT_MANIFEST,
   auditManifestToolCallLog,
   stageSnapshotManifest,
@@ -377,6 +378,45 @@ test("auditManifestToolCallLog rejects mixed-provenance refs on unmarked manifes
     missing_hash_tool_call_ids: [],
     missing_provenance: true,
   });
+});
+
+test("auditManifestToolCallLog bypasses the tool-call audit for fact-only deterministic manifests", async () => {
+  const db = {
+    async query<R extends Record<string, unknown>>() {
+      throw new Error("tool_call_logs must not be queried for deterministic fact-only manifests");
+    },
+  };
+
+  const result = await auditManifestToolCallLog(db, {
+    [DETERMINISTIC_SNAPSHOT_MANIFEST]: true,
+    fact_refs: [firstFactId],
+    source_ids: [firstSourceId],
+    tool_call_ids: [],
+    tool_call_result_hashes: [],
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.missing_provenance, false);
+});
+
+test("auditManifestToolCallLog does NOT bypass the audit for deterministic manifests carrying non-fact refs", async () => {
+  const db = {
+    async query<R extends Record<string, unknown>>() {
+      throw new Error("tool_call_logs must not be queried when there are no tool calls");
+    },
+  };
+
+  const result = await auditManifestToolCallLog(db, {
+    [DETERMINISTIC_SNAPSHOT_MANIFEST]: true,
+    fact_refs: [firstFactId],
+    claim_refs: [claimId],
+    source_ids: [firstSourceId],
+    tool_call_ids: [],
+    tool_call_result_hashes: [],
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.missing_provenance, true);
 });
 
 test("auditManifestToolCallLog accepts full tool result hashes with embedded manifest contribution", async () => {

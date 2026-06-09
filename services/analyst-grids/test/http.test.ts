@@ -71,3 +71,31 @@ test("missing x-user-id returns 401", async () => {
     server.close();
   }
 });
+
+test("malformed JSON body returns 400 (not 500)", async () => {
+  const { server, base } = await startServer(fakeDb(() => []));
+  try {
+    const res = await fetch(`${base}/v1/analyst-grids`, {
+      method: "POST",
+      headers: { "x-user-id": USER_ID, "content-type": "application/json" },
+      body: "{ not valid json",
+    });
+    assert.equal(res.status, 400);
+  } finally {
+    server.close();
+  }
+});
+
+test("unknown universe_spec.source returns 400", async () => {
+  const { server, base } = await startServer(fakeDb(() => []));
+  try {
+    const res = await fetch(`${base}/v1/analyst-grids`, {
+      method: "POST",
+      headers: { "x-user-id": USER_ID, "content-type": "application/json" },
+      body: JSON.stringify({ name: "g", universe_spec: { source: "bogus" }, column_specs: [] }),
+    });
+    assert.equal(res.status, 400);
+  } finally {
+    server.close();
+  }
+});

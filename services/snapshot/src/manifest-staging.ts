@@ -325,9 +325,11 @@ export async function auditManifestToolCallLog(
   // Deterministic (non-LLM) producers build manifests with no tool_call_ids by
   // design; the DETERMINISTIC_SNAPSHOT_MANIFEST symbol opts them out of the
   // tool-call provenance requirement.
+  const deterministicFactOnly =
+    isDeterministicSnapshotManifest(manifest) && isFactOnlyManifest(manifest);
   const missingProvenance =
     hasProvenanceBearingRefs(manifest) &&
-    !isDeterministicSnapshotManifest(manifest) &&
+    !deterministicFactOnly &&
     (uniqueToolCallIds.length === 0 || !isStagedSnapshotManifest(manifest));
 
   if (uniqueToolCallIds.length === 0 || missingProvenance) {
@@ -406,6 +408,25 @@ function isDeterministicSnapshotManifest(
   manifest: Pick<SnapshotManifestDraft, typeof DETERMINISTIC_SNAPSHOT_MANIFEST>,
 ): boolean {
   return manifest[DETERMINISTIC_SNAPSHOT_MANIFEST] === true;
+}
+
+// The deterministic tool-call-audit bypass is justified only for fact-backed
+// seals, whose provenance is the fact's source (enforced by the verifier's
+// fact→source binding). Claims/events/documents/series have no such guarantee,
+// so a manifest carrying any of those must NOT skip the audit even if marked
+// deterministic. (Today buildFactBackedSealInput only ever emits fact-only
+// manifests; this keeps the bypass honest if that ever changes.)
+function isFactOnlyManifest(
+  manifest: Partial<
+    Pick<SnapshotManifestDraft, "claim_refs" | "event_refs" | "document_refs" | "series_specs">
+  >,
+): boolean {
+  return [
+    manifest.claim_refs,
+    manifest.event_refs,
+    manifest.document_refs,
+    manifest.series_specs,
+  ].every((refs) => !Array.isArray(refs) || refs.length === 0);
 }
 
 function hasProvenanceBearingRefs(

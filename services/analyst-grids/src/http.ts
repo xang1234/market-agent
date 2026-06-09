@@ -6,7 +6,13 @@ import {
 } from "../../shared/src/request-auth.ts";
 import { createGrid, getGrid, listGrids } from "./queries.ts";
 import { listColumns } from "./column-catalog.ts";
-import { GridNotFoundError, GridValidationError, type CreateGridInput, type QueryExecutor } from "./types.ts";
+import {
+  GridNotFoundError,
+  GridValidationError,
+  UNIVERSE_SOURCES,
+  type CreateGridInput,
+  type QueryExecutor,
+} from "./types.ts";
 
 const MAX_BODY = 64 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -27,7 +33,12 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
     chunks.push(chunk as Buffer);
   }
   const text = Buffer.concat(chunks).toString("utf8") || "{}";
-  const parsed = JSON.parse(text);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new GridValidationError("request body must be valid JSON");
+  }
   if (typeof parsed !== "object" || parsed === null) throw new GridValidationError("body must be an object");
   return parsed as Record<string, unknown>;
 }
@@ -35,6 +46,10 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
 function parseCreateInput(body: Record<string, unknown>): CreateGridInput {
   if (typeof body.name !== "string" || body.name.length === 0) throw new GridValidationError("'name' is required");
   if (typeof body.universe_spec !== "object" || body.universe_spec === null) throw new GridValidationError("'universe_spec' is required");
+  const source = (body.universe_spec as { source?: unknown }).source;
+  if (typeof source !== "string" || !(UNIVERSE_SOURCES as readonly string[]).includes(source)) {
+    throw new GridValidationError(`'universe_spec.source' must be one of: ${UNIVERSE_SOURCES.join(", ")}`);
+  }
   if (!Array.isArray(body.column_specs)) throw new GridValidationError("'column_specs' must be an array");
   return {
     name: body.name,

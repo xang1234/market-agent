@@ -11,3 +11,11 @@ const server = createAnalystGridsServer(pool);
 server.listen(port, host, () => {
   console.log(`analyst-grids listening on http://${host}:${port}`);
 });
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    server.close(() => {
+      pool.end().finally(() => process.exit(0));
+    });
+  });
+}

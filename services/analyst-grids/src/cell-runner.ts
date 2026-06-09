@@ -51,12 +51,17 @@ export async function computeAndPersistCell(
 
   let sealedSnapshotId: string | null = null;
   if (result.seal) {
-    const sealResult = await sealSnapshotWithPool(deps.pool, result.seal);
-    if (!sealResult.ok) {
+    try {
+      const sealResult = await sealSnapshotWithPool(deps.pool, result.seal);
+      if (!sealResult.ok) {
+        await persistError();
+        return;
+      }
+      sealedSnapshotId = sealResult.snapshot.snapshot_id;
+    } catch {
       await persistError();
       return;
     }
-    sealedSnapshotId = sealResult.snapshot.snapshot_id;
   }
 
   await persist({
