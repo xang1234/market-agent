@@ -18,7 +18,12 @@ function fakeDb(responder: (text: string) => unknown[]): QueryExecutor {
 }
 
 async function startServer(db: QueryExecutor) {
-  const server = createAnalystGridsServer(db, { auth: { mode: "dev_user_header" } });
+  const server = createAnalystGridsServer({
+    db,
+    pool: { connect: async () => { throw new Error("pool unused"); } },
+    universe: { resolveScreen: async () => [], resolveWatchlist: async () => [], resolvePortfolio: async () => [], resolvePeers: async () => [] },
+    auth: { mode: "dev_user_header" },
+  });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   return { server, base: `http://127.0.0.1:${port}` };
