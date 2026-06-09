@@ -29,3 +29,19 @@ test("runWithConcurrency runs all tasks and never exceeds the limit", async () =
   assert.deepEqual(results.sort((a, b) => a - b), [2, 4, 6, 8, 10, 12]);
   assert.ok(peak <= 2, `peak concurrency ${peak} exceeded 2`);
 });
+
+test("runWithConcurrency aborts pulling new items after the first error and rejects", async () => {
+  const started: number[] = [];
+  await assert.rejects(
+    () =>
+      runWithConcurrency([0, 1, 2, 3, 4, 5, 6, 7], 2, async (n) => {
+        started.push(n);
+        await new Promise((r) => setTimeout(r, 5));
+        if (n === 1) throw new Error("boom");
+        return n;
+      }),
+    /boom/,
+  );
+  // With limit 2 and an abort on item 1, not all 8 items should have started.
+  assert.ok(started.length < 8, `expected abort to skip items; ${started.length} started`);
+});

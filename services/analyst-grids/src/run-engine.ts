@@ -32,7 +32,10 @@ export function capUniverse(refs: ReadonlyArray<SubjectRef>): { capped: Readonly
 }
 
 // Minimal bounded-concurrency map (no p-limit dependency): at most `limit`
-// tasks in flight, preserving result order by index.
+// tasks in flight, preserving result order by index. On the first task error
+// it stops pulling new items, lets in-flight tasks drain, then rejects with
+// that error — so a caller that finalizes on rejection never races workers
+// that are still writing.
 export async function runWithConcurrency<T, R>(
   items: ReadonlyArray<T>,
   limit: number,
@@ -40,15 +43,27 @@ export async function runWithConcurrency<T, R>(
 ): Promise<R[]> {
   const results = new Array<R>(items.length);
   let next = 0;
+  let aborted = false;
+  let firstError: unknown = null;
   async function worker(): Promise<void> {
     while (true) {
+      if (aborted) return;
       const i = next++;
       if (i >= items.length) return;
-      results[i] = await fn(items[i], i);
+      try {
+        results[i] = await fn(items[i], i);
+      } catch (err) {
+        if (!aborted) {
+          aborted = true;
+          firstError = err;
+        }
+        return;
+      }
     }
   }
   const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
   await Promise.all(workers);
+  if (aborted) throw firstError;
   return results;
 }
 
@@ -95,9 +110,13 @@ export async function startGridRun(
     console.log(`analyst-grids run ${runId}: universe of ${resolved.length} capped to ${MAX_GRID_ROWS} (dropped ${droppedRowCount})`);
   }
 
-  // Detached: the caller already has its run id. runWorker catches everything
-  // and records run-level failure, so this never rejects unhandled.
-  void runWorker(deps, { runId, rows, columns, asOf: input.asOf });
+  // Detached: the caller already has its run id. runWorker records run-level
+  // failure on error, but its recovery write can itself reject (e.g. DB
+  // outage), so we attach a catch here to keep that from becoming an unhandled
+  // rejection that crashes the host process.
+  void runWorker(deps, { runId, rows, columns, asOf: input.asOf }).catch((err) => {
+    console.error(`analyst-grids run ${runId}: worker crashed`, err);
+  });
 
   return { runId, status: "pending" };
 }
@@ -131,9 +150,13 @@ async function runWorker(
     const anyError = detail.cells.some((c) => c.status === "error");
     await setRunStatus(deps.db, ctx.runId, anyError ? "partial" : "completed", { completedAt: true });
   } catch (error) {
-    await setRunStatus(deps.db, ctx.runId, "failed", {
-      completedAt: true,
-      errorMessage: error instanceof Error ? error.message : "run failed",
-    });
+    try {
+      await setRunStatus(deps.db, ctx.runId, "failed", {
+        completedAt: true,
+        errorMessage: error instanceof Error ? error.message : "run failed",
+      });
+    } catch (finalizeError) {
+      console.error(`analyst-grids run ${ctx.runId}: failed to record run failure`, finalizeError);
+    }
   }
 }
