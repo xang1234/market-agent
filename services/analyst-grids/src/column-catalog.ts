@@ -106,9 +106,12 @@ const latestMarketCapProducer: GridColumnProducer = async (deps, ctx) => {
 
   const block = {
     id: randomUUID(),
+    kind: "metric_row" as const,
     snapshot_id: ctx.snapshotId,
     as_of: ctx.asOf,
-    data_ref: { kind: "grid_cell", id: row.fact_id, params: { column_key: "latest_market_cap" } },
+    source_refs: [row.source_id],
+    data_ref: { kind: "metric_row", id: row.fact_id, params: { column_key: "latest_market_cap" } },
+    items: [{ value_ref: row.fact_id }],
   };
 
   const seal = buildFactBackedSealInput({

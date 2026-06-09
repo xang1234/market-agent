@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import { bootstrapDatabase, connectedClient } from "../../../db/test/docker-pg.ts";
 import { getColumn, listColumns } from "../src/column-catalog.ts";
+import { verifySnapshotSeal } from "../../snapshot/src/snapshot-verifier.ts";
 import type { QueryExecutor } from "../src/types.ts";
 
 test("catalog lists the latest_market_cap column", () => {
@@ -39,9 +40,9 @@ test("latest_market_cap produces a sealable ok cell for a seeded fact", async (t
   await db.query(
     `insert into facts (fact_id, subject_kind, subject_id, metric_id, period_kind,
         value_num, unit, as_of, observed_at, source_id, method, verification_status,
-        freshness_class, coverage_level, confidence)
+        freshness_class, coverage_level, confidence, period_end)
      values ($1,'issuer',$2,$3,'point', 3200000000000, 'USD', now(), now(), $4,
-        'reported','authoritative','eod','full', 0.95)`,
+        'reported','authoritative','eod','full', 0.95, '2024-03-31')`,
     [factId, issuerId, metricId, sourceId],
   );
 
@@ -61,6 +62,9 @@ test("latest_market_cap produces a sealable ok cell for a seeded fact", async (t
   assert.equal(result.primaryRef?.kind, "fact");
   assert.equal(result.primaryRef?.id, factId);
   assert.ok(result.seal, "expected a seal input");
+
+  const verification = await verifySnapshotSeal(result.seal!);
+  assert.equal(verification.ok, true, `seal must verify; failures: ${JSON.stringify(verification.failures ?? [])}`);
 });
 
 test("latest_market_cap returns missing_data when no fact exists", async (t) => {
