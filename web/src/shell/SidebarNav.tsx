@@ -7,6 +7,7 @@ import {
   MessageSquare,
   Settings,
   SlidersHorizontal,
+  Table2,
   type LucideIcon,
 } from 'lucide-react'
 import { ANALYZE_PATH } from '../analyze/analyzeEntry'
@@ -23,6 +24,7 @@ const PRIMARY_WORKSPACES: ReadonlyArray<{ to: string; label: string; icon: Lucid
   { to: '/chat', label: 'Chat', icon: MessageSquare },
   { to: '/screener', label: 'Screener', icon: SlidersHorizontal },
   { to: ANALYZE_PATH, label: 'Analyze', icon: LineChart },
+  { to: '/analyst-grids', label: 'Grids', icon: Table2 },
   ...(webDevFlags.llmSettingsEnabled
     ? [{ to: '/settings', label: 'Settings', icon: Settings }]
     : []),

@@ -15,6 +15,7 @@ import { AgentsPage } from './pages/AgentsPage'
 import { ChatEmptyState, ChatLayout, ChatThreadView } from './pages/ChatPage'
 import { ScreenerPage } from './pages/ScreenerPage'
 import { AnalyzePage } from './pages/AnalyzePage'
+import { GridsPage } from './analyst-grids/GridsPage.tsx'
 import { ReviewPage } from './pages/ReviewPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SubjectDetailShell } from './shell/SubjectDetailShell'
@@ -60,6 +61,7 @@ const router = createBrowserRouter(
       </Route>
       <Route path="screener" handle={publicHandle} element={<ScreenerPage />} />
       <Route path="analyze" handle={publicHandle} element={<AnalyzePage />} />
+      <Route path="analyst-grids" handle={publicHandle} element={<GridsPage />} />
       <Route path="symbol/:subjectRef" handle={publicHandle} element={<SubjectDetailShell />}>
         <Route index element={<Navigate to="overview" replace />} />
         <Route path="overview" element={<OverviewSection />} />

@@ -1,0 +1,59 @@
+import { useEffect, useState, type ReactElement } from "react";
+import { useAuth } from "../shell/useAuth.ts";
+import { fetchColumns, createGrid, createRun } from "./gridsClient.ts";
+import { useGridRun } from "./useGridRun.ts";
+import { GridBuilder, type GridBuilderSubmit } from "./GridBuilder.tsx";
+import { GridTable } from "./GridTable.tsx";
+import type { GridColumn } from "./gridsTypes.ts";
+
+export function GridsPage(): ReactElement {
+  const { session } = useAuth();
+  const userId = session?.userId ?? null;
+  const [columns, setColumns] = useState<GridColumn[]>([]);
+  const [runId, setRunId] = useState<string | null>(null);
+  const [activeColumns, setActiveColumns] = useState<GridColumn[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!userId) return;
+    fetchColumns({ userId })
+      .then(setColumns)
+      .catch((e) => setError(e instanceof Error ? e.message : "failed to load columns"));
+  }, [userId]);
+
+  const { detail } = useGridRun({ userId: userId ?? "", runId });
+
+  async function onSubmit(spec: GridBuilderSubmit) {
+    if (!userId) return;
+    setError(null);
+    try {
+      const grid = await createGrid({ userId, body: { name: "Untitled grid", universe_spec: spec.universe_spec, column_specs: spec.column_specs } });
+      const run = await createRun({ userId, gridId: grid.grid_id });
+      setActiveColumns(columns.filter((c) => spec.column_specs.some((s) => s.column_key === c.column_key)));
+      setRunId(run.runId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to start run");
+    }
+  }
+
+  if (!userId) return <div className="p-4 text-sm text-muted">Sign in to build research grids.</div>;
+
+  return (
+    <div className="space-y-4 p-4">
+      <h1 className="text-lg font-semibold">Analyst Grid</h1>
+      <GridBuilder columns={columns} onSubmit={onSubmit} />
+      {error ? <div className="text-sm text-negative">{error}</div> : null}
+      {detail ? (
+        <div className="space-y-2">
+          <div className="text-xs text-muted">
+            {detail.run.status} · {detail.run.cell_done}/{detail.run.cell_total} cells
+            {detail.run.dropped_row_count > 0 ? ` · ${detail.run.dropped_row_count} rows dropped (cap 25)` : ""}
+          </div>
+          <GridTable columns={activeColumns} detail={detail} />
+        </div>
+      ) : runId ? (
+        <div className="text-sm text-muted">Running…</div>
+      ) : null}
+    </div>
+  );
+}
