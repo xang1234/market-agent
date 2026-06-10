@@ -28,7 +28,12 @@ export async function createReaderColumnDepsFromEnv(
   env: ReaderWiringEnv = process.env as ReaderWiringEnv,
 ): Promise<ReaderColumnDeps | undefined> {
   if (!env.S3_BUCKET || !env.S3_REGION) return undefined;
-  const router = await createLlmRouterFromEnv(env).catch(() => null);
+  const router = await createLlmRouterFromEnv(env).catch((error: unknown) => {
+    console.warn(
+      `analyst-grids: reader LLM config error, disabling reader columns: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
+  });
   if (router === null) return undefined;
 
   const client = new S3Client({
