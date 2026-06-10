@@ -951,7 +951,7 @@ export const readerQuestionProducer: GridColumnProducer = async (deps, ctx) => {
     throw new Error("reader_question: params.prompt required");
   }
 
-  const docs = await selectReaderDocuments(deps.db, ctx.subject.id, READER_DOCUMENTS_PER_CELL);
+  const docs = await selectReaderDocuments(deps.db, ctx.subject.id, ctx.userId, READER_DOCUMENTS_PER_CELL);
   if (docs.length === 0) return NO_COVERAGE("no_documents");
 
   const texts: ReaderDocText[] = [];
@@ -994,7 +994,9 @@ export const readerQuestionProducer: GridColumnProducer = async (deps, ctx) => {
   // The audited result: answer + the claim ids it rests on. The hash is passed
   // explicitly so the manifest entry and the tool_call_logs row agree.
   const toolResult = { answer: parsed.answer, claim_ids: claimRows.map((c) => c.claim_id) };
-  const resultHash = createHash("sha256").update(JSON.stringify(toolResult)).digest("hex");
+  // The audit requires the "sha256:"-prefixed format (assertResultHash in
+  // services/snapshot/src/manifest-staging.ts).
+  const resultHash = "sha256:" + createHash("sha256").update(JSON.stringify(toolResult)).digest("hex");
   const logged = await writeToolCallLog(deps.db, {
     tool_name: READER_TOOL_NAME,
     args: { subject_id: ctx.subject.id, prompt: prompt.trim(), document_ids: texts.map((t) => t.document_id) },
