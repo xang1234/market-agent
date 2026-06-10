@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { Pool } from "pg";
-import { bootstrapDatabase } from "../../../db/test/docker-pg.ts";
+import { bootstrapDatabase, connectedPool } from "../../../db/test/docker-pg.ts";
 import { createGrid, getRunDetail } from "../src/queries.ts";
 import { startGridRun } from "../src/run-engine.ts";
 import { createUniverseResolverDeps } from "../src/universe-wiring.ts";
@@ -21,8 +20,7 @@ async function poll<T>(fn: () => Promise<T>, until: (v: T) => boolean, tries = 6
 
 test("startGridRun runs a deterministic column end-to-end and seals an inspectable cell", async (t) => {
   const { databaseUrl } = await bootstrapDatabase(t, "grid-run-e2e");
-  const pool = new Pool({ connectionString: databaseUrl });
-  t.after(() => pool.end());
+  const pool = await connectedPool(t, databaseUrl);
   const db = pool as unknown as QueryExecutor;
 
   const sourceId = randomUUID();
