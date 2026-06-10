@@ -44,6 +44,7 @@ const CTX = {
   period: null,
   snapshotId: SNAPSHOT_ID,
   asOf: "2026-06-09T00:00:00.000Z",
+  params: null,
 };
 
 test("latest_market_cap restricts the fact query to the 'app' entitlement channel", async () => {
