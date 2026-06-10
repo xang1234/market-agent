@@ -76,8 +76,6 @@ export type ColumnCatalogEntry = {
   producer: GridColumnProducer;
 };
 
-// Re-export EMPTY_DISPLAY so existing imports from column-catalog.ts keep working.
-export { EMPTY_DISPLAY } from "./types.ts";
 
 const MISSING: GridCellResult = { status: "missing_data", display: EMPTY_DISPLAY };
 

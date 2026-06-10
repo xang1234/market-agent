@@ -5,7 +5,8 @@ import {
 } from "../../snapshot/src/snapshot-sealer.ts";
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import { updateCellResult } from "./queries.ts";
-import { EMPTY_DISPLAY, type ColumnCatalogEntry, type GridCellResult, type PeriodContext, type ReaderColumnDeps } from "./column-catalog.ts";
+import type { ColumnCatalogEntry, GridCellResult, PeriodContext, ReaderColumnDeps } from "./column-catalog.ts";
+import { EMPTY_DISPLAY } from "./types.ts";
 import type { CellResultStatus, CellWrite, QueryExecutor } from "./types.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
 
