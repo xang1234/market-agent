@@ -1,5 +1,5 @@
 import { authenticatedJson, type FetchImpl } from "../http/authFetch.ts";
-import type { GridColumn, GridRunDetail } from "./gridsTypes.ts";
+import type { GridColumn, GridRunDetail, ColumnSpecInput } from "./gridsTypes.ts";
 
 export async function fetchColumns(args: { userId: string; fetchImpl?: FetchImpl }): Promise<GridColumn[]> {
   const body = await authenticatedJson<{ columns: GridColumn[] }>("/v1/analyst-grids/columns", {
@@ -29,7 +29,7 @@ export async function fetchRun(args: { userId: string; runId: string; fetchImpl?
 export type CreateGridBody = {
   name: string;
   universe_spec: unknown;
-  column_specs: Array<{ column_key: string }>;
+  column_specs: ColumnSpecInput[];
 };
 
 export async function createGrid(args: { userId: string; body: CreateGridBody; fetchImpl?: FetchImpl }): Promise<{
@@ -37,7 +37,7 @@ export async function createGrid(args: { userId: string; body: CreateGridBody; f
   name: string;
   description: string | null;
   universe_spec: unknown;
-  column_specs: ReadonlyArray<{ column_key: string }>;
+  column_specs: ReadonlyArray<ColumnSpecInput>;
   created_at: string;
   updated_at: string;
 }> {
@@ -46,7 +46,7 @@ export async function createGrid(args: { userId: string; body: CreateGridBody; f
     name: string;
     description: string | null;
     universe_spec: unknown;
-    column_specs: ReadonlyArray<{ column_key: string }>;
+    column_specs: ReadonlyArray<ColumnSpecInput>;
     created_at: string;
     updated_at: string;
   }>("/v1/analyst-grids", {

@@ -1,7 +1,7 @@
 import { useState, type ReactElement, type FormEvent } from "react";
-import type { GridColumn } from "./gridsTypes.ts";
+import type { GridColumn, ColumnSpecInput } from "./gridsTypes.ts";
 
-export type GridBuilderSubmit = { universe_spec: unknown; column_specs: Array<{ column_key: string }> };
+export type GridBuilderSubmit = { universe_spec: unknown; column_specs: ColumnSpecInput[] };
 
 const ID_SOURCES = ["screen", "watchlist", "portfolio", "peers"] as const;
 type IdSource = (typeof ID_SOURCES)[number];
@@ -35,7 +35,11 @@ export function GridBuilder({ columns, onSubmit }: GridBuilderProps): ReactEleme
     const FormDataCtor = (e.currentTarget.ownerDocument.defaultView as Window & { FormData: typeof FormData }).FormData;
     const fd = new FormDataCtor(e.currentTarget);
     const selectedKeys = new Set(fd.getAll("column").map(String));
-    const column_specs = columns.filter((c) => selectedKeys.has(c.column_key)).map((c) => ({ column_key: c.column_key }));
+    const column_specs: ColumnSpecInput[] = columns.filter((c) => selectedKeys.has(c.column_key)).map((c) => ({ column_key: c.column_key }));
+    const question = String(fd.get("question") ?? "").trim();
+    if (question.length > 0) {
+      column_specs.push({ column_key: "reader_question", params: { prompt: question } });
+    }
     if (column_specs.length === 0) return; // a grid needs at least one column
     const universe_spec =
       source === "manual"
@@ -79,13 +83,24 @@ export function GridBuilder({ columns, onSubmit }: GridBuilderProps): ReactEleme
 
       <fieldset className="space-y-1">
         <legend className="text-xs uppercase tracking-wide text-muted">Columns</legend>
-        {columns.map((col) => (
+        {columns.filter((c) => c.kind !== "reader").map((col) => (
           <label key={col.column_key} className="flex items-center gap-2 text-sm">
             <input type="checkbox" name="column" value={col.column_key} data-testid={`grid-builder-col-${col.column_key}`} />
             {col.label}
           </label>
         ))}
       </fieldset>
+
+      <label className="block text-sm">
+        Question column <span className="text-muted">(optional — asked per company, answered from documents)</span>
+        <textarea
+          name="question"
+          data-testid="grid-builder-question-input"
+          className="w-full rounded border border-line bg-surface-2 px-2 py-1"
+          placeholder='e.g. "Any China exposure flagged in risk factors?"'
+          maxLength={300}
+        />
+      </label>
 
       <button type="submit" data-testid="grid-builder-submit" className="rounded bg-accent px-3 py-1 text-sm text-bg">
         Create &amp; Run

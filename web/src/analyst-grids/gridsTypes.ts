@@ -4,6 +4,8 @@ export type CellRef = { kind: "fact" | "claim"; id: string };
 
 export type GridColumn = { column_key: string; label: string; kind: "deterministic" | "reader" };
 
+export type ColumnSpecInput = { column_key: string; params?: { prompt: string } };
+
 export type GridRunStatus = "pending" | "running" | "partial" | "completed" | "failed";
 
 export type GridRunSummary = {
