@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { QueryResult } from "pg";
 
-import { getColumn } from "../src/column-catalog.ts";
+import { getColumn, listColumns } from "../src/column-catalog.ts";
+import { readerQuestionProducer } from "../src/reader-question-column.ts";
 import type { QueryExecutor } from "../src/types.ts";
 
 // Docker-free coverage for latestMarketCapProducer. The producer's SQL needs a
@@ -75,4 +76,18 @@ test("latest_market_cap returns missing_data when no fact row matches", async ()
   const result = await getColumn("latest_market_cap")!.producer({ db }, CTX);
   assert.equal(result.status, "missing_data");
   assert.equal(result.seal, undefined);
+});
+
+test("catalog advertises reader_question as a reader column", () => {
+  const columns = listColumns();
+  const entry = columns.find((c) => c.column_key === "reader_question");
+  assert.ok(entry);
+  assert.equal(entry!.kind, "reader");
+  assert.equal(entry!.label, "Question");
+});
+
+test("getColumn resolves reader_question to the reader producer", () => {
+  const entry = getColumn("reader_question");
+  assert.ok(entry);
+  assert.equal(entry!.producer, readerQuestionProducer);
 });

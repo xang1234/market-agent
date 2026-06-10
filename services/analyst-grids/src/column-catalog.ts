@@ -7,8 +7,9 @@ import {
 } from "../../analyze/src/block-seal-input.ts";
 import { formatCompactCurrency } from "../../analyze/src/block-format.ts";
 import type { CellDisplay, CellRef, CellResultStatus, QueryExecutor } from "./types.ts";
-import { GridValidationError } from "./types.ts";
+import { EMPTY_DISPLAY, GridValidationError } from "./types.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
+import { readerQuestionProducer } from "./reader-question-column.ts";
 
 export const READER_QUESTION_COLUMN_KEY = "reader_question";
 export const MAX_READER_COLUMNS_PER_GRID = 3;
@@ -75,8 +76,8 @@ export type ColumnCatalogEntry = {
   producer: GridColumnProducer;
 };
 
-// The empty/placeholder cell display, shared with the cell runner's error path.
-export const EMPTY_DISPLAY: CellDisplay = { value: "—", tone: null };
+// Re-export EMPTY_DISPLAY so existing imports from column-catalog.ts keep working.
+export { EMPTY_DISPLAY } from "./types.ts";
 
 const MISSING: GridCellResult = { status: "missing_data", display: EMPTY_DISPLAY };
 
@@ -166,8 +167,7 @@ const CATALOG: ReadonlyMap<string, ColumnCatalogEntry> = new Map([
       column_key: READER_QUESTION_COLUMN_KEY,
       label: "Question",
       kind: "reader",
-      // Placeholder until the reader producer lands (plan Task 6/7): fail closed.
-      producer: async () => ({ status: "error", display: EMPTY_DISPLAY }),
+      producer: readerQuestionProducer,
     },
   ],
 ]);

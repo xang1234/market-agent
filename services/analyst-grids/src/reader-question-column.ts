@@ -5,7 +5,7 @@ import { buildClaimBackedSealInput } from "../../analyze/src/block-seal-input.ts
 import { selectReaderDocuments, READER_DOCUMENTS_PER_CELL } from "./reader-documents.ts";
 import { buildReaderMessages, parseReaderResponse, type ReaderDocText } from "./reader-llm.ts";
 import type { GridColumnProducer, GridCellResult } from "./column-catalog.ts";
-import { EMPTY_DISPLAY } from "./column-catalog.ts";
+import { EMPTY_DISPLAY } from "./types.ts";
 
 export const READER_TOOL_NAME = "grid_reader_question";
 
@@ -56,6 +56,9 @@ export const readerQuestionProducer: GridColumnProducer = async (deps, ctx) => {
 
   const docById = new Map(docs.map((doc) => [doc.document_id, doc]));
   const claimRows = [];
+  // Claims and the tool-call log are intentionally append-only and committed
+  // per-statement: if a later step (or the seal) fails, orphaned rows remain
+  // inert — nothing surfaces a claim without a sealed snapshot citing it.
   for (const claim of parsed.claims) {
     const doc = docById.get(claim.document_id)!;
     claimRows.push(
