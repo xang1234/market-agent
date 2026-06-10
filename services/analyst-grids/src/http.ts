@@ -5,7 +5,7 @@ import {
   type RequestAuthConfig,
 } from "../../shared/src/request-auth.ts";
 import { createGrid, getGrid, listGrids, loadRunForUser, getRunDetail } from "./queries.ts";
-import { getColumn, listColumns } from "./column-catalog.ts";
+import { listColumns, validateColumnSpecs } from "./column-catalog.ts";
 import {
   GridNotFoundError,
   GridValidationError,
@@ -60,10 +60,8 @@ function parseCreateInput(body: Record<string, unknown>): CreateGridInput {
     if (typeof columnKey !== "string") {
       throw new GridValidationError("each column_spec needs a string 'column_key'");
     }
-    if (!getColumn(columnKey)) {
-      throw new GridValidationError(`unknown column_key: ${columnKey}`);
-    }
   }
+  validateColumnSpecs(body.column_specs as Array<{ column_key: string; params?: unknown }>);
   return {
     name: body.name,
     description: typeof body.description === "string" ? body.description : null,

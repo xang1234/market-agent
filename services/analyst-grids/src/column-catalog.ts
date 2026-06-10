@@ -7,7 +7,13 @@ import {
 } from "../../analyze/src/block-seal-input.ts";
 import { formatCompactCurrency } from "../../analyze/src/block-format.ts";
 import type { CellDisplay, CellRef, CellResultStatus, QueryExecutor } from "./types.ts";
+import { GridValidationError } from "./types.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
+
+export const READER_QUESTION_COLUMN_KEY = "reader_question";
+export const MAX_READER_COLUMNS_PER_GRID = 3;
+const PROMPT_MIN = 8;
+const PROMPT_MAX = 300;
 
 // A grid cell's period context. Plan 2 fills the fiscal period from the
 // subject's latest fact; document_refs stays [] until Plan 3 wires
@@ -153,6 +159,16 @@ const CATALOG: ReadonlyMap<string, ColumnCatalogEntry> = new Map([
       producer: latestMarketCapProducer,
     },
   ],
+  [
+    READER_QUESTION_COLUMN_KEY,
+    {
+      column_key: READER_QUESTION_COLUMN_KEY,
+      label: "Question",
+      kind: "reader",
+      // Placeholder until the reader producer lands (plan Task 6/7): fail closed.
+      producer: async () => ({ status: "error", display: EMPTY_DISPLAY }),
+    },
+  ],
 ]);
 
 export function listColumns(): ReadonlyArray<Omit<ColumnCatalogEntry, "producer">> {
@@ -161,4 +177,30 @@ export function listColumns(): ReadonlyArray<Omit<ColumnCatalogEntry, "producer"
 
 export function getColumn(columnKey: string): ColumnCatalogEntry | undefined {
   return CATALOG.get(columnKey);
+}
+
+// Create/run-time validation for a grid's column specs. Throws
+// GridValidationError (surfaced as HTTP 400 by the existing handler).
+export function validateColumnSpecs(
+  specs: ReadonlyArray<{ column_key: string; params?: unknown }>,
+): void {
+  let readerCount = 0;
+  for (const spec of specs) {
+    const entry = CATALOG.get(spec.column_key);
+    if (!entry) throw new GridValidationError(`unknown column_key: ${spec.column_key}`);
+    if (entry.kind === "reader") readerCount += 1;
+    if (spec.column_key === READER_QUESTION_COLUMN_KEY) {
+      const prompt = (spec.params as { prompt?: unknown } | undefined)?.prompt;
+      if (typeof prompt !== "string") {
+        throw new GridValidationError("reader_question requires params.prompt (string)");
+      }
+      const len = prompt.trim().length;
+      if (len < PROMPT_MIN || len > PROMPT_MAX) {
+        throw new GridValidationError(`params.prompt must be ${PROMPT_MIN}-${PROMPT_MAX} characters`);
+      }
+    }
+  }
+  if (readerCount > MAX_READER_COLUMNS_PER_GRID) {
+    throw new GridValidationError(`at most ${MAX_READER_COLUMNS_PER_GRID} question columns per grid`);
+  }
 }
