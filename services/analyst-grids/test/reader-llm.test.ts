@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildReaderMessages, parseReaderResponse, MAX_ANSWER_CHARS } from "../src/reader-llm.ts";
+import { buildReaderMessages, parseReaderResponse, MAX_ANSWER_CHARS, MAX_CLAIMS_PER_CELL } from "../src/reader-llm.ts";
 
 const DOC_A = "2b3c4d5e-6f7a-4b2c-8d3e-4f5a6b7c8d9e";
 
@@ -73,4 +73,81 @@ test("answered with zero claims is treated as not_discussed", () => {
     new Set([DOC_A]),
   );
   assert.equal(parsed.kind, "not_discussed");
+});
+
+const VALID_CLAIM = {
+  document_id: DOC_A,
+  predicate: "risk_exposure",
+  text_canonical: "The company flags China tariff exposure in Item 1A.",
+  polarity: "negative" as const,
+  modality: "asserted" as const,
+  confidence: 0.85,
+};
+
+test("answer with embedded newlines/tabs/control chars is normalised to a single clean line", () => {
+  // Include newline, tab, zero-width space (U+200B), and a C0 control char (\x01)
+  const dirtyAnswer = "Line1\nLine2\t\x01extra​";
+  const parsed = parseReaderResponse(
+    JSON.stringify({
+      answer: dirtyAnswer,
+      claims: [VALID_CLAIM],
+      not_discussed: false,
+    }),
+    new Set([DOC_A]),
+  );
+  assert.equal(parsed.kind, "answered");
+  if (parsed.kind === "answered") {
+    assert.doesNotMatch(parsed.answer, /[\n\t\r\x00-\x1f\x7f-\x9f​-‍﻿]/);
+    assert.doesNotMatch(parsed.answer, /  /); // no double spaces
+    assert.ok(parsed.answer.length > 0);
+  }
+});
+
+test("whitespace-only answer throws /missing answer/", () => {
+  assert.throws(
+    () =>
+      parseReaderResponse(
+        JSON.stringify({ answer: "   \n\t  ", claims: [VALID_CLAIM], not_discussed: false }),
+        new Set([DOC_A]),
+      ),
+    /missing answer/,
+  );
+});
+
+test("21 claims throws /too many claims/; 20 claims passes", () => {
+  const makeClaims = (n: number) =>
+    Array.from({ length: n }, () => ({ ...VALID_CLAIM }));
+
+  assert.throws(
+    () =>
+      parseReaderResponse(
+        JSON.stringify({ answer: "ok", claims: makeClaims(MAX_CLAIMS_PER_CELL + 1), not_discussed: false }),
+        new Set([DOC_A]),
+      ),
+    /too many claims/,
+  );
+
+  const parsed = parseReaderResponse(
+    JSON.stringify({ answer: "ok", claims: makeClaims(MAX_CLAIMS_PER_CELL), not_discussed: false }),
+    new Set([DOC_A]),
+  );
+  assert.equal(parsed.kind, "answered");
+  if (parsed.kind === "answered") {
+    assert.equal(parsed.claims.length, MAX_CLAIMS_PER_CELL);
+  }
+});
+
+test("whitespace-only predicate throws", () => {
+  assert.throws(
+    () =>
+      parseReaderResponse(
+        JSON.stringify({
+          answer: "ok answer",
+          claims: [{ ...VALID_CLAIM, predicate: "   " }],
+          not_discussed: false,
+        }),
+        new Set([DOC_A]),
+      ),
+    /predicate required/,
+  );
 });
