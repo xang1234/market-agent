@@ -5,13 +5,15 @@ import {
 } from "../../snapshot/src/snapshot-sealer.ts";
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import { updateCellResult } from "./queries.ts";
-import { EMPTY_DISPLAY, type ColumnCatalogEntry, type GridCellResult, type PeriodContext } from "./column-catalog.ts";
+import { EMPTY_DISPLAY, type ColumnCatalogEntry, type GridCellResult, type PeriodContext, type ReaderColumnDeps } from "./column-catalog.ts";
 import type { CellResultStatus, CellWrite, QueryExecutor } from "./types.ts";
+import type { JsonValue } from "../../observability/src/types.ts";
 
-export type CellRunnerDeps = { db: QueryExecutor; pool: SnapshotClientPool };
+export type CellRunnerDeps = { db: QueryExecutor; pool: SnapshotClientPool; reader?: ReaderColumnDeps };
 
 export type ComputeCellInput = {
   column: ColumnCatalogEntry;
+  params: JsonValue | null;
   gridRowId: string;
   subject: SubjectRef;
   period: PeriodContext;
@@ -40,8 +42,8 @@ export async function computeAndPersistCell(
   let result: GridCellResult;
   try {
     result = await input.column.producer(
-      { db: deps.db },
-      { subject: input.subject, period: input.period, snapshotId, asOf: input.asOf },
+      { db: deps.db, reader: deps.reader },
+      { subject: input.subject, period: input.period, snapshotId, asOf: input.asOf, params: input.params },
     );
   } catch {
     return persistError();

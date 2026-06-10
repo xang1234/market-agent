@@ -7,6 +7,7 @@ import {
 } from "../../analyze/src/block-seal-input.ts";
 import { formatCompactCurrency } from "../../analyze/src/block-format.ts";
 import type { CellDisplay, CellRef, CellResultStatus, QueryExecutor } from "./types.ts";
+import type { JsonValue } from "../../observability/src/types.ts";
 
 // A grid cell's period context. Plan 2 fills the fiscal period from the
 // subject's latest fact; document_refs stays [] until Plan 3 wires
@@ -26,6 +27,7 @@ export type GridColumnContext = {
   period: PeriodContext;
   snapshotId: string;
   asOf: string;
+  params: JsonValue | null; // the column's ColumnSpec.params, verbatim
 };
 
 export type GridCellResult = {
@@ -36,7 +38,23 @@ export type GridCellResult = {
   coverageFlag?: string;
 };
 
-export type GridColumnDeps = { db: QueryExecutor };
+// The reader-side dependencies a reader-kind column needs. llm matches the
+// services/llm router's complete() surface; loadDocumentText resolves a
+// document's raw blob to utf-8 text (null when the blob is missing/ephemeral).
+export type ReaderLlm = {
+  complete(request: {
+    messages: ReadonlyArray<{ role: "system" | "user" | "assistant"; content: string }>;
+    temperature?: number;
+    maxTokens?: number;
+  }): Promise<{ text: string; deployment?: { channel: string; model: string } }>;
+};
+
+export type ReaderColumnDeps = {
+  llm: ReaderLlm;
+  loadDocumentText: (rawBlobId: string) => Promise<string | null>;
+};
+
+export type GridColumnDeps = { db: QueryExecutor; reader?: ReaderColumnDeps };
 
 export type GridColumnProducer = (
   deps: GridColumnDeps,

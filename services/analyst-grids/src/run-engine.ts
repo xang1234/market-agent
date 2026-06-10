@@ -13,9 +13,10 @@ import {
 import { withTransaction } from "../../evidence/src/transaction.ts";
 import { resolveUniverse, type UniverseResolverDeps } from "./universe.ts";
 import { resolvePeriodContext } from "./period-context.ts";
-import { getColumn, type ColumnCatalogEntry, type PeriodContext } from "./column-catalog.ts";
+import { getColumn, type ColumnCatalogEntry, type PeriodContext, type ReaderColumnDeps } from "./column-catalog.ts";
 import { computeAndPersistCell } from "./cell-runner.ts";
 import { GridValidationError, type QueryExecutor } from "./types.ts";
+import type { JsonValue } from "../../observability/src/types.ts";
 
 export const MAX_GRID_ROWS = 25;
 const ROW_CONCURRENCY = 4;
@@ -24,7 +25,10 @@ export type RunEngineDeps = {
   db: QueryExecutor;
   pool: SnapshotClientPool;
   universe: UniverseResolverDeps;
+  reader?: ReaderColumnDeps;
 };
+
+type RunColumn = { entry: ColumnCatalogEntry; params: JsonValue | null };
 
 export function capUniverse(refs: ReadonlyArray<SubjectRef>): { capped: ReadonlyArray<SubjectRef>; droppedRowCount: number } {
   if (refs.length <= MAX_GRID_ROWS) return { capped: refs, droppedRowCount: 0 };
@@ -78,10 +82,10 @@ export async function startGridRun(
   input: { gridId: string; userId: string; asOf: string },
 ): Promise<StartRunResult> {
   const grid = await getGrid(deps.db, input.userId, input.gridId);
-  const columns: ColumnCatalogEntry[] = grid.column_specs.map((spec) => {
-    const column = getColumn(spec.column_key);
-    if (!column) throw new GridValidationError(`unknown column_key: ${spec.column_key}`);
-    return column;
+  const columns: RunColumn[] = grid.column_specs.map((spec) => {
+    const entry = getColumn(spec.column_key);
+    if (!entry) throw new GridValidationError(`unknown column_key: ${spec.column_key}`);
+    return { entry, params: spec.params ?? null };
   });
 
   const resolved = await resolveUniverse(deps.universe, input.userId, grid.universe_spec);
@@ -103,7 +107,7 @@ export async function startGridRun(
     for (const [rowNumber, subject] of capped.entries()) {
       const gridRowId = await insertRow(tx.db, { gridRunId: runId, rowNumber, subjectRef: subject });
       for (const column of columns) {
-        await insertPendingCell(tx.db, { gridRowId, gridRunId: runId, columnKey: column.column_key });
+        await insertPendingCell(tx.db, { gridRowId, gridRunId: runId, columnKey: column.entry.column_key });
       }
       rows.push({ gridRowId, subject });
     }
@@ -127,7 +131,7 @@ export async function startGridRun(
 
 async function runWorker(
   deps: RunEngineDeps,
-  ctx: { runId: string; rows: Array<{ gridRowId: string; subject: SubjectRef }>; columns: ColumnCatalogEntry[]; asOf: string },
+  ctx: { runId: string; rows: Array<{ gridRowId: string; subject: SubjectRef }>; columns: RunColumn[]; asOf: string },
 ): Promise<void> {
   try {
     await setRunStatus(deps.db, ctx.runId, "running");
@@ -145,8 +149,8 @@ async function runWorker(
       let errored = false;
       for (const column of ctx.columns) {
         const status = await computeAndPersistCell(
-          { db: deps.db, pool: deps.pool },
-          { column, gridRowId, subject, period, asOf: ctx.asOf },
+          { db: deps.db, pool: deps.pool, reader: deps.reader },
+          { column: column.entry, params: column.params, gridRowId, subject, period, asOf: ctx.asOf },
         );
         if (status === "error") errored = true;
         await bumpCellDone(deps.db, ctx.runId);

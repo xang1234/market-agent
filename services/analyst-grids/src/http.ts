@@ -16,6 +16,7 @@ import {
 import { startGridRun, type RunEngineDeps } from "./run-engine.ts";
 import type { UniverseResolverDeps } from "./universe.ts";
 import type { SnapshotClientPool } from "../../snapshot/src/snapshot-sealer.ts";
+import type { ReaderColumnDeps } from "./column-catalog.ts";
 
 const MAX_BODY = 64 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -75,11 +76,12 @@ export type AnalystGridsServerDeps = {
   db: QueryExecutor;
   pool: SnapshotClientPool;
   universe: UniverseResolverDeps;
+  reader?: ReaderColumnDeps;
   auth?: RequestAuthConfig;
 };
 
 export function createAnalystGridsServer(deps: AnalystGridsServerDeps): Server {
-  const { db, pool, universe, auth } = deps;
+  const { db, pool, universe, reader, auth } = deps;
   return createServer(async (req, res) => {
     try {
       const method = req.method ?? "GET";
@@ -112,7 +114,7 @@ export function createAnalystGridsServer(deps: AnalystGridsServerDeps): Server {
       // POST /v1/analyst-grids/:gridId/runs — start an async run
       const runStartMatch = path.match(/^\/v1\/analyst-grids\/([^/]+)\/runs$/);
       if (method === "POST" && runStartMatch && UUID_RE.test(runStartMatch[1])) {
-        const engineDeps: RunEngineDeps = { db, pool, universe };
+        const engineDeps: RunEngineDeps = { db, pool, universe, reader };
         const result = await startGridRun(engineDeps, { gridId: runStartMatch[1], userId, asOf: new Date().toISOString() });
         respond(res, 202, result);
         return;
