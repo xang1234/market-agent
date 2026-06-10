@@ -133,6 +133,65 @@ function distinct(values: ReadonlyArray<UUID>): UUID[] {
   return [...new Set(values)];
 }
 
+export type ClaimSealClaim = { claim_id: UUID; source_id: UUID };
+export type ClaimSealDocument = { document_id: UUID; source_id: UUID | null };
+export type SealToolCallRef = { tool_call_id: UUID; result_hash: string };
+
+// The claim-backed sibling of buildFactBackedSealInput, for LLM-derived blocks
+// (analyst-grid reader cells). The manifest is STAGED only — never
+// DETERMINISTIC — so the sealer's tool-call provenance audit applies: every
+// tool_call_id must exist in tool_call_logs with a matching result_hash.
+export function buildClaimBackedSealInput(input: {
+  block: SealableBlock & {
+    kind: string;
+    source_refs: ReadonlyArray<string>;
+    segments: ReadonlyArray<unknown>;
+  };
+  claims: ReadonlyArray<ClaimSealClaim>;
+  documents: ReadonlyArray<ClaimSealDocument>;
+  subjectRefs: ReadonlyArray<{ kind: string; id: string }>;
+  toolCalls: ReadonlyArray<SealToolCallRef>;
+  modelVersion?: string | null;
+}): SnapshotSealInput {
+  const claimRefs = distinct(input.claims.map((claim) => claim.claim_id));
+  const documentRefs = distinct(input.documents.map((doc) => doc.document_id));
+  const sourceIds = distinct([
+    ...input.claims.map((claim) => claim.source_id),
+    ...input.documents.flatMap((doc) => (doc.source_id === null ? [] : [doc.source_id])),
+  ]);
+
+  const manifest: SnapshotManifestDraft = Object.freeze({
+    [STAGED_SNAPSHOT_MANIFEST]: true,
+    subject_refs: Object.freeze(input.subjectRefs.map((s) => ({ kind: s.kind, id: s.id }))),
+    fact_refs: Object.freeze([]),
+    claim_refs: Object.freeze(claimRefs),
+    event_refs: Object.freeze([]),
+    document_refs: Object.freeze(documentRefs),
+    series_specs: Object.freeze([]),
+    source_ids: Object.freeze(sourceIds),
+    tool_call_ids: Object.freeze(input.toolCalls.map((t) => t.tool_call_id)),
+    tool_call_result_hashes: Object.freeze(
+      input.toolCalls.map((t) => ({ tool_call_id: t.tool_call_id, result_hash: t.result_hash })),
+    ),
+    as_of: input.block.as_of,
+    basis: "unadjusted",
+    normalization: "raw",
+    coverage_start: null,
+    allowed_transforms: Object.freeze({}),
+    model_version: input.modelVersion ?? null,
+    parent_snapshot: null,
+  });
+
+  return {
+    snapshot_id: input.block.snapshot_id,
+    manifest,
+    blocks: [input.block as unknown as VerifierBlock],
+    claims: input.claims.map((claim) => ({ ...claim })),
+    documents: input.documents.map((doc) => ({ ...doc })),
+    sources: sourceIds,
+  };
+}
+
 // Append the disclosure blocks the seal's facts require (delayed/eod pricing,
 // filing-time basis). compileDisclosurePolicy generates sealable disclosure
 // blocks from the facts' freshness; the verifier re-derives the same requirement
