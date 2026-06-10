@@ -9,8 +9,8 @@ import {
   markRowResolved,
   markRowFailed,
   bumpCellDone,
-  getRunDetail,
 } from "./queries.ts";
+import { withTransaction } from "../../evidence/src/transaction.ts";
 import { resolveUniverse, type UniverseResolverDeps } from "./universe.ts";
 import { resolvePeriodContext } from "./period-context.ts";
 import { getColumn, type ColumnCatalogEntry, type PeriodContext } from "./column-catalog.ts";
@@ -88,23 +88,27 @@ export async function startGridRun(
   const { capped, droppedRowCount } = capUniverse(resolved);
   const cellTotal = capped.length * columns.length;
 
-  const runId = await createRun(deps.db, {
-    gridId: grid.grid_id,
-    userId: input.userId,
-    asOf: input.asOf,
-    cellTotal,
-    droppedRowCount,
-  });
-
-  const rows = await Promise.all(
-    capped.map(async (subject, rowNumber) => {
-      const gridRowId = await insertRow(deps.db, { gridRunId: runId, rowNumber, subjectRef: subject });
+  // Materialize the run, its rows, and its pending cells atomically: a partial
+  // failure here must not leave a run whose cell_total never reconciles. The
+  // inserts run sequentially because a transaction is a single connection.
+  const { runId, rows } = await withTransaction(deps.db, async (tx) => {
+    const runId = await createRun(tx.db, {
+      gridId: grid.grid_id,
+      userId: input.userId,
+      asOf: input.asOf,
+      cellTotal,
+      droppedRowCount,
+    });
+    const rows: Array<{ gridRowId: string; subject: SubjectRef }> = [];
+    for (const [rowNumber, subject] of capped.entries()) {
+      const gridRowId = await insertRow(tx.db, { gridRunId: runId, rowNumber, subjectRef: subject });
       for (const column of columns) {
-        await insertPendingCell(deps.db, { gridRowId, gridRunId: runId, columnKey: column.column_key });
+        await insertPendingCell(tx.db, { gridRowId, gridRunId: runId, columnKey: column.column_key });
       }
-      return { gridRowId, subject };
-    }),
-  );
+      rows.push({ gridRowId, subject });
+    }
+    return { runId, rows };
+  });
 
   if (droppedRowCount > 0) {
     console.log(`analyst-grids run ${runId}: universe of ${resolved.length} capped to ${MAX_GRID_ROWS} (dropped ${droppedRowCount})`);
@@ -127,7 +131,9 @@ async function runWorker(
 ): Promise<void> {
   try {
     await setRunStatus(deps.db, ctx.runId, "running");
-    await runWithConcurrency(ctx.rows, ROW_CONCURRENCY, async ({ gridRowId, subject }) => {
+    // Each row reports whether any of its cells errored; the worker finalizes
+    // from these outcomes rather than re-reading every cell back.
+    const rowHadError = await runWithConcurrency(ctx.rows, ROW_CONCURRENCY, async ({ gridRowId, subject }) => {
       let period: PeriodContext = null;
       try {
         period = await resolvePeriodContext(deps.db, subject);
@@ -136,18 +142,20 @@ async function runWorker(
         await markRowFailed(deps.db, gridRowId);
         period = null;
       }
+      let errored = false;
       for (const column of ctx.columns) {
-        await computeAndPersistCell(
+        const status = await computeAndPersistCell(
           { db: deps.db, pool: deps.pool },
           { column, gridRowId, subject, period, asOf: ctx.asOf },
         );
+        if (status === "error") errored = true;
         await bumpCellDone(deps.db, ctx.runId);
       }
+      return errored;
     });
 
     // partial when any cell errored, else completed.
-    const detail = await getRunDetail(deps.db, ctx.runId);
-    const anyError = detail.cells.some((c) => c.status === "error");
+    const anyError = rowHadError.some(Boolean);
     await setRunStatus(deps.db, ctx.runId, anyError ? "partial" : "completed", { completedAt: true });
   } catch (error) {
     try {

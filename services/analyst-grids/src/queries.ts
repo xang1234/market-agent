@@ -1,5 +1,8 @@
 import {
   GridNotFoundError,
+  type CellDisplay,
+  type CellRef,
+  type CellStatus,
   type CellWrite,
   type CreateGridInput,
   type QueryExecutor,
@@ -287,10 +290,10 @@ export type GridCellDetail = {
   grid_cell_id: string;
   grid_row_id: string;
   column_key: string;
-  status: string;
-  display: { value: string; tone: "best" | "worst" | null } | null;
+  status: CellStatus;
+  display: CellDisplay | null;
   snapshot_id: string | null;
-  primary_ref: { kind: "fact" | "claim"; id: string } | null;
+  primary_ref: CellRef | null;
   coverage_flag: string | null;
 };
 
@@ -323,7 +326,7 @@ export async function getRunDetail(db: QueryExecutor, runId: string): Promise<Gr
       grid_cell_id: String(c.grid_cell_id),
       grid_row_id: String(c.grid_row_id),
       column_key: String(c.column_key),
-      status: String(c.status),
+      status: c.status as CellStatus,
       display: (c.display as GridCellDetail["display"]) ?? null,
       snapshot_id: (c.snapshot_id as string | null) ?? null,
       primary_ref: (c.primary_ref as GridCellDetail["primary_ref"]) ?? null,
