@@ -4,6 +4,7 @@ import { buildClaimBackedSealInput } from "../src/block-seal-input.ts";
 import { verifySnapshotSeal } from "../../snapshot/src/snapshot-verifier.ts";
 import {
   DETERMINISTIC_SNAPSHOT_MANIFEST,
+  auditManifestToolCallLog,
 } from "../../snapshot/src/manifest-staging.ts";
 
 const SNAPSHOT_ID = "8b6c8b1e-6a1f-4d2a-9a3b-0c1d2e3f4a5b";
@@ -36,7 +37,7 @@ function sealInput() {
     claims: [{ claim_id: CLAIM_ID, source_id: SOURCE_ID }],
     documents: [{ document_id: DOC_ID, source_id: SOURCE_ID }],
     subjectRefs: [{ kind: "issuer", id: SUBJECT_ID }],
-    toolCalls: [{ tool_call_id: TOOL_CALL_ID, result_hash: "a".repeat(64) }],
+    toolCalls: [{ tool_call_id: TOOL_CALL_ID, result_hash: "sha256:" + "a".repeat(64) }],
     modelVersion: "reader:test-model",
   });
 }
@@ -48,7 +49,7 @@ test("claim-backed seal passes the snapshot verifier", async () => {
   assert.equal(result.ok, true);
 });
 
-test("manifest is STAGED but NOT deterministic (tool-call audit applies)", () => {
+test("manifest is STAGED, not deterministic, and carries tool-call provenance", () => {
   const input = sealInput();
   assert.notEqual(
     (input.manifest as Record<PropertyKey, unknown>)[DETERMINISTIC_SNAPSHOT_MANIFEST as unknown as PropertyKey],
@@ -65,4 +66,46 @@ test("a block citing a claim missing from the manifest fails verification", asyn
   const result = await verifySnapshotSeal(broken as typeof input);
   assert.equal(result.ok, false);
   assert.ok(result.failures.some((f) => f.reason_code === "missing_claim_ref"));
+});
+
+test("buildClaimBackedSealInput throws on empty toolCalls", () => {
+  assert.throws(
+    () =>
+      buildClaimBackedSealInput({
+        block: block(),
+        claims: [{ claim_id: CLAIM_ID, source_id: SOURCE_ID }],
+        documents: [{ document_id: DOC_ID, source_id: SOURCE_ID }],
+        subjectRefs: [{ kind: "issuer", id: SUBJECT_ID }],
+        toolCalls: [],
+        modelVersion: "reader:test-model",
+      }),
+    /LLM-derived blocks require at least one tool call ref/,
+  );
+});
+
+test("the sealer-side audit accepts the manifest when tool_call_logs match", async () => {
+  const input = sealInput();
+  const fakeDb = {
+    query: async () => ({
+      rows: [{ tool_call_id: TOOL_CALL_ID, result_hash: "sha256:" + "a".repeat(64) }],
+      rowCount: 1,
+    }),
+  };
+  const audit = await auditManifestToolCallLog(fakeDb as never, input.manifest as never);
+  assert.equal(audit.ok, true);
+  assert.deepEqual(audit.missing_tool_call_ids, []);
+  assert.deepEqual(audit.mismatched_tool_call_ids, []);
+});
+
+test("the sealer-side audit rejects the manifest when the log hash mismatches", async () => {
+  const input = sealInput();
+  const fakeDb = {
+    query: async () => ({
+      rows: [{ tool_call_id: TOOL_CALL_ID, result_hash: "sha256:" + "b".repeat(64) }],
+      rowCount: 1,
+    }),
+  };
+  const audit = await auditManifestToolCallLog(fakeDb as never, input.manifest as never);
+  assert.equal(audit.ok, false);
+  assert.deepEqual(audit.mismatched_tool_call_ids, [TOOL_CALL_ID]);
 });

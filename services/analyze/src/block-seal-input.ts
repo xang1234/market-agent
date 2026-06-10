@@ -134,7 +134,7 @@ function distinct(values: ReadonlyArray<UUID>): UUID[] {
 }
 
 export type ClaimSealClaim = { claim_id: UUID; source_id: UUID };
-export type ClaimSealDocument = { document_id: UUID; source_id: UUID | null };
+export type ClaimSealDocument = { document_id: UUID; source_id: UUID };
 export type SealToolCallRef = { tool_call_id: UUID; result_hash: string };
 
 // The claim-backed sibling of buildFactBackedSealInput, for LLM-derived blocks
@@ -153,11 +153,15 @@ export function buildClaimBackedSealInput(input: {
   toolCalls: ReadonlyArray<SealToolCallRef>;
   modelVersion?: string | null;
 }): SnapshotSealInput {
+  if (input.toolCalls.length === 0) {
+    throw new Error("buildClaimBackedSealInput: LLM-derived blocks require at least one tool call ref");
+  }
+
   const claimRefs = distinct(input.claims.map((claim) => claim.claim_id));
   const documentRefs = distinct(input.documents.map((doc) => doc.document_id));
   const sourceIds = distinct([
     ...input.claims.map((claim) => claim.source_id),
-    ...input.documents.flatMap((doc) => (doc.source_id === null ? [] : [doc.source_id])),
+    ...input.documents.map((doc) => doc.source_id),
   ]);
 
   const manifest: SnapshotManifestDraft = Object.freeze({
