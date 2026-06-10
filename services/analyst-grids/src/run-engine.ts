@@ -122,7 +122,7 @@ export async function startGridRun(
   // failure on error, but its recovery write can itself reject (e.g. DB
   // outage), so we attach a catch here to keep that from becoming an unhandled
   // rejection that crashes the host process.
-  void runWorker(deps, { runId, rows, columns, asOf: input.asOf }).catch((err) => {
+  void runWorker(deps, { runId, rows, columns, asOf: input.asOf, userId: input.userId }).catch((err) => {
     console.error(`analyst-grids run ${runId}: worker crashed`, err);
   });
 
@@ -131,7 +131,7 @@ export async function startGridRun(
 
 async function runWorker(
   deps: RunEngineDeps,
-  ctx: { runId: string; rows: Array<{ gridRowId: string; subject: SubjectRef }>; columns: RunColumn[]; asOf: string },
+  ctx: { runId: string; rows: Array<{ gridRowId: string; subject: SubjectRef }>; columns: RunColumn[]; asOf: string; userId: string },
 ): Promise<void> {
   try {
     await setRunStatus(deps.db, ctx.runId, "running");
@@ -150,7 +150,7 @@ async function runWorker(
       for (const column of ctx.columns) {
         const status = await computeAndPersistCell(
           { db: deps.db, pool: deps.pool, reader: deps.reader },
-          { column: column.entry, params: column.params, gridRowId, subject, period, asOf: ctx.asOf },
+          { column: column.entry, params: column.params, gridRowId, subject, period, asOf: ctx.asOf, userId: ctx.userId },
         );
         if (status === "error") errored = true;
         await bumpCellDone(deps.db, ctx.runId);

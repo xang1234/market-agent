@@ -13,6 +13,8 @@ const SOURCE_B_ID = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"; // article / ephemer
 const ISSUER_X_ID = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
 const ISSUER_Y_ID = "dddddddd-dddd-4ddd-dddd-dddddddddddd";
 const ISSUER_EMPTY_ID = "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee";
+const OUR_USER_ID = "ffffffff-ffff-4fff-afff-ffffffffffff";
+const OTHER_USER_ID = "00000000-0000-4000-a000-000000000001";
 
 // ─── Seeding helper ──────────────────────────────────────────────────────────
 // Returns the document_id of the inserted document (as text).
@@ -119,7 +121,7 @@ test("selectReaderDocuments — selects recent, non-ephemeral docs, kind-ranked"
   await seedMention(db, d3Id, ISSUER_X_ID);
   await seedMention(db, d4Id, ISSUER_Y_ID);
 
-  const rows = await selectReaderDocuments(db, ISSUER_X_ID, 5);
+  const rows = await selectReaderDocuments(db, ISSUER_X_ID, OUR_USER_ID, 5);
 
   assert.deepEqual(
     rows.map((r) => r.document_id),
@@ -140,7 +142,7 @@ test("selectReaderDocuments — returns empty array when issuer has no eligible 
   const { databaseUrl } = await bootstrapDatabase(t, "reader-docs-empty");
   const db = await connectedClient(t, databaseUrl);
 
-  const rows = await selectReaderDocuments(db, ISSUER_EMPTY_ID, 5);
+  const rows = await selectReaderDocuments(db, ISSUER_EMPTY_ID, OUR_USER_ID, 5);
   assert.deepEqual(rows, []);
 });
 
@@ -169,8 +171,67 @@ test("selectReaderDocuments — issuer Y docs do not appear for issuer X", async
   });
   await seedMention(db, dYId, ISSUER_Y_ID);
 
-  const rows = await selectReaderDocuments(db, ISSUER_X_ID, 5);
+  const rows = await selectReaderDocuments(db, ISSUER_X_ID, OUR_USER_ID, 5);
   assert.deepEqual(rows, []);
+});
+
+test("selectReaderDocuments — source owned by other user is excluded; source owned by our user is included", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker not available");
+    return;
+  }
+
+  const { databaseUrl } = await bootstrapDatabase(t, "reader-docs-user-scope");
+  const db = await connectedClient(t, databaseUrl);
+
+  // Seed the two users
+  await db.query(`insert into users (user_id, email) values ($1, $2)`, [OUR_USER_ID, "our@test.dev"]);
+  await db.query(`insert into users (user_id, email) values ($1, $2)`, [OTHER_USER_ID, "other@test.dev"]);
+
+  const SOURCE_OUR_ID = "11111111-1111-4111-a111-100000000001";
+  const SOURCE_OTHER_ID = "11111111-1111-4111-a111-100000000002";
+
+  // Source owned by OTHER_USER_ID
+  await db.query(
+    `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at, content_hash, user_id)
+     values ($1, 'test', 'filing', 'primary', 'public', now(), 'hother', $2)`,
+    [SOURCE_OTHER_ID, OTHER_USER_ID],
+  );
+
+  // Source owned by OUR_USER_ID
+  await db.query(
+    `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at, content_hash, user_id)
+     values ($1, 'test', 'filing', 'primary', 'public', now(), 'hour', $2)`,
+    [SOURCE_OUR_ID, OUR_USER_ID],
+  );
+
+  const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+
+  // Doc from OTHER's source — mentions issuer X
+  const dOtherDocId = await seedDocument(db, {
+    sourceId: SOURCE_OTHER_ID,
+    kind: "filing",
+    publishedAt: tenDaysAgo,
+    rawBlobId: "sha256:" + "e".repeat(64),
+    contentHash: "hash-dother",
+  });
+  await seedMention(db, dOtherDocId, ISSUER_X_ID);
+
+  // Doc from OUR source — mentions issuer X
+  const dOurDocId = await seedDocument(db, {
+    sourceId: SOURCE_OUR_ID,
+    kind: "filing",
+    publishedAt: tenDaysAgo,
+    rawBlobId: "sha256:" + "9".repeat(64),
+    contentHash: "hash-dour",
+  });
+  await seedMention(db, dOurDocId, ISSUER_X_ID);
+
+  const rows = await selectReaderDocuments(db, ISSUER_X_ID, OUR_USER_ID, 10);
+
+  const ids = rows.map((r) => r.document_id);
+  assert.ok(!ids.includes(dOtherDocId), "doc from other user's source must not appear");
+  assert.ok(ids.includes(dOurDocId), "doc from our user's source must appear");
 });
 
 // ─── Pure unit tests (no database) ──────────────────────────────────────────
@@ -184,6 +245,7 @@ function makeRow(
     raw_blob_id: "sha256:" + "0".repeat(64),
     doc_kind: "article",
     published_at: null,
+    created_at: "2020-01-01T00:00:00Z",
     ...overrides,
   };
 }
@@ -204,7 +266,7 @@ test("selectReaderDocuments unit — kind ranking: filing < transcript < article
     makeRow({ document_id: "id-transcript", doc_kind: "transcript", published_at: "2025-01-02" }),
   ];
 
-  const result = await selectReaderDocuments(fakeDb(rows), "any-issuer", 10);
+  const result = await selectReaderDocuments(fakeDb(rows), "any-issuer", OUR_USER_ID, 10);
   assert.deepEqual(
     result.map((r) => r.doc_kind),
     ["filing", "transcript", "article"],
@@ -219,7 +281,7 @@ test("selectReaderDocuments unit — recency tiebreak within same kind", async (
     makeRow({ document_id: "id-newest", doc_kind: "filing", published_at: "2025-06-01" }),
   ];
 
-  const result = await selectReaderDocuments(fakeDb(rows), "any-issuer", 10);
+  const result = await selectReaderDocuments(fakeDb(rows), "any-issuer", OUR_USER_ID, 10);
   assert.deepEqual(
     result.map((r) => r.document_id),
     ["id-newest", "id-newer", "id-old"],
@@ -235,7 +297,7 @@ test("selectReaderDocuments unit — limit slices the ranked result", async () =
     makeRow({ document_id: "id-4", doc_kind: "article", published_at: "2025-03-01" }),
   ];
 
-  const result = await selectReaderDocuments(fakeDb(rows), "any-issuer", 2);
+  const result = await selectReaderDocuments(fakeDb(rows), "any-issuer", OUR_USER_ID, 2);
   assert.equal(result.length, 2, "limit should slice result to 2");
   assert.equal(result[0].doc_kind, "filing");
   assert.equal(result[1].doc_kind, "transcript");
@@ -247,7 +309,7 @@ test("selectReaderDocuments unit — unknown kind ranks below article", async ()
     makeRow({ document_id: "id-upload", doc_kind: "upload", published_at: "2025-01-01" }),
   ];
 
-  const result = await selectReaderDocuments(fakeDb(rows), "any-issuer", 10);
+  const result = await selectReaderDocuments(fakeDb(rows), "any-issuer", OUR_USER_ID, 10);
   assert.equal(result[0].doc_kind, "article", "article (rank 3) should come before upload (rank 4)");
   assert.equal(result[1].doc_kind, "upload");
 });
@@ -258,7 +320,24 @@ test("selectReaderDocuments unit — null published_at treated as empty string i
     makeRow({ document_id: "id-dated", doc_kind: "filing", published_at: "2025-01-01" }),
   ];
 
-  const result = await selectReaderDocuments(fakeDb(rows), "any-issuer", 10);
-  // "2025-01-01" > "" so dated should come first
+  const result = await selectReaderDocuments(fakeDb(rows), "any-issuer", OUR_USER_ID, 10);
+  // "2025-01-01" > "2020-01-01T00:00:00Z" (created_at fallback) so dated should come first
   assert.equal(result[0].document_id, "id-dated", "dated filing should rank before null-dated filing");
+});
+
+test("selectReaderDocuments unit — created_at used as recency fallback when published_at is null", async () => {
+  // Both rows have published_at = null; created_at determines recency order.
+  // The JS sort coalesces to created_at when published_at is null, so the row
+  // with the newer created_at must rank first within the same kind.
+  const rows = [
+    makeRow({ document_id: "id-old-created", doc_kind: "filing", published_at: null, created_at: "2024-01-01T00:00:00Z" }),
+    makeRow({ document_id: "id-new-created", doc_kind: "filing", published_at: null, created_at: "2025-06-01T00:00:00Z" }),
+  ];
+
+  const result = await selectReaderDocuments(fakeDb(rows), "any-issuer", OUR_USER_ID, 10);
+  assert.equal(
+    result[0].document_id,
+    "id-new-created",
+    "row with newer created_at should rank first when published_at is null for both",
+  );
 });

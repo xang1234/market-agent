@@ -33,6 +33,7 @@ export type GridColumnContext = {
   period: PeriodContext;
   snapshotId: string;
   asOf: string;
+  userId: string;
   params: JsonValue | null; // the column's ColumnSpec.params, verbatim
 };
 

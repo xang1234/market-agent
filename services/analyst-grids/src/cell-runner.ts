@@ -18,6 +18,7 @@ export type ComputeCellInput = {
   subject: SubjectRef;
   period: PeriodContext;
   asOf: string;
+  userId: string;
 };
 
 // Computes one cell, seals its snapshot, and persists the result. Returns the
@@ -43,7 +44,7 @@ export async function computeAndPersistCell(
   try {
     result = await input.column.producer(
       { db: deps.db, reader: deps.reader },
-      { subject: input.subject, period: input.period, snapshotId, asOf: input.asOf, params: input.params },
+      { subject: input.subject, period: input.period, snapshotId, asOf: input.asOf, userId: input.userId, params: input.params },
     );
   } catch {
     return persistError();

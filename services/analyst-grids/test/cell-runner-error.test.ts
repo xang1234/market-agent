@@ -30,9 +30,11 @@ function column(producer: ColumnCatalogEntry["producer"]): ColumnCatalogEntry {
 
 const INPUT = {
   gridRowId: "55555555-5555-4555-a555-555555555555",
+  params: null,
   subject: { kind: "issuer" as const, id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa" },
   period: null,
   asOf: "2026-06-09T00:00:00.000Z",
+  userId: "ffffffff-ffff-4fff-afff-ffffffffffff",
 };
 
 function statusOf(queries: Captured[]): unknown {

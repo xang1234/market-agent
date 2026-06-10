@@ -44,6 +44,7 @@ const CTX = {
   period: null,
   snapshotId: SNAPSHOT_ID,
   asOf: "2026-06-09T00:00:00.000Z",
+  userId: "ffffffff-ffff-4fff-afff-ffffffffffff",
   params: null,
 };
 

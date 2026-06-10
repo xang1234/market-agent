@@ -28,6 +28,7 @@ test("cell runner passes column params and reader deps to the producer", async (
       subject: { kind: "issuer", id: "22222222-2222-4222-8222-222222222222" },
       period: null,
       asOf: "2026-06-10T00:00:00Z",
+      userId: "ffffffff-ffff-4fff-afff-ffffffffffff",
     },
   );
   assert.deepEqual(seenParams, { prompt: "Any China exposure?" });

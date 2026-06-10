@@ -53,10 +53,12 @@ test("computeAndPersistCell seals a snapshot and writes an ok cell", async (t) =
     { db, pool },
     {
       column: getColumn("latest_market_cap")!,
+      params: null,
       gridRowId: rowId,
       subject: { kind: "issuer", id: issuerId },
       period: null,
       asOf: new Date().toISOString(),
+      userId,
     },
   );
 
