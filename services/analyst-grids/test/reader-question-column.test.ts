@@ -284,13 +284,15 @@ test("reader_question — missing reader deps rejects with descriptive error", a
   );
 });
 
-// ─── Test 6b: missing params.prompt → rejects ────────────────────────────────
+// ─── Test 6b: invalid params → rejects via the shared parser ─────────────────
+// Run-time enforcement mirrors create-time validateColumnSpecs exactly: both
+// call parseReaderQuestionParams.
 test("reader_question — missing params.prompt rejects", async () => {
   const db = happyDb();
   const reader = makeReader({});
   await assert.rejects(
     () => readerQuestionProducer({ db, reader }, baseCtx({ params: null })),
-    /params\.prompt required/,
+    /requires params\.prompt/,
   );
 });
 
@@ -299,7 +301,7 @@ test("reader_question — blank params.prompt rejects", async () => {
   const reader = makeReader({});
   await assert.rejects(
     () => readerQuestionProducer({ db, reader }, baseCtx({ params: { prompt: "   " } })),
-    /params\.prompt required/,
+    /must be 8-300 characters/,
   );
 });
 
@@ -309,7 +311,7 @@ test("reader_question — non-string params.prompt rejects", async () => {
   await assert.rejects(
     () =>
       readerQuestionProducer({ db, reader }, baseCtx({ params: { prompt: 42 } })),
-    /params\.prompt required/,
+    /requires params\.prompt/,
   );
 });
 

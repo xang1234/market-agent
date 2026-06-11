@@ -9,12 +9,10 @@ import { formatCompactCurrency } from "../../analyze/src/block-format.ts";
 import type { CellDisplay, CellRef, CellResultStatus, QueryExecutor } from "./types.ts";
 import { EMPTY_DISPLAY, GridValidationError } from "./types.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
-import { readerQuestionProducer } from "./reader-question-column.ts";
+import { parseReaderQuestionParams, readerQuestionProducer } from "./reader-question-column.ts";
 
 export const READER_QUESTION_COLUMN_KEY = "reader_question";
 export const MAX_READER_COLUMNS_PER_GRID = 3;
-const PROMPT_MIN = 8;
-const PROMPT_MAX = 300;
 
 // A grid cell's period context. Plan 2 fills the fiscal period from the
 // subject's latest fact; document_refs stays [] until Plan 3 wires
@@ -189,14 +187,7 @@ export function validateColumnSpecs(
     if (!entry) throw new GridValidationError(`unknown column_key: ${spec.column_key}`);
     if (entry.kind === "reader") readerCount += 1;
     if (spec.column_key === READER_QUESTION_COLUMN_KEY) {
-      const prompt = (spec.params as { prompt?: unknown } | undefined)?.prompt;
-      if (typeof prompt !== "string") {
-        throw new GridValidationError("reader_question requires params.prompt (string)");
-      }
-      const len = prompt.trim().length;
-      if (len < PROMPT_MIN || len > PROMPT_MAX) {
-        throw new GridValidationError(`params.prompt must be ${PROMPT_MIN}-${PROMPT_MAX} characters`);
-      }
+      parseReaderQuestionParams(spec.params);
     }
   }
   if (readerCount > MAX_READER_COLUMNS_PER_GRID) {

@@ -5,9 +5,26 @@ import { buildClaimBackedSealInput } from "../../analyze/src/block-seal-input.ts
 import { selectReaderDocuments, READER_DOCUMENTS_PER_CELL } from "./reader-documents.ts";
 import { buildReaderMessages, parseReaderResponse, type ReaderDocText } from "./reader-llm.ts";
 import type { GridColumnProducer, GridCellResult } from "./column-catalog.ts";
-import { EMPTY_DISPLAY } from "./types.ts";
+import { EMPTY_DISPLAY, GridValidationError } from "./types.ts";
 
 export const READER_TOOL_NAME = "grid_reader_question";
+export const PROMPT_MIN = 8;
+export const PROMPT_MAX = 300;
+
+// The single params contract for reader_question columns, enforced at grid
+// create time (validateColumnSpecs) and again at run time (the producer) —
+// one parser, so a spec that validates always runs, and vice versa.
+export function parseReaderQuestionParams(params: unknown): { prompt: string } {
+  const prompt = (params as { prompt?: unknown } | null | undefined)?.prompt;
+  if (typeof prompt !== "string") {
+    throw new GridValidationError("reader_question requires params.prompt (string)");
+  }
+  const trimmed = prompt.trim();
+  if (trimmed.length < PROMPT_MIN || trimmed.length > PROMPT_MAX) {
+    throw new GridValidationError(`params.prompt must be ${PROMPT_MIN}-${PROMPT_MAX} characters`);
+  }
+  return { prompt: trimmed };
+}
 
 const NO_COVERAGE = (flag: string): GridCellResult => ({
   status: "no_coverage",
@@ -19,10 +36,7 @@ export const readerQuestionProducer: GridColumnProducer = async (deps, ctx) => {
   if (ctx.subject.kind !== "issuer") return NO_COVERAGE("issuer_only");
   const reader = deps.reader;
   if (!reader) throw new Error("reader_question: reader deps not configured");
-  const prompt = (ctx.params as { prompt?: unknown } | null)?.prompt;
-  if (typeof prompt !== "string" || prompt.trim().length === 0) {
-    throw new Error("reader_question: params.prompt required");
-  }
+  const { prompt } = parseReaderQuestionParams(ctx.params);
 
   const docs = await selectReaderDocuments(
     deps.db,
@@ -42,7 +56,7 @@ export const readerQuestionProducer: GridColumnProducer = async (deps, ctx) => {
   if (texts.length === 0) return NO_COVERAGE("no_document_text");
 
   const completion = await reader.llm.complete({
-    messages: buildReaderMessages(prompt.trim(), texts),
+    messages: buildReaderMessages(prompt, texts),
     temperature: 0,
     maxTokens: 1500,
   });
@@ -82,7 +96,7 @@ export const readerQuestionProducer: GridColumnProducer = async (deps, ctx) => {
     tool_name: READER_TOOL_NAME,
     args: {
       subject_id: ctx.subject.id,
-      prompt: prompt.trim(),
+      prompt,
       document_ids: texts.map((t) => t.document_id),
     },
     result: {
