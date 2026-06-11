@@ -6,7 +6,7 @@ import { createReaderColumnDepsFromEnv } from "./reader-wiring.ts";
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required");
 
-const port = Number(process.env.PORT ?? 8093);
+const port = Number(process.env.ANALYST_GRIDS_PORT ?? 8093);
 const host = process.env.HOST ?? "127.0.0.1";
 const pool = new Pool({ connectionString: databaseUrl });
 const reader = await createReaderColumnDepsFromEnv();

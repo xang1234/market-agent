@@ -193,6 +193,9 @@ test("up rolls back already-started services when a later readiness check fails"
   assert.match(trace, /compose:up -d/);
   assert.match(trace, /fail:resolver/);
   assert.match(trace, /compose:down/);
+  // Every HTTP service must be registered in up(); a missing entry means the
+  // web proxy 502s for that surface (this caught analyst-grids being absent).
+  assert.match(trace, /start:analyst-grids/);
 
   const pidDirEntries = await readdir(join(fixture.root, ".dev", "pids"));
   assert.deepEqual(pidDirEntries, []);
