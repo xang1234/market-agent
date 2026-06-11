@@ -20,9 +20,8 @@ export const READER_DOCUMENTS_PER_CELL = 5;
 // (private uploads); sources with user_id IS NULL are public.
 //
 // Structure: inner subquery deduplicates by document_id (required by
-// distinct on) then outer query applies priority ORDER BY + LIMIT 200 so the
-// cap only drops genuinely lower-priority candidates. JS sort is the final
-// tiebreak layer operating on the already-ranked 200-row window.
+// distinct on); outer query ranks and limits. least(limit, 200) backstops a
+// caller passing an absurd limit.
 export async function selectReaderDocuments(
   db: QueryExecutor,
   issuerId: string,
@@ -59,18 +58,8 @@ export async function selectReaderDocuments(
                  else 4
                end,
                coalesce(published_at, created_at) desc
-      limit 200`,
-    [issuerId, String(READER_DOCUMENT_WINDOW_DAYS), userId],
+      limit least($4::int, 200)`,
+    [issuerId, String(READER_DOCUMENT_WINDOW_DAYS), userId, limit],
   );
-  const kindRank = (kind: string): number =>
-    ({ filing: 0, transcript: 1, press_release: 2, article: 3 } as Record<string, number>)[kind] ?? 4;
-  // ISO-8601 text ordering matches chronological ordering for timestamptz::text
-  // cast within a single session (timezone-consistent output from Postgres).
-  return rows
-    .sort(
-      (a, b) =>
-        kindRank(a.doc_kind) - kindRank(b.doc_kind) ||
-        (b.published_at ?? b.created_at).localeCompare(a.published_at ?? a.created_at),
-    )
-    .slice(0, limit);
+  return rows;
 }

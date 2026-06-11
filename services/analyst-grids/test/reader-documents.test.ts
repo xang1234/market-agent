@@ -1,11 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
-import {
-  selectReaderDocuments,
-  READER_DOCUMENT_WINDOW_DAYS,
-  type ReaderDocumentRow,
-} from "../src/reader-documents.ts";
+import { selectReaderDocuments } from "../src/reader-documents.ts";
 
 // ─── Fixed UUIDs ────────────────────────────────────────────────────────────
 const SOURCE_A_ID = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"; // filing / public
@@ -234,110 +230,63 @@ test("selectReaderDocuments — source owned by other user is excluded; source o
   assert.ok(ids.includes(dOurDocId), "doc from our user's source must appear");
 });
 
-// ─── Pure unit tests (no database) ──────────────────────────────────────────
-// Test kind-ranking and recency tiebreak using a fake QueryExecutor.
+test("selectReaderDocuments — SQL ranking: kind preference, recency tiebreak, limit", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker not available");
+    return;
+  }
 
-function makeRow(
-  overrides: Partial<ReaderDocumentRow> & { document_id: string },
-): ReaderDocumentRow {
-  return {
-    source_id: "src",
-    raw_blob_id: "sha256:" + "0".repeat(64),
-    doc_kind: "article",
-    published_at: null,
-    created_at: "2020-01-01T00:00:00Z",
-    ...overrides,
-  };
-}
+  const { databaseUrl } = await bootstrapDatabase(t, "reader-docs-ranking");
+  const db = await connectedClient(t, databaseUrl);
 
-function fakeDb(fakeRows: ReaderDocumentRow[]) {
-  return {
-    query: async <R extends Record<string, unknown> = Record<string, unknown>>(
-      _text: string,
-      _values?: unknown[],
-    ) => ({ rows: fakeRows as unknown as R[], rowCount: fakeRows.length, command: "SELECT", oid: 0, fields: [] }),
-  };
-}
-
-test("selectReaderDocuments unit — kind ranking: filing < transcript < article", async () => {
-  const rows = [
-    makeRow({ document_id: "id-article", doc_kind: "article", published_at: "2025-01-03" }),
-    makeRow({ document_id: "id-filing", doc_kind: "filing", published_at: "2025-01-01" }),
-    makeRow({ document_id: "id-transcript", doc_kind: "transcript", published_at: "2025-01-02" }),
-  ];
-
-  const result = await selectReaderDocuments(fakeDb(rows), "any-issuer", OUR_USER_ID, 10);
-  assert.deepEqual(
-    result.map((r) => r.doc_kind),
-    ["filing", "transcript", "article"],
-    "filing should rank before transcript, transcript before article",
+  await db.query(
+    `insert into sources (source_id, provider, kind, trust_tier, license_class, retrieved_at, content_hash)
+     values ($1, 'test', 'filing', 'primary', 'public', now(), 'hrank')`,
+    [SOURCE_A_ID],
   );
-});
 
-test("selectReaderDocuments unit — recency tiebreak within same kind", async () => {
-  const rows = [
-    makeRow({ document_id: "id-old", doc_kind: "filing", published_at: "2024-06-01" }),
-    makeRow({ document_id: "id-newer", doc_kind: "filing", published_at: "2025-01-15" }),
-    makeRow({ document_id: "id-newest", doc_kind: "filing", published_at: "2025-06-01" }),
+  const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+  // Inserted deliberately out of rank order; expected order is
+  // filing (newest first within kind) > transcript > article > upload.
+  const seeds: Array<{ kind: Parameters<typeof seedDocument>[1]["kind"]; publishedAt: string | null; blob: string }> = [
+    { kind: "article", publishedAt: daysAgo(2), blob: "1" },
+    { kind: "filing", publishedAt: daysAgo(30), blob: "2" },
+    { kind: "upload", publishedAt: daysAgo(1), blob: "3" },
+    { kind: "filing", publishedAt: daysAgo(5), blob: "4" },
+    { kind: "transcript", publishedAt: daysAgo(3), blob: "5" },
+    { kind: "filing", publishedAt: null, blob: "6" }, // created_at (now) is the recency fallback
   ];
+  const idByBlob = new Map<string, string>();
+  for (const s of seeds) {
+    const id = await seedDocument(db, {
+      sourceId: SOURCE_A_ID,
+      kind: s.kind,
+      publishedAt: s.publishedAt,
+      rawBlobId: "sha256:" + s.blob.repeat(64),
+      contentHash: `hash-rank-${s.blob}`,
+    });
+    idByBlob.set(s.blob, id);
+    await seedMention(db, id, ISSUER_X_ID);
+  }
 
-  const result = await selectReaderDocuments(fakeDb(rows), "any-issuer", OUR_USER_ID, 10);
+  const all = await selectReaderDocuments(db, ISSUER_X_ID, OUR_USER_ID, 10);
   assert.deepEqual(
-    result.map((r) => r.document_id),
-    ["id-newest", "id-newer", "id-old"],
-    "most recent first within the same kind",
+    all.map((r) => r.document_id),
+    [
+      idByBlob.get("6"), // filing, published_at null → created_at=now is most recent
+      idByBlob.get("4"), // filing, 5 days ago
+      idByBlob.get("2"), // filing, 30 days ago
+      idByBlob.get("5"), // transcript
+      idByBlob.get("1"), // article
+      idByBlob.get("3"), // upload (unranked kind) last despite being most recent
+    ],
+    "kind preference first, then coalesce(published_at, created_at) desc within kind",
   );
-});
 
-test("selectReaderDocuments unit — limit slices the ranked result", async () => {
-  const rows = [
-    makeRow({ document_id: "id-1", doc_kind: "filing", published_at: "2025-06-01" }),
-    makeRow({ document_id: "id-2", doc_kind: "transcript", published_at: "2025-05-01" }),
-    makeRow({ document_id: "id-3", doc_kind: "article", published_at: "2025-04-01" }),
-    makeRow({ document_id: "id-4", doc_kind: "article", published_at: "2025-03-01" }),
-  ];
-
-  const result = await selectReaderDocuments(fakeDb(rows), "any-issuer", OUR_USER_ID, 2);
-  assert.equal(result.length, 2, "limit should slice result to 2");
-  assert.equal(result[0].doc_kind, "filing");
-  assert.equal(result[1].doc_kind, "transcript");
-});
-
-test("selectReaderDocuments unit — unknown kind ranks below article", async () => {
-  const rows = [
-    makeRow({ document_id: "id-article", doc_kind: "article", published_at: "2025-01-01" }),
-    makeRow({ document_id: "id-upload", doc_kind: "upload", published_at: "2025-01-01" }),
-  ];
-
-  const result = await selectReaderDocuments(fakeDb(rows), "any-issuer", OUR_USER_ID, 10);
-  assert.equal(result[0].doc_kind, "article", "article (rank 3) should come before upload (rank 4)");
-  assert.equal(result[1].doc_kind, "upload");
-});
-
-test("selectReaderDocuments unit — null published_at treated as empty string in recency sort", async () => {
-  const rows = [
-    makeRow({ document_id: "id-null-date", doc_kind: "filing", published_at: null }),
-    makeRow({ document_id: "id-dated", doc_kind: "filing", published_at: "2025-01-01" }),
-  ];
-
-  const result = await selectReaderDocuments(fakeDb(rows), "any-issuer", OUR_USER_ID, 10);
-  // "2025-01-01" > "2020-01-01T00:00:00Z" (created_at fallback) so dated should come first
-  assert.equal(result[0].document_id, "id-dated", "dated filing should rank before null-dated filing");
-});
-
-test("selectReaderDocuments unit — created_at used as recency fallback when published_at is null", async () => {
-  // Both rows have published_at = null; created_at determines recency order.
-  // The JS sort coalesces to created_at when published_at is null, so the row
-  // with the newer created_at must rank first within the same kind.
-  const rows = [
-    makeRow({ document_id: "id-old-created", doc_kind: "filing", published_at: null, created_at: "2024-01-01T00:00:00Z" }),
-    makeRow({ document_id: "id-new-created", doc_kind: "filing", published_at: null, created_at: "2025-06-01T00:00:00Z" }),
-  ];
-
-  const result = await selectReaderDocuments(fakeDb(rows), "any-issuer", OUR_USER_ID, 10);
-  assert.equal(
-    result[0].document_id,
-    "id-new-created",
-    "row with newer created_at should rank first when published_at is null for both",
+  const limited = await selectReaderDocuments(db, ISSUER_X_ID, OUR_USER_ID, 2);
+  assert.deepEqual(
+    limited.map((r) => r.document_id),
+    [idByBlob.get("6"), idByBlob.get("4")],
+    "limit truncates the ranked result, keeping the best-ranked rows",
   );
 });
