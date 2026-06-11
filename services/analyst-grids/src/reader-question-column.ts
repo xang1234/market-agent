@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { createClaim } from "../../evidence/src/claim-repo.ts";
 import { writeToolCallLog } from "../../observability/src/tool-call.ts";
 import { buildClaimBackedSealInput } from "../../analyze/src/block-seal-input.ts";
@@ -75,15 +75,9 @@ export const readerQuestionProducer: GridColumnProducer = async (deps, ctx) => {
     );
   }
 
-  // The audited result: answer + the claim ids it rests on. The hash is passed
-  // explicitly (sha256: prefix required by the sealer audit) so the manifest
-  // entry and the tool_call_logs row agree by construction.
-  const toolResult = {
-    answer: parsed.answer,
-    claim_ids: claimRows.map((c) => c.claim_id),
-  };
-  const resultHash =
-    "sha256:" + createHash("sha256").update(JSON.stringify(toolResult)).digest("hex");
+  // The audited result: answer + the claim ids it rests on. writeToolCallLog
+  // hashes it canonically (hashJsonValue) and returns the persisted hash, so
+  // the manifest entry and the tool_call_logs row agree by construction.
   const logged = await writeToolCallLog(deps.db, {
     tool_name: READER_TOOL_NAME,
     args: {
@@ -91,9 +85,15 @@ export const readerQuestionProducer: GridColumnProducer = async (deps, ctx) => {
       prompt: prompt.trim(),
       document_ids: texts.map((t) => t.document_id),
     },
-    result_hash: resultHash,
+    result: {
+      answer: parsed.answer,
+      claim_ids: claimRows.map((c) => c.claim_id),
+    },
     status: "ok",
   });
+  if (logged.result_hash === null) {
+    throw new Error("reader_question: tool call log returned no result_hash");
+  }
 
   const sourceRefs = [
     ...new Set([
@@ -130,7 +130,7 @@ export const readerQuestionProducer: GridColumnProducer = async (deps, ctx) => {
       return { document_id: doc.document_id, source_id: doc.source_id };
     }),
     subjectRefs: [{ kind: ctx.subject.kind, id: ctx.subject.id }],
-    toolCalls: [{ tool_call_id: logged.tool_call_id, result_hash: resultHash }],
+    toolCalls: [{ tool_call_id: logged.tool_call_id, result_hash: logged.result_hash }],
     modelVersion: completion.deployment ? `reader:${completion.deployment.model}` : null,
   });
 

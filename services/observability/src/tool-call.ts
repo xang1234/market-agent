@@ -23,6 +23,10 @@ export type ToolCallLogInput = {
 export type ToolCallLogRow = {
   tool_call_id: string;
   created_at: Date;
+  // The hash actually persisted (canonical hashJsonValue of `result` unless the
+  // caller passed result_hash). Returned so callers that must reference the
+  // logged hash elsewhere (e.g. snapshot manifests) never re-hash themselves.
+  result_hash: string | null;
 };
 
 export type RunLoggedToolCallInput<
@@ -56,7 +60,7 @@ export async function writeToolCallLog(
     `insert into tool_call_logs
        (thread_id, agent_id, tool_name, args, result_hash, duration_ms, status, error_code)
      values ($1, $2, $3, $4::jsonb, $5, $6, $7, $8)
-     returning tool_call_id, created_at`,
+     returning tool_call_id, created_at, result_hash`,
     [
       input.thread_id ?? null,
       input.agent_id ?? null,

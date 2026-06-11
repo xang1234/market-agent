@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHash, randomUUID } from "node:crypto";
 import type { QueryResult } from "pg";
 
 import { readerQuestionProducer, READER_TOOL_NAME } from "../src/reader-question-column.ts";
+import { hashJsonValue } from "../../observability/src/tool-call.ts";
 import type { GridColumnContext, GridColumnDeps, ReaderColumnDeps } from "../src/column-catalog.ts";
 
 // ─── Fixed UUIDs (valid v4: third group [89abAB]xxx) ─────────────────────────
@@ -78,10 +78,18 @@ function claimRow(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-function toolCallLogRow() {
+// What the real writeToolCallLog would persist for the happy-path tool result:
+// the canonical hashJsonValue of {answer, claim_ids}, echoed back via RETURNING.
+const EXPECTED_RESULT_HASH = hashJsonValue({
+  answer: "Revenue grew 10% YoY.",
+  claim_ids: [CLAIM_ID],
+});
+
+function toolCallLogRow(resultHash: string | null = EXPECTED_RESULT_HASH) {
   return {
     tool_call_id: TOOL_CALL_ID,
     created_at: new Date("2026-06-11T00:00:00.000Z"),
+    result_hash: resultHash,
   };
 }
 
@@ -168,13 +176,22 @@ test("reader_question — happy path: ok status, display.value, primaryRef claim
     `result_hash must start with "sha256:", got: ${hashes[0].result_hash}`,
   );
 
-  // Verify the hash is consistent: SHA256 of {answer, claim_ids}
-  const expectedHash =
-    "sha256:" +
-    createHash("sha256")
-      .update(JSON.stringify({ answer: "Revenue grew 10% YoY.", claim_ids: [CLAIM_ID] }))
-      .digest("hex");
-  assert.equal(hashes[0].result_hash, expectedHash);
+  // The manifest carries the hash returned by writeToolCallLog verbatim — the
+  // producer never re-hashes (hashing is tested in services/observability).
+  assert.equal(hashes[0].result_hash, EXPECTED_RESULT_HASH);
+});
+
+test("reader_question — tool call log returning no result_hash rejects", async () => {
+  const db = makeDb({
+    "from mentions": { rows: [docRow()] },
+    "insert into claims": { rows: [claimRow()] },
+    "insert into tool_call_logs": { rows: [toolCallLogRow(null)] },
+  });
+  const reader = makeReader({});
+  await assert.rejects(
+    () => readerQuestionProducer({ db, reader }, baseCtx()),
+    /no result_hash/,
+  );
 });
 
 // ─── Test 2: non-issuer subject → no_coverage "issuer_only" ──────────────────
