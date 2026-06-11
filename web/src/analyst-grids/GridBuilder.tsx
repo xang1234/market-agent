@@ -72,7 +72,7 @@ export function GridBuilder({ columns, onSubmit }: GridBuilderProps): ReactEleme
           name="manual"
           data-testid="grid-builder-manual-input"
           className="w-full rounded border border-line bg-surface-2 px-2 py-1"
-          placeholder="comma- or newline-separated issuer ids"
+          placeholder="comma- or newline-separated tickers (e.g. AAPL, MSFT) or issuer ids"
         />
       ) : (
         <input
@@ -80,7 +80,7 @@ export function GridBuilder({ columns, onSubmit }: GridBuilderProps): ReactEleme
           required
           data-testid="grid-builder-ref-input"
           className="w-full rounded border border-line bg-surface-2 px-2 py-1"
-          placeholder={`${source} id`}
+          placeholder={source === "peers" ? "ticker or issuer id" : `${source} id`}
         />
       )}
 

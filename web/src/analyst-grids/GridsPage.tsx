@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { useAuth } from "../shell/useAuth.ts";
 import { fetchColumns, createGrid, createRun } from "./gridsClient.ts";
+import { resolveUniverseSpecInput } from "./resolveUniverseInput.ts";
 import { useGridRun } from "./useGridRun.ts";
 import { GridBuilder, type GridBuilderSubmit } from "./GridBuilder.tsx";
 import { GridTable } from "./GridTable.tsx";
@@ -27,7 +28,10 @@ export function GridsPage(): ReactElement {
     if (!userId) return;
     setError(null);
     try {
-      const grid = await createGrid({ userId, body: { name: "Untitled grid", universe_spec: spec.universe_spec, column_specs: spec.column_specs } });
+      // Typed tickers (manual entries, peers issuer) become issuer uuids here;
+      // UnresolvedTickersError lands in the error banner naming the inputs.
+      const universe_spec = await resolveUniverseSpecInput(spec.universe_spec);
+      const grid = await createGrid({ userId, body: { name: "Untitled grid", universe_spec, column_specs: spec.column_specs } });
       const run = await createRun({ userId, gridId: grid.grid_id });
       setActiveColumns(columns.filter((c) => spec.column_specs.some((s) => s.column_key === c.column_key)));
       setRunId(run.runId);
