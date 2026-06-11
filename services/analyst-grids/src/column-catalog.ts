@@ -176,13 +176,16 @@ export function getColumn(columnKey: string): ColumnCatalogEntry | undefined {
   return CATALOG.get(columnKey);
 }
 
-// Create/run-time validation for a grid's column specs. Throws
-// GridValidationError (surfaced as HTTP 400 by the existing handler).
-export function validateColumnSpecs(
-  specs: ReadonlyArray<{ column_key: string; params?: unknown }>,
-): void {
+// Create-time validation for a grid's column specs. Owns the narrowing from
+// raw request JSON (unknown elements) so HTTP callers hand the parsed array
+// straight in. Throws GridValidationError (surfaced as HTTP 400).
+export function validateColumnSpecs(specs: ReadonlyArray<unknown>): void {
   let readerCount = 0;
-  for (const spec of specs) {
+  for (const value of specs) {
+    const spec = (value ?? {}) as { column_key?: unknown; params?: unknown };
+    if (typeof spec.column_key !== "string") {
+      throw new GridValidationError("each column_spec needs a string 'column_key'");
+    }
     const entry = CATALOG.get(spec.column_key);
     if (!entry) throw new GridValidationError(`unknown column_key: ${spec.column_key}`);
     if (entry.kind === "reader") readerCount += 1;

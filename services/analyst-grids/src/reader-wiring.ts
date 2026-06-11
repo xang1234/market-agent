@@ -46,8 +46,10 @@ export async function createReaderColumnDepsFromEnv(
   });
   const store = new S3ObjectStore({ client, bucket: env.S3_BUCKET });
 
+  // The router satisfies ReaderLlm structurally (its result's required
+  // `deployment` narrows to ReaderLlm's optional one).
   return {
-    llm: { complete: (request) => router.complete(request) },
+    llm: router,
     loadDocumentText: createLoadDocumentText(store),
   };
 }

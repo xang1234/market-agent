@@ -63,8 +63,10 @@ export function createUniverseResolverDeps(db: QueryExecutor): UniverseResolverD
   const peers = createSqlPeerSetResolver(db as FundamentalsQueryExecutor);
   return {
     resolveScreen: async (userId: string, screenId: string): Promise<ReadonlyArray<SubjectRef>> => {
-      const screens = createPostgresScreenRepository(db as never);
-      const candidates = createPostgresCandidateRepository(db as never);
+      // The screener executor types are structural ({ rows } / { rows, rowCount? })
+      // and pg's QueryResult satisfies both — no cast needed.
+      const screens = createPostgresScreenRepository(db);
+      const candidates = createPostgresCandidateRepository(db);
       return resolveScreenWith(
         {
           find: (id) => screens.find(id),

@@ -46,13 +46,17 @@ export const readerQuestionProducer: GridColumnProducer = async (deps, ctx) => {
   );
   if (docs.length === 0) return NO_COVERAGE("no_documents");
 
-  const texts: ReaderDocText[] = [];
-  for (const doc of docs) {
-    const text = await reader.loadDocumentText(doc.raw_blob_id);
-    if (text !== null && text.trim().length > 0) {
-      texts.push({ document_id: doc.document_id, doc_kind: doc.doc_kind, text });
-    }
-  }
+  // Blob fetches are independent; load in parallel. Promise.all preserves doc
+  // order, so the prompt's document sections stay in ranked order.
+  const texts = (
+    await Promise.all(
+      docs.map(async (doc): Promise<ReaderDocText | null> => {
+        const text = await reader.loadDocumentText(doc.raw_blob_id);
+        if (text === null || text.trim().length === 0) return null;
+        return { document_id: doc.document_id, doc_kind: doc.doc_kind, text };
+      }),
+    )
+  ).filter((t): t is ReaderDocText => t !== null);
   if (texts.length === 0) return NO_COVERAGE("no_document_text");
 
   const completion = await reader.llm.complete({
