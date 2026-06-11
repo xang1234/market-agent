@@ -4,7 +4,7 @@ import type { SnapshotSealInput } from "../../snapshot/src/snapshot-sealer.ts";
 import {
   buildFactBackedSealInput,
   toSealFactRow,
-} from "../../analyze/src/block-seal-input.ts";
+} from "../../snapshot/src/seal-input.ts";
 import { formatCompactCurrency } from "../../analyze/src/block-format.ts";
 import type { CellDisplay, CellRef, CellResultStatus, QueryExecutor } from "./types.ts";
 import { EMPTY_DISPLAY, GridValidationError } from "./types.ts";

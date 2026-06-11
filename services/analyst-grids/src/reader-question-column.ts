@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createClaim } from "../../evidence/src/claim-repo.ts";
 import { writeToolCallLog } from "../../observability/src/tool-call.ts";
-import { buildClaimBackedSealInput } from "../../analyze/src/block-seal-input.ts";
+import { buildClaimBackedSealInput } from "../../snapshot/src/seal-input.ts";
 import { selectReaderDocuments, READER_DOCUMENTS_PER_CELL } from "./reader-documents.ts";
 import { buildReaderMessages, parseReaderResponse, type ReaderDocText } from "./reader-llm.ts";
 import type { GridColumnProducer, GridCellResult } from "./column-catalog.ts";
