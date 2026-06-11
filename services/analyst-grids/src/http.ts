@@ -9,12 +9,11 @@ import { listColumns, validateColumnSpecs } from "./column-catalog.ts";
 import {
   GridNotFoundError,
   GridValidationError,
-  UNIVERSE_SOURCES,
   type CreateGridInput,
   type QueryExecutor,
 } from "./types.ts";
 import { startGridRun, type RunEngineDeps } from "./run-engine.ts";
-import type { UniverseResolverDeps } from "./universe.ts";
+import { validateUniverseSpec, type UniverseResolverDeps } from "./universe.ts";
 import type { SnapshotClientPool } from "../../snapshot/src/snapshot-sealer.ts";
 import type { ReaderColumnDeps } from "./column-catalog.ts";
 
@@ -49,17 +48,13 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
 
 function parseCreateInput(body: Record<string, unknown>): CreateGridInput {
   if (typeof body.name !== "string" || body.name.length === 0) throw new GridValidationError("'name' is required");
-  if (typeof body.universe_spec !== "object" || body.universe_spec === null) throw new GridValidationError("'universe_spec' is required");
-  const source = (body.universe_spec as { source?: unknown }).source;
-  if (typeof source !== "string" || !(UNIVERSE_SOURCES as readonly string[]).includes(source)) {
-    throw new GridValidationError(`'universe_spec.source' must be one of: ${UNIVERSE_SOURCES.join(", ")}`);
-  }
+  validateUniverseSpec(body.universe_spec);
   if (!Array.isArray(body.column_specs)) throw new GridValidationError("'column_specs' must be an array");
   validateColumnSpecs(body.column_specs);
   return {
     name: body.name,
     description: typeof body.description === "string" ? body.description : null,
-    universe_spec: body.universe_spec as CreateGridInput["universe_spec"],
+    universe_spec: body.universe_spec,
     column_specs: body.column_specs as CreateGridInput["column_specs"],
   };
 }

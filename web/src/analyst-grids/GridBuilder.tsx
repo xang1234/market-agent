@@ -41,11 +41,13 @@ export function GridBuilder({ columns, onSubmit }: GridBuilderProps): ReactEleme
       column_specs.push({ column_key: "reader_question", params: { prompt: question } });
     }
     if (column_specs.length === 0) return; // a grid needs at least one column
-    const universe_spec =
-      source === "manual"
-        ? manualSpec(String(fd.get("manual") ?? ""))
-        : idSpec(source, String(fd.get("refId") ?? "").trim());
-    onSubmit({ universe_spec, column_specs });
+    if (source !== "manual") {
+      const refId = String(fd.get("refId") ?? "").trim();
+      if (refId.length === 0) return; // an id-source universe needs its id
+      onSubmit({ universe_spec: idSpec(source, refId), column_specs });
+      return;
+    }
+    onSubmit({ universe_spec: manualSpec(String(fd.get("manual") ?? "")), column_specs });
   }
 
   return (
@@ -75,6 +77,7 @@ export function GridBuilder({ columns, onSubmit }: GridBuilderProps): ReactEleme
       ) : (
         <input
           name="refId"
+          required
           data-testid="grid-builder-ref-input"
           className="w-full rounded border border-line bg-surface-2 px-2 py-1"
           placeholder={`${source} id`}

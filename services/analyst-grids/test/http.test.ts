@@ -105,6 +105,26 @@ test("unknown universe_spec.source returns 400", async () => {
   }
 });
 
+test("id-source universe with an empty id returns 400 at create time", async () => {
+  const { server, base } = await startServer(fakeDb(() => []));
+  try {
+    const res = await fetch(`${base}/v1/analyst-grids`, {
+      method: "POST",
+      headers: { "x-user-id": USER_ID, "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "g",
+        universe_spec: { source: "watchlist", watchlist_id: "" },
+        column_specs: [{ column_key: "latest_market_cap" }],
+      }),
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as { error: string };
+    assert.match(body.error, /watchlist_id/);
+  } finally {
+    server.close();
+  }
+});
+
 test("unknown column_key returns 400", async () => {
   const { server, base } = await startServer(fakeDb(() => []));
   try {

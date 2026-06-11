@@ -111,6 +111,19 @@ test("a question-only grid submits with just the question column", async () => {
   });
 });
 
+test("an id-source universe with an empty ref id does not submit", async () => {
+  const emitted = await withGridBuilder(COLUMNS, async (doc, domWindow) => {
+    const select = doc.querySelector('[data-testid="grid-builder-source"]') as HTMLSelectElement;
+    select.value = "watchlist";
+    await act(async () => {
+      select.dispatchEvent(new domWindow.Event("change", { bubbles: true }));
+    });
+    await act(async () => { (doc.querySelector('[data-testid="grid-builder-col-latest_market_cap"]') as HTMLInputElement).click(); });
+    // ref id input left empty — submitting must be a no-op, not a doomed grid
+  });
+  assert.equal(emitted, null);
+});
+
 test("reader-kind columns are not rendered as checkboxes", async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>');
   const restore = installDomGlobals(dom.window as unknown as Window);
