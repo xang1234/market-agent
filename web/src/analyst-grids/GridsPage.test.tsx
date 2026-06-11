@@ -30,6 +30,9 @@ function route(url: string, init?: RequestInit): Response {
       unresolved: [],
     });
   }
+  if (url.includes("/v1/watchlists")) return json({ watchlists: [] });
+  if (url.includes("/v1/portfolios")) return json({ portfolios: [] });
+  if (url.includes("/v1/screener/screens")) return json({ screens: [] });
   if (url.includes("/v1/analyst-grids/columns")) return json({ columns: [{ column_key: "latest_market_cap", label: "Market Cap (latest)", kind: "deterministic" }] });
   if (url.endsWith("/v1/analyst-grids")) {
     createBodies.push(JSON.parse(String(init?.body ?? "null")));

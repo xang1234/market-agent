@@ -1,5 +1,6 @@
 import { useState, type ReactElement, type FormEvent } from "react";
 import type { GridColumn, ColumnSpecInput } from "./gridsTypes.ts";
+import type { UniverseOptions } from "./universeOptions.ts";
 
 export type GridBuilderSubmit = { universe_spec: unknown; column_specs: ColumnSpecInput[] };
 
@@ -20,12 +21,16 @@ function idSpec(source: IdSource, id: string): unknown {
   }
 }
 
-type GridBuilderProps = { columns: ReadonlyArray<GridColumn>; onSubmit: (spec: GridBuilderSubmit) => void };
+type GridBuilderProps = {
+  columns: ReadonlyArray<GridColumn>;
+  universeOptions: UniverseOptions;
+  onSubmit: (spec: GridBuilderSubmit) => void;
+};
 
 // A pure, uncontrolled form: data fields are read via FormData at submit, so the
 // only React state is `source` (it toggles which universe input renders, and the
 // uncontrolled input remounts — naturally clearing stale ids on source switch).
-export function GridBuilder({ columns, onSubmit }: GridBuilderProps): ReactElement {
+export function GridBuilder({ columns, universeOptions, onSubmit }: GridBuilderProps): ReactElement {
   const [source, setSource] = useState<"manual" | IdSource>("manual");
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -74,14 +79,34 @@ export function GridBuilder({ columns, onSubmit }: GridBuilderProps): ReactEleme
           className="w-full rounded border border-line bg-surface-2 px-2 py-1"
           placeholder="comma- or newline-separated tickers (e.g. AAPL, MSFT) or issuer ids"
         />
-      ) : (
+      ) : source === "peers" ? (
         <input
           name="refId"
           required
           data-testid="grid-builder-ref-input"
           className="w-full rounded border border-line bg-surface-2 px-2 py-1"
-          placeholder={source === "peers" ? "ticker or issuer id" : `${source} id`}
+          placeholder="ticker or issuer id"
         />
+      ) : (
+        <>
+          <select
+            name="refId"
+            required
+            defaultValue=""
+            data-testid="grid-builder-ref-select"
+            className="w-full rounded border border-line bg-surface-2 px-2 py-1"
+          >
+            <option value="" disabled>
+              Select a {source}…
+            </option>
+            {universeOptions[source].map((option) => (
+              <option key={option.id} value={option.id}>{option.label}</option>
+            ))}
+          </select>
+          {universeOptions[source].length === 0 ? (
+            <p className="text-xs text-muted">You have no {source}s yet.</p>
+          ) : null}
+        </>
       )}
 
       <fieldset className="space-y-1">

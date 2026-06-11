@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactElement } from "react";
 import { useAuth } from "../shell/useAuth.ts";
 import { fetchColumns, createGrid, createRun } from "./gridsClient.ts";
 import { resolveUniverseSpecInput } from "./resolveUniverseInput.ts";
+import { EMPTY_UNIVERSE_OPTIONS, fetchUniverseOptions, type UniverseOptions } from "./universeOptions.ts";
 import { useGridRun } from "./useGridRun.ts";
 import { GridBuilder, type GridBuilderSubmit } from "./GridBuilder.tsx";
 import { GridTable } from "./GridTable.tsx";
@@ -11,6 +12,7 @@ export function GridsPage(): ReactElement {
   const { session } = useAuth();
   const userId = session?.userId ?? null;
   const [columns, setColumns] = useState<GridColumn[]>([]);
+  const [universeOptions, setUniverseOptions] = useState<UniverseOptions>(EMPTY_UNIVERSE_OPTIONS);
   const [runId, setRunId] = useState<string | null>(null);
   const [activeColumns, setActiveColumns] = useState<GridColumn[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -20,6 +22,8 @@ export function GridsPage(): ReactElement {
     fetchColumns({ userId })
       .then(setColumns)
       .catch((e) => setError(e instanceof Error ? e.message : "failed to load columns"));
+    // Per-source failures already degrade to empty lists inside the fetch.
+    fetchUniverseOptions({ userId }).then(setUniverseOptions);
   }, [userId]);
 
   const { detail } = useGridRun({ userId: userId ?? "", runId });
@@ -45,7 +49,7 @@ export function GridsPage(): ReactElement {
   return (
     <div className="space-y-4 p-4">
       <h1 className="text-lg font-semibold">Analyst Grid</h1>
-      <GridBuilder columns={columns} onSubmit={onSubmit} />
+      <GridBuilder columns={columns} universeOptions={universeOptions} onSubmit={onSubmit} />
       {error ? <div className="text-sm text-negative">{error}</div> : null}
       {detail ? (
         <div className="space-y-2">

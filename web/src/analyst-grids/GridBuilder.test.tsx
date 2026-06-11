@@ -5,6 +5,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { installDomGlobals } from "./testDom.ts";
 import { GridBuilder } from "./GridBuilder.tsx";
+import { EMPTY_UNIVERSE_OPTIONS, type UniverseOptions } from "./universeOptions.ts";
 import type { GridColumn } from "./gridsTypes.ts";
 
 const COLUMNS: GridColumn[] = [{ column_key: "latest_market_cap", label: "Market Cap (latest)", kind: "deterministic" }];
@@ -19,6 +20,7 @@ const COLUMNS_WITH_READER: GridColumn[] = [
 async function withGridBuilder(
   columns: GridColumn[],
   fn: (doc: Document, domWindow: typeof globalThis.window) => void | Promise<void>,
+  universeOptions: UniverseOptions = EMPTY_UNIVERSE_OPTIONS,
 ): Promise<unknown> {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>');
   const restore = installDomGlobals(dom.window as unknown as Window);
@@ -26,7 +28,7 @@ async function withGridBuilder(
   try {
     const root = createRoot(dom.window.document.getElementById("root")!);
     await act(async () => {
-      root.render(<GridBuilder columns={columns} onSubmit={(spec) => { emitted = spec; }} />);
+      root.render(<GridBuilder columns={columns} universeOptions={universeOptions} onSubmit={(spec) => { emitted = spec; }} />);
     });
     const doc = dom.window.document;
     await fn(doc, dom.window as unknown as typeof globalThis.window);
@@ -49,7 +51,7 @@ test("GridBuilder assembles a manual universe + selected columns and emits them"
   try {
     const root = createRoot(dom.window.document.getElementById("root")!);
     await act(async () => {
-      root.render(<GridBuilder columns={COLUMNS} onSubmit={(spec) => { emitted = spec; }} />);
+      root.render(<GridBuilder columns={COLUMNS} universeOptions={EMPTY_UNIVERSE_OPTIONS} onSubmit={(spec) => { emitted = spec; }} />);
     });
     const doc = dom.window.document;
     // Uncontrolled: set the textarea value directly; FormData reads the live DOM value at submit.
@@ -124,13 +126,61 @@ test("an id-source universe with an empty ref id does not submit", async () => {
   assert.equal(emitted, null);
 });
 
+const WATCHLIST_ID = "33333333-3333-4333-8333-333333333333";
+const PICKER_OPTIONS: UniverseOptions = {
+  watchlist: [{ id: WATCHLIST_ID, label: "Tech names" }],
+  portfolio: [],
+  screen: [],
+};
+
+test("watchlist source renders a picker of the user's watchlists and emits the chosen id", async () => {
+  const emitted = await withGridBuilder(
+    COLUMNS,
+    async (doc, domWindow) => {
+      const select = doc.querySelector('[data-testid="grid-builder-source"]') as HTMLSelectElement;
+      select.value = "watchlist";
+      await act(async () => {
+        select.dispatchEvent(new domWindow.Event("change", { bubbles: true }));
+      });
+      // The free-text uuid input is replaced by a select of the user's objects.
+      assert.equal(doc.querySelector('[data-testid="grid-builder-ref-input"]'), null);
+      const picker = doc.querySelector('[data-testid="grid-builder-ref-select"]') as HTMLSelectElement;
+      assert.ok(picker, "expected a ref picker for watchlist source");
+      assert.match(picker.innerHTML, /Tech names/);
+      picker.value = WATCHLIST_ID;
+      await act(async () => { (doc.querySelector('[data-testid="grid-builder-col-latest_market_cap"]') as HTMLInputElement).click(); });
+    },
+    PICKER_OPTIONS,
+  );
+  assert.deepEqual(emitted, {
+    universe_spec: { source: "watchlist", watchlist_id: WATCHLIST_ID },
+    column_specs: [{ column_key: "latest_market_cap" }],
+  });
+});
+
+test("peers source keeps the free-text ticker input, not a picker", async () => {
+  await withGridBuilder(
+    COLUMNS,
+    async (doc, domWindow) => {
+      const select = doc.querySelector('[data-testid="grid-builder-source"]') as HTMLSelectElement;
+      select.value = "peers";
+      await act(async () => {
+        select.dispatchEvent(new domWindow.Event("change", { bubbles: true }));
+      });
+      assert.ok(doc.querySelector('[data-testid="grid-builder-ref-input"]'), "peers keeps a text input");
+      assert.equal(doc.querySelector('[data-testid="grid-builder-ref-select"]'), null);
+    },
+    PICKER_OPTIONS,
+  );
+});
+
 test("reader-kind columns are not rendered as checkboxes", async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>');
   const restore = installDomGlobals(dom.window as unknown as Window);
   try {
     const root = createRoot(dom.window.document.getElementById("root")!);
     await act(async () => {
-      root.render(<GridBuilder columns={COLUMNS_WITH_READER} onSubmit={() => {}} />);
+      root.render(<GridBuilder columns={COLUMNS_WITH_READER} universeOptions={EMPTY_UNIVERSE_OPTIONS} onSubmit={() => {}} />);
     });
     const doc = dom.window.document;
     // deterministic column should have a checkbox
