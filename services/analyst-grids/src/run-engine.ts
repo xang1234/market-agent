@@ -12,6 +12,7 @@ import {
 } from "./queries.ts";
 import { withTransaction } from "../../evidence/src/transaction.ts";
 import { resolveUniverse, type UniverseResolverDeps } from "./universe.ts";
+import { normalizeUniverseToIssuers } from "./subject-normalization.ts";
 import { resolvePeriodContext } from "./period-context.ts";
 import { getColumn, type ColumnCatalogEntry, type PeriodContext, type ReaderColumnDeps } from "./column-catalog.ts";
 import { computeAndPersistCell } from "./cell-runner.ts";
@@ -89,7 +90,10 @@ export async function startGridRun(
   });
 
   const resolved = await resolveUniverse(deps.universe, input.userId, grid.universe_spec);
-  const { capped, droppedRowCount } = capUniverse(resolved);
+  // Watchlist/portfolio/screen universes carry listing refs; columns are
+  // issuer-scoped, so normalize before capping (mapping can also dedupe).
+  const normalized = await normalizeUniverseToIssuers(deps.db, resolved);
+  const { capped, droppedRowCount } = capUniverse(normalized);
   const cellTotal = capped.length * columns.length;
 
   // Materialize the run, its rows, and its pending cells atomically: a partial
@@ -115,7 +119,7 @@ export async function startGridRun(
   });
 
   if (droppedRowCount > 0) {
-    console.log(`analyst-grids run ${runId}: universe of ${resolved.length} capped to ${MAX_GRID_ROWS} (dropped ${droppedRowCount})`);
+    console.log(`analyst-grids run ${runId}: universe of ${normalized.length} capped to ${MAX_GRID_ROWS} (dropped ${droppedRowCount})`);
   }
 
   // Detached: the caller already has its run id. runWorker records run-level

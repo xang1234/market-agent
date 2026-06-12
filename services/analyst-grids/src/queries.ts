@@ -282,6 +282,9 @@ export type GridRowDetail = {
   grid_row_id: string;
   row_number: number;
   subject_ref: SubjectRef;
+  // The issuer's legal name for display; null for non-issuer rows or when the
+  // issuer row is gone. The UI falls back to the raw id.
+  subject_label: string | null;
   period_context: Record<string, unknown> | null;
   status: RowStatus;
 };
@@ -303,8 +306,13 @@ export async function getRunDetail(db: QueryExecutor, runId: string): Promise<Gr
   const runRes = await db.query<GridRunDbRow>(`select ${RUN_COLUMNS} from grid_runs where grid_run_id = $1`, [runId]);
   if (!runRes.rows[0]) throw new GridNotFoundError("grid run not found");
   const rowsRes = await db.query(
-    `select grid_row_id::text as grid_row_id, row_number, subject_ref, period_context, status
-       from grid_rows where grid_run_id = $1 order by row_number asc`,
+    `select gr.grid_row_id::text as grid_row_id, gr.row_number, gr.subject_ref, gr.period_context, gr.status,
+            i.legal_name as subject_label
+       from grid_rows gr
+       left join issuers i
+         on gr.subject_ref->>'kind' = 'issuer'
+        and i.issuer_id::text = gr.subject_ref->>'id'
+      where gr.grid_run_id = $1 order by gr.row_number asc`,
     [runId],
   );
   const cellsRes = await db.query(
@@ -319,6 +327,7 @@ export async function getRunDetail(db: QueryExecutor, runId: string): Promise<Gr
       grid_row_id: String(r.grid_row_id),
       row_number: Number(r.row_number),
       subject_ref: r.subject_ref as SubjectRef,
+      subject_label: (r.subject_label as string | null) ?? null,
       period_context: (r.period_context as Record<string, unknown> | null) ?? null,
       status: r.status as RowStatus,
     })),

@@ -20,6 +20,7 @@ export type GridRowDetail = {
   grid_row_id: string;
   row_number: number;
   subject_ref: { kind: string; id: string };
+  subject_label?: string | null;
   status: "pending" | "resolved" | "failed";
 };
 

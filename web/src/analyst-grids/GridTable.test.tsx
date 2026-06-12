@@ -32,6 +32,20 @@ test("GridTable renders one row per subject and the cell value", () => {
   assert.match(html, /BBB/);
 });
 
+test("GridTable shows the subject label when present, falling back to the raw id", () => {
+  const labeled: GridRunDetail = {
+    ...DETAIL,
+    rows: [
+      { ...DETAIL.rows[0], subject_label: "Acme Corp" },
+      DETAIL.rows[1], // no label — falls back to the id
+    ],
+  };
+  const html = renderToStaticMarkup(<GridTable columns={COLUMNS} detail={labeled} />);
+  assert.match(html, /Acme Corp/);
+  assert.doesNotMatch(html, />AAA</, "labeled rows must not show the raw id");
+  assert.match(html, /BBB/);
+});
+
 test("GridTable marks an ok cell with a snapshot as inspectable and a missing cell as not", () => {
   const html = renderToStaticMarkup(<GridTable columns={COLUMNS} detail={DETAIL} />);
   assert.match(html, /data-cell-inspectable="true"[^>]*data-snapshot-id="snap-1"/);

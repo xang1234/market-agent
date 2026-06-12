@@ -42,7 +42,7 @@ export function GridTable({ columns, detail }: GridTableProps): ReactElement {
         <tbody>
           {detail.rows.map((row) => (
             <tr key={row.grid_row_id} className="border-t border-line">
-              <td className="px-3 py-2 text-fg">{row.subject_ref.id}</td>
+              <td className="px-3 py-2 text-fg">{row.subject_label ?? row.subject_ref.id}</td>
               {columns.map((col) => {
                 const cell = byKey.get(cellKey(row.grid_row_id, col.column_key));
                 const inspectable = Boolean(cell && cell.snapshot_id && cell.primary_ref);

@@ -28,6 +28,9 @@ test("run progress helpers advance run/row/cell state and read detail", async (t
   const { databaseUrl } = await bootstrapDatabase(t, "grid-run-progress");
   const db = await connectedClient(t, databaseUrl);
   await seedUser(db);
+  await db.query(`insert into issuers (issuer_id, legal_name) values ($1, 'Acme Corp')`, [
+    "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+  ]);
 
   const grid = await createGrid(db, USER, {
     name: "g",
@@ -53,6 +56,7 @@ test("run progress helpers advance run/row/cell state and read detail", async (t
   assert.equal(detail.run.cell_done, 1);
   assert.equal(detail.rows.length, 1);
   assert.equal(detail.rows[0].status, "resolved");
+  assert.equal(detail.rows[0].subject_label, "Acme Corp", "issuer rows carry the legal name for display");
   assert.equal(detail.rows[0].period_context?.period_kind, "point");
   assert.equal(detail.cells.length, 1);
   assert.equal(detail.cells[0].column_key, "latest_market_cap");
