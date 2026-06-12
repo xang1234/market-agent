@@ -25,13 +25,19 @@ type GridBuilderProps = {
   columns: ReadonlyArray<GridColumn>;
   universeOptions: UniverseOptions;
   onSubmit: (spec: GridBuilderSubmit) => void;
+  // Initial field values + capture hook so the page can restore the form
+  // after navigating away (the form itself stays uncontrolled).
+  defaults?: { source: string; manual: string; refId: string; question: string };
+  onFieldsCapture?: (fields: { source: string; manual: string; refId: string; question: string }) => void;
 };
 
 // A pure, uncontrolled form: data fields are read via FormData at submit, so the
 // only React state is `source` (it toggles which universe input renders, and the
 // uncontrolled input remounts — naturally clearing stale ids on source switch).
-export function GridBuilder({ columns, universeOptions, onSubmit }: GridBuilderProps): ReactElement {
-  const [source, setSource] = useState<"manual" | IdSource>("manual");
+export function GridBuilder({ columns, universeOptions, onSubmit, defaults, onFieldsCapture }: GridBuilderProps): ReactElement {
+  const initialSource =
+    defaults && ["manual", ...ID_SOURCES].includes(defaults.source) ? (defaults.source as "manual" | IdSource) : "manual";
+  const [source, setSource] = useState<"manual" | IdSource>(initialSource);
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -42,6 +48,12 @@ export function GridBuilder({ columns, universeOptions, onSubmit }: GridBuilderP
     const selectedKeys = new Set(fd.getAll("column").map(String));
     const column_specs: ColumnSpecInput[] = columns.filter((c) => selectedKeys.has(c.column_key)).map((c) => ({ column_key: c.column_key }));
     const question = String(fd.get("question") ?? "").trim();
+    onFieldsCapture?.({
+      source,
+      manual: String(fd.get("manual") ?? ""),
+      refId: String(fd.get("refId") ?? ""),
+      question: String(fd.get("question") ?? ""),
+    });
     if (question.length > 0) {
       column_specs.push({ column_key: "reader_question", params: { prompt: question } });
     }
@@ -75,6 +87,7 @@ export function GridBuilder({ columns, universeOptions, onSubmit }: GridBuilderP
       {source === "manual" ? (
         <textarea
           name="manual"
+          defaultValue={defaults?.manual}
           data-testid="grid-builder-manual-input"
           className="w-full rounded border border-line bg-surface-2 px-2 py-1"
           placeholder="comma- or newline-separated tickers (e.g. AAPL, MSFT) or issuer ids"
@@ -83,6 +96,7 @@ export function GridBuilder({ columns, universeOptions, onSubmit }: GridBuilderP
         <input
           name="refId"
           required
+          defaultValue={defaults?.refId}
           data-testid="grid-builder-ref-input"
           className="w-full rounded border border-line bg-surface-2 px-2 py-1"
           placeholder="ticker or issuer id"
@@ -92,7 +106,7 @@ export function GridBuilder({ columns, universeOptions, onSubmit }: GridBuilderP
           <select
             name="refId"
             required
-            defaultValue=""
+            defaultValue={defaults?.refId ?? ""}
             data-testid="grid-builder-ref-select"
             className="w-full rounded border border-line bg-surface-2 px-2 py-1"
           >
@@ -123,6 +137,7 @@ export function GridBuilder({ columns, universeOptions, onSubmit }: GridBuilderP
         Question column <span className="text-muted">(optional — asked per company, answered from documents)</span>
         <textarea
           name="question"
+          defaultValue={defaults?.question}
           data-testid="grid-builder-question-input"
           className="w-full rounded border border-line bg-surface-2 px-2 py-1"
           placeholder='e.g. "Any China exposure flagged in risk factors?"'

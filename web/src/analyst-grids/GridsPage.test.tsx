@@ -78,6 +78,27 @@ test("GridsPage builds a grid, runs it, and renders the resulting cell value", a
       { source: "manual", subject_refs: [{ kind: "issuer", id: ISSUER_ID }] },
     );
     await act(async () => root.unmount());
+
+    // Navigate-away-and-back: a fresh mount must restore the last run's table
+    // (and the typed manual input) from the page memory without resubmitting.
+    const root2 = createRoot(dom.window.document.getElementById("root")!);
+    await act(async () => {
+      root2.render(
+        <AuthContext.Provider value={{ session: { userId: "11111111-1111-4111-a111-111111111111", displayName: "U" }, signIn: () => undefined, signOut: () => undefined }}>
+          <EvidenceInspectorProvider>
+            <GridsPage />
+          </EvidenceInspectorProvider>
+        </AuthContext.Provider>,
+      );
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 80)); });
+    assert.match(doc.getElementById("root")!.innerHTML, /\$2\.5T/, "table restored after remount");
+    assert.equal(
+      (doc.querySelector('[data-testid="grid-builder-manual-input"]') as HTMLTextAreaElement).value,
+      "AAA",
+      "form input restored after remount",
+    );
+    await act(async () => root2.unmount());
   } finally {
     restore();
   }
