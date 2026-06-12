@@ -12,6 +12,11 @@ import {
 } from 'lucide-react'
 import { ANALYZE_PATH } from '../analyze/analyzeEntry'
 import { webDevFlags } from '../devFlags'
+import { NAV_HOTKEYS } from './navHotkeys'
+
+// Path → single-key hint, sourced from the same table the global keydown
+// handler uses (useNavHotkeys) so chip and behavior cannot drift.
+const HOTKEY_BY_PATH = new Map(NAV_HOTKEYS.map((item) => [item.to, item.key]))
 
 // Vertical primary navigation living in the left sidebar (redesign IA). Carries
 // the same workspace set + dev-flag gating as the prior horizontal PrimaryTabs;
@@ -47,7 +52,15 @@ export function SidebarNav() {
           }
         >
           <Icon aria-hidden="true" className="h-[17px] w-[17px] shrink-0" strokeWidth={1.8} />
-          {label}
+          <span className="flex-1">{label}</span>
+          {HOTKEY_BY_PATH.has(to) ? (
+            <kbd
+              aria-hidden="true"
+              className="num rounded border border-line px-1 text-[10px] uppercase text-faint"
+            >
+              {HOTKEY_BY_PATH.get(to)}
+            </kbd>
+          ) : null}
         </NavLink>
       ))}
     </nav>

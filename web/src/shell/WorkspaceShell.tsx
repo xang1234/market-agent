@@ -8,6 +8,7 @@ import { RouteScopeGate } from './RouteScopeGate'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
 import { useAuth } from './useAuth'
+import { useNavHotkeys } from './useNavHotkeys'
 import { useSearchHotkey } from './useSearchHotkey'
 
 // The persistent workspace shell. Redesign IA collapses the prior separate
@@ -38,6 +39,7 @@ export function WorkspaceShell() {
   const { session } = useAuth()
   const userId = session?.userId ?? null
   useSearchHotkey()
+  useNavHotkeys()
   return (
     <AuthInterruptProvider>
       <RightRailProvider>
