@@ -7,6 +7,8 @@ import {
   subjectFromAnalyzeEntry,
   type AnalyzeIntent,
 } from '../analyze/analyzeEntry'
+import { sectionProgress } from '../analyze/sectionProgress.ts'
+import { SectionProgressList } from '../analyze/SectionProgressList.tsx'
 import { fetchAnalyzePlaybooks, type AnalyzePlaybook } from '../analyze/playbooks.ts'
 import {
   diffAnalyzeRuns,
@@ -281,11 +283,13 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
           {selectedPlaybook ? (
             <section className="rounded-md border border-line p-3 text-sm">
               <h3 className="font-medium text-fg">Sections</h3>
-              <ul className="mt-2 flex flex-col gap-1 text-fg-soft">
-                {selectedPlaybook.sections.map((section) => (
-                  <li key={section.section_id}>{section.title}</li>
-                ))}
-              </ul>
+              <SectionProgressList
+                rows={sectionProgress(
+                  selectedPlaybook.sections,
+                  status === 'Generating memo' ? 'generating' : memoRun ? 'complete' : 'idle',
+                  memoRun?.blocks ?? null,
+                )}
+              />
             </section>
           ) : null}
           <label className="flex flex-col gap-2 text-sm font-medium text-fg">
