@@ -151,3 +151,14 @@ test("whitespace-only predicate throws", () => {
     /predicate required/,
   );
 });
+
+test("parseReaderResponse tolerates raw newlines inside JSON strings", () => {
+  // Models quoting filing text often emit literal line breaks inside
+  // text_canonical — illegal JSON that must not cost the whole cell.
+  const raw = `{"answer": "Buyback announced.", "claims": [{"document_id": "${DOC_A}", "predicate": "buyback", "text_canonical": "approved a\n$6B repurchase\nprogram", "polarity": "positive", "modality": "asserted", "confidence": 0.9}], "not_discussed": false}`;
+  const parsed = parseReaderResponse(raw, new Set([DOC_A]));
+  assert.equal(parsed.kind, "answered");
+  if (parsed.kind === "answered") {
+    assert.equal(parsed.claims[0].text_canonical, "approved a $6B repurchase program");
+  }
+});

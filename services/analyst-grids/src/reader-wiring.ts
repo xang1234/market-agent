@@ -4,11 +4,28 @@ import type { ObjectStore } from "../../evidence/src/object-store.ts";
 import { createLlmRouterFromEnv, type LlmSettingsLoaderEnv } from "../../llm/src/settings-loader.ts";
 import type { ReaderColumnDeps } from "./column-catalog.ts";
 
+// Stored filings are inline-XBRL HTML; the reader needs prose, and the
+// per-document char cap would otherwise be spent on markup. Plain-text blobs
+// pass through untouched.
+export function htmlToReaderText(raw: string): string {
+  if (!/<(?:!doctype|html|head|body|div|p|span|table)\b/i.test(raw)) return raw;
+  return raw
+    .replace(/<(script|style|head)\b[\s\S]*?<\/\1\s*>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#x?[0-9a-f]+;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function createLoadDocumentText(store: ObjectStore): ReaderColumnDeps["loadDocumentText"] {
   return async (rawBlobId) => {
     const blob = await store.get(rawBlobId);
     if (blob === null) return null;
-    return new TextDecoder("utf-8", { fatal: false }).decode(blob.bytes);
+    return htmlToReaderText(new TextDecoder("utf-8", { fatal: false }).decode(blob.bytes));
   };
 }
 

@@ -47,7 +47,11 @@ export async function computeAndPersistCell(
       { db: deps.db, reader: deps.reader },
       { subject: input.subject, period: input.period, snapshotId, asOf: input.asOf, userId: input.userId, params: input.params },
     );
-  } catch {
+  } catch (error) {
+    console.error(
+      `analyst-grids cell ${input.column.column_key} (${input.subject.kind}:${input.subject.id}) failed:`,
+      error,
+    );
     return persistError();
   }
 
@@ -55,9 +59,19 @@ export async function computeAndPersistCell(
   if (result.seal) {
     try {
       const sealResult = await sealSnapshotWithPool(deps.pool, result.seal);
-      if (!sealResult.ok) return persistError();
+      if (!sealResult.ok) {
+        console.error(
+          `analyst-grids cell ${input.column.column_key} (${input.subject.kind}:${input.subject.id}) seal rejected:`,
+          JSON.stringify(sealResult),
+        );
+        return persistError();
+      }
       sealedSnapshotId = sealResult.snapshot.snapshot_id;
-    } catch {
+    } catch (error) {
+      console.error(
+        `analyst-grids cell ${input.column.column_key} (${input.subject.kind}:${input.subject.id}) seal failed:`,
+        error,
+      );
       return persistError();
     }
   }

@@ -62,7 +62,9 @@ export const readerQuestionProducer: GridColumnProducer = async (deps, ctx) => {
   const completion = await reader.llm.complete({
     messages: buildReaderMessages(prompt, texts),
     temperature: 0,
-    maxTokens: 1500,
+    // Headroom for the JSON claims array — 1500 truncated real responses
+    // mid-string once documents carried actual prose.
+    maxTokens: 4000,
   });
   const parsed = parseReaderResponse(
     completion.text,

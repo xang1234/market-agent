@@ -15,6 +15,22 @@ test("createLoadDocumentText decodes stored blob bytes as utf-8", async () => {
   assert.equal(await load("sha256:missing"), null);
 });
 
+test("createLoadDocumentText converts HTML filings to readable prose", async () => {
+  const html =
+    '<!DOCTYPE html><html><head><style>.x{color:red}</style><script>var a=1;</script></head>' +
+    '<body><div ix:name="dei:DocumentType">8-K</div><p>Apple&nbsp;announced a <b>dividend</b> increase &amp; buyback.</p></body></html>';
+  const bytes = new TextEncoder().encode(html);
+  const store = {
+    get: async () => ({ raw_blob_id: "sha256:h", size: bytes.byteLength, bytes }),
+    put: async () => { throw new Error("unused"); },
+    has: async () => true,
+    delete: async () => false,
+  };
+  const load = createLoadDocumentText(store as never);
+  const text = await load("sha256:h");
+  assert.equal(text, "8-K Apple announced a dividend increase & buyback.");
+});
+
 test("returns undefined when LLM or S3 env is not configured", async () => {
   const deps = await createReaderColumnDepsFromEnv({});
   assert.equal(deps, undefined);
