@@ -73,3 +73,12 @@ function parseAllY(path: string): number[] {
   const matches = [...path.matchAll(/[ML] ([\d.]+),([\d.]+)/g)]
   return matches.map((m) => Number(m[2]))
 }
+
+test('geometry exposes the plotted points the path was built from', () => {
+  const geometry = computeSparklineGeometry({ values: [1, 3, 2], width: 100, height: 50 })
+  assert.ok(geometry !== null)
+  assert.equal(geometry.points.length, 3)
+  assert.deepEqual(geometry.end, geometry.points[2])
+  // The path string is derived from these exact coordinates.
+  assert.ok(geometry.path.startsWith(`M ${geometry.points[0].x.toFixed(2)},${geometry.points[0].y.toFixed(2)}`))
+})

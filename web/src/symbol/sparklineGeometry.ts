@@ -9,12 +9,18 @@ export const SPARKLINE_DEFAULTS = {
   padY: 6,
 } as const
 
+export type SparklinePoint = { x: number; y: number }
+
 export type SparklineGeometry = {
   path: string
   // Closed polygon: the line path continued down to the chart floor and back,
   // so callers can render a gradient/tinted area fill under the line without
   // recomputing points. Always present; render it only when an area is wanted.
   areaPath: string
+  // The plotted per-value pixel coordinates the path was built from, so
+  // callers (crosshair hover, end labels) share the exact projection instead
+  // of mirroring the scale math.
+  points: ReadonlyArray<SparklinePoint>
   // The last point's coordinates, so callers can anchor an end-of-line label
   // (e.g. multi-series TradingView-style labels) without re-parsing the path.
   end: { x: number; y: number }
@@ -53,11 +59,12 @@ export function computeSparklineGeometry({
   // baseline so the three can't drift apart.
   const projectY = (value: number) =>
     rawSpan === 0 ? midY : padY + (1 - (value - lo) / span) * innerH
-  const path = values
-    .map((value, i) => {
-      const x = padX + (i / (values.length - 1)) * innerW
-      return `${i === 0 ? 'M' : 'L'} ${x.toFixed(2)},${projectY(value).toFixed(2)}`
-    })
+  const points = values.map((value, i) => ({
+    x: padX + (i / (values.length - 1)) * innerW,
+    y: projectY(value),
+  }))
+  const path = points
+    .map((point, i) => `${i === 0 ? 'M' : 'L'} ${point.x.toFixed(2)},${point.y.toFixed(2)}`)
     .join(' ')
   // Close the line down to the chart floor and back to the start for area fills.
   const firstX = padX
@@ -66,9 +73,9 @@ export function computeSparklineGeometry({
   const areaPath = `${path} L ${lastX.toFixed(2)},${floorY.toFixed(2)} L ${firstX.toFixed(
     2,
   )},${floorY.toFixed(2)} Z`
-  const end = { x: lastX, y: projectY(values[values.length - 1]) }
+  const end = points[points.length - 1]
   const baselineY = baseline === null ? null : projectY(baseline)
-  return { path, areaPath, end, baselineY }
+  return { path, areaPath, points, end, baselineY }
 }
 
 function resolveDomain(

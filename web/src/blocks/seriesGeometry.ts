@@ -1,4 +1,4 @@
-import { computeSparklineGeometry, SPARKLINE_DEFAULTS } from '../symbol/sparklineGeometry.ts'
+import { computeSparklineGeometry } from '../symbol/sparklineGeometry.ts'
 import type { Series } from './types.ts'
 
 export const SERIES_CHART_DEFAULTS = {
@@ -58,26 +58,16 @@ export function computeSeriesGeometry(
   const yDomain = computeSeriesYDomain(series)
   if (yDomain === null) return null
 
-  // Mirror sparklineGeometry's projection (padding + flat-series mid-line
-  // guard) so hover points land exactly on the rendered path.
-  const { padX, padY } = SPARKLINE_DEFAULTS
-  const innerW = width - padX * 2
-  const innerH = height - padY * 2
-  const [lo, hi] = yDomain
-  const rawSpan = hi - lo
-  const span = rawSpan === 0 ? 1 : rawSpan
-  const midY = padY + innerH / 2
-  const projectY = (value: number) =>
-    rawSpan === 0 ? midY : padY + (1 - (value - lo) / span) * innerH
-
   const paths: SeriesPath[] = []
   for (const s of series) {
     const values = s.points.map((p) => p.y)
     const geom = computeSparklineGeometry({ values, domain: yDomain, width, height })
     if (geom === null) continue
+    // Pixel coordinates come straight from the shared projection that built
+    // the path, annotated with the data values for hover readouts.
     const points = s.points.map((point, i) => ({
-      x: padX + (i / (values.length - 1)) * innerW,
-      y: projectY(point.y),
+      x: geom.points[i].x,
+      y: geom.points[i].y,
       value: point.y,
       xLabel: point.label ?? point.x,
     }))
