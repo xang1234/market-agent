@@ -26,17 +26,17 @@ export function StreamingTurnView({ state }: StreamingTurnViewProps): ReactEleme
       className="flex w-full flex-col gap-3"
     >
       <AgentPlanPanel steps={state.plan_steps} />
-      {state.block_order.map((block_id) => {
-        const block = state.blocks_by_id.get(block_id)
-        if (block === undefined) return null
-        return (
-          <BlockColumn key={block_id} kind={block.kind}>
-            <AssistantTurn>
+      <AssistantTurn className="w-full">
+        {state.block_order.map((block_id) => {
+          const block = state.blocks_by_id.get(block_id)
+          if (block === undefined) return null
+          return (
+            <BlockColumn key={block_id} kind={block.kind}>
               <StreamingBlockView block={block} />
-            </AssistantTurn>
-          </BlockColumn>
-        )
-      })}
+            </BlockColumn>
+          )
+        })}
+      </AssistantTurn>
       {state.turn_status === 'error' ? (
         <p data-testid="streaming-turn-error" className="text-sm text-negative">
           Stream error: {state.error ?? 'unknown'}

@@ -40,15 +40,13 @@ function MessageItemInner({ message, onMeasure }: MessageItemProps): ReactElemen
           ))}
         </div>
       ) : (
-        <div className="flex w-full flex-col gap-3">
+        <AssistantTurn className="w-full">
           {message.blocks.map((block) => (
             <BlockColumn key={block.id} kind={block.kind}>
-              <AssistantTurn>
-                <MemoizedBlockView block={block} />
-              </AssistantTurn>
+              <MemoizedBlockView block={block} />
             </BlockColumn>
           ))}
-        </div>
+        </AssistantTurn>
       )}
     </div>
   )

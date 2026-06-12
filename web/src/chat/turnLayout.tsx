@@ -32,19 +32,19 @@ export function ThreadColumn({
   return <div className={`${THREAD_COLUMN_CLASS} ${className}`.trim()}>{children}</div>
 }
 
-// Assistant turns get the full answer canvas; the user's turn stays a compact
-// bubble (USER_BUBBLE_CLASS). Extra div props pass through so callers can attach
-// test ids / data attributes without re-declaring the styling.
+// Assistant turns get the full answer canvas as continuous document flow — no
+// card chrome. The turn is ONE surface wrapping all of its blocks (callers
+// apply it once per turn, not per block); blocks inside are separated by
+// vertical rhythm only, so research output reads as a document. The user's
+// turn stays a compact bubble (USER_BUBBLE_CLASS). Extra div props pass
+// through so callers can attach test ids / data attributes.
 export function AssistantTurn({
   children,
   className = '',
   ...rest
 }: { children: ReactNode } & HTMLAttributes<HTMLDivElement>) {
   return (
-    <div
-      className={`flex flex-col gap-3 rounded-xl border border-line bg-surface p-4 shadow-md ${className}`.trim()}
-      {...rest}
-    >
+    <div className={`flex flex-col gap-4 py-1 ${className}`.trim()} {...rest}>
       {children}
     </div>
   )
