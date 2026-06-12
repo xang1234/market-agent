@@ -108,6 +108,9 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
   const [compareRunId, setCompareRunId] = useState('')
   const [openedRunDetails, setOpenedRunDetails] = useState<Record<string, AnalyzeRunDetail>>({})
   const [status, setStatus] = useState('Ready')
+  // Explicit run phase for the section-progress rail — `status` is display
+  // copy and must never drive control flow.
+  const [isGenerating, setIsGenerating] = useState(false)
   const availableSourceCategories = sourceCategoriesFor(selectedTemplate, selectedPlaybook)
   const compareRunDetail = compareRunId ? openedRunDetails[compareRunId] : null
   const runDiff = memoRun && compareRunDetail ? diffAnalyzeRuns(compareRunDetail, memoRun) : null
@@ -172,6 +175,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
       return null
     }
     setStatus('Generating memo')
+    setIsGenerating(true)
     try {
       const run = await authenticatedJson<AnalyzeRunDetail>('/v1/analyze/runs', {
         userId: session.userId,
@@ -195,6 +199,8 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
     } catch (caught) {
       setStatus(`Generate failed: ${caught instanceof Error ? caught.message : String(caught)}`)
       return null
+    } finally {
+      setIsGenerating(false)
     }
   }
 
@@ -286,7 +292,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
               <SectionProgressList
                 rows={sectionProgress(
                   selectedPlaybook.sections,
-                  status === 'Generating memo' ? 'generating' : memoRun ? 'complete' : 'idle',
+                  isGenerating ? 'generating' : memoRun ? 'complete' : 'idle',
                   memoRun?.blocks ?? null,
                 )}
               />
