@@ -10,6 +10,7 @@ import type { CellDisplay, CellRef, CellResultStatus, QueryExecutor } from "./ty
 import { EMPTY_DISPLAY, GridValidationError } from "./types.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
 import { parseReaderQuestionParams, readerQuestionProducer } from "./reader-question-column.ts";
+import { latestEpsDilutedProducer, latestRevenueProducer } from "./fiscal-fact-column.ts";
 
 export const READER_QUESTION_COLUMN_KEY = "reader_question";
 export const MAX_READER_COLUMNS_PER_GRID = 3;
@@ -155,6 +156,24 @@ const CATALOG: ReadonlyMap<string, ColumnCatalogEntry> = new Map([
       label: "Market Cap (latest)",
       kind: "deterministic",
       producer: latestMarketCapProducer,
+    },
+  ],
+  [
+    "latest_revenue",
+    {
+      column_key: "latest_revenue",
+      label: "Revenue (latest)",
+      kind: "deterministic",
+      producer: latestRevenueProducer,
+    },
+  ],
+  [
+    "latest_eps_diluted",
+    {
+      column_key: "latest_eps_diluted",
+      label: "EPS diluted (latest)",
+      kind: "deterministic",
+      producer: latestEpsDilutedProducer,
     },
   ],
   [
