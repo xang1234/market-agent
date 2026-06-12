@@ -1,10 +1,18 @@
-import { computeSparklineGeometry } from '../symbol/sparklineGeometry.ts'
+import { computeSparklineGeometry, SPARKLINE_DEFAULTS } from '../symbol/sparklineGeometry.ts'
 import type { Series } from './types.ts'
 
 export const SERIES_CHART_DEFAULTS = {
   width: 480,
   height: 160,
 } as const
+
+// One plotted point in chart-pixel space, for crosshair hover lookup.
+export type SeriesChartPoint = {
+  x: number
+  y: number
+  value: number
+  xLabel: string | number | undefined
+}
 
 export type SeriesPath = {
   name: string
@@ -14,6 +22,8 @@ export type SeriesPath = {
   areaPath: string
   // End-of-line anchor for the series label.
   end: { x: number; y: number }
+  // Per-point pixel coordinates (same scale math as `d`).
+  points: ReadonlyArray<SeriesChartPoint>
 }
 
 export type SeriesGeometry = {
@@ -48,12 +58,30 @@ export function computeSeriesGeometry(
   const yDomain = computeSeriesYDomain(series)
   if (yDomain === null) return null
 
+  // Mirror sparklineGeometry's projection (padding + flat-series mid-line
+  // guard) so hover points land exactly on the rendered path.
+  const { padX, padY } = SPARKLINE_DEFAULTS
+  const innerW = width - padX * 2
+  const innerH = height - padY * 2
+  const [lo, hi] = yDomain
+  const rawSpan = hi - lo
+  const span = rawSpan === 0 ? 1 : rawSpan
+  const midY = padY + innerH / 2
+  const projectY = (value: number) =>
+    rawSpan === 0 ? midY : padY + (1 - (value - lo) / span) * innerH
+
   const paths: SeriesPath[] = []
   for (const s of series) {
     const values = s.points.map((p) => p.y)
     const geom = computeSparklineGeometry({ values, domain: yDomain, width, height })
     if (geom === null) continue
-    paths.push({ name: s.name, unit: s.unit, d: geom.path, areaPath: geom.areaPath, end: geom.end })
+    const points = s.points.map((point, i) => ({
+      x: padX + (i / (values.length - 1)) * innerW,
+      y: projectY(point.y),
+      value: point.y,
+      xLabel: point.label ?? point.x,
+    }))
+    paths.push({ name: s.name, unit: s.unit, d: geom.path, areaPath: geom.areaPath, end: geom.end, points })
   }
   if (paths.length === 0) return null
   return { paths, yDomain, width, height }

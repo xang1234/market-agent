@@ -1,4 +1,4 @@
-import { useId, type ReactElement } from 'react'
+import { useId, useState, type PointerEvent, type ReactElement } from 'react'
 import type { Series } from './types.ts'
 import { computeSeriesGeometry, type SeriesGeometry } from './seriesGeometry.ts'
 
@@ -31,7 +31,21 @@ export function SeriesChart({
   const geometry = computeSeriesGeometry(series, { width, height })
   // useId() contains colons (":r0:") which break url(#…) gradient references.
   const gradientId = `series-fill-${useId().replace(/:/g, '')}`
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   if (geometry === null) return null
+
+  // Crosshair index from pointer position: points are evenly spaced on x, so
+  // the nearest index is a pure proportion of the wrapper width (works with
+  // preserveAspectRatio="none" where SVG pixels stretch with the element).
+  const maxPoints = Math.max(...geometry.paths.map((path) => path.points.length))
+
+  function onPointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (maxPoints < 2) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    if (rect.width === 0) return
+    const rel = (event.clientX - rect.left) / rect.width
+    setHoverIndex(Math.max(0, Math.min(maxPoints - 1, Math.round(rel * (maxPoints - 1)))))
+  }
 
   // A gradient area fill only reads cleanly under a single line; with multiple
   // overlapping series the translucent fills muddy each other, so the fill is
@@ -42,7 +56,11 @@ export function SeriesChart({
 
   return (
     <div data-testid={testId} className="flex flex-col gap-2">
-      <div className="relative">
+      <div
+        className="relative"
+        onPointerMove={onPointerMove}
+        onPointerLeave={() => setHoverIndex(null)}
+      >
         <svg
           role="img"
           aria-label={ariaLabel}
@@ -72,10 +90,63 @@ export function SeriesChart({
           ))}
         </svg>
         <SeriesEndLabels testId={testId} geometry={geometry} />
+        {hoverIndex !== null ? (
+          <SeriesCrosshair testId={testId} geometry={geometry} index={hoverIndex} />
+        ) : null}
       </div>
       <SeriesLegend testId={testId} series={geometry.paths} />
     </div>
   )
+}
+
+// Vertical rule + per-series value readout at the hovered point index,
+// rendered as an HTML overlay (same reasoning as SeriesEndLabels: SVG text
+// would stretch under preserveAspectRatio="none").
+function SeriesCrosshair({
+  testId,
+  geometry,
+  index,
+}: {
+  testId: string
+  geometry: SeriesGeometry
+  index: number
+}): ReactElement | null {
+  const anchor = geometry.paths.find((path) => path.points[index] !== undefined)?.points[index]
+  if (anchor === undefined) return null
+  const leftPct = (anchor.x / geometry.width) * 100
+  return (
+    <div data-testid={`${testId}-crosshair`} aria-hidden className="pointer-events-none absolute inset-0">
+      <div
+        className="absolute inset-y-0 border-l border-dashed border-line-strong"
+        style={{ left: `${leftPct}%` }}
+      />
+      <div
+        className={`absolute top-1 flex flex-col gap-0.5 rounded-md border border-line bg-surface/95 px-2 py-1 text-[10px] shadow-md ${leftPct > 60 ? '-translate-x-[calc(100%+6px)]' : 'translate-x-1.5'}`}
+        style={{ left: `${leftPct}%` }}
+      >
+        <span className="num text-faint">{String(anchor.xLabel ?? '')}</span>
+        {geometry.paths.map((path, seriesIndex) => {
+          const point = path.points[index]
+          if (point === undefined) return null
+          return (
+            <span
+              key={`${testId}-hover-${seriesIndex}`}
+              className={`num font-medium ${paletteAt(seriesIndex).text}`}
+            >
+              {path.name}: {formatHoverValue(point.value)}
+              {path.unit !== undefined && path.unit.length > 0 ? path.unit : ''}
+            </span>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function formatHoverValue(value: number): string {
+  return Math.abs(value) >= 1000
+    ? value.toLocaleString('en-US', { maximumFractionDigits: 0 })
+    : value.toLocaleString('en-US', { maximumFractionDigits: 2 })
 }
 
 // End-of-line labels rendered as an HTML overlay rather than SVG <text>: the
