@@ -33,12 +33,12 @@ The video renders assistant research as one continuous document on the canvas; t
 - Modify: `web/src/chat/StreamingTurnView.tsx:29-39`
 - Test: `web/src/chat/turnLayout.test.tsx`, `web/src/chat/MessageItem.test.tsx`
 
-- [ ] **Step 1: Run the existing chat tests to see current assertions**
+- [x] **Step 1: Run the existing chat tests to see current assertions**
 
 Run: `cd web && npm test 2>&1 | grep -A2 -i "turnLayout\|MessageItem"`
 Expected: PASS (baseline).
 
-- [ ] **Step 2: Restyle `AssistantTurn` as a document surface**
+- [x] **Step 2: Restyle `AssistantTurn` as a document surface**
 
 In `web/src/chat/turnLayout.tsx` replace the `AssistantTurn` className:
 
@@ -59,7 +59,7 @@ export function AssistantTurn({
 }
 ```
 
-- [ ] **Step 3: Apply `AssistantTurn` once per turn in `MessageItem`**
+- [x] **Step 3: Apply `AssistantTurn` once per turn in `MessageItem`**
 
 Replace the assistant branch (currently wraps each block):
 
@@ -75,7 +75,7 @@ Replace the assistant branch (currently wraps each block):
       )}
 ```
 
-- [ ] **Step 4: Same change in `StreamingTurnView`**
+- [x] **Step 4: Same change in `StreamingTurnView`**
 
 ```tsx
       <AgentPlanPanel steps={state.plan_steps} />
@@ -92,12 +92,12 @@ Replace the assistant branch (currently wraps each block):
       </AssistantTurn>
 ```
 
-- [ ] **Step 5: Run chat tests; update any assertion that expected per-block card classes (border/bg-surface/shadow) or per-block AssistantTurn wrappers to expect the single document wrapper**
+- [x] **Step 5: Run chat tests; update any assertion that expected per-block card classes (border/bg-surface/shadow) or per-block AssistantTurn wrappers to expect the single document wrapper**
 
 Run: `cd web && npm test`
 Expected: PASS after updates.
 
-- [ ] **Step 6: Typecheck + commit**
+- [x] **Step 6: Typecheck + commit**
 
 ```bash
 cd web && npm run typecheck
@@ -117,11 +117,11 @@ The video styles inline deltas (`+127% YoY`) green/red inside sentences. Add an 
 - Modify: `web/src/blocks/RichText.tsx:34`
 - Test: `web/src/blocks/RichText.test.tsx`
 
-- [ ] **Step 1: Write the failing renderer test** (append to `web/src/blocks/RichText.test.tsx`, mirroring its existing render-helper pattern): a rich_text block with segments `[{type:'text',text:'Data Center revenue grew '},{type:'text',text:'+127% YoY',tone:'positive'},{type:'text',text:' last quarter'}]` renders the toned run with class containing `text-positive` and `data-tone="positive"`.
+- [x] **Step 1: Write the failing renderer test** (append to `web/src/blocks/RichText.test.tsx`, mirroring its existing render-helper pattern): a rich_text block with segments `[{type:'text',text:'Data Center revenue grew '},{type:'text',text:'+127% YoY',tone:'positive'},{type:'text',text:' last quarter'}]` renders the toned run with class containing `text-positive` and `data-tone="positive"`.
 
-- [ ] **Step 2: Run it** — `cd web && npm test 2>&1 | grep -i richtext` — Expected: FAIL (tone not rendered / type error).
+- [x] **Step 2: Run it** — `cd web && npm test 2>&1 | grep -i richtext` — Expected: FAIL (tone not rendered / type error).
 
-- [ ] **Step 3: Schema change in `spec/finance_research_block_schema.json`** — inside the `TextSegment` properties add:
+- [x] **Step 3: Schema change in `spec/finance_research_block_schema.json`** — inside the `TextSegment` properties add:
 
 ```json
         "tone": {
@@ -132,16 +132,16 @@ The video styles inline deltas (`+127% YoY`) green/red inside sentences. Add an 
 
 (keep `additionalProperties: false`; `tone` stays optional — not in `required`).
 
-- [ ] **Step 4: Mirror to web** — `cd web && npm run sync:schema`. Run `npm test 2>&1 | grep -i schemaSync` — Expected: PASS.
+- [x] **Step 4: Mirror to web** — `cd web && npm run sync:schema`. Run `npm test 2>&1 | grep -i schemaSync` — Expected: PASS.
 
-- [ ] **Step 5: Type it** in `web/src/blocks/types.ts`:
+- [x] **Step 5: Type it** in `web/src/blocks/types.ts`:
 
 ```ts
 export type TextSegmentTone = 'positive' | 'negative' | 'neutral'
 export type TextSegment = { type: 'text'; text: string; tone?: TextSegmentTone }
 ```
 
-- [ ] **Step 6: Render it** in `web/src/blocks/RichText.tsx` — replace the plain text-segment span in the multi-segment branch:
+- [x] **Step 6: Render it** in `web/src/blocks/RichText.tsx` — replace the plain text-segment span in the multi-segment branch:
 
 ```tsx
 const TONE_CLASS: Readonly<Record<NonNullable<TextSegment['tone']>, string>> = {
@@ -167,9 +167,9 @@ and in the map:
 
 (import `TextSegment` type; single-segment Markdown fast-path also gains tone by falling through to the multi-segment branch when `onlySegment.tone` is set: change the condition to `onlySegment && !isRefSegment(onlySegment) && onlySegment.tone === undefined`.)
 
-- [ ] **Step 7: Run web tests + typecheck** — Expected: PASS.
+- [x] **Step 7: Run web tests + typecheck** — Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add spec/finance_research_block_schema.json web/src/blocks
@@ -187,7 +187,7 @@ git commit -m "feat(blocks): optional tone on rich_text text segments"
 - Create: `web/src/watchlists/useWatchlistSparklines.ts` (hook)
 - Test: `web/src/watchlists/watchlistSparklines.test.ts`
 
-- [ ] **Step 1: Write failing tests** (`watchlistSparklines.test.ts`, node:test + assert, pattern as in `membership.test.ts`):
+- [x] **Step 1: Write failing tests** (`watchlistSparklines.test.ts`, node:test + assert, pattern as in `membership.test.ts`):
 
 ```ts
 import assert from 'node:assert/strict'
@@ -252,9 +252,9 @@ test('sparklineClosesByListing keeps available outcomes only', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure** — `cd web && npm test 2>&1 | grep -i watchlistSparklines` — Expected: FAIL (module not found).
+- [x] **Step 2: Run to verify failure** — `cd web && npm test 2>&1 | grep -i watchlistSparklines` — Expected: FAIL (module not found).
 
-- [ ] **Step 3: Implement `watchlistSparklines.ts`**
+- [x] **Step 3: Implement `watchlistSparklines.ts`**
 
 ```ts
 // Pure helpers for the watchlist rail's inline sparklines: window → day span,
@@ -318,9 +318,9 @@ export function sparklineClosesByListing(
 }
 ```
 
-- [ ] **Step 4: Run tests** — Expected: PASS.
+- [x] **Step 4: Run tests** — Expected: PASS.
 
-- [ ] **Step 5: Implement the hook** `useWatchlistSparklines.ts`:
+- [x] **Step 5: Implement the hook** `useWatchlistSparklines.ts`:
 
 ```ts
 // One batched series fetch per (membership set, window). Keyed through
@@ -358,7 +358,7 @@ export function useWatchlistSparklines(
 
 (Check `useFetched`'s exact state-shape names at integration time — it's the same helper `OverviewSection` uses; adjust `state.kind === 'ready'` to its actual ready discriminant.)
 
-- [ ] **Step 6: Typecheck + commit**
+- [x] **Step 6: Typecheck + commit**
 
 ```bash
 cd web && npm run typecheck
@@ -375,7 +375,7 @@ git add web/src/watchlists && git commit -m "feat(web): batched watchlist sparkl
 - Modify: `web/src/symbol/QuoteRow.tsx`
 - Test: existing `web/src/symbol/quoteRowView.test.ts` stays green; manual visual check.
 
-- [ ] **Step 1: Add optional sparkline prop to `QuoteRow`** — render between text and price:
+- [x] **Step 1: Add optional sparkline prop to `QuoteRow`** — render between text and price:
 
 ```tsx
 import { Sparkline } from './Sparkline.tsx'
@@ -404,9 +404,9 @@ and inside the Link, after the `min-w-0 flex-1` span:
         ) : null}
 ```
 
-- [ ] **Step 2: Thread it through `ManualWatchlist`** — add props `sparklines: ReadonlyMap<string, ReadonlyArray<number>>`, pass `sparkline={member.subject_ref.kind === 'listing' ? sparklines.get(member.subject_ref.id) : undefined}` to each `QuoteRow`.
+- [x] **Step 2: Thread it through `ManualWatchlist`** — add props `sparklines: ReadonlyMap<string, ReadonlyArray<number>>`, pass `sparkline={member.subject_ref.kind === 'listing' ? sparklines.get(member.subject_ref.id) : undefined}` to each `QuoteRow`.
 
-- [ ] **Step 3: Window state + toggle + hook in `WatchlistSection`**
+- [x] **Step 3: Window state + toggle + hook in `WatchlistSection`**
 
 ```tsx
 import { useState } from 'react'
@@ -439,9 +439,9 @@ render the toggle under the header row:
 
 and pass `sparklines={sparklines}` to `ManualWatchlist`.
 
-- [ ] **Step 4: Run web tests + typecheck** — Expected: PASS (QuoteRow prop optional ⇒ no breakage).
+- [x] **Step 4: Run web tests + typecheck** — Expected: PASS (QuoteRow prop optional ⇒ no breakage).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/src/shell/WatchlistSection.tsx web/src/watchlists/ManualWatchlist.tsx web/src/symbol/QuoteRow.tsx
@@ -462,7 +462,7 @@ git commit -m "feat(web): watchlist rail sparklines with timeframe selector"
 - Modify: `web/src/shell/WorkspaceShell.tsx:40`
 - Test: `web/src/shell/navHotkeys.test.ts`
 
-- [ ] **Step 1: Extract `isTypingTarget`** to `web/src/shell/isTypingTarget.ts`:
+- [x] **Step 1: Extract `isTypingTarget`** to `web/src/shell/isTypingTarget.ts`:
 
 ```ts
 export function isTypingTarget(target: EventTarget | null): boolean {
@@ -474,7 +474,7 @@ export function isTypingTarget(target: EventTarget | null): boolean {
 
 Update `useSearchHotkey.ts` to import it; delete the inline copy.
 
-- [ ] **Step 2: Write failing test** `web/src/shell/navHotkeys.test.ts` for the pure key→path map:
+- [x] **Step 2: Write failing test** `web/src/shell/navHotkeys.test.ts` for the pure key→path map:
 
 ```ts
 import assert from 'node:assert/strict'
@@ -495,7 +495,7 @@ test('hotkey list carries display labels for the sidebar chips', () => {
 })
 ```
 
-- [ ] **Step 3: Run to verify failure**, then implement `web/src/shell/navHotkeys.ts`:
+- [x] **Step 3: Run to verify failure**, then implement `web/src/shell/navHotkeys.ts`:
 
 ```ts
 export const NAV_HOTKEYS: ReadonlyArray<{ key: string; to: string }> = [
@@ -539,9 +539,9 @@ export function useNavHotkeys() {
 }
 ```
 
-- [ ] **Step 4: Mount in `WorkspaceShell`** next to `useSearchHotkey()`: `useNavHotkeys()`.
+- [x] **Step 4: Mount in `WorkspaceShell`** next to `useSearchHotkey()`: `useNavHotkeys()`.
 
-- [ ] **Step 5: Kbd chips in `SidebarNav`** — extend `PRIMARY_WORKSPACES` entries with `hotkey?: string` (`h`, `a`, `c`, `s`, `g`; none for Review/Analyze/Settings) and render after the label:
+- [x] **Step 5: Kbd chips in `SidebarNav`** — extend `PRIMARY_WORKSPACES` entries with `hotkey?: string` (`h`, `a`, `c`, `s`, `g`; none for Review/Analyze/Settings) and render after the label:
 
 ```tsx
           <span className="flex-1">{label}</span>
@@ -555,7 +555,7 @@ export function useNavHotkeys() {
           ) : null}
 ```
 
-- [ ] **Step 6: Tests + typecheck + commit**
+- [x] **Step 6: Tests + typecheck + commit**
 
 ```bash
 cd web && npm test && npm run typecheck
@@ -571,7 +571,7 @@ git add web/src/shell && git commit -m "feat(web): single-key nav hotkeys with v
 - Modify: `web/src/blocks/SeriesChart.tsx` (hover overlay)
 - Test: `web/src/blocks/seriesGeometry.test.ts`
 
-- [ ] **Step 1: Write failing geometry test** (append):
+- [x] **Step 1: Write failing geometry test** (append):
 
 ```ts
 test('computeSeriesGeometry exposes per-point pixel coordinates', () => {
@@ -589,9 +589,9 @@ test('computeSeriesGeometry exposes per-point pixel coordinates', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure.**
+- [x] **Step 2: Run to verify failure.**
 
-- [ ] **Step 3: Extend `SeriesPath`** in `seriesGeometry.ts` — mirror `sparklineGeometry`'s scale math (padX=4, padY=6, flat-series mid-line guard):
+- [x] **Step 3: Extend `SeriesPath`** in `seriesGeometry.ts` — mirror `sparklineGeometry`'s scale math (padX=4, padY=6, flat-series mid-line guard):
 
 ```ts
 export type SeriesChartPoint = {
@@ -627,9 +627,9 @@ add `points: ReadonlyArray<SeriesChartPoint>` to `SeriesPath`, and in `computeSe
   }
 ```
 
-- [ ] **Step 4: Run geometry tests** — Expected: PASS.
+- [x] **Step 4: Run geometry tests** — Expected: PASS.
 
-- [ ] **Step 5: Hover overlay in `SeriesChart.tsx`** — track hovered index from pointer position over the relative wrapper; render a vertical rule + value badges:
+- [x] **Step 5: Hover overlay in `SeriesChart.tsx`** — track hovered index from pointer position over the relative wrapper; render a vertical rule + value badges:
 
 ```tsx
 import { useId, useState, type ReactElement, type PointerEvent } from 'react'
@@ -701,7 +701,7 @@ function formatHoverValue(value: number): string {
 }
 ```
 
-- [ ] **Step 6: Web tests + typecheck + commit**
+- [x] **Step 6: Web tests + typecheck + commit**
 
 ```bash
 cd web && npm test && npm run typecheck
@@ -719,7 +719,7 @@ Today `PerfComparison.tsx` renders only metadata (chips + range/basis labels) �
 - Modify: `web/src/blocks/PerfComparison.tsx`
 - Test: `web/src/blocks/perfComparisonSeries.test.ts`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```ts
 import assert from 'node:assert/strict'
@@ -785,7 +785,7 @@ test('seriesFromPerfResponse converts bars to chart series named by listing', ()
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**, then implement `perfComparisonSeries.ts`:
+- [x] **Step 2: Run to verify failure**, then implement `perfComparisonSeries.ts`:
 
 ```ts
 // Pure plumbing for the live perf_comparison chart: block → range options,
@@ -864,9 +864,9 @@ export function seriesFromPerfResponse(response: GetSeriesResponse): ReadonlyArr
 }
 ```
 
-- [ ] **Step 3: Run tests** — Expected: PASS.
+- [x] **Step 3: Run tests** — Expected: PASS.
 
-- [ ] **Step 4: Rewrite `PerfComparison.tsx`** keeping the metadata card as fallback when no listings/series:
+- [x] **Step 4: Rewrite `PerfComparison.tsx`** keeping the metadata card as fallback when no listings/series:
 
 ```tsx
 import { useState, type ReactElement } from 'react'
@@ -950,7 +950,7 @@ export function PerfComparison({ block }: PerfComparisonProps): ReactElement {
 
 (Adapt `state.kind` to `useFetched`'s actual discriminant, same as Task 3. If existing `PerfComparison` tests assert the metadata grid, keep them passing via the fallback branch — fetch in tests will be unavailable.)
 
-- [ ] **Step 5: Web tests + typecheck + commit**
+- [x] **Step 5: Web tests + typecheck + commit**
 
 ```bash
 cd web && npm test && npm run typecheck
@@ -968,7 +968,7 @@ Upgrade the Overview performance card: windows `5D/1M/6M/YTD/1Y/5Y`, taller `Ser
 - Modify: `web/src/pages/symbol/OverviewSection.tsx:47-51,267-291`
 - Test: `web/src/symbol/series.test.ts` (window table)
 
-- [ ] **Step 1: Extend the window table** in `series.ts`:
+- [x] **Step 1: Extend the window table** in `series.ts`:
 
 ```ts
 export type PriceWindow = '5D' | '1M' | '6M' | 'YTD' | '1Y' | '5Y'
@@ -993,7 +993,7 @@ export function priceWindowDays(window: PriceWindow, now: Date = new Date()): nu
 
 Add a test in `series.test.ts` asserting `priceWindowDays('YTD', new Date('2026-06-12T00:00:00Z')) === 162` and `priceWindowDays('5Y') === 1825`.
 
-- [ ] **Step 2: Update `OverviewSection`** — `PRICE_WINDOW_OPTIONS` lists all six; the series fetch uses `priceWindowDays(priceWindow)` instead of `PRICE_WINDOW_DAYS[priceWindow]`; replace `PriceSparkline`'s `Sparkline` with `SeriesChart`:
+- [x] **Step 2: Update `OverviewSection`** — `PRICE_WINDOW_OPTIONS` lists all six; the series fetch uses `priceWindowDays(priceWindow)` instead of `PRICE_WINDOW_DAYS[priceWindow]`; replace `PriceSparkline`'s `Sparkline` with `SeriesChart`:
 
 ```tsx
 import { SeriesChart } from '../../blocks/SeriesChart.tsx'
@@ -1024,7 +1024,7 @@ function PriceSparkline({ bars, windowLabel }: { bars: NormalizedBar[]; windowLa
 
 (`SeriesChart` height prop flows into `computeSeriesGeometry`; the svg's Tailwind class `h-40` stays the layout height — acceptable. Single series ⇒ gradient fill + crosshair.)
 
-- [ ] **Step 3: Web tests + typecheck + commit**
+- [x] **Step 3: Web tests + typecheck + commit**
 
 ```bash
 cd web && npm test && npm run typecheck
@@ -1042,7 +1042,7 @@ Playbooks are pure data (`services/analyze/src/playbook.ts`); the section runner
 - Modify: `services/analyze/src/playbook.ts:38-88`
 - Test: `services/analyze/test/playbook.test.ts`
 
-- [ ] **Step 1: Write failing test** (append, matching the file's existing style):
+- [x] **Step 1: Write failing test** (append, matching the file's existing style):
 
 ```ts
 test("investment_memo playbook resolves with verdict section last", () => {
@@ -1054,9 +1054,9 @@ test("investment_memo playbook resolves with verdict section last", () => {
 });
 ```
 
-- [ ] **Step 2: Run** — `cd services/analyze && npm test` — Expected: FAIL (unknown playbook).
+- [x] **Step 2: Run** — `cd services/analyze && npm test` — Expected: FAIL (unknown playbook).
 
-- [ ] **Step 3: Add the playbook** to `ANALYZE_PLAYBOOKS` (after `peer_comparison`):
+- [x] **Step 3: Add the playbook** to `ANALYZE_PLAYBOOKS` (after `peer_comparison`):
 
 ```ts
   Object.freeze({
@@ -1082,9 +1082,9 @@ test("investment_memo playbook resolves with verdict section last", () => {
   }),
 ```
 
-- [ ] **Step 4: Run service tests** — Expected: PASS. Also run `cd services/analyze && npm test 2>&1 | tail -5` for the full suite (template-runner tests iterate playbooks; confirm none hard-code the playbook count — fix the fixture list if one does).
+- [x] **Step 4: Run service tests** — Expected: PASS. Also run `cd services/analyze && npm test 2>&1 | tail -5` for the full suite (template-runner tests iterate playbooks; confirm none hard-code the playbook count — fix the fixture list if one does).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add services/analyze/src/playbook.ts services/analyze/test/playbook.test.ts
@@ -1103,7 +1103,7 @@ git commit -m "feat(analyze): investment memo playbook with final verdict sectio
 - Modify: `web/src/pages/AnalyzePage.tsx:281-290` (swap static list for the component)
 - Test: `web/src/analyze/sectionProgress.test.ts`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```ts
 import assert from 'node:assert/strict'
@@ -1134,7 +1134,7 @@ test('complete: sections with a matching block title are done, others skipped', 
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**, then implement `sectionProgress.ts`:
+- [x] **Step 2: Run to verify failure**, then implement `sectionProgress.ts`:
 
 ```ts
 // TOC state for a playbook memo. Matching is by case-insensitive title:
@@ -1173,7 +1173,7 @@ function row(section: PlaybookSectionLike, state: SectionProgressState): Section
 }
 ```
 
-- [ ] **Step 3: Component** `SectionProgressList.tsx`:
+- [x] **Step 3: Component** `SectionProgressList.tsx`:
 
 ```tsx
 import type { ReactElement } from 'react'
@@ -1214,7 +1214,7 @@ export function SectionProgressList({ rows }: { rows: ReadonlyArray<SectionProgr
 
 (If `text-on-accent` is not a defined token in `index.css`, use `text-white`.)
 
-- [ ] **Step 4: Integrate in `AnalyzePage`** — replace the static `<ul>` in the Sections card with:
+- [x] **Step 4: Integrate in `AnalyzePage`** — replace the static `<ul>` in the Sections card with:
 
 ```tsx
               <SectionProgressList
@@ -1228,7 +1228,7 @@ export function SectionProgressList({ rows }: { rows: ReadonlyArray<SectionProgr
 
 (Read the surrounding `generateMemo` to confirm the exact in-flight `status` string it sets, and use that literal; if generation status is tracked another way, derive `'generating'` from that.)
 
-- [ ] **Step 5: Web tests + typecheck + commit**
+- [x] **Step 5: Web tests + typecheck + commit**
 
 ```bash
 cd web && npm test && npm run typecheck
@@ -1240,6 +1240,6 @@ git commit -m "feat(web): status-aware section progress rail on Analyze"
 
 ## Final verification
 
-- [ ] `cd web && npm test && npm run typecheck && npm run lint`
-- [ ] `cd services/analyze && npm test`
-- [ ] `git push` (per session close protocol)
+- [x] `cd web && npm test && npm run typecheck && npm run lint`
+- [x] `cd services/analyze && npm test`
+- [x] `git push` (per session close protocol)
