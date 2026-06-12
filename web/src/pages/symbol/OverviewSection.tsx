@@ -23,9 +23,8 @@ import {
 } from '../../symbol/stats.ts'
 import { listingIdForQuote } from '../../symbol/quote.ts'
 import {
+  dailySeriesQuery,
   fetchSeries,
-  windowedDailyQuery,
-  priceWindowDays,
   singleListingOutcome,
   type NormalizedBar,
   type PriceWindow,
@@ -83,10 +82,12 @@ export function OverviewSection() {
     if (listingId === null) {
       return { kind: 'unavailable', reason: 'no listing context for this subject' }
     }
-    const response = await fetchSeries(
-      windowedDailyQuery(listingId, priceWindowDays(priceWindow)),
-      { signal },
-    )
+    // Live surface: anchored at "now" by contract (sealed blocks pin as_of).
+    const query = dailySeriesQuery([{ kind: 'listing', id: listingId }], priceWindow, 'raw', new Date())
+    if (query === null) {
+      return { kind: 'unavailable', reason: 'unknown price window' }
+    }
+    const response = await fetchSeries(query, { signal })
     const outcome = singleListingOutcome(response, listingId)
     if (outcome === null) {
       return { kind: 'unavailable', reason: 'series response did not include this listing' }

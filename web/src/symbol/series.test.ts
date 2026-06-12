@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  dailySeriesQuery,
   fetchSeries,
-  priceWindowDays,
+  rangeDays,
   windowedDailyQuery,
   SeriesFetchError,
   singleListingOutcome,
@@ -118,9 +119,36 @@ test('singleListingOutcome returns null when the listing is not in the response'
   assert.equal(singleListingOutcome(response, APPLE_LISTING_ID), null)
 })
 
-test('priceWindowDays resolves YTD from now and fixed windows from the table', () => {
-  assert.equal(priceWindowDays('YTD', new Date('2026-06-12T00:00:00Z')), 162)
-  assert.equal(priceWindowDays('YTD', new Date('2026-01-02T12:00:00Z')), 7)
-  assert.equal(priceWindowDays('5D'), 7)
-  assert.equal(priceWindowDays('5Y'), 1825)
+test('rangeDays resolves YTD from the anchor and fixed labels from the table', () => {
+  assert.equal(rangeDays('YTD', new Date('2026-06-12T00:00:00Z')), 162)
+  // Early-January YTD keeps the min-7 guard so a line is still drawable.
+  assert.equal(rangeDays('YTD', new Date('2026-01-02T12:00:00Z')), 7)
+  assert.equal(rangeDays('5D', new Date()), 7)
+  assert.equal(rangeDays('3M', new Date()), 90)
+  assert.equal(rangeDays('5Y', new Date()), 1825)
+  assert.equal(rangeDays('bogus', new Date()), null)
+})
+
+test('dailySeriesQuery anchors the range end and binds the daily-bars contract', () => {
+  const anchor = new Date('2026-06-12T00:00:00Z')
+  const query = dailySeriesQuery(
+    [{ kind: 'listing', id: APPLE_LISTING_ID }],
+    '1M',
+    'pct_return',
+    anchor,
+  )
+  assert.ok(query !== null)
+  assert.equal(query.range.end, '2026-06-12T00:00:00.000Z')
+  assert.equal(query.interval, '1d')
+  assert.equal(query.basis, 'split_and_div_adjusted')
+  assert.equal(query.normalization, 'pct_return')
+  assert.equal(
+    (Date.parse(query.range.end) - Date.parse(query.range.start)) / (24 * 60 * 60 * 1000),
+    30,
+  )
+})
+
+test('dailySeriesQuery returns null for unknown labels or empty listings', () => {
+  assert.equal(dailySeriesQuery([{ kind: 'listing', id: APPLE_LISTING_ID }], 'bogus', 'raw', new Date()), null)
+  assert.equal(dailySeriesQuery([], '1M', 'raw', new Date()), null)
 })

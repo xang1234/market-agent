@@ -3,7 +3,7 @@ import { test } from 'node:test'
 
 import type { GetSeriesResponse } from '../symbol/series.ts'
 import {
-  perfRangeDays,
+  perfAnchor,
   perfRangeOptions,
   perfSeriesQuery,
   seriesFromPerfResponse,
@@ -32,16 +32,27 @@ test('range options come from interactive.ranges with fallback defaults', () => 
   assert.deepEqual([...perfRangeOptions(withSpec)], ['5D', '1Y'])
 })
 
-test('perfRangeDays understands the labeled ranges', () => {
-  const now = new Date('2026-06-12T00:00:00Z')
-  assert.equal(perfRangeDays('1M', now), 30)
-  assert.equal(perfRangeDays('YTD', now), 162)
-  assert.equal(perfRangeDays('5Y', now), 1825)
-  assert.equal(perfRangeDays('bogus', now), null)
+test('series fetches are anchored at the pinned block moment, never "now"', () => {
+  // Sealed-snapshot contract: as_of anchors the range end…
+  assert.equal(perfAnchor(block).toISOString(), '2026-06-12T00:00:00.000Z')
+  const query = perfSeriesQuery(block, 'YTD')
+  assert.ok(query !== null)
+  assert.equal(query.range.end, '2026-06-12T00:00:00.000Z')
+  // …YTD resolves against that anchor (2026-01-01 → 2026-06-12 is 162 days)…
+  assert.equal(
+    (Date.parse(query.range.end) - Date.parse(query.range.start)) / (24 * 60 * 60 * 1000),
+    162,
+  )
+  // …and an explicit interactive.range_end_max takes precedence over as_of.
+  const withMax = {
+    ...block,
+    interactive: { range_end_max: '2026-03-31T00:00:00Z' },
+  } as PerfComparisonBlock
+  assert.equal(perfSeriesQuery(withMax, '1M')?.range.end, '2026-03-31T00:00:00.000Z')
 })
 
 test('perfSeriesQuery uses listings only, pct_return normalization', () => {
-  const query = perfSeriesQuery(block, 'YTD', new Date('2026-06-12T00:00:00Z'))
+  const query = perfSeriesQuery(block, 'YTD')
   assert.ok(query !== null)
   assert.deepEqual(query.subject_refs.map((ref) => ref.id), ['l-1'])
   assert.equal(query.normalization, 'pct_return')
@@ -49,9 +60,9 @@ test('perfSeriesQuery uses listings only, pct_return normalization', () => {
 })
 
 test('perfSeriesQuery returns null for unknown range or no listings', () => {
-  assert.equal(perfSeriesQuery(block, 'bogus', new Date()), null)
+  assert.equal(perfSeriesQuery(block, 'bogus'), null)
   const noListings = { ...block, subject_refs: [{ kind: 'issuer', id: 'i-1' }] } as PerfComparisonBlock
-  assert.equal(perfSeriesQuery(noListings, 'YTD', new Date()), null)
+  assert.equal(perfSeriesQuery(noListings, 'YTD'), null)
 })
 
 test('seriesFromPerfResponse converts bars to chart series named by listing', () => {

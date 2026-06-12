@@ -6,22 +6,7 @@ import {
   WATCHLIST_WINDOWS,
   sparklineClosesByListing,
   watchlistSeriesQuery,
-  watchlistWindowDays,
 } from './watchlistSparklines.ts'
-
-test('watchlistWindowDays maps fixed windows and computes YTD from now', () => {
-  const now = new Date('2026-06-12T00:00:00Z')
-  assert.equal(watchlistWindowDays('5D', now), 7)
-  assert.equal(watchlistWindowDays('1M', now), 30)
-  assert.equal(watchlistWindowDays('6M', now), 180)
-  assert.equal(watchlistWindowDays('1Y', now), 365)
-  // 2026-01-01 → 2026-06-12 is 162 days.
-  assert.equal(watchlistWindowDays('YTD', now), 162)
-})
-
-test('YTD in early January still spans enough days to draw a line', () => {
-  assert.equal(watchlistWindowDays('YTD', new Date('2026-01-02T12:00:00Z')), 7)
-})
 
 test('window list drives the rail toggle', () => {
   assert.deepEqual([...WATCHLIST_WINDOWS], ['5D', '1M', '6M', 'YTD', '1Y'])

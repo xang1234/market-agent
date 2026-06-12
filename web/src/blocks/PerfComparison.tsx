@@ -29,7 +29,7 @@ export function PerfComparison({ block }: PerfComparisonProps): ReactElement {
   const state = useFetched<ReadonlyArray<Series>>(
     `${block.id}|${range}`,
     async (_key, signal) => {
-      const query = perfSeriesQuery(block, range, new Date())
+      const query = perfSeriesQuery(block, range)
       if (query === null) return { kind: 'unavailable', reason: 'no listing subjects in block' }
       const response = await fetchSeries(query, { signal })
       const series = seriesFromPerfResponse(response)
