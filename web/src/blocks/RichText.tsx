@@ -1,12 +1,21 @@
 import type { ReactElement } from 'react'
 import { InspectableRef } from '../evidence/InspectableRef.tsx'
-import type { RefSegment, RichTextBlock } from './types.ts'
+import type { RefSegment, RichTextBlock, TextSegmentTone } from './types.ts'
 import { isRefSegment, refSegmentPlaceholder } from './richText.ts'
 import { resolveRefSegment, type SnapshotManifest } from './snapshotManifest.ts'
 import { useSnapshotManifest } from './snapshotManifestContext.ts'
 import { Markdown } from './Markdown.tsx'
 
 type RichTextProps = { block: RichTextBlock }
+
+// Inline emphasis for toned text runs (the video's green "+127% YoY" deltas).
+// Neutral tone is intentionally unstyled — it exists so emitters can be
+// explicit without changing rendering.
+const TONE_CLASS: Readonly<Record<TextSegmentTone, string>> = {
+  positive: 'font-medium text-positive',
+  negative: 'font-medium text-negative',
+  neutral: '',
+}
 
 export function RichText({ block }: RichTextProps): ReactElement {
   const manifest = useSnapshotManifest()
@@ -15,9 +24,10 @@ export function RichText({ block }: RichTextProps): ReactElement {
   // goal). A block that interleaves text and ref segments is an inline cited
   // sentence; rendering each text run as block Markdown (<div>/<p>) would split
   // the refs onto their own lines, so render those text runs inline instead and
-  // keep the refs in flow.
+  // keep the refs in flow. A toned single segment also takes the inline path —
+  // Markdown has no tone treatment.
   const onlySegment = block.segments.length === 1 ? block.segments[0] : null
-  const children = onlySegment && !isRefSegment(onlySegment)
+  const children = onlySegment && !isRefSegment(onlySegment) && onlySegment.tone === undefined
     ? <Markdown text={onlySegment.text} />
     : block.segments.map((segment, index) =>
         isRefSegment(segment)
@@ -31,7 +41,15 @@ export function RichText({ block }: RichTextProps): ReactElement {
               manifest={manifest}
             />
           )
-          : <span key={`${block.id}-seg-${index}`}>{segment.text}</span>,
+          : (
+            <span
+              key={`${block.id}-seg-${index}`}
+              data-tone={segment.tone}
+              className={segment.tone !== undefined ? TONE_CLASS[segment.tone] : undefined}
+            >
+              {segment.text}
+            </span>
+          ),
       )
   return (
     <div
