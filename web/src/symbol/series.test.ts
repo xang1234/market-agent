@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   fetchSeries,
+  priceWindowDays,
   windowedDailyQuery,
   SeriesFetchError,
   singleListingOutcome,
@@ -115,4 +116,11 @@ test('singleListingOutcome returns null when the listing is not in the response'
   const query: NormalizedSeriesQuery = windowedDailyQuery(MSFT_LISTING_ID, 30, FIXED_END)
   const response: GetSeriesResponse = { query, results: [] }
   assert.equal(singleListingOutcome(response, APPLE_LISTING_ID), null)
+})
+
+test('priceWindowDays resolves YTD from now and fixed windows from the table', () => {
+  assert.equal(priceWindowDays('YTD', new Date('2026-06-12T00:00:00Z')), 162)
+  assert.equal(priceWindowDays('YTD', new Date('2026-01-02T12:00:00Z')), 7)
+  assert.equal(priceWindowDays('5D'), 7)
+  assert.equal(priceWindowDays('5Y'), 1825)
 })

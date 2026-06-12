@@ -25,12 +25,12 @@ import { listingIdForQuote } from '../../symbol/quote.ts'
 import {
   fetchSeries,
   windowedDailyQuery,
-  PRICE_WINDOW_DAYS,
+  priceWindowDays,
   singleListingOutcome,
   type NormalizedBar,
   type PriceWindow,
 } from '../../symbol/series.ts'
-import { Sparkline } from '../../symbol/Sparkline.tsx'
+import { SeriesChart } from '../../blocks/SeriesChart.tsx'
 import { SegmentedToggle } from '../../symbol/SegmentedToggle.tsx'
 import { SectorChip } from '../../symbol/SectorChip.tsx'
 import { useConsensus } from '../../symbol/useConsensus.ts'
@@ -45,9 +45,12 @@ const STAT_ORDER: ReadonlyArray<KeyStatKey> = [
 ]
 
 const PRICE_WINDOW_OPTIONS: ReadonlyArray<{ value: PriceWindow; label: string }> = [
+  { value: '5D', label: '5D' },
   { value: '1M', label: '1M' },
   { value: '6M', label: '6M' },
+  { value: 'YTD', label: 'YTD' },
   { value: '1Y', label: '1Y' },
+  { value: '5Y', label: '5Y' },
 ]
 
 export function OverviewSection() {
@@ -81,7 +84,7 @@ export function OverviewSection() {
       return { kind: 'unavailable', reason: 'no listing context for this subject' }
     }
     const response = await fetchSeries(
-      windowedDailyQuery(listingId, PRICE_WINDOW_DAYS[priceWindow]),
+      windowedDailyQuery(listingId, priceWindowDays(priceWindow)),
       { signal },
     )
     const outcome = singleListingOutcome(response, listingId)
@@ -264,22 +267,23 @@ function ExchangeBadge({ exchange }: { exchange: IssuerProfileExchange }) {
   )
 }
 
+// Hero price chart: SeriesChart brings the gradient area fill and the
+// crosshair hover readout (reference-terminal interaction) that the bare
+// Sparkline lacked.
 function PriceSparkline({ bars, windowLabel }: { bars: NormalizedBar[]; windowLabel: string }) {
-  const closes = bars.map((b) => b.close)
   const first = bars[0].close
   const last = bars[bars.length - 1].close
-  const trendClass =
-    last > first
-      ? 'stroke-positive'
-      : last < first
-        ? 'stroke-negative'
-        : 'stroke-muted'
   return (
     <div className="flex flex-col gap-2">
-      <Sparkline
-        values={closes}
+      <SeriesChart
+        testId="overview-hero-chart"
         ariaLabel={`${windowLabel} price line from ${formatPrice(first)} to ${formatPrice(last)}`}
-        trendStrokeClass={trendClass}
+        series={[
+          {
+            name: 'Close',
+            points: bars.map((bar) => ({ x: bar.ts.slice(0, 10), y: bar.close })),
+          },
+        ]}
       />
       <div className="flex items-center justify-between text-xs num text-muted">
         <span>{formatPrice(first)}</span>

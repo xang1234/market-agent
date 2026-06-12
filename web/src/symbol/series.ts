@@ -104,12 +104,26 @@ export async function fetchSeries(
 
 // Ranges behind the Overview price-range toggle. 1M preserves the prior fixed
 // 30-day window, so the default view is unchanged when no selection is made.
-export type PriceWindow = '1M' | '6M' | '1Y'
+export type PriceWindow = '5D' | '1M' | '6M' | 'YTD' | '1Y' | '5Y'
 
 export const PRICE_WINDOW_DAYS: Record<PriceWindow, number> = {
+  // 7 calendar days ≈ 5 trading bars.
+  '5D': 7,
   '1M': 30,
   '6M': 180,
+  // YTD resolves at query time (priceWindowDays); 365 is the safe upper bound
+  // for any caller that indexes this table directly.
+  YTD: 365,
   '1Y': 365,
+  '5Y': 1825,
+}
+
+// Day span for a window, resolving YTD against `now` (min 7 so an early-
+// January YTD still has enough bars to draw a line).
+export function priceWindowDays(window: PriceWindow, now: Date = new Date()): number {
+  if (window !== 'YTD') return PRICE_WINDOW_DAYS[window]
+  const yearStart = Date.UTC(now.getUTCFullYear(), 0, 1)
+  return Math.max(7, Math.floor((now.getTime() - yearStart) / (24 * 60 * 60 * 1000)))
 }
 
 // split_and_div_adjusted is the only basis the market service emits today.
