@@ -11,6 +11,7 @@ import {
   type FactClientPool,
   type FactInput,
 } from "./fact-repo.ts";
+import { listIssuerNews } from "./issuer-news-repo.ts";
 import type { QueryExecutor } from "./types.ts";
 import { assertNonEmptyString, assertUuidV4 } from "./validators.ts";
 import {
@@ -26,6 +27,7 @@ export type EvidenceReviewServerDb = QueryExecutor & FactClientPool;
 
 type Route =
   | { action: "healthz" }
+  | { action: "issuer_news"; issuer_id: string; limit: number }
   | { action: "list"; stale_after_seconds: number | null; limit: number }
   | { action: "approve"; review_id: string }
   | { action: "reject"; review_id: string }
@@ -60,6 +62,15 @@ export function createEvidenceReviewServer(
 
       if (route.action === "healthz") {
         respond(res, 200, { status: "ok", service: "evidence-review" });
+        return;
+      }
+
+      // Public read: subject detail is a public surface (spec §3.11), so the
+      // issuer news/filings rail must not require a reviewer session. Handled
+      // before the auth gate below.
+      if (route.action === "issuer_news") {
+        const items = await listIssuerNews(db, { issuerId: route.issuer_id, limit: route.limit });
+        respond(res, 200, { items });
         return;
       }
 
@@ -147,6 +158,16 @@ function matchRoute(method: string, rawUrl: string): Route | null {
 
   if (method === "GET" && (pathname === "/healthz" || pathname === "/v1/evidence/healthz")) {
     return { action: "healthz" };
+  }
+
+  if (method === "GET" && pathname === "/v1/evidence/issuer-news") {
+    const issuerId = searchParams.get("issuer_id") ?? "";
+    assertClientValidation(() => assertUuidV4(issuerId, "issuer_id"));
+    return {
+      action: "issuer_news",
+      issuer_id: issuerId,
+      limit: optionalPositiveInteger(searchParams.get("limit"), "limit") ?? 8,
+    };
   }
 
   if (method === "GET" && pathname === "/v1/evidence/fact-review-queue") {

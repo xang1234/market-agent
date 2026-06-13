@@ -21,7 +21,7 @@ import {
 import { SubjectMembershipBadges } from '../watchlists/SubjectMembershipBadges'
 import { useAuth } from './useAuth'
 import { ProtectedActionType } from './authInterruptState'
-import { SubjectConsensusRail } from './SubjectConsensusRail.tsx'
+import { SubjectNewsRail } from './SubjectNewsRail.tsx'
 import type { SubjectDetailOutletContext } from './subjectDetailOutletContext'
 import { useRequestProtectedAction } from './useAuthInterrupt'
 import { useRightRailContent } from './useRightRailContent.ts'
@@ -109,7 +109,7 @@ export function SubjectDetailShell() {
       : ({ status: 'idle' } as const)
 
   useRightRailContent(
-    issuerId === null ? null : <SubjectConsensusRail issuerId={issuerId} />,
+    issuerId === null ? null : <SubjectNewsRail issuerId={issuerId} />,
     [issuerId],
   )
 
