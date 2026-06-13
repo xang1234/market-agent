@@ -1,8 +1,6 @@
 import { useState, type ReactNode } from 'react'
-import { pluralize } from '../../format/pluralize.ts'
 import { useSubjectDetailContext } from '../../shell/subjectDetailOutletContext.ts'
 import { Card } from '../../symbol/Card.tsx'
-import { CARD_CLASS } from '../../symbol/surfaceStyles.ts'
 import { FetchStateView } from '../../symbol/FetchStateView.tsx'
 import { useFetched } from '../../symbol/useFetched.ts'
 import {
@@ -14,11 +12,7 @@ import {
 } from '../../symbol/profile.ts'
 import {
   fetchKeyStats,
-  formatStatValue,
-  statLabel,
   statsBelongToIssuer,
-  type KeyStat,
-  type KeyStatKey,
   type KeyStatsEnvelope,
 } from '../../symbol/stats.ts'
 import { listingIdForQuote } from '../../symbol/quote.ts'
@@ -34,14 +28,10 @@ import { SegmentedToggle } from '../../symbol/SegmentedToggle.tsx'
 import { SectorChip } from '../../symbol/SectorChip.tsx'
 import { useConsensus } from '../../symbol/useConsensus.ts'
 import { ConsensusBody, PriceTargetBody } from '../../symbol/consensusViews.tsx'
+import { buildKeyStatsGrid } from './keyStatsGrid.ts'
+import { KeyStatsGrid } from './KeyStatsGrid.tsx'
 
-const STAT_ORDER: ReadonlyArray<KeyStatKey> = [
-  'gross_margin',
-  'operating_margin',
-  'net_margin',
-  'revenue_growth_yoy',
-  'pe_ratio',
-]
+type PriceSeries = { bars: NormalizedBar[]; currency: string }
 
 const PRICE_WINDOW_OPTIONS: ReadonlyArray<{ value: PriceWindow; label: string }> = [
   { value: '5D', label: '5D' },
@@ -78,7 +68,7 @@ export function OverviewSection() {
   // return visit to the same window is a cache hit — not a per-render re-key.
   const seriesKey = listingId === null ? null : `${listingId}|${priceWindow}`
 
-  const series = useFetched<NormalizedBar[]>(seriesKey, async (_key, signal) => {
+  const series = useFetched<PriceSeries>(seriesKey, async (_key, signal) => {
     if (listingId === null) {
       return { kind: 'unavailable', reason: 'no listing context for this subject' }
     }
@@ -95,18 +85,61 @@ export function OverviewSection() {
     if (outcome.outcome === 'unavailable') {
       return { kind: 'unavailable', reason: outcome.detail ?? outcome.reason }
     }
-    return { kind: 'ready', data: outcome.data.bars }
+    return { kind: 'ready', data: { bars: outcome.data.bars, currency: outcome.data.currency } }
   })
 
   // Analyst consensus + price target are surfaced on the landing tab (not only
   // under Earnings), matching the reference design — same shared fetch.
   const consensus = useConsensus(issuerId)
 
+  // The dense stats grid renders from whatever's loaded — intraday cells from
+  // the latest bars, fundamental cells from the key-stats envelope — dashing
+  // the rest. It's not gated behind a single fetch so a slow stats call doesn't
+  // hide the price cells (and vice-versa).
+  const priceSeries = series.status === 'ready' ? series.data : null
+  const statsEnvelope = stats.status === 'ready' ? stats.data : null
+  const statCells = buildKeyStatsGrid(
+    priceSeries?.bars ?? null,
+    statsEnvelope,
+    priceSeries?.currency ?? 'USD',
+  )
+
   return (
     <div
       data-testid="section-overview"
       className="flex w-full flex-col gap-6 p-8"
     >
+      <Card
+        testId="overview-performance"
+        headingId="overview-performance-heading"
+        heading={`Performance · ${priceWindow}`}
+        action={
+          <SegmentedToggle
+            options={PRICE_WINDOW_OPTIONS}
+            value={priceWindow}
+            onChange={setPriceWindow}
+            ariaLabel="Price range"
+            testIdPrefix="price-window"
+          />
+        }
+      >
+        <FetchStateView
+          state={series}
+          noun="series"
+          idleMessage="No listing context for this subject."
+        >
+          {({ bars }) =>
+            bars.length < 2 ? (
+              <p className="text-sm text-muted">
+                Not enough bars in the requested range to draw a line.
+              </p>
+            ) : (
+              <PriceSparkline bars={bars} windowLabel={priceWindow} />
+            )
+          }
+        </FetchStateView>
+      </Card>
+      <KeyStatsGrid cells={statCells} />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
         <Card testId="overview-profile" headingId="overview-profile-heading" heading="Company profile">
           <FetchStateView
@@ -117,47 +150,6 @@ export function OverviewSection() {
             {(data) => <ProfileBody profile={data} />}
           </FetchStateView>
         </Card>
-        <Card
-          testId="overview-performance"
-          headingId="overview-performance-heading"
-          heading={`Performance · ${priceWindow}`}
-          action={
-            <SegmentedToggle
-              options={PRICE_WINDOW_OPTIONS}
-              value={priceWindow}
-              onChange={setPriceWindow}
-              ariaLabel="Price range"
-              testIdPrefix="price-window"
-            />
-          }
-        >
-          <FetchStateView
-            state={series}
-            noun="series"
-            idleMessage="No listing context for this subject."
-          >
-            {(bars) =>
-              bars.length < 2 ? (
-                <p className="text-sm text-muted">
-                  Not enough bars in the requested range to draw a line.
-                </p>
-              ) : (
-                <PriceSparkline bars={bars} windowLabel={priceWindow} />
-              )
-            }
-          </FetchStateView>
-        </Card>
-      </div>
-      <Card testId="overview-key-stats" headingId="overview-key-stats-heading" heading="Key stats">
-        <FetchStateView
-          state={stats}
-          noun="key stats"
-          idleMessage="Issuer context unavailable for this entry. Open this symbol from search to load key stats."
-        >
-          {(envelope) => <KeyStatsBody envelope={envelope} />}
-        </FetchStateView>
-      </Card>
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
         <Card
           testId="overview-consensus"
           headingId="overview-consensus-heading"
@@ -171,26 +163,26 @@ export function OverviewSection() {
             {(envelope) => <ConsensusBody envelope={envelope} />}
           </FetchStateView>
         </Card>
-        <Card
-          testId="overview-price-target"
-          headingId="overview-price-target-heading"
-          heading="Price target"
-        >
-          <FetchStateView
-            state={consensus}
-            noun="price target"
-            idleMessage="Issuer context unavailable for this entry."
-          >
-            {(envelope) =>
-              envelope.price_target ? (
-                <PriceTargetBody target={envelope.price_target} />
-              ) : (
-                <p className="text-sm text-muted">No price target in this consensus envelope.</p>
-              )
-            }
-          </FetchStateView>
-        </Card>
       </div>
+      <Card
+        testId="overview-price-target"
+        headingId="overview-price-target-heading"
+        heading="Price target"
+      >
+        <FetchStateView
+          state={consensus}
+          noun="price target"
+          idleMessage="Issuer context unavailable for this entry."
+        >
+          {(envelope) =>
+            envelope.price_target ? (
+              <PriceTargetBody target={envelope.price_target} />
+            ) : (
+              <p className="text-sm text-muted">No price target in this consensus envelope.</p>
+            )
+          }
+        </FetchStateView>
+      </Card>
     </div>
   )
 }
@@ -297,65 +289,5 @@ function PriceSparkline({ bars, windowLabel }: { bars: NormalizedBar[]; windowLa
 
 function formatPrice(value: number): string {
   return value.toFixed(2)
-}
-
-function KeyStatsBody({ envelope }: { envelope: KeyStatsEnvelope }) {
-  const byKey = new Map(envelope.stats.map((s) => [s.stat_key, s] as const))
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        {STAT_ORDER.map((key) => {
-          const stat = byKey.get(key)
-          return stat ? (
-            <KeyStatTile key={key} stat={stat} />
-          ) : (
-            <KeyStatMissingTile key={key} statKey={key} />
-          )
-        })}
-      </div>
-      <p className="text-xs text-muted">
-        FY{envelope.fiscal_year} {envelope.fiscal_period} · {envelope.basis.replaceAll('_', ' ')} ·{' '}
-        {envelope.reporting_currency}
-      </p>
-    </div>
-  )
-}
-
-function KeyStatTile({ stat }: { stat: KeyStat }) {
-  const hasWarning = stat.warnings.length > 0
-  const warningSummary = hasWarning ? stat.warnings.map((w) => w.message).join('\n') : undefined
-  return (
-    <div
-      data-testid={`key-stat-${stat.stat_key}`}
-      className={`flex flex-col gap-1 ${CARD_CLASS} p-3`}
-    >
-      <span className="text-xs uppercase tracking-wide text-muted">
-        {statLabel(stat.stat_key)}
-      </span>
-      <span className="num text-lg font-semibold text-fg">
-        {formatStatValue(stat)}
-      </span>
-      {hasWarning && (
-        <span
-          title={warningSummary}
-          className="text-xs text-warning"
-        >
-          {stat.warnings.length} {pluralize(stat.warnings.length, 'warning')}
-        </span>
-      )}
-    </div>
-  )
-}
-
-function KeyStatMissingTile({ statKey }: { statKey: KeyStatKey }) {
-  return (
-    <div
-      data-testid={`key-stat-${statKey}`}
-      className="flex flex-col gap-1 rounded-lg border border-dashed border-line bg-surface p-3 text-muted"
-    >
-      <span className="text-xs uppercase tracking-wide">{statLabel(statKey)}</span>
-      <span className="num text-lg font-semibold">—</span>
-    </div>
-  )
 }
 

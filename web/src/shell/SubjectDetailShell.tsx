@@ -195,16 +195,18 @@ export function SubjectDetailShell() {
         data-testid="subject-header"
         className="border-b border-line px-8 py-5"
       >
-        <QuoteSnapshot subject={subject} />
-        {userId !== null && canonicalSubject !== null ? (
-          <SubjectMembershipBadges subjectRef={canonicalSubject.subject_ref} userId={userId} />
-        ) : null}
-        <div className="mt-4 flex items-center gap-2">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <QuoteSnapshot subject={subject} />
+            {userId !== null && canonicalSubject !== null ? (
+              <SubjectMembershipBadges subjectRef={canonicalSubject.subject_ref} userId={userId} />
+            ) : null}
+          </div>
           {canonicalSubject !== null ? (
-            <>
+            <div className="flex shrink-0 items-center gap-2">
               <SaveToWatchlistButton subject={canonicalSubject} />
               <AnalyzeThisSubjectButton subject={canonicalSubject} />
-            </>
+            </div>
           ) : null}
         </div>
       </header>
