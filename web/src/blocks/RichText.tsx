@@ -24,10 +24,14 @@ export function RichText({ block }: RichTextProps): ReactElement {
   // goal). A block that interleaves text and ref segments is an inline cited
   // sentence; rendering each text run as block Markdown (<div>/<p>) would split
   // the refs onto their own lines, so render those text runs inline instead and
-  // keep the refs in flow. A toned single segment also takes the inline path —
-  // Markdown has no tone treatment.
+  // keep the refs in flow. A positively/negatively toned single segment takes
+  // the inline path (Markdown has no tone treatment); neutral is by definition
+  // unstyled, so it keeps the Markdown fast-path.
   const onlySegment = block.segments.length === 1 ? block.segments[0] : null
-  const children = onlySegment && !isRefSegment(onlySegment) && onlySegment.tone === undefined
+  const children =
+    onlySegment &&
+    !isRefSegment(onlySegment) &&
+    (onlySegment.tone === undefined || onlySegment.tone === 'neutral')
     ? <Markdown text={onlySegment.text} />
     : block.segments.map((segment, index) =>
         isRefSegment(segment)

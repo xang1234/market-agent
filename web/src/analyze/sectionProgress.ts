@@ -26,8 +26,10 @@ export function sectionProgress(
     const matched =
       blocks !== null &&
       blocks.some(
+        // typeof guard (not just !== undefined): run payloads cross the API
+        // boundary, so a null/non-string title must not throw at render time.
         (block) =>
-          block.title !== undefined &&
+          typeof block.title === 'string' &&
           block.title.toLowerCase() === section.title.toLowerCase(),
       )
     return row(section, matched ? 'done' : 'skipped')

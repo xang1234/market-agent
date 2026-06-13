@@ -27,3 +27,11 @@ test('complete: sections with a matching block title are done, others skipped', 
   ])
   assert.deepEqual(rows.map((row) => row.state), ['done', 'skipped'])
 })
+
+test('non-string block titles from run payloads do not throw', () => {
+  const rows = sectionProgress(sections, 'complete', [
+    { title: null } as unknown as { title?: string },
+    { title: 'Final verdict' },
+  ])
+  assert.deepEqual(rows.map((row) => row.state), ['skipped', 'done'])
+})

@@ -228,6 +228,14 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
     }
   }
 
+  // The section rail must grade a run against the run's OWN playbook —
+  // handleOpenRun/handleRerun can load a memo from a different playbook than
+  // the one currently selected. Null when the run has no/unknown playbook.
+  const memoRunPlaybook =
+    memoRun && memoRun.playbook_id !== null
+      ? playbooks.find((playbook) => playbook.playbook_id === memoRun.playbook_id) ?? null
+      : null
+
   const handleOpenRun = async (runId: string) => {
     if (!session) return
     const cached = openedRunDetails[runId]
@@ -290,11 +298,13 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
             <section className="rounded-md border border-line p-3 text-sm">
               <h3 className="font-medium text-fg">Sections</h3>
               <SectionProgressList
-                rows={sectionProgress(
-                  selectedPlaybook.sections,
-                  isGenerating ? 'generating' : memoRun ? 'complete' : 'idle',
-                  memoRun?.blocks ?? null,
-                )}
+                rows={
+                  isGenerating
+                    ? sectionProgress(selectedPlaybook.sections, 'generating', null)
+                    : memoRunPlaybook
+                      ? sectionProgress(memoRunPlaybook.sections, 'complete', memoRun?.blocks ?? null)
+                      : sectionProgress(selectedPlaybook.sections, 'idle', null)
+                }
               />
             </section>
           ) : null}
