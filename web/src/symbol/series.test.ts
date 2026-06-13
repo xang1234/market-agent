@@ -152,3 +152,10 @@ test('dailySeriesQuery returns null for unknown labels or empty listings', () =>
   assert.equal(dailySeriesQuery([{ kind: 'listing', id: APPLE_LISTING_ID }], 'bogus', 'raw', new Date()), null)
   assert.equal(dailySeriesQuery([], '1M', 'raw', new Date()), null)
 })
+
+test('an invalid anchor yields null instead of throwing on toISOString', () => {
+  const bad = new Date('not-a-date')
+  assert.equal(rangeDays('1M', bad), null)
+  assert.equal(rangeDays('YTD', bad), null)
+  assert.equal(dailySeriesQuery([{ kind: 'listing', id: APPLE_LISTING_ID }], '1M', 'raw', bad), null)
+})

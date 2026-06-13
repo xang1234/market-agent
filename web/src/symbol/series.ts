@@ -129,9 +129,11 @@ const DAY_MS = 24 * 60 * 60 * 1000
 // early-January YTD still has enough bars to draw a line). Null for labels
 // outside the vocabulary.
 export function rangeDays(label: string, anchor: Date): number | null {
+  const anchorMs = anchor.getTime()
+  if (!Number.isFinite(anchorMs)) return null
   if (label === 'YTD') {
     const yearStart = Date.UTC(anchor.getUTCFullYear(), 0, 1)
-    return Math.max(7, Math.floor((anchor.getTime() - yearStart) / DAY_MS))
+    return Math.max(7, Math.floor((anchorMs - yearStart) / DAY_MS))
   }
   return FIXED_RANGE_DAYS[label] ?? null
 }
@@ -145,13 +147,17 @@ export function dailySeriesQuery(
   normalization: SeriesNormalization,
   anchor: Date,
 ): NormalizedSeriesQuery | null {
+  const anchorMs = anchor.getTime()
+  // Invalid anchor (e.g. a malformed block as_of) → null, keeping callers on
+  // the existing unavailable path instead of throwing on toISOString().
+  if (!Number.isFinite(anchorMs)) return null
   const days = rangeDays(label, anchor)
   if (listings.length === 0 || days === null) return null
   return {
     subject_refs: [...listings],
     range: {
-      start: new Date(anchor.getTime() - days * DAY_MS).toISOString(),
-      end: anchor.toISOString(),
+      start: new Date(anchorMs - days * DAY_MS).toISOString(),
+      end: new Date(anchorMs).toISOString(),
     },
     interval: '1d',
     basis: 'split_and_div_adjusted',
