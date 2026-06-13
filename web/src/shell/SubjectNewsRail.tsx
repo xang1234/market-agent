@@ -26,7 +26,7 @@ export function SubjectNewsRail({ issuerId }: SubjectNewsRailProps) {
     <div className="flex flex-col gap-3 p-4" data-testid="subject-news-rail">
       <h2 className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted">
         News &amp; filings
-        <span className="text-[10px] font-normal normal-case text-faint">last 7d</span>
+        <span className="text-[10px] font-normal normal-case text-faint">latest</span>
       </h2>
       {news.status === 'idle' ? (
         <RailStatus>Issuer context unavailable.</RailStatus>
