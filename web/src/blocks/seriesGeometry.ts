@@ -6,6 +6,14 @@ export const SERIES_CHART_DEFAULTS = {
   height: 160,
 } as const
 
+// One plotted point in chart-pixel space, for crosshair hover lookup.
+export type SeriesChartPoint = {
+  x: number
+  y: number
+  value: number
+  xLabel: string | number | undefined
+}
+
 export type SeriesPath = {
   name: string
   unit: string | undefined
@@ -14,6 +22,8 @@ export type SeriesPath = {
   areaPath: string
   // End-of-line anchor for the series label.
   end: { x: number; y: number }
+  // Per-point pixel coordinates (same scale math as `d`).
+  points: ReadonlyArray<SeriesChartPoint>
 }
 
 export type SeriesGeometry = {
@@ -53,7 +63,15 @@ export function computeSeriesGeometry(
     const values = s.points.map((p) => p.y)
     const geom = computeSparklineGeometry({ values, domain: yDomain, width, height })
     if (geom === null) continue
-    paths.push({ name: s.name, unit: s.unit, d: geom.path, areaPath: geom.areaPath, end: geom.end })
+    // Pixel coordinates come straight from the shared projection that built
+    // the path, annotated with the data values for hover readouts.
+    const points = s.points.map((point, i) => ({
+      x: geom.points[i].x,
+      y: geom.points[i].y,
+      value: point.y,
+      xLabel: point.label ?? point.x,
+    }))
+    paths.push({ name: s.name, unit: s.unit, d: geom.path, areaPath: geom.areaPath, end: geom.end, points })
   }
   if (paths.length === 0) return null
   return { paths, yDomain, width, height }

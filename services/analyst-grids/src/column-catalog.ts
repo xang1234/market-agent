@@ -4,23 +4,37 @@ import type { SnapshotSealInput } from "../../snapshot/src/snapshot-sealer.ts";
 import {
   buildFactBackedSealInput,
   toSealFactRow,
-} from "../../analyze/src/block-seal-input.ts";
+} from "../../snapshot/src/seal-input.ts";
 import { formatCompactCurrency } from "../../analyze/src/block-format.ts";
 import type { CellDisplay, CellRef, CellResultStatus, QueryExecutor } from "./types.ts";
+import { EMPTY_DISPLAY, GridValidationError } from "./types.ts";
+import type { JsonValue } from "../../observability/src/types.ts";
+import { parseReaderQuestionParams, readerQuestionProducer } from "./reader-question-column.ts";
+import { latestEpsDilutedProducer, latestRevenueProducer } from "./fiscal-fact-column.ts";
 
-// A grid cell's period context. Plan 1 producers ignore it (null); Plan 2 adds
-// the per-row resolver and period-sensitive columns.
-export type PeriodContext = null | {
+export const READER_QUESTION_COLUMN_KEY = "reader_question";
+export const MAX_READER_COLUMNS_PER_GRID = 3;
+
+// A grid cell's period context. Plan 2 fills the fiscal period from the
+// subject's latest fact; document_refs stays [] until Plan 3 wires
+// document→issuer linkage. null means "no period resolved" (non-issuer rows).
+export type ResolvedPeriod = {
   period_kind: string;
   fiscal_year: number | null;
   fiscal_period: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  document_refs: ReadonlyArray<{ kind: "document"; id: string; doc_kind: string }>;
 };
+export type PeriodContext = null | ResolvedPeriod;
 
 export type GridColumnContext = {
   subject: SubjectRef;
   period: PeriodContext;
   snapshotId: string;
   asOf: string;
+  userId: string;
+  params: JsonValue | null; // the column's ColumnSpec.params, verbatim
 };
 
 export type GridCellResult = {
@@ -31,7 +45,23 @@ export type GridCellResult = {
   coverageFlag?: string;
 };
 
-export type GridColumnDeps = { db: QueryExecutor };
+// The reader-side dependencies a reader-kind column needs. llm matches the
+// services/llm router's complete() surface; loadDocumentText resolves a
+// document's raw blob to utf-8 text (null when the blob is missing/ephemeral).
+export type ReaderLlm = {
+  complete(request: {
+    messages: ReadonlyArray<{ role: "system" | "user" | "assistant"; content: string }>;
+    temperature?: number;
+    maxTokens?: number;
+  }): Promise<{ text: string; deployment?: { channel: string; model: string } }>;
+};
+
+export type ReaderColumnDeps = {
+  llm: ReaderLlm;
+  loadDocumentText: (rawBlobId: string) => Promise<string | null>;
+};
+
+export type GridColumnDeps = { db: QueryExecutor; reader?: ReaderColumnDeps };
 
 export type GridColumnProducer = (
   deps: GridColumnDeps,
@@ -45,8 +75,6 @@ export type ColumnCatalogEntry = {
   producer: GridColumnProducer;
 };
 
-// The empty/placeholder cell display, shared with the cell runner's error path.
-export const EMPTY_DISPLAY: CellDisplay = { value: "—", tone: null };
 
 const MISSING: GridCellResult = { status: "missing_data", display: EMPTY_DISPLAY };
 
@@ -130,6 +158,33 @@ const CATALOG: ReadonlyMap<string, ColumnCatalogEntry> = new Map([
       producer: latestMarketCapProducer,
     },
   ],
+  [
+    "latest_revenue",
+    {
+      column_key: "latest_revenue",
+      label: "Revenue (latest)",
+      kind: "deterministic",
+      producer: latestRevenueProducer,
+    },
+  ],
+  [
+    "latest_eps_diluted",
+    {
+      column_key: "latest_eps_diluted",
+      label: "EPS diluted (latest)",
+      kind: "deterministic",
+      producer: latestEpsDilutedProducer,
+    },
+  ],
+  [
+    READER_QUESTION_COLUMN_KEY,
+    {
+      column_key: READER_QUESTION_COLUMN_KEY,
+      label: "Question",
+      kind: "reader",
+      producer: readerQuestionProducer,
+    },
+  ],
 ]);
 
 export function listColumns(): ReadonlyArray<Omit<ColumnCatalogEntry, "producer">> {
@@ -138,4 +193,26 @@ export function listColumns(): ReadonlyArray<Omit<ColumnCatalogEntry, "producer"
 
 export function getColumn(columnKey: string): ColumnCatalogEntry | undefined {
   return CATALOG.get(columnKey);
+}
+
+// Create-time validation for a grid's column specs. Owns the narrowing from
+// raw request JSON (unknown elements) so HTTP callers hand the parsed array
+// straight in. Throws GridValidationError (surfaced as HTTP 400).
+export function validateColumnSpecs(specs: ReadonlyArray<unknown>): void {
+  let readerCount = 0;
+  for (const value of specs) {
+    const spec = (value ?? {}) as { column_key?: unknown; params?: unknown };
+    if (typeof spec.column_key !== "string") {
+      throw new GridValidationError("each column_spec needs a string 'column_key'");
+    }
+    const entry = CATALOG.get(spec.column_key);
+    if (!entry) throw new GridValidationError(`unknown column_key: ${spec.column_key}`);
+    if (entry.kind === "reader") readerCount += 1;
+    if (spec.column_key === READER_QUESTION_COLUMN_KEY) {
+      parseReaderQuestionParams(spec.params);
+    }
+  }
+  if (readerCount > MAX_READER_COLUMNS_PER_GRID) {
+    throw new GridValidationError(`at most ${MAX_READER_COLUMNS_PER_GRID} question columns per grid`);
+  }
 }

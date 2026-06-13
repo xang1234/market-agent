@@ -63,6 +63,11 @@ export type CellWrite = {
   coverageFlag: string | null;
 };
 
+// The empty/placeholder cell display, shared with column producers' error/missing
+// paths. Lives here (not column-catalog.ts) to avoid an import cycle: producer
+// modules import EMPTY_DISPLAY while column-catalog.ts imports those producers.
+export const EMPTY_DISPLAY: CellDisplay = { value: "—", tone: null };
+
 export class GridNotFoundError extends Error {
   constructor(message = "grid not found") {
     super(message);

@@ -104,12 +104,65 @@ export async function fetchSeries(
 
 // Ranges behind the Overview price-range toggle. 1M preserves the prior fixed
 // 30-day window, so the default view is unchanged when no selection is made.
-export type PriceWindow = '1M' | '6M' | '1Y'
+export type PriceWindow = '5D' | '1M' | '6M' | 'YTD' | '1Y' | '5Y'
 
-export const PRICE_WINDOW_DAYS: Record<PriceWindow, number> = {
+// ── Canonical range-label vocabulary ─────────────────────────────────────────
+// Single source of truth for "range label → day span" and "label → daily
+// series query" across every surface (Overview hero chart, watchlist rail
+// sparklines, perf_comparison blocks). YTD deliberately has no table entry —
+// it only exists through rangeDays(label, anchor), so it cannot be misread
+// as a fixed span.
+
+const FIXED_RANGE_DAYS: Readonly<Record<string, number>> = {
+  // 7 calendar days ≈ 5 trading bars.
+  '5D': 7,
   '1M': 30,
+  '3M': 90,
   '6M': 180,
   '1Y': 365,
+  '5Y': 1825,
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+// Day span for a range label, resolving YTD against `anchor` (min 7 so an
+// early-January YTD still has enough bars to draw a line). Null for labels
+// outside the vocabulary.
+export function rangeDays(label: string, anchor: Date): number | null {
+  const anchorMs = anchor.getTime()
+  if (!Number.isFinite(anchorMs)) return null
+  if (label === 'YTD') {
+    const yearStart = Date.UTC(anchor.getUTCFullYear(), 0, 1)
+    return Math.max(7, Math.floor((anchorMs - yearStart) / DAY_MS))
+  }
+  return FIXED_RANGE_DAYS[label] ?? null
+}
+
+// One batched daily-bars query for a labeled range ending at `anchor`. The
+// anchor is the caller's freshness contract: live surfaces pass `new Date()`,
+// sealed blocks pass their pinned as_of so rendering stays deterministic.
+export function dailySeriesQuery(
+  listings: ReadonlyArray<ListingRef>,
+  label: string,
+  normalization: SeriesNormalization,
+  anchor: Date,
+): NormalizedSeriesQuery | null {
+  const anchorMs = anchor.getTime()
+  // Invalid anchor (e.g. a malformed block as_of) → null, keeping callers on
+  // the existing unavailable path instead of throwing on toISOString().
+  if (!Number.isFinite(anchorMs)) return null
+  const days = rangeDays(label, anchor)
+  if (listings.length === 0 || days === null) return null
+  return {
+    subject_refs: [...listings],
+    range: {
+      start: new Date(anchorMs - days * DAY_MS).toISOString(),
+      end: new Date(anchorMs).toISOString(),
+    },
+    interval: '1d',
+    basis: 'split_and_div_adjusted',
+    normalization,
+  }
 }
 
 // split_and_div_adjusted is the only basis the market service emits today.

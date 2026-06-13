@@ -1,5 +1,7 @@
 import { useEffect } from 'react'
 
+import { isTypingTarget } from './isTypingTarget.ts'
+
 // Global hotkey to focus the top-bar symbol search: ⌘K / Ctrl+K anywhere, or a
 // bare "/" when focus is not already in a text field. The search input opts in
 // by carrying `data-search-input="topbar"` so this stays decoupled from
@@ -12,11 +14,6 @@ export function useSearchHotkey() {
         el.focus()
         el.select()
       }
-    }
-    function isTypingTarget(target: EventTarget | null): boolean {
-      if (!(target instanceof HTMLElement)) return false
-      const tag = target.tagName
-      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable
     }
     function onKeyDown(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {

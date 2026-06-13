@@ -9,14 +9,18 @@ import { ChangePill } from './ChangePill.tsx'
 import { fetchQuoteSnapshot, quoteBelongsToListing, SIGNED_BY_QUOTE_DIRECTION } from './quote.ts'
 import { quoteRowView } from './quoteRowView.ts'
 import type { SubjectRef } from './search.ts'
+import { Sparkline } from './Sparkline.tsx'
 import { useFetched, type FetchedResult } from './useFetched.ts'
 
 type QuoteRowProps = {
   subjectRef: SubjectRef
   trailing?: ReactNode
+  // Closing prices for an inline trend sparkline (reference-terminal rail).
+  // Omit to render the row without one (e.g. holdings surfaces).
+  sparkline?: ReadonlyArray<number>
 }
 
-export function QuoteRow({ subjectRef, trailing }: QuoteRowProps) {
+export function QuoteRow({ subjectRef, trailing, sparkline }: QuoteRowProps) {
   const listingId = subjectRef.kind === 'listing' ? subjectRef.id : null
   const state = useFetched(listingId, fetchQuoteForListing)
   const view = quoteRowView(state, subjectRef)
@@ -32,6 +36,18 @@ export function QuoteRow({ subjectRef, trailing }: QuoteRowProps) {
           <span className="block truncate font-semibold text-fg">{view.primary}</span>
           <span className="block truncate text-[10px] text-muted">{view.secondary}</span>
         </span>
+        {sparkline !== undefined && sparkline.length >= 2 ? (
+          <Sparkline
+            values={sparkline}
+            ariaLabel="price trend"
+            trendStrokeClass={
+              sparkline[sparkline.length - 1] >= sparkline[0]
+                ? 'stroke-positive'
+                : 'stroke-negative'
+            }
+            className="h-6 w-14 shrink-0"
+          />
+        ) : null}
         <span className="flex shrink-0 flex-col items-end gap-1">
           {view.price ? (
             <>

@@ -18,7 +18,12 @@ function fakeDb(responder: (text: string) => unknown[]): QueryExecutor {
 }
 
 async function startServer(db: QueryExecutor) {
-  const server = createAnalystGridsServer(db, { auth: { mode: "dev_user_header" } });
+  const server = createAnalystGridsServer({
+    db,
+    pool: { connect: async () => { throw new Error("pool unused"); } },
+    universe: { resolveScreen: async () => [], resolveWatchlist: async () => [], resolvePortfolio: async () => [], resolvePeers: async () => [] },
+    auth: { mode: "dev_user_header" },
+  });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   return { server, base: `http://127.0.0.1:${port}` };
@@ -95,6 +100,26 @@ test("unknown universe_spec.source returns 400", async () => {
       body: JSON.stringify({ name: "g", universe_spec: { source: "bogus" }, column_specs: [] }),
     });
     assert.equal(res.status, 400);
+  } finally {
+    server.close();
+  }
+});
+
+test("id-source universe with an empty id returns 400 at create time", async () => {
+  const { server, base } = await startServer(fakeDb(() => []));
+  try {
+    const res = await fetch(`${base}/v1/analyst-grids`, {
+      method: "POST",
+      headers: { "x-user-id": USER_ID, "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "g",
+        universe_spec: { source: "watchlist", watchlist_id: "" },
+        column_specs: [{ column_key: "latest_market_cap" }],
+      }),
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as { error: string };
+    assert.match(body.error, /watchlist_id/);
   } finally {
     server.close();
   }

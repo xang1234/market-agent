@@ -5,42 +5,54 @@ import {
 } from "../../snapshot/src/snapshot-sealer.ts";
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import { updateCellResult } from "./queries.ts";
-import { EMPTY_DISPLAY, type ColumnCatalogEntry, type GridCellResult, type PeriodContext } from "./column-catalog.ts";
-import type { CellWrite, QueryExecutor } from "./types.ts";
+import type { ColumnCatalogEntry, GridCellResult, PeriodContext, ReaderColumnDeps } from "./column-catalog.ts";
+import { EMPTY_DISPLAY } from "./types.ts";
+import type { CellResultStatus, CellWrite, QueryExecutor } from "./types.ts";
+import type { JsonValue } from "../../observability/src/types.ts";
 
-export type CellRunnerDeps = { db: QueryExecutor; pool: SnapshotClientPool };
+export type CellRunnerDeps = { db: QueryExecutor; pool: SnapshotClientPool; reader?: ReaderColumnDeps };
 
 export type ComputeCellInput = {
   column: ColumnCatalogEntry;
+  params: JsonValue | null;
   gridRowId: string;
   subject: SubjectRef;
   period: PeriodContext;
   asOf: string;
+  userId: string;
 };
 
+// Computes one cell, seals its snapshot, and persists the result. Returns the
+// terminal status it wrote so the run worker can finalize the run without
+// re-reading every cell back from the database.
 export async function computeAndPersistCell(
   deps: CellRunnerDeps,
   input: ComputeCellInput,
-): Promise<void> {
+): Promise<CellResultStatus> {
   const persist = (fields: CellWrite) =>
     updateCellResult(deps.db, {
       gridRowId: input.gridRowId,
       columnKey: input.column.column_key,
       ...fields,
     });
-  const persistError = () =>
-    persist({ status: "error", display: EMPTY_DISPLAY, snapshotId: null, primaryRef: null, coverageFlag: null });
+  const persistError = async (): Promise<CellResultStatus> => {
+    await persist({ status: "error", display: EMPTY_DISPLAY, snapshotId: null, primaryRef: null, coverageFlag: null });
+    return "error";
+  };
 
   const snapshotId = randomUUID();
   let result: GridCellResult;
   try {
     result = await input.column.producer(
-      { db: deps.db },
-      { subject: input.subject, period: input.period, snapshotId, asOf: input.asOf },
+      { db: deps.db, reader: deps.reader },
+      { subject: input.subject, period: input.period, snapshotId, asOf: input.asOf, userId: input.userId, params: input.params },
     );
-  } catch {
-    await persistError();
-    return;
+  } catch (error) {
+    console.error(
+      `analyst-grids cell ${input.column.column_key} (${input.subject.kind}:${input.subject.id}) failed:`,
+      error,
+    );
+    return persistError();
   }
 
   let sealedSnapshotId: string | null = null;
@@ -48,13 +60,19 @@ export async function computeAndPersistCell(
     try {
       const sealResult = await sealSnapshotWithPool(deps.pool, result.seal);
       if (!sealResult.ok) {
-        await persistError();
-        return;
+        console.error(
+          `analyst-grids cell ${input.column.column_key} (${input.subject.kind}:${input.subject.id}) seal rejected:`,
+          JSON.stringify(sealResult),
+        );
+        return persistError();
       }
       sealedSnapshotId = sealResult.snapshot.snapshot_id;
-    } catch {
-      await persistError();
-      return;
+    } catch (error) {
+      console.error(
+        `analyst-grids cell ${input.column.column_key} (${input.subject.kind}:${input.subject.id}) seal failed:`,
+        error,
+      );
+      return persistError();
     }
   }
 
@@ -65,4 +83,5 @@ export async function computeAndPersistCell(
     primaryRef: result.primaryRef ?? null,
     coverageFlag: result.coverageFlag ?? null,
   });
+  return result.status;
 }

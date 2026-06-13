@@ -76,3 +76,28 @@ test('each path carries an area fill closed to the floor and an end anchor at th
   assert.ok(path.end.x > 90 && path.end.x <= 100, `end.x near right edge, got ${path.end.x}`)
   assert.ok(path.end.y >= 0 && path.end.y <= 50, `end.y within height, got ${path.end.y}`)
 })
+
+test('computeSeriesGeometry exposes per-point pixel coordinates', () => {
+  const geometry = computeSeriesGeometry(
+    [{ name: 'A', points: [{ x: 'Q1', y: 0 }, { x: 'Q2', y: 10 }] }],
+    { width: 100, height: 50 },
+  )
+  assert.ok(geometry !== null)
+  const pts = geometry.paths[0].points
+  assert.equal(pts.length, 2)
+  assert.equal(pts[0].xLabel, 'Q1')
+  assert.equal(pts[0].value, 0)
+  assert.ok(pts[0].x < pts[1].x, 'x increases left to right')
+  assert.ok(pts[0].y > pts[1].y, 'higher value sits higher on the chart (smaller y)')
+})
+
+test('per-point coordinates handle a flat series via the mid-line guard', () => {
+  const geometry = computeSeriesGeometry(
+    [{ name: 'Flat', points: [{ x: 1, y: 5 }, { x: 2, y: 5 }] }],
+    { width: 100, height: 50 },
+  )
+  assert.ok(geometry !== null)
+  const pts = geometry.paths[0].points
+  assert.equal(pts[0].y, pts[1].y)
+  assert.ok(pts[0].y > 0 && pts[0].y < 50, 'flat series centered, not on the floor')
+})

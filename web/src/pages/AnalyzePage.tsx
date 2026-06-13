@@ -7,6 +7,8 @@ import {
   subjectFromAnalyzeEntry,
   type AnalyzeIntent,
 } from '../analyze/analyzeEntry'
+import { sectionProgress } from '../analyze/sectionProgress.ts'
+import { SectionProgressList } from '../analyze/SectionProgressList.tsx'
 import { fetchAnalyzePlaybooks, type AnalyzePlaybook } from '../analyze/playbooks.ts'
 import {
   diffAnalyzeRuns,
@@ -106,6 +108,9 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
   const [compareRunId, setCompareRunId] = useState('')
   const [openedRunDetails, setOpenedRunDetails] = useState<Record<string, AnalyzeRunDetail>>({})
   const [status, setStatus] = useState('Ready')
+  // Explicit run phase for the section-progress rail — `status` is display
+  // copy and must never drive control flow.
+  const [isGenerating, setIsGenerating] = useState(false)
   const availableSourceCategories = sourceCategoriesFor(selectedTemplate, selectedPlaybook)
   const compareRunDetail = compareRunId ? openedRunDetails[compareRunId] : null
   const runDiff = memoRun && compareRunDetail ? diffAnalyzeRuns(compareRunDetail, memoRun) : null
@@ -170,6 +175,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
       return null
     }
     setStatus('Generating memo')
+    setIsGenerating(true)
     try {
       const run = await authenticatedJson<AnalyzeRunDetail>('/v1/analyze/runs', {
         userId: session.userId,
@@ -193,6 +199,8 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
     } catch (caught) {
       setStatus(`Generate failed: ${caught instanceof Error ? caught.message : String(caught)}`)
       return null
+    } finally {
+      setIsGenerating(false)
     }
   }
 
@@ -219,6 +227,14 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
       setStatus(`Add to chat failed: ${caught instanceof Error ? caught.message : String(caught)}`)
     }
   }
+
+  // The section rail must grade a run against the run's OWN playbook —
+  // handleOpenRun/handleRerun can load a memo from a different playbook than
+  // the one currently selected. Null when the run has no/unknown playbook.
+  const memoRunPlaybook =
+    memoRun && memoRun.playbook_id !== null
+      ? playbooks.find((playbook) => playbook.playbook_id === memoRun.playbook_id) ?? null
+      : null
 
   const handleOpenRun = async (runId: string) => {
     if (!session) return
@@ -281,11 +297,15 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
           {selectedPlaybook ? (
             <section className="rounded-md border border-line p-3 text-sm">
               <h3 className="font-medium text-fg">Sections</h3>
-              <ul className="mt-2 flex flex-col gap-1 text-fg-soft">
-                {selectedPlaybook.sections.map((section) => (
-                  <li key={section.section_id}>{section.title}</li>
-                ))}
-              </ul>
+              <SectionProgressList
+                rows={
+                  isGenerating
+                    ? sectionProgress(selectedPlaybook.sections, 'generating', null)
+                    : memoRunPlaybook
+                      ? sectionProgress(memoRunPlaybook.sections, 'complete', memoRun?.blocks ?? null)
+                      : sectionProgress(selectedPlaybook.sections, 'idle', null)
+                }
+              />
             </section>
           ) : null}
           <label className="flex flex-col gap-2 text-sm font-medium text-fg">

@@ -37,3 +37,13 @@ test("resolveAnalyzePlaybookRequest overlays user instructions without dropping 
   assert.ok(request.prompt.includes("Variant view"));
   assert.ok(request.prompt.includes("Focus on hyperscaler capex risk."));
 });
+
+test("investment_memo playbook resolves with the verdict section last", () => {
+  const resolved = resolveAnalyzePlaybookRequest({ playbook_id: "investment_memo" });
+  assert.equal(resolved.playbook.name, "Investment memo");
+  assert.deepEqual(resolved.playbook.default_source_categories, ["filings", "transcripts", "news"]);
+  const sectionIds = resolved.playbook.sections.map((section) => section.section_id);
+  assert.equal(sectionIds[0], "investment_thesis");
+  assert.deepEqual(sectionIds.slice(-1), ["final_verdict"]);
+  assert.ok(resolved.prompt.includes("Final verdict"));
+});

@@ -1,9 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { Pool } from "pg";
-
-import { bootstrapDatabase, connectedClient } from "../../../db/test/docker-pg.ts";
+import { bootstrapDatabase, connectedClient, connectedPool } from "../../../db/test/docker-pg.ts";
 import { computeAndPersistCell } from "../src/cell-runner.ts";
 import { getColumn } from "../src/column-catalog.ts";
 import { createGrid, createRun, insertRow, insertPendingCell } from "../src/queries.ts";
@@ -13,8 +11,7 @@ test("computeAndPersistCell seals a snapshot and writes an ok cell", async (t) =
   const { databaseUrl } = await bootstrapDatabase(t, "analyst-grids-cell");
   const client = await connectedClient(t, databaseUrl);
   const db = client as unknown as QueryExecutor;
-  const pool = new Pool({ connectionString: databaseUrl });
-  t.after(() => pool.end());
+  const pool = await connectedPool(t, databaseUrl);
 
   const userId = randomUUID();
   const issuerId = randomUUID();
@@ -53,10 +50,12 @@ test("computeAndPersistCell seals a snapshot and writes an ok cell", async (t) =
     { db, pool },
     {
       column: getColumn("latest_market_cap")!,
+      params: null,
       gridRowId: rowId,
       subject: { kind: "issuer", id: issuerId },
       period: null,
       asOf: new Date().toISOString(),
+      userId,
     },
   );
 

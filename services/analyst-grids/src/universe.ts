@@ -1,5 +1,5 @@
-import { isSubjectRef, type SubjectRef } from "../../shared/src/subject-ref.ts";
-import { GridValidationError, type UniverseSpec } from "./types.ts";
+import { isSubjectRef, isUuid, type SubjectRef } from "../../shared/src/subject-ref.ts";
+import { GridValidationError, UNIVERSE_SOURCES, type UniverseSpec } from "./types.ts";
 
 // Each non-manual source is injected so the grid service never imports
 // screener/watchlist/portfolio/fundamentals internals directly.
@@ -13,20 +13,56 @@ export type UniverseResolverDeps = {
 export const DEFAULT_PEER_LIMIT = 5;
 export const MAX_PEER_LIMIT = 50;
 
-export async function resolveUniverse(
-  deps: UniverseResolverDeps,
-  userId: string,
-  spec: UniverseSpec,
-): Promise<ReadonlyArray<SubjectRef>> {
-  switch (spec.source) {
+function requireUuid(value: unknown, field: string): void {
+  if (!isUuid(value)) {
+    throw new GridValidationError(`universe_spec.${field} must be a uuid`);
+  }
+}
+
+// The single universe_spec contract, owning the narrowing from raw request
+// JSON. Enforced at grid creation (parseCreateInput → HTTP 400) and again at
+// run time (resolveUniverse) so a stored spec that validates always resolves
+// — an unchecked id would otherwise surface as a pg uuid error (HTTP 500).
+export function validateUniverseSpec(value: unknown): asserts value is UniverseSpec {
+  if (typeof value !== "object" || value === null) {
+    throw new GridValidationError("'universe_spec' is required");
+  }
+  const spec = value as { source?: unknown } & Record<string, unknown>;
+  if (typeof spec.source !== "string" || !(UNIVERSE_SOURCES as readonly string[]).includes(spec.source)) {
+    throw new GridValidationError(`'universe_spec.source' must be one of: ${UNIVERSE_SOURCES.join(", ")}`);
+  }
+  switch (spec.source as UniverseSpec["source"]) {
     case "manual": {
+      if (!Array.isArray(spec.subject_refs)) {
+        throw new GridValidationError("manual universe requires a subject_refs array");
+      }
       for (const ref of spec.subject_refs) {
         if (!isSubjectRef(ref)) {
           throw new GridValidationError("manual universe contains an invalid subject_ref");
         }
       }
-      return spec.subject_refs;
+      return;
     }
+    case "screen":
+      return requireUuid(spec.screen_id, "screen_id");
+    case "watchlist":
+      return requireUuid(spec.watchlist_id, "watchlist_id");
+    case "portfolio":
+      return requireUuid(spec.portfolio_id, "portfolio_id");
+    case "peers":
+      return requireUuid(spec.issuer_id, "issuer_id");
+  }
+}
+
+export async function resolveUniverse(
+  deps: UniverseResolverDeps,
+  userId: string,
+  spec: UniverseSpec,
+): Promise<ReadonlyArray<SubjectRef>> {
+  validateUniverseSpec(spec);
+  switch (spec.source) {
+    case "manual":
+      return spec.subject_refs;
     case "screen":
       return deps.resolveScreen(userId, spec.screen_id);
     case "watchlist":

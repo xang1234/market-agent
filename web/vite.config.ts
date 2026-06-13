@@ -63,6 +63,10 @@ export default defineConfig({
         target: process.env.EVIDENCE_ORIGIN ?? 'http://127.0.0.1:4335',
         changeOrigin: true,
       },
+      '/v1/analyst-grids': {
+        target: process.env.ANALYST_GRIDS_ORIGIN ?? 'http://127.0.0.1:8093',
+        changeOrigin: true,
+      },
     },
   },
 })

@@ -40,6 +40,16 @@ export async function authenticatedJson<T>(
   const response = await authenticatedFetch(input, init)
   const body = await readJsonBody(response)
   if (!response.ok) throw new HttpJsonError(response.status, body)
+  if (body === null) {
+    // Every caller expects a JSON object; a 2xx without one is a routing or
+    // server bug (e.g. an unproxied API path served by the SPA fallback).
+    // Fail with a diagnosable error instead of leaking null to the caller.
+    throw new HttpJsonError(
+      response.status,
+      null,
+      `expected a JSON response (got HTTP ${response.status} with a non-JSON body — is the API endpoint proxied and running?)`,
+    )
+  }
   return body as T
 }
 

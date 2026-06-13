@@ -51,3 +51,22 @@ test('authenticatedJson throws HttpJsonError with parsed response body', async (
       JSON.stringify(error.body) === JSON.stringify({ error: 'nope' }),
   )
 })
+
+test('authenticatedJson throws on 2xx responses without a JSON body', async () => {
+  // A 200 with an HTML body is what a dev-server SPA fallback returns when an
+  // API path is not proxied; surfacing null instead of throwing turns that
+  // misconfiguration into an opaque TypeError at the call site.
+  const fetchImpl: typeof fetch = async () =>
+    new Response('<!doctype html><html></html>', {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    })
+
+  await assert.rejects(
+    authenticatedJson('/v1/example', { userId: USER_ID, fetchImpl }),
+    (error: unknown) =>
+      error instanceof HttpJsonError &&
+      error.status === 200 &&
+      /expected a JSON response/i.test(error.message),
+  )
+})

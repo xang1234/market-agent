@@ -220,6 +220,22 @@ export type FetchFilingResult = {
   url: string;
 };
 
+// The slice of the submissions payload the backfill consumes; the real
+// response carries many more parallel arrays we ignore.
+export type SecSubmissionsRecent = {
+  accessionNumber: string[];
+  form: string[];
+  primaryDocument: string[];
+  filingDate: string[];
+};
+
+export type SecSubmissions = { filings: { recent: SecSubmissionsRecent } };
+
+export function submissionsUrl(cik: number): string {
+  assertPositiveInteger(cik, "submissionsUrl.cik");
+  return `https://data.sec.gov/submissions/CIK${String(cik).padStart(10, "0")}.json`;
+}
+
 export class SecEdgarClient {
   private readonly userAgent: string;
   private readonly fetchImpl: FetchLike;
@@ -259,6 +275,25 @@ export class SecEdgarClient {
 
   async fetchFiling(input: FetchFilingInput): Promise<FetchFilingResult> {
     const url = filingArchiveUrl(input);
+    const { bytes, contentType } = await this.fetchBytes(url);
+    return {
+      bytes,
+      contentType,
+      retrievedAt: new Date(this.now()).toISOString(),
+      url,
+    };
+  }
+
+  // The issuer's filing index from the submissions API (column-oriented
+  // arrays, newest first). Same Fair Access policy as the archive, so it
+  // shares the rate limiter and User-Agent.
+  async fetchSubmissions(cik: number): Promise<SecSubmissions> {
+    const url = submissionsUrl(cik);
+    const { bytes } = await this.fetchBytes(url);
+    return JSON.parse(new TextDecoder("utf-8").decode(bytes)) as SecSubmissions;
+  }
+
+  private async fetchBytes(url: string): Promise<{ bytes: Uint8Array; contentType: string | null }> {
     await this.rateLimiter.acquire();
     const controller = new AbortController();
     const timeoutHandle = setTimeout(() => controller.abort(), this.requestTimeoutMs);
@@ -291,19 +326,18 @@ export class SecEdgarClient {
     } finally {
       clearTimeout(timeoutHandle);
     }
-    return {
-      bytes: buffer,
-      contentType: response.headers.get("content-type"),
-      retrievedAt: new Date(this.now()).toISOString(),
-      url,
-    };
+    return { bytes: buffer, contentType: response.headers.get("content-type") };
   }
 }
+
+// Structural fetcher surface so orchestrators and tests can inject fakes
+// without constructing the full rate-limited client.
+export type SecFilingFetcher = Pick<SecEdgarClient, "fetchFiling">;
 
 export type IngestSecFilingDeps = {
   db: QueryExecutor;
   objectStore: ObjectStore;
-  secClient: SecEdgarClient;
+  secClient: SecFilingFetcher;
 };
 
 export type IngestSecFilingInput = {

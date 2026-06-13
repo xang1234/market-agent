@@ -117,3 +117,73 @@ test('RichText keeps interleaved text and ref segments inline', async () => {
     restoreGlobals()
   }
 })
+
+const tonedBlock: RichTextBlock = {
+  id: 'rich-text-tone-1',
+  kind: 'rich_text',
+  snapshot_id: SNAPSHOT_ID,
+  data_ref: { kind: 'rich_text', id: 'rich-text-tone-1' },
+  source_refs: [],
+  as_of: '2026-06-01T00:00:00.000Z',
+  segments: [
+    { type: 'text', text: 'Data Center revenue grew ' },
+    { type: 'text', text: '+127% YoY', tone: 'positive' },
+    { type: 'text', text: ' last quarter' },
+  ],
+}
+
+test('RichText styles toned text segments (inline colored deltas)', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
+  try {
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(
+        <SnapshotManifestContext.Provider value={null}>
+          <RichText block={tonedBlock} />
+        </SnapshotManifestContext.Provider>,
+      )
+    })
+
+    const html = dom.window.document.getElementById('root')!.innerHTML
+    assert.match(html, /data-tone="positive"/, 'toned run carries data-tone')
+    assert.match(html, /text-positive/, 'toned run is colored via text-positive')
+    assert.match(html, /\+127% YoY/, 'toned text content present')
+
+    await act(async () => root.unmount())
+  } finally {
+    restoreGlobals()
+  }
+})
+
+const neutralMarkdownBlock: RichTextBlock = {
+  id: 'rich-text-neutral-md-1',
+  kind: 'rich_text',
+  snapshot_id: SNAPSHOT_ID,
+  data_ref: { kind: 'rich_text', id: 'rich-text-neutral-md-1' },
+  source_refs: [],
+  as_of: '2026-06-01T00:00:00.000Z',
+  segments: [{ type: 'text', text: MARKDOWN_TABLE, tone: 'neutral' }],
+}
+
+test('neutral tone keeps the single-segment Markdown fast-path', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+  const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
+  try {
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    await act(async () => {
+      root.render(
+        <SnapshotManifestContext.Provider value={null}>
+          <RichText block={neutralMarkdownBlock} />
+        </SnapshotManifestContext.Provider>,
+      )
+    })
+
+    const html = dom.window.document.getElementById('root')!.innerHTML
+    assert.match(html, /<table[\s>]/, 'neutral tone must not break Markdown table rendering')
+
+    await act(async () => root.unmount())
+  } finally {
+    restoreGlobals()
+  }
+})
