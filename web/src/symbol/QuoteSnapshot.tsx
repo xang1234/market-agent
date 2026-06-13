@@ -10,14 +10,14 @@ import {
   type ResolvedSubject,
   type RouteResolvedSubject,
 } from './quote.ts'
-import type { VisibleQuoteState } from './useSubjectQuote.ts'
+import type { SubjectQuoteState } from './useSubjectQuote.ts'
 import { ChangePill } from './ChangePill.tsx'
 
 type QuoteSnapshotProps = {
   subject: ResolvedSubject | RouteResolvedSubject
   // The quote is fetched once by the shell (useSubjectQuote) and shared with
   // the Overview grid via context — QuoteSnapshot is purely presentational.
-  quoteState: VisibleQuoteState
+  quoteState: SubjectQuoteState
 }
 
 export function QuoteSnapshot({ subject, quoteState }: QuoteSnapshotProps) {
@@ -32,14 +32,16 @@ export function QuoteSnapshot({ subject, quoteState }: QuoteSnapshotProps) {
         <p className="mt-3 text-sm text-muted">
           {quoteState.status === 'loading'
             ? 'Loading quote…'
-            : `Quote unavailable: ${quoteState.reason}`}
+            : quoteState.status === 'unavailable'
+              ? `Quote unavailable: ${quoteState.reason}`
+              : 'Quote unavailable'}
         </p>
         <IssuerProfileLine profile={issuerProfile} />
       </section>
     )
   }
 
-  const quote = quoteState.quote
+  const quote = quoteState.data
   const direction = SIGNED_BY_QUOTE_DIRECTION[quoteDirection(quote)]
 
   return (

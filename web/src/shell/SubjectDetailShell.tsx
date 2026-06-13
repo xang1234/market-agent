@@ -100,7 +100,7 @@ export function SubjectDetailShell() {
   // One quote fetch for the entered subject, shared by the header and the
   // Overview key-stats grid (via outlet context).
   const quoteState = useSubjectQuote(listingIdForQuote(subject))
-  const quote = quoteState.status === 'ready' ? quoteState.quote : null
+  const quote = quoteState.status === 'ready' ? quoteState.data : null
   const shouldBlockForHydration = needsHydration && !hydratedSubjectMatchesBase
   const hydrationError =
     hydrationState.status === 'error' && hydrationState.key === canonicalBaseSubjectKey
