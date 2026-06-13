@@ -1,87 +1,45 @@
-import { useEffect, useState } from 'react'
 import {
-  fetchQuoteSnapshot,
   formatProviderName,
   formatQuotePrice,
   formatSignedNumber,
   formatSignedPercent,
   issuerProfileFromSubject,
-  listingIdForQuote,
-  quoteBelongsToListing,
   quoteDirection,
   SIGNED_BY_QUOTE_DIRECTION,
   subjectDisplayName,
-  type QuoteSnapshot as QuoteSnapshotData,
   type ResolvedSubject,
   type RouteResolvedSubject,
 } from './quote.ts'
+import type { VisibleQuoteState } from './useSubjectQuote.ts'
 import { ChangePill } from './ChangePill.tsx'
 
 type QuoteSnapshotProps = {
   subject: ResolvedSubject | RouteResolvedSubject
+  // The quote is fetched once by the shell (useSubjectQuote) and shared with
+  // the Overview grid via context — QuoteSnapshot is purely presentational.
+  quoteState: VisibleQuoteState
 }
 
-type FetchState =
-  | { status: 'idle' }
-  | { status: 'unavailable'; listingId: string; reason: string }
-  | { status: 'ready'; listingId: string; quote: QuoteSnapshotData }
-
-type VisibleFetchState =
-  | { status: 'loading' }
-  | { status: 'unavailable'; reason: string }
-  | { status: 'ready'; quote: QuoteSnapshotData }
-
-export function QuoteSnapshot({ subject }: QuoteSnapshotProps) {
-  const listingId = listingIdForQuote(subject)
-  const [state, setState] = useState<FetchState>({ status: 'idle' })
-
-  useEffect(() => {
-    if (!listingId) return
-    const controller = new AbortController()
-    fetchQuoteSnapshot(listingId, { signal: controller.signal })
-      .then((quote) => {
-        if (controller.signal.aborted) return
-        if (!quoteBelongsToListing(quote, listingId)) {
-          setState({
-            status: 'unavailable',
-            listingId,
-            reason: 'quote response did not match requested listing',
-          })
-          return
-        }
-        setState({ status: 'ready', listingId, quote })
-      })
-      .catch((err) => {
-        if (controller.signal.aborted) return
-        setState({
-          status: 'unavailable',
-          listingId,
-          reason: err instanceof Error ? err.message : 'quote fetch failed',
-        })
-      })
-    return () => controller.abort()
-  }, [listingId])
-
+export function QuoteSnapshot({ subject, quoteState }: QuoteSnapshotProps) {
   const issuerProfile = issuerProfileFromSubject(subject)
-  const visibleState = visibleQuoteState(state, listingId)
 
-  if (visibleState.status !== 'ready') {
+  if (quoteState.status !== 'ready') {
     return (
       <section className="min-w-0">
         <h1 className="min-w-0 truncate text-2xl font-semibold text-fg">
           {subjectDisplayName(subject)}
         </h1>
         <p className="mt-3 text-sm text-muted">
-          {visibleState.status === 'loading'
+          {quoteState.status === 'loading'
             ? 'Loading quote…'
-            : `Quote unavailable: ${visibleState.reason}`}
+            : `Quote unavailable: ${quoteState.reason}`}
         </p>
         <IssuerProfileLine profile={issuerProfile} />
       </section>
     )
   }
 
-  const quote = visibleState.quote
+  const quote = quoteState.quote
   const direction = SIGNED_BY_QUOTE_DIRECTION[quoteDirection(quote)]
 
   return (
@@ -116,23 +74,6 @@ export function QuoteSnapshot({ subject }: QuoteSnapshotProps) {
       <IssuerProfileLine profile={issuerProfile} />
     </section>
   )
-}
-
-function visibleQuoteState(state: FetchState, listingId: string | null): VisibleFetchState {
-  if (!listingId) {
-    return { status: 'unavailable', reason: 'no listing context for this subject' }
-  }
-  if (
-    state.status === 'ready' &&
-    state.listingId === listingId &&
-    quoteBelongsToListing(state.quote, listingId)
-  ) {
-    return { status: 'ready', quote: state.quote }
-  }
-  if (state.status === 'unavailable' && state.listingId === listingId) {
-    return { status: 'unavailable', reason: state.reason }
-  }
-  return { status: 'loading' }
 }
 
 function IssuerProfileLine({

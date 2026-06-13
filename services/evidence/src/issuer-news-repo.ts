@@ -30,6 +30,8 @@ export async function listIssuerNews(
 ): Promise<IssuerNewsItem[]> {
   assertUuidV4(input.issuerId, "issuer_id");
   const limit = clampNewsLimit(input.limit);
+  // SELECT aliases every column to the IssuerNewsItem shape, so the typed rows
+  // are the result — no field-by-field remap needed.
   const { rows } = await db.query<IssuerNewsItem>(
     `select d.document_id::text as document_id,
             d.kind,
@@ -51,12 +53,5 @@ export async function listIssuerNews(
       limit $2`,
     [input.issuerId, limit],
   );
-  return rows.map((row) => ({
-    document_id: row.document_id,
-    kind: row.kind,
-    title: row.title,
-    published_at: row.published_at,
-    provider: row.provider,
-    provider_doc_id: row.provider_doc_id,
-  }));
+  return rows;
 }

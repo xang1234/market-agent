@@ -1,9 +1,9 @@
 // Pure assembly of the dense key-stats grid shown under the symbol hero chart.
-// Pulls intraday cells (prev close, open, day range, volume) from the latest
-// two daily bars and fundamental cells (P/E, margins, revenue growth) from the
-// key-stats envelope. Cells whose data provider isn't wired yet (market cap,
-// 52-wk range, beta) carry a null value and render as a dash — the grid keeps
-// a complete shape without fabricating numbers.
+// Prev close comes from the authoritative quote; open / day range / volume from
+// the latest daily bar; fundamentals (P/E, margins, revenue growth) from the
+// key-stats envelope. Only cells whose provider exists are emitted — a cell may
+// still be null for a given subject (data not reported), rendering a dash, but
+// the grid never ships tiles that can never carry data.
 
 import type { NormalizedBar } from '../../symbol/series.ts'
 import { formatQuotePrice } from '../../symbol/quote.ts'
@@ -12,10 +12,18 @@ import { formatStatValue, statLabel, type KeyStatKey, type KeyStatsEnvelope } fr
 export type KeyStatCell = {
   key: string
   label: string
-  // null → the value is unavailable; the renderer shows a subdued dash.
+  // null → the value is unavailable for this subject; renderer shows a dash.
   value: string | null
   // The queried subject's prior close anchors the page — emphasize it.
   emphasis?: boolean
+}
+
+export type KeyStatsGridInput = {
+  bars: ReadonlyArray<NormalizedBar> | null
+  stats: KeyStatsEnvelope | null
+  // Authoritative prior-session close from the quote (not derived from bars).
+  prevClose: number | null
+  currency: string
 }
 
 export function formatCompactNumber(value: number): string {
@@ -39,20 +47,16 @@ const FUNDAMENTAL_CELLS: ReadonlyArray<KeyStatKey> = [
   'revenue_growth_yoy',
 ]
 
-export function buildKeyStatsGrid(
-  bars: ReadonlyArray<NormalizedBar> | null,
-  stats: KeyStatsEnvelope | null,
-  currency: string,
-): ReadonlyArray<KeyStatCell> {
+export function buildKeyStatsGrid(input: KeyStatsGridInput): ReadonlyArray<KeyStatCell> {
+  const { bars, stats, prevClose, currency } = input
   const last = bars && bars.length > 0 ? bars[bars.length - 1] : null
-  const prev = bars && bars.length >= 2 ? bars[bars.length - 2].close : null
   const statByKey = new Map((stats?.stats ?? []).map((s) => [s.stat_key, s] as const))
 
   const priceCells: KeyStatCell[] = [
     {
       key: 'prev_close',
       label: 'Prev close',
-      value: prev !== null ? formatQuotePrice(prev, currency) : null,
+      value: prevClose !== null ? formatQuotePrice(prevClose, currency) : null,
       emphasis: true,
     },
     { key: 'open', label: 'Open', value: last ? formatQuotePrice(last.open, currency) : null },
@@ -62,8 +66,6 @@ export function buildKeyStatsGrid(
       value: last ? `${formatQuotePrice(last.low, currency)} – ${formatQuotePrice(last.high, currency)}` : null,
     },
     { key: 'volume', label: 'Volume', value: last ? formatCompactNumber(last.volume) : null },
-    { key: 'fifty_two_week', label: '52-wk range', value: null },
-    { key: 'market_cap', label: 'Market cap', value: null },
   ]
 
   const fundamentalCells: KeyStatCell[] = FUNDAMENTAL_CELLS.map((key) => {
@@ -71,5 +73,5 @@ export function buildKeyStatsGrid(
     return { key, label: statLabel(key), value: stat ? formatStatValue(stat) : null }
   })
 
-  return [...priceCells, ...fundamentalCells, { key: 'beta', label: 'Beta', value: null }]
+  return [...priceCells, ...fundamentalCells]
 }

@@ -22,7 +22,7 @@ const LISTING_SUBJECT: ResolvedSubject = {
 }
 
 function SubjectOutlet({ subject }: { subject: ResolvedSubject }): ReactElement {
-  return <Outlet context={{ subject } satisfies SubjectDetailOutletContext} />
+  return <Outlet context={{ subject, quote: null } satisfies SubjectDetailOutletContext} />
 }
 
 function installDomGlobals(domWindow: Window): () => void {

@@ -48,42 +48,47 @@ test('formatCompactNumber abbreviates by magnitude', () => {
   assert.equal(formatCompactNumber(950), '950')
 })
 
-test('buildKeyStatsGrid derives price cells from the latest two bars', () => {
+test('prev close comes from the authoritative quote value, not the bars', () => {
   const bars = [
-    bar({ close: 1_643.23 }),
+    bar({ close: 1_640 }), // a bars-derived prev close would wrongly pick this
     bar({ open: 1_646.1, high: 1_662, low: 1_641, close: 1_658.4, volume: 2_410_000 }),
   ]
-  const cells = buildKeyStatsGrid(bars, null, 'USD')
+  const cells = buildKeyStatsGrid({ bars, stats: null, prevClose: 1_643.23, currency: 'USD' })
   const byKey = new Map(cells.map((c) => [c.key, c]))
 
   const prev = byKey.get('prev_close')
   assert.ok(prev)
   assert.equal(prev.emphasis, true)
   assert.match(prev.value ?? '', /1,643\.23/)
+  // open / day range / volume still come from the latest bar
   assert.match(byKey.get('open')?.value ?? '', /1,646\.10/)
   assert.match(byKey.get('day_range')?.value ?? '', /1,641\.00.*1,662\.00/)
   assert.equal(byKey.get('volume')?.value, '2.41M')
 })
 
 test('buildKeyStatsGrid fills fundamental cells from the stats envelope', () => {
-  const cells = buildKeyStatsGrid(null, envelope([
-    stat('pe_ratio', 48.2, 'multiple'),
-    stat('gross_margin', 0.712, 'percent'),
-  ]), 'USD')
+  const cells = buildKeyStatsGrid({
+    bars: null,
+    stats: envelope([stat('pe_ratio', 48.2, 'multiple'), stat('gross_margin', 0.712, 'percent')]),
+    prevClose: null,
+    currency: 'USD',
+  })
   const byKey = new Map(cells.map((c) => [c.key, c]))
   assert.equal(byKey.get('pe_ratio')?.value, '48.20×')
   assert.equal(byKey.get('gross_margin')?.value, '71.20%')
 })
 
-test('cells with no data carry a null value (rendered as a dash)', () => {
-  const cells = buildKeyStatsGrid(null, null, 'USD')
+test('only provider-backed cells are emitted; unavailable ones are null (dash)', () => {
+  const cells = buildKeyStatsGrid({ bars: null, stats: null, prevClose: null, currency: 'USD' })
   const byKey = new Map(cells.map((c) => [c.key, c]))
-  // price cells have no bars, fundamentals have no envelope, and these are
-  // always-null placeholders until their providers are wired.
+  // prev close / fundamentals exist as cells but carry null (no data yet)
+  assert.ok(byKey.has('prev_close'))
   assert.equal(byKey.get('prev_close')?.value, null)
-  assert.equal(byKey.get('market_cap')?.value, null)
-  assert.equal(byKey.get('fifty_two_week')?.value, null)
-  assert.equal(byKey.get('beta')?.value, null)
-  // every cell still has a label so the grid renders a complete shape
+  assert.ok(byKey.has('pe_ratio'))
+  // no-provider placeholders are NOT emitted at all
+  assert.equal(byKey.has('market_cap'), false)
+  assert.equal(byKey.has('fifty_two_week'), false)
+  assert.equal(byKey.has('beta'), false)
+  // every emitted cell has a label
   assert.ok(cells.every((c) => c.label.length > 0))
 })

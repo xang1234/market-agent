@@ -43,7 +43,7 @@ const PRICE_WINDOW_OPTIONS: ReadonlyArray<{ value: PriceWindow; label: string }>
 ]
 
 export function OverviewSection() {
-  const { subject } = useSubjectDetailContext()
+  const { subject, quote } = useSubjectDetailContext()
   const issuerId = issuerIdFromSubject(subject)
   const listingId = listingIdForQuote(subject)
 
@@ -92,17 +92,18 @@ export function OverviewSection() {
   // under Earnings), matching the reference design — same shared fetch.
   const consensus = useConsensus(issuerId)
 
-  // The dense stats grid renders from whatever's loaded — intraday cells from
-  // the latest bars, fundamental cells from the key-stats envelope — dashing
-  // the rest. It's not gated behind a single fetch so a slow stats call doesn't
-  // hide the price cells (and vice-versa).
+  // The dense stats grid renders from whatever's loaded — prev close/currency
+  // from the shared quote, intraday cells from the latest bars, fundamentals
+  // from the key-stats envelope — dashing the rest. Not gated behind a single
+  // fetch so a slow stats call doesn't hide the price cells (and vice-versa).
   const priceSeries = series.status === 'ready' ? series.data : null
   const statsEnvelope = stats.status === 'ready' ? stats.data : null
-  const statCells = buildKeyStatsGrid(
-    priceSeries?.bars ?? null,
-    statsEnvelope,
-    priceSeries?.currency ?? 'USD',
-  )
+  const statCells = buildKeyStatsGrid({
+    bars: priceSeries?.bars ?? null,
+    stats: statsEnvelope,
+    prevClose: quote?.prev_close ?? null,
+    currency: quote?.currency ?? priceSeries?.currency ?? 'USD',
+  })
 
   return (
     <div
