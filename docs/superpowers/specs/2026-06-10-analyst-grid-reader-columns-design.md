@@ -31,8 +31,9 @@ sealed and claim-backed so it click-throughs to the evidence inspector.
 
 - New catalog entry `reader_question`, kind `reader`, in
   `services/analyst-grids/src/column-catalog.ts`.
-- `ColumnSpec`: `{ column_key: "reader_question", params: { prompt: string, label?: string } }`
+- `ColumnSpec`: `{ column_key: "reader_question", params: { prompt: string } }`
   (`params` already exists on `ColumnSpec`, `services/analyst-grids/src/types.ts:26`).
+  v1 ships `prompt` only; no per-column label override.
 - Validation (grid create/update): prompt length 8–300 chars; at most 3
   reader columns per grid (cost bound). Violations raise `GridValidationError`
   (existing 400 path — no run row is created).
@@ -43,8 +44,9 @@ sealed and claim-backed so it click-throughs to the evidence inspector.
   - `GridColumnContext` gains `params: JsonValue | null` (the column's
     `ColumnSpec.params`), threaded through the run worker → cell runner →
     producer.
-  - `GridColumnDeps` gains an optional `readerChannel` (reader LLM caller +
-    tool-call logger); deterministic producers ignore it.
+  - `GridColumnDeps` gains an optional reader dependency (reader LLM caller +
+    document loader; shipped as `ReaderColumnDeps` = `{ llm, loadDocumentText }`,
+    wired in `reader-wiring.ts`); deterministic producers ignore it.
 
 ### 2. Producer pipeline (per cell)
 

@@ -52,6 +52,14 @@ test("GridTable marks an ok cell with a snapshot as inspectable and a missing ce
   assert.match(html, /data-cell-status="missing_data"/);
 });
 
+test("an inspectable cell exposes a keyboard-operable button, a missing one does not", () => {
+  const html = renderToStaticMarkup(<GridTable columns={COLUMNS} detail={DETAIL} />);
+  // The inspectable cell's value is wrapped in a real <button>; the missing
+  // cell renders inert text (no button to tab into).
+  assert.match(html, /<button[^>]*>\$2\.5T<\/button>/);
+  assert.doesNotMatch(html, /<button[^>]*>—<\/button>/);
+});
+
 test("clicking an inspectable cell triggers an evidence inspection fetch", async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>');
   const restore = installDomGlobals(dom.window as unknown as Window);
@@ -84,8 +92,8 @@ test("clicking an inspectable cell triggers an evidence inspection fetch", async
         </AuthContext.Provider>,
       );
     });
-    const okCell = dom.window.document.querySelector('[data-snapshot-id="snap-1"]') as HTMLElement;
-    await act(async () => { okCell.click(); });
+    const okButton = dom.window.document.querySelector('[data-snapshot-id="snap-1"] button') as HTMLElement;
+    await act(async () => { okButton.click(); });
     assert.ok(calls.some((u) => u.includes("/v1/evidence/inspect")), `expected an inspect call, saw ${calls.join(",")}`);
     await act(async () => root.unmount());
   } finally {

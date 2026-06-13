@@ -17,8 +17,12 @@ export function useGridRun(args: {
   fetchRunImpl?: (a: { userId: string; runId: string }) => Promise<GridRunDetail>;
 }): UseGridRunResult {
   const { userId, runId, intervalMs = 1500 } = args;
-  const [detail, setDetail] = useState<GridRunDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // State is tagged with the runId it was fetched for. When runId changes the
+  // tag no longer matches and the derived getters below return null, so stale
+  // detail/error can never render against the wrong run — without a
+  // setState-in-effect reset (which would cascade renders).
+  const [state, setState] = useState<{ runId: string; detail: GridRunDetail } | null>(null);
+  const [errorState, setErrorState] = useState<{ runId: string; message: string } | null>(null);
 
   useEffect(() => {
     if (!runId) return;
@@ -30,13 +34,13 @@ export function useGridRun(args: {
       try {
         const next = await doFetch({ userId, runId: runId as string });
         if (cancelled) return;
-        setDetail(next);
+        setState({ runId: runId as string, detail: next });
         if (!TERMINAL.has(next.run.status)) {
           timer = setTimeout(tick, intervalMs);
         }
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "run fetch failed");
+        setErrorState({ runId: runId as string, message: err instanceof Error ? err.message : "run fetch failed" });
         timer = setTimeout(tick, intervalMs);
       }
     }
@@ -47,5 +51,7 @@ export function useGridRun(args: {
     };
   }, [userId, runId, intervalMs]);
 
+  const detail = state !== null && state.runId === runId ? state.detail : null;
+  const error = errorState !== null && errorState.runId === runId ? errorState.message : null;
   return { status: detail?.run.status ?? null, detail, error };
 }

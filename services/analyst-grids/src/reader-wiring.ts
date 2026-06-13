@@ -1,4 +1,5 @@
 import { S3Client } from "@aws-sdk/client-s3";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
 import { S3ObjectStore } from "../../evidence/src/s3-object-store.ts";
 import type { ObjectStore } from "../../evidence/src/object-store.ts";
 import { createLlmRouterFromEnv, type LlmSettingsLoaderEnv } from "../../llm/src/settings-loader.ts";
@@ -55,6 +56,9 @@ export async function createReaderColumnDepsFromEnv(
 
   const client = new S3Client({
     region: env.S3_REGION,
+    // Bounded S3 I/O: a stalled blob read must fail the one reader cell
+    // (producer throw -> cell "error"), not hang a run-engine worker slot.
+    requestHandler: new NodeHttpHandler({ connectionTimeout: 5_000, requestTimeout: 20_000 }),
     ...(env.S3_ENDPOINT ? { endpoint: env.S3_ENDPOINT } : {}),
     ...(env.S3_FORCE_PATH_STYLE === "true" ? { forcePathStyle: true } : {}),
     ...(env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY

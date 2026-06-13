@@ -87,7 +87,7 @@ test("unresolvable tickers throw UnresolvedTickersError naming them", async () =
   );
 });
 
-test("a resolver failure marks the entry unresolved instead of crashing", async () => {
+test("a resolver failure propagates instead of being masked as an unresolved ticker", async () => {
   await assert.rejects(
     () =>
       resolveUniverseSpecInput(
@@ -96,7 +96,10 @@ test("a resolver failure marks the entry unresolved instead of crashing", async 
           throw new Error("resolver down");
         },
       ),
-    UnresolvedTickersError,
+    (error: unknown) =>
+      error instanceof Error &&
+      /resolver down/.test(error.message) &&
+      !(error instanceof UnresolvedTickersError),
   );
 });
 

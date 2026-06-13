@@ -113,6 +113,14 @@ test("a question-only grid submits with just the question column", async () => {
   });
 });
 
+test("a manual universe with no tickers does not submit", async () => {
+  const emitted = await withGridBuilder(COLUMNS, async (doc) => {
+    // manual input left empty; a column is selected so only the empty universe blocks submit
+    await act(async () => { (doc.querySelector('[data-testid="grid-builder-col-latest_market_cap"]') as HTMLInputElement).click(); });
+  });
+  assert.equal(emitted, null);
+});
+
 test("an id-source universe with an empty ref id does not submit", async () => {
   const emitted = await withGridBuilder(COLUMNS, async (doc, domWindow) => {
     const select = doc.querySelector('[data-testid="grid-builder-source"]') as HTMLSelectElement;

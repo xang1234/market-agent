@@ -64,7 +64,9 @@ export function GridBuilder({ columns, universeOptions, onSubmit, defaults, onFi
       onSubmit({ universe_spec: idSpec(source, refId), column_specs });
       return;
     }
-    onSubmit({ universe_spec: manualSpec(String(fd.get("manual") ?? "")), column_specs });
+    const manual = manualSpec(String(fd.get("manual") ?? ""));
+    if (manual.subject_refs.length === 0) return; // a manual universe needs at least one ticker/issuer id
+    onSubmit({ universe_spec: manual, column_specs });
   }
 
   return (

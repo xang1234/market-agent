@@ -7,7 +7,9 @@ import type { ResolvedPeriod } from "./column-catalog.ts";
 // select the latest reported period-bearing fact — period_kind in
 // ('fiscal_q','fiscal_y','ttm') — so point facts (e.g. market_cap, which
 // has NULL fiscal_year/fiscal_period and a continuously-updated as_of) can't
-// win and defeat the resolver. Ties are broken deterministically with the
+// win and defeat the resolver. Entitlement-gated to the app channel like the
+// value producers (column-catalog, fiscal-fact-column), so the period header
+// can't be driven by a fact the displayed cells aren't allowed to read. Ties are broken deterministically with the
 // repo's canonical live-fact ordering (as_of desc, period_end desc nulls
 // last, created_at desc, fact_id desc; see 0026_sec_fact_identity).
 // document_refs is intentionally empty in Plan 2/3 — documents have no
@@ -34,10 +36,11 @@ export async function resolvePeriodContext(
         and f.subject_id = $1
         and f.invalidated_at is null
         and f.superseded_by is null
+        and f.entitlement_channels ? $2
         and f.period_kind in ('fiscal_q','fiscal_y','ttm')
       order by f.as_of desc, f.period_end desc nulls last, f.created_at desc, f.fact_id desc
       limit 1`,
-    [subject.id],
+    [subject.id, "app"],
   );
   const row = rows[0];
   if (!row) return null;

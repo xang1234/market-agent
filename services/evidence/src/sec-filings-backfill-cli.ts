@@ -39,6 +39,7 @@ const objectStore = new S3ObjectStore({ client: s3, bucket: process.env.S3_BUCKE
 const pool = new Pool({ connectionString: databaseUrl });
 
 const requestedIds = process.argv.slice(2);
+let hadFailures = false;
 try {
   const issuers = requestedIds.length
     ? await pool.query<{ issuer_id: string; legal_name: string; cik: string | null }>(
@@ -65,9 +66,13 @@ try {
         `${issuer.legal_name}: ingested ${result.ingested.length} filing(s) [${forms}], skipped ${result.skipped} already present`,
       );
     } catch (error) {
+      hadFailures = true;
       console.error(`${issuer.legal_name}: backfill failed —`, error instanceof Error ? error.message : error);
     }
   }
 } finally {
   await pool.end();
 }
+// Per-issuer failures are logged and the loop continues, but automation must
+// still see a non-zero exit when any issuer failed.
+if (hadFailures) process.exitCode = 1;

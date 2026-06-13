@@ -144,7 +144,10 @@ export function buildFactBackedSealInput(input: {
     snapshot_id: block.snapshot_id,
     manifest,
     blocks: [sealedBlock],
-    facts: facts.map((fact) => ({ ...fact })),
+    // Seal exactly the cited rows: callers may load a superset, but an
+    // uncited fact in the payload would desync facts from fact_refs/source_ids
+    // (and could demand disclosures for content the block never cites).
+    facts: factRefs.map((ref) => ({ ...factById.get(ref)! })),
     sources: sourceIds,
   };
 }
@@ -189,6 +192,24 @@ export function buildClaimBackedSealInput(input: {
     ...input.documents.map((doc) => doc.source_id),
   ]);
 
+  // Tool calls get the same normalization discipline as claims/documents:
+  // duplicates collapse, and the same tool_call_id with two different result
+  // hashes is ambiguous provenance — fail the seal rather than record it.
+  const toolCallById = new Map<UUID, string>();
+  for (const call of input.toolCalls) {
+    const existing = toolCallById.get(call.tool_call_id);
+    if (existing !== undefined && existing !== call.result_hash) {
+      throw new Error(
+        `buildClaimBackedSealInput: conflicting result_hash for tool_call_id ${call.tool_call_id}`,
+      );
+    }
+    toolCallById.set(call.tool_call_id, call.result_hash);
+  }
+  const toolCalls = [...toolCallById.entries()].map(([tool_call_id, result_hash]) => ({
+    tool_call_id,
+    result_hash,
+  }));
+
   const manifest: SnapshotManifestDraft = Object.freeze({
     ...stagedManifestBase({
       subjectRefs: input.subjectRefs,
@@ -198,9 +219,9 @@ export function buildClaimBackedSealInput(input: {
     claim_refs: Object.freeze(claimRefs),
     document_refs: Object.freeze(documentRefs),
     source_ids: Object.freeze(sourceIds),
-    tool_call_ids: Object.freeze(input.toolCalls.map((t) => t.tool_call_id)),
+    tool_call_ids: Object.freeze(toolCalls.map((t) => t.tool_call_id)),
     tool_call_result_hashes: Object.freeze(
-      input.toolCalls.map((t) => ({ tool_call_id: t.tool_call_id, result_hash: t.result_hash })),
+      toolCalls.map((t) => ({ tool_call_id: t.tool_call_id, result_hash: t.result_hash })),
     ),
   });
 

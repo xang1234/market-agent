@@ -67,6 +67,29 @@ test("resolvePeriodContext ignores a newer point fact and returns the latest fis
   assert.deepEqual(period?.document_refs, []);
 });
 
+test("resolvePeriodContext ignores facts outside the app entitlement channel", async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "grid-period-entitlement");
+  const db = await connectedClient(t, databaseUrl);
+  await seedFact(db, { period_kind: "fiscal_q", fiscal_year: 2025, fiscal_period: "Q1", period_end: "2025-03-31", as_of: "2025-04-15T00:00:00.000Z" });
+  // A newer fiscal fact gated to a non-app channel must not drive the period.
+  const metric = await db.query(
+    `select metric_id::text as metric_id from metrics where metric_key = 'revenue'`,
+  );
+  await db.query(
+    `insert into facts (subject_kind, subject_id, metric_id, period_kind, period_end, fiscal_year, fiscal_period,
+                        value_num, unit, as_of, observed_at, source_id, method, verification_status,
+                        freshness_class, coverage_level, confidence, entitlement_channels)
+     values ('issuer', $1, $2, 'fiscal_q', '2025-06-30', 2025, 'Q2', 100, 'USD',
+             '2025-07-15T00:00:00.000Z', '2025-07-15T00:00:00.000Z', $3, 'reported', 'authoritative',
+             'filing_time', 'full', 1, '["pro"]'::jsonb)`,
+    [ISSUER, metric.rows[0].metric_id, SOURCE],
+  );
+
+  const period = await resolvePeriodContext(db, { kind: "issuer", id: ISSUER });
+  assert.equal(period?.fiscal_period, "Q1");
+  assert.equal(period?.period_end, "2025-03-31");
+});
+
 test("resolvePeriodContext returns null for a non-issuer subject", async (t) => {
   const { databaseUrl } = await bootstrapDatabase(t, "grid-period-nonissuer");
   const db = await connectedClient(t, databaseUrl);

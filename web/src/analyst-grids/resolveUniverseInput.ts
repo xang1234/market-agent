@@ -26,14 +26,14 @@ function issuerRefFrom(subject: ResolvedSubject): IssuerRef | null {
   return issuer ? { kind: "issuer", id: issuer.id } : null;
 }
 
+// A null return means "the resolver ran but found no issuer for this text" —
+// a genuine unresolved ticker. Resolver/transport FAILURES are NOT caught
+// here: they propagate so a backend outage surfaces as the real error instead
+// of being mislabeled as an unresolvable ticker.
 async function resolveIssuerRef(text: string, resolve: ResolveTextImpl): Promise<IssuerRef | null> {
-  try {
-    const response = await resolve({ text });
-    const first = response.subjects[0];
-    return first ? issuerRefFrom(first) : null;
-  } catch {
-    return null;
-  }
+  const response = await resolve({ text });
+  const first = response.subjects[0];
+  return first ? issuerRefFrom(first) : null;
 }
 
 // The GridBuilder lets users type tickers where issuer uuids belong (manual

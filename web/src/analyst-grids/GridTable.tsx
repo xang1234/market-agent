@@ -49,21 +49,29 @@ export function GridTable({ columns, detail }: GridTableProps): ReactElement {
                 return (
                   <td
                     key={col.column_key}
-                    className={`num px-3 py-2 text-fg${toneClass(cell)}${inspectable ? " cursor-pointer underline decoration-dotted" : ""}`}
+                    className="px-3 py-2"
                     data-cell-status={cell?.status ?? "pending"}
                     data-cell-inspectable={inspectable ? "true" : "false"}
                     data-snapshot-id={cell?.snapshot_id ?? undefined}
-                    onClick={
-                      inspectable && cell?.snapshot_id && cell.primary_ref
-                        ? () =>
-                            inspector?.openInspection({
-                              snapshotId: cell.snapshot_id as string,
-                              ref: cell.primary_ref as EvidenceInspectionRef,
-                            })
-                        : undefined
-                    }
                   >
-                    {cellText(cell)}
+                    {inspectable && cell?.snapshot_id && cell.primary_ref ? (
+                      // A real button so the cell is keyboard-operable (Enter/
+                      // Space) and reachable by tab — a clickable <td> is not.
+                      <button
+                        type="button"
+                        className={`num text-left text-fg underline decoration-dotted${toneClass(cell)}`}
+                        onClick={() =>
+                          inspector?.openInspection({
+                            snapshotId: cell.snapshot_id as string,
+                            ref: cell.primary_ref as EvidenceInspectionRef,
+                          })
+                        }
+                      >
+                        {cellText(cell)}
+                      </button>
+                    ) : (
+                      <span className={`num text-fg${toneClass(cell)}`}>{cellText(cell)}</span>
+                    )}
                   </td>
                 );
               })}

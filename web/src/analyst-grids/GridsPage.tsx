@@ -3,7 +3,7 @@ import { useAuth } from "../shell/useAuth.ts";
 import { fetchColumns, createGrid, createRun } from "./gridsClient.ts";
 import { resolveUniverseSpecInput } from "./resolveUniverseInput.ts";
 import { EMPTY_UNIVERSE_OPTIONS, fetchUniverseOptions, type UniverseOptions } from "./universeOptions.ts";
-import { gridsPageMemory } from "./gridsPageState.ts";
+import { gridsPageMemoryFor } from "./gridsPageState.ts";
 import { useGridRun } from "./useGridRun.ts";
 import { GridBuilder, type GridBuilderSubmit } from "./GridBuilder.tsx";
 import { GridTable } from "./GridTable.tsx";
@@ -14,18 +14,20 @@ export function GridsPage(): ReactElement {
   const userId = session?.userId ?? null;
   const [columns, setColumns] = useState<GridColumn[]>([]);
   const [universeOptions, setUniverseOptions] = useState<UniverseOptions>(EMPTY_UNIVERSE_OPTIONS);
-  // Seeded from module memory so the last run + table survive navigation.
-  const [runId, setRunId] = useState<string | null>(gridsPageMemory.runId);
+  // Seeded from the current user's module memory so the last run + table
+  // survive navigation (without bleeding across accounts).
+  const [runId, setRunId] = useState<string | null>(userId ? gridsPageMemoryFor(userId).runId : null);
   const [activeColumns, setActiveColumns] = useState<GridColumn[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!userId) return;
+    const memory = gridsPageMemoryFor(userId);
     fetchColumns({ userId })
       .then((cols) => {
         setColumns(cols);
-        if (gridsPageMemory.activeColumnKeys.length > 0) {
-          setActiveColumns(cols.filter((c) => gridsPageMemory.activeColumnKeys.includes(c.column_key)));
+        if (memory.activeColumnKeys.length > 0) {
+          setActiveColumns(cols.filter((c) => memory.activeColumnKeys.includes(c.column_key)));
         }
       })
       .catch((e) => setError(e instanceof Error ? e.message : "failed to load columns"));
@@ -33,7 +35,8 @@ export function GridsPage(): ReactElement {
     fetchUniverseOptions({ userId }).then(setUniverseOptions);
   }, [userId]);
 
-  const { detail } = useGridRun({ userId: userId ?? "", runId });
+  // Poll only when authenticated — a remembered runId must not poll with "".
+  const { detail } = useGridRun({ userId: userId ?? "", runId: userId ? runId : null });
 
   async function onSubmit(spec: GridBuilderSubmit) {
     if (!userId) return;
@@ -46,8 +49,9 @@ export function GridsPage(): ReactElement {
       const run = await createRun({ userId, gridId: grid.grid_id });
       setActiveColumns(columns.filter((c) => spec.column_specs.some((s) => s.column_key === c.column_key)));
       setRunId(run.runId);
-      gridsPageMemory.runId = run.runId;
-      gridsPageMemory.activeColumnKeys = spec.column_specs.map((s) => s.column_key);
+      const memory = gridsPageMemoryFor(userId);
+      memory.runId = run.runId;
+      memory.activeColumnKeys = spec.column_specs.map((s) => s.column_key);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to start run");
     }
@@ -62,9 +66,9 @@ export function GridsPage(): ReactElement {
         columns={columns}
         universeOptions={universeOptions}
         onSubmit={onSubmit}
-        defaults={gridsPageMemory.builder}
+        defaults={gridsPageMemoryFor(userId).builder}
         onFieldsCapture={(fields) => {
-          gridsPageMemory.builder = fields;
+          gridsPageMemoryFor(userId).builder = fields;
         }}
       />
       {error ? <div className="text-sm text-negative">{error}</div> : null}

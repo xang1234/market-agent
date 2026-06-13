@@ -3,7 +3,8 @@
 // (source + blob + documents row via ingestSecFiling), and records a mention
 // binding the document to the issuer — the linkage reader columns select by.
 // Idempotent: filings whose accession number already has a live documents row
-// are skipped without refetching.
+// are skipped without refetching (the issuer mention is still re-asserted via
+// upsert, so a rerun heals a run that died between ingest and mention).
 
 import {
   ingestSecFiling,
@@ -62,6 +63,16 @@ export async function backfillIssuerFilings(
       document: recent.primaryDocument[index],
       filedAt: Date.parse(recent.filingDate[index]),
     }))
+    // EDGAR's parallel arrays can be ragged; a row missing its primary
+    // document (or form/accession) is skipped instead of failing the issuer.
+    .filter(
+      (c): c is { accession: string; form: string; document: string; filedAt: number } =>
+        typeof c.accession === "string" &&
+        c.accession.length > 0 &&
+        typeof c.form === "string" &&
+        typeof c.document === "string" &&
+        c.document.length > 0,
+    )
     .filter((c) => (forms as ReadonlyArray<string>).includes(c.form))
     .filter((c) => Number.isFinite(c.filedAt) && c.filedAt >= cutoffMs)
     .slice(0, maxFilings);
@@ -69,11 +80,26 @@ export async function backfillIssuerFilings(
   const ingested: BackfillIssuerFilingsResult["ingested"] = [];
   let skipped = 0;
   for (const candidate of candidates) {
-    const existing = await deps.db.query(
-      `select 1 from documents where provider_doc_id = $1 and deleted_at is null limit 1`,
+    const existing = await deps.db.query<{ document_id: string }>(
+      `select document_id::text as document_id
+         from documents
+        where provider_doc_id = $1 and deleted_at is null
+        limit 1`,
       [candidate.accession],
     );
-    if ((existing.rows as unknown[]).length > 0) {
+    const existingRow = (existing.rows as Array<{ document_id: string }>)[0];
+    if (existingRow !== undefined) {
+      // A prior run may have ingested the document but died before recording
+      // the issuer mention; createMention upserts, so re-asserting the
+      // linkage here keeps reruns truly idempotent (heals partial state).
+      await createMention(deps.db, {
+        document_id: existingRow.document_id,
+        subject_kind: "issuer",
+        subject_id: input.issuerId,
+        prominence: "headline",
+        mention_count: 1,
+        confidence: 1,
+      });
       skipped += 1;
       continue;
     }
