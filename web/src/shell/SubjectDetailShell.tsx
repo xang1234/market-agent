@@ -3,7 +3,8 @@ import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'reac
 import { analyzeEntryFromSubject } from '../analyze/analyzeEntry'
 import { issuerIdFromSubject } from '../symbol/profile.ts'
 import { QuoteSnapshot } from '../symbol/QuoteSnapshot'
-import { subjectDisplayName } from '../symbol/quote'
+import { listingIdForQuote, subjectDisplayName } from '../symbol/quote'
+import { useSubjectQuote } from '../symbol/useSubjectQuote'
 import { PANEL_CLASS } from '../symbol/surfaceStyles.ts'
 import {
   fetchSubjectHydration,
@@ -21,7 +22,7 @@ import {
 import { SubjectMembershipBadges } from '../watchlists/SubjectMembershipBadges'
 import { useAuth } from './useAuth'
 import { ProtectedActionType } from './authInterruptState'
-import { SubjectConsensusRail } from './SubjectConsensusRail.tsx'
+import { SubjectNewsRail } from './SubjectNewsRail.tsx'
 import type { SubjectDetailOutletContext } from './subjectDetailOutletContext'
 import { useRequestProtectedAction } from './useAuthInterrupt'
 import { useRightRailContent } from './useRightRailContent.ts'
@@ -96,6 +97,10 @@ export function SubjectDetailShell() {
   const subject = needsHydration && hydratedSubjectMatchesBase ? hydratedSubject : baseSubject
   const canonicalSubject = isCanonicalResolvedSubject(subject) ? subject : null
   const issuerId = issuerIdFromSubject(subject)
+  // One quote fetch for the entered subject, shared by the header and the
+  // Overview key-stats grid (via outlet context).
+  const quoteState = useSubjectQuote(listingIdForQuote(subject))
+  const quote = quoteState.status === 'ready' ? quoteState.data : null
   const shouldBlockForHydration = needsHydration && !hydratedSubjectMatchesBase
   const hydrationError =
     hydrationState.status === 'error' && hydrationState.key === canonicalBaseSubjectKey
@@ -109,7 +114,7 @@ export function SubjectDetailShell() {
       : ({ status: 'idle' } as const)
 
   useRightRailContent(
-    issuerId === null ? null : <SubjectConsensusRail issuerId={issuerId} />,
+    issuerId === null ? null : <SubjectNewsRail issuerId={issuerId} />,
     [issuerId],
   )
 
@@ -195,16 +200,18 @@ export function SubjectDetailShell() {
         data-testid="subject-header"
         className="border-b border-line px-8 py-5"
       >
-        <QuoteSnapshot subject={subject} />
-        {userId !== null && canonicalSubject !== null ? (
-          <SubjectMembershipBadges subjectRef={canonicalSubject.subject_ref} userId={userId} />
-        ) : null}
-        <div className="mt-4 flex items-center gap-2">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <QuoteSnapshot subject={subject} quoteState={quoteState} />
+            {userId !== null && canonicalSubject !== null ? (
+              <SubjectMembershipBadges subjectRef={canonicalSubject.subject_ref} userId={userId} />
+            ) : null}
+          </div>
           {canonicalSubject !== null ? (
-            <>
+            <div className="flex shrink-0 items-center gap-2">
               <SaveToWatchlistButton subject={canonicalSubject} />
               <AnalyzeThisSubjectButton subject={canonicalSubject} />
-            </>
+            </div>
           ) : null}
         </div>
       </header>
@@ -243,7 +250,7 @@ export function SubjectDetailShell() {
             message={hydrationError ?? 'Loading issuer context for this subject.'}
           />
         ) : (
-          <Outlet context={{ subject } satisfies SubjectDetailOutletContext} />
+          <Outlet context={{ subject, quote } satisfies SubjectDetailOutletContext} />
         )}
       </div>
     </div>

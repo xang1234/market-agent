@@ -19,39 +19,6 @@ const LISTING_ID = '11111111-1111-4111-a111-111111111111'
 const ALT_LISTING_ID = '44444444-4444-4444-a444-444444444444'
 const ISSUER_ID = '33333333-3333-4333-a333-333333333333'
 
-const CONSENSUS_RESPONSE = {
-  consensus: {
-    subject: { kind: 'issuer', id: ISSUER_ID },
-    family: 'analyst_consensus',
-    analyst_count: 41,
-    as_of: '2026-06-01',
-    rating_distribution: {
-      counts: {
-        strong_buy: 10,
-        buy: 20,
-        hold: 9,
-        sell: 2,
-        strong_sell: 0,
-      },
-      contributor_count: 41,
-      as_of: '2026-06-01',
-      source_id: 'source-1',
-    },
-    price_target: {
-      currency: 'USD',
-      low: 120,
-      mean: 210.25,
-      median: 205,
-      high: 260,
-      contributor_count: 31,
-      as_of: '2026-06-01',
-      source_id: 'source-1',
-    },
-    estimates: [],
-    coverage_warnings: [],
-  },
-}
-
 const HYDRATED_LISTING: ResolvedSubject = {
   subject_ref: { kind: 'listing', id: LISTING_ID },
   display_name: 'AAPL · XNAS — Apple Inc.',
@@ -229,7 +196,7 @@ test('SubjectDetailShell hydrates a bare listing route before child sections nee
   }
 })
 
-test('SubjectDetailShell surfaces issuer consensus in the persistent right rail', async () => {
+test('SubjectDetailShell surfaces issuer news & filings in the persistent right rail', async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
   const restoreGlobals = installDomGlobals(dom.window as unknown as Window)
   const originalFetch = globalThis.fetch
@@ -239,11 +206,22 @@ test('SubjectDetailShell surfaces issuer consensus in the persistent right rail'
     globalThis.fetch = async (input) => {
       const url = String(input)
       calls.push(url)
-      if (url.startsWith('/v1/fundamentals/consensus?')) {
-        return new Response(JSON.stringify(CONSENSUS_RESPONSE), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        })
+      if (url.startsWith('/v1/evidence/issuer-news?')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                document_id: 'doc-1',
+                kind: 'filing',
+                title: 'Q1 FY26 10-Q filed',
+                published_at: '2026-06-01T00:00:00.000Z',
+                provider: 'sec_edgar',
+                provider_doc_id: '0000-1',
+              },
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
       }
       return new Response(JSON.stringify({ unavailable: { detail: 'test quote unavailable' } }), {
         status: 404,
@@ -275,7 +253,7 @@ test('SubjectDetailShell surfaces issuer consensus in the persistent right rail'
 
     for (
       let attempt = 0;
-      attempt < 5 && !dom.window.document.body.innerHTML.includes('Street view');
+      attempt < 5 && !dom.window.document.body.innerHTML.includes('News &amp; filings');
       attempt += 1
     ) {
       await act(async () => {
@@ -283,11 +261,11 @@ test('SubjectDetailShell surfaces issuer consensus in the persistent right rail'
       })
     }
 
-    assert.match(dom.window.document.body.innerHTML, /Street view/)
-    assert.match(dom.window.document.body.innerHTML, /Buy/)
-    assert.match(dom.window.document.body.innerHTML, /\$210\.25/)
+    assert.match(dom.window.document.body.innerHTML, /News &amp; filings/)
+    assert.match(dom.window.document.body.innerHTML, /Q1 FY26 10-Q filed/)
+    assert.match(dom.window.document.body.innerHTML, /sec_edgar/)
     assert.ok(
-      calls.includes(`/v1/fundamentals/consensus?subject_kind=issuer&subject_id=${ISSUER_ID}`),
+      calls.some((url) => url.startsWith(`/v1/evidence/issuer-news?issuer_id=${ISSUER_ID}`)),
     )
     await act(async () => root.unmount())
   } finally {

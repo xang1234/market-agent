@@ -1,21 +1,23 @@
 import { useRightRail } from './useRightRail'
 import { getRightRailState } from './rightRailState'
 
-// Always mounted — main-canvas width stays stable across tab switches
-// regardless of whether a surface has pushed content. When no content is
-// pushed the rail renders as an empty labeled landmark; surfaces that want
-// the wider canvas (e.g., Screener per spec §3.7) will opt out via a
-// context flag when that surface ships.
+// Collapses when no surface has pushed content: the main canvas takes the full
+// width instead of reserving an empty 320px column (the dead-space the symbol
+// page used to show when a subject had no issuer context). Surfaces that want
+// the rail push content via useRightRailContent; everything else gets the wide
+// canvas for free.
 export function RightRailSlot() {
   const { content } = useRightRail()
   const railState = getRightRailState(content)
+
+  if (railState.mode !== 'content') return null
 
   return (
     <aside
       aria-label="Activity rail"
       className="flex h-full w-80 shrink-0 flex-col border-l border-line bg-surface"
     >
-      {railState.mode === 'content' ? railState.content : <div className="flex-1" aria-hidden="true" />}
+      {railState.content}
     </aside>
   )
 }
