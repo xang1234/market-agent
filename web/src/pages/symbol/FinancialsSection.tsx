@@ -292,7 +292,7 @@ function SegmentsView({ envelope }: { envelope: SegmentFactsEnvelope }) {
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-[minmax(0,150px)_minmax(0,1fr)] md:items-center">
+    <div className="grid gap-4 md:grid-cols-[minmax(0,140px)_minmax(0,1fr)] md:items-center">
       <SegmentDonut slices={slices} />
       <SegmentBreakdownList slices={slices} reportingCurrency={envelope.reporting_currency} />
       {envelope.coverage_warnings.length > 0 && (

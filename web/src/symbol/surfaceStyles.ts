@@ -1,7 +1,9 @@
-// Shared surface chrome for the redesign's panels. The app has three surface
-// tiers; before this they were copy-pasted as literal class strings across
-// ~25 sites, so an elevation/radius/border tweak meant a codebase-wide sweep.
-// Centralizing each tier mirrors buttonStyles.ts (PRIMARY_BUTTON_CLASS): sites
+// Shared Tailwind class-string constants for the redesign. Most of the file is
+// surface chrome — the app's three surface tiers; before this they were
+// copy-pasted as literal class strings across ~25 sites, so an
+// elevation/radius/border tweak meant a codebase-wide sweep. The section stack
+// at the bottom is the same idea for sub-tab page layout.
+// Centralizing each mirrors buttonStyles.ts (PRIMARY_BUTTON_CLASS): sites
 // append their own padding/layout extras rather than re-declaring the core.
 //
 // Lives in symbol/ (not shell/) because it's the established shared-primitive
