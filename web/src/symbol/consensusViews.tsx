@@ -61,6 +61,7 @@ function RatingDistributionBar({
       <StackedBar
         ariaLabel={`Analyst ratings across ${total} contributors`}
         heightClass="h-3"
+        total={total}
         segments={ANALYST_RATINGS.map((rating) => ({
           key: rating,
           value: distribution.counts[rating],

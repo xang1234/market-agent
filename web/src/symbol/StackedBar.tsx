@@ -22,12 +22,17 @@ export function StackedBar({
   segments,
   ariaLabel,
   heightClass = 'h-3.5',
+  total,
 }: {
   segments: ReadonlyArray<StackedSegment>
   ariaLabel: string
   heightClass?: string
+  // Denominator for segment widths. Defaults to the segment-value sum; pass an
+  // explicit total when the segments are a subset of a known whole (e.g.
+  // unbucketed analyst contributors) so the remainder shows as track background.
+  total?: number
 }): ReactElement {
-  const total = segments.reduce((sum, s) => sum + s.value, 0)
+  const denom = total ?? segments.reduce((sum, s) => sum + s.value, 0)
   return (
     <div className={`flex overflow-hidden rounded-sm bg-surface-2 ${heightClass}`} role="img" aria-label={ariaLabel}>
       {segments.map((s) =>
@@ -37,7 +42,7 @@ export function StackedBar({
             data-testid={s.testId}
             title={s.title}
             className={`block h-full ${s.className}`}
-            style={{ width: `${total === 0 ? 0 : (s.value / total) * 100}%` }}
+            style={{ width: `${denom <= 0 ? 0 : (s.value / denom) * 100}%` }}
           />
         ) : null,
       )}
