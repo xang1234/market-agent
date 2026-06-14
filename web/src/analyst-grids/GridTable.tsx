@@ -19,6 +19,16 @@ function toneClass(cell: GridCellDetail | undefined): string {
   return "";
 }
 
+// Background tint for the cell's best/worst tone. The tone already drives the
+// text colour (toneClass); shading the cell turns the matrix into a scannable
+// heatmap — a row of green vs a row of red reads in one pass instead of
+// number-by-number.
+function toneCellClass(cell: GridCellDetail | undefined): string {
+  if (cell?.display?.tone === "best") return " bg-positive-soft";
+  if (cell?.display?.tone === "worst") return " bg-negative-soft";
+  return "";
+}
+
 type GridTableProps = { columns: ReadonlyArray<GridColumn>; detail: GridRunDetail };
 
 export function GridTable({ columns, detail }: GridTableProps): ReactElement {
@@ -49,7 +59,7 @@ export function GridTable({ columns, detail }: GridTableProps): ReactElement {
                 return (
                   <td
                     key={col.column_key}
-                    className="px-3 py-2"
+                    className={`px-3 py-2${toneCellClass(cell)}`}
                     data-cell-status={cell?.status ?? "pending"}
                     data-cell-inspectable={inspectable ? "true" : "false"}
                     data-snapshot-id={cell?.snapshot_id ?? undefined}
