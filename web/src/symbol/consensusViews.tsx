@@ -7,22 +7,15 @@
 
 import {
   ANALYST_RATINGS,
+  RATING_BAR_COLORS,
   ratingLabel,
   type AnalystConsensusEnvelope,
-  type AnalystRating,
   type ConsensusEstimate,
   type PriceTarget,
   type RatingDistribution,
 } from './consensus.ts'
 import { currencyPrefix, formatCompactDollars, formatCurrency2 } from './format.ts'
-
-const RATING_BAR_COLORS: Readonly<Record<AnalystRating, string>> = {
-  strong_buy: 'bg-emerald-600 dark:bg-emerald-500',
-  buy: 'bg-emerald-400 dark:bg-emerald-600',
-  hold: 'bg-neutral-400 dark:bg-neutral-500',
-  sell: 'bg-red-400 dark:bg-red-600',
-  strong_sell: 'bg-red-600 dark:bg-red-500',
-}
+import { StackedBar } from './StackedBar.tsx'
 
 export function ConsensusBody({ envelope }: { envelope: AnalystConsensusEnvelope }) {
   return (
@@ -65,26 +58,18 @@ function RatingDistributionBar({
   }
   return (
     <div className="flex flex-col gap-2">
-      <div
-        role="img"
-        aria-label={`Analyst ratings across ${total} contributors`}
-        className="flex h-3 w-full overflow-hidden rounded"
-      >
-        {ANALYST_RATINGS.map((rating) => {
-          const count = distribution.counts[rating]
-          if (count === 0) return null
-          const widthPct = (count / total) * 100
-          return (
-            <div
-              key={rating}
-              data-testid={`rating-segment-${rating}`}
-              className={RATING_BAR_COLORS[rating]}
-              style={{ width: `${widthPct}%` }}
-              title={`${ratingLabel(rating)}: ${count}`}
-            />
-          )
-        })}
-      </div>
+      <StackedBar
+        ariaLabel={`Analyst ratings across ${total} contributors`}
+        heightClass="h-3"
+        segments={ANALYST_RATINGS.map((rating) => ({
+          key: rating,
+          value: distribution.counts[rating],
+          label: ratingLabel(rating),
+          className: RATING_BAR_COLORS[rating],
+          testId: `rating-segment-${rating}`,
+          title: `${ratingLabel(rating)}: ${distribution.counts[rating]}`,
+        }))}
+      />
       <ul className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-3">
         {ANALYST_RATINGS.map((rating) => {
           const count = distribution.counts[rating]

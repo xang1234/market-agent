@@ -10,6 +10,19 @@ export const ANALYST_RATINGS: ReadonlyArray<AnalystRating> = [
   'strong_sell',
 ]
 
+// Bar/legend fill by rating — a fixed strong_buy → strong_sell gradient. These
+// are off-palette emerald/red shades (not the semantic tokens) because the
+// five-step gradient needs five distinct hues the token set doesn't provide.
+// Shared by the symbol consensus view and the analyst_consensus block so the
+// palette is defined once.
+export const RATING_BAR_COLORS: Readonly<Record<AnalystRating, string>> = {
+  strong_buy: 'bg-emerald-600 dark:bg-emerald-500',
+  buy: 'bg-emerald-400 dark:bg-emerald-600',
+  hold: 'bg-neutral-400 dark:bg-neutral-500',
+  sell: 'bg-red-400 dark:bg-red-600',
+  strong_sell: 'bg-red-600 dark:bg-red-500',
+}
+
 export type RatingDistribution = {
   counts: Readonly<Record<AnalystRating, number>>
   contributor_count: number

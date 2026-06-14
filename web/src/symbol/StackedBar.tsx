@@ -7,30 +7,33 @@ export type StackedSegment = {
   label: string
   // Fill class for the segment / its legend dot, e.g. severityFillClass(sev).
   className: string
+  // Optional hover tooltip and test hook on the segment.
+  title?: string
+  testId?: string
 }
 
 // Horizontal stacked proportion bar — a track of colored segments whose widths
-// sum to 100%. The shared primitive behind the Review severity bar, the Home
-// findings-severity bar, and (future) the analyst-consensus / insider-flow
-// splits, which all hand-rolled this. Zero-value segments collapse to nothing.
+// sum to 100%. The shared primitive behind the Review/Home severity bars, the
+// analyst-consensus rating bar, and the insider buy/sell split. Zero-value
+// segments collapse to nothing; `heightClass` tunes the track thickness.
 export function StackedBar({
   segments,
   ariaLabel,
+  heightClass = 'h-3.5',
 }: {
   segments: ReadonlyArray<StackedSegment>
   ariaLabel: string
+  heightClass?: string
 }): ReactElement {
   const total = segments.reduce((sum, s) => sum + s.value, 0)
   return (
-    <div
-      className="flex h-3.5 overflow-hidden rounded-sm bg-surface-2"
-      role="img"
-      aria-label={ariaLabel}
-    >
+    <div className={`flex overflow-hidden rounded-sm bg-surface-2 ${heightClass}`} role="img" aria-label={ariaLabel}>
       {segments.map((s) =>
         s.value > 0 ? (
           <span
             key={s.key}
+            data-testid={s.testId}
+            title={s.title}
             className={`block h-full ${s.className}`}
             style={{ width: `${total === 0 ? 0 : (s.value / total) * 100}%` }}
           />
