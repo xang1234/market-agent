@@ -83,5 +83,27 @@ insert into metrics (metric_key, display_name, unit_class, aggregation, interpre
   -- Analyst price targets (vendor)
   ('price_target_low',           'Price Target Low',  'currency', 'point_in_time', 'neutral', 'vendor', 1, 'Lowest analyst price target.'),
   ('price_target_mean',          'Price Target Mean', 'currency', 'point_in_time', 'neutral', 'vendor', 1, 'Mean analyst price target.'),
-  ('price_target_high',          'Price Target High', 'currency', 'point_in_time', 'neutral', 'vendor', 1, 'Highest analyst price target.')
+  ('price_target_high',          'Price Target High', 'currency', 'point_in_time', 'neutral', 'vendor', 1, 'Highest analyst price target.'),
+
+  -- Momentum and technical signals (vendor; xang1234/stock-screener weekly-reference feed)
+  ('rsi_14',                'RSI (14)',                   'ratio',    'point_in_time', 'neutral', 'vendor', 1, '14-day relative strength index.'),
+  ('perf_week',             'Performance (1W)',           'percent',  'point_in_time', 'neutral', 'vendor', 1, 'Trailing one-week price performance.'),
+  ('perf_month',            'Performance (1M)',           'percent',  'point_in_time', 'neutral', 'vendor', 1, 'Trailing one-month price performance.'),
+  ('perf_quarter',          'Performance (3M)',           'percent',  'point_in_time', 'neutral', 'vendor', 1, 'Trailing three-month price performance.'),
+  ('perf_half_year',        'Performance (6M)',           'percent',  'point_in_time', 'neutral', 'vendor', 1, 'Trailing six-month price performance.'),
+  ('perf_year',             'Performance (1Y)',           'percent',  'point_in_time', 'neutral', 'vendor', 1, 'Trailing one-year price performance.'),
+  ('perf_ytd',              'Performance (YTD)',          'percent',  'point_in_time', 'neutral', 'vendor', 1, 'Year-to-date price performance.'),
+  ('sma_20',                'Price vs SMA(20)',           'percent',  'point_in_time', 'neutral', 'vendor', 1, 'Percent distance of price from its 20-day simple moving average.'),
+  ('sma_50',                'Price vs SMA(50)',           'percent',  'point_in_time', 'neutral', 'vendor', 1, 'Percent distance of price from its 50-day simple moving average.'),
+  ('sma_200',               'Price vs SMA(200)',          'percent',  'point_in_time', 'neutral', 'vendor', 1, 'Percent distance of price from its 200-day simple moving average.'),
+  ('week_52_high',          '52-Week High',               'currency', 'point_in_time', 'neutral', 'market', 1, 'Highest trade price over the trailing 52 weeks.'),
+  ('week_52_low',           '52-Week Low',                'currency', 'point_in_time', 'neutral', 'market', 1, 'Lowest trade price over the trailing 52 weeks.'),
+  ('week_52_high_distance', 'Distance from 52-Week High', 'percent',  'point_in_time', 'neutral', 'vendor', 1, 'Percent distance of price below the 52-week high.'),
+  ('week_52_low_distance',  'Distance from 52-Week Low',  'percent',  'point_in_time', 'neutral', 'vendor', 1, 'Percent distance of price above the 52-week low.'),
+  ('short_float',           'Short Float',                'percent',  'point_in_time', 'neutral', 'vendor', 1, 'Shares sold short as a percent of float.'),
+  ('relative_volume',       'Relative Volume',            'ratio',    'point_in_time', 'neutral', 'vendor', 1, 'Current volume relative to its average.'),
+  ('avg_volume',            'Average Volume',             'count',    'avg',           'neutral', 'vendor', 1, 'Average daily share volume.'),
+  ('atr_14',                'ATR (14)',                   'currency', 'point_in_time', 'neutral', 'vendor', 1, '14-day average true range in price units.'),
+  ('volatility_week',       'Volatility (1W)',            'percent',  'point_in_time', 'neutral', 'vendor', 1, 'Average daily price volatility over the past week.'),
+  ('volatility_month',      'Volatility (1M)',            'percent',  'point_in_time', 'neutral', 'vendor', 1, 'Average daily price volatility over the past month.')
 on conflict (metric_key) do nothing;

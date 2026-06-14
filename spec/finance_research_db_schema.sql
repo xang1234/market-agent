@@ -999,3 +999,28 @@ create index grid_runs_grid_idx on grid_runs(grid_id, started_at desc);
 create index grid_rows_run_idx on grid_rows(grid_run_id);
 create index grid_cells_row_idx on grid_cells(grid_row_id);
 create index grid_cells_snapshot_idx on grid_cells(snapshot_id);
+
+create table artifact_ingestion_ledger (
+  ledger_id          uuid primary key default gen_random_uuid(),
+  provider           text not null,
+  release_tag        text not null,
+  market             text not null,
+  schema_version     text not null,
+  bundle_asset_name  text not null,
+  sha256             text not null,
+  as_of_date         date not null,
+  source_id          uuid not null references sources(source_id),
+  ingestion_batch_id uuid not null,
+  rows_total         integer not null default 0 check (rows_total >= 0),
+  rows_ingested      integer not null default 0 check (rows_ingested >= 0),
+  rows_skipped       integer not null default 0 check (rows_skipped >= 0),
+  status             text not null default 'succeeded' check (status in ('succeeded', 'partial', 'failed')),
+  started_at         timestamptz not null,
+  finished_at        timestamptz not null default now(),
+  created_at         timestamptz not null default now(),
+  unique (release_tag, market, sha256),
+  check (finished_at >= started_at)
+);
+
+create index artifact_ingestion_ledger_lookup_idx
+  on artifact_ingestion_ledger(release_tag, market, as_of_date desc, finished_at desc);
