@@ -27,6 +27,7 @@ import { formatPeriodLabel, revenueBarsFromStatements } from '../../symbol/finan
 import { MetricBars, type MetricBar } from '../../symbol/MetricBars.tsx'
 import { signedDirection } from '../../symbol/signedColor.ts'
 import { seriesHexAt } from '../../symbol/seriesPalette.ts'
+import { SECTION_STACK_CLASS } from './sectionLayout.ts'
 
 const STATEMENT_FAMILY = 'income' as const
 type PeriodMode = 'annual' | 'quarterly'
@@ -109,7 +110,7 @@ export function FinancialsSection() {
   })
 
   return (
-    <div data-testid="section-financials" className="flex w-full flex-col gap-6 p-8">
+    <div data-testid="section-financials" className={SECTION_STACK_CLASS}>
       <Card
         testId="financials-revenue"
         headingId="financials-revenue-heading"
@@ -133,28 +134,6 @@ export function FinancialsSection() {
         </FetchStateView>
       </Card>
       <Card
-        testId="financials-statements"
-        headingId="financials-statements-heading"
-        heading={`Income statement · ${periodSpan}`}
-        action={
-          <SegmentedToggle
-            options={BASIS_OPTIONS}
-            value={basis}
-            onChange={setBasis}
-            ariaLabel="Statement basis"
-            testIdPrefix="basis"
-          />
-        }
-      >
-        <FetchStateView
-          state={statements}
-          noun="statements"
-          idleMessage="Issuer context unavailable for this entry. Open this symbol from search to load financials."
-        >
-          {(data) => <StatementsTable response={data} />}
-        </FetchStateView>
-      </Card>
-      <Card
         testId="financials-segments"
         headingId="financials-segments-heading"
         heading={`Segments · ${SEGMENT_PERIOD} · revenue share`}
@@ -174,6 +153,30 @@ export function FinancialsSection() {
           idleMessage="Issuer context unavailable for this entry. Open this symbol from search to load segments."
         >
           {(envelope) => <SegmentsView envelope={envelope} />}
+        </FetchStateView>
+      </Card>
+      {/* Income-statement grid is the detail layer — kept last so the section
+          reads charts-first (revenue trend, then segment mix, then the table). */}
+      <Card
+        testId="financials-statements"
+        headingId="financials-statements-heading"
+        heading={`Income statement · ${periodSpan}`}
+        action={
+          <SegmentedToggle
+            options={BASIS_OPTIONS}
+            value={basis}
+            onChange={setBasis}
+            ariaLabel="Statement basis"
+            testIdPrefix="basis"
+          />
+        }
+      >
+        <FetchStateView
+          state={statements}
+          noun="statements"
+          idleMessage="Issuer context unavailable for this entry. Open this symbol from search to load financials."
+        >
+          {(data) => <StatementsTable response={data} />}
         </FetchStateView>
       </Card>
     </div>
@@ -289,7 +292,7 @@ function SegmentsView({ envelope }: { envelope: SegmentFactsEnvelope }) {
   }
 
   return (
-    <div className="grid gap-6 md:grid-cols-[minmax(0,200px)_minmax(0,1fr)]">
+    <div className="grid gap-5 md:grid-cols-[minmax(0,150px)_minmax(0,1fr)] md:items-center">
       <SegmentDonut slices={slices} />
       <SegmentBreakdownList slices={slices} reportingCurrency={envelope.reporting_currency} />
       {envelope.coverage_warnings.length > 0 && (
@@ -313,8 +316,8 @@ type DonutSlice = {
 
 function SegmentDonut({ slices }: { slices: DonutSlice[] }) {
   const size = 180
-  const radius = 70
-  const stroke = 28
+  const radius = 72
+  const stroke = 24
   const cx = size / 2
   const cy = size / 2
   const circumference = 2 * Math.PI * radius
@@ -330,7 +333,7 @@ function SegmentDonut({ slices }: { slices: DonutSlice[] }) {
       role="img"
       aria-label="Segment revenue share"
       viewBox={`0 0 ${size} ${size}`}
-      className="h-44 w-full max-w-[200px]"
+      className="h-32 w-full max-w-[140px]"
     >
       <circle cx={cx} cy={cy} r={radius} fill="none" stroke="currentColor" strokeOpacity={0.08} strokeWidth={stroke} />
       {arcs.map(({ slice, index, length, offset }) => (

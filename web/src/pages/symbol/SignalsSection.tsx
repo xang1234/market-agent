@@ -30,6 +30,7 @@ import {
 } from '../../symbol/signedColor.ts'
 import { Sparkline } from '../../symbol/Sparkline.tsx'
 import { fetchThemeMembershipRationales } from '../../symbol/themeRationale.ts'
+import { SECTION_STACK_CLASS } from './sectionLayout.ts'
 
 const PLACEHOLDER_CLASS = 'text-sm text-muted'
 
@@ -125,7 +126,7 @@ export function SignalsSection() {
   )
 
   return (
-    <div data-testid="section-signals" className="flex w-full flex-col gap-6 p-8">
+    <div data-testid="section-signals" className={SECTION_STACK_CLASS}>
       <Card
         testId="signals-sentiment-trend"
         headingId="signals-sentiment-trend-heading"

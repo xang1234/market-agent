@@ -30,6 +30,7 @@ import { useConsensus } from '../../symbol/useConsensus.ts'
 import { ConsensusBody, PriceTargetBody } from '../../symbol/consensusViews.tsx'
 import { buildKeyStatsGrid } from './keyStatsGrid.ts'
 import { KeyStatsGrid } from './KeyStatsGrid.tsx'
+import { SECTION_STACK_CLASS } from './sectionLayout.ts'
 
 type PriceSeries = { bars: NormalizedBar[]; currency: string }
 
@@ -108,7 +109,7 @@ export function OverviewSection() {
   return (
     <div
       data-testid="section-overview"
-      className="flex w-full flex-col gap-6 p-8"
+      className={SECTION_STACK_CLASS}
     >
       <Card
         testId="overview-performance"
@@ -141,7 +142,7 @@ export function OverviewSection() {
         </FetchStateView>
       </Card>
       <KeyStatsGrid cells={statCells} />
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
         <Card testId="overview-profile" headingId="overview-profile-heading" heading="Company profile">
           <FetchStateView
             state={profile}
