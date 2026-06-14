@@ -1,7 +1,21 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { diffAnalyzeRuns } from './runHistory.ts'
+import { countRunDiffStatuses, diffAnalyzeRuns, type AnalyzeRunDiffRow } from './runHistory.ts'
+
+test('countRunDiffStatuses tallies diff rows by status', () => {
+  const rows: AnalyzeRunDiffRow[] = [
+    { status: 'added', key: 'a', title: 'A' },
+    { status: 'changed', key: 'b', title: 'B' },
+    { status: 'changed', key: 'c', title: 'C' },
+    { status: 'unchanged', key: 'd', title: 'D' },
+  ]
+  assert.deepEqual(countRunDiffStatuses(rows), { added: 1, removed: 0, changed: 2, unchanged: 1 })
+})
+
+test('countRunDiffStatuses returns all-zero for an empty diff', () => {
+  assert.deepEqual(countRunDiffStatuses([]), { added: 0, removed: 0, changed: 0, unchanged: 0 })
+})
 
 test('diffAnalyzeRuns matches sections by playbook section id before title', () => {
   const diff = diffAnalyzeRuns(

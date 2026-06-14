@@ -11,12 +11,15 @@ import { sectionProgress } from '../analyze/sectionProgress.ts'
 import { SectionProgressList } from '../analyze/SectionProgressList.tsx'
 import { fetchAnalyzePlaybooks, type AnalyzePlaybook } from '../analyze/playbooks.ts'
 import {
+  countRunDiffStatuses,
   diffAnalyzeRuns,
   fetchAnalyzeRun,
   fetchAnalyzeRuns,
   isRerunnableRun,
   rerunAnalyzeRun,
   type AnalyzeRunDetail,
+  type AnalyzeRunDiff,
+  type AnalyzeRunDiffRow,
   type AnalyzeRunHistoryItem,
 } from '../analyze/runHistory.ts'
 import { shareAnalyzeRunToChat, type AnalyzeRun } from '../analyze/shareToChat.ts'
@@ -77,7 +80,7 @@ export function AnalyzePage() {
   const subject = subjectFromAnalyzeEntry(query, location.state)
 
   return (
-    <div className="flex flex-1 flex-col gap-6 overflow-auto p-8">
+    <div className="flex flex-1 flex-col gap-4 overflow-auto p-6">
       <header>
         <h1 className="text-2xl font-semibold">Analyze</h1>
         <p className="mt-1 text-sm text-muted">
@@ -269,8 +272,8 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <section className="grid gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
+    <div className="flex flex-col gap-4">
+      <section className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
         <div className="flex flex-col gap-4 rounded-md border border-line bg-surface p-5">
           <label className="flex flex-col gap-2 text-sm font-medium text-fg">
             Playbook
@@ -439,23 +442,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
               Load more
             </button>
           ) : null}
-          {runDiff ? (
-            <section className="mt-4 rounded-md border border-line p-3">
-              <h3 className="text-sm font-semibold">Run diff</h3>
-              {runDiffDriftLabels.length > 0 ? (
-                <ul className="mt-2 flex flex-wrap gap-2 text-xs text-fg-soft">
-                  {runDiffDriftLabels.map((label) => (
-                    <li key={label} className="rounded border border-line px-2 py-1">{label}</li>
-                  ))}
-                </ul>
-              ) : null}
-              <ul className="mt-2 text-sm">
-                {runDiff.rows.map((row) => (
-                  <li key={`${row.status}:${row.key}`}>{row.status}: {row.title}</li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
+          {runDiff ? <RunDiffView diff={runDiff} driftLabels={runDiffDriftLabels} /> : null}
         </section>
       ) : null}
     </div>
@@ -495,6 +482,75 @@ function sourceCategoriesFor(
 
 function blockKey(block: Record<string, unknown>): string {
   return typeof block.id === 'string' ? block.id : JSON.stringify(block)
+}
+
+// Run-diff at a glance: a colored chip per status (the counts) over the
+// per-section list, replacing a plain `status: title` text list. Drift pills
+// (template / evidence / playbook changed) are kept above.
+const RUN_DIFF_ORDER = ['added', 'changed', 'removed', 'unchanged'] as const
+
+const RUN_DIFF_CHIP: Readonly<Record<AnalyzeRunDiffRow['status'], string>> = {
+  added: 'border-positive/40 bg-positive-soft text-positive',
+  changed: 'border-warning/40 bg-warning-soft text-warning',
+  removed: 'border-negative/40 bg-negative-soft text-negative',
+  unchanged: 'border-line bg-surface-2 text-muted',
+}
+
+const RUN_DIFF_CHIP_LABEL: Readonly<Record<AnalyzeRunDiffRow['status'], (n: number) => string>> = {
+  added: (n) => `+${n} added`,
+  changed: (n) => `${n} changed`,
+  removed: (n) => `${n} removed`,
+  unchanged: (n) => `${n} unchanged`,
+}
+
+const RUN_DIFF_DOT: Readonly<Record<AnalyzeRunDiffRow['status'], string>> = {
+  added: 'bg-positive',
+  changed: 'bg-warning',
+  removed: 'bg-negative',
+  unchanged: 'bg-muted',
+}
+
+function RunDiffView({
+  diff,
+  driftLabels,
+}: {
+  diff: AnalyzeRunDiff
+  driftLabels: ReadonlyArray<string>
+}) {
+  const counts = countRunDiffStatuses(diff.rows)
+  return (
+    <section className="mt-4 rounded-md border border-line p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">Run diff</h3>
+        <div className="flex flex-wrap gap-1.5">
+          {RUN_DIFF_ORDER.map((status) => (
+            <span
+              key={status}
+              className={`num rounded border px-2 py-0.5 text-xs font-medium ${RUN_DIFF_CHIP[status]}`}
+            >
+              {RUN_DIFF_CHIP_LABEL[status](counts[status])}
+            </span>
+          ))}
+        </div>
+      </div>
+      {driftLabels.length > 0 ? (
+        <ul className="mt-2 flex flex-wrap gap-2 text-xs text-fg-soft">
+          {driftLabels.map((label) => (
+            <li key={label} className="rounded border border-line px-2 py-1">{label}</li>
+          ))}
+        </ul>
+      ) : null}
+      <ul className="mt-2 flex flex-col gap-1 text-sm">
+        {diff.rows.map((row) => (
+          <li key={`${row.status}:${row.key}`} className="flex items-center gap-2">
+            <span aria-hidden="true" className={`inline-block h-2 w-2 shrink-0 rounded-sm ${RUN_DIFF_DOT[row.status]}`} />
+            <span className="text-fg-soft">{row.title}</span>
+            <span className="text-xs text-muted">{row.status}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
 }
 
 function CarriedSubjectContext({

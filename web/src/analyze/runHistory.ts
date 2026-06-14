@@ -128,6 +128,16 @@ export function diffAnalyzeRuns(
   }
 }
 
+export type RunDiffStatusCounts = Record<AnalyzeRunDiffRow['status'], number>
+
+// Tally diff rows by status — the data behind the run-diff chip summary, kept
+// here (with the diff logic) and unit-tested rather than reduced inline in JSX.
+export function countRunDiffStatuses(rows: ReadonlyArray<AnalyzeRunDiffRow>): RunDiffStatusCounts {
+  const counts: RunDiffStatusCounts = { added: 0, removed: 0, changed: 0, unchanged: 0 }
+  for (const row of rows) counts[row.status] += 1
+  return counts
+}
+
 function diffSummary(before: AnalyzeRunDetail, after: AnalyzeRunDetail): AnalyzeRunDiffSummary {
   const templateVersionBefore = templateVersion(before)
   const templateVersionAfter = templateVersion(after)
