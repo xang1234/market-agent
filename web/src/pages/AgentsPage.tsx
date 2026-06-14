@@ -15,6 +15,14 @@ import {
 import type { SubjectKind } from '../subject/subjectRef.ts'
 import { authenticatedFetch } from '../http/authFetch.ts'
 import { useAuth } from '../shell/useAuth.ts'
+import { SeverityBadge } from '../blocks/SeverityBadge.tsx'
+import { FINDING_SEVERITIES, type FindingSeverity } from '../blocks/types.ts'
+import {
+  agentRunTicks,
+  latestRunStatus,
+  rosterRunSummary,
+  type RunStatus,
+} from '../agents/runStats.ts'
 
 type AgentRow = {
   agent_id: string
@@ -111,6 +119,7 @@ export function AgentsPage() {
   const visibleFindings = detailsMatchSelection ? findings : []
   const visibleRunActivities = detailsMatchSelection ? runActivities : []
   const visibleDetailsError = detailsMatchSelection ? detailsError : null
+  const fleet = rosterRunSummary(agents, runs)
 
   useEffect(() => {
     if (!session) return
@@ -348,15 +357,17 @@ export function AgentsPage() {
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-6 overflow-auto p-8">
+    <div className="flex flex-1 flex-col gap-4 overflow-auto p-6">
       <header>
         <h1 className="text-2xl font-semibold">Agents</h1>
         <p className="mt-1 text-sm text-muted">
           Session-scoped research monitors with durable configuration, run history, and live activity.
         </p>
       </header>
-      <section className="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
-        <form onSubmit={submitAgent} className="flex flex-col gap-4 rounded-md border border-line bg-surface p-5">
+      {/* Monitor-first: the roster + details lead (order-1, wide column); the
+          configuration form steps back to a side panel (order-2, narrow). */}
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <form onSubmit={submitAgent} className="order-2 flex flex-col gap-4 rounded-md border border-line bg-surface p-5">
           <h2 className="text-lg font-semibold text-fg">{editingAgentId ? 'Edit agent' : 'Create agent'}</h2>
           <label className="flex flex-col gap-2 text-sm font-medium text-fg">
             Name
@@ -576,9 +587,10 @@ export function AgentsPage() {
             {editingAgentId ? 'Save agent' : 'Create agent'}
           </button>
         </form>
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="order-1 grid gap-4 lg:grid-cols-2">
           <section className="rounded-md border border-line bg-surface p-5">
             <h2 className="text-lg font-semibold text-fg">Agents</h2>
+            <FleetSummary fleet={fleet} />
             {loadError ? (
               <p className="mt-3 text-sm text-negative">Load failed: {loadError}</p>
             ) : null}
@@ -593,8 +605,11 @@ export function AgentsPage() {
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="text-sm font-semibold text-fg">{agent.name}</h3>
+                    <div className="min-w-0">
+                      <h3 className="flex items-center gap-2 text-sm font-semibold text-fg">
+                        <StatusDot status={latestRunStatus(runs, agent.agent_id)} />
+                        {agent.name}
+                      </h3>
                       <p className="mt-1 text-sm text-fg-soft">{agent.thesis}</p>
                       <p className="mt-2 text-xs text-muted">
                         {agent.enabled ? 'enabled' : 'disabled'} · {agent.cadence}
@@ -605,6 +620,7 @@ export function AgentsPage() {
                       <p className="mt-1 text-xs text-muted">
                         Alert rule: {alertRuleLabel(agent.alert_rules)}
                       </p>
+                      <RunTimeline ticks={agentRunTicks(runs, agent.agent_id)} />
                     </div>
                     <div className="flex flex-wrap justify-end gap-2">
                       <button
@@ -661,9 +677,7 @@ export function AgentsPage() {
                   <li key={finding.finding_id} className="rounded-md border border-line p-3 text-sm">
                     <div className="flex items-start justify-between gap-3">
                       <span className="font-medium text-fg">{finding.headline}</span>
-                      <span className="rounded border border-line-strong px-2 py-0.5 text-xs text-muted">
-                        {finding.severity}
-                      </span>
+                      <FindingSeverityBadge severity={finding.severity} />
                     </div>
                     <p className="mt-2 text-xs text-muted">{finding.created_at}</p>
                   </li>
@@ -712,6 +726,73 @@ export function AgentsPage() {
         <p className="mt-2 text-sm text-fg-soft">{activity}</p>
       </section>
     </div>
+  )
+}
+
+// Fleet health one-liner under the roster heading — the monitor-first read
+// before the agent rows.
+function FleetSummary({ fleet }: { fleet: { total: number; enabled: number; running: number; failing: number } }) {
+  return (
+    <p className="mt-1 text-xs text-muted">
+      <span className="num">{fleet.total}</span> {fleet.total === 1 ? 'monitor' : 'monitors'} ·{' '}
+      <span className="num">{fleet.enabled}</span> enabled
+      {fleet.running > 0 ? (
+        <>
+          {' · '}
+          <span className="num text-warning">{fleet.running}</span> running
+        </>
+      ) : null}
+      {fleet.failing > 0 ? (
+        <>
+          {' · '}
+          <span className="num text-negative">{fleet.failing}</span> failing
+        </>
+      ) : null}
+    </p>
+  )
+}
+
+const RUN_STATUS_FILL: Readonly<Record<RunStatus, string>> = {
+  completed: 'bg-positive',
+  failed: 'bg-negative',
+  running: 'bg-warning',
+}
+
+function StatusDot({ status }: { status: RunStatus | null }) {
+  const fill = status === null ? 'bg-faint' : RUN_STATUS_FILL[status]
+  return (
+    <span
+      aria-hidden="true"
+      title={status ?? 'never run'}
+      className={`inline-block h-2 w-2 shrink-0 rounded-full ${fill}`}
+    />
+  )
+}
+
+// Per-agent run history as colored ticks (green completed / red failed / amber
+// running), oldest→newest — the signature monitor visual the text "Run history"
+// list was impersonating.
+function RunTimeline({ ticks }: { ticks: ReadonlyArray<RunStatus> }) {
+  if (ticks.length === 0) {
+    return <p className="mt-2 text-[10px] uppercase tracking-wide text-faint">No runs yet</p>
+  }
+  return (
+    <div className="mt-2 flex items-end gap-0.5" role="img" aria-label={`Last ${ticks.length} runs`}>
+      {ticks.map((status, i) => (
+        <span key={i} className={`h-3.5 w-1.5 rounded-sm ${RUN_STATUS_FILL[status]}`} />
+      ))}
+    </div>
+  )
+}
+
+// Reuse the canonical severity tone map for known severities; an unrecognized
+// value (the field is a free string on the wire) falls back to a muted pill.
+function FindingSeverityBadge({ severity }: { severity: string }) {
+  if ((FINDING_SEVERITIES as readonly string[]).includes(severity)) {
+    return <SeverityBadge severity={severity as FindingSeverity} />
+  }
+  return (
+    <span className="rounded border border-line-strong px-2 py-0.5 text-xs text-muted">{severity}</span>
   )
 }
 
