@@ -158,6 +158,14 @@ export async function loadPostgresScreenerCandidates(
         revenue_growth_yoy: latest.revenue === null || prior.revenue === null || prior.revenue === 0
           ? null
           : (latest.revenue - prior.revenue) / prior.revenue,
+        // Technical/momentum fields are vendor-sourced (screener-artifacts); the
+        // reported SEC path has no data for them.
+        forward_pe: null,
+        roic: null,
+        perf_quarter: null,
+        perf_year: null,
+        rsi_14: null,
+        week_52_high_distance: null,
       },
     });
   }

@@ -95,6 +95,16 @@ const DEFINITIONS: ReadonlyArray<FieldDefinition> = [
   { field: "revenue_growth_yoy", dimension: "fundamentals", kind: "numeric", sortable: true },
   { field: "pe_ratio", dimension: "fundamentals", kind: "numeric", sortable: true },
   { field: "market_cap", dimension: "fundamentals", kind: "numeric", sortable: true },
+
+  // Momentum/technical signals from the screener-artifact vendor feed
+  // (services/screener-artifacts). Numeric + sortable; the reported candidate path
+  // leaves them null, the vendor path populates them.
+  { field: "forward_pe", dimension: "fundamentals", kind: "numeric", sortable: true },
+  { field: "roic", dimension: "fundamentals", kind: "numeric", sortable: true },
+  { field: "perf_quarter", dimension: "fundamentals", kind: "numeric", sortable: true },
+  { field: "perf_year", dimension: "fundamentals", kind: "numeric", sortable: true },
+  { field: "rsi_14", dimension: "fundamentals", kind: "numeric", sortable: true },
+  { field: "week_52_high_distance", dimension: "fundamentals", kind: "numeric", sortable: true },
 ];
 
 const REGISTRY: ReadonlyMap<string, FieldDefinition> = new Map(

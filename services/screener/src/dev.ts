@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import { createPostgresCandidateRepository } from "./db-candidates.ts";
+import { createVendorScreenerCandidateRepository } from "./db-candidates-vendor.ts";
 import { createScreenerServer } from "./http.ts";
 import { createPostgresScreenRepository } from "./screen-repository.ts";
 
@@ -12,13 +13,19 @@ if (!databaseUrl) {
 }
 
 const pool = new Pool({ connectionString: databaseUrl });
-const candidates = createPostgresCandidateRepository(pool);
+// 'vendor' serves the bulk screener-artifacts universe (set-based, quote-optional);
+// 'reported' (default) keeps the SEC-reported margins/PE path.
+const candidateSource = process.env.SCREENER_CANDIDATE_SOURCE ?? "reported";
+const candidates =
+  candidateSource === "vendor"
+    ? createVendorScreenerCandidateRepository(pool)
+    : createPostgresCandidateRepository(pool);
 const screens = createPostgresScreenRepository(pool);
 const server = createScreenerServer({ candidates, screens });
 
 server.listen(port, host, () => {
   console.log(`screener listening on http://${host}:${port}`);
-  console.log("using live Postgres/provider-backed screener candidates");
+  console.log(`using ${candidateSource} screener candidates`);
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
