@@ -191,9 +191,9 @@ export function formatSignedNumber(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(2)}`
 }
 
-export function formatSignedPercent(value: number): string {
-  if (Object.is(value, -0) || value === 0) return '0.00%'
-  return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`
+export function formatSignedPercent(value: number, digits = 2): string {
+  if (Object.is(value, -0) || value === 0) return `${(0).toFixed(digits)}%`
+  return `${value > 0 ? '+' : ''}${value.toFixed(digits)}%`
 }
 
 export function formatQuotePrice(value: number, currency: string): string {

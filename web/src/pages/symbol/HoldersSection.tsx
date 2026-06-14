@@ -138,8 +138,10 @@ function OwnershipBars({ view }: { view: OwnershipView }) {
     label: bar.holderName,
     fraction: view.maxPct === 0 ? 0 : bar.pct / view.maxPct,
     value: `${bar.pct.toFixed(1)}%`,
-    delta: bar.sharesChange === 0 ? undefined : formatSignedCount(bar.sharesChange),
-    deltaDirection: bar.sharesChange === 0 ? undefined : signedDirection(bar.sharesChange),
+    delta:
+      bar.sharesChange === 0
+        ? undefined
+        : { text: formatSignedCount(bar.sharesChange), direction: signedDirection(bar.sharesChange) },
   }))
   return (
     <div className="flex flex-col gap-3">

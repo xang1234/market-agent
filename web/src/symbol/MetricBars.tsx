@@ -8,9 +8,9 @@ export type MetricBar = {
   // 0..1 of the row set's max — drives the fill width.
   fraction: number
   value: string
-  // Optional signed delta shown at the right (YoY / period-over-period).
-  delta?: string
-  deltaDirection?: SignedDirection
+  // Optional signed delta shown at the right (YoY / period-over-period). Text
+  // and direction travel together so a half-set state isn't representable.
+  delta?: { text: string; direction: SignedDirection }
 }
 
 // Horizontal labelled bars — the charts-first primitive shared by the
@@ -42,12 +42,10 @@ export function MetricBars({
           <span className="num w-20 shrink-0 text-right text-fg">{bar.value}</span>
           <span
             className={`num w-12 shrink-0 text-right ${
-              bar.delta !== undefined && bar.deltaDirection !== undefined
-                ? SIGNED_TEXT_CLASS[bar.deltaDirection]
-                : 'text-faint'
+              bar.delta ? SIGNED_TEXT_CLASS[bar.delta.direction] : 'text-faint'
             }`}
           >
-            {bar.delta ?? ''}
+            {bar.delta?.text ?? ''}
           </span>
         </li>
       ))}

@@ -12,6 +12,7 @@ import {
 } from '../../symbol/earnings.ts'
 import { beatMissSummary, type BeatMissChip, type BeatMissSummary } from '../../symbol/earningsStrip.ts'
 import { formatCurrency2 } from '../../symbol/format.ts'
+import { formatSignedPercent } from '../../symbol/quote.ts'
 import { pluralize } from '../../format/pluralize.ts'
 import { issuerIdFromSubject } from '../../symbol/profile.ts'
 import { Th } from '../../symbol/Th.tsx'
@@ -132,7 +133,7 @@ function BeatMissStrip({ summary }: { summary: BeatMissSummary }) {
           <>
             {' · avg surprise '}
             <span className={summary.avgSurprisePct >= 0 ? 'num text-positive' : 'num text-negative'}>
-              {formatSignedPct(summary.avgSurprisePct)}
+              {formatSignedPercent(summary.avgSurprisePct, 1)}
             </span>
           </>
         ) : null}
@@ -153,14 +154,10 @@ function BeatMissChipView({ chip }: { chip: BeatMissChip }) {
       </span>
       <span className="text-sm font-bold">{CHIP_LABEL[chip.direction]}</span>
       {chip.surprisePct !== null ? (
-        <span className="num text-[11px] font-medium">{formatSignedPct(chip.surprisePct)}</span>
+        <span className="num text-[11px] font-medium">{formatSignedPercent(chip.surprisePct, 1)}</span>
       ) : null}
     </li>
   )
-}
-
-function formatSignedPct(pct: number): string {
-  return `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`
 }
 
 function EarningsTable({ envelope }: { envelope: EarningsEventsEnvelope }) {

@@ -15,6 +15,7 @@ import {
   type StatementBasis,
 } from '../../symbol/statements.ts'
 import { formatCompactDollars } from '../../symbol/format.ts'
+import { formatSignedPercent } from '../../symbol/quote.ts'
 import {
   axisLabel,
   fetchSegments,
@@ -192,15 +193,12 @@ function RevenueBars({ response }: { response: GetStatementsResponse }) {
     label: formatPeriodLabel(bar.period),
     fraction: max === 0 ? 0 : bar.value / max,
     value: formatCompactDollars(bar.value),
-    delta: bar.deltaPct === null ? undefined : formatDeltaPct(bar.deltaPct),
-    deltaDirection: bar.deltaPct === null ? undefined : signedDirection(bar.deltaPct),
+    delta:
+      bar.deltaPct === null
+        ? undefined
+        : { text: formatSignedPercent(bar.deltaPct * 100, 0), direction: signedDirection(bar.deltaPct) },
   }))
   return <MetricBars bars={bars} testId="revenue-bars" ariaLabel="Revenue by period" />
-}
-
-function formatDeltaPct(fraction: number): string {
-  const pct = fraction * 100
-  return `${pct >= 0 ? '+' : ''}${pct.toFixed(0)}%`
 }
 
 function StatementsTable({ response }: { response: GetStatementsResponse }) {
