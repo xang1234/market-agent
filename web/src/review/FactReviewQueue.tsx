@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { SeverityBadge } from '../blocks/SeverityBadge.tsx'
 import { isStaleItem, severityForItem, tallySeverities, type ReviewSeverity } from './severity.ts'
+import { confidenceDistribution, type ConfidenceDistribution } from './queueStats.ts'
 
 export type FactReviewCandidate = Record<string, unknown>
 
@@ -93,11 +94,7 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject, onApproveA
 
   return (
     <section className="flex flex-col gap-3">
-      <QueueSummary
-        counts={tallySeverities(items)}
-        total={items.length}
-        onApproveAllLow={onApproveAllLow}
-      />
+      <QueueSummary items={items} onApproveAllLow={onApproveAllLow} />
       <ul className="flex flex-col gap-3">
         {decorated.map(({ item, severity, isStale }) => {
           const draft = draftFromItem(item)
@@ -212,33 +209,136 @@ function FactReviewQueueContent({ items, onApprove, onEdit, onReject, onApproveA
   )
 }
 
+// Charts-first queue header: the backlog's shape at a glance — a severity
+// stacked bar and a confidence-vs-threshold distribution — replacing a row of
+// count badges (and the rail that used to restate them). The detail item cards
+// follow below.
 function QueueSummary({
-  counts,
-  total,
+  items,
   onApproveAllLow,
 }: {
-  counts: Record<ReviewSeverity, number>
-  total: number
+  items: ReadonlyArray<FactReviewQueueItem>
   onApproveAllLow?: () => void | Promise<void>
 }) {
+  const counts = tallySeverities(items)
+  const dist = confidenceDistribution(items)
+  const stale = items.filter(isStaleItem).length
+  const total = items.length
   return (
-    <header className="flex flex-wrap items-center gap-2">
-      <span className="rounded-md border border-line bg-surface-2 px-2 py-1 text-xs text-muted">
-        <span className="num text-fg-soft">{total}</span> {total === 1 ? 'claim' : 'claims'} awaiting review
-      </span>
-      {counts.high > 0 ? <SeverityBadge severity="high">{counts.high} high</SeverityBadge> : null}
-      {counts.medium > 0 ? <SeverityBadge severity="medium">{counts.medium} medium</SeverityBadge> : null}
-      {counts.low > 0 ? <SeverityBadge severity="low">{counts.low} low</SeverityBadge> : null}
-      {onApproveAllLow && counts.low > 0 ? (
-        <button
-          type="button"
-          onClick={() => void onApproveAllLow()}
-          className="ml-auto rounded-md border border-line-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg hover:bg-surface-2"
-        >
-          Approve all low
-        </button>
-      ) : null}
+    <header className="flex flex-col gap-3 rounded-md border border-line bg-surface p-4">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="text-sm font-medium text-fg">
+          <span className="num">{total}</span> {total === 1 ? 'claim' : 'claims'} awaiting review
+        </span>
+        {stale > 0 ? <span className="num text-xs text-warning">{stale} stale</span> : null}
+        {onApproveAllLow && counts.low > 0 ? (
+          <button
+            type="button"
+            onClick={() => void onApproveAllLow()}
+            className="ml-auto rounded-md border border-line-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg hover:bg-surface-2"
+          >
+            Approve all low
+          </button>
+        ) : null}
+      </div>
+      <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+        <SeverityBar counts={counts} total={total} />
+        <ConfidenceHistogram dist={dist} />
+      </div>
     </header>
+  )
+}
+
+// Severity fills mirror SeverityBadge's tone map (high=negative, medium=warning,
+// low=muted) so the bar and the per-item badges read the same colour language.
+const SEVERITY_BAR_SEGMENTS: ReadonlyArray<{ key: ReviewSeverity; label: string; fill: string }> = [
+  { key: 'high', label: 'High', fill: 'bg-negative' },
+  { key: 'medium', label: 'Med', fill: 'bg-warning' },
+  { key: 'low', label: 'Low', fill: 'bg-muted' },
+]
+
+function SeverityBar({ counts, total }: { counts: Record<ReviewSeverity, number>; total: number }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-xs uppercase tracking-wide text-muted">By severity</span>
+      <div
+        className="flex h-3.5 overflow-hidden rounded-sm bg-surface-2"
+        role="img"
+        aria-label={`${counts.high} high, ${counts.medium} medium, ${counts.low} low`}
+      >
+        {SEVERITY_BAR_SEGMENTS.map((seg) =>
+          counts[seg.key] > 0 ? (
+            <span
+              key={seg.key}
+              className={`block h-full ${seg.fill}`}
+              style={{ width: `${total === 0 ? 0 : (counts[seg.key] / total) * 100}%` }}
+            />
+          ) : null,
+        )}
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs num text-muted">
+        {SEVERITY_BAR_SEGMENTS.map((seg) => (
+          <span key={seg.key} className="inline-flex items-center gap-1.5">
+            <span aria-hidden="true" className={`inline-block h-2 w-2 rounded-sm ${seg.fill}`} />
+            {seg.label} {counts[seg.key]}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Confidence distribution with the median approval threshold marked. Bars left
+// of the marker (below the bar) shade warning→negative by how far short they
+// fall; bars at/above shade positive — the shortfall story the severity model
+// already grades each item on, shown as a shape rather than three counts.
+function ConfidenceHistogram({ dist }: { dist: ConfidenceDistribution }) {
+  const marker = dist.thresholdMarker
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-xs uppercase tracking-wide text-muted">Confidence vs threshold</span>
+      <div className="relative">
+        <div
+          className="flex h-12 items-end gap-0.5"
+          role="img"
+          aria-label="Distribution of candidate confidence across the queue"
+        >
+          {dist.bins.map((bin, i) => {
+            const center = (bin.from + bin.to) / 2
+            const fill =
+              marker === null
+                ? 'bg-accent'
+                : center >= marker
+                  ? 'bg-positive'
+                  : center >= marker - 0.15
+                    ? 'bg-warning'
+                    : 'bg-negative'
+            return (
+              <span
+                key={i}
+                title={`${formatPercent(bin.from)}–${formatPercent(bin.to)}: ${bin.count}`}
+                className={`flex-1 rounded-t-sm ${dist.max === 0 ? '' : fill}`}
+                style={{
+                  height: `${dist.max === 0 ? 0 : Math.max(bin.count === 0 ? 0 : 8, (bin.count / dist.max) * 100)}%`,
+                }}
+              />
+            )
+          })}
+        </div>
+        {marker !== null ? (
+          <span
+            aria-hidden="true"
+            className="absolute inset-y-0 border-l border-dashed border-negative"
+            style={{ left: `${marker * 100}%` }}
+          />
+        ) : null}
+      </div>
+      <div className="flex justify-between text-[10px] num text-faint">
+        <span>0</span>
+        {marker !== null ? <span className="text-negative">thr {formatPercent(marker)}</span> : null}
+        <span>100%</span>
+      </div>
+    </div>
   )
 }
 

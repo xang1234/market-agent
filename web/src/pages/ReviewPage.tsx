@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { FactReviewQueue, type FactReviewQueueAction, type FactReviewQueueItem, type FactReviewQueueRejectAction } from '../review/FactReviewQueue.tsx'
 import {
@@ -7,10 +7,8 @@ import {
   fetchFactReviewQueue,
   rejectFactReview,
 } from '../review/factReviewClient.ts'
-import { isStaleItem, severityForItem, tallySeverities } from '../review/severity.ts'
-import { SeverityBadge } from '../blocks/SeverityBadge.tsx'
+import { severityForItem } from '../review/severity.ts'
 import { useAuth } from '../shell/useAuth.ts'
-import { useRightRailContent } from '../shell/useRightRailContent.ts'
 
 type ReviewLoadState =
   | { kind: 'loading' }
@@ -125,13 +123,11 @@ export function ReviewPage() {
 
   const visibleState: ReviewLoadState = reviewerId === null ? { kind: 'unauthenticated' } : state
 
-  // Push queue-health context into the shell-owned right rail; cleared when
-  // unauthenticated or on unmount.
-  const railItems = visibleState.kind === 'ready' ? visibleState.items : null
-  useRightRailContent(railItems ? <ReviewRail items={railItems} /> : null, [railItems])
-
+  // No right rail: the old "Queue health" rail restated the queue summary
+  // header verbatim. The charts-first summary now lives in the queue itself and
+  // the editor takes the full width.
   return (
-    <div className="flex flex-1 flex-col gap-6 overflow-auto p-8">
+    <div className="flex flex-1 flex-col gap-4 overflow-auto p-6">
       <header>
         <h1 className="text-2xl font-semibold">Review</h1>
         <p className="mt-1 text-sm text-muted">
@@ -160,44 +156,6 @@ export function ReviewPage() {
           />
         </>
       )}
-    </div>
-  )
-}
-
-function ReviewRail({ items }: { items: ReadonlyArray<FactReviewQueueItem> }) {
-  const counts = tallySeverities(items)
-  const stale = items.filter(isStaleItem).length
-  return (
-    <div className="flex flex-col gap-4 p-4">
-      <section>
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted">Queue health</h2>
-        <dl className="mt-2 flex flex-col gap-2 text-sm">
-          <RailRow label="Awaiting">
-            <span className="num text-fg">{items.length}</span>
-          </RailRow>
-          <RailRow label="High severity">
-            <SeverityBadge severity="high">{counts.high}</SeverityBadge>
-          </RailRow>
-          <RailRow label="Medium severity">
-            <SeverityBadge severity="medium">{counts.medium}</SeverityBadge>
-          </RailRow>
-          <RailRow label="Low severity">
-            <SeverityBadge severity="low">{counts.low}</SeverityBadge>
-          </RailRow>
-          <RailRow label="Stale">
-            <span className={`num ${stale > 0 ? 'text-warning' : 'text-muted'}`}>{stale}</span>
-          </RailRow>
-        </dl>
-      </section>
-    </div>
-  )
-}
-
-function RailRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-2">
-      <dt className="text-muted">{label}</dt>
-      <dd>{children}</dd>
     </div>
   )
 }
