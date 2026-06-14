@@ -7,7 +7,7 @@ import { gridsPageMemoryFor } from "./gridsPageState.ts";
 import { useGridRun } from "./useGridRun.ts";
 import { GridBuilder, type GridBuilderSubmit } from "./GridBuilder.tsx";
 import { GridTable } from "./GridTable.tsx";
-import type { GridColumn } from "./gridsTypes.ts";
+import type { GridColumn, GridRunSummary } from "./gridsTypes.ts";
 
 export function GridsPage(): ReactElement {
   const { session } = useAuth();
@@ -74,15 +74,41 @@ export function GridsPage(): ReactElement {
       {error ? <div className="text-sm text-negative">{error}</div> : null}
       {detail ? (
         <div className="space-y-2">
-          <div className="text-xs text-muted">
-            {detail.run.status} · {detail.run.cell_done}/{detail.run.cell_total} cells
-            {detail.run.dropped_row_count > 0 ? ` · ${detail.run.dropped_row_count} rows dropped (cap 25)` : ""}
-          </div>
+          <GridRunProgress run={detail.run} />
           <GridTable columns={activeColumns} detail={detail} />
         </div>
       ) : runId ? (
         <div className="text-sm text-muted">Running…</div>
       ) : null}
+    </div>
+  );
+}
+
+// Run status + a fill bar over cell completion. The grid already fills in
+// cell-by-cell; the bar gives the at-a-glance "how far along" the text line
+// alone couldn't.
+function GridRunProgress({ run }: { run: GridRunSummary }): ReactElement {
+  const pct = run.cell_total > 0 ? run.cell_done / run.cell_total : 0;
+  return (
+    <div className="space-y-1">
+      <div className="text-xs text-muted">
+        {run.status} · <span className="num text-fg">{run.cell_done}/{run.cell_total}</span> cells ·{" "}
+        <span className="num">{Math.round(pct * 100)}%</span>
+        {run.dropped_row_count > 0 ? ` · ${run.dropped_row_count} rows dropped (cap 25)` : ""}
+      </div>
+      <div
+        className="h-1.5 overflow-hidden rounded-sm bg-surface-2"
+        role="progressbar"
+        aria-label="Grid cell completion"
+        aria-valuenow={run.cell_done}
+        aria-valuemin={0}
+        aria-valuemax={run.cell_total}
+      >
+        <div
+          className="h-full rounded-sm bg-accent transition-[width] duration-300"
+          style={{ width: `${pct * 100}%` }}
+        />
+      </div>
     </div>
   );
 }

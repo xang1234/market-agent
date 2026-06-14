@@ -32,6 +32,7 @@ import {
   type ScreenerResultRow,
   type SortDirection,
 } from './contracts.ts'
+import { ScreenerSummaryView } from './ScreenerSummary.tsx'
 import { QUERY_TEMPLATES, type QueryTemplate } from './queryTemplates.ts'
 import {
   createDefaultQueryDraft,
@@ -693,6 +694,7 @@ function ScreenerResults({
 
   return (
     <section className={`flex flex-col gap-3 ${PANEL_CLASS} p-3`}>
+      {response.rows.length > 0 ? <ScreenerSummaryView response={response} /> : null}
       <div className="flex items-center justify-between text-xs text-muted">
         <span>
           {response.total_count === 0

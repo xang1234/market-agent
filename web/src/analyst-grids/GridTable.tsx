@@ -13,10 +13,19 @@ function cellText(cell: GridCellDetail | undefined): string {
   return cell.display?.value ?? "—";
 }
 
-function toneClass(cell: GridCellDetail | undefined): string {
-  if (cell?.display?.tone === "best") return " text-positive";
-  if (cell?.display?.tone === "worst") return " text-negative";
-  return "";
+// Per-tone classes: the value's text colour and the cell's background tint.
+// Shading the cell turns the matrix into a scannable heatmap (a row of green vs
+// a row of red reads in one pass); the text colour keeps the value legible on
+// the tint. One map so the two never drift. Leading spaces let callers
+// concatenate into a className template.
+const TONE_CLASS: Readonly<Record<"best" | "worst", { text: string; bg: string }>> = {
+  best: { text: " text-positive", bg: " bg-positive-soft" },
+  worst: { text: " text-negative", bg: " bg-negative-soft" },
+};
+
+function toneClasses(cell: GridCellDetail | undefined): { text: string; bg: string } {
+  const tone = cell?.display?.tone;
+  return tone ? TONE_CLASS[tone] : { text: "", bg: "" };
 }
 
 type GridTableProps = { columns: ReadonlyArray<GridColumn>; detail: GridRunDetail };
@@ -46,10 +55,11 @@ export function GridTable({ columns, detail }: GridTableProps): ReactElement {
               {columns.map((col) => {
                 const cell = byKey.get(cellKey(row.grid_row_id, col.column_key));
                 const inspectable = Boolean(cell && cell.snapshot_id && cell.primary_ref);
+                const tone = toneClasses(cell);
                 return (
                   <td
                     key={col.column_key}
-                    className="px-3 py-2"
+                    className={`px-3 py-2${tone.bg}`}
                     data-cell-status={cell?.status ?? "pending"}
                     data-cell-inspectable={inspectable ? "true" : "false"}
                     data-snapshot-id={cell?.snapshot_id ?? undefined}
@@ -59,7 +69,7 @@ export function GridTable({ columns, detail }: GridTableProps): ReactElement {
                       // Space) and reachable by tab — a clickable <td> is not.
                       <button
                         type="button"
-                        className={`num text-left text-fg underline decoration-dotted${toneClass(cell)}`}
+                        className={`num text-left text-fg underline decoration-dotted${tone.text}`}
                         onClick={() =>
                           inspector?.openInspection({
                             snapshotId: cell.snapshot_id as string,
@@ -70,7 +80,7 @@ export function GridTable({ columns, detail }: GridTableProps): ReactElement {
                         {cellText(cell)}
                       </button>
                     ) : (
-                      <span className={`num text-fg${toneClass(cell)}`}>{cellText(cell)}</span>
+                      <span className={`num text-fg${tone.text}`}>{cellText(cell)}</span>
                     )}
                   </td>
                 );
