@@ -10,10 +10,14 @@ import {
   type EarningsEventsEnvelope,
   type EarningsSurpriseDirection,
 } from '../../symbol/earnings.ts'
+import { beatMissSummary, type BeatMissChip, type BeatMissSummary } from '../../symbol/earningsStrip.ts'
 import { formatCurrency2 } from '../../symbol/format.ts'
+import { pluralize } from '../../format/pluralize.ts'
 import { issuerIdFromSubject } from '../../symbol/profile.ts'
 import { Th } from '../../symbol/Th.tsx'
 import { useFetched } from '../../symbol/useFetched.ts'
+
+const BEAT_MISS_COUNT = 4
 
 export function EarningsSection() {
   const { subject } = useSubjectDetailContext()
@@ -31,6 +35,19 @@ export function EarningsSection() {
 
   return (
     <div data-testid="section-earnings" className="flex w-full flex-col gap-6 p-8">
+      <Card
+        testId="earnings-beats"
+        headingId="earnings-beats-heading"
+        heading={`Beats & misses · last ${BEAT_MISS_COUNT} quarters`}
+      >
+        <FetchStateView
+          state={earnings}
+          noun="earnings history"
+          idleMessage="Issuer context unavailable for this entry. Open this symbol from search to load earnings."
+        >
+          {(envelope) => <BeatMissStrip summary={beatMissSummary(envelope.events, BEAT_MISS_COUNT)} />}
+        </FetchStateView>
+      </Card>
       <Card
         testId="earnings-chronology"
         headingId="earnings-chronology-heading"
@@ -82,6 +99,68 @@ export function EarningsSection() {
       </div>
     </div>
   )
+}
+
+const CHIP_CLASS: Readonly<Record<EarningsSurpriseDirection, string>> = {
+  beat: 'border-positive/40 bg-positive-soft text-positive',
+  miss: 'border-negative/40 bg-negative-soft text-negative',
+  inline: 'border-line bg-surface-2 text-muted',
+}
+
+const CHIP_LABEL: Readonly<Record<EarningsSurpriseDirection, string>> = {
+  beat: 'Beat',
+  miss: 'Miss',
+  inline: 'Inline',
+}
+
+// At-a-glance beat/miss chips for the most recent quarters, plus a one-line
+// streak summary — the charts-first lede above the detail table.
+function BeatMissStrip({ summary }: { summary: BeatMissSummary }) {
+  if (summary.chips.length === 0) {
+    return <p className="text-sm text-muted">No earnings releases recorded.</p>
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      <ul data-testid="beat-miss-strip" className="flex flex-wrap gap-2">
+        {summary.chips.map((chip) => (
+          <BeatMissChipView key={chip.key} chip={chip} />
+        ))}
+      </ul>
+      <p className="text-xs text-muted">
+        {summary.beatCount} of last {summary.total} {pluralize(summary.total, 'quarter')} beat
+        {summary.avgSurprisePct !== null ? (
+          <>
+            {' · avg surprise '}
+            <span className={summary.avgSurprisePct >= 0 ? 'num text-positive' : 'num text-negative'}>
+              {formatSignedPct(summary.avgSurprisePct)}
+            </span>
+          </>
+        ) : null}
+      </p>
+    </div>
+  )
+}
+
+function BeatMissChipView({ chip }: { chip: BeatMissChip }) {
+  return (
+    <li
+      data-testid={`beat-miss-chip-${chip.key}`}
+      data-direction={chip.direction}
+      className={`flex min-w-[72px] flex-1 flex-col items-center gap-0.5 rounded-lg border px-3 py-2 ${CHIP_CLASS[chip.direction]}`}
+    >
+      <span className="num text-[10px] uppercase tracking-wide opacity-80">
+        FY{String(chip.fiscalYear).slice(2)} {chip.fiscalPeriod}
+      </span>
+      <span className="text-sm font-bold">{CHIP_LABEL[chip.direction]}</span>
+      {chip.surprisePct !== null ? (
+        <span className="num text-[11px] font-medium">{formatSignedPct(chip.surprisePct)}</span>
+      ) : null}
+    </li>
+  )
+}
+
+function formatSignedPct(pct: number): string {
+  return `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`
 }
 
 function EarningsTable({ envelope }: { envelope: EarningsEventsEnvelope }) {
