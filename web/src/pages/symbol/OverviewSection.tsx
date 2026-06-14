@@ -30,7 +30,7 @@ import { useConsensus } from '../../symbol/useConsensus.ts'
 import { ConsensusBody, PriceTargetBody } from '../../symbol/consensusViews.tsx'
 import { buildKeyStatsGrid } from './keyStatsGrid.ts'
 import { KeyStatsGrid } from './KeyStatsGrid.tsx'
-import { SECTION_STACK_CLASS } from './sectionLayout.ts'
+import { SECTION_STACK_CLASS } from '../../symbol/surfaceStyles.ts'
 
 type PriceSeries = { bars: NormalizedBar[]; currency: string }
 

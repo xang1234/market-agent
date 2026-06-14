@@ -36,7 +36,7 @@ import {
 import { MetricBars, type MetricBar } from '../../symbol/MetricBars.tsx'
 import { Th } from '../../symbol/Th.tsx'
 import { useFetched, type FetchedResult } from '../../symbol/useFetched.ts'
-import { SECTION_STACK_CLASS } from './sectionLayout.ts'
+import { SECTION_STACK_CLASS } from '../../symbol/surfaceStyles.ts'
 
 const TOP_OWNERS = 6
 

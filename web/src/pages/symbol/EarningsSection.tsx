@@ -17,7 +17,7 @@ import { pluralize } from '../../format/pluralize.ts'
 import { issuerIdFromSubject } from '../../symbol/profile.ts'
 import { Th } from '../../symbol/Th.tsx'
 import { useFetched } from '../../symbol/useFetched.ts'
-import { SECTION_STACK_CLASS } from './sectionLayout.ts'
+import { SECTION_STACK_CLASS } from '../../symbol/surfaceStyles.ts'
 
 const BEAT_MISS_COUNT = 4
 

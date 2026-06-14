@@ -14,7 +14,7 @@ export function Card({ testId, headingId, heading, action, children }: CardProps
     <section
       data-testid={testId}
       aria-labelledby={headingId}
-      className={`flex flex-col gap-2.5 ${CARD_CLASS} p-4`}
+      className={`flex flex-col gap-3 ${CARD_CLASS} p-4`}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3

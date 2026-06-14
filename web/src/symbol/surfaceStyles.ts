@@ -19,3 +19,11 @@ export const CARD_CLASS = `${PANEL_CLASS} shadow-sm`
 // Recessed inset tier (bg-surface-2): metric tiles and form controls that
 // should read as carved into the surface rather than floating above it.
 export const INSET_SURFACE_CLASS = 'rounded-lg border border-line bg-surface-2'
+
+// Vertical stack for a subject-detail sub-tab (Overview / Financials /
+// Earnings / Holders / Signals). Every section shares the same canvas chrome —
+// full width, a single column of cards, consistent gap and padding — so the
+// density lives here once rather than copy-pasted across five files. Tuned
+// dense (gap-4 p-6) to read like a data terminal, the charts-first redesign
+// target, instead of a roomy web page.
+export const SECTION_STACK_CLASS = 'flex w-full flex-col gap-4 p-6'

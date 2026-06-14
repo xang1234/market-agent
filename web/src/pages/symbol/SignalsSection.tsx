@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSubjectDetailContext } from '../../shell/subjectDetailOutletContext.ts'
 import { Card } from '../../symbol/Card.tsx'
-import { CARD_CLASS } from '../../symbol/surfaceStyles.ts'
+import { CARD_CLASS, SECTION_STACK_CLASS } from '../../symbol/surfaceStyles.ts'
 import { formatCompactNumber } from '../../symbol/format.ts'
 import { issuerIdFromSubject } from '../../symbol/profile.ts'
 import {
@@ -30,7 +30,6 @@ import {
 } from '../../symbol/signedColor.ts'
 import { Sparkline } from '../../symbol/Sparkline.tsx'
 import { fetchThemeMembershipRationales } from '../../symbol/themeRationale.ts'
-import { SECTION_STACK_CLASS } from './sectionLayout.ts'
 
 const PLACEHOLDER_CLASS = 'text-sm text-muted'
 

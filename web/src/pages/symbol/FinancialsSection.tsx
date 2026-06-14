@@ -27,7 +27,7 @@ import { formatPeriodLabel, revenueBarsFromStatements } from '../../symbol/finan
 import { MetricBars, type MetricBar } from '../../symbol/MetricBars.tsx'
 import { signedDirection } from '../../symbol/signedColor.ts'
 import { seriesHexAt } from '../../symbol/seriesPalette.ts'
-import { SECTION_STACK_CLASS } from './sectionLayout.ts'
+import { SECTION_STACK_CLASS } from '../../symbol/surfaceStyles.ts'
 
 const STATEMENT_FAMILY = 'income' as const
 type PeriodMode = 'annual' | 'quarterly'
@@ -292,7 +292,7 @@ function SegmentsView({ envelope }: { envelope: SegmentFactsEnvelope }) {
   }
 
   return (
-    <div className="grid gap-5 md:grid-cols-[minmax(0,150px)_minmax(0,1fr)] md:items-center">
+    <div className="grid gap-4 md:grid-cols-[minmax(0,150px)_minmax(0,1fr)] md:items-center">
       <SegmentDonut slices={slices} />
       <SegmentBreakdownList slices={slices} reportingCurrency={envelope.reporting_currency} />
       {envelope.coverage_warnings.length > 0 && (
