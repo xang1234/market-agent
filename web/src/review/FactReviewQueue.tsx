@@ -4,6 +4,7 @@ import { isStaleItem, severityForItem, tallySeverities, type ReviewSeverity } fr
 import { confidenceDistribution, type ConfidenceDistribution } from './queueStats.ts'
 import { severityFillClass } from '../blocks/severityTone.ts'
 import { StackedBar, StackedBarLegend, type StackedSegment } from '../symbol/StackedBar.tsx'
+import { VerticalBars } from '../symbol/VerticalBars.tsx'
 
 export type FactReviewCandidate = Record<string, unknown>
 
@@ -282,37 +283,22 @@ function SeverityBar({ counts }: { counts: Record<ReviewSeverity, number> }) {
 // already grades each item on, shown as a shape rather than three counts.
 function ConfidenceHistogram({ dist }: { dist: ConfidenceDistribution }) {
   const marker = dist.thresholdMarker
+  const bars = dist.bins.map((bin, i) => ({
+    key: String(i),
+    value: bin.count,
+    className: confidenceBandClass((bin.from + bin.to) / 2, marker),
+    title: `${formatPercent(bin.from)}–${formatPercent(bin.to)}: ${bin.count}`,
+  }))
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-xs uppercase tracking-wide text-muted">Confidence vs threshold</span>
       <div className="relative">
-        <div
-          className="flex h-12 items-end gap-0.5"
-          role="img"
-          aria-label="Distribution of candidate confidence across the queue"
-        >
-          {dist.bins.map((bin, i) => {
-            const center = (bin.from + bin.to) / 2
-            const fill =
-              marker === null
-                ? 'bg-accent'
-                : center >= marker
-                  ? 'bg-positive'
-                  : center >= marker - 0.15
-                    ? 'bg-warning'
-                    : 'bg-negative'
-            return (
-              <span
-                key={i}
-                title={`${formatPercent(bin.from)}–${formatPercent(bin.to)}: ${bin.count}`}
-                className={`flex-1 rounded-t-sm ${dist.max === 0 ? '' : fill}`}
-                style={{
-                  height: `${dist.max === 0 ? 0 : Math.max(bin.count === 0 ? 0 : 8, (bin.count / dist.max) * 100)}%`,
-                }}
-              />
-            )
-          })}
-        </div>
+        <VerticalBars
+          bars={bars}
+          heightClass="h-12"
+          minBarPct={8}
+          ariaLabel="Distribution of candidate confidence across the queue"
+        />
         {marker !== null ? (
           <span
             aria-hidden="true"
@@ -328,6 +314,16 @@ function ConfidenceHistogram({ dist }: { dist: ConfidenceDistribution }) {
       </div>
     </div>
   )
+}
+
+// Shade a confidence bin by how far below the median threshold its centre sits:
+// at/above the bar = positive, within 0.15 below = warning, further below =
+// negative. No marker (empty queue) = neutral accent.
+function confidenceBandClass(center: number, marker: number | null): string {
+  if (marker === null) return 'bg-accent'
+  if (center >= marker) return 'bg-positive'
+  if (center >= marker - 0.15) return 'bg-warning'
+  return 'bg-negative'
 }
 
 function ConfidenceChip({ label, value }: { label: string; value: number }) {

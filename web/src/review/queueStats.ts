@@ -1,56 +1,29 @@
-// Pure summary stats for the fact-review queue's charts-first header. The queue
-// component renders a thin presenter over these, so the binning/median logic is
-// tested here rather than buried in JSX. Input is structural (only the fields
-// the stats need) so this stays decoupled from the full FactReviewQueueItem —
-// mirroring severity.ts and avoiding a circular import.
+import { median, numericDistribution, type Distribution } from '../symbol/distribution.ts'
+
+// Structural input — only the fields the confidence summary needs, decoupled
+// from the full FactReviewQueueItem (mirrors severity.ts, avoids a circular
+// import).
 type ConfidenceInput = { confidence: number; threshold: number }
 
-export type ConfidenceBin = { from: number; to: number; count: number }
-
-export type ConfidenceDistribution = {
-  bins: ReadonlyArray<ConfidenceBin>
-  // Tallest bin, for normalizing bar heights. 0 when the queue is empty.
-  max: number
+export type ConfidenceDistribution = Distribution & {
   // Median approval threshold across the queue — the reference line candidates
-  // are graded against. null when the queue is empty.
+  // are graded against. null when the queue is empty. Thresholds vary per item,
+  // so a single axis can't draw each; the median is the one meaningful marker.
   thresholdMarker: number | null
-  total: number
 }
 
-const DEFAULT_BINS = 10
-
-// Bin the queue's confidence values across [0, 1] and locate the median
-// approval threshold. Thresholds vary per candidate, so a single histogram axis
-// can't draw each one — the median is the one reference line that means
-// "candidates left of here are below the bar that graded them" for the typical
-// item, which is what the reviewer reads at a glance.
+// Bin the queue's confidence values over the fixed [0, 1] probability domain and
+// locate the median approval threshold. A thin wrapper over the shared
+// numericDistribution.
 export function confidenceDistribution(
   items: ReadonlyArray<ConfidenceInput>,
-  binCount: number = DEFAULT_BINS,
+  binCount?: number,
 ): ConfidenceDistribution {
-  // A non-positive-integer binCount (0, negative, fractional, NaN) would build a
-  // ragged bin array and index out of bounds; fall back to the default instead.
-  const n = Number.isInteger(binCount) && binCount > 0 ? binCount : DEFAULT_BINS
-  const bins: ConfidenceBin[] = Array.from({ length: n }, (_, i) => ({
-    from: i / n,
-    to: (i + 1) / n,
-    count: 0,
-  }))
-  for (const item of items) {
-    const c = clamp01(item.confidence)
-    // 1.0 lands in the last bin rather than spilling one past the array.
-    const idx = Math.min(n - 1, Math.floor(c * n))
-    bins[idx].count += 1
-  }
-  const max = bins.reduce((m, b) => Math.max(m, b.count), 0)
-  return { bins, max, thresholdMarker: medianThreshold(items), total: items.length }
-}
-
-function medianThreshold(items: ReadonlyArray<ConfidenceInput>): number | null {
-  if (items.length === 0) return null
-  const sorted = items.map((i) => clamp01(i.threshold)).sort((a, b) => a - b)
-  const mid = Math.floor(sorted.length / 2)
-  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+  const distribution = numericDistribution(
+    items.map((item) => item.confidence),
+    { binCount, domain: [0, 1] },
+  )
+  return { ...distribution, thresholdMarker: median(items.map((item) => clamp01(item.threshold))) }
 }
 
 function clamp01(value: number): number {
