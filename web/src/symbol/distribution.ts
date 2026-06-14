@@ -39,7 +39,8 @@ export function numericDistribution(
   options: { binCount?: number; domain?: readonly [number, number] } = {},
 ): Distribution {
   const requested = options.binCount
-  const n = Number.isInteger(requested) && (requested as number) > 0 ? (requested as number) : DEFAULT_BINS
+  const n =
+    typeof requested === 'number' && Number.isInteger(requested) && requested > 0 ? requested : DEFAULT_BINS
   const finite = finiteNumbers(values)
   const lo = options.domain ? options.domain[0] : finite.length > 0 ? Math.min(...finite) : 0
   const hi = options.domain ? options.domain[1] : finite.length > 0 ? Math.max(...finite) : 0
