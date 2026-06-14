@@ -17,6 +17,7 @@ import { pluralize } from '../../format/pluralize.ts'
 import { issuerIdFromSubject } from '../../symbol/profile.ts'
 import { Th } from '../../symbol/Th.tsx'
 import { useFetched } from '../../symbol/useFetched.ts'
+import { SECTION_STACK_CLASS } from '../../symbol/surfaceStyles.ts'
 
 const BEAT_MISS_COUNT = 4
 
@@ -35,7 +36,7 @@ export function EarningsSection() {
   const consensus = useConsensus(issuerId)
 
   return (
-    <div data-testid="section-earnings" className="flex w-full flex-col gap-6 p-8">
+    <div data-testid="section-earnings" className={SECTION_STACK_CLASS}>
       <Card
         testId="earnings-beats"
         headingId="earnings-beats-heading"
@@ -49,20 +50,7 @@ export function EarningsSection() {
           {(envelope) => <BeatMissStrip summary={beatMissSummary(envelope.events, BEAT_MISS_COUNT)} />}
         </FetchStateView>
       </Card>
-      <Card
-        testId="earnings-chronology"
-        headingId="earnings-chronology-heading"
-        heading="Earnings · last 8 quarters"
-      >
-        <FetchStateView
-          state={earnings}
-          noun="earnings history"
-          idleMessage="Issuer context unavailable for this entry. Open this symbol from search to load earnings."
-        >
-          {(envelope) => <EarningsTable envelope={envelope} />}
-        </FetchStateView>
-      </Card>
-      <div className="grid gap-6 md:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
         <Card
           testId="earnings-consensus"
           headingId="earnings-consensus-heading"
@@ -98,6 +86,21 @@ export function EarningsSection() {
           </FetchStateView>
         </Card>
       </div>
+      {/* Quarter-by-quarter table is the detail layer — kept last so the
+          section reads at-a-glance first (beat/miss chips, then consensus). */}
+      <Card
+        testId="earnings-chronology"
+        headingId="earnings-chronology-heading"
+        heading="Earnings · last 8 quarters"
+      >
+        <FetchStateView
+          state={earnings}
+          noun="earnings history"
+          idleMessage="Issuer context unavailable for this entry. Open this symbol from search to load earnings."
+        >
+          {(envelope) => <EarningsTable envelope={envelope} />}
+        </FetchStateView>
+      </Card>
     </div>
   )
 }
