@@ -90,6 +90,15 @@ export type ScreenerFundamentalsSummary = {
   operating_margin: number | null
   net_margin: number | null
   revenue_growth_yoy: number | null
+  // Momentum/technical fields from the screener-artifacts vendor feed. Note these
+  // are in percent units (perf_year 20.67 = 20.67%), unlike the fractional margins
+  // and change_pct — the filter hints below call that out.
+  forward_pe: number | null
+  roic: number | null
+  perf_quarter: number | null
+  perf_year: number | null
+  rsi_14: number | null
+  week_52_high_distance: number | null
 }
 
 export type ScreenerResultRow = {
@@ -179,6 +188,13 @@ export const FUNDAMENTALS_NUMERIC_FIELDS: ReadonlyArray<NumericRangeField> = [
   { field: 'operating_margin', label: 'Operating margin', hint: 'fractional', step: 'any' },
   { field: 'net_margin', label: 'Net margin', hint: 'fractional', step: 'any' },
   { field: 'revenue_growth_yoy', label: 'Revenue YoY', hint: 'fractional', step: 'any' },
+  // Momentum/technical (screener-artifacts vendor feed). Percent-unit, not fractional.
+  { field: 'forward_pe', label: 'Forward P/E', step: 'any' },
+  { field: 'roic', label: 'ROIC', hint: 'percent, e.g. 13.9', step: 'any' },
+  { field: 'perf_quarter', label: 'Perf 3M', hint: 'percent', step: 'any' },
+  { field: 'perf_year', label: 'Perf 1Y', hint: 'percent', step: 'any' },
+  { field: 'rsi_14', label: 'RSI (14)', hint: '0–100', step: 'any' },
+  { field: 'week_52_high_distance', label: 'Dist. 52w high', hint: 'percent, ≤ 0', step: 'any' },
 ]
 
 // Sortable fields surfaced in the UI sort picker. Mirrors the `sortable`
@@ -193,4 +209,10 @@ export const SORTABLE_FIELDS: ReadonlyArray<{ field: string; label: string }> = 
   { field: 'operating_margin', label: 'Operating margin' },
   { field: 'net_margin', label: 'Net margin' },
   { field: 'revenue_growth_yoy', label: 'Revenue YoY' },
+  { field: 'forward_pe', label: 'Forward P/E' },
+  { field: 'roic', label: 'ROIC' },
+  { field: 'perf_quarter', label: 'Perf 3M' },
+  { field: 'perf_year', label: 'Perf 1Y' },
+  { field: 'rsi_14', label: 'RSI (14)' },
+  { field: 'week_52_high_distance', label: 'Dist. 52w high' },
 ]

@@ -739,6 +739,9 @@ function ScreenerResults({
                 <th scope="col" className="py-2 pr-3 text-right">Volume</th>
                 <th scope="col" className="py-2 pr-3 text-right">Market cap</th>
                 <th scope="col" className="py-2 pr-3 text-right">P/E</th>
+                <th scope="col" className="py-2 pr-3 text-right">Perf 1Y</th>
+                <th scope="col" className="py-2 pr-3 text-right">RSI</th>
+                <th scope="col" className="py-2 pr-3 text-right">52w high</th>
               </tr>
             </thead>
             <tbody>
@@ -779,6 +782,17 @@ function ScreenerResults({
                   <td className="py-2 pr-3 text-right num">{cells.volume}</td>
                   <td className="py-2 pr-3 text-right num">{cells.marketCap}</td>
                   <td className="py-2 pr-3 text-right num">{cells.peRatio}</td>
+                  <td className="py-2 pr-3 text-right">
+                    {cells.perfYear === null ? (
+                      <span className="num text-muted">—</span>
+                    ) : (
+                      <ChangePill direction={cells.perfYear.direction}>
+                        {cells.perfYear.text}
+                      </ChangePill>
+                    )}
+                  </td>
+                  <td className="py-2 pr-3 text-right num">{cells.rsi}</td>
+                  <td className="py-2 pr-3 text-right num">{cells.dist52wHigh}</td>
                 </tr>
               ))}
             </tbody>
@@ -799,6 +813,11 @@ type FormattedCells = {
   volume: string
   marketCap: string
   peRatio: string
+  // Momentum/technical (vendor feed). perfYear is a signed pill (already percent);
+  // rsi + dist52wHigh are plain numbers, em-dash when absent.
+  perfYear: ChangeCell | null
+  rsi: string
+  dist52wHigh: string
 }
 
 function formatRowCells(row: ScreenerResultRow): { row: ScreenerResultRow; cells: FormattedCells } {
@@ -817,8 +836,21 @@ function formatRowCells(row: ScreenerResultRow): { row: ScreenerResultRow; cells
       : formatCompactCurrency(row.fundamentals.market_cap, row.quote.currency)
   const peRatio =
     row.fundamentals.pe_ratio === null ? '—' : row.fundamentals.pe_ratio.toFixed(1)
+  // perf_year is already in percent units (e.g. 20.67 = 20.67%), so the pill shows
+  // the magnitude with the sign carried by its arrow; week_52_high_distance is the
+  // (typically negative) percent gap below the 52-week high.
+  const perfYearValue = row.fundamentals.perf_year
+  const perfYear: ChangeCell | null =
+    perfYearValue === null
+      ? null
+      : { direction: signedDirection(perfYearValue), text: `${Math.abs(perfYearValue).toFixed(1)}%` }
+  const rsi = row.fundamentals.rsi_14 === null ? '—' : row.fundamentals.rsi_14.toFixed(0)
+  const dist52wHigh =
+    row.fundamentals.week_52_high_distance === null
+      ? '—'
+      : `${row.fundamentals.week_52_high_distance.toFixed(1)}%`
   return {
     row,
-    cells: { lastPrice, change: changeCell, volume, marketCap, peRatio },
+    cells: { lastPrice, change: changeCell, volume, marketCap, peRatio, perfYear, rsi, dist52wHigh },
   }
 }

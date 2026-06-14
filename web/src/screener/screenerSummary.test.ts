@@ -32,6 +32,12 @@ function row(over: {
       operating_margin: null,
       net_margin: null,
       revenue_growth_yoy: null,
+      forward_pe: null,
+      roic: null,
+      perf_quarter: null,
+      perf_year: null,
+      rsi_14: null,
+      week_52_high_distance: null,
     },
   }
 }
