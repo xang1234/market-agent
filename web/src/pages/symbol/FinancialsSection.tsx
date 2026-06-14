@@ -15,6 +15,7 @@ import {
   type StatementBasis,
 } from '../../symbol/statements.ts'
 import { formatCompactDollars } from '../../symbol/format.ts'
+import { formatSignedPercent } from '../../symbol/quote.ts'
 import {
   axisLabel,
   fetchSegments,
@@ -22,6 +23,10 @@ import {
   type SegmentFactsEnvelope,
 } from '../../symbol/segments.ts'
 import { useFetched } from '../../symbol/useFetched.ts'
+import { formatPeriodLabel, revenueBarsFromStatements } from '../../symbol/financialsCharts.ts'
+import { MetricBars, type MetricBar } from '../../symbol/MetricBars.tsx'
+import { signedDirection } from '../../symbol/signedColor.ts'
+import { seriesHexAt } from '../../symbol/seriesPalette.ts'
 
 const STATEMENT_FAMILY = 'income' as const
 type PeriodMode = 'annual' | 'quarterly'
@@ -71,10 +76,8 @@ export function FinancialsSection() {
 
   const statementsKey = issuerId === null ? null : `${issuerId}|${basis}|${periodMode}`
   const segmentsKey = issuerId === null ? null : `${issuerId}|${axis}`
-  const statementsHeading =
-    periodMode === 'annual'
-      ? `Income statement · last ${PERIOD_COUNT} FY`
-      : `Income statement · last ${QUARTER_PERIOD_COUNT} quarters`
+  const periodSpan =
+    periodMode === 'annual' ? `last ${PERIOD_COUNT} FY` : `last ${QUARTER_PERIOD_COUNT} quarters`
 
   const statements = useFetched<GetStatementsResponse>(statementsKey, async (_key, signal) => {
     const periods = periodMode === 'annual'
@@ -108,26 +111,39 @@ export function FinancialsSection() {
   return (
     <div data-testid="section-financials" className="flex w-full flex-col gap-6 p-8">
       <Card
+        testId="financials-revenue"
+        headingId="financials-revenue-heading"
+        heading={`Revenue · ${periodSpan}`}
+        action={
+          <SegmentedToggle
+            options={PERIOD_MODE_OPTIONS}
+            value={periodMode}
+            onChange={setPeriodMode}
+            ariaLabel="Statement period mode"
+            testIdPrefix="period-mode"
+          />
+        }
+      >
+        <FetchStateView
+          state={statements}
+          noun="revenue"
+          idleMessage="Issuer context unavailable for this entry. Open this symbol from search to load financials."
+        >
+          {(data) => <RevenueBars response={data} />}
+        </FetchStateView>
+      </Card>
+      <Card
         testId="financials-statements"
         headingId="financials-statements-heading"
-        heading={statementsHeading}
+        heading={`Income statement · ${periodSpan}`}
         action={
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <SegmentedToggle
-              options={PERIOD_MODE_OPTIONS}
-              value={periodMode}
-              onChange={setPeriodMode}
-              ariaLabel="Statement period mode"
-              testIdPrefix="period-mode"
-            />
-            <SegmentedToggle
-              options={BASIS_OPTIONS}
-              value={basis}
-              onChange={setBasis}
-              ariaLabel="Statement basis"
-              testIdPrefix="basis"
-            />
-          </div>
+          <SegmentedToggle
+            options={BASIS_OPTIONS}
+            value={basis}
+            onChange={setBasis}
+            ariaLabel="Statement basis"
+            testIdPrefix="basis"
+          />
         }
       >
         <FetchStateView
@@ -162,6 +178,27 @@ export function FinancialsSection() {
       </Card>
     </div>
   )
+}
+
+// Revenue trend as labelled bars with period-over-period deltas — the
+// Financials hero (charts-first), replacing a number-grid lede.
+function RevenueBars({ response }: { response: GetStatementsResponse }) {
+  const revenue = revenueBarsFromStatements(response)
+  if (revenue.length === 0) {
+    return <p className="text-sm text-muted">No revenue facts in this statement set.</p>
+  }
+  const max = Math.max(...revenue.map((b) => b.value))
+  const bars: MetricBar[] = revenue.map((bar) => ({
+    key: bar.period,
+    label: formatPeriodLabel(bar.period),
+    fraction: max === 0 ? 0 : bar.value / max,
+    value: formatCompactDollars(bar.value),
+    delta:
+      bar.deltaPct === null
+        ? undefined
+        : { text: formatSignedPercent(bar.deltaPct * 100, 0), direction: signedDirection(bar.deltaPct) },
+  }))
+  return <MetricBars bars={bars} testId="revenue-bars" ariaLabel="Revenue by period" />
 }
 
 function StatementsTable({ response }: { response: GetStatementsResponse }) {
@@ -254,7 +291,7 @@ function SegmentsView({ envelope }: { envelope: SegmentFactsEnvelope }) {
   return (
     <div className="grid gap-6 md:grid-cols-[minmax(0,200px)_minmax(0,1fr)]">
       <SegmentDonut slices={slices} />
-      <SegmentTrajectory slices={slices} reportingCurrency={envelope.reporting_currency} />
+      <SegmentBreakdownList slices={slices} reportingCurrency={envelope.reporting_currency} />
       {envelope.coverage_warnings.length > 0 && (
         <div
           data-testid="segments-warnings"
@@ -273,16 +310,6 @@ type DonutSlice = {
   share: number
   label: string
 }
-
-const DONUT_PALETTE = [
-  '#2563eb',
-  '#7c3aed',
-  '#16a34a',
-  '#ea580c',
-  '#0891b2',
-  '#dc2626',
-  '#a16207',
-] as const
 
 function SegmentDonut({ slices }: { slices: DonutSlice[] }) {
   const size = 180
@@ -313,7 +340,7 @@ function SegmentDonut({ slices }: { slices: DonutSlice[] }) {
           cy={cy}
           r={radius}
           fill="none"
-          stroke={DONUT_PALETTE[index % DONUT_PALETTE.length]}
+          stroke={seriesHexAt(index)}
           strokeWidth={stroke}
           strokeDasharray={`${length} ${circumference - length}`}
           strokeDashoffset={-offset}
@@ -324,7 +351,9 @@ function SegmentDonut({ slices }: { slices: DonutSlice[] }) {
   )
 }
 
-function SegmentTrajectory({
+// Per-segment share + value legend beside the donut. (Named a "breakdown",
+// not a trajectory — a single period, no time series.)
+function SegmentBreakdownList({
   slices,
   reportingCurrency,
 }: {
@@ -342,7 +371,7 @@ function SegmentTrajectory({
           <span
             aria-hidden="true"
             className="inline-block h-2.5 w-2.5 rounded-sm"
-            style={{ backgroundColor: DONUT_PALETTE[i % DONUT_PALETTE.length] }}
+            style={{ backgroundColor: seriesHexAt(i) }}
           />
           <span className="flex-1 truncate text-fg">{slice.label}</span>
           <span className="num text-muted">

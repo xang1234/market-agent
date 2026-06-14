@@ -24,10 +24,20 @@ import {
   NEGATIVE_CLASS,
   NEUTRAL_CLASS,
   POSITIVE_CLASS,
+  signedDirection,
   signedTextClass,
 } from '../../symbol/signedColor.ts'
+import {
+  insiderNetFlow,
+  topOwnership,
+  type InsiderNetFlow,
+  type OwnershipView,
+} from '../../symbol/holdersCharts.ts'
+import { MetricBars, type MetricBar } from '../../symbol/MetricBars.tsx'
 import { Th } from '../../symbol/Th.tsx'
 import { useFetched, type FetchedResult } from '../../symbol/useFetched.ts'
+
+const TOP_OWNERS = 6
 
 export function HoldersSection() {
   const { subject } = useSubjectDetailContext()
@@ -45,6 +55,32 @@ export function HoldersSection() {
 
   return (
     <div data-testid="section-holders" className="flex w-full flex-col gap-6 p-8">
+      <Card
+        testId="holders-ownership"
+        headingId="holders-ownership-heading"
+        heading={`Top institutional holders · % of shares`}
+      >
+        <FetchStateView
+          state={institutional}
+          noun="institutional holders"
+          idleMessage="Issuer context unavailable for this entry. Open this symbol from search to load holders."
+        >
+          {(envelope) => <OwnershipBars view={topOwnership(envelope.holders, TOP_OWNERS)} />}
+        </FetchStateView>
+      </Card>
+      <Card
+        testId="holders-insider-flow"
+        headingId="holders-insider-flow-heading"
+        heading="Insider activity"
+      >
+        <FetchStateView
+          state={insider}
+          noun="insider transactions"
+          idleMessage="Issuer context unavailable for this entry. Open this symbol from search to load insider activity."
+        >
+          {(envelope) => <InsiderFlow flow={insiderNetFlow(envelope.holders)} />}
+        </FetchStateView>
+      </Card>
       <Card
         testId="holders-institutional"
         headingId="holders-institutional-heading"
@@ -89,6 +125,65 @@ async function loadHolders<E extends HoldersEnvelope>(
     return { kind: 'unavailable', reason: `expected ${kind} kind, received ${data.kind}` }
   }
   return { kind: 'ready', data }
+}
+
+// Top owners as bars (% of shares), scaled to the largest holder, with the
+// signed share-change as the delta — the charts-first lede above the table.
+function OwnershipBars({ view }: { view: OwnershipView }) {
+  if (view.bars.length === 0) {
+    return <p className="text-sm text-muted">No institutional holders recorded.</p>
+  }
+  const bars: MetricBar[] = view.bars.map((bar) => ({
+    key: bar.key,
+    label: bar.holderName,
+    fraction: view.maxPct === 0 ? 0 : bar.pct / view.maxPct,
+    value: `${bar.pct.toFixed(1)}%`,
+    delta:
+      bar.sharesChange === 0
+        ? undefined
+        : { text: formatSignedCount(bar.sharesChange), direction: signedDirection(bar.sharesChange) },
+  }))
+  return (
+    <div className="flex flex-col gap-3">
+      <MetricBars bars={bars} fillClass="bg-accent" testId="ownership-bars" ariaLabel="Top holders by share" />
+      <p className="text-xs text-muted">
+        Top {view.bars.length} hold{' '}
+        <span className="num text-fg">{view.topSharePct.toFixed(1)}%</span> of shares outstanding
+      </p>
+    </div>
+  )
+}
+
+// Net insider buying vs selling over the window: the net figure, a buy/sell
+// split bar, and counts — above the transaction log.
+function InsiderFlow({ flow }: { flow: InsiderNetFlow }) {
+  const traded = flow.buyShares + flow.sellShares
+  if (traded === 0) {
+    return <p className="text-sm text-muted">No open-market insider buys or sells recorded.</p>
+  }
+  const netClass = flow.netShares > 0 ? POSITIVE_CLASS : flow.netShares < 0 ? NEGATIVE_CLASS : NEUTRAL_CLASS
+  const buyFrac = (flow.buyShares / traded) * 100
+  return (
+    <div className="flex items-center gap-4" data-testid="insider-flow">
+      <div className="shrink-0">
+        <div className={`num text-xl font-semibold ${netClass}`}>
+          {flow.netShares > 0 ? '+' : flow.netShares < 0 ? '−' : ''}
+          {formatCompactDollars(Math.abs(flow.netShares))}
+        </div>
+        <div className="text-xs text-muted">net shares {flow.netShares >= 0 ? 'bought' : 'sold'}</div>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="num text-xs text-muted">
+          {flow.buyCount} {flow.buyCount === 1 ? 'buy' : 'buys'} · {flow.sellCount}{' '}
+          {flow.sellCount === 1 ? 'sell' : 'sells'}
+        </div>
+        <div className="mt-1.5 flex h-2.5 overflow-hidden rounded-sm bg-surface-2">
+          <span className="block h-full bg-positive" style={{ width: `${buyFrac}%` }} />
+          <span className="block h-full bg-negative" style={{ width: `${100 - buyFrac}%` }} />
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function InstitutionalTable({ envelope }: { envelope: InstitutionalHoldersEnvelope }) {
