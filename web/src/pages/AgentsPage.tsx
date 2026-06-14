@@ -8,58 +8,21 @@ import {
   canRoundTripUniverse,
   isAgentSubjectKind,
   subjectRefsText,
-  type AgentAlertRule,
   type AgentPayload,
   type AgentUniverse,
 } from '../agents/agentPayload.ts'
+import type {
+  AgentActivityRow,
+  AgentFindingRow,
+  AgentRow,
+  AgentRunRow,
+} from '../agents/agentRows.ts'
+import { AgentRoster } from '../agents/AgentRoster.tsx'
+import { AgentDetailPanels } from '../agents/AgentDetailPanels.tsx'
+import { alertRuleLabel, dynamicUniverseIdFor, universeLabel } from '../agents/agentLabels.ts'
 import type { SubjectKind } from '../subject/subjectRef.ts'
 import { authenticatedFetch } from '../http/authFetch.ts'
 import { useAuth } from '../shell/useAuth.ts'
-import { SeverityBadge } from '../blocks/SeverityBadge.tsx'
-import { FINDING_SEVERITIES, type FindingSeverity } from '../blocks/types.ts'
-import {
-  agentRunTicks,
-  latestRunStatus,
-  rosterRunSummary,
-  type RunStatus,
-} from '../agents/runStats.ts'
-
-type AgentRow = {
-  agent_id: string
-  name: string
-  thesis: string
-  cadence: string
-  enabled: boolean
-  universe?: AgentUniverse
-  alert_rules?: ReadonlyArray<AgentAlertRule>
-  updated_at: string
-}
-
-type AgentRunRow = {
-  agent_run_log_id: string
-  agent_id: string
-  status: 'running' | 'completed' | 'failed'
-  started_at: string
-  ended_at: string | null
-  error: string | null
-}
-
-type AgentFindingRow = {
-  finding_id: string
-  agent_id: string
-  snapshot_id: string
-  headline: string
-  severity: string
-  created_at: string
-}
-
-type AgentActivityRow = {
-  run_activity_id: string
-  agent_id: string
-  stage: string
-  summary: string
-  ts: string
-}
 
 const DEMO_AGENTS: ReadonlyArray<AgentRow> = [
   {
@@ -119,7 +82,6 @@ export function AgentsPage() {
   const visibleFindings = detailsMatchSelection ? findings : []
   const visibleRunActivities = detailsMatchSelection ? runActivities : []
   const visibleDetailsError = detailsMatchSelection ? detailsError : null
-  const fleet = rosterRunSummary(agents, runs)
 
   useEffect(() => {
     if (!session) return
@@ -364,10 +326,30 @@ export function AgentsPage() {
           Session-scoped research monitors with durable configuration, run history, and live activity.
         </p>
       </header>
-      {/* Monitor-first: the roster + details lead (order-1, wide column); the
-          configuration form steps back to a side panel (order-2, narrow). */}
+      {/* Monitor-first: the roster + read-only detail panels take the wide
+          column and come first in the DOM, so reading and tab order match the
+          visual order; the configuration form is the narrow side panel after. */}
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <form onSubmit={submitAgent} className="order-2 flex flex-col gap-4 rounded-md border border-line bg-surface p-5">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <AgentRoster
+            agents={agents}
+            runs={runs}
+            selectedAgentId={selectedAgentId}
+            loadError={loadError}
+            onSelect={setSelectedAgentId}
+            onEdit={editAgent}
+            onRun={(id) => void runAgent(id)}
+            onToggleEnabled={(agent) => void updateAgent(agent.agent_id, { enabled: !agent.enabled })}
+            onDelete={(id) => void deleteAgent(id)}
+          />
+          <AgentDetailPanels
+            findings={visibleFindings}
+            detailsError={visibleDetailsError}
+            runs={runs}
+            runActivities={visibleRunActivities}
+          />
+        </div>
+        <form onSubmit={submitAgent} className="flex flex-col gap-4 rounded-md border border-line bg-surface p-5">
           <h2 className="text-lg font-semibold text-fg">{editingAgentId ? 'Edit agent' : 'Create agent'}</h2>
           <label className="flex flex-col gap-2 text-sm font-medium text-fg">
             Name
@@ -587,139 +569,6 @@ export function AgentsPage() {
             {editingAgentId ? 'Save agent' : 'Create agent'}
           </button>
         </form>
-        <div className="order-1 grid gap-4 lg:grid-cols-2">
-          <section className="rounded-md border border-line bg-surface p-5">
-            <h2 className="text-lg font-semibold text-fg">Agents</h2>
-            <FleetSummary fleet={fleet} />
-            {loadError ? (
-              <p className="mt-3 text-sm text-negative">Load failed: {loadError}</p>
-            ) : null}
-            <ul className="mt-4 flex flex-col gap-3">
-              {agents.map((agent) => (
-                <li
-                  key={agent.agent_id}
-                  className={`rounded-md border p-3 ${
-                    selectedAgentId === agent.agent_id
-                      ? 'border-accent'
-                      : 'border-line'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h3 className="flex items-center gap-2 text-sm font-semibold text-fg">
-                        <StatusDot status={latestRunStatus(runs, agent.agent_id)} />
-                        {agent.name}
-                      </h3>
-                      <p className="mt-1 text-sm text-fg-soft">{agent.thesis}</p>
-                      <p className="mt-2 text-xs text-muted">
-                        {agent.enabled ? 'enabled' : 'disabled'} · {agent.cadence}
-                      </p>
-                      <p className="mt-2 text-xs text-muted">
-                        Universe: {universeLabel(agent.universe)}
-                      </p>
-                      <p className="mt-1 text-xs text-muted">
-                        Alert rule: {alertRuleLabel(agent.alert_rules)}
-                      </p>
-                      <RunTimeline ticks={agentRunTicks(runs, agent.agent_id)} />
-                    </div>
-                    <div className="flex flex-wrap justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedAgentId(agent.agent_id)}
-                        className="rounded-md border border-line-strong px-3 py-1.5 text-xs font-medium"
-                      >
-                        View
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => editAgent(agent)}
-                        className="rounded-md border border-line-strong px-3 py-1.5 text-xs font-medium"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void runAgent(agent.agent_id)}
-                        className="rounded-md border border-line-strong px-3 py-1.5 text-xs font-medium"
-                      >
-                        Run
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void updateAgent(agent.agent_id, { enabled: !agent.enabled })}
-                        className="rounded-md border border-line-strong px-3 py-1.5 text-xs font-medium"
-                      >
-                        {agent.enabled ? 'Disable' : 'Enable'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void deleteAgent(agent.agent_id)}
-                        className="rounded-md border border-negative px-3 py-1.5 text-xs font-medium text-negative"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-          <section className="rounded-md border border-line bg-surface p-5">
-            <h2 className="text-lg font-semibold text-fg">Findings</h2>
-            {visibleDetailsError ? (
-              <p className="mt-3 text-sm text-negative">Details failed: {visibleDetailsError}</p>
-            ) : null}
-            {visibleFindings.length === 0 ? (
-              <p className="mt-4 text-sm text-muted">No findings for this agent yet.</p>
-            ) : (
-              <ul className="mt-4 flex flex-col gap-3">
-                {visibleFindings.map((finding) => (
-                  <li key={finding.finding_id} className="rounded-md border border-line p-3 text-sm">
-                    <div className="flex items-start justify-between gap-3">
-                      <span className="font-medium text-fg">{finding.headline}</span>
-                      <FindingSeverityBadge severity={finding.severity} />
-                    </div>
-                    <p className="mt-2 text-xs text-muted">{finding.created_at}</p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-          <section className="rounded-md border border-line bg-surface p-5">
-            <h2 className="text-lg font-semibold text-fg">Run history</h2>
-            {runs.length === 0 ? (
-              <p className="mt-4 text-sm text-muted">No recorded runs yet.</p>
-            ) : (
-              <ul className="mt-4 flex flex-col gap-3">
-                {runs.map((run) => (
-                  <li key={run.agent_run_log_id} className="rounded-md border border-line p-3 text-sm">
-                    <span className="font-medium">{run.status}</span>
-                    <span className="ml-2 text-muted">{run.started_at}</span>
-                    {run.error ? <p className="mt-1 text-negative">{run.error}</p> : null}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-          <section className="rounded-md border border-line bg-surface p-5">
-            <h2 className="text-lg font-semibold text-fg">Run activity</h2>
-            {visibleRunActivities.length === 0 ? (
-              <p className="mt-4 text-sm text-muted">No activity for this agent yet.</p>
-            ) : (
-              <ul className="mt-4 flex flex-col gap-3">
-                {visibleRunActivities.map((item) => (
-                  <li key={item.run_activity_id} className="rounded-md border border-line p-3 text-sm">
-                    <div className="flex items-start justify-between gap-3">
-                      <span className="font-medium capitalize text-fg">{item.stage}</span>
-                      <span className="text-xs text-muted">{item.ts}</span>
-                    </div>
-                    <p className="mt-2 text-fg-soft">{item.summary}</p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </div>
       </section>
       <section className="rounded-md border border-line bg-surface p-5">
         <h2 className="text-lg font-semibold text-fg">Activity</h2>
@@ -729,98 +578,3 @@ export function AgentsPage() {
   )
 }
 
-// Fleet health one-liner under the roster heading — the monitor-first read
-// before the agent rows.
-function FleetSummary({ fleet }: { fleet: { total: number; enabled: number; running: number; failing: number } }) {
-  return (
-    <p className="mt-1 text-xs text-muted">
-      <span className="num">{fleet.total}</span> {fleet.total === 1 ? 'monitor' : 'monitors'} ·{' '}
-      <span className="num">{fleet.enabled}</span> enabled
-      {fleet.running > 0 ? (
-        <>
-          {' · '}
-          <span className="num text-warning">{fleet.running}</span> running
-        </>
-      ) : null}
-      {fleet.failing > 0 ? (
-        <>
-          {' · '}
-          <span className="num text-negative">{fleet.failing}</span> failing
-        </>
-      ) : null}
-    </p>
-  )
-}
-
-const RUN_STATUS_FILL: Readonly<Record<RunStatus, string>> = {
-  completed: 'bg-positive',
-  failed: 'bg-negative',
-  running: 'bg-warning',
-}
-
-function StatusDot({ status }: { status: RunStatus | null }) {
-  const fill = status === null ? 'bg-faint' : RUN_STATUS_FILL[status]
-  return (
-    <span
-      aria-hidden="true"
-      title={status ?? 'never run'}
-      className={`inline-block h-2 w-2 shrink-0 rounded-full ${fill}`}
-    />
-  )
-}
-
-// Per-agent run history as colored ticks (green completed / red failed / amber
-// running), oldest→newest — the signature monitor visual the text "Run history"
-// list was impersonating.
-function RunTimeline({ ticks }: { ticks: ReadonlyArray<RunStatus> }) {
-  if (ticks.length === 0) {
-    return <p className="mt-2 text-[10px] uppercase tracking-wide text-faint">No runs yet</p>
-  }
-  return (
-    <div className="mt-2 flex items-end gap-0.5" role="img" aria-label={`Last ${ticks.length} runs`}>
-      {ticks.map((status, i) => (
-        <span key={i} className={`h-3.5 w-1.5 rounded-sm ${RUN_STATUS_FILL[status]}`} />
-      ))}
-    </div>
-  )
-}
-
-// Reuse the canonical severity tone map for known severities; an unrecognized
-// value (the field is a free string on the wire) falls back to a muted pill.
-function FindingSeverityBadge({ severity }: { severity: string }) {
-  if ((FINDING_SEVERITIES as readonly string[]).includes(severity)) {
-    return <SeverityBadge severity={severity as FindingSeverity} />
-  }
-  return (
-    <span className="rounded border border-line-strong px-2 py-0.5 text-xs text-muted">{severity}</span>
-  )
-}
-
-function universeLabel(universe: AgentRow['universe']): string {
-  if (!universe) return 'not configured'
-  if (universe.mode === 'static') {
-    if (universe.subject_refs.length === 0) return 'static empty'
-    return universe.subject_refs.map((ref) => `${ref.kind}: ${ref.id}`).join(', ')
-  }
-  if (universe.mode === 'screen') return `screen: ${universe.screen_id}`
-  if (universe.mode === 'theme') return `theme: ${universe.theme_id}`
-  if (universe.mode === 'portfolio') return `portfolio: ${universe.portfolio_id}`
-  return `agent: ${universe.agent_id}`
-}
-
-function alertRuleLabel(alertRules: AgentRow['alert_rules']): string {
-  const rule = alertRules?.[0]
-  if (!rule) return 'not configured'
-  const severity = rule.severity_at_least ?? 'any'
-  const headline = rule.headline_contains ? ` headline contains ${rule.headline_contains}` : ''
-  const channels = rule.channels?.length ? ` via ${rule.channels.join(', ')}` : ''
-  return `${severity}+${headline}${channels}`.trim()
-}
-
-function dynamicUniverseIdFor(universe: AgentRow['universe']): string {
-  if (!universe || universe.mode === 'static') return ''
-  if (universe.mode === 'screen') return universe.screen_id
-  if (universe.mode === 'theme') return universe.theme_id
-  if (universe.mode === 'portfolio') return universe.portfolio_id
-  return universe.agent_id
-}

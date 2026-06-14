@@ -25,6 +25,8 @@ import {
 import { moversBars } from '../home/moversBars.ts'
 import { FINDING_SEVERITY_ORDER, tallyFindingSeverities } from '../home/findingStats.ts'
 import type { FindingSeverity } from '../blocks/types.ts'
+import { severityFillClass } from '../blocks/severityTone.ts'
+import { StackedBar, StackedBarLegend, type StackedSegment } from '../symbol/StackedBar.tsx'
 import { useAuth } from '../shell/useAuth.ts'
 import { useRightRail } from '../shell/useRightRail'
 
@@ -211,15 +213,6 @@ function FindingsSection({ cards }: { cards: ReadonlyArray<HomeFindingCardSummar
   )
 }
 
-// Severity fills mirror the rest of the app's tone language (critical=negative,
-// high=warning, medium=accent, low=muted).
-const FINDING_SEVERITY_FILL: Readonly<Record<FindingSeverity, string>> = {
-  critical: 'bg-negative',
-  high: 'bg-warning',
-  medium: 'bg-accent',
-  low: 'bg-muted',
-}
-
 const FINDING_SEVERITY_LABEL: Readonly<Record<FindingSeverity, string>> = {
   critical: 'Critical',
   high: 'High',
@@ -232,34 +225,23 @@ const FINDING_SEVERITY_LABEL: Readonly<Record<FindingSeverity, string>> = {
 function FindingsSeverityBar({ cards }: { cards: ReadonlyArray<HomeFindingCardSummary> }) {
   const counts = tallyFindingSeverities(cards)
   const total = cards.length
+  const segments: StackedSegment[] = FINDING_SEVERITY_ORDER.map((sev) => ({
+    key: sev,
+    label: FINDING_SEVERITY_LABEL[sev],
+    value: counts[sev],
+    className: severityFillClass(sev),
+  }))
   return (
     <div className="flex flex-col gap-1.5">
-      <div
-        className="flex h-3 overflow-hidden rounded-sm bg-surface-2"
-        role="img"
-        aria-label={`${total} findings by severity`}
-      >
-        {FINDING_SEVERITY_ORDER.map((sev) =>
-          counts[sev] > 0 ? (
-            <span
-              key={sev}
-              className={`block h-full ${FINDING_SEVERITY_FILL[sev]}`}
-              style={{ width: `${(counts[sev] / total) * 100}%` }}
-            />
-          ) : null,
-        )}
-      </div>
-      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs num text-muted">
-        <span className="text-fg">
-          {total} {total === 1 ? 'finding' : 'findings'}
-        </span>
-        {FINDING_SEVERITY_ORDER.filter((sev) => counts[sev] > 0).map((sev) => (
-          <span key={sev} className="inline-flex items-center gap-1.5">
-            <span aria-hidden="true" className={`inline-block h-2 w-2 rounded-sm ${FINDING_SEVERITY_FILL[sev]}`} />
-            {FINDING_SEVERITY_LABEL[sev]} {counts[sev]}
+      <StackedBar segments={segments} ariaLabel={`${total} findings by severity`} />
+      <StackedBarLegend
+        segments={segments.filter((s) => s.value > 0)}
+        leading={
+          <span className="text-fg">
+            {total} {total === 1 ? 'finding' : 'findings'}
           </span>
-        ))}
-      </div>
+        }
+      />
     </div>
   )
 }

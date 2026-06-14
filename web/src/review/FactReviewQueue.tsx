@@ -2,6 +2,8 @@ import { useRef, useState } from 'react'
 import { SeverityBadge } from '../blocks/SeverityBadge.tsx'
 import { isStaleItem, severityForItem, tallySeverities, type ReviewSeverity } from './severity.ts'
 import { confidenceDistribution, type ConfidenceDistribution } from './queueStats.ts'
+import { severityFillClass } from '../blocks/severityTone.ts'
+import { StackedBar, StackedBarLegend, type StackedSegment } from '../symbol/StackedBar.tsx'
 
 export type FactReviewCandidate = Record<string, unknown>
 
@@ -242,48 +244,34 @@ function QueueSummary({
         ) : null}
       </div>
       <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
-        <SeverityBar counts={counts} total={total} />
+        <SeverityBar counts={counts} />
         <ConfidenceHistogram dist={dist} />
       </div>
     </header>
   )
 }
 
-// Severity fills mirror SeverityBadge's tone map (high=negative, medium=warning,
-// low=muted) so the bar and the per-item badges read the same colour language.
-const SEVERITY_BAR_SEGMENTS: ReadonlyArray<{ key: ReviewSeverity; label: string; fill: string }> = [
-  { key: 'high', label: 'High', fill: 'bg-negative' },
-  { key: 'medium', label: 'Med', fill: 'bg-warning' },
-  { key: 'low', label: 'Low', fill: 'bg-muted' },
+const REVIEW_SEVERITY_LABEL: ReadonlyArray<{ key: ReviewSeverity; label: string }> = [
+  { key: 'high', label: 'High' },
+  { key: 'medium', label: 'Med' },
+  { key: 'low', label: 'Low' },
 ]
 
-function SeverityBar({ counts, total }: { counts: Record<ReviewSeverity, number>; total: number }) {
+function SeverityBar({ counts }: { counts: Record<ReviewSeverity, number> }) {
+  const segments: StackedSegment[] = REVIEW_SEVERITY_LABEL.map(({ key, label }) => ({
+    key,
+    label,
+    value: counts[key],
+    className: severityFillClass(key),
+  }))
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-xs uppercase tracking-wide text-muted">By severity</span>
-      <div
-        className="flex h-3.5 overflow-hidden rounded-sm bg-surface-2"
-        role="img"
-        aria-label={`${counts.high} high, ${counts.medium} medium, ${counts.low} low`}
-      >
-        {SEVERITY_BAR_SEGMENTS.map((seg) =>
-          counts[seg.key] > 0 ? (
-            <span
-              key={seg.key}
-              className={`block h-full ${seg.fill}`}
-              style={{ width: `${total === 0 ? 0 : (counts[seg.key] / total) * 100}%` }}
-            />
-          ) : null,
-        )}
-      </div>
-      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs num text-muted">
-        {SEVERITY_BAR_SEGMENTS.map((seg) => (
-          <span key={seg.key} className="inline-flex items-center gap-1.5">
-            <span aria-hidden="true" className={`inline-block h-2 w-2 rounded-sm ${seg.fill}`} />
-            {seg.label} {counts[seg.key]}
-          </span>
-        ))}
-      </div>
+      <StackedBar
+        segments={segments}
+        ariaLabel={`${counts.high} high, ${counts.medium} medium, ${counts.low} low`}
+      />
+      <StackedBarLegend segments={segments} />
     </div>
   )
 }

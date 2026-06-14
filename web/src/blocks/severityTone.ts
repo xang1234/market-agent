@@ -14,3 +14,20 @@ export const SEVERITY_BADGE_CLASS: Readonly<Record<FindingSeverity, string>> = {
 export function severityBadgeClass(severity: FindingSeverity): string {
   return SEVERITY_BADGE_CLASS[severity]
 }
+
+// Canonical severity → solid fill, for stacked severity bars (Home findings,
+// Review queue). A bar needs four *distinct* hues to show the mix, so this
+// deliberately diverges from the badge map (which uses red for both high and
+// critical, distinguished by intensity + label — fine for a pill, ambiguous as
+// adjacent bar segments). Red is reserved for `critical`; review severities
+// never reach it, so a review bar tops out at amber.
+export const SEVERITY_FILL_CLASS: Readonly<Record<FindingSeverity, string>> = {
+  low: 'bg-muted',
+  medium: 'bg-accent',
+  high: 'bg-warning',
+  critical: 'bg-negative',
+}
+
+export function severityFillClass(severity: FindingSeverity): string {
+  return SEVERITY_FILL_CLASS[severity]
+}
