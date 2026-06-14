@@ -9,7 +9,9 @@ import { screenerSummary, type Distribution } from './screenerSummary.ts'
 // scoped to the rows on screen ("shown"); the full match count is total_count.
 export function ScreenerSummaryView({ response }: { response: ScreenerResponse }) {
   const summary = useMemo(() => screenerSummary(response.rows), [response])
-  const currency = response.rows[0]?.quote.currency ?? 'USD'
+  // Matches is the full result set; the medians and up% are computed only over
+  // the loaded page, so call that out when the page is a subset.
+  const pageScoped = summary.shown < response.total_count
   return (
     <div className="flex flex-col gap-2 border-b border-line pb-3">
       <div className="flex flex-wrap gap-2">
@@ -17,14 +19,23 @@ export function ScreenerSummaryView({ response }: { response: ScreenerResponse }
         <SummaryStat label="Median P/E" value={summary.medianPe === null ? '—' : summary.medianPe.toFixed(1)} />
         <SummaryStat
           label="Median cap"
-          value={summary.medianMarketCap === null ? '—' : formatCompactCurrency(summary.medianMarketCap, currency)}
+          value={
+            summary.medianMarketCap === null || summary.marketCapCurrency === null
+              ? '—'
+              : formatCompactCurrency(summary.medianMarketCap, summary.marketCapCurrency)
+          }
         />
         <SummaryStat
-          label="Up (shown)"
+          label="Up today"
           value={summary.upPct === null ? '—' : `${Math.round(summary.upPct)}%`}
           positive={summary.upPct !== null && summary.upPct >= 50}
         />
       </div>
+      {pageScoped ? (
+        <p className="text-[10px] text-faint">
+          Median &amp; up% cover the <span className="num">{summary.shown}</span> loaded rows; Matches is the full set.
+        </p>
+      ) : null}
       {summary.peDistribution.count >= 3 ? (
         <MetricDistribution dist={summary.peDistribution} label="P/E" />
       ) : null}

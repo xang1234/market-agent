@@ -4,7 +4,12 @@ import test from 'node:test'
 import { median, numericDistribution, screenerSummary } from './screenerSummary.ts'
 import type { ScreenerResultRow } from './contracts.ts'
 
-function row(over: { pe?: number | null; cap?: number | null; change?: number | null }): ScreenerResultRow {
+function row(over: {
+  pe?: number | null
+  cap?: number | null
+  change?: number | null
+  currency?: string
+}): ScreenerResultRow {
   return {
     subject_ref: { kind: 'issuer', id: 'x' },
     display: { primary: 'X' },
@@ -15,7 +20,7 @@ function row(over: { pe?: number | null; cap?: number | null; change?: number | 
       change_pct: over.change ?? null,
       volume: null,
       delay_class: 'eod',
-      currency: 'USD',
+      currency: over.currency ?? 'USD',
       as_of: '2026-01-01T00:00:00.000Z',
     },
     fundamentals: {
@@ -78,4 +83,23 @@ test('screenerSummary computes up%, medians, and the P/E distribution over loade
   assert.equal(s.medianMarketCap, 200e9)
   assert.equal(s.peDistribution.count, 3)
   assert.equal(s.peDistribution.median, 20)
+  assert.equal(s.marketCapCurrency, 'USD')
+})
+
+test('screenerSummary withholds median cap when cap rows span multiple currencies', () => {
+  const s = screenerSummary([
+    row({ cap: 100e9, currency: 'USD' }),
+    row({ cap: 200e9, currency: 'JPY' }), // native caps can't be pooled across FX
+  ])
+  assert.equal(s.medianMarketCap, null)
+  assert.equal(s.marketCapCurrency, null)
+})
+
+test('screenerSummary keeps median cap for a single-currency set', () => {
+  const s = screenerSummary([
+    row({ cap: 100e9, currency: 'USD' }),
+    row({ cap: 300e9, currency: 'USD' }),
+  ])
+  assert.equal(s.medianMarketCap, 200e9)
+  assert.equal(s.marketCapCurrency, 'USD')
 })

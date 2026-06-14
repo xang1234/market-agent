@@ -98,8 +98,11 @@ function GridRunProgress({ run }: { run: GridRunSummary }): ReactElement {
       </div>
       <div
         className="h-1.5 overflow-hidden rounded-sm bg-surface-2"
-        role="img"
-        aria-label={`${run.cell_done} of ${run.cell_total} cells complete`}
+        role="progressbar"
+        aria-label="Grid cell completion"
+        aria-valuenow={run.cell_done}
+        aria-valuemin={0}
+        aria-valuemax={run.cell_total}
       >
         <div
           className="h-full rounded-sm bg-accent transition-[width] duration-300"
