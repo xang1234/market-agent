@@ -4,9 +4,11 @@ export type StackedSegment = {
   key: string
   // Raw magnitude; segment widths are this as a share of the segment sum.
   value: number
-  label: string
   // Fill class for the segment / its legend dot, e.g. severityFillClass(sev).
   className: string
+  // Only the legend renders a label; bar-only callers (consensus, insider split)
+  // omit it.
+  label?: string
   // Optional hover tooltip and test hook on the segment.
   title?: string
   testId?: string

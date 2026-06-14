@@ -181,8 +181,8 @@ function InsiderFlow({ flow }: { flow: InsiderNetFlow }) {
         <div className="mt-1.5">
           <StackedBar
             segments={[
-              { key: 'buy', value: flow.buyShares, label: 'Buys', className: 'bg-positive' },
-              { key: 'sell', value: flow.sellShares, label: 'Sells', className: 'bg-negative' },
+              { key: 'buy', value: flow.buyShares, className: 'bg-positive' },
+              { key: 'sell', value: flow.sellShares, className: 'bg-negative' },
             ]}
             ariaLabel={`Insider buys vs sells: ${flow.buyCount} buys, ${flow.sellCount} sells`}
             heightClass="h-2.5"

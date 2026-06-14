@@ -64,7 +64,6 @@ function RatingDistributionBar({
         segments={ANALYST_RATINGS.map((rating) => ({
           key: rating,
           value: distribution.counts[rating],
-          label: ratingLabel(rating),
           className: RATING_BAR_COLORS[rating],
           testId: `rating-segment-${rating}`,
           title: `${ratingLabel(rating)}: ${distribution.counts[rating]}`,

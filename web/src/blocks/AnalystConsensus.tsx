@@ -26,7 +26,6 @@ export function AnalystConsensus({ block }: AnalystConsensusProps): ReactElement
             segments={block.distribution.map((bucket, index) => ({
               key: `${block.id}-seg-${index}`,
               value: bucket.count ?? 0,
-              label: bucket.bucket,
               className: RATING_BAR_COLORS[ANALYST_RATINGS[index]] ?? 'bg-neutral-400',
               testId: `block-analyst-consensus-${block.id}-rating-segment-${index}`,
               title: `${bucket.bucket}: ${bucket.count ?? 0}`,
