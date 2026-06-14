@@ -72,9 +72,10 @@ test('FactReviewQueue summary header tallies severities and shows Approve all lo
   // Strip tags + React's <!-- --> text-boundary markers to assert on content.
   const text = html.replace(/<[^>]*>/g, '')
   assert.match(text, /3 claims awaiting review/)
-  assert.match(text, /1 high/)
-  assert.match(text, /1 medium/)
-  assert.match(text, /1 low/)
+  // Severity counts now read from the stacked-bar legend (High/Med/Low N).
+  assert.match(text, /High 1/)
+  assert.match(text, /Med 1/)
+  assert.match(text, /Low 1/)
   assert.match(text, /Approve all low/)
 })
 

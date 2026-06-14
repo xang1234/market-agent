@@ -19,10 +19,14 @@ import {
   agentSummaryHeadline,
   formatChangePercent,
   formatPrice,
-  quoteDirection,
   savedScreenSubtitle,
   watchlistMoversEmptyState,
 } from '../home/summaryView.ts'
+import { moversBars } from '../home/moversBars.ts'
+import { FINDING_SEVERITY_ORDER, tallyFindingSeverities } from '../home/findingStats.ts'
+import type { FindingSeverity } from '../blocks/types.ts'
+import { severityFillClass } from '../blocks/severityTone.ts'
+import { StackedBar, StackedBarLegend, type StackedSegment } from '../symbol/StackedBar.tsx'
 import { useAuth } from '../shell/useAuth.ts'
 import { useRightRail } from '../shell/useRightRail'
 
@@ -94,7 +98,7 @@ export function HomePage() {
   }, [userId])
 
   return (
-    <div className="flex flex-1 flex-col gap-6 overflow-auto p-8">
+    <div className="flex flex-1 flex-col gap-4 overflow-auto p-6">
       <header>
         <h1 className="text-2xl font-semibold">Home</h1>
         <p className="mt-1 text-sm text-muted">
@@ -178,7 +182,7 @@ function ErrorHint({ message }: { message: string }) {
 
 function SummaryView({ summary }: { summary: HomeSummary }) {
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <FindingsSection cards={summary.findings.cards} />
       <MarketPulseSection rows={summary.market_pulse.rows} omittedCount={summary.market_pulse.omitted.length} />
       <WatchlistMoversSection movers={summary.watchlist_movers} />
@@ -194,15 +198,51 @@ function FindingsSection({ cards }: { cards: ReadonlyArray<HomeFindingCardSummar
       {cards.length === 0 ? (
         <EmptyHint>No findings yet from your active agents.</EmptyHint>
       ) : (
-        <ul className="flex flex-col gap-2">
-          {cards.map((card) => (
-            <li key={card.home_card_id}>
-              <FindingRow card={card} />
-            </li>
-          ))}
-        </ul>
+        <div className="flex flex-col gap-2">
+          <FindingsSeverityBar cards={cards} />
+          <ul className="flex flex-col gap-2">
+            {cards.map((card) => (
+              <li key={card.home_card_id}>
+                <FindingRow card={card} />
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </Section>
+  )
+}
+
+const FINDING_SEVERITY_LABEL: Readonly<Record<FindingSeverity, string>> = {
+  critical: 'Critical',
+  high: 'High',
+  medium: 'Med',
+  low: 'Low',
+}
+
+// At-a-glance severity mix for the findings feed — a stacked bar + legend
+// answering "how alarming is today" before the row-by-row list.
+function FindingsSeverityBar({ cards }: { cards: ReadonlyArray<HomeFindingCardSummary> }) {
+  const counts = tallyFindingSeverities(cards)
+  const total = cards.length
+  const segments: StackedSegment[] = FINDING_SEVERITY_ORDER.map((sev) => ({
+    key: sev,
+    label: FINDING_SEVERITY_LABEL[sev],
+    value: counts[sev],
+    className: severityFillClass(sev),
+  }))
+  return (
+    <div className="flex flex-col gap-1.5">
+      <StackedBar segments={segments} ariaLabel={`${total} findings by severity`} />
+      <StackedBarLegend
+        segments={segments.filter((s) => s.value > 0)}
+        leading={
+          <span className="text-fg">
+            {total} {total === 1 ? 'finding' : 'findings'}
+          </span>
+        }
+      />
+    </div>
   )
 }
 
@@ -239,13 +279,7 @@ function MarketPulseSection({
       {rows.length === 0 ? (
         <EmptyHint>Market pulse is not configured for this environment.</EmptyHint>
       ) : (
-        <ul className="grid grid-cols-2 gap-3 md:grid-cols-3">
-          {rows.map((row) => (
-            <li key={row.listing.id}>
-              <QuoteCell row={row} />
-            </li>
-          ))}
-        </ul>
+        <MoversBars rows={rows} />
       )}
       {omittedCount > 0 ? <FootnoteHint>{omittedCount} subjects had no quote.</FootnoteHint> : null}
     </Section>
@@ -265,39 +299,37 @@ function WatchlistMoversBody({ movers }: { movers: HomeWatchlistMovers }) {
   const empty = watchlistMoversEmptyState(movers.reason)
   if (empty !== null) return <EmptyHint>{empty}</EmptyHint>
   if (movers.rows.length === 0) return <EmptyHint>No quotable listings in your watchlist.</EmptyHint>
-  return (
-    <ul className="flex flex-col gap-2">
-      {movers.rows.map((row) => (
-        <li key={row.listing.id}>
-          <QuoteCell row={row} />
-        </li>
-      ))}
-    </ul>
-  )
+  return <MoversBars rows={movers.rows} />
 }
 
-function QuoteCell({ row }: { row: HomeQuoteRow }) {
-  const direction = quoteDirection(row)
-  const tone =
-    direction === 'up'
-      ? 'text-positive'
-      : direction === 'down'
-        ? 'text-negative'
-        : 'text-muted'
+// Quote rows as labelled bars ranked by absolute move and coloured by
+// direction — the charts-first market visual shared by Market pulse and
+// Watchlist movers, replacing the grid of number tiles.
+function MoversBars({ rows }: { rows: ReadonlyArray<HomeQuoteRow> }) {
   return (
-    <div className={`${PANEL_CLASS} p-3`}>
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-sm font-medium">
-          {row.ticker}
-          <span className="ml-1 text-xs font-normal text-faint">{row.mic}</span>
-        </span>
-        <span className={`num text-sm font-semibold ${tone}`}>{formatChangePercent(row.change_pct)}</span>
-      </div>
-      <div className="mt-1 flex items-baseline justify-between gap-2 text-xs text-muted">
-        <span className="num">{formatPrice(row.price, row.currency)}</span>
-        <span className="uppercase">{row.delay_class.replace('_', ' ')}</span>
-      </div>
-    </div>
+    <ul className="flex flex-col gap-1.5">
+      {moversBars(rows).map(({ row, fraction, direction }) => {
+        const tone =
+          direction === 'up' ? 'text-positive' : direction === 'down' ? 'text-negative' : 'text-muted'
+        const fill =
+          direction === 'up' ? 'bg-positive' : direction === 'down' ? 'bg-negative' : 'bg-muted'
+        return (
+          <li key={row.listing.id} className="flex items-center gap-3 text-xs">
+            <span className="w-20 shrink-0 truncate font-medium text-fg">
+              {row.ticker}
+              <span className="ml-1 font-normal text-faint">{row.mic}</span>
+            </span>
+            <span className="h-3.5 flex-1 overflow-hidden rounded-sm bg-surface-2">
+              <span className={`block h-full rounded-sm ${fill}`} style={{ width: `${fraction * 100}%` }} />
+            </span>
+            <span className="num w-20 shrink-0 text-right text-muted">{formatPrice(row.price, row.currency)}</span>
+            <span className={`num w-16 shrink-0 text-right font-semibold ${tone}`}>
+              {formatChangePercent(row.change_pct)}
+            </span>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 
@@ -323,8 +355,14 @@ function AgentSummariesSection({
               <div className="mt-1 text-sm text-fg">{agentSummaryHeadline(row)}</div>
               <div className="mt-1 text-xs text-muted">
                 <span className="num">{row.finding_counts.total}</span> total ·{' '}
-                <span className="num">{row.finding_counts.high_or_critical}</span> high+ ·{' '}
-                <span className="num">{row.finding_counts.critical}</span> critical
+                <span className={`num ${row.finding_counts.high_or_critical > 0 ? 'text-warning' : ''}`}>
+                  {row.finding_counts.high_or_critical}
+                </span>{' '}
+                high+ ·{' '}
+                <span className={`num ${row.finding_counts.critical > 0 ? 'text-negative' : ''}`}>
+                  {row.finding_counts.critical}
+                </span>{' '}
+                critical
               </div>
             </li>
           ))}
