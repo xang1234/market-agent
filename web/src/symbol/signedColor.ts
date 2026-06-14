@@ -22,7 +22,7 @@ export function signedDirection(value: number, deadband = 0): SignedDirection {
   return 'neutral'
 }
 
-const SIGNED_TEXT_CLASS: Readonly<Record<SignedDirection, string>> = {
+export const SIGNED_TEXT_CLASS: Readonly<Record<SignedDirection, string>> = {
   positive: POSITIVE_CLASS,
   negative: NEGATIVE_CLASS,
   neutral: NEUTRAL_CLASS,
