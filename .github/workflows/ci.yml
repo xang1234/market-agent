@@ -127,6 +127,35 @@ jobs:
         working-directory: services/resolver
         run: npm test
 
+  screener-artifacts:
+    name: screener-artifacts (integration tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            db/package-lock.json
+            services/screener-artifacts/package-lock.json
+
+      # The ETL integration test imports the shared db/test Docker harness and
+      # invokes `npm run seed` inside db/, so db dependencies must be present.
+      - name: Install db deps (needed by screener-artifacts integration harness)
+        working-directory: db
+        run: npm ci
+
+      - name: Install screener-artifacts deps
+        working-directory: services/screener-artifacts
+        run: npm ci
+
+      - name: Run screener-artifacts tests
+        working-directory: services/screener-artifacts
+        run: npm test
+
   dev-api:
     name: dev-api (integration tests)
     runs-on: ubuntu-latest
