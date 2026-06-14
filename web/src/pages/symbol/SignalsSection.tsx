@@ -48,6 +48,12 @@ const SCORE_STROKE_CLASS: Readonly<Record<SignedDirection, string>> = {
   neutral: 'stroke-muted',
 }
 
+const SCORE_FILL_CLASS: Readonly<Record<SignedDirection, string>> = {
+  positive: 'fill-positive/15',
+  negative: 'fill-negative/15',
+  neutral: 'fill-muted/10',
+}
+
 const STANCE_BADGE_CLASS: Readonly<Record<ClaimStance, string>> = {
   bullish:
     'bg-positive-soft text-positive border-positive/40',
@@ -203,6 +209,7 @@ function SentimentTrendBody({ block }: { block: SentimentTrendBlock }) {
         values={block.points.map((p) => p.sentiment_score)}
         ariaLabel={`${block.window_days}-day sentiment trend ending at ${formatScore(latest.sentiment_score)}`}
         trendStrokeClass={SCORE_STROKE_CLASS[direction]}
+        areaFillClass={SCORE_FILL_CLASS[direction]}
         domain={[-1, 1]}
         baseline={0}
       />
@@ -210,6 +217,29 @@ function SentimentTrendBody({ block }: { block: SentimentTrendBlock }) {
         <span>{earliest.date}</span>
         <span>{block.points.length} days</span>
         <span>{latest.date}</span>
+      </div>
+      <MentionVolumeBars points={block.points} />
+    </div>
+  )
+}
+
+// Per-day mention volume as compact vertical bars under the sentiment line —
+// the "how loud" beside the "how positive". Heights are normalized to the
+// busiest day in the window.
+function MentionVolumeBars({ points }: { points: SentimentTrendBlock['points'] }) {
+  const max = Math.max(1, ...points.map((p) => p.mention_count))
+  return (
+    <div className="flex flex-col gap-1" data-testid="mention-volume-bars">
+      <span className={`text-[10px] uppercase tracking-wide ${NEUTRAL_CLASS}`}>Mention volume</span>
+      <div className="flex h-8 items-end gap-0.5" aria-hidden="true">
+        {points.map((point) => (
+          <span
+            key={point.date}
+            title={`${point.date}: ${point.mention_count}`}
+            className="flex-1 rounded-t-sm bg-accent/70"
+            style={{ height: `${Math.max(4, (point.mention_count / max) * 100)}%` }}
+          />
+        ))}
       </div>
     </div>
   )
