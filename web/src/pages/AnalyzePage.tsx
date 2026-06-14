@@ -489,25 +489,15 @@ function blockKey(block: Record<string, unknown>): string {
 // (template / evidence / playbook changed) are kept above.
 const RUN_DIFF_ORDER = ['added', 'changed', 'removed', 'unchanged'] as const
 
-const RUN_DIFF_CHIP: Readonly<Record<AnalyzeRunDiffRow['status'], string>> = {
-  added: 'border-positive/40 bg-positive-soft text-positive',
-  changed: 'border-warning/40 bg-warning-soft text-warning',
-  removed: 'border-negative/40 bg-negative-soft text-negative',
-  unchanged: 'border-line bg-surface-2 text-muted',
-}
-
-const RUN_DIFF_CHIP_LABEL: Readonly<Record<AnalyzeRunDiffRow['status'], (n: number) => string>> = {
-  added: (n) => `+${n} added`,
-  changed: (n) => `${n} changed`,
-  removed: (n) => `${n} removed`,
-  unchanged: (n) => `${n} unchanged`,
-}
-
-const RUN_DIFF_DOT: Readonly<Record<AnalyzeRunDiffRow['status'], string>> = {
-  added: 'bg-positive',
-  changed: 'bg-warning',
-  removed: 'bg-negative',
-  unchanged: 'bg-muted',
+// One entry per status (chip class, legend-dot class, count label) so the four
+// statuses are each defined once and can't drift across parallel maps.
+const RUN_DIFF_STYLE: Readonly<
+  Record<AnalyzeRunDiffRow['status'], { chip: string; dot: string; label: (n: number) => string }>
+> = {
+  added: { chip: 'border-positive/40 bg-positive-soft text-positive', dot: 'bg-positive', label: (n) => `+${n} added` },
+  changed: { chip: 'border-warning/40 bg-warning-soft text-warning', dot: 'bg-warning', label: (n) => `${n} changed` },
+  removed: { chip: 'border-negative/40 bg-negative-soft text-negative', dot: 'bg-negative', label: (n) => `${n} removed` },
+  unchanged: { chip: 'border-line bg-surface-2 text-muted', dot: 'bg-muted', label: (n) => `${n} unchanged` },
 }
 
 function RunDiffView({
@@ -526,9 +516,9 @@ function RunDiffView({
           {RUN_DIFF_ORDER.map((status) => (
             <span
               key={status}
-              className={`num rounded border px-2 py-0.5 text-xs font-medium ${RUN_DIFF_CHIP[status]}`}
+              className={`num rounded border px-2 py-0.5 text-xs font-medium ${RUN_DIFF_STYLE[status].chip}`}
             >
-              {RUN_DIFF_CHIP_LABEL[status](counts[status])}
+              {RUN_DIFF_STYLE[status].label(counts[status])}
             </span>
           ))}
         </div>
@@ -543,7 +533,7 @@ function RunDiffView({
       <ul className="mt-2 flex flex-col gap-1 text-sm">
         {diff.rows.map((row) => (
           <li key={`${row.status}:${row.key}`} className="flex items-center gap-2">
-            <span aria-hidden="true" className={`inline-block h-2 w-2 shrink-0 rounded-sm ${RUN_DIFF_DOT[row.status]}`} />
+            <span aria-hidden="true" className={`inline-block h-2 w-2 shrink-0 rounded-sm ${RUN_DIFF_STYLE[row.status].dot}`} />
             <span className="text-fg-soft">{row.title}</span>
             <span className="text-xs text-muted">{row.status}</span>
           </li>
