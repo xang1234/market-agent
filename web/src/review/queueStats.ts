@@ -28,15 +28,18 @@ export function confidenceDistribution(
   items: ReadonlyArray<ConfidenceInput>,
   binCount: number = DEFAULT_BINS,
 ): ConfidenceDistribution {
-  const bins: ConfidenceBin[] = Array.from({ length: binCount }, (_, i) => ({
-    from: i / binCount,
-    to: (i + 1) / binCount,
+  // A non-positive-integer binCount (0, negative, fractional, NaN) would build a
+  // ragged bin array and index out of bounds; fall back to the default instead.
+  const n = Number.isInteger(binCount) && binCount > 0 ? binCount : DEFAULT_BINS
+  const bins: ConfidenceBin[] = Array.from({ length: n }, (_, i) => ({
+    from: i / n,
+    to: (i + 1) / n,
     count: 0,
   }))
   for (const item of items) {
     const c = clamp01(item.confidence)
     // 1.0 lands in the last bin rather than spilling one past the array.
-    const idx = Math.min(binCount - 1, Math.floor(c * binCount))
+    const idx = Math.min(n - 1, Math.floor(c * n))
     bins[idx].count += 1
   }
   const max = bins.reduce((m, b) => Math.max(m, b.count), 0)

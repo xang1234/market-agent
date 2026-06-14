@@ -43,3 +43,15 @@ test('rosterRunSummary tallies monitors, enabled, running, failing by latest run
   ]
   assert.deepEqual(rosterRunSummary(agents, runs), { total: 3, enabled: 2, running: 1, failing: 1 })
 })
+
+test('rosterRunSummary excludes disabled agents from running/failing counts', () => {
+  const agents = [
+    { agent_id: 'a', enabled: true },
+    { agent_id: 'b', enabled: false },
+  ]
+  const runs = [
+    run('a', 'running', '2026-05-05T00:00:00Z'),
+    run('b', 'failed', '2026-05-04T00:00:00Z'), // disabled — must not count as failing
+  ]
+  assert.deepEqual(rosterRunSummary(agents, runs), { total: 2, enabled: 1, running: 1, failing: 0 })
+})

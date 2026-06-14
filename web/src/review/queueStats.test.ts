@@ -46,6 +46,15 @@ test('confidenceDistribution clamps out-of-range confidence and threshold', () =
   assert.equal(d.thresholdMarker, 0.5) // median of clamped thresholds [0, 1]
 })
 
+test('confidenceDistribution falls back to the default bin count for an invalid binCount', () => {
+  for (const bad of [0, -3, 3.5, Number.NaN]) {
+    const d = confidenceDistribution([{ confidence: 0.5, threshold: 0.7 }], bad)
+    assert.equal(d.bins.length, 10) // DEFAULT_BINS
+    assert.equal(d.total, 1)
+    assert.equal(d.bins[5].count, 1) // 0.5 still lands in the right bin
+  }
+})
+
 test('confidenceDistribution medianThreshold handles odd and even counts', () => {
   assert.equal(
     confidenceDistribution([

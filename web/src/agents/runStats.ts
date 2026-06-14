@@ -40,7 +40,10 @@ export function rosterRunSummary(
   let running = 0
   let failing = 0
   for (const agent of agents) {
-    if (agent.enabled) enabled += 1
+    // Disabled monitors are off the fleet — their last run's status doesn't
+    // count toward running/failing health.
+    if (!agent.enabled) continue
+    enabled += 1
     const status = latestRunStatus(runs, agent.agent_id)
     if (status === 'running') running += 1
     else if (status === 'failed') failing += 1
