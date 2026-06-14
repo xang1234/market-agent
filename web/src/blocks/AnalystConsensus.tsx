@@ -1,18 +1,10 @@
 import type { ReactElement } from 'react'
 import type { AnalystConsensusBlock, AnalystDistributionBucket } from './types.ts'
 import { ChartCard } from './ChartCard.tsx'
+import { ANALYST_RATINGS, RATING_BAR_COLORS } from '../symbol/consensus.ts'
+import { StackedBar } from '../symbol/StackedBar.tsx'
 
 type AnalystConsensusProps = { block: AnalystConsensusBlock }
-
-// Bucket colors by fixed rating order (strong_buy → strong_sell), matching the
-// Symbol Overview consensus palette.
-const BUCKET_COLORS = [
-  'bg-emerald-600 dark:bg-emerald-500',
-  'bg-emerald-400 dark:bg-emerald-600',
-  'bg-neutral-400 dark:bg-neutral-500',
-  'bg-red-400 dark:bg-red-600',
-  'bg-red-600 dark:bg-red-500',
-]
 
 export function AnalystConsensus({ block }: AnalystConsensusProps): ReactElement {
   const counts = block.distribution.map((bucket) => bucket.count)
@@ -28,25 +20,17 @@ export function AnalystConsensus({ block }: AnalystConsensusProps): ReactElement
     >
       {hasCounts && total > 0 ? (
         <div className="flex flex-col gap-2">
-          <div
-            role="img"
-            aria-label={`Analyst ratings across ${total} contributors`}
-            className="flex h-3 w-full overflow-hidden rounded"
-          >
-            {block.distribution.map((bucket, index) => {
-              const count = bucket.count ?? 0
-              if (count === 0) return null
-              return (
-                <div
-                  key={`${block.id}-seg-${index}`}
-                  data-testid={`block-analyst-consensus-${block.id}-rating-segment-${index}`}
-                  className={BUCKET_COLORS[index] ?? 'bg-neutral-400'}
-                  style={{ width: `${(count / total) * 100}%` }}
-                  title={`${bucket.bucket}: ${count}`}
-                />
-              )
-            })}
-          </div>
+          <StackedBar
+            ariaLabel={`Analyst ratings across ${total} contributors`}
+            heightClass="h-3"
+            segments={block.distribution.map((bucket, index) => ({
+              key: `${block.id}-seg-${index}`,
+              value: bucket.count ?? 0,
+              className: RATING_BAR_COLORS[ANALYST_RATINGS[index]] ?? 'bg-neutral-400',
+              testId: `block-analyst-consensus-${block.id}-rating-segment-${index}`,
+              title: `${bucket.bucket}: ${bucket.count ?? 0}`,
+            }))}
+          />
           <ul className="flex list-none flex-col gap-1 p-0 text-sm">
             {block.distribution.map((bucket, index) => (
               <li

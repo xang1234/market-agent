@@ -34,6 +34,7 @@ import {
   type OwnershipView,
 } from '../../symbol/holdersCharts.ts'
 import { MetricBars, type MetricBar } from '../../symbol/MetricBars.tsx'
+import { StackedBar } from '../../symbol/StackedBar.tsx'
 import { Th } from '../../symbol/Th.tsx'
 import { useFetched, type FetchedResult } from '../../symbol/useFetched.ts'
 import { SECTION_STACK_CLASS } from '../../symbol/surfaceStyles.ts'
@@ -163,7 +164,6 @@ function InsiderFlow({ flow }: { flow: InsiderNetFlow }) {
     return <p className="text-sm text-muted">No open-market insider buys or sells recorded.</p>
   }
   const netClass = flow.netShares > 0 ? POSITIVE_CLASS : flow.netShares < 0 ? NEGATIVE_CLASS : NEUTRAL_CLASS
-  const buyFrac = (flow.buyShares / traded) * 100
   return (
     <div className="flex items-center gap-4" data-testid="insider-flow">
       <div className="shrink-0">
@@ -178,9 +178,15 @@ function InsiderFlow({ flow }: { flow: InsiderNetFlow }) {
           {flow.buyCount} {flow.buyCount === 1 ? 'buy' : 'buys'} · {flow.sellCount}{' '}
           {flow.sellCount === 1 ? 'sell' : 'sells'}
         </div>
-        <div className="mt-1.5 flex h-2.5 overflow-hidden rounded-sm bg-surface-2">
-          <span className="block h-full bg-positive" style={{ width: `${buyFrac}%` }} />
-          <span className="block h-full bg-negative" style={{ width: `${100 - buyFrac}%` }} />
+        <div className="mt-1.5">
+          <StackedBar
+            segments={[
+              { key: 'buy', value: flow.buyShares, className: 'bg-positive' },
+              { key: 'sell', value: flow.sellShares, className: 'bg-negative' },
+            ]}
+            ariaLabel={`Insider buys vs sells: ${flow.buyCount} buys, ${flow.sellCount} sells`}
+            heightClass="h-2.5"
+          />
         </div>
       </div>
     </div>
