@@ -29,6 +29,7 @@ import {
   type SignedDirection,
 } from '../../symbol/signedColor.ts'
 import { Sparkline } from '../../symbol/Sparkline.tsx'
+import { VerticalBars } from '../../symbol/VerticalBars.tsx'
 import { fetchThemeMembershipRationales } from '../../symbol/themeRationale.ts'
 
 const PLACEHOLDER_CLASS = 'text-sm text-muted'
@@ -227,20 +228,16 @@ function SentimentTrendBody({ block }: { block: SentimentTrendBlock }) {
 // the "how loud" beside the "how positive". Heights are normalized to the
 // busiest day in the window.
 function MentionVolumeBars({ points }: { points: SentimentTrendBlock['points'] }) {
-  const max = Math.max(1, ...points.map((p) => p.mention_count))
+  const bars = points.map((point) => ({
+    key: point.date,
+    value: point.mention_count,
+    className: 'bg-accent/70',
+    title: `${point.date}: ${point.mention_count}`,
+  }))
   return (
     <div className="flex flex-col gap-1" data-testid="mention-volume-bars">
       <span className={`text-[10px] uppercase tracking-wide ${NEUTRAL_CLASS}`}>Mention volume</span>
-      <div className="flex h-8 items-end gap-0.5" aria-hidden="true">
-        {points.map((point) => (
-          <span
-            key={point.date}
-            title={`${point.date}: ${point.mention_count}`}
-            className="flex-1 rounded-t-sm bg-accent/70"
-            style={{ height: `${Math.max(4, (point.mention_count / max) * 100)}%` }}
-          />
-        ))}
-      </div>
+      <VerticalBars bars={bars} heightClass="h-8" minBarPct={4} />
     </div>
   )
 }

@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { median, numericDistribution, screenerSummary } from './screenerSummary.ts'
+import { screenerSummary } from './screenerSummary.ts'
 import type { ScreenerResultRow } from './contracts.ts'
+
+// median + numericDistribution behaviour is covered by symbol/distribution.test.ts.
 
 function row(over: {
   pe?: number | null
@@ -33,41 +35,6 @@ function row(over: {
     },
   }
 }
-
-test('median handles odd, even, and empty', () => {
-  assert.equal(median([3, 1, 2]), 2)
-  assert.equal(median([1, 2, 3, 4]), 2.5)
-  assert.equal(median([]), null)
-})
-
-test('numericDistribution bins finite values across their range and drops nulls', () => {
-  const d = numericDistribution([0, null, 5, 10, Number.NaN], 5)
-  assert.equal(d.count, 3) // 0, 5, 10
-  assert.equal(d.min, 0)
-  assert.equal(d.maxValue, 10)
-  assert.equal(d.median, 5)
-  assert.equal(d.bins.length, 5)
-  assert.equal(d.bins[0].count, 1) // 0 -> first bin
-  assert.equal(d.bins[2].count, 1) // 5 -> middle bin
-  assert.equal(d.bins[4].count, 1) // 10 -> last bin
-  assert.equal(d.max, 1)
-})
-
-test('numericDistribution puts an all-equal set in the first bin', () => {
-  const d = numericDistribution([7, 7, 7], 4)
-  assert.equal(d.bins[0].count, 3)
-  assert.equal(d.median, 7)
-  assert.equal(d.min, 7)
-  assert.equal(d.maxValue, 7)
-})
-
-test('numericDistribution returns empty stats for no finite values', () => {
-  const d = numericDistribution([null, undefined, Number.NaN])
-  assert.equal(d.count, 0)
-  assert.equal(d.max, 0)
-  assert.equal(d.median, null)
-  assert.equal(d.bins.length, 10)
-})
 
 test('screenerSummary computes up%, medians, and the P/E distribution over loaded rows', () => {
   const rows = [

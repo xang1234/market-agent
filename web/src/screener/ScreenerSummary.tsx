@@ -1,8 +1,10 @@
 import { useMemo } from 'react'
 import { INSET_SURFACE_CLASS } from '../symbol/surfaceStyles.ts'
 import { formatCompactCurrency } from '../symbol/format.ts'
+import { VerticalBars } from '../symbol/VerticalBars.tsx'
+import type { Distribution } from '../symbol/distribution.ts'
 import type { ScreenerResponse } from './contracts.ts'
-import { screenerSummary, type Distribution } from './screenerSummary.ts'
+import { screenerSummary } from './screenerSummary.ts'
 
 // Charts-first lead for the results: a stat strip + a P/E distribution over the
 // loaded rows — the shape of the basket a paginated table can't show. Stats are
@@ -53,21 +55,17 @@ function SummaryStat({ label, value, positive }: { label: string; value: string;
 }
 
 function MetricDistribution({ dist, label }: { dist: Distribution; label: string }) {
+  const bars = dist.bins.map((bin, i) => ({
+    key: String(i),
+    value: bin.count,
+    title: `${bin.from.toFixed(1)}–${bin.to.toFixed(1)}: ${bin.count}`,
+  }))
   return (
     <div className="flex flex-col gap-1">
       <span className="text-[10px] uppercase tracking-wide text-muted">
         {label} distribution · <span className="num">{dist.count}</span> shown
       </span>
-      <div className="flex h-10 items-end gap-0.5" role="img" aria-label={`${label} distribution across shown rows`}>
-        {dist.bins.map((bin, i) => (
-          <span
-            key={i}
-            title={`${bin.from.toFixed(1)}–${bin.to.toFixed(1)}: ${bin.count}`}
-            className={`flex-1 rounded-t-sm ${dist.max === 0 ? '' : 'bg-accent'}`}
-            style={{ height: `${dist.max === 0 ? 0 : Math.max(bin.count === 0 ? 0 : 8, (bin.count / dist.max) * 100)}%` }}
-          />
-        ))}
-      </div>
+      <VerticalBars bars={bars} minBarPct={8} ariaLabel={`${label} distribution across shown rows`} />
       <div className="flex justify-between text-[10px] num text-faint">
         <span>{dist.min === null ? '' : dist.min.toFixed(0)}</span>
         {dist.median !== null ? <span className="text-accent">med {dist.median.toFixed(1)}</span> : null}
