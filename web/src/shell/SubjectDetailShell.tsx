@@ -55,6 +55,11 @@ const SECTIONS = [
   { to: 'signals', label: 'Signals' },
 ] satisfies ReadonlyArray<{ to: SymbolDetailTab; label: string }>
 
+// Tabs where the news/filings rail earns its 320px. The data-dense tabs
+// (financials, earnings, holders) take the full canvas instead — their tables
+// and charts want the width, and the issuer news there is redundant/blank.
+const RAIL_TABS: ReadonlySet<SymbolDetailTab> = new Set(['overview', 'signals'])
+
 const HEADER_ACTION_CLASS =
   'inline-flex items-center gap-1 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-soft transition-colors hover:border-accent hover:text-fg'
 
@@ -113,9 +118,10 @@ export function SubjectDetailShell() {
       ? legacyResolution
       : ({ status: 'idle' } as const)
 
+  const railEnabled = RAIL_TABS.has(currentTab)
   useRightRailContent(
-    issuerId === null ? null : <SubjectNewsRail issuerId={issuerId} />,
-    [issuerId],
+    railEnabled && issuerId !== null ? <SubjectNewsRail issuerId={issuerId} /> : null,
+    [railEnabled, issuerId],
   )
 
   useEffect(() => {
