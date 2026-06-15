@@ -45,3 +45,22 @@ test("parseMasterIndex tolerates a trailing blank line and CRLF", () => {
   const entries = parseMasterIndex(SAMPLE.replace(/\n/g, "\r\n"));
   assert.equal(entries.length, 4);
 });
+
+test("deriveAccession throws when the path carries no accession", () => {
+  assert.throws(() => deriveAccession("edgar/data/320193/0000320193-26-000051.htm"));
+});
+
+test("parseMasterIndex skips ragged rows that lack exactly 5 fields", () => {
+  const entries = parseMasterIndex(
+    "badrow|only|three\n320193|Apple Inc.|4|2026-06-12|edgar/data/320193/0000320193-26-000050.txt\n",
+  );
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].accession, "0000320193-26-000050");
+});
+
+test("parseMasterIndex returns no entries for a header-only document", () => {
+  const headerOnly = `CIK|Company Name|Form Type|Date Filed|File Name
+--------------------------------------------------------------------------------
+`;
+  assert.equal(parseMasterIndex(headerOnly).length, 0);
+});
