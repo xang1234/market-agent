@@ -3,7 +3,11 @@ export type TestChannelResponse =
   | { ok: false; error_code: string; message: string; attempts?: unknown[] }
 
 export function testMessage(body: TestChannelResponse): string {
-  return body.ok ? `Test passed: ${body.reply}` : diagnosticMessage(body)
+  if (!body.ok) return diagnosticMessage(body)
+  // Success now means the call completed; the reply is informative when present
+  // but may be empty (e.g. a reasoning model truncated before emitting text), so
+  // avoid rendering a bare "Test passed: " tail.
+  return body.reply.trim() ? `Test passed: ${body.reply}` : 'Test passed'
 }
 
 export function diagnosticMessage(body: { error_code?: string; message?: string }): string {
