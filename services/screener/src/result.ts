@@ -63,6 +63,16 @@ export type ScreenerFundamentalsSummary = {
   operating_margin: number | null;
   net_margin: number | null;
   revenue_growth_yoy: number | null;
+  // Momentum/technical stats from the screener-artifact vendor feed. Nullable like
+  // the rest: the SEC/reported candidate path leaves these null; the vendor path
+  // populates them. Added with null-defaulting in freezeFundamentalsSummary so
+  // existing six-field candidate inputs stay valid.
+  forward_pe: number | null;
+  roic: number | null;
+  perf_quarter: number | null;
+  perf_year: number | null;
+  rsi_14: number | null;
+  week_52_high_distance: number | null;
 };
 
 // Display identity — `primary` is the headline label and is always
@@ -355,6 +365,23 @@ export function freezeFundamentalsSummary(
   const revenue_growth_yoy = raw.revenue_growth_yoy;
   assertNullableFiniteNumber(revenue_growth_yoy, `${label}.revenue_growth_yoy`);
 
+  // Technical fields default to null when absent — they're optional in the input
+  // but must always be present in the frozen output, or the executor would read
+  // `undefined`, which slips past the null guard in numericClauseMatches and
+  // fabricates matches.
+  const forward_pe = raw.forward_pe ?? null;
+  assertNullableFiniteNumber(forward_pe, `${label}.forward_pe`);
+  const roic = raw.roic ?? null;
+  assertNullableFiniteNumber(roic, `${label}.roic`);
+  const perf_quarter = raw.perf_quarter ?? null;
+  assertNullableFiniteNumber(perf_quarter, `${label}.perf_quarter`);
+  const perf_year = raw.perf_year ?? null;
+  assertNullableFiniteNumber(perf_year, `${label}.perf_year`);
+  const rsi_14 = raw.rsi_14 ?? null;
+  assertNullableFiniteNumber(rsi_14, `${label}.rsi_14`);
+  const week_52_high_distance = raw.week_52_high_distance ?? null;
+  assertNullableFiniteNumber(week_52_high_distance, `${label}.week_52_high_distance`);
+
   return Object.freeze({
     market_cap,
     pe_ratio,
@@ -362,5 +389,11 @@ export function freezeFundamentalsSummary(
     operating_margin,
     net_margin,
     revenue_growth_yoy,
+    forward_pe,
+    roic,
+    perf_quarter,
+    perf_year,
+    rsi_14,
+    week_52_high_distance,
   });
 }

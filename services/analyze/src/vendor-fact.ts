@@ -3,6 +3,8 @@
 // price): authoritative, full coverage, confidence 1, period_end derived from
 // as_of. Returns the full fact row; callers project to a lean seal row with
 // toSealFactRow when they don't want the freshness surfaced as a disclosure.
+// An optional ingestionBatchId groups facts from one batch load (e.g. the
+// screener-artifacts ETL) so a run is traceable and reversible by batch.
 
 import { createFact, type FactRow, type FactSubjectKind, type FreshnessClass } from "../../evidence/src/fact-repo.ts";
 import type { QueryExecutor } from "../../evidence/src/types.ts";
@@ -19,6 +21,7 @@ export function mintVendorPointFact(
     sourceId: string;
     freshnessClass: FreshnessClass;
     observedAt: string;
+    ingestionBatchId?: string;
   },
 ): Promise<FactRow> {
   return createFact(db, {
@@ -38,5 +41,6 @@ export function mintVendorPointFact(
     freshness_class: input.freshnessClass,
     coverage_level: "full",
     confidence: 1,
+    ...(input.ingestionBatchId === undefined ? {} : { ingestion_batch_id: input.ingestionBatchId }),
   });
 }

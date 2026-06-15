@@ -1,0 +1,52 @@
+name: Ingest weekly-reference artifacts
+
+# Scheduled ETL: pulls the latest xang1234/stock-screener weekly-reference bundle
+# into Postgres (services/screener-artifacts). Fires after the upstream Saturday
+# 08:10 ET reference run publishes. Idempotent — the ledger sha256 gate makes an
+# extra run a cheap no-op, so an occasional duplicate/retry is safe.
+#
+# Requires a DATABASE_URL secret pointing at a Postgres reachable from the runner.
+# If the database is only reachable from a private host, run the same
+# `npm run job:weekly-reference` from a host cron/launchd instead — the job is the
+# same plain script either way.
+on:
+  schedule:
+    - cron: "30 13 * * 6" # 13:30 UTC Sat (~08:30–09:30 ET, after the upstream run)
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Re-ingest even if the bundle sha256 is unchanged"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ingest-weekly-reference
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    name: weekly-reference ETL
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: services/screener-artifacts
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.19.0"
+          cache: npm
+          cache-dependency-path: services/screener-artifacts/package-lock.json
+
+      - run: npm ci
+
+      - name: Run weekly-reference ETL
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SCREENER_ARTIFACTS_ENABLE: "true"
+          SCREENER_ARTIFACTS_MARKETS: US
+        run: npm run job:weekly-reference -- ${{ inputs.force && '--force' || '' }}

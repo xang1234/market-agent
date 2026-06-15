@@ -55,6 +55,21 @@ test("source seed registers open reference and Stooq market sources", () => {
   );
 });
 
+test("source seed registers the stock-screener artifact ETL sources", () => {
+  const sourcesSql = readFileSync(new URL("../seed/sources.sql", import.meta.url), "utf8");
+
+  // Weekly reference fundamentals bundle (reference_data) and daily price bundle
+  // (market_data), both under the xang1234/stock-screener provider.
+  assert.match(
+    sourcesSql,
+    /'xang1234_stock_screener',\s*'reference_data',\s*'https:\/\/github\.com\/xang1234\/stock-screener\/releases\/download\/weekly-reference-data',\s*'tertiary',\s*'free'/,
+  );
+  assert.match(
+    sourcesSql,
+    /'xang1234_stock_screener',\s*'market_data',\s*'https:\/\/github\.com\/xang1234\/stock-screener\/releases\/download\/daily-price-data',\s*'tertiary',\s*'free'/,
+  );
+});
+
 type SeedSnapshot = {
   metricCount: string;
   sourceCount: string;

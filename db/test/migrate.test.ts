@@ -61,6 +61,29 @@ test("snapshot manifest forward migration owns post-baseline snapshot columns", 
   }
 });
 
+test("artifact ingestion ledger migration matches the consolidated schema", () => {
+  const upMigration = readFileSync(
+    join(dbRoot, "migrations", "0031_artifact_ingestion_ledger.up.sql"),
+    "utf8",
+  );
+  const downMigration = readFileSync(
+    join(dbRoot, "migrations", "0031_artifact_ingestion_ledger.down.sql"),
+    "utf8",
+  );
+  const schema = readFileSync(schemaPath, "utf8");
+
+  // The forward migration and the consolidated spec must both define the table —
+  // the docker-gated parity test compares migrated tables against the spec, so the
+  // two drifting apart is a silent CI break this file-based check catches first.
+  for (const sql of [upMigration, schema]) {
+    assert.match(sql, /create table artifact_ingestion_ledger \(/);
+    assert.match(sql, /source_id\s+uuid not null references sources\(source_id\)/);
+    assert.match(sql, /unique \(release_tag, market, sha256\)/);
+    assert.match(sql, /create index artifact_ingestion_ledger_lookup_idx/);
+  }
+  assert.match(downMigration, /drop table if exists artifact_ingestion_ledger;/);
+});
+
 test("watchlist list-management migration is append-only after default manual baseline", () => {
   const defaultManualMigration = readFileSync(defaultManualWatchlistMigrationPath, "utf8");
   const listManagementMigration = readFileSync(watchlistListManagementMigrationPath, "utf8");
