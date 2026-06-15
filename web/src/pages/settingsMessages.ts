@@ -1,6 +1,8 @@
+// The frontend reads only these fields; the backend also sends deployment/attempts
+// on the wire, but they're intentionally not modelled here since nothing consumes them.
 export type TestChannelResponse =
-  | { ok: true; reply: string; deployment?: unknown }
-  | { ok: false; error_code: string; message: string; attempts?: unknown[] }
+  | { ok: true; reply: string }
+  | { ok: false; error_code: string; message: string }
 
 export function testMessage(body: TestChannelResponse): string {
   if (!body.ok) return diagnosticMessage(body)
