@@ -50,7 +50,12 @@ export function parseWeeklyBundle(raw: unknown): WeeklyReferenceBundle {
   if (!isObject(snapshot) || !Array.isArray(snapshot.rows)) {
     throw new BundleParseError("bundle.snapshot.rows must be an array");
   }
-  const universe = Array.isArray(raw.universe) ? (raw.universe as UniverseEntry[]) : [];
+  // universe is the authoritative identity source (carries MICs); a bundle missing
+  // it is malformed — fail fast rather than silently ingesting nothing.
+  if (!Array.isArray(raw.universe)) {
+    throw new BundleParseError("bundle.universe must be an array");
+  }
+  const universe = raw.universe as UniverseEntry[];
 
   return {
     schema_version: WEEKLY_BUNDLE_SCHEMA,

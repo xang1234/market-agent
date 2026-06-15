@@ -89,7 +89,6 @@ export async function seedUniverseEntry(
   await fillIssuerProfileFields(db, issuerId, {
     sector: entry.sector,
     industry: entry.industry,
-    domicile: opts.domicile,
   });
   return { listingId: ref.id, issuerId };
 }
@@ -108,21 +107,39 @@ async function issuerIdForListing(db: QueryExecutor, listingId: string): Promise
 }
 
 // Coalesce semantics (mirrors resolver fillIssuerIdentityFields): fill a null
-// column, never overwrite an existing SEC/Polygon-sourced value. The per-source
-// provenance is carried separately by issuer_profile_enrichments.
+// column, never overwrite an existing SEC/Polygon-sourced value. Owns sector and
+// industry only — domicile flows through the discovered-listing upsert, so this
+// keeps one writer per column. Per-source provenance is carried separately by
+// issuer_profile_enrichments.
 async function fillIssuerProfileFields(
   db: QueryExecutor,
   issuerId: string,
-  values: { sector?: string | null; industry?: string | null; domicile?: string | null },
+  values: { sector?: string | null; industry?: string | null },
 ): Promise<void> {
-  if (!values.sector && !values.industry && !values.domicile) return;
+  const sector = cleanField(values.sector);
+  const industry = cleanField(values.industry);
+  if (!sector && !industry) return;
+  // The where-guard keeps updated_at from churning on rows that already have both
+  // columns — coalesce would otherwise keep the existing value but still bump the
+  // timestamp on every weekly re-run.
   await db.query(
     `update issuers
         set sector = coalesce(sector, $2),
             industry = coalesce(industry, $3),
-            domicile = coalesce(domicile, $4),
             updated_at = now()
-      where issuer_id = $1`,
-    [issuerId, values.sector ?? null, values.industry ?? null, values.domicile ?? null],
+      where issuer_id = $1
+        and (
+          (sector is null and $2::text is not null) or
+          (industry is null and $3::text is not null)
+        )`,
+    [issuerId, sector, industry],
   );
+}
+
+// Trims, treating a whitespace-only string as null, so a blank bundle value never
+// pollutes the canonical issuer columns.
+function cleanField(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }

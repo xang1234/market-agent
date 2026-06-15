@@ -54,7 +54,7 @@ export function mapPayloadToVendorStats(
   payload: NormalizedPayload,
   opts: { currency?: string } = {},
 ): VendorStat[] {
-  const currency = opts.currency ?? "USD";
+  const currency = (opts.currency ?? "USD").trim().toUpperCase();
   const stats: VendorStat[] = [];
   for (const mapping of MAPPINGS) {
     const value = payload[mapping.field];

@@ -42,6 +42,7 @@ const BUNDLE: WeeklyReferenceBundle = {
           forward_pe: 20.5,
           rsi_14: 70.1,
           perf_year: 12.3,
+          sales_growth_yy: 50, // percent points upstream → fraction at the screener
           gross_margin: null, // 0%-covered field — must not produce a fact
         },
       },
@@ -109,8 +110,9 @@ test("weekly-reference ETL seeds the universe, mints vendor facts, and is idempo
   assert.equal(report.rowsTotal, 3);
   assert.equal(report.rowsIngested, 2);
   assert.equal(report.rowsSkipped, 1);
-  // TSTA: market_cap, forward_pe_ratio, rsi_14, perf_year (4); TSTB: market_cap, rsi_14 (2).
-  assert.equal(report.factsWritten, 6);
+  // TSTA: market_cap, forward_pe_ratio, rsi_14, perf_year, revenue_growth_yoy (5);
+  // TSTB: market_cap, rsi_14 (2).
+  assert.equal(report.factsWritten, 7);
   assert.equal(report.errorSamples.length, 0);
 
   // Identity chain seeded with the universe MIC + issuer profile filled.
@@ -147,7 +149,7 @@ test("weekly-reference ETL seeds the universe, mints vendor facts, and is idempo
       where f.subject_kind = 'issuer' and l.ticker in ('TSTA', 'TSTB')
       order by l.ticker, m.metric_key`,
   );
-  assert.equal(facts.rows.length, 6);
+  assert.equal(facts.rows.length, 7);
   assert.ok(facts.rows.every((r) => r.method === "vendor"), "all facts are method='vendor'");
   assert.ok(
     facts.rows.every((r) => r.ingestion_batch_id === report.ingestionBatchId),
@@ -155,6 +157,10 @@ test("weekly-reference ETL seeds the universe, mints vendor facts, and is idempo
   );
   const tstaMarketCap = facts.rows.find((r) => r.ticker === "TSTA" && r.metric_key === "market_cap");
   assert.equal(Number(tstaMarketCap?.value_num), 1_000_000);
+  // The fact is stored as percent (its registry unit); only the screener candidate
+  // above sees the fraction — the conversion lives at the read boundary.
+  const tstaRevGrowth = facts.rows.find((r) => r.ticker === "TSTA" && r.metric_key === "revenue_growth_yoy");
+  assert.equal(Number(tstaRevGrowth?.value_num), 50);
   assert.equal(
     facts.rows.some((r) => r.metric_key === "gross_margin"),
     false,
@@ -192,6 +198,8 @@ test("weekly-reference ETL seeds the universe, mints vendor facts, and is idempo
   assert.equal(tsta.fundamentals.forward_pe, 20.5);
   assert.equal(tsta.fundamentals.rsi_14, 70.1);
   assert.equal(tsta.fundamentals.perf_year, 12.3);
+  // 50% (percent fact) is converted to a fraction at the screener boundary.
+  assert.equal(tsta.fundamentals.revenue_growth_yoy, 0.5);
   assert.equal(tsta.fundamentals.pe_ratio, null);
   assert.equal(tsta.fundamentals.gross_margin, null);
   assert.equal(tsta.quote.last_price, null);

@@ -64,10 +64,12 @@ test("parseWeeklyBundle rejects a non-array snapshot.rows", () => {
   );
 });
 
-test("parseWeeklyBundle defaults a missing universe to an empty array", () => {
+test("parseWeeklyBundle rejects a bundle missing its universe array", () => {
   const { universe: _omit, ...withoutUniverse } = BUNDLE;
-  const bundle = parseWeeklyBundle(withoutUniverse);
-  assert.deepEqual(bundle.universe, []);
+  assert.throws(
+    () => parseWeeklyBundle(withoutUniverse),
+    (error: unknown) => error instanceof BundleParseError && /universe/.test(error.message),
+  );
 });
 
 test("sanitizeNonFiniteNumbers rewrites Python NaN/Infinity tokens in value position", () => {

@@ -75,18 +75,6 @@ export type ScreenerFundamentalsSummary = {
   week_52_high_distance: number | null;
 };
 
-// The momentum/technical extension to the fundamentals summary. Kept out of
-// FUNDAMENTALS_FIELDS (the required-present set) so a candidate built before these
-// existed still freezes — the fields default to null.
-const TECHNICAL_FUNDAMENTALS_FIELDS = [
-  "forward_pe",
-  "roic",
-  "perf_quarter",
-  "perf_year",
-  "rsi_14",
-  "week_52_high_distance",
-] as const;
-
 // Display identity — `primary` is the headline label and is always
 // present. The other fields are optional because they only make sense
 // for certain subject kinds (e.g. `mic` for listings, `legal_name` for
@@ -377,15 +365,22 @@ export function freezeFundamentalsSummary(
   const revenue_growth_yoy = raw.revenue_growth_yoy;
   assertNullableFiniteNumber(revenue_growth_yoy, `${label}.revenue_growth_yoy`);
 
-  // Technical fields are optional in the input (default null) but always present in
-  // the frozen output, so the executor never sees `undefined` (which would slip past
-  // the null guard in numericClauseMatches and fabricate matches).
-  const technical: Record<string, number | null> = {};
-  for (const key of TECHNICAL_FUNDAMENTALS_FIELDS) {
-    const value = raw[key] ?? null;
-    assertNullableFiniteNumber(value, `${label}.${key}`);
-    technical[key] = value as number | null;
-  }
+  // Technical fields default to null when absent — they're optional in the input
+  // but must always be present in the frozen output, or the executor would read
+  // `undefined`, which slips past the null guard in numericClauseMatches and
+  // fabricates matches.
+  const forward_pe = raw.forward_pe ?? null;
+  assertNullableFiniteNumber(forward_pe, `${label}.forward_pe`);
+  const roic = raw.roic ?? null;
+  assertNullableFiniteNumber(roic, `${label}.roic`);
+  const perf_quarter = raw.perf_quarter ?? null;
+  assertNullableFiniteNumber(perf_quarter, `${label}.perf_quarter`);
+  const perf_year = raw.perf_year ?? null;
+  assertNullableFiniteNumber(perf_year, `${label}.perf_year`);
+  const rsi_14 = raw.rsi_14 ?? null;
+  assertNullableFiniteNumber(rsi_14, `${label}.rsi_14`);
+  const week_52_high_distance = raw.week_52_high_distance ?? null;
+  assertNullableFiniteNumber(week_52_high_distance, `${label}.week_52_high_distance`);
 
   return Object.freeze({
     market_cap,
@@ -394,11 +389,11 @@ export function freezeFundamentalsSummary(
     operating_margin,
     net_margin,
     revenue_growth_yoy,
-    forward_pe: technical.forward_pe,
-    roic: technical.roic,
-    perf_quarter: technical.perf_quarter,
-    perf_year: technical.perf_year,
-    rsi_14: technical.rsi_14,
-    week_52_high_distance: technical.week_52_high_distance,
+    forward_pe,
+    roic,
+    perf_quarter,
+    perf_year,
+    rsi_14,
+    week_52_high_distance,
   });
 }

@@ -1,9 +1,10 @@
-import type {
-  ScreenerCandidate,
-  ScreenerCandidateRepository,
-  ScreenerCandidateUniverse,
-} from "./candidate.ts";
-import type { AssetType } from "./fields.ts";
+import type { ScreenerCandidate, ScreenerCandidateRepository } from "./candidate.ts";
+import {
+  displayFromRow,
+  isoString,
+  universeFromRow,
+  type ScreenerIdentityRow,
+} from "./candidate-row.ts";
 import {
   loadRecentIssuerFundamentals,
   type IssuerFundamentalFact,
@@ -45,18 +46,8 @@ export function createPostgresCandidateRepository(
   };
 }
 
-type CandidateRow = {
+type CandidateRow = ScreenerIdentityRow & {
   issuer_id: string;
-  listing_id: string;
-  legal_name: string;
-  share_class: string | null;
-  asset_type: AssetType;
-  mic: string;
-  ticker: string;
-  trading_currency: string;
-  domicile: string | null;
-  sector: string | null;
-  industry: string | null;
   price: string | number;
   prev_close: string | number;
   delay_class: string;
@@ -132,13 +123,7 @@ export async function loadPostgresScreenerCandidates(
 
     candidates.push({
       subject_ref: { kind: "listing", id: row.listing_id },
-      display: {
-        primary: `${row.ticker} · ${row.mic} — ${row.legal_name}`,
-        ticker: row.ticker,
-        mic: row.mic,
-        legal_name: row.legal_name,
-        ...(row.share_class ? { share_class: row.share_class } : {}),
-      },
+      display: displayFromRow(row),
       universe,
       quote: {
         last_price: price,
@@ -171,18 +156,6 @@ export async function loadPostgresScreenerCandidates(
   }
 
   return Object.freeze(candidates);
-}
-
-function universeFromRow(row: CandidateRow): ScreenerCandidateUniverse | null {
-  if (!row.domicile || !row.sector || !row.industry) return null;
-  return {
-    asset_type: row.asset_type,
-    mic: row.mic,
-    trading_currency: row.trading_currency,
-    domicile: row.domicile,
-    sector: row.sector,
-    industry: row.industry,
-  };
 }
 
 function pickCurrentPriorFundamentals(facts: ReadonlyArray<IssuerFundamentalFact>): {
@@ -226,8 +199,4 @@ function emptyFacts(): Record<string, number | null> {
 function ratio(numerator: number | null, denominator: number | null): number | null {
   if (numerator === null || denominator === null || denominator === 0) return null;
   return numerator / denominator;
-}
-
-function isoString(value: Date | string): string {
-  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }

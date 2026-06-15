@@ -27,6 +27,8 @@ jobs:
   ingest:
     name: weekly-reference ETL
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 30
     defaults:
       run:

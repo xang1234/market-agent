@@ -57,6 +57,11 @@ test("mapPayloadToVendorStats tags currency-denominated stats with the currency"
   assert.equal(statByKey(stats, "rsi_14")?.currency, undefined);
 });
 
+test("mapPayloadToVendorStats normalizes the currency (trim + uppercase)", () => {
+  const stats = mapPayloadToVendorStats({ market_cap_usd: 1000 }, { currency: " usd " });
+  assert.equal(statByKey(stats, "market_cap")?.currency, "USD");
+});
+
 test("mapPayloadToVendorStats skips non-finite and non-numeric drift", () => {
   const stats = mapPayloadToVendorStats({
     market_cap_usd: Number.NaN,

@@ -16,12 +16,13 @@
 // statement absolutes); margins/PE come through null because that feed is 0%-covered
 // for them — they keep coming from the reported path.
 
-import type {
-  ScreenerCandidate,
-  ScreenerCandidateRepository,
-  ScreenerCandidateUniverse,
-} from "./candidate.ts";
-import type { AssetType } from "./fields.ts";
+import type { ScreenerCandidate, ScreenerCandidateRepository } from "./candidate.ts";
+import {
+  displayFromRow,
+  isoString,
+  universeFromRow,
+  type ScreenerIdentityRow,
+} from "./candidate-row.ts";
 import type { ScreenerFundamentalsSummary, ScreenerQuoteSummary } from "./result.ts";
 
 export type VendorCandidateQueryExecutor = {
@@ -49,6 +50,14 @@ const FUNDAMENTAL_METRIC_KEYS: ReadonlyArray<string> = [
   "week_52_high_distance",
 ];
 
+// Vendor candidates are scoped to the artifact-ingested universe by requiring an
+// issuer_profile_enrichments row from this provider — every seeded universe entry
+// gets sector/industry enrichments under it, so it's a precise "came from the
+// weekly-reference ingest" marker. Without it, any provider-enriched listing (e.g.
+// SEC/Polygon-discovered) with a populated profile but no artifact facts would leak
+// into vendor screens with all-null fundamentals.
+const ARTIFACT_ENRICHMENT_PROVIDER = "xang1234_stock_screener";
+
 export function createVendorScreenerCandidateRepository(
   db: VendorCandidateQueryExecutor,
   clock: () => Date = () => new Date(),
@@ -69,17 +78,7 @@ export function createVendorScreenerCandidateRepository(
   };
 }
 
-type VendorCandidateRow = {
-  listing_id: string;
-  legal_name: string;
-  share_class: string | null;
-  asset_type: AssetType;
-  mic: string;
-  ticker: string;
-  trading_currency: string;
-  domicile: string | null;
-  sector: string | null;
-  industry: string | null;
+type VendorCandidateRow = ScreenerIdentityRow & {
   price: string | number | null;
   prev_close: string | number | null;
   delay_class: string | null;
@@ -161,8 +160,13 @@ export async function loadVendorScreenerCandidates(
         and iss.domicile is not null
         and iss.sector is not null
         and iss.industry is not null
+        and exists (
+          select 1
+            from issuer_profile_enrichments e
+           where e.issuer_id = iss.issuer_id and e.provider = $3
+        )
       order by l.ticker, l.mic, l.listing_id`,
-    [nowIso, [...FUNDAMENTAL_METRIC_KEYS]],
+    [nowIso, [...FUNDAMENTAL_METRIC_KEYS], ARTIFACT_ENRICHMENT_PROVIDER],
   );
 
   const candidates: ScreenerCandidate[] = [];
@@ -171,31 +175,13 @@ export async function loadVendorScreenerCandidates(
     if (!universe) continue;
     candidates.push({
       subject_ref: { kind: "listing", id: row.listing_id },
-      display: {
-        primary: `${row.ticker} · ${row.mic} — ${row.legal_name}`,
-        ticker: row.ticker,
-        mic: row.mic,
-        legal_name: row.legal_name,
-        ...(row.share_class ? { share_class: row.share_class } : {}),
-      },
+      display: displayFromRow(row),
       universe,
       quote: quoteFromRow(row, nowIso),
       fundamentals: fundamentalsFromRow(row),
     });
   }
   return Object.freeze(candidates);
-}
-
-function universeFromRow(row: VendorCandidateRow): ScreenerCandidateUniverse | null {
-  if (!row.domicile || !row.sector || !row.industry) return null;
-  return {
-    asset_type: row.asset_type,
-    mic: row.mic,
-    trading_currency: row.trading_currency,
-    domicile: row.domicile,
-    sector: row.sector,
-    industry: row.industry,
-  };
 }
 
 function quoteFromRow(row: VendorCandidateRow, nowIso: string): ScreenerQuoteSummary {
@@ -221,7 +207,9 @@ function quoteFromRow(row: VendorCandidateRow, nowIso: string): ScreenerQuoteSum
     volume: null,
     delay_class: row.delay_class ?? "unknown",
     currency: row.currency ?? row.trading_currency,
-    as_of: isoString(row.as_of, nowIso),
+    // A quote row with a price always carries an as_of; fall back to nowIso only
+    // for the degenerate null case.
+    as_of: row.as_of === null ? nowIso : isoString(row.as_of),
   };
 }
 
@@ -232,7 +220,12 @@ function fundamentalsFromRow(row: VendorCandidateRow): ScreenerFundamentalsSumma
     gross_margin: numOrNull(row.gross_margin),
     operating_margin: numOrNull(row.operating_margin),
     net_margin: numOrNull(row.net_margin),
-    revenue_growth_yoy: numOrNull(row.revenue_growth_yoy),
+    // The vendor feed stores revenue growth as percent points (its registry unit),
+    // but the screener field is fractional — the reported path computes
+    // (latest-prior)/prior and the UI labels it fractional. Convert at this boundary
+    // so vendor and reported candidates agree. The other percent fields (perf_*,
+    // roic) are new fields shown as percent end-to-end and need no conversion.
+    revenue_growth_yoy: percentToFraction(numOrNull(row.revenue_growth_yoy)),
     forward_pe: numOrNull(row.forward_pe),
     roic: numOrNull(row.roic),
     perf_quarter: numOrNull(row.perf_quarter),
@@ -248,7 +241,6 @@ function numOrNull(value: string | number | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function isoString(value: Date | string | null, fallback: string): string {
-  if (value === null) return fallback;
-  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+function percentToFraction(value: number | null): number | null {
+  return value === null ? null : value / 100;
 }
