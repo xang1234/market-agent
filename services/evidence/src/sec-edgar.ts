@@ -36,9 +36,14 @@ export const SEC_FORM_CODES = Object.freeze([
   "10-K",
   "10-Q",
   "8-K",
+  "8-K/A",
   "20-F",
   "6-K",
   "40-F",
+  "4",
+  "4/A",
+  "13F-HR",
+  "13F-HR/A",
 ] as const);
 export type SecFormCode = (typeof SEC_FORM_CODES)[number];
 
