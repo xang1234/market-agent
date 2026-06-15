@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { HttpJsonError, readJsonBody } from '../http/authFetch.ts'
+import { diagnosticMessage, testMessage, type TestChannelResponse } from './settingsMessages.ts'
 
 export type LlmChannelSettings = {
   name: string
@@ -26,9 +27,6 @@ type SettingsState =
 
 type MessageTone = 'success' | 'error'
 type BusyAction = 'save' | 'test' | 'discover' | null
-type TestChannelResponse =
-  | { ok: true; reply: string; deployment?: unknown }
-  | { ok: false; error_code: string; message: string; attempts?: unknown[] }
 type DiscoverModelsResponse =
   | { ok: true; models: string[] }
   | { ok: false; error_code?: string; message?: string; models: [] }
@@ -354,15 +352,6 @@ function splitCsv(value: string): string[] {
 
 function uniqueStrings(values: string[]): string[] {
   return [...new Set(values)]
-}
-
-export function testMessage(body: TestChannelResponse): string {
-  return body.ok ? `Test passed: ${body.reply}` : diagnosticMessage(body)
-}
-
-function diagnosticMessage(body: { error_code?: string; message?: string }): string {
-  if (body.error_code && body.message) return `${body.error_code}: ${body.message}`
-  return body.message ?? body.error_code ?? 'request failed'
 }
 
 function messageClass(tone: MessageTone = 'success'): string {

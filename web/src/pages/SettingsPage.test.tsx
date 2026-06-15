@@ -6,7 +6,8 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
 
-import { SettingsPage, SettingsView, testMessage, type LlmEditableSettings } from './SettingsPage.tsx'
+import { SettingsPage, SettingsView, type LlmEditableSettings } from './SettingsPage.tsx'
+import { testMessage } from './settingsMessages.ts'
 
 test('testMessage renders pass and diagnostic outcomes', () => {
   assert.equal(testMessage({ ok: true, reply: 'Reply OK' }), 'Test passed: Reply OK')
