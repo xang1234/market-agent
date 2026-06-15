@@ -9,6 +9,7 @@
 
 import { ingestDocument, type IngestDocumentResult } from "./ingest.ts";
 import type { ObjectStore } from "./object-store.ts";
+import { parseMasterIndex, type FilingIndexEntry } from "./sec-daily-index.ts";
 import { createSource, deleteSource, type SourceRow } from "./source-repo.ts";
 import type { QueryExecutor } from "./types.ts";
 import { assertOneOf, assertPositiveInteger } from "./validators.ts";
@@ -241,6 +242,15 @@ export function submissionsUrl(cik: number): string {
   return `https://data.sec.gov/submissions/CIK${String(cik).padStart(10, "0")}.json`;
 }
 
+export function dailyIndexUrl(date: Date): string {
+  const yyyy = date.getUTCFullYear();
+  const mm = date.getUTCMonth(); // 0-based
+  const dd = date.getUTCDate();
+  const quarter = Math.floor(mm / 3) + 1;
+  const stamp = `${yyyy}${String(mm + 1).padStart(2, "0")}${String(dd).padStart(2, "0")}`;
+  return `https://www.sec.gov/Archives/edgar/daily-index/${yyyy}/QTR${quarter}/master.${stamp}.idx`;
+}
+
 export class SecEdgarClient {
   private readonly userAgent: string;
   private readonly fetchImpl: FetchLike;
@@ -296,6 +306,14 @@ export class SecEdgarClient {
     const url = submissionsUrl(cik);
     const { bytes } = await this.fetchBytes(url);
     return JSON.parse(new TextDecoder("utf-8").decode(bytes)) as SecSubmissions;
+  }
+
+  // The day's cross-market filing index (every filer, every form). Same Fair
+  // Access policy as the archive, so it shares the rate limiter + User-Agent.
+  async fetchDailyIndex(date: Date): Promise<FilingIndexEntry[]> {
+    const url = dailyIndexUrl(date);
+    const { bytes } = await this.fetchBytes(url);
+    return parseMasterIndex(new TextDecoder("utf-8").decode(bytes));
   }
 
   private async fetchBytes(url: string): Promise<{ bytes: Uint8Array; contentType: string | null }> {
