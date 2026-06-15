@@ -61,10 +61,16 @@ export async function crawlDailyFilings(
       const result = await input.handlers[entry.form](entry, handlerDeps);
       if (result.ingested) outcome.ingested += 1;
       else outcome.skipped += 1;
-    } catch {
-      // One bad filing must not sink the day's crawl; mark the form partial
-      // and continue. The ledger row records the discrepancy for an operator.
+    } catch (err) {
+      // One bad filing must not sink the day's crawl: mark the form partial,
+      // count it as skipped so the ledger keeps total = ingested + skipped, and
+      // log it (no silent drops) so an operator can diagnose. Then continue.
       outcome.status = "partial";
+      outcome.skipped += 1;
+      console.error(
+        `[sec-daily-crawl] handler failed for form=${entry.form} accession=${entry.accession}`,
+        err,
+      );
     }
   }
 
