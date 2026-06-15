@@ -8,6 +8,7 @@ import {
   readLlmSettingsEnvFile,
   writeLlmSettingsEnvFile,
   type LlmChatClient,
+  type LlmRouterAttempt,
   LlmRouterError,
 } from "../../llm/src/index.ts";
 
@@ -81,11 +82,7 @@ async function handleLlmSettingsRequestUnsafe(input: {
       respondJson(res, 400, { error: "no enabled LLM deployment is configured" });
       return;
     }
-    const result = await testConfiguredRouter(router);
-    respondJson(res, 200, {
-      ok: result.ok,
-      ...result.body,
-    });
+    respondJson(res, 200, await testConfiguredRouter(router));
     return;
   }
 
@@ -225,12 +222,13 @@ async function discoverOpenAiCompatibleModels(
   };
 }
 
+type TestChannelResult =
+  | { ok: true; reply: string; deployment: { channel: string; model: string } }
+  | { ok: false; error_code: string; message: string; attempts?: ReadonlyArray<LlmRouterAttempt> };
+
 async function testConfiguredRouter(
   router: NonNullable<Awaited<ReturnType<typeof createLlmRouterFromEnv>>>,
-): Promise<{
-  ok: boolean;
-  body: Record<string, unknown>;
-}> {
+): Promise<TestChannelResult> {
   try {
     const result = await router.complete({
       messages: [
@@ -238,32 +236,26 @@ async function testConfiguredRouter(
         { role: "user", content: "Connection test" },
       ],
       temperature: 0,
-      maxTokens: 128,
+      // Reasoning models spend their budget thinking before answering; a tight cap
+      // truncates them mid-thought. A completed call already proves the channel
+      // works (auth, model, endpoint reachable), so give ample room and treat any
+      // non-erroring reply as success instead of gating on the exact text.
+      maxTokens: 1024,
     });
-    return {
-      ok: result.text.trim() === "Reply OK",
-      body: {
-        reply: result.text,
-        deployment: result.deployment,
-      },
-    };
+    return { ok: true, reply: result.text, deployment: result.deployment };
   } catch (error) {
     if (error instanceof LlmRouterError) {
       return {
         ok: false,
-        body: {
-          error_code: diagnosticRouterCode(error),
-          message: diagnosticRouterMessage(error),
-          attempts: error.attempts,
-        },
+        error_code: diagnosticRouterCode(error),
+        message: diagnosticRouterMessage(error),
+        attempts: error.attempts,
       };
     }
     return {
       ok: false,
-      body: {
-        error_code: "provider_failed",
-        message: error instanceof Error ? error.message : "unknown LLM provider failure",
-      },
+      error_code: "provider_failed",
+      message: error instanceof Error ? error.message : "unknown LLM provider failure",
     };
   }
 }

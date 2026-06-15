@@ -121,7 +121,35 @@ test("POST /v1/dev/llm-settings/test-channel gives reasoning models enough outpu
 
   assert.equal(response.status, 200);
   assert.equal((response.body as { ok?: boolean }).ok, true);
-  assert.equal(observedMaxTokens, 128);
+  assert.ok((observedMaxTokens ?? 0) >= 1024, `expected a generous output budget for reasoning models, got ${observedMaxTokens}`);
+});
+
+test("POST /v1/dev/llm-settings/test-channel passes when a deployment answers, even off-script", async () => {
+  const envFile = await seedEnvFile();
+  const response = await invoke("/v1/dev/llm-settings/test-channel", {
+    method: "POST",
+    env: enabledEnv(envFile),
+    options: {
+      createClient: () => async () => ({ text: "Sure - everything looks connected." }),
+    },
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal((response.body as { ok?: boolean }).ok, true);
+});
+
+test("POST /v1/dev/llm-settings/test-channel passes when a reasoning model returns no usable text", async () => {
+  const envFile = await seedEnvFile();
+  const response = await invoke("/v1/dev/llm-settings/test-channel", {
+    method: "POST",
+    env: enabledEnv(envFile),
+    options: {
+      createClient: () => async () => ({ text: "" }),
+    },
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal((response.body as { ok?: boolean }).ok, true);
 });
 
 test("POST /v1/dev/llm-settings/test-channel distinguishes provider failures", async () => {

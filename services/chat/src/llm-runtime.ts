@@ -41,7 +41,9 @@ export function createLlmThreadTitleModel(options: LlmRuntimeOptions = {}): Thre
         },
       ],
       temperature: 0.2,
-      maxTokens: 32,
+      // A title is short, but reasoning models think before answering; 32 tokens
+      // truncates them mid-thought and yields an empty title. Leave room to reason.
+      maxTokens: 512,
     });
     return result.text;
   };

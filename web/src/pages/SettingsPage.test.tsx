@@ -7,6 +7,14 @@ import { createRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
 
 import { SettingsPage, SettingsView, type LlmEditableSettings } from './SettingsPage.tsx'
+import { testMessage } from './settingsMessages.ts'
+
+test('testMessage renders pass and diagnostic outcomes', () => {
+  assert.equal(testMessage({ ok: true, reply: 'Reply OK' }), 'Test passed: Reply OK')
+  assert.equal(testMessage({ ok: true, reply: '' }), 'Test passed')
+  assert.equal(testMessage({ ok: false, error_code: 'auth_failed', message: 'bad key' }), 'auth_failed: bad key')
+  assert.equal(testMessage({ ok: false, error_code: 'provider_failed', message: 'provider down' }), 'provider_failed: provider down')
+})
 
 test('SettingsView renders AI model channels and model selectors', () => {
   const html = renderToString(
