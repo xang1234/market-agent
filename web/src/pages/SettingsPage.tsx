@@ -28,7 +28,7 @@ type MessageTone = 'success' | 'error'
 type BusyAction = 'save' | 'test' | 'discover' | null
 type TestChannelResponse =
   | { ok: true; reply: string; deployment?: unknown }
-  | { ok: false; reply?: string; error_code?: string; message?: string; attempts?: unknown[] }
+  | { ok: false; error_code: string; message: string; attempts?: unknown[] }
 type DiscoverModelsResponse =
   | { ok: true; models: string[] }
   | { ok: false; error_code?: string; message?: string; models: [] }
@@ -356,10 +356,8 @@ function uniqueStrings(values: string[]): string[] {
   return [...new Set(values)]
 }
 
-function testMessage(body: TestChannelResponse): string {
-  if (body.ok) return `Test passed: ${body.reply}`
-  if (body.error_code) return diagnosticMessage(body)
-  return `Unexpected reply: ${body.reply ?? 'empty response'}`
+export function testMessage(body: TestChannelResponse): string {
+  return body.ok ? `Test passed: ${body.reply}` : diagnosticMessage(body)
 }
 
 function diagnosticMessage(body: { error_code?: string; message?: string }): string {

@@ -37,6 +37,21 @@ test("createLlmThreadTitleModel delegates to the shared router", async () => {
   assert.match(calls[0], /Margins compressed/);
 });
 
+test("createLlmThreadTitleModel gives reasoning models enough output budget", async () => {
+  let observedMaxTokens: number | undefined;
+  const model = createLlmThreadTitleModel({
+    env: BASE_ENV,
+    createClient: () => async (_deployment, request) => {
+      observedMaxTokens = request.maxTokens;
+      return { text: "Apple Margin Watch" };
+    },
+  });
+
+  await model({ userIntent: "Why did Apple sell off?", assistantText: "Margins compressed." });
+
+  assert.ok((observedMaxTokens ?? 0) >= 256, `expected a generous title budget for reasoning models, got ${observedMaxTokens}`);
+});
+
 test("composeAnalystBlocksWithLlm returns original blocks when no deployment is configured", async () => {
   const blocks = [richTextBlock("Deterministic note")];
   const result = await composeAnalystBlocksWithLlm({
