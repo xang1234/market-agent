@@ -62,6 +62,17 @@ test("mapPayloadToVendorStats normalizes the currency (trim + uppercase)", () =>
   assert.equal(statByKey(stats, "market_cap")?.currency, "USD");
 });
 
+test("mapPayloadToVendorStats tags market_cap as USD regardless of listing currency", () => {
+  // market_cap_usd is USD-denominated by name; price-level fields stay listing-currency.
+  const stats = mapPayloadToVendorStats(
+    { market_cap_usd: 1000, week_52_high: 50, atr_14: 2 },
+    { currency: "HKD" },
+  );
+  assert.equal(statByKey(stats, "market_cap")?.currency, "USD");
+  assert.equal(statByKey(stats, "week_52_high")?.currency, "HKD");
+  assert.equal(statByKey(stats, "atr_14")?.currency, "HKD");
+});
+
 test("mapPayloadToVendorStats skips non-finite and non-numeric drift", () => {
   const stats = mapPayloadToVendorStats({
     market_cap_usd: Number.NaN,

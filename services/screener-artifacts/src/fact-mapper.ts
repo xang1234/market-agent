@@ -11,12 +11,15 @@ type StatMapping = {
   field: keyof NormalizedPayload;
   metricKey: string;
   unit: "currency" | "percent" | "ratio" | "count";
+  // Overrides the listing currency for a stat denominated in a fixed currency
+  // regardless of market — market_cap_usd is always USD, even for non-USD listings.
+  fixedCurrency?: string;
 };
 
 const CURRENCY_UNIT = "currency";
 
 const MAPPINGS: ReadonlyArray<StatMapping> = [
-  { field: "market_cap_usd", metricKey: "market_cap", unit: CURRENCY_UNIT },
+  { field: "market_cap_usd", metricKey: "market_cap", unit: CURRENCY_UNIT, fixedCurrency: "USD" },
   { field: "forward_pe", metricKey: "forward_pe_ratio", unit: "ratio" },
   { field: "roic", metricKey: "roic", unit: "percent" },
   { field: "sales_growth_yy", metricKey: "revenue_growth_yoy", unit: "percent" },
@@ -63,7 +66,7 @@ export function mapPayloadToVendorStats(
       metricKey: mapping.metricKey,
       value,
       unit: mapping.unit,
-      ...(mapping.unit === CURRENCY_UNIT ? { currency } : {}),
+      ...(mapping.unit === CURRENCY_UNIT ? { currency: mapping.fixedCurrency ?? currency } : {}),
     });
   }
   return stats;
