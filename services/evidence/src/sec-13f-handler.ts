@@ -33,14 +33,15 @@ type ResolvedHolding = {
 type ChangeKind = "new_position" | "increased" | "decreased" | "exit";
 
 // A filer reports a position split across managers, so the same CUSIP appears in
-// multiple rows — sum shares + value. PRN (debt principal) rows are excluded; this
-// is an equity-holdings view.
+// multiple rows — sum shares + value. Excluded: PRN (debt principal) rows, and
+// option positions (a non-null putCall) which also use SH amounts but are not
+// direct common-share holdings — this is an equity-holdings view.
 function aggregateByCusip(
   holdings: ReadonlyArray<Form13fHolding>,
 ): Map<string, { nameOfIssuer: string; shares: number; valueRaw: number }> {
   const byCusip = new Map<string, { nameOfIssuer: string; shares: number; valueRaw: number }>();
   for (const h of holdings) {
-    if (h.sshPrnamtType !== "SH") continue;
+    if (h.sshPrnamtType !== "SH" || h.putCall !== null) continue;
     const existing = byCusip.get(h.cusip);
     if (existing) {
       existing.shares += h.shares;
@@ -85,22 +86,29 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
   const filing = parse13fInfoTable(new TextDecoder("utf-8").decode(fetched.bytes));
   const valueMultiplier = entry.filedDate < WHOLE_USD_FROM ? 1000 : 1;
 
-  // Aggregate, then resolve each CUSIP to a tracked issuer (skip + log misses).
-  const resolved: ResolvedHolding[] = [];
+  // Aggregate by CUSIP, resolve each to a tracked issuer (skip + log misses), then
+  // sum BY ISSUER: a multi-class issuer (e.g. GOOG/GOOGL) reports multiple CUSIPs
+  // that resolve to one issuer, and the read model is unique per (filer, issuer,
+  // period) — so the issuer-level total must be summed before the upsert.
+  const byIssuer = new Map<string, ResolvedHolding>();
+  let hadUnresolved = false;
   for (const [cusip, agg] of aggregateByCusip(filing.holdings)) {
     const issuerId = await resolveIssuerByCusip(deps.db, cusip);
     if (issuerId === null) {
+      hadUnresolved = true;
       console.warn(`[sec-13f] ${entry.accession}: CUSIP ${cusip} (${agg.nameOfIssuer}) not resolvable — skipped`);
       continue;
     }
-    resolved.push({
-      issuerId,
-      cusip,
-      nameOfIssuer: agg.nameOfIssuer,
-      shares: agg.shares,
-      valueUsd: agg.valueRaw * valueMultiplier,
-    });
+    const valueUsd = agg.valueRaw * valueMultiplier;
+    const existing = byIssuer.get(issuerId);
+    if (existing) {
+      existing.shares += agg.shares;
+      existing.valueUsd += valueUsd;
+    } else {
+      byIssuer.set(issuerId, { issuerId, cusip, nameOfIssuer: agg.nameOfIssuer, shares: agg.shares, valueUsd });
+    }
   }
+  const resolved = [...byIssuer.values()];
   if (resolved.length === 0) {
     console.warn(`[sec-13f] skip ${entry.accession}: no resolvable holdings for ${filerName}`);
     return { ingested: false };
@@ -198,8 +206,13 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
       );
     }
 
-    // Exits: issuers held in the prior period but absent now (fully sold).
-    if (priorPeriod !== null) {
+    // Exits: issuers held in the prior period but absent now (fully sold). Only
+    // safe when EVERY current CUSIP resolved — otherwise a still-held issuer whose
+    // CUSIP didn't resolve this period would be misread as an exit. Under sparse
+    // v1 resolution this usually defers exits to when coverage is complete
+    // (fra-ajvd.7); new/increased/decreased above stay reliable (issuer present
+    // and resolved in both periods).
+    if (priorPeriod !== null && !hadUnresolved) {
       for (const prior of priorHoldings) {
         if (currentIssuerIds.has(prior.issuer_id)) continue;
         await emitNotable(
@@ -209,6 +222,8 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
           { cusip: prior.cusip, shares: 0, prior_shares: prior.shares },
         );
       }
+    } else if (priorPeriod !== null && hadUnresolved) {
+      console.warn(`[sec-13f] ${entry.accession}: unresolved CUSIPs present — exit detection skipped to avoid false positives`);
     }
   });
 

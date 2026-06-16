@@ -15,14 +15,16 @@ const KO_CUSIP = "191216100";
 const NEW_CUSIP = "478160104";
 const EXIT_CUSIP = "023135106";
 
-type Row = { name: string; cusip: string; value: number; shares: number };
+type Row = { name: string; cusip: string; value: number; shares: number; putCall?: string };
 
 function submission(periodMMDDYYYY: string, rows: Row[]): string {
   const tables = rows
     .map(
       (r) =>
         `<infoTable><nameOfIssuer>${r.name}</nameOfIssuer><cusip>${r.cusip}</cusip><value>${r.value}</value>` +
-        `<shrsOrPrnAmt><sshPrnamt>${r.shares}</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt></infoTable>`,
+        `<shrsOrPrnAmt><sshPrnamt>${r.shares}</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt>` +
+        (r.putCall ? `<putCall>${r.putCall}</putCall>` : "") +
+        `</infoTable>`,
     )
     .join("\n");
   return `<SEC-DOCUMENT>
@@ -154,4 +156,84 @@ test("handle13f normalizes pre-2023 values from thousands to whole USD", async (
 
   const row = await client.query<{ value_usd: string }>(`select value_usd from institutional_holdings where issuer_id = $1`, [id]);
   assert.equal(Number(row.rows[0]!.value_usd), 50_000_000, "50000 (thousands) → 50,000,000 USD");
+});
+
+test("handle13f excludes option (putCall) rows from common-share holdings", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-options");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  const id = await seedIssuerWithCusip(client, "Apple Inc.", AAPL_CUSIP);
+
+  const txt = submission("03-31-2026", [
+    { name: "APPLE INC", cusip: AAPL_CUSIP, value: 200000, shares: 1000 }, // direct
+    { name: "APPLE INC", cusip: AAPL_CUSIP, value: 9999, shares: 555, putCall: "Call" }, // option → excluded
+  ]);
+  await handle13f(entry("0001193125-26-000020"), { db, objectStore: new MemoryObjectStore(), client: fakeClient(txt) } as unknown as FormHandlerDeps);
+
+  const row = await client.query<{ shares: string }>(`select shares from institutional_holdings where issuer_id = $1`, [id]);
+  assert.equal(row.rows.length, 1);
+  assert.equal(Number(row.rows[0]!.shares), 1000, "the call option's 555 shares are not counted");
+});
+
+test("handle13f sums multiple CUSIPs that resolve to the same issuer", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-multiclass");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  // One issuer, two share classes (two CUSIPs) → both resolve to the same issuer_id.
+  const issuerId = await seedIssuerWithCusip(client, "Alphabet Inc.", "02079K305"); // GOOGL
+  await client.query(`insert into instruments (issuer_id, asset_type, cusip) values ($1, 'common_stock', '02079K107')`, [issuerId]); // GOOG
+
+  const txt = submission("03-31-2026", [
+    { name: "ALPHABET INC CL A", cusip: "02079K305", value: 1000, shares: 100 },
+    { name: "ALPHABET INC CL C", cusip: "02079K107", value: 2000, shares: 200 },
+  ]);
+  await handle13f(entry("0001193125-26-000021"), { db, objectStore: new MemoryObjectStore(), client: fakeClient(txt) } as unknown as FormHandlerDeps);
+
+  const row = await client.query<{ shares: string; value_usd: string }>(
+    `select shares, value_usd from institutional_holdings where issuer_id = $1`,
+    [issuerId],
+  );
+  assert.equal(row.rows.length, 1, "one issuer-level row, not one-per-CUSIP");
+  assert.equal(Number(row.rows[0]!.shares), 300, "shares summed across both classes (100 + 200)");
+  assert.equal(Number(row.rows[0]!.value_usd), 3000, "value summed (1000 + 2000)");
+});
+
+test("handle13f skips exit detection when the current filing has unresolved CUSIPs", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-exitguard");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  const koId = await seedIssuerWithCusip(client, "Coca-Cola Co", KO_CUSIP);
+  const exitId = await seedIssuerWithCusip(client, "Exited Co", EXIT_CUSIP);
+  const sourceId = await seedSource(client);
+
+  // Prior period: KO 100 + EXIT 200.
+  for (const [issuerId, cusip, shares] of [[koId, KO_CUSIP, 100], [exitId, EXIT_CUSIP, 200]] as const) {
+    await insertHolding(db, {
+      filer_cik: "0001067983", filer_name: "Berkshire Hathaway Inc", issuer_id: issuerId, cusip,
+      shares, value_usd: shares * 50, filing_period: "2025-12-31", filing_date: "2026-02-14",
+      source_id: sourceId, accession: "0001193125-26-000030",
+    });
+  }
+  // Current: KO 500 (resolves) + an UNRESOLVABLE cusip. EXIT is absent — but because
+  // a current CUSIP didn't resolve, we can't be sure EXIT was truly sold → no exit claim.
+  const txt = submission("03-31-2026", [
+    { name: "COCA COLA CO", cusip: KO_CUSIP, value: 50000, shares: 500 },
+    { name: "MYSTERY CO", cusip: "999999999", value: 1000, shares: 10 },
+  ]);
+  await handle13f(entry("0001193125-26-000031"), { db, objectStore: new MemoryObjectStore(), client: fakeClient(txt) } as unknown as FormHandlerDeps);
+
+  assert.equal(
+    (await client.query(`select count(*)::int as n from claims where predicate = 'position_change.exit'`)).rows[0]!.n,
+    0,
+    "no exit claim emitted while current-period coverage is incomplete",
+  );
+  // The increased claim (KO 100→500, both periods resolved) is still reliable.
+  assert.equal(
+    (await client.query(`select count(*)::int as n from claims where predicate = 'position_change.increased'`)).rows[0]!.n,
+    1,
+    "increased still fires (issuer resolved in both periods)",
+  );
 });

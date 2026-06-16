@@ -32,4 +32,15 @@ test("resolveIssuerByCusip matches an explicit cusip and derives from a US ISIN"
   assert.equal(await resolveIssuerByCusip(db, "037833100".toLowerCase()), issuerA, "case-insensitive");
   assert.equal(await resolveIssuerByCusip(db, "000000000"), null, "unknown CUSIP → null");
   assert.equal(await resolveIssuerByCusip(db, "12345"), null, "non-9-char input → null");
+
+  // Ambiguous: two distinct issuers carry the same explicit cusip → don't guess.
+  const c = await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name) values ('Dup A') returning issuer_id::text as issuer_id`,
+  );
+  await client.query(`insert into instruments (issuer_id, asset_type, cusip) values ($1, 'common_stock', '111111111')`, [c.rows[0]!.issuer_id]);
+  const d = await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name) values ('Dup B') returning issuer_id::text as issuer_id`,
+  );
+  await client.query(`insert into instruments (issuer_id, asset_type, cusip) values ($1, 'common_stock', '111111111')`, [d.rows[0]!.issuer_id]);
+  assert.equal(await resolveIssuerByCusip(db, "111111111"), null, "ambiguous direct match → null, not an arbitrary issuer");
 });

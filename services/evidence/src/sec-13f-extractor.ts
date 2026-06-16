@@ -11,6 +11,10 @@ export type Form13fHolding = {
   valueRaw: number; // as reported (whole USD post-2023; thousands pre-2023)
   shares: number;
   sshPrnamtType: string; // SH (shares) | PRN (principal amount)
+  // "Put" | "Call" for option positions; null for a direct holding. Option rows
+  // also use SH share amounts, so consumers must exclude them from common-share
+  // holdings (the handler does).
+  putCall: string | null;
 };
 
 export type Form13fFiling = {
@@ -29,6 +33,7 @@ export function parse13fInfoTable(submissionTxt: string): Form13fFiling {
       valueRaw: parseNonNegativeNumber(requireTagText(row, "value", "infoTable"), "value"),
       shares: parseNonNegativeNumber(requireTagText(row, "sshPrnamt", "infoTable"), "sshPrnamt"),
       sshPrnamtType: tagText(row, "sshPrnamtType") ?? "SH",
+      putCall: tagText(row, "putCall"),
     });
   }
   return { periodOfReport, holdings };
@@ -37,10 +42,16 @@ export function parse13fInfoTable(submissionTxt: string): Form13fFiling {
 // EDGAR's 13F cover reports the period as MM-DD-YYYY; normalize to ISO. Tolerate
 // an already-ISO value defensively.
 function normalizePeriod(raw: string): string {
-  const us = /^(\d{2})-(\d{2})-(\d{4})$/.exec(raw.trim());
-  if (us) return `${us[3]}-${us[1]}-${us[2]}`;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) return raw.trim();
-  throw new Error(`parse13fInfoTable: unrecognized periodOfReport "${raw}"`);
+  const trimmed = raw.trim();
+  const us = /^(\d{2})-(\d{2})-(\d{4})$/.exec(trimmed);
+  const iso = us ? `${us[3]}-${us[1]}-${us[2]}` : /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
+  // Validate the calendar date (not just the shape) so e.g. "13-99-2026" fails at
+  // the parse boundary instead of surfacing as a bad date in later DB operations.
+  if (iso !== null) {
+    const d = new Date(`${iso}T00:00:00.000Z`);
+    if (!Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === iso) return iso;
+  }
+  throw new Error(`parse13fInfoTable: unrecognized or invalid periodOfReport "${raw}"`);
 }
 
 function parseNonNegativeNumber(raw: string, label: string): number {

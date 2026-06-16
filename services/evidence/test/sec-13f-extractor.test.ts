@@ -78,3 +78,21 @@ test("parse13fInfoTable throws on a non-numeric value (no NaN propagation)", () 
 test("parse13fInfoTable throws when the cover has no periodOfReport", () => {
   assert.throws(() => parse13fInfoTable("<XML><informationTable></informationTable></XML>"), /periodOfReport/);
 });
+
+test("parse13fInfoTable captures putCall so option rows can be excluded downstream", () => {
+  const withOption = `<XML><edgarSubmission><periodOfReport>03-31-2026</periodOfReport></edgarSubmission></XML>
+<XML><informationTable>
+  <infoTable><nameOfIssuer>APPLE INC</nameOfIssuer><cusip>037833100</cusip><value>1000</value>
+    <shrsOrPrnAmt><sshPrnamt>10</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt></infoTable>
+  <infoTable><nameOfIssuer>APPLE INC</nameOfIssuer><cusip>037833100</cusip><value>500</value>
+    <shrsOrPrnAmt><sshPrnamt>5</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt><putCall>Call</putCall></infoTable>
+</informationTable></XML>`;
+  const filing = parse13fInfoTable(withOption);
+  assert.equal(filing.holdings[0]!.putCall, null, "direct holding has no putCall");
+  assert.equal(filing.holdings[1]!.putCall, "Call", "option row's putCall is captured");
+});
+
+test("parse13fInfoTable rejects a shape-valid but non-calendar period", () => {
+  const bad = `<XML><periodOfReport>13-99-2026</periodOfReport></XML><XML><informationTable></informationTable></XML>`;
+  assert.throws(() => parse13fInfoTable(bad), /periodOfReport/);
+});

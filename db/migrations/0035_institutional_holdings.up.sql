@@ -25,4 +25,4 @@ create index institutional_holdings_filer_period_idx on institutional_holdings(f
 -- CUSIP lives on the instrument (alongside isin/figi_composite); 13F resolution
 -- matches on it, or derives it from a US ISIN (US + 9-char CUSIP + check digit).
 alter table instruments add column cusip text;
-create index instruments_cusip_idx on instruments(cusip);
+create index instruments_cusip_idx on instruments(cusip) where cusip is not null;

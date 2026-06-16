@@ -10,13 +10,30 @@ export async function resolveIssuerByCusip(db: QueryExecutor, cusip: string): Pr
   // A CUSIP is exactly 9 characters; anything else can't match (and avoids a
   // substr() false-positive against an unrelated ISIN).
   if (normalized.length !== 9) return null;
-  const { rows } = await db.query<{ issuer_id: string }>(
-    `select issuer_id::text as issuer_id
-       from instruments
-      where cusip = $1
-         or (isin like 'US%' and upper(substr(isin, 3, 9)) = $1)
-      limit 1`,
-    [normalized],
+
+  // Resolve in deterministic phases — an explicit cusip first, then a US-ISIN
+  // derivation. Within a phase, >1 distinct issuer is ambiguous → return null
+  // rather than pick an arbitrary row (which could misattribute holdings).
+  const direct = await matchIssuers(
+    db,
+    `select distinct issuer_id::text as issuer_id from instruments where upper(cusip) = $1 limit 2`,
+    normalized,
   );
-  return rows[0]?.issuer_id ?? null;
+  if (direct.length > 1) return null; // ambiguous direct match → don't guess
+  if (direct.length === 1) return direct[0]!;
+
+  const derived = await matchIssuers(
+    db,
+    `select distinct issuer_id::text as issuer_id
+       from instruments
+      where isin like 'US%' and upper(substr(isin, 3, 9)) = $1
+      limit 2`,
+    normalized,
+  );
+  return derived.length === 1 ? derived[0]! : null; // none, or ambiguous → null
+}
+
+async function matchIssuers(db: QueryExecutor, sql: string, cusip: string): Promise<string[]> {
+  const { rows } = await db.query<{ issuer_id: string }>(sql, [cusip]);
+  return rows.map((r) => r.issuer_id);
 }
