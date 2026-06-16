@@ -99,10 +99,12 @@ function optionalTagText(xml: string, tag: string): string | null {
   const re = new RegExp(`<${tag}>[\\s\\S]*?<\\/${tag}>`, "");
   const m = re.exec(xml);
   if (!m) return null;
-  // Strip the open and close tags
-  return m[0]
-    .slice(tag.length + 2, -(tag.length + 3))
-    .trim();
+  // Strip the open and close tags. An empty/whitespace-only element (a real SEC
+  // quirk, e.g. <transactionPricePerShare><value></value>) is treated as absent
+  // (null) — so "no price" stays null rather than collapsing to Number("") === 0,
+  // and an empty REQUIRED tag makes requireTagText throw (malformed filing).
+  const inner = m[0].slice(tag.length + 2, -(tag.length + 3)).trim();
+  return inner === "" ? null : inner;
 }
 
 function requireTagText(xml: string, tag: string): string {
