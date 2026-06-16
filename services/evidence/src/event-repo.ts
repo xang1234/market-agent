@@ -136,6 +136,36 @@ export async function createEvent(db: QueryExecutor, input: EventInput): Promise
   return eventRowFromDb(rows[0]);
 }
 
+// Issuer events timeline: events whose subject is this issuer, within the
+// trailing window, newest-first. Backs the Signals/Evidence timeline and is the
+// read side of the 8-K / Form 4 event ingestion. Columns are qualified because
+// event_id is ambiguous across the join.
+export async function findEventsByIssuer(
+  db: QueryExecutor,
+  issuerId: string,
+  sinceDays: number,
+): Promise<EventRow[]> {
+  const { rows } = await db.query<EventDbRow>(
+    `select e.event_id,
+            e.event_type,
+            e.occurred_at,
+            e.status,
+            e.source_claim_ids,
+            e.source_ids,
+            e.payload_json,
+            e.created_at,
+            e.updated_at
+       from events e
+       join event_subjects es on es.event_id = e.event_id
+      where es.subject_kind = 'issuer'
+        and es.subject_id = $1::uuid
+        and e.occurred_at >= now() - ($2::int * interval '1 day')
+      order by e.occurred_at desc, e.event_id desc`,
+    [issuerId, sinceDays],
+  );
+  return rows.map(eventRowFromDb);
+}
+
 export async function createEventSubject(
   db: QueryExecutor,
   input: EventSubjectInput,
