@@ -14,7 +14,7 @@ import {
   type OpenReferenceProviderConfig,
 } from "./provider-sources.ts";
 
-type FetchImpl = typeof fetch;
+export type FetchImpl = typeof fetch;
 
 export type OpenReferenceTickerDiscoveryProviderOptions = OpenReferenceProviderConfig & {
   fetchImpl?: FetchImpl;
@@ -36,7 +36,7 @@ type NasdaqOtherListedRow = {
   "ETF"?: string;
 };
 
-type OpenFigiMappingResponse = Array<{
+export type OpenFigiMappingResponse = Array<{
   data?: unknown[];
   error?: unknown;
   warning?: unknown;
@@ -365,7 +365,7 @@ async function fetchText(
   return response.text();
 }
 
-async function fetchJson(
+export async function fetchJson(
   url: string | URL,
   fetchImpl: FetchImpl,
   timeoutMs: number,
@@ -405,7 +405,7 @@ function parsePipeRows<T extends Record<string, string | undefined>>(text: strin
   });
 }
 
-function isOpenFigiMappingResponse(value: unknown): value is OpenFigiMappingResponse {
+export function isOpenFigiMappingResponse(value: unknown): value is OpenFigiMappingResponse {
   return Array.isArray(value);
 }
 
@@ -480,11 +480,11 @@ function countryFromGleif(value: unknown): string | null {
   return null;
 }
 
-function joinUrlPath(baseUrl: string, path: string): string {
+export function joinUrlPath(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
 }
 
-function isinValue(value: unknown): string | null {
+export function isinValue(value: unknown): string | null {
   const raw = stringValue(value)?.toUpperCase();
   return raw && /^[A-Z]{2}[A-Z0-9]{9}\d$/.test(raw) ? raw : null;
 }
@@ -509,7 +509,7 @@ function normalizeName(value: string | null): string {
     .trim();
 }
 
-function stringValue(value: unknown): string | null {
+export function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
