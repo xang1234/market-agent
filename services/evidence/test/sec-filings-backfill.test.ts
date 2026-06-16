@@ -20,12 +20,15 @@ const SUBMISSIONS = {
     recent: {
       accessionNumber: [
         "0000002488-26-000010", // 10-Q, recent — ingest
-        "0000002488-26-000008", // 8-K, recent — ingest
+        "0000002488-26-000008", // 6-K, recent — ingest
         "0000002488-26-000005", // S-8, recent but unsupported form — skip
         "0000002488-25-000001", // 10-K, outside the window — skip
       ],
-      form: ["10-Q", "8-K", "S-8", "10-K"],
-      primaryDocument: ["amd-10q.htm", "amd-8k.htm", "amd-s8.htm", "amd-10k.htm"],
+      // 8-K is intentionally absent: it has a dedicated event handler (handle8k)
+      // and is no longer a generic-backfill default. 6-K stands in as the second
+      // recent narrative-evidence form here.
+      form: ["10-Q", "6-K", "S-8", "10-K"],
+      primaryDocument: ["amd-10q.htm", "amd-6k.htm", "amd-s8.htm", "amd-10k.htm"],
       filingDate: ["2026-05-01", "2026-04-15", "2026-04-01", "2025-08-01"],
     },
   },
@@ -67,15 +70,15 @@ test(
       { issuerId: ISSUER_ID, cik: CIK, sinceDays: 180, maxFilings: 5, now: NOW },
     );
 
-    assert.equal(result.ingested.length, 2, "the recent 10-Q and 8-K");
+    assert.equal(result.ingested.length, 2, "the recent 10-Q and 6-K");
     assert.deepEqual(
       result.ingested.map((f) => f.form),
-      ["10-Q", "8-K"],
+      ["10-Q", "6-K"],
     );
     assert.equal(result.skipped, 0, "nothing pre-existing on first run");
     assert.deepEqual(
       fetched.map((f) => f.document),
-      ["amd-10q.htm", "amd-8k.htm"],
+      ["amd-10q.htm", "amd-6k.htm"],
       "unsupported forms and out-of-window filings are never fetched",
     );
 
@@ -87,7 +90,7 @@ test(
       docs.rows.map((d) => ({ provider_doc_id: d.provider_doc_id, kind: d.kind, title: d.title })),
       [
         { provider_doc_id: "0000002488-26-000010", kind: "filing", title: "10-Q" },
-        { provider_doc_id: "0000002488-26-000008", kind: "filing", title: "8-K" },
+        { provider_doc_id: "0000002488-26-000008", kind: "filing", title: "6-K" },
       ],
     );
     for (const d of docs.rows) {

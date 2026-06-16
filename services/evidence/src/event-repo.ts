@@ -21,6 +21,15 @@ export const EVENT_TYPES = Object.freeze([
   "macro_event",
   "theme_event",
   "insider_transaction",
+  // 8-K material events (fra-ajvd.3). material_event is the generic fallback for
+  // recognized-but-untyped items (e.g. 9.01) and unknown item codes.
+  "officer_change",
+  "restatement",
+  "material_agreement",
+  "bankruptcy",
+  "delisting",
+  "auditor_change",
+  "material_event",
 ] as const);
 
 export const EVENT_STATUSES = Object.freeze([
@@ -125,6 +134,41 @@ export async function createEvent(db: QueryExecutor, input: EventInput): Promise
   );
 
   return eventRowFromDb(rows[0]);
+}
+
+// Issuer events timeline: events whose subject is this issuer, within the
+// trailing window, newest-first. Backs the Signals/Evidence timeline and is the
+// read side of the 8-K / Form 4 event ingestion. Columns are qualified because
+// event_id is ambiguous across the join.
+export async function findEventsByIssuer(
+  db: QueryExecutor,
+  issuerId: string,
+  sinceDays: number,
+): Promise<EventRow[]> {
+  if (!Number.isInteger(sinceDays) || sinceDays < 0) {
+    // A negative/non-integer window silently skews the cutoff (e.g. into the
+    // future); reject at the boundary so a caller bug surfaces here.
+    throw new Error(`findEventsByIssuer: sinceDays must be a non-negative integer; received ${sinceDays}`);
+  }
+  const { rows } = await db.query<EventDbRow>(
+    `select e.event_id,
+            e.event_type,
+            e.occurred_at,
+            e.status,
+            e.source_claim_ids,
+            e.source_ids,
+            e.payload_json,
+            e.created_at,
+            e.updated_at
+       from events e
+       join event_subjects es on es.event_id = e.event_id
+      where es.subject_kind = 'issuer'
+        and es.subject_id = $1::uuid
+        and e.occurred_at >= now() - ($2::int * interval '1 day')
+      order by e.occurred_at desc, e.event_id desc`,
+    [issuerId, sinceDays],
+  );
+  return rows.map(eventRowFromDb);
 }
 
 export async function createEventSubject(

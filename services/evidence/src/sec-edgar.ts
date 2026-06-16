@@ -233,6 +233,9 @@ export type SecSubmissionsRecent = {
   form: string[];
   primaryDocument: string[];
   filingDate: string[];
+  // Comma-joined 8-K Item codes per filing ("2.02,9.01"); "" for non-8-K forms.
+  // Optional because most callers (Form 4, generic filings) never read it.
+  items?: string[];
 };
 
 export type SecSubmissions = { filings: { recent: SecSubmissionsRecent } };
@@ -245,6 +248,7 @@ export type SubmissionRow = {
   primaryDocument: string;
   filedDate: string; // YYYY-MM-DD
   filedAtMs: number;
+  items: string; // raw comma-joined 8-K item codes; "" when the feed omits them
 };
 
 // Zip EDGAR's parallel `recent.*` arrays into rows, dropping ragged rows missing
@@ -260,6 +264,9 @@ export function recentSubmissionRows(recent: SecSubmissionsRecent): SubmissionRo
       primaryDocument: recent.primaryDocument[index],
       filedDate: recent.filingDate[index],
       filedAtMs: Date.parse(recent.filingDate[index]),
+      // items is supplemental, not part of the ragged-array guard: "" when the
+      // feed omits the array (non-8-K callers) or that index is missing.
+      items: recent.items?.[index] ?? "",
     }))
     .filter(
       (row): row is SubmissionRow =>

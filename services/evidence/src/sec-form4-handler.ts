@@ -13,7 +13,7 @@ import { createClaim } from "./claim-repo.ts";
 import { createClaimArgument } from "./claim-argument-repo.ts";
 import { insertInsiderTransaction } from "./insider-transactions-repo.ts";
 import { parseForm4, type Form4Transaction, type Form4ReportingOwner } from "./sec-form4-extractor.ts";
-import type { QueryExecutor } from "./types.ts";
+import { resolveIssuerIdByCik } from "./sec-issuer-resolve.ts";
 
 // handleForm4 reads only these fields of a filing — the CIK to resolve the
 // issuer, the accession to fetch/dedup, and form/filing date for the document
@@ -65,16 +65,6 @@ function claimText(owner: Form4ReportingOwner, txn: Form4Transaction, type: stri
   return `${owner.name} (${insiderRole(owner)}) ${action} ${txn.shares} shares${price}.`;
 }
 
-// Tracked-scope (Q9): map the issuer CIK to a tracked issuer, matching either the
-// zero-padded or bare form (issuers.cik storage is text). Returns null → skip.
-async function resolveIssuerId(db: QueryExecutor, issuerCik: number): Promise<string | null> {
-  const { rows } = await db.query<{ issuer_id: string }>(
-    `select issuer_id::text as issuer_id from issuers where cik = $1 or cik = $2 limit 1`,
-    [String(issuerCik).padStart(10, "0"), String(issuerCik)],
-  );
-  return rows[0]?.issuer_id ?? null;
-}
-
 export const handleForm4 = async (entry: Form4FilingRef, deps: FormHandlerDeps) => {
   // Fetch + parse + resolve the issuer outside the transaction (network/reads).
   const fetched = await deps.client.fetchFiling({
@@ -94,7 +84,7 @@ export const handleForm4 = async (entry: Form4FilingRef, deps: FormHandlerDeps) 
     return { ingested: false };
   }
 
-  const issuerId = await resolveIssuerId(deps.db, filing.issuerCik);
+  const issuerId = await resolveIssuerIdByCik(deps.db, filing.issuerCik);
   if (issuerId === null) {
     console.warn(`[sec-form4] skip ${entry.accession}: issuer CIK ${filing.issuerCik} not tracked`);
     return { ingested: false };

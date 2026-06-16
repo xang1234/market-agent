@@ -6,9 +6,11 @@ import {
   EVENT_TYPES,
   createEvent,
   createEventSubject,
+  findEventsByIssuer,
   listEventSubjectsForEvent,
 } from "../src/event-repo.ts";
 import type { QueryExecutor } from "../src/types.ts";
+import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 
 const EVENT_ID = "11111111-1111-4111-a111-111111111111";
 const EVENT_SUBJECT_ID = "22222222-2222-4222-a222-222222222222";
@@ -169,6 +171,13 @@ test("EVENT_TYPES and EVENT_STATUSES pin the P3.4 event contract", () => {
     "macro_event",
     "theme_event",
     "insider_transaction",
+    "officer_change",
+    "restatement",
+    "material_agreement",
+    "bankruptcy",
+    "delisting",
+    "auditor_change",
+    "material_event",
   ]);
   assert.deepEqual(EVENT_STATUSES, ["reported", "confirmed", "canceled"]);
   assert.equal(Object.isFrozen(EVENT_TYPES), true);
@@ -183,5 +192,59 @@ test("listEventSubjectsForEvent rejects stored subject shape drift", async () =>
   await assert.rejects(
     () => listEventSubjectsForEvent(recordingDb([[eventSubjectRow({ subject_id: "not-a-uuid" })]]).db, EVENT_ID),
     /subject_id/,
+  );
+});
+
+test("findEventsByIssuer returns the issuer's in-window events newest-first", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("docker unavailable");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "events-by-issuer");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  const seeded = await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name) values ('Acme Inc') returning issuer_id::text as issuer_id`,
+  );
+  const issuerId = seeded.rows[0]!.issuer_id;
+  const other = await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name) values ('Other Inc') returning issuer_id::text as issuer_id`,
+  );
+  const otherId = other.rows[0]!.issuer_id;
+
+  const now = Date.now();
+  const iso = (daysAgo: number) => new Date(now - daysAgo * 86_400_000).toISOString();
+
+  // Two in-window events for Acme (different dates) + one stale + one for another issuer.
+  for (const [eventType, occurredAt] of [
+    ["officer_change", iso(2)],
+    ["bankruptcy", iso(1)],
+    ["delisting", iso(200)], // outside a 90-day window
+  ] as const) {
+    const event = await createEvent(db, {
+      event_type: eventType,
+      occurred_at: occurredAt,
+      status: "reported",
+      source_claim_ids: [],
+      source_ids: [],
+      payload_json: null,
+    });
+    await createEventSubject(db, { event_id: event.event_id, subject_kind: "issuer", subject_id: issuerId, role: "subject" });
+  }
+  const otherEvent = await createEvent(db, {
+    event_type: "material_event",
+    occurred_at: iso(1),
+    status: "reported",
+    source_claim_ids: [],
+    source_ids: [],
+    payload_json: null,
+  });
+  await createEventSubject(db, { event_id: otherEvent.event_id, subject_kind: "issuer", subject_id: otherId, role: "subject" });
+
+  const events = await findEventsByIssuer(db, issuerId, 90);
+  assert.deepEqual(
+    events.map((e) => e.event_type),
+    ["bankruptcy", "officer_change"],
+    "in-window events newest-first; the 200-day-old delisting and the other issuer's event are excluded",
   );
 });

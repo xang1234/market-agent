@@ -5,11 +5,12 @@
 //
 // With no --date flag, crawls yesterday's or today's UTC date (whatever `now`
 // resolves to). Form handlers (Form 4, 8-K, 13F, …) are registered in
-// FORM_HANDLERS (Form 4 registered below; 8-K / 13F in later slices).
+// FORM_HANDLERS (Form 4 and 8-K registered below; 13F in a later slice).
 
 import { createEvidenceCliRuntime } from "./evidence-cli-runtime.ts";
 import { crawlDailyFilings, type FormHandler } from "./sec-daily-crawl.ts";
 import { handleForm4 } from "./sec-form4-handler.ts";
+import { handle8k } from "./sec-8k-handler.ts";
 
 // ---------------------------------------------------------------------------
 // Exported so tests can import and exercise argv parsing without touching
@@ -32,10 +33,12 @@ export function resolveCrawlDate(argv: string[], now: () => Date = () => new Dat
   return date;
 }
 
-// Form handlers. Form 4 is registered; 8-K / 13F land in later slices.
+// Form handlers. Form 4 + 8-K are registered; 13F lands in a later slice.
 export const FORM_HANDLERS: Record<string, FormHandler> = {
   "4": handleForm4,
   "4/A": handleForm4,
+  "8-K": handle8k,
+  "8-K/A": handle8k,
 };
 
 // ---------------------------------------------------------------------------
