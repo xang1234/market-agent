@@ -52,6 +52,7 @@ Confirmed by reading the code — the spine is ~70% present in `services/evidenc
 13. **13F = superinvestor-seeded + DB-resolvable CUSIP (Q8).** Seeded filer registry; map a holding to an issuer only when its CUSIP resolves to a tracked issuer (skip + log misses). `as_of` = report period-end, `freshness_class="stale"` (surfaces the ~45-day lag via the snapshot disclosure compiler); normalize values to whole USD (scale ×1000 for pre-2023 filings).
 14. **Idempotency** mirrors the backfill: skip any filing whose `accession` already has a live `documents` row; a crawl ledger row records each day's progress per form.
 15. **TDD with injected fakes** (in-memory `QueryExecutor` + `fetch` stubs); no live Postgres/EDGAR in unit tests.
+16. **Handlers persist atomically (PR #94 review follow-up).** A form handler MUST write the `documents` row and all derived rows (events/claims/facts/mentions) in one DB transaction. The daily crawl skips any accession that already has a live `documents` row, so a non-atomic handler that commits the document then fails would strand the filing (the retry skips it and never repairs the missing rows). Compose the writes in a transaction (the `issuer-ir-ingest.ts` pattern); do NOT reuse the non-transactional `ingestSecFiling` followed by separate derived writes. **Acceptance criterion for Slices 1–3.**
 
 ---
 

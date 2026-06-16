@@ -13,6 +13,14 @@ export type DailyCrawlClient = { fetchDailyIndex(date: Date): Promise<FilingInde
 // Handlers fetch the filing they're dispatched (the submission .txt), so the
 // capability they need is fetchFiling — not the index fetch the orchestrator uses.
 export type FormHandlerDeps = { db: QueryExecutor; objectStore: ObjectStore; client: SecFilingFetcher };
+// CONTRACT: a handler MUST persist the filing's `documents` row and all derived
+// rows (events/claims/facts/mentions) in a SINGLE database transaction. The
+// orchestrator skips any accession that already has a live `documents` row, so a
+// non-atomic handler that commits the document and then fails before its derived
+// rows would strand the filing — the next crawl would skip it and never repair
+// the missing rows. Compose createSource/createDocument + the derived writes
+// inside one transaction (see issuer-ir-ingest.ts); do NOT reuse the
+// non-transactional `ingestSecFiling` and then write derived rows separately.
 export type FormHandler = (entry: FilingIndexEntry, deps: FormHandlerDeps) => Promise<{ ingested: boolean }>;
 
 export type CrawlDailyFilingsDeps = {
