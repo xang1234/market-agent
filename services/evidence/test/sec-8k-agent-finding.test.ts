@@ -43,12 +43,16 @@ ITEM INFORMATION:		Financial Statements and Exhibits`,
 
 function fakeClient() {
   return {
-    fetchFiling: async (input: { accession_number: string }) => ({
-      bytes: new TextEncoder().encode(TXT_BY_ACCESSION[input.accession_number]),
-      contentType: "text/plain",
-      retrievedAt: "2026-04-30T00:00:00.000Z",
-      url: `https://www.sec.gov/Archives/edgar/data/320193/x/${input.accession_number}.txt`,
-    }),
+    fetchFiling: async (input: { accession_number: string }) => {
+      const txt = TXT_BY_ACCESSION[input.accession_number];
+      assert.ok(txt, `missing fixture for accession ${input.accession_number}`);
+      return {
+        bytes: new TextEncoder().encode(txt),
+        contentType: "text/plain",
+        retrievedAt: "2026-04-30T00:00:00.000Z",
+        url: `https://www.sec.gov/Archives/edgar/data/320193/x/${input.accession_number}.txt`,
+      };
+    },
   };
 }
 

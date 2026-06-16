@@ -6,7 +6,7 @@ import { BACKFILL_DEFAULT_FORMS } from "../src/sec-filings-backfill.ts";
 // periodic narrative-evidence forms, not the full SEC_FORM_CODES universe, so the
 // forms with dedicated event handlers aren't ingested here as plain documents.
 test("per-issuer backfill default includes the periodic evidence forms", () => {
-  for (const form of ["10-K", "10-Q", "20-F"] as const) {
+  for (const form of ["10-K", "10-Q", "20-F", "6-K", "40-F"] as const) {
     assert.ok(BACKFILL_DEFAULT_FORMS.includes(form), `expected default to include ${form}`);
   }
 });

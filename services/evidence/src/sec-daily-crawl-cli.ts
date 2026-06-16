@@ -5,7 +5,7 @@
 //
 // With no --date flag, crawls yesterday's or today's UTC date (whatever `now`
 // resolves to). Form handlers (Form 4, 8-K, 13F, …) are registered in
-// FORM_HANDLERS (Form 4 registered below; 8-K / 13F in later slices).
+// FORM_HANDLERS (Form 4 and 8-K registered below; 13F in a later slice).
 
 import { createEvidenceCliRuntime } from "./evidence-cli-runtime.ts";
 import { crawlDailyFilings, type FormHandler } from "./sec-daily-crawl.ts";

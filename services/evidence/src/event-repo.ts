@@ -145,6 +145,11 @@ export async function findEventsByIssuer(
   issuerId: string,
   sinceDays: number,
 ): Promise<EventRow[]> {
+  if (!Number.isInteger(sinceDays) || sinceDays < 0) {
+    // A negative/non-integer window silently skews the cutoff (e.g. into the
+    // future); reject at the boundary so a caller bug surfaces here.
+    throw new Error(`findEventsByIssuer: sinceDays must be a non-negative integer; received ${sinceDays}`);
+  }
   const { rows } = await db.query<EventDbRow>(
     `select e.event_id,
             e.event_type,
