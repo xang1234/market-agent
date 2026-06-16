@@ -126,7 +126,39 @@ test("upsertDiscoveredListing writes optional open reference identifiers through
     null,
     "US0079031078",
     "BBG000BBQCY0",
+    null,
   ]);
+});
+
+test("upsertDiscoveredListing writes a normalized cusip through the insert contract", async () => {
+  const queries: Array<{ text: string; values?: unknown[] }> = [];
+  const db = {
+    query: async <R extends Record<string, unknown> = Record<string, unknown>>(text: string, values?: unknown[]) => {
+      queries.push({ text, values });
+      if (text.includes("select issuer_id from issuers")) return { rows: [] as R[] };
+      if (text.includes("insert into issuers")) return { rows: [{ issuer_id: "11111111-1111-4111-a111-111111111111" } as R] };
+      if (text.includes("select instrument_id") && text.includes("from instruments")) return { rows: [] as R[] };
+      if (text.includes("insert into instruments")) return { rows: [{ instrument_id: "22222222-2222-4222-a222-222222222222" } as R] };
+      if (text.includes("select listing_id")) return { rows: [] as R[] };
+      if (text.includes("insert into listings")) return { rows: [{ listing_id: "33333333-3333-4333-a333-333333333333" } as R] };
+      throw new Error(`Unexpected query: ${text}`);
+    },
+  };
+
+  await upsertDiscoveredListing(db, {
+    ticker: "AAPL",
+    legal_name: "Apple Inc.",
+    market: "stocks",
+    active: true,
+    mic: "XNAS",
+    trading_currency: "USD",
+    timezone: "America/New_York",
+    asset_type: "common_stock",
+    cusip: "037833100",
+  });
+
+  const instrumentInsert = queries.find((query) => query.text.includes("insert into instruments"));
+  assert.equal(instrumentInsert?.values?.[5], "037833100", "cusip is the 6th instrument insert value");
 });
 
 test("upsertDiscoveredListing enriches one exact legal-name issuer instead of inserting a duplicate", async () => {

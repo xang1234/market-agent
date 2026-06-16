@@ -26,6 +26,7 @@ export type DiscoveredListing = {
   domicile?: string;
   isin?: string;
   figi_composite?: string;
+  cusip?: string;
   source_provenance?: DiscoverySourceProvenance[];
 };
 
@@ -203,7 +204,7 @@ function discoveredListingFromPolygonRow(
 }
 
 type IssuerIdentityFields = { cik?: string; lei?: string; domicile?: string };
-type InstrumentIdentityFields = { isin?: string; figiComposite?: string };
+type InstrumentIdentityFields = { isin?: string; figiComposite?: string; cusip?: string };
 type InstrumentIdentityMatch = { instrument_id: string; issuer_id: string };
 
 function issuerIdentityFromListing(listing: DiscoveredListing): IssuerIdentityFields {
@@ -218,6 +219,7 @@ function instrumentIdentityFromListing(listing: DiscoveredListing): InstrumentId
   return {
     isin: listing.isin ? normalizeIsin(listing.isin) : undefined,
     figiComposite: listing.figi_composite?.trim() || undefined,
+    cusip: listing.cusip?.trim().toUpperCase() || undefined,
   };
 }
 
@@ -324,10 +326,17 @@ async function upsertInstrument(
   }
 
   const inserted = await db.query<{ instrument_id: string }>(
-    `insert into instruments (issuer_id, asset_type, share_class, isin, figi_composite)
-     values ($1, $2::asset_type, $3, $4, $5)
+    `insert into instruments (issuer_id, asset_type, share_class, isin, figi_composite, cusip)
+     values ($1, $2::asset_type, $3, $4, $5, $6)
      returning instrument_id`,
-    [issuerId, listing.asset_type, listing.share_class ?? null, values.isin ?? null, values.figiComposite ?? null],
+    [
+      issuerId,
+      listing.asset_type,
+      listing.share_class ?? null,
+      values.isin ?? null,
+      values.figiComposite ?? null,
+      values.cusip ?? null,
+    ],
   );
   return inserted.rows[0].instrument_id;
 }
@@ -337,7 +346,7 @@ async function fillInstrumentIdentityFields(
   instrumentId: string,
   values: InstrumentIdentityFields,
 ): Promise<void> {
-  if (!values.isin && !values.figiComposite) return;
+  if (!values.isin && !values.figiComposite && !values.cusip) return;
   await db.query(
     `update instruments
         set isin = case
@@ -361,9 +370,12 @@ async function fillInstrumentIdentityFields(
               then $3
               else figi_composite
             end,
+            -- cusip has no uniqueness constraint (a partial, non-unique index),
+            -- so backfill it whenever absent without the cross-instrument guard.
+            cusip = case when cusip is null and $4::text is not null then $4 else cusip end,
             updated_at = now()
       where instrument_id = $1`,
-    [instrumentId, values.isin ?? null, values.figiComposite ?? null],
+    [instrumentId, values.isin ?? null, values.figiComposite ?? null, values.cusip ?? null],
   );
 }
 
