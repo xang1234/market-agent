@@ -20,6 +20,8 @@ import {
   createUnsupportedSegmentsRepository,
 } from "./unsupported-repositories.ts";
 import { createFundamentalsServer } from "./http.ts";
+import { createSecHoldersRepository } from "./sec-holders-repository.ts";
+import { createFallthroughHoldersRepository } from "./fallthrough-holders-repository.ts";
 
 const host = process.env.FUNDAMENTALS_HOST ?? "127.0.0.1";
 const port = Number(process.env.FUNDAMENTALS_PORT ?? "4322");
@@ -55,7 +57,10 @@ const stats = createSecBackedStatsRepository(pool, { statements, fetcher: secFet
 const segments = createUnsupportedSegmentsRepository();
 const consensus = devProviderRuntime?.consensus ?? createUnsupportedConsensusRepository();
 const earnings = devProviderRuntime?.earnings ?? createUnsupportedEarningsRepository();
-const holders = devProviderRuntime?.holders ?? createUnsupportedHoldersRepository();
+// Official SEC Form 4 insider data is served ahead of the yfinance dev provider;
+// the SEC repo returns null for institutional + uncovered issuers → falls through.
+const devHolders = devProviderRuntime?.holders ?? createUnsupportedHoldersRepository();
+const holders = createFallthroughHoldersRepository(createSecHoldersRepository(pool), devHolders);
 const server = createFundamentalsServer({
   profiles,
   stats,
