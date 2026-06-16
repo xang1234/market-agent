@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "node --experimental-strip-types src/dev.ts",
     "repair:provider-identities": "node --experimental-strip-types src/repair-provider-identities.ts",
+    "enrich:cusips": "node --experimental-strip-types src/cusip-enrichment-cli.ts",
     "test": "node --experimental-strip-types --test \"test/**/*.test.ts\""
   },
   "dependencies": {
