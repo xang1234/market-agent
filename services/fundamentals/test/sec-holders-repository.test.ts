@@ -46,3 +46,40 @@ test("createSecHoldersRepository maps insider rows into a frozen envelope", asyn
   assert.equal(env.holders[0]!.price, 150.25);
   assert.equal(env.holders[0]!.value, 150250);
 });
+
+test("createSecHoldersRepository derives as_of/source from the newest filed row, not latest transaction_date", async () => {
+  const NEWER_SOURCE = "33333333-3333-4333-8333-333333333333";
+  const repo = createSecHoldersRepository(
+    fakeDb([
+      // Rows arrive ordered by transaction_date desc (as the query returns them).
+      // This one has the latest transaction_date but was filed earlier.
+      {
+        insider_name: "COOK TIMOTHY D",
+        insider_role: "Chief Executive Officer",
+        transaction_date: "2026-06-10",
+        transaction_type: "buy",
+        shares: "1000",
+        price: "150",
+        value: "150000",
+        source_id: SOURCE,
+        filed_at: "2026-06-11T00:00:00.000Z",
+      },
+      // A later-filed amendment of an OLDER trade → should drive as_of and source.
+      {
+        insider_name: "COOK TIMOTHY D",
+        insider_role: "Chief Executive Officer",
+        transaction_date: "2026-06-02",
+        transaction_type: "buy",
+        shares: "500",
+        price: "150",
+        value: "75000",
+        source_id: NEWER_SOURCE,
+        filed_at: "2026-06-20T00:00:00.000Z",
+      },
+    ]),
+  );
+  const env = await repo.find(ISSUER as never, "insider");
+  assert.ok(env, "expected an envelope");
+  assert.equal(env.as_of, "2026-06-20T00:00:00.000Z", "as_of = max filed_at, not rows[0].filed_at");
+  assert.equal(env.source_id, NEWER_SOURCE, "source = the newest-filed row");
+});

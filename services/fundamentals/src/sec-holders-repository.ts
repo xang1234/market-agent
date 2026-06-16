@@ -61,13 +61,17 @@ export function createSecHoldersRepository(db: HoldersQueryExecutor): HoldersRep
         price: row.price === null ? null : Number(row.price),
         value: row.value === null ? null : Number(row.value),
       }));
-      const latest = rows[0]!;
+      // as_of/source reflect the most recently FILED row, not the latest
+      // transaction_date: a later filing can restate an older trade
+      // (amendment/correction), and "as of" should track when we last learned.
+      const toMs = (v: Date | string): number => new Date(v).getTime();
+      const newestFiled = rows.reduce((a, b) => (toMs(b.filed_at) > toMs(a.filed_at) ? b : a));
       return freezeInsiderHoldersEnvelope({
         subject: { kind: "issuer", id: issuer_id },
         currency: "USD",
         holders,
-        as_of: latest.filed_at instanceof Date ? latest.filed_at.toISOString() : new Date(latest.filed_at).toISOString(),
-        source_id: latest.source_id as UUID,
+        as_of: new Date(newestFiled.filed_at).toISOString(),
+        source_id: newestFiled.source_id as UUID,
       });
     },
   };

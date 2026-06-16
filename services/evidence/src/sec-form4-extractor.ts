@@ -165,7 +165,7 @@ function parseTransaction(block: string): Form4Transaction {
   const amountsBlock = extractBlock(block, "transactionAmounts") ?? block;
 
   const sharesBlock = extractBlock(amountsBlock, "transactionShares") ?? amountsBlock;
-  const shares = Number(requireTagText(sharesBlock, "value"));
+  const shares = parseNonNegativeNumber(requireTagText(sharesBlock, "value"), "transactionShares.value");
 
   const adBlock = extractBlock(amountsBlock, "transactionAcquiredDisposedCode") ?? amountsBlock;
   const adRaw = requireTagText(adBlock, "value") as "A" | "D";
@@ -176,7 +176,7 @@ function parseTransaction(block: string): Form4Transaction {
   if (priceBlock !== null) {
     const priceText = optionalTagText(priceBlock, "value");
     if (priceText !== null) {
-      pricePerShare = Number(priceText);
+      pricePerShare = parseNonNegativeNumber(priceText, "transactionPricePerShare.value");
     }
   }
 
@@ -198,5 +198,22 @@ function parseTransaction(block: string): Form4Transaction {
 
 function parseBool(raw: string): boolean {
   const s = raw.trim().toLowerCase();
-  return s === "1" || s === "true";
+  if (s === "1" || s === "true") return true;
+  if (s === "0" || s === "false") return false;
+  // xsd:boolean permits exactly 0/1/true/false. Anything else is a malformed
+  // filing; throw rather than silently defaulting to false, which would downgrade
+  // an officer/director flag and suppress an otherwise-material claim.
+  throw new Error(`parseForm4: invalid boolean "${raw}" (expected 0/1/true/false)`);
+}
+
+// Form 4 share counts and prices are non-negative; the acquired/disposed code
+// carries direction. Reject NaN/Infinity/negative so a malformed numeric fails
+// the filing loudly (the crawl isolates per filing) instead of propagating into
+// shares/price/value and contaminating the read model and screener aggregates.
+function parseNonNegativeNumber(raw: string, label: string): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error(`parseForm4: invalid ${label} "${raw}" (expected a non-negative number)`);
+  }
+  return n;
 }

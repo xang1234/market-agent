@@ -52,7 +52,10 @@ function isMaterial(txn: Form4Transaction, owner: Form4ReportingOwner): boolean 
   return (
     (txn.code === "P" || txn.code === "S") &&
     (owner.isOfficer || owner.isDirector) &&
-    (txn.value ?? 0) >= MATERIAL_VALUE_THRESHOLD
+    // Contract is |value| ≥ threshold. value = shares × price is non-negative
+    // today, so Math.abs is currently a no-op, but it keeps the code faithful to
+    // the stated contract and robust if value ever carries a sign.
+    Math.abs(txn.value ?? 0) >= MATERIAL_VALUE_THRESHOLD
   );
 }
 
