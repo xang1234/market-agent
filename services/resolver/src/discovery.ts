@@ -42,7 +42,7 @@ export type PolygonTickerDiscoveryProviderOptions = {
   fetcher?: PolygonReferenceFetcher;
 };
 
-export type QueryExecutor = {
+type QueryExecutor = {
   query<R extends Record<string, unknown> = Record<string, unknown>>(
     text: string,
     values?: unknown[],

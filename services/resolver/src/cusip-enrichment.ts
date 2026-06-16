@@ -3,7 +3,8 @@
 // upsertDiscoveredListing, recording the cusip. Intended as a CLI/batch step —
 // NOT inline in 13F ingest (which stays a pure DB resolve), so the atomic crawl
 // never makes live API calls.
-import { upsertDiscoveredListing, type DiscoveredListing, type QueryExecutor } from "./discovery.ts";
+import { upsertDiscoveredListing, type DiscoveredListing } from "./discovery.ts";
+import { resolveIssuerByCusip, type QueryExecutor } from "./lookup.ts";
 import { mapCusipViaOpenFigi } from "./openfigi-cusip.ts";
 import type { OpenReferenceProviderConfig } from "./provider-sources.ts";
 import type { FetchImpl } from "./open-reference-providers.ts";
@@ -24,8 +25,8 @@ export async function enrichCusip(deps: EnrichCusipDeps, cusip: string): Promise
   const normalized = cusip.trim().toUpperCase();
 
   // Cheap DB check first: skip the OpenFIGI call (rate limits) if the CUSIP
-  // already resolves via an explicit cusip or a US-ISIN derivation.
-  const existing = await resolveIssuerIdByCusip(deps.db, normalized);
+  // already resolves (via the canonical, ambiguity-safe resolver in lookup.ts).
+  const existing = await resolveIssuerByCusip(deps.db, normalized);
   if (existing) return { status: "already", issuer_id: existing };
 
   const match = await mapCusipViaOpenFigi(deps.openfigi, normalized, deps.fetchImpl);
@@ -49,22 +50,6 @@ export async function enrichCusip(deps: EnrichCusipDeps, cusip: string): Promise
   // the same security merges (refining venue/name), never duplicates.
   await upsertDiscoveredListing(deps.db, listing);
 
-  const issuer_id = (await resolveIssuerIdByCusip(deps.db, normalized)) ?? undefined;
+  const issuer_id = (await resolveIssuerByCusip(deps.db, normalized)) ?? undefined;
   return { status: "enriched", issuer_id, ticker: match.ticker };
-}
-
-// CUSIP→issuer via the explicit cusip column or US-ISIN derivation. Mirrors the
-// evidence read-model resolver (services/evidence/src/cusip-issuer-map.ts); kept
-// local so the resolver does not depend on the higher evidence layer. (A later
-// tidy-up could move the canonical CUSIP resolver down into this service.)
-async function resolveIssuerIdByCusip(db: QueryExecutor, cusip: string): Promise<string | null> {
-  const { rows } = await db.query<{ issuer_id: string }>(
-    `select issuer_id::text as issuer_id
-       from instruments
-      where upper(cusip) = $1
-         or (isin like 'US%' and upper(substr(isin, 3, 9)) = $1)
-      limit 1`,
-    [cusip],
-  );
-  return rows[0]?.issuer_id ?? null;
 }
