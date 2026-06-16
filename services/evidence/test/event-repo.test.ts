@@ -169,6 +169,13 @@ test("EVENT_TYPES and EVENT_STATUSES pin the P3.4 event contract", () => {
     "macro_event",
     "theme_event",
     "insider_transaction",
+    "officer_change",
+    "restatement",
+    "material_agreement",
+    "bankruptcy",
+    "delisting",
+    "auditor_change",
+    "material_event",
   ]);
   assert.deepEqual(EVENT_STATUSES, ["reported", "confirmed", "canceled"]);
   assert.equal(Object.isFrozen(EVENT_TYPES), true);

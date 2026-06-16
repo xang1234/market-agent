@@ -21,6 +21,15 @@ export const EVENT_TYPES = Object.freeze([
   "macro_event",
   "theme_event",
   "insider_transaction",
+  // 8-K material events (fra-ajvd.3). material_event is the generic fallback for
+  // recognized-but-untyped items (e.g. 9.01) and unknown item codes.
+  "officer_change",
+  "restatement",
+  "material_agreement",
+  "bankruptcy",
+  "delisting",
+  "auditor_change",
+  "material_event",
 ] as const);
 
 export const EVENT_STATUSES = Object.freeze([
