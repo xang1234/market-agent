@@ -3,17 +3,10 @@
 // upsertDiscoveredListing, recording the cusip. Intended as a CLI/batch step —
 // NOT inline in 13F ingest (which stays a pure DB resolve), so the atomic crawl
 // never makes live API calls.
-import { upsertDiscoveredListing, type DiscoveredListing } from "./discovery.ts";
+import { upsertDiscoveredListing, type DiscoveredListing, type QueryExecutor } from "./discovery.ts";
 import { mapCusipViaOpenFigi } from "./openfigi-cusip.ts";
 import type { OpenReferenceProviderConfig } from "./provider-sources.ts";
 import type { FetchImpl } from "./open-reference-providers.ts";
-
-type QueryExecutor = {
-  query<R extends Record<string, unknown> = Record<string, unknown>>(
-    text: string,
-    values?: unknown[],
-  ): Promise<{ rows: R[] }>;
-};
 
 export type EnrichCusipDeps = {
   db: QueryExecutor;
