@@ -84,7 +84,7 @@ test("backfillIssuerForm4 ingests only in-window Form 4 filings, then is idempot
   const deps = { db, objectStore: new MemoryObjectStore(), secClient: fakeClient(fetchCount) };
   // now=2026-06-20, sinceDays=180 ⇒ cutoff ≈ 2025-12-22: keeps the 2026-06-11
   // Form 4, drops the 2025-01-01 one; the 10-K is dropped by form.
-  const opts = { cik: 320193, company: "Apple Inc.", sinceDays: 180, now: () => new Date("2026-06-20T00:00:00.000Z") };
+  const opts = { cik: 320193, sinceDays: 180, now: () => new Date("2026-06-20T00:00:00.000Z") };
 
   const first = await backfillIssuerForm4(deps, opts);
   assert.equal(first.ingested, 1, "only the in-window Form 4 is ingested");

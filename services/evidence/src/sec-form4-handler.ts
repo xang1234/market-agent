@@ -4,7 +4,7 @@
 // write can never strand a filing (the daily crawl skips accessions that already
 // have a documents row).
 import type { FilingIndexEntry } from "./sec-daily-index.ts";
-import type { FormHandler, FormHandlerDeps } from "./sec-daily-crawl.ts";
+import type { FormHandlerDeps } from "./sec-daily-crawl.ts";
 import { withTransaction } from "./transaction.ts";
 import { createSource } from "./source-repo.ts";
 import { ingestDocumentInTransaction } from "./ingest.ts";
@@ -14,6 +14,15 @@ import { createClaimArgument } from "./claim-argument-repo.ts";
 import { insertInsiderTransaction } from "./insider-transactions-repo.ts";
 import { parseForm4, type Form4Transaction, type Form4ReportingOwner } from "./sec-form4-extractor.ts";
 import type { QueryExecutor } from "./types.ts";
+
+// handleForm4 reads only these fields of a filing — the CIK to resolve the
+// issuer, the accession to fetch/dedup, and form/filing date for the document
+// row. It deliberately does NOT depend on the daily-index-only fields
+// (company, fileName), so both the crawl (which has a full FilingIndexEntry)
+// and the backfill (which has no index row) can drive it without fabricating
+// fields. FilingIndexEntry is a structural supertype, so the FORM_HANDLERS
+// registration still type-checks against the FormHandler contract.
+export type Form4FilingRef = Pick<FilingIndexEntry, "cik" | "accession" | "form" | "filedDate">;
 
 const MATERIAL_VALUE_THRESHOLD = 100_000;
 
@@ -63,7 +72,7 @@ async function resolveIssuerId(db: QueryExecutor, issuerCik: number): Promise<st
   return rows[0]?.issuer_id ?? null;
 }
 
-export const handleForm4: FormHandler = async (entry: FilingIndexEntry, deps: FormHandlerDeps) => {
+export const handleForm4 = async (entry: Form4FilingRef, deps: FormHandlerDeps) => {
   // Fetch + parse + resolve the issuer outside the transaction (network/reads).
   const fetched = await deps.client.fetchFiling({
     cik: entry.cik,

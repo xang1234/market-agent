@@ -8,6 +8,7 @@
 
 import {
   ingestSecFiling,
+  recentSubmissionRows,
   type FetchFilingInput,
   type FetchFilingResult,
   type SecFormCode,
@@ -71,26 +72,9 @@ export async function backfillIssuerFilings(
   const cutoffMs = now().getTime() - sinceDays * 24 * 60 * 60 * 1000;
 
   const submissions = await deps.secClient.fetchSubmissions(input.cik);
-  const recent = submissions.filings.recent;
-  const candidates = recent.accessionNumber
-    .map((accession, index) => ({
-      accession,
-      form: recent.form[index],
-      document: recent.primaryDocument[index],
-      filedAt: Date.parse(recent.filingDate[index]),
-    }))
-    // EDGAR's parallel arrays can be ragged; a row missing its primary
-    // document (or form/accession) is skipped instead of failing the issuer.
-    .filter(
-      (c): c is { accession: string; form: string; document: string; filedAt: number } =>
-        typeof c.accession === "string" &&
-        c.accession.length > 0 &&
-        typeof c.form === "string" &&
-        typeof c.document === "string" &&
-        c.document.length > 0,
-    )
-    .filter((c) => (forms as ReadonlyArray<string>).includes(c.form))
-    .filter((c) => Number.isFinite(c.filedAt) && c.filedAt >= cutoffMs)
+  const candidates = recentSubmissionRows(submissions.filings.recent)
+    .filter((row) => (forms as ReadonlyArray<string>).includes(row.form))
+    .filter((row) => row.filedAtMs >= cutoffMs)
     .slice(0, maxFilings);
 
   const ingested: BackfillIssuerFilingsResult["ingested"] = [];
@@ -117,7 +101,7 @@ export async function backfillIssuerFilings(
       {
         cik: input.cik,
         accession_number: candidate.accession,
-        document: candidate.document,
+        document: candidate.primaryDocument,
         form: candidate.form as SecFormCode,
       },
     );

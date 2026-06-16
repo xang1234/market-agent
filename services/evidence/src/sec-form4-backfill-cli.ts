@@ -33,7 +33,7 @@ async function main(): Promise<void> {
       try {
         const result = await backfillIssuerForm4(
           { db: pool, objectStore, secClient },
-          { cik, company: issuer.legal_name },
+          { cik },
         );
         console.log(
           `${issuer.legal_name}: ingested ${result.ingested} Form 4 filing(s), skipped ${result.skipped} already present`,

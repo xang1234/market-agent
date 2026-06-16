@@ -162,17 +162,19 @@ export async function loadPostgresScreenerCandidates(
 
 // Net shares acquired by insiders over the trailing 90 days (acquired minus
 // disposed), computed at query time from the Form 4 read model — not a stored
-// fact (the screener gates facts on method='reported'; this is derived).
+// fact (the screener gates facts on method='reported'; this is derived). The
+// window is by transaction_date (when the trade occurred), matching the Holders
+// reader (findRecentByIssuer) so both views of this table agree.
 async function loadInsiderNetShares90d(
   db: ScreenerCandidateQueryExecutor,
   issuerId: string,
   now: Date,
 ): Promise<number | null> {
-  const cutoff = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString();
+  const cutoff = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const { rows } = await db.query<{ net_shares: string | null }>(
     `select sum(case when acquired_disposed = 'A' then shares else -shares end) as net_shares
        from insider_transactions
-      where issuer_id = $1 and filed_at >= $2`,
+      where issuer_id = $1 and transaction_date >= $2::date`,
     [issuerId, cutoff],
   );
   const raw = rows[0]?.net_shares;

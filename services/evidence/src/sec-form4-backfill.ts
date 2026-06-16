@@ -8,11 +8,10 @@
 // plain document ingest the generic path does. Idempotent — accessions with a
 // live documents row are skipped (the same dedup the crawl applies).
 
-import type { FilingIndexEntry } from "./sec-daily-index.ts";
-import { handleForm4 } from "./sec-form4-handler.ts";
+import { handleForm4, type Form4FilingRef } from "./sec-form4-handler.ts";
 import { findLiveDocumentIdByAccession } from "./document-repo.ts";
 import type { ObjectStore } from "./object-store.ts";
-import type { SecFilingFetcher, SecSubmissions } from "./sec-edgar.ts";
+import { recentSubmissionRows, type SecFilingFetcher, type SecSubmissions } from "./sec-edgar.ts";
 import type { QueryExecutor } from "./types.ts";
 
 const FORM4_FORMS: ReadonlySet<string> = new Set(["4", "4/A"]);
@@ -32,10 +31,6 @@ export type Form4BackfillDeps = {
 
 export type BackfillIssuerForm4Input = {
   cik: number;
-  // Issuer display name, threaded into the FilingIndexEntry.company field the
-  // handler carries but does not read. The handler resolves the issuer itself
-  // from the filing's <issuerCik>, so the issuer UUID is not an input here.
-  company?: string;
   // Defaults match the reader's document-selection window (180 days).
   sinceDays?: number;
   // Safety cap — ownership forms are high-frequency. Truncation is logged.
@@ -58,28 +53,9 @@ export async function backfillIssuerForm4(
   const cutoffMs = now().getTime() - sinceDays * DAY_MS;
 
   const submissions = await deps.secClient.fetchSubmissions(input.cik);
-  const recent = submissions.filings.recent;
-  const inWindow = recent.accessionNumber
-    .map((accession, index) => ({
-      accession,
-      form: recent.form[index],
-      primaryDocument: recent.primaryDocument[index],
-      filedDate: recent.filingDate[index],
-      filedAtMs: Date.parse(recent.filingDate[index]),
-    }))
-    // EDGAR's parallel arrays can be ragged; a row missing any field it needs is
-    // skipped rather than failing the whole issuer (mirrors backfillIssuerFilings).
-    .filter(
-      (c): c is { accession: string; form: string; primaryDocument: string; filedDate: string; filedAtMs: number } =>
-        typeof c.accession === "string" &&
-        c.accession.length > 0 &&
-        typeof c.form === "string" &&
-        typeof c.primaryDocument === "string" &&
-        c.primaryDocument.length > 0 &&
-        typeof c.filedDate === "string",
-    )
-    .filter((c) => FORM4_FORMS.has(c.form))
-    .filter((c) => Number.isFinite(c.filedAtMs) && c.filedAtMs >= cutoffMs);
+  const inWindow = recentSubmissionRows(submissions.filings.recent)
+    .filter((row) => FORM4_FORMS.has(row.form))
+    .filter((row) => row.filedAtMs >= cutoffMs);
 
   // No silent truncation: EDGAR returns `recent` newest-first, so slicing keeps
   // the most recent filings, but a caller should know coverage was capped.
@@ -99,16 +75,11 @@ export async function backfillIssuerForm4(
       skipped += 1;
       continue;
     }
-    const entry: FilingIndexEntry = {
+    const entry: Form4FilingRef = {
       cik: input.cik,
-      company: input.company ?? "",
+      accession: candidate.accession,
       form: candidate.form,
       filedDate: candidate.filedDate,
-      // handleForm4 keys off cik/accession/form/filedDate. fileName completes the
-      // FilingIndexEntry contract with the real EDGAR primary-document path; the
-      // Form 4 handler does not read it (it fetches `${accession}.txt`).
-      fileName: `edgar/data/${input.cik}/${candidate.accession.replace(/-/g, "")}/${candidate.primaryDocument}`,
-      accession: candidate.accession,
     };
     const result = await handleForm4(entry, handlerDeps);
     if (result.ingested) ingested += 1;
