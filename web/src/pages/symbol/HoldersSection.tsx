@@ -242,7 +242,9 @@ function InstitutionalRow({ holder, currency }: { holder: InstitutionalHolder; c
         {formatCompactCurrency(holder.market_value, currency)}
       </td>
       <td className="px-2 py-2 text-right num text-fg">
-        {holder.percent_of_shares_outstanding.toFixed(2)}%
+        {holder.percent_of_shares_outstanding === null
+          ? '—'
+          : `${holder.percent_of_shares_outstanding.toFixed(2)}%`}
       </td>
       <td className={`px-2 py-2 text-right num ${signedTextClass(holder.shares_change)}`}>
         {formatSignedCount(holder.shares_change)}
