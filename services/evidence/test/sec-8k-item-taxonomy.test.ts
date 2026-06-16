@@ -1,33 +1,29 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import {
-  classify8kItems,
-  itemCodeForDescription,
-  extract8kItemCodesFromHeader,
-} from "../src/sec-8k-item-taxonomy.ts";
+import { classify8kItems, classify8kHeader, itemCodeForDescription } from "../src/sec-8k-item-taxonomy.ts";
 
 test("classify8kItems maps recognized codes to their event type (claimable)", () => {
   assert.deepEqual(classify8kItems(["5.02"]), [
-    { itemCode: "5.02", eventType: "officer_change", claimable: true },
+    { itemCode: "5.02", itemDescription: null, eventType: "officer_change", claimable: true },
   ]);
   assert.deepEqual(classify8kItems(["1.03"]), [
-    { itemCode: "1.03", eventType: "bankruptcy", claimable: true },
+    { itemCode: "1.03", itemDescription: null, eventType: "bankruptcy", claimable: true },
   ]);
   assert.deepEqual(classify8kItems(["4.02"]), [
-    { itemCode: "4.02", eventType: "restatement", claimable: true },
+    { itemCode: "4.02", itemDescription: null, eventType: "restatement", claimable: true },
   ]);
 });
 
 test("classify8kItems excludes 9.01 from claims but still emits an event", () => {
   assert.deepEqual(classify8kItems(["9.01"]), [
-    { itemCode: "9.01", eventType: "material_event", claimable: false },
+    { itemCode: "9.01", itemDescription: null, eventType: "material_event", claimable: false },
   ]);
 });
 
-test("classify8kItems falls back to material_event (claimable) for an unknown code", () => {
+test("classify8kItems falls back to a claimable material_event for a recognized-but-untyped code", () => {
   assert.deepEqual(classify8kItems(["7.01"]), [
-    { itemCode: "7.01", eventType: "material_event", claimable: true },
+    { itemCode: "7.01", itemDescription: null, eventType: "material_event", claimable: true },
   ]);
 });
 
@@ -39,6 +35,7 @@ test("classify8kItems de-dupes repeated codes, preserving first-seen order", () 
 test("itemCodeForDescription maps canonical SEC titles to codes (whitespace/case tolerant)", () => {
   assert.equal(itemCodeForDescription("Results of Operations and Financial Condition"), "2.02");
   assert.equal(itemCodeForDescription("  financial   statements and exhibits "), "9.01");
+  assert.equal(itemCodeForDescription("Regulation FD Disclosure"), "7.01");
   assert.equal(
     itemCodeForDescription("Departure of Directors or Certain Officers; Election of Directors; Appointment of Certain Officers"),
     "5.02",
@@ -58,21 +55,22 @@ FILED AS OF DATE:		20260430
 <DOCUMENT><TYPE>8-K</DOCUMENT>
 </SEC-DOCUMENT>`;
 
-test("extract8kItemCodesFromHeader reads ITEM INFORMATION descriptions into codes", () => {
-  assert.deepEqual(extract8kItemCodesFromHeader(REAL_HEADER), ["2.02", "9.01"]);
+test("classify8kHeader resolves ITEM INFORMATION descriptions to coded classifications", () => {
+  assert.deepEqual(classify8kHeader(REAL_HEADER), [
+    { itemCode: "2.02", itemDescription: null, eventType: "guidance_update", claimable: true },
+    { itemCode: "9.01", itemDescription: null, eventType: "material_event", claimable: false },
+  ]);
 });
 
-test("extract8kItemCodesFromHeader keeps an unknown-description sentinel (no silent drop)", () => {
+test("classify8kHeader records an unrecognized title as a null-code material event (no sentinel string)", () => {
   const header = `<SEC-HEADER>
-ITEM INFORMATION:		Regulation FD Disclosure
+ITEM INFORMATION:		Some Brand New Item Type
 </SEC-HEADER>`;
-  const codes = extract8kItemCodesFromHeader(header);
-  assert.equal(codes.length, 1, "one item retained");
-  // Unknown description → a sentinel code that classify8kItems treats as material_event.
-  assert.equal(classify8kItems(codes)[0]!.eventType, "material_event");
-  assert.equal(classify8kItems(codes)[0]!.claimable, true);
+  assert.deepEqual(classify8kHeader(header), [
+    { itemCode: null, itemDescription: "Some Brand New Item Type", eventType: "material_event", claimable: true },
+  ]);
 });
 
-test("extract8kItemCodesFromHeader returns [] when the header has no ITEM INFORMATION", () => {
-  assert.deepEqual(extract8kItemCodesFromHeader("<SEC-HEADER>\nCONFORMED SUBMISSION TYPE:\t8-K\n</SEC-HEADER>"), []);
+test("classify8kHeader returns [] when the header has no ITEM INFORMATION", () => {
+  assert.deepEqual(classify8kHeader("<SEC-HEADER>\nCONFORMED SUBMISSION TYPE:\t8-K\n</SEC-HEADER>"), []);
 });

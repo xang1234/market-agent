@@ -47,10 +47,7 @@ test("backfillIssuer8k ingests only in-window 8-K filings (items from the feed),
   const { databaseUrl } = await bootstrapDatabase(t, "form8k-backfill");
   const client = await connectedClient(t, databaseUrl);
   const db = client as unknown as QueryExecutor;
-  const seeded = await client.query<{ issuer_id: string }>(
-    `insert into issuers (legal_name, cik) values ('Apple Inc.', '0000320193') returning issuer_id::text as issuer_id`,
-  );
-  const issuerId = seeded.rows[0]!.issuer_id;
+  await client.query(`insert into issuers (legal_name, cik) values ('Apple Inc.', '0000320193')`);
 
   const fetchCount = { n: 0 };
   const deps = { db, objectStore: new MemoryObjectStore(), secClient: fakeClient(fetchCount) };
@@ -78,5 +75,4 @@ test("backfillIssuer8k ingests only in-window 8-K filings (items from the feed),
 
   const eventCount = await client.query<{ n: number }>(`select count(*)::int as n from events`);
   assert.equal(eventCount.rows[0]!.n, 2, "rerun does not duplicate events");
-  void issuerId;
 });

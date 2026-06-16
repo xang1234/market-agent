@@ -14,11 +14,7 @@ import { createEvent, createEventSubject } from "./event-repo.ts";
 import { createClaim } from "./claim-repo.ts";
 import { createClaimArgument } from "./claim-argument-repo.ts";
 import { resolveIssuerIdByCik } from "./sec-issuer-resolve.ts";
-import {
-  classify8kItems,
-  extract8kItemCodesFromHeader,
-  type Item8kClassification,
-} from "./sec-8k-item-taxonomy.ts";
+import { classify8kHeader, type Item8kClassification } from "./sec-8k-item-taxonomy.ts";
 import type { FetchFilingResult } from "./sec-edgar.ts";
 
 // handle8k reads only these fields — the filer CIK (= issuer for an 8-K), the
@@ -68,12 +64,14 @@ export async function persist8kFiling(
   });
 
   for (const item of items) {
+    // Label the item by its numeric code when known, else its header title.
+    const itemLabel = item.itemCode ?? item.itemDescription ?? "unspecified item";
     const claimIds: string[] = [];
     if (item.claimable) {
       const claim = await createClaim(deps.tx.db, {
         document_id: document.document_id,
         predicate: `material_event.${item.eventType}`,
-        text_canonical: `Material event reported via 8-K: ${item.eventType.replace(/_/g, " ")} (Item ${item.itemCode}).`,
+        text_canonical: `Material event reported via 8-K: ${item.eventType.replace(/_/g, " ")} (${itemLabel}).`,
         polarity: "neutral",
         modality: "asserted",
         reported_by_source_id: source.source_id,
@@ -97,7 +95,12 @@ export async function persist8kFiling(
       status: "reported",
       source_claim_ids: claimIds,
       source_ids: [source.source_id],
-      payload_json: { item_code: item.itemCode, form: entry.form, accession: entry.accession },
+      payload_json: {
+        item_code: item.itemCode,
+        item_description: item.itemDescription,
+        form: entry.form,
+        accession: entry.accession,
+      },
     });
     await createEventSubject(deps.tx.db, {
       event_id: event.event_id,
@@ -109,31 +112,32 @@ export async function persist8kFiling(
 }
 
 export const handle8k = async (entry: Form8kFilingRef, deps: FormHandlerDeps) => {
-  const fetched = await deps.client.fetchFiling({
-    cik: entry.cik,
-    accession_number: entry.accession,
-    document: `${entry.accession}.txt`,
-  });
-  const codes = extract8kItemCodesFromHeader(new TextDecoder("utf-8").decode(fetched.bytes));
-  // No ITEM INFORMATION in the header → nothing to classify. Skip WITHOUT
-  // persisting a document, so the accession isn't marked done and an edge/
-  // malformed filing can be reprocessed later (mirrors the Form 4 empty guard).
-  if (codes.length === 0) {
-    console.warn(`[sec-8k] skip ${entry.accession}: no ITEM INFORMATION in header`);
-    return { ingested: false };
-  }
-  // For an 8-K the filer IS the issuer, so resolve from the index/entry CIK.
+  // For an 8-K the filer IS the issuer, and the filer CIK is known from the index
+  // entry — so resolve BEFORE the network fetch and skip untracked filers without
+  // downloading the filing. (Form 4 can't: its issuer CIK is inside the parsed
+  // body. The daily index is dominated by untracked filers, so this matters.)
   const issuerId = await resolveIssuerIdByCik(deps.db, entry.cik);
   if (issuerId === null) {
     console.warn(`[sec-8k] skip ${entry.accession}: filer CIK ${entry.cik} not tracked`);
     return { ingested: false };
   }
 
+  const fetched = await deps.client.fetchFiling({
+    cik: entry.cik,
+    accession_number: entry.accession,
+    document: `${entry.accession}.txt`,
+  });
+  const items = classify8kHeader(new TextDecoder("utf-8").decode(fetched.bytes));
+  // No ITEM INFORMATION in the header → nothing to classify. Skip WITHOUT
+  // persisting a document, so the accession isn't marked done and an edge/
+  // malformed filing can be reprocessed later (mirrors the Form 4 empty guard).
+  if (items.length === 0) {
+    console.warn(`[sec-8k] skip ${entry.accession}: no ITEM INFORMATION in header`);
+    return { ingested: false };
+  }
+
   await withTransaction(deps.db, async (tx) => {
-    await persist8kFiling(
-      { tx, objectStore: deps.objectStore },
-      { issuerId, fetched, entry, items: classify8kItems(codes) },
-    );
+    await persist8kFiling({ tx, objectStore: deps.objectStore }, { issuerId, fetched, entry, items });
   });
   return { ingested: true };
 };
