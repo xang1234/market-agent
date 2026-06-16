@@ -86,7 +86,11 @@ export async function loadLocalRuntimeEvidence(
        -- listing/instrument universe ref. Evidence (SEC filings, issuer IR,
        -- news) is issuer-scoped, but agent universes are usually listing-scoped,
        -- so an exact (kind, id) match silently misses issuer-attributed claims.
-       -- The original refs still match; union dedupes.
+       -- The original refs still match; union dedupes. This is the AUGMENT
+       -- sibling of analyst-grids' normalizeUniverseToIssuers (which REPLACES
+       -- listing/instrument->issuer for issuer-scoped grid columns); a shared
+       -- subject->issuer module should unify both and the inline
+       -- listings/instruments joins — see fra-t2j6.
        select subject_kind, subject_id from input_refs
        union
        select 'issuer'::subject_kind as subject_kind, ins.issuer_id as subject_id
