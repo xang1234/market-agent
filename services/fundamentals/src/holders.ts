@@ -107,10 +107,15 @@ export function freezeInstitutionalHoldersEnvelope(
     seen.add(dedupKey);
     frozen.push(h);
   }
-  // Newest filings first, then largest position ties first.
+  // Top holders by position size first, then most-recent filing, then name for a
+  // stable order. filing_date must NOT be primary: SEC 13F filers report one
+  // period on different filing dates, so a filing-date-first sort would rank a
+  // small late filer above a large holder. The dev provider's single-date
+  // snapshots are unaffected (the filing_date tier was already a no-op there).
   frozen.sort((a, b) => {
+    if (b.shares_held !== a.shares_held) return b.shares_held - a.shares_held;
     const cmp = b.filing_date.localeCompare(a.filing_date);
-    return cmp !== 0 ? cmp : b.shares_held - a.shares_held;
+    return cmp !== 0 ? cmp : a.holder_name.localeCompare(b.holder_name);
   });
   return Object.freeze({
     subject,

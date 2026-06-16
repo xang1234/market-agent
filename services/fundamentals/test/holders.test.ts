@@ -80,7 +80,7 @@ test("freezeInstitutionalHoldersEnvelope returns a frozen envelope tagged 'holde
   assert.equal(Object.isFrozen(env.subject), true);
 });
 
-test("freezeInstitutionalHoldersEnvelope sorts by filing_date desc, then shares_held desc", () => {
+test("freezeInstitutionalHoldersEnvelope sorts by position size (shares_held desc), filing_date as tiebreaker", () => {
   const env = freezeInstitutionalHoldersEnvelope(
     institutionalInput({
       holders: [
@@ -90,9 +90,11 @@ test("freezeInstitutionalHoldersEnvelope sorts by filing_date desc, then shares_
       ],
     }),
   );
+  // Largest position first, regardless of filing date (a late small filer must not
+  // outrank a large holder — the SEC 13F multi-filer case).
   assert.deepEqual(
     env.holders.map((h) => h.holder_name),
-    ["C", "B", "A"],
+    ["C", "A", "B"],
   );
 });
 
