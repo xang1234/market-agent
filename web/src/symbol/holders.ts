@@ -16,7 +16,8 @@ export type InstitutionalHolder = {
   holder_name: string
   shares_held: number
   market_value: number
-  percent_of_shares_outstanding: number
+  // null when not computable (e.g. SEC 13F, which has no ownership percentage)
+  percent_of_shares_outstanding: number | null
   shares_change: number
   filing_date: string
 }

@@ -30,6 +30,8 @@ export const EVENT_TYPES = Object.freeze([
   "delisting",
   "auditor_change",
   "material_event",
+  // 13F institutional holdings (fra-ajvd.4): notable period-over-period changes.
+  "position_change",
 ] as const);
 
 export const EVENT_STATUSES = Object.freeze([

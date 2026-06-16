@@ -160,12 +160,14 @@ create table instruments (
   share_class text,
   isin text,
   figi_composite text,
+  cusip text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 create index instruments_issuer_idx on instruments(issuer_id);
 create unique index instruments_isin_idx on instruments(isin) where isin is not null;
 create unique index instruments_figi_composite_idx on instruments(figi_composite) where figi_composite is not null;
+create index instruments_cusip_idx on instruments(cusip) where cusip is not null;
 
 -- Listings model venue-specific symbol state. Use listing identity for quotes, bars,
 -- session state, and other market interactions that depend on exchange context.
@@ -1065,3 +1067,25 @@ create table insider_transactions (
 );
 create index insider_transactions_issuer_date_idx on insider_transactions(issuer_id, transaction_date desc);
 create index insider_transactions_issuer_filed_idx on insider_transactions(issuer_id, filed_at desc);
+
+-- 13F institutional holdings (superinvestor-seeded v1) read model. One aggregated
+-- row per (filer, issuer, reporting period); only CUSIP-resolvable holdings are
+-- stored. Notable period-over-period changes are gated into claims by the handler.
+create table institutional_holdings (
+  institutional_holding_id uuid primary key default gen_random_uuid(),
+  filer_cik      text not null,
+  filer_name     text not null,
+  issuer_id      uuid not null references issuers(issuer_id) on delete cascade,
+  cusip          text not null,
+  shares         numeric not null check (shares >= 0),
+  value_usd      numeric not null check (value_usd >= 0),
+  filing_period  date not null,
+  filing_date    date not null,
+  source_id      uuid not null references sources(source_id),
+  accession      text not null,
+  created_at     timestamptz not null default now(),
+  unique (filer_cik, issuer_id, filing_period)
+);
+
+create index institutional_holdings_issuer_period_idx on institutional_holdings(issuer_id, filing_period desc);
+create index institutional_holdings_filer_period_idx on institutional_holdings(filer_cik, filing_period desc);

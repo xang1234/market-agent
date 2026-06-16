@@ -5,12 +5,13 @@
 //
 // With no --date flag, crawls yesterday's or today's UTC date (whatever `now`
 // resolves to). Form handlers (Form 4, 8-K, 13F, …) are registered in
-// FORM_HANDLERS (Form 4 and 8-K registered below; 13F in a later slice).
+// FORM_HANDLERS (Form 4, 8-K, and 13F registered below).
 
 import { createEvidenceCliRuntime } from "./evidence-cli-runtime.ts";
 import { crawlDailyFilings, type FormHandler } from "./sec-daily-crawl.ts";
 import { handleForm4 } from "./sec-form4-handler.ts";
 import { handle8k } from "./sec-8k-handler.ts";
+import { handle13f } from "./sec-13f-handler.ts";
 
 // ---------------------------------------------------------------------------
 // Exported so tests can import and exercise argv parsing without touching
@@ -33,12 +34,19 @@ export function resolveCrawlDate(argv: string[], now: () => Date = () => new Dat
   return date;
 }
 
-// Form handlers. Form 4 + 8-K are registered; 13F lands in a later slice.
+// Form handlers. Form 4 + 8-K + 13F are registered.
+// NOTE: only the original 13F-HR (full holdings report) is processed. A 13F-HR/A
+// amendment may be SUPPLEMENTAL (add-only) rather than a full restatement, so
+// routing it through handle13f's full-period path would treat the partial
+// amendment as the whole portfolio and flag omitted prior holdings as false
+// exits. Amendment handling (parse amendmentType, restate vs supplement) is
+// tracked in fra-kb2p; until then 13F-HR/A is intentionally not registered.
 export const FORM_HANDLERS: Record<string, FormHandler> = {
   "4": handleForm4,
   "4/A": handleForm4,
   "8-K": handle8k,
   "8-K/A": handle8k,
+  "13F-HR": handle13f,
 };
 
 // ---------------------------------------------------------------------------

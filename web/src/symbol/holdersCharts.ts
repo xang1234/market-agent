@@ -14,13 +14,21 @@ export type OwnershipView = {
   bars: ReadonlyArray<OwnershipBar>
   maxPct: number
   topSharePct: number
+  // true when there ARE holders but none report an ownership percentage (e.g. SEC
+  // 13F) — distinct from "no holders at all", so the card shows the right message.
+  percentUnavailable: boolean
 }
 
 export function topOwnership(
   holders: ReadonlyArray<InstitutionalHolder>,
   topN: number,
 ): OwnershipView {
-  const sorted = [...holders]
+  // The ownership-% chart only includes holders with a known percentage; SEC 13F
+  // holders carry a null percent and are charted elsewhere (by position value).
+  const sorted = holders
+    .filter((h): h is InstitutionalHolder & { percent_of_shares_outstanding: number } =>
+      h.percent_of_shares_outstanding !== null,
+    )
     .sort((a, b) => b.percent_of_shares_outstanding - a.percent_of_shares_outstanding)
     .slice(0, topN)
   const bars = sorted.map((h, i) => ({
@@ -33,6 +41,7 @@ export function topOwnership(
     bars,
     maxPct: bars.length === 0 ? 0 : bars[0].pct,
     topSharePct: bars.reduce((sum, b) => sum + b.pct, 0),
+    percentUnavailable: holders.length > 0 && bars.length === 0,
   }
 }
 

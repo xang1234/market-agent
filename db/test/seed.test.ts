@@ -197,6 +197,14 @@ test("seed populates metrics and sources with the expected registry", { timeout:
     );
   }
 
+  for (const institutionalMetric of ["institutional_ownership_pct", "institutional_holders_count"]) {
+    assert.equal(
+      queryValue(containerName, `select count(*) from metrics where metric_key = '${institutionalMetric}'`),
+      "1",
+      `expected institutional metric ${institutionalMetric} to be present exactly once`,
+    );
+  }
+
   assert.equal(
     queryValue(containerName, "select count(*) from sources where provider = 'sec_edgar' and kind = 'filing'"),
     "1",

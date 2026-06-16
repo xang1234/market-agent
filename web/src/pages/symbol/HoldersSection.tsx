@@ -133,7 +133,13 @@ async function loadHolders<E extends HoldersEnvelope>(
 // signed share-change as the delta — the charts-first lede above the table.
 function OwnershipBars({ view }: { view: OwnershipView }) {
   if (view.bars.length === 0) {
-    return <p className="text-sm text-muted">No institutional holders recorded.</p>
+    return (
+      <p className="text-sm text-muted">
+        {view.percentUnavailable
+          ? 'Ownership % not reported for these holders (see the holdings table below).'
+          : 'No institutional holders recorded.'}
+      </p>
+    )
   }
   const bars: MetricBar[] = view.bars.map((bar) => ({
     key: bar.key,
@@ -242,7 +248,9 @@ function InstitutionalRow({ holder, currency }: { holder: InstitutionalHolder; c
         {formatCompactCurrency(holder.market_value, currency)}
       </td>
       <td className="px-2 py-2 text-right num text-fg">
-        {holder.percent_of_shares_outstanding.toFixed(2)}%
+        {holder.percent_of_shares_outstanding === null
+          ? '—'
+          : `${holder.percent_of_shares_outstanding.toFixed(2)}%`}
       </td>
       <td className={`px-2 py-2 text-right num ${signedTextClass(holder.shares_change)}`}>
         {formatSignedCount(holder.shares_change)}

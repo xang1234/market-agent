@@ -51,6 +51,27 @@ test('insiderNetFlow nets buys against sells and counts each side', () => {
   assert.equal(flow.sellCount, 2)
 })
 
+test('topOwnership distinguishes null-percent holders (SEC 13F) from no holders', () => {
+  // Holders exist but none report a percentage → no bars, but NOT "no holders".
+  const nullPct: InstitutionalHolder = {
+    holder_name: 'Berkshire Hathaway Inc',
+    shares_held: 915_560_382,
+    market_value: 174_300_000_000,
+    percent_of_shares_outstanding: null,
+    shares_change: 12_000_000,
+    filing_date: '2026-03-31',
+  }
+  const withNulls = topOwnership([nullPct], 5)
+  assert.deepEqual(withNulls.bars, [])
+  assert.equal(withNulls.percentUnavailable, true, 'holders present but no percent → unavailable, not empty')
+
+  // Genuinely no holders → not "unavailable".
+  assert.equal(topOwnership([], 5).percentUnavailable, false)
+
+  // Holders with percentages → bars present, not unavailable.
+  assert.equal(topOwnership([holder('Vanguard', 8.9)], 5).percentUnavailable, false)
+})
+
 test('empty inputs yield neutral results', () => {
   assert.deepEqual(topOwnership([], 5).bars, [])
   assert.equal(insiderNetFlow([]).netShares, 0)
