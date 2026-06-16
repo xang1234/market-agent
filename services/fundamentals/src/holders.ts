@@ -187,7 +187,13 @@ function freezeInsiderTransaction(input: InsiderTransaction, label: string): Ins
   assertNonEmptyString(input.insider_role, `${label}.insider_role`);
   assertIsoDate(input.transaction_date, `${label}.transaction_date`);
   assertOneOf(input.transaction_type, INSIDER_TRANSACTION_TYPES, `${label}.transaction_type`);
-  assertNonNegativeInteger(input.shares, `${label}.shares`);
+  // Form 4 transactionShares can be fractional (DRIP, fractional/unit awards), and
+  // the insider_transactions read model stores `numeric` — so require a finite
+  // non-negative number, not an integer (institutional shares_held stays integer).
+  assertFiniteNumber(input.shares, `${label}.shares`);
+  if (input.shares < 0) {
+    throw new Error(`${label}.shares: must be non-negative; received ${input.shares}`);
+  }
   if (input.price !== null) {
     assertFiniteNumber(input.price, `${label}.price`);
     if (input.price < 0) {

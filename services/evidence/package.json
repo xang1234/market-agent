@@ -10,6 +10,7 @@
     "dev": "node --experimental-strip-types src/dev.ts",
     "test": "node --experimental-strip-types --test \"test/**/*.test.ts\"",
     "backfill:sec-filings": "node --experimental-strip-types src/sec-filings-backfill-cli.ts",
+    "backfill:sec-form4": "node --experimental-strip-types src/sec-form4-backfill-cli.ts",
     "crawl:sec-daily": "node --experimental-strip-types src/sec-daily-crawl-cli.ts"
   },
   "dependencies": {

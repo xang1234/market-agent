@@ -237,6 +237,42 @@ export type SecSubmissionsRecent = {
 
 export type SecSubmissions = { filings: { recent: SecSubmissionsRecent } };
 
+// One filing from the submissions feed, zipped from the parallel `recent.*`
+// arrays. filedAtMs is the parsed filingDate (for window filters).
+export type SubmissionRow = {
+  accession: string;
+  form: string;
+  primaryDocument: string;
+  filedDate: string; // YYYY-MM-DD
+  filedAtMs: number;
+};
+
+// Zip EDGAR's parallel `recent.*` arrays into rows, dropping ragged rows missing
+// any shared field (the arrays can be ragged, and an unparseable filingDate
+// yields NaN). Form and date-window filtering are left to the caller — those
+// differ per backfill — so this owns only the array-quirk knowledge, once, next
+// to the type it unpacks.
+export function recentSubmissionRows(recent: SecSubmissionsRecent): SubmissionRow[] {
+  return recent.accessionNumber
+    .map((accession, index) => ({
+      accession,
+      form: recent.form[index],
+      primaryDocument: recent.primaryDocument[index],
+      filedDate: recent.filingDate[index],
+      filedAtMs: Date.parse(recent.filingDate[index]),
+    }))
+    .filter(
+      (row): row is SubmissionRow =>
+        typeof row.accession === "string" &&
+        row.accession.length > 0 &&
+        typeof row.form === "string" &&
+        typeof row.primaryDocument === "string" &&
+        row.primaryDocument.length > 0 &&
+        typeof row.filedDate === "string" &&
+        Number.isFinite(row.filedAtMs),
+    );
+}
+
 export function submissionsUrl(cik: number): string {
   assertPositiveInteger(cik, "submissionsUrl.cik");
   return `https://data.sec.gov/submissions/CIK${String(cik).padStart(10, "0")}.json`;

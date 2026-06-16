@@ -105,6 +105,11 @@ const DEFINITIONS: ReadonlyArray<FieldDefinition> = [
   { field: "perf_year", dimension: "fundamentals", kind: "numeric", sortable: true },
   { field: "rsi_14", dimension: "fundamentals", kind: "numeric", sortable: true },
   { field: "week_52_high_distance", dimension: "fundamentals", kind: "numeric", sortable: true },
+
+  // Insider activity (SEC Form 4): net shares acquired by insiders over the
+  // trailing 90 days (acquired minus disposed). Computed at query time from the
+  // insider_transactions read model in db-candidates — not a stored fact.
+  { field: "insider_net_shares_90d", dimension: "fundamentals", kind: "numeric", sortable: true },
 ];
 
 const REGISTRY: ReadonlyMap<string, FieldDefinition> = new Map(

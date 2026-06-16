@@ -48,6 +48,9 @@ class FakeCandidateDb {
     if (text.includes("from facts f")) {
       return rows([]);
     }
+    if (text.includes("from insider_transactions")) {
+      return rows([]);
+    }
     throw new Error(`unhandled query: ${text}`);
   }
 }
@@ -70,6 +73,7 @@ test("Postgres screener candidate repository computes current/prior fundamentals
   assert.equal(f.operating_margin, 0.3, "operating_income(30) / revenue(100)");
   assert.equal(f.net_margin, 0.2, "net_income(20) / revenue(100)");
   assert.equal(f.revenue_growth_yoy, 0.25, "(revenue 100 - prior 80) / prior 80");
+  assert.equal(f.insider_net_shares_90d, 5000, "net insider shares from the read model");
 });
 
 class FakeFundamentalsDb {
@@ -113,6 +117,9 @@ class FakeFundamentalsDb {
           fact("revenue", 2023, 80),
         ] as R[],
       );
+    }
+    if (text.includes("from insider_transactions")) {
+      return rows([{ net_shares: "5000" }] as R[]);
     }
     throw new Error(`unhandled query: ${text}`);
   }

@@ -20,6 +20,7 @@ export const EVENT_TYPES = Object.freeze([
   "lawsuit",
   "macro_event",
   "theme_event",
+  "insider_transaction",
 ] as const);
 
 export const EVENT_STATUSES = Object.freeze([

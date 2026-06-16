@@ -232,6 +232,11 @@ function fundamentalsFromRow(row: VendorCandidateRow): ScreenerFundamentalsSumma
     perf_year: numOrNull(row.perf_year),
     rsi_14: numOrNull(row.rsi_14),
     week_52_high_distance: numOrNull(row.week_52_high_distance),
+    // Insider activity is SEC-sourced (the Postgres candidate path joins the
+    // Form 4 read model); the vendor feed has no insider data. Default to null
+    // so the field is present — a missing key reads as `undefined`, which slips
+    // past numericClauseMatches' `=== null` guard and fabricates matches.
+    insider_net_shares_90d: null,
   };
 }
 
