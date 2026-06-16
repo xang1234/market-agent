@@ -105,5 +105,9 @@ insert into metrics (metric_key, display_name, unit_class, aggregation, interpre
   ('avg_volume',            'Average Volume',             'count',    'avg',           'neutral', 'vendor', 1, 'Average daily share volume.'),
   ('atr_14',                'ATR (14)',                   'currency', 'point_in_time', 'neutral', 'vendor', 1, '14-day average true range in price units.'),
   ('volatility_week',       'Volatility (1W)',            'percent',  'point_in_time', 'neutral', 'vendor', 1, 'Average daily price volatility over the past week.'),
-  ('volatility_month',      'Volatility (1M)',            'percent',  'point_in_time', 'neutral', 'vendor', 1, 'Average daily price volatility over the past month.')
+  ('volatility_month',      'Volatility (1M)',            'percent',  'point_in_time', 'neutral', 'vendor', 1, 'Average daily price volatility over the past month.'),
+
+  -- Institutional ownership (SEC 13F, fra-ajvd.4)
+  ('institutional_ownership_pct', 'Institutional Ownership', 'percent', 'point_in_time', 'neutral', 'derived', 1, 'Percent of shares outstanding held by reporting institutions (13F).'),
+  ('institutional_holders_count', 'Institutional Holders',   'count',   'point_in_time', 'neutral', 'derived', 1, 'Number of institutions reporting a position in the issuer (13F).')
 on conflict (metric_key) do nothing;
