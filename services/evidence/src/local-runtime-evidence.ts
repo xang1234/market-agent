@@ -76,10 +76,33 @@ export async function loadLocalRuntimeEvidence(
   const includeIssuerIr = (sourceCategories ?? []).includes("issuer_ir");
   const includeNonIr = sourceCategories === null || sourceCategories.some((category) => category !== "issuer_ir");
   const { rows } = await db.query<ClaimEvidenceRow>(
-    `with subject_refs as (
+    `with input_refs as (
        select kind::subject_kind as subject_kind,
               id::uuid as subject_id
          from jsonb_to_recordset($1::jsonb) as refs(kind text, id text)
+     ),
+     subject_refs as (
+       -- ADR 0001: also match claims attributed to the ISSUER behind a
+       -- listing/instrument universe ref. Evidence (SEC filings, issuer IR,
+       -- news) is issuer-scoped, but agent universes are usually listing-scoped,
+       -- so an exact (kind, id) match silently misses issuer-attributed claims.
+       -- The original refs still match; union dedupes. This is the AUGMENT
+       -- sibling of analyst-grids' normalizeUniverseToIssuers (which REPLACES
+       -- listing/instrument->issuer for issuer-scoped grid columns); a shared
+       -- subject->issuer module should unify both and the inline
+       -- listings/instruments joins — see fra-t2j6.
+       select subject_kind, subject_id from input_refs
+       union
+       select 'issuer'::subject_kind as subject_kind, ins.issuer_id as subject_id
+         from input_refs ir
+         join listings l on l.listing_id = ir.subject_id
+         join instruments ins on ins.instrument_id = l.instrument_id
+        where ir.subject_kind = 'listing'
+       union
+       select 'issuer'::subject_kind as subject_kind, ins.issuer_id as subject_id
+         from input_refs ir
+         join instruments ins on ins.instrument_id = ir.subject_id
+        where ir.subject_kind = 'instrument'
      ),
      matching_claims as (
        select distinct on (c.claim_id)
