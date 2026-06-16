@@ -8,15 +8,31 @@
 
 import {
   ingestSecFiling,
-  SEC_FORM_CODES,
   type FetchFilingInput,
   type FetchFilingResult,
   type SecFormCode,
   type SecSubmissions,
 } from "./sec-edgar.ts";
 import { createMention } from "./mention-repo.ts";
+import { findLiveDocumentIdByAccession } from "./document-repo.ts";
 import type { ObjectStore } from "./object-store.ts";
 import type { QueryExecutor } from "./types.ts";
+
+// Per-issuer backfill targets the periodic/event evidence filings. It is
+// deliberately NOT the full SEC_FORM_CODES universe: ownership forms (4, 13F-HR)
+// are high-frequency and would consume the maxFilings slots, crowding out the
+// 10-K/10-Q/8-K evidence this backfill exists to fetch. Ownership ingestion is
+// the daily crawl's job; callers that want ownership forms pass `forms`
+// explicitly (e.g. the Form 4 lazy backfill).
+export const BACKFILL_DEFAULT_FORMS: readonly SecFormCode[] = [
+  "10-K",
+  "10-Q",
+  "8-K",
+  "8-K/A",
+  "20-F",
+  "6-K",
+  "40-F",
+];
 
 export type FilingsBackfillClient = {
   fetchSubmissions(cik: number): Promise<SecSubmissions>;
@@ -50,7 +66,7 @@ export async function backfillIssuerFilings(
 ): Promise<BackfillIssuerFilingsResult> {
   const sinceDays = input.sinceDays ?? 180;
   const maxFilings = input.maxFilings ?? 5;
-  const forms = input.forms ?? SEC_FORM_CODES;
+  const forms = input.forms ?? BACKFILL_DEFAULT_FORMS;
   const now = input.now ?? (() => new Date());
   const cutoffMs = now().getTime() - sinceDays * 24 * 60 * 60 * 1000;
 
@@ -80,20 +96,13 @@ export async function backfillIssuerFilings(
   const ingested: BackfillIssuerFilingsResult["ingested"] = [];
   let skipped = 0;
   for (const candidate of candidates) {
-    const existing = await deps.db.query<{ document_id: string }>(
-      `select document_id::text as document_id
-         from documents
-        where provider_doc_id = $1 and deleted_at is null
-        limit 1`,
-      [candidate.accession],
-    );
-    const existingRow = (existing.rows as Array<{ document_id: string }>)[0];
-    if (existingRow !== undefined) {
+    const existingDocumentId = await findLiveDocumentIdByAccession(deps.db, candidate.accession);
+    if (existingDocumentId !== null) {
       // A prior run may have ingested the document but died before recording
       // the issuer mention; createMention upserts, so re-asserting the
       // linkage here keeps reruns truly idempotent (heals partial state).
       await createMention(deps.db, {
-        document_id: existingRow.document_id,
+        document_id: existingDocumentId,
         subject_kind: "issuer",
         subject_id: input.issuerId,
         prominence: "headline",

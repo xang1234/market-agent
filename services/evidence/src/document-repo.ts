@@ -162,6 +162,22 @@ export async function getDocument(
   return rows[0] ? documentRowFromDb(rows[0]) : null;
 }
 
+// Idempotency lookup shared by the SEC ingestion paths (per-issuer backfill and
+// the daily crawl): the live document id for a provider accession, or null.
+export async function findLiveDocumentIdByAccession(
+  db: QueryExecutor,
+  accession: string,
+): Promise<string | null> {
+  const { rows } = await db.query<{ document_id: string }>(
+    `select document_id::text as document_id
+       from documents
+      where provider_doc_id = $1 and deleted_at is null
+      limit 1`,
+    [accession],
+  );
+  return rows[0]?.document_id ?? null;
+}
+
 export async function getDocumentChildren(
   db: QueryExecutor,
   parentDocumentId: string,
