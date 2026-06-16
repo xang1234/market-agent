@@ -19,17 +19,15 @@ import { findLiveDocumentIdByAccession } from "./document-repo.ts";
 import type { ObjectStore } from "./object-store.ts";
 import type { QueryExecutor } from "./types.ts";
 
-// Per-issuer backfill targets the periodic/event evidence filings. It is
-// deliberately NOT the full SEC_FORM_CODES universe: ownership forms (4, 13F-HR)
-// are high-frequency and would consume the maxFilings slots, crowding out the
-// 10-K/10-Q/8-K evidence this backfill exists to fetch. Ownership ingestion is
-// the daily crawl's job; callers that want ownership forms pass `forms`
-// explicitly (e.g. the Form 4 lazy backfill).
+// Per-issuer backfill targets the periodic narrative-evidence filings. It is
+// deliberately NOT the full SEC_FORM_CODES universe: the typed-event forms (4,
+// 8-K, 13F-HR) have dedicated atomic handlers + their own per-issuer backfills
+// that produce events/claims — ingesting them here as plain documents would both
+// crowd out the maxFilings slots and lose that typed extraction. Callers that
+// want a specific form set pass `forms` explicitly.
 export const BACKFILL_DEFAULT_FORMS: readonly SecFormCode[] = [
   "10-K",
   "10-Q",
-  "8-K",
-  "8-K/A",
   "20-F",
   "6-K",
   "40-F",
