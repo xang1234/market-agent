@@ -14,6 +14,7 @@ create table edgar_crawl_ledger (
   finished_at      timestamptz not null default now(),
   created_at       timestamptz not null default now(),
   unique (form, index_date),
+  check (filings_ingested + filings_skipped = filings_total),
   check (finished_at >= started_at)
 );
 

@@ -20,6 +20,7 @@ export async function recordCrawlBatch(db: QueryExecutor, input: RecordCrawlBatc
        filings_total = excluded.filings_total,
        filings_ingested = excluded.filings_ingested,
        filings_skipped = excluded.filings_skipped,
+       started_at = excluded.started_at,
        finished_at = now()`,
     [
       input.form,

@@ -22,6 +22,15 @@ export function createEvidenceCliRuntime(): EvidenceCliRuntime {
     );
   }
 
+  // Reject partial static-credential config: a single key set on its own would
+  // otherwise silently fall through to the default provider chain and pick up
+  // unrelated ambient credentials. Set both (explicit) or neither (default chain).
+  if (Boolean(process.env.S3_ACCESS_KEY_ID) !== Boolean(process.env.S3_SECRET_ACCESS_KEY)) {
+    throw new Error(
+      "S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be set together (or both omitted to use the default credential chain)",
+    );
+  }
+
   const secClient = SecEdgarClient.fromEnv();
   const s3 = new S3Client({
     region: process.env.S3_REGION,

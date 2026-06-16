@@ -362,6 +362,7 @@ create index documents_source_idx on documents(source_id);
 create index documents_published_idx on documents(published_at desc);
 create index documents_parent_idx on documents(parent_document_id) where parent_document_id is not null;
 create index documents_conversation_idx on documents(conversation_id) where conversation_id is not null;
+create index documents_provider_doc_id_idx on documents(provider_doc_id) where deleted_at is null and provider_doc_id is not null;
 
 create table ir_source_registry (
   ir_source_id uuid primary key default gen_random_uuid(),
@@ -1037,6 +1038,7 @@ create table edgar_crawl_ledger (
   finished_at      timestamptz not null default now(),
   created_at       timestamptz not null default now(),
   unique (form, index_date),
+  check (filings_ingested + filings_skipped = filings_total),
   check (finished_at >= started_at)
 );
 

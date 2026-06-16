@@ -54,11 +54,14 @@ export async function crawlDailyFilings(
   for (const entry of entries) {
     const outcome = byForm[entry.form];
     outcome.total += 1;
+    // Dedup is infrastructure: a DB fault here must abort the crawl loudly
+    // rather than be downgraded to a silently-skipped filing. Only the handler
+    // call is wrapped below, so a parser/persistence bug isolates to its form.
+    if ((await findLiveDocumentIdByAccession(deps.db, entry.accession)) !== null) {
+      outcome.skipped += 1;
+      continue;
+    }
     try {
-      if ((await findLiveDocumentIdByAccession(deps.db, entry.accession)) !== null) {
-        outcome.skipped += 1;
-        continue;
-      }
       const handlerDeps: FormHandlerDeps = {
         db: deps.db,
         objectStore: deps.objectStore,
@@ -68,9 +71,9 @@ export async function crawlDailyFilings(
       if (result.ingested) outcome.ingested += 1;
       else outcome.skipped += 1;
     } catch (err) {
-      // One bad filing must not sink the day's crawl: mark the form partial,
-      // count it as skipped so the ledger keeps total = ingested + skipped, and
-      // log it (no silent drops) so an operator can diagnose. Then continue.
+      // A handler failure marks the form partial and counts the filing as
+      // skipped (keeps total = ingested + skipped), logs it (no silent drops),
+      // and the crawl continues to the next filing.
       outcome.status = "partial";
       outcome.skipped += 1;
       console.error(

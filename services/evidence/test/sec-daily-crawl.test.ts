@@ -62,3 +62,21 @@ test("a handler throwing marks that form partial but does not abort the crawl", 
   assert.equal(result.byForm["4"].status, "partial");
   assert.equal(result.byForm["8-K"].status, "succeeded");
 });
+
+test("a dedup (DB) failure aborts the crawl instead of silently skipping", async () => {
+  const handler: FormHandler = async () => ({ ingested: true });
+  const db = {
+    query: async (sql: string) => {
+      if (/from documents/i.test(sql)) throw new Error("db down");
+      return { rows: [] } as never;
+    },
+  } as unknown as QueryExecutor;
+  const client = { fetchDailyIndex: async (_d: Date) => ENTRIES } as never;
+  await assert.rejects(
+    crawlDailyFilings(
+      { db, client, objectStore: {} as never },
+      { date: new Date("2026-06-12T00:00:00Z"), handlers: { "4": handler } },
+    ),
+    /db down/,
+  );
+});

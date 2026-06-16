@@ -15,3 +15,12 @@ test("resolveCrawlDate defaults to today (UTC) when no flag is given", () => {
     "2026-06-15",
   );
 });
+
+test("resolveCrawlDate throws when --date has no value", () => {
+  assert.throws(() => resolveCrawlDate(["--date"]), /YYYY-MM-DD/);
+});
+
+test("resolveCrawlDate throws on a malformed --date", () => {
+  assert.throws(() => resolveCrawlDate(["--date", "06/12/2026"]), /YYYY-MM-DD/);
+  assert.throws(() => resolveCrawlDate(["--date", "2026-13-45"]), /valid calendar date/);
+});

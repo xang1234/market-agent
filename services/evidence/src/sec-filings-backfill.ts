@@ -8,7 +8,6 @@
 
 import {
   ingestSecFiling,
-  SEC_FORM_CODES,
   type FetchFilingInput,
   type FetchFilingResult,
   type SecFormCode,
@@ -18,6 +17,22 @@ import { createMention } from "./mention-repo.ts";
 import { findLiveDocumentIdByAccession } from "./document-repo.ts";
 import type { ObjectStore } from "./object-store.ts";
 import type { QueryExecutor } from "./types.ts";
+
+// Per-issuer backfill targets the periodic/event evidence filings. It is
+// deliberately NOT the full SEC_FORM_CODES universe: ownership forms (4, 13F-HR)
+// are high-frequency and would consume the maxFilings slots, crowding out the
+// 10-K/10-Q/8-K evidence this backfill exists to fetch. Ownership ingestion is
+// the daily crawl's job; callers that want ownership forms pass `forms`
+// explicitly (e.g. the Form 4 lazy backfill).
+export const BACKFILL_DEFAULT_FORMS: readonly SecFormCode[] = [
+  "10-K",
+  "10-Q",
+  "8-K",
+  "8-K/A",
+  "20-F",
+  "6-K",
+  "40-F",
+];
 
 export type FilingsBackfillClient = {
   fetchSubmissions(cik: number): Promise<SecSubmissions>;
@@ -51,7 +66,7 @@ export async function backfillIssuerFilings(
 ): Promise<BackfillIssuerFilingsResult> {
   const sinceDays = input.sinceDays ?? 180;
   const maxFilings = input.maxFilings ?? 5;
-  const forms = input.forms ?? SEC_FORM_CODES;
+  const forms = input.forms ?? BACKFILL_DEFAULT_FORMS;
   const now = input.now ?? (() => new Date());
   const cutoffMs = now().getTime() - sinceDays * 24 * 60 * 60 * 1000;
 
