@@ -133,7 +133,13 @@ async function loadHolders<E extends HoldersEnvelope>(
 // signed share-change as the delta — the charts-first lede above the table.
 function OwnershipBars({ view }: { view: OwnershipView }) {
   if (view.bars.length === 0) {
-    return <p className="text-sm text-muted">No institutional holders recorded.</p>
+    return (
+      <p className="text-sm text-muted">
+        {view.percentUnavailable
+          ? 'Ownership % not reported for these holders (see the holdings table below).'
+          : 'No institutional holders recorded.'}
+      </p>
+    )
   }
   const bars: MetricBar[] = view.bars.map((bar) => ({
     key: bar.key,

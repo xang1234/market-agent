@@ -14,6 +14,9 @@ export type OwnershipView = {
   bars: ReadonlyArray<OwnershipBar>
   maxPct: number
   topSharePct: number
+  // true when there ARE holders but none report an ownership percentage (e.g. SEC
+  // 13F) — distinct from "no holders at all", so the card shows the right message.
+  percentUnavailable: boolean
 }
 
 export function topOwnership(
@@ -38,6 +41,7 @@ export function topOwnership(
     bars,
     maxPct: bars.length === 0 ? 0 : bars[0].pct,
     topSharePct: bars.reduce((sum, b) => sum + b.pct, 0),
+    percentUnavailable: holders.length > 0 && bars.length === 0,
   }
 }
 
