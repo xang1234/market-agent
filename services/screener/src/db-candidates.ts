@@ -120,6 +120,7 @@ export async function loadPostgresScreenerCandidates(
     const netIncome = latest.net_income;
     const epsDiluted = latest.eps_diluted;
     const dilutedShares = latest.shares_outstanding_diluted;
+    const insiderNetShares90d = await loadInsiderNetShares90d(db, row.issuer_id, now);
 
     candidates.push({
       subject_ref: { kind: "listing", id: row.listing_id },
@@ -143,6 +144,7 @@ export async function loadPostgresScreenerCandidates(
         revenue_growth_yoy: latest.revenue === null || prior.revenue === null || prior.revenue === 0
           ? null
           : (latest.revenue - prior.revenue) / prior.revenue,
+        insider_net_shares_90d: insiderNetShares90d,
         // Technical/momentum fields are vendor-sourced (screener-artifacts); the
         // reported SEC path has no data for them.
         forward_pe: null,
@@ -156,6 +158,25 @@ export async function loadPostgresScreenerCandidates(
   }
 
   return Object.freeze(candidates);
+}
+
+// Net shares acquired by insiders over the trailing 90 days (acquired minus
+// disposed), computed at query time from the Form 4 read model — not a stored
+// fact (the screener gates facts on method='reported'; this is derived).
+async function loadInsiderNetShares90d(
+  db: ScreenerCandidateQueryExecutor,
+  issuerId: string,
+  now: Date,
+): Promise<number | null> {
+  const cutoff = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString();
+  const { rows } = await db.query<{ net_shares: string | null }>(
+    `select sum(case when acquired_disposed = 'A' then shares else -shares end) as net_shares
+       from insider_transactions
+      where issuer_id = $1 and filed_at >= $2`,
+    [issuerId, cutoff],
+  );
+  const raw = rows[0]?.net_shares;
+  return raw === null || raw === undefined ? null : Number(raw);
 }
 
 function pickCurrentPriorFundamentals(facts: ReadonlyArray<IssuerFundamentalFact>): {

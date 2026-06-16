@@ -73,6 +73,9 @@ export type ScreenerFundamentalsSummary = {
   perf_year: number | null;
   rsi_14: number | null;
   week_52_high_distance: number | null;
+  // Insider net shares (SEC Form 4) over the trailing 90 days; null-defaulted like
+  // the vendor fields so existing candidate inputs stay valid.
+  insider_net_shares_90d: number | null;
 };
 
 // Display identity — `primary` is the headline label and is always
@@ -381,6 +384,8 @@ export function freezeFundamentalsSummary(
   assertNullableFiniteNumber(rsi_14, `${label}.rsi_14`);
   const week_52_high_distance = raw.week_52_high_distance ?? null;
   assertNullableFiniteNumber(week_52_high_distance, `${label}.week_52_high_distance`);
+  const insider_net_shares_90d = raw.insider_net_shares_90d ?? null;
+  assertNullableFiniteNumber(insider_net_shares_90d, `${label}.insider_net_shares_90d`);
 
   return Object.freeze({
     market_cap,
@@ -395,5 +400,6 @@ export function freezeFundamentalsSummary(
     perf_year,
     rsi_14,
     week_52_high_distance,
+    insider_net_shares_90d,
   });
 }
