@@ -7,10 +7,7 @@
 // resolves to). Form handlers (Form 4, 8-K, 13F, …) are registered in
 // FORM_HANDLERS; the slice is intentionally empty at this stage.
 
-import { Pool } from "pg";
-import { S3Client } from "@aws-sdk/client-s3";
-import { S3ObjectStore } from "./s3-object-store.ts";
-import { SecEdgarClient } from "./sec-edgar.ts";
+import { createEvidenceCliRuntime } from "./evidence-cli-runtime.ts";
 import { crawlDailyFilings, type FormHandler } from "./sec-daily-crawl.ts";
 
 // ---------------------------------------------------------------------------
@@ -35,34 +32,12 @@ export const FORM_HANDLERS: Record<string, FormHandler> = {};
 
 async function main(argv: string[]): Promise<void> {
   const date = resolveCrawlDate(argv);
-
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) throw new Error("DATABASE_URL is required");
-  if (!process.env.S3_BUCKET || !process.env.S3_REGION) {
-    throw new Error(
-      "S3_BUCKET and S3_REGION are required: the crawl writes blobs to S3/MinIO so reader columns can load them",
-    );
-  }
-
-  const client = SecEdgarClient.fromEnv();
-  const s3 = new S3Client({
-    region: process.env.S3_REGION,
-    ...(process.env.S3_ENDPOINT ? { endpoint: process.env.S3_ENDPOINT } : {}),
-    ...(process.env.S3_FORCE_PATH_STYLE === "true" ? { forcePathStyle: true } : {}),
-    ...(process.env.S3_ACCESS_KEY_ID && process.env.S3_SECRET_ACCESS_KEY
-      ? {
-          credentials: {
-            accessKeyId: process.env.S3_ACCESS_KEY_ID,
-            secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
-          },
-        }
-      : {}),
-  });
-  const objectStore = new S3ObjectStore({ client: s3, bucket: process.env.S3_BUCKET });
-  const db = new Pool({ connectionString: databaseUrl });
-
+  const { db, objectStore, secClient } = createEvidenceCliRuntime();
   try {
-    const result = await crawlDailyFilings({ db, client, objectStore }, { date, handlers: FORM_HANDLERS });
+    const result = await crawlDailyFilings(
+      { db, client: secClient, objectStore },
+      { date, handlers: FORM_HANDLERS },
+    );
     console.log(JSON.stringify({ date: date.toISOString().slice(0, 10), result }));
   } finally {
     await db.end();

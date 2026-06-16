@@ -1,6 +1,7 @@
--- Watermark + idempotency ledger for the daily EDGAR master-index crawl.
--- One row per (form, index_date) crawl attempt so reruns resume and an
--- operator can see coverage gaps.
+-- Idempotency + per-day audit ledger for the daily EDGAR master-index crawl.
+-- One row per (form, index_date) crawl attempt: reruns upsert in place and an
+-- operator can see per-day coverage. (Resume/catch-up is deferred until the
+-- form handlers exist to key a watermark on.)
 create table edgar_crawl_ledger (
   ledger_id        uuid primary key default gen_random_uuid(),
   form             text not null,

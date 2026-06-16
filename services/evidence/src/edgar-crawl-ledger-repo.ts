@@ -32,16 +32,3 @@ export async function recordCrawlBatch(db: QueryExecutor, input: RecordCrawlBatc
     ],
   );
 }
-
-export async function lastCrawledDate(db: QueryExecutor, form: string): Promise<string | null> {
-  const result = await db.query<{ index_date: string }>(
-    `select to_char(index_date, 'YYYY-MM-DD') as index_date
-       from edgar_crawl_ledger
-      where form = $1 and status = 'succeeded'
-      order by index_date desc
-      limit 1`,
-    [form],
-  );
-  const row = (result.rows as Array<{ index_date: string }>)[0];
-  return row?.index_date ?? null;
-}

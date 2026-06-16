@@ -15,6 +15,7 @@ import {
   type SecSubmissions,
 } from "./sec-edgar.ts";
 import { createMention } from "./mention-repo.ts";
+import { findLiveDocumentIdByAccession } from "./document-repo.ts";
 import type { ObjectStore } from "./object-store.ts";
 import type { QueryExecutor } from "./types.ts";
 
@@ -80,20 +81,13 @@ export async function backfillIssuerFilings(
   const ingested: BackfillIssuerFilingsResult["ingested"] = [];
   let skipped = 0;
   for (const candidate of candidates) {
-    const existing = await deps.db.query<{ document_id: string }>(
-      `select document_id::text as document_id
-         from documents
-        where provider_doc_id = $1 and deleted_at is null
-        limit 1`,
-      [candidate.accession],
-    );
-    const existingRow = (existing.rows as Array<{ document_id: string }>)[0];
-    if (existingRow !== undefined) {
+    const existingDocumentId = await findLiveDocumentIdByAccession(deps.db, candidate.accession);
+    if (existingDocumentId !== null) {
       // A prior run may have ingested the document but died before recording
       // the issuer mention; createMention upserts, so re-asserting the
       // linkage here keeps reruns truly idempotent (heals partial state).
       await createMention(deps.db, {
-        document_id: existingRow.document_id,
+        document_id: existingDocumentId,
         subject_kind: "issuer",
         subject_id: input.issuerId,
         prominence: "headline",

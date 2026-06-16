@@ -3,18 +3,24 @@
 // stored (idempotent), and record per-form progress in the crawl ledger.
 import type { FilingIndexEntry } from "./sec-daily-index.ts";
 import { recordCrawlBatch } from "./edgar-crawl-ledger-repo.ts";
+import { findLiveDocumentIdByAccession } from "./document-repo.ts";
 import type { ObjectStore } from "./object-store.ts";
+import type { SecFilingFetcher } from "./sec-edgar.ts";
 import type { QueryExecutor } from "./types.ts";
 
 export type DailyCrawlClient = { fetchDailyIndex(date: Date): Promise<FilingIndexEntry[]> };
 
-export type FormHandlerDeps = { db: QueryExecutor; objectStore: ObjectStore; client: DailyCrawlClient };
+// Handlers fetch the filing they're dispatched (the submission .txt), so the
+// capability they need is fetchFiling — not the index fetch the orchestrator uses.
+export type FormHandlerDeps = { db: QueryExecutor; objectStore: ObjectStore; client: SecFilingFetcher };
 export type FormHandler = (entry: FilingIndexEntry, deps: FormHandlerDeps) => Promise<{ ingested: boolean }>;
 
 export type CrawlDailyFilingsDeps = {
   db: QueryExecutor;
   objectStore: ObjectStore;
-  client: DailyCrawlClient;
+  // The orchestrator reads the daily index; handlers fetch filings — the client
+  // must do both. SecEdgarClient satisfies this intersection.
+  client: DailyCrawlClient & SecFilingFetcher;
 };
 
 export type CrawlDailyFilingsInput = {
@@ -49,7 +55,7 @@ export async function crawlDailyFilings(
     const outcome = byForm[entry.form];
     outcome.total += 1;
     try {
-      if (await accessionExists(deps.db, entry.accession)) {
+      if ((await findLiveDocumentIdByAccession(deps.db, entry.accession)) !== null) {
         outcome.skipped += 1;
         continue;
       }
@@ -87,17 +93,6 @@ export async function crawlDailyFilings(
     });
   }
   return { byForm };
-}
-
-async function accessionExists(db: QueryExecutor, accession: string): Promise<boolean> {
-  const result = await db.query<{ document_id: string }>(
-    `select document_id::text as document_id
-       from documents
-      where provider_doc_id = $1 and deleted_at is null
-      limit 1`,
-    [accession],
-  );
-  return (result.rows as unknown[]).length > 0;
 }
 
 function isoDate(date: Date): string {
