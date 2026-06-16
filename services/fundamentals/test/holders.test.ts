@@ -163,6 +163,13 @@ test("freezeInstitutionalHoldersEnvelope rejects fractional shares_held (must be
   );
 });
 
+test("freezeInsiderHoldersEnvelope accepts fractional shares (Form 4 can report fractional)", () => {
+  const env = freezeInsiderHoldersEnvelope(
+    insiderInput({ holders: [validInsider({ shares: 10.5, price: 100, value: 1050 })] }),
+  );
+  assert.equal(env.holders[0]!.shares, 10.5, "fractional Form 4 shares are preserved, not rejected");
+});
+
 test("freezeInsiderHoldersEnvelope returns a frozen envelope tagged 'holders' / 'insider'", () => {
   const env = freezeInsiderHoldersEnvelope(insiderInput());
   assert.equal(env.family, "holders");

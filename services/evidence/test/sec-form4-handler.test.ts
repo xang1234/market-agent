@@ -113,3 +113,56 @@ test("handleForm4 skips an untracked issuer CIK without writing", async (t) => {
   const txns = await client.query(`select count(*)::int as n from insider_transactions`);
   assert.equal(txns.rows[0]!.n, 0, "nothing written for an untracked issuer");
 });
+
+// A Form 4 whose only activity is in the derivative table (e.g. an option
+// exercise). This extractor parses non-derivative transactions only, so it
+// yields zero transactions — the handler must NOT persist a documents row, or
+// the accession would be marked done and masked from future reprocessing.
+const DERIVATIVE_ONLY_TXT = `<SEC-DOCUMENT>
+<DOCUMENT><TYPE>4<TEXT><XML>
+<ownershipDocument>
+  <issuer><issuerCik>0000320193</issuerCik></issuer>
+  <reportingOwner>
+    <reportingOwnerId><rptOwnerCik>0001214156</rptOwnerCik><rptOwnerName>COOK TIMOTHY D</rptOwnerName></reportingOwnerId>
+    <reportingOwnerRelationship><isDirector>0</isDirector><isOfficer>1</isOfficer><officerTitle>Chief Executive Officer</officerTitle><isTenPercentOwner>0</isTenPercentOwner></reportingOwnerRelationship>
+  </reportingOwner>
+  <derivativeTable>
+    <derivativeTransaction>
+      <transactionDate><value>2026-06-10</value></transactionDate>
+      <transactionCoding><transactionCode>M</transactionCode></transactionCoding>
+    </derivativeTransaction>
+  </derivativeTable>
+</ownershipDocument>
+</XML></TEXT></DOCUMENT></SEC-DOCUMENT>`;
+
+test("handleForm4 skips a derivative-only filing without persisting an orphan document", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("docker unavailable");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "form4-derivative-only");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  await client.query(`insert into issuers (legal_name, cik) values ('Apple Inc.', '0000320193')`);
+
+  const deps = {
+    db,
+    objectStore: new MemoryObjectStore(),
+    client: {
+      fetchFiling: async () => ({
+        bytes: new TextEncoder().encode(DERIVATIVE_ONLY_TXT),
+        contentType: "text/plain",
+        retrievedAt: "2026-06-11T00:00:00.000Z",
+        url: `https://www.sec.gov/Archives/edgar/data/320193/x/${ACCESSION}.txt`,
+      }),
+    },
+  } as unknown as FormHandlerDeps;
+
+  const result = await handleForm4(entry(), deps);
+  assert.equal(result.ingested, false, "no non-derivative transactions → not ingested");
+
+  const docs = await client.query(`select count(*)::int as n from documents`);
+  assert.equal(docs.rows[0]!.n, 0, "no orphan documents row — the filing can be reprocessed later");
+  const txns = await client.query(`select count(*)::int as n from insider_transactions`);
+  assert.equal(txns.rows[0]!.n, 0, "no read-model rows");
+});

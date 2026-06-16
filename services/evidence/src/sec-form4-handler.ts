@@ -81,6 +81,16 @@ export const handleForm4 = async (entry: Form4FilingRef, deps: FormHandlerDeps) 
   });
   const filing = parseForm4(new TextDecoder("utf-8").decode(fetched.bytes));
 
+  // A Form 4 with no non-derivative transactions (e.g. derivative/option-only
+  // filings, which this extractor does not yet parse) has nothing to record.
+  // Skip WITHOUT persisting source/document, so the accession is not marked done
+  // by the crawl/backfill dedup — a later run can reprocess it once derivative
+  // parsing lands, rather than the filing being masked by an orphan documents row.
+  if (filing.transactions.length === 0) {
+    console.warn(`[sec-form4] skip ${entry.accession}: no non-derivative transactions extracted`);
+    return { ingested: false };
+  }
+
   const issuerId = await resolveIssuerId(deps.db, filing.issuerCik);
   if (issuerId === null) {
     console.warn(`[sec-form4] skip ${entry.accession}: issuer CIK ${filing.issuerCik} not tracked`);
