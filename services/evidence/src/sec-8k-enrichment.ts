@@ -7,6 +7,7 @@
 // LLM call is external/slow (same constraint as the OpenFIGI CUSIP harvest).
 import type { QueryExecutor } from "./types.ts";
 import type { SecFilingFetcher } from "./sec-edgar.ts";
+import { withTransaction } from "./transaction.ts";
 import { writeToolCallLog } from "../../observability/src/tool-call.ts";
 import type { LlmChatMessage, LlmChatRequest, LlmRouterResult } from "../../llm/src/router.ts";
 
@@ -15,9 +16,21 @@ import type { LlmChatMessage, LlmChatRequest, LlmRouterResult } from "../../llm/
 const HIGH_SEVERITY_EVENT_TYPES = ["bankruptcy", "restatement", "delisting", "m_and_a", "auditor_change"] as const;
 const HIGH_SEVERITY_PREDICATES = HIGH_SEVERITY_EVENT_TYPES.map((t) => `material_event.${t}`);
 
-// 8-K bodies (the Item narrative) sit early in the full-submission .txt, before the
-// exhibits; cap the prompt input so a large exhibit-heavy filing stays affordable.
+// Cap the prompt input so a large exhibit-heavy filing stays affordable. Windowed from
+// the <DOCUMENT> body (see extractFilingBody) so the budget covers the Item narrative,
+// not the SGML <SEC-HEADER>/cover boilerplate.
 const MAX_FILING_CHARS = 16_000;
+
+// A material-event narrative is one or two sentences; reject a model that ignores that
+// and returns a runaway blob rather than writing it into the claim's text column.
+const MAX_DESCRIPTION_CHARS = 1_000;
+
+// Window the full-submission .txt from its first <DOCUMENT> (the primary 8-K body),
+// skipping the <SEC-HEADER> metadata so the truncation budget lands on the Item text.
+export function extractFilingBody(filingText: string): string {
+  const start = filingText.indexOf("<DOCUMENT>");
+  return start >= 0 ? filingText.slice(start) : filingText;
+}
 
 // The LLM client surface this needs — the llm router's `complete` satisfies it, and a
 // test can inject a fake without booting a provider.
@@ -43,19 +56,24 @@ export type Enrich8kOutcome = "enriched" | "empty" | "unparseable";
 // uuid) rather than the text attributed_to_id.
 export async function findEnrich8kCandidates(db: QueryExecutor, limit = 100): Promise<Enrich8kCandidate[]> {
   const { rows } = await db.query<{ claim_id: string; predicate: string; accession: string; cik: string }>(
-    `select c.claim_id::text as claim_id,
-            c.predicate,
-            d.provider_doc_id as accession,
-            i.cik
-       from claims c
-       join claim_arguments ca on ca.claim_id = c.claim_id and ca.subject_kind = 'issuer'
-       join documents d on d.document_id = c.document_id
-       join issuers i on i.issuer_id = ca.subject_id
-      where c.predicate = any($1::text[])
-        and c.enriched_at is null
-        and i.cik is not null
-      order by c.created_at
-      limit $2`,
+    `select claim_id, predicate, accession, cik from (
+       select distinct on (c.claim_id)
+              c.claim_id::text as claim_id,
+              c.predicate,
+              d.provider_doc_id as accession,
+              i.cik,
+              c.created_at
+         from claims c
+         join claim_arguments ca on ca.claim_id = c.claim_id and ca.subject_kind = 'issuer'
+         join documents d on d.document_id = c.document_id
+         join issuers i on i.issuer_id = ca.subject_id
+        where c.predicate = any($1::text[])
+          and c.enriched_at is null
+          and i.cik is not null
+        order by c.claim_id
+     ) sub
+     order by sub.created_at
+     limit $2`,
     [HIGH_SEVERITY_PREDICATES, limit],
   );
   return rows.flatMap((row) => {
@@ -100,13 +118,26 @@ export function parseEnrichmentDescription(text: string): string | null {
   }
   if (typeof parsed !== "object" || parsed === null) return null;
   const description = (parsed as Record<string, unknown>).description;
-  return typeof description === "string" ? description.trim() : null;
+  if (typeof description !== "string") return null;
+  const trimmed = description.trim();
+  // A runaway blob (model ignored "one or two sentences") is treated as unparseable
+  // rather than written into the claim's text column.
+  return trimmed.length > MAX_DESCRIPTION_CHARS ? null : trimmed;
 }
 
 // Enrich one candidate: fetch the filing, LLM-extract a narrative, and augment the
-// deterministic claim's text in place (enriched_at = now()). Records the LLM call as a
-// tool_call_log (the provenance contract for LLM-derived content). Returns the outcome;
-// transport errors from the LLM/fetch propagate so a batch run can fail the item and retry.
+// deterministic claim's text in place. Returns the outcome; transport errors from the
+// LLM/fetch propagate so a batch run can fail the item and retry.
+//
+// Confidence is intentionally NOT lowered: the event detection (predicate
+// material_event.<type>) is deterministic and certain; only the descriptive prose is
+// LLM-derived, and enriched_at marks that. The tool_call_log is an AUDIT trail of the
+// enrichment, not a seal-consumable provenance link — claims carry no tool-call FK and
+// the snapshot seal recomputes its own provenance. If an enriched claim is ever cited in
+// a snapshot block, that block must re-establish tool-call provenance at seal time (as
+// the analyst-grid reader does); the seal is fail-closed, so LLM text cannot pass as
+// deterministic. The augment + audit log are written in one transaction so an enriched
+// claim is never left unlogged.
 export async function enrich8kClaim(deps: Enrich8kDeps, candidate: Enrich8kCandidate): Promise<Enrich8kOutcome> {
   const fetched = await deps.secClient.fetchFiling({
     cik: candidate.issuerCik,
@@ -115,7 +146,7 @@ export async function enrich8kClaim(deps: Enrich8kDeps, candidate: Enrich8kCandi
   });
   const filingText = new TextDecoder("utf-8").decode(fetched.bytes);
   const completion = await deps.llm.complete({
-    messages: buildEnrichmentMessages(candidate.eventType, filingText),
+    messages: buildEnrichmentMessages(candidate.eventType, extractFilingBody(filingText)),
     temperature: 0,
     maxTokens: 500,
   });
@@ -123,16 +154,19 @@ export async function enrich8kClaim(deps: Enrich8kDeps, candidate: Enrich8kCandi
   if (description === null) return "unparseable";
   if (description === "") return "empty";
 
-  // Augment in place (idempotent: the enriched_at guard means a concurrent/rerun no-ops).
-  await deps.db.query(
-    `update claims set text_canonical = $1, enriched_at = now() where claim_id = $2 and enriched_at is null`,
-    [description, candidate.claimId],
-  );
-  await writeToolCallLog(deps.db, {
-    tool_name: "enrich_8k",
-    args: { claim_id: candidate.claimId, accession: candidate.accession, event_type: candidate.eventType, model: completion.deployment.model },
-    result: { description },
-    status: "ok",
+  // Augment in place (idempotent: the enriched_at guard means a concurrent/rerun no-ops)
+  // and record the LLM call atomically, so a committed enrichment is always audited.
+  await withTransaction(deps.db, async (tx) => {
+    await tx.db.query(
+      `update claims set text_canonical = $1, enriched_at = now() where claim_id = $2 and enriched_at is null`,
+      [description, candidate.claimId],
+    );
+    await writeToolCallLog(tx.db, {
+      tool_name: "enrich_8k",
+      args: { claim_id: candidate.claimId, accession: candidate.accession, event_type: candidate.eventType, model: completion.deployment.model },
+      result: { description },
+      status: "ok",
+    });
   });
   return "enriched";
 }

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   enrich8kClaim,
+  extractFilingBody,
   findEnrich8kCandidates,
   parseEnrichmentDescription,
   type Enrich8kDeps,
@@ -92,6 +93,22 @@ test("parseEnrichmentDescription handles plain JSON, fenced JSON, and rejects ju
   assert.equal(parseEnrichmentDescription("not json"), null);
   assert.equal(parseEnrichmentDescription('{"foo":"bar"}'), null, "missing description field");
   assert.equal(parseEnrichmentDescription('{"description":42}'), null, "non-string description");
+  assert.equal(
+    parseEnrichmentDescription(JSON.stringify({ description: "x".repeat(2000) })),
+    null,
+    "a runaway blob is rejected, not written into the claim text",
+  );
+});
+
+test("extractFilingBody windows from the first <DOCUMENT>, skipping the SGML header", () => {
+  const txt =
+    "<SEC-DOCUMENT>0000320193-26-000099.txt\n<SEC-HEADER>FILER: ACME ... CIK ... PERIOD ...</SEC-HEADER>\n" +
+    "<DOCUMENT><TYPE>8-K<TEXT>Item 4.02 Non-Reliance: the company will restate FY2024.</TEXT></DOCUMENT>";
+  const body = extractFilingBody(txt);
+  assert.ok(body.startsWith("<DOCUMENT>"), "windows from the primary document body");
+  assert.ok(!body.includes("SEC-HEADER"), "the SGML header metadata is excluded from the prompt budget");
+  // No <DOCUMENT> marker → fall back to the whole text (never lose content).
+  assert.equal(extractFilingBody("plain text"), "plain text");
 });
 
 test("enrich8kClaim augments the deterministic claim in place and logs the LLM call", async (t) => {
