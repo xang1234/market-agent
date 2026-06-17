@@ -11,7 +11,7 @@ import { ingestDocumentInTransaction } from "./ingest.ts";
 import { createEvent, createEventSubject } from "./event-repo.ts";
 import { createClaim } from "./claim-repo.ts";
 import { createClaimArgument } from "./claim-argument-repo.ts";
-import { insertInsiderTransaction } from "./insider-transactions-repo.ts";
+import { insertInsiderTransaction, supersedeInsiderFiling } from "./insider-transactions-repo.ts";
 import { parseForm4, type Form4Transaction, type Form4ReportingOwner } from "./sec-form4-extractor.ts";
 import { resolveIssuerIdByCik } from "./sec-issuer-resolve.ts";
 
@@ -110,6 +110,25 @@ export const handleForm4 = async (entry: Form4FilingRef, deps: FormHandlerDeps) 
       },
     );
 
+    // A 4/A amendment restates the full ownership form: supersede the prior filing's
+    // read-model rows + derived material claims/events for this (issuer, owner, period)
+    // so the amendment replaces — rather than double-counts — the original. Runs in the
+    // same transaction as the re-insert below, so a failure leaves neither applied.
+    if (entry.form === "4/A" && filing.periodOfReport !== null) {
+      const superseded = await supersedeInsiderFiling(tx.db, {
+        issuer_id: issuerId,
+        insider_cik: filing.reportingOwner.cik,
+        insider_name: filing.reportingOwner.name,
+        period_of_report: filing.periodOfReport,
+      });
+      if (superseded.transactions > 0) {
+        console.warn(
+          `[sec-form4] ${entry.accession} (4/A): superseded ${superseded.transactions} prior transaction(s), ` +
+            `${superseded.claims} claim(s), ${superseded.events} event(s) for ${filing.reportingOwner.name} @ ${filing.periodOfReport}`,
+        );
+      }
+    }
+
     for (const txn of filing.transactions) {
       const type = transactionType(txn.code);
       const role = insiderRole(filing.reportingOwner);
@@ -129,6 +148,7 @@ export const handleForm4 = async (entry: Form4FilingRef, deps: FormHandlerDeps) 
         value: txn.value,
         source_id: source.source_id,
         accession: entry.accession,
+        period_of_report: filing.periodOfReport,
         filed_at: filedAt,
       });
 

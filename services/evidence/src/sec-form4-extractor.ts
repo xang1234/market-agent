@@ -25,6 +25,11 @@ export type Form4ReportingOwner = {
 export type Form4Filing = {
   issuerCik: number;
   reportingOwner: Form4ReportingOwner;
+  // SEC "Date of Earliest Transaction" — the anchor a 4/A amendment shares with the
+  // original it restates, used to supersede the prior filing. Falls back to the
+  // earliest parsed transaction date (its definition) when the tag is absent; null
+  // only for a filing with neither (which the handler skips anyway).
+  periodOfReport: string | null; // YYYY-MM-DD
   transactions: Form4Transaction[];
 };
 
@@ -50,6 +55,7 @@ export function parseForm4(submissionTxt: string): Form4Filing {
   const officerTitle = isOfficer ? (optionalTagText(ownerRelBlock ?? xml, "officerTitle") ?? null) : null;
 
   const transactions = parseNonDerivativeTransactions(xml);
+  const periodOfReport = optionalTagText(xml, "periodOfReport") ?? earliestTransactionDate(transactions);
 
   return {
     issuerCik,
@@ -61,8 +67,16 @@ export function parseForm4(submissionTxt: string): Form4Filing {
       isDirector,
       isTenPercentOwner,
     },
+    periodOfReport,
     transactions,
   };
+}
+
+// The earliest transaction date (ISO dates sort lexically), or null when there are
+// no transactions — the SEC definition of periodOfReport, used as a fallback.
+function earliestTransactionDate(transactions: ReadonlyArray<Form4Transaction>): string | null {
+  if (transactions.length === 0) return null;
+  return transactions.map((t) => t.transactionDate).sort()[0]!;
 }
 
 // ---------------------------------------------------------------------------

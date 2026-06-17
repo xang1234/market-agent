@@ -166,3 +166,96 @@ test("handleForm4 skips a derivative-only filing without persisting an orphan do
   const txns = await client.query(`select count(*)::int as n from insider_transactions`);
   assert.equal(txns.rows[0]!.n, 0, "no read-model rows");
 });
+
+const AMENDMENT_ACCESSION = "0000320193-26-000051";
+
+// A 4/A amending the original: same issuer / owner / period (earliest txn 2026-06-09),
+// but the P purchase is corrected 1000 → 800 shares. Carries an explicit <periodOfReport>.
+const AMENDMENT_TXT = `<SEC-DOCUMENT>
+<DOCUMENT><TYPE>4/A<TEXT><XML>
+<ownershipDocument>
+  <periodOfReport>2026-06-09</periodOfReport>
+  <issuer><issuerCik>0000320193</issuerCik></issuer>
+  <reportingOwner>
+    <reportingOwnerId><rptOwnerCik>0001214156</rptOwnerCik><rptOwnerName>COOK TIMOTHY D</rptOwnerName></reportingOwnerId>
+    <reportingOwnerRelationship><isDirector>0</isDirector><isOfficer>1</isOfficer><officerTitle>Chief Executive Officer</officerTitle><isTenPercentOwner>0</isTenPercentOwner></reportingOwnerRelationship>
+  </reportingOwner>
+  <nonDerivativeTable>
+    <nonDerivativeTransaction>
+      <transactionDate><value>2026-06-10</value></transactionDate>
+      <transactionCoding><transactionCode>P</transactionCode></transactionCoding>
+      <transactionAmounts>
+        <transactionShares><value>800</value></transactionShares>
+        <transactionPricePerShare><value>150.25</value></transactionPricePerShare>
+        <transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode>
+      </transactionAmounts>
+    </nonDerivativeTransaction>
+    <nonDerivativeTransaction>
+      <transactionDate><value>2026-06-09</value></transactionDate>
+      <transactionCoding><transactionCode>A</transactionCode></transactionCoding>
+      <transactionAmounts>
+        <transactionShares><value>500</value></transactionShares>
+        <transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode>
+      </transactionAmounts>
+    </nonDerivativeTransaction>
+  </nonDerivativeTable>
+</ownershipDocument>
+</XML></TEXT></DOCUMENT></SEC-DOCUMENT>`;
+
+function clientReturning(txt: string, accession: string) {
+  return {
+    fetchFiling: async () => ({
+      bytes: new TextEncoder().encode(txt),
+      contentType: "text/plain",
+      retrievedAt: "2026-06-12T00:00:00.000Z",
+      url: `https://www.sec.gov/Archives/edgar/data/320193/x/${accession}.txt`,
+    }),
+  };
+}
+
+function amendmentEntry(): FilingIndexEntry {
+  return {
+    cik: 320193,
+    company: "Apple Inc.",
+    form: "4/A",
+    filedDate: "2026-06-12",
+    fileName: `edgar/data/320193/${AMENDMENT_ACCESSION}.txt`,
+    accession: AMENDMENT_ACCESSION,
+  };
+}
+
+test("handleForm4 supersedes the original filing on a 4/A amendment (no double-count)", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("docker unavailable");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "form4-amend");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  const issuerId = (
+    await client.query<{ issuer_id: string }>(
+      `insert into issuers (legal_name, cik) values ('Apple Inc.', '0000320193') returning issuer_id::text as issuer_id`,
+    )
+  ).rows[0]!.issuer_id;
+
+  // Original 4: P 1000 (material) + A 500 → 2 rows, 1 claim, 2 events.
+  await handleForm4(entry(), { db, objectStore: new MemoryObjectStore(), client: fakeClient() } as unknown as FormHandlerDeps);
+  // 4/A restating the same (issuer, owner, period) with P corrected to 800.
+  await handleForm4(
+    amendmentEntry(),
+    { db, objectStore: new MemoryObjectStore(), client: clientReturning(AMENDMENT_TXT, AMENDMENT_ACCESSION) } as unknown as FormHandlerDeps,
+  );
+
+  const txns = await client.query<{ n: number; p_shares: string | null }>(
+    `select count(*)::int as n, sum(case when transaction_code = 'P' then shares else 0 end) as p_shares
+       from insider_transactions where issuer_id = $1`,
+    [issuerId],
+  );
+  assert.equal(txns.rows[0]!.n, 2, "amendment replaces the original — 2 rows, not 4 (no double-count)");
+  assert.equal(Number(txns.rows[0]!.p_shares), 800, "the corrected P share count, not stale 1000 or summed 1800");
+
+  const claims = await client.query<{ n: number }>(`select count(*)::int as n from claims where predicate = 'insider.transaction'`);
+  assert.equal(claims.rows[0]!.n, 1, "one material claim — the original's was superseded, not duplicated");
+  const events = await client.query<{ n: number }>(`select count(*)::int as n from events where event_type = 'insider_transaction'`);
+  assert.equal(events.rows[0]!.n, 2, "two events — the original's were superseded, not duplicated");
+});

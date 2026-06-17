@@ -33,12 +33,13 @@ test("insertInsiderTransaction inserts every column in order", async () => {
     value: 150250,
     source_id: SOURCE,
     accession: "0000320193-26-000050",
+    period_of_report: "2026-06-09",
     filed_at: "2026-06-11T00:00:00Z",
   });
   assert.match(calls[0].text, /insert into insider_transactions/i);
   assert.deepEqual(calls[0].values, [
     ISSUER, "COOK TIMOTHY D", "Chief Executive Officer", "0001214156", "2026-06-10",
-    "P", "buy", "A", 1000, 150.25, 150250, SOURCE, "0000320193-26-000050", "2026-06-11T00:00:00Z",
+    "P", "buy", "A", 1000, 150.25, 150250, SOURCE, "0000320193-26-000050", "2026-06-09", "2026-06-11T00:00:00Z",
   ]);
 });
 

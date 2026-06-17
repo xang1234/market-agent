@@ -1062,11 +1062,13 @@ create table insider_transactions (
   value             numeric,
   source_id         uuid not null references sources(source_id),
   accession         text not null,
+  period_of_report  date,
   filed_at          timestamptz not null,
   created_at        timestamptz not null default now()
 );
 create index insider_transactions_issuer_date_idx on insider_transactions(issuer_id, transaction_date desc);
 create index insider_transactions_issuer_filed_idx on insider_transactions(issuer_id, filed_at desc);
+create index insider_transactions_supersede_idx on insider_transactions(issuer_id, period_of_report, insider_cik);
 
 -- 13F institutional holdings (superinvestor-seeded v1) read model. One aggregated
 -- row per (filer, issuer, reporting period); only CUSIP-resolvable holdings are

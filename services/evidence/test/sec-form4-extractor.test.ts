@@ -491,3 +491,31 @@ test("parseForm4: unknown boolean encoding for a role flag → throws (not silen
 </ownershipDocument>`);
   assert.throws(() => parseForm4(malformed), /boolean/i);
 });
+
+test("parseForm4 reads periodOfReport, falling back to the earliest transaction date", () => {
+  // APPLE_OFFICER_PURCHASE carries no <periodOfReport>; its one transaction is 2026-06-10.
+  assert.equal(parseForm4(APPLE_OFFICER_PURCHASE).periodOfReport, "2026-06-10");
+
+  // An explicit <periodOfReport> wins over the transaction date — the stable anchor a
+  // 4/A shares with the original it amends.
+  const withPeriod = wrapInSubmission(`<?xml version="1.0"?>
+<ownershipDocument>
+  <periodOfReport>2026-05-01</periodOfReport>
+  <issuer><issuerCik>0000320193</issuerCik></issuer>
+  <reportingOwner>
+    <reportingOwnerId><rptOwnerName>COOK TIMOTHY D</rptOwnerName></reportingOwnerId>
+    <reportingOwnerRelationship><isDirector>1</isDirector><isOfficer>0</isOfficer><isTenPercentOwner>0</isTenPercentOwner></reportingOwnerRelationship>
+  </reportingOwner>
+  <nonDerivativeTable>
+    <nonDerivativeTransaction>
+      <transactionDate><value>2026-05-10</value></transactionDate>
+      <transactionCoding><transactionCode>P</transactionCode></transactionCoding>
+      <transactionAmounts>
+        <transactionShares><value>1</value></transactionShares>
+        <transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode>
+      </transactionAmounts>
+    </nonDerivativeTransaction>
+  </nonDerivativeTable>
+</ownershipDocument>`);
+  assert.equal(parseForm4(withPeriod).periodOfReport, "2026-05-01");
+});
