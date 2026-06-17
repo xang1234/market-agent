@@ -27,7 +27,7 @@ const EVENT_TYPE_LABELS: Readonly<Record<string, string>> = {
   bankruptcy: "bankruptcy or receivership",
   restatement: "financial restatement (non-reliance on previously issued financials)",
   delisting: "delisting or transfer of listing",
-  m_and_a: "merger or acquisition",
+  m_and_a: "merger, acquisition, or disposition of assets",
   auditor_change: "change of certifying accountant (auditor)",
 };
 
