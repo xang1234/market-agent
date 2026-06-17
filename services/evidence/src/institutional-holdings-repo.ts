@@ -154,3 +154,16 @@ export async function priorPeriodForFiler(
   );
   return rows[0]?.filing_period ?? null;
 }
+
+// The source any existing holding for this accession already references, or null when
+// the accession has no holdings yet. The reprocess pass reuses it instead of minting a
+// fresh, document-less source: for a previously-ingested filing this is the original
+// source (which carries the archived document); and a source the reprocess itself
+// created on an earlier run is reused on later runs, so reruns never leak sources.
+export async function sourceIdForAccession(db: QueryExecutor, accession: string): Promise<string | null> {
+  const { rows } = await db.query<{ source_id: string }>(
+    `select source_id::text as source_id from institutional_holdings where accession = $1 limit 1`,
+    [accession],
+  );
+  return rows[0]?.source_id ?? null;
+}

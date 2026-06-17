@@ -13,6 +13,9 @@ export const WHOLE_USD_FROM = "2023-01-01";
 // One aggregated, issuer-resolved holding — the read-model grain (per issuer).
 export type ResolvedHolding = {
   issuerId: string;
+  // For a multi-class issuer (e.g. GOOG/GOOGL), this is a *representative* CUSIP —
+  // whichever class was iterated first — not an authoritative single identifier; the
+  // grain is the issuer, and shares/value are summed across its classes.
   cusip: string;
   nameOfIssuer: string;
   shares: number;

@@ -23,12 +23,12 @@ export function parseFilerCikArgs(argv: ReadonlyArray<string>): number[] {
   if (requested.length === 0) {
     return [...SUPERINVESTOR_FILERS.keys()].map((cik) => Number(cik));
   }
-  const ciks = requested.map((a) => Number(a));
-  const invalid = requested.filter((_, i) => !Number.isInteger(ciks[i]) || ciks[i]! <= 0);
+  const parsed = requested.map((raw) => ({ raw, cik: Number(raw) }));
+  const invalid = parsed.filter((p) => !Number.isInteger(p.cik) || p.cik <= 0);
   if (invalid.length > 0) {
-    throw new Error(`invalid CIK(s): ${invalid.join(", ")} (expected positive integers)`);
+    throw new Error(`invalid CIK(s): ${invalid.map((p) => p.raw).join(", ")} (expected positive integers)`);
   }
-  return [...new Set(ciks)];
+  return [...new Set(parsed.map((p) => p.cik))];
 }
 
 async function main(): Promise<void> {
@@ -39,6 +39,9 @@ async function main(): Promise<void> {
 
   const ciks = parseFilerCikArgs(process.argv.slice(2));
   const secClient = SecEdgarClient.fromEnv();
+  // Build the pool directly rather than via createEvidenceCliRuntime: that runtime
+  // hard-requires S3 env to construct an object store, which this read-model refresh
+  // never uses (it reuses the already-archived source, it does not re-ingest blobs).
   const pool = new Pool({ connectionString: databaseUrl });
   let hadFailures = false;
   try {

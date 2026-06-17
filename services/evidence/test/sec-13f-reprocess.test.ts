@@ -2,8 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { reprocessFiler13f, type Reprocess13fDeps } from "../src/sec-13f-reprocess.ts";
+import { handle13f } from "../src/sec-13f-handler.ts";
+import { MemoryObjectStore } from "../src/object-store.ts";
+import type { FormHandlerDeps } from "../src/sec-daily-crawl.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
+import { submission, seedIssuerWithCusip } from "./fixtures/sec-13f.ts";
 
 const BERKSHIRE = 1067983; // seeded superinvestor
 const AAPL_CUSIP = "037833100"; // pre-seeded → already resolvable
@@ -12,21 +16,6 @@ const UNKNOWN_CUSIP = "999999999"; // OpenFIGI has no match → stays unmapped
 
 const OPENFIGI = { enabled: true as const, baseUrl: "https://openfigi.test", apiKey: null };
 const NOW = () => new Date("2026-06-01T00:00:00.000Z");
-
-type Row = { name: string; cusip: string; value: number; shares: number };
-function submission(periodMMDDYYYY: string, rows: Row[]): string {
-  const tables = rows
-    .map(
-      (r) =>
-        `<infoTable><nameOfIssuer>${r.name}</nameOfIssuer><cusip>${r.cusip}</cusip><value>${r.value}</value>` +
-        `<shrsOrPrnAmt><sshPrnamt>${r.shares}</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt></infoTable>`,
-    )
-    .join("\n");
-  return `<SEC-DOCUMENT>
-<XML><edgarSubmission><headerData><periodOfReport>${periodMMDDYYYY}</periodOfReport></headerData></edgarSubmission></XML>
-<XML><informationTable>${tables}</informationTable></XML>
-</SEC-DOCUMENT>`;
-}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -75,20 +64,6 @@ function fakeSecClient(accession: string, txt: string, filedDate = "2026-05-15")
       url: `https://www.sec.gov/Archives/edgar/data/1067983/x/${input.accession_number}.txt`,
     }),
   } as unknown as Reprocess13fDeps["secClient"];
-}
-
-async function seedIssuerWithCusip(
-  client: { query: QueryExecutor["query"] },
-  name: string,
-  cusip: string,
-): Promise<string> {
-  const r = await client.query<{ issuer_id: string }>(
-    `insert into issuers (legal_name) values ($1) returning issuer_id::text as issuer_id`,
-    [name],
-  );
-  const id = r.rows[0]!.issuer_id;
-  await client.query(`insert into instruments (issuer_id, asset_type, cusip) values ($1, 'common_stock', $2)`, [id, cusip]);
-  return id;
 }
 
 test("reprocessFiler13f harvests an unresolved CUSIP and upserts the newly-resolvable holding", async (t) => {
@@ -185,4 +160,87 @@ test("reprocessFiler13f leaves an OpenFIGI-unmapped CUSIP skipped (not a phantom
 test("reprocessFiler13f rejects a non-superinvestor filer before any fetch", async () => {
   const deps = { db: {}, secClient: {}, openfigi: OPENFIGI } as unknown as Reprocess13fDeps;
   await assert.rejects(() => reprocessFiler13f(deps, { cik: 9999999 }), /not a seeded superinvestor/);
+});
+
+test("reprocessFiler13f reuses the original ingest's source — no document-less source leak", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-reprocess-source");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  await seedIssuerWithCusip(client, "Apple Inc.", AAPL_CUSIP);
+
+  const accession = "0001067983-26-000004";
+  const txt = submission("03-31-2026", [
+    { name: "APPLE INC", cusip: AAPL_CUSIP, value: 200000, shares: 1000 },
+    { name: "NVIDIA CORP", cusip: NVDA_CUSIP, value: 90000, shares: 300 },
+  ]);
+  // Real first ingest: AAPL resolves → persists a source + document; NVDA is skipped.
+  await handle13f(
+    { cik: BERKSHIRE, form: "13F-HR", filedDate: "2026-05-15", accession },
+    { db, objectStore: new MemoryObjectStore(), client: fakeSecClient(accession, txt) } as unknown as FormHandlerDeps,
+  );
+  const sourcesBefore = (await client.query<{ n: number }>(`select count(*)::int as n from sources`)).rows[0]!.n;
+  const origSourceId = (
+    await client.query<{ source_id: string }>(`select source_id::text as source_id from institutional_holdings where cusip = $1`, [AAPL_CUSIP])
+  ).rows[0]!.source_id;
+
+  // Reprocess: enrich NVDA + backfill the read model, reusing the original source.
+  await reprocessFiler13f(
+    { db, secClient: fakeSecClient(accession, txt), openfigi: OPENFIGI, openfigiFetch: fakeOpenFigiFetch() },
+    { cik: BERKSHIRE, now: NOW },
+  );
+
+  const sourcesAfter = (await client.query<{ n: number }>(`select count(*)::int as n from sources`)).rows[0]!.n;
+  assert.equal(sourcesAfter, sourcesBefore, "no new source minted — the original is reused");
+  const distinctSources = (await client.query<{ n: number }>(`select count(distinct source_id)::int as n from institutional_holdings`)).rows[0]!.n;
+  assert.equal(distinctSources, 1, "AAPL + newly-resolved NVDA both point at the one original source");
+  const aaplSourceAfter = (
+    await client.query<{ source_id: string }>(`select source_id::text as source_id from institutional_holdings where cusip = $1`, [AAPL_CUSIP])
+  ).rows[0]!.source_id;
+  assert.equal(aaplSourceAfter, origSourceId, "AAPL still points at the original document-bearing source");
+});
+
+test("reprocessFiler13f propagates an OpenFIGI transport failure (does not swallow it as unmapped)", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-reprocess-transport");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  await seedIssuerWithCusip(client, "Apple Inc.", AAPL_CUSIP); // AAPL resolvable; NVDA hits the failing fetch
+
+  const txt = submission("03-31-2026", [
+    { name: "APPLE INC", cusip: AAPL_CUSIP, value: 200000, shares: 1000 },
+    { name: "NVIDIA CORP", cusip: NVDA_CUSIP, value: 90000, shares: 300 },
+  ]);
+  const failingFetch = (async () => {
+    throw new Error("network down");
+  }) as unknown as typeof fetch;
+
+  await assert.rejects(
+    () =>
+      reprocessFiler13f(
+        { db, secClient: fakeSecClient("0001067983-26-000005", txt), openfigi: OPENFIGI, openfigiFetch: failingFetch },
+        { cik: BERKSHIRE, now: NOW },
+      ),
+    /network down/,
+    "a 429/outage must fail the run for retry, not be counted as 'unmapped'",
+  );
+});
+
+test("reprocessFiler13f keeps per-filer rows distinct when two filers hold the same issuer", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-reprocess-multifiler");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  const aapl = await seedIssuerWithCusip(client, "Apple Inc.", AAPL_CUSIP);
+
+  const PERSHING = 1336528; // also a seeded superinvestor
+  const txt = submission("03-31-2026", [{ name: "APPLE INC", cusip: AAPL_CUSIP, value: 200000, shares: 1000 }]);
+  for (const cik of [BERKSHIRE, PERSHING]) {
+    await reprocessFiler13f(
+      { db, secClient: fakeSecClient(`${String(cik).padStart(10, "0")}-26-000006`, txt), openfigi: OPENFIGI, openfigiFetch: fakeOpenFigiFetch() },
+      { cik, now: NOW },
+    );
+  }
+  const rows = (await client.query<{ n: number }>(`select count(*)::int as n from institutional_holdings where issuer_id = $1`, [aapl])).rows[0]!.n;
+  assert.equal(rows, 2, "two filers holding AAPL → two distinct rows (unique on filer_cik,issuer,period), not a collision");
 });

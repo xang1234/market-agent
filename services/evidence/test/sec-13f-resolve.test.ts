@@ -5,22 +5,13 @@ import { resolveHoldingsByIssuer } from "../src/sec-13f-resolve.ts";
 import type { Form13fFiling, Form13fHolding } from "../src/sec-13f-extractor.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
+import { seedIssuerWithCusip } from "./fixtures/sec-13f.ts";
 
 function holding(over: Partial<Form13fHolding>): Form13fHolding {
   return { nameOfIssuer: "X", cusip: "000000000", valueRaw: 0, shares: 0, sshPrnamtType: "SH", putCall: null, ...over };
 }
 function filing(holdings: Form13fHolding[]): Form13fFiling {
   return { periodOfReport: "2026-03-31", holdings };
-}
-
-async function seedIssuerWithCusip(client: { query: QueryExecutor["query"] }, name: string, cusip: string): Promise<string> {
-  const r = await client.query<{ issuer_id: string }>(
-    `insert into issuers (legal_name) values ($1) returning issuer_id::text as issuer_id`,
-    [name],
-  );
-  const id = r.rows[0]!.issuer_id;
-  await client.query(`insert into instruments (issuer_id, asset_type, cusip) values ($1, 'common_stock', $2)`, [id, cusip]);
-  return id;
 }
 
 test("resolveHoldingsByIssuer sums multi-class CUSIPs by issuer and returns the misses", async (t) => {
@@ -74,4 +65,20 @@ test("resolveHoldingsByIssuer normalizes pre-2023 values from thousands and excl
   assert.equal(resolved[0]!.issuerId, aapl);
   assert.equal(resolved[0]!.shares, 1000, "the call option's 555 shares are not counted");
   assert.equal(resolved[0]!.valueUsd, 50_000_000, "50000 (thousands) → 50,000,000 USD");
+});
+
+test("resolveHoldingsByIssuer applies the whole-USD cutoff at exactly 2023-01-01", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-resolve-cutoff");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  await seedIssuerWithCusip(client, "Apple Inc.", "037833100");
+  const one = filing([holding({ nameOfIssuer: "APPLE INC", cusip: "037833100", valueRaw: 100, shares: 1 })]);
+
+  // The cutoff is a string compare (filedDate < "2023-01-01"); pin both sides so a
+  // slip to <= can't pass silently.
+  const onCutoff = await resolveHoldingsByIssuer(db, one, "2023-01-01");
+  assert.equal(onCutoff.resolved[0]!.valueUsd, 100, "filed on 2023-01-01 → whole USD (×1)");
+  const dayBefore = await resolveHoldingsByIssuer(db, one, "2022-12-31");
+  assert.equal(dayBefore.resolved[0]!.valueUsd, 100_000, "filed 2022-12-31 → thousands (×1000)");
 });

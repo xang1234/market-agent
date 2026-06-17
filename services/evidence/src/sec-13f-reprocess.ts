@@ -22,7 +22,7 @@
 import { parse13fInfoTable } from "./sec-13f-extractor.ts";
 import { resolveHoldingsByIssuer } from "./sec-13f-resolve.ts";
 import { isSuperinvestorFiler, superinvestorName } from "./superinvestor-filers.ts";
-import { insertHolding } from "./institutional-holdings-repo.ts";
+import { insertHolding, sourceIdForAccession } from "./institutional-holdings-repo.ts";
 import { createSource } from "./source-repo.ts";
 import { withTransaction } from "./transaction.ts";
 import { recentSubmissionRows, type SecFilingFetcher, type SecSubmissions } from "./sec-edgar.ts";
@@ -124,19 +124,26 @@ export async function reprocessFiler13f(
       continue;
     }
 
-    // A fresh source records this re-fetch (canonical_url + retrieved_at). We do NOT
-    // re-ingest the document: the filing's bytes were archived at first ingest (the
-    // blob is content-addressed, so re-ingest wouldn't attach it to this source
-    // anyway). This is a read-model refresh, not re-archival.
+    // Reuse the source that archived this filing at first ingest: its retrieval is
+    // the authoritative provenance and it carries the stored document. Only mint a
+    // new source if the accession was never ingested (a corner case for the seeded
+    // superinvestors) — and that source is itself reused on the next run, so a rerun
+    // never leaks document-less sources. This is a read-model refresh, not
+    // re-archival (the bytes are already content-addressed at first ingest; no S3).
+    const existingSourceId = await sourceIdForAccession(deps.db, candidate.accession);
     await withTransaction(deps.db, async (tx) => {
-      const source = await createSource(tx.db, {
-        provider: "sec_edgar",
-        kind: "filing",
-        canonical_url: fetched.url,
-        trust_tier: "primary",
-        license_class: "public",
-        retrieved_at: fetched.retrievedAt,
-      });
+      const sourceId =
+        existingSourceId ??
+        (
+          await createSource(tx.db, {
+            provider: "sec_edgar",
+            kind: "filing",
+            canonical_url: fetched.url,
+            trust_tier: "primary",
+            license_class: "public",
+            retrieved_at: fetched.retrievedAt,
+          })
+        ).source_id;
       for (const h of resolved) {
         await insertHolding(tx.db, {
           filer_cik: filerCik,
@@ -147,7 +154,7 @@ export async function reprocessFiler13f(
           value_usd: h.valueUsd,
           filing_period: filing.periodOfReport,
           filing_date: candidate.filedDate,
-          source_id: source.source_id,
+          source_id: sourceId,
           accession: candidate.accession,
         });
         result.holdingsUpserted += 1;
