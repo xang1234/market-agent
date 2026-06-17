@@ -16,6 +16,19 @@ import type { LlmChatMessage, LlmChatRequest, LlmRouterResult } from "../../llm/
 const HIGH_SEVERITY_EVENT_TYPES = ["bankruptcy", "restatement", "delisting", "m_and_a", "auditor_change"] as const;
 const HIGH_SEVERITY_PREDICATES = HIGH_SEVERITY_EVENT_TYPES.map((t) => `material_event.${t}`);
 
+// Human-readable event labels for the prompt — naive underscore-stripping turns
+// "m_and_a" into "m and a", a poor hint for the model.
+const EVENT_TYPE_LABELS: Readonly<Record<string, string>> = {
+  bankruptcy: "bankruptcy or receivership",
+  restatement: "financial restatement (non-reliance on previously issued financials)",
+  delisting: "delisting or transfer of listing",
+  m_and_a: "merger or acquisition",
+  auditor_change: "change of certifying accountant (auditor)",
+};
+
+// Keyset paging sentinel: claim_id > this matches every claim (uuid order).
+const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
+
 // Cap the prompt input so a large exhibit-heavy filing stays affordable. Windowed from
 // the <DOCUMENT> body (see extractFilingBody) so the budget covers the Item narrative,
 // not the SGML <SEC-HEADER>/cover boilerplate.
@@ -53,28 +66,34 @@ export type Enrich8kOutcome = "enriched" | "empty" | "unparseable";
 
 // High-severity 8-K claims not yet LLM-enriched, with the CIK + accession needed to
 // re-fetch the filing. Joined through claim_arguments (subject_id is a typed issuer
-// uuid) rather than the text attributed_to_id.
-export async function findEnrich8kCandidates(db: QueryExecutor, limit = 100): Promise<Enrich8kCandidate[]> {
+// uuid) rather than the text attributed_to_id; distinct on (claim_id) guards against a
+// future claim with multiple issuer args. Paged by a claim_id keyset (afterClaimId) so
+// the drain advances past failures without an in-memory seen-set.
+//
+// No `superseded_at is null` filter (unlike the sibling claim-selection queries in
+// local-runtime-evidence / inferred-membership): only insider.transaction claims are
+// ever superseded (see insider-transactions-repo), so a material_event claim can't be.
+export async function findEnrich8kCandidates(
+  db: QueryExecutor,
+  opts: { afterClaimId?: string; limit?: number } = {},
+): Promise<Enrich8kCandidate[]> {
   const { rows } = await db.query<{ claim_id: string; predicate: string; accession: string; cik: string }>(
-    `select claim_id, predicate, accession, cik from (
-       select distinct on (c.claim_id)
-              c.claim_id::text as claim_id,
-              c.predicate,
-              d.provider_doc_id as accession,
-              i.cik,
-              c.created_at
-         from claims c
-         join claim_arguments ca on ca.claim_id = c.claim_id and ca.subject_kind = 'issuer'
-         join documents d on d.document_id = c.document_id
-         join issuers i on i.issuer_id = ca.subject_id
-        where c.predicate = any($1::text[])
-          and c.enriched_at is null
-          and i.cik is not null
-        order by c.claim_id
-     ) sub
-     order by sub.created_at
-     limit $2`,
-    [HIGH_SEVERITY_PREDICATES, limit],
+    `select distinct on (c.claim_id)
+            c.claim_id::text as claim_id,
+            c.predicate,
+            d.provider_doc_id as accession,
+            i.cik
+       from claims c
+       join claim_arguments ca on ca.claim_id = c.claim_id and ca.subject_kind = 'issuer'
+       join documents d on d.document_id = c.document_id
+       join issuers i on i.issuer_id = ca.subject_id
+      where c.predicate = any($1::text[])
+        and c.enriched_at is null
+        and i.cik is not null
+        and c.claim_id > $2::uuid
+      order by c.claim_id
+      limit $3`,
+    [HIGH_SEVERITY_PREDICATES, opts.afterClaimId ?? ZERO_UUID, opts.limit ?? 100],
   );
   return rows.flatMap((row) => {
     const issuerCik = Number(row.cik);
@@ -100,7 +119,7 @@ function buildEnrichmentMessages(eventType: string, filingText: string): LlmChat
     },
     {
       role: "user",
-      content: `Material event type: ${eventType.replace(/_/g, " ")}.\n\n8-K filing text:\n${filingText.slice(0, MAX_FILING_CHARS)}`,
+      content: `Material event type: ${EVENT_TYPE_LABELS[eventType] ?? eventType.replace(/_/g, " ")}.\n\n8-K filing text:\n${filingText.slice(0, MAX_FILING_CHARS)}`,
     },
   ];
 }
@@ -151,8 +170,8 @@ export async function enrich8kClaim(deps: Enrich8kDeps, candidate: Enrich8kCandi
     maxTokens: 500,
   });
   const description = parseEnrichmentDescription(completion.text);
-  const narrative = description !== null && description !== "" ? description : null;
   const outcome: Enrich8kOutcome = description === null ? "unparseable" : description === "" ? "empty" : "enriched";
+  const narrative = outcome === "enriched" ? description : null; // derived from outcome so they can't disagree
 
   // Mark the claim attempted (enriched_at) for EVERY terminal outcome — not just success
   // — and augment the text only when there's a narrative. The LLM runs at temperature 0,
@@ -160,7 +179,8 @@ export async function enrich8kClaim(deps: Enrich8kDeps, candidate: Enrich8kCandi
   // re-calling it on every batch run would never change, so marking it keeps the batch
   // idempotent. A transport error throws before this point, so it stays a candidate for
   // retry. The claim update + audit log are one transaction, so a committed enrichment is
-  // always logged; the outcome is recorded in the log (ok / skipped-empty / error).
+  // always logged; the tool_call status records the outcome (ok / skipped-empty /
+  // partial-unparseable — never "error", which is reserved for the throwing transport path).
   await withTransaction(deps.db, async (tx) => {
     if (narrative !== null) {
       await tx.db.query(
@@ -174,8 +194,39 @@ export async function enrich8kClaim(deps: Enrich8kDeps, candidate: Enrich8kCandi
       tool_name: "enrich_8k",
       args: { claim_id: candidate.claimId, accession: candidate.accession, event_type: candidate.eventType, model: completion.deployment.model },
       result: { outcome, description: narrative },
-      status: outcome === "enriched" ? "ok" : outcome === "empty" ? "skipped" : "error",
+      status: outcome === "enriched" ? "ok" : outcome === "empty" ? "skipped" : "partial",
     });
   });
   return outcome;
+}
+
+export type Enrich8kDrainResult = { enriched: number; empty: number; unparseable: number; failed: number };
+
+// Drain the full high-severity backlog: page by a claim_id keyset, advancing the cursor
+// even on a failure so a failing claim never blocks the rest of the run. Every terminal
+// outcome stamps enriched_at (so the claim drops out of future runs); a transport error
+// leaves it a candidate for the next invocation. onClaim reports per-claim progress for a
+// CLI; the aggregate counts (including failures) are returned.
+export async function runEnrich8kDrain(
+  deps: Enrich8kDeps,
+  opts: { pageSize?: number; onClaim?: (candidate: Enrich8kCandidate, result: Enrich8kOutcome | { error: unknown }) => void } = {},
+): Promise<Enrich8kDrainResult> {
+  const result: Enrich8kDrainResult = { enriched: 0, empty: 0, unparseable: 0, failed: 0 };
+  let cursor = ZERO_UUID;
+  for (;;) {
+    const page = await findEnrich8kCandidates(deps.db, { afterClaimId: cursor, limit: opts.pageSize ?? 100 });
+    if (page.length === 0) break;
+    for (const candidate of page) {
+      cursor = candidate.claimId; // advance even on failure → never re-fetch a failing claim this run
+      try {
+        const outcome = await enrich8kClaim(deps, candidate);
+        result[outcome] += 1;
+        opts.onClaim?.(candidate, outcome);
+      } catch (error) {
+        result.failed += 1;
+        opts.onClaim?.(candidate, { error });
+      }
+    }
+  }
+  return result;
 }

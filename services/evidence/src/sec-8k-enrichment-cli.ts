@@ -9,7 +9,7 @@
 // re-enrichment, so a rerun only processes claims added since the last run.
 import { Pool } from "pg";
 import { SecEdgarClient } from "./sec-edgar.ts";
-import { findEnrich8kCandidates, enrich8kClaim, type Enrich8kOutcome } from "./sec-8k-enrichment.ts";
+import { runEnrich8kDrain } from "./sec-8k-enrichment.ts";
 import { createLlmRouterFromEnv } from "../../llm/src/settings-loader.ts";
 
 async function main(): Promise<void> {
@@ -20,41 +20,29 @@ async function main(): Promise<void> {
 
   const secClient = SecEdgarClient.fromEnv();
   const pool = new Pool({ connectionString: databaseUrl });
-  const counts: Record<Enrich8kOutcome, number> = { enriched: 0, empty: 0, unparseable: 0 };
-  let hadFailures = false;
+  let result;
   try {
-    // Drain the whole backlog, not just one page: every terminal outcome stamps
-    // enriched_at, so each page fetches the next un-enriched claims. attempted tracks
-    // this-run transport failures (which stay enriched_at null) so they don't loop
-    // forever — when a page surfaces only already-attempted claims, we're done.
-    const attempted = new Set<string>();
-    let total = 0;
-    for (;;) {
-      const page = (await findEnrich8kCandidates(pool)).filter((c) => !attempted.has(c.claimId));
-      if (page.length === 0) break;
-      for (const candidate of page) {
-        attempted.add(candidate.claimId);
-        total += 1;
-        try {
-          const outcome = await enrich8kClaim({ db: pool, llm, secClient }, candidate);
-          counts[outcome] += 1;
-          console.log(`${candidate.accession} (${candidate.eventType}): ${outcome}`);
-        } catch (error) {
-          hadFailures = true;
+    result = await runEnrich8kDrain({ db: pool, llm, secClient }, {
+      onClaim: (candidate, outcome) => {
+        if (typeof outcome === "object") {
           console.error(
             `${candidate.accession} (${candidate.eventType}): failed —`,
-            error instanceof Error ? error.message : error,
+            outcome.error instanceof Error ? outcome.error.message : outcome.error,
           );
+        } else {
+          console.log(`${candidate.accession} (${candidate.eventType}): ${outcome}`);
         }
-      }
-    }
-    console.log(`done: ${total} processed — ${counts.enriched} enriched, ${counts.empty} empty, ${counts.unparseable} unparseable`);
+      },
+    });
   } finally {
     await pool.end();
   }
-  // Per-claim failures are logged and the loop continues, but automation must still see
+  console.log(
+    `done: ${result.enriched} enriched, ${result.empty} empty, ${result.unparseable} unparseable, ${result.failed} failed`,
+  );
+  // Per-claim failures are logged and the drain continues, but automation must still see
   // a non-zero exit when any claim failed.
-  if (hadFailures) process.exitCode = 1;
+  if (result.failed > 0) process.exitCode = 1;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

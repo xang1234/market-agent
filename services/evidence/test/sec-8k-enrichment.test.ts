@@ -6,6 +6,7 @@ import {
   extractFilingBody,
   findEnrich8kCandidates,
   parseEnrichmentDescription,
+  runEnrich8kDrain,
   type Enrich8kDeps,
 } from "../src/sec-8k-enrichment.ts";
 import type { QueryExecutor } from "../src/types.ts";
@@ -191,4 +192,35 @@ test("enrich8kClaim marks empty/unparseable outcomes attempted (text untouched) 
   // Both attempted claims drop out of the candidate set (idempotent batch).
   const remaining = await findEnrich8kCandidates(db);
   assert.equal(remaining.length, 0, "empty + unparseable attempts are no longer candidates");
+});
+
+test("runEnrich8kDrain drains the full backlog across pages; a failure doesn't block the rest", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "8k-enrich-drain");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  const { issuerId } = await seed8kClaim(client, { accession: "0000320193-26-000090", eventType: "restatement" });
+  await seed8kClaim(client, { issuerId, accession: "0000320193-26-000091", eventType: "bankruptcy" });
+  await seed8kClaim(client, { issuerId, accession: "0000320193-26-000092", eventType: "delisting" });
+
+  // One accession's fetch throws (transport failure); the other two fetch fine.
+  const FAIL = "0000320193-26-000091";
+  const secClient = {
+    fetchFiling: async (input: { accession_number: string }) => {
+      if (input.accession_number === FAIL) throw new Error("sec fetch failed");
+      return { bytes: new TextEncoder().encode("<DOCUMENT>Item ...</DOCUMENT>"), contentType: "text/plain", retrievedAt: "2026-06-15T00:00:00.000Z", url: "x" };
+    },
+  } as unknown as Enrich8kDeps["secClient"];
+  const { llm } = fakeLlm('{"description":"A material event occurred."}');
+
+  // pageSize 1 forces multi-page paging: the keyset cursor must advance PAST the failing
+  // claim (whatever its claim_id order) so the remaining claims still drain — a Set-based
+  // drain would early-stop if the failure sorted first.
+  const result = await runEnrich8kDrain({ db, llm, secClient }, { pageSize: 1 });
+  assert.equal(result.enriched, 2, "both non-failing claims enriched — the failure did not stop the drain");
+  assert.equal(result.failed, 1);
+
+  const remaining = await findEnrich8kCandidates(db);
+  assert.equal(remaining.length, 1, "only the failed claim is still a candidate");
+  assert.equal(remaining[0]!.accession, FAIL);
 });
