@@ -457,7 +457,8 @@ create table claims (
   confidence numeric not null check (confidence >= 0 and confidence <= 1),
   status claim_status not null,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  enriched_at timestamptz
 );
 create index claims_document_idx on claims(document_id);
 create index claims_predicate_idx on claims(predicate);
