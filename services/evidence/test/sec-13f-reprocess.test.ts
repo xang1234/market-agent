@@ -211,18 +211,27 @@ test("reprocessFiler13f propagates an OpenFIGI transport failure (does not swall
     { name: "APPLE INC", cusip: AAPL_CUSIP, value: 200000, shares: 1000 },
     { name: "NVIDIA CORP", cusip: NVDA_CUSIP, value: 90000, shares: 300 },
   ]);
-  const failingFetch = (async () => {
+  // Both a thrown network error AND a non-2xx (429) response must reject the run for
+  // retry — never be counted as 'unmapped' (which would silently skip the holding).
+  const throwingFetch = (async () => {
     throw new Error("network down");
   }) as unknown as typeof fetch;
-
   await assert.rejects(
     () =>
       reprocessFiler13f(
-        { db, secClient: fakeSecClient("0001067983-26-000005", txt), openfigi: OPENFIGI, openfigiFetch: failingFetch },
+        { db, secClient: fakeSecClient("0001067983-26-000005", txt), openfigi: OPENFIGI, openfigiFetch: throwingFetch },
         { cik: BERKSHIRE, now: NOW },
       ),
     /network down/,
-    "a 429/outage must fail the run for retry, not be counted as 'unmapped'",
+  );
+  const rateLimitedFetch = (async () => jsonResponse({ error: "rate limited" }, 429)) as unknown as typeof fetch;
+  await assert.rejects(
+    () =>
+      reprocessFiler13f(
+        { db, secClient: fakeSecClient("0001067983-26-000006", txt), openfigi: OPENFIGI, openfigiFetch: rateLimitedFetch },
+        { cik: BERKSHIRE, now: NOW },
+      ),
+    /429/,
   );
 });
 

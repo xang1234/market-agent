@@ -77,6 +77,15 @@ export async function reprocessFiler13f(
   const filerName = superinvestorName(input.cik) ?? `CIK ${input.cik}`;
   const sinceDays = input.sinceDays ?? 365 * 3;
   const maxFilings = input.maxFilings ?? 20;
+  // Fail loudly on nonsensical windows rather than silently misbehaving: a negative
+  // sinceDays would push the cutoff into the future (nothing in window); a negative
+  // maxFilings would make slice(0, maxFilings) drop filings from the end.
+  if (!Number.isInteger(sinceDays) || sinceDays <= 0) {
+    throw new Error(`reprocessFiler13f: sinceDays must be a positive integer (got ${String(input.sinceDays)})`);
+  }
+  if (!Number.isInteger(maxFilings) || maxFilings <= 0) {
+    throw new Error(`reprocessFiler13f: maxFilings must be a positive integer (got ${String(input.maxFilings)})`);
+  }
   const now = input.now ?? (() => new Date());
   const cutoffMs = now().getTime() - sinceDays * DAY_MS;
 

@@ -9,13 +9,19 @@ export type Form13fRow = { name: string; cusip: string; value: number; shares: n
 // A 13F full-submission .txt: two <XML> docs — the cover (periodOfReport in
 // MM-DD-YYYY) and the informationTable of <infoTable> rows. A row with `putCall`
 // emits an option position (which the handler excludes from common-share holdings).
+// Escape XML text so a row value with &/</> (e.g. "AT&T", "Procter & Gamble") can't
+// produce malformed payloads that fail the parser for reasons unrelated to the test.
+function xmlEscape(s: string): string {
+  return s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
 export function submission(periodMMDDYYYY: string, rows: Form13fRow[]): string {
   const tables = rows
     .map(
       (r) =>
-        `<infoTable><nameOfIssuer>${r.name}</nameOfIssuer><cusip>${r.cusip}</cusip><value>${r.value}</value>` +
+        `<infoTable><nameOfIssuer>${xmlEscape(r.name)}</nameOfIssuer><cusip>${xmlEscape(r.cusip)}</cusip><value>${r.value}</value>` +
         `<shrsOrPrnAmt><sshPrnamt>${r.shares}</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt>` +
-        (r.putCall ? `<putCall>${r.putCall}</putCall>` : "") +
+        (r.putCall ? `<putCall>${xmlEscape(r.putCall)}</putCall>` : "") +
         `</infoTable>`,
     )
     .join("\n");

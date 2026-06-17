@@ -376,6 +376,24 @@ export async function fetchJson(
   return response.json();
 }
 
+// Like fetchJson, but throws on a non-2xx response instead of returning null. Use
+// this when a transient provider failure (429/5xx) must surface for retry rather than
+// be indistinguishable from a legitimate empty/no-match body — e.g. the CUSIP harvest,
+// where a swallowed 429 would masquerade as an "unmapped" CUSIP and silently skip a
+// backfillable holding.
+export async function fetchJsonOrThrow(
+  url: string | URL,
+  fetchImpl: FetchImpl,
+  timeoutMs: number,
+  init?: RequestInit,
+): Promise<unknown> {
+  const response = await fetchWithTimeout(url, fetchImpl, timeoutMs, init);
+  if (!response.ok) {
+    throw new Error(`request failed: ${response.status} ${response.statusText} (${url.toString()})`);
+  }
+  return response.json();
+}
+
 async function fetchWithTimeout(
   url: string | URL,
   fetchImpl: FetchImpl,
