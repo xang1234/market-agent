@@ -70,7 +70,9 @@ export type SupersedeInsiderFilingResult = { transactions: number; claims: numbe
 // Why three explicit deletes rather than one source cascade: claims cascade only from
 // documents (which we retain, not delete), and events have NO foreign key to sources at
 // all (source_ids is jsonb) — so neither can be reached by deleting the source. The
-// owner is matched by CIK when present, else by name (some filers omit the CIK).
+// owner is matched by CIK when both filings carry it, falling back to name when either
+// omits it (the parser allows a null rptOwnerCik), so an amendment still supersedes
+// across a CIK-presence change.
 export async function supersedeInsiderFiling(
   db: QueryExecutor,
   key: SupersedeInsiderFilingKey,
@@ -86,8 +88,10 @@ export async function supersedeInsiderFiling(
     `delete from insider_transactions
        where issuer_id = $1
          and period_of_report = $2::date
-         and (($3::text is not null and insider_cik = $3)
-              or ($3::text is null and insider_cik is null and insider_name = $4))
+         and (
+           ($3::text is not null and (insider_cik = $3 or (insider_cik is null and insider_name = $4)))
+           or ($3::text is null and insider_name = $4)
+         )
      returning source_id::text as source_id`,
     [key.issuer_id, key.period_of_report, key.insider_cik, key.insider_name],
   );

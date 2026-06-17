@@ -377,3 +377,25 @@ test("handleForm4 chains supersession: 4 -> 4/A -> 4/A'", async (t) => {
   const claims = await client.query<{ n: number }>(`select count(*)::int as n from claims where predicate = 'insider.transaction'`);
   assert.equal(claims.rows[0]!.n, 1, "one material claim after the chain, not three");
 });
+
+test("handleForm4 supersedes across a CIK-presence change (original null-CIK, amendment with CIK)", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("docker unavailable");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "form4-amend-cikchange");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  const issuerId = await seedApple(client);
+  const deps = (txt: string) =>
+    ({ db, objectStore: new MemoryObjectStore(), client: { fetchFiling: async () => ({ bytes: new TextEncoder().encode(txt), contentType: "text/plain", retrievedAt: "2026-06-12T00:00:00.000Z", url: "https://www.sec.gov/x.txt" }) } }) as unknown as FormHandlerDeps;
+
+  // Original omits rptOwnerCik (parser stores null); the amendment includes it — the
+  // supersede must still match the same owner by name across that change.
+  await handleForm4(entryFor("4", "0000320193-26-000066"), deps(form4Txt({ form: "4", ownerCik: null, pShares: 1000 })));
+  await handleForm4(entryFor("4/A", "0000320193-26-000067"), deps(form4Txt({ form: "4/A", ownerCik: "0001214156", pShares: 700 })));
+
+  const { rows, shares } = await pShareCount(client, issuerId);
+  assert.equal(rows, 1, "matched by name across the CIK-presence change — 1 row, not 2");
+  assert.equal(shares, 700);
+});
