@@ -23,22 +23,32 @@ async function main(): Promise<void> {
   const counts: Record<Enrich8kOutcome, number> = { enriched: 0, empty: 0, unparseable: 0 };
   let hadFailures = false;
   try {
-    const candidates = await findEnrich8kCandidates(pool);
-    console.log(`[enrich:sec-8k] ${candidates.length} high-severity claim(s) to enrich`);
-    for (const candidate of candidates) {
-      try {
-        const outcome = await enrich8kClaim({ db: pool, llm, secClient }, candidate);
-        counts[outcome] += 1;
-        console.log(`${candidate.accession} (${candidate.eventType}): ${outcome}`);
-      } catch (error) {
-        hadFailures = true;
-        console.error(
-          `${candidate.accession} (${candidate.eventType}): failed —`,
-          error instanceof Error ? error.message : error,
-        );
+    // Drain the whole backlog, not just one page: every terminal outcome stamps
+    // enriched_at, so each page fetches the next un-enriched claims. attempted tracks
+    // this-run transport failures (which stay enriched_at null) so they don't loop
+    // forever — when a page surfaces only already-attempted claims, we're done.
+    const attempted = new Set<string>();
+    let total = 0;
+    for (;;) {
+      const page = (await findEnrich8kCandidates(pool)).filter((c) => !attempted.has(c.claimId));
+      if (page.length === 0) break;
+      for (const candidate of page) {
+        attempted.add(candidate.claimId);
+        total += 1;
+        try {
+          const outcome = await enrich8kClaim({ db: pool, llm, secClient }, candidate);
+          counts[outcome] += 1;
+          console.log(`${candidate.accession} (${candidate.eventType}): ${outcome}`);
+        } catch (error) {
+          hadFailures = true;
+          console.error(
+            `${candidate.accession} (${candidate.eventType}): failed —`,
+            error instanceof Error ? error.message : error,
+          );
+        }
       }
     }
-    console.log(`done: ${counts.enriched} enriched, ${counts.empty} empty, ${counts.unparseable} unparseable`);
+    console.log(`done: ${total} processed — ${counts.enriched} enriched, ${counts.empty} empty, ${counts.unparseable} unparseable`);
   } finally {
     await pool.end();
   }

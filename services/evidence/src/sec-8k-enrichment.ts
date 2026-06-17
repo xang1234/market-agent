@@ -151,22 +151,31 @@ export async function enrich8kClaim(deps: Enrich8kDeps, candidate: Enrich8kCandi
     maxTokens: 500,
   });
   const description = parseEnrichmentDescription(completion.text);
-  if (description === null) return "unparseable";
-  if (description === "") return "empty";
+  const narrative = description !== null && description !== "" ? description : null;
+  const outcome: Enrich8kOutcome = description === null ? "unparseable" : description === "" ? "empty" : "enriched";
 
-  // Augment in place (idempotent: the enriched_at guard means a concurrent/rerun no-ops)
-  // and record the LLM call atomically, so a committed enrichment is always audited.
+  // Mark the claim attempted (enriched_at) for EVERY terminal outcome — not just success
+  // — and augment the text only when there's a narrative. The LLM runs at temperature 0,
+  // so an empty/unparseable result is deterministic for a given filing: re-fetching +
+  // re-calling it on every batch run would never change, so marking it keeps the batch
+  // idempotent. A transport error throws before this point, so it stays a candidate for
+  // retry. The claim update + audit log are one transaction, so a committed enrichment is
+  // always logged; the outcome is recorded in the log (ok / skipped-empty / error).
   await withTransaction(deps.db, async (tx) => {
-    await tx.db.query(
-      `update claims set text_canonical = $1, enriched_at = now() where claim_id = $2 and enriched_at is null`,
-      [description, candidate.claimId],
-    );
+    if (narrative !== null) {
+      await tx.db.query(
+        `update claims set text_canonical = $1, enriched_at = now() where claim_id = $2 and enriched_at is null`,
+        [narrative, candidate.claimId],
+      );
+    } else {
+      await tx.db.query(`update claims set enriched_at = now() where claim_id = $1 and enriched_at is null`, [candidate.claimId]);
+    }
     await writeToolCallLog(tx.db, {
       tool_name: "enrich_8k",
       args: { claim_id: candidate.claimId, accession: candidate.accession, event_type: candidate.eventType, model: completion.deployment.model },
-      result: { description },
-      status: "ok",
+      result: { outcome, description: narrative },
+      status: outcome === "enriched" ? "ok" : outcome === "empty" ? "skipped" : "error",
     });
   });
-  return "enriched";
+  return outcome;
 }

@@ -158,29 +158,37 @@ test("findEnrich8kCandidates returns only high-severity, un-enriched claims", as
   assert.equal(candidates[0]!.issuerCik, ACME_CIK);
 });
 
-test("enrich8kClaim leaves the claim untouched on unparseable LLM output, and is idempotent", async (t) => {
+test("enrich8kClaim marks empty/unparseable outcomes attempted (text untouched) so the batch is idempotent", async (t) => {
   if (!dockerAvailable()) return t.skip("docker unavailable");
   const { databaseUrl } = await bootstrapDatabase(t, "8k-enrich-guard");
   const client = await connectedClient(t, databaseUrl);
   const db = client as unknown as QueryExecutor;
-  const { claimId } = await seed8kClaim(client, { accession: "0000320193-26-000084", eventType: "delisting" });
-  const original = (await client.query<{ t: string }>(`select text_canonical as t from claims where claim_id = $1`, [claimId])).rows[0]!.t;
+  const unparseable = await seed8kClaim(client, { accession: "0000320193-26-000084", eventType: "delisting" });
+  const empty = await seed8kClaim(client, { issuerId: unparseable.issuerId, accession: "0000320193-26-000085", eventType: "bankruptcy" });
+  const deterministicText = (await client.query<{ t: string }>(`select text_canonical as t from claims where claim_id = $1`, [unparseable.claimId])).rows[0]!.t;
 
-  // Unparseable → no update, no enriched_at.
+  // Unparseable JSON and a valid-but-empty description both: leave the deterministic text,
+  // but stamp enriched_at — a temp-0 LLM would return the same on every rerun, so the
+  // batch must not re-fetch + re-call them forever.
   const bad = await enrich8kClaim(
     { db, llm: fakeLlm("the company is in trouble").llm, secClient: fakeSec("<SEC-DOCUMENT>...</SEC-DOCUMENT>") },
-    { claimId, eventType: "delisting", accession: "0000320193-26-000084", issuerCik: ACME_CIK },
+    { claimId: unparseable.claimId, eventType: "delisting", accession: "0000320193-26-000084", issuerCik: ACME_CIK },
   );
   assert.equal(bad, "unparseable");
-  const afterBad = await client.query<{ t: string; e: string | null }>(`select text_canonical as t, enriched_at as e from claims where claim_id = $1`, [claimId]);
-  assert.equal(afterBad.rows[0]!.t, original, "deterministic text preserved on unparseable output");
-  assert.equal(afterBad.rows[0]!.e, null, "not marked enriched on failure → still a candidate for retry");
-
-  // Enrich, then confirm it drops out of the candidate set (idempotency).
-  await enrich8kClaim(
-    { db, llm: fakeLlm('{"description":"Acme received a delisting notice from Nasdaq."}').llm, secClient: fakeSec("x") },
-    { claimId, eventType: "delisting", accession: "0000320193-26-000084", issuerCik: ACME_CIK },
+  const emptyOutcome = await enrich8kClaim(
+    { db, llm: fakeLlm('{"description":""}').llm, secClient: fakeSec("x") },
+    { claimId: empty.claimId, eventType: "bankruptcy", accession: "0000320193-26-000085", issuerCik: ACME_CIK },
   );
+  assert.equal(emptyOutcome, "empty");
+
+  const after = await client.query<{ t: string; e: string | null }>(
+    `select text_canonical as t, enriched_at as e from claims where claim_id = $1`,
+    [unparseable.claimId],
+  );
+  assert.equal(after.rows[0]!.t, deterministicText, "deterministic text preserved (no narrative applied)");
+  assert.notEqual(after.rows[0]!.e, null, "marked attempted so the batch does not re-call the LLM every run");
+
+  // Both attempted claims drop out of the candidate set (idempotent batch).
   const remaining = await findEnrich8kCandidates(db);
-  assert.equal(remaining.length, 0, "an enriched claim is no longer a candidate");
+  assert.equal(remaining.length, 0, "empty + unparseable attempts are no longer candidates");
 });
