@@ -5,7 +5,7 @@
 import type { OpenReferenceProviderConfig } from "./provider-sources.ts";
 import type { DiscoveryAssetType } from "./discovery.ts";
 import {
-  fetchJson,
+  fetchJsonOrThrow,
   joinUrlPath,
   stringValue,
   isinValue,
@@ -31,13 +31,14 @@ export async function mapCusipViaOpenFigi(
   if (!config.enabled) return null;
   const normalized = cusip.trim().toUpperCase();
   if (normalized.length !== 9) return null;
-  // Transport failures (network/timeout — and a non-2xx surfaces as a null body)
-  // are NOT swallowed here: in a batch enrichment run a 429/outage must fail the
-  // CUSIP for retry, not silently mark it "unmapped". Only a successful mapping
-  // with no/ambiguous data returns null below.
+  // Transport failures (network/timeout) AND non-2xx responses (429/5xx) are NOT
+  // swallowed: fetchJsonOrThrow throws, so in a batch enrichment run a rate-limit or
+  // outage fails the CUSIP for retry instead of masquerading as "unmapped" (which
+  // would silently skip a backfillable holding). Only a successful (2xx) mapping with
+  // no/ambiguous/non-equity data returns null below.
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (config.apiKey) headers["X-OPENFIGI-APIKEY"] = config.apiKey;
-  const response = await fetchJson(joinUrlPath(config.baseUrl, "/v3/mapping"), fetchImpl, timeoutMs, {
+  const response = await fetchJsonOrThrow(joinUrlPath(config.baseUrl, "/v3/mapping"), fetchImpl, timeoutMs, {
     method: "POST",
     headers,
     body: JSON.stringify([{ idType: "ID_CUSIP", idValue: normalized }]),

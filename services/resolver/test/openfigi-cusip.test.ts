@@ -45,6 +45,14 @@ test("mapCusipViaOpenFigi propagates transport failures (does not swallow them a
   );
 });
 
+test("mapCusipViaOpenFigi throws on a non-2xx response (e.g. 429) rather than reporting unmapped", async () => {
+  await assert.rejects(
+    () => mapCusipViaOpenFigi(ENABLED, "037833100", async () => jsonResponse({ error: "rate limited" }, 429)),
+    /429/,
+    "a rate-limit/5xx must surface for retry — a swallowed 429 would masquerade as an unmapped CUSIP",
+  );
+});
+
 test("mapCusipViaOpenFigi returns null for a non-equity security", async () => {
   const bond = { ...APPLE_ROW, marketSector: "Corp", securityType: "GLOBAL", compositeFIGI: "BBG00BONDXXX" };
   assert.equal(await mapCusipViaOpenFigi(ENABLED, "037833100", async () => jsonResponse(mapping([bond]))), null);

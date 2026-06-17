@@ -8,30 +8,13 @@ import type { FilingIndexEntry } from "../src/sec-daily-index.ts";
 import type { FormHandlerDeps } from "../src/sec-daily-crawl.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
+import { submission, seedIssuerWithCusip } from "./fixtures/sec-13f.ts";
 
 const BERKSHIRE = 1067983; // seeded superinvestor
 const AAPL_CUSIP = "037833100";
 const KO_CUSIP = "191216100";
 const NEW_CUSIP = "478160104";
 const EXIT_CUSIP = "023135106";
-
-type Row = { name: string; cusip: string; value: number; shares: number; putCall?: string };
-
-function submission(periodMMDDYYYY: string, rows: Row[]): string {
-  const tables = rows
-    .map(
-      (r) =>
-        `<infoTable><nameOfIssuer>${r.name}</nameOfIssuer><cusip>${r.cusip}</cusip><value>${r.value}</value>` +
-        `<shrsOrPrnAmt><sshPrnamt>${r.shares}</sshPrnamt><sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt>` +
-        (r.putCall ? `<putCall>${r.putCall}</putCall>` : "") +
-        `</infoTable>`,
-    )
-    .join("\n");
-  return `<SEC-DOCUMENT>
-<XML><edgarSubmission><headerData><periodOfReport>${periodMMDDYYYY}</periodOfReport></headerData></edgarSubmission></XML>
-<XML><informationTable>${tables}</informationTable></XML>
-</SEC-DOCUMENT>`;
-}
 
 function fakeClient(txt: string) {
   return {
@@ -46,16 +29,6 @@ function fakeClient(txt: string) {
 
 function entry(accession: string, filedDate = "2026-05-15", cik = BERKSHIRE): FilingIndexEntry {
   return { cik, company: "Berkshire Hathaway Inc", form: "13F-HR", filedDate, fileName: `x/${accession}.txt`, accession };
-}
-
-async function seedIssuerWithCusip(client: { query: QueryExecutor["query"] }, name: string, cusip: string): Promise<string> {
-  const r = await client.query<{ issuer_id: string }>(
-    `insert into issuers (legal_name) values ($1) returning issuer_id::text as issuer_id`,
-    [name],
-  );
-  const id = r.rows[0]!.issuer_id;
-  await client.query(`insert into instruments (issuer_id, asset_type, cusip) values ($1, 'common_stock', $2)`, [id, cusip]);
-  return id;
 }
 
 async function seedSource(client: { query: QueryExecutor["query"] }): Promise<string> {

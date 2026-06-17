@@ -11,47 +11,16 @@ import { ingestDocumentInTransaction } from "./ingest.ts";
 import { createEvent, createEventSubject } from "./event-repo.ts";
 import { createClaim } from "./claim-repo.ts";
 import { createClaimArgument } from "./claim-argument-repo.ts";
-import { parse13fInfoTable, type Form13fHolding } from "./sec-13f-extractor.ts";
+import { parse13fInfoTable } from "./sec-13f-extractor.ts";
 import { isSuperinvestorFiler, superinvestorName } from "./superinvestor-filers.ts";
-import { resolveIssuerByCusip } from "./cusip-issuer-map.ts";
+import { resolveHoldingsByIssuer } from "./sec-13f-resolve.ts";
 import { insertHolding, holdingsByFiler, priorPeriodForFiler } from "./institutional-holdings-repo.ts";
 
 export type Form13fFilingRef = Pick<FilingIndexEntry, "cik" | "accession" | "form" | "filedDate">;
 
 const NOTABLE_CHANGE_PCT = 0.2;
-// SEC switched 13F <value> from thousands to whole USD for filings on/after this date.
-const WHOLE_USD_FROM = "2023-01-01";
-
-type ResolvedHolding = {
-  issuerId: string;
-  cusip: string;
-  nameOfIssuer: string;
-  shares: number;
-  valueUsd: number;
-};
 
 type ChangeKind = "new_position" | "increased" | "decreased" | "exit";
-
-// A filer reports a position split across managers, so the same CUSIP appears in
-// multiple rows — sum shares + value. Excluded: PRN (debt principal) rows, and
-// option positions (a non-null putCall) which also use SH amounts but are not
-// direct common-share holdings — this is an equity-holdings view.
-function aggregateByCusip(
-  holdings: ReadonlyArray<Form13fHolding>,
-): Map<string, { nameOfIssuer: string; shares: number; valueRaw: number }> {
-  const byCusip = new Map<string, { nameOfIssuer: string; shares: number; valueRaw: number }>();
-  for (const h of holdings) {
-    if (h.sshPrnamtType !== "SH" || h.putCall !== null) continue;
-    const existing = byCusip.get(h.cusip);
-    if (existing) {
-      existing.shares += h.shares;
-      existing.valueRaw += h.valueRaw;
-    } else {
-      byCusip.set(h.cusip, { nameOfIssuer: h.nameOfIssuer, shares: h.shares, valueRaw: h.valueRaw });
-    }
-  }
-  return byCusip;
-}
 
 function classifyChange(current: number, prior: number | undefined): ChangeKind | null {
   if (prior === undefined || prior === 0) return current > 0 ? "new_position" : null;
@@ -84,31 +53,15 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
     document: `${entry.accession}.txt`,
   });
   const filing = parse13fInfoTable(new TextDecoder("utf-8").decode(fetched.bytes));
-  const valueMultiplier = entry.filedDate < WHOLE_USD_FROM ? 1000 : 1;
 
-  // Aggregate by CUSIP, resolve each to a tracked issuer (skip + log misses), then
-  // sum BY ISSUER: a multi-class issuer (e.g. GOOG/GOOGL) reports multiple CUSIPs
-  // that resolve to one issuer, and the read model is unique per (filer, issuer,
-  // period) — so the issuer-level total must be summed before the upsert.
-  const byIssuer = new Map<string, ResolvedHolding>();
-  let hadUnresolved = false;
-  for (const [cusip, agg] of aggregateByCusip(filing.holdings)) {
-    const issuerId = await resolveIssuerByCusip(deps.db, cusip);
-    if (issuerId === null) {
-      hadUnresolved = true;
-      console.warn(`[sec-13f] ${entry.accession}: CUSIP ${cusip} (${agg.nameOfIssuer}) not resolvable — skipped`);
-      continue;
-    }
-    const valueUsd = agg.valueRaw * valueMultiplier;
-    const existing = byIssuer.get(issuerId);
-    if (existing) {
-      existing.shares += agg.shares;
-      existing.valueUsd += valueUsd;
-    } else {
-      byIssuer.set(issuerId, { issuerId, cusip, nameOfIssuer: agg.nameOfIssuer, shares: agg.shares, valueUsd });
-    }
+  // Resolve holdings to tracked issuers (aggregation + value normalization live in
+  // the shared resolver). Misses are skipped + logged with this accession's context;
+  // coverage grows via CUSIP enrichment (fra-ajvd.7) + the reprocess pass (fra-msx1).
+  const { resolved, unresolved } = await resolveHoldingsByIssuer(deps.db, filing, entry.filedDate);
+  for (const miss of unresolved) {
+    console.warn(`[sec-13f] ${entry.accession}: CUSIP ${miss.cusip} (${miss.nameOfIssuer}) not resolvable — skipped`);
   }
-  const resolved = [...byIssuer.values()];
+  const hadUnresolved = unresolved.length > 0;
   if (resolved.length === 0) {
     console.warn(`[sec-13f] skip ${entry.accession}: no resolvable holdings for ${filerName}`);
     return { ingested: false };
