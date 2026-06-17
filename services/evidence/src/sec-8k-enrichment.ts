@@ -1,13 +1,18 @@
-// 8-K LLM enrichment (fra-ajvd.6): the deterministic handler writes a generic
-// claim per material-event Item ("Material event reported via 8-K: restatement
-// (4.02)."); this batch step LLM-extracts a narrative of WHAT actually happened for
-// high-severity items and AUGMENTS that claim's text in place (claims.enriched_at
-// marks it, gating idempotency + signalling the text is LLM-derived, not the
-// deterministic template). A batch/CLI step — never the atomic crawl — because the
-// LLM call is external/slow (same constraint as the OpenFIGI CUSIP harvest).
+// 8-K LLM enrichment (fra-ajvd.6): the deterministic handler writes a generic claim per
+// material-event Item ("Material event reported via 8-K: restatement (4.02)."), recording
+// THAT an event happened, not WHAT. This batch step LLM-extracts a narrative of what
+// happened for high-severity items and records it as a SEPARATE `material_event.<type>.detail`
+// claim — attached to the same issuer + event — leaving the deterministic claim untouched.
+// That separation matters: the deterministic claim may already be in a cluster signature or
+// a sealed snapshot's citations, and mutating its text in place would desync those (a second
+// cluster, a citation showing text the snapshot never sealed). claims.enriched_at on the
+// deterministic claim marks it processed (idempotency). A batch/CLI step — never the atomic
+// crawl — because the LLM call is external/slow (same constraint as the OpenFIGI harvest).
 import type { QueryExecutor } from "./types.ts";
 import type { SecFilingFetcher } from "./sec-edgar.ts";
 import { withTransaction } from "./transaction.ts";
+import { createClaim } from "./claim-repo.ts";
+import { createClaimArgument } from "./claim-argument-repo.ts";
 import { writeToolCallLog } from "../../observability/src/tool-call.ts";
 import type { LlmChatMessage, LlmChatRequest, LlmRouterResult } from "../../llm/src/router.ts";
 
@@ -38,6 +43,10 @@ const MAX_FILING_CHARS = 16_000;
 // and returns a runaway blob rather than writing it into the claim's text column.
 const MAX_DESCRIPTION_CHARS = 1_000;
 
+// The detail claim is purely LLM-derived prose; a confidence below the deterministic
+// claim's 0.9 reflects that the EVENT is certain but its narrative is model-extracted.
+const ENRICHED_CONFIDENCE = 0.8;
+
 // Window the full-submission .txt from its first <DOCUMENT> (the primary 8-K body),
 // skipping the <SEC-HEADER> metadata so the truncation budget lands on the Item text.
 export function extractFilingBody(filingText: string): string {
@@ -56,10 +65,14 @@ export type Enrich8kDeps = {
 };
 
 export type Enrich8kCandidate = {
-  claimId: string;
+  claimId: string; // the deterministic material_event claim — marked processed, never mutated
   eventType: string;
   accession: string;
   issuerCik: number;
+  issuerId: string;
+  documentId: string;
+  sourceId: string;
+  effectiveTime: string | null;
 };
 
 // "noop" = the claim's enriched_at was already stamped between discovery and the update
@@ -79,12 +92,27 @@ export async function findEnrich8kCandidates(
   db: QueryExecutor,
   opts: { afterClaimId?: string; limit?: number } = {},
 ): Promise<Enrich8kCandidate[]> {
-  const { rows } = await db.query<{ claim_id: string; predicate: string; accession: string; cik: string }>(
+  const { rows } = await db.query<{
+    claim_id: string;
+    predicate: string;
+    accession: string;
+    cik: string;
+    issuer_id: string;
+    document_id: string;
+    source_id: string;
+    effective_time: Date | string | null;
+  }>(
+    // effective_time is selected uncast so pg returns a Date we can render as ISO-8601;
+    // a ::text cast would yield "2026-06-14 00:00:00+00" (no T), which createClaim rejects.
     `select distinct on (c.claim_id)
             c.claim_id::text as claim_id,
             c.predicate,
             d.provider_doc_id as accession,
-            i.cik
+            i.cik,
+            ca.subject_id::text as issuer_id,
+            c.document_id::text as document_id,
+            c.reported_by_source_id::text as source_id,
+            c.effective_time
        from claims c
        join claim_arguments ca on ca.claim_id = c.claim_id and ca.subject_kind = 'issuer'
        join documents d on d.document_id = c.document_id
@@ -105,6 +133,10 @@ export async function findEnrich8kCandidates(
       eventType: row.predicate.replace(/^material_event\./, ""),
       accession: row.accession,
       issuerCik,
+      issuerId: row.issuer_id,
+      documentId: row.document_id,
+      sourceId: row.source_id,
+      effectiveTime: row.effective_time == null ? null : new Date(row.effective_time).toISOString(),
     }];
   });
 }
@@ -146,19 +178,20 @@ export function parseEnrichmentDescription(text: string): string | null {
   return trimmed.length > MAX_DESCRIPTION_CHARS ? null : trimmed;
 }
 
-// Enrich one candidate: fetch the filing, LLM-extract a narrative, and augment the
-// deterministic claim's text in place. Returns the outcome; transport errors from the
-// LLM/fetch propagate so a batch run can fail the item and retry.
+// Enrich one candidate: fetch the filing, LLM-extract a narrative, and record it as a
+// SEPARATE material_event.<type>.detail claim (attached to the same issuer + event). The
+// deterministic claim is NEVER mutated — only its enriched_at is stamped (idempotency) —
+// so a cluster signature or sealed snapshot that already cited it stays valid. Returns
+// the outcome; transport errors propagate so a batch run can fail-and-retry the item.
 //
-// Confidence is intentionally NOT lowered: the event detection (predicate
-// material_event.<type>) is deterministic and certain; only the descriptive prose is
-// LLM-derived, and enriched_at marks that. The tool_call_log is an AUDIT trail of the
-// enrichment, not a seal-consumable provenance link — claims carry no tool-call FK and
-// the snapshot seal recomputes its own provenance. If an enriched claim is ever cited in
-// a snapshot block, that block must re-establish tool-call provenance at seal time (as
-// the analyst-grid reader does); the seal is fail-closed, so LLM text cannot pass as
-// deterministic. The augment + audit log are written in one transaction so an enriched
-// claim is never left unlogged.
+// The detail claim + the enriched_at stamp + the audit log are one transaction, and the
+// stamp is rowCount-guarded: if a concurrent run already processed this deterministic
+// claim, the guarded update no-ops and nothing is created or logged ("noop"). An empty or
+// unparseable LLM result still stamps enriched_at (the temp-0 result is deterministic, so
+// re-running wouldn't change it) but creates no detail claim. The tool_call_log is an
+// audit trail, not a seal-consumable provenance link — a snapshot citing the detail claim
+// re-establishes tool-call provenance at seal time (the seal is fail-closed). The detail
+// claim's confidence is ENRICHED_CONFIDENCE (LLM prose), below the deterministic 0.9.
 export async function enrich8kClaim(deps: Enrich8kDeps, candidate: Enrich8kCandidate): Promise<Enrich8kOutcome> {
   const fetched = await deps.secClient.fetchFiling({
     cik: candidate.issuerCik,
@@ -175,31 +208,47 @@ export async function enrich8kClaim(deps: Enrich8kDeps, candidate: Enrich8kCandi
   const outcome: Enrich8kOutcome = description === null ? "unparseable" : description === "" ? "empty" : "enriched";
   const narrative = outcome === "enriched" ? description : null; // derived from outcome so they can't disagree
 
-  // Mark the claim attempted (enriched_at) for EVERY terminal outcome — not just success
-  // — and augment the text only when there's a narrative. The LLM runs at temperature 0,
-  // so an empty/unparseable result is deterministic for a given filing: re-fetching +
-  // re-calling it on every batch run would never change, so marking it keeps the batch
-  // idempotent. A transport error throws before this point, so it stays a candidate for
-  // retry. The claim update + audit log are one transaction; the audit log is written
-  // ONLY when the update actually applied (rowCount > 0) — if a concurrent run/worker
-  // stamped enriched_at between discovery and here, the guarded update no-ops and we
-  // record neither an audit row nor a count for text we didn't write (returns "noop").
-  // The tool_call status records the outcome (ok / skipped-empty / partial-unparseable —
-  // never "error", which is reserved for the throwing transport path).
   let applied = false;
   await withTransaction(deps.db, async (tx) => {
-    const updated = narrative !== null
-      ? await tx.db.query(
-          `update claims set text_canonical = $1, enriched_at = now() where claim_id = $2 and enriched_at is null`,
-          [narrative, candidate.claimId],
-        )
-      : await tx.db.query(`update claims set enriched_at = now() where claim_id = $1 and enriched_at is null`, [candidate.claimId]);
-    if ((updated.rowCount ?? 0) === 0) return; // already enriched concurrently — nothing applied
+    // Mark the deterministic claim processed; the rowCount guard makes a concurrent
+    // double-run a no-op rather than a duplicate detail claim.
+    const stamped = await tx.db.query(
+      `update claims set enriched_at = now() where claim_id = $1 and enriched_at is null`,
+      [candidate.claimId],
+    );
+    if ((stamped.rowCount ?? 0) === 0) return; // a concurrent run already processed this claim
     applied = true;
+
+    let detailClaimId: string | null = null;
+    if (narrative !== null) {
+      // Record the narrative as a separate claim — the deterministic claim (and anything
+      // that already cited it) is left untouched.
+      const detail = await createClaim(tx.db, {
+        document_id: candidate.documentId,
+        predicate: `material_event.${candidate.eventType}.detail`,
+        text_canonical: narrative,
+        polarity: "neutral",
+        modality: "asserted",
+        reported_by_source_id: candidate.sourceId,
+        attributed_to_type: "issuer",
+        attributed_to_id: candidate.issuerId,
+        effective_time: candidate.effectiveTime,
+        confidence: ENRICHED_CONFIDENCE,
+        status: "extracted",
+      });
+      await createClaimArgument(tx.db, { claim_id: detail.claim_id, subject_kind: "issuer", subject_id: candidate.issuerId, role: "subject" });
+      // Attach the detail to the same event as the deterministic claim (it's in exactly one).
+      await tx.db.query(
+        `update events set source_claim_ids = source_claim_ids || to_jsonb($1::text)
+          where source_claim_ids @> jsonb_build_array($2::text)`,
+        [detail.claim_id, candidate.claimId],
+      );
+      detailClaimId = detail.claim_id;
+    }
     await writeToolCallLog(tx.db, {
       tool_name: "enrich_8k",
       args: { claim_id: candidate.claimId, accession: candidate.accession, event_type: candidate.eventType, model: completion.deployment.model },
-      result: { outcome, description: narrative },
+      result: { outcome, detail_claim_id: detailClaimId },
       status: outcome === "enriched" ? "ok" : outcome === "empty" ? "skipped" : "partial",
     });
   });

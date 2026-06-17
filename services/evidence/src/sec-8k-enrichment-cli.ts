@@ -7,9 +7,10 @@
 //   (or point LLM_SETTINGS_ENV_FILE=<path> at a file with the same vars.)
 //
 // Finds high-severity 8-K claims not yet enriched, re-fetches each filing, LLM-extracts
-// a description of what happened, and augments the claim text in place. A batch step,
-// never the atomic crawl (the LLM call is external/slow). Idempotent: enriched_at gates
-// re-enrichment, so a rerun only processes claims added since the last run.
+// a description of what happened, and records it as a separate material_event.<type>.detail
+// claim on the same event (the deterministic claim is left untouched). A batch step, never
+// the atomic crawl (the LLM call is external/slow). Idempotent: enriched_at marks the
+// deterministic claim processed, so a rerun only processes claims added since the last run.
 import { Pool } from "pg";
 import { SecEdgarClient } from "./sec-edgar.ts";
 import { runEnrich8kDrain } from "./sec-8k-enrichment.ts";

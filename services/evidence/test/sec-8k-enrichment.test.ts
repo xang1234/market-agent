@@ -10,6 +10,7 @@ import {
   type Enrich8kDeps,
 } from "../src/sec-8k-enrichment.ts";
 import type { QueryExecutor } from "../src/types.ts";
+import { createEvent, type EventType } from "../src/event-repo.ts";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 
 const ACME_CIK = 320193;
@@ -44,7 +45,7 @@ function fakeSec(filingText: string): Enrich8kDeps["secClient"] {
 async function seed8kClaim(
   client: { query: QueryExecutor["query"] },
   opts: { issuerId?: string; accession: string; eventType: string; enriched?: boolean },
-): Promise<{ claimId: string; issuerId: string }> {
+): Promise<{ claimId: string; issuerId: string; documentId: string; sourceId: string }> {
   let issuerId = opts.issuerId;
   if (!issuerId) {
     const r = await client.query<{ id: string }>(
@@ -84,7 +85,16 @@ async function seed8kClaim(
     claimId,
     issuerId,
   ]);
-  return { claimId, issuerId };
+  // The deterministic event the claim belongs to (as persist8kFiling writes it) — the
+  // enrichment attaches its detail claim to this event by matching source_claim_ids.
+  await createEvent(client as unknown as QueryExecutor, {
+    event_type: opts.eventType as EventType,
+    occurred_at: new Date("2026-06-14T00:00:00Z").toISOString(),
+    status: "reported",
+    source_claim_ids: [claimId],
+    source_ids: [sourceId],
+  });
+  return { claimId, issuerId, documentId: docId, sourceId };
 }
 
 test("parseEnrichmentDescription handles plain JSON, fenced JSON, and rejects junk", () => {
@@ -112,35 +122,58 @@ test("extractFilingBody windows from the first <DOCUMENT>, skipping the SGML hea
   assert.equal(extractFilingBody("plain text"), "plain text");
 });
 
-test("enrich8kClaim augments the deterministic claim in place and logs the LLM call", async (t) => {
+test("enrich8kClaim records a separate detail claim and never mutates the deterministic one", async (t) => {
   if (!dockerAvailable()) return t.skip("docker unavailable");
   const { databaseUrl } = await bootstrapDatabase(t, "8k-enrich");
   const client = await connectedClient(t, databaseUrl);
   const db = client as unknown as QueryExecutor;
   const { claimId } = await seed8kClaim(client, { accession: "0000320193-26-000080", eventType: "restatement" });
+  const before = await client.query<{ text_canonical: string }>(`select text_canonical from claims where claim_id = $1`, [claimId]);
+  const deterministicText = before.rows[0]!.text_canonical;
 
   const narrative = "Acme Inc will restate its FY2024 financial statements due to revenue-recognition errors.";
   const { llm, calls } = fakeLlm(`{"description":"${narrative}"}`);
   const deps: Enrich8kDeps = { db, llm, secClient: fakeSec("<SEC-DOCUMENT>Item 4.02 Non-Reliance ... restatement details ...</SEC-DOCUMENT>") };
 
-  const outcome = await enrich8kClaim(deps, {
-    claimId,
-    eventType: "restatement",
-    accession: "0000320193-26-000080",
-    issuerCik: ACME_CIK,
-  });
+  // Drive the real query→enrich flow so the candidate carries issuer/document/source ids.
+  const [candidate] = await findEnrich8kCandidates(db);
+  assert.equal(candidate!.claimId, claimId, "the seeded high-severity claim is a candidate");
+  const outcome = await enrich8kClaim(deps, candidate!);
   assert.equal(outcome, "enriched");
   assert.match(calls[0]!, /restatement/, "the event type + filing text reach the prompt");
 
-  const claim = await client.query<{ text_canonical: string; enriched_at: string | null }>(
+  // The deterministic claim is untouched (so its clusters + sealed citations stay valid)
+  // but marked processed so the batch is idempotent.
+  const det = await client.query<{ text_canonical: string; enriched_at: string | null }>(
     `select text_canonical, enriched_at from claims where claim_id = $1`,
     [claimId],
   );
-  assert.equal(claim.rows[0]!.text_canonical, narrative, "claim text augmented with the LLM narrative");
-  assert.notEqual(claim.rows[0]!.enriched_at, null, "enriched_at stamped");
+  assert.equal(det.rows[0]!.text_canonical, deterministicText, "deterministic claim text is NOT mutated");
+  assert.notEqual(det.rows[0]!.enriched_at, null, "deterministic claim marked processed (enriched_at)");
+
+  // The narrative lives in a SEPARATE detail claim attributed to the same issuer.
+  const detail = await client.query<{ claim_id: string; text_canonical: string; confidence: string }>(
+    `select claim_id::text as claim_id, text_canonical, confidence from claims where predicate = 'material_event.restatement.detail'`,
+  );
+  assert.equal(detail.rows.length, 1, "exactly one detail claim is created");
+  assert.equal(detail.rows[0]!.text_canonical, narrative, "the LLM narrative is the detail claim's text");
+  assert.equal(Number(detail.rows[0]!.confidence), 0.8, "the detail claim carries the LLM (enriched) confidence");
+  const detailClaimId = detail.rows[0]!.claim_id;
+
+  const arg = await client.query<{ n: number }>(
+    `select count(*)::int as n from claim_arguments where claim_id = $1 and subject_kind = 'issuer'`,
+    [detailClaimId],
+  );
+  assert.equal(arg.rows[0]!.n, 1, "the detail claim is attributed to the issuer");
+
+  const linked = await client.query<{ n: number }>(
+    `select count(*)::int as n from events where source_claim_ids @> jsonb_build_array($1::text)`,
+    [detailClaimId],
+  );
+  assert.equal(linked.rows[0]!.n, 1, "the detail claim is attached to the existing event");
 
   const logged = await client.query<{ n: number }>(`select count(*)::int as n from tool_call_logs where tool_name = 'enrich_8k'`);
-  assert.equal(logged.rows[0]!.n, 1, "the LLM call is recorded as a tool_call_log for provenance");
+  assert.equal(logged.rows[0]!.n, 1, "the LLM call is recorded as a tool_call_log for audit");
 });
 
 test("findEnrich8kCandidates returns only high-severity, un-enriched claims", async (t) => {
@@ -168,18 +201,19 @@ test("enrich8kClaim marks empty/unparseable outcomes attempted (text untouched) 
   const empty = await seed8kClaim(client, { issuerId: unparseable.issuerId, accession: "0000320193-26-000085", eventType: "bankruptcy" });
   const deterministicText = (await client.query<{ t: string }>(`select text_canonical as t from claims where claim_id = $1`, [unparseable.claimId])).rows[0]!.t;
 
-  // Unparseable JSON and a valid-but-empty description both: leave the deterministic text,
-  // but stamp enriched_at — a temp-0 LLM would return the same on every rerun, so the
-  // batch must not re-fetch + re-call them forever.
+  const candidates = await findEnrich8kCandidates(db);
+  const unparseableCand = candidates.find((c) => c.claimId === unparseable.claimId)!;
+  const emptyCand = candidates.find((c) => c.claimId === empty.claimId)!;
+
+  // Unparseable JSON and a valid-but-empty description both: leave the deterministic claim,
+  // create no detail claim, but stamp enriched_at — a temp-0 LLM would return the same on
+  // every rerun, so the batch must not re-fetch + re-call them forever.
   const bad = await enrich8kClaim(
     { db, llm: fakeLlm("the company is in trouble").llm, secClient: fakeSec("<SEC-DOCUMENT>...</SEC-DOCUMENT>") },
-    { claimId: unparseable.claimId, eventType: "delisting", accession: "0000320193-26-000084", issuerCik: ACME_CIK },
+    unparseableCand,
   );
   assert.equal(bad, "unparseable");
-  const emptyOutcome = await enrich8kClaim(
-    { db, llm: fakeLlm('{"description":""}').llm, secClient: fakeSec("x") },
-    { claimId: empty.claimId, eventType: "bankruptcy", accession: "0000320193-26-000085", issuerCik: ACME_CIK },
-  );
+  const emptyOutcome = await enrich8kClaim({ db, llm: fakeLlm('{"description":""}').llm, secClient: fakeSec("x") }, emptyCand);
   assert.equal(emptyOutcome, "empty");
 
   const after = await client.query<{ t: string; e: string | null }>(
@@ -188,6 +222,10 @@ test("enrich8kClaim marks empty/unparseable outcomes attempted (text untouched) 
   );
   assert.equal(after.rows[0]!.t, deterministicText, "deterministic text preserved (no narrative applied)");
   assert.notEqual(after.rows[0]!.e, null, "marked attempted so the batch does not re-call the LLM every run");
+
+  // No detail claim is created when there's no narrative.
+  const details = await client.query<{ n: number }>(`select count(*)::int as n from claims where predicate like '%.detail'`);
+  assert.equal(details.rows[0]!.n, 0, "empty/unparseable outcomes create no detail claim");
 
   // Both attempted claims drop out of the candidate set (idempotent batch).
   const remaining = await findEnrich8kCandidates(db);
@@ -231,16 +269,27 @@ test("enrich8kClaim returns noop without logging when the claim was already enri
   const client = await connectedClient(t, databaseUrl);
   const db = client as unknown as QueryExecutor;
   // enriched:true simulates a concurrent run stamping enriched_at between discovery and update.
-  const { claimId } = await seed8kClaim(client, { accession: "0000320193-26-000093", eventType: "restatement", enriched: true });
-  const before = (await client.query<{ t: string }>(`select text_canonical as t from claims where claim_id = $1`, [claimId])).rows[0]!.t;
+  const seeded = await seed8kClaim(client, { accession: "0000320193-26-000093", eventType: "restatement", enriched: true });
+  const before = (await client.query<{ t: string }>(`select text_canonical as t from claims where claim_id = $1`, [seeded.claimId])).rows[0]!.t;
 
   const outcome = await enrich8kClaim(
     { db, llm: fakeLlm('{"description":"Acme restated FY2024."}').llm, secClient: fakeSec("<DOCUMENT>...</DOCUMENT>") },
-    { claimId, eventType: "restatement", accession: "0000320193-26-000093", issuerCik: ACME_CIK },
+    {
+      claimId: seeded.claimId,
+      eventType: "restatement",
+      accession: "0000320193-26-000093",
+      issuerCik: ACME_CIK,
+      issuerId: seeded.issuerId,
+      documentId: seeded.documentId,
+      sourceId: seeded.sourceId,
+      effectiveTime: null,
+    },
   );
-  assert.equal(outcome, "noop", "the guarded update affected 0 rows → nothing applied");
-  const after = (await client.query<{ t: string }>(`select text_canonical as t from claims where claim_id = $1`, [claimId])).rows[0]!.t;
+  assert.equal(outcome, "noop", "the guarded enriched_at stamp affected 0 rows → nothing applied");
+  const after = (await client.query<{ t: string }>(`select text_canonical as t from claims where claim_id = $1`, [seeded.claimId])).rows[0]!.t;
   assert.equal(after, before, "the already-enriched claim's text is untouched");
+  const detail = await client.query<{ n: number }>(`select count(*)::int as n from claims where predicate like '%.detail'`);
+  assert.equal(detail.rows[0]!.n, 0, "no detail claim created when the stamp no-ops");
   const logged = await client.query<{ n: number }>(`select count(*)::int as n from tool_call_logs where tool_name = 'enrich_8k'`);
   assert.equal(logged.rows[0]!.n, 0, "no audit row written for an enrichment that did not apply");
 });
