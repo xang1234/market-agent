@@ -124,7 +124,17 @@ export const handleForm4 = async (entry: Form4FilingRef, deps: FormHandlerDeps) 
       if (superseded.transactions > 0) {
         console.warn(
           `[sec-form4] ${entry.accession} (4/A): superseded ${superseded.transactions} prior transaction(s), ` +
-            `${superseded.claims} claim(s), ${superseded.events} event(s) for ${filing.reportingOwner.name} @ ${filing.periodOfReport}`,
+            `${superseded.claims} claim(s), ${superseded.events} event(s), ${superseded.documents} document(s) ` +
+            `for ${filing.reportingOwner.name} @ ${filing.periodOfReport}`,
+        );
+      } else {
+        // No prior filing matched — the original may not be ingested yet (out-of-order),
+        // or the amendment's period_of_report differs from the original's (the match key
+        // misses if a 4/A shifts the earliest transaction date). Surface it so an
+        // otherwise-silent double-count is at least visible.
+        console.warn(
+          `[sec-form4] ${entry.accession} (4/A): no prior filing matched for ` +
+            `${filing.reportingOwner.name} @ ${filing.periodOfReport} — inserting without supersede`,
         );
       }
     }

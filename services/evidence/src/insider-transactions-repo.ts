@@ -58,18 +58,29 @@ export type SupersedeInsiderFilingKey = {
   period_of_report: string; // YYYY-MM-DD
 };
 
-export type SupersedeInsiderFilingResult = { transactions: number; claims: number; events: number };
+export type SupersedeInsiderFilingResult = { transactions: number; claims: number; events: number; documents: number };
 
 // A Form 4/A restates the full ownership form, so before ingesting it the handler
-// removes the prior filing's read-model rows AND their derived material claims/events
-// for (issuer, reporting owner, period) — the amendment's data replaces, rather than
-// double-counts, the original. The archived source/document rows are left intact
-// (provenance of what was originally filed). The owner is matched by CIK when present,
-// else by name (some filers omit the reporting-owner CIK).
+// supersedes the prior filing for (issuer, reporting owner, period): delete its
+// read-model rows + derived material claims/events, and mark its document(s)
+// superseded — the amendment's data replaces, rather than double-counts, the original.
+// The archived source + document bytes are retained; only documents.parse_status flips,
+// so a "parsed document with no derived claims" reads as superseded, not corrupt.
+//
+// Why three explicit deletes rather than one source cascade: claims cascade only from
+// documents (which we retain, not delete), and events have NO foreign key to sources at
+// all (source_ids is jsonb) — so neither can be reached by deleting the source. The
+// owner is matched by CIK when present, else by name (some filers omit the CIK).
 export async function supersedeInsiderFiling(
   db: QueryExecutor,
   key: SupersedeInsiderFilingKey,
 ): Promise<SupersedeInsiderFilingResult> {
+  // Types are erased at runtime; a null period would compare as `= NULL` (never true)
+  // and silently supersede nothing, so fail loudly instead.
+  if (!key.period_of_report) {
+    throw new Error("supersedeInsiderFiling: period_of_report is required");
+  }
+
   // 1. Delete the prior read-model rows, capturing the source(s) that produced them.
   const deleted = await db.query<{ source_id: string }>(
     `delete from insider_transactions
@@ -81,7 +92,7 @@ export async function supersedeInsiderFiling(
     [key.issuer_id, key.period_of_report, key.insider_cik, key.insider_name],
   );
   const sourceIds = [...new Set(deleted.rows.map((r) => r.source_id))];
-  if (sourceIds.length === 0) return { transactions: 0, claims: 0, events: 0 };
+  if (sourceIds.length === 0) return { transactions: 0, claims: 0, events: 0, documents: 0 };
 
   // 2. Delete the material claims those filings produced (claim_arguments cascade).
   const claims = await db.query(
@@ -99,7 +110,19 @@ export async function supersedeInsiderFiling(
         )`,
     [sourceIds],
   );
-  return { transactions: deleted.rowCount ?? 0, claims: claims.rowCount ?? 0, events: events.rowCount ?? 0 };
+  // 4. Mark the prior filing's document(s) superseded (bytes/source retained), so the
+  //    now-claimless document is explained rather than mislabeled 'parsed'.
+  const documents = await db.query(
+    `update documents set parse_status = 'superseded'
+      where source_id = any($1::uuid[]) and parse_status <> 'superseded'`,
+    [sourceIds],
+  );
+  return {
+    transactions: deleted.rowCount ?? 0,
+    claims: claims.rowCount ?? 0,
+    events: events.rowCount ?? 0,
+    documents: documents.rowCount ?? 0,
+  };
 }
 
 export type RecentInsiderTransaction = {

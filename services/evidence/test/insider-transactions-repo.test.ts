@@ -37,6 +37,7 @@ test("insertInsiderTransaction inserts every column in order", async () => {
     filed_at: "2026-06-11T00:00:00Z",
   });
   assert.match(calls[0].text, /insert into insider_transactions/i);
+  assert.match(calls[0].text, /period_of_report/, "column present in the SQL, not just the values array");
   assert.deepEqual(calls[0].values, [
     ISSUER, "COOK TIMOTHY D", "Chief Executive Officer", "0001214156", "2026-06-10",
     "P", "buy", "A", 1000, 150.25, 150250, SOURCE, "0000320193-26-000050", "2026-06-09", "2026-06-11T00:00:00Z",

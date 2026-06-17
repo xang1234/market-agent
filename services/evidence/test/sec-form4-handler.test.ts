@@ -85,6 +85,14 @@ test("handleForm4 records all transactions + material-only claims (atomic)", asy
   const txns = await client.query(`select count(*)::int as n from insider_transactions where issuer_id = $1`, [issuerId]);
   assert.equal(txns.rows[0]!.n, 2, "both transactions recorded in the read model");
 
+  // period_of_report is persisted (FIXTURE_TXT has no <periodOfReport> → earliest txn
+  // 2026-06-09), so a later 4/A can match this filing.
+  const periods = await client.query<{ period_of_report: string | null }>(
+    `select distinct to_char(period_of_report, 'YYYY-MM-DD') as period_of_report from insider_transactions where issuer_id = $1`,
+    [issuerId],
+  );
+  assert.deepEqual(periods.rows.map((r) => r.period_of_report), ["2026-06-09"], "period_of_report stored on the plain 4");
+
   const events = await client.query(`select count(*)::int as n from events where event_type = 'insider_transaction'`);
   assert.equal(events.rows[0]!.n, 2, "an event per transaction");
 
@@ -258,4 +266,114 @@ test("handleForm4 supersedes the original filing on a 4/A amendment (no double-c
   assert.equal(claims.rows[0]!.n, 1, "one material claim — the original's was superseded, not duplicated");
   const events = await client.query<{ n: number }>(`select count(*)::int as n from events where event_type = 'insider_transaction'`);
   assert.equal(events.rows[0]!.n, 2, "two events — the original's were superseded, not duplicated");
+});
+
+// A single-(P)-transaction Form 4/4-A on 2026-06-10, parameterized for the supersede
+// edge cases. Omitting ownerCik exercises the NULL-cik name-match branch; omitting
+// period relies on the earliest-transaction fallback (2026-06-10).
+function form4Txt(opts: { form: string; ownerCik: string | null; period?: string; pShares: number }): string {
+  const cikTag = opts.ownerCik ? `<rptOwnerCik>${opts.ownerCik}</rptOwnerCik>` : "";
+  const periodTag = opts.period ? `<periodOfReport>${opts.period}</periodOfReport>` : "";
+  return `<SEC-DOCUMENT>
+<DOCUMENT><TYPE>${opts.form}<TEXT><XML>
+<ownershipDocument>
+  ${periodTag}
+  <issuer><issuerCik>0000320193</issuerCik></issuer>
+  <reportingOwner>
+    <reportingOwnerId>${cikTag}<rptOwnerName>COOK TIMOTHY D</rptOwnerName></reportingOwnerId>
+    <reportingOwnerRelationship><isDirector>0</isDirector><isOfficer>1</isOfficer><officerTitle>Chief Executive Officer</officerTitle><isTenPercentOwner>0</isTenPercentOwner></reportingOwnerRelationship>
+  </reportingOwner>
+  <nonDerivativeTable>
+    <nonDerivativeTransaction>
+      <transactionDate><value>2026-06-10</value></transactionDate>
+      <transactionCoding><transactionCode>P</transactionCode></transactionCoding>
+      <transactionAmounts>
+        <transactionShares><value>${opts.pShares}</value></transactionShares>
+        <transactionPricePerShare><value>150.25</value></transactionPricePerShare>
+        <transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode>
+      </transactionAmounts>
+    </nonDerivativeTransaction>
+  </nonDerivativeTable>
+</ownershipDocument>
+</XML></TEXT></DOCUMENT></SEC-DOCUMENT>`;
+}
+
+function entryFor(form: string, accession: string): FilingIndexEntry {
+  return { cik: 320193, company: "Apple Inc.", form, filedDate: "2026-06-12", fileName: `edgar/data/320193/${accession}.txt`, accession };
+}
+
+async function seedApple(client: { query: QueryExecutor["query"] }): Promise<string> {
+  return (
+    await client.query<{ issuer_id: string }>(
+      `insert into issuers (legal_name, cik) values ('Apple Inc.', '0000320193') returning issuer_id::text as issuer_id`,
+    )
+  ).rows[0]!.issuer_id;
+}
+
+async function pShareCount(client: { query: QueryExecutor["query"] }, issuerId: string): Promise<{ rows: number; shares: number }> {
+  const r = await client.query<{ n: number; p: string | null }>(
+    `select count(*)::int as n, sum(case when transaction_code = 'P' then shares else 0 end) as p
+       from insider_transactions where issuer_id = $1`,
+    [issuerId],
+  );
+  return { rows: r.rows[0]!.n, shares: Number(r.rows[0]!.p ?? 0) };
+}
+
+test("handleForm4 supersedes a NULL-CIK owner by name (4/A name-match branch)", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("docker unavailable");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "form4-amend-nocik");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  const issuerId = await seedApple(client);
+  const deps = (txt: string) => ({ db, objectStore: new MemoryObjectStore(), client: { fetchFiling: async () => ({ bytes: new TextEncoder().encode(txt), contentType: "text/plain", retrievedAt: "2026-06-12T00:00:00.000Z", url: "https://www.sec.gov/x.txt" }) } } as unknown as FormHandlerDeps);
+
+  await handleForm4(entryFor("4", "0000320193-26-000060"), deps(form4Txt({ form: "4", ownerCik: null, pShares: 1000 })));
+  await handleForm4(entryFor("4/A", "0000320193-26-000061"), deps(form4Txt({ form: "4/A", ownerCik: null, pShares: 700 })));
+
+  const { rows, shares } = await pShareCount(client, issuerId);
+  assert.equal(rows, 1, "no-CIK owner superseded by name — 1 row, not 2");
+  assert.equal(shares, 700, "the corrected share count");
+});
+
+test("handleForm4 ingests a 4/A with no prior filing (insert-only, supersede is a no-op)", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("docker unavailable");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "form4-amend-noprior");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  const issuerId = await seedApple(client);
+  const deps = { db, objectStore: new MemoryObjectStore(), client: { fetchFiling: async () => ({ bytes: new TextEncoder().encode(form4Txt({ form: "4/A", ownerCik: "0001214156", pShares: 800 })), contentType: "text/plain", retrievedAt: "2026-06-12T00:00:00.000Z", url: "https://www.sec.gov/x.txt" }) } } as unknown as FormHandlerDeps;
+
+  const result = await handleForm4(entryFor("4/A", "0000320193-26-000062"), deps);
+  assert.equal(result.ingested, true);
+  const { rows, shares } = await pShareCount(client, issuerId);
+  assert.equal(rows, 1, "amendment inserted normally when there is nothing to supersede");
+  assert.equal(shares, 800);
+});
+
+test("handleForm4 chains supersession: 4 -> 4/A -> 4/A'", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("docker unavailable");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "form4-amend-chain");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  const issuerId = await seedApple(client);
+  const deps = (txt: string) => ({ db, objectStore: new MemoryObjectStore(), client: { fetchFiling: async () => ({ bytes: new TextEncoder().encode(txt), contentType: "text/plain", retrievedAt: "2026-06-12T00:00:00.000Z", url: "https://www.sec.gov/x.txt" }) } } as unknown as FormHandlerDeps);
+
+  await handleForm4(entryFor("4", "0000320193-26-000063"), deps(form4Txt({ form: "4", ownerCik: "0001214156", pShares: 1000 })));
+  await handleForm4(entryFor("4/A", "0000320193-26-000064"), deps(form4Txt({ form: "4/A", ownerCik: "0001214156", pShares: 800 })));
+  await handleForm4(entryFor("4/A", "0000320193-26-000065"), deps(form4Txt({ form: "4/A", ownerCik: "0001214156", pShares: 700 })));
+
+  const { rows, shares } = await pShareCount(client, issuerId);
+  assert.equal(rows, 1, "each amendment supersedes the prior — 1 row after the chain, not 3");
+  assert.equal(shares, 700, "the latest amendment wins");
+  const claims = await client.query<{ n: number }>(`select count(*)::int as n from claims where predicate = 'insider.transaction'`);
+  assert.equal(claims.rows[0]!.n, 1, "one material claim after the chain, not three");
 });
