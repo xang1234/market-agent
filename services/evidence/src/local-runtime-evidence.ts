@@ -226,6 +226,10 @@ export async function loadVerifierRowsForRefs(
           and (s.user_id is null or ($2::uuid is not null and s.user_id = $2::uuid))`,
       [documentIds, userId],
     );
+  // Rehydration by id for a snapshot's claim_refs: deliberately does NOT filter
+  // superseded_at — a sealed snapshot may cite a since-superseded claim (a Form 4/A
+  // supersede, fra-28yi), and dropping it here would cause verifier missing_claim_ref.
+  // Fresh subject->claims selection (matching_claims, above) filters it; this must not.
   const claims = claimIds.length === 0
     ? { rows: [] as Array<{ claim_id: string; source_id: string }> }
     : await db.query<{ claim_id: string; source_id: string }>(

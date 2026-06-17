@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { loadLocalRuntimeEvidence } from "../src/local-runtime-evidence.ts";
+import { loadLocalRuntimeEvidence, loadVerifierRowsForRefs } from "../src/local-runtime-evidence.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 
@@ -120,4 +120,14 @@ test("loadLocalRuntimeEvidence hides a superseded claim from fresh selection but
     [SUPERSEDED_CLAIM],
   );
   assert.equal(preserved.rows[0]!.n, 1, "the superseded claim row is preserved for rehydration");
+
+  // The actual rehydration-by-id path the snapshot verifier uses MUST still return it —
+  // the half of the asymmetry the fix turns on (a regression that filtered superseded_at
+  // here would reintroduce missing_claim_ref, which the count check above would not catch).
+  const rehydrated = await loadVerifierRowsForRefs(db, { source_ids: [], document_refs: [], claim_refs: [SUPERSEDED_CLAIM] });
+  assert.deepEqual(
+    rehydrated.claims.map((c) => c.claim_id),
+    [SUPERSEDED_CLAIM],
+    "superseded claim still rehydrates by id (no missing_claim_ref)",
+  );
 });
