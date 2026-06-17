@@ -1,0 +1,11 @@
+-- Enrichment marker on the deterministic 8-K material-event claim (fra-ajvd.6). The
+-- handler writes a generic claim ("Material event reported via 8-K: restatement (4.02).");
+-- a separate batch step (enrich:sec-8k) LLM-extracts a narrative of what happened for
+-- high-severity items and records it as a SEPARATE material_event.<type>.detail claim —
+-- the deterministic claim's text is NOT changed (mutating it would desync clusters /
+-- sealed citations). enriched_at marks the deterministic claim as processed: it gates
+-- idempotency (the batch only selects where enriched_at is null), so a detail claim is
+-- created at most once. The LLM call is recorded in a tool_call_log for audit (not a
+-- seal-consumable provenance link — see sec-8k-enrichment.ts). Nullable; null = not yet
+-- processed.
+alter table claims add column enriched_at timestamptz;
