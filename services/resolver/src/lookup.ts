@@ -205,7 +205,7 @@ export async function resolveIssuerByCusip(db: QueryExecutor, cusip: string): Pr
     db,
     `select distinct issuer_id::text as issuer_id
        from instruments
-      where isin like 'US%' and upper(substr(isin, 3, 9)) = $1
+      where upper(isin) like 'US%' and upper(substr(isin, 3, 9)) = $1
       limit 2`,
     normalized,
   );

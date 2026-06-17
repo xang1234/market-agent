@@ -27,7 +27,6 @@ test("mapCusipViaOpenFigi returns a unique equity match (ticker/mic/name/figi/is
   const match = await mapCusipViaOpenFigi(ENABLED, "037833100", async () => jsonResponse(mapping([APPLE_ROW])));
   assert.deepEqual(match, {
     ticker: "AAPL",
-    mic: "XNAS",
     legalName: "APPLE INC",
     assetType: "common_stock",
     isin: "US0378331005",
@@ -35,11 +34,15 @@ test("mapCusipViaOpenFigi returns a unique equity match (ticker/mic/name/figi/is
   });
 });
 
-test("mapCusipViaOpenFigi defaults the MIC when the composite row carries only an exchCode", async () => {
-  const { micCode, ...noMic } = APPLE_ROW;
-  void micCode;
-  const match = await mapCusipViaOpenFigi(ENABLED, "037833100", async () => jsonResponse(mapping([{ ...noMic, exchCode: "US" }])));
-  assert.equal(match?.mic, "XNAS", "defaults to the primary US equity MIC");
+test("mapCusipViaOpenFigi propagates transport failures (does not swallow them as unmapped)", async () => {
+  await assert.rejects(
+    () =>
+      mapCusipViaOpenFigi(ENABLED, "037833100", async () => {
+        throw new Error("network down");
+      }),
+    /network down/,
+    "a network/outage error must surface so a batch run can retry, not look 'unmapped'",
+  );
 });
 
 test("mapCusipViaOpenFigi returns null for a non-equity security", async () => {

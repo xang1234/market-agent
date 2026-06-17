@@ -11,14 +11,11 @@ export type DiscoverySourceProvenance = {
   fields: string[];
 };
 
-export type DiscoveredListing = {
-  ticker: string;
+// Issuer + instrument identity, independent of any trading venue. CUSIP→issuer
+// enrichment populates this WITHOUT a listing — it has no real venue (MIC), so it
+// must not fabricate one.
+export type DiscoveredInstrument = {
   legal_name: string;
-  market: "stocks";
-  active: true;
-  mic: string;
-  trading_currency: string;
-  timezone: string;
   asset_type: DiscoveryAssetType;
   share_class?: string;
   cik?: string;
@@ -27,6 +24,15 @@ export type DiscoveredListing = {
   isin?: string;
   figi_composite?: string;
   cusip?: string;
+};
+
+export type DiscoveredListing = DiscoveredInstrument & {
+  ticker: string;
+  market: "stocks";
+  active: true;
+  mic: string;
+  trading_currency: string;
+  timezone: string;
   source_provenance?: DiscoverySourceProvenance[];
 };
 
@@ -149,22 +155,32 @@ export function createPolygonTickerDiscoveryProvider(
   };
 }
 
+// Get-or-create the issuer + instrument identity, WITHOUT a listing — matches an
+// existing instrument by ISIN/FIGI identity (filling its fields) or creates the
+// issuer + instrument. CUSIP→issuer enrichment uses this directly so it never
+// fabricates a venue/listing it doesn't actually know.
+export async function upsertDiscoveredInstrument(
+  db: QueryExecutor,
+  instrument: DiscoveredInstrument,
+): Promise<{ issuer_id: string; instrument_id: string }> {
+  const instrumentIdentity = instrumentIdentityFromListing(instrument);
+  const matched = await findInstrumentByIdentity(db, instrumentIdentity);
+  if (matched) {
+    await fillIssuerIdentityFields(db, matched.issuer_id, issuerIdentityFromListing(instrument));
+    await fillInstrumentIdentityFields(db, matched.instrument_id, instrumentIdentity);
+    return { issuer_id: matched.issuer_id, instrument_id: matched.instrument_id };
+  }
+  const issuerId = await upsertIssuer(db, instrument);
+  const instrumentId = await upsertInstrument(db, issuerId, instrument, instrumentIdentity);
+  return { issuer_id: issuerId, instrument_id: instrumentId };
+}
+
 export async function upsertDiscoveredListing(
   db: QueryExecutor,
   listing: DiscoveredListing,
 ): Promise<SubjectRef & { kind: "listing" }> {
-  const instrumentIdentity = instrumentIdentityFromListing(listing);
-  const matchedInstrument = await findInstrumentByIdentity(db, instrumentIdentity);
-  if (matchedInstrument) {
-    await fillIssuerIdentityFields(db, matchedInstrument.issuer_id, issuerIdentityFromListing(listing));
-    await fillInstrumentIdentityFields(db, matchedInstrument.instrument_id, instrumentIdentity);
-    const listingId = await upsertListing(db, matchedInstrument.instrument_id, listing);
-    return { kind: "listing", id: listingId };
-  }
-
-  const issuerId = await upsertIssuer(db, listing);
-  const instrumentId = await upsertInstrument(db, issuerId, listing, instrumentIdentity);
-  const listingId = await upsertListing(db, instrumentId, listing);
+  const { instrument_id } = await upsertDiscoveredInstrument(db, listing);
+  const listingId = await upsertListing(db, instrument_id, listing);
   return { kind: "listing", id: listingId };
 }
 
@@ -207,7 +223,7 @@ type IssuerIdentityFields = { cik?: string; lei?: string; domicile?: string };
 type InstrumentIdentityFields = { isin?: string; figiComposite?: string; cusip?: string };
 type InstrumentIdentityMatch = { instrument_id: string; issuer_id: string };
 
-function issuerIdentityFromListing(listing: DiscoveredListing): IssuerIdentityFields {
+function issuerIdentityFromListing(listing: DiscoveredInstrument): IssuerIdentityFields {
   return {
     cik: listing.cik ? normalizeCik(listing.cik) : undefined,
     lei: listing.lei ? normalizeLei(listing.lei) : undefined,
@@ -215,7 +231,7 @@ function issuerIdentityFromListing(listing: DiscoveredListing): IssuerIdentityFi
   };
 }
 
-function instrumentIdentityFromListing(listing: DiscoveredListing): InstrumentIdentityFields {
+function instrumentIdentityFromListing(listing: DiscoveredInstrument): InstrumentIdentityFields {
   return {
     isin: listing.isin ? normalizeIsin(listing.isin) : undefined,
     figiComposite: listing.figi_composite?.trim() || undefined,
@@ -223,7 +239,7 @@ function instrumentIdentityFromListing(listing: DiscoveredListing): InstrumentId
   };
 }
 
-async function upsertIssuer(db: QueryExecutor, listing: DiscoveredListing): Promise<string> {
+async function upsertIssuer(db: QueryExecutor, listing: DiscoveredInstrument): Promise<string> {
   const { cik, lei, domicile } = issuerIdentityFromListing(listing);
   const byCik = cik
     ? await db.query<{ issuer_id: string }>("select issuer_id from issuers where cik = $1", [cik])
@@ -307,7 +323,7 @@ async function findInstrumentByIdentity(
 async function upsertInstrument(
   db: QueryExecutor,
   issuerId: string,
-  listing: DiscoveredListing,
+  listing: DiscoveredInstrument,
   values: InstrumentIdentityFields = instrumentIdentityFromListing(listing),
 ): Promise<string> {
   const byShape = await db.query<{ instrument_id: string }>(

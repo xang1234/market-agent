@@ -16,18 +16,11 @@ import {
 
 export type OpenFigiCusipMatch = {
   ticker: string;
-  mic: string;
   legalName: string;
   assetType: DiscoveryAssetType;
   isin?: string;
   figiComposite: string;
 };
-
-// An ID_CUSIP mapping resolves to the COMPOSITE security, whose row often carries
-// only exchCode "US" rather than a venue MIC. The listing MIC is a refinable
-// detail (later Polygon discovery merges the precise venue by FIGI identity), so
-// default to the primary US equity market.
-const DEFAULT_US_MIC = "XNAS";
 
 export async function mapCusipViaOpenFigi(
   config: OpenReferenceProviderConfig["openfigi"],
@@ -38,19 +31,19 @@ export async function mapCusipViaOpenFigi(
   if (!config.enabled) return null;
   const normalized = cusip.trim().toUpperCase();
   if (normalized.length !== 9) return null;
-  try {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (config.apiKey) headers["X-OPENFIGI-APIKEY"] = config.apiKey;
-    const response = await fetchJson(joinUrlPath(config.baseUrl, "/v3/mapping"), fetchImpl, timeoutMs, {
-      method: "POST",
-      headers,
-      body: JSON.stringify([{ idType: "ID_CUSIP", idValue: normalized }]),
-    });
-    if (!response || !isOpenFigiMappingResponse(response)) return null;
-    return uniqueCusipMatch(response);
-  } catch {
-    return null;
-  }
+  // Transport failures (network/timeout — and a non-2xx surfaces as a null body)
+  // are NOT swallowed here: in a batch enrichment run a 429/outage must fail the
+  // CUSIP for retry, not silently mark it "unmapped". Only a successful mapping
+  // with no/ambiguous data returns null below.
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (config.apiKey) headers["X-OPENFIGI-APIKEY"] = config.apiKey;
+  const response = await fetchJson(joinUrlPath(config.baseUrl, "/v3/mapping"), fetchImpl, timeoutMs, {
+    method: "POST",
+    headers,
+    body: JSON.stringify([{ idType: "ID_CUSIP", idValue: normalized }]),
+  });
+  if (!response || !isOpenFigiMappingResponse(response)) return null;
+  return uniqueCusipMatch(response);
 }
 
 // Require exactly one distinct equity security (by composite FIGI) — ambiguity or
@@ -77,9 +70,8 @@ function cusipCandidate(value: unknown): OpenFigiCusipMatch | null {
   if (!ticker || !legalName || !figiComposite || assetType === null) return null;
   if (marketSector && marketSector !== "equity") return null;
 
-  const mic = stringValue(row.micCode)?.toUpperCase() || DEFAULT_US_MIC;
   const isin = isinValue(row.isin) ?? isinValue(row.idValue) ?? undefined;
-  return { ticker, mic, legalName, assetType, isin, figiComposite };
+  return { ticker, legalName, assetType, isin, figiComposite };
 }
 
 // Mirror the asset-type categories in open-reference-providers' matcher; a

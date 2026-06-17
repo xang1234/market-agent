@@ -3,7 +3,7 @@
 // upsertDiscoveredListing, recording the cusip. Intended as a CLI/batch step —
 // NOT inline in 13F ingest (which stays a pure DB resolve), so the atomic crawl
 // never makes live API calls.
-import { upsertDiscoveredListing, type DiscoveredListing } from "./discovery.ts";
+import { upsertDiscoveredInstrument, type DiscoveredInstrument } from "./discovery.ts";
 import { resolveIssuerByCusip, type QueryExecutor } from "./lookup.ts";
 import { mapCusipViaOpenFigi } from "./openfigi-cusip.ts";
 import type { OpenReferenceProviderConfig } from "./provider-sources.ts";
@@ -32,24 +32,25 @@ export async function enrichCusip(deps: EnrichCusipDeps, cusip: string): Promise
   const match = await mapCusipViaOpenFigi(deps.openfigi, normalized, deps.fetchImpl);
   if (!match) return { status: "unmapped" };
 
-  const listing: DiscoveredListing = {
-    ticker: match.ticker,
+  // Get-or-create the issuer + INSTRUMENT only (no listing): OpenFIGI-by-CUSIP has
+  // no real trading venue, so fabricating a listing/MIC would create a phantom
+  // venue. CUSIP resolution reads instruments (cusip/isin), not listings. Matches
+  // an existing instrument by FIGI/ISIN identity (filling the cusip) or creates it;
+  // a later Polygon discovery merges by identity to add the precise listing.
+  const instrument: DiscoveredInstrument = {
     legal_name: match.legalName,
-    market: "stocks",
-    active: true,
-    mic: match.mic,
-    trading_currency: "USD",
-    timezone: "America/New_York",
     asset_type: match.assetType,
     isin: match.isin,
     figi_composite: match.figiComposite,
     cusip: normalized,
   };
-  // Idempotent: matches an existing instrument by FIGI/ISIN identity and fills the
-  // cusip, or creates the issuer/instrument/listing. A later Polygon discovery of
-  // the same security merges (refining venue/name), never duplicates.
-  await upsertDiscoveredListing(deps.db, listing);
+  await upsertDiscoveredInstrument(deps.db, instrument);
 
-  const issuer_id = (await resolveIssuerByCusip(deps.db, normalized)) ?? undefined;
+  const issuer_id = await resolveIssuerByCusip(deps.db, normalized);
+  if (!issuer_id) {
+    // The instrument was written but the cusip still doesn't resolve to a unique
+    // issuer (ambiguous) — surface it rather than report a false "enriched".
+    throw new Error(`CUSIP ${normalized} was upserted but does not resolve to a unique issuer`);
+  }
   return { status: "enriched", issuer_id, ticker: match.ticker };
 }
