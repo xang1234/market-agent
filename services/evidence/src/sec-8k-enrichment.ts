@@ -62,7 +62,9 @@ export type Enrich8kCandidate = {
   issuerCik: number;
 };
 
-export type Enrich8kOutcome = "enriched" | "empty" | "unparseable";
+// "noop" = the claim's enriched_at was already stamped between discovery and the update
+// (a concurrent run/worker), so this call applied nothing and recorded no audit row.
+export type Enrich8kOutcome = "enriched" | "empty" | "unparseable" | "noop";
 
 // High-severity 8-K claims not yet LLM-enriched, with the CIK + accession needed to
 // re-fetch the filing. Joined through claim_arguments (subject_id is a typed issuer
@@ -178,18 +180,22 @@ export async function enrich8kClaim(deps: Enrich8kDeps, candidate: Enrich8kCandi
   // so an empty/unparseable result is deterministic for a given filing: re-fetching +
   // re-calling it on every batch run would never change, so marking it keeps the batch
   // idempotent. A transport error throws before this point, so it stays a candidate for
-  // retry. The claim update + audit log are one transaction, so a committed enrichment is
-  // always logged; the tool_call status records the outcome (ok / skipped-empty /
-  // partial-unparseable — never "error", which is reserved for the throwing transport path).
+  // retry. The claim update + audit log are one transaction; the audit log is written
+  // ONLY when the update actually applied (rowCount > 0) — if a concurrent run/worker
+  // stamped enriched_at between discovery and here, the guarded update no-ops and we
+  // record neither an audit row nor a count for text we didn't write (returns "noop").
+  // The tool_call status records the outcome (ok / skipped-empty / partial-unparseable —
+  // never "error", which is reserved for the throwing transport path).
+  let applied = false;
   await withTransaction(deps.db, async (tx) => {
-    if (narrative !== null) {
-      await tx.db.query(
-        `update claims set text_canonical = $1, enriched_at = now() where claim_id = $2 and enriched_at is null`,
-        [narrative, candidate.claimId],
-      );
-    } else {
-      await tx.db.query(`update claims set enriched_at = now() where claim_id = $1 and enriched_at is null`, [candidate.claimId]);
-    }
+    const updated = narrative !== null
+      ? await tx.db.query(
+          `update claims set text_canonical = $1, enriched_at = now() where claim_id = $2 and enriched_at is null`,
+          [narrative, candidate.claimId],
+        )
+      : await tx.db.query(`update claims set enriched_at = now() where claim_id = $1 and enriched_at is null`, [candidate.claimId]);
+    if ((updated.rowCount ?? 0) === 0) return; // already enriched concurrently — nothing applied
+    applied = true;
     await writeToolCallLog(tx.db, {
       tool_name: "enrich_8k",
       args: { claim_id: candidate.claimId, accession: candidate.accession, event_type: candidate.eventType, model: completion.deployment.model },
@@ -197,10 +203,10 @@ export async function enrich8kClaim(deps: Enrich8kDeps, candidate: Enrich8kCandi
       status: outcome === "enriched" ? "ok" : outcome === "empty" ? "skipped" : "partial",
     });
   });
-  return outcome;
+  return applied ? outcome : "noop";
 }
 
-export type Enrich8kDrainResult = { enriched: number; empty: number; unparseable: number; failed: number };
+export type Enrich8kDrainResult = { enriched: number; empty: number; unparseable: number; noop: number; failed: number };
 
 // Drain the full high-severity backlog: page by a claim_id keyset, advancing the cursor
 // even on a failure so a failing claim never blocks the rest of the run. Every terminal
@@ -211,7 +217,7 @@ export async function runEnrich8kDrain(
   deps: Enrich8kDeps,
   opts: { pageSize?: number; onClaim?: (candidate: Enrich8kCandidate, result: Enrich8kOutcome | { error: unknown }) => void } = {},
 ): Promise<Enrich8kDrainResult> {
-  const result: Enrich8kDrainResult = { enriched: 0, empty: 0, unparseable: 0, failed: 0 };
+  const result: Enrich8kDrainResult = { enriched: 0, empty: 0, unparseable: 0, noop: 0, failed: 0 };
   let cursor = ZERO_UUID;
   for (;;) {
     const page = await findEnrich8kCandidates(deps.db, { afterClaimId: cursor, limit: opts.pageSize ?? 100 });

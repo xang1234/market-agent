@@ -224,3 +224,23 @@ test("runEnrich8kDrain drains the full backlog across pages; a failure doesn't b
   assert.equal(remaining.length, 1, "only the failed claim is still a candidate");
   assert.equal(remaining[0]!.accession, FAIL);
 });
+
+test("enrich8kClaim returns noop without logging when the claim was already enriched concurrently", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "8k-enrich-noop");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  // enriched:true simulates a concurrent run stamping enriched_at between discovery and update.
+  const { claimId } = await seed8kClaim(client, { accession: "0000320193-26-000093", eventType: "restatement", enriched: true });
+  const before = (await client.query<{ t: string }>(`select text_canonical as t from claims where claim_id = $1`, [claimId])).rows[0]!.t;
+
+  const outcome = await enrich8kClaim(
+    { db, llm: fakeLlm('{"description":"Acme restated FY2024."}').llm, secClient: fakeSec("<DOCUMENT>...</DOCUMENT>") },
+    { claimId, eventType: "restatement", accession: "0000320193-26-000093", issuerCik: ACME_CIK },
+  );
+  assert.equal(outcome, "noop", "the guarded update affected 0 rows → nothing applied");
+  const after = (await client.query<{ t: string }>(`select text_canonical as t from claims where claim_id = $1`, [claimId])).rows[0]!.t;
+  assert.equal(after, before, "the already-enriched claim's text is untouched");
+  const logged = await client.query<{ n: number }>(`select count(*)::int as n from tool_call_logs where tool_name = 'enrich_8k'`);
+  assert.equal(logged.rows[0]!.n, 0, "no audit row written for an enrichment that did not apply");
+});
