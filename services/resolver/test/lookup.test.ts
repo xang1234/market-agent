@@ -9,6 +9,7 @@ import {
   resolveByLei,
   resolveByNameCandidate,
   resolveByTicker,
+  resolveIssuerByCusip,
   normalizeNameForLookup,
 } from "../src/lookup.ts";
 import { isAmbiguous, isResolved, isNotFound } from "../src/envelope.ts";
@@ -597,4 +598,34 @@ test("resolveByInput dispatches to the right family based on discriminator", { t
   assert.equal(viaTicker.subject_ref.id, apple.listing_id);
   assert.equal(viaLei.subject_ref.id, apple.issuer_id);
   assert.equal(viaName.subject_ref.id, apple.issuer_id);
+});
+
+test("resolveIssuerByCusip resolves by explicit cusip and US-ISIN derivation, null on ambiguity", { timeout: 120000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("docker unavailable");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "resolve-by-cusip");
+  const client = await connectedClient(t, databaseUrl);
+
+  // Issuer A carries the cusip explicitly; issuer B only a US ISIN embedding a cusip.
+  const a = await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name) values ('Apple Inc.') returning issuer_id::text as issuer_id`,
+  );
+  await client.query(`insert into instruments (issuer_id, asset_type, cusip) values ($1, 'common_stock', '037833100')`, [a.rows[0]!.issuer_id]);
+  const b = await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name) values ('Microsoft Corp') returning issuer_id::text as issuer_id`,
+  );
+  await client.query(`insert into instruments (issuer_id, asset_type, isin) values ($1, 'common_stock', 'US5949181045')`, [b.rows[0]!.issuer_id]);
+
+  assert.equal(await resolveIssuerByCusip(client, "037833100"), a.rows[0]!.issuer_id, "explicit cusip");
+  assert.equal(await resolveIssuerByCusip(client, "594918104"), b.rows[0]!.issuer_id, "cusip derived from US ISIN");
+  assert.equal(await resolveIssuerByCusip(client, "12345"), null, "non-9-char → null");
+
+  // Two distinct issuers sharing one cusip (the column is non-unique) → don't guess.
+  const c = await client.query<{ issuer_id: string }>(
+    `insert into issuers (legal_name) values ('Dup Co') returning issuer_id::text as issuer_id`,
+  );
+  await client.query(`insert into instruments (issuer_id, asset_type, cusip) values ($1, 'common_stock', '037833100')`, [c.rows[0]!.issuer_id]);
+  assert.equal(await resolveIssuerByCusip(client, "037833100"), null, "ambiguous explicit match → null, not an arbitrary issuer");
 });

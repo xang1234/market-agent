@@ -183,6 +183,40 @@ export async function resolveByIsin(
   });
 }
 
+// Resolve a CUSIP to a tracked issuer_id (not a ResolverEnvelope — callers want
+// the id). Two deterministic phases — explicit cusip, then US-ISIN derivation
+// (a US ISIN embeds the 9-char CUSIP) — and >1 distinct issuer in a phase is
+// ambiguous → null rather than an arbitrary row (which would misattribute
+// holdings). The canonical CUSIP resolver; evidence/src/cusip-issuer-map.ts holds
+// a parallel copy pending cross-service consolidation (see fra-* follow-up).
+export async function resolveIssuerByCusip(db: QueryExecutor, cusip: string): Promise<string | null> {
+  const normalized = cusip.trim().toUpperCase();
+  if (normalized.length !== 9) return null;
+
+  const direct = await matchCusipIssuers(
+    db,
+    `select distinct issuer_id::text as issuer_id from instruments where upper(cusip) = $1 limit 2`,
+    normalized,
+  );
+  if (direct.length > 1) return null; // ambiguous explicit match → don't guess
+  if (direct.length === 1) return direct[0]!;
+
+  const derived = await matchCusipIssuers(
+    db,
+    `select distinct issuer_id::text as issuer_id
+       from instruments
+      where upper(isin) like 'US%' and upper(substr(isin, 3, 9)) = $1
+      limit 2`,
+    normalized,
+  );
+  return derived.length === 1 ? derived[0]! : null; // none, or ambiguous → null
+}
+
+async function matchCusipIssuers(db: QueryExecutor, sql: string, cusip: string): Promise<string[]> {
+  const { rows } = await db.query<{ issuer_id: string }>(sql, [cusip]);
+  return rows.map((row) => row.issuer_id);
+}
+
 export async function resolveByTicker(
   db: QueryExecutor,
   ticker: string,
