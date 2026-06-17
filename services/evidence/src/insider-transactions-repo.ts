@@ -62,17 +62,17 @@ export type SupersedeInsiderFilingResult = { transactions: number; claims: numbe
 
 // A Form 4/A restates the full ownership form, so before ingesting it the handler
 // supersedes the prior filing for (issuer, reporting owner, period): delete its
-// read-model rows + derived material claims/events, and mark its document(s)
-// superseded — the amendment's data replaces, rather than double-counts, the original.
-// The archived source + document bytes are retained; only documents.parse_status flips,
-// so a "parsed document with no derived claims" reads as superseded, not corrupt.
+// read-model rows + per-transaction events, SOFT-supersede its material claims (stamp
+// superseded_at), and mark its document(s) superseded. The amendment's data replaces,
+// rather than double-counts, the original.
 //
-// Why three explicit deletes rather than one source cascade: claims cascade only from
-// documents (which we retain, not delete), and events have NO foreign key to sources at
-// all (source_ids is jsonb) — so neither can be reached by deleting the source. The
-// owner is matched by CIK when both filings carry it, falling back to name when either
-// omits it (the parser allows a null rptOwnerCik), so an amendment still supersedes
-// across a CIK-presence change.
+// Claims are soft-superseded, not deleted, because a sealed snapshot may cite a claim_id
+// in snapshots.claim_refs: keeping the row lets rehydration-by-id still find it (no
+// verifier missing_claim_ref), while fresh subject->claims selection (loadLocalRuntime-
+// Evidence, theme inference) filters `superseded_at is null`. The read model + events ARE
+// hard-deleted (not cited), and the source/document bytes are retained (only
+// documents.parse_status flips). The owner is matched by CIK when both filings carry it,
+// falling back to name when either omits it (the parser allows a null rptOwnerCik).
 export async function supersedeInsiderFiling(
   db: QueryExecutor,
   key: SupersedeInsiderFilingKey,
@@ -98,9 +98,13 @@ export async function supersedeInsiderFiling(
   const sourceIds = [...new Set(deleted.rows.map((r) => r.source_id))];
   if (sourceIds.length === 0) return { transactions: 0, claims: 0, events: 0, documents: 0 };
 
-  // 2. Delete the material claims those filings produced (claim_arguments cascade).
+  // 2. Soft-supersede the material claims (stamp superseded_at, idempotent) rather than
+  //    deleting — a sealed snapshot's claim_refs must still rehydrate the row by id.
   const claims = await db.query(
-    `delete from claims where predicate = 'insider.transaction' and reported_by_source_id = any($1::uuid[])`,
+    `update claims set superseded_at = now()
+      where predicate = 'insider.transaction'
+        and reported_by_source_id = any($1::uuid[])
+        and superseded_at is null`,
     [sourceIds],
   );
   // 3. Delete the per-transaction events (event_subjects cascade). source_ids is a

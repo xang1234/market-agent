@@ -173,6 +173,7 @@ export async function computeInferredThemeCandidates(
          join cluster_claims cc on cc.claim_id = ca.claim_id
          join claims c on c.claim_id = ca.claim_id
         where ($2::numeric is null or c.confidence >= $2::numeric)
+          and c.superseded_at is null
      ),
      impact_links as (
        select ei.subject_kind, ei.subject_id, ei.claim_id,
@@ -181,6 +182,7 @@ export async function computeInferredThemeCandidates(
          join cluster_claims cc on cc.claim_id = ei.claim_id
          join claims c on c.claim_id = ei.claim_id
         where ($2::numeric is null or c.confidence >= $2::numeric)
+          and c.superseded_at is null
           and ($3::impact_direction[] is null or ei.direction = any($3::impact_direction[]))
      ),
      all_links as (

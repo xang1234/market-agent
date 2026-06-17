@@ -132,6 +132,7 @@ export async function loadLocalRuntimeEvidence(
          join sources s
            on s.source_id = c.reported_by_source_id
         where c.status in ('extracted', 'corroborated')
+          and c.superseded_at is null
           and not (c.claim_id = any($4::uuid[]))
           and (
             s.user_id is null
