@@ -103,3 +103,78 @@ test("backfillIssuerForm4 ingests only in-window Form 4 filings, then is idempot
   const after = await client.query(`select count(*)::int as n from insider_transactions where issuer_id = $1`, [issuerId]);
   assert.equal(after.rows[0]!.n, 2, "rerun does not duplicate read-model rows");
 });
+
+// A single-P Form 4/4-A on 2026-06-10 (period_of_report falls back to that date),
+// for the backfill-ordering scenario.
+function form4(form: string, pShares: number): string {
+  return `<SEC-DOCUMENT>
+<DOCUMENT><TYPE>${form}<TEXT><XML>
+<ownershipDocument>
+  <issuer><issuerCik>0000320193</issuerCik></issuer>
+  <reportingOwner>
+    <reportingOwnerId><rptOwnerCik>0001214156</rptOwnerCik><rptOwnerName>COOK TIMOTHY D</rptOwnerName></reportingOwnerId>
+    <reportingOwnerRelationship><isDirector>0</isDirector><isOfficer>1</isOfficer><officerTitle>CEO</officerTitle><isTenPercentOwner>0</isTenPercentOwner></reportingOwnerRelationship>
+  </reportingOwner>
+  <nonDerivativeTable><nonDerivativeTransaction>
+    <transactionDate><value>2026-06-10</value></transactionDate>
+    <transactionCoding><transactionCode>P</transactionCode></transactionCoding>
+    <transactionAmounts>
+      <transactionShares><value>${pShares}</value></transactionShares>
+      <transactionPricePerShare><value>150.25</value></transactionPricePerShare>
+      <transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode>
+    </transactionAmounts>
+  </nonDerivativeTransaction></nonDerivativeTable>
+</ownershipDocument>
+</XML></TEXT></DOCUMENT></SEC-DOCUMENT>`;
+}
+
+test("backfillIssuerForm4 processes a 4/A after its original so the amendment supersedes (no double-count)", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("docker unavailable");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "form4-backfill-amend-order");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  const issuerId = (
+    await client.query<{ issuer_id: string }>(
+      `insert into issuers (legal_name, cik) values ('Apple Inc.', '0000320193') returning issuer_id::text as issuer_id`,
+    )
+  ).rows[0]!.issuer_id;
+
+  const ORIG = "0000320193-26-000070";
+  const AMEND = "0000320193-26-000071";
+  const secClient = {
+    // EDGAR returns `recent` newest-first: the 4/A (filed later) precedes its original.
+    fetchSubmissions: async () => ({
+      filings: {
+        recent: {
+          accessionNumber: [AMEND, ORIG],
+          form: ["4/A", "4"],
+          primaryDocument: ["xslF345X05/amend.xml", "xslF345X05/form4.xml"],
+          filingDate: ["2026-06-12", "2026-06-10"],
+        },
+      },
+    }),
+    fetchFiling: async (input: { accession_number: string }) => ({
+      bytes: new TextEncoder().encode(input.accession_number === AMEND ? form4("4/A", 800) : form4("4", 1000)),
+      contentType: "text/plain",
+      retrievedAt: "2026-06-12T00:00:00.000Z",
+      url: `https://www.sec.gov/x/${input.accession_number}.txt`,
+    }),
+  } as unknown as Form4BackfillClient;
+
+  const result = await backfillIssuerForm4(
+    { db, objectStore: new MemoryObjectStore(), secClient },
+    { cik: 320193, sinceDays: 180, now: () => new Date("2026-06-20T00:00:00.000Z") },
+  );
+  assert.equal(result.ingested, 2, "both the original and the amendment are ingested");
+
+  const r = await client.query<{ n: number; p: string | null }>(
+    `select count(*)::int as n, sum(case when transaction_code = 'P' then shares else 0 end) as p
+       from insider_transactions where issuer_id = $1`,
+    [issuerId],
+  );
+  assert.equal(r.rows[0]!.n, 1, "processed oldest-first, so the 4/A supersedes the original — 1 row, not 2");
+  assert.equal(Number(r.rows[0]!.p), 800, "the amendment's corrected share count wins");
+});

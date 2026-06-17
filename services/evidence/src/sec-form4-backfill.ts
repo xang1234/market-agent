@@ -65,7 +65,12 @@ export async function backfillIssuerForm4(
         `exceed the cap of ${maxFilings}; processing the most recent ${maxFilings}.`,
     );
   }
-  const candidates = inWindow.slice(0, maxFilings);
+  // Keep the most-recent `maxFilings` (recent is newest-first), then process them
+  // OLDEST-first so a 4/A is handled after the original it amends and can supersede it
+  // (the daily crawl ingests chronologically; this restores that order for the backfill,
+  // otherwise a newer 4/A processed before its original supersedes nothing and the
+  // later-inserted original double-counts).
+  const candidates = inWindow.slice(0, maxFilings).reverse();
 
   const handlerDeps = { db: deps.db, objectStore: deps.objectStore, client: deps.secClient };
   let ingested = 0;
