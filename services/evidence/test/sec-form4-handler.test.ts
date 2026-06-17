@@ -262,10 +262,17 @@ test("handleForm4 supersedes the original filing on a 4/A amendment (no double-c
   assert.equal(txns.rows[0]!.n, 2, "amendment replaces the original — 2 rows, not 4 (no double-count)");
   assert.equal(Number(txns.rows[0]!.p_shares), 800, "the corrected P share count, not stale 1000 or summed 1800");
 
-  const claims = await client.query<{ n: number }>(`select count(*)::int as n from claims where predicate = 'insider.transaction'`);
-  assert.equal(claims.rows[0]!.n, 1, "one material claim — the original's was superseded, not duplicated");
+  // Claims are SOFT-superseded: the original's row is preserved (so a sealed snapshot
+  // citing it still rehydrates) but excluded from fresh selection; only the amendment's
+  // claim is active.
+  const claims = await client.query<{ active: number; total: number }>(
+    `select count(*) filter (where superseded_at is null)::int as active, count(*)::int as total
+       from claims where predicate = 'insider.transaction'`,
+  );
+  assert.equal(claims.rows[0]!.active, 1, "one ACTIVE material claim — the amendment's");
+  assert.equal(claims.rows[0]!.total, 2, "the original's claim row is preserved (superseded), not deleted");
   const events = await client.query<{ n: number }>(`select count(*)::int as n from events where event_type = 'insider_transaction'`);
-  assert.equal(events.rows[0]!.n, 2, "two events — the original's were superseded, not duplicated");
+  assert.equal(events.rows[0]!.n, 2, "two events — the original's were hard-deleted (not cited), not duplicated");
 });
 
 // A single-(P)-transaction Form 4/4-A on 2026-06-10, parameterized for the supersede
@@ -374,8 +381,12 @@ test("handleForm4 chains supersession: 4 -> 4/A -> 4/A'", async (t) => {
   const { rows, shares } = await pShareCount(client, issuerId);
   assert.equal(rows, 1, "each amendment supersedes the prior — 1 row after the chain, not 3");
   assert.equal(shares, 700, "the latest amendment wins");
-  const claims = await client.query<{ n: number }>(`select count(*)::int as n from claims where predicate = 'insider.transaction'`);
-  assert.equal(claims.rows[0]!.n, 1, "one material claim after the chain, not three");
+  const claims = await client.query<{ active: number; total: number }>(
+    `select count(*) filter (where superseded_at is null)::int as active, count(*)::int as total
+       from claims where predicate = 'insider.transaction'`,
+  );
+  assert.equal(claims.rows[0]!.active, 1, "one ACTIVE material claim after the chain (the latest amendment's)");
+  assert.equal(claims.rows[0]!.total, 3, "all three filings' claim rows are preserved (two superseded)");
 });
 
 test("handleForm4 supersedes across a CIK-presence change (original null-CIK, amendment with CIK)", async (t) => {

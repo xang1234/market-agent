@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { loadLocalRuntimeEvidence } from "../src/local-runtime-evidence.ts";
+import { loadLocalRuntimeEvidence, loadVerifierRowsForRefs } from "../src/local-runtime-evidence.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 
@@ -85,4 +85,49 @@ test("delta query expands listing/instrument universes to the issuer (ADR 0001)"
     exclude_claim_ids: [CLAIM_ID],
   });
   assert.deepEqual(excluded.claim_refs, [], "exclude_claim_ids still applies after expansion");
+});
+
+test("loadLocalRuntimeEvidence hides a superseded claim from fresh selection but preserves the row", async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("docker unavailable");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "evidence-superseded");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  await seedIssuerAttributedClaim(db); // active CLAIM_ID attributed to ISSUER_ID
+
+  // A second insider claim for the same issuer, soft-superseded as a 4/A supersede does.
+  const SUPERSEDED_CLAIM = "a8888888-8888-4888-8888-888888888888";
+  await db.query(
+    `insert into claims
+       (claim_id, document_id, predicate, text_canonical, polarity, modality, reported_by_source_id, confidence, status, superseded_at)
+     values ($1, $2, 'insider.transaction', 'CEO bought shares (stale)', 'neutral', 'asserted', $3, 0.9, 'extracted', now())`,
+    [SUPERSEDED_CLAIM, DOCUMENT_ID, SOURCE_ID],
+  );
+  await db.query(`insert into claim_arguments (claim_id, subject_kind, subject_id, role) values ($1, 'issuer', $2, 'subject')`, [
+    SUPERSEDED_CLAIM,
+    ISSUER_ID,
+  ]);
+
+  // Fresh subject->claims selection returns only the active claim.
+  const fresh = await loadLocalRuntimeEvidence(db, { subject_refs: [{ kind: "issuer", id: ISSUER_ID }] });
+  assert.deepEqual(fresh.claim_refs, [CLAIM_ID], "the superseded claim is hidden from fresh selection");
+
+  // But its row is preserved (not deleted), so a sealed snapshot's claim_refs still rehydrate by id.
+  const preserved = await db.query<{ n: number }>(
+    `select count(*)::int as n from claims where claim_id = $1 and superseded_at is not null`,
+    [SUPERSEDED_CLAIM],
+  );
+  assert.equal(preserved.rows[0]!.n, 1, "the superseded claim row is preserved for rehydration");
+
+  // The actual rehydration-by-id path the snapshot verifier uses MUST still return it —
+  // the half of the asymmetry the fix turns on (a regression that filtered superseded_at
+  // here would reintroduce missing_claim_ref, which the count check above would not catch).
+  const rehydrated = await loadVerifierRowsForRefs(db, { source_ids: [], document_refs: [], claim_refs: [SUPERSEDED_CLAIM] });
+  assert.deepEqual(
+    rehydrated.claims.map((c) => c.claim_id),
+    [SUPERSEDED_CLAIM],
+    "superseded claim still rehydrates by id (no missing_claim_ref)",
+  );
 });

@@ -458,6 +458,7 @@ create table claims (
   status claim_status not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  superseded_at timestamptz,
   enriched_at timestamptz
 );
 create index claims_document_idx on claims(document_id);
