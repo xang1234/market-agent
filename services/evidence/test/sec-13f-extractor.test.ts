@@ -96,3 +96,21 @@ test("parse13fInfoTable rejects a shape-valid but non-calendar period", () => {
   const bad = `<XML><periodOfReport>13-99-2026</periodOfReport></XML><XML><informationTable></informationTable></XML>`;
   assert.throws(() => parse13fInfoTable(bad), /periodOfReport/);
 });
+
+test("parse13fInfoTable reports amendmentType null on an original 13F-HR (no amendmentInfo)", () => {
+  assert.equal(parse13fInfoTable(SUBMISSION).amendmentType, null);
+});
+
+test("parse13fInfoTable extracts amendmentType from a 13F-HR/A cover, uppercased + trimmed", () => {
+  const restate = SUBMISSION.replace(
+    "<periodOfReport>03-31-2026</periodOfReport>",
+    "<periodOfReport>03-31-2026</periodOfReport><amendmentInfo><amendmentType>  restatement  </amendmentType></amendmentInfo>",
+  );
+  assert.equal(parse13fInfoTable(restate).amendmentType, "RESTATEMENT", "case + whitespace normalized so the handler can branch reliably");
+
+  const supplement = SUBMISSION.replace(
+    "<periodOfReport>03-31-2026</periodOfReport>",
+    "<periodOfReport>03-31-2026</periodOfReport><amendmentInfo><amendmentType>NEW HOLDINGS</amendmentType></amendmentInfo>",
+  );
+  assert.equal(parse13fInfoTable(supplement).amendmentType, "NEW HOLDINGS");
+});
