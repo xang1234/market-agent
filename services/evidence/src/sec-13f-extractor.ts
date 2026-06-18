@@ -19,11 +19,18 @@ export type Form13fHolding = {
 
 export type Form13fFiling = {
   periodOfReport: string; // YYYY-MM-DD (reporting quarter end)
+  // 13F-HR/A cover <amendmentInfo><amendmentType>: "RESTATEMENT" (full portfolio
+  // replacement) | "NEW HOLDINGS" (supplemental, add-only). null on an original
+  // 13F-HR (no amendmentInfo). Uppercased + trimmed so the handler can branch
+  // reliably; the restate-vs-supplement distinction is what stops a supplemental
+  // amendment from being mis-read as the whole portfolio (false exits) — fra-kb2p.
+  amendmentType: string | null;
   holdings: Form13fHolding[];
 };
 
 export function parse13fInfoTable(submissionTxt: string): Form13fFiling {
   const periodOfReport = normalizePeriod(requireTagText(submissionTxt, "periodOfReport", "13F cover"));
+  const amendmentType = tagText(submissionTxt, "amendmentType")?.trim().toUpperCase() ?? null;
 
   const holdings: Form13fHolding[] = [];
   for (const row of iterateBlocks(submissionTxt, "infoTable")) {
@@ -36,7 +43,7 @@ export function parse13fInfoTable(submissionTxt: string): Form13fFiling {
       putCall: tagText(row, "putCall"),
     });
   }
-  return { periodOfReport, holdings };
+  return { periodOfReport, amendmentType, holdings };
 }
 
 // EDGAR's 13F cover reports the period as MM-DD-YYYY; normalize to ISO. Tolerate

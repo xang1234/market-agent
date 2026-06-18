@@ -14,7 +14,7 @@ import { createClaimArgument } from "./claim-argument-repo.ts";
 import { parse13fInfoTable } from "./sec-13f-extractor.ts";
 import { isSuperinvestorFiler, superinvestorName } from "./superinvestor-filers.ts";
 import { resolveHoldingsByIssuer } from "./sec-13f-resolve.ts";
-import { insertHolding, holdingsByFiler, priorPeriodForFiler } from "./institutional-holdings-repo.ts";
+import { insertHolding, holdingsByFiler, priorPeriodForFiler, supersede13fFiling } from "./institutional-holdings-repo.ts";
 
 export type Form13fFilingRef = Pick<FilingIndexEntry, "cik" | "accession" | "form" | "filedDate">;
 
@@ -53,6 +53,27 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
     document: `${entry.accession}.txt`,
   });
   const filing = parse13fInfoTable(new TextDecoder("utf-8").decode(fetched.bytes));
+
+  // 13F-HR/A amendment routing (fra-kb2p). The cover's <amendmentType> says whether the
+  // amendment RESTATES the whole portfolio or only adds NEW HOLDINGS (supplemental):
+  //   - RESTATEMENT → supersede the original (filer, period) first, then re-ingest as a
+  //     full filing, so an issuer the amendment dropped is removed (the stale-row bug)
+  //     and real exits/changes are re-derived against the prior period.
+  //   - NEW HOLDINGS → merge the added rows into the existing period and skip exit
+  //     detection: the amendment isn't the full portfolio, so an unlisted original is
+  //     NOT an exit (treating it as one would emit a false exit).
+  // An amendment we can't classify is skipped, not guessed — guessing either way
+  // corrupts the read model. An original 13F-HR is unaffected.
+  const isAmendment = entry.form === "13F-HR/A";
+  if (isAmendment && filing.amendmentType !== "RESTATEMENT" && filing.amendmentType !== "NEW HOLDINGS") {
+    console.warn(
+      `[sec-13f] skip ${entry.accession}: 13F-HR/A with unrecognized amendmentType ` +
+        `"${filing.amendmentType ?? "(absent)"}" — not ingested (fra-kb2p)`,
+    );
+    return { ingested: false };
+  }
+  const restate = isAmendment && filing.amendmentType === "RESTATEMENT";
+  const supplemental = isAmendment && filing.amendmentType === "NEW HOLDINGS";
 
   // Resolve holdings to tracked issuers (aggregation + value normalization live in
   // the shared resolver). Misses are skipped + logged with this accession's context;
@@ -135,6 +156,29 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
       });
     };
 
+    // A RESTATEMENT replaces the whole period: supersede the original filing's read-model
+    // rows + derived claims/events before re-inserting, so the amendment replaces rather
+    // than double-counts or leaves stale (an omitted issuer's row is removed here). Same
+    // transaction as the re-insert, so a failure leaves neither applied.
+    if (restate) {
+      const superseded = await supersede13fFiling(tx.db, { filer_cik: filerCik, filing_period: period });
+      if (superseded.holdings > 0) {
+        console.warn(
+          `[sec-13f] ${entry.accession} (13F-HR/A RESTATEMENT): superseded ${superseded.holdings} holding(s), ` +
+            `${superseded.claims} claim(s), ${superseded.events} event(s), ${superseded.documents} document(s) ` +
+            `for ${filerName} @ ${period}`,
+        );
+      } else {
+        // No prior filing matched — the original may not be ingested yet (out-of-order
+        // backfill). Surface it so an otherwise-silent gap is visible (robust handling
+        // of amendment-before-original is a follow-up, mirroring fra-28yi).
+        console.warn(
+          `[sec-13f] ${entry.accession} (13F-HR/A RESTATEMENT): no prior filing matched for ` +
+            `${filerName} @ ${period} — inserting without supersede`,
+        );
+      }
+    }
+
     for (const h of resolved) {
       await insertHolding(tx.db, {
         filer_cik: filerCik,
@@ -165,7 +209,10 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
     // v1 resolution this usually defers exits to when coverage is complete
     // (fra-ajvd.7); new/increased/decreased above stay reliable (issuer present
     // and resolved in both periods).
-    if (priorPeriod !== null && !hadUnresolved) {
+    if (supplemental) {
+      // Add-only amendment: the unlisted originals are still held, not exited — skip
+      // exit detection entirely (the merge above just added the supplemental rows).
+    } else if (priorPeriod !== null && !hadUnresolved) {
       for (const prior of priorHoldings) {
         if (currentIssuerIds.has(prior.issuer_id)) continue;
         await emitNotable(

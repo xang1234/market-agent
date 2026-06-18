@@ -31,8 +31,10 @@ import { enrichCusip } from "../../resolver/src/cusip-enrichment.ts";
 import type { OpenReferenceProviderConfig } from "../../resolver/src/provider-sources.ts";
 import type { FetchImpl } from "../../resolver/src/open-reference-providers.ts";
 
-// Only the original 13F-HR is reprocessed — amendments (13F-HR/A) are not ingested
-// by the crawl either (their partial-update semantics are tracked in fra-kb2p).
+// Only the original 13F-HR is reprocessed here. 13F-HR/A amendments are now ingested
+// by the crawl (fra-kb2p: restate vs supplement branch), but reprocessing them on a
+// CUSIP-coverage pass needs the same supersede/merge semantics and is deferred to the
+// reprocess follow-up (fra-msx1).
 const FORM_13F_HR = "13F-HR";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
