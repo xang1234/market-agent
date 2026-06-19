@@ -51,7 +51,7 @@ async function main(): Promise<void> {
         console.log(
           `CIK ${cik}: ${result.accessionsProcessed} accession(s), ` +
             `${result.cusipsEnriched} CUSIP(s) enriched, ${result.cusipsUnmapped} unmapped, ` +
-            `${result.holdingsUpserted} holding(s) upserted`,
+            `${result.holdingsUpserted} holding(s) upserted, ${result.supersededSkipped} superseded-skipped`,
         );
       } catch (error) {
         hadFailures = true;

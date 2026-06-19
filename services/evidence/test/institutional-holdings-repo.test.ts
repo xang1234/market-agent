@@ -6,6 +6,7 @@ import {
   holdingsByFiler,
   findFilerIssuerHolding,
   priorPeriodForFiler,
+  supersede13fFiling,
 } from "../src/institutional-holdings-repo.ts";
 import type { QueryExecutor } from "../src/types.ts";
 
@@ -93,4 +94,32 @@ test("priorPeriodForFiler returns the most recent period before the given one, o
   assert.deepEqual(calls[0].values, [BERKSHIRE, "2026-03-31"]);
   assert.equal(prior, "2025-12-31");
   assert.equal(await priorPeriodForFiler(fakeDb([{ filing_period: null }]).db, BERKSHIRE, "2026-03-31"), null);
+});
+
+test("supersede13fFiling deletes the period's holdings and delegates the artifact cleanup to the shared helper", async () => {
+  // Two holdings share one filing's source — the captured source set must dedup to one,
+  // which is then forwarded to supersedeFilingArtifacts (claims, events, documents).
+  const { db, calls } = fakeDb([{ source_id: SOURCE }, { source_id: SOURCE }]);
+  await supersede13fFiling(db, { filer_cik: BERKSHIRE, filing_period: "2026-03-31" });
+  assert.equal(calls.length, 4, "the read-model delete + the helper's 3 artifact queries");
+
+  // Step 1 (this repo's job): delete the whole (filer, period) portfolio, capture sources.
+  assert.match(calls[0].text, /delete from institutional_holdings\s+where filer_cik = \$1 and filing_period = \$2::date/i);
+  assert.match(calls[0].text, /returning source_id/i);
+  assert.deepEqual(calls[0].values, [BERKSHIRE, "2026-03-31"]);
+
+  // The deduped source set is forwarded to the shared helper (predicate/event SQL is
+  // asserted in supersede-filing.test.ts). 13F uses the position_change.* LIKE prefix.
+  assert.deepEqual(calls[1].values, [[SOURCE], "position_change.%"], "deduped sources + position_change LIKE prefix");
+});
+
+test("supersede13fFiling no-ops (single query, zero counts) when no prior holdings match", async () => {
+  const { db, calls } = fakeDb([]); // delete matched nothing → out-of-order amendment-before-original
+  const result = await supersede13fFiling(db, { filer_cik: BERKSHIRE, filing_period: "2026-03-31" });
+  assert.equal(calls.length, 1, "no claims/events/documents work when nothing was superseded");
+  assert.deepEqual(result, { holdings: 0, claims: 0, events: 0, documents: 0 });
+});
+
+test("supersede13fFiling rejects an empty filing_period (would silently supersede nothing)", async () => {
+  await assert.rejects(() => supersede13fFiling(fakeDb().db, { filer_cik: BERKSHIRE, filing_period: "" }), /filing_period is required/);
 });

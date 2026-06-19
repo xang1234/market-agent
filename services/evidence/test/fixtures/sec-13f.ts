@@ -15,7 +15,9 @@ function xmlEscape(s: string): string {
   return s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
-export function submission(periodMMDDYYYY: string, rows: Form13fRow[]): string {
+// An optional amendmentType (e.g. "RESTATEMENT" | "NEW HOLDINGS") renders the cover's
+// <amendmentInfo> block, as a 13F-HR/A carries; omit it for an original 13F-HR.
+export function submission(periodMMDDYYYY: string, rows: Form13fRow[], amendmentType?: string): string {
   const tables = rows
     .map(
       (r) =>
@@ -25,8 +27,9 @@ export function submission(periodMMDDYYYY: string, rows: Form13fRow[]): string {
         `</infoTable>`,
     )
     .join("\n");
+  const amendment = amendmentType ? `<amendmentInfo><amendmentType>${xmlEscape(amendmentType)}</amendmentType></amendmentInfo>` : "";
   return `<SEC-DOCUMENT>
-<XML><edgarSubmission><headerData><periodOfReport>${periodMMDDYYYY}</periodOfReport></headerData></edgarSubmission></XML>
+<XML><edgarSubmission><headerData><periodOfReport>${periodMMDDYYYY}</periodOfReport>${amendment}</headerData></edgarSubmission></XML>
 <XML><informationTable>${tables}</informationTable></XML>
 </SEC-DOCUMENT>`;
 }

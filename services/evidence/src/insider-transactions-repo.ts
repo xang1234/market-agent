@@ -1,4 +1,5 @@
 import type { QueryExecutor } from "./types.ts";
+import { supersedeFilingArtifacts, type SupersededArtifactCounts } from "./supersede-filing.ts";
 
 // Read model for SEC Form 4 insider transactions. Written by the Form 4 handler
 // (every reported transaction) inside its ingest transaction; read by the
@@ -58,21 +59,14 @@ export type SupersedeInsiderFilingKey = {
   period_of_report: string; // YYYY-MM-DD
 };
 
-export type SupersedeInsiderFilingResult = { transactions: number; claims: number; events: number; documents: number };
+export type SupersedeInsiderFilingResult = { transactions: number } & SupersededArtifactCounts;
 
 // A Form 4/A restates the full ownership form, so before ingesting it the handler
 // supersedes the prior filing for (issuer, reporting owner, period): delete its
-// read-model rows + per-transaction events, SOFT-supersede its material claims (stamp
-// superseded_at), and mark its document(s) superseded. The amendment's data replaces,
-// rather than double-counts, the original.
-//
-// Claims are soft-superseded, not deleted, because a sealed snapshot may cite a claim_id
-// in snapshots.claim_refs: keeping the row lets rehydration-by-id still find it (no
-// verifier missing_claim_ref), while fresh subject->claims selection (loadLocalRuntime-
-// Evidence, theme inference) filters `superseded_at is null`. The read model + events ARE
-// hard-deleted (not cited), and the source/document bytes are retained (only
-// documents.parse_status flips). The owner is matched by CIK when both filings carry it,
-// falling back to name when either omits it (the parser allows a null rptOwnerCik).
+// read-model rows, then retire the derived claims/events/documents via the shared
+// supersedeFilingArtifacts. The amendment's data replaces, rather than double-counts,
+// the original. The owner is matched by CIK when both filings carry it, falling back to
+// name when either omits it (the parser allows a null rptOwnerCik).
 export async function supersedeInsiderFiling(
   db: QueryExecutor,
   key: SupersedeInsiderFilingKey,
@@ -83,7 +77,7 @@ export async function supersedeInsiderFiling(
     throw new Error("supersedeInsiderFiling: period_of_report is required");
   }
 
-  // 1. Delete the prior read-model rows, capturing the source(s) that produced them.
+  // Delete the prior read-model rows, capturing the source(s) that produced them.
   const deleted = await db.query<{ source_id: string }>(
     `delete from insider_transactions
        where issuer_id = $1
@@ -98,39 +92,12 @@ export async function supersedeInsiderFiling(
   const sourceIds = [...new Set(deleted.rows.map((r) => r.source_id))];
   if (sourceIds.length === 0) return { transactions: 0, claims: 0, events: 0, documents: 0 };
 
-  // 2. Soft-supersede the material claims (stamp superseded_at, idempotent) rather than
-  //    deleting — a sealed snapshot's claim_refs must still rehydrate the row by id.
-  const claims = await db.query(
-    `update claims set superseded_at = now()
-      where predicate = 'insider.transaction'
-        and reported_by_source_id = any($1::uuid[])
-        and superseded_at is null`,
-    [sourceIds],
-  );
-  // 3. Delete the per-transaction events (event_subjects cascade). source_ids is a
-  //    jsonb array of source UUIDs; match events that reference any superseded source.
-  //    Each Form 4 filing creates its own source, so this targets exactly its events.
-  const events = await db.query(
-    `delete from events
-      where event_type = 'insider_transaction'
-        and exists (
-          select 1 from jsonb_array_elements_text(source_ids) sid where sid = any($1::text[])
-        )`,
-    [sourceIds],
-  );
-  // 4. Mark the prior filing's document(s) superseded (bytes/source retained), so the
-  //    now-claimless document is explained rather than mislabeled 'parsed'.
-  const documents = await db.query(
-    `update documents set parse_status = 'superseded'
-      where source_id = any($1::uuid[]) and parse_status <> 'superseded'`,
-    [sourceIds],
-  );
-  return {
-    transactions: deleted.rowCount ?? 0,
-    claims: claims.rowCount ?? 0,
-    events: events.rowCount ?? 0,
-    documents: documents.rowCount ?? 0,
-  };
+  const counts = await supersedeFilingArtifacts(db, {
+    sourceIds,
+    claimPredicate: { equals: "insider.transaction" },
+    eventType: "insider_transaction",
+  });
+  return { transactions: deleted.rowCount ?? 0, ...counts };
 }
 
 export type RecentInsiderTransaction = {

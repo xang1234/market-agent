@@ -253,3 +253,39 @@ test("reprocessFiler13f keeps per-filer rows distinct when two filers hold the s
   const rows = (await client.query<{ n: number }>(`select count(*)::int as n from institutional_holdings where issuer_id = $1`, [aapl])).rows[0]!.n;
   assert.equal(rows, 2, "two filers holding AAPL → two distinct rows (unique on filer_cik,issuer,period), not a collision");
 });
+
+test("reprocessFiler13f skips an original superseded by a 13F-HR/A amendment (does not re-add the stale portfolio)", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-reprocess-superseded");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  await seedIssuerWithCusip(client, "Apple Inc.", AAPL_CUSIP);
+
+  // Simulate the post-supersede state: a RESTATEMENT retired this original, so its
+  // read-model rows are gone and its document is parse_status='superseded'.
+  const ACC = "0001067983-26-000009";
+  const src = await client.query<{ id: string }>(
+    `insert into sources (provider, kind, trust_tier, license_class, retrieved_at)
+     values ('sec_edgar', 'filing', 'primary', 'public', now()) returning source_id::text as id`,
+  );
+  await client.query(
+    `insert into documents (source_id, provider_doc_id, kind, content_hash, raw_blob_id, parse_status)
+     values ($1, $2, 'filing', $3, $4, 'superseded')`,
+    [src.rows[0]!.id, ACC, `h-${ACC}`, `sha256:${ACC}`],
+  );
+
+  const txt = submission("03-31-2026", [{ name: "APPLE INC", cusip: AAPL_CUSIP, value: 200000, shares: 1000 }]);
+  const result = await reprocessFiler13f(
+    { db, secClient: fakeSecClient(ACC, txt), openfigi: OPENFIGI, openfigiFetch: fakeOpenFigiFetch() },
+    { cik: BERKSHIRE, now: NOW },
+  );
+
+  assert.equal(result.supersededSkipped, 1, "the superseded original is skipped");
+  assert.equal(result.accessionsProcessed, 0, "no reprocessing of the superseded original");
+  assert.equal(result.holdingsUpserted, 0);
+  assert.equal(
+    (await client.query<{ n: number }>(`select count(*)::int as n from institutional_holdings`)).rows[0]!.n,
+    0,
+    "the stale portfolio is NOT re-added under a fresh source",
+  );
+});

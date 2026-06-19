@@ -1,4 +1,5 @@
 import type { QueryExecutor } from "./types.ts";
+import { supersedeFilingArtifacts, type SupersededArtifactCounts } from "./supersede-filing.ts";
 
 // Read model for 13F institutional holdings. One aggregated row per
 // (filer, issuer, reporting period) — the handler sums the multiple infoTable
@@ -45,6 +46,50 @@ export async function insertHolding(db: QueryExecutor, input: InstitutionalHoldi
       input.accession,
     ],
   );
+}
+
+export type Supersede13fFilingKey = {
+  filer_cik: string;
+  filing_period: string; // YYYY-MM-DD (reporting quarter end)
+};
+
+export type Supersede13fFilingResult = { holdings: number } & SupersededArtifactCounts;
+
+// Supersede the prior 13F filing for a (filer, reporting period) so a 13F-HR/A
+// RESTATEMENT replaces — rather than double-counts or leaves stale — the original.
+// A restatement is a full-portfolio re-file, so deleting the whole period's rows is what
+// removes an issuer the amendment dropped (the stale-row bug, fra-kb2p). Deletes the
+// read-model rows, then retires the derived claims/events/documents via the shared
+// supersedeFilingArtifacts. Call inside the amendment's transaction so a failure leaves
+// neither the supersede nor the re-insert applied.
+export async function supersede13fFiling(
+  db: QueryExecutor,
+  key: Supersede13fFilingKey,
+): Promise<Supersede13fFilingResult> {
+  // Types are erased at runtime; an empty period would compare as `= ''` and supersede
+  // nothing silently, so fail loudly instead.
+  if (!key.filing_period) {
+    throw new Error("supersede13fFiling: filing_period is required");
+  }
+
+  // Delete the prior read-model rows for the whole (filer, period) portfolio, capturing
+  // the source(s) that produced them. One source per filing, so the per-issuer rows
+  // collapse to a single source id.
+  const deleted = await db.query<{ source_id: string }>(
+    `delete from institutional_holdings
+       where filer_cik = $1 and filing_period = $2::date
+     returning source_id::text as source_id`,
+    [key.filer_cik, key.filing_period],
+  );
+  const sourceIds = [...new Set(deleted.rows.map((r) => r.source_id))];
+  if (sourceIds.length === 0) return { holdings: 0, claims: 0, events: 0, documents: 0 };
+
+  const counts = await supersedeFilingArtifacts(db, {
+    sourceIds,
+    claimPredicate: { prefix: "position_change" },
+    eventType: "position_change",
+  });
+  return { holdings: deleted.rowCount ?? 0, ...counts };
 }
 
 export type IssuerTopHolder = {

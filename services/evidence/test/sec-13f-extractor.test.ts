@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parse13fInfoTable } from "../src/sec-13f-extractor.ts";
+import { parse13fInfoTable, classify13fAmendment } from "../src/sec-13f-extractor.ts";
 
 // Modeled on a real Berkshire 13F-HR (acc 0001193125-26-226661): two <XML> docs —
 // the cover (periodOfReport MM-DD-YYYY) and the informationTable. ALLY appears
@@ -95,4 +95,38 @@ test("parse13fInfoTable captures putCall so option rows can be excluded downstre
 test("parse13fInfoTable rejects a shape-valid but non-calendar period", () => {
   const bad = `<XML><periodOfReport>13-99-2026</periodOfReport></XML><XML><informationTable></informationTable></XML>`;
   assert.throws(() => parse13fInfoTable(bad), /periodOfReport/);
+});
+
+test("parse13fInfoTable reports amendmentType null on an original 13F-HR (no amendmentInfo)", () => {
+  assert.equal(parse13fInfoTable(SUBMISSION).amendmentType, null);
+});
+
+test("parse13fInfoTable extracts amendmentType from a 13F-HR/A cover, uppercased + trimmed", () => {
+  const restate = SUBMISSION.replace(
+    "<periodOfReport>03-31-2026</periodOfReport>",
+    "<periodOfReport>03-31-2026</periodOfReport><amendmentInfo><amendmentType>  restatement  </amendmentType></amendmentInfo>",
+  );
+  assert.equal(parse13fInfoTable(restate).amendmentType, "RESTATEMENT", "case + whitespace normalized so the handler can branch reliably");
+
+  const supplement = SUBMISSION.replace(
+    "<periodOfReport>03-31-2026</periodOfReport>",
+    "<periodOfReport>03-31-2026</periodOfReport><amendmentInfo><amendmentType>NEW HOLDINGS</amendmentType></amendmentInfo>",
+  );
+  assert.equal(parse13fInfoTable(supplement).amendmentType, "NEW HOLDINGS");
+
+  // A cover that wraps the value across lines / with runs of whitespace still classifies
+  // (the handler compares on exact token equality, so internal whitespace must collapse).
+  const wrapped = SUBMISSION.replace(
+    "<periodOfReport>03-31-2026</periodOfReport>",
+    "<periodOfReport>03-31-2026</periodOfReport><amendmentInfo><amendmentType>NEW\n        HOLDINGS</amendmentType></amendmentInfo>",
+  );
+  assert.equal(parse13fInfoTable(wrapped).amendmentType, "NEW HOLDINGS", "internal whitespace runs collapse to one space");
+});
+
+test("classify13fAmendment narrows known kinds and rejects absent/unmodeled values", () => {
+  assert.equal(classify13fAmendment("RESTATEMENT"), "RESTATEMENT");
+  assert.equal(classify13fAmendment("NEW HOLDINGS"), "NEW HOLDINGS");
+  assert.equal(classify13fAmendment(null), null, "absent (original 13F-HR) → null");
+  // An unmodeled value narrows to null; the handler keeps the raw string for its skip warn.
+  assert.equal(classify13fAmendment("CONFIDENTIAL TREATMENT"), null);
 });
