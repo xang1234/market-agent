@@ -331,6 +331,35 @@ jobs:
         working-directory: services/evidence
         run: npm test
 
+  analyst-grids:
+    name: analyst-grids (integration tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            db/package-lock.json
+            services/analyst-grids/package-lock.json
+
+      # analyst-grids tests use the shared db/test Docker harness (bootstrapDatabase),
+      # which runs `npm run apply:schema` inside db/, so db dependencies must be present.
+      - name: Install db deps (needed by analyst-grids integration harness)
+        working-directory: db
+        run: npm ci
+
+      - name: Install analyst-grids deps
+        working-directory: services/analyst-grids
+        run: npm ci
+
+      - name: Run analyst-grids tests
+        working-directory: services/analyst-grids
+        run: npm test
+
   agents:
     name: agents (tests)
     runs-on: ubuntu-latest
