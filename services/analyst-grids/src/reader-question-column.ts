@@ -3,8 +3,8 @@ import { createClaim } from "../../evidence/src/claim-repo.ts";
 import { writeToolCallLog } from "../../observability/src/tool-call.ts";
 import { buildClaimBackedSealInput } from "../../snapshot/src/seal-input.ts";
 import { selectReaderDocuments, READER_DOCUMENTS_PER_CELL } from "./reader-documents.ts";
-import { buildReaderMessages, parseReaderResponse, type ReaderDocText } from "./reader-llm.ts";
-import type { GridColumnProducer, GridCellResult } from "./column-catalog.ts";
+import { buildReaderMessages, parseReaderResponse, type ReaderDocText, type ParsedReaderResponse } from "./reader-llm.ts";
+import type { GridColumnProducer, GridCellResult, ReaderLlm } from "./column-catalog.ts";
 import { EMPTY_DISPLAY, GridValidationError } from "./types.ts";
 
 export const READER_TOOL_NAME = "grid_reader_question";
@@ -31,6 +31,36 @@ const NO_COVERAGE = (flag: string): GridCellResult => ({
   display: EMPTY_DISPLAY,
   coverageFlag: flag,
 });
+
+const READER_MAX_ATTEMPTS = 2;
+
+// One reader cell in six intermittently failed with 'Unterminated string in JSON': the dev
+// channel truncates the response provider-side (~930 chars) despite maxTokens being
+// forwarded. The cut is non-deterministic (temperature 0, but provider-side), so a single
+// fresh retry absorbs it. Only a JSON.parse SyntaxError (the truncation symptom) is
+// retried — a shape/validation failure throws a plain Error and is deterministic at
+// temperature 0, so re-asking wouldn't change it. Returns the deployment so the caller can
+// stamp the seal's model_version. (fra-iuv9)
+async function completeAndParseReader(
+  llm: ReaderLlm,
+  messages: ReturnType<typeof buildReaderMessages>,
+  allowedDocumentIds: ReadonlySet<string>,
+): Promise<{ parsed: ParsedReaderResponse; deployment?: { channel: string; model: string } }> {
+  for (let attempt = 1; ; attempt += 1) {
+    const completion = await llm.complete({
+      messages,
+      temperature: 0,
+      // Headroom for the JSON claims array — 1500 truncated real responses mid-string
+      // once documents carried actual prose.
+      maxTokens: 4000,
+    });
+    try {
+      return { parsed: parseReaderResponse(completion.text, allowedDocumentIds), deployment: completion.deployment };
+    } catch (err) {
+      if (attempt >= READER_MAX_ATTEMPTS || !(err instanceof SyntaxError)) throw err;
+    }
+  }
+}
 
 export const readerQuestionProducer: GridColumnProducer = async (deps, ctx) => {
   if (ctx.subject.kind !== "issuer") return NO_COVERAGE("issuer_only");
@@ -59,15 +89,9 @@ export const readerQuestionProducer: GridColumnProducer = async (deps, ctx) => {
   ).filter((t): t is ReaderDocText => t !== null);
   if (texts.length === 0) return NO_COVERAGE("no_document_text");
 
-  const completion = await reader.llm.complete({
-    messages: buildReaderMessages(prompt, texts),
-    temperature: 0,
-    // Headroom for the JSON claims array — 1500 truncated real responses
-    // mid-string once documents carried actual prose.
-    maxTokens: 4000,
-  });
-  const parsed = parseReaderResponse(
-    completion.text,
+  const { parsed, deployment } = await completeAndParseReader(
+    reader.llm,
+    buildReaderMessages(prompt, texts),
     new Set(texts.map((t) => t.document_id)),
   );
   if (parsed.kind === "not_discussed") {
@@ -151,7 +175,7 @@ export const readerQuestionProducer: GridColumnProducer = async (deps, ctx) => {
     }),
     subjectRefs: [{ kind: ctx.subject.kind, id: ctx.subject.id }],
     toolCalls: [{ tool_call_id: logged.tool_call_id, result_hash: logged.result_hash }],
-    modelVersion: completion.deployment ? `reader:${completion.deployment.model}` : null,
+    modelVersion: deployment ? `reader:${deployment.model}` : null,
   });
 
   return {
