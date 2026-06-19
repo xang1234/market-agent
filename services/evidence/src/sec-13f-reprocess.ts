@@ -23,6 +23,7 @@ import { parse13fInfoTable } from "./sec-13f-extractor.ts";
 import { resolveHoldingsByIssuer } from "./sec-13f-resolve.ts";
 import { isSuperinvestorFiler, superinvestorName } from "./superinvestor-filers.ts";
 import { insertHolding, sourceIdForAccession } from "./institutional-holdings-repo.ts";
+import { isAccessionSuperseded } from "./document-repo.ts";
 import { createSource } from "./source-repo.ts";
 import { withTransaction } from "./transaction.ts";
 import { recentSubmissionRows, type SecFilingFetcher, type SecSubmissions } from "./sec-edgar.ts";
@@ -64,6 +65,7 @@ export type Reprocess13fResult = {
   cusipsEnriched: number; // newly mapped to an issuer via OpenFIGI this run
   cusipsUnmapped: number; // OpenFIGI returned no/ambiguous/non-equity match
   holdingsUpserted: number; // read-model rows written across all accessions
+  supersededSkipped: number; // originals replaced by a 13F-HR/A amendment — left untouched
 };
 
 export async function reprocessFiler13f(
@@ -105,8 +107,18 @@ export async function reprocessFiler13f(
   }
   const candidates = inWindow.slice(0, maxFilings);
 
-  const result: Reprocess13fResult = { accessionsProcessed: 0, cusipsEnriched: 0, cusipsUnmapped: 0, holdingsUpserted: 0 };
+  const result: Reprocess13fResult = { accessionsProcessed: 0, cusipsEnriched: 0, cusipsUnmapped: 0, holdingsUpserted: 0, supersededSkipped: 0 };
   for (const candidate of candidates) {
+    // Skip an original whose filing a later 13F-HR/A RESTATEMENT already superseded:
+    // supersede13fFiling deleted its read-model rows and flipped its document to
+    // 'superseded'. Re-resolving + upserting it here would re-add the stale portfolio
+    // under a fresh source (sourceIdForAccession returns null after the delete), undoing
+    // the amendment. Reprocessing amendment chains for coverage is a follow-up (fra-msx1).
+    if (await isAccessionSuperseded(deps.db, candidate.accession)) {
+      console.warn(`[sec-13f-reprocess] ${candidate.accession}: superseded by a 13F-HR/A amendment — skipped`);
+      result.supersededSkipped += 1;
+      continue;
+    }
     const fetched = await deps.secClient.fetchFiling({
       cik: input.cik,
       accession_number: candidate.accession,

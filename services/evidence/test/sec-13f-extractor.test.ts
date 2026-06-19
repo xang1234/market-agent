@@ -113,6 +113,14 @@ test("parse13fInfoTable extracts amendmentType from a 13F-HR/A cover, uppercased
     "<periodOfReport>03-31-2026</periodOfReport><amendmentInfo><amendmentType>NEW HOLDINGS</amendmentType></amendmentInfo>",
   );
   assert.equal(parse13fInfoTable(supplement).amendmentType, "NEW HOLDINGS");
+
+  // A cover that wraps the value across lines / with runs of whitespace still classifies
+  // (the handler compares on exact token equality, so internal whitespace must collapse).
+  const wrapped = SUBMISSION.replace(
+    "<periodOfReport>03-31-2026</periodOfReport>",
+    "<periodOfReport>03-31-2026</periodOfReport><amendmentInfo><amendmentType>NEW\n        HOLDINGS</amendmentType></amendmentInfo>",
+  );
+  assert.equal(parse13fInfoTable(wrapped).amendmentType, "NEW HOLDINGS", "internal whitespace runs collapse to one space");
 });
 
 test("classify13fAmendment narrows known kinds and rejects absent/unmodeled values", () => {

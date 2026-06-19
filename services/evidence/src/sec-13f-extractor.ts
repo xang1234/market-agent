@@ -45,7 +45,10 @@ export type Form13fFiling = {
 
 export function parse13fInfoTable(submissionTxt: string): Form13fFiling {
   const periodOfReport = normalizePeriod(requireTagText(submissionTxt, "periodOfReport", "13F cover"));
-  const amendmentType = tagText(submissionTxt, "amendmentType")?.trim().toUpperCase() ?? null;
+  // Collapse internal whitespace (incl. line breaks) before matching, so a cover that
+  // wraps the value (e.g. "NEW\n   HOLDINGS") still classifies (the handler compares on
+  // exact token equality).
+  const amendmentType = tagText(submissionTxt, "amendmentType")?.replace(/\s+/g, " ").trim().toUpperCase() ?? null;
 
   const holdings: Form13fHolding[] = [];
   for (const row of iterateBlocks(submissionTxt, "infoTable")) {
