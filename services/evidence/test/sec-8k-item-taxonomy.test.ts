@@ -1,7 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { classify8kItems, classify8kHeader, itemCodeForDescription } from "../src/sec-8k-item-taxonomy.ts";
+import { classify8kItems, classify8kHeader, itemCodeForDescription, parseFiledAsOfDate } from "../src/sec-8k-item-taxonomy.ts";
+
+test("parseFiledAsOfDate reads the SEC-HEADER filing date as ISO, or null when absent/invalid", () => {
+  const header = `<SEC-DOCUMENT>0000320193-26-000080.txt : 20260315
+<SEC-HEADER>
+ACCESSION NUMBER:\t\t0000320193-26-000080
+CONFORMED SUBMISSION TYPE:\t8-K
+FILED AS OF DATE:\t\t20260315
+DATE AS OF CHANGE:\t\t20260315
+</SEC-HEADER>`;
+  assert.equal(parseFiledAsOfDate(header), "2026-03-15");
+  assert.equal(parseFiledAsOfDate("no header here"), null);
+  // Shape-valid but non-calendar date is rejected (not surfaced as a bad event date).
+  assert.equal(parseFiledAsOfDate("FILED AS OF DATE:\t\t20261345"), null);
+});
 
 test("classify8kItems maps recognized codes to their event type (claimable)", () => {
   assert.deepEqual(classify8kItems(["5.02"]), [
