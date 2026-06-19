@@ -127,3 +127,15 @@ export function classify8kHeader(submissionTxt: string): Item8kClassification[] 
   }
   return out;
 }
+
+// The full-submission .txt SGML header carries the canonical filing date as
+// "FILED AS OF DATE:\t\tYYYYMMDD". Returns ISO YYYY-MM-DD, or null when absent or
+// not a real calendar date — the legacy-8-K repair uses it for the event's
+// occurred_at and skips (rather than mis-dating) a filing it can't date.
+export function parseFiledAsOfDate(submissionTxt: string): string | null {
+  const m = /FILED AS OF DATE:\s*(\d{4})(\d{2})(\d{2})/.exec(submissionTxt);
+  if (m === null) return null;
+  const iso = `${m[1]}-${m[2]}-${m[3]}`;
+  const d = new Date(`${iso}T00:00:00.000Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === iso ? iso : null;
+}

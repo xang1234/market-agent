@@ -16,6 +16,7 @@ import { createClaimArgument } from "./claim-argument-repo.ts";
 import { resolveIssuerIdByCik } from "./sec-issuer-resolve.ts";
 import { classify8kHeader, type Item8kClassification } from "./sec-8k-item-taxonomy.ts";
 import type { FetchFilingResult } from "./sec-edgar.ts";
+import type { QueryExecutor } from "./types.ts";
 
 // handle8k reads only these fields — the filer CIK (= issuer for an 8-K), the
 // accession to fetch/dedup, and form/filing date for the document + event rows.
@@ -63,52 +64,71 @@ export async function persist8kFiling(
     confidence: 1,
   });
 
+  await persist8kMaterialEvents(deps.tx.db, {
+    documentId: document.document_id,
+    sourceId: source.source_id,
+    issuerId,
+    items,
+    occurredAt,
+    form: entry.form,
+    accession: entry.accession,
+  });
+}
+
+// Write the typed artifacts for a classified 8-K — one event per item, plus a
+// material_event claim (+ issuer claim_argument) per claimable item, and an issuer
+// event_subject — all referencing the given document + source. Shared by
+// persist8kFiling (fresh ingest) and the legacy repair (which attaches these to an
+// EXISTING document + source, see sec-8k-repair.ts). Returns the row counts.
+export async function persist8kMaterialEvents(
+  db: QueryExecutor,
+  args: {
+    documentId: string;
+    sourceId: string;
+    issuerId: string;
+    items: ReadonlyArray<Item8kClassification>;
+    occurredAt: string;
+    form: string;
+    accession: string;
+  },
+): Promise<{ events: number; claims: number }> {
+  const { documentId, sourceId, issuerId, items, occurredAt, form, accession } = args;
+  let events = 0;
+  let claims = 0;
   for (const item of items) {
     // Label the item by its numeric code when known, else its header title.
     const itemLabel = item.itemCode ?? item.itemDescription ?? "unspecified item";
     const claimIds: string[] = [];
     if (item.claimable) {
-      const claim = await createClaim(deps.tx.db, {
-        document_id: document.document_id,
+      const claim = await createClaim(db, {
+        document_id: documentId,
         predicate: `material_event.${item.eventType}`,
         text_canonical: `Material event reported via 8-K: ${item.eventType.replace(/_/g, " ")} (${itemLabel}).`,
         polarity: "neutral",
         modality: "asserted",
-        reported_by_source_id: source.source_id,
+        reported_by_source_id: sourceId,
         attributed_to_type: "issuer",
         attributed_to_id: issuerId,
         effective_time: occurredAt,
         confidence: 0.9,
         status: "extracted",
       });
-      await createClaimArgument(deps.tx.db, {
-        claim_id: claim.claim_id,
-        subject_kind: "issuer",
-        subject_id: issuerId,
-        role: "subject",
-      });
+      await createClaimArgument(db, { claim_id: claim.claim_id, subject_kind: "issuer", subject_id: issuerId, role: "subject" });
       claimIds.push(claim.claim_id);
+      claims += 1;
     }
-    const event = await createEvent(deps.tx.db, {
+    const event = await createEvent(db, {
       event_type: item.eventType,
       occurred_at: occurredAt,
       status: "reported",
       source_claim_ids: claimIds,
-      source_ids: [source.source_id],
-      payload_json: {
-        item_code: item.itemCode,
-        item_description: item.itemDescription,
-        form: entry.form,
-        accession: entry.accession,
-      },
+      source_ids: [sourceId],
+      payload_json: { item_code: item.itemCode, item_description: item.itemDescription, form, accession },
     });
-    await createEventSubject(deps.tx.db, {
-      event_id: event.event_id,
-      subject_kind: "issuer",
-      subject_id: issuerId,
-      role: "subject",
-    });
+    await createEventSubject(db, { event_id: event.event_id, subject_kind: "issuer", subject_id: issuerId, role: "subject" });
+    events += 1;
   }
+  return { events, claims };
 }
 
 export const handle8k = async (entry: Form8kFilingRef, deps: FormHandlerDeps) => {
