@@ -14,7 +14,7 @@ import { createClaimArgument } from "./claim-argument-repo.ts";
 import { parse13fInfoTable, classify13fAmendment } from "./sec-13f-extractor.ts";
 import { isSuperinvestorFiler, superinvestorName } from "./superinvestor-filers.ts";
 import { resolveHoldingsByIssuer } from "./sec-13f-resolve.ts";
-import { insertHolding, holdingsByFiler, priorPeriodForFiler, supersede13fFiling } from "./institutional-holdings-repo.ts";
+import { insertHolding, holdingsByFiler, priorPeriodForFiler, supersede13fFiling, findFilerIssuerHolding } from "./institutional-holdings-repo.ts";
 
 export type Form13fFilingRef = Pick<FilingIndexEntry, "cik" | "accession" | "form" | "filedDate">;
 
@@ -84,7 +84,12 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
     console.warn(`[sec-13f] ${entry.accession}: CUSIP ${miss.cusip} (${miss.nameOfIssuer}) not resolvable — skipped`);
   }
   const hadUnresolved = unresolved.length > 0;
-  if (resolved.length === 0) {
+  // A RESTATEMENT with no resolvable holdings must STILL proceed: it authoritatively
+  // restates the portfolio (possibly to empty), so the transaction below has to supersede
+  // the original's rows + claims — returning here would leave them stale. For an original
+  // or a supplemental amendment, an empty resolve has nothing to do (no rows to insert,
+  // nothing to supersede).
+  if (resolved.length === 0 && !restate) {
     console.warn(`[sec-13f] skip ${entry.accession}: no resolvable holdings for ${filerName}`);
     return { ingested: false };
   }
@@ -186,34 +191,43 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
       }
     }
 
-    // For a NEW HOLDINGS supplemental amendment `resolved` is only the added holdings; the
-    // read-model upsert merges them into the existing period and each emits a change claim
-    // vs the prior quarter (same as an original filing's holdings). SEC NEW HOLDINGS are
-    // disjoint from the original by definition, so this doesn't duplicate the original's
-    // claims; a malformed amendment that re-listed an original issuer would emit a second
-    // claim (the claims table has no uniqueness constraint), but the read model stays
-    // correct via the (filer, issuer, period) upsert.
+    // Insert each resolved holding and emit a notable change vs the prior quarter. For a
+    // NEW HOLDINGS supplemental amendment the row is ADDED to the period: insertHolding
+    // upserts on (filer, issuer, period), so if this issuer is already held — e.g. the
+    // original reported a different share class (GOOGL) and the supplement adds another
+    // (GOOG), both resolving to the same issuer — the supplement must be MERGED into the
+    // existing total rather than overwriting it, and the change claim computed from the
+    // merged total. An original/restatement is the full portfolio, so it overwrites as-is.
     for (const h of resolved) {
+      let shares = h.shares;
+      let valueUsd = h.valueUsd;
+      if (supplemental) {
+        const existing = await findFilerIssuerHolding(tx.db, filerCik, h.issuerId, period);
+        if (existing) {
+          shares += existing.shares;
+          valueUsd += existing.value_usd;
+        }
+      }
       await insertHolding(tx.db, {
         filer_cik: filerCik,
         filer_name: filerName,
         issuer_id: h.issuerId,
         cusip: h.cusip,
-        shares: h.shares,
-        value_usd: h.valueUsd,
+        shares,
+        value_usd: valueUsd,
         filing_period: period,
         filing_date: entry.filedDate,
         source_id: source.source_id,
         accession: entry.accession,
       });
       if (priorPeriod === null) continue; // baseline period
-      const kind = classifyChange(h.shares, priorByIssuer.get(h.issuerId)?.shares);
+      const kind = classifyChange(shares, priorByIssuer.get(h.issuerId)?.shares);
       if (kind === null) continue; // routine rebalance → read-model only
       await emitNotable(
         h.issuerId,
         kind,
-        `${filerName} ${changeVerb(kind)} ${h.nameOfIssuer} (${h.shares.toLocaleString("en-US")} shares as of ${period}).`,
-        { cusip: h.cusip, shares: h.shares, prior_shares: priorByIssuer.get(h.issuerId)?.shares ?? null },
+        `${filerName} ${changeVerb(kind)} ${h.nameOfIssuer} (${shares.toLocaleString("en-US")} shares as of ${period}).`,
+        { cusip: h.cusip, shares, prior_shares: priorByIssuer.get(h.issuerId)?.shares ?? null },
       );
     }
 

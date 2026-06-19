@@ -268,6 +268,48 @@ test("handle13f (13F-HR/A RESTATEMENT) drops an omitted issuer's stale row and s
   assert.equal((await client.query(`select count(*)::int as n from documents where parse_status = 'superseded'`)).rows[0]!.n, 1);
 });
 
+test("handle13f (13F-HR/A RESTATEMENT) with no resolvable holdings still supersedes the original", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-restate-empty");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  const aaplId = await seedIssuerWithCusip(client, "Apple Inc.", AAPL_CUSIP);
+  const sourceId = await seedSource(client);
+
+  // Prior period (2025-12-31): AAPL 80 — so the original Q1 emits an "increased" claim.
+  await insertHolding(db, {
+    filer_cik: "0001067983", filer_name: "Berkshire Hathaway Inc", issuer_id: aaplId, cusip: AAPL_CUSIP,
+    shares: 80, value_usd: 4000, filing_period: "2025-12-31", filing_date: "2026-02-14",
+    source_id: sourceId, accession: "0001193125-26-000043",
+  });
+
+  // Original Q1 13F-HR: AAPL 100 (read-model row + an "increased" claim vs the prior period).
+  await handle13f(entry("0001193125-26-000044"), memDeps(db, submission("03-31-2026", [
+    { name: "APPLE INC", cusip: AAPL_CUSIP, value: 10000, shares: 100 },
+  ])));
+  assert.equal((await client.query(`select count(*)::int as n from institutional_holdings where filing_period = '2026-03-31'`)).rows[0]!.n, 1);
+
+  // Amended Q1 13F-HR/A RESTATEMENT to an EMPTY portfolio (no resolvable holdings). The
+  // old guard returned at resolved.length===0 BEFORE superseding, leaving the row stale.
+  const res = await handle13f(
+    entry("0001193125-26-000045", "2026-06-01", BERKSHIRE, "13F-HR/A"),
+    memDeps(db, submission("03-31-2026", [], "RESTATEMENT")),
+  );
+  assert.equal(res.ingested, true, "the empty restatement is processed (supersedes), not skipped");
+
+  // The original Q1 holding is superseded (removed), not left stale.
+  assert.equal(
+    (await client.query(`select count(*)::int as n from institutional_holdings where filing_period = '2026-03-31'`)).rows[0]!.n,
+    0,
+    "the restated-away holding is removed",
+  );
+  // The original "increased" claim is soft-superseded.
+  const active = await client.query<{ n: number }>(
+    `select count(*)::int as n from claims where predicate = 'position_change.increased' and superseded_at is null`,
+  );
+  assert.equal(active.rows[0]!.n, 0, "the original increased claim is superseded");
+});
+
 test("handle13f (13F-HR/A NEW HOLDINGS) merges supplemental rows without flagging the originals as exits", async (t) => {
   if (!dockerAvailable()) return t.skip("docker unavailable");
   const { databaseUrl } = await bootstrapDatabase(t, "f13f-supplement");
@@ -312,6 +354,41 @@ test("handle13f (13F-HR/A NEW HOLDINGS) merges supplemental rows without flaggin
     0,
     "an add-only amendment never emits exits (the bug this fixes)",
   );
+});
+
+test("handle13f (13F-HR/A NEW HOLDINGS) adds a supplemental share class to an already-held issuer's total", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-supp-merge");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  // One issuer, two share classes (GOOGL + GOOG) → both resolve to the same issuer_id.
+  const alphabetId = await seedIssuerWithCusip(client, "Alphabet Inc.", "02079K305"); // GOOGL
+  await client.query(`insert into instruments (issuer_id, asset_type, cusip) values ($1, 'common_stock', '02079K107')`, [alphabetId]); // GOOG
+
+  // Original Q1: GOOGL 100 → Alphabet total 100.
+  await handle13f(entry("0001193125-26-000061"), memDeps(db, submission("03-31-2026", [
+    { name: "ALPHABET INC CL A", cusip: "02079K305", value: 1000, shares: 100 },
+  ])));
+  assert.equal(
+    Number((await client.query(`select shares from institutional_holdings where issuer_id = $1 and filing_period = '2026-03-31'`, [alphabetId])).rows[0]!.shares),
+    100,
+  );
+
+  // Supplemental NEW HOLDINGS: GOOG 200 — same issuer, a previously-unreported share class.
+  const res = await handle13f(
+    entry("0001193125-26-000062", "2026-06-01", BERKSHIRE, "13F-HR/A"),
+    memDeps(db, submission("03-31-2026", [{ name: "ALPHABET INC CL C", cusip: "02079K107", value: 2000, shares: 200 }], "NEW HOLDINGS")),
+  );
+  assert.equal(res.ingested, true);
+
+  // The supplement is ADDED to the existing total (100 + 200), not overwritten (200).
+  const row = await client.query<{ shares: string; value_usd: string }>(
+    `select shares, value_usd from institutional_holdings where issuer_id = $1 and filing_period = '2026-03-31'`,
+    [alphabetId],
+  );
+  assert.equal(row.rows.length, 1, "still one issuer-level row for the period");
+  assert.equal(Number(row.rows[0]!.shares), 300, "supplemental merged into the existing total (100 + 200), not overwritten");
+  assert.equal(Number(row.rows[0]!.value_usd), 3000, "value merged (1000 + 2000)");
 });
 
 test("handle13f skips a 13F-HR/A with an unrecognized amendmentType rather than guessing", async (t) => {

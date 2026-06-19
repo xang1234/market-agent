@@ -178,6 +178,22 @@ export async function findLiveDocumentIdByAccession(
   return rows[0]?.document_id ?? null;
 }
 
+// True if a document for this accession has been marked superseded — i.e. a later
+// amendment (e.g. a 13F-HR/A RESTATEMENT) retired this filing via supersede13fFiling,
+// which flips parse_status to 'superseded'. The 13F reprocess uses this to skip an
+// original whose portfolio an amendment already replaced, rather than re-adding the
+// stale rows under a fresh source.
+export async function isAccessionSuperseded(db: QueryExecutor, accession: string): Promise<boolean> {
+  const { rows } = await db.query<{ one: number }>(
+    `select 1 as one
+       from documents
+      where provider_doc_id = $1 and parse_status = 'superseded'
+      limit 1`,
+    [accession],
+  );
+  return rows.length > 0;
+}
+
 export async function getDocumentChildren(
   db: QueryExecutor,
   parentDocumentId: string,
