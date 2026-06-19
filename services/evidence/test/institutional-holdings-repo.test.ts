@@ -96,27 +96,21 @@ test("priorPeriodForFiler returns the most recent period before the given one, o
   assert.equal(await priorPeriodForFiler(fakeDb([{ filing_period: null }]).db, BERKSHIRE, "2026-03-31"), null);
 });
 
-test("supersede13fFiling deletes the period's holdings, soft-supersedes claims, deletes events, marks docs", async () => {
-  // Two holdings share one filing's source — the captured source set must dedup to one.
+test("supersede13fFiling deletes the period's holdings and delegates the artifact cleanup to the shared helper", async () => {
+  // Two holdings share one filing's source — the captured source set must dedup to one,
+  // which is then forwarded to supersedeFilingArtifacts (claims, events, documents).
   const { db, calls } = fakeDb([{ source_id: SOURCE }, { source_id: SOURCE }]);
   await supersede13fFiling(db, { filer_cik: BERKSHIRE, filing_period: "2026-03-31" });
-  assert.equal(calls.length, 4, "delete holdings, supersede claims, delete events, mark documents");
+  assert.equal(calls.length, 4, "the read-model delete + the helper's 3 artifact queries");
 
+  // Step 1 (this repo's job): delete the whole (filer, period) portfolio, capture sources.
   assert.match(calls[0].text, /delete from institutional_holdings\s+where filer_cik = \$1 and filing_period = \$2::date/i);
   assert.match(calls[0].text, /returning source_id/i);
   assert.deepEqual(calls[0].values, [BERKSHIRE, "2026-03-31"]);
 
-  assert.match(calls[1].text, /update claims set superseded_at = now\(\)/i);
-  assert.match(calls[1].text, /predicate like 'position_change\.%'/i);
-  assert.match(calls[1].text, /superseded_at is null/i, "idempotent: only stamps un-superseded claims");
-  assert.deepEqual(calls[1].values, [[SOURCE]], "deduped source set");
-
-  assert.match(calls[2].text, /delete from events\s+where event_type = 'position_change'/i);
-  assert.match(calls[2].text, /jsonb_array_elements_text\(source_ids\)/i);
-  assert.deepEqual(calls[2].values, [[SOURCE]]);
-
-  assert.match(calls[3].text, /update documents set parse_status = 'superseded'/i);
-  assert.deepEqual(calls[3].values, [[SOURCE]]);
+  // The deduped source set is forwarded to the shared helper (predicate/event SQL is
+  // asserted in supersede-filing.test.ts). 13F uses the position_change.* LIKE prefix.
+  assert.deepEqual(calls[1].values, [[SOURCE], "position_change.%"], "deduped sources + position_change LIKE prefix");
 });
 
 test("supersede13fFiling no-ops (single query, zero counts) when no prior holdings match", async () => {

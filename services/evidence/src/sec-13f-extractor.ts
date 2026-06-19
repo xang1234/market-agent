@@ -17,13 +17,28 @@ export type Form13fHolding = {
   putCall: string | null;
 };
 
+// The 13F-HR/A amendment kinds we model (cover <amendmentInfo><amendmentType>):
+// RESTATEMENT replaces the whole portfolio; NEW HOLDINGS is supplemental (add-only). The
+// restate-vs-supplement distinction is what stops a supplemental amendment from being
+// mis-read as the whole portfolio (false exits) — fra-kb2p.
+export const KNOWN_13F_AMENDMENT_TYPES = ["RESTATEMENT", "NEW HOLDINGS"] as const;
+export type Known13fAmendmentType = (typeof KNOWN_13F_AMENDMENT_TYPES)[number];
+
+// Narrow a raw cover amendmentType to a kind we model, or null if absent/unmodeled. The
+// handler keeps the raw value (Form13fFiling.amendmentType) for its skip diagnostic and
+// refuses to guess an unmodeled type; this narrowing makes the handler's branch
+// comparisons compiler-checked.
+export function classify13fAmendment(raw: string | null): Known13fAmendmentType | null {
+  return raw !== null && (KNOWN_13F_AMENDMENT_TYPES as readonly string[]).includes(raw)
+    ? (raw as Known13fAmendmentType)
+    : null;
+}
+
 export type Form13fFiling = {
   periodOfReport: string; // YYYY-MM-DD (reporting quarter end)
-  // 13F-HR/A cover <amendmentInfo><amendmentType>: "RESTATEMENT" (full portfolio
-  // replacement) | "NEW HOLDINGS" (supplemental, add-only). null on an original
-  // 13F-HR (no amendmentInfo). Uppercased + trimmed so the handler can branch
-  // reliably; the restate-vs-supplement distinction is what stops a supplemental
-  // amendment from being mis-read as the whole portfolio (false exits) — fra-kb2p.
+  // Raw 13F-HR/A cover <amendmentInfo><amendmentType>, uppercased + trimmed; null on an
+  // original 13F-HR (no amendmentInfo). Kept raw for diagnostics — the handler narrows it
+  // via classify13fAmendment and logs the raw value when it can't be classified.
   amendmentType: string | null;
   holdings: Form13fHolding[];
 };

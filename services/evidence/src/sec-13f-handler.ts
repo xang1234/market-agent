@@ -11,7 +11,7 @@ import { ingestDocumentInTransaction } from "./ingest.ts";
 import { createEvent, createEventSubject } from "./event-repo.ts";
 import { createClaim } from "./claim-repo.ts";
 import { createClaimArgument } from "./claim-argument-repo.ts";
-import { parse13fInfoTable } from "./sec-13f-extractor.ts";
+import { parse13fInfoTable, classify13fAmendment } from "./sec-13f-extractor.ts";
 import { isSuperinvestorFiler, superinvestorName } from "./superinvestor-filers.ts";
 import { resolveHoldingsByIssuer } from "./sec-13f-resolve.ts";
 import { insertHolding, holdingsByFiler, priorPeriodForFiler, supersede13fFiling } from "./institutional-holdings-repo.ts";
@@ -65,15 +65,16 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
   // An amendment we can't classify is skipped, not guessed — guessing either way
   // corrupts the read model. An original 13F-HR is unaffected.
   const isAmendment = entry.form === "13F-HR/A";
-  if (isAmendment && filing.amendmentType !== "RESTATEMENT" && filing.amendmentType !== "NEW HOLDINGS") {
+  const amendmentType = classify13fAmendment(filing.amendmentType);
+  if (isAmendment && amendmentType === null) {
     console.warn(
       `[sec-13f] skip ${entry.accession}: 13F-HR/A with unrecognized amendmentType ` +
         `"${filing.amendmentType ?? "(absent)"}" — not ingested (fra-kb2p)`,
     );
     return { ingested: false };
   }
-  const restate = isAmendment && filing.amendmentType === "RESTATEMENT";
-  const supplemental = isAmendment && filing.amendmentType === "NEW HOLDINGS";
+  const restate = isAmendment && amendmentType === "RESTATEMENT";
+  const supplemental = isAmendment && amendmentType === "NEW HOLDINGS";
 
   // Resolve holdings to tracked issuers (aggregation + value normalization live in
   // the shared resolver). Misses are skipped + logged with this accession's context;
@@ -160,6 +161,12 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
     // rows + derived claims/events before re-inserting, so the amendment replaces rather
     // than double-counts or leaves stale (an omitted issuer's row is removed here). Same
     // transaction as the re-insert, so a failure leaves neither applied.
+    //
+    // The supersede deletes the FULL period; the loop below re-inserts only CUSIP-
+    // resolvable holdings. So an issuer resolvable in the original but not in the amendment
+    // (a CUSIP that no longer resolves) is dropped, not re-added — unlike an original
+    // filing, where an unresolved CUSIP simply never stored a row. Acceptable: a
+    // restatement is authoritative and CUSIP coverage only grows, so this is rare.
     if (restate) {
       const superseded = await supersede13fFiling(tx.db, { filer_cik: filerCik, filing_period: period });
       if (superseded.holdings > 0) {
@@ -179,6 +186,13 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
       }
     }
 
+    // For a NEW HOLDINGS supplemental amendment `resolved` is only the added holdings; the
+    // read-model upsert merges them into the existing period and each emits a change claim
+    // vs the prior quarter (same as an original filing's holdings). SEC NEW HOLDINGS are
+    // disjoint from the original by definition, so this doesn't duplicate the original's
+    // claims; a malformed amendment that re-listed an original issuer would emit a second
+    // claim (the claims table has no uniqueness constraint), but the read model stays
+    // correct via the (filer, issuer, period) upsert.
     for (const h of resolved) {
       await insertHolding(tx.db, {
         filer_cik: filerCik,
@@ -203,27 +217,26 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
       );
     }
 
-    // Exits: issuers held in the prior period but absent now (fully sold). Only
-    // safe when EVERY current CUSIP resolved — otherwise a still-held issuer whose
-    // CUSIP didn't resolve this period would be misread as an exit. Under sparse
-    // v1 resolution this usually defers exits to when coverage is complete
-    // (fra-ajvd.7); new/increased/decreased above stay reliable (issuer present
-    // and resolved in both periods).
-    if (supplemental) {
-      // Add-only amendment: the unlisted originals are still held, not exited — skip
-      // exit detection entirely (the merge above just added the supplemental rows).
-    } else if (priorPeriod !== null && !hadUnresolved) {
-      for (const prior of priorHoldings) {
-        if (currentIssuerIds.has(prior.issuer_id)) continue;
-        await emitNotable(
-          prior.issuer_id,
-          "exit",
-          `${filerName} exited its position in ${prior.cusip} (held ${prior.shares.toLocaleString("en-US")} shares as of ${priorPeriod}).`,
-          { cusip: prior.cusip, shares: 0, prior_shares: prior.shares },
-        );
+    // Exits: issuers held in the prior period but absent now (fully sold). Skipped for a
+    // supplemental (NEW HOLDINGS) amendment — it's add-only, so an unlisted original is
+    // still held, not exited. Otherwise detect exits only when EVERY current CUSIP
+    // resolved; an unresolved one could mask a still-held issuer as an exit, so it's
+    // deferred until coverage is complete (fra-ajvd.7). new/increased/decreased above stay
+    // reliable (issuer present + resolved in both periods).
+    if (!supplemental && priorPeriod !== null) {
+      if (!hadUnresolved) {
+        for (const prior of priorHoldings) {
+          if (currentIssuerIds.has(prior.issuer_id)) continue;
+          await emitNotable(
+            prior.issuer_id,
+            "exit",
+            `${filerName} exited its position in ${prior.cusip} (held ${prior.shares.toLocaleString("en-US")} shares as of ${priorPeriod}).`,
+            { cusip: prior.cusip, shares: 0, prior_shares: prior.shares },
+          );
+        }
+      } else {
+        console.warn(`[sec-13f] ${entry.accession}: unresolved CUSIPs present — exit detection skipped to avoid false positives`);
       }
-    } else if (priorPeriod !== null && hadUnresolved) {
-      console.warn(`[sec-13f] ${entry.accession}: unresolved CUSIPs present — exit detection skipped to avoid false positives`);
     }
   });
 

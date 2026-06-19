@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parse13fInfoTable } from "../src/sec-13f-extractor.ts";
+import { parse13fInfoTable, classify13fAmendment } from "../src/sec-13f-extractor.ts";
 
 // Modeled on a real Berkshire 13F-HR (acc 0001193125-26-226661): two <XML> docs —
 // the cover (periodOfReport MM-DD-YYYY) and the informationTable. ALLY appears
@@ -113,4 +113,12 @@ test("parse13fInfoTable extracts amendmentType from a 13F-HR/A cover, uppercased
     "<periodOfReport>03-31-2026</periodOfReport><amendmentInfo><amendmentType>NEW HOLDINGS</amendmentType></amendmentInfo>",
   );
   assert.equal(parse13fInfoTable(supplement).amendmentType, "NEW HOLDINGS");
+});
+
+test("classify13fAmendment narrows known kinds and rejects absent/unmodeled values", () => {
+  assert.equal(classify13fAmendment("RESTATEMENT"), "RESTATEMENT");
+  assert.equal(classify13fAmendment("NEW HOLDINGS"), "NEW HOLDINGS");
+  assert.equal(classify13fAmendment(null), null, "absent (original 13F-HR) → null");
+  // An unmodeled value narrows to null; the handler keeps the raw string for its skip warn.
+  assert.equal(classify13fAmendment("CONFIDENTIAL TREATMENT"), null);
 });
