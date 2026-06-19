@@ -334,6 +334,8 @@ jobs:
   analyst-grids:
     name: analyst-grids (integration tests)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
