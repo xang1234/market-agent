@@ -376,3 +376,45 @@ test("reader_question — no deployment yields null model_version", async () => 
 test("reader_question — READER_TOOL_NAME constant is 'grid_reader_question'", () => {
   assert.equal(READER_TOOL_NAME, "grid_reader_question");
 });
+
+// ─── fra-iuv9: retry once on truncated (provider-cut) LLM JSON ────────────────
+// An LLM that returns the given texts in order (repeating the last), counting calls —
+// lets a test return a truncated response first and a complete one on the retry.
+function makeReaderSeq(texts: string[]): { reader: ReaderColumnDeps; calls: () => number } {
+  let i = 0;
+  const reader: ReaderColumnDeps = {
+    llm: {
+      async complete() {
+        const text = texts[Math.min(i, texts.length - 1)]!;
+        i += 1;
+        return { text };
+      },
+    },
+    loadDocumentText: async () => "Some document text.",
+  };
+  return { reader, calls: () => i };
+}
+
+// JSON cut mid-string (the provider-side truncation symptom): JSON.parse → SyntaxError.
+const TRUNCATED_JSON = '{"answer": "Revenue grew 10% YoY.", "claims": [{"document_id": "incomplete';
+
+test("reader_question — retries once and succeeds when the first response is truncated", async () => {
+  const { reader, calls } = makeReaderSeq([TRUNCATED_JSON, validLlmAnswer()]);
+  const result = await readerQuestionProducer({ db: happyDb(), reader }, baseCtx());
+  assert.equal(result.status, "ok", "the retry's complete response parses");
+  assert.equal(calls(), 2, "exactly one retry");
+});
+
+test("reader_question — does NOT retry a deterministic shape/validation error", async () => {
+  // Valid JSON, but missing the answer field — a temp-0 model would return it again, so
+  // retrying only wastes a call. Bubbles immediately.
+  const { reader, calls } = makeReaderSeq(['{"claims": []}', validLlmAnswer()]);
+  await assert.rejects(() => readerQuestionProducer({ db: happyDb(), reader }, baseCtx()), /missing answer/);
+  assert.equal(calls(), 1, "no retry on a non-syntax (deterministic) parse failure");
+});
+
+test("reader_question — a persistently truncated response fails after one retry", async () => {
+  const { reader, calls } = makeReaderSeq([TRUNCATED_JSON]); // every attempt truncated
+  await assert.rejects(() => readerQuestionProducer({ db: happyDb(), reader }, baseCtx()));
+  assert.equal(calls(), 2, "two attempts, then give up → error cell");
+});
