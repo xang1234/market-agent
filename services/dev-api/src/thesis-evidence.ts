@@ -9,6 +9,8 @@ import { mergeSealInputs } from '../../analyze/src/seal-input-merge.ts';
 import { writeToolCallLog } from '../../observability/src/tool-call.ts';
 import type { JsonValue } from '../../observability/src/types.ts';
 type PacketFact = ThesisFact & {
+  confidence: number;
+  trust_tier: string;
   fiscal_year: number | null;
   fiscal_period: string | null;
   period_start: string | null;
@@ -37,7 +39,7 @@ export async function loadThesisPacket(db: QueryExecutor, input: {
   from jsonb_to_recordset($2::jsonb) requested(metric_key text,unit text,period_kind text)
   cross join lateral (
    select f.fact_id::text,m.metric_key,f.value_num::float8,f.scale::float8,f.unit,f.period_kind,
-    f.period_end::text,f.period_start::text,f.fiscal_year,f.fiscal_period,f.as_of::text,f.source_id::text
+    f.period_end::text,f.period_start::text,f.fiscal_year,f.fiscal_period,f.as_of::text,f.source_id::text,f.confidence::float8,s.trust_tier
    from facts f join metrics m on m.metric_id=f.metric_id join sources s on s.source_id=f.source_id
    where f.subject_kind='issuer' and f.subject_id=$1::uuid and m.metric_key=requested.metric_key
     and f.unit=requested.unit and f.period_kind=requested.period_kind

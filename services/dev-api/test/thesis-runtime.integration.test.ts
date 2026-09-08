@@ -8,13 +8,15 @@ import { createDocument } from '../../evidence/src/document-repo.ts';
 import { createSource } from '../../evidence/src/source-repo.ts';
 import { ephemeralRawBlobIdForSource } from '../../evidence/src/object-store.ts';
 import type { ThesisLlm } from '../../agents/src/thesis-evaluator.ts';
-import { bootstrapDatabase, connectedClient, connectedPool, dockerAvailable } from '../../../db/test/docker-pg.ts';
+import { bootstrapDatabase, connectedClient, connectedPool, dockerAvailable, registerLifoCleanup } from '../../../db/test/docker-pg.ts';
 import { createAgent, getAgent } from '../../agents/src/agent-repo.ts';
 import { saveThesis, loadThesisHistory } from '../../agents/src/thesis-repo.ts';
 import { runAgentLoop } from '../../agents/src/agent-loop.ts';
 import { createThesisAgentLoopStages } from '../src/thesis-runtime.ts';
 import { createThesisAdapter } from '../src/thesis-adapter.ts';
-import { createServiceDevApiAdapters } from '../src/http.ts';
+import { createDevApiServer, createServiceDevApiAdapters } from '../src/http.ts';
+import { createAgentLoopStages, closeLocalRuntimePoolForTests } from '../src/local-runtime.ts';
+import type { AddressInfo } from 'node:net';
 import { loadEvidenceInspection } from '../../evidence/src/inspector.ts';
 
 const USER = '10000000-0000-4000-8000-000000000001';
@@ -105,6 +107,24 @@ test('thesis monitoring persists, deduplicates, reassesses changed facts and pro
   history=await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER});
   assert.equal(history.versions.length,2);
   assert.equal(history.assessments.length,priorCount);
+  // Exercise the actual HTTP run path and stage selector with alert persistence.
+  const previousUrl=process.env.DATABASE_URL;
+  process.env.DATABASE_URL=databaseUrl;
+  registerLifoCleanup(t,async()=>{await closeLocalRuntimePoolForTests(); if(previousUrl===undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL=previousUrl;});
+  const realAdapters=createServiceDevApiAdapters({db:pool,createAgentLoopStages,async sealAnalyzeSnapshot(){throw new Error('not used');}});
+  await realAdapters.agents.update({userId:USER,agentId:agent.agent_id,body:{alert_rules:[{rule_id:'thesis-transition',severity_at_least:'medium',channels:['email']}]}});
+  const server=createDevApiServer({}, {adapters:realAdapters});
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  registerLifoCleanup(t,()=>new Promise<void>(resolve=>server.close(()=>resolve())));
+  const url=`http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/agents/${agent.agent_id}/runs`;
+  for(let i=0;i<2;i++) {
+    const response=await fetch(url,{method:'POST',headers:{'x-user-id':USER}});
+    assert.equal(response.status,201);
+    const run=await response.json() as {status:string};
+    assert.equal(run.status,'completed');
+    assert.equal((await db.query('select count(*)::int as n from alerts_fired where agent_id=$1',[agent.agent_id])).rows[0].n,1);
+  }
+  assert.equal((await db.query('select count(*)::int as n from alerts_fired where agent_id=$1',[agent.agent_id])).rows[0].n,1);
 });
 
 
@@ -125,7 +145,9 @@ test('narrative monitoring sees only current owner-visible claims, rejects fabri
     return {source,document,claim};
   }
   const valid=await evidence('Current');
-  await evidence('Foreign',OTHER);
+  await db.query(`insert into entity_impacts(claim_id,subject_kind,subject_id,direction,channel,horizon,confidence)
+    values($1,'issuer',$2,'negative','demand','near_term',0.9)`,[valid.claim.claim_id,ISSUER]);
+  const foreign=await evidence('Foreign',OTHER);
   const deleted=await evidence('Deleted');
   await db.query('update documents set deleted_at=now() where document_id=$1',[deleted.document.document_id]);
   const old=await evidence('Superseded');
@@ -155,15 +177,25 @@ test('narrative monitoring sees only current owner-visible claims, rejects fabri
   let history=await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER});
   assert.equal(history.assessments[0].model_version,'test:controlled');
   assert.equal(history.assessments[0].results[0].status,'challenged');
+  assert.equal((await db.query('select severity from findings where agent_id=$1',[agent.agent_id])).rows[0].severity,'critical','direct relevance plus strong sourced impact must use existing severity policy');
   const inspection=await loadEvidenceInspection(db,{user_id:USER,snapshot_id:history.assessments[0].snapshot_id,ref:{kind:'claim',id:valid.claim.claim_id}});
   assert.equal(inspection.ref.id,valid.claim.claim_id);
   await assert.rejects(loadEvidenceInspection(db,{user_id:OTHER,snapshot_id:history.assessments[0].snapshot_id,ref:{kind:'claim',id:valid.claim.claim_id}}),{status:404});
+  const assessedSnapshot=history.assessments[0].snapshot_id;
+  const inspectCurrent=()=>loadEvidenceInspection(db,{user_id:USER,snapshot_id:assessedSnapshot,ref:{kind:'claim' as const,id:valid.claim.claim_id}});
+  await db.query('update documents set deleted_at=now() where document_id=$1',[valid.document.document_id]);
+  await assert.rejects(inspectCurrent(),{status:404});
+  await db.query('update documents set deleted_at=null where document_id=$1',[valid.document.document_id]);
+  await db.query('update documents set source_id=$1 where document_id=$2',[foreign.source.source_id,valid.document.document_id]);
+  await assert.rejects(inspectCurrent(),{status:404});
+  await db.query('update documents set source_id=$1 where document_id=$2',[valid.source.source_id,valid.document.document_id]);
   const watermarks=(await getAgent(db,agent.agent_id))!.watermarks;
   await assert.rejects(execute(null,'unavailable'),/unavailable/);
   await assert.rejects(execute({async complete(){return {text:JSON.stringify({results:[{condition_id:CONDITION,status:'supported',reason:'Fabricated evidence.',claim_refs:[randomUUID()]}]})};}},'invalid'),/unsupplied/);
   assert.deepEqual((await getAgent(db,agent.agent_id))!.watermarks,watermarks);
   assert.equal((await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER})).assessments.length,1);
   await db.query('update claims set superseded_at=now() where claim_id=$1',[valid.claim.claim_id]);
+  assert.equal((await inspectCurrent()).ref.id,valid.claim.claim_id,'accessible superseded claims remain inspectable in their historical snapshot');
   await execute(null);
   history=await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER});
   assert.equal(history.assessments[0].results[0].status,'unresolved');

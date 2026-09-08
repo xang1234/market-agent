@@ -357,8 +357,12 @@ async function inspectClaim(
             s.canonical_url
        from claims c
        join sources s on s.source_id = c.reported_by_source_id
+       join documents d on d.document_id = c.document_id
+       join sources document_source on document_source.source_id = d.source_id
       where c.claim_id = $1::uuid
-        and (s.user_id is null or s.user_id = $2::uuid)`,
+        and (s.user_id is null or s.user_id = $2::uuid)
+        and d.deleted_at is null
+        and (document_source.user_id is null or document_source.user_id = $2::uuid)`,
     [claimId, userId],
   );
   const row = rows[0];

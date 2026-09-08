@@ -1,10 +1,9 @@
-import { randomUUID } from 'node:crypto';
 import type { AgentRow, QueryExecutor } from '../../agents/src/agent-repo.ts';
 import type { AgentLoopStages } from '../../agents/src/agent-loop.ts';
 import { getCurrentThesis, loadThesisHistory, recordThesisAssessment } from '../../agents/src/thesis-repo.ts';
 import { evaluateThesis, THESIS_PROMPT_VERSION, type ThesisLlm } from '../../agents/src/thesis-evaluator.ts';
 import { ThesisConflictError, type ThesisVersion, type ConditionAssessment, type ThesisAssessment } from '../../agents/src/thesis-types.ts';
-import { buildFindingSummaryBlocks } from '../../agents/src/finding-summary-blocks.ts';
+import { generateThesisFinding } from './thesis-finding.ts';
 import type { FindingRow } from '../../agents/src/finding-generator.ts';
 import { writeRunActivity } from '../../observability/src/run-activity.ts';
 import { hashJsonValue } from '../../observability/src/tool-call.ts';
@@ -85,21 +84,11 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
       for (const result of evaluation.results) {
         if (result.status === 'unresolved' || previous?.results.find(r => r.condition_id === result.condition_id)?.status === result.status)
           continue;
-        const condition = input.thesis.conditions.find(c => c.condition_id === result.condition_id)!;
-        const sourceIds = [...new Set([
-            ...packet.claims.filter(c => result.claim_refs.includes(c.claim_id)).map(c => c.source_id),
-            ...packet.facts.filter(f => result.fact_refs.includes(f.fact_id)).map(f => f.source_id),
-          ])];
-        const severity = result.status === 'challenged' ? 'high' : 'medium';
-        const findingId = randomUUID();
-        const headline = `${input.agent.name}: ${condition.statement} — ${result.status}. ${result.reason}`;
-        const blocks = buildFindingSummaryBlocks({ finding_id: findingId, headline, severity, snapshot_id: snapshot.snapshot_id, source_refs: sourceIds, subject_refs: [input.thesis.subject_ref], as_of: asOf });
-        const finding: FindingRow = { finding_id: findingId, agent_id: input.agent.agent_id, snapshot_id: snapshot.snapshot_id, headline, severity, subject_refs: [input.thesis.subject_ref], claim_cluster_ids: [], summary_blocks: blocks, created_at: asOf };
-        await tx.query(`insert into findings(finding_id,agent_id,snapshot_id,subject_refs,claim_cluster_ids,severity,headline,summary_blocks)
-     values($1::uuid,$2::uuid,$3::uuid,$4::jsonb,'[]'::jsonb,$5,$6,$7::jsonb)`, [findingId, input.agent.agent_id, snapshot.snapshot_id, JSON.stringify(finding.subject_refs), severity, headline, JSON.stringify(blocks)]);
-        findings.push(finding);
+        findings.push(await generateThesisFinding(tx, {
+          thesis: input.thesis, result, packet, agentName: input.agent.name, snapshot,
+        }));
       }
-      await activity(tx, input, 'reading', `Considered ${packet.claims.length} current claims and ${packet.facts.length} eligible facts for this company.`);
+      await activity(tx, input, 'reading', `Considered ${packet.claims.length} current claims and ${packet.facts.length} stored facts for the configured metrics.`);
       await activity(tx, input, 'investigating', `Assessed ${evaluation.results.length} saved conditions using ${evaluation.model_version ?? 'deterministic checks / missing-evidence handling'}.`);
       await activity(tx, input, findings.length ? 'found' : 'dismissed', findings.length ? `Recorded ${findings.length} thesis condition changes.` : 'Recorded the assessment; no new supported or challenged states.');
       return { findings: findings.length, assessments: 1, reused: false };
