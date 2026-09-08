@@ -295,3 +295,35 @@ test("draftThesisConditions rejects responses that do not contain exactly three 
     ThesisValidationError,
   );
 });
+
+test('same-period metric updates prefer the newer observation regardless of input order', async () => {
+  const saved = thesis([condition(METRIC_ID, {metric:{metric_key:'revenue',unit:'USDm',period_kind:'fiscal_q',operator:'gte',threshold:100,max_age_days:30}})]);
+  const older = fact({value_num:120,scale:1,as_of:'2026-09-05T00:00:00.000Z'});
+  const newer = fact({fact_id:CLAIM_ID,value_num:80,scale:1,as_of:'2026-09-07T00:00:00.000Z'});
+  for (const facts of [[older,newer],[newer,older]]) {
+    const result = await evaluateThesis({thesis:saved,claims:[],facts,as_of:AS_OF,llm:null});
+    assert.equal(result.results[0].status,'challenged');
+    assert.deepEqual(result.results[0].fact_refs,[newer.fact_id]);
+  }
+});
+
+test('relative narrative horizons retain the saved version date across later assessments', async () => {
+  const saved = thesis([condition(BULL_ID,{horizon:'Next quarter'})]);
+  const llm:ThesisLlm = {async complete(request) {
+    assert.match(request.messages[0].content,/relative horizons.*thesis_created_at/i);
+    const packet=JSON.parse(request.messages[1].content);
+    assert.equal(packet.thesis_created_at,saved.created_at);
+    return {text:JSON.stringify({results:[{condition_id:BULL_ID,status:'unresolved',reason:'The horizon has not been established by evidence.',claim_refs:[]}]})};
+  }};
+  for (const as_of of ['2026-09-06T00:00:00.000Z',AS_OF]) {
+    await evaluateThesis({thesis:saved,claims:[{claim_id:CLAIM_ID,text_canonical:'Demand slowed.'}],facts:[],as_of,llm});
+  }
+});
+
+test('narrative reasons normalize whitespace and reject values that cannot be persisted', async () => {
+  const input={thesis:thesis([condition(BULL_ID)]),claims:[{claim_id:CLAIM_ID,text_canonical:'Demand slowed.'}],facts:[],as_of:AS_OF};
+  const response=(reason:string)=>llmResponse({results:[{condition_id:BULL_ID,status:'challenged',reason,claim_refs:[CLAIM_ID]}]});
+  const normalized=await evaluateThesis({...input,llm:response('  Demand slowed.  ')});
+  assert.equal(normalized.results[0].reason,'Demand slowed.');
+  await assert.rejects(evaluateThesis({...input,llm:response('x'.repeat(2001))}),ThesisValidationError);
+});
