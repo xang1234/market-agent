@@ -55,3 +55,30 @@ already resolves to a tracked issuer; unresolved CUSIPs are logged, not dropped 
 filer: a newly initiated position, a full exit, or a large change (roughly a quarter of the
 position, or entering/leaving the filer's top holdings). Routine rebalancing is recorded
 but not treated as notable.
+
+## Living Investment Theses
+
+**Thesis version** is an immutable saved investment view and one to five conditions,
+owned through an agent and scoped to a single issuer. Listing and instrument universes
+resolve to that issuer. Saving requires the currently expected version and synchronizes
+the agent's summary thesis. A structured agent's thesis must be edited through this
+versioned path; changing its company requires a separate agent.
+
+**Thesis condition** is a statement, falsifier, and time horizon. An optional numerical
+check binds an exact metric, unit, period, comparison, threshold, and maximum evidence age.
+Numerical checks use authoritative scaled facts. Relative narrative horizons are
+anchored to the saved version date. Narrative checks evaluate structured claims;
+raw documents are never supplied to the assessment model.
+
+**Condition assessment** is supported, challenged, or unresolved, with a short rationale,
+claim/fact references, and the method used. An assessment belongs to a thesis version,
+run, sealed evidence snapshot, input fingerprint, and model/prompt provenance. Unsupported
+model citations fail the run. Absence of evidence is unresolved, never support.
+
+**Thesis change** is a new supported or challenged condition state relative to the latest
+assessment of the same version. It creates a finding using existing Home, severity
+scoring, and alert flows. Direct condition matches with validated citations establish
+relevance; evidence quality and stored issuer impacts contribute to severity.
+An identical current packet is reused without duplicate findings. An earlier packet that
+recurs after a different assessment receives a new assessment. A version changed during
+assessment invalidates that run before its side effects commit.

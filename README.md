@@ -61,12 +61,18 @@ Filter the universe by asset type, sector, venue, price, change %, and volume, p
 ### Analyze
 ![Analyze — guided memo playbooks](docs/screenshots/analyze.png)
 
-Run guided memo playbooks such as *Earnings quality*, *Variant view*, or *Peer comparison*. Tune the instructions and the source categories, generate a memo, inspect the evidence behind it, rerun it, compare against earlier runs, and hand the result off into a chat thread.
+Run guided memo playbooks such as *Earnings quality*, *Variant view*, or *Peer comparison*. Tune the instructions and the source categories, generate a memo, inspect the evidence behind it, rerun it, compare against earlier runs, and hand the result off into a chat thread. A completed single-company memo also offers **Monitor this thesis**, carrying its company and editable text into agent creation.
 
 ### Agents
 ![Agents — thesis agents with cadence, universe, and run history](docs/screenshots/agents.png)
 
-Create a thesis agent: give it a name, a thesis, a cadence (daily / weekly / on-demand), and a universe (specific names, or a dynamic universe driven by a screen, theme, or portfolio). The agent ingests new evidence on its schedule, scores it against your thesis, raises findings to Home, and alerts you by email, web push, or digest. Run history and live activity are visible per agent.
+Create an agent with a name, thesis, cadence, and company or universe. For an agent tracking one company, open **Thesis conditions** and define one to five statements to monitor, what would disprove each, and its time horizon. Write them yourself or use **Suggest conditions** and edit the suggestions before saving.
+
+Each save creates a thesis version. A run assesses its conditions as **supported**, **challenged**, or **unresolved**, with evidence links, assessment method, and model provenance. Optional numeric conditions compare an available authoritative metric against your threshold; narrative conditions use the model configured in Settings. New supported or challenged states appear in Home and use the agent's existing alert rules. Repeated evidence stays quiet. Missing evidence produces an unresolved assessment; model failures leave the run failed without inventing a result.
+
+Monitoring uses current, owner-visible evidence already stored in the project: up to 100 claims and 250 facts for configured metrics. It does not start a new web crawl. Numerical evidence must match the chosen metric, unit, period, and maximum age; period-based freshness uses the period end. The panel shows the latest 20 assessments and versions. Existing agents without saved thesis conditions keep their previous workflow, including multi-company universes.
+
+The assessment history also makes agent behavior inspectable: which conditions were checked, which evidence was used, whether a calculation or model made the assessment, and what changed between runs.
 
 ### Watchlists & Portfolio
 Build manual watchlists, or dynamic ones that track a screen, theme, or portfolio. Keep research-scoped holdings (not a brokerage account) and see them overlaid across the surfaces above.
@@ -101,7 +107,7 @@ The terminal works out of the box, but a few keys unlock live data and the AI fe
 
 - **`POLYGON_API_KEY`** — stock ticker discovery and live quotes/bars. Without it, unknown tickers resolve as not-found and market surfaces show as unavailable.
 - **`SEC_EDGAR_USER_AGENT`** — on-demand SEC company-facts ingestion for statements and key stats (use a string you control, e.g. `market-agent-dev you@example.com`).
-- **LLM models** — required for Chat, Analyze, and Agents. Configure channels in the in-app **Settings** page, or via the `.env.dev` fields `LLM_CHANNELS`, `LLM_<NAME>_*`, `LITELLM_MODEL`, `LITELLM_FALLBACK_MODELS`, and `AGENT_LITELLM_MODEL`. Settings-page changes are picked up without restarting.
+- **LLM models** — used by Chat, Analyze, and narrative thesis assessments and suggestions. Numerical thesis checks do not require a model. Configure channels in the in-app **Settings** page, or via the `.env.dev` fields `LLM_CHANNELS`, `LLM_<NAME>_*`, `LITELLM_MODEL`, `LITELLM_FALLBACK_MODELS`, and `AGENT_LITELLM_MODEL`. Settings-page changes are picked up without restarting.
 - **`ENABLE_UNOFFICIAL_DEV_PROVIDERS=true`** — optional yfinance/Finviz fallback for local dev when the primary provider misses.
 - **Open datasource coverage** — optional fallback coverage when paid providers miss:
   - `NASDAQ_TRADER_REFERENCE_ENABLED=true` validates unknown US-listed tickers from Nasdaq Trader symbol directories.
