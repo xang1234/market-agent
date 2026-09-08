@@ -25,7 +25,9 @@ export async function loadThesisPacket(db: QueryExecutor, input: {
   asOf: string;
 }): Promise<ThesisPacket> {
   const evidence = await loadLocalRuntimeEvidence(db, {
-    subject_refs: [input.thesis.subject_ref], user_id: input.userId, limit: 100, as_of: input.asOf,
+    subject_refs: [input.thesis.subject_ref], user_id: input.userId,
+    source_categories: ['filings', 'transcripts', 'news', 'issuer_ir'],
+    limit: 100, as_of: input.asOf,
   });
   const claims = [...evidence.claims];
   const metrics = [...new Map(input.thesis.conditions.flatMap(condition => condition.metric

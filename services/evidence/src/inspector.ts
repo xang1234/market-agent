@@ -466,7 +466,7 @@ async function inspectFact(
     // that pick the current authoritative fact among candidates.
     `select f.fact_id::text as fact_id,
             f.source_id::text as source_id,
-            coalesce(f.value_text, f.value_num::text, '') as value,
+            coalesce(f.value_text, (f.value_num * f.scale)::text, '') as value,
             f.unit,
             f.period_kind,
             f.fiscal_year,

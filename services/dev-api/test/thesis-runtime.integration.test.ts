@@ -35,18 +35,18 @@ test('thesis monitoring persists, deduplicates, reassesses changed facts and pro
   const metric = {metric_id:randomUUID(),metric_key:'cash_reserves'};
   await db.query("insert into sources(source_id,provider,kind,trust_tier,license_class,retrieved_at) values($1,'Test filings','filing','primary','public',now())",[source]);
   await db.query("insert into metrics(metric_id,metric_key,display_name,unit_class,aggregation,interpretation,canonical_source_class) values($1,$2,'Cash reserves','currency','latest','higher is better','filing')",[metric.metric_id,metric.metric_key]);
-  const conditions = [{condition_id:CONDITION,statement:'Cash reserves remain strong.',falsifier:'Cash reserves fall below the required floor.',horizon:'Next quarter',metric:{metric_key:metric.metric_key,unit:'USD',period_kind:'point' as const,operator:'gte' as const,threshold:100,max_age_days:90}}];
+  const conditions = [{condition_id:CONDITION,statement:'Cash reserves remain strong.',falsifier:'Cash reserves fall below the required floor.',horizon:'Next quarter',metric:{metric_key:metric.metric_key,unit:'USD',period_kind:'point' as const,operator:'gte' as const,threshold:1_000_000,max_age_days:90}}];
   let thesis = await saveThesis(db, { agent_id:agent.agent_id,user_id:USER,expected_version:0,thesis:agent.thesis,subject_ref:{kind:'issuer',id:ISSUER},conditions });
   const adapter = createThesisAdapter(db);
   await assert.rejects(adapter.get({userId:OTHER,agentId:agent.agent_id}), {status:404});
   await assert.rejects(adapter.save({userId:OTHER,agentId:agent.agent_id,body:{expected_version:1,thesis:'Stolen thesis',conditions}}), {status:404});
-  const insertFact = async (value:number) => {
+  const insertFact = async (value:number, scale=1) => {
     const id = randomUUID();
-    await db.query(`insert into facts(fact_id,subject_kind,subject_id,metric_id,period_kind,period_end,value_num,unit,as_of,observed_at,source_id,method,verification_status,freshness_class,coverage_level,confidence)
-      values($1,'issuer',$2,$3,'point',current_date,$4,'USD',now(),now(),$5,'reported','authoritative','filing_time','full',1)`, [id,ISSUER,metric.metric_id,value,source]);
+    await db.query(`insert into facts(fact_id,subject_kind,subject_id,metric_id,period_kind,period_end,value_num,unit,scale,as_of,observed_at,source_id,method,verification_status,freshness_class,coverage_level,confidence)
+      values($1,'issuer',$2,$3,'point',current_date,$4,'USD',$5,now(),now(),$6,'reported','authoritative','filing_time','full',1)`, [id,ISSUER,metric.metric_id,value,scale,source]);
     return id;
   };
-  const fact1 = await insertFact(120);
+  const fact1 = await insertFact(2,1_000_000);
   const configured = await adapter.get({userId:USER,agentId:agent.agent_id});
   assert.deepEqual(configured.metrics,[{metric_key:metric.metric_key,label:'Cash reserves',unit:'USD',period_kind:'point'}]);
   await assert.rejects(adapter.save({userId:USER,agentId:agent.agent_id,body:{expected_version:0,thesis:agent.thesis,conditions}}),{status:409});
@@ -79,12 +79,14 @@ test('thesis monitoring persists, deduplicates, reassesses changed facts and pro
   const firstSnapshot = history.assessments[0].snapshot_id;
   const inspected = await loadEvidenceInspection(db,{user_id:USER,snapshot_id:firstSnapshot,ref:{kind:'fact',id:fact1}});
   assert.equal(inspected.ref.id,fact1);
+  assert.equal(inspected.title,'2000000 USD');
+  assert.deepEqual(inspected.rows.find(row=>row.label==='Value'),{label:'Value',value:'2000000'});
   await assert.rejects(loadEvidenceInspection(db,{user_id:OTHER,snapshot_id:firstSnapshot,ref:{kind:'fact',id:fact1}}),{status:404});
   await execute();
   assert.equal((await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER})).assessments.length,1);
   assert.equal((await db.query('select count(*)::int as n from findings where agent_id=$1',[agent.agent_id])).rows[0].n,1);
   await db.query('update facts set invalidated_at=now() where fact_id=$1',[fact1]);
-  const fact2=await insertFact(80);
+  const fact2=await insertFact(0.8,1_000_000);
   await execute();
   history=await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER});
   assert.equal(history.assessments[0].results[0].status,'challenged');
@@ -128,7 +130,7 @@ test('thesis monitoring persists, deduplicates, reassesses changed facts and pro
 });
 
 
-test('narrative monitoring sees only current owner-visible claims, rejects fabricated citations and handles removed evidence', {skip:!dockerAvailable(),timeout:120000}, async t => {
+test('narrative monitoring includes IR and non-IR claims, rejects fabricated citations and handles removed evidence', {skip:!dockerAvailable(),timeout:120000}, async t => {
   const {databaseUrl}=await bootstrapDatabase(t,'living-thesis-narrative');
   const db=await connectedClient(t,databaseUrl);
   const pool=await connectedPool(t,databaseUrl);
@@ -147,6 +149,12 @@ test('narrative monitoring sees only current owner-visible claims, rejects fabri
   const valid=await evidence('Current');
   await db.query(`insert into entity_impacts(claim_id,subject_kind,subject_id,direction,channel,horizon,confidence)
     values($1,'issuer',$2,'negative','demand','near_term',0.9)`,[valid.claim.claim_id,ISSUER]);
+  const ir=await evidence('Issuer IR');
+  const irRegistry=await db.query<{ir_source_id:string}>(`insert into ir_source_registry(issuer_id,source_type,url,enabled)
+    values($1,'rss','https://investors.example.test/news/rss',true) returning ir_source_id::text as ir_source_id`,[ISSUER]);
+  await db.query(`insert into ir_document_assets(ir_source_id,issuer_id,document_id,source_id,asset_kind,canonical_url,hosted_provider,issuer_attested,content_type,discovered_at,fetched_at)
+    values($1,$2,$3,$4,'press_release','https://investors.example.test/news/current','issuer_ir',true,'text/html',now(),now())`,
+    [irRegistry.rows[0]!.ir_source_id,ISSUER,ir.document.document_id,ir.source.source_id]);
   const foreign=await evidence('Foreign',OTHER);
   const deleted=await evidence('Deleted');
   await db.query('update documents set deleted_at=now() where document_id=$1',[deleted.document.document_id]);
@@ -163,7 +171,7 @@ test('narrative monitoring sees only current owner-visible claims, rejects fabri
   const model:ThesisLlm={async complete(input){
     calls++;
     const packet=JSON.parse(input.messages[1].content);
-    assert.deepEqual(packet.claims.map((c:{claim_id:string})=>c.claim_id),[valid.claim.claim_id]);
+    assert.deepEqual(packet.claims.map((c:{claim_id:string})=>c.claim_id).sort(),[valid.claim.claim_id,ir.claim.claim_id].sort());
     return {text:JSON.stringify({results:[{condition_id:CONDITION,status:'challenged',reason:'The cited cancellations challenge demand durability.',claim_refs:[valid.claim.claim_id]}]}),deployment:{channel:'test',model:'controlled'}};
   }};
   async function execute(llm:ThesisLlm|null=model,identity='controlled') {
@@ -194,7 +202,7 @@ test('narrative monitoring sees only current owner-visible claims, rejects fabri
   await assert.rejects(execute({async complete(){return {text:JSON.stringify({results:[{condition_id:CONDITION,status:'supported',reason:'Fabricated evidence.',claim_refs:[randomUUID()]}]})};}},'invalid'),/unsupplied/);
   assert.deepEqual((await getAgent(db,agent.agent_id))!.watermarks,watermarks);
   assert.equal((await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER})).assessments.length,1);
-  await db.query('update claims set superseded_at=now() where claim_id=$1',[valid.claim.claim_id]);
+  await db.query('update claims set superseded_at=now() where claim_id=any($1::uuid[])',[[valid.claim.claim_id,ir.claim.claim_id]]);
   assert.equal((await inspectCurrent()).ref.id,valid.claim.claim_id,'accessible superseded claims remain inspectable in their historical snapshot');
   await execute(null);
   history=await loadThesisHistory(db,{agent_id:agent.agent_id,user_id:USER});
