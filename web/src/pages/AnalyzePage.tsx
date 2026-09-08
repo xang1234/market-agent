@@ -23,6 +23,7 @@ import {
   type AnalyzeRunHistoryItem,
 } from '../analyze/runHistory.ts'
 import { shareAnalyzeRunToChat, type AnalyzeRun } from '../analyze/shareToChat.ts'
+import { analyzeThesisHandoff } from '../analyze/thesisHandoff.ts'
 import { BlockView, type Block } from '../blocks'
 import { authenticatedJson } from '../http/authFetch.ts'
 import { subjectDisplayName } from '../symbol/quote'
@@ -116,6 +117,7 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
   const [isGenerating, setIsGenerating] = useState(false)
   const availableSourceCategories = sourceCategoriesFor(selectedTemplate, selectedPlaybook)
   const compareRunDetail = compareRunId ? openedRunDetails[compareRunId] : null
+  const thesisHandoff = memoRun ? analyzeThesisHandoff(memoRun) : null
   const runDiff = memoRun && compareRunDetail ? diffAnalyzeRuns(compareRunDetail, memoRun) : null
   const runDiffDriftLabels = runDiff ? [
     runDiff.summary.evidence_snapshot_changed ? 'Evidence snapshot changed' : null,
@@ -381,6 +383,15 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
             >
               Add to chat
             </button>
+            {thesisHandoff ? (
+              <button
+                type="button"
+                onClick={() => navigate('/agents', { state: { thesisHandoff } })}
+                className={PRIMARY_BUTTON_CLASS}
+              >
+                Monitor this thesis
+              </button>
+            ) : null}
           </div>
         </div>
         <p className="mt-3 text-xs text-muted">{status}</p>

@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useLocation } from 'react-router-dom'
 import { PRIMARY_BUTTON_CLASS } from '../shell/buttonStyles.ts'
 
 import {
@@ -19,7 +20,9 @@ import type {
 } from '../agents/agentRows.ts'
 import { AgentRoster } from '../agents/AgentRoster.tsx'
 import { AgentDetailPanels } from '../agents/AgentDetailPanels.tsx'
+import { ThesisPanel } from '../agents/ThesisPanel.tsx'
 import { alertRuleLabel, dynamicUniverseIdFor, universeLabel } from '../agents/agentLabels.ts'
+import { readAnalyzeThesisHandoff } from '../analyze/thesisHandoff.ts'
 import type { SubjectKind } from '../subject/subjectRef.ts'
 import { authenticatedFetch } from '../http/authFetch.ts'
 import { useAuth } from '../shell/useAuth.ts'
@@ -46,6 +49,8 @@ const DEMO_AGENTS: ReadonlyArray<AgentRow> = [
 
 export function AgentsPage() {
   const { session } = useAuth()
+  const location = useLocation()
+  const analyzeHandoff = useMemo(() => readAnalyzeThesisHandoff(location.state), [location.state])
   const [agents, setAgents] = useState<ReadonlyArray<AgentRow>>(DEMO_AGENTS)
   const [runs, setRuns] = useState<ReadonlyArray<AgentRunRow>>([])
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
@@ -54,16 +59,20 @@ export function AgentsPage() {
   const [detailsError, setDetailsError] = useState<string | null>(null)
   const [detailsAgentId, setDetailsAgentId] = useState<string | null>(null)
   const [detailsRefreshKey, setDetailsRefreshKey] = useState(0)
-  const [name, setName] = useState('')
-  const [thesis, setThesis] = useState('')
+  const [thesisRefreshKey, setThesisRefreshKey] = useState(0)
+  const [structuredAgentIds, setStructuredAgentIds] = useState<ReadonlySet<string>>(new Set())
+  const [name, setName] = useState(analyzeHandoff?.name ?? '')
+  const [thesis, setThesis] = useState(analyzeHandoff?.thesis ?? '')
   const [cadence, setCadence] = useState('daily')
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
   const [editingAgent, setEditingAgent] = useState<AgentRow | null>(null)
   const [universeMode, setUniverseMode] = useState<AgentUniverse['mode']>('static')
-  const [staticSubjectRefsText, setStaticSubjectRefsText] = useState('')
+  const [staticSubjectRefsText, setStaticSubjectRefsText] = useState(
+    analyzeHandoff ? `${analyzeHandoff.subjectRef.kind}:${analyzeHandoff.subjectRef.id}` : '',
+  )
   const [dynamicUniverseId, setDynamicUniverseId] = useState('')
-  const [subjectKind, setSubjectKind] = useState<SubjectKind>('issuer')
-  const [subjectId, setSubjectId] = useState('')
+  const [subjectKind, setSubjectKind] = useState<SubjectKind>(analyzeHandoff?.subjectRef.kind ?? 'issuer')
+  const [subjectId, setSubjectId] = useState(analyzeHandoff?.subjectRef.id ?? '')
   const [alertRuleId, setAlertRuleId] = useState('')
   const [alertSeverity, setAlertSeverity] = useState('high')
   const [alertHeadline, setAlertHeadline] = useState('')
@@ -72,12 +81,16 @@ export function AgentsPage() {
   const [alertSms, setAlertSms] = useState(false)
   const [alertMobilePush, setAlertMobilePush] = useState(false)
   const [alertDigest, setAlertDigest] = useState(false)
-  const [activity, setActivity] = useState('Idle')
+  const [activity, setActivity] = useState(analyzeHandoff
+    ? 'Review this Analyze memo, create the agent, then draft and save its conditions.'
+    : 'Idle')
   const [loadError, setLoadError] = useState<string | null>(null)
   const preservesUnsupportedUniverse =
     editingAgent?.universe !== undefined && !canRoundTripUniverse(editingAgent.universe)
   const preservesUnsupportedAlertRules =
     editingAgent?.alert_rules !== undefined && !canRoundTripAlertRules(editingAgent.alert_rules)
+  const editingStructuredThesis = editingAgentId !== null && structuredAgentIds.has(editingAgentId)
+  const universeEditingDisabled = preservesUnsupportedUniverse || editingStructuredThesis
   const detailsMatchSelection = session && selectedAgentId && detailsAgentId === selectedAgentId
   const visibleFindings = detailsMatchSelection ? findings : []
   const visibleRunActivities = detailsMatchSelection ? runActivities : []
@@ -251,7 +264,9 @@ export function AgentsPage() {
     setAlertSms(channels.includes('sms'))
     setAlertMobilePush(channels.includes('mobile_push'))
     setAlertDigest(channels.includes('digest'))
-    setActivity('Editing agent')
+    setActivity(structuredAgentIds.has(agent.agent_id)
+      ? 'Edit thesis text and conditions in Thesis conditions. Other agent settings remain editable here.'
+      : 'Editing agent')
   }
 
   const updateAgent = async (
@@ -312,11 +327,31 @@ export function AgentsPage() {
       setRuns((current) => [run, ...current])
       setSelectedAgentId(agentId)
       setDetailsRefreshKey((current) => current + 1)
+      if (run.status === 'completed') setThesisRefreshKey((current) => current + 1)
       setActivity(run.status === 'completed' ? 'Run completed' : 'Run queued')
     } else {
       setActivity(`Run failed: HTTP ${response.status}`)
     }
   }
+
+  const handleStructuredChange = useCallback((agentId: string, hasStructuredThesis: boolean) => {
+    setStructuredAgentIds((current) => {
+      const alreadyTracked = current.has(agentId)
+      if (alreadyTracked === hasStructuredThesis) return current
+      const next = new Set(current)
+      if (hasStructuredThesis) next.add(agentId)
+      else next.delete(agentId)
+      return next
+    })
+  }, [])
+
+  const handleThesisSaved = useCallback((saved: import('../agents/thesisTypes.ts').ThesisVersion) => {
+    setAgents((current) => current.map((agent) => agent.agent_id === saved.agent_id
+      ? { ...agent, thesis: saved.thesis }
+      : agent))
+    setThesis((current) => editingAgentId === saved.agent_id ? saved.thesis : current)
+    setActivity(`Thesis version ${saved.version} saved`)
+  }, [editingAgentId])
 
   return (
     <div className="flex flex-1 flex-col gap-4 overflow-auto p-6">
@@ -326,30 +361,43 @@ export function AgentsPage() {
           Session-scoped research monitors with durable configuration, run history, and live activity.
         </p>
       </header>
-      {/* Monitor-first: the roster + read-only detail panels take the wide
-          column and come first in the DOM, so reading and tab order match the
-          visual order; the configuration form is the narrow side panel after. */}
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="grid gap-4 lg:grid-cols-2">
-          <AgentRoster
-            agents={agents}
-            runs={runs}
-            selectedAgentId={selectedAgentId}
-            loadError={loadError}
-            onSelect={setSelectedAgentId}
-            onEdit={editAgent}
-            onRun={(id) => void runAgent(id)}
-            onToggleEnabled={(agent) => void updateAgent(agent.agent_id, { enabled: !agent.enabled })}
-            onDelete={(id) => void deleteAgent(id)}
+      <section className="grid items-start gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
+        <AgentRoster
+          agents={agents}
+          runs={runs}
+          selectedAgentId={selectedAgentId}
+          loadError={loadError}
+          onSelect={setSelectedAgentId}
+          onEdit={editAgent}
+          onRun={(id) => void runAgent(id)}
+          onToggleEnabled={(agent) => void updateAgent(agent.agent_id, { enabled: !agent.enabled })}
+          onDelete={(id) => void deleteAgent(id)}
+        />
+        {session && selectedAgentId ? (
+          <ThesisPanel
+            userId={session.userId}
+            agentId={selectedAgentId}
+            initialThesis={agents.find((agent) => agent.agent_id === selectedAgentId)?.thesis ?? ''}
+            refreshKey={thesisRefreshKey}
+            onStructuredChange={handleStructuredChange}
+            onSaved={handleThesisSaved}
           />
-          <AgentDetailPanels
-            findings={visibleFindings}
-            detailsError={visibleDetailsError}
-            runs={runs}
-            runActivities={visibleRunActivities}
-          />
-        </div>
-        <form onSubmit={submitAgent} className="flex flex-col gap-4 rounded-md border border-line bg-surface p-5">
+        ) : (
+          <section className="rounded-md border border-dashed border-line-strong bg-surface p-5">
+            <h2 className="text-lg font-semibold text-fg">Thesis conditions</h2>
+            <p className="mt-2 text-sm text-muted">Select an agent to edit its living thesis.</p>
+          </section>
+        )}
+      </section>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <AgentDetailPanels
+          findings={visibleFindings}
+          detailsError={visibleDetailsError}
+          runs={runs}
+          runActivities={visibleRunActivities}
+        />
+      </div>
+      <form onSubmit={submitAgent} className="flex flex-col gap-4 rounded-md border border-line bg-surface p-5">
           <h2 className="text-lg font-semibold text-fg">{editingAgentId ? 'Edit agent' : 'Create agent'}</h2>
           <label className="flex flex-col gap-2 text-sm font-medium text-fg">
             Name
@@ -366,10 +414,16 @@ export function AgentsPage() {
               name="agent-thesis"
               value={thesis}
               onChange={(event) => setThesis(event.currentTarget.value)}
+              disabled={editingStructuredThesis}
               rows={4}
-              className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
+              className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm disabled:opacity-60"
             />
           </label>
+          {editingStructuredThesis ? (
+            <p className="rounded-md border border-accent/40 bg-accent-soft px-3 py-2 text-xs text-fg-soft">
+              This agent has a versioned thesis. Edit its thesis and conditions in the Thesis conditions panel. Create another agent to monitor a different company.
+            </p>
+          ) : null}
           <label className="flex flex-col gap-2 text-sm font-medium text-fg">
             Cadence
             <select
@@ -396,7 +450,7 @@ export function AgentsPage() {
                 name="universe-mode"
                 value={universeMode}
                 onChange={(event) => setUniverseMode(event.currentTarget.value as AgentUniverse['mode'])}
-                disabled={preservesUnsupportedUniverse}
+                disabled={universeEditingDisabled}
                 className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
               >
                 <option value="static">static subjects</option>
@@ -413,7 +467,7 @@ export function AgentsPage() {
                   name="static-subject-refs"
                   value={staticSubjectRefsText}
                   onChange={(event) => setStaticSubjectRefsText(event.currentTarget.value)}
-                  disabled={preservesUnsupportedUniverse}
+                  disabled={universeEditingDisabled}
                   rows={4}
                   placeholder="issuer:...\nlisting:..."
                   className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
@@ -426,7 +480,7 @@ export function AgentsPage() {
                   name="dynamic-universe-id"
                   value={dynamicUniverseId}
                   onChange={(event) => setDynamicUniverseId(event.currentTarget.value)}
-                  disabled={preservesUnsupportedUniverse}
+                  disabled={universeEditingDisabled}
                   className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
                 />
               </label>
@@ -441,7 +495,7 @@ export function AgentsPage() {
                     const next = event.currentTarget.value
                     if (isAgentSubjectKind(next)) setSubjectKind(next)
                   }}
-                  disabled={preservesUnsupportedUniverse || universeMode !== 'static'}
+                  disabled={universeEditingDisabled || universeMode !== 'static'}
                   className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
                 >
                   <option value="issuer">issuer</option>
@@ -457,7 +511,7 @@ export function AgentsPage() {
                   name="subject-id"
                   value={subjectId}
                   onChange={(event) => setSubjectId(event.currentTarget.value)}
-                  disabled={preservesUnsupportedUniverse || universeMode !== 'static'}
+                  disabled={universeEditingDisabled || universeMode !== 'static'}
                   className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm"
                 />
               </label>
@@ -568,8 +622,7 @@ export function AgentsPage() {
           <button type="submit" className={PRIMARY_BUTTON_CLASS}>
             {editingAgentId ? 'Save agent' : 'Create agent'}
           </button>
-        </form>
-      </section>
+      </form>
       <section className="rounded-md border border-line bg-surface p-5">
         <h2 className="text-lg font-semibold text-fg">Activity</h2>
         <p className="mt-2 text-sm text-fg-soft">{activity}</p>
@@ -577,4 +630,3 @@ export function AgentsPage() {
     </div>
   )
 }
-
