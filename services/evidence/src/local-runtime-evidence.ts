@@ -10,6 +10,8 @@ export type LocalRuntimeEvidenceInput = {
   exclude_claim_ids?: ReadonlyArray<string>;
   source_categories?: ReadonlyArray<string>;
   limit?: number;
+  // Optional date boundary only; current document visibility always applies.
+  as_of?: string;
 };
 
 export type LocalRuntimeClaimEvidence = {
@@ -44,6 +46,7 @@ export type LocalRuntimeEvidence = {
 type ClaimEvidenceRow = {
   claim_id: string;
   document_id: string;
+  document_source_id: string;
   source_id: string;
   text_canonical: string;
   predicate: string;
@@ -108,6 +111,7 @@ export async function loadLocalRuntimeEvidence(
        select distinct on (c.claim_id)
               c.claim_id::text as claim_id,
               c.document_id::text as document_id,
+              d.source_id::text as document_source_id,
               c.reported_by_source_id::text as source_id,
               c.text_canonical,
               c.predicate,
@@ -133,6 +137,14 @@ export async function loadLocalRuntimeEvidence(
            on s.source_id = c.reported_by_source_id
         where c.status in ('extracted', 'corroborated')
           and c.superseded_at is null
+          and d.deleted_at is null
+          and d.parse_status <> 'superseded'
+          and exists (select 1 from sources ds where ds.source_id=d.source_id
+            and (ds.user_id is null or ds.user_id=$3::uuid))
+          and ($7::timestamptz is null or (
+            c.created_at <= $7::timestamptz
+            and coalesce(d.published_at,d.created_at) <= $7::timestamptz
+          ))
           and not (c.claim_id = any($4::uuid[]))
           and (
             s.user_id is null
@@ -162,6 +174,7 @@ export async function loadLocalRuntimeEvidence(
      )
      select claim_id,
             document_id,
+            document_source_id,
             source_id,
             text_canonical,
             predicate,
@@ -185,6 +198,7 @@ export async function loadLocalRuntimeEvidence(
       excludedClaimIds,
       includeIssuerIr,
       includeNonIr,
+      input.as_of ?? null,
     ],
   );
 
@@ -271,6 +285,7 @@ export async function loadVerifierFactsForRefs(
     period_kind: string | null;
     period_start: string | null;
     period_end: string | null;
+    as_of: Date | string;
     fiscal_year: number | null;
     fiscal_period: string | null;
   }>(
@@ -280,6 +295,7 @@ export async function loadVerifierFactsForRefs(
             period_kind,
             period_start::text as period_start,
             period_end::text as period_end,
+            as_of,
             fiscal_year,
             fiscal_period
        from facts
@@ -297,6 +313,7 @@ export async function loadVerifierFactsForRefs(
         period_kind: row.period_kind ?? undefined,
         period_start: row.period_start,
         period_end: row.period_end,
+        as_of: new Date(row.as_of).toISOString(),
         fiscal_year: row.fiscal_year,
         fiscal_period: row.fiscal_period,
       }),
@@ -330,7 +347,10 @@ function evidenceFromClaimRows(
       effective_time: row.effective_time == null ? null : isoString(row.effective_time),
     }),
   );
-  const sourceIds = unique(claims.map((claim) => claim.source_id));
+  const documents = [...new Map(rows.map(row => [row.document_id,
+    Object.freeze({ document_id: row.document_id, source_id: row.document_source_id }),
+  ])).values()];
+  const sourceIds = unique([...claims.map(claim => claim.source_id), ...documents.map(doc => doc.source_id)]);
   const documentRefs = unique(claims.map((claim) => claim.document_id));
   const claimRefs = unique(claims.map((claim) => claim.claim_id));
 
@@ -341,9 +361,7 @@ function evidenceFromClaimRows(
     claim_refs: Object.freeze(claimRefs),
     subject_refs: Object.freeze([...subjectRefs]),
     verifier_sources: Object.freeze(sourceIds.map((source_id) => Object.freeze({ source_id }))),
-    verifier_documents: Object.freeze(
-      claims.map((claim) => Object.freeze({ document_id: claim.document_id, source_id: claim.source_id })),
-    ),
+    verifier_documents: Object.freeze(documents),
     verifier_claims: Object.freeze(claims.map((claim) => Object.freeze({ claim_id: claim.claim_id, source_id: claim.source_id }))),
   });
 }

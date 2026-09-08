@@ -74,6 +74,7 @@ test("loadLocalRuntimeEvidence carries GDELT discovery disclosure with claim cit
           {
             claim_id: "11111111-1111-4111-a111-111111111111",
             document_id: "22222222-2222-4222-a222-222222222222",
+            document_source_id: "44444444-4444-4444-a444-444444444444",
             source_id: "33333333-3333-4333-a333-333333333333",
             text_canonical: "Acme Robotics lifted guidance after a Reuters-reported order.",
             predicate: "guidance_update",
@@ -97,6 +98,14 @@ test("loadLocalRuntimeEvidence carries GDELT discovery disclosure with claim cit
     subject_refs: [{ kind: "issuer", id: SUBJECT_ID }],
   });
 
+  assert.deepEqual(evidence.verifier_documents, [{
+    document_id: "22222222-2222-4222-a222-222222222222",
+    source_id: "44444444-4444-4444-a444-444444444444",
+  }]);
+  assert.deepEqual(evidence.source_ids, [
+    "33333333-3333-4333-a333-333333333333", "44444444-4444-4444-a444-444444444444",
+  ]);
+  assert.equal(evidence.verifier_claims[0].source_id, "33333333-3333-4333-a333-333333333333");
   assert.equal(evidence.claims[0]?.provider, GDELT_ARTICLE_DISCOVERY_PROVIDER);
   assert.equal(evidence.claims[0]?.license_class, GDELT_DISCOVERY_LICENSE_CLASS);
   assert.equal(evidence.claims[0]?.source_canonical_url, "https://reuters.com/markets/acme-robotics");

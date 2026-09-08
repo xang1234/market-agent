@@ -32,6 +32,7 @@ test("loadVerifierFactsForRefs selects verifier fact fields for active facts by 
       period_kind: "fiscal_y",
       period_start: null,
       period_end: null,
+      as_of: "2026-04-29T12:00:00.123Z",
       fiscal_year: 2024,
       fiscal_period: "FY",
     },
@@ -51,8 +52,23 @@ test("loadVerifierFactsForRefs selects verifier fact fields for active facts by 
       period_kind: "fiscal_y",
       period_start: null,
       period_end: null,
+      as_of: "2026-04-29T12:00:00.123Z",
       fiscal_year: 2024,
       fiscal_period: "FY",
     },
   ]);
+});
+
+
+test("loadVerifierFactsForRefs preserves precise observation times for undated point facts", async () => {
+  const observed = "2026-04-29T12:00:00.123Z";
+  const { db } = recordingDb([{
+    fact_id: FACT_ID,
+    source_id: "22222222-2222-4222-8222-222222222222",
+    unit: "USD", period_kind: "point", period_start: null, period_end: null,
+    fiscal_year: null, fiscal_period: null, as_of: new Date(observed),
+  }]);
+  const [fact] = await loadVerifierFactsForRefs(db, { fact_refs: [FACT_ID] });
+  assert.equal(fact.period_end, null);
+  assert.equal(fact.as_of, observed);
 });

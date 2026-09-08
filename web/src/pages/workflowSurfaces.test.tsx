@@ -447,7 +447,7 @@ test('Analyze Add-to-chat shares run blocks through the durable artifact endpoin
 })
 
 test('Agents surface renders CRUD controls, run history, and activity status', () => {
-  const html = renderWithAuth(<AgentsPage />)
+  const html = renderWithAuth(<MemoryRouter><AgentsPage /></MemoryRouter>)
 
   assert.match(html, /Create agent/)
   assert.match(html, /Universe/)
@@ -520,20 +520,29 @@ test('Agents surface loads selected agent findings and activity routes', async (
           ],
         }), { status: 200, headers: { 'content-type': 'application/json' } })
       }
+      if (String(input) === '/v1/agents/11111111-1111-4111-8111-111111111111/thesis') {
+        return new Response(JSON.stringify({
+          thesis: null,
+          versions: [],
+          assessments: [],
+          metrics: [],
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
       throw new Error(`unexpected fetch: ${String(input)}`)
     }
     const root = createRoot(dom.window.document.getElementById('root')!)
     await act(async () => {
-      root.render(wrapWithAuth(<AgentsPage />))
+      root.render(wrapWithAuth(<MemoryRouter><AgentsPage /></MemoryRouter>))
     })
     await act(async () => undefined)
     await act(async () => undefined)
 
-    assert.deepEqual(calls, [
+    assert.deepEqual([...calls].sort(), [
       '/v1/agents',
       '/v1/agents/11111111-1111-4111-8111-111111111111/findings',
       '/v1/agents/11111111-1111-4111-8111-111111111111/activity',
-    ])
+      '/v1/agents/11111111-1111-4111-8111-111111111111/thesis',
+    ].sort())
     assert.match(dom.window.document.body.innerHTML, /Operating margin quality improved/)
     assert.match(dom.window.document.body.innerHTML, /Created 1 source-backed finding/)
     await act(async () => root.unmount())

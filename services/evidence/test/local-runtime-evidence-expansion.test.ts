@@ -87,6 +87,38 @@ test("delta query expands listing/instrument universes to the issuer (ADR 0001)"
   assert.deepEqual(excluded.claim_refs, [], "exclude_claim_ids still applies after expansion");
 });
 
+test("document visibility is enforced with and without a temporal cutoff", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "evidence-document-visibility");
+  const db = await connectedClient(t, databaseUrl);
+  await seedIssuerAttributedClaim(db);
+  const owner = "b1111111-1111-4111-8111-111111111111";
+  const other = "b2222222-2222-4222-8222-222222222222";
+  const privateSource = "b3333333-3333-4333-8333-333333333333";
+  await db.query("insert into users(user_id,email) values($1,'owner@example.test'),($2,'other@example.test')", [owner, other]);
+  await db.query(`insert into sources(source_id,provider,kind,trust_tier,license_class,retrieved_at,user_id)
+    values($1,'private','filing','primary','public',now(),$2)`, [privateSource, other]);
+  const asOf = new Date().toISOString();
+  const select = (as_of?: string, user_id: string | null = owner) => loadLocalRuntimeEvidence(db, {
+    subject_refs: [{ kind: "issuer", id: ISSUER_ID }], user_id, as_of,
+  });
+  for (const cutoff of [undefined, asOf]) {
+    assert.deepEqual((await select(cutoff)).claim_refs, [CLAIM_ID]);
+    await db.query("update documents set deleted_at=now() where document_id=$1", [DOCUMENT_ID]);
+    assert.deepEqual((await select(cutoff)).claim_refs, [], "deleted documents are never fresh evidence");
+    await db.query("update documents set deleted_at=null, parse_status='superseded' where document_id=$1", [DOCUMENT_ID]);
+    assert.deepEqual((await select(cutoff)).claim_refs, [], "superseded documents are never fresh evidence");
+    await db.query("update documents set parse_status='parsed', source_id=$2 where document_id=$1", [DOCUMENT_ID, privateSource]);
+    assert.deepEqual((await select(cutoff)).claim_refs, [], "a public reporting source cannot expose a foreign document");
+    assert.deepEqual((await select(cutoff, null)).claim_refs, [], "anonymous requests cannot read private documents");
+    assert.deepEqual((await select(cutoff, other)).claim_refs, [CLAIM_ID], "the document owner can read its claim");
+    await db.query("update documents set source_id=$2 where document_id=$1", [DOCUMENT_ID, SOURCE_ID]);
+  }
+  await db.query("update documents set published_at=$2::timestamptz + interval '1 day' where document_id=$1", [DOCUMENT_ID, asOf]);
+  assert.deepEqual((await select()).claim_refs, [CLAIM_ID], "omitting the cutoff imposes no date boundary");
+  assert.deepEqual((await select(asOf)).claim_refs, [], "the cutoff filters publication time only");
+});
+
 test("loadLocalRuntimeEvidence hides a superseded claim from fresh selection but preserves the row", async (t) => {
   if (!dockerAvailable()) {
     t.skip("docker unavailable");

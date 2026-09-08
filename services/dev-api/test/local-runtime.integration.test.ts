@@ -382,7 +382,7 @@ test(
       run_id: RUN_ID,
       current_watermarks: agent.watermarks,
       alert_rules: alertRules,
-      stages: createAgentLoopStages({ userId: USER_ID, runId: RUN_ID, agent, trigger: "manual" }),
+      stages: await createAgentLoopStages({ userId: USER_ID, runId: RUN_ID, agent, trigger: "manual" }),
     });
 
     assert.deepEqual(result.outputs_summary, {
@@ -524,7 +524,7 @@ test(
       run_id: secondRunId,
       current_watermarks: updatedAgent!.watermarks,
       alert_rules: alertRules,
-      stages: createAgentLoopStages({ userId: USER_ID, runId: secondRunId, agent: updatedAgent!, trigger: "manual" }),
+      stages: await createAgentLoopStages({ userId: USER_ID, runId: secondRunId, agent: updatedAgent!, trigger: "manual" }),
     });
 
     assert.deepEqual(secondResult.outputs_summary, {
@@ -563,7 +563,7 @@ test(
       pool,
       agent_id: agent.agent_id,
       current_watermarks: agentAfterNoopRun!.watermarks,
-      stages: createAgentLoopStages({ userId: USER_ID, runId: thirdRunId, agent: agentAfterNoopRun!, trigger: "manual" }),
+      stages: await createAgentLoopStages({ userId: USER_ID, runId: thirdRunId, agent: agentAfterNoopRun!, trigger: "manual" }),
     });
 
     assert.deepEqual(thirdResult.outputs_summary, {
@@ -659,7 +659,7 @@ test(
       run_id: emptyRunId,
       current_watermarks: agent.watermarks,
       alert_rules: agent.alert_rules as ReadonlyArray<unknown>,
-      stages: createAgentLoopStages({ userId: USER_ID, runId: emptyRunId, agent, trigger: "manual" }),
+      stages: await createAgentLoopStages({ userId: USER_ID, runId: emptyRunId, agent, trigger: "manual" }),
     });
 
     assert.deepEqual(result.outputs_summary, {

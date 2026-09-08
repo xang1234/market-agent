@@ -141,6 +141,14 @@ async function assertSnapshotVisibleToUser(
        )
        or exists (
          select 1
+           from agent_thesis_assessments ta
+           join agent_thesis_versions tv on tv.thesis_version_id = ta.thesis_version_id
+           join agents a on a.agent_id = tv.agent_id
+          where ta.snapshot_id = $1::uuid
+            and a.user_id = $2::uuid
+       )
+       or exists (
+         select 1
            from grid_cells gc
            join grid_runs gr on gr.grid_run_id = gc.grid_run_id
            join research_grids g on g.grid_id = gr.grid_id
@@ -349,8 +357,12 @@ async function inspectClaim(
             s.canonical_url
        from claims c
        join sources s on s.source_id = c.reported_by_source_id
+       join documents d on d.document_id = c.document_id
+       join sources document_source on document_source.source_id = d.source_id
       where c.claim_id = $1::uuid
-        and (s.user_id is null or s.user_id = $2::uuid)`,
+        and (s.user_id is null or s.user_id = $2::uuid)
+        and d.deleted_at is null
+        and (document_source.user_id is null or document_source.user_id = $2::uuid)`,
     [claimId, userId],
   );
   const row = rows[0];
@@ -454,7 +466,7 @@ async function inspectFact(
     // that pick the current authoritative fact among candidates.
     `select f.fact_id::text as fact_id,
             f.source_id::text as source_id,
-            coalesce(f.value_text, f.value_num::text, '') as value,
+            coalesce(f.value_text, (f.value_num * f.scale)::text, '') as value,
             f.unit,
             f.period_kind,
             f.fiscal_year,

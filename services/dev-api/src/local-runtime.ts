@@ -1,3 +1,5 @@
+import { getCurrentThesis } from "../../agents/src/thesis-repo.ts";
+import { createThesisAgentLoopStages } from "./thesis-runtime.ts";
 import { randomUUID } from "node:crypto";
 
 import { Pool } from "pg";
@@ -248,7 +250,15 @@ export async function inspectEvidence(
   });
 }
 
-export const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, runId, agent, trigger = "scheduled" }) => {
+export const createAgentLoopStages: DevApiAgentLoopStageFactory = async (input) => {
+  // Select and bind the thesis version once before executing the loop.
+  const thesis = await getCurrentThesis(pool(), input.agent.agent_id);
+  return thesis
+    ? createThesisAgentLoopStages({ ...input, db: pool(), thesis })
+    : createLegacyAgentLoopStages(input);
+};
+
+const createLegacyAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, runId, agent, trigger = "scheduled" }) => {
   const subjectRefs = normalizeSubjectRefs(subjectRefsFromUniverse(agent.universe));
   const asOf = new Date().toISOString();
   const activityClock = activityClockFrom(asOf);

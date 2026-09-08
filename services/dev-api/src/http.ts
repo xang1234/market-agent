@@ -1,3 +1,5 @@
+import { createThesisAdapter, assertLegacyThesisEditAllowed, type ThesisAdapter } from "./thesis-adapter.ts";
+import { withTransaction } from "../../evidence/src/transaction.ts";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import { ANALYZE_PLAYBOOKS } from "../../analyze/src/index.ts";
@@ -149,6 +151,7 @@ export type DevApiEvidenceAdapter = {
 };
 
 export type DevApiAdapters = {
+  theses?: ThesisAdapter;
   analyze: DevApiAnalyzeAdapter;
   agents: DevApiAgentsAdapter;
   themes: DevApiThemesAdapter;
@@ -164,7 +167,7 @@ export type DevApiAgentLoopStageFactoryInput = {
 
 export type DevApiAgentLoopStageFactory = (
   input: DevApiAgentLoopStageFactoryInput,
-) => AgentLoopStages;
+) => AgentLoopStages | Promise<AgentLoopStages>;
 
 export type DevApiServerOptions = {
   adapters?: DevApiAdapters;
@@ -199,6 +202,25 @@ export function createDevApiServer(
     }
 
     const url = new URL(req.url ?? "/", "http://localhost");
+
+    const thesisMatch = url.pathname.match(/^\/v1\/agents\/([^/]+)\/thesis(\/draft)?$/);
+    if (thesisMatch) {
+      res.setHeader("cache-control", "no-store");
+      const userId = readUserIdHeader(req.headers["x-user-id"]);
+      if (!userId) { respondJson(res, 401, { error: "x-user-id header is required" }); return; }
+      const agentId = decodeURIComponent(thesisMatch[1]);
+      if (!isUuid(agentId)) { respondJson(res, 400, { error: "agent id must be a UUID" }); return; }
+      if (!adapters?.theses) { respondJson(res, 503, { error: "thesis monitoring is unavailable" }); return; }
+      if (!thesisMatch[2] && req.method === "GET") {
+        respondJson(res, 200, await adapters.theses.get({ userId, agentId })); return;
+      }
+      if ((!thesisMatch[2] && req.method === "PUT") || (thesisMatch[2] && req.method === "POST")) {
+        const body = await readJson(req).catch(() => BAD_JSON);
+        if (body === BAD_JSON || !isObjectRecord(body)) { respondJson(res, 400, { error: "request body must be a JSON object" }); return; }
+        respondJson(res, 200, await (thesisMatch[2] ? adapters.theses.draft : adapters.theses.save)({ userId, agentId, body })); return;
+      }
+      respondJson(res, 405, { error: "method not allowed" }); return;
+    }
 
     if (req.method === "GET" && url.pathname === "/v1/dev/services") {
       respondJson(res, 200, {
@@ -672,6 +694,7 @@ export type DevApiServiceAdapterDeps = AnalyzeServiceDeps & {
 export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): DevApiAdapters {
   return {
     analyze: createServiceAnalyzeAdapter(deps),
+    theses: createThesisAdapter(deps.db),
     agents: {
       async list({ userId }) {
         const rows = await listAgentsByUser(deps.db, userId);
@@ -693,18 +716,22 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
         return toDevAgent(row);
       },
       async update({ userId, agentId, body }) {
-        const existing = await getAgent(deps.db, agentId);
-        if (existing === null || existing.user_id !== userId) return null;
-        const row = await updateAgent(deps.db, agentId, {
-          enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
-          name: nonEmptyString(body.name) ?? undefined,
-          thesis: nonEmptyString(body.thesis) ?? undefined,
-          cadence: nonEmptyString(body.cadence) ?? undefined,
-          universe: body.universe === undefined ? undefined : readUniverse(body.universe),
-          alert_rules: body.alert_rules === undefined ? undefined : readAlertRules(body.alert_rules),
-          prompt_template: nonEmptyString(body.prompt_template) ?? undefined,
+        return withTransaction(deps.db, async ({ db }) => {
+          await db.query("select agent_id from agents where agent_id = $1::uuid and user_id = $2::uuid for update", [agentId, userId]);
+          const existing = await getAgent(db, agentId);
+          if (existing === null || existing.user_id !== userId) return null;
+          await assertLegacyThesisEditAllowed(db, agentId, body);
+          const row = await updateAgent(db, agentId, {
+            enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
+            name: nonEmptyString(body.name) ?? undefined,
+            thesis: nonEmptyString(body.thesis) ?? undefined,
+            cadence: nonEmptyString(body.cadence) ?? undefined,
+            universe: body.universe === undefined ? undefined : readUniverse(body.universe),
+            alert_rules: body.alert_rules === undefined ? undefined : readAlertRules(body.alert_rules),
+            prompt_template: nonEmptyString(body.prompt_template) ?? undefined,
+          });
+          return toDevAgent(row);
         });
-        return toDevAgent(row);
       },
       async delete({ userId, agentId }) {
         const result = await deps.db.query(
@@ -753,7 +780,7 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
             run_id: runId,
             current_watermarks: loopAgent.watermarks,
             alert_rules: Array.isArray(loopAgent.alert_rules) ? loopAgent.alert_rules : [],
-            stages: deps.createAgentLoopStages({
+            stages: await deps.createAgentLoopStages({
               userId,
               runId,
               agent: loopAgent,
