@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { JSDOM } from 'jsdom'
-import { act } from 'react'
+import { act, StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { EvidenceInspectorContext, type EvidenceInspectorContextValue } from '../evidence/evidenceInspectorContext.ts'
@@ -62,6 +62,67 @@ test('ThesisPanel preserves an existing metric option and saves the exact versio
       }],
     })
     assert.deepEqual(saved, ['Updated margin thesis for the company.'])
+  } finally {
+    await harness.unmount()
+  }
+})
+
+test('ThesisPanel completes drafts and saves under StrictMode', async () => {
+  const saved: string[] = []
+  const history = currentHistory()
+  const fetchImpl: typeof fetch = async (input, init) => {
+    if (String(input).endsWith('/draft')) {
+      return json({ conditions: [{
+        condition_id: CONDITION_A,
+        statement: 'StrictMode draft completed.',
+        falsifier: 'StrictMode draft falsifier.',
+        horizon: 'Next quarter',
+      }] })
+    }
+    if (init?.method === 'PUT') {
+      return json({ thesis: { ...history.thesis!, thesis: 'StrictMode save completed.' } })
+    }
+    return json(history)
+  }
+  const harness = await mountPanel({
+    fetchImpl,
+    strictMode: true,
+    onSaved: (thesis) => saved.push(thesis.thesis),
+  })
+  try {
+    await clickButton(harness.document, 'Suggest conditions')
+    assert.equal(
+      harness.document.querySelector<HTMLTextAreaElement>('[name="thesis-condition-0-statement"]')?.value,
+      'StrictMode draft completed.',
+    )
+
+    await clickButton(harness.document, 'Save thesis')
+    assert.deepEqual(saved, ['StrictMode save completed.'])
+    assert.match(harness.document.body.textContent ?? '', /Thesis version 2 saved/i)
+  } finally {
+    await harness.unmount()
+  }
+})
+
+test('ThesisPanel accepts and submits fractional metric thresholds', async () => {
+  const calls: Array<{ input: string; init?: RequestInit }> = []
+  const history = currentHistory()
+  history.thesis!.conditions[0]!.metric!.threshold = 40.5
+  const fetchImpl: typeof fetch = async (input, init) => {
+    calls.push({ input: String(input), init })
+    if (init?.method === 'PUT') return json({ thesis: history.thesis })
+    return json(history)
+  }
+  const harness = await mountPanel({ fetchImpl })
+  try {
+    const threshold = harness.document.querySelector<HTMLInputElement>('input[type="number"][value="40.5"]')!
+    assert.equal(threshold.step, 'any')
+    assert.equal(threshold.validity.stepMismatch, false)
+
+    await clickButton(harness.document, 'Save thesis')
+    const saveCall = calls.find((call) => call.init?.method === 'PUT')
+    assert.ok(saveCall)
+    assert.equal(JSON.parse(String(saveCall.init?.body)).conditions[0].metric.threshold, 40.5)
   } finally {
     await harness.unmount()
   }
@@ -276,6 +337,7 @@ async function mountPanel(input: {
   onSaved?: Parameters<typeof ThesisPanel>[0]['onSaved']
   inspector?: EvidenceInspectorContextValue
   waitForEffects?: boolean
+  strictMode?: boolean
 }) {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
   const restore = installDomGlobals(dom.window as unknown as Window)
@@ -291,11 +353,12 @@ async function mountPanel(input: {
       ...override,
     }
     await act(async () => {
-      root.render(
+      const panel = (
         <EvidenceInspectorContext.Provider value={input.inspector ?? null}>
           <ThesisPanel {...props} />
-        </EvidenceInspectorContext.Provider>,
+        </EvidenceInspectorContext.Provider>
       )
+      root.render(input.strictMode ? <StrictMode>{panel}</StrictMode> : panel)
     })
     if (input.waitForEffects !== false) await act(async () => undefined)
   }

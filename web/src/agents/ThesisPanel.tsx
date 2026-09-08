@@ -63,8 +63,11 @@ function ThesisPanelContent({
   const [message, setMessage] = useState('Loading thesis conditions')
   const mountedRef = useRef(true)
 
-  useEffect(() => () => {
-    mountedRef.current = false
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
   }, [])
   useEffect(() => {
     let ignore = false
@@ -335,6 +338,7 @@ function ConditionEditor({
               Threshold ({condition.metric.unit})
               <input
                 type="number"
+                step="any"
                 value={condition.metric.threshold}
                 onChange={(event) => onChange({ ...condition, metric: { ...condition.metric!, threshold: Number(event.currentTarget.value) } })}
                 disabled={disabled}
