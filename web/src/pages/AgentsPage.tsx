@@ -345,7 +345,7 @@ export function AgentsPage() {
     })
   }, [])
 
-  const handleThesisSaved = useCallback((saved: import('../agents/thesisTypes.ts').ThesisVersion) => {
+  const handleThesisSaved = useCallback((saved: import('../../../services/agents/src/thesis-types.ts').ThesisVersion) => {
     setAgents((current) => current.map((agent) => agent.agent_id === saved.agent_id
       ? { ...agent, thesis: saved.thesis }
       : agent))

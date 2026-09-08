@@ -1,19 +1,47 @@
+// Browser-safe thesis contract shared by the editor, API, repository and evaluator.
+export type ThesisPeriodKind = 'point' | 'fiscal_q' | 'fiscal_y' | 'ttm';
+export type ThesisOperator = 'gte' | 'lte';
+export type ThesisMetricCheck = {
+  metric_key: string;
+  unit: string;
+  period_kind: ThesisPeriodKind;
+  operator: ThesisOperator;
+  threshold: number;
+  max_age_days: number;
+};
+
 export type ThesisCondition = {
   condition_id: string;
   statement: string;
   falsifier: string;
   horizon: string;
-  metric?: {
-    metric_key: string;
-    unit: string;
-    period_kind: "point" | "fiscal_q" | "fiscal_y" | "ttm";
-    operator: "gte" | "lte";
-    threshold: number;
-    max_age_days: number;
-  };
+  metric?: ThesisMetricCheck;
 };
 
-type ThesisMetric = NonNullable<ThesisCondition["metric"]>;
+export const THESIS_TEXT_MIN = 8;
+export const THESIS_TEXT_MAX = 4000;
+export const THESIS_CONDITIONS_MAX = 5;
+export const THESIS_REASON_MAX = 2000;
+
+export type SaveThesisInput = {
+  expected_version: number;
+  thesis: string;
+  conditions: ThesisCondition[];
+};
+
+export type ThesisMetricOption = {
+  metric_key: string;
+  label: string;
+  unit: string;
+  period_kind: ThesisPeriodKind;
+};
+
+export type ThesisHistory = {
+  thesis: ThesisVersion | null;
+  versions: ThesisVersion[];
+  assessments: ThesisAssessment[];
+};
+export type ThesisHistoryResponse = ThesisHistory & { metrics: ThesisMetricOption[] };
 
 export type ThesisVersion = {
   thesis_version_id: string;
@@ -72,8 +100,8 @@ const PERIOD_KINDS = new Set(["point", "fiscal_q", "fiscal_y", "ttm"]);
 const OPERATORS = new Set(["gte", "lte"]);
 
 export function parseThesisConditions(value: unknown): ThesisCondition[] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 5) {
-    throw new ThesisValidationError("conditions must contain between 1 and 5 items");
+  if (!Array.isArray(value) || value.length < 1 || value.length > THESIS_CONDITIONS_MAX) {
+    throw new ThesisValidationError(`conditions must contain between 1 and ${THESIS_CONDITIONS_MAX} items`);
   }
 
   const seenIds = new Set<string>();
@@ -99,7 +127,7 @@ export function parseThesisConditions(value: unknown): ThesisCondition[] {
         metric.period_kind,
         `${label}.metric.period_kind`,
         PERIOD_KINDS,
-      ) as ThesisMetric["period_kind"];
+      ) as ThesisPeriodKind;
       const operator = requireEnum(
         metric.operator,
         `${label}.metric.operator`,
@@ -121,21 +149,21 @@ export function parseThesisConditions(value: unknown): ThesisCondition[] {
   });
 }
 
-function requireRecord(value: unknown, label: string): Record<string, unknown> {
+export function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new ThesisValidationError(`${label} must be an object`);
   }
   return value as Record<string, unknown>;
 }
 
-function requireUuid(value: unknown, label: string): string {
+export function requireUuid(value: unknown, label: string): string {
   if (typeof value !== "string" || !UUID_RE.test(value)) {
     throw new ThesisValidationError(`${label} must be a UUID`);
   }
   return value;
 }
 
-function requireTrimmedString(
+export function requireTrimmedString(
   value: unknown,
   label: string,
   minLength: number,
@@ -173,4 +201,49 @@ function requireEnum(value: unknown, label: string, allowed: ReadonlySet<string>
     throw new ThesisValidationError(`${label} has an unsupported value`);
   }
   return value;
+}
+
+export function parseThesisText(value: unknown): string {
+  if (typeof value !== 'string' || value.trim().length < THESIS_TEXT_MIN || value.trim().length > THESIS_TEXT_MAX) {
+    throw new ThesisValidationError(`Thesis must be ${THESIS_TEXT_MIN}–${THESIS_TEXT_MAX} characters.`);
+  }
+  return value.trim();
+}
+
+export function parseThesisExpectedVersion(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new ThesisValidationError('expected_version must be a non-negative integer');
+  }
+  return value;
+}
+
+export function parseConditionAssessments(value: unknown): ConditionAssessment[] {
+  if (!Array.isArray(value)) throw new ThesisValidationError("results must be an array");
+  return value.map((item, index) => {
+    const label = `results[${index}]`;
+    const row = requireRecord(item, label);
+    const conditionId = requireUuid(row.condition_id, `${label}.condition_id`);
+    if (row.status !== "supported" && row.status !== "challenged" && row.status !== "unresolved") {
+      throw new ThesisValidationError(`${label}.status is invalid`);
+    }
+    const reason = requireTrimmedString(row.reason, `${label}.reason`, 1, THESIS_REASON_MAX);
+    const claimRefs = parseUuidArray(row.claim_refs, `${label}.claim_refs`);
+    const factRefs = parseUuidArray(row.fact_refs, `${label}.fact_refs`);
+    if (row.method !== "metric" && row.method !== "model" && row.method !== "no_evidence") {
+      throw new ThesisValidationError(`${label}.method is invalid`);
+    }
+    return {
+      condition_id: conditionId,
+      status: row.status,
+      reason,
+      claim_refs: claimRefs,
+      fact_refs: factRefs,
+      method: row.method,
+    };
+  });
+}
+
+function parseUuidArray(value: unknown, label: string): string[] {
+  if (!Array.isArray(value)) throw new ThesisValidationError(`${label} must be an array`);
+  return value.map((item, index) => requireUuid(item, `${label}[${index}]`));
 }

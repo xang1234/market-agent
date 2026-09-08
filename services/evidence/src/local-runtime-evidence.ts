@@ -10,6 +10,7 @@ export type LocalRuntimeEvidenceInput = {
   exclude_claim_ids?: ReadonlyArray<string>;
   source_categories?: ReadonlyArray<string>;
   limit?: number;
+  // Optional date boundary only; current document visibility always applies.
   as_of?: string;
 };
 
@@ -134,12 +135,13 @@ export async function loadLocalRuntimeEvidence(
            on s.source_id = c.reported_by_source_id
         where c.status in ('extracted', 'corroborated')
           and c.superseded_at is null
+          and d.deleted_at is null
+          and d.parse_status <> 'superseded'
+          and exists (select 1 from sources ds where ds.source_id=d.source_id
+            and (ds.user_id is null or ds.user_id=$3::uuid))
           and ($7::timestamptz is null or (
-            d.deleted_at is null and d.parse_status <> 'superseded'
-            and c.created_at <= $7::timestamptz
+            c.created_at <= $7::timestamptz
             and coalesce(d.published_at,d.created_at) <= $7::timestamptz
-            and exists (select 1 from sources ds where ds.source_id=d.source_id
-              and (ds.user_id is null or ds.user_id=$3::uuid))
           ))
           and not (c.claim_id = any($4::uuid[]))
           and (

@@ -3,7 +3,7 @@ import test from "node:test";
 import type { QueryResult } from "pg";
 
 import {
-  findThesisAssessment,
+  getLatestThesisAssessment,
   getCurrentThesis,
   loadThesisHistory,
   recordThesisAssessment,
@@ -12,6 +12,7 @@ import {
 import {
   ThesisConflictError,
   ThesisNotFoundError,
+  ThesisValidationError,
   type ConditionAssessment,
 } from "../src/thesis-types.ts";
 import type { QueryExecutor } from "../src/agent-repo.ts";
@@ -40,6 +41,17 @@ const RESULTS: ConditionAssessment[] = [{
   fact_refs: [],
   method: "model",
 }];
+
+test('saveThesis rejects text outside the user-facing bounds before opening a transaction', async () => {
+  const db: QueryExecutor = { async query() { throw new Error('invalid thesis reached the database'); } };
+  for (const thesis of ['x'.repeat(7), 'x'.repeat(4001)]) {
+    await assert.rejects(saveThesis(db, {
+      agent_id: AGENT_ID, user_id: USER_ID, expected_version: 0,
+      thesis, subject_ref: { kind: 'issuer', id: ISSUER_ID },
+      conditions: [{ condition_id: CONDITION_ID, statement: 'Demand remains durable.', falsifier: 'Demand contracts materially.', horizon: 'This year' }],
+    }), ThesisValidationError);
+  }
+});
 
 test("recordThesisAssessment performs one statement and does not open a nested transaction", async () => {
   const statements: string[] = [];
@@ -166,7 +178,7 @@ test(
     }
     assert.equal(duplicate.assessment_id, assessment.assessment_id);
     assert.deepEqual(
-      await findThesisAssessment(pool as unknown as QueryExecutor, version2.thesis_version_id, "packet-1"),
+      await getLatestThesisAssessment(pool as unknown as QueryExecutor, version2.thesis_version_id),
       assessment,
     );
 
@@ -178,6 +190,13 @@ test(
     assert.deepEqual(history.versions.map((version) => version.version), [2, 1]);
     assert.equal(history.assessments.length, 1);
     assert.equal(history.assessments[0]?.assessment_id, assessment.assessment_id);
+
+    const newer = await recordThesisAssessment(pool, {
+      thesis_version_id: version2.thesis_version_id, run_id: RUN_ID, snapshot_id: SNAPSHOT_ID,
+      input_hash: 'packet-2', results: RESULTS, model_version: null, prompt_version: 'living-thesis-v1',
+    });
+    assert.equal((await getLatestThesisAssessment(pool, version2.thesis_version_id))?.assessment_id, newer.assessment_id);
+    assert.equal(await getLatestThesisAssessment(pool, version1.thesis_version_id), null);
     await assert.rejects(
       loadThesisHistory(pool as unknown as QueryExecutor, { agent_id: AGENT_ID, user_id: OTHER_USER_ID }),
       ThesisNotFoundError,
@@ -198,6 +217,12 @@ test(
       }),
       ThesisConflictError,
     );
+
+    // Rows from the original permissive writer must not bypass the contract.
+    await pool.query('update agent_thesis_versions set thesis=$2 where thesis_version_id=$1', [version2.thesis_version_id, 'x'.repeat(4001)]);
+    await assert.rejects(getCurrentThesis(pool, AGENT_ID), ThesisValidationError);
+    await pool.query('update agent_thesis_versions set thesis=$2 where thesis_version_id=$1', [version2.thesis_version_id, `  ${version2.thesis}  `]);
+    assert.equal((await getCurrentThesis(pool, AGENT_ID))?.thesis, version2.thesis);
 
     await pool.query("delete from agents where agent_id = $1::uuid", [AGENT_ID]);
     const remaining = await pool.query<{ versions: string; assessments: string }>(

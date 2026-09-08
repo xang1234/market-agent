@@ -4,10 +4,15 @@ import { isSubjectRef, type SubjectRef } from "../../shared/src/subject-ref.ts";
 import type { QueryExecutor } from "./agent-repo.ts";
 import {
   parseThesisConditions,
+  parseThesisText,
+  parseThesisExpectedVersion,
+  parseConditionAssessments,
+  requireUuid as assertUuid,
+  requireTrimmedString as assertBoundedText,
+  type ThesisHistory,
   ThesisConflictError,
   ThesisNotFoundError,
   ThesisValidationError,
-  type ConditionAssessment,
   type ThesisAssessment,
   type ThesisVersion,
 } from "./thesis-types.ts";
@@ -70,8 +75,8 @@ export async function saveThesis(
 ): Promise<ThesisVersion> {
   assertUuid(input.agent_id, "agent_id");
   assertUuid(input.user_id, "user_id");
-  assertExpectedVersion(input.expected_version);
-  const thesis = assertThesis(input.thesis);
+  parseThesisExpectedVersion(input.expected_version);
+  const thesis = parseThesisText(input.thesis);
   const subjectRef = assertIssuerSubject(input.subject_ref);
   const conditions = parseThesisConditions(input.conditions);
 
@@ -131,7 +136,7 @@ export async function saveThesis(
 export async function loadThesisHistory(
   db: QueryExecutor,
   input: { agent_id: string; user_id: string },
-): Promise<{ thesis: ThesisVersion | null; versions: ThesisVersion[]; assessments: ThesisAssessment[] }> {
+): Promise<ThesisHistory> {
   assertUuid(input.agent_id, "agent_id");
   assertUuid(input.user_id, "user_id");
   const owner = await db.query(
@@ -170,19 +175,18 @@ export async function loadThesisHistory(
   };
 }
 
-export async function findThesisAssessment(
+export async function getLatestThesisAssessment(
   db: QueryExecutor,
   versionId: string,
-  inputHash: string,
 ): Promise<ThesisAssessment | null> {
   assertUuid(versionId, "thesis_version_id");
-  const normalizedHash = assertInputHash(inputHash);
   const { rows } = await db.query<ThesisAssessmentDbRow>(
     `select ${ASSESSMENT_COLUMNS}
        from agent_thesis_assessments
       where thesis_version_id = $1::uuid
-        and input_hash = $2`,
-    [versionId, normalizedHash],
+      order by assessed_at desc, assessment_id desc
+      limit 1`,
+    [versionId],
   );
   return rows[0] === undefined ? null : thesisAssessmentFromDb(rows[0]);
 }
@@ -226,7 +230,7 @@ function thesisVersionFromDb(row: ThesisVersionDbRow | undefined): ThesisVersion
     thesis_version_id: row.thesis_version_id,
     agent_id: row.agent_id,
     version: row.version,
-    thesis: row.thesis,
+    thesis: parseThesisText(row.thesis),
     subject_ref: assertIssuerSubject(jsonValue(row.subject_ref, "subject_ref")),
     conditions: parseThesisConditions(jsonValue(row.conditions, "conditions")),
     created_at: isoDate(row.created_at, "created_at"),
@@ -246,40 +250,6 @@ function thesisAssessmentFromDb(row: ThesisAssessmentDbRow | undefined): ThesisA
     prompt_version: row.prompt_version,
     assessed_at: isoDate(row.assessed_at, "assessed_at"),
   };
-}
-
-function parseConditionAssessments(value: unknown): ConditionAssessment[] {
-  if (!Array.isArray(value)) throw new ThesisValidationError("results must be an array");
-  return value.map((item, index) => {
-    const label = `results[${index}]`;
-    if (item === null || typeof item !== "object" || Array.isArray(item)) {
-      throw new ThesisValidationError(`${label} must be an object`);
-    }
-    const row = item as Record<string, unknown>;
-    const conditionId = assertUuid(row.condition_id, `${label}.condition_id`);
-    if (row.status !== "supported" && row.status !== "challenged" && row.status !== "unresolved") {
-      throw new ThesisValidationError(`${label}.status is invalid`);
-    }
-    const reason = assertBoundedText(row.reason, `${label}.reason`, 1, 2_000);
-    const claimRefs = parseUuidArray(row.claim_refs, `${label}.claim_refs`);
-    const factRefs = parseUuidArray(row.fact_refs, `${label}.fact_refs`);
-    if (row.method !== "metric" && row.method !== "model" && row.method !== "no_evidence") {
-      throw new ThesisValidationError(`${label}.method is invalid`);
-    }
-    return {
-      condition_id: conditionId,
-      status: row.status,
-      reason,
-      claim_refs: claimRefs,
-      fact_refs: factRefs,
-      method: row.method,
-    };
-  });
-}
-
-function parseUuidArray(value: unknown, label: string): string[] {
-  if (!Array.isArray(value)) throw new ThesisValidationError(`${label} must be an array`);
-  return value.map((item, index) => assertUuid(item, `${label}[${index}]`));
 }
 
 function assertIssuerSubject(value: unknown): { kind: "issuer"; id: string } {
@@ -309,39 +279,8 @@ async function isMatchingSingleIssuerUniverse(
   return normalized.length === 1 && normalized[0]?.kind === "issuer" && normalized[0].id === issuerId;
 }
 
-function assertThesis(value: unknown): string {
-  return assertBoundedText(value, "thesis", 1, 20_000);
-}
-
 function assertInputHash(value: unknown): string {
   return assertBoundedText(value, "input_hash", 1, 512);
-}
-
-function assertBoundedText(value: unknown, label: string, min: number, max: number): string {
-  if (
-    typeof value !== "string" ||
-    value !== value.trim() ||
-    value.length < min ||
-    value.length > max
-  ) {
-    throw new ThesisValidationError(`${label} must be trimmed and between ${min} and ${max} characters`);
-  }
-  return value;
-}
-
-function assertExpectedVersion(value: unknown): void {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    throw new ThesisValidationError("expected_version must be a non-negative integer");
-  }
-}
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function assertUuid(value: unknown, label: string): string {
-  if (typeof value !== "string" || !UUID_RE.test(value)) {
-    throw new ThesisValidationError(`${label} must be a UUID`);
-  }
-  return value;
 }
 
 function jsonValue(value: unknown, label: string): unknown {

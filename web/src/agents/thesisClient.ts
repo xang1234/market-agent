@@ -1,5 +1,5 @@
 import { authenticatedJson, type FetchImpl } from '../http/authFetch.ts'
-import type { SaveThesisInput, ThesisCondition, ThesisHistoryResponse, ThesisVersion } from './thesisTypes.ts'
+import type { SaveThesisInput, ThesisCondition, ThesisHistoryResponse, ThesisVersion } from '../../../services/agents/src/thesis-types.ts'
 
 export function fetchThesisHistory(input: {
   userId: string

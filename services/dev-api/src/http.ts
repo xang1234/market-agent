@@ -167,7 +167,7 @@ export type DevApiAgentLoopStageFactoryInput = {
 
 export type DevApiAgentLoopStageFactory = (
   input: DevApiAgentLoopStageFactoryInput,
-) => AgentLoopStages;
+) => AgentLoopStages | Promise<AgentLoopStages>;
 
 export type DevApiServerOptions = {
   adapters?: DevApiAdapters;
@@ -780,7 +780,7 @@ export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): Dev
             run_id: runId,
             current_watermarks: loopAgent.watermarks,
             alert_rules: Array.isArray(loopAgent.alert_rules) ? loopAgent.alert_rules : [],
-            stages: deps.createAgentLoopStages({
+            stages: await deps.createAgentLoopStages({
               userId,
               runId,
               agent: loopAgent,

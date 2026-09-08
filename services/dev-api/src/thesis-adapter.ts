@@ -2,22 +2,14 @@ import { getAgent, type QueryExecutor } from '../../agents/src/agent-repo.ts';
 import { normalizeUniverseToIssuers } from '../../analyst-grids/src/subject-normalization.ts';
 import { getCurrentThesis, loadThesisHistory, saveThesis } from '../../agents/src/thesis-repo.ts';
 import { draftThesisConditions, type ThesisLlm } from '../../agents/src/thesis-evaluator.ts';
-import { parseThesisConditions, ThesisConflictError, ThesisNotFoundError, ThesisValidationError } from '../../agents/src/thesis-types.ts';
+import { parseThesisConditions, parseThesisText, parseThesisExpectedVersion, type ThesisHistoryResponse, type ThesisMetricOption, ThesisConflictError, ThesisNotFoundError, ThesisValidationError } from '../../agents/src/thesis-types.ts';
 import { createLlmRouterFromEnv } from '../../llm/src/settings-loader.ts';
 import { DevApiHttpError } from './dev-api-shared.ts';
-export type ThesisMetricOption = {
-  metric_key: string;
-  label: string;
-  unit: string;
-  period_kind: string;
-};
 export type ThesisAdapter = {
   get(input: {
     userId: string;
     agentId: string;
-  }): Promise<Awaited<ReturnType<typeof loadThesisHistory>> & {
-    metrics?: ThesisMetricOption[];
-  }>;
+  }): Promise<ThesisHistoryResponse>;
   save(input: {
     userId: string;
     agentId: string;
@@ -68,18 +60,15 @@ export function createThesisAdapter(db: QueryExecutor, getModel: () => Promise<T
       const [subject] = await normalizeUniverseToIssuers(db, agent.universe.subject_refs);
       if (subject?.kind !== 'issuer')
         throw new DevApiHttpError(409, 'Choose a company before saving thesis conditions.');
-      const expected = body.expected_version;
-      if (!Number.isInteger(expected) || (expected as number) < 0)
-        throw new DevApiHttpError(400, 'expected_version must be a non-negative integer');
       return translateErrors(async () => ({ thesis: await saveThesis(db, {
-          agent_id: agentId, user_id: userId, expected_version: expected as number,
-          thesis: thesisText(body.thesis), subject_ref: { kind: 'issuer', id: subject.id },
+          agent_id: agentId, user_id: userId, expected_version: parseThesisExpectedVersion(body.expected_version),
+          thesis: parseThesisText(body.thesis), subject_ref: { kind: 'issuer', id: subject.id },
           conditions: parseThesisConditions(body.conditions),
         }) }));
     },
     async draft({ userId, agentId, body }) {
       await ownedAgent(userId, agentId);
-      const text = thesisText(body.thesis);
+      const text = await translateErrors(async () => parseThesisText(body.thesis));
       try {
         const model = await getModel();
         if (!model)
@@ -105,12 +94,6 @@ export async function assertLegacyThesisEditAllowed(db: QueryExecutor, agentId: 
     || (body.universe !== undefined && JSON.stringify(body.universe) !== JSON.stringify(agent?.universe))) {
     throw new DevApiHttpError(409, 'Edit this thesis in Thesis conditions. Create another agent to monitor a different company.');
   }
-}
-function thesisText(value: unknown): string {
-  if (typeof value !== 'string' || value.trim().length < 8 || value.trim().length > 4000) {
-    throw new DevApiHttpError(400, 'Thesis must be 8–4000 characters.');
-  }
-  return value.trim();
 }
 async function translateErrors<T>(action: () => Promise<T>): Promise<T> {
   try {

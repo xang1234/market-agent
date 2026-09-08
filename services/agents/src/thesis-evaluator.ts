@@ -2,6 +2,9 @@ import { randomUUID } from "node:crypto";
 
 import {
   parseThesisConditions,
+  parseThesisText,
+  requireTrimmedString,
+  THESIS_REASON_MAX,
   ThesisValidationError,
   type ConditionAssessment,
   type ThesisCondition,
@@ -33,7 +36,6 @@ export type ThesisFact = {
 export type ThesisClaim = {
   claim_id: string;
   text_canonical: string;
-  [key: string]: unknown;
 };
 
 export async function evaluateThesis(input: {
@@ -44,6 +46,7 @@ export async function evaluateThesis(input: {
   llm: ThesisLlm | null;
 }): Promise<{ results: ConditionAssessment[]; model_version: string | null }> {
   const assessmentTime = parseAssessmentTime(input.as_of);
+  const thesisText = parseThesisText(input.thesis.thesis);
   const conditions = parseThesisConditions(input.thesis.conditions);
   const metricResults = new Map<string, ConditionAssessment>();
   const narrativeConditions: ThesisCondition[] = [];
@@ -87,7 +90,7 @@ export async function evaluateThesis(input: {
           {
             role: "user",
             content: JSON.stringify({
-              thesis: input.thesis.thesis,
+              thesis: thesisText,
               thesis_created_at: input.thesis.created_at,
               conditions: narrativeConditions,
               claims: input.claims,
@@ -123,9 +126,7 @@ export async function draftThesisConditions(
   llm: ThesisLlm,
   thesis: string,
 ): Promise<ThesisCondition[]> {
-  if (typeof thesis !== "string" || thesis !== thesis.trim() || thesis.length === 0) {
-    throw new ThesisValidationError("thesis must be a non-empty trimmed string");
-  }
+  const normalizedThesis = parseThesisText(thesis);
 
   const response = await llm.complete({
     messages: [
@@ -136,7 +137,7 @@ export async function draftThesisConditions(
           "Return JSON as {\"conditions\":[{\"statement\":string,\"falsifier\":string,\"horizon\":string}]}. " +
           "Do not include IDs or numerical metric conditions.",
       },
-      { role: "user", content: thesis },
+      { role: "user", content: normalizedThesis },
     ],
     temperature: 0.2,
     maxTokens: 1_000,
@@ -250,9 +251,10 @@ function parseNarrativeResults(
     if (row.status !== "supported" && row.status !== "challenged" && row.status !== "unresolved") {
       throw new ThesisValidationError(`assessment response results[${index}].status is invalid`);
     }
-    if (typeof row.reason !== "string" || row.reason.trim().length === 0 || row.reason.trim().length > 2000) {
-      throw new ThesisValidationError(`assessment response results[${index}].reason must contain 1–2000 trimmed characters`);
-    }
+    const reason = requireTrimmedString(
+      typeof row.reason === 'string' ? row.reason.trim() : row.reason,
+      `assessment response results[${index}].reason`, 1, THESIS_REASON_MAX,
+    );
     if (!Array.isArray(row.claim_refs) || !row.claim_refs.every((ref) => typeof ref === "string")) {
       throw new ThesisValidationError(`assessment response results[${index}].claim_refs must be strings`);
     }
@@ -265,7 +267,7 @@ function parseNarrativeResults(
     return {
       condition_id: row.condition_id,
       status: row.status,
-      reason: row.reason.trim(),
+      reason,
       claim_refs: [...new Set(row.claim_refs)],
       fact_refs: [],
       method: "model",

@@ -7,7 +7,6 @@ import { buildClaimBackedSealInput, buildFactBackedSealInput, toSealFactRow } fr
 import { sealSnapshotInTransaction, snapshotTransactionClient } from '../../snapshot/src/snapshot-sealer.ts';
 import { mergeSealInputs } from '../../analyze/src/seal-input-merge.ts';
 import { writeToolCallLog } from '../../observability/src/tool-call.ts';
-import type { JsonValue } from '../../observability/src/types.ts';
 type PacketFact = ThesisFact & {
   confidence: number;
   trust_tier: string;
@@ -73,7 +72,7 @@ export async function sealThesisPacket(db: QueryExecutor, input: {
   const log = await writeToolCallLog(db, {
     agent_id: input.thesis.agent_id, tool_name: 'thesis_assessment', status: 'ok',
     args: { version_id: input.thesis.thesis_version_id, input_hash: input.inputHash },
-    result: { results: input.results, model_version: input.modelVersion } as unknown as JsonValue,
+    result: { results: input.results, model_version: input.modelVersion },
   });
   const claims = input.packet.claims;
   const sources = [...new Set(claims.map(c => c.source_id))];

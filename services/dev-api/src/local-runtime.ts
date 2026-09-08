@@ -250,21 +250,12 @@ export async function inspectEvidence(
   });
 }
 
-export const createAgentLoopStages: DevApiAgentLoopStageFactory = (input) => {
-  // Select once per run; an assessment may not switch thesis versions mid-run.
-  let selected: Promise<ReturnType<DevApiAgentLoopStageFactory>> | undefined;
-  const stages = () => selected ??= getCurrentThesis(pool(), input.agent.agent_id).then(thesis => thesis
+export const createAgentLoopStages: DevApiAgentLoopStageFactory = async (input) => {
+  // Select and bind the thesis version once before executing the loop.
+  const thesis = await getCurrentThesis(pool(), input.agent.agent_id);
+  return thesis
     ? createThesisAgentLoopStages({ ...input, db: pool(), thesis })
-    : createLegacyAgentLoopStages(input));
-  return {
-    readDeltas: async context => (await stages()).readDeltas(context),
-    extractEvidence: async context => (await stages()).extractEvidence(context),
-    clusterEvidence: async context => (await stages()).clusterEvidence(context),
-    analyze: async context => (await stages()).analyze(context),
-    nextWatermarks: async context => (await stages()).nextWatermarks(context),
-    applySideEffects: async context => (await stages()).applySideEffects(context),
-    alertFindings: async context => (await stages()).alertFindings?.(context) ?? [],
-  };
+    : createLegacyAgentLoopStages(input);
 };
 
 const createLegacyAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, runId, agent, trigger = "scheduled" }) => {

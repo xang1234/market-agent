@@ -269,6 +269,21 @@ test("evaluateThesis rejects invalid or future assessment dates", async () => {
   }
 });
 
+test('draftThesisConditions rejects out-of-bounds text before calling a model', async () => {
+  const llm: ThesisLlm = { async complete() { throw new Error('invalid thesis reached the model'); } };
+  for (const thesis of ['x'.repeat(7), 'x'.repeat(4001)]) {
+    await assert.rejects(draftThesisConditions(llm, thesis), ThesisValidationError);
+  }
+});
+
+test('evaluateThesis rejects an invalid stored thesis before calling a model', async () => {
+  const llm: ThesisLlm = { async complete() { throw new Error('invalid stored thesis reached the model'); } };
+  await assert.rejects(evaluateThesis({
+    thesis: { ...thesis([condition(BULL_ID)]), thesis: 'x'.repeat(4001) },
+    claims: [{ claim_id: CLAIM_ID, text_canonical: 'Demand slowed.' }], facts: [], as_of: AS_OF, llm,
+  }), ThesisValidationError);
+});
+
 test("draftThesisConditions creates exactly three narrative conditions with server-generated IDs", async () => {
   const conditions = await draftThesisConditions(
     llmResponse({ conditions: [

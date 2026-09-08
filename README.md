@@ -70,6 +70,8 @@ Create an agent with a name, thesis, cadence, and company or universe. For an ag
 
 Each save creates a thesis version. A run assesses its conditions as **supported**, **challenged**, or **unresolved**, with evidence links, assessment method, and model provenance. Optional numeric conditions compare an available authoritative metric against your threshold; narrative conditions use the model configured in Settings. New supported or challenged states appear in Home and use the agent's existing alert rules. Repeated evidence stays quiet. Missing evidence produces an unresolved assessment; model failures leave the run failed without inventing a result.
 
+Assessment refreshes preserve your unsaved thesis edits. If a newer thesis version was saved elsewhere, the editor keeps your draft and offers **Load saved version** to replace it explicitly.
+
 Monitoring uses current, owner-visible evidence already stored in the project: up to 100 claims and 250 facts for configured metrics. It does not start a new web crawl. Numerical evidence must match the chosen metric, unit, period, and maximum age; period-based freshness uses the period end. The panel shows the latest 20 assessments and versions. Existing agents without saved thesis conditions keep their previous workflow, including multi-company universes.
 
 The assessment history also makes agent behavior inspectable: which conditions were checked, which evidence was used, whether a calculation or model made the assessment, and what changed between runs.

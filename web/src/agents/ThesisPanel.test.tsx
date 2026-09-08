@@ -7,7 +7,7 @@ import { createRoot } from 'react-dom/client'
 
 import { EvidenceInspectorContext, type EvidenceInspectorContextValue } from '../evidence/evidenceInspectorContext.ts'
 import { ThesisPanel } from './ThesisPanel.tsx'
-import type { ThesisHistoryResponse } from './thesisTypes.ts'
+import type { ThesisHistoryResponse } from '../../../services/agents/src/thesis-types.ts'
 
 const USER_A = '00000000-0000-4000-8000-000000000001'
 const USER_B = '00000000-0000-4000-8000-000000000002'
@@ -262,6 +262,74 @@ test('ThesisPanel opens condition evidence with its assessment snapshot and expl
     assert.match(harness.document.body.textContent ?? '', /Prompt thesis-assessment-v1/i)
     await clickButton(harness.document, 'Inspect fact evidence')
     assert.deepEqual(opened, [{ snapshotId: SNAPSHOT_A, ref: { kind: 'fact', id: FACT_A } }])
+  } finally {
+    await harness.unmount()
+  }
+})
+
+test('ThesisPanel refreshes assessments without replacing an unsaved draft or its expected version', async () => {
+  let history = currentHistory()
+  let payload: Record<string, unknown> | undefined
+  const harness = await mountPanel({ fetchImpl: async (_input, init) => {
+    if (init?.method === 'PUT') {
+      payload = JSON.parse(String(init.body))
+      return json({ error: 'Thesis changed; reload before saving.' }, 409)
+    }
+    return json(history)
+  } })
+  try {
+    await clickButton(harness.document, 'Add condition')
+    const count = () => harness.document.querySelectorAll('textarea[name$="-statement"]').length
+    assert.equal(count(), 2)
+    history = {
+      ...history,
+      thesis: { ...history.thesis!, version: 3, thesis: 'A newer thesis saved elsewhere.' },
+      assessments: [{ ...history.assessments[0], prompt_version: 'refreshed-assessment' }],
+    }
+    await harness.render({ refreshKey: 1 })
+    assert.equal(count(), 2, 'history refresh must preserve the unsaved condition')
+    assert.equal(harness.document.querySelector<HTMLTextAreaElement>('[name="thesis-text"]')?.value, 'Margins can remain structurally strong.')
+    assert.match(harness.document.body.textContent ?? '', /refreshed-assessment/)
+    await clickButton(harness.document, 'Load saved version')
+    assert.equal(count(), 1, 'explicit loading replaces the draft with the saved conditions')
+    assert.equal(harness.document.querySelector<HTMLTextAreaElement>('[name="thesis-text"]')?.value, history.thesis!.thesis)
+    await clickButton(harness.document, 'Save thesis')
+    assert.equal(payload?.expected_version, 3)
+  } finally {
+    await harness.unmount()
+  }
+})
+
+test('ThesisPanel keeps the draft base version when history advances', async () => {
+  let history = currentHistory()
+  let expectedVersion: number | undefined
+  const harness = await mountPanel({ fetchImpl: async (_input, init) => {
+    if (init?.method === 'PUT') {
+      expectedVersion = JSON.parse(String(init.body)).expected_version
+      return json({ error: 'Thesis changed; reload before saving.' }, 409)
+    }
+    return json(history)
+  } })
+  try {
+    history = { ...history, thesis: { ...history.thesis!, version: 3 } }
+    await harness.render({ refreshKey: 1 })
+    await clickButton(harness.document, 'Save thesis')
+    assert.equal(expectedVersion, 2, 'refreshing cannot silently advance the draft base version')
+    assert.match(harness.document.body.textContent ?? '', /Thesis changed; reload before saving/)
+  } finally {
+    await harness.unmount()
+  }
+})
+
+test('ThesisPanel retains editable conditions if a background history refresh fails', async () => {
+  let fail = false
+  const harness = await mountPanel({ fetchImpl: async () => fail ? json({ error: 'History refresh failed' }, 503) : json(currentHistory()) })
+  try {
+    await clickButton(harness.document, 'Add condition')
+    fail = true
+    await harness.render({ refreshKey: 1 })
+    assert.equal(harness.document.querySelectorAll('textarea[name$="-statement"]').length, 2)
+    assert.match(harness.document.body.textContent ?? '', /History refresh failed/)
   } finally {
     await harness.unmount()
   }
