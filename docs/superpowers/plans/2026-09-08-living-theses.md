@@ -64,15 +64,19 @@ Export `THESIS_PROMPT_VERSION`. Narrative result JSON is `{results:[{condition_i
 **Files:** New web/src/agents/thesisTypes.ts, thesisClient.ts, ThesisPanel.tsx and tests; modify AgentsPage.tsx and AnalyzePage.tsx; add focused handoff helper/test.
 **Consumes:** Shared HTTP wire contract in spec. **Produces:** Editable conditions, optional metric checks, draft, assessment inspection and handoff.
 
-- [ ] Write UI behavior tests for save payload, draft remains editable, failed request, switching agent, condition evidence click and Analyze handoff.
-- [ ] Implement panel with accessible labels and existing styling. The GET response additionally includes optional `metrics: {metric_key:string;label:string;unit:string;period_kind:string}[]`, scoped available fact definitions. Select numeric checks through these human-readable labels and units, never require typing metric keys. Scope requests by user and agent; abort/ignore stale responses. Reset on selection. 20-item histories are bounded; label older versions on historical assessments. Use existing EvidenceInspector hook with snapshot and claim/fact refs.
-- [ ] Mount panel for selected agent and refresh it after manual run completion. Refresh roster text after thesis save. Existing agent editing must guide versioned thesis edits to the new panel.
-- [ ] Add Monitor this thesis action to completed single-company Analyze runs. Navigate with editable carried company/memo context; prefill Agents form without an automatic save. The user creates agent then drafts/saves its conditions.
-- [ ] Run focused UI tests then web typecheck/lint/build and commit task files.
+- [x] Write UI behavior tests for save payload, draft remains editable, failed request, switching agent, condition evidence click and Analyze handoff.
+- [x] Implement panel with accessible labels and existing styling. The GET response additionally includes optional `metrics: {metric_key:string;label:string;unit:string;period_kind:string}[]`, scoped available fact definitions. Select numeric checks through these human-readable labels and units, never require typing metric keys. Scope requests by user and agent; abort/ignore stale responses. Reset on selection. 20-item histories are bounded; label older versions on historical assessments. Use existing EvidenceInspector hook with snapshot and claim/fact refs.
+- [x] Mount panel for selected agent and refresh it after manual run completion. Refresh roster text after thesis save. Existing agent editing must guide versioned thesis edits to the new panel.
+- [x] Add Monitor this thesis action to completed single-company Analyze runs. Navigate with editable carried company/memo context; prefill Agents form without an automatic save. The user creates agent then drafts/saves its conditions.
+- [x] Run focused UI tests then web typecheck/lint/build and commit task files.
 
 ## Completion
 
-- [ ] Review complete branch for source attribution, authorization, transactions, missing-data behavior and UI continuity.
-- [ ] Update CONTEXT.md and README.md with supported flow and limitations, close tracking issue, create issues only for required follow-ups.
-- [ ] Run relevant suites and real DB integration; capture genuine environmental skips as limitations.
-- [ ] Rebase on current origin/main, synchronize beads, push feat/living-theses, verify branch tracking and clean worktree. Preserve unrelated original checkout changes.
+- [x] Review complete branch for source attribution, authorization, transactions, missing-data behavior and UI continuity.
+- [x] Update CONTEXT.md and README.md with supported flow and limitations, close tracking issue, create issues only for required follow-ups.
+- [x] Run relevant suites and real DB integration; capture genuine environmental skips as limitations.
+- [x] Rebase on current origin/main, synchronize beads, push feat/living-theses, verify branch tracking and clean worktree. Preserve unrelated original checkout changes.
+
+## Verification record
+
+Agents 85/85; API 68 passed with 2 live-data skips; database schema/migrations 29/29; web 590/590 with serial test concurrency (one unchanged timing benchmark failed under default full-suite load, then passed isolated and serial). Final UI regressions 9/9, typecheck/lint/build passed; final source/display runtime regressions 2/2 and evidence inspector/loader 13/13 passed. All review findings addressed; no live external model/provider calls. Existing lint and bundle-size warnings remain. Installed beads has no `bd sync` command, so tracking was synchronized through JSONL export and git while preserving unrelated records.
