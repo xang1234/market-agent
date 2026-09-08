@@ -28,3 +28,6 @@ web/node_modules/
 
 # Brainstorming visual companion (local, not committed)
 .superpowers/
+
+# Dependency directories may also be symlinked in worktrees
+node_modules

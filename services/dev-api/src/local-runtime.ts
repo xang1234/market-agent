@@ -1,3 +1,5 @@
+import { getCurrentThesis } from "../../agents/src/thesis-repo.ts";
+import { createThesisAgentLoopStages } from "./thesis-runtime.ts";
 import { randomUUID } from "node:crypto";
 
 import { Pool } from "pg";
@@ -248,7 +250,24 @@ export async function inspectEvidence(
   });
 }
 
-export const createAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, runId, agent, trigger = "scheduled" }) => {
+export const createAgentLoopStages: DevApiAgentLoopStageFactory = (input) => {
+  // Select once per run; an assessment may not switch thesis versions mid-run.
+  let selected: Promise<ReturnType<DevApiAgentLoopStageFactory>> | undefined;
+  const stages = () => selected ??= getCurrentThesis(pool(), input.agent.agent_id).then(thesis => thesis
+    ? createThesisAgentLoopStages({ ...input, db: pool(), thesis })
+    : createLegacyAgentLoopStages(input));
+  return {
+    readDeltas: async context => (await stages()).readDeltas(context),
+    extractEvidence: async context => (await stages()).extractEvidence(context),
+    clusterEvidence: async context => (await stages()).clusterEvidence(context),
+    analyze: async context => (await stages()).analyze(context),
+    nextWatermarks: async context => (await stages()).nextWatermarks(context),
+    applySideEffects: async context => (await stages()).applySideEffects(context),
+    alertFindings: async context => (await stages()).alertFindings?.(context) ?? [],
+  };
+};
+
+const createLegacyAgentLoopStages: DevApiAgentLoopStageFactory = ({ userId, runId, agent, trigger = "scheduled" }) => {
   const subjectRefs = normalizeSubjectRefs(subjectRefsFromUniverse(agent.universe));
   const asOf = new Date().toISOString();
   const activityClock = activityClockFrom(asOf);
