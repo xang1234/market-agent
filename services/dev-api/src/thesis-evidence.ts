@@ -3,7 +3,7 @@ import type { QueryExecutor } from '../../agents/src/agent-repo.ts';
 import type { ThesisVersion, ConditionAssessment } from '../../agents/src/thesis-types.ts';
 import type { ThesisFact } from '../../agents/src/thesis-evaluator.ts';
 import { loadLocalRuntimeEvidence, type LocalRuntimeClaimEvidence } from '../../evidence/src/local-runtime-evidence.ts';
-import { buildClaimBackedSealInput, buildFactBackedSealInput, toSealFactRow } from '../../snapshot/src/seal-input.ts';
+import { buildClaimBackedSealInput, buildFactBackedSealInput, toSealFactRow, type ClaimSealDocument } from '../../snapshot/src/seal-input.ts';
 import { sealSnapshotInTransaction, snapshotTransactionClient } from '../../snapshot/src/snapshot-sealer.ts';
 import { mergeSealInputs } from '../../analyze/src/seal-input-merge.ts';
 import { writeToolCallLog } from '../../observability/src/tool-call.ts';
@@ -16,6 +16,7 @@ type PacketFact = ThesisFact & {
 };
 export type ThesisPacket = {
   claims: LocalRuntimeClaimEvidence[];
+  documents: ClaimSealDocument[];
   facts: PacketFact[];
 };
 export async function loadThesisPacket(db: QueryExecutor, input: {
@@ -29,11 +30,12 @@ export async function loadThesisPacket(db: QueryExecutor, input: {
     limit: 100, as_of: input.asOf,
   });
   const claims = [...evidence.claims];
+  const documents = [...evidence.verifier_documents];
   const metrics = [...new Map(input.thesis.conditions.flatMap(condition => condition.metric
       ? [[JSON.stringify([condition.metric.metric_key, condition.metric.unit, condition.metric.period_kind]), condition.metric] as const]
       : [])).values()];
   if (!metrics.length)
-    return { claims, facts: [] };
+    return { claims, documents, facts: [] };
   // Bound each requested metric separately. Another unit or a dense history for
   // one condition must not displace the current evidence for another condition.
   const { rows } = await db.query<PacketFact>(`select packet.*
@@ -47,7 +49,7 @@ export async function loadThesisPacket(db: QueryExecutor, input: {
     and f.invalidated_at is null and f.superseded_by is null and f.value_num is not null
     and f.value_num not in ('NaN'::numeric,'Infinity'::numeric,'-Infinity'::numeric)
     and f.verification_status='authoritative' and f.entitlement_channels ? 'app'
-    and f.period_end is not null and f.period_end <= $3::timestamptz::date
+    and (f.period_kind='point' or (f.period_end is not null and f.period_end <= $3::timestamptz::date))
     and (f.period_kind not in ('fiscal_q','fiscal_y') or f.fiscal_year is not null)
     and (f.period_kind <> 'fiscal_q' or f.fiscal_period is not null)
     and (f.period_kind <> 'ttm' or f.period_start is not null)
@@ -58,7 +60,7 @@ export async function loadThesisPacket(db: QueryExecutor, input: {
     f.as_of desc,f.fact_id limit 50
   ) packet
   order by packet.metric_key,packet.unit,packet.period_kind,packet.period_end desc,packet.as_of desc,packet.fact_id`, [input.thesis.subject_ref.id, JSON.stringify(metrics), input.asOf, input.userId]);
-  return { claims, facts: rows };
+  return { claims, documents, facts: rows };
 }
 export async function sealThesisPacket(db: QueryExecutor, input: {
   thesis: ThesisVersion;
@@ -75,13 +77,14 @@ export async function sealThesisPacket(db: QueryExecutor, input: {
     result: { results: input.results, model_version: input.modelVersion },
   });
   const claims = input.packet.claims;
-  const sources = [...new Set(claims.map(c => c.source_id))];
+  const documents = input.packet.documents;
+  const sources = [...new Set([...claims.map(c => c.source_id), ...documents.map(d => d.source_id)])];
   const base = buildClaimBackedSealInput({
     block: { id: randomUUID(), kind: 'rich_text', snapshot_id: snapshotId, as_of: input.asOf,
       data_ref: { kind: 'rich_text', id: input.thesis.thesis_version_id }, source_refs: sources,
       segments: [{ type: 'text', text: 'Evidence considered for the saved thesis conditions.' }] },
     claims: claims.map(c => ({ claim_id: c.claim_id, source_id: c.source_id })),
-    documents: [...new Map(claims.map(c => [c.document_id, { document_id: c.document_id, source_id: c.source_id }])).values()],
+    documents,
     subjectRefs: [input.thesis.subject_ref], toolCalls: [{ tool_call_id: log.tool_call_id, result_hash: log.result_hash! }],
     modelVersion: input.modelVersion,
   });

@@ -45,22 +45,12 @@ export async function evaluateThesis(input: {
   as_of: string;
   llm: ThesisLlm | null;
 }): Promise<{ results: ConditionAssessment[]; model_version: string | null }> {
-  const assessmentTime = parseAssessmentTime(input.as_of);
   const thesisText = parseThesisText(input.thesis.thesis);
   const conditions = parseThesisConditions(input.thesis.conditions);
-  const metricResults = new Map<string, ConditionAssessment>();
-  const narrativeConditions: ThesisCondition[] = [];
-
-  for (const condition of conditions) {
-    if (condition.metric === undefined) {
-      narrativeConditions.push(condition);
-    } else {
-      metricResults.set(
-        condition.condition_id,
-        evaluateMetricCondition(condition, condition.metric, input.facts, assessmentTime),
-      );
-    }
-  }
+  const metricResults = new Map(
+    evaluateThesisMetrics(conditions, input.facts, input.as_of).map(result => [result.condition_id, result]),
+  );
+  const narrativeConditions = conditions.filter(condition => condition.metric === undefined);
 
   let modelVersion: string | null = null;
   const narrativeResults = new Map<string, ConditionAssessment>();
@@ -159,6 +149,19 @@ export async function draftThesisConditions(
       horizon: condition.horizon,
     };
   }));
+}
+
+// The runtime uses the same deterministic results to invalidate cached assessments
+// when a fact crosses its freshness boundary, even if the evidence packet is unchanged.
+export function evaluateThesisMetrics(
+  conditions: ReadonlyArray<ThesisCondition>,
+  facts: ReadonlyArray<ThesisFact>,
+  asOf: string,
+): ConditionAssessment[] {
+  const assessmentTime = parseAssessmentTime(asOf);
+  return parseThesisConditions(conditions).flatMap(condition => condition.metric === undefined
+    ? []
+    : [evaluateMetricCondition(condition, condition.metric, facts, assessmentTime)]);
 }
 
 function evaluateMetricCondition(

@@ -37,6 +37,7 @@ export type VerifierFact = {
   period_kind?: string;
   period_start?: string | null;
   period_end?: string | null;
+  as_of?: string;
   fiscal_year?: number | null;
   fiscal_period?: string | null;
   // Surfaced only by facts that carry freshness into the seal (market facts);
@@ -67,6 +68,7 @@ export type VerifierFactBinding = {
   period_kind?: string;
   period_start?: string | null;
   period_end?: string | null;
+  as_of?: string;
   fiscal_year?: number | null;
   fiscal_period?: string | null;
 };
@@ -631,6 +633,7 @@ function normalizeFact(fact: VerifierFact, index: number): VerifierFact {
     ...(fact.period_end === undefined
       ? {}
       : { period_end: nullableDateString(fact.period_end, `verifySnapshotSeal.facts[${index}].period_end`) }),
+    ...(fact.as_of === undefined ? {} : { as_of: canonicalTimestamp(fact.as_of, `verifySnapshotSeal.facts[${index}].as_of`) }),
     ...(fact.fiscal_year === undefined
       ? {}
       : { fiscal_year: nullableInteger(fact.fiscal_year, `verifySnapshotSeal.facts[${index}].fiscal_year`) }),
@@ -1671,6 +1674,7 @@ function normalizeFactBinding(value: unknown, label: string): VerifierFactBindin
     ...(binding.period_end === undefined
       ? {}
       : { period_end: nullableDateString(binding.period_end, `verifySnapshotSeal.${label}.period_end`) }),
+    ...(binding.as_of === undefined ? {} : { as_of: canonicalTimestamp(binding.as_of, `verifySnapshotSeal.${label}.as_of`) }),
     ...(binding.fiscal_year === undefined ? {} : { fiscal_year: nullableInteger(binding.fiscal_year, `verifySnapshotSeal.${label}.fiscal_year`) }),
     ...(binding.fiscal_period === undefined ? {} : { fiscal_period: nullableString(binding.fiscal_period, `verifySnapshotSeal.${label}.fiscal_period`) }),
   });
@@ -1704,7 +1708,9 @@ function requiredFactBindingFields(
   const periodKind = fact.period_kind ?? binding.period_kind;
   switch (periodKind) {
     case "point":
-      fields.push("period_end");
+      // Undated point facts use their observation timestamp as the temporal binding.
+      // Keep period-end bindings valid for existing dated facts and snapshots.
+      fields.push(fact.period_end == null && fact.as_of !== undefined ? "as_of" : "period_end");
       break;
     case "fiscal_q":
       fields.push("fiscal_year", "fiscal_period");

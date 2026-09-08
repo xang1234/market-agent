@@ -41,6 +41,7 @@ export function toSealFactRow(row: {
   period_kind: string;
   period_start: string | null;
   period_end: string | null;
+  as_of?: string;
   fiscal_year: number | null;
   fiscal_period: string | null;
 }): FactRow {
@@ -51,6 +52,7 @@ export function toSealFactRow(row: {
     period_kind: row.period_kind,
     period_start: row.period_start,
     period_end: row.period_end,
+    ...(row.as_of === undefined ? {} : { as_of: new Date(row.as_of).toISOString() }),
     fiscal_year: row.fiscal_year,
     fiscal_period: row.fiscal_period,
   };

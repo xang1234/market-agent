@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { getAgent, type QueryExecutor } from '../../agents/src/agent-repo.ts';
 import { normalizeUniverseToIssuers } from '../../analyst-grids/src/subject-normalization.ts';
 import { getCurrentThesis, loadThesisHistory, saveThesis } from '../../agents/src/thesis-repo.ts';
@@ -91,7 +92,7 @@ export async function assertLegacyThesisEditAllowed(db: QueryExecutor, agentId: 
     return;
   const agent = await getAgent(db, agentId);
   if ((body.thesis !== undefined && body.thesis !== thesis.thesis)
-    || (body.universe !== undefined && JSON.stringify(body.universe) !== JSON.stringify(agent?.universe))) {
+    || (body.universe !== undefined && !isDeepStrictEqual(body.universe, agent?.universe))) {
     throw new DevApiHttpError(409, 'Edit this thesis in Thesis conditions. Create another agent to monitor a different company.');
   }
 }
