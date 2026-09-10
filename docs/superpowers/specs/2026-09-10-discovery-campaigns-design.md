@@ -160,7 +160,7 @@ All routes require the current authenticated user; missing and foreign-owned res
 - `POST /v1/discovery/runs/:id/cancel` → accepted cancellation or existing terminal state.
 - `DELETE /v1/discovery/campaigns/:id` → 204 after cancellation/quiescence and scoped deletion; 409 while a worker still holds a live lease.
 
-400 malformed input, 401 unauthenticated, 404 missing/foreign, 409 stale brief/active-run conflict, 429 draft rate limit, 503 missing required provider/worker readiness. Poll active runs every two seconds while visible, backing off to ten seconds on errors; stop when terminal or page hidden. Preserve editable drafts during background polling, matching the lessons from PR #107.
+400 malformed input, 401 unauthenticated, 404 missing/foreign, 409 stale brief/active-run conflict, 429 draft rate limit, 503 missing required provider configuration. A run queued for over 90 seconds shows “Waiting for research worker; no research started” rather than reporting an empty result. Worker startup/health is an operational release requirement. Poll active runs every two seconds while visible, backing off to ten seconds on errors; stop when terminal or page hidden. Preserve editable drafts during background polling, matching the lessons from PR #107.
 
 ## 11. UI and handoff
 
