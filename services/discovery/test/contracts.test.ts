@@ -16,7 +16,8 @@ type RepositoryFactoryIsCanonical = Assert<IsAssignable<ReturnType<typeof create
 type OperationRunnerFactoryIsCanonical = Assert<IsAssignable<typeof createOperationRunner, (repo: P.DiscoveryRepository, lease: P.Lease, signal: AbortSignal) => P.OperationRunner>>;
 type CampaignModelFactoryIsCanonical = Assert<IsAssignable<typeof createCampaignModel, (router: ControlledRouter, operations: P.OperationRunner) => P.CampaignModel>>;
 type AdvertisedPorts = P.Lease | P.Checkpoint | P.Excerpt | P.PacketFact | P.EvidencePacket | P.OperationContext |
-  P.OperationRunner | P.CampaignModel | P.SearchProvider | P.IdentityProvider | P.EvidenceProvider | P.FinancialProvider |
+  P.FinancialReadResult | P.ProviderOperation | P.SearchInput | P.SearchResult | P.OperationRunner | P.CampaignModel |
+  P.SearchProvider | P.IdentityProvider | P.EvidenceProvider | P.FinancialProvider |
   P.Providers | P.DiscoveryContext | P.DiscoveryPool | P.AssessmentContext | P.AttemptReservation | P.StoredCandidate |
   P.DiscoveryRepository | P.WorkerDeps | P.DiscoveryService | P.DiscoveryDb;
 type AdvertisedDomainTypes = D.Id | D.Level | D.RunStatus | D.Stage | D.CandidateState | D.Resource | D.Origin |

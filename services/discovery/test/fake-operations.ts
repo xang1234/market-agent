@@ -52,5 +52,8 @@ export function fakeOperations(options: Options = {}) {
     },
   };
 
-  return { operations, providerAttempts, providerReservations, ledger };
+  // The runner is returned directly so adapter tests can pass `fakeOperations()`
+  // anywhere an OperationRunner is required. Keep the named field temporarily
+  // for the Task 2 tests that already inspect this fixture's helper ledger.
+  return Object.freeze({ ...operations, operations, providerAttempts, providerReservations, ledger });
 }

@@ -141,7 +141,7 @@ export type Excerpt = {
   published_at:string|null;retrieved_at:string;document_hash:string;
   normalized_start:number;text:string;primary:boolean;primary_eligible:boolean;
 };
-export type PacketFact = ThesisFact&{
+export type PacketFact = ThesisFact&{currency:string|null;
   fiscal_year:number|null;fiscal_period:string|null;period_start:string|null;
 };
 export type EvidencePacket = {
@@ -162,27 +162,30 @@ export type CampaignModel = {
     role:'planner'|'scout'|'analyst'|'skeptic'|'summary';phase:'discovery'|'research'|'verification';
     candidate_id?:D.Id;model_initial?:boolean;messages:LlmChatMessage[]}):Promise<LlmRouterResult>;
 };
-export type SearchProvider = {
-  search(input:{query:string;query_index:number},operations:OperationRunner):Promise<D.SearchHit[]>;
-};
+export type FinancialReadResult = {facts:PacketFact[];missing_fields:string[];coverage_gaps:string[]};
+export type ProviderOperation = {operation_key:string;request_hash:string;
+  phase:'discovery'|'research'|'verification';candidate_id?:D.Id};
+export type SearchInput = ProviderOperation&{query:string;query_index:number};
+export type SearchResult = {hits:D.SearchHit[];hits_truncated:number|null};
+export type SearchProvider = {search(input:SearchInput,operations:OperationRunner):Promise<SearchResult>};
 export type IdentityProvider = {
-  resolve(input:{query:string;hit_ids:D.Id[]},operations:OperationRunner):Promise<
+  resolve(input:ProviderOperation&{query:string;hit_ids:D.Id[]},operations:OperationRunner):Promise<
     {status:'resolved';identity:D.CompanyIdentity}|{status:'unresolved';reason:string}>;
 };
 export type EvidenceProvider = {
-  acquire(input:{brief:D.Brief;candidate:D.DiscoveredCandidate;as_of:string},operations:OperationRunner):Promise<EvidencePacket>;
+  acquire(input:ProviderOperation&{brief:D.Brief;candidate:D.DiscoveredCandidate;as_of:string},operations:OperationRunner):Promise<EvidencePacket>;
 };
 export type FinancialProvider = {
-  read(input:{identity:D.CompanyIdentity;as_of:string},operations:OperationRunner):Promise<PacketFact[]>;
+  read(input:ProviderOperation&{identity:D.CompanyIdentity;as_of:string;candidate_id:D.Id},operations:OperationRunner):Promise<FinancialReadResult>;
 };
 export type Providers = {search:SearchProvider;identity:IdentityProvider;evidence:EvidenceProvider;financials:FinancialProvider};
 export type DiscoveryContext = {
-  brief:D.Brief;providers:Providers;model:CampaignModel;operations:OperationRunner;
+  run_id:D.Id;brief:D.Brief;providers:Providers;model:CampaignModel;operations:OperationRunner;
   existing:D.DiscoveredCandidate[];admit:(candidate:D.DiscoveredCandidate)=>Promise<void>;
 };
 export type DiscoveryPool = {candidates:D.DiscoveredCandidate[];coverage:D.Coverage};
 export type AssessmentContext = {
-  brief:D.Brief;packet:EvidencePacket;model:CampaignModel;as_of:string;
+  run_id:D.Id;brief:D.Brief;packet:EvidencePacket;model:CampaignModel;as_of:string;
   persistQuotes:(raw:D.AnalystOutput|D.SkepticOutput)=>Promise<Map<string,D.Citation>>;
 };
 export type AttemptReservation = {
