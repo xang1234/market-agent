@@ -1,0 +1,21 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { parseBrief, validateModelRequest } from "../src/validation.ts";
+import { briefFixture } from "./fixtures.ts";
+
+test("briefs reject unsupported scope and model requests enforce approved ceilings", () => {
+  assert.throws(() => parseBrief({ ...briefFixture(), market: "global" }));
+  assert.throws(() => parseBrief({ ...briefFixture(), mechanisms: [] }));
+  assert.throws(() => validateModelRequest([{ role: "user", content: "x".repeat(64_000) }], 10_000));
+  assert.doesNotThrow(() => validateModelRequest([{ role: "user", content: "x".repeat(63_900) }], 10_000));
+  assert.throws(() => validateModelRequest([{ role: "user", content: "ok" }], 10_001));
+});
+
+test("brief parsing rejects undeclared IDs and unknown JSON keys", () => {
+  assert.throws(() => parseBrief({
+    ...briefFixture(),
+    queries: [{ mechanism_id: "40000000-0000-4000-8000-000000000099", query: "Unknown mechanism" }],
+  }));
+  assert.throws(() => parseBrief({ ...briefFixture(), extra: true }));
+});
