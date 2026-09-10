@@ -1189,7 +1189,7 @@ create table discovery_attempts (
   attempt_id uuid primary key default gen_random_uuid(), campaign_id uuid not null references discovery_campaigns(campaign_id) on delete cascade, run_id uuid,
   operation_key text not null check (length(btrim(operation_key)) > 0), request_hash text not null check (request_hash ~ '^sha256:[0-9a-f]{64}$'),
   attempt_number integer not null check (attempt_number in (1,2)), resource text not null check (resource in ('search','document','identity','financial','model')),
-  phase text not null check (phase in ('draft','discovery','research','verification')), candidate_id uuid references discovery_candidates(candidate_id) on delete cascade,
+  phase text not null check (phase in ('draft','discovery','research','verification')), candidate_id uuid references discovery_candidates(candidate_id) on delete cascade, model_initial boolean not null default false,
   outcome text not null check (outcome in ('reserved','success','error','unknown')), result jsonb check (result is null or jsonb_typeof(result) in ('object','array','string','number','boolean','null')), result_hash text, tool_call_id uuid,
   reserved_at timestamptz not null default now(), completed_at timestamptz,
   foreign key (run_id, campaign_id) references discovery_runs(run_id, campaign_id) on delete cascade,

@@ -61,6 +61,25 @@ test("pi adapter calls complete with a custom OpenAI-compatible model", async ()
   });
 });
 
+test("pi adapter forwards an abort signal to the provider", async () => {
+  const controller = new AbortController();
+  let received: AbortSignal | undefined;
+  const client = createPiLlmChatClient({
+    complete: async (_model, _context, options) => {
+      received = options.signal;
+      return { content: [{ type: "text", text: "Reply OK" }] };
+    },
+  });
+
+  await client(
+    deployment(),
+    { messages: [{ role: "user", content: "hello" }] },
+    { signal: controller.signal },
+  );
+
+  assert.equal(received, controller.signal);
+});
+
 test("pi adapter joins text blocks and ignores non-text output", async () => {
   const client = createPiLlmChatClient({
     complete: async () => ({

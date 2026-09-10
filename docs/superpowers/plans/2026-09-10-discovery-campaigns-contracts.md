@@ -151,14 +151,16 @@ export type EvidencePacket = {
 };
 export type OperationContext = {signal:AbortSignal;attempt_number:1|2};
 export type OperationRunner = {
-  run<T>(input:{key:string;resource:D.Resource;phase:'discovery'|'research'|'verification';
-    candidate_id?:D.Id;execute:(ctx:OperationContext)=>Promise<T>}):Promise<T>;
-  providerAttempt<T>(input:{key:string;index:0|1;resource:'model';
+  run<T>(input:{key:string;request_hash:string;resource:D.Resource;phase:'discovery'|'research'|'verification';
+    candidate_id?:D.Id;model_initial?:boolean;execute:(ctx:OperationContext)=>Promise<T>}):Promise<T>;
+  providerAttempt<T>(input:{key:string;request_hash:string;index:0|1;resource:'model';
+    phase:'discovery'|'research'|'verification';candidate_id?:D.Id;model_initial?:boolean;
     execute:(signal:AbortSignal)=>Promise<T>}):Promise<T>;
 };
 export type CampaignModel = {
-  complete(input:{operation_key:string;role:'planner'|'scout'|'analyst'|'skeptic'|'summary';
-    messages:LlmChatMessage[]}):Promise<LlmRouterResult>;
+  complete(input:{operation_key:string;request_hash:string;attempt_number?:1|2;
+    role:'planner'|'scout'|'analyst'|'skeptic'|'summary';phase:'discovery'|'research'|'verification';
+    candidate_id?:D.Id;model_initial?:boolean;messages:LlmChatMessage[]}):Promise<LlmRouterResult>;
 };
 export type SearchProvider = {
   search(input:{query:string;query_index:number},operations:OperationRunner):Promise<D.SearchHit[]>;
@@ -211,7 +213,7 @@ export interface DiscoveryRepository {
   failCandidate(lease:Lease,candidateId:D.Id,code:string):Promise<void>;
   reserveAttempt(scope:Lease|{campaign_id:D.Id;user_id:D.Id;draft_token:D.Id},input:{
     operation_key:string;request_hash:string;resource:D.Resource;phase:'draft'|'discovery'|'research'|'verification';
-    candidate_id?:D.Id;attempt_number:1|2}):Promise<AttemptReservation>;
+    candidate_id?:D.Id;attempt_number:1|2;model_initial?:boolean}):Promise<AttemptReservation>;
   finishAttempt(scope:Lease|{campaign_id:D.Id;user_id:D.Id;draft_token:D.Id},input:{
     attempt_id:D.Id;outcome:'success'|'error'|'unknown';result:unknown;tool_call_id:D.Id|null}):Promise<void>;
   getOperation(userId:D.Id,runId:D.Id,key:string):Promise<{outcome:string;result:unknown}|null>;
@@ -291,14 +293,16 @@ export type LlmExecutionControls = {
   maxAttempts?:number;
   beforeAttempt?:(attempt:{index:number;channel:string;model:string})=>Promise<void>;
   executeAttempt?: (attempt:{index:number;channel:string;model:string},
-    dispatch:()=>Promise<LlmChatResult>)=>Promise<LlmChatResult>;
+    dispatch:(signal?:AbortSignal)=>Promise<LlmChatResult>)=>Promise<LlmChatResult>;
 };
 export type ControlledRouter = {
   complete(request:LlmChatRequest,controls?:LlmExecutionControls):Promise<LlmRouterResult>;
 };
 ```
 
-`beforeAttempt` remains useful for clients with admission-only control. Campaigns use `executeAttempt` to wrap the real provider invocation with reservation and durable outcome recording. The router calls both controls outside the provider catch that decides fallbacks: admission/storage/control errors must propagate, whereas errors thrown by the actual provider retain existing provider classification. Implement this distinction with a dedicated provider-dispatch wrapper, not a catch-all around the hook. Limit2 actual attempts per logical operation. A malformed successful response may use the second attempt as a repair only if one actual attempt remains; it does not reset the attempt counter. The operation's cached validated output is reused on restart before any new provider dispatch.
+`beforeAttempt` remains useful for clients with admission-only control. Campaigns use `executeAttempt` to wrap the real provider invocation with reservation and durable outcome recording. The router calls both controls outside the provider catch that decides fallbacks: admission/storage/control errors must propagate, whereas errors thrown by the actual provider retain existing provider classification. Implement this distinction with a dedicated provider-dispatch wrapper, not a catch-all around the hook. Limit2 actual attempts per logical operation. The dispatch callback accepts the operation runner's per-attempt signal; the router combines it with its outer signal and passes the result to the client. A malformed successful response may use the second attempt as a repair only if one actual attempt remains; it does not reset the attempt counter.
+
+`request_hash` is required at every operation boundary. It is the stable hash of the original logical request (role/prompt version, brief, candidate and original messages), and is reused unchanged by a repair even when repair messages differ. `attempt_number` defaults to1; Task5 validates/revalidates the cached raw response before explicitly requesting2 for the one allowed repair. It must never call a third attempt when fallback already used2. `model_initial:true` is only for an initial Analyst or Skeptic call for an explicit selected `candidate_id`; the locked reservation query uses candidate/phase/resource metadata—not prompt text—to protect the two outstanding initial role slots per selected non-`research_error` candidate. A candidate moved to `research_error` releases only its unreserved floor slots. Provider responses are stored before role validation; raw provider success and a validated role result remain distinct checkpoints.
 
 Add optional `signal` to the client execution options and the Pi completion options, passing it through to the installed SDK; preserve existing signatures' optional compatibility. Validate actual SDK support locally. An SDK incapable of aborting is not eligible for campaign execution until its adapter supports cancellation. A failed deadline does not authorize a background provider request to keep spawning follow-ups.
 
@@ -323,7 +327,7 @@ Task1 translates these columns to explicit DDL and TypeScript row mappers; the t
 | discovery_briefs | brief_id UUID PK, campaign_id FK campaigns CASCADE, version integer CHECK>0, brief jsonb object, content_hash text, approved_at nullable, created_at; UNIQUE(campaign_id,version), UNIQUE(brief_id,campaign_id) |
 | discovery_runs | run_id UUID PK, campaign_id UUID, user_id UUID, brief_id UUID, request_key UUID, status/stage checked, policy_version text, model_config jsonb array (channel/model only), limits/usage/phase_usage/checkpoint/coverage jsonb objects, lease_owner text nullable, lease_epoch bigint default0, lease_expires_at nullable, next_event_sequence bigint default0, cancel_requested_at/started_at/finished_at nullable, created_at; composite FK(campaign_id,user_id)→campaigns CASCADE; composite FK(brief_id,campaign_id)→briefs RESTRICT; UNIQUE(run_id,campaign_id); active user and request-key indices from plan |
 | discovery_candidates | candidate_id UUID PK, run_id FK runs CASCADE, lead_key text, issuer_id UUID FK issuers nullable, listing_id UUID FK listings nullable, identity_display jsonb object nullable, origins/mechanisms/lead_hit_ids/reason_codes jsonb arrays, first_seen jsonb array length2, seed boolean, primary_domain_lead boolean, name text, state checked, selection_ordinal integer nullable CHECK1..25, analyst_output/skeptic_output/assessment jsonb objects nullable, snapshot_id UUID FK snapshots nullable, rank integer nullable CHECK1..10, created_at/updated_at; unique run/issuer, run/lead_key, run/rank; CHECK issuer_id and listing_id either both null or both non-null |
-| discovery_attempts | attempt_id UUID PK, campaign_id FK campaigns CASCADE, run_id UUID nullable, operation_key text, request_hash text, attempt_number integer CHECK IN(1,2), resource/phase checked, candidate_id FK candidates CASCADE nullable, outcome checked reserved/success/error/unknown, result jsonb nullable, result_hash text nullable, tool_call_id UUID nullable, reserved_at/completed_at; composite FK(run_id,campaign_id)→runs CASCADE; UNIQUE(campaign_id,operation_key,attempt_number) |
+| discovery_attempts | attempt_id UUID PK, campaign_id FK campaigns CASCADE, run_id UUID nullable, operation_key text, request_hash text, attempt_number integer CHECK IN(1,2), resource/phase checked, candidate_id FK candidates CASCADE nullable, model_initial boolean default false, outcome checked reserved/success/error/unknown, result jsonb nullable, result_hash text nullable, tool_call_id UUID nullable, reserved_at/completed_at; composite FK(run_id,campaign_id)→runs CASCADE; UNIQUE(campaign_id,operation_key,attempt_number) |
 | discovery_events | run_id FK runs CASCADE, sequence bigint CHECK>0, candidate_id FK candidates CASCADE nullable, stage/event_kind checked, summary text, citation_refs jsonb array, learning_concept_id text nullable, created_at; PRIMARY KEY(run_id,sequence) |
 
 No FK to partitioned tool_call_logs unless its existing key permits it; retain its canonical ID/hash and validate via existing snapshot/tool-log code. Link role/operation logs to user/campaign/run metadata for lifecycle redaction/removal. No secret-bearing prompt configuration is persisted.

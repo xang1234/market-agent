@@ -10,10 +10,10 @@ export type PacketFact = ThesisFact & { fiscal_year: number | null; fiscal_perio
 export type EvidencePacket = { candidate_id: D.Id; identity: D.CompanyIdentity; excerpts: Excerpt[]; claims: { claim_id: D.Id; document_id: D.Id; source_id: D.Id; text_canonical: string }[]; facts: PacketFact[]; counter_search_completed: boolean; coverage_gaps: string[] };
 export type OperationContext = { signal: AbortSignal; attempt_number: 1 | 2 };
 export type OperationRunner = {
-  run<T>(input: { key: string; resource: D.Resource; phase: "discovery" | "research" | "verification"; candidate_id?: D.Id; execute: (ctx: OperationContext) => Promise<T> }): Promise<T>;
-  providerAttempt<T>(input: { key: string; index: 0 | 1; resource: "model"; execute: (signal: AbortSignal) => Promise<T> }): Promise<T>;
+  run<T>(input: { key: string; request_hash: string; resource: D.Resource; phase: "discovery" | "research" | "verification"; candidate_id?: D.Id; model_initial?: boolean; execute: (ctx: OperationContext) => Promise<T> }): Promise<T>;
+  providerAttempt<T>(input: { key: string; request_hash: string; index: 0 | 1; resource: "model"; phase: "discovery" | "research" | "verification"; candidate_id?: D.Id; model_initial?: boolean; execute: (signal: AbortSignal) => Promise<T> }): Promise<T>;
 };
-export type CampaignModel = { complete(input: { operation_key: string; role: "planner" | "scout" | "analyst" | "skeptic" | "summary"; messages: LlmChatMessage[] }): Promise<LlmRouterResult> };
+export type CampaignModel = { complete(input: { operation_key: string; request_hash: string; attempt_number?: 1 | 2; role: "planner" | "scout" | "analyst" | "skeptic" | "summary"; phase: "discovery" | "research" | "verification"; candidate_id?: D.Id; model_initial?: boolean; messages: LlmChatMessage[] }): Promise<LlmRouterResult> };
 export type SearchProvider = { search(input: { query: string; query_index: number }, operations: OperationRunner): Promise<D.SearchHit[]> };
 export type IdentityProvider = { resolve(input: { query: string; hit_ids: D.Id[] }, operations: OperationRunner): Promise<{ status: "resolved"; identity: D.CompanyIdentity } | { status: "unresolved"; reason: string }> };
 export type EvidenceProvider = { acquire(input: { brief: D.Brief; candidate: D.DiscoveredCandidate; as_of: string }, operations: OperationRunner): Promise<EvidencePacket> };
@@ -43,7 +43,7 @@ export interface DiscoveryRepository {
   admitCandidate(lease: Lease, candidate: D.DiscoveredCandidate): Promise<void>;
   commitCohort(lease: Lease, candidateIds: D.Id[], coverage: D.Coverage): Promise<void>;
   failCandidate(lease: Lease, candidateId: D.Id, code: string): Promise<void>;
-  reserveAttempt(scope: Lease | { campaign_id: D.Id; user_id: D.Id; draft_token: D.Id }, input: { operation_key: string; request_hash: string; resource: D.Resource; phase: "draft" | "discovery" | "research" | "verification"; candidate_id?: D.Id; attempt_number: 1 | 2 }): Promise<AttemptReservation>;
+  reserveAttempt(scope: Lease | { campaign_id: D.Id; user_id: D.Id; draft_token: D.Id }, input: { operation_key: string; request_hash: string; resource: D.Resource; phase: "draft" | "discovery" | "research" | "verification"; candidate_id?: D.Id; attempt_number: 1 | 2; model_initial?: boolean }): Promise<AttemptReservation>;
   finishAttempt(scope: Lease | { campaign_id: D.Id; user_id: D.Id; draft_token: D.Id }, input: { attempt_id: D.Id; outcome: "success" | "error" | "unknown"; result: unknown; tool_call_id: D.Id | null }): Promise<void>;
   getOperation(userId: D.Id, runId: D.Id, key: string): Promise<{ outcome: string; result: unknown } | null>;
   acquireDraft(userId: D.Id, campaignId: D.Id, requestId: D.Id): Promise<{ draft_token: D.Id; expires_at: string }>;

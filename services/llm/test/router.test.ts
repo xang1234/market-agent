@@ -42,6 +42,71 @@ test("LLM router falls back after retryable provider failure", async () => {
   assert.deepEqual(result.deployment, { channel: "deepseek", model: "deepseek-chat" });
 });
 
+test("LLM router stops before fallback when attempt admission rejects", async () => {
+  const dispatched: string[] = [];
+  const reservations: number[] = [];
+  const router = createLlmRouter({
+    settings: settings(),
+    client: async (deployment) => {
+      dispatched.push(deployment.model);
+      throw new Error("transient");
+    },
+  });
+
+  await assert.rejects(
+    () => router.complete({ messages: [{ role: "user", content: "test" }] }, {
+      maxAttempts: 2,
+      beforeAttempt: async ({ index }) => {
+        reservations.push(index);
+        if (index === 1) throw new Error("budget");
+      },
+    }),
+    /budget/u,
+  );
+
+  assert.equal(dispatched.length, 1);
+  assert.deepEqual(reservations, [0, 1]);
+});
+
+test("LLM router dispatch uses the attempt signal supplied by execution control", async () => {
+  const controller = new AbortController();
+  let received: AbortSignal | undefined;
+  const router = createLlmRouter({
+    settings: settings(),
+    client: async (_deployment, _request, options) => {
+      received = options?.signal;
+      return { text: "ok" };
+    },
+  });
+
+  await router.complete(
+    { messages: [{ role: "user", content: "test" }] },
+    { executeAttempt: async (_attempt, dispatch) => dispatch(controller.signal) },
+  );
+
+  assert.equal(received, controller.signal);
+});
+
+test("LLM router stops before dispatch when its outer signal is aborted", async () => {
+  const controller = new AbortController();
+  const reason = new Error("campaign cancelled");
+  controller.abort(reason);
+  let dispatched = 0;
+  const router = createLlmRouter({
+    settings: settings(),
+    client: async () => {
+      dispatched += 1;
+      return { text: "unexpected" };
+    },
+  });
+
+  await assert.rejects(
+    router.complete({ messages: [{ role: "user", content: "hello" }] }, { signal: controller.signal }),
+    (error) => error === reason,
+  );
+  assert.equal(dispatched, 0);
+});
+
 test("LLM router stops on auth failure", async () => {
   const router = createLlmRouter({
     settings: settings(),

@@ -39,8 +39,10 @@ test("migration path installs discovery schema and rollback removes only discove
   assert.equal(migrated.status, 0, migrated.stderr || migrated.stdout);
   const db = await connectedPool(t, databaseUrl);
   await assertDiscoverySchema(db);
-  const rolledBack = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
-  assert.equal(rolledBack.status, 0, rolledBack.stderr || rolledBack.stdout);
+  const rolledBackLatest = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
+  assert.equal(rolledBackLatest.status, 0, rolledBackLatest.stderr || rolledBackLatest.stdout);
+  const rolledBackDiscovery = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
+  assert.equal(rolledBackDiscovery.status, 0, rolledBackDiscovery.stderr || rolledBackDiscovery.stdout);
   const after = await db.query<{ discovery: string | null; metrics: string | null }>("select to_regclass('public.discovery_campaigns')::text as discovery,to_regclass('public.metrics')::text as metrics");
   assert.equal(after.rows[0]?.discovery, null);
   assert.equal(after.rows[0]?.metrics, "metrics");
@@ -52,4 +54,8 @@ async function assertDiscoverySchema(db: { query: <T extends Record<string, unkn
   const indexes = await db.query<{ indexname: string }>("select indexname from pg_indexes where schemaname='public' and tablename in ('discovery_runs','discovery_candidates')");
   const names = new Set(indexes.rows.map((row) => row.indexname));
   for (const expected of ["discovery_request_identity", "discovery_one_active_run_per_user", "discovery_candidate_issuer", "discovery_candidate_lead", "discovery_shortlist_rank"]) assert.equal(names.has(expected), true);
+  const attemptFlag = await db.query<{ data_type: string; is_nullable: string }>(
+    "select data_type,is_nullable from information_schema.columns where table_schema='public' and table_name='discovery_attempts' and column_name='model_initial'",
+  );
+  assert.deepEqual(attemptFlag.rows, [{ data_type: "boolean", is_nullable: "NO" }]);
 }
