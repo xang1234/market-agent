@@ -1,6 +1,6 @@
 import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
 import type { Lease, StoredCandidate } from "./ports.ts";
-import { DiscoveryError, type CandidateDecision, type CandidateState, type Coverage, type DiscoveredCandidate } from "./types.ts";
+import { DiscoveryError, type CandidateDecision, type CandidateState, type CompanyIdentity, type Coverage, type DiscoveredCandidate } from "./types.ts";
 import { json, jsonValue, requireUuid, transaction } from "./repository-support.ts";
 import { lockLiveLease } from "./worker-lock.ts";
 
@@ -69,7 +69,7 @@ function assertCandidate(candidate: DiscoveredCandidate): void {
 }
 
 function candidateFromRow(row: CandidateRow): StoredCandidate {
-  const identity = row.issuer_id === null || row.listing_id === null ? null : jsonValue(row.identity_display, "identity_display");
+  const identity: CompanyIdentity | null = row.issuer_id === null || row.listing_id === null ? null : jsonValue<CompanyIdentity>(row.identity_display, "identity_display");
   return { candidate_id: row.candidate_id, lead_key: row.lead_key, name: row.name, identity, origins: jsonValue(row.origins, "origins"), mechanism_ids: jsonValue(row.mechanism_ids, "mechanism_ids"), seed: row.seed, primary_domain_lead: row.primary_domain_lead, first_seen: jsonValue(row.first_seen, "first_seen"), lead_hit_ids: jsonValue(row.lead_hit_ids, "lead_hit_ids"), reason_codes: jsonValue(row.reason_codes, "reason_codes"), state: row.state, ordinal: row.selection_ordinal, assessment: row.assessment === null ? null : jsonValue<CandidateDecision>(row.assessment, "assessment"), snapshot_id: row.snapshot_id, rank: row.rank };
 }
 

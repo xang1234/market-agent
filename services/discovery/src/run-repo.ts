@@ -1,5 +1,5 @@
 import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
-import { DEFAULT_LIMITS, EMPTY_CHECKPOINT, EMPTY_COVERAGE, EMPTY_USAGE, POLICY_VERSION } from "./policy.ts";
+import { DEFAULT_LIMITS, EMPTY_CHECKPOINT, EMPTY_COVERAGE, EMPTY_PHASE_USAGE, EMPTY_USAGE, POLICY_VERSION } from "./policy.ts";
 import type { Checkpoint, Lease } from "./ports.ts";
 import { DiscoveryError, type Coverage, type Page, type RankedDecision, type RunRecord } from "./types.ts";
 import { decodeCursor, encodeCursor, isoDate, json, jsonValue, requireLimit, requireText, requireUuid, transaction } from "./repository-support.ts";
@@ -35,7 +35,7 @@ export function createRunStore(db: QueryExecutor, clock: () => Date) {
             `insert into discovery_runs (campaign_id,user_id,brief_id,request_key,status,stage,policy_version,limits,usage,phase_usage,checkpoint,coverage)
              values ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'queued','queued',$5,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb)
              returning ${RUN_COLUMNS}`,
-            [campaignId, userId, current.brief_id, input.request_key, POLICY_VERSION, json(DEFAULT_LIMITS), json(EMPTY_USAGE), json({}), json(EMPTY_CHECKPOINT), json(EMPTY_COVERAGE)],
+            [campaignId, userId, current.brief_id, input.request_key, POLICY_VERSION, json(DEFAULT_LIMITS), json(EMPTY_USAGE), json(EMPTY_PHASE_USAGE), json(EMPTY_CHECKPOINT), json(EMPTY_COVERAGE)],
           );
           return runFromRow(rows[0]);
         } catch (error) {
@@ -104,15 +104,26 @@ export function createRunStore(db: QueryExecutor, clock: () => Date) {
     async finalize(lease: Lease, input: { status: "completed" | "partial" | "failed" | "cancelled"; decisions: RankedDecision[]; coverage: Coverage }): Promise<void> {
       await transaction(db, async (tx) => {
         await lockLiveLease(tx, lease, clock(), { allowCancelled: input.status === "cancelled" });
-        const shortlist = input.decisions.filter((decision) => decision.rank !== null);
-        if (shortlist.length > 10 || new Set(shortlist.map((decision) => decision.rank)).size !== shortlist.length) throw new DiscoveryError("validation", "shortlist ranks are invalid");
-        for (const decision of input.decisions) await tx.query("update discovery_candidates set state=$2,rank=$3,assessment=$4::jsonb,updated_at=now() where run_id=$1::uuid and candidate_id=$5::uuid", [lease.run_id, decision.state, decision.rank, json(decision), decision.candidate_id]);
+        const candidateIds = input.decisions.map((decision) => requireUuid(decision.candidate_id, "candidate_id"));
+        if (new Set(candidateIds).size !== candidateIds.length) throw new DiscoveryError("validation", "candidate decisions must be unique");
+        const shortlist = input.decisions.filter((decision) => decision.state === "shortlisted");
+        if (shortlist.length > 10 || input.decisions.some((decision) => (decision.state === "shortlisted") !== (decision.rank !== null))) throw new DiscoveryError("validation", "shortlist ranks are invalid");
+        const ranks = shortlist.map((decision) => decision.rank).sort((left, right) => left! - right!);
+        if (ranks.some((rank, index) => !Number.isInteger(rank) || rank !== index + 1)) throw new DiscoveryError("validation", "shortlist ranks are invalid");
+        const candidates = await tx.query<{ candidate_id: string }>("select candidate_id::text as candidate_id from discovery_candidates where run_id=$1::uuid and candidate_id=any($2::uuid[]) for update", [lease.run_id, candidateIds]);
+        if (candidates.rows.length !== candidateIds.length) throw new DiscoveryError("not_found", "finalization candidate not found");
+        for (const decision of input.decisions) {
+          const updated = await tx.query("update discovery_candidates set state=$2,rank=$3,assessment=$4::jsonb,updated_at=now() where run_id=$1::uuid and candidate_id=$5::uuid", [lease.run_id, decision.state, decision.rank, json(decision), decision.candidate_id]);
+          if (updated.rowCount !== 1) throw new DiscoveryError("not_found", "finalization candidate not found");
+        }
         await tx.query("update discovery_runs set status=$2,stage='finalization',coverage=$3::jsonb,finished_at=$4::timestamptz,lease_expires_at=null where run_id=$1::uuid", [lease.run_id, input.status, json(input.coverage), clock().toISOString()]);
       });
     },
     async deleteCampaign(userId: string, campaignId: string): Promise<void> {
       requireUuid(userId, "user_id"); requireUuid(campaignId, "campaign_id");
       await transaction(db, async (tx) => {
+        const user = await tx.query("select user_id from users where user_id=$1::uuid for update", [userId]);
+        if (!user.rows[0]) throw new DiscoveryError("not_found", "campaign not found");
         const campaign = await tx.query("select campaign_id from discovery_campaigns where campaign_id=$1::uuid and user_id=$2::uuid for update", [campaignId, userId]);
         if (!campaign.rows[0]) throw new DiscoveryError("not_found", "campaign not found");
         const active = await tx.query("select 1 from discovery_runs where campaign_id=$1::uuid and lease_expires_at > $2::timestamptz limit 1", [campaignId, clock().toISOString()]);
@@ -130,6 +141,7 @@ function runFromRow(row: RunRow | undefined): RunRecord {
 
 function checkpointFromValue(value: unknown): Checkpoint {
   const raw = jsonValue<Partial<Checkpoint>>(value, "checkpoint");
-  if (raw.version !== 1 || !Array.isArray(raw.cohort) || !Array.isArray(raw.completed_operation_keys) || !Number.isInteger(raw.next_company) || !["queued", "discovery", "research", "finalization"].includes(raw.stage ?? "")) throw new DiscoveryError("validation", "checkpoint is invalid");
-  return { version: 1, stage: raw.stage as Checkpoint["stage"], cohort: raw.cohort.map((id) => requireUuid(id, "checkpoint.cohort")), next_company: raw.next_company, completed_operation_keys: raw.completed_operation_keys.map((key) => requireText(key, "checkpoint.operation_key", 1, 500)) };
+  const { stage, next_company: nextCompany, cohort, completed_operation_keys: completedOperationKeys } = raw;
+  if (raw.version !== 1 || !Array.isArray(cohort) || !Array.isArray(completedOperationKeys) || typeof nextCompany !== "number" || !Number.isInteger(nextCompany) || !["queued", "discovery", "research", "finalization"].includes(stage ?? "")) throw new DiscoveryError("validation", "checkpoint is invalid");
+  return { version: 1, stage: stage as Checkpoint["stage"], cohort: cohort.map((id) => requireUuid(id, "checkpoint.cohort")), next_company: nextCompany, completed_operation_keys: completedOperationKeys.map((key) => requireText(key, "checkpoint.operation_key", 1, 500)) };
 }

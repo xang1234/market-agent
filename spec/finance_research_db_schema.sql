@@ -1132,6 +1132,7 @@ create table discovery_campaigns (
   question text not null check (length(btrim(question)) between 20 and 4000),
   current_brief_version integer not null default 0 check (current_brief_version >= 0),
   archived_at timestamptz, draft_lock_token uuid, draft_lock_until timestamptz,
+  draft_request_ledger jsonb not null default '[]'::jsonb check (jsonb_typeof(draft_request_ledger) = 'array'),
   created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
   unique (campaign_id, user_id)
 );
@@ -1162,8 +1163,9 @@ create table discovery_runs (
   created_at timestamptz not null default now(),
   foreign key (campaign_id, user_id) references discovery_campaigns(campaign_id, user_id) on delete cascade,
   foreign key (brief_id, campaign_id) references discovery_briefs(brief_id, campaign_id) on delete restrict,
-  unique (run_id, campaign_id), unique (campaign_id, request_key)
+  unique (run_id, campaign_id)
 );
+create unique index discovery_request_identity on discovery_runs(campaign_id, request_key);
 create unique index discovery_one_active_run_per_user on discovery_runs(user_id) where status in ('queued','running');
 create index discovery_runs_campaign_created_idx on discovery_runs(campaign_id, created_at desc, run_id desc);
 create table discovery_candidates (

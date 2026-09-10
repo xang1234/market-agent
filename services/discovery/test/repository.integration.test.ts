@@ -2,8 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { hashJsonValue } from "../../observability/src/tool-call.ts";
+import type { Origin, RankedDecision } from "../src/types.ts";
 import { briefFixture, identityFixture } from "./fixtures.ts";
 import { dbOptions, withCampaignDb } from "./db-fixture.ts";
+
+function rankedDecision(candidateId: string, state: RankedDecision["state"], rank: number | null): RankedDecision {
+  const unknown = { level: "unknown" as const, explanation: "Unavailable", citations: [] };
+  return {
+    candidate_id: candidateId, identity: identityFixture(), state, rank,
+    dimensions: { theme_exposure: unknown, evidence_strength: unknown, business_quality: unknown, valuation_context: unknown },
+    criteria: [], counterarguments: [], unresolved_questions: [], next_action: "Review", reason_codes: [],
+  };
+}
 
 test("a stale editor cannot replace an approved brief", dbOptions, async (t) => {
   const { repo, createApprovedRun, userId } = await withCampaignDb(t);
@@ -92,7 +102,7 @@ test("candidate admission merges a duplicate resolved issuer", dbOptions, async 
   await db.query("insert into instruments (instrument_id,issuer_id,asset_type) values ($1::uuid,$2::uuid,'common_stock')", [instrumentId, identity.issuer_id]);
   await db.query("insert into listings (listing_id,instrument_id,mic,ticker,trading_currency,timezone) values ($1::uuid,$2::uuid,$3,$4,$5,'America/New_York')", [identity.listing_id, instrumentId, identity.mic, identity.ticker, identity.currency]);
   const lease = await repo.claimNextRun("worker-1"); assert.ok(lease);
-  const base = { identity, origins: ["web"] as const, mechanism_ids: ["40000000-0000-4000-8000-000000000001"], seed: false, primary_domain_lead: false, first_seen: [0, 0] as [number, number], lead_hit_ids: [], reason_codes: ["first"] };
+  const base = { identity, origins: ["web"] as Origin[], mechanism_ids: ["40000000-0000-4000-8000-000000000001"], seed: false, primary_domain_lead: false, first_seen: [0, 0] as [number, number], lead_hit_ids: [], reason_codes: ["first"] };
   await repo.admitCandidate(lease, { ...base, candidate_id: crypto.randomUUID(), lead_key: "first", name: identity.legal_name });
   await repo.admitCandidate(lease, { ...base, candidate_id: crypto.randomUUID(), lead_key: "second", name: identity.legal_name, origins: ["seed"], mechanism_ids: ["40000000-0000-4000-8000-000000000002"], reason_codes: ["second"] });
   const candidates = await repo.candidates(lease.user_id, run.run_id);
@@ -137,4 +147,79 @@ test("attempt reservations cache matching results and event sequences are monoto
   const events = await repo.events(lease.user_id, run.run_id, 0, 100);
   assert.deepEqual(events.items.map((event) => event.sequence), [1, 2]);
   assert.equal(events.next_sequence, 2);
+});
+
+test("attempt request identity spans both provider attempts", dbOptions, async (t) => {
+  const { repo, createApprovedRun } = await withCampaignDb(t);
+  const { run } = await createApprovedRun();
+  const lease = await repo.claimNextRun("worker-1"); assert.ok(lease);
+  const key = `${run.run_id}/discovery/pool/search`;
+  const firstHash = hashJsonValue({ query: "grid suppliers" });
+  const first = await repo.reserveAttempt(lease, { operation_key: key, request_hash: firstHash, resource: "search", phase: "discovery", attempt_number: 1 });
+  await repo.finishAttempt(lease, { attempt_id: first.attempt_id, outcome: "error", result: { retry: true }, tool_call_id: null });
+  await assert.rejects(
+    repo.reserveAttempt(lease, { operation_key: key, request_hash: hashJsonValue({ query: "changed suppliers" }), resource: "search", phase: "discovery", attempt_number: 2 }),
+    { code: "request_conflict" },
+  );
+  assert.equal((await repo.reserveAttempt(lease, { operation_key: key, request_hash: firstHash, resource: "search", phase: "discovery", attempt_number: 2 })).state, "dispatch");
+});
+
+test("search allocations are atomic and retries consume verification capacity", dbOptions, async (t) => {
+  const { db, repo, createApprovedRun } = await withCampaignDb(t);
+  const { run } = await createApprovedRun();
+  const lease = await repo.claimNextRun("worker-1"); assert.ok(lease);
+  const reserveDiscovery = (index: number) => repo.reserveAttempt(lease, {
+    operation_key: `${run.run_id}/discovery/pool/search-discovery-${index}`,
+    request_hash: hashJsonValue({ index, phase: "discovery" }), resource: "search", phase: "discovery", attempt_number: 1,
+  });
+  const reserveRetry = (index: number) => repo.reserveAttempt(lease, {
+    operation_key: `${run.run_id}/discovery/pool/search-retry-${index}`,
+    request_hash: hashJsonValue({ index, phase: "retry" }), resource: "search", phase: "discovery", attempt_number: 2,
+  });
+  for (let index = 0; index < 20; index += 1) await reserveDiscovery(index);
+  await assert.rejects(reserveDiscovery(20), { code: "budget_exhausted" });
+  for (let index = 0; index < 10; index += 1) await reserveRetry(index);
+  await assert.rejects(reserveRetry(10), { code: "budget_exhausted" });
+  const usage = await db.query<{ usage: { search: number }; phase_usage: { search: { discovery: number; verification: number } } }>("select usage,phase_usage from discovery_runs where run_id=$1::uuid", [run.run_id]);
+  assert.equal(usage.rows[0]?.usage.search, 30);
+  assert.deepEqual(usage.rows[0]?.phase_usage.search, { discovery: 20, research: 0, verification: 10 });
+});
+
+test("finalization rejects incomplete shortlist ranks and missing candidates", dbOptions, async (t) => {
+  const { repo, createApprovedRun } = await withCampaignDb(t);
+  const { run } = await createApprovedRun();
+  const lease = await repo.claimNextRun("worker-1"); assert.ok(lease);
+  const candidateId = crypto.randomUUID();
+  await repo.admitCandidate(lease, {
+    candidate_id: candidateId, lead_key: "ranked", name: "Ranked candidate", identity: null, origins: ["web"],
+    mechanism_ids: ["40000000-0000-4000-8000-000000000001"], seed: false, primary_domain_lead: false,
+    first_seen: [0, 0], lead_hit_ids: [], reason_codes: [],
+  });
+  const decision = rankedDecision(candidateId, "shortlisted", 3);
+  await assert.rejects(repo.finalize(lease, { status: "completed", decisions: [decision], coverage: {} as never }), { code: "validation" });
+  await assert.rejects(repo.finalize(lease, {
+    status: "completed",
+    decisions: [{ ...decision, candidate_id: crypto.randomUUID(), rank: 1 }],
+    coverage: {} as never,
+  }), { code: "not_found" });
+});
+
+test("finalization assigns ranks only to shortlisted candidates", dbOptions, async (t) => {
+  const { repo, createApprovedRun } = await withCampaignDb(t);
+  await createApprovedRun();
+  const lease = await repo.claimNextRun("worker-1"); assert.ok(lease);
+  const candidateId = crypto.randomUUID();
+  await assert.rejects(repo.finalize(lease, { status: "completed", decisions: [rankedDecision(candidateId, "excluded", 1)], coverage: {} as never }), { code: "validation" });
+  await assert.rejects(repo.finalize(lease, { status: "completed", decisions: [rankedDecision(candidateId, "shortlisted", null)], coverage: {} as never }), { code: "validation" });
+});
+
+test("draft rate limits count logical request IDs rather than provider attempts", dbOptions, async (t) => {
+  const { repo, userId } = await withCampaignDb(t);
+  const campaign = await repo.createCampaign(userId, { name: "Draft rate", question: "Which US-listed companies benefit from grid modernization spending?" });
+  const firstRequest = crypto.randomUUID();
+  for (const requestId of [firstRequest, firstRequest, crypto.randomUUID(), crypto.randomUUID()]) {
+    const draft = await repo.acquireDraft(userId, campaign.campaign_id, requestId);
+    await repo.releaseDraft(userId, campaign.campaign_id, draft.draft_token);
+  }
+  await assert.rejects(repo.acquireDraft(userId, campaign.campaign_id, crypto.randomUUID()), { code: "draft_rate_limit" });
 });

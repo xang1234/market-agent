@@ -51,5 +51,5 @@ async function assertDiscoverySchema(db: { query: <T extends Record<string, unkn
   assert.deepEqual(installed.rows.map((row) => row.table_name), [...tables].sort());
   const indexes = await db.query<{ indexname: string }>("select indexname from pg_indexes where schemaname='public' and tablename in ('discovery_runs','discovery_candidates')");
   const names = new Set(indexes.rows.map((row) => row.indexname));
-  for (const expected of ["discovery_one_active_run_per_user", "discovery_candidate_issuer", "discovery_candidate_lead", "discovery_shortlist_rank"]) assert.equal(names.has(expected), true);
+  for (const expected of ["discovery_request_identity", "discovery_one_active_run_per_user", "discovery_candidate_issuer", "discovery_candidate_lead", "discovery_shortlist_rank"]) assert.equal(names.has(expected), true);
 }

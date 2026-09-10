@@ -54,8 +54,14 @@ export function packetFixture(): EvidencePacket {
   const identity = identityFixture();
   return {
     candidate_id: "90000000-0000-4000-8000-000000000001", identity,
-    excerpts: [{ excerpt_id: "a0000000-0000-4000-8000-000000000001", document_id: "a1000000-0000-4000-8000-000000000001", source_id: "a2000000-0000-4000-8000-000000000001", family_key: "candidate-primary", title: "Primary disclosure", url: "https://example.test/primary", published_at: null, retrieved_at: "2026-09-10T12:00:00.000Z", document_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", normalized_start: 0, text: "The company sells grid modernization equipment.", primary: true, primary_eligible: true }],
-    claims: [{ claim_id: "b0000000-0000-4000-8000-000000000001", document_id: "a1000000-0000-4000-8000-000000000001", source_id: "a2000000-0000-4000-8000-000000000001", text_canonical: "The company sells grid modernization equipment." }],
+    excerpts: [
+      { excerpt_id: "a0000000-0000-4000-8000-000000000001", document_id: "a1000000-0000-4000-8000-000000000001", source_id: "a2000000-0000-4000-8000-000000000001", family_key: "candidate-primary", title: "Primary disclosure", url: "https://example.test/primary", published_at: null, retrieved_at: "2026-09-10T12:00:00.000Z", document_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", normalized_start: 0, text: "The company sells grid modernization equipment.", primary: true, primary_eligible: true },
+      { excerpt_id: "a0000000-0000-4000-8000-000000000002", document_id: "a1000000-0000-4000-8000-000000000002", source_id: "a2000000-0000-4000-8000-000000000002", family_key: "candidate-risk", title: "Risk disclosure", url: "https://example.test/risk", published_at: null, retrieved_at: "2026-09-10T12:00:00.000Z", document_hash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", normalized_start: 0, text: "Project timing can delay grid modernization equipment revenue.", primary: true, primary_eligible: true },
+    ],
+    claims: [
+      { claim_id: "b0000000-0000-4000-8000-000000000001", document_id: "a1000000-0000-4000-8000-000000000001", source_id: "a2000000-0000-4000-8000-000000000001", text_canonical: "The company sells grid modernization equipment." },
+      { claim_id: "b0000000-0000-4000-8000-000000000002", document_id: "a1000000-0000-4000-8000-000000000002", source_id: "a2000000-0000-4000-8000-000000000002", text_canonical: "Project timing can delay grid modernization equipment revenue." },
+    ],
     facts: [], counter_search_completed: true, coverage_gaps: [],
   };
 }
@@ -73,6 +79,6 @@ export function analystFixture(): AnalystOutput {
 export function skepticFixture(): SkepticOutput {
   return {
     ...analystFixture(),
-    counterarguments: [{ text: "Risk evidence remains incomplete.", citations: [] }],
+    counterarguments: [{ text: "Project timing can delay revenue.", citations: [{ kind: "claim", id: "b0000000-0000-4000-8000-000000000002" }] }],
   };
 }

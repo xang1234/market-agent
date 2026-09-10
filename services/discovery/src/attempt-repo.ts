@@ -1,32 +1,39 @@
 import { hashJsonValue } from "../../observability/src/tool-call.ts";
 import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
 import type { AttemptReservation, Lease } from "./ports.ts";
+import { SEARCH_PHASE_LIMITS } from "./policy.ts";
 import type { Resource } from "./types.ts";
 import { DiscoveryError } from "./types.ts";
 import { json, jsonValue, requireText, requireUuid, transaction } from "./repository-support.ts";
 import { lockLiveLease } from "./worker-lock.ts";
 
 type Scope = Lease | { campaign_id: string; user_id: string; draft_token: string };
+type SearchPhase = keyof typeof SEARCH_PHASE_LIMITS;
+type AttemptInput = { operation_key: string; request_hash: string; resource: Resource; phase: "draft" | "discovery" | "research" | "verification"; candidate_id?: string; attempt_number: 1 | 2 };
+type AttemptRow = { attempt_id: string; attempt_number: 1 | 2; outcome: string; result: unknown; request_hash: string };
+type BudgetRow = { usage: Partial<Record<Resource, number>>; limits: { attempts: Record<Resource, number> }; phase_usage: unknown };
+type DraftRequest = { request_id: string; requested_at: string };
 
 export function createAttemptStore(db: QueryExecutor, clock: () => Date) {
   return {
-    async reserveAttempt(scope: Scope, input: { operation_key: string; request_hash: string; resource: Resource; phase: "draft" | "discovery" | "research" | "verification"; candidate_id?: string; attempt_number: 1 | 2 }): Promise<AttemptReservation> {
+    async reserveAttempt(scope: Scope, input: AttemptInput): Promise<AttemptReservation> {
       requireText(input.operation_key, "operation_key", 1, 500); requireText(input.request_hash, "request_hash", 8, 80);
       if (!/^sha256:[0-9a-f]{64}$/u.test(input.request_hash) || (input.attempt_number !== 1 && input.attempt_number !== 2)) throw new DiscoveryError("validation", "attempt input is invalid");
       if (input.candidate_id !== undefined) requireUuid(input.candidate_id, "candidate_id");
+      if (!("run_id" in scope) && input.operation_key !== `draft/${scope.draft_token}`) throw new DiscoveryError("validation", "draft operation key is invalid");
       return transaction(db, async (tx) => {
         const identity = await lockScope(tx, scope, clock);
-        const existing = await tx.query<{ attempt_id: string; outcome: string; result: unknown; request_hash: string }>("select attempt_id::text as attempt_id,outcome,result,request_hash from discovery_attempts where campaign_id=$1::uuid and operation_key=$2 and attempt_number=$3 for update", [identity.campaign_id, input.operation_key, input.attempt_number]);
-        if (existing.rows[0]) {
-          if (existing.rows[0].request_hash !== input.request_hash) throw new DiscoveryError("request_conflict", "operation key was used with a different request");
-          if (existing.rows[0].outcome === "success") return { attempt_id: existing.rows[0].attempt_id, attempt_number: input.attempt_number, state: "cached", result: existing.rows[0].result };
-          return { attempt_id: existing.rows[0].attempt_id, attempt_number: input.attempt_number, state: "exhausted", result: existing.rows[0].result };
+        const attempts = await tx.query<AttemptRow>(
+          "select attempt_id::text as attempt_id,attempt_number,outcome,result,request_hash from discovery_attempts where campaign_id=$1::uuid and operation_key=$2 for update",
+          [identity.campaign_id, input.operation_key],
+        );
+        if (attempts.rows.some((attempt) => attempt.request_hash !== input.request_hash)) throw new DiscoveryError("request_conflict", "operation key was used with a different request");
+        const existing = attempts.rows.find((attempt) => attempt.attempt_number === input.attempt_number);
+        if (existing) {
+          if (existing.outcome === "success") return { attempt_id: existing.attempt_id, attempt_number: input.attempt_number, state: "cached", result: existing.result };
+          return { attempt_id: existing.attempt_id, attempt_number: input.attempt_number, state: "exhausted", result: existing.result };
         }
-        if (identity.run_id !== null) {
-          const run = await tx.query<{ usage: Record<Resource, number>; limits: { attempts: Record<Resource, number> } }>("select usage,limits from discovery_runs where run_id=$1::uuid for update", [identity.run_id]);
-          const current = run.rows[0]; if (!current || (current.usage[input.resource] ?? 0) >= current.limits.attempts[input.resource]) throw new DiscoveryError("budget_exhausted", "attempt budget is exhausted");
-          await tx.query("update discovery_runs set usage=jsonb_set(usage,array[$2],to_jsonb(coalesce((usage ->> $2)::int,0)+1)) where run_id=$1::uuid", [identity.run_id, input.resource]);
-        }
+        if (identity.run_id !== null) await reserveRunBudget(tx, identity.run_id, input);
         const { rows } = await tx.query<{ attempt_id: string }>(
           `insert into discovery_attempts (campaign_id,run_id,operation_key,request_hash,attempt_number,resource,phase,candidate_id,outcome)
            values ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8::uuid,'reserved') returning attempt_id::text as attempt_id`,
@@ -51,12 +58,21 @@ export function createAttemptStore(db: QueryExecutor, clock: () => Date) {
     async acquireDraft(userId: string, campaignId: string, requestId: string): Promise<{ draft_token: string; expires_at: string }> {
       requireUuid(userId, "user_id"); requireUuid(campaignId, "campaign_id"); requireUuid(requestId, "request_id"); const now = clock(); const expires = new Date(now.getTime() + 90_000);
       return transaction(db, async (tx) => {
-        const campaign = await tx.query<{ draft_lock_token: string | null; draft_lock_until: Date | string | null }>("select draft_lock_token::text as draft_lock_token,draft_lock_until from discovery_campaigns where campaign_id=$1::uuid and user_id=$2::uuid for update", [campaignId, userId]);
-        if (!campaign.rows[0]) throw new DiscoveryError("not_found", "campaign not found");
-        if (campaign.rows[0].draft_lock_until !== null && new Date(campaign.rows[0].draft_lock_until).getTime() > now.getTime() && campaign.rows[0].draft_lock_token !== requestId) throw new DiscoveryError("draft_rate_limit", "another draft request is active");
-        const count = await tx.query<{ count: number }>("select count(*)::int as count from discovery_attempts where campaign_id=$1::uuid and phase='draft' and reserved_at >= $2::timestamptz", [campaignId, new Date(now.getTime() - 3_600_000).toISOString()]);
-        if ((count.rows[0]?.count ?? 0) >= 3) throw new DiscoveryError("draft_rate_limit", "draft request rate limit is exhausted");
-        await tx.query("update discovery_campaigns set draft_lock_token=$3::uuid,draft_lock_until=$4::timestamptz where campaign_id=$1::uuid and user_id=$2::uuid", [campaignId, userId, requestId, expires.toISOString()]);
+        const campaign = await tx.query<{ draft_lock_token: string | null; draft_lock_until: Date | string | null; draft_request_ledger: unknown }>("select draft_lock_token::text as draft_lock_token,draft_lock_until,draft_request_ledger from discovery_campaigns where campaign_id=$1::uuid and user_id=$2::uuid for update", [campaignId, userId]);
+        const current = campaign.rows[0];
+        if (!current) throw new DiscoveryError("not_found", "campaign not found");
+        const activeUntil = current.draft_lock_until === null ? null : new Date(current.draft_lock_until);
+        const active = activeUntil !== null && activeUntil.getTime() > now.getTime();
+        if (active && current.draft_lock_token !== requestId) throw new DiscoveryError("draft_rate_limit", "another draft request is active");
+        const requests = currentDraftRequests(current.draft_request_ledger, new Date(now.getTime() - 3_600_000));
+        const knownRequest = requests.some((request) => request.request_id === requestId);
+        if (!knownRequest && requests.length >= 3) throw new DiscoveryError("draft_rate_limit", "draft request rate limit is exhausted");
+        if (!knownRequest) requests.push({ request_id: requestId, requested_at: now.toISOString() });
+        if (active && current.draft_lock_token === requestId) {
+          if (!knownRequest) await tx.query("update discovery_campaigns set draft_request_ledger=$3::jsonb where campaign_id=$1::uuid and user_id=$2::uuid", [campaignId, userId, json(requests)]);
+          return { draft_token: requestId, expires_at: activeUntil.toISOString() };
+        }
+        await tx.query("update discovery_campaigns set draft_lock_token=$3::uuid,draft_lock_until=$4::timestamptz,draft_request_ledger=$5::jsonb where campaign_id=$1::uuid and user_id=$2::uuid", [campaignId, userId, requestId, expires.toISOString(), json(requests)]);
         return { draft_token: requestId, expires_at: expires.toISOString() };
       });
     },
@@ -66,6 +82,53 @@ export function createAttemptStore(db: QueryExecutor, clock: () => Date) {
       if (updated.rowCount === 0) throw new DiscoveryError("not_found", "draft lock not found");
     },
   };
+}
+
+async function reserveRunBudget(tx: QueryExecutor, runId: string, input: AttemptInput): Promise<void> {
+  const run = await tx.query<BudgetRow>("select usage,limits,phase_usage from discovery_runs where run_id=$1::uuid for update", [runId]);
+  const current = run.rows[0];
+  const used = current?.usage[input.resource] ?? 0;
+  if (!current || !Number.isInteger(used) || used < 0 || used >= current.limits.attempts[input.resource]) throw new DiscoveryError("budget_exhausted", "attempt budget is exhausted");
+  if (input.resource !== "search") {
+    await tx.query("update discovery_runs set usage=jsonb_set(usage,array[$2],to_jsonb($3::int)) where run_id=$1::uuid", [runId, input.resource, used + 1]);
+    return;
+  }
+  const phase = searchPhaseFor(input);
+  const phaseUsage = currentSearchPhaseUsage(current.phase_usage);
+  if (phaseUsage[phase] >= SEARCH_PHASE_LIMITS[phase]) throw new DiscoveryError("budget_exhausted", "search phase budget is exhausted");
+  const nextPhaseUsage = { search: { ...phaseUsage, [phase]: phaseUsage[phase] + 1 } };
+  await tx.query("update discovery_runs set usage=jsonb_set(usage,array[$2],to_jsonb($3::int)),phase_usage=$4::jsonb where run_id=$1::uuid", [runId, input.resource, used + 1, json(nextPhaseUsage)]);
+}
+
+function searchPhaseFor(input: AttemptInput): SearchPhase {
+  if (input.attempt_number === 2) return "verification";
+  if (input.phase === "discovery" || input.phase === "research" || input.phase === "verification") return input.phase;
+  throw new DiscoveryError("validation", "search attempts require a search phase");
+}
+
+function currentSearchPhaseUsage(value: unknown): Record<SearchPhase, number> {
+  const raw = jsonValue<unknown>(value, "phase_usage");
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new Error("phase_usage is invalid");
+  const search = (raw as { search?: unknown }).search;
+  if (typeof search !== "object" || search === null || Array.isArray(search)) return { discovery: 0, research: 0, verification: 0 };
+  return Object.fromEntries(Object.keys(SEARCH_PHASE_LIMITS).map((phase) => {
+    const value = (search as Record<string, unknown>)[phase];
+    return [phase, typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0];
+  })) as Record<SearchPhase, number>;
+}
+
+function currentDraftRequests(value: unknown, cutoff: Date): DraftRequest[] {
+  const raw = jsonValue<unknown>(value, "draft_request_ledger");
+  if (!Array.isArray(raw)) throw new Error("draft request ledger is invalid");
+  const requests = new Map<string, DraftRequest>();
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) throw new Error("draft request ledger is invalid");
+    const request = entry as Partial<DraftRequest>;
+    const requestedAt = typeof request.requested_at === "string" ? new Date(request.requested_at) : null;
+    if (typeof request.request_id !== "string" || requestedAt === null || !Number.isFinite(requestedAt.getTime())) throw new Error("draft request ledger is invalid");
+    if (requestedAt >= cutoff && !requests.has(request.request_id)) requests.set(request.request_id, { request_id: request.request_id, requested_at: requestedAt.toISOString() });
+  }
+  return [...requests.values()];
 }
 
 async function lockScope(tx: QueryExecutor, scope: Scope, clock: () => Date, options: { allowCancelled?: boolean } = {}): Promise<{ campaign_id: string; run_id: string | null }> {

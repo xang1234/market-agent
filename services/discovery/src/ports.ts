@@ -56,4 +56,19 @@ export interface DiscoveryRepository {
 }
 
 export type WorkerDeps = { repo: DiscoveryRepository; providers: Providers; clock: () => Date; model: (operations: OperationRunner) => CampaignModel; loadExisting: (userId: D.Id, brief: D.Brief) => Promise<D.DiscoveredCandidate[]>; persistQuotes: (lease: Lease, packet: EvidencePacket, raw: D.AnalystOutput | D.SkepticOutput) => Promise<Map<string, D.Citation>>; commitAssessment: (lease: Lease, packet: EvidencePacket, decision: D.CandidateDecision) => Promise<D.AssessedCandidate> };
+export type DiscoveryService = {
+  createCampaign(userId: D.Id, input: { name: string; question: string }): Promise<D.Campaign>;
+  listCampaigns(userId: D.Id, cursor: string | null, limit: number): Promise<D.Page<D.Campaign>>;
+  getCampaign(userId: D.Id, campaignId: D.Id): Promise<D.CampaignDetail>;
+  draftBrief(userId: D.Id, campaignId: D.Id, expectedVersion: number): Promise<{ brief: D.Brief; base_version: number }>;
+  saveBrief(userId: D.Id, campaignId: D.Id, expectedVersion: number, brief: D.Brief): Promise<D.SavedBrief>;
+  startRun(userId: D.Id, campaignId: D.Id, input: { brief_version: number; brief_hash: string; request_key: D.Id }): Promise<D.RunRecord>;
+  listRuns(userId: D.Id, campaignId: D.Id, cursor: string | null, limit: number): Promise<D.Page<D.RunRecord>>;
+  getRun(userId: D.Id, runId: D.Id): Promise<D.RunView>;
+  getCandidates(userId: D.Id, runId: D.Id, input: { cursor: string | null; limit: number; state?: D.CandidateState }): Promise<D.Page<D.CandidateView>>;
+  getEvents(userId: D.Id, runId: D.Id, after: number): Promise<D.EventPage>;
+  cancelRun(userId: D.Id, runId: D.Id): Promise<D.RunRecord>;
+  deleteCampaign(userId: D.Id, campaignId: D.Id): Promise<void>;
+};
+
 export type DiscoveryDb = QueryExecutor;
