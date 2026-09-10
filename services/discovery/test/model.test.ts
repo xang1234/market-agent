@@ -139,6 +139,32 @@ test("campaign model requires initial analyst and skeptic calls to reserve their
   assert.equal(fake.providerAttempts.length, 0);
 });
 
+test("campaign model identifies the protected analyst role at reservation", async () => {
+  const fake = fakeOperations();
+  const model = createCampaignModel(createLlmRouter({
+    settings: settings(),
+    client: async () => ({ text: "analysis" }),
+  }), fake.operations);
+  const operation_key = "00000000-0000-4000-8000-000000000001/research/00000000-0000-4000-8000-000000000002/analyst";
+
+  await model.complete({
+    operation_key,
+    request_hash: "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    role: "analyst",
+    phase: "research",
+    candidate_id: "00000000-0000-4000-8000-000000000002",
+    model_initial: true,
+    messages: [{ role: "user", content: "Assess this candidate." }],
+  });
+
+  assert.deepEqual(fake.providerReservations, [{
+    key: operation_key,
+    index: 0,
+    model_initial: true,
+    model_role: "analyst",
+  }]);
+});
+
 function settings() {
   return parseLlmEnv({
     LLM_CHANNELS: "openai,deepseek",

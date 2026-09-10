@@ -9,10 +9,12 @@ import { lockLiveLease } from "./worker-lock.ts";
 
 type Scope = Lease | { campaign_id: string; user_id: string; draft_token: string };
 type SearchPhase = keyof typeof SEARCH_PHASE_LIMITS;
-type AttemptInput = { operation_key: string; request_hash: string; resource: Resource; phase: "draft" | "discovery" | "research" | "verification"; candidate_id?: string; attempt_number: 1 | 2; model_initial?: boolean };
-type AttemptRow = { attempt_id: string; attempt_number: 1 | 2; outcome: string; result: unknown; request_hash: string; model_initial: boolean };
+type ModelRole = "analyst" | "skeptic";
+type AttemptInput = { operation_key: string; request_hash: string; resource: Resource; phase: "draft" | "discovery" | "research" | "verification"; candidate_id?: string; attempt_number: 1 | 2; model_initial?: boolean; model_role?: ModelRole };
+type AttemptRow = { attempt_id: string; attempt_number: 1 | 2; outcome: string; result: unknown; request_hash: string; model_initial: boolean; model_role: ModelRole | null; reserved_worker_id: string | null; reserved_lease_epoch: number | string | null };
 type BudgetRow = { usage: Partial<Record<Resource, number>>; limits: { attempts: Record<Resource, number>; run_timeout_ms: number }; phase_usage: unknown; started_at: Date | string | null };
 type DraftRequest = { request_id: string; requested_at: string };
+type LockedScope = { campaign_id: string; run_id: string | null; reserved_worker_id: string | null; reserved_lease_epoch: number | null };
 
 export function createAttemptStore(db: QueryExecutor, clock: () => Date) {
   return {
@@ -20,20 +22,22 @@ export function createAttemptStore(db: QueryExecutor, clock: () => Date) {
       requireText(input.operation_key, "operation_key", 1, 500); requireText(input.request_hash, "request_hash", 8, 80);
       if (!/^sha256:[0-9a-f]{64}$/u.test(input.request_hash) || (input.attempt_number !== 1 && input.attempt_number !== 2)) throw new DiscoveryError("validation", "attempt input is invalid");
       if (input.candidate_id !== undefined) requireUuid(input.candidate_id, "candidate_id");
-      if (input.model_initial === true && (input.resource !== "model" || input.phase !== "research" || input.attempt_number !== 1)) throw new DiscoveryError("validation", "initial model attempts must be first research model attempts");
+      if (input.model_initial === true && (input.resource !== "model" || input.phase !== "research" || input.attempt_number !== 1 || (input.model_role !== "analyst" && input.model_role !== "skeptic"))) throw new DiscoveryError("validation", "initial model attempts must identify an analyst or skeptic role");
+      if (input.model_initial !== true && input.model_role !== undefined) throw new DiscoveryError("validation", "only initial model attempts may identify a protected role");
       if (!("run_id" in scope) && input.operation_key !== `draft/${scope.draft_token}`) throw new DiscoveryError("validation", "draft operation key is invalid");
       return transaction(db, async (tx) => {
         const identity = await lockScope(tx, scope, clock);
         const attempts = await tx.query<AttemptRow>(
-          "select attempt_id::text as attempt_id,attempt_number,outcome,result,request_hash,model_initial from discovery_attempts where campaign_id=$1::uuid and operation_key=$2 for update",
+          "select attempt_id::text as attempt_id,attempt_number,outcome,result,request_hash,model_initial,model_role,reserved_worker_id,reserved_lease_epoch from discovery_attempts where campaign_id=$1::uuid and operation_key=$2 for update",
           [identity.campaign_id, input.operation_key],
         );
         if (attempts.rows.some((attempt) => attempt.request_hash !== input.request_hash)) throw new DiscoveryError("request_conflict", "operation key was used with a different request");
         const existing = attempts.rows.find((attempt) => attempt.attempt_number === input.attempt_number);
         if (existing) {
-          if (existing.model_initial !== (input.model_initial === true)) throw new DiscoveryError("request_conflict", "attempt kind changed for an existing operation");
+          if (existing.model_initial !== (input.model_initial === true) || existing.model_role !== (input.model_initial === true ? input.model_role : null)) throw new DiscoveryError("request_conflict", "attempt kind changed for an existing operation");
           if (existing.outcome === "success") return { attempt_id: existing.attempt_id, attempt_number: input.attempt_number, state: "cached", result: existing.result };
           if (existing.outcome === "reserved") {
+            if (!reservationIsStale(existing, identity)) return { attempt_id: existing.attempt_id, attempt_number: input.attempt_number, state: "in_progress", result: null };
             await tx.query(
               "update discovery_attempts set outcome='unknown',completed_at=$2::timestamptz where attempt_id=$1::uuid and outcome='reserved'",
               [existing.attempt_id, clock().toISOString()],
@@ -43,9 +47,9 @@ export function createAttemptStore(db: QueryExecutor, clock: () => Date) {
         }
         if (identity.run_id !== null) await reserveRunBudget(tx, identity.run_id, input, clock());
         const { rows } = await tx.query<{ attempt_id: string }>(
-          `insert into discovery_attempts (campaign_id,run_id,operation_key,request_hash,attempt_number,resource,phase,candidate_id,model_initial,outcome)
-           values ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8::uuid,$9,'reserved') returning attempt_id::text as attempt_id`,
-          [identity.campaign_id, identity.run_id, input.operation_key, input.request_hash, input.attempt_number, input.resource, input.phase, input.candidate_id ?? null, input.model_initial === true],
+          `insert into discovery_attempts (campaign_id,run_id,operation_key,request_hash,attempt_number,resource,phase,candidate_id,model_initial,model_role,reserved_worker_id,reserved_lease_epoch,outcome)
+           values ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8::uuid,$9,$10,$11,$12,'reserved') returning attempt_id::text as attempt_id`,
+          [identity.campaign_id, identity.run_id, input.operation_key, input.request_hash, input.attempt_number, input.resource, input.phase, input.candidate_id ?? null, input.model_initial === true, input.model_initial === true ? input.model_role : null, identity.reserved_worker_id, identity.reserved_lease_epoch],
         );
         return { attempt_id: rows[0]!.attempt_id, attempt_number: input.attempt_number, state: "dispatch", result: null };
       });
@@ -124,28 +128,37 @@ async function enforceModelReservationFloor(
   if (input.model_initial === true && input.candidate_id === undefined) {
     throw new DiscoveryError("validation", "initial model attempts require a selected candidate");
   }
-  const { rows } = await tx.query<{ selected: number; reserved_initial: number; candidate_selected: boolean }>(
-    `select
-       (select count(*)::int from discovery_candidates
-         where run_id=$1::uuid and selection_ordinal is not null and state <> 'research_error') as selected,
-       (select count(*)::int from discovery_attempts a
-         join discovery_candidates c on c.candidate_id=a.candidate_id
-         where a.run_id=$1::uuid and a.resource='model' and a.attempt_number=1 and a.model_initial
-           and c.selection_ordinal is not null and c.state <> 'research_error') as reserved_initial,
-       case when $2::uuid is null then false else exists(
-         select 1 from discovery_candidates
-         where run_id=$1::uuid and candidate_id=$2::uuid and selection_ordinal is not null and state <> 'research_error'
-       ) end as candidate_selected`,
-    [runId, input.candidate_id ?? null],
+  const { rows } = await tx.query<{ candidate_id: string; analyst_reserved: boolean; skeptic_reserved: boolean }>(
+    `select c.candidate_id::text as candidate_id,
+       coalesce(bool_or(a.model_role='analyst'),false) as analyst_reserved,
+       coalesce(bool_or(a.model_role='skeptic'),false) as skeptic_reserved
+     from discovery_candidates c
+     left join discovery_attempts a on a.run_id=c.run_id and a.candidate_id=c.candidate_id
+       and a.resource='model' and a.attempt_number=1 and a.model_initial
+     where c.run_id=$1::uuid and c.selection_ordinal is not null and c.state <> 'research_error'
+     group by c.candidate_id`,
+    [runId],
   );
-  const floor = Math.max(0, (rows[0]?.selected ?? 0) * 2 - (rows[0]?.reserved_initial ?? 0));
-  if (input.model_initial === true && !rows[0]?.candidate_selected) {
+  const candidate = input.candidate_id === undefined ? undefined : rows.find((row) => row.candidate_id === input.candidate_id);
+  if (input.model_initial === true && candidate === undefined) {
     throw new DiscoveryError("validation", "initial model attempts require a selected candidate");
   }
+  const roleAlreadyReserved = input.model_role === "analyst" ? candidate?.analyst_reserved : candidate?.skeptic_reserved;
+  if (input.model_initial === true && roleAlreadyReserved) {
+    throw new DiscoveryError("request_conflict", "selected candidate role already has an initial model reservation");
+  }
+  const floor = rows.reduce((total, row) => total + Number(!row.analyst_reserved) + Number(!row.skeptic_reserved), 0);
   const floorAfterReservation = Math.max(0, floor - (input.model_initial === true ? 1 : 0));
   if (used + 1 + floorAfterReservation > limit) {
     throw new DiscoveryError("budget_exhausted", "model attempt budget is reserved for selected companies");
   }
+}
+
+function reservationIsStale(attempt: AttemptRow, scope: LockedScope): boolean {
+  const reservedEpoch = attempt.reserved_lease_epoch === null ? null : Number(attempt.reserved_lease_epoch);
+  return scope.run_id !== null && scope.reserved_worker_id !== null && scope.reserved_lease_epoch !== null
+    && attempt.reserved_worker_id !== null && Number.isInteger(reservedEpoch)
+    && (attempt.reserved_worker_id !== scope.reserved_worker_id || reservedEpoch !== scope.reserved_lease_epoch);
 }
 
 function searchPhaseFor(input: AttemptInput): SearchPhase {
@@ -179,9 +192,9 @@ function currentDraftRequests(value: unknown, cutoff: Date): DraftRequest[] {
   return [...requests.values()];
 }
 
-async function lockScope(tx: QueryExecutor, scope: Scope, clock: () => Date, options: { allowCancelled?: boolean } = {}): Promise<{ campaign_id: string; run_id: string | null }> {
-  if ("run_id" in scope) { await lockLiveLease(tx, scope, clock(), options); const row = await tx.query<{ campaign_id: string }>("select campaign_id::text as campaign_id from discovery_runs where run_id=$1::uuid", [scope.run_id]); return { campaign_id: row.rows[0]!.campaign_id, run_id: scope.run_id }; }
+async function lockScope(tx: QueryExecutor, scope: Scope, clock: () => Date, options: { allowCancelled?: boolean } = {}): Promise<LockedScope> {
+  if ("run_id" in scope) { await lockLiveLease(tx, scope, clock(), options); const row = await tx.query<{ campaign_id: string }>("select campaign_id::text as campaign_id from discovery_runs where run_id=$1::uuid", [scope.run_id]); return { campaign_id: row.rows[0]!.campaign_id, run_id: scope.run_id, reserved_worker_id: scope.worker_id, reserved_lease_epoch: scope.epoch }; }
   requireUuid(scope.campaign_id, "campaign_id"); requireUuid(scope.user_id, "user_id"); requireUuid(scope.draft_token, "draft_token");
   const locked = await tx.query("select campaign_id from discovery_campaigns where campaign_id=$1::uuid and user_id=$2::uuid and draft_lock_token=$3::uuid and draft_lock_until > $4::timestamptz for update", [scope.campaign_id, scope.user_id, scope.draft_token, clock().toISOString()]);
-  if (!locked.rows[0]) throw new DiscoveryError("lease_lost", "draft lock is no longer current"); return { campaign_id: scope.campaign_id, run_id: null };
+  if (!locked.rows[0]) throw new DiscoveryError("lease_lost", "draft lock is no longer current"); return { campaign_id: scope.campaign_id, run_id: null, reserved_worker_id: null, reserved_lease_epoch: null };
 }

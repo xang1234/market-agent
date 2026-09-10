@@ -9,6 +9,7 @@ type RunInput<T> = {
   phase: "discovery" | "research" | "verification";
   candidate_id?: string;
   model_initial?: boolean;
+  model_role?: "analyst" | "skeptic";
   execute: (context: OperationContext) => Promise<T>;
 };
 
@@ -20,6 +21,7 @@ type ProviderAttemptInput<T> = {
   phase: "discovery" | "research" | "verification";
   candidate_id?: string;
   model_initial?: boolean;
+  model_role?: "analyst" | "skeptic";
   execute: (signal: AbortSignal) => Promise<T>;
 };
 
@@ -41,8 +43,10 @@ export function createOperationRunner(repo: DiscoveryRepository, lease: Lease, s
           candidate_id: input.candidate_id,
           attempt_number,
           model_initial: input.model_initial === true && attempt_number === 1,
+          model_role: input.model_initial === true && attempt_number === 1 ? input.model_role : undefined,
         });
         if (reservation.state === "cached") return reservation.result as T;
+        if (reservation.state === "in_progress") throw inProgress(input.key);
         if (reservation.state === "exhausted") {
           if (attempt_number === 2) throw exhausted(input.key);
           continue;
@@ -81,6 +85,7 @@ export function createOperationRunner(repo: DiscoveryRepository, lease: Lease, s
         candidate_id: input.candidate_id,
         attempt_number: (input.index + 1) as 1 | 2,
         model_initial: input.model_initial,
+        model_role: input.model_initial === true ? input.model_role : undefined,
       });
       if (reservation.state === "exhausted" && input.index === 0) {
         reservation = await repo.reserveAttempt(lease, {
@@ -93,6 +98,7 @@ export function createOperationRunner(repo: DiscoveryRepository, lease: Lease, s
         });
       }
       if (reservation.state === "cached") return reservation.result as T;
+      if (reservation.state === "in_progress") throw inProgress(input.key);
       if (reservation.state === "exhausted") throw exhausted(input.key);
 
       const attemptSignal = await signalForAttempt();
@@ -125,4 +131,8 @@ function throwIfAborted(signal: AbortSignal): void {
 
 function exhausted(key: string): DiscoveryError {
   return new DiscoveryError("budget_exhausted", `operation attempts are exhausted for ${key}`);
+}
+
+function inProgress(key: string): DiscoveryError {
+  return new DiscoveryError("operation_in_progress", `operation is already in progress for ${key}`);
 }

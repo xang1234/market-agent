@@ -116,7 +116,7 @@ export type ResearchHandoff = {
 };
 ```
 
-Task1 exports a `DiscoveryError` with `code`, `status`, `message`. Codes/statuses: validation400; not_found404; stale_brief409; active_run409; request_conflict409; draft_rate_limit429; unavailable503; budget_exhausted409; deadline_exceeded409; lease_lost409; cancelled409. Worker control errors are not exposed as raw stack traces. Typed budget exhaustion becomes a partial terminal run, not an endless HTTP retry.
+Task1 exports a `DiscoveryError` with `code`, `status`, `message`. Codes/statuses: validation400; not_found404; stale_brief409; active_run409; request_conflict409; draft_rate_limit429; unavailable503; budget_exhausted409; deadline_exceeded409; lease_lost409; cancelled409; operation_in_progress409. Worker control errors are not exposed as raw stack traces. Typed budget exhaustion becomes a partial terminal run, not an endless HTTP retry.
 
 Validation: name1–120, question20–4,000; horizon1–60 months and lookback1–24 integer months; mechanisms2–4 with unique UUID IDs, label1–160 and chain2–5 strings each1–300; criteria1–8 with unique UUID IDs, statement/falsifier8–1,000 characters; seeds0–5 strings1–200; exclusions/preferences0–10 strings1–300; queries1–20, each1–600 characters and at most75 whitespace-separated words, every mechanism represented. All referenced mechanism IDs must exist. Metric criteria use the existing `ThesisMetricCheck` validation and supported catalog; no arbitrary provider field. Unknown JSON keys fail. IDs are assigned by the server for model-generated proposals; user edits retain IDs. Hash a normalized JSON value with the existing canonical hash utility; do not hash object insertion order. Arrays' order is significant in the approved brief.
 
@@ -152,9 +152,9 @@ export type EvidencePacket = {
 export type OperationContext = {signal:AbortSignal;attempt_number:1|2};
 export type OperationRunner = {
   run<T>(input:{key:string;request_hash:string;resource:D.Resource;phase:'discovery'|'research'|'verification';
-    candidate_id?:D.Id;model_initial?:boolean;execute:(ctx:OperationContext)=>Promise<T>}):Promise<T>;
+    candidate_id?:D.Id;model_initial?:boolean;model_role?:'analyst'|'skeptic';execute:(ctx:OperationContext)=>Promise<T>}):Promise<T>;
   providerAttempt<T>(input:{key:string;request_hash:string;index:0|1;resource:'model';
-    phase:'discovery'|'research'|'verification';candidate_id?:D.Id;model_initial?:boolean;
+    phase:'discovery'|'research'|'verification';candidate_id?:D.Id;model_initial?:boolean;model_role?:'analyst'|'skeptic';
     execute:(signal:AbortSignal)=>Promise<T>}):Promise<T>;
 };
 export type CampaignModel = {
@@ -187,7 +187,7 @@ export type AssessmentContext = {
 };
 export type AttemptReservation = {
   attempt_id:D.Id;attempt_number:1|2;
-  state:'dispatch'|'cached'|'exhausted';result:unknown;
+  state:'dispatch'|'cached'|'exhausted'|'in_progress';result:unknown;
 };
 export type StoredCandidate = D.DiscoveredCandidate&{
   state:D.CandidateState;ordinal:number|null;assessment:D.CandidateDecision|null;
@@ -213,7 +213,7 @@ export interface DiscoveryRepository {
   failCandidate(lease:Lease,candidateId:D.Id,code:string):Promise<void>;
   reserveAttempt(scope:Lease|{campaign_id:D.Id;user_id:D.Id;draft_token:D.Id},input:{
     operation_key:string;request_hash:string;resource:D.Resource;phase:'draft'|'discovery'|'research'|'verification';
-    candidate_id?:D.Id;attempt_number:1|2;model_initial?:boolean}):Promise<AttemptReservation>;
+    candidate_id?:D.Id;attempt_number:1|2;model_initial?:boolean;model_role?:'analyst'|'skeptic'}):Promise<AttemptReservation>;
   finishAttempt(scope:Lease|{campaign_id:D.Id;user_id:D.Id;draft_token:D.Id},input:{
     attempt_id:D.Id;outcome:'success'|'error'|'unknown';result:unknown;tool_call_id:D.Id|null}):Promise<void>;
   getOperation(userId:D.Id,runId:D.Id,key:string):Promise<{outcome:string;result:unknown}|null>;
@@ -302,7 +302,7 @@ export type ControlledRouter = {
 
 `beforeAttempt` remains useful for clients with admission-only control. Campaigns use `executeAttempt` to wrap the real provider invocation with reservation and durable outcome recording. The router calls both controls outside the provider catch that decides fallbacks: admission/storage/control errors must propagate, whereas errors thrown by the actual provider retain existing provider classification. Implement this distinction with a dedicated provider-dispatch wrapper, not a catch-all around the hook. Limit2 actual attempts per logical operation. The dispatch callback accepts the operation runner's per-attempt signal; the router combines it with its outer signal and passes the result to the client. A malformed successful response may use the second attempt as a repair only if one actual attempt remains; it does not reset the attempt counter.
 
-`request_hash` is required at every operation boundary. It is the stable hash of the original logical request (role/prompt version, brief, candidate and original messages), and is reused unchanged by a repair even when repair messages differ. `attempt_number` defaults to1; Task5 validates/revalidates the cached raw response before explicitly requesting2 for the one allowed repair. It must never call a third attempt when fallback already used2. `model_initial:true` is only for an initial Analyst or Skeptic call for an explicit selected `candidate_id`; the locked reservation query uses candidate/phase/resource metadata—not prompt text—to protect the two outstanding initial role slots per selected non-`research_error` candidate. A candidate moved to `research_error` releases only its unreserved floor slots. Provider responses are stored before role validation; raw provider success and a validated role result remain distinct checkpoints.
+`request_hash` is required at every operation boundary. It is the stable hash of the original logical request (role/prompt version, brief, candidate and original messages), and is reused unchanged by a repair even when repair messages differ. `attempt_number` defaults to1; Task5 validates/revalidates the cached raw response before explicitly requesting2 for the one allowed repair. It must never call a third attempt when fallback already used2. `model_initial:true` requires an explicit `model_role:'analyst'|'skeptic'` and an explicit selected `candidate_id`; the locked reservation query uses candidate, role, phase and resource metadata—not prompt text—to protect one outstanding initial slot for each role per selected non-`research_error` candidate. A duplicate live reservation returns typed `operation_in_progress`; it becomes `unknown` only after a new live lease proves the reserving worker/epoch stale. A candidate moved to `research_error` releases only its unreserved floor slots. Provider responses are stored before role validation; raw provider success and a validated role result remain distinct checkpoints.
 
 Add optional `signal` to the client execution options and the Pi completion options, passing it through to the installed SDK; preserve existing signatures' optional compatibility. Validate actual SDK support locally. An SDK incapable of aborting is not eligible for campaign execution until its adapter supports cancellation. A failed deadline does not authorize a background provider request to keep spawning follow-ups.
 
@@ -327,7 +327,7 @@ Task1 translates these columns to explicit DDL and TypeScript row mappers; the t
 | discovery_briefs | brief_id UUID PK, campaign_id FK campaigns CASCADE, version integer CHECK>0, brief jsonb object, content_hash text, approved_at nullable, created_at; UNIQUE(campaign_id,version), UNIQUE(brief_id,campaign_id) |
 | discovery_runs | run_id UUID PK, campaign_id UUID, user_id UUID, brief_id UUID, request_key UUID, status/stage checked, policy_version text, model_config jsonb array (channel/model only), limits/usage/phase_usage/checkpoint/coverage jsonb objects, lease_owner text nullable, lease_epoch bigint default0, lease_expires_at nullable, next_event_sequence bigint default0, cancel_requested_at/started_at/finished_at nullable, created_at; composite FK(campaign_id,user_id)→campaigns CASCADE; composite FK(brief_id,campaign_id)→briefs RESTRICT; UNIQUE(run_id,campaign_id); active user and request-key indices from plan |
 | discovery_candidates | candidate_id UUID PK, run_id FK runs CASCADE, lead_key text, issuer_id UUID FK issuers nullable, listing_id UUID FK listings nullable, identity_display jsonb object nullable, origins/mechanisms/lead_hit_ids/reason_codes jsonb arrays, first_seen jsonb array length2, seed boolean, primary_domain_lead boolean, name text, state checked, selection_ordinal integer nullable CHECK1..25, analyst_output/skeptic_output/assessment jsonb objects nullable, snapshot_id UUID FK snapshots nullable, rank integer nullable CHECK1..10, created_at/updated_at; unique run/issuer, run/lead_key, run/rank; CHECK issuer_id and listing_id either both null or both non-null |
-| discovery_attempts | attempt_id UUID PK, campaign_id FK campaigns CASCADE, run_id UUID nullable, operation_key text, request_hash text, attempt_number integer CHECK IN(1,2), resource/phase checked, candidate_id FK candidates CASCADE nullable, model_initial boolean default false, outcome checked reserved/success/error/unknown, result jsonb nullable, result_hash text nullable, tool_call_id UUID nullable, reserved_at/completed_at; composite FK(run_id,campaign_id)→runs CASCADE; UNIQUE(campaign_id,operation_key,attempt_number) |
+| discovery_attempts | attempt_id UUID PK, campaign_id FK campaigns CASCADE, run_id UUID nullable, operation_key text, request_hash text, attempt_number integer CHECK IN(1,2), resource/phase checked, candidate_id FK candidates CASCADE nullable, model_initial boolean default false, model_role analyst/skeptic nullable only when model_initial, reserved_worker_id/reserved_lease_epoch nullable reservation provenance, outcome checked reserved/success/error/unknown, result jsonb nullable, result_hash text nullable, tool_call_id UUID nullable, reserved_at/completed_at; composite FK(run_id,campaign_id)→runs CASCADE; UNIQUE(campaign_id,operation_key,attempt_number) |
 | discovery_events | run_id FK runs CASCADE, sequence bigint CHECK>0, candidate_id FK candidates CASCADE nullable, stage/event_kind checked, summary text, citation_refs jsonb array, learning_concept_id text nullable, created_at; PRIMARY KEY(run_id,sequence) |
 
 No FK to partitioned tool_call_logs unless its existing key permits it; retain its canonical ID/hash and validate via existing snapshot/tool-log code. Link role/operation logs to user/campaign/run metadata for lifecycle redaction/removal. No secret-bearing prompt configuration is persisted.
@@ -338,7 +338,7 @@ Deletion order: under user+campaign locks, refuse a live lease, delete campaign-
 
 Operation key format: `<run UUID>/<stage>/<candidate UUID or pool>/<purpose>`, with a canonical request hash checked on reuse. Draft uses `draft/<request UUID>` scoped to campaign; save its expected brief version in request hash. Attempt number1 and2 share that operation key; a repair is not a new unrelated operation. Discovery query keys include the approved query index; counter-search keys include candidate and query purpose. Budget phase_usage enforces discovery20/research50/verification10 search allocations within overall80, with retries charged to verification rather than silently increasing an initial allocation.
 
-Post-discovery model reservation floor is two times the number of selected companies whose initial Analyst/Skeptic attempt is not yet reserved. Mandatory initial attempts reduce this floor; optional retry/summary calls can run only if usage+1+floor<=64. If a company cannot be researched because acquisition failed, mark the company research_error and release its unconsumed floor slots, not already charged attempts. The run still records incomplete planned research.
+Post-discovery model reservation floor is one outstanding Analyst slot plus one outstanding Skeptic slot for each selected company. Each candidate/role pair can reserve at most one initial model attempt; mandatory initial attempts reduce only their own candidate/role slot. Optional retry/summary calls can run only if usage+1+floor<=64. If a company cannot be researched because acquisition failed, mark the company research_error and release its unconsumed floor slots, not already charged attempts. The run still records incomplete planned research.
 
 ## Public route responses and pagination
 

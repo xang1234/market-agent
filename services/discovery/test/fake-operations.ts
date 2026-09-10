@@ -8,6 +8,7 @@ export function fakeOperations(options: Options = {}) {
   const now = options.now ?? (() => new Date());
   const ledger = new Map<string, Entry>();
   const providerAttempts: Array<{ key: string; index: 0 | 1; request_hash: string; at: Date }> = [];
+  const providerReservations: Array<{ key: string; index: 0 | 1; model_initial: boolean; model_role?: "analyst" | "skeptic" }> = [];
 
   function prior(key: string, request_hash: string): Entry | undefined {
     const entry = ledger.get(key);
@@ -39,6 +40,7 @@ export function fakeOperations(options: Options = {}) {
       const entry = prior(key, input.request_hash);
       if (entry?.state === "success") return entry.result as typeof input extends { execute: (...args: never[]) => Promise<infer T> } ? T : never;
       providerAttempts.push({ key: input.key, index: input.index, request_hash: input.request_hash, at: now() });
+      providerReservations.push({ key: input.key, index: input.index, model_initial: input.model_initial === true, model_role: input.model_role });
       try {
         const result = await input.execute(signal);
         ledger.set(key, { request_hash: input.request_hash, state: "success", result, at: now() });
@@ -50,5 +52,5 @@ export function fakeOperations(options: Options = {}) {
     },
   };
 
-  return { operations, providerAttempts, ledger };
+  return { operations, providerAttempts, providerReservations, ledger };
 }

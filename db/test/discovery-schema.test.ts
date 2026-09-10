@@ -43,6 +43,8 @@ test("migration path installs discovery schema and rollback removes only discove
   assert.equal(rolledBackLatest.status, 0, rolledBackLatest.stderr || rolledBackLatest.stdout);
   const rolledBackDiscovery = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
   assert.equal(rolledBackDiscovery.status, 0, rolledBackDiscovery.stderr || rolledBackDiscovery.stdout);
+  const rolledBackBase = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
+  assert.equal(rolledBackBase.status, 0, rolledBackBase.stderr || rolledBackBase.stdout);
   const after = await db.query<{ discovery: string | null; metrics: string | null }>("select to_regclass('public.discovery_campaigns')::text as discovery,to_regclass('public.metrics')::text as metrics");
   assert.equal(after.rows[0]?.discovery, null);
   assert.equal(after.rows[0]?.metrics, "metrics");
@@ -54,8 +56,14 @@ async function assertDiscoverySchema(db: { query: <T extends Record<string, unkn
   const indexes = await db.query<{ indexname: string }>("select indexname from pg_indexes where schemaname='public' and tablename in ('discovery_runs','discovery_candidates')");
   const names = new Set(indexes.rows.map((row) => row.indexname));
   for (const expected of ["discovery_request_identity", "discovery_one_active_run_per_user", "discovery_candidate_issuer", "discovery_candidate_lead", "discovery_shortlist_rank"]) assert.equal(names.has(expected), true);
-  const attemptFlag = await db.query<{ data_type: string; is_nullable: string }>(
-    "select data_type,is_nullable from information_schema.columns where table_schema='public' and table_name='discovery_attempts' and column_name='model_initial'",
+  const attemptColumns = await db.query<{ column_name: string; data_type: string; is_nullable: string }>(
+    "select column_name,data_type,is_nullable from information_schema.columns where table_schema='public' and table_name='discovery_attempts' and column_name = any($1::text[]) order by column_name",
+    [["model_initial", "model_role", "reserved_worker_id", "reserved_lease_epoch"]],
   );
-  assert.deepEqual(attemptFlag.rows, [{ data_type: "boolean", is_nullable: "NO" }]);
+  assert.deepEqual(attemptColumns.rows, [
+    { column_name: "model_initial", data_type: "boolean", is_nullable: "NO" },
+    { column_name: "model_role", data_type: "text", is_nullable: "YES" },
+    { column_name: "reserved_lease_epoch", data_type: "bigint", is_nullable: "YES" },
+    { column_name: "reserved_worker_id", data_type: "text", is_nullable: "YES" },
+  ]);
 }

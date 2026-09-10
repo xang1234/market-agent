@@ -74,8 +74,8 @@ test("a run deadline includes worker downtime before a reservation", dbOptions, 
   assert.equal(dispatched, 0);
 });
 
-test("an interrupted reserved operation becomes unknown and only retries once", dbOptions, async (t) => {
-  const { db, repo, createApprovedRun } = await withCampaignDb(t);
+test("an interrupted reserved operation becomes unknown only after lease reclamation", dbOptions, async (t) => {
+  const { db, repo, clock, createApprovedRun } = await withCampaignDb(t);
   const { run } = await createApprovedRun();
   const lease = await repo.claimNextRun("worker-1");
   assert.ok(lease);
@@ -88,7 +88,10 @@ test("an interrupted reserved operation becomes unknown and only retries once", 
     phase: "discovery",
     attempt_number: 1,
   });
-  const operations = createOperationRunner(repo, lease, new AbortController().signal);
+  clock.advance(90_001);
+  const reclaimed = await repo.claimNextRun("worker-2");
+  assert.ok(reclaimed);
+  const operations = createOperationRunner(repo, reclaimed, new AbortController().signal);
   let dispatched = 0;
 
   const result = await operations.run({
@@ -114,8 +117,60 @@ test("an interrupted reserved operation becomes unknown and only retries once", 
   ]);
 });
 
-test("a restarted model operation dispatches only durable attempt two", dbOptions, async (t) => {
+test("a duplicate live operation stays in progress and preserves the first result", dbOptions, async (t) => {
   const { db, repo, createApprovedRun } = await withCampaignDb(t);
+  const { run } = await createApprovedRun();
+  const lease = await repo.claimNextRun("worker-1");
+  assert.ok(lease);
+  const operations = createOperationRunner(repo, lease, new AbortController().signal);
+  const key = `${run.run_id}/discovery/pool/live-search`;
+  const request_hash = hashJsonValue({ query: "live duplicate" });
+  let dispatched = 0;
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  let started!: () => void;
+  const dispatchStarted = new Promise<void>((resolve) => { started = resolve; });
+
+  const first = operations.run({
+    key,
+    request_hash,
+    resource: "search",
+    phase: "discovery",
+    execute: async () => {
+      dispatched += 1;
+      started();
+      await blocked;
+      return { hits: ["first result"] };
+    },
+  });
+  await dispatchStarted;
+  const duplicate = operations.run({
+    key,
+    request_hash,
+    resource: "search",
+    phase: "discovery",
+    execute: async () => {
+      dispatched += 1;
+      return { hits: ["duplicate result"] };
+    },
+  });
+
+  const duplicateResult = await Promise.allSettled([duplicate]);
+  release();
+  const firstResult = await Promise.allSettled([first]);
+  assert.equal(dispatched, 1);
+  assert.deepEqual(firstResult, [{ status: "fulfilled", value: { hits: ["first result"] } }]);
+  assert.equal(duplicateResult[0]?.status, "rejected");
+  assert.equal((duplicateResult[0] as PromiseRejectedResult).reason.code, "operation_in_progress");
+  const attempts = await db.query<{ attempt_number: number; outcome: string; result: unknown }>(
+    "select attempt_number,outcome,result from discovery_attempts where run_id=$1::uuid and operation_key=$2",
+    [run.run_id, key],
+  );
+  assert.deepEqual(attempts.rows, [{ attempt_number: 1, outcome: "success", result: { hits: ["first result"] } }]);
+});
+
+test("a restarted model operation dispatches only durable attempt two", dbOptions, async (t) => {
+  const { db, repo, clock, createApprovedRun } = await withCampaignDb(t);
   const { run } = await createApprovedRun();
   const lease = await repo.claimNextRun("worker-1");
   assert.ok(lease);
@@ -128,7 +183,10 @@ test("a restarted model operation dispatches only durable attempt two", dbOption
     phase: "discovery",
     attempt_number: 1,
   });
-  const operations = createOperationRunner(repo, lease, new AbortController().signal);
+  clock.advance(90_001);
+  const reclaimed = await repo.claimNextRun("worker-2");
+  assert.ok(reclaimed);
+  const operations = createOperationRunner(repo, reclaimed, new AbortController().signal);
   let dispatched = 0;
 
   const result = await operations.providerAttempt({
@@ -275,6 +333,7 @@ test("optional model calls preserve initial analyst and skeptic slots for select
     phase: "research",
     candidate_id: candidateId,
     model_initial: true,
+    model_role: "analyst",
     attempt_number: 1,
   });
   assert.equal(analyst.state, "dispatch");
@@ -292,9 +351,77 @@ test("optional model calls preserve initial analyst and skeptic slots for select
     phase: "research",
     candidate_id: candidateId,
     model_initial: true,
+    model_role: "skeptic",
     attempt_number: 1,
   });
   assert.equal(skeptic.state, "dispatch");
+  const usage = await db.query<{ usage: { model: number } }>("select usage from discovery_runs where run_id=$1::uuid", [run.run_id]);
+  assert.equal(usage.rows[0]?.usage.model, 64);
+});
+
+test("initial model slots are unique to each selected candidate and role", dbOptions, async (t) => {
+  const { db, repo, createApprovedRun } = await withCampaignDb(t);
+  const { run } = await createApprovedRun();
+  const lease = await repo.claimNextRun("worker-1");
+  assert.ok(lease);
+  const candidateA = crypto.randomUUID();
+  const candidateB = crypto.randomUUID();
+  for (const [candidate_id, lead_key, name] of [[candidateA, "floor-a", "Floor A"], [candidateB, "floor-b", "Floor B"]] as const) {
+    await repo.admitCandidate(lease, {
+      candidate_id,
+      lead_key,
+      name,
+      identity: null,
+      origins: ["web"],
+      mechanism_ids: ["40000000-0000-4000-8000-000000000001"],
+      seed: false,
+      primary_domain_lead: false,
+      first_seen: [0, 0],
+      lead_hit_ids: [],
+      reason_codes: [],
+    });
+  }
+  await repo.commitCohort(lease, [candidateA, candidateB], {} as never);
+  await db.query("update discovery_runs set usage=jsonb_set(usage,array['model'],to_jsonb(60::int)) where run_id=$1::uuid", [run.run_id]);
+
+  for (const model_role of ["analyst", "skeptic"] as const) {
+    const reserved = await repo.reserveAttempt(lease, {
+      operation_key: `${run.run_id}/research/${candidateA}/${model_role}`,
+      request_hash: hashJsonValue({ candidate: candidateA, model_role }),
+      resource: "model",
+      phase: "research",
+      candidate_id: candidateA,
+      model_initial: true,
+      model_role,
+      attempt_number: 1,
+    });
+    assert.equal(reserved.state, "dispatch");
+  }
+  for (const model_role of ["analyst", "skeptic"] as const) {
+    await assert.rejects(repo.reserveAttempt(lease, {
+      operation_key: `${run.run_id}/research/${candidateA}/duplicate-${model_role}`,
+      request_hash: hashJsonValue({ candidate: candidateA, model_role, duplicate: true }),
+      resource: "model",
+      phase: "research",
+      candidate_id: candidateA,
+      model_initial: true,
+      model_role,
+      attempt_number: 1,
+    }), { code: "request_conflict" });
+  }
+  for (const model_role of ["analyst", "skeptic"] as const) {
+    const reserved = await repo.reserveAttempt(lease, {
+      operation_key: `${run.run_id}/research/${candidateB}/${model_role}`,
+      request_hash: hashJsonValue({ candidate: candidateB, model_role }),
+      resource: "model",
+      phase: "research",
+      candidate_id: candidateB,
+      model_initial: true,
+      model_role,
+      attempt_number: 1,
+    });
+    assert.equal(reserved.state, "dispatch");
+  }
   const usage = await db.query<{ usage: { model: number } }>("select usage from discovery_runs where run_id=$1::uuid", [run.run_id]);
   assert.equal(usage.rows[0]?.usage.model, 64);
 });
@@ -361,6 +488,7 @@ test("a research error releases only its unreserved initial model floor slots", 
     phase: "research",
     candidate_id: candidateId,
     model_initial: true,
+    model_role: "analyst",
     attempt_number: 1,
   });
   await repo.failCandidate(lease, candidateId, "acquisition_failed");

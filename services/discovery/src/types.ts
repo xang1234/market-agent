@@ -106,12 +106,12 @@ export type ResearchHandoff = {
 
 export type DiscoveryErrorCode =
   | "validation" | "not_found" | "stale_brief" | "active_run" | "request_conflict"
-  | "draft_rate_limit" | "unavailable" | "budget_exhausted" | "deadline_exceeded" | "lease_lost" | "cancelled";
+  | "draft_rate_limit" | "unavailable" | "budget_exhausted" | "deadline_exceeded" | "lease_lost" | "cancelled" | "operation_in_progress";
 
 const STATUS_BY_CODE: Record<DiscoveryErrorCode, number> = {
   validation: 400, not_found: 404, stale_brief: 409, active_run: 409, request_conflict: 409,
   draft_rate_limit: 429, unavailable: 503, budget_exhausted: 409, deadline_exceeded: 409,
-  lease_lost: 409, cancelled: 409,
+  lease_lost: 409, cancelled: 409, operation_in_progress: 409,
 };
 
 export class DiscoveryError extends Error {

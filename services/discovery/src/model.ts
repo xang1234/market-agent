@@ -25,6 +25,7 @@ export function createCampaignModel(router: ControlledRouter, operations: Operat
               phase: input.phase,
               candidate_id: input.candidate_id,
               model_initial: input.model_initial === true && index === 0,
+              model_role: input.model_initial === true && index === 0 && (input.role === "analyst" || input.role === "skeptic") ? input.role : undefined,
               execute: async (signal) => dispatch(signal),
             });
           },
