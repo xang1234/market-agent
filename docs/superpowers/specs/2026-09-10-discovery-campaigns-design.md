@@ -1,8 +1,8 @@
 # Discovery campaigns: investment question to defensible shortlist
 
-Status: proposed design for user review; implementation is not authorized by this document alone.
+Status: approved for engineering planning on 2026-09-10, with the user-approved model limit changes below. This task delivers documentation; it does not start implementation.
 Baseline: `origin/main` at `c12529e` (includes living theses, PR #107).
-Companion: `../plans/2026-09-10-discovery-campaigns.md` (written after design approval).
+Companion: [Implementation plan](../plans/2026-09-10-discovery-campaigns.md).
 
 ## 1. Outcome and confirmed decisions
 
@@ -16,6 +16,7 @@ The user confirmed on 2026-09-10:
 - Approve the research brief once, then run without intermediate approvals.
 - Produce research priorities with valuation context, not a list of buy recommendations.
 - Discover up to **100** companies, investigate up to **25**, shortlist up to **10**.
+- Keep the **45-minute** run ceiling; increase model request ceilings to **64,000 input characters** and **10,000 output tokens**.
 
 Example input: “Which overlooked US-listed companies benefit from AI data-centre power demand over the next two years?” This is a test question, not a claim about any particular security.
 
@@ -75,7 +76,7 @@ Activity events describe observable actions and decision summaries: query execut
 
 ## 6. Limits and completion semantics
 
-Proposed fixed v1 limits per run:
+Approved fixed v1 limits per run:
 
 | Resource | Hard limit |
 |---|---:|
@@ -85,11 +86,13 @@ Proposed fixed v1 limits per run:
 | Identity lookup attempts | 120 |
 | Financial-provider attempts | 50 |
 | Model provider attempts | 64 |
-| Model request input / output | 32,000 characters / 2,000 output tokens |
+| Model request input / output | 64,000 input characters / 10,000 output tokens |
 | Individual external request | 30 seconds |
 | Whole run | 45 minutes from start; includes downtime |
 | Concurrent active runs | One per user |
 | Concurrent company evaluations | One in v1 |
+
+Input length is `JSON.stringify(messages).length` (JavaScript UTF-16 code units), including system and user messages. Reject oversize requests before reservation; build bounded excerpts before forming the request. Output is a maximum, not a requested verbosity target. The existing 30-second per-attempt timeout still applies; benchmark configured models and expose timeout failures honestly.
 
 A model attempt means each actual provider invocation, including router fallback and retry—not just one call to the router. Add an optional per-attempt hook to the existing router so a campaign can reserve/check budget without changing other callers. Limit scout model extraction to four bounded batches; an unread overflow is reported, not silently included in coverage. Preserve slots for the Analyst and Skeptic of each admitted research candidate; leave final prose optional. Each operation uses a persisted unique attempt key, reserves a budget unit atomically before dispatch, and records success/error/unknown afterward. A timed-out or interrupted attempt still consumes budget. At most one retry per failed logical operation, within the same caps; malformed model outputs get at most one repair attempt, also budgeted.
 
