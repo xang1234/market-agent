@@ -340,6 +340,12 @@ Operation key format: `<run UUID>/<stage>/<candidate UUID or pool>/<purpose>`, w
 
 Post-discovery model reservation floor is one outstanding Analyst slot plus one outstanding Skeptic slot for each selected company. Each candidate/role pair can reserve at most one initial model attempt; mandatory initial attempts reduce only their own candidate/role slot. Optional retry/summary calls can run only if usage+1+floor<=64. If a company cannot be researched because acquisition failed, mark the company research_error and release its unconsumed floor slots, not already charged attempts. The run still records incomplete planned research.
 
+### Migration 0042 carry-forward
+
+Migration 0042 never infers an Analyst or Skeptic role from legacy operation keys, prompts, or model text. It clears legacy `model_initial` labels while retaining each attempt's charge, outcome, result, and cache; cleared completed rows remain cacheable for the same canonical request but no longer reduce the protected-role floor. The conservative effect is that a legacy run can end partial when its original role capacity cannot be safely reconstructed.
+
+Before converting a legacy reserved run attempt to `unknown`, the same migration increments that run's lease epoch, clears its owner, and expires its lease. An old worker therefore fails its next lease-guarded write; a newly claimed worker can consume only durable attempt2. Operators should let the worker reclaim the fenced run and report its resulting partial state where remaining capacity cannot support recovery. Migration performs no provider dispatch, snapshot rewrite, or result side effect.
+
 ## Public route responses and pagination
 
 The API request bodies are in spec §10. Campaign/brief/run methods return the named DTO directly, except listing endpoints return Page<T>. Event pages default100, maximum200; candidate pages default25, maximum100; campaign/run lists default20, maximum100. Reject invalid/negative cursors. Encode a cursor as opaque base64url JSON `{created_at,id}` for newest-first campaign/run lists; candidate pagination uses candidate_id ascending and filters state before page size. Cursors are validated as data and parameterized in SQL. Event `after_sequence` is nonnegative integer and never a timestamp.

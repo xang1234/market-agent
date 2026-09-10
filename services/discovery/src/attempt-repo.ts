@@ -34,7 +34,7 @@ export function createAttemptStore(db: QueryExecutor, clock: () => Date) {
         if (attempts.rows.some((attempt) => attempt.request_hash !== input.request_hash)) throw new DiscoveryError("request_conflict", "operation key was used with a different request");
         const existing = attempts.rows.find((attempt) => attempt.attempt_number === input.attempt_number);
         if (existing) {
-          if (existing.model_initial !== (input.model_initial === true) || existing.model_role !== (input.model_initial === true ? input.model_role : null)) throw new DiscoveryError("request_conflict", "attempt kind changed for an existing operation");
+          if ((existing.model_initial !== (input.model_initial === true) || existing.model_role !== (input.model_initial === true ? input.model_role : null)) && !isLegacyRunAttempt(existing, identity)) throw new DiscoveryError("request_conflict", "attempt kind changed for an existing operation");
           if (existing.outcome === "success") return { attempt_id: existing.attempt_id, attempt_number: input.attempt_number, state: "cached", result: existing.result };
           if (existing.outcome === "reserved") {
             if (!reservationIsStale(existing, identity)) return { attempt_id: existing.attempt_id, attempt_number: input.attempt_number, state: "in_progress", result: null };
@@ -159,6 +159,10 @@ function reservationIsStale(attempt: AttemptRow, scope: LockedScope): boolean {
   return scope.run_id !== null && scope.reserved_worker_id !== null && scope.reserved_lease_epoch !== null
     && attempt.reserved_worker_id !== null && Number.isInteger(reservedEpoch)
     && (attempt.reserved_worker_id !== scope.reserved_worker_id || reservedEpoch !== scope.reserved_lease_epoch);
+}
+
+function isLegacyRunAttempt(attempt: AttemptRow, scope: LockedScope): boolean {
+  return scope.run_id !== null && attempt.reserved_worker_id === null && attempt.reserved_lease_epoch === null;
 }
 
 function searchPhaseFor(input: AttemptInput): SearchPhase {
