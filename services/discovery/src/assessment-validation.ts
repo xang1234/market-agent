@@ -190,11 +190,13 @@ function supportedNumericTokens(citation: RawCitation, packet: EvidencePacket): 
 
 function numericTokens(value: string): string[] {
   const dateStarts = new Set<number>();
+  const recognizedDigits = new Uint8Array(value.length);
   const tokens: string[] = [];
   for (const match of value.matchAll(CALENDAR_DATE_TOKEN)) {
     const index = match.index;
     if (index === undefined) continue;
     dateStarts.add(index);
+    markRecognizedDigits(recognizedDigits, index, match[0]);
     addNumericToken(tokens, `date:${match[0]}`);
   }
   for (const match of value.matchAll(NUMERIC_CANDIDATE)) {
@@ -202,9 +204,27 @@ function numericTokens(value: string): string[] {
     if (index !== undefined && dateStarts.has(index)) continue;
     const numeric = canonicalNumericLiteral(match[0]);
     if (numeric === null) throw new Error("contains an unsupported numerical literal");
+    if (index !== undefined) markRecognizedDigits(recognizedDigits, index, match[0]);
     addNumericToken(tokens, numeric);
   }
+  assertNoUnrecognizedNumericDigits(value, recognizedDigits);
   return tokens;
+}
+
+function markRecognizedDigits(recognizedDigits: Uint8Array, start: number, literal: string): void {
+  for (let offset = 0; offset < literal.length; offset += 1) {
+    const character = literal[offset];
+    if (character !== undefined && character >= "0" && character <= "9") recognizedDigits[start + offset] = 1;
+  }
+}
+
+function assertNoUnrecognizedNumericDigits(value: string, recognizedDigits: Uint8Array): void {
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (character !== undefined && character >= "0" && character <= "9" && recognizedDigits[index] === 0) {
+      throw new Error("contains an unsupported numerical literal");
+    }
+  }
 }
 
 function structuredNumericTokens(value: string | null): string[] {

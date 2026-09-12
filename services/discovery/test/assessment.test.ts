@@ -282,7 +282,7 @@ test("numeric prose fails closed for unsupported scientific values and lossless 
   }
 });
 
-test("numeric prose rejects unrecognized whole literals before fragments can be cited", () => {
+test("numeric prose rejects malformed numeric runs before fragments can be cited", () => {
   const sourceClaim = (explanation: string) => {
     const packet = packetFixture();
     const claimId = "d0000000-0000-4000-8000-000000000005";
@@ -306,6 +306,16 @@ test("numeric prose rejects unrecognized whole literals before fragments can be 
     "Primary evidence supports 1__000 units of exposure.",
     "Primary evidence supports FY1_000 units of exposure.",
     "Primary evidence supports 1_000units of exposure.",
+    "Primary evidence supports _1_000 units of exposure.",
+    "Primary evidence supports +_1_000 units of exposure.",
+    "Primary evidence supports -_1_000 units of exposure.",
+    "Primary evidence supports _.1_000 units of exposure.",
+    "Primary evidence supports ._1_000 units of exposure.",
+    "Primary evidence supports __1_000 units of exposure.",
+    "Primary evidence supports 1+_000 units of exposure.",
+    "Primary evidence supports 1e_000 units of exposure.",
+    "Primary evidence supports ++1 units of exposure.",
+    "Primary evidence supports 1+0 units of exposure.",
   ]) {
     const { packet, raw } = sourceClaim(explanation);
     assert.throws(() => validateAnalystOutput(raw, briefFixture(), packet), /numerical/i);
