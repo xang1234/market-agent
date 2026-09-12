@@ -49,6 +49,8 @@ export function createCandidateStore(db: QueryExecutor, clock: () => Date) {
         if (run.rows[0]?.stage !== "discovery") throw new DiscoveryError("request_conflict", "research cohort is already committed");
         const present = await tx.query<{ candidate_id: string }>("select candidate_id::text as candidate_id from discovery_candidates where run_id=$1::uuid and candidate_id=any($2::uuid[]) for update", [lease.run_id, candidateIds]);
         if (present.rows.length !== candidateIds.length) throw new DiscoveryError("not_found", "cohort candidate not found");
+        const selectable = await tx.query<{ candidate_id: string }>("select candidate_id::text as candidate_id from discovery_candidates where run_id=$1::uuid and candidate_id=any($2::uuid[]) and issuer_id is not null and listing_id is not null and state='discovered' for update", [lease.run_id, candidateIds]);
+        if (selectable.rows.length !== candidateIds.length) throw new DiscoveryError("validation", "cohort candidates must be resolved discovered rows");
         await tx.query("update discovery_candidates set state='not_selected',selection_ordinal=null,updated_at=now() where run_id=$1::uuid and state='discovered' and candidate_id<>all($2::uuid[])", [lease.run_id, candidateIds]);
         for (const [index, candidateId] of candidateIds.entries()) await tx.query("update discovery_candidates set state='researching',selection_ordinal=$3,updated_at=now() where run_id=$1::uuid and candidate_id=$2::uuid", [lease.run_id, candidateId, index + 1]);
         await tx.query("update discovery_runs set coverage=$2::jsonb,stage='research' where run_id=$1::uuid", [lease.run_id, json(coverage)]);

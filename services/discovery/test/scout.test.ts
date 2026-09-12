@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { chooseResearchCohort } from "../src/cohort.ts";
 import { discoverCandidates } from "../src/scout.ts";
 import type { DiscoveryContext, Providers } from "../src/ports.ts";
 import { DiscoveryError, type CompanyIdentity, type DiscoveredCandidate, type SearchHit } from "../src/types.ts";
@@ -163,19 +164,65 @@ test("scout skips inaccessible existing evidence before identity resolution", as
   assert.equal(pool.coverage.gaps.some((gap) => gap.code === "existing_evidence_unavailable"), true);
 });
 
-test("scout revalidates accessible existing evidence against the canonical listing adapter", async () => {
+test("scout reuses an attested existing canonical identity without a provider resolution", async () => {
   const existing = existingCandidate(3);
-  const canonical = identityFixture(8);
-  const queries: string[] = [];
+  let resolutions = 0;
   const pool = await discoverCandidates(makeContext({
     existing: [existing],
     search: async () => ({ hits: [], hits_truncated: 0 }),
-    resolve: async (query) => { queries.push(query); return { status: "resolved", identity: canonical }; },
+    resolve: async () => { resolutions += 1; throw new Error("attested rows must not resolve again"); },
   }));
 
   assert.equal(pool.candidates.length, 1);
-  assert.equal(pool.candidates[0]?.identity?.issuer_id, canonical.issuer_id);
-  assert.deepEqual(queries, [existing.identity!.ticker]);
+  assert.equal(pool.candidates[0]?.identity?.issuer_id, existing.identity!.issuer_id);
+  assert.equal(pool.candidates[0]?.primary_domain_lead, true);
+  assert.equal(resolutions, 0);
+});
+
+test("an invalid existing identity cannot bypass the current authorization attestation", async () => {
+  const existing = { ...existingCandidate(4), identity: { ...identityFixture(4), issuer_id: "forged-issuer-id" } };
+  let resolutions = 0;
+  const pool = await discoverCandidates(makeContext({
+    existing: [existing],
+    canUseExisting: async () => false,
+    search: async () => ({ hits: [], hits_truncated: 0 }),
+    resolve: async () => { resolutions += 1; return { status: "resolved", identity: identityFixture(9) }; },
+  }));
+
+  assert.equal(pool.candidates.length, 0);
+  assert.equal(resolutions, 0);
+  assert.equal(pool.coverage.gaps.some((gap) => gap.code === "existing_evidence_unavailable"), true);
+});
+
+test("Scout propagates an existing-evidence attestation failure before provider work", async () => {
+  let resolutions = 0;
+  await assert.rejects(
+    discoverCandidates(makeContext({
+      existing: [existingCandidate(7)],
+      canUseExisting: async () => { throw new DiscoveryError("lease_lost", "attestation query lost its lease"); },
+      resolve: async () => { resolutions += 1; return { status: "resolved", identity: identityFixture(7) }; },
+    })),
+    { code: "lease_lost" },
+  );
+  assert.equal(resolutions, 0);
+});
+
+test("an attested primary-domain existing lead retains cohort priority after Scout admission", async () => {
+  const brief = briefFixture();
+  const existing = { ...existingCandidate(5), first_seen: [2, 0] as [number, number] };
+  const hit = searchHit("60000000-0000-4000-8000-000000000035", 0, 0, "Web lead (WEB)");
+  const pool = await discoverCandidates(makeContext({
+    brief,
+    existing: [existing],
+    search: async (_query, queryIndex) => ({ hits: queryIndex === 0 ? [hit] : [], hits_truncated: 0 }),
+    model: async () => ({ text: JSON.stringify({ hit_ids: [hit.hit_id], seeds: [] }) }),
+    resolve: async () => ({ status: "resolved", identity: identityFixture(6) }),
+  }));
+
+  const cohort = chooseResearchCohort(brief, pool.candidates);
+  const existingId = pool.candidates.find((candidate) => candidate.origins.includes("existing"))?.candidate_id;
+  assert.equal(pool.candidates.find((candidate) => candidate.candidate_id === existingId)?.primary_domain_lead, true);
+  assert.equal(cohort[0], existingId);
 });
 
 test("scout executes its deterministic twenty-search plan", async () => {

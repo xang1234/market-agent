@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
 import { hashJsonValue } from "../../observability/src/tool-call.ts";
-import type { Origin, RankedDecision } from "../src/types.ts";
+import type { DiscoveryContext, Providers } from "../src/ports.ts";
+import { discoverCandidates } from "../src/scout.ts";
+import type { CompanyIdentity, DiscoveredCandidate, Origin, RankedDecision, SearchHit } from "../src/types.ts";
 import { briefFixture, identityFixture } from "./fixtures.ts";
 import { dbOptions, withCampaignDb } from "./db-fixture.ts";
+import { fakeOperations } from "./fake-operations.ts";
 
 function rankedDecision(candidateId: string, state: RankedDecision["state"], rank: number | null): RankedDecision {
   const unknown = { level: "unknown" as const, explanation: "Unavailable", citations: [] };
@@ -13,6 +17,13 @@ function rankedDecision(candidateId: string, state: RankedDecision["state"], ran
     dimensions: { theme_exposure: unknown, evidence_strength: unknown, business_quality: unknown, valuation_context: unknown },
     criteria: [], counterarguments: [], unresolved_questions: [], next_action: "Review", reason_codes: [],
   };
+}
+
+async function insertEligibleListing(db: QueryExecutor, identity: CompanyIdentity): Promise<void> {
+  const instrumentId = crypto.randomUUID();
+  await db.query("insert into issuers (issuer_id,legal_name,former_names) values ($1::uuid,$2,'[]'::jsonb)", [identity.issuer_id, identity.legal_name]);
+  await db.query("insert into instruments (instrument_id,issuer_id,asset_type) values ($1::uuid,$2::uuid,'common_stock')", [instrumentId, identity.issuer_id]);
+  await db.query("insert into listings (listing_id,instrument_id,mic,ticker,trading_currency,timezone) values ($1::uuid,$2::uuid,$3,$4,$5,'America/New_York')", [identity.listing_id, instrumentId, identity.mic, identity.ticker, identity.currency]);
 }
 
 test("a stale editor cannot replace an approved brief", dbOptions, async (t) => {
@@ -157,6 +168,67 @@ test("cohort commit leaves unresolved rows visible and marks other resolved rows
   assert.equal(states.get(unselectedId), "not_selected");
   assert.equal(states.get(unresolvedId), "unresolved_identity");
   await assert.rejects(repo.commitCohort(lease, [unselectedId], {} as never), { code: "request_conflict" });
+});
+
+test("cohort commit rejects unresolved and no-longer-discovered candidate ids without advancing the run", dbOptions, async (t) => {
+  const { db, repo, createApprovedRun } = await withCampaignDb(t);
+  const { run } = await createApprovedRun();
+  const identity = identityFixture(20);
+  await insertEligibleListing(db, identity);
+  const lease = await repo.claimNextRun("worker-1");
+  assert.ok(lease);
+  const base = { origins: ["web"] as Origin[], mechanism_ids: ["40000000-0000-4000-8000-000000000001"], seed: false, primary_domain_lead: false, first_seen: [0, 0] as [number, number], lead_hit_ids: [], reason_codes: [] };
+  const unresolvedId = crypto.randomUUID();
+  const resolvedId = crypto.randomUUID();
+  await repo.admitCandidate(lease, { ...base, candidate_id: unresolvedId, lead_key: "unresolved-selection", name: "Unresolved", identity: null });
+  await repo.admitCandidate(lease, { ...base, candidate_id: resolvedId, lead_key: "stale-selection", name: identity.legal_name, identity });
+
+  await assert.rejects(repo.commitCohort(lease, [unresolvedId], {} as never), { code: "validation" });
+  assert.equal((await repo.readRun(lease.user_id, run.run_id)).stage, "discovery");
+  await db.query("update discovery_candidates set state='not_selected' where candidate_id=$1::uuid", [resolvedId]);
+  await assert.rejects(repo.commitCohort(lease, [resolvedId], {} as never), { code: "validation" });
+  assert.equal((await repo.readRun(lease.user_id, run.run_id)).stage, "discovery");
+});
+
+test("Scout duplicate issuer admission persists merged origins, mechanisms, and hit evidence", dbOptions, async (t) => {
+  const { db, repo, createApprovedRun } = await withCampaignDb(t);
+  const { brief } = await createApprovedRun();
+  const identity = identityFixture(21);
+  await insertEligibleListing(db, identity);
+  const lease = await repo.claimNextRun("worker-1");
+  assert.ok(lease);
+  const existing: DiscoveredCandidate = {
+    candidate_id: crypto.randomUUID(), lead_key: "existing-issuer", name: identity.legal_name, identity,
+    origins: ["existing"], mechanism_ids: [brief.brief.mechanisms[0]!.mechanism_id], seed: false,
+    primary_domain_lead: true, first_seen: [2, 0], lead_hit_ids: [], reason_codes: ["existing"],
+  };
+  const hit: SearchHit = {
+    hit_id: "60000000-0000-4000-8000-000000000051", query_index: 1, result_index: 0,
+    title: "Duplicate listing lead (DUP)", url: "https://example.test/duplicate", description: "Grounded web lead", retrieved_at: "2026-09-12T00:00:00.000Z",
+  };
+  let identityResolutions = 0;
+  const providers: Providers = {
+    search: { search: async (input) => ({ hits: input.query_index === 1 ? [hit] : [], hits_truncated: 0 }) },
+    identity: { resolve: async () => { identityResolutions += 1; return { status: "resolved", identity }; } },
+    evidence: { acquire: async () => { throw new Error("Scout must not acquire evidence"); } },
+    financials: { read: async () => { throw new Error("Scout must not read financials"); } },
+  };
+  const context: DiscoveryContext = {
+    run_id: lease.run_id, brief: brief.brief, providers,
+    model: { complete: async () => ({ text: JSON.stringify({ hit_ids: [hit.hit_id], seeds: [] }), deployment: { channel: "test", model: "scout" } }) },
+    operations: fakeOperations().operations, existing: [existing], canUseExisting: async () => true,
+    admit: async (candidate) => repo.admitCandidate(lease, candidate),
+  };
+
+  const pool = await discoverCandidates(context);
+  const saved = await repo.candidates(lease.user_id, lease.run_id);
+  assert.equal(identityResolutions, 1);
+  assert.equal(pool.candidates.length, 1);
+  assert.equal(saved.length, 1);
+  assert.deepEqual(saved[0]?.origins.sort(), ["existing", "web"]);
+  assert.deepEqual(saved[0]?.mechanism_ids.sort(), brief.brief.mechanisms.map((mechanism) => mechanism.mechanism_id).sort());
+  assert.deepEqual(saved[0]?.lead_hit_ids, [hit.hit_id]);
+  assert.equal(saved[0]?.primary_domain_lead, true);
 });
 
 test("brief saves reject an unregistered metric key", dbOptions, async (t) => {

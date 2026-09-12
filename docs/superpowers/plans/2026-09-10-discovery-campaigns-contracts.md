@@ -289,6 +289,17 @@ runDiscoveryWorker(deps:WorkerDeps,options:{signal:AbortSignal;pollMs:number}):P
 
 These signature blocks are a contract checklist, not a directly executable standalone source file: backend imports above provide the referenced types. Implementers copy the domain type blocks to their canonical modules and implement the factories in the files assigned by the plan. A compile-only contract test imports every exported factory and checks its type against the companion before downstream tasks merge.
 
+`canUseExisting` is a current authorization attestation, not a shape check. It
+returns true only when the caller has verified, for the run user, that the
+exact candidate identity still matches an eligible canonical issuer,
+instrument, and listing and that the linked source evidence remains
+accessible. When `primary_domain_lead` is true, the same check attests its
+verified primary-domain provenance. Scout may reuse that canonical identity
+without calling `IdentityProvider.resolve` only after a true result; a false
+or failed attestation skips the row with a privacy-safe coverage gap. Task6
+builds this callback from current database evidence and must never derive it
+from candidate-supplied identity, display name, or source-access flags.
+
 ## Model control contract (additive to existing router)
 
 ```ts

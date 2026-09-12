@@ -6,7 +6,17 @@ import { parseLlmEnv } from "../../llm/src/channel-config.ts";
 import { createLlmRouter } from "../../llm/src/router.ts";
 import { createCampaignModel } from "../src/model.ts";
 import { createOperationRunner } from "../src/operations.ts";
+import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
+import type { CompanyIdentity } from "../src/types.ts";
 import { dbOptions, withCampaignDb } from "./db-fixture.ts";
+import { identityFixture } from "./fixtures.ts";
+
+async function insertEligibleListing(db: QueryExecutor, identity: CompanyIdentity): Promise<void> {
+  const instrumentId = crypto.randomUUID();
+  await db.query("insert into issuers (issuer_id,legal_name,former_names) values ($1::uuid,$2,'[]'::jsonb)", [identity.issuer_id, identity.legal_name]);
+  await db.query("insert into instruments (instrument_id,issuer_id,asset_type) values ($1::uuid,$2::uuid,'common_stock')", [instrumentId, identity.issuer_id]);
+  await db.query("insert into listings (listing_id,instrument_id,mic,ticker,trading_currency,timezone) values ($1::uuid,$2::uuid,$3,$4,$5,'America/New_York')", [identity.listing_id, instrumentId, identity.mic, identity.ticker, identity.currency]);
+}
 
 test("the last model budget slot dispatches exactly one concurrent operation", dbOptions, async (t) => {
   const { db, repo, createApprovedRun } = await withCampaignDb(t);
@@ -302,11 +312,13 @@ test("optional model calls preserve initial analyst and skeptic slots for select
   const lease = await repo.claimNextRun("worker-1");
   assert.ok(lease);
   const candidateId = crypto.randomUUID();
+  const identity = identityFixture(30);
+  await insertEligibleListing(db, identity);
   await repo.admitCandidate(lease, {
     candidate_id: candidateId,
     lead_key: "floor-candidate",
     name: "Floor Candidate",
-    identity: null,
+    identity,
     origins: ["web"],
     mechanism_ids: ["40000000-0000-4000-8000-000000000001"],
     seed: false,
@@ -366,12 +378,14 @@ test("initial model slots are unique to each selected candidate and role", dbOpt
   assert.ok(lease);
   const candidateA = crypto.randomUUID();
   const candidateB = crypto.randomUUID();
-  for (const [candidate_id, lead_key, name] of [[candidateA, "floor-a", "Floor A"], [candidateB, "floor-b", "Floor B"]] as const) {
+  for (const [index, candidate_id, lead_key, name] of [[31, candidateA, "floor-a", "Floor A"], [32, candidateB, "floor-b", "Floor B"]] as const) {
+    const identity = identityFixture(index);
+    await insertEligibleListing(db, identity);
     await repo.admitCandidate(lease, {
       candidate_id,
       lead_key,
       name,
-      identity: null,
+      identity,
       origins: ["web"],
       mechanism_ids: ["40000000-0000-4000-8000-000000000001"],
       seed: false,
@@ -466,11 +480,13 @@ test("a research error releases only its unreserved initial model floor slots", 
   const lease = await repo.claimNextRun("worker-1");
   assert.ok(lease);
   const candidateId = crypto.randomUUID();
+  const identity = identityFixture(33);
+  await insertEligibleListing(db, identity);
   await repo.admitCandidate(lease, {
     candidate_id: candidateId,
     lead_key: "failed-candidate",
     name: "Failed Candidate",
-    identity: null,
+    identity,
     origins: ["web"],
     mechanism_ids: ["40000000-0000-4000-8000-000000000001"],
     seed: false,
