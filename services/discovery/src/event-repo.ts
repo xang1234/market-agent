@@ -6,16 +6,26 @@ import { lockLiveLease } from "./worker-lock.ts";
 
 type EventRow = { run_id: string; sequence: number | string; stage: CampaignEvent["stage"]; event_kind: CampaignEvent["kind"]; candidate_id: string | null; summary: string; citation_refs: CampaignEvent["citations"]; created_at: Date | string };
 
+/** Appends an event inside an already-fenced domain transaction. */
+export async function appendEventInTransaction(
+  tx: QueryExecutor,
+  run: Pick<Lease, "run_id">,
+  event: Omit<CampaignEvent, "run_id" | "sequence" | "created_at">,
+): Promise<void> {
+  if (typeof event.summary !== "string" || event.summary !== event.summary.trim() || event.summary.length < 1 || event.summary.length > 2_000) throw new DiscoveryError("validation", "event summary is invalid");
+  if (!Array.isArray(event.citations) || event.citations.length > 12) throw new DiscoveryError("validation", "event citations are invalid");
+  const updated = await tx.query<{ next_event_sequence: number }>("update discovery_runs set next_event_sequence=next_event_sequence+1 where run_id=$1::uuid returning next_event_sequence", [run.run_id]);
+  const sequence = updated.rows[0]?.next_event_sequence;
+  if (sequence === undefined) throw new DiscoveryError("lease_lost", "run no longer exists");
+  await tx.query("insert into discovery_events (run_id,sequence,candidate_id,stage,event_kind,summary,citation_refs) values ($1::uuid,$2,$3::uuid,$4,$5,$6,$7::jsonb)", [run.run_id, sequence, event.candidate_id, event.stage, event.kind, event.summary, json(event.citations)]);
+}
+
 export function createEventStore(db: QueryExecutor, clock: () => Date) {
   return {
     async appendEvent(lease: Lease, event: Omit<CampaignEvent, "run_id" | "sequence" | "created_at">): Promise<void> {
-      if (typeof event.summary !== "string" || event.summary !== event.summary.trim() || event.summary.length < 1 || event.summary.length > 2_000) throw new DiscoveryError("validation", "event summary is invalid");
-      if (!Array.isArray(event.citations) || event.citations.length > 12) throw new DiscoveryError("validation", "event citations are invalid");
       await transaction(db, async (tx) => {
         await lockLiveLease(tx, lease, clock());
-        const run = await tx.query<{ next_event_sequence: number }>("update discovery_runs set next_event_sequence=next_event_sequence+1 where run_id=$1::uuid returning next_event_sequence", [lease.run_id]);
-        const sequence = run.rows[0]?.next_event_sequence; if (sequence === undefined) throw new DiscoveryError("lease_lost", "run no longer exists");
-        await tx.query("insert into discovery_events (run_id,sequence,candidate_id,stage,event_kind,summary,citation_refs) values ($1::uuid,$2,$3::uuid,$4,$5,$6,$7::jsonb)", [lease.run_id, sequence, event.candidate_id, event.stage, event.kind, event.summary, json(event.citations)]);
+        await appendEventInTransaction(tx, lease, event);
       });
     },
     async events(userId: string, runId: string, after: number, limit: number): Promise<EventPage> {

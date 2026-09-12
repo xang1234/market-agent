@@ -30,6 +30,8 @@ test("assessment commit seals before atomically persisting an eligible candidate
       if (text.includes("from tool_call_logs")) return result([{ tool_call_id: TOOL_CALL_ID, result_hash: TOOL_HASH }] as unknown as R[]);
       if (text.includes("insert into snapshots")) return result([{ snapshot_id: SNAPSHOT_ID, created_at: "2026-09-10T12:00:01.000Z" }] as unknown as R[]);
       if (text.includes("update discovery_candidates")) return result([] as R[], 1);
+      if (text.includes("update discovery_runs set next_event_sequence")) return result([{ next_event_sequence: 1 }] as unknown as R[]);
+      if (text.includes("insert into discovery_events")) return result([] as R[], 1);
       throw new Error(`unexpected query: ${text}`);
     },
   };
@@ -40,6 +42,7 @@ test("assessment commit seals before atomically persisting an eligible candidate
   assert.equal(committed.snapshot_id, SNAPSHOT_ID);
   assert.equal(committed.decision.state, "eligible_not_shortlisted");
   assert.ok(queries.findIndex((query) => query.includes("insert into snapshots")) < queries.findIndex((query) => query.includes("update discovery_candidates")));
+  assert.ok(queries.findIndex((query) => query.includes("update discovery_candidates")) < queries.findIndex((query) => query.includes("insert into discovery_events")));
 });
 
 test("source revocation prevents a stale assessment packet from sealing or changing the candidate", async () => {

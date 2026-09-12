@@ -4,6 +4,7 @@ import type { Checkpoint, Lease } from "./ports.ts";
 import { DiscoveryError, type Coverage, type Page, type RankedDecision, type RunRecord } from "./types.ts";
 import { decodeCursor, encodeCursor, isoDate, json, jsonValue, requireLimit, requireText, requireUuid, transaction } from "./repository-support.ts";
 import { leaseFromRow, lockLiveLease } from "./worker-lock.ts";
+import { appendEventInTransaction } from "./event-repo.ts";
 
 type RunRow = { run_id: string; campaign_id: string; brief_id: string; user_id: string; status: RunRecord["status"]; stage: RunRecord["stage"]; policy_version: string; request_key: string; limits: unknown; usage: unknown; coverage: unknown; started_at: Date | string | null; finished_at: Date | string | null; cancel_requested_at: Date | string | null; created_at: Date | string; lease_owner?: string | null; lease_epoch?: number; lease_expires_at?: Date | string | null; checkpoint?: unknown };
 const RUN_COLUMNS = "run_id::text as run_id, campaign_id::text as campaign_id, brief_id::text as brief_id, user_id::text as user_id, status, stage, policy_version, request_key::text as request_key, limits, usage, coverage, started_at, finished_at, cancel_requested_at, created_at";
@@ -97,20 +98,30 @@ export function createRunStore(db: QueryExecutor, clock: () => Date) {
     async requestCancel(userId: string, runId: string): Promise<RunRecord> {
       requireUuid(userId, "user_id"); requireUuid(runId, "run_id");
       const now = clock().toISOString();
-      const { rows } = await db.query<RunRow>(
-        `update discovery_runs
-            set cancel_requested_at=coalesce(cancel_requested_at,$3::timestamptz),
-                status=case when status='queued' then 'cancelled' else status end,
-                stage=case when status='queued' then 'finalization' else stage end,
-                finished_at=case when status='queued' then coalesce(finished_at,$3::timestamptz) else finished_at end,
-                lease_expires_at=case when status='queued' then null else lease_expires_at end
-          where run_id=$1::uuid and user_id=$2::uuid and status in ('queued','running')
-          returning ${RUN_COLUMNS}`,
-        [runId, userId, now],
-      );
-      if (rows[0]) return runFromRow(rows[0]);
-      const { rows: existing } = await db.query<RunRow>(`select ${RUN_COLUMNS} from discovery_runs where run_id=$1::uuid and user_id=$2::uuid`, [runId, userId]);
-      if (!existing[0]) throw new DiscoveryError("not_found", "run not found"); return runFromRow(existing[0]);
+      return transaction(db, async (tx) => {
+        const current = await tx.query<RunRow>(`select ${RUN_COLUMNS} from discovery_runs where run_id=$1::uuid and user_id=$2::uuid for update`, [runId, userId]);
+        const run = current.rows[0];
+        if (!run) throw new DiscoveryError("not_found", "run not found");
+        if (run.status === "queued") {
+          const updated = await tx.query<RunRow>(
+            `update discovery_runs set cancel_requested_at=coalesce(cancel_requested_at,$3::timestamptz),status='cancelled',stage='finalization',finished_at=coalesce(finished_at,$3::timestamptz),lease_expires_at=null
+              where run_id=$1::uuid and user_id=$2::uuid returning ${RUN_COLUMNS}`,
+            [runId, userId, now],
+          );
+          await appendEventInTransaction(tx, { run_id: runId }, {
+            stage: "finalization", kind: "run_finalized", candidate_id: null, summary: "Run cancelled.", citations: [],
+          });
+          return runFromRow(updated.rows[0]);
+        }
+        if (run.status === "running") {
+          const updated = await tx.query<RunRow>(
+            `update discovery_runs set cancel_requested_at=coalesce(cancel_requested_at,$3::timestamptz) where run_id=$1::uuid and user_id=$2::uuid returning ${RUN_COLUMNS}`,
+            [runId, userId, now],
+          );
+          return runFromRow(updated.rows[0]);
+        }
+        return runFromRow(run);
+      });
     },
     async finalize(lease: Lease, input: { status: "completed" | "partial" | "failed" | "cancelled"; decisions: RankedDecision[]; coverage: Coverage }): Promise<void> {
       await transaction(db, async (tx) => {
@@ -128,11 +139,9 @@ export function createRunStore(db: QueryExecutor, clock: () => Date) {
           if (updated.rowCount !== 1) throw new DiscoveryError("not_found", "finalization candidate not found");
         }
         await tx.query("update discovery_runs set status=$2,stage='finalization',coverage=$3::jsonb,finished_at=$4::timestamptz,lease_expires_at=null where run_id=$1::uuid", [lease.run_id, input.status, json(input.coverage), clock().toISOString()]);
-        const sequence = await tx.query<{ next_event_sequence: number }>("update discovery_runs set next_event_sequence=next_event_sequence+1 where run_id=$1::uuid returning next_event_sequence", [lease.run_id]);
-        await tx.query(
-          "insert into discovery_events (run_id,sequence,candidate_id,stage,event_kind,summary,citation_refs) values ($1::uuid,$2,null,'finalization','run_finalized',$3,'[]'::jsonb)",
-          [lease.run_id, sequence.rows[0]?.next_event_sequence, `Run ${input.status}.`],
-        );
+        await appendEventInTransaction(tx, lease, {
+          stage: "finalization", kind: "run_finalized", candidate_id: null, summary: `Run ${input.status}.`, citations: [],
+        });
       });
     },
     async deleteCampaign(userId: string, campaignId: string): Promise<void> {

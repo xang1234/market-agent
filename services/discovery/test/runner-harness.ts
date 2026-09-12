@@ -4,24 +4,28 @@ import assert from "node:assert/strict";
 import { persistCampaignQuotes } from "../../evidence/src/campaign-claims.ts";
 import { hashJsonValue } from "../../observability/src/tool-call.ts";
 import { createAssessmentCommitter } from "../src/assessment-repo.ts";
+import { ProviderRequestError } from "../src/providers/errors.ts";
 import { canonicalCampaignQuotes } from "../src/quote-claims.ts";
 import { executeDiscoveryRun } from "../src/runner.ts";
+import { requestHash } from "../src/scout-support.ts";
 import { executeStages } from "../src/stages.ts";
 import type { CampaignModel, Providers, WorkerDeps } from "../src/ports.ts";
-import type { AnalystOutput, DiscoveredCandidate, RawCitation, SkepticOutput } from "../src/types.ts";
+import type { AnalystOutput, ExistingCandidate, RawCitation, SkepticOutput } from "../src/types.ts";
 import { DiscoveryError } from "../src/types.ts";
 import { analystFixture, briefFixture, identityFixture, packetFixture, skepticFixture } from "./fixtures.ts";
 import { withCampaignDb } from "./db-fixture.ts";
 
 export const IDS = Object.freeze({ issuer: identityFixture().issuer_id });
 type TestContext = Parameters<typeof withCampaignDb>[0];
-type CrashAfter = "candidate_commit" | "analyst_checkpoint";
+type CrashAfter = "candidate_commit" | "analyst_checkpoint" | "candidate_failure" | "cohort_commit";
 type FailurePoint = "reservation" | "response_persistence" | "finalization";
+type ExistingCandidateInput = ExistingCandidate;
 type Options = {
   crashAfter?: CrashAfter;
   cancelDuring?: "research";
   failOnceAt?: FailurePoint;
   failEveryReservation?: boolean;
+  providerFailure?: ConstructorParameters<typeof ProviderRequestError>[0];
   withoutExisting?: boolean;
 };
 type ModelCall = { role: Parameters<CampaignModel["complete"]>[0]["role"]; candidate_id: string | undefined; operation_key: string; request_hash: string };
@@ -61,6 +65,20 @@ export async function createRunnerHarness(t: TestContext, options: Options = {})
       if (!crashed && options.crashAfter === "analyst_checkpoint" && checkpoint.role === "analyst") {
         crashed = true;
         throw new DiscoveryError("lease_lost", "injected crash after analyst checkpoint");
+      }
+    },
+    async commitCohort(lease, candidateIds, coverage) {
+      await baseRepo.commitCohort(lease, candidateIds, coverage);
+      if (!crashed && options.crashAfter === "cohort_commit") {
+        crashed = true;
+        throw new DiscoveryError("lease_lost", "injected crash after cohort commit");
+      }
+    },
+    async failCandidate(lease, candidateId, code) {
+      await baseRepo.failCandidate(lease, candidateId, code);
+      if (!crashed && options.crashAfter === "candidate_failure") {
+        crashed = true;
+        throw new DiscoveryError("lease_lost", "injected crash after candidate failure");
       }
     },
     async finalize(lease, input) {
@@ -160,6 +178,26 @@ export async function createRunnerHarness(t: TestContext, options: Options = {})
     },
     candidates: () => baseRepo.candidates(userId, run.run_id),
     events: async () => (await baseRepo.events(userId, run.run_id, 0, 100)).items,
+    async makeFirstExistingDocumentUnavailableWithUnrelatedVisibleEvidence() {
+      const packet = packets[0]!;
+      await db.query("update documents set deleted_at=$1::timestamptz where document_id=$2::uuid", [clock.now().toISOString(), packet.excerpts[0]!.document_id]);
+      await addUnrelatedVisibleDocument(db, packet.identity.issuer_id, clock.now().toISOString());
+    },
+    async useUnentitledFactAsFirstExistingProvenance() {
+      const packet = packets[0]!;
+      const metric = await db.query<{ metric_id: string }>(
+        "insert into metrics (metric_key,display_name,unit_class,aggregation,interpretation,canonical_source_class) values ($1,$2,'currency','point_in_time','neutral','fixture') returning metric_id::text as metric_id",
+        [`existing-provenance-${run.run_id}`, "Existing provenance"],
+      );
+      const fact_id = randomUUID();
+      await db.query(
+        `insert into facts (fact_id,subject_kind,subject_id,metric_id,period_kind,unit,scale,as_of,observed_at,source_id,method,verification_status,freshness_class,coverage_level,entitlement_channels,confidence)
+         values ($1::uuid,'issuer',$2::uuid,$3::uuid,'point','USD',1,$4::timestamptz,$4::timestamptz,$5::uuid,'reported','authoritative','filing_time','full','["export"]'::jsonb,1)`,
+        [fact_id, packet.identity.issuer_id, metric.rows[0]!.metric_id, clock.now().toISOString(), packet.excerpts[0]!.source_id],
+      );
+      existing[0]!.evidence_refs = [{ kind: "fact", fact_id, source_id: packet.excerpts[0]!.source_id }];
+      await addUnrelatedVisibleDocument(db, packet.identity.issuer_id, clock.now().toISOString());
+    },
     async revokeExistingEvidence() {
       await db.query(
         "update documents set deleted_at=$1::timestamptz where document_id=any($2::uuid[])",
@@ -185,6 +223,15 @@ export async function createRunnerHarness(t: TestContext, options: Options = {})
       const lease = await baseRepo.claimNextRun(workerId);
       if (oldLease === null && lease !== null) oldLease = lease;
       return lease;
+    },
+    claimWorkersConcurrently: () => Promise.all([baseRepo.claimNextRun("concurrent-a"), baseRepo.claimNextRun("concurrent-b")]),
+    async reserveLiveDiscoverySearch(lease: NonNullable<Awaited<ReturnType<typeof baseRepo.claimNextRun>>>) {
+      const query = brief.brief.queries[0]!;
+      await baseRepo.reserveAttempt(lease, {
+        operation_key: `${run.run_id}/discovery/pool/search/0`,
+        request_hash: requestHash({ kind: "discovery-search-v1", run_id: run.run_id, query: { ...query, query_index: 0 } }),
+        resource: "search", phase: "discovery", attempt_number: 1,
+      });
     },
     executeLease,
     providerUsers: () => [...providerUsers],
@@ -222,7 +269,12 @@ export async function createRunnerHarness(t: TestContext, options: Options = {})
           return structuredClone({ ...original, candidate_id: input.candidate.candidate_id, identity: input.candidate.identity! });
         },
       },
-      financials: { async read() { return { facts: [], missing_fields: [], coverage_gaps: [] }; } },
+      financials: {
+        async read() {
+          if (options.providerFailure !== undefined) throw new ProviderRequestError(options.providerFailure, `fixture ${options.providerFailure}`);
+          return { facts: [], missing_fields: [], coverage_gaps: [] };
+        },
+      },
     };
   }
 
@@ -258,12 +310,31 @@ function makePacket(index: number) {
 
 function uuid(prefix: string, n: number): string { return `${prefix}000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`; }
 
-function candidateFromPacket(packet: ReturnType<typeof makePacket>, mechanism_id: string): DiscoveredCandidate {
+function candidateFromPacket(packet: ReturnType<typeof makePacket>, mechanism_id: string): ExistingCandidateInput {
   return {
     candidate_id: packet.candidate_id, lead_key: `existing:${packet.identity.issuer_id}`, name: packet.identity.legal_name,
     identity: packet.identity, origins: ["existing"], mechanism_ids: [mechanism_id], seed: false,
     primary_domain_lead: false, first_seen: [0, 0], lead_hit_ids: [], reason_codes: ["fixture"],
+    evidence_refs: [{
+      kind: "document", source_id: packet.excerpts[0]!.source_id, document_id: packet.excerpts[0]!.document_id,
+      claim_id: packet.claims[0]!.claim_id,
+    }],
   };
+}
+
+async function addUnrelatedVisibleDocument(db: { query: Function }, issuerId: string, retrievedAt: string): Promise<void> {
+  const sourceId = randomUUID();
+  const documentId = randomUUID();
+  const hash = `sha256:${randomUUID().replaceAll("-", "").padEnd(64, "0")}`;
+  await db.query(
+    "insert into sources (source_id,provider,kind,canonical_url,trust_tier,license_class,retrieved_at) values ($1::uuid,'fixture-unrelated','press_release',$2,'primary','test',$3::timestamptz)",
+    [sourceId, `https://example.test/unrelated/${documentId}`, retrievedAt],
+  );
+  await db.query(
+    "insert into documents (document_id,source_id,kind,title,published_at,content_hash,raw_blob_id,parse_status) values ($1::uuid,$2::uuid,'press_release','Unrelated visible evidence',$3::timestamptz,$4,$4,'parsed')",
+    [documentId, sourceId, retrievedAt, hash],
+  );
+  await db.query("insert into mentions (document_id,subject_kind,subject_id,prominence,confidence) values ($1::uuid,'issuer',$2::uuid,'body',1)", [documentId, issuerId]);
 }
 
 function rawRole(role: Parameters<CampaignModel["complete"]>[0]["role"], packet: ReturnType<typeof makePacket>): AnalystOutput<RawCitation> | SkepticOutput<RawCitation> {

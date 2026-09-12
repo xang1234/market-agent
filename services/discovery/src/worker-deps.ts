@@ -21,7 +21,7 @@ export function createWorkerDeps(input: {
   clock: () => Date;
   providerFactory: UserScopedProviderFactory;
   modelFactory: (userId: D.Id, operations: OperationRunner) => CampaignModel;
-  loadExisting: (userId: D.Id, brief: D.Brief) => Promise<D.DiscoveredCandidate[]>;
+  loadExisting: (userId: D.Id, brief: D.Brief) => Promise<D.ExistingCandidate[]>;
   persistQuotes: (lease: Lease, packet: EvidencePacket, raw: D.AnalystOutput | D.SkepticOutput, request: AssessmentQuoteRequest) => Promise<Map<string, D.Citation>>;
   commitAssessment: WorkerDeps["commitAssessment"];
 }): WorkerDeps {

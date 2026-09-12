@@ -6,6 +6,7 @@ import type { AssessmentRoleProgress, Lease, ValidatedRoleCheckpoint } from "./p
 import { json, requireUuid, transaction } from "./repository-support.ts";
 import { requestHash } from "./scout-support.ts";
 import { sealCandidateAssessment } from "./seal.ts";
+import { appendEventInTransaction } from "./event-repo.ts";
 import { lockLiveLease } from "./worker-lock.ts";
 import type { AssessedCandidate, CandidateDecision, Id } from "./types.ts";
 import type { EvidencePacket } from "./ports.ts";
@@ -53,6 +54,10 @@ export function createAssessmentCommitter(options: {
       [lease.run_id, packet.candidate_id, decision.state, json(decision), snapshot_id],
     );
     if (updated.rowCount !== 1) throw new DiscoveryError("request_conflict", "candidate assessment could not be committed");
+    await appendEventInTransaction(tx, lease, {
+      stage: "research", kind: "criterion_assessed", candidate_id: packet.candidate_id,
+      summary: "Committed a sealed company assessment.", citations: [],
+    });
     return { decision, snapshot_id };
   });
 }

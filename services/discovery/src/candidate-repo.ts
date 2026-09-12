@@ -1,5 +1,6 @@
 import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
 import type { Lease, StoredCandidate } from "./ports.ts";
+import { appendEventInTransaction } from "./event-repo.ts";
 import { DiscoveryError, type CandidateDecision, type CandidateState, type CompanyIdentity, type Coverage, type DiscoveredCandidate } from "./types.ts";
 import { json, jsonValue, requireUuid, transaction } from "./repository-support.ts";
 import { lockLiveLease } from "./worker-lock.ts";
@@ -54,6 +55,10 @@ export function createCandidateStore(db: QueryExecutor, clock: () => Date) {
         await tx.query("update discovery_candidates set state='not_selected',selection_ordinal=null,updated_at=now() where run_id=$1::uuid and state='discovered' and candidate_id<>all($2::uuid[])", [lease.run_id, candidateIds]);
         for (const [index, candidateId] of candidateIds.entries()) await tx.query("update discovery_candidates set state='researching',selection_ordinal=$3,updated_at=now() where run_id=$1::uuid and candidate_id=$2::uuid", [lease.run_id, candidateId, index + 1]);
         await tx.query("update discovery_runs set coverage=$2::jsonb,stage='research' where run_id=$1::uuid", [lease.run_id, json(coverage)]);
+        await appendEventInTransaction(tx, lease, {
+          stage: "research", kind: "lead_resolved", candidate_id: null,
+          summary: `Committed ${candidateIds.length} companies for bounded research.`, citations: [],
+        });
       });
     },
     async failCandidate(lease: Lease, candidateId: string, code: string): Promise<void> {

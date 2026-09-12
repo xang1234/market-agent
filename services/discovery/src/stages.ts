@@ -1,9 +1,11 @@
 import { assessCompany } from "./assessment.ts";
+import { LlmProviderError, LlmRouterError } from "../../llm/src/router.ts";
 import { chooseResearchCohort } from "./cohort.ts";
 import { createOperationRunner } from "./operations.ts";
 import { rankShortlist } from "./selection.ts";
 import { addGap, requestHash } from "./scout-support.ts";
 import { discoverCandidates } from "./scout.ts";
+import { ProviderRequestError } from "./providers/errors.ts";
 import type { Checkpoint, EvidencePacket, Lease, StoredCandidate, WorkerDeps } from "./ports.ts";
 import type { Coverage, RunStatus } from "./types.ts";
 import { DiscoveryError } from "./types.ts";
@@ -20,8 +22,9 @@ export async function executeStages(deps: WorkerDeps, lease: Lease, signal: Abor
   let coverage = structuredClone(run.coverage);
 
   if (run.stage === "discovery") {
-    const existing = await deps.loadExisting(lease, brief.brief);
-    const authorizedExisting = await deps.repo.authorizeExistingCandidates(lease, existing);
+    const existingWithEvidence = await deps.loadExisting(lease, brief.brief);
+    const authorizedExisting = await deps.repo.authorizeExistingCandidates(lease, existingWithEvidence);
+    const existing = existingWithEvidence.map(({ evidence_refs: _evidenceRefs, ...candidate }) => candidate);
     await assertRunnable(deps, lease, signal);
     const pool = await discoverCandidates({
       run_id: lease.run_id,
@@ -41,10 +44,6 @@ export async function executeStages(deps: WorkerDeps, lease: Lease, signal: Abor
     }
     await assertRunnable(deps, lease, signal);
     await deps.repo.commitCohort(lease, cohort, pool.coverage);
-    await deps.repo.appendEvent(lease, {
-      stage: "research", kind: "lead_resolved", candidate_id: null,
-      summary: `Committed ${cohort.length} companies for bounded research.`, citations: [],
-    });
     checkpoint = { version: 1, stage: "research", cohort, next_company: 0, completed_operation_keys: checkpoint.completed_operation_keys };
     await deps.repo.saveCheckpoint(lease, checkpoint);
     coverage = pool.coverage;
@@ -58,7 +57,6 @@ export async function executeStages(deps: WorkerDeps, lease: Lease, signal: Abor
     await deps.repo.saveCheckpoint(lease, checkpoint);
   }
 
-  let systemicFailures = 0;
   let incomplete = false;
   for (let index = checkpoint.next_company; index < selected.length; index += 1) {
     const candidate = selected[index]!;
@@ -68,10 +66,10 @@ export async function executeStages(deps: WorkerDeps, lease: Lease, signal: Abor
       } catch (error) {
         if (isControl(error)) throw error;
         incomplete = true;
-        if (error instanceof DiscoveryError && error.code === "unavailable") systemicFailures += 1;
+        const code = failureCode(error);
         await assertRunnable(deps, lease, signal);
-        await deps.repo.failCandidate(lease, candidate.candidate_id, failureCode(error));
-        addGap(coverage, failureCode(error), candidate.candidate_id, errorMessage(error));
+        await deps.repo.failCandidate(lease, candidate.candidate_id, code);
+        addGap(coverage, code, candidate.candidate_id, errorMessage(error));
       }
     }
     checkpoint = { ...checkpoint, next_company: index + 1 };
@@ -83,6 +81,7 @@ export async function executeStages(deps: WorkerDeps, lease: Lease, signal: Abor
   reconcileCoverage(coverage, finalCandidates, selected.map((candidate) => candidate.candidate_id));
   incomplete ||= coverage.gaps.length > 0 || finalCandidates.some((candidate) => candidate.state === "research_error");
   const assessed = finalCandidates.filter((candidate) => candidate.assessment !== null).length;
+  const systemicFailures = finalCandidates.filter((candidate) => candidate.ordinal !== null && candidate.state === "research_error" && candidate.reason_codes.some((code) => code.startsWith("systemic:"))).length;
   const status: StageOutcome["status"] = selected.length > 0 && assessed === 0 && systemicFailures === selected.length
     ? "failed"
     : incomplete ? "partial" : "completed";
@@ -124,10 +123,6 @@ async function researchCompany(
   // request for the fenced seal transaction.
   const sealPacket = await deps.repo.refreshResearchPacket(lease, original);
   await deps.commitAssessment(lease, sealPacket, decision);
-  await deps.repo.appendEvent(lease, {
-    stage: "research", kind: "criterion_assessed", candidate_id: candidate.candidate_id,
-    summary: "Committed a sealed company assessment.", citations: [],
-  });
 }
 
 async function acquirePacket(
@@ -219,10 +214,20 @@ function isControl(error: unknown): boolean {
   return error instanceof DiscoveryError && ["operation_in_progress", "lease_lost", "cancelled", "budget_exhausted", "deadline_exceeded"].includes(error.code);
 }
 function failureCode(error: unknown): string {
-  if (error instanceof DiscoveryError && error.code === "unavailable") return "provider_unavailable";
+  const systemic = systemicFailureCode(error);
+  if (systemic !== null) return `systemic:${systemic}`;
   return "company_research_failed";
 }
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+
+/** Persist only errors whose provider or router family can disable every company. */
+function systemicFailureCode(error: unknown): string | null {
+  if (error instanceof DiscoveryError && error.code === "unavailable") return "discovery_unavailable";
+  if (error instanceof ProviderRequestError) return `provider_${error.code}`;
+  if (error instanceof LlmProviderError) return `model_${error.code}`;
+  if (error instanceof LlmRouterError) return `model_router_${error.code}`;
+  return null;
+}
 
 function immutablePacketAsOf(packet: EvidencePacket): string {
   const observations = [...packet.excerpts.map((excerpt) => excerpt.retrieved_at), ...packet.facts.map((fact) => fact.as_of)]

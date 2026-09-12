@@ -14,9 +14,9 @@ test("worker commits its immutable cohort before any company model call", dbOpti
 
 test("only one worker can hold the live run lease", dbOptions, async (t) => {
   const h = await createRunnerHarness(t);
-  const first = await h.claimWorker("first");
+  const [first, second] = await h.claimWorkersConcurrently();
   assert.ok(first);
-  assert.equal(await h.claimWorker("second"), null);
+  assert.equal(second, null);
   await h.executeLease(first);
   assert.equal((await h.repo.readRun(h.userId, h.runId)).status, "completed");
   await h.assertCountersReconcile();
@@ -54,6 +54,22 @@ test("revoked source evidence cannot authorize an existing candidate identity", 
   await h.assertCountersReconcile();
 });
 
+test("an unavailable exact document provenance cannot be replaced by an unrelated visible issuer document", dbOptions, async (t) => {
+  const h = await createRunnerHarness(t);
+  await h.makeFirstExistingDocumentUnavailableWithUnrelatedVisibleEvidence();
+  await h.executeOnce();
+  assert.equal(h.callsForCompany("80000000-0000-4000-8000-000000000001"), 0);
+  assert.equal((await h.repo.readRun(h.userId, h.runId)).status, "partial");
+});
+
+test("an unentitled exact fact provenance cannot be replaced by an unrelated visible issuer document", dbOptions, async (t) => {
+  const h = await createRunnerHarness(t);
+  await h.useUnentitledFactAsFirstExistingProvenance();
+  await h.executeOnce();
+  assert.equal(h.callsForCompany("80000000-0000-4000-8000-000000000001"), 0);
+  assert.equal((await h.repo.readRun(h.userId, h.runId)).status, "partial");
+});
+
 test("a reservation failure leaves only that company incomplete and reconciles terminal coverage", dbOptions, async (t) => {
   const h = await createRunnerHarness(t, { failOnceAt: "reservation" });
   await h.executeOnce();
@@ -68,6 +84,14 @@ test("a systemic provider failure preventing every assessment finalizes failed",
   assert.equal((await h.repo.readRun(h.userId, h.runId)).status, "failed");
   assert.ok((await h.candidates()).every((candidate) => candidate.assessment === null));
   await h.assertCountersReconcile();
+});
+
+test("a replacement lease classifies every persisted configuration failure as failed", dbOptions, async (t) => {
+  const h = await createRunnerHarness(t, { providerFailure: "missing_configuration", crashAfter: "candidate_failure" });
+  await assert.rejects(h.executeOnce(), /injected crash/);
+  h.advanceClock(91_000);
+  await h.resumeWithWorker("replacement");
+  assert.equal((await h.repo.readRun(h.userId, h.runId)).status, "failed");
 });
 
 test("response persistence retry completes through the operation ledger", dbOptions, async (t) => {
@@ -94,10 +118,23 @@ test("a cancellation request wins over normal completion", dbOptions, async (t) 
   await h.assertCountersReconcile();
 });
 
+test("a live operation reservation leaves the runner nonterminal until a replacement lease resumes it", dbOptions, async (t) => {
+  const h = await createRunnerHarness(t);
+  const original = await h.claimWorker("original");
+  assert.ok(original);
+  await h.reserveLiveDiscoverySearch(original);
+  await h.executeLease(original);
+  assert.equal((await h.repo.readRun(h.userId, h.runId)).status, "running");
+  h.advanceClock(91_000);
+  await h.resumeWithWorker("replacement");
+  assert.equal((await h.repo.readRun(h.userId, h.runId)).status, "completed");
+});
+
 test("queued cancellation becomes terminal without a worker lease", dbOptions, async (t) => {
   const h = await createRunnerHarness(t);
   assert.equal((await h.cancelQueued()).status, "cancelled");
   assert.equal(await h.repo.claimNextRun("should-not-claim"), null);
+  assert.equal((await h.events()).filter((event) => event.kind === "run_finalized").length, 1);
 });
 
 test("a cancellation request cannot rewrite a completed run", dbOptions, async (t) => {

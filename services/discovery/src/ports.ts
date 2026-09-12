@@ -91,7 +91,7 @@ export interface DiscoveryRepository {
   checkpoint(lease: Lease): Promise<Checkpoint>;
   saveCheckpoint(lease: Lease, checkpoint: Checkpoint): Promise<void>;
   candidates(userId: D.Id, runId: D.Id): Promise<StoredCandidate[]>;
-  authorizeExistingCandidates(lease: Lease, candidates: D.DiscoveredCandidate[]): Promise<ReadonlySet<D.Id>>;
+  authorizeExistingCandidates(lease: Lease, candidates: D.ExistingCandidate[]): Promise<ReadonlySet<D.Id>>;
   admitCandidate(lease: Lease, candidate: D.DiscoveredCandidate): Promise<void>;
   commitCohort(lease: Lease, candidateIds: D.Id[], coverage: D.Coverage): Promise<void>;
   failCandidate(lease: Lease, candidateId: D.Id, code: string): Promise<void>;
@@ -118,7 +118,7 @@ export type WorkerDeps = {
   providers: (lease: Lease) => Providers;
   clock: () => Date;
   model: (lease: Lease, operations: OperationRunner) => CampaignModel;
-  loadExisting: (lease: Lease, brief: D.Brief) => Promise<D.DiscoveredCandidate[]>;
+  loadExisting: (lease: Lease, brief: D.Brief) => Promise<D.ExistingCandidate[]>;
   persistQuotes: (lease: Lease, packet: EvidencePacket, raw: D.AnalystOutput | D.SkepticOutput, request: AssessmentQuoteRequest) => Promise<Map<string, D.Citation>>;
   commitAssessment: (lease: Lease, packet: EvidencePacket, decision: D.CandidateDecision) => Promise<D.AssessedCandidate>;
 };

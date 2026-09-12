@@ -60,6 +60,11 @@ export type DiscoveredCandidate = {
   mechanism_ids: Id[]; seed: boolean; primary_domain_lead: boolean; first_seen: [number, number];
   lead_hit_ids: Id[]; reason_codes: string[];
 };
+/** Exact current evidence that permitted reuse of an existing discovery lead. */
+export type ExistingEvidenceRef =
+  | { kind: "document"; source_id: Id; document_id: Id; claim_id?: Id }
+  | { kind: "fact"; source_id: Id; fact_id: Id };
+export type ExistingCandidate = DiscoveredCandidate & { evidence_refs: ExistingEvidenceRef[] };
 export type CriterionOutcome<C = Citation> = {
   criterion_id: Id; outcome: "pass" | "fail" | "unknown"; explanation: string; citations: C[];
 };
