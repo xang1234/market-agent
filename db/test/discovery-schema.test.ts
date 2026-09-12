@@ -17,7 +17,7 @@ import {
 } from "./docker-pg.ts";
 
 const tables = [
-  "discovery_campaigns", "discovery_briefs", "discovery_runs", "discovery_candidates", "discovery_attempts", "discovery_events",
+  "discovery_campaigns", "discovery_briefs", "discovery_runs", "discovery_candidates", "discovery_attempts", "discovery_events", "discovery_quote_claims",
 ];
 const options = { skip: !dockerAvailable(), timeout: 120_000 };
 
@@ -43,6 +43,8 @@ test("migration path installs discovery schema and rollback removes only discove
   await assertDiscoverySchema(db);
   const rolledBackLatest = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
   assert.equal(rolledBackLatest.status, 0, rolledBackLatest.stderr || rolledBackLatest.stdout);
+  const rolledBackQuoteClaims = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
+  assert.equal(rolledBackQuoteClaims.status, 0, rolledBackQuoteClaims.stderr || rolledBackQuoteClaims.stdout);
   const rolledBackDiscovery = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
   assert.equal(rolledBackDiscovery.status, 0, rolledBackDiscovery.stderr || rolledBackDiscovery.stdout);
   const rolledBackBase = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
@@ -61,6 +63,8 @@ test("migration 0042 fences legacy reservations and preserves charged cached att
   await waitForPostgres(containerName, databaseUrl);
   const initial = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
   assert.equal(initial.status, 0, initial.stderr || initial.stdout);
+  const before0043 = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
+  assert.equal(before0043.status, 0, before0043.stderr || before0043.stdout);
   const before0042 = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
   assert.equal(before0042.status, 0, before0042.stderr || before0042.stdout);
   const db = await connectedPool(t, databaseUrl);

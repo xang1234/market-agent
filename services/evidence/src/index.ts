@@ -191,6 +191,9 @@ export type {
 } from "./document-repo.ts";
 export type { QueryExecutor } from "./types.ts";
 
+export { campaignQuoteKey, persistCampaignQuotes } from "./campaign-claims.ts";
+export type { CampaignQuote } from "./campaign-claims.ts";
+
 export * from "./inspector.ts";
 
 export { createEvidenceReviewServer } from "./review-http.ts";

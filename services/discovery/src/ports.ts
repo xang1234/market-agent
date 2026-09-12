@@ -43,7 +43,23 @@ export type DiscoveryContext = {
   admit: (candidate: D.DiscoveredCandidate) => Promise<void>;
 };
 export type DiscoveryPool = { candidates: D.DiscoveredCandidate[]; coverage: D.Coverage };
-export type AssessmentContext = { run_id: D.Id; brief: D.Brief; packet: EvidencePacket; model: CampaignModel; as_of: string; persistQuotes: (raw: D.AnalystOutput | D.SkepticOutput) => Promise<Map<string, D.Citation>> };
+export type ValidatedRoleCheckpoint = {
+  version: 1;
+  role: "analyst" | "skeptic";
+  request_hash: string;
+  packet_hash: string;
+  output: D.AnalystOutput | D.SkepticOutput;
+};
+export type AssessmentContext = {
+  run_id: D.Id;
+  brief: D.Brief;
+  packet: EvidencePacket;
+  model: CampaignModel;
+  as_of: string;
+  persistQuotes: (raw: D.AnalystOutput | D.SkepticOutput, packet: EvidencePacket) => Promise<Map<string, D.Citation>>;
+  reloadPacket: () => Promise<EvidencePacket>;
+  saveValidatedRole: (checkpoint: ValidatedRoleCheckpoint) => Promise<void>;
+};
 export type AttemptReservation = { attempt_id: D.Id; attempt_number: 1 | 2; state: "dispatch" | "cached" | "exhausted" | "in_progress"; result: unknown };
 export type StoredCandidate = D.DiscoveredCandidate & { state: D.CandidateState; ordinal: number | null; assessment: D.CandidateDecision | null; snapshot_id: D.Id | null; rank: number | null };
 
