@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { createAssessmentCommitter, saveValidatedRoleCheckpoint } from "../src/assessment-repo.ts";
 import { decideCandidate } from "../src/assessment.ts";
+import type { AnalystOutput, Citation } from "../src/types.ts";
 import { analystFixture, briefFixture, packetFixture, skepticFixture } from "./fixtures.ts";
 
 const USER_ID = "10000000-0000-4000-8000-000000000001";
@@ -112,8 +113,9 @@ test("a validated role checkpoint is persisted separately from the raw provider 
     version: 1 as const,
     role: "analyst" as const,
     request_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    request_packet_hash: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
     packet_hash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    output: analystFixture(),
+    output: analystFixture() as AnalystOutput<Citation>,
   };
 
   await saveValidatedRoleCheckpoint(db, { run_id: RUN_ID, user_id: USER_ID, worker_id: "worker", epoch: 2, expires_at: "2026-09-10T13:00:00.000Z" }, packet.candidate_id, checkpoint, () => new Date("2026-09-10T12:00:00.000Z"));

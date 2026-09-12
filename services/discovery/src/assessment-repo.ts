@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
 import type { SealToolCallRef } from "../../snapshot/src/seal-input.ts";
-import type { Lease, ValidatedRoleCheckpoint } from "./ports.ts";
+import type { AssessmentRoleProgress, Lease, ValidatedRoleCheckpoint } from "./ports.ts";
 import { json, requireUuid, transaction } from "./repository-support.ts";
 import { requestHash } from "./scout-support.ts";
 import { sealCandidateAssessment } from "./seal.ts";
@@ -11,7 +11,15 @@ import type { AssessedCandidate, CandidateDecision, Id } from "./types.ts";
 import type { EvidencePacket } from "./ports.ts";
 import { DiscoveryError } from "./types.ts";
 
-type CandidateForAssessment = { candidate_id: string; issuer_id: string | null; state: string; assessment: unknown; snapshot_id: string | null };
+type CandidateForAssessment = {
+  candidate_id: string;
+  issuer_id: string | null;
+  state: string;
+  assessment: unknown;
+  snapshot_id: string | null;
+  analyst_output?: unknown;
+  skeptic_output?: unknown;
+};
 
 export function createAssessmentCommitter(options: {
   db: QueryExecutor;
@@ -57,7 +65,7 @@ export async function saveValidatedRoleCheckpoint(
   clock: () => Date,
 ): Promise<void> {
   requireUuid(candidate_id, "candidate_id");
-  if (!/^sha256:[0-9a-f]{64}$/u.test(checkpoint.request_hash) || !/^sha256:[0-9a-f]{64}$/u.test(checkpoint.packet_hash)) {
+  if (!/^sha256:[0-9a-f]{64}$/u.test(checkpoint.request_hash) || !/^sha256:[0-9a-f]{64}$/u.test(checkpoint.request_packet_hash) || !/^sha256:[0-9a-f]{64}$/u.test(checkpoint.packet_hash)) {
     throw new DiscoveryError("validation", "validated role checkpoint hashes are invalid");
   }
   await transaction(db, async (tx) => {
@@ -75,9 +83,32 @@ export async function saveValidatedRoleCheckpoint(
   });
 }
 
+export async function loadValidatedRoleProgress(
+  db: QueryExecutor,
+  lease: Lease,
+  candidate_id: Id,
+  clock: () => Date,
+): Promise<AssessmentRoleProgress> {
+  requireUuid(candidate_id, "candidate_id");
+  return transaction(db, async (tx) => {
+    await lockLiveLease(tx, lease, clock());
+    const candidate = await lockCandidate(tx, lease, candidate_id, undefined);
+    if (candidate.state !== "researching" || candidate.assessment !== null || candidate.snapshot_id !== null) {
+      throw new DiscoveryError("request_conflict", "candidate is not available for assessment");
+    }
+    // This only restores normalized output and immutable request binding. Fresh
+    // packet validation in assessCompany remains the source of authorization.
+    return Object.freeze({
+      analyst: parseCheckpoint(candidate.analyst_output, "analyst"),
+      skeptic: parseCheckpoint(candidate.skeptic_output, "skeptic"),
+    });
+  });
+}
+
 async function lockCandidate(tx: QueryExecutor, lease: Lease, candidateId: string, issuerId: string | undefined): Promise<CandidateForAssessment> {
   const { rows } = await tx.query<CandidateForAssessment>(
-    `select candidate_id::text as candidate_id,issuer_id::text as issuer_id,state,assessment,snapshot_id::text as snapshot_id
+    `select candidate_id::text as candidate_id,issuer_id::text as issuer_id,state,assessment,snapshot_id::text as snapshot_id,
+            analyst_output,skeptic_output
        from discovery_candidates where run_id=$1::uuid and candidate_id=$2::uuid for update`,
     [lease.run_id, candidateId],
   );
@@ -86,6 +117,25 @@ async function lockCandidate(tx: QueryExecutor, lease: Lease, candidateId: strin
   if (issuerId !== undefined && candidate.issuer_id !== issuerId) throw new DiscoveryError("request_conflict", "candidate issuer no longer matches the evidence packet");
   return candidate;
 }
+
+function parseCheckpoint(value: unknown, role: "analyst" | "skeptic"): ValidatedRoleCheckpoint | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "object" || Array.isArray(value)) throw new DiscoveryError("validation", `stored ${role} checkpoint is malformed`);
+  const record = value as Record<string, unknown>;
+  if (record.version !== 1 || record.role !== role || !validHash(record.request_hash) || !validHash(record.request_packet_hash) || !validHash(record.packet_hash) || typeof record.output !== "object" || record.output === null || Array.isArray(record.output)) {
+    throw new DiscoveryError("validation", `stored ${role} checkpoint is malformed`);
+  }
+  return Object.freeze({
+    version: 1,
+    role,
+    request_hash: record.request_hash,
+    request_packet_hash: record.request_packet_hash,
+    packet_hash: record.packet_hash,
+    output: record.output as ValidatedRoleCheckpoint["output"],
+  });
+}
+
+function validHash(value: unknown): value is string { return typeof value === "string" && /^sha256:[0-9a-f]{64}$/u.test(value); }
 
 async function requirePacketVisible(
   tx: QueryExecutor,
@@ -114,6 +164,34 @@ async function requirePacketVisible(
   const facts = new Map(packet.facts.map((fact) => [fact.fact_id, fact]));
   const citedFacts = factIds.map((factId) => facts.get(factId)).filter((fact): fact is NonNullable<typeof fact> => fact !== undefined);
   if (citedFacts.length !== factIds.length) throw new DiscoveryError("validation", "assessment cites a fact outside its evidence packet");
+  const uniqueFactIds = unique(citedFacts.map((fact) => fact.fact_id));
+  if (uniqueFactIds.length > 0) {
+    const { rows } = await tx.query<{
+      fact_id: string;
+      source_id: string;
+      invalidated_at: string | null;
+      superseded_by: string | null;
+      visible_source_id: string | null;
+    }>(
+      `select f.fact_id::text as fact_id,
+              f.source_id::text as source_id,
+              f.invalidated_at::text as invalidated_at,
+              f.superseded_by::text as superseded_by,
+              case when s.user_id is null or s.user_id=$2::uuid then s.source_id::text else null end as visible_source_id
+         from facts f
+         join sources s on s.source_id=f.source_id
+        where f.fact_id=any($1::uuid[])
+        for key share of f,s`,
+      [uniqueFactIds, userId],
+    );
+    const current = new Map(rows.map((row) => [row.fact_id, row]));
+    for (const fact of citedFacts) {
+      const actual = current.get(fact.fact_id);
+      if (actual === undefined || actual.source_id !== fact.source_id || actual.visible_source_id !== fact.source_id || actual.invalidated_at !== null || actual.superseded_by !== null) {
+        throw new DiscoveryError("not_found", "cited fact is no longer current");
+      }
+    }
+  }
   const sourceIds = unique([...citedClaims.map((claim) => claim.source_id), ...citedFacts.map((fact) => fact.source_id)]);
   if (sourceIds.length === 0) return;
   const { rows } = await tx.query<{ source_id: string }>(

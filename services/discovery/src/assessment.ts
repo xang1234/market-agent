@@ -5,28 +5,26 @@ import { buildAssessmentMessages } from "./assessment-prompts.ts";
 import { normalizeRoleCitations, validateAnalystOutput, validateSkepticOutput } from "./assessment-validation.ts";
 import { requestHash } from "./scout-support.ts";
 import type { AnalystOutput, Brief, CandidateDecision, Citation, CriterionOutcome, Dimension, Level, RawCitation, SkepticOutput } from "./types.ts";
-import type { AssessmentContext, ValidatedRoleCheckpoint } from "./ports.ts";
+import type { AssessmentContext, AssessmentQuoteRequest, ValidatedRoleCheckpoint } from "./ports.ts";
 
 const LEVEL_ORDER: Record<Level, number> = { strong: 3, mixed: 2, weak: 1, unknown: 0 };
+type Role = "analyst" | "skeptic";
+type RawRoleOutput = AnalystOutput<RawCitation> | SkepticOutput<RawCitation>;
+type NormalizedRoleOutput = AnalystOutput<Citation> | SkepticOutput<Citation>;
+type RoleRequest = AssessmentQuoteRequest & { messages: ReturnType<typeof buildAssessmentMessages> };
 
 export async function assessCompany(context: AssessmentContext): Promise<CandidateDecision> {
-  const analyst = await completeRole(context, "analyst");
-  const skeptic = await completeRole(context, "skeptic");
-  const visiblePacket = await reloadAssessmentPacket(context);
-  // Cached raw role output is always revalidated against current source
-  // visibility before it can mint a durable quote claim.
-  validateAnalystOutput(analyst.raw, context.brief, visiblePacket);
-  validateSkepticOutput(skeptic.raw, context.brief, visiblePacket);
-  const analystCitations = await context.persistQuotes(analyst.raw, visiblePacket);
-  const skepticCitations = await context.persistQuotes(skeptic.raw, visiblePacket);
-  const normalizedAnalyst = normalizeRoleCitations(analyst.raw, analystCitations);
-  const normalizedSkeptic = normalizeRoleCitations(skeptic.raw, skepticCitations);
+  const progress = await context.loadValidatedRoles();
+  if (progress.analyst === null && progress.skeptic !== null) {
+    throw new Error("Skeptic checkpoint cannot exist without an Analyst checkpoint");
+  }
+  const analyst = await resolveRole(context, "analyst", progress.analyst);
+  // The durable normalized Analyst checkpoint is saved before this independent
+  // request, so an in-progress or failed Skeptic can be resumed alone.
+  const skeptic = await resolveRole(context, "skeptic", progress.skeptic);
   const packet = await reloadAssessmentPacket(context);
-  const validatedAnalyst = validateAnalystOutput(normalizedAnalyst, context.brief, packet);
-  const validatedSkeptic = validateSkepticOutput(normalizedSkeptic, context.brief, packet);
-  const packet_hash = requestHash(packet);
-  await context.saveValidatedRole(checkpoint("analyst", analyst.request_hash, packet_hash, validatedAnalyst));
-  await context.saveValidatedRole(checkpoint("skeptic", skeptic.request_hash, packet_hash, validatedSkeptic));
+  const validatedAnalyst = revalidateNormalizedRole("analyst", analyst.output, context, packet) as AnalystOutput<Citation>;
+  const validatedSkeptic = revalidateNormalizedRole("skeptic", skeptic.output, context, packet) as SkepticOutput<Citation>;
   return decideCandidate(context.brief, packet, validatedAnalyst, validatedSkeptic, context.as_of);
 }
 
@@ -38,24 +36,57 @@ async function reloadAssessmentPacket(context: AssessmentContext): Promise<Evide
   return packet;
 }
 
-async function completeRole(context: AssessmentContext, role: "analyst" | "skeptic"): Promise<{ raw: AnalystOutput | SkepticOutput; request_hash: string }> {
+function roleRequest(context: AssessmentContext, role: Role): RoleRequest {
   const messages = buildAssessmentMessages({ role, brief: context.brief, packet: context.packet, as_of: context.as_of });
+  const request_packet_hash = requestHash(context.packet);
   const request_hash = requestHash({ kind: "campaign-assessment-v1", role, run_id: context.run_id, candidate_id: context.packet.candidate_id, brief: context.brief, packet: context.packet, messages });
   const operation_key = `${context.run_id}/research/${context.packet.candidate_id}/${role}`;
+  return Object.freeze({ role, operation_key, request_hash, request_packet_hash, messages });
+}
+
+async function resolveRole(context: AssessmentContext, role: Role, stored: ValidatedRoleCheckpoint | null): Promise<ValidatedRoleCheckpoint> {
+  const request = roleRequest(context, role);
+  if (stored !== null) return refreshStoredRole(context, role, request, stored);
+  const raw = await completeRole(context, role, request);
+  const visiblePacket = await reloadAssessmentPacket(context);
+  // A model response is raw evidence only. It must pass against current
+  // packet visibility before it can create a source-linked quote claim.
+  validateRole(role, raw, context, visiblePacket);
+  const { messages: _messages, ...quoteRequest } = request;
+  const citations = await context.persistQuotes(raw, visiblePacket, quoteRequest);
+  const normalized = normalizeRole(role, raw, citations);
+  const authorizedPacket = await reloadAssessmentPacket(context);
+  const output = revalidateNormalizedRole(role, normalized, context, authorizedPacket);
+  const saved = checkpoint(role, request, requestHash(authorizedPacket), output);
+  await context.saveValidatedRole(saved);
+  return saved;
+}
+
+async function refreshStoredRole(context: AssessmentContext, role: Role, request: RoleRequest, stored: ValidatedRoleCheckpoint): Promise<ValidatedRoleCheckpoint> {
+  if (stored.role !== role || stored.request_hash !== request.request_hash || stored.request_packet_hash !== request.request_packet_hash) {
+    throw new Error(`stored ${role} checkpoint does not match the original assessment request`);
+  }
+  const packet = await reloadAssessmentPacket(context);
+  const output = revalidateNormalizedRole(role, stored.output, context, packet);
+  const refreshed = checkpoint(role, request, requestHash(packet), output);
+  await context.saveValidatedRole(refreshed);
+  return refreshed;
+}
+
+async function completeRole(context: AssessmentContext, role: Role, request: RoleRequest): Promise<RawRoleOutput> {
+  const { messages, request_hash, operation_key } = request;
   const validate = (text: string): AnalystOutput | SkepticOutput => {
     if (text.length > 100_000) throw new Error(`${role} response exceeds the response size limit`);
     let value: unknown;
     try { value = JSON.parse(text); } catch { throw new Error(`${role} response is not valid JSON`); }
-    return role === "analyst"
-      ? validateAnalystOutput(value, context.brief, context.packet)
-      : validateSkepticOutput(value, context.brief, context.packet);
+    return validateRole(role, value, context, context.packet);
   };
   const initial = await context.model.complete({ operation_key, request_hash, role, phase: "research", candidate_id: context.packet.candidate_id, model_initial: true, messages });
   try {
-    return { raw: validate(initial.text), request_hash };
+    return validate(initial.text);
   } catch {
     const repaired = await context.model.complete({ operation_key, request_hash, attempt_number: 2, role, phase: "research", candidate_id: context.packet.candidate_id, model_initial: false, messages: repairMessages(messages) });
-    return { raw: validate(repaired.text), request_hash };
+    return validate(repaired.text);
   }
 }
 
@@ -65,8 +96,38 @@ function repairMessages(messages: ReadonlyArray<{ role: "system" | "user" | "ass
   return [{ ...system, content: `${system.content} Your prior response was invalid; return only the required JSON schema.` }, ...messages.slice(1)];
 }
 
-function checkpoint(role: "analyst" | "skeptic", request_hash: string, packet_hash: string, output: AnalystOutput | SkepticOutput): ValidatedRoleCheckpoint {
-  return Object.freeze({ version: 1, role, request_hash, packet_hash, output });
+function validateRole(role: Role, value: unknown, context: AssessmentContext, packet: EvidencePacket): RawRoleOutput {
+  return role === "analyst"
+    ? validateAnalystOutput(value, context.brief, packet)
+    : validateSkepticOutput(value, context.brief, packet);
+}
+
+function normalizeRole(role: Role, raw: RawRoleOutput, citations: ReadonlyMap<string, Citation>): NormalizedRoleOutput {
+  return role === "analyst"
+    ? normalizeRoleCitations(raw as AnalystOutput<RawCitation>, citations)
+    : normalizeRoleCitations(raw as SkepticOutput<RawCitation>, citations);
+}
+
+function revalidateNormalizedRole(role: Role, value: unknown, context: AssessmentContext, packet: EvidencePacket): NormalizedRoleOutput {
+  const validated = validateRole(role, value, context, packet);
+  for (const citation of roleCitations(validated)) {
+    if (citation.kind === "excerpt") throw new Error(`stored ${role} checkpoint contains an unpersisted excerpt citation`);
+  }
+  return validated as NormalizedRoleOutput;
+}
+
+function roleCitations(role: RawRoleOutput): RawCitation[] {
+  return [
+    ...role.exposure.citations,
+    ...role.business_quality.citations,
+    ...role.valuation_context.citations,
+    ...role.criteria.flatMap((criterion) => criterion.citations),
+    ...("counterarguments" in role ? role.counterarguments.flatMap((counterargument) => counterargument.citations) : []),
+  ];
+}
+
+function checkpoint(role: Role, request: AssessmentQuoteRequest, packet_hash: string, output: NormalizedRoleOutput): ValidatedRoleCheckpoint {
+  return Object.freeze({ version: 1, role, request_hash: request.request_hash, request_packet_hash: request.request_packet_hash, packet_hash, output });
 }
 
 export function decideCandidate(

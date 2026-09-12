@@ -47,18 +47,30 @@ export type ValidatedRoleCheckpoint = {
   version: 1;
   role: "analyst" | "skeptic";
   request_hash: string;
+  request_packet_hash: string;
   packet_hash: string;
-  output: D.AnalystOutput | D.SkepticOutput;
+  output: D.AnalystOutput<D.Citation> | D.SkepticOutput<D.Citation>;
 };
+export type AssessmentRoleProgress = Readonly<{
+  analyst: ValidatedRoleCheckpoint | null;
+  skeptic: ValidatedRoleCheckpoint | null;
+}>;
+export type AssessmentQuoteRequest = Readonly<{
+  role: "analyst" | "skeptic";
+  operation_key: string;
+  request_hash: string;
+  request_packet_hash: string;
+}>;
 export type AssessmentContext = {
   run_id: D.Id;
   brief: D.Brief;
   packet: EvidencePacket;
   model: CampaignModel;
   as_of: string;
-  persistQuotes: (raw: D.AnalystOutput | D.SkepticOutput, packet: EvidencePacket) => Promise<Map<string, D.Citation>>;
+  persistQuotes: (raw: D.AnalystOutput | D.SkepticOutput, packet: EvidencePacket, request: AssessmentQuoteRequest) => Promise<Map<string, D.Citation>>;
   reloadPacket: () => Promise<EvidencePacket>;
   saveValidatedRole: (checkpoint: ValidatedRoleCheckpoint) => Promise<void>;
+  loadValidatedRoles: () => Promise<AssessmentRoleProgress>;
 };
 export type AttemptReservation = { attempt_id: D.Id; attempt_number: 1 | 2; state: "dispatch" | "cached" | "exhausted" | "in_progress"; result: unknown };
 export type StoredCandidate = D.DiscoveredCandidate & { state: D.CandidateState; ordinal: number | null; assessment: D.CandidateDecision | null; snapshot_id: D.Id | null; rank: number | null };
@@ -93,7 +105,7 @@ export interface DiscoveryRepository {
   deleteCampaign(userId: D.Id, campaignId: D.Id): Promise<void>;
 }
 
-export type WorkerDeps = { repo: DiscoveryRepository; providers: Providers; clock: () => Date; model: (operations: OperationRunner) => CampaignModel; loadExisting: (userId: D.Id, brief: D.Brief) => Promise<D.DiscoveredCandidate[]>; persistQuotes: (lease: Lease, packet: EvidencePacket, raw: D.AnalystOutput | D.SkepticOutput) => Promise<Map<string, D.Citation>>; commitAssessment: (lease: Lease, packet: EvidencePacket, decision: D.CandidateDecision) => Promise<D.AssessedCandidate> };
+export type WorkerDeps = { repo: DiscoveryRepository; providers: Providers; clock: () => Date; model: (operations: OperationRunner) => CampaignModel; loadExisting: (userId: D.Id, brief: D.Brief) => Promise<D.DiscoveredCandidate[]>; persistQuotes: (lease: Lease, packet: EvidencePacket, raw: D.AnalystOutput | D.SkepticOutput, request: AssessmentQuoteRequest) => Promise<Map<string, D.Citation>>; commitAssessment: (lease: Lease, packet: EvidencePacket, decision: D.CandidateDecision) => Promise<D.AssessedCandidate> };
 export type DiscoveryService = {
   createCampaign(userId: D.Id, input: { name: string; question: string }): Promise<D.Campaign>;
   listCampaigns(userId: D.Id, cursor: string | null, limit: number): Promise<D.Page<D.Campaign>>;
