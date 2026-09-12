@@ -6,8 +6,11 @@ const MAX_TEXT_CHARS = 2_000;
 const MAX_CITATIONS = 12;
 const MAX_QUESTIONS = 8;
 const MAX_COUNTERARGUMENTS = 8;
-const NUMERIC_TOKEN = /(?<![A-Za-z0-9.,+-])(?:\d{4}-\d{1,2}-\d{1,2}(?=$|[Tt]|[^A-Za-z0-9,.]|\.(?!\d))|[+-]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)(?![A-Za-z0-9]|\.\d|,\d))/gu;
-const CALENDAR_DATE = /^\d{4}-\d{1,2}-\d{1,2}$/u;
+const MAX_NUMERIC_TOKENS = 1_000;
+const MAX_ABSOLUTE_EXPONENT = 10_000;
+const CALENDAR_DATE_TOKEN = /(?<![A-Za-z0-9.,+-])\d{4}-\d{1,2}-\d{1,2}(?=$|[Tt]|[^A-Za-z0-9,.]|\.(?!\d))/gu;
+const NUMERIC_CANDIDATE = /(?<![A-Za-z0-9.,+-])[+-]?(?:\d(?:[\d,.]*\d)?|\.\d+(?:[\d,.]*\d)?)(?:[eE][+-]?\d*)?(?![A-Za-z0-9])/gu;
+const NUMERIC_LITERAL = /^([+-]?)(?:(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?|\.(\d+))(?:[eE]([+-]?\d+))?$/u;
 
 type RawRole = AnalystOutput<RawCitation> | SkepticOutput<RawCitation>;
 
@@ -186,12 +189,22 @@ function supportedNumericTokens(citation: RawCitation, packet: EvidencePacket): 
 }
 
 function numericTokens(value: string): string[] {
-  return [...value.matchAll(NUMERIC_TOKEN)].flatMap((match) => {
-    const literal = match[0];
-    if (CALENDAR_DATE.test(literal)) return [`date:${literal}`];
-    const numeric = canonicalNumber(Number(literal.replaceAll(",", "")));
-    return numeric === null ? [] : [numeric];
-  });
+  const dateStarts = new Set<number>();
+  const tokens: string[] = [];
+  for (const match of value.matchAll(CALENDAR_DATE_TOKEN)) {
+    const index = match.index;
+    if (index === undefined) continue;
+    dateStarts.add(index);
+    addNumericToken(tokens, `date:${match[0]}`);
+  }
+  for (const match of value.matchAll(NUMERIC_CANDIDATE)) {
+    const index = match.index;
+    if (index !== undefined && dateStarts.has(index)) continue;
+    const numeric = canonicalNumericLiteral(match[0]);
+    if (numeric === null) throw new Error("contains an unsupported numerical literal");
+    addNumericToken(tokens, numeric);
+  }
+  return tokens;
 }
 
 function structuredNumericTokens(value: string | null): string[] {
@@ -199,7 +212,39 @@ function structuredNumericTokens(value: string | null): string[] {
 }
 
 function canonicalNumber(value: number): string | null {
-  return Number.isFinite(value) ? `number:${String(Object.is(value, -0) ? 0 : value)}` : null;
+  return Number.isFinite(value) ? canonicalNumericLiteral(String(Object.is(value, -0) ? 0 : value)) : null;
+}
+
+function canonicalNumericLiteral(literal: string): string | null {
+  const match = NUMERIC_LITERAL.exec(literal);
+  if (match === null) return null;
+  const exponent = boundedExponent(match[5]);
+  if (exponent === null) return null;
+  const integer = match[2] ?? "";
+  const fraction = match[3] ?? match[4] ?? "";
+  const digits = `${integer}${fraction}`.replaceAll(",", "").replace(/^0+/u, "");
+  if (digits.length === 0) return "number:0e0";
+  const significant = digits.replace(/0+$/u, "");
+  const trailingZeros = digits.length - significant.length;
+  const power = exponent - fraction.length + trailingZeros;
+  if (!Number.isSafeInteger(power) || Math.abs(power) > MAX_ABSOLUTE_EXPONENT) return null;
+  return `number:${match[1] === "-" ? "-" : ""}${significant}e${power}`;
+}
+
+function boundedExponent(value: string | undefined): number | null {
+  if (value === undefined) return 0;
+  const negative = value.startsWith("-");
+  const digits = value.replace(/^[+-]?0*/u, "") || "0";
+  const limit = String(MAX_ABSOLUTE_EXPONENT);
+  if (digits.length > limit.length || (digits.length === limit.length && digits > limit)) return null;
+  let magnitude = 0;
+  for (const digit of digits) magnitude = magnitude * 10 + digit.charCodeAt(0) - 48;
+  return negative ? -magnitude : magnitude;
+}
+
+function addNumericToken(tokens: string[], token: string): void {
+  if (tokens.length >= MAX_NUMERIC_TOKENS) throw new Error("contains too many numerical literals");
+  tokens.push(token);
 }
 
 function normalizeText(value: string): string { return value.replace(/\s+/gu, " ").trim(); }

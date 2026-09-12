@@ -235,6 +235,53 @@ test("numerical prose preserves signed, decimal, grouped, and date literal bound
   assert.throws(() => validateAnalystOutput(output("The report recorded +1.25, 1,000.50, and 2026-9-1."), briefFixture(), packet), /numerical assertion/i);
 });
 
+test("scientific notation has lossless numeric evidence support", () => {
+  const packet = packetFixture();
+  const claimId = "d0000000-0000-4000-8000-000000000003";
+  packet.claims.push({
+    claim_id: claimId,
+    document_id: packet.excerpts[0]!.document_id,
+    source_id: packet.excerpts[0]!.source_id,
+    text_canonical: "Primary evidence records 1e3 units of exposure.",
+  });
+  const raw = analystFixture();
+  raw.exposure = {
+    level: "strong",
+    explanation: "Primary evidence records 1000 units of exposure.",
+    citations: [{ kind: "claim", id: claimId }],
+  };
+
+  assert.doesNotThrow(() => validateAnalystOutput(raw, briefFixture(), packet));
+});
+
+test("numeric prose fails closed for unsupported scientific values and lossless integers", () => {
+  const sourceClaim = (text_canonical: string, explanation: string) => {
+    const packet = packetFixture();
+    const claimId = "d0000000-0000-4000-8000-000000000004";
+    packet.claims.push({
+      claim_id: claimId,
+      document_id: packet.excerpts[0]!.document_id,
+      source_id: packet.excerpts[0]!.source_id,
+      text_canonical,
+    });
+    const raw = analystFixture();
+    raw.exposure = {
+      level: "strong",
+      explanation,
+      citations: [{ kind: "claim", id: claimId }],
+    };
+    return { packet, raw };
+  };
+
+  for (const { packet, raw } of [
+    sourceClaim("Primary evidence supports exposure.", "Primary evidence supports 1e3 units of exposure."),
+    sourceClaim("Primary evidence reports 9007199254740992 units.", "Primary evidence reports 9007199254740993 units."),
+    sourceClaim("Primary evidence supports exposure.", "Primary evidence supports 1e1000000 units of exposure."),
+  ]) {
+    assert.throws(() => validateAnalystOutput(raw, briefFixture(), packet), /numerical/i);
+  }
+});
+
 function metricBrief(): Brief {
   const brief = briefFixture();
   brief.criteria[0] = {
