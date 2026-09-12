@@ -181,7 +181,8 @@ export type FinancialProvider = {
 export type Providers = {search:SearchProvider;identity:IdentityProvider;evidence:EvidenceProvider;financials:FinancialProvider};
 export type DiscoveryContext = {
   run_id:D.Id;brief:D.Brief;providers:Providers;model:CampaignModel;operations:OperationRunner;
-  existing:D.DiscoveredCandidate[];admit:(candidate:D.DiscoveredCandidate)=>Promise<void>;
+  existing:D.DiscoveredCandidate[];canUseExisting:(candidate:D.DiscoveredCandidate)=>Promise<boolean>;
+  admit:(candidate:D.DiscoveredCandidate)=>Promise<void>;
 };
 export type DiscoveryPool = {candidates:D.DiscoveredCandidate[];coverage:D.Coverage};
 export type AssessmentContext = {

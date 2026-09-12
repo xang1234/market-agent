@@ -93,6 +93,24 @@ test("candidate admission caps at one hundred", dbOptions, async (t) => {
   assert.equal((await repo.candidates(lease.user_id, run.run_id)).length, 100);
 });
 
+test("unresolved admissions remain visible without entering research selection", dbOptions, async (t) => {
+  const { repo, createApprovedRun } = await withCampaignDb(t);
+  const { run } = await createApprovedRun();
+  const lease = await repo.claimNextRun("worker-1");
+  assert.ok(lease);
+  const unresolved = {
+    candidate_id: crypto.randomUUID(), lead_key: "unresolved", name: "Unresolved lead", identity: null,
+    origins: ["web"], mechanism_ids: ["40000000-0000-4000-8000-000000000001"], seed: false,
+    primary_domain_lead: false, first_seen: [0, 0], lead_hit_ids: [], reason_codes: ["identity_unresolved"],
+  } as const;
+  await repo.admitCandidate(lease, unresolved);
+  await repo.admitCandidate(lease, unresolved);
+
+  const candidates = await repo.candidates(lease.user_id, run.run_id);
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0]?.state, "unresolved_identity");
+});
+
 test("candidate admission merges a duplicate resolved issuer", dbOptions, async (t) => {
   const { db, repo, createApprovedRun } = await withCampaignDb(t);
   const { run } = await createApprovedRun();
@@ -109,6 +127,36 @@ test("candidate admission merges a duplicate resolved issuer", dbOptions, async 
   assert.equal(candidates.length, 1);
   assert.deepEqual(candidates[0]?.origins.sort(), ["seed", "web"]);
   assert.deepEqual(candidates[0]?.mechanism_ids.sort(), ["40000000-0000-4000-8000-000000000001", "40000000-0000-4000-8000-000000000002"]);
+});
+
+test("cohort commit leaves unresolved rows visible and marks other resolved rows not selected", dbOptions, async (t) => {
+  const { db, repo, createApprovedRun } = await withCampaignDb(t);
+  const { run } = await createApprovedRun();
+  const selectedIdentity = identityFixture(10);
+  const unselectedIdentity = identityFixture(11);
+  for (const identity of [selectedIdentity, unselectedIdentity]) {
+    const instrumentId = crypto.randomUUID();
+    await db.query("insert into issuers (issuer_id,legal_name,former_names) values ($1::uuid,$2,'[]'::jsonb)", [identity.issuer_id, identity.legal_name]);
+    await db.query("insert into instruments (instrument_id,issuer_id,asset_type) values ($1::uuid,$2::uuid,'common_stock')", [instrumentId, identity.issuer_id]);
+    await db.query("insert into listings (listing_id,instrument_id,mic,ticker,trading_currency,timezone) values ($1::uuid,$2::uuid,$3,$4,$5,'America/New_York')", [identity.listing_id, instrumentId, identity.mic, identity.ticker, identity.currency]);
+  }
+  const lease = await repo.claimNextRun("worker-1");
+  assert.ok(lease);
+  const selectedId = crypto.randomUUID();
+  const unselectedId = crypto.randomUUID();
+  const unresolvedId = crypto.randomUUID();
+  const base = { origins: ["web"] as Origin[], mechanism_ids: ["40000000-0000-4000-8000-000000000001"], seed: false, primary_domain_lead: false, first_seen: [0, 0] as [number, number], lead_hit_ids: [], reason_codes: [] };
+  await repo.admitCandidate(lease, { ...base, candidate_id: selectedId, lead_key: "selected", name: selectedIdentity.legal_name, identity: selectedIdentity });
+  await repo.admitCandidate(lease, { ...base, candidate_id: unselectedId, lead_key: "unselected", name: unselectedIdentity.legal_name, identity: unselectedIdentity });
+  await repo.admitCandidate(lease, { ...base, candidate_id: unresolvedId, lead_key: "unresolved", name: "Unresolved", identity: null });
+
+  await repo.commitCohort(lease, [selectedId], {} as never);
+
+  const states = new Map((await repo.candidates(lease.user_id, run.run_id)).map((candidate) => [candidate.candidate_id, candidate.state]));
+  assert.equal(states.get(selectedId), "researching");
+  assert.equal(states.get(unselectedId), "not_selected");
+  assert.equal(states.get(unresolvedId), "unresolved_identity");
+  await assert.rejects(repo.commitCohort(lease, [unselectedId], {} as never), { code: "request_conflict" });
 });
 
 test("brief saves reject an unregistered metric key", dbOptions, async (t) => {

@@ -23,7 +23,7 @@ export type IdentityProvider = { resolve(input: ProviderOperation & { query: str
 export type EvidenceProvider = { acquire(input: ProviderOperation & { brief: D.Brief; candidate: D.DiscoveredCandidate; as_of: string }, operations: OperationRunner): Promise<EvidencePacket> };
 export type FinancialProvider = { read(input: ProviderOperation & { identity: D.CompanyIdentity; as_of: string; candidate_id: D.Id }, operations: OperationRunner): Promise<FinancialReadResult> };
 export type Providers = { search: SearchProvider; identity: IdentityProvider; evidence: EvidenceProvider; financials: FinancialProvider };
-export type DiscoveryContext = { run_id: D.Id; brief: D.Brief; providers: Providers; model: CampaignModel; operations: OperationRunner; existing: D.DiscoveredCandidate[]; admit: (candidate: D.DiscoveredCandidate) => Promise<void> };
+export type DiscoveryContext = { run_id: D.Id; brief: D.Brief; providers: Providers; model: CampaignModel; operations: OperationRunner; existing: D.DiscoveredCandidate[]; canUseExisting: (candidate: D.DiscoveredCandidate) => Promise<boolean>; admit: (candidate: D.DiscoveredCandidate) => Promise<void> };
 export type DiscoveryPool = { candidates: D.DiscoveredCandidate[]; coverage: D.Coverage };
 export type AssessmentContext = { run_id: D.Id; brief: D.Brief; packet: EvidencePacket; model: CampaignModel; as_of: string; persistQuotes: (raw: D.AnalystOutput | D.SkepticOutput) => Promise<Map<string, D.Citation>> };
 export type AttemptReservation = { attempt_id: D.Id; attempt_number: 1 | 2; state: "dispatch" | "cached" | "exhausted" | "in_progress"; result: unknown };

@@ -18,6 +18,8 @@ export function createCandidateStore(db: QueryExecutor, clock: () => Date) {
       assertCandidate(candidate);
       await transaction(db, async (tx) => {
         await lockLiveLease(tx, lease, clock());
+        const knownLead = await tx.query<{ candidate_id: string }>("select candidate_id::text as candidate_id from discovery_candidates where run_id=$1::uuid and lead_key=$2 for update", [lease.run_id, candidate.lead_key]);
+        if (knownLead.rows[0]) return;
         if (candidate.identity !== null) {
           const existing = await tx.query<CandidateRow>(`select ${CANDIDATE_COLUMNS} from discovery_candidates where run_id=$1::uuid and issuer_id=$2::uuid for update`, [lease.run_id, candidate.identity.issuer_id]);
           if (existing.rows[0]) {
@@ -33,8 +35,8 @@ export function createCandidateStore(db: QueryExecutor, clock: () => Date) {
         if ((count.rows[0]?.count ?? 0) >= 100) throw new DiscoveryError("budget_exhausted", "candidate limit is exhausted");
         await tx.query(
           `insert into discovery_candidates (candidate_id,run_id,lead_key,issuer_id,listing_id,identity_display,origins,mechanism_ids,lead_hit_ids,reason_codes,first_seen,seed,primary_domain_lead,name,state)
-           values ($1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb,$12,$13,$14,'discovered')`,
-          [candidate.candidate_id, lease.run_id, candidate.lead_key, candidate.identity?.issuer_id ?? null, candidate.identity?.listing_id ?? null, candidate.identity === null ? null : json(candidate.identity), json(candidate.origins), json(candidate.mechanism_ids), json(candidate.lead_hit_ids), json(candidate.reason_codes), json(candidate.first_seen), candidate.seed, candidate.primary_domain_lead, candidate.name],
+           values ($1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb,$12,$13,$14,$15)`,
+          [candidate.candidate_id, lease.run_id, candidate.lead_key, candidate.identity?.issuer_id ?? null, candidate.identity?.listing_id ?? null, candidate.identity === null ? null : json(candidate.identity), json(candidate.origins), json(candidate.mechanism_ids), json(candidate.lead_hit_ids), json(candidate.reason_codes), json(candidate.first_seen), candidate.seed, candidate.primary_domain_lead, candidate.name, candidate.identity === null ? "unresolved_identity" : "discovered"],
         );
       });
     },
@@ -43,8 +45,11 @@ export function createCandidateStore(db: QueryExecutor, clock: () => Date) {
       candidateIds.forEach((id) => requireUuid(id, "candidate_id"));
       await transaction(db, async (tx) => {
         await lockLiveLease(tx, lease, clock());
+        const run = await tx.query<{ stage: string }>("select stage from discovery_runs where run_id=$1::uuid for update", [lease.run_id]);
+        if (run.rows[0]?.stage !== "discovery") throw new DiscoveryError("request_conflict", "research cohort is already committed");
         const present = await tx.query<{ candidate_id: string }>("select candidate_id::text as candidate_id from discovery_candidates where run_id=$1::uuid and candidate_id=any($2::uuid[]) for update", [lease.run_id, candidateIds]);
         if (present.rows.length !== candidateIds.length) throw new DiscoveryError("not_found", "cohort candidate not found");
+        await tx.query("update discovery_candidates set state='not_selected',selection_ordinal=null,updated_at=now() where run_id=$1::uuid and state='discovered' and candidate_id<>all($2::uuid[])", [lease.run_id, candidateIds]);
         for (const [index, candidateId] of candidateIds.entries()) await tx.query("update discovery_candidates set state='researching',selection_ordinal=$3,updated_at=now() where run_id=$1::uuid and candidate_id=$2::uuid", [lease.run_id, candidateId, index + 1]);
         await tx.query("update discovery_runs set coverage=$2::jsonb,stage='research' where run_id=$1::uuid", [lease.run_id, json(coverage)]);
       });
