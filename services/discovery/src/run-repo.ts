@@ -96,7 +96,18 @@ export function createRunStore(db: QueryExecutor, clock: () => Date) {
     },
     async requestCancel(userId: string, runId: string): Promise<RunRecord> {
       requireUuid(userId, "user_id"); requireUuid(runId, "run_id");
-      const { rows } = await db.query<RunRow>(`update discovery_runs set cancel_requested_at=coalesce(cancel_requested_at,$3::timestamptz) where run_id=$1::uuid and user_id=$2::uuid and status in ('queued','running') returning ${RUN_COLUMNS}`, [runId, userId, clock().toISOString()]);
+      const now = clock().toISOString();
+      const { rows } = await db.query<RunRow>(
+        `update discovery_runs
+            set cancel_requested_at=coalesce(cancel_requested_at,$3::timestamptz),
+                status=case when status='queued' then 'cancelled' else status end,
+                stage=case when status='queued' then 'finalization' else stage end,
+                finished_at=case when status='queued' then coalesce(finished_at,$3::timestamptz) else finished_at end,
+                lease_expires_at=case when status='queued' then null else lease_expires_at end
+          where run_id=$1::uuid and user_id=$2::uuid and status in ('queued','running')
+          returning ${RUN_COLUMNS}`,
+        [runId, userId, now],
+      );
       if (rows[0]) return runFromRow(rows[0]);
       const { rows: existing } = await db.query<RunRow>(`select ${RUN_COLUMNS} from discovery_runs where run_id=$1::uuid and user_id=$2::uuid`, [runId, userId]);
       if (!existing[0]) throw new DiscoveryError("not_found", "run not found"); return runFromRow(existing[0]);
@@ -117,6 +128,11 @@ export function createRunStore(db: QueryExecutor, clock: () => Date) {
           if (updated.rowCount !== 1) throw new DiscoveryError("not_found", "finalization candidate not found");
         }
         await tx.query("update discovery_runs set status=$2,stage='finalization',coverage=$3::jsonb,finished_at=$4::timestamptz,lease_expires_at=null where run_id=$1::uuid", [lease.run_id, input.status, json(input.coverage), clock().toISOString()]);
+        const sequence = await tx.query<{ next_event_sequence: number }>("update discovery_runs set next_event_sequence=next_event_sequence+1 where run_id=$1::uuid returning next_event_sequence", [lease.run_id]);
+        await tx.query(
+          "insert into discovery_events (run_id,sequence,candidate_id,stage,event_kind,summary,citation_refs) values ($1::uuid,$2,null,'finalization','run_finalized',$3,'[]'::jsonb)",
+          [lease.run_id, sequence.rows[0]?.next_event_sequence, `Run ${input.status}.`],
+        );
       });
     },
     async deleteCampaign(userId: string, campaignId: string): Promise<void> {

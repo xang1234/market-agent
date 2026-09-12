@@ -17,6 +17,8 @@ export type LlmChatRequest = {
 
 export type LlmChatResult = {
   text: string;
+  /** Optional audit record created by the concrete provider transport. */
+  tool_call_id?: string;
 };
 
 export type LlmClientExecutionOptions = {

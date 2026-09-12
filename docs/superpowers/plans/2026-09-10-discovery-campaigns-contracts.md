@@ -192,6 +192,7 @@ export type ValidatedRoleCheckpoint = {
 export type AssessmentRoleProgress = {
   analyst:ValidatedRoleCheckpoint|null;skeptic:ValidatedRoleCheckpoint|null;
 };
+export type StoredResearchPacket = {packet:EvidencePacket;packet_hash:string};
 export type AssessmentQuoteRequest = {
   role:'analyst'|'skeptic';operation_key:string;request_hash:string;request_packet_hash:string;
 };
@@ -226,9 +227,15 @@ export interface DiscoveryRepository {
   checkpoint(lease:Lease):Promise<Checkpoint>;
   saveCheckpoint(lease:Lease,checkpoint:Checkpoint):Promise<void>;
   candidates(userId:D.Id,runId:D.Id):Promise<StoredCandidate[]>;
+  authorizeExistingCandidates(lease:Lease,candidates:D.DiscoveredCandidate[]):Promise<ReadonlySet<D.Id>>;
   admitCandidate(lease:Lease,candidate:D.DiscoveredCandidate):Promise<void>;
   commitCohort(lease:Lease,candidateIds:D.Id[],coverage:D.Coverage):Promise<void>;
   failCandidate(lease:Lease,candidateId:D.Id,code:string):Promise<void>;
+  loadResearchPacket(lease:Lease,candidateId:D.Id):Promise<StoredResearchPacket|null>;
+  saveResearchPacket(lease:Lease,packet:EvidencePacket):Promise<StoredResearchPacket>;
+  refreshResearchPacket(lease:Lease,packet:EvidencePacket):Promise<EvidencePacket>;
+  saveValidatedRole(lease:Lease,candidateId:D.Id,checkpoint:ValidatedRoleCheckpoint):Promise<void>;
+  loadValidatedRoles(lease:Lease,candidateId:D.Id):Promise<AssessmentRoleProgress>;
   reserveAttempt(scope:Lease|{campaign_id:D.Id;user_id:D.Id;draft_token:D.Id},input:{
     operation_key:string;request_hash:string;resource:D.Resource;phase:'draft'|'discovery'|'research'|'verification';
     candidate_id?:D.Id;attempt_number:1|2;model_initial?:boolean;model_role?:'analyst'|'skeptic'}):Promise<AttemptReservation>;
@@ -245,9 +252,9 @@ export interface DiscoveryRepository {
   deleteCampaign(userId:D.Id,campaignId:D.Id):Promise<void>;
 }
 export type WorkerDeps = {
-  repo:DiscoveryRepository;providers:Providers;clock:()=>Date;
-  model:(operations:OperationRunner)=>CampaignModel;
-  loadExisting:(userId:D.Id,brief:D.Brief)=>Promise<D.DiscoveredCandidate[]>;
+  repo:DiscoveryRepository;providers:(lease:Lease)=>Providers;clock:()=>Date;
+  model:(lease:Lease,operations:OperationRunner)=>CampaignModel;
+  loadExisting:(lease:Lease,brief:D.Brief)=>Promise<D.DiscoveredCandidate[]>;
   persistQuotes:(lease:Lease,packet:EvidencePacket,raw:D.AnalystOutput|D.SkepticOutput,
     request:AssessmentQuoteRequest)=>Promise<Map<string,D.Citation>>;
   commitAssessment:(lease:Lease,packet:EvidencePacket,decision:D.CandidateDecision)=>Promise<D.AssessedCandidate>;

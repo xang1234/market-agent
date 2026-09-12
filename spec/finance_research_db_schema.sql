@@ -1192,9 +1192,12 @@ create table discovery_candidates (
   state text not null check (state in ('unresolved_identity','discovered','not_selected','researching','shortlisted','eligible_not_shortlisted','excluded','needs_evidence','research_error')),
   selection_ordinal integer check (selection_ordinal between 1 and 25), analyst_output jsonb check (analyst_output is null or jsonb_typeof(analyst_output) = 'object'),
   skeptic_output jsonb check (skeptic_output is null or jsonb_typeof(skeptic_output) = 'object'), assessment jsonb check (assessment is null or jsonb_typeof(assessment) = 'object'),
+  research_packet jsonb check (research_packet is null or jsonb_typeof(research_packet) = 'object'),
+  research_packet_hash text check (research_packet_hash is null or research_packet_hash ~ '^sha256:[0-9a-f]{64}$'),
   snapshot_id uuid references snapshots(snapshot_id), rank integer check (rank is null or rank between 1 and 10),
   created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
-  check ((issuer_id is null and listing_id is null) or (issuer_id is not null and listing_id is not null))
+  check ((issuer_id is null and listing_id is null) or (issuer_id is not null and listing_id is not null)),
+  constraint discovery_research_packet_pair check ((research_packet is null) = (research_packet_hash is null))
 );
 create unique index discovery_candidate_issuer on discovery_candidates(run_id, issuer_id) where issuer_id is not null;
 create unique index discovery_candidate_lead on discovery_candidates(run_id, lead_key);

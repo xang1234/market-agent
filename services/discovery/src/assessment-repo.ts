@@ -180,7 +180,7 @@ async function requirePacketVisible(
               case when s.user_id is null or s.user_id=$2::uuid then s.source_id::text else null end as visible_source_id
          from facts f
          join sources s on s.source_id=f.source_id
-        where f.fact_id=any($1::uuid[])
+        where f.fact_id=any($1::uuid[]) and f.entitlement_channels ? 'app'
         for key share of f,s`,
       [uniqueFactIds, userId],
     );

@@ -109,7 +109,7 @@ export function createOperationRunner(repo: DiscoveryRepository, lease: Lease, s
           attempt_id: reservation.attempt_id,
           outcome: "success",
           result,
-          tool_call_id: null,
+          tool_call_id: modelToolCallId(result),
         });
         return result;
       } catch (error) {
@@ -135,4 +135,13 @@ function exhausted(key: string): DiscoveryError {
 
 function inProgress(key: string): DiscoveryError {
   return new DiscoveryError("operation_in_progress", `operation is already in progress for ${key}`);
+}
+
+/** Provider transports may return the already-audited tool-call id with a model response. */
+function modelToolCallId(result: unknown): string | null {
+  if (typeof result !== "object" || result === null || !("tool_call_id" in result)) return null;
+  const value = (result as { tool_call_id?: unknown }).tool_call_id;
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value)
+    ? value
+    : null;
 }
