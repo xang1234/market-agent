@@ -282,6 +282,36 @@ test("numeric prose fails closed for unsupported scientific values and lossless 
   }
 });
 
+test("numeric prose rejects unrecognized whole literals before fragments can be cited", () => {
+  const sourceClaim = (explanation: string) => {
+    const packet = packetFixture();
+    const claimId = "d0000000-0000-4000-8000-000000000005";
+    packet.claims.push({
+      claim_id: claimId,
+      document_id: packet.excerpts[0]!.document_id,
+      source_id: packet.excerpts[0]!.source_id,
+      text_canonical: "Primary disclosure reports 1 unit and 0 exceptions.",
+    });
+    const raw = analystFixture();
+    raw.exposure = {
+      level: "strong",
+      explanation,
+      citations: [{ kind: "claim", id: claimId }],
+    };
+    return { packet, raw };
+  };
+
+  for (const explanation of [
+    "Primary evidence supports 1_000 units of exposure.",
+    "Primary evidence supports 1__000 units of exposure.",
+    "Primary evidence supports FY1_000 units of exposure.",
+    "Primary evidence supports 1_000units of exposure.",
+  ]) {
+    const { packet, raw } = sourceClaim(explanation);
+    assert.throws(() => validateAnalystOutput(raw, briefFixture(), packet), /numerical/i);
+  }
+});
+
 function metricBrief(): Brief {
   const brief = briefFixture();
   brief.criteria[0] = {

@@ -8,8 +8,8 @@ const MAX_QUESTIONS = 8;
 const MAX_COUNTERARGUMENTS = 8;
 const MAX_NUMERIC_TOKENS = 1_000;
 const MAX_ABSOLUTE_EXPONENT = 10_000;
-const CALENDAR_DATE_TOKEN = /(?<![A-Za-z0-9.,+-])\d{4}-\d{1,2}-\d{1,2}(?=$|[Tt]|[^A-Za-z0-9,.]|\.(?!\d))/gu;
-const NUMERIC_CANDIDATE = /(?<![A-Za-z0-9.,+-])[+-]?(?:\d(?:[\d,.]*\d)?|\.\d+(?:[\d,.]*\d)?)(?:[eE][+-]?\d*)?(?![A-Za-z0-9])/gu;
+const CALENDAR_DATE_TOKEN = /(?<![0-9_.,+-])\d{4}-\d{1,2}-\d{1,2}(?=$|[Tt]|[^A-Za-z0-9,.]|\.(?!\d))/gu;
+const NUMERIC_CANDIDATE = /(?<![0-9_.,+-])[+-]?(?:\d(?:[\d,._]*\d|_*)?|\.\d+(?:[\d,._]*\d|_*)?)(?:[eE][+-]?(?:\d[\d_]*|_+[\d_]*|(?=$|[^A-Za-z0-9_])))?(?![0-9_])/gu;
 const NUMERIC_LITERAL = /^([+-]?)(?:(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?|\.(\d+))(?:[eE]([+-]?\d+))?$/u;
 
 type RawRole = AnalystOutput<RawCitation> | SkepticOutput<RawCitation>;
