@@ -6,6 +6,8 @@ const MAX_TEXT_CHARS = 2_000;
 const MAX_CITATIONS = 12;
 const MAX_QUESTIONS = 8;
 const MAX_COUNTERARGUMENTS = 8;
+const NUMERIC_TOKEN = /(?<![A-Za-z0-9.,+-])(?:\d{4}-\d{1,2}-\d{1,2}(?=$|[Tt]|[^A-Za-z0-9,.]|\.(?!\d))|[+-]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)(?![A-Za-z0-9]|\.\d|,\d))/gu;
+const CALENDAR_DATE = /^\d{4}-\d{1,2}-\d{1,2}$/u;
 
 type RawRole = AnalystOutput<RawCitation> | SkepticOutput<RawCitation>;
 
@@ -161,24 +163,43 @@ function parseCitations(value: unknown, label: string, packet: EvidencePacket): 
 }
 
 function assertNumbersSupported(content: string, citations: RawCitation[], packet: EvidencePacket, label: string): void {
-  const numbers = content.match(/(?<![A-Za-z])[-+]?\d+(?:\.\d+)?/g) ?? [];
+  const numbers = numericTokens(content);
   if (numbers.length === 0) return;
-  const citedText = citations.flatMap((citation) => {
-    if (citation.kind === "excerpt") return [citation.quote];
-    if (citation.kind === "claim") return packet.claims.filter((claim) => claim.claim_id === citation.id).map((claim) => claim.text_canonical);
-    return packet.facts.filter((fact) => fact.fact_id === citation.id).flatMap((fact) => [
-      String(fact.value_num),
-      String(fact.value_num * fact.scale),
-      fact.unit,
-      fact.period_kind,
-      fact.period_start ?? "",
-      fact.period_end ?? "",
-      fact.as_of,
-      fact.fiscal_year === null ? "" : String(fact.fiscal_year),
-      fact.fiscal_period ?? "",
-    ]);
-  }).join(" ");
-  for (const number of numbers) if (!citedText.includes(number)) throw new Error(`${label} contains an unsupported numerical assertion`);
+  const supported = new Set(citations.flatMap((citation) => supportedNumericTokens(citation, packet)));
+  for (const number of numbers) if (!supported.has(number)) throw new Error(`${label} contains an unsupported numerical assertion`);
+}
+
+function supportedNumericTokens(citation: RawCitation, packet: EvidencePacket): string[] {
+  if (citation.kind === "excerpt") return numericTokens(citation.quote);
+  if (citation.kind === "claim") {
+    return packet.claims.filter((claim) => claim.claim_id === citation.id).flatMap((claim) => numericTokens(claim.text_canonical));
+  }
+  return packet.facts.filter((fact) => fact.fact_id === citation.id).flatMap((fact) => [
+    canonicalNumber(fact.value_num),
+    canonicalNumber(fact.value_num * fact.scale),
+    ...structuredNumericTokens(fact.period_start),
+    ...structuredNumericTokens(fact.period_end),
+    ...structuredNumericTokens(fact.as_of),
+    ...(fact.fiscal_year === null ? [] : [canonicalNumber(fact.fiscal_year)]),
+    ...structuredNumericTokens(fact.fiscal_period),
+  ].filter((token): token is string => token !== null));
+}
+
+function numericTokens(value: string): string[] {
+  return [...value.matchAll(NUMERIC_TOKEN)].flatMap((match) => {
+    const literal = match[0];
+    if (CALENDAR_DATE.test(literal)) return [`date:${literal}`];
+    const numeric = canonicalNumber(Number(literal.replaceAll(",", "")));
+    return numeric === null ? [] : [numeric];
+  });
+}
+
+function structuredNumericTokens(value: string | null): string[] {
+  return value === null ? [] : numericTokens(value);
+}
+
+function canonicalNumber(value: number): string | null {
+  return Number.isFinite(value) ? `number:${String(Object.is(value, -0) ? 0 : value)}` : null;
 }
 
 function normalizeText(value: string): string { return value.replace(/\s+/gu, " ").trim(); }

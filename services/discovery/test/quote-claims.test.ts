@@ -35,3 +35,16 @@ test("an excerpt quote with multiple source locations is rejected as ambiguous",
 
   assert.throws(() => canonicalCampaignQuotes(role, packet), /ambiguous/i);
 });
+
+test("an excerpt quote with overlapping source locations is rejected as ambiguous", () => {
+  const packet = packetFixture();
+  const quote = "aaaaaaaaaaaaaaaaaaaa";
+  packet.excerpts[0] = { ...packet.excerpts[0]!, text: `${quote}a` };
+  const role = analystFixture();
+  role.exposure = {
+    ...role.exposure,
+    citations: [{ kind: "excerpt", id: packet.excerpts[0]!.excerpt_id, quote }],
+  };
+
+  assert.throws(() => canonicalCampaignQuotes(role, packet), /ambiguous/i);
+});

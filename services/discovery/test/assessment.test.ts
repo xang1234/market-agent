@@ -181,6 +181,60 @@ test("numerical prose may refer to the cited fact's canonical period and observa
   assert.doesNotThrow(() => validateAnalystOutput(raw, briefFixture(), packet));
 });
 
+test("numerical prose requires complete evidence tokens rather than numeric substrings", () => {
+  const packet = packetFixture();
+  const fact = metricFact();
+  packet.facts = [fact];
+  const dateSubstring = analystFixture();
+  dateSubstring.exposure = {
+    level: "strong",
+    explanation: "The cited observation supports 2 units of exposure.",
+    citations: [{ kind: "fact", id: fact.fact_id }],
+  };
+  assert.throws(() => validateAnalystOutput(dateSubstring, briefFixture(), packet), /numerical assertion/i);
+
+  const claimId = "d0000000-0000-4000-8000-000000000001";
+  packet.claims.push({
+    claim_id: claimId,
+    document_id: packet.excerpts[0]!.document_id,
+    source_id: packet.excerpts[0]!.source_id,
+    text_canonical: "The report measured 125 units of grid equipment sales.",
+  });
+  const textSubstring = analystFixture();
+  textSubstring.exposure = {
+    level: "strong",
+    explanation: "The report measured 25 units of grid equipment sales.",
+    citations: [{ kind: "claim", id: claimId }],
+  };
+  assert.throws(() => validateAnalystOutput(textSubstring, briefFixture(), packet), /numerical assertion/i);
+});
+
+test("numerical prose preserves signed, decimal, grouped, and date literal boundaries", () => {
+  const packet = packetFixture();
+  const claimId = "d0000000-0000-4000-8000-000000000002";
+  packet.claims.push({
+    claim_id: claimId,
+    document_id: packet.excerpts[0]!.document_id,
+    source_id: packet.excerpts[0]!.source_id,
+    text_canonical: "The report recorded +1.25, 1,000.50, and 2026-09-01.",
+  });
+  const output = (explanation: string) => {
+    const raw = analystFixture();
+    raw.exposure = {
+      level: "strong",
+      explanation,
+      citations: [{ kind: "claim", id: claimId }],
+    };
+    return raw;
+  };
+
+  assert.doesNotThrow(() => validateAnalystOutput(output("The report recorded +1.25, 1,000.50, and 2026-09-01."), briefFixture(), packet));
+  assert.doesNotThrow(() => validateAnalystOutput(output("The report recorded 1.25, 1000.50, and 2026-09-01."), briefFixture(), packet));
+  assert.throws(() => validateAnalystOutput(output("The report recorded 1, 1,000.50, and 2026-09-01."), briefFixture(), packet), /numerical assertion/i);
+  assert.throws(() => validateAnalystOutput(output("The report recorded -1.25, 1,000.50, and 2026-09-01."), briefFixture(), packet), /numerical assertion/i);
+  assert.throws(() => validateAnalystOutput(output("The report recorded +1.25, 1,000.50, and 2026-9-1."), briefFixture(), packet), /numerical assertion/i);
+});
+
 function metricBrief(): Brief {
   const brief = briefFixture();
   brief.criteria[0] = {

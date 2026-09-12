@@ -34,6 +34,7 @@ export async function persistCampaignQuotes(
   return withTransaction(db, async ({ db: tx }) => {
     const citations = new Map<string, { kind: "claim"; id: string }>();
     for (const quote of quotes) {
+      await requireCanonicalQuoteDocument(tx, quote);
       const quote_key = campaignQuoteKey(quote);
       const known = await tx.query<{ claim_id: string }>(
         "select claim_id::text as claim_id from discovery_quote_claims where quote_key=$1 for update",
@@ -79,6 +80,20 @@ export async function persistCampaignQuotes(
     }
     return citations;
   });
+}
+
+async function requireCanonicalQuoteDocument(tx: QueryExecutor, quote: CampaignQuote): Promise<void> {
+  const { rows } = await tx.query<{ source_id: string; content_hash: string }>(
+    `select d.source_id::text as source_id,d.content_hash
+       from documents d join sources s on s.source_id=d.source_id
+      where d.document_id=$1::uuid and d.deleted_at is null
+      for key share of d,s`,
+    [quote.document_id],
+  );
+  const current = rows[0];
+  if (current?.source_id !== quote.source_id || current.content_hash !== quote.document_hash) {
+    throw new Error("quote document/source/hash does not match the current canonical document");
+  }
 }
 
 function normalizeQuote(value: CampaignQuote): CampaignQuote {

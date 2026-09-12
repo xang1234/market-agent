@@ -25,6 +25,9 @@ test("quote persistence is retry-safe and stores the supplied exact quote", asyn
   const db: QueryExecutor = {
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       queries.push({ text, values });
+      if (text.includes("from documents d join sources")) {
+        return { rows: [{ source_id: SOURCE_ID, content_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }] as unknown as R[], command: "SELECT", rowCount: 1, oid: 0, fields: [] };
+      }
       if (text.includes("select claim_id::text as claim_id from discovery_quote_claims")) {
         const claim_id = mappings.get(String(values?.[0]));
         return { rows: (claim_id === undefined ? [] : [{ claim_id }]) as unknown as R[], command: "SELECT", rowCount: claim_id === undefined ? 0 : 1, oid: 0, fields: [] };
@@ -54,4 +57,32 @@ test("quote persistence is retry-safe and stores the supplied exact quote", asyn
   const evidenceInsert = queries.find((query) => query.text.includes("insert into claim_evidence"));
   assert.ok(evidenceInsert);
   assert.equal(String(evidenceInsert.values?.[2]).includes(QUOTE), false);
+});
+
+test("quote persistence rejects a source that does not own the canonical document before cache reuse", async () => {
+  const queries: string[] = [];
+  const db: QueryExecutor = {
+    async query<R extends Record<string, unknown>>(text: string) {
+      queries.push(text);
+      if (text.includes("select claim_id::text as claim_id from discovery_quote_claims")) {
+        return { rows: [{ claim_id: CLAIM_ID }] as unknown as R[], command: "SELECT", rowCount: 1, oid: 0, fields: [] };
+      }
+      return { rows: [] as R[], command: "SELECT", rowCount: 0, oid: 0, fields: [] };
+    },
+  };
+  const input = {
+    operation_key: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa/research/bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb/analyst",
+    request_hash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    quotes: [{
+      excerpt_id: "44444444-4444-4444-a444-444444444444",
+      document_id: DOCUMENT_ID,
+      source_id: "55555555-5555-4555-a555-555555555555",
+      document_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      normalized_start: 40,
+      quote: QUOTE,
+    }],
+  };
+
+  await assert.rejects(() => persistCampaignQuotes(db, input), /canonical document|source/i);
+  assert.equal(queries.some((text) => text.includes("from discovery_quote_claims")), false, "identity must be checked before the quote-key cache");
 });

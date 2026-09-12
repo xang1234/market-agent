@@ -23,7 +23,7 @@ export function canonicalCampaignQuotes(
     const text = normalize(excerpt.text);
     const index = text.indexOf(normalizedQuote);
     if (index < 0) throw new Error("excerpt quote does not match the supplied excerpt");
-    if (text.indexOf(normalizedQuote, index + normalizedQuote.length) >= 0) {
+    if (text.indexOf(normalizedQuote, index + 1) >= 0) {
       throw new Error("excerpt quote is ambiguous across multiple canonical source locations");
     }
     if (!Number.isSafeInteger(excerpt.normalized_start) || excerpt.normalized_start < 0) {
