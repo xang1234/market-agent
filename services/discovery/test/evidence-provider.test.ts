@@ -78,6 +78,64 @@ test("primary candidate finder combines only metered SEC and verified-IR documen
   assert.deepEqual(candidates.map((item) => item.provider), ["sec_edgar", "issuer_ir"]);
 });
 
+test("primary candidate discovery passes remaining capacity and skips issuer IR once SEC fills it", async () => {
+  let secCapacity: number | undefined;
+  let issuerIrCalled = false;
+  const finder = createPrimaryDocumentCandidateFinder({
+    sec: { find: async (input) => {
+      secCapacity = input.remaining_capacity;
+      return Array.from({ length: 4 }, (_, index) => ({
+        url: `https://www.sec.gov/Archives/acme-${index}.html`, title: "Filing", published_at: "2026-02-01T00:00:00.000Z", provider: "sec_edgar" as const, kind: "filing" as const,
+      }));
+    } },
+    issuer_ir: { find: async () => {
+      issuerIrCalled = true;
+      return [];
+    } },
+  });
+
+  const candidates = await finder.find({
+    candidate: candidate(), as_of: "2026-09-10T00:00:00.000Z", operation_key: "run/research/candidate/evidence",
+    request_hash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", phase: "research",
+    remaining_capacity: 4,
+  }, fakeOperations());
+
+  assert.equal(secCapacity, 4);
+  assert.equal(candidates.length, 4);
+  assert.equal(issuerIrCalled, false);
+});
+
+test("evidence acquisition gives candidate discovery only its uncached document capacity", async () => {
+  let remainingCapacity: number | undefined;
+  const provider = createEvidenceProvider({
+    documents: {
+      load: async () => ({ documents: Array.from({ length: 4 }, (_, index) => document(index)), coverage_gaps: [] }),
+      fetchAndStore: async () => { throw new Error("unexpected"); },
+    },
+    candidates: { find: async (input) => {
+      remainingCapacity = input.remaining_capacity;
+      return [];
+    } },
+  });
+
+  await provider.acquire({
+    brief: brief(), candidate: candidate(), as_of: "2026-09-10T00:00:00.000Z",
+    operation_key: "run/research/candidate/evidence", request_hash: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    phase: "research", candidate_id: CANDIDATE,
+  }, fakeOperations());
+
+  assert.equal(remainingCapacity, 2);
+});
+
+function document(index: number) {
+  return {
+    document_id: `55555555-5555-4555-a555-55555555555${index}`, source_id: `66666666-6666-4666-a666-66666666666${index}`,
+    family_key: `sec:${index}`, title: "Annual report", url: `https://www.sec.gov/Archives/acme-${index}`, published_at: "2026-02-01T00:00:00.000Z",
+    retrieved_at: "2026-09-01T00:00:00.000Z", document_hash: `sha256:doc${index}`, normalized_text: "Grid transformer demand grew.",
+    primary: true, primary_eligible: true, claims: [],
+  };
+}
+
 function candidate() {
   return {
     candidate_id: CANDIDATE, lead_key: "acme", name: "Acme", identity: {

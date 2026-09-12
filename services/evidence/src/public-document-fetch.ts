@@ -264,10 +264,13 @@ function isPublicIpv4(address: string): boolean {
 }
 
 function isPublicIpv6(address: string): boolean {
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/u.exec(address);
-  if (mapped) return isPublicIpv4(mapped[1]!);
+  const dottedMapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/u.exec(address);
+  if (dottedMapped) return isPublicIpv4(dottedMapped[1]!);
   const groups = expandIpv6(address);
   if (!groups) return false;
+  if (groups.slice(0, 6).every((group, index) => group === (index === 5 ? 0xffff : 0))) {
+    return isPublicIpv4(`${groups[6]! >> 8}.${groups[6]! & 0xff}.${groups[7]! >> 8}.${groups[7]! & 0xff}`);
+  }
   if (groups.every((group, index) => group === (index === 7 ? 1 : 0))) return false;
   if (groups.every((group) => group === 0)) return false;
   if ((groups[0]! & 0xffc0) === 0xfe80) return false;

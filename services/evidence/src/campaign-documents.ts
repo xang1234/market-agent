@@ -3,8 +3,8 @@ import { createMention } from "./mention-repo.ts";
 import { isEphemeralRawBlobId, type ObjectStore } from "./object-store.ts";
 import { issuerIrTextFromBytes } from "./issuer-ir-extraction.ts";
 import { ingestDocument } from "./ingest.ts";
-import { listEnabledIrSourceRegistryEntries, type IrSourceRegistryRow } from "./issuer-ir-registry.ts";
-import { discoverIssuerIrCandidates } from "./providers/issuer-ir.ts";
+import { createIrDocumentAsset, listEnabledIrSourceRegistryEntries, type IrSourceRegistryRow } from "./issuer-ir-registry.ts";
+import { discoverIssuerIrCandidates, hostedProviderFromUrl } from "./providers/issuer-ir.ts";
 import { createPinnedHttpsFetch, type PublicDocumentDns, type PublicDocumentTransport } from "./public-document-fetch.ts";
 import { SecEdgarClient, filingArchiveUrl, recentSubmissionRows, type SecEdgarClientConfig, type SecSubmissions } from "./sec-edgar.ts";
 import { deleteSource, createSource } from "./source-repo.ts";
@@ -50,6 +50,7 @@ export type CampaignDocumentRepository = {
     retrieved_at: string;
     provider: "sec_edgar" | "issuer_ir";
     kind: "filing" | "press_release" | "transcript";
+    ir_source_id?: string;
     bytes: Uint8Array;
     content_type: string;
   }): Promise<CampaignDocument>;
@@ -82,6 +83,7 @@ export type SecPrimaryDocumentCandidateFinder = {
     request_hash: string;
     candidate_id: string;
     phase: "discovery" | "research" | "verification";
+    remaining_capacity?: number;
   }, operations: DocumentOperationRunner): Promise<readonly SecPrimaryDocumentCandidate[]>;
 };
 
@@ -91,6 +93,7 @@ export type IssuerIrPrimaryDocumentCandidate = Readonly<{
   published_at: string | null;
   provider: "issuer_ir";
   kind: "press_release" | "transcript";
+  ir_source_id: string;
 }>;
 export type IssuerIrPrimaryDocumentCandidateFinder = {
   find(input: {
@@ -99,6 +102,7 @@ export type IssuerIrPrimaryDocumentCandidateFinder = {
     request_hash: string;
     candidate_id: string;
     phase: "discovery" | "research" | "verification";
+    remaining_capacity?: number;
   }, operations: DocumentOperationRunner): Promise<readonly IssuerIrPrimaryDocumentCandidate[]>;
 };
 
@@ -145,6 +149,7 @@ export function createCampaignDocumentService(options: {
       request_hash: string;
       phase: "discovery" | "research" | "verification";
       candidate_id?: string;
+      ir_source_id?: string;
     }, operations: DocumentOperationRunner): Promise<CampaignDocument> {
       if (!options.fetcher) throw new Error("campaign document fetcher is not configured");
       return operations.run({
@@ -163,6 +168,7 @@ export function createCampaignDocumentService(options: {
             retrieved_at: new Date().toISOString(),
             provider: input.provider,
             kind: input.kind,
+            ir_source_id: input.ir_source_id,
             bytes: fetched.bytes,
             content_type: fetched.content_type,
           });
@@ -180,6 +186,8 @@ export function createSecPrimaryDocumentCandidateFinder(options: {
 }): SecPrimaryDocumentCandidateFinder {
   return Object.freeze({
     async find(input, operations) {
+      const remainingCapacity = documentCapacity(input.remaining_capacity);
+      if (remainingCapacity === 0) return Object.freeze([]);
       const { rows } = await options.db.query<{ cik: string | null }>(
         "select cik from issuers where issuer_id = $1::uuid",
         [input.issuer_id],
@@ -194,7 +202,7 @@ export function createSecPrimaryDocumentCandidateFinder(options: {
         candidate_id: input.candidate_id,
         execute: () => options.sec.fetchSubmissions(cik),
       });
-      return Object.freeze(selectSecPrimaryDocuments(cik, submissions));
+      return Object.freeze(selectSecPrimaryDocuments(cik, submissions, remainingCapacity));
     },
   });
 }
@@ -215,9 +223,11 @@ export function createIssuerIrPrimaryDocumentCandidateFinder(options: {
 }): IssuerIrPrimaryDocumentCandidateFinder {
   return Object.freeze({
     async find(input, operations) {
+      const remainingCapacity = documentCapacity(input.remaining_capacity);
+      if (remainingCapacity === 0) return Object.freeze([]);
       const entries = await options.list(input.issuer_id);
       const candidates: IssuerIrPrimaryDocumentCandidate[] = [];
-      for (const entry of entries) {
+      for (const entry of entries.slice(0, remainingCapacity)) {
         const discovered = await operations.run({
           key: `${input.operation_key}/issuer-ir/${entry.ir_source_id}`,
           request_hash: requestHash({ request_hash: input.request_hash, ir_source_id: entry.ir_source_id }),
@@ -234,8 +244,9 @@ export function createIssuerIrPrimaryDocumentCandidateFinder(options: {
             published_at: candidate.publishedAt,
             provider: "issuer_ir",
             kind: candidate.assetKind,
+            ir_source_id: entry.ir_source_id,
           }));
-          if (candidates.length >= MAX_DOCUMENTS_PER_COMPANY) return Object.freeze(candidates);
+          if (candidates.length >= remainingCapacity) return Object.freeze(candidates);
         }
       }
       return Object.freeze(candidates);
@@ -254,7 +265,7 @@ export function createPinnedIssuerIrPrimaryDocumentCandidateFinder(options: {
   });
 }
 
-function selectSecPrimaryDocuments(cik: number, submissions: SecSubmissions): SecPrimaryDocumentCandidate[] {
+function selectSecPrimaryDocuments(cik: number, submissions: SecSubmissions, remainingCapacity: number): SecPrimaryDocumentCandidate[] {
   const allowed = new Set(["10-K", "20-F", "10-Q", "6-K", "8-K"]);
   const forms = new Set<string>();
   const selected: SecPrimaryDocumentCandidate[] = [];
@@ -268,7 +279,7 @@ function selectSecPrimaryDocuments(cik: number, submissions: SecSubmissions): Se
       provider: "sec_edgar",
       kind: "filing",
     }));
-    if (selected.length >= MAX_DOCUMENTS_PER_COMPANY) break;
+    if (selected.length >= remainingCapacity) break;
   }
   return selected;
 }
@@ -339,6 +350,9 @@ export function createPostgresCampaignDocumentRepository(options: {
       return Object.freeze(documents);
     },
     async store(input) {
+      if (input.provider === "issuer_ir" && (!input.ir_source_id || input.kind === "filing")) {
+        throw new Error("issuer IR campaign document requires a verified registry source and primary IR asset kind");
+      }
       const source = await createSource(options.db, {
         provider: input.provider,
         kind: input.kind,
@@ -362,6 +376,21 @@ export function createPostgresCampaignDocumentRepository(options: {
           mention_count: 1,
           confidence: 1,
         });
+        if (input.provider === "issuer_ir" && input.kind !== "filing") {
+          await createIrDocumentAsset(options.db, {
+            ir_source_id: input.ir_source_id,
+            issuer_id: input.issuer_id,
+            document_id: ingest.document.document_id,
+            source_id: source.source_id,
+            asset_kind: input.kind,
+            canonical_url: input.url,
+            hosted_provider: hostedProviderFromUrl(input.url),
+            issuer_attested: true,
+            content_type: input.content_type,
+            discovered_at: input.retrieved_at,
+            fetched_at: input.retrieved_at,
+          });
+        }
         const normalized = issuerIrTextFromBytes({ bytes: input.bytes, contentType: input.content_type });
         if (normalized.status !== "available") throw new Error("stored campaign document could not be normalized");
         return Object.freeze({
@@ -408,6 +437,11 @@ function isoRequired(value: Date | string): string {
 
 function requestHash(value: unknown): string {
   return `sha256:${createHash("sha256").update(stableJson(value)).digest("hex")}`;
+}
+
+function documentCapacity(value: number | undefined): number {
+  const capacity = typeof value === "number" && Number.isInteger(value) ? value : MAX_DOCUMENTS_PER_COMPANY;
+  return Math.min(Math.max(capacity, 0), MAX_DOCUMENTS_PER_COMPANY);
 }
 
 function stableJson(value: unknown): string {

@@ -15,6 +15,7 @@ export type VerifiedDocumentCandidate = {
   published_at: string | null;
   provider: "sec_edgar" | "issuer_ir";
   kind: "filing" | "press_release" | "transcript";
+  ir_source_id?: string;
 };
 export type CampaignDocumentService = {
   load(input: { issuer_id: string; limit?: number }): Promise<{ documents: readonly CampaignDocument[]; coverage_gaps: readonly string[] }>;
@@ -33,6 +34,7 @@ export type PrimaryDocumentCandidateFinder = {
     operation_key: string;
     request_hash: string;
     phase: "discovery" | "research" | "verification";
+    remaining_capacity?: number;
   }, operations: OperationRunner): Promise<readonly VerifiedDocumentCandidate[]>;
 };
 export type SourcePrimaryDocumentCandidateFinder = {
@@ -42,6 +44,7 @@ export type SourcePrimaryDocumentCandidateFinder = {
     request_hash: string;
     candidate_id: string;
     phase: "discovery" | "research" | "verification";
+    remaining_capacity?: number;
   }, operations: OperationRunner): Promise<readonly VerifiedDocumentCandidate[]>;
 };
 
@@ -59,10 +62,14 @@ export function createPrimaryDocumentCandidateFinder(options: {
         request_hash: input.request_hash,
         candidate_id: input.candidate.candidate_id,
         phase: input.phase,
+        remaining_capacity: documentCapacity(input.remaining_capacity),
       };
-      const sec = options.sec ? await options.sec.find(request, operations) : [];
-      const issuerIr = options.issuer_ir ? await options.issuer_ir.find(request, operations) : [];
-      return Object.freeze([...sec, ...issuerIr].slice(0, MAX_DOCUMENTS));
+      const sec = options.sec ? (await options.sec.find(request, operations)).slice(0, request.remaining_capacity) : [];
+      const remainingCapacity = request.remaining_capacity - sec.length;
+      const issuerIr = remainingCapacity > 0 && options.issuer_ir
+        ? await options.issuer_ir.find({ ...request, remaining_capacity: remainingCapacity }, operations)
+        : [];
+      return Object.freeze([...sec, ...issuerIr].slice(0, request.remaining_capacity));
     },
   });
 }
@@ -84,6 +91,7 @@ export function createEvidenceProvider(options: {
           operation_key: input.operation_key,
           request_hash: input.request_hash,
           phase: input.phase,
+          remaining_capacity: MAX_DOCUMENTS - documents.length,
         }, operations);
         for (const [index, candidate] of candidates.entries()) {
           if (documents.length >= MAX_DOCUMENTS) break;
@@ -112,6 +120,11 @@ export function createEvidenceProvider(options: {
       };
     },
   });
+}
+
+function documentCapacity(value: number | undefined): number {
+  const capacity = typeof value === "number" && Number.isInteger(value) ? value : MAX_DOCUMENTS;
+  return Math.min(Math.max(capacity, 0), MAX_DOCUMENTS);
 }
 
 function makeExcerpts(documents: readonly CampaignDocument[], brief: Brief, asOf: string): EvidencePacket["excerpts"] {

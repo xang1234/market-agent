@@ -55,6 +55,15 @@ test("public address validation rejects expanded IPv6 loopback", () => {
   assert.equal(isPublicAddress("0:0:0:0:0:0:0:1"), false);
 });
 
+test("public address validation rejects hexadecimal IPv4-mapped private IPv6 destinations", () => {
+  assert.equal(isPublicAddress("::ffff:7f00:1"), false);
+  assert.equal(isPublicAddress("0:0:0:0:0:ffff:7f00:1"), false);
+});
+
+test("public address validation retains public dotted IPv4-mapped IPv6 destinations", () => {
+  assert.equal(isPublicAddress("::ffff:93.184.216.34"), true);
+});
+
 test("public document fetcher revalidates each redirect and rejects an unsafe rebinding", async () => {
   const lookedUp: string[] = [];
   const fetcher = createPublicDocumentFetcher({
