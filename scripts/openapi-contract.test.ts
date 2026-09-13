@@ -249,6 +249,87 @@ test("OpenAPI recursively closes every discovery response object and preserves k
   assert.deepEqual(record(runProperties.coverage, "DiscoveryRun.coverage"), { $ref: "#/components/schemas/DiscoveryCoverage" });
 });
 
+test("OpenAPI matches discovery handler query, response, error, and DTO semantics", async () => {
+  const document = await openApiDocument();
+  const responsesByOperation: ReadonlyArray<readonly [string, string, Readonly<Record<string, string>>]> = [
+    ["get", "/v1/discovery/metric-options", { "200": "DiscoveryMetricOptionsResponse", "401": "DiscoveryUnauthorized" }],
+    ["get", "/v1/discovery/campaigns", { "200": "DiscoveryCampaignPageResponse", "401": "DiscoveryUnauthorized" }],
+    ["post", "/v1/discovery/campaigns", { "201": "DiscoveryCampaignResponse", "400": "DiscoveryBadRequest", "401": "DiscoveryUnauthorized" }],
+    ["get", "/v1/discovery/campaigns/{campaignId}", { "200": "DiscoveryCampaignDetailResponse", "400": "DiscoveryBadRequest", "401": "DiscoveryUnauthorized", "404": "DiscoveryNotFound" }],
+    ["delete", "/v1/discovery/campaigns/{campaignId}", { "204": "DiscoveryNoContent", "400": "DiscoveryBadRequest", "401": "DiscoveryUnauthorized", "404": "DiscoveryNotFound", "409": "DiscoveryConflict" }],
+    ["post", "/v1/discovery/campaigns/{campaignId}/draft", { "200": "DiscoveryDraftResponse", "400": "DiscoveryBadRequest", "401": "DiscoveryUnauthorized", "404": "DiscoveryNotFound", "409": "DiscoveryConflict", "429": "DiscoveryRateLimited", "503": "DiscoveryUnavailable" }],
+    ["put", "/v1/discovery/campaigns/{campaignId}/brief", { "200": "DiscoverySavedBriefResponse", "400": "DiscoveryBadRequest", "401": "DiscoveryUnauthorized", "404": "DiscoveryNotFound", "409": "DiscoveryConflict" }],
+    ["get", "/v1/discovery/campaigns/{campaignId}/runs", { "200": "DiscoveryRunPageResponse", "400": "DiscoveryBadRequest", "401": "DiscoveryUnauthorized", "404": "DiscoveryNotFound" }],
+    ["post", "/v1/discovery/campaigns/{campaignId}/runs", { "201": "DiscoveryRunResponse", "400": "DiscoveryBadRequest", "401": "DiscoveryUnauthorized", "404": "DiscoveryNotFound", "409": "DiscoveryConflict" }],
+    ["get", "/v1/discovery/runs/{runId}", { "200": "DiscoveryRunViewResponse", "400": "DiscoveryBadRequest", "401": "DiscoveryUnauthorized", "404": "DiscoveryNotFound" }],
+    ["get", "/v1/discovery/runs/{runId}/candidates", { "200": "DiscoveryCandidatePageResponse", "400": "DiscoveryBadRequest", "401": "DiscoveryUnauthorized", "404": "DiscoveryNotFound" }],
+    ["get", "/v1/discovery/runs/{runId}/events", { "200": "DiscoveryEventPageResponse", "400": "DiscoveryBadRequest", "401": "DiscoveryUnauthorized", "404": "DiscoveryNotFound" }],
+    ["post", "/v1/discovery/runs/{runId}/cancel", { "200": "DiscoveryRunResponse", "400": "DiscoveryBadRequest", "401": "DiscoveryUnauthorized", "404": "DiscoveryNotFound" }],
+  ];
+  for (const [method, path, expected] of responsesByOperation) assertOperationResponses(document, method, path, expected);
+
+  const queries: ReadonlyArray<readonly [string, string, Readonly<Record<string, QuerySchemaExpectation>>]> = [
+    ["get", "/v1/discovery/campaigns", { cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 100, default: 20 } }],
+    ["get", "/v1/discovery/campaigns/{campaignId}/runs", { cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 100, default: 20 } }],
+    ["get", "/v1/discovery/runs/{runId}/candidates", {
+      cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 100, default: 25 },
+      state: { type: "string", enum: CANDIDATE_STATES },
+    }],
+    ["get", "/v1/discovery/runs/{runId}/events", { after: { type: "integer", minimum: 0, default: 0 } }],
+  ];
+  for (const [method, path, expected] of queries) assertQueryParameters(document, method, path, expected);
+
+  for (const [response, schema] of [
+    ["DiscoveryCampaignResponse", "DiscoveryCampaign"], ["DiscoveryCampaignPageResponse", "DiscoveryCampaignPage"],
+    ["DiscoveryCampaignDetailResponse", "DiscoveryCampaignDetail"], ["DiscoveryDraftResponse", "DiscoveryDraft"],
+    ["DiscoverySavedBriefResponse", "DiscoverySavedBrief"], ["DiscoveryRunResponse", "DiscoveryRun"],
+    ["DiscoveryRunPageResponse", "DiscoveryRunPage"], ["DiscoveryRunViewResponse", "DiscoveryRunView"],
+    ["DiscoveryCandidatePageResponse", "DiscoveryCandidatePage"], ["DiscoveryEventPageResponse", "DiscoveryEventPage"],
+    ["DiscoveryBadRequest", "DiscoveryError"], ["DiscoveryNotFound", "DiscoveryError"], ["DiscoveryConflict", "DiscoveryError"],
+    ["DiscoveryRateLimited", "DiscoveryError"], ["DiscoveryUnavailable", "DiscoveryError"], ["DiscoveryUnauthorized", "DiscoveryAuthenticationError"],
+  ] as const) assertResponseSchemaReference(document, response, schema);
+  assertNoContentResponse(document, "DiscoveryNoContent");
+  assertMetricOptionsWrapper(document);
+
+  assertClosedRequiredObject(document, "DiscoveryAuthenticationError", ["error"]);
+  assertClosedRequiredObject(document, "DiscoveryError", ["error", "code"]);
+  assertPropertyReference(document, "DiscoveryError", "code", "DiscoveryErrorCode");
+  assertExactEnum(componentSchema(document, "DiscoveryErrorCode"), DISCOVERY_ERROR_CODES, "DiscoveryErrorCode");
+
+  for (const [component, property, kind] of DISCOVERY_PROPERTY_KINDS) assertPropertyKind(document, component, property, kind);
+  for (const [component, target] of DISCOVERY_ARRAY_SCHEMA_KINDS) assertArraySchemaKind(document, component, target);
+
+  for (const [component, property, expected] of [
+    ["DiscoveryRun", "status", RUN_STATUSES], ["DiscoveryRun", "stage", RUN_STAGES],
+    ["DiscoveryRunView", "status", RUN_STATUSES], ["DiscoveryRunView", "stage", RUN_STAGES],
+    ["DiscoveryCandidate", "state", CANDIDATE_STATES], ["DiscoveryCandidateDecision", "state", DECISION_STATES],
+    ["DiscoveryEvent", "stage", RUN_STAGES], ["DiscoveryEvent", "kind", EVENT_KINDS],
+  ] as const) assertPropertyEnum(document, component, property, expected);
+
+  for (const component of ["DiscoveryUsage", "DiscoveryAttemptLimits"] as const) {
+    const minimum = component === "DiscoveryUsage" ? 0 : 1;
+    assertClosedRequiredObject(document, component, RESOURCES);
+    for (const resource of RESOURCES) {
+      const schema = schemaProperty(document, component, resource);
+      assert.equal(schema.type, "integer", `${component}.${resource} is an integer`);
+      assert.equal(schema.minimum, minimum, `${component}.${resource} has its runtime minimum`);
+    }
+  }
+
+  for (const component of ["DiscoveryCampaignPage", "DiscoveryRunPage", "DiscoveryCandidatePage"] as const) {
+    assertArrayPropertyReference(document, component, "items", component.replace("Page", ""));
+    assertNullableType(document, component, "next_cursor", "string");
+  }
+  assertArrayPropertyReference(document, "DiscoveryEventPage", "items", "DiscoveryEvent");
+  assertNullableType(document, "DiscoveryRun", "started_at", "string");
+  assertNullableType(document, "DiscoveryRun", "finished_at", "string");
+  assertNullableType(document, "DiscoveryRun", "cancel_requested_at", "string");
+  assertNullableType(document, "DiscoveryCandidate", "rank", "integer");
+  assertNullableType(document, "DiscoveryCandidate", "snapshot_id", "string");
+  assertNullableType(document, "DiscoverySourceView", "published_at", "string");
+  assertNullableType(document, "DiscoveryCampaign", "archived_at", "string");
+});
+
 test("OpenAPI no longer exposes the retired home feed route", async () => {
   const routes = await openApiRoutes();
 
@@ -322,7 +403,7 @@ function componentSchema(document: OpenApiDocument, name: string): OpenApiSchema
   return record(record(record(document.components, "components").schemas, "components.schemas")[name], `components.schemas.${name}`);
 }
 
-function resolveComponent(document: OpenApiDocument, value: OpenApiSchema, collection: "responses" | "schemas"): OpenApiSchema {
+function resolveComponent(document: OpenApiDocument, value: OpenApiSchema, collection: "parameters" | "responses" | "schemas"): OpenApiSchema {
   const reference = value.$ref;
   if (typeof reference !== "string") return value;
   const expectedPrefix = `#/components/${collection}/`;
@@ -333,6 +414,209 @@ function resolveComponent(document: OpenApiDocument, value: OpenApiSchema, colle
 function record(value: unknown, label: string): Record<string, unknown> {
   assert.ok(value !== null && typeof value === "object" && !Array.isArray(value), `${label} is an object`);
   return value as Record<string, unknown>;
+}
+
+const RESOURCES = ["search", "document", "identity", "financial", "model"] as const;
+const CANDIDATE_STATES = ["unresolved_identity", "discovered", "not_selected", "researching", "shortlisted", "eligible_not_shortlisted", "excluded", "needs_evidence", "research_error"] as const;
+const DECISION_STATES = ["excluded", "needs_evidence", "eligible_not_shortlisted"] as const;
+const RUN_STATUSES = ["queued", "running", "completed", "partial", "failed", "cancelled"] as const;
+const RUN_STAGES = ["queued", "discovery", "research", "finalization"] as const;
+const EVENT_KINDS = ["search_completed", "lead_resolved", "document_acquired", "criterion_assessed", "skeptic_completed", "budget_exhausted", "run_resumed", "run_finalized"] as const;
+const DISCOVERY_ERROR_CODES = ["validation", "not_found", "stale_brief", "active_run", "request_conflict", "draft_rate_limit", "unavailable", "budget_exhausted", "deadline_exceeded", "lease_lost", "cancelled", "operation_in_progress"] as const;
+
+type QuerySchemaExpectation = Readonly<{
+  type: "string" | "integer";
+  minimum?: number;
+  maximum?: number;
+  default?: number;
+  enum?: readonly string[];
+}>;
+
+type PropertyKind = "array" | "boolean" | "integer" | "number" | "string" | `array:${string}` | `nullable:${"integer" | "string"}` | `nullable-ref:${string}` | `ref:${string}`;
+type PropertyContract = readonly [component: string, property: string, kind: PropertyKind];
+
+function fields(component: string, kind: PropertyKind, names: readonly string[]): readonly PropertyContract[] {
+  return names.map((name) => [component, name, kind] as const);
+}
+
+const DISCOVERY_PROPERTY_KINDS: readonly PropertyContract[] = [
+  ...fields("DiscoveryAuthenticationError", "string", ["error"]),
+  ...fields("DiscoveryError", "string", ["error"]), ["DiscoveryError", "code", "ref:DiscoveryErrorCode"],
+  ...fields("DiscoveryMetricOption", "string", ["metric_key", "display_name", "unit_class", "aggregation", "interpretation", "canonical_source_class"]),
+  ...fields("DiscoveryCampaign", "string", ["campaign_id", "user_id", "name", "question", "created_at", "updated_at"]),
+  ["DiscoveryCampaign", "current_brief_version", "integer"], ["DiscoveryCampaign", "archived_at", "nullable:string"],
+  ["DiscoveryCampaignPage", "items", "array:DiscoveryCampaign"], ["DiscoveryCampaignPage", "next_cursor", "nullable:string"],
+  ...fields("DiscoveryBrief", "integer", ["schema_version", "horizon_months", "lookback_months"]),
+  ...fields("DiscoveryBrief", "string", ["question", "market"]),
+  ["DiscoveryBrief", "mechanisms", "ref:DiscoveryMechanismList"], ["DiscoveryBrief", "criteria", "ref:DiscoveryCriterionList"],
+  ["DiscoveryBrief", "seed_queries", "ref:DiscoverySeedQueryList"], ["DiscoveryBrief", "exclusions", "ref:DiscoveryExclusionList"],
+  ["DiscoveryBrief", "preferences", "ref:DiscoveryPreferenceList"], ["DiscoveryBrief", "queries", "ref:DiscoveryBriefQueryList"],
+  ...fields("DiscoveryMechanism", "string", ["mechanism_id", "label"]), ["DiscoveryMechanism", "chain", "array"],
+  ...fields("DiscoveryMetricCheck", "string", ["metric_key", "unit", "period_kind", "operator"]),
+  ["DiscoveryMetricCheck", "threshold", "number"], ["DiscoveryMetricCheck", "max_age_days", "integer"],
+  ...fields("DiscoveryCriterion", "string", ["criterion_id", "importance", "statement", "falsifier"]), ["DiscoveryCriterion", "metric", "ref:DiscoveryMetricCheck"],
+  ...fields("DiscoveryBriefQuery", "string", ["mechanism_id", "query"]),
+  ...fields("DiscoverySavedBrief", "string", ["brief_id", "campaign_id", "hash", "created_at"]),
+  ["DiscoverySavedBrief", "version", "integer"], ["DiscoverySavedBrief", "brief", "ref:DiscoveryBrief"], ["DiscoverySavedBrief", "approved_at", "nullable:string"],
+  ...fields("DiscoveryModelConfig", "string", ["role", "provider", "model", "as_of"]), ["DiscoveryModelConfig", "max_output_tokens", "integer"],
+  ...fields("DiscoveryLimits", "integer", ["candidates", "research", "shortlist", "input_chars", "output_tokens", "request_timeout_ms", "run_timeout_ms"]),
+  ["DiscoveryLimits", "attempts", "ref:DiscoveryAttemptLimits"],
+  ...fields("DiscoveryCoverageMechanism", "string", ["mechanism_id"]), ...fields("DiscoveryCoverageMechanism", "integer", ["discovered", "selected", "assessed"]),
+  ...fields("DiscoveryCoverageGap", "string", ["code", "detail"]), ["DiscoveryCoverageGap", "candidate_id", "nullable:string"],
+  ...fields("DiscoveryCoverage", "integer", ["searches_planned", "searches_completed", "hits_truncated", "leads_overflow", "extraction_batches_skipped", "unresolved", "discovered", "selected", "assessed", "not_selected"]),
+  ["DiscoveryCoverage", "mechanisms", "array:DiscoveryCoverageMechanism"], ["DiscoveryCoverage", "gaps", "array:DiscoveryCoverageGap"],
+  ...fields("DiscoveryRun", "string", ["run_id", "campaign_id", "brief_id", "user_id", "status", "stage", "policy_version", "request_key"]),
+  ["DiscoveryRun", "model_config", "array:DiscoveryModelConfig"], ["DiscoveryRun", "limits", "ref:DiscoveryLimits"], ["DiscoveryRun", "usage", "ref:DiscoveryUsage"], ["DiscoveryRun", "coverage", "ref:DiscoveryCoverage"],
+  ...fields("DiscoveryRun", "nullable:string", ["started_at", "finished_at", "cancel_requested_at"]),
+  ["DiscoveryRunPage", "items", "array:DiscoveryRun"], ["DiscoveryRunPage", "next_cursor", "nullable:string"],
+  ...fields("DiscoveryRunView", "string", ["run_id", "campaign_id", "brief_id", "user_id", "status", "stage", "policy_version", "request_key"]),
+  ["DiscoveryRunView", "model_config", "array:DiscoveryModelConfig"], ["DiscoveryRunView", "limits", "ref:DiscoveryLimits"], ["DiscoveryRunView", "usage", "ref:DiscoveryUsage"], ["DiscoveryRunView", "coverage", "ref:DiscoveryCoverage"],
+  ...fields("DiscoveryRunView", "nullable:string", ["started_at", "finished_at", "cancel_requested_at"]), ["DiscoveryRunView", "shortlist", "array:DiscoveryCandidate"], ["DiscoveryRunView", "cost", "ref:DiscoveryCost"], ["DiscoveryRunView", "worker_waiting", "boolean"],
+  ["DiscoveryCost", "status", "string"], ["DiscoveryReadiness", "ready", "boolean"], ["DiscoveryReadiness", "missing", "array"],
+  ["DiscoveryCampaignDetail", "campaign", "ref:DiscoveryCampaign"], ["DiscoveryCampaignDetail", "brief", "nullable-ref:DiscoverySavedBrief"], ["DiscoveryCampaignDetail", "latest_run", "nullable-ref:DiscoveryRun"], ["DiscoveryCampaignDetail", "readiness", "ref:DiscoveryReadiness"],
+  ["DiscoveryDraft", "brief", "ref:DiscoveryBrief"], ["DiscoveryDraft", "base_version", "integer"],
+  ...fields("DiscoveryCitation", "string", ["kind", "id"]),
+  ["DiscoverySourceView", "citation", "ref:DiscoveryCitation"], ...fields("DiscoverySourceView", "string", ["title", "url", "retrieved_at"]), ["DiscoverySourceView", "published_at", "nullable:string"],
+  ...fields("DiscoveryCandidate", "string", ["candidate_id", "name", "state"]), ["DiscoveryCandidate", "identity", "nullable-ref:DiscoveryCompanyIdentity"], ["DiscoveryCandidate", "rank", "nullable:integer"], ["DiscoveryCandidate", "snapshot_id", "nullable:string"], ["DiscoveryCandidate", "evidence_available", "boolean"], ["DiscoveryCandidate", "can_promote", "boolean"], ["DiscoveryCandidate", "assessment", "nullable-ref:DiscoveryCandidateDecision"], ["DiscoveryCandidate", "sources", "array:DiscoverySourceView"], ["DiscoveryCandidate", "origins", "array"], ["DiscoveryCandidate", "mechanism_ids", "array"], ["DiscoveryCandidate", "reason_codes", "array"],
+  ...fields("DiscoveryCompanyIdentity", "string", ["issuer_id", "listing_id", "legal_name", "ticker", "mic", "currency", "asset_type"]), ["DiscoveryCompanyIdentity", "identity_source_ids", "array"],
+  ...fields("DiscoveryDimension", "string", ["level", "explanation"]), ["DiscoveryDimension", "citations", "array:DiscoveryCitation"],
+  ...fields("DiscoveryDimensions", "ref:DiscoveryDimension", ["theme_exposure", "evidence_strength", "business_quality", "valuation_context"]),
+  ...fields("DiscoveryCriterionOutcome", "string", ["criterion_id", "outcome", "explanation"]), ["DiscoveryCriterionOutcome", "citations", "array:DiscoveryCitation"],
+  ["DiscoveryCounterargument", "text", "string"], ["DiscoveryCounterargument", "citations", "array:DiscoveryCitation"],
+  ["DiscoveryCandidateDecision", "candidate_id", "string"], ["DiscoveryCandidateDecision", "identity", "ref:DiscoveryCompanyIdentity"], ["DiscoveryCandidateDecision", "state", "string"], ["DiscoveryCandidateDecision", "dimensions", "ref:DiscoveryDimensions"], ["DiscoveryCandidateDecision", "criteria", "array:DiscoveryCriterionOutcome"], ["DiscoveryCandidateDecision", "counterarguments", "array:DiscoveryCounterargument"], ["DiscoveryCandidateDecision", "unresolved_questions", "array"], ["DiscoveryCandidateDecision", "next_action", "string"], ["DiscoveryCandidateDecision", "reason_codes", "array"],
+  ["DiscoveryCandidatePage", "items", "array:DiscoveryCandidate"], ["DiscoveryCandidatePage", "next_cursor", "nullable:string"],
+  ...fields("DiscoveryEvent", "string", ["run_id", "stage", "kind", "summary", "created_at"]), ["DiscoveryEvent", "sequence", "integer"], ["DiscoveryEvent", "candidate_id", "nullable:string"], ["DiscoveryEvent", "citations", "array:DiscoveryCitation"],
+  ["DiscoveryEventPage", "items", "array:DiscoveryEvent"], ["DiscoveryEventPage", "next_sequence", "integer"], ["DiscoveryEventPage", "has_more", "boolean"],
+];
+
+const DISCOVERY_ARRAY_SCHEMA_KINDS: ReadonlyArray<readonly [component: string, itemDto: string | null]> = [
+  ["DiscoveryMechanismList", "DiscoveryMechanism"], ["DiscoveryCriterionList", "DiscoveryCriterion"], ["DiscoveryBriefQueryList", "DiscoveryBriefQuery"],
+  ["DiscoverySeedQueryList", null], ["DiscoveryExclusionList", null], ["DiscoveryPreferenceList", null],
+];
+
+function operationAt(document: OpenApiDocument, method: string, path: string): OpenApiSchema {
+  return record(record(record(document.paths, "paths")[path], `paths.${path}`)[method], `${method.toUpperCase()} ${path}`);
+}
+
+function assertOperationResponses(document: OpenApiDocument, method: string, path: string, expected: Readonly<Record<string, string>>): void {
+  const responses = record(operationAt(document, method, path).responses, `${method.toUpperCase()} ${path}.responses`);
+  assert.deepEqual(Object.keys(responses).sort(), Object.keys(expected).sort(), `${method.toUpperCase()} ${path} documents every handler status`);
+  for (const [status, response] of Object.entries(expected)) {
+    assert.equal(record(responses[status], `${method.toUpperCase()} ${path} ${status}`).$ref, `#/components/responses/${response}`, `${method.toUpperCase()} ${path} ${status} has its status-specific response`);
+  }
+}
+
+function assertQueryParameters(document: OpenApiDocument, method: string, path: string, expected: Readonly<Record<string, QuerySchemaExpectation>>): void {
+  const pathItem = record(record(document.paths, "paths")[path], `paths.${path}`);
+  const operation = operationAt(document, method, path);
+  const parameters = [...parameterList(document, pathItem.parameters), ...parameterList(document, operation.parameters)];
+  const queryParameters = new Map(parameters.filter((parameter) => parameter.in === "query").map((parameter) => [parameter.name, parameter]));
+  assert.deepEqual([...queryParameters.keys()].sort(), Object.keys(expected).sort(), `${method.toUpperCase()} ${path} documents every query parser input`);
+  for (const [name, contract] of Object.entries(expected)) {
+    const schema = record(queryParameters.get(name)?.schema, `${method.toUpperCase()} ${path} ${name}.schema`);
+    assert.equal(schema.type, contract.type, `${method.toUpperCase()} ${path} ${name} type`);
+    for (const key of ["minimum", "maximum", "default"] as const) {
+      if (contract[key] !== undefined) assert.equal(schema[key], contract[key], `${method.toUpperCase()} ${path} ${name} ${key}`);
+    }
+    if (contract.enum !== undefined) assertExactEnum(schema, contract.enum, `${method.toUpperCase()} ${path} ${name}`);
+  }
+}
+
+function parameterList(document: OpenApiDocument, value: unknown): OpenApiSchema[] {
+  if (value === undefined) return [];
+  assert.ok(Array.isArray(value), "parameters are an array");
+  return value.map((parameter, index) => {
+    const raw = record(parameter, `parameters[${index}]`);
+    return typeof raw.$ref === "string" ? resolveComponent(document, raw, "parameters") : raw;
+  });
+}
+
+function responseContentSchema(document: OpenApiDocument, responseName: string): OpenApiSchema {
+  const response = record(record(record(document.components, "components").responses, "components.responses")[responseName], `components.responses.${responseName}`);
+  return record(record(record(response.content, `components.responses.${responseName}.content`)["application/json"], `components.responses.${responseName}.application/json`).schema, `components.responses.${responseName}.schema`);
+}
+
+function assertResponseSchemaReference(document: OpenApiDocument, responseName: string, schemaName: string): void {
+  assert.equal(responseContentSchema(document, responseName).$ref, `#/components/schemas/${schemaName}`, `${responseName} has its browser-safe DTO reference`);
+}
+
+function assertNoContentResponse(document: OpenApiDocument, responseName: string): void {
+  const response = record(record(record(document.components, "components").responses, "components.responses")[responseName], `components.responses.${responseName}`);
+  assert.equal(response.content, undefined, `${responseName} has no response body`);
+}
+
+function assertMetricOptionsWrapper(document: OpenApiDocument): void {
+  const schema = responseContentSchema(document, "DiscoveryMetricOptionsResponse");
+  assert.equal(schema.type, "object", "metric options wrapper is an object");
+  assert.equal(schema.additionalProperties, false, "metric options wrapper is closed");
+  assert.deepEqual(schema.required, ["items"], "metric options wrapper requires items");
+  const items = record(record(schema.properties, "DiscoveryMetricOptionsResponse.properties").items, "DiscoveryMetricOptionsResponse.items");
+  assert.equal(items.type, "array", "metric options items is an array");
+  assert.equal(record(items.items, "DiscoveryMetricOptionsResponse.items.items").$ref, "#/components/schemas/DiscoveryMetricOption", "metric options items reference the metric DTO");
+}
+
+function assertClosedRequiredObject(document: OpenApiDocument, component: string, required: readonly string[]): void {
+  const schema = componentSchema(document, component);
+  assert.equal(schema.type, "object", `${component} is an object`);
+  assert.equal(schema.additionalProperties, false, `${component} is closed`);
+  assert.deepEqual(schema.required, required, `${component} has exact required fields`);
+}
+
+function schemaProperty(document: OpenApiDocument, component: string, property: string): OpenApiSchema {
+  return record(record(componentSchema(document, component).properties, `${component}.properties`)[property], `${component}.${property}`);
+}
+
+function assertPropertyKind(document: OpenApiDocument, component: string, property: string, kind: PropertyKind): void {
+  const schema = schemaProperty(document, component, property);
+  if (kind.startsWith("ref:")) {
+    assert.equal(schema.$ref, `#/components/schemas/${kind.slice("ref:".length)}`, `${component}.${property} DTO reference`);
+    return;
+  }
+  if (kind.startsWith("array:")) {
+    assert.equal(schema.type, "array", `${component}.${property} is an array`);
+    assert.equal(record(schema.items, `${component}.${property}.items`).$ref, `#/components/schemas/${kind.slice("array:".length)}`, `${component}.${property} array item DTO`);
+    return;
+  }
+  if (kind.startsWith("nullable-ref:")) {
+    assert.deepEqual(schema.anyOf, [{ $ref: `#/components/schemas/${kind.slice("nullable-ref:".length)}` }, { type: "null" }], `${component}.${property} is its nullable DTO union`);
+    return;
+  }
+  if (kind.startsWith("nullable:")) {
+    assert.deepEqual(schema.type, [kind.slice("nullable:".length), "null"], `${component}.${property} is nullable`);
+    return;
+  }
+  assert.equal(schema.type, kind, `${component}.${property} primitive type`);
+}
+
+function assertArraySchemaKind(document: OpenApiDocument, component: string, target: string | null): void {
+  const schema = componentSchema(document, component);
+  assert.equal(schema.type, "array", `${component} is an array schema`);
+  const items = record(schema.items, `${component}.items`);
+  if (target === null) assert.equal(items.type, "string", `${component} has string items`);
+  else assert.equal(items.$ref, `#/components/schemas/${target}`, `${component} item DTO`);
+}
+
+function assertPropertyReference(document: OpenApiDocument, component: string, property: string, target: string): void {
+  assert.equal(schemaProperty(document, component, property).$ref, `#/components/schemas/${target}`, `${component}.${property} references ${target}`);
+}
+
+function assertPropertyEnum(document: OpenApiDocument, component: string, property: string, expected: readonly string[]): void {
+  assertExactEnum(schemaProperty(document, component, property), expected, `${component}.${property}`);
+}
+
+function assertExactEnum(schema: OpenApiSchema, expected: readonly string[], label: string): void {
+  assert.equal(schema.type, "string", `${label} is a string enum`);
+  assert.deepEqual(schema.enum, expected, `${label} has its exact runtime values`);
+}
+
+function assertArrayPropertyReference(document: OpenApiDocument, component: string, property: string, target: string): void {
+  const schema = schemaProperty(document, component, property);
+  assert.equal(schema.type, "array", `${component}.${property} is an array`);
+  assert.equal(record(schema.items, `${component}.${property}.items`).$ref, `#/components/schemas/${target}`, `${component}.${property} item DTO`);
+}
+
+function assertNullableType(document: OpenApiDocument, component: string, property: string, type: string): void {
+  assert.deepEqual(schemaProperty(document, component, property).type, [type, "null"], `${component}.${property} is nullable ${type}`);
 }
 
 function escapeRegExp(value: string): string {

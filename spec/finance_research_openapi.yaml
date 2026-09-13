@@ -1192,6 +1192,13 @@ paths:
       tags: [Discovery]
       summary: List owned discovery campaigns
       operationId: listDiscoveryCampaigns
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
       responses:
         '200': { $ref: '#/components/responses/DiscoveryCampaignPageResponse' }
         '401': { $ref: '#/components/responses/DiscoveryUnauthorized' }
@@ -1275,6 +1282,13 @@ paths:
       tags: [Discovery]
       summary: List owned campaign runs
       operationId: listDiscoveryRuns
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
       responses:
         '200': { $ref: '#/components/responses/DiscoveryRunPageResponse' }
         '400': { $ref: '#/components/responses/DiscoveryBadRequest' }
@@ -1318,7 +1332,7 @@ paths:
         schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
       - name: state
         in: query
-        schema: { type: string }
+        schema: { type: string, enum: [unresolved_identity, discovered, not_selected, researching, shortlisted, eligible_not_shortlisted, excluded, needs_evidence, research_error] }
     get:
       tags: [Discovery]
       summary: Page currently authorized candidate views
@@ -2114,7 +2128,7 @@ components:
       description: Missing or malformed user credential
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/DiscoveryError' }
+          schema: { $ref: '#/components/schemas/DiscoveryAuthenticationError' }
     DiscoveryNotFound:
       description: Requested discovery resource is unavailable to the caller
       content:
@@ -2138,11 +2152,20 @@ components:
   schemas:
     DiscoveryError:
       type: object
+      required: [error, code]
+      additionalProperties: false
+      properties:
+        error: { type: string }
+        code: { $ref: '#/components/schemas/DiscoveryErrorCode' }
+    DiscoveryAuthenticationError:
+      type: object
       required: [error]
       additionalProperties: false
       properties:
         error: { type: string }
-        code: { type: string }
+    DiscoveryErrorCode:
+      type: string
+      enum: [validation, not_found, stale_brief, active_run, request_conflict, draft_rate_limit, unavailable, budget_exhausted, deadline_exceeded, lease_lost, cancelled, operation_in_progress]
     DiscoveryMetricOption:
       type: object
       required: [metric_key, display_name, unit_class, aggregation, interpretation, canonical_source_class]
