@@ -84,7 +84,7 @@ export interface DiscoveryRepository {
   getBrief(userId: D.Id, briefId: D.Id): Promise<D.SavedBrief>;
   currentBrief(userId: D.Id, campaignId: D.Id): Promise<D.SavedBrief | null>;
   saveBrief(userId: D.Id, campaignId: D.Id, expectedVersion: number, brief: D.Brief): Promise<D.SavedBrief>;
-  startRun(userId: D.Id, campaignId: D.Id, input: { brief_version: number; brief_hash: string; request_key: D.Id }): Promise<D.RunRecord>;
+  startRun(userId: D.Id, campaignId: D.Id, input: { brief_version: number; brief_hash: string; request_key: D.Id } & D.RunConfigurationSnapshot): Promise<D.RunRecord>;
   readRun(userId: D.Id, runId: D.Id): Promise<D.RunRecord>;
   listRuns(userId: D.Id, campaignId: D.Id, cursor: string | null, limit: number): Promise<D.Page<D.RunRecord>>;
   claimNextRun(workerId: string): Promise<Lease | null>;
@@ -111,6 +111,7 @@ export interface DiscoveryRepository {
   requestCancel(userId: D.Id, runId: D.Id): Promise<D.RunRecord>;
   finalize(lease: Lease, input: { status: "completed" | "partial" | "failed" | "cancelled"; decisions: D.RankedDecision[]; coverage: D.Coverage }): Promise<void>;
   deleteCampaign(userId: D.Id, campaignId: D.Id): Promise<void>;
+  listMetricOptions(userId: D.Id): Promise<D.MetricOption[]>;
 }
 
 export type WorkerDeps = {
@@ -130,6 +131,7 @@ export type DiscoveryService = {
   draftBrief(userId: D.Id, campaignId: D.Id, expectedVersion: number): Promise<{ brief: D.Brief; base_version: number }>;
   saveBrief(userId: D.Id, campaignId: D.Id, expectedVersion: number, brief: D.Brief): Promise<D.SavedBrief>;
   startRun(userId: D.Id, campaignId: D.Id, input: { brief_version: number; brief_hash: string; request_key: D.Id }): Promise<D.RunRecord>;
+  listMetricOptions(userId: D.Id): Promise<D.MetricOption[]>;
   listRuns(userId: D.Id, campaignId: D.Id, cursor: string | null, limit: number): Promise<D.Page<D.RunRecord>>;
   getRun(userId: D.Id, runId: D.Id): Promise<D.RunView>;
   getCandidates(userId: D.Id, runId: D.Id, input: { cursor: string | null; limit: number; state?: D.CandidateState }): Promise<D.Page<D.CandidateView>>;

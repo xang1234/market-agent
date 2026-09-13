@@ -1,4 +1,5 @@
 import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
+import { deleteUnreferencedCampaignExactQuoteClaims } from "../../evidence/src/campaign-quote-lifecycle.ts";
 import { deleteSnapshotIfUnreachable } from "../../evidence/src/snapshot-reachability.ts";
 import { DiscoveryError } from "./types.ts";
 import { requireUuid, transaction } from "./repository-support.ts";
@@ -30,6 +31,15 @@ export async function deleteCampaignWithLifecycle(
         where campaign_id=$1::uuid and tool_call_id is not null`,
       [input.campaign_id],
     );
+    const quoteClaims = await tx.query<{ claim_id: string }>(
+      `select q.claim_id::text as claim_id
+         from discovery_quote_claims q
+         join discovery_runs r on q.operation_key like r.run_id::text || '/%'
+         join claims c on c.claim_id=q.claim_id and c.predicate='campaign_exact_quote'
+        where r.campaign_id=$1::uuid
+        for update of q,c`,
+      [input.campaign_id],
+    );
     await tx.query(
       `update discovery_runs
           set cancel_requested_at=coalesce(cancel_requested_at, $2::timestamptz),
@@ -50,6 +60,7 @@ export async function deleteCampaignWithLifecycle(
     for (const snapshotId of new Set(snapshots.rows.map((snapshot) => snapshot.snapshot_id))) {
       await deleteSnapshotIfUnreachable(tx, snapshotId);
     }
+    await deleteUnreferencedCampaignExactQuoteClaims(tx, quoteClaims.rows.map((row) => row.claim_id));
     await deleteUnreferencedDiscoveryToolCalls(tx, toolCalls.rows.map((row) => row.tool_call_id));
   });
 }

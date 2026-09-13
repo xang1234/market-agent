@@ -13,6 +13,7 @@ const FRONTEND_V1_ROUTES = [
   "/v1/analyze/runs",
   "/v1/analyze/runs/{runId}/share-to-chat",
   "/v1/analyze/templates",
+  "/v1/discovery/metric-options",
   "/v1/discovery/campaigns",
   "/v1/discovery/campaigns/{campaignId}",
   "/v1/discovery/campaigns/{campaignId}/draft",
@@ -73,6 +74,7 @@ const FRONTEND_V1_OPERATIONS = [
   ["post", "/v1/agents/{agentId}/runs"],
   ["post", "/v1/analyze/runs"],
   ["post", "/v1/analyze/runs/{runId}/share-to-chat"],
+  ["get", "/v1/discovery/metric-options"],
   ["get", "/v1/discovery/campaigns"],
   ["post", "/v1/discovery/campaigns"],
   ["get", "/v1/discovery/campaigns/{campaignId}"],
@@ -135,6 +137,31 @@ test("OpenAPI documents the Analyze run and share-to-chat payload contract", asy
   }
 });
 
+test("OpenAPI gives every discovery operation browser-safe response and error schemas", async () => {
+  const spec = await readFile(OPENAPI_PATH, "utf8");
+  const operations = [
+    ["get", "/v1/discovery/metric-options"], ["get", "/v1/discovery/campaigns"], ["post", "/v1/discovery/campaigns"],
+    ["get", "/v1/discovery/campaigns/{campaignId}"], ["delete", "/v1/discovery/campaigns/{campaignId}"],
+    ["post", "/v1/discovery/campaigns/{campaignId}/draft"], ["put", "/v1/discovery/campaigns/{campaignId}/brief"],
+    ["get", "/v1/discovery/campaigns/{campaignId}/runs"], ["post", "/v1/discovery/campaigns/{campaignId}/runs"],
+    ["get", "/v1/discovery/runs/{runId}"], ["get", "/v1/discovery/runs/{runId}/candidates"],
+    ["get", "/v1/discovery/runs/{runId}/events"], ["post", "/v1/discovery/runs/{runId}/cancel"],
+  ] as const;
+  for (const [method, route] of operations) {
+    const section = openApiOperationSection(spec, route, method);
+    assert.match(section, /responses:/);
+    assert.deepEqual([...section.matchAll(/^        '\d{3}':(?! \{ \$ref: '#\/components\/responses\/Discovery)/gm)].map((match) => match[0]), [], `${method} ${route} has a referenced response for every status`);
+  }
+  for (const expected of ["DiscoveryMetricOptionsResponse", "DiscoveryCampaignPageResponse", "DiscoveryRunViewResponse", "DiscoveryEventPageResponse", "DiscoveryBadRequest"]) {
+    assert.match(spec, new RegExp(escapeRegExp(`    ${expected}:`)));
+  }
+  const model = componentSchemaSection(spec, "DiscoveryModelConfig");
+  for (const expected of ["additionalProperties: false", "role:", "provider:", "model:", "max_output_tokens:", "as_of:"]) assert.match(model, new RegExp(escapeRegExp(expected)));
+  assert.doesNotMatch(model, /api_key|apiKey|endpoint|headers/i);
+  const metric = componentSchemaSection(spec, "DiscoveryMetricOption");
+  for (const expected of ["metric_key:", "display_name:", "unit_class:", "aggregation:", "interpretation:", "canonical_source_class:"]) assert.match(metric, new RegExp(escapeRegExp(expected)));
+});
+
 test("OpenAPI no longer exposes the retired home feed route", async () => {
   const routes = await openApiRoutes();
 
@@ -165,4 +192,21 @@ function openApiRouteSection(spec: string, route: string): string {
 
   const nextRoute = spec.slice(start + routeHeader.length).search(/\n  \/v1\//);
   return spec.slice(start, nextRoute === -1 ? spec.length : start + routeHeader.length + nextRoute);
+}
+
+function openApiOperationSection(spec: string, route: string, method: string): string {
+  const routeSection = openApiRouteSection(spec, route);
+  const start = routeSection.indexOf(`    ${method}:`);
+  if (start === -1) return "";
+  const following = routeSection.slice(start + `    ${method}:`.length);
+  const next = following.search(/\n    (?:get|post|put|patch|delete):/);
+  return routeSection.slice(start, next === -1 ? routeSection.length : start + `    ${method}:`.length + next);
+}
+
+function componentSchemaSection(spec: string, name: string): string {
+  const start = spec.indexOf(`    ${name}:`);
+  if (start === -1) return "";
+  const following = spec.slice(start + name.length + 5);
+  const next = following.search(/\n    [A-Za-z][A-Za-z0-9]+:/);
+  return spec.slice(start, next === -1 ? spec.length : start + name.length + 5 + next);
 }

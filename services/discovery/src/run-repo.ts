@@ -1,20 +1,24 @@
 import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
-import { DEFAULT_LIMITS, EMPTY_CHECKPOINT, EMPTY_COVERAGE, EMPTY_PHASE_USAGE, EMPTY_USAGE, POLICY_VERSION } from "./policy.ts";
+import { EMPTY_CHECKPOINT, EMPTY_COVERAGE, EMPTY_PHASE_USAGE, EMPTY_USAGE, POLICY_VERSION } from "./policy.ts";
 import type { Checkpoint, Lease } from "./ports.ts";
 import { DiscoveryError, type Coverage, type Page, type RankedDecision, type RunRecord } from "./types.ts";
 import { decodeCursor, encodeCursor, isoDate, json, jsonValue, requireLimit, requireText, requireUuid, transaction } from "./repository-support.ts";
 import { leaseFromRow, lockLiveLease } from "./worker-lock.ts";
 import { appendEventInTransaction } from "./event-repo.ts";
 import { deleteCampaignWithLifecycle } from "./lifecycle.ts";
+import { defaultRunConfiguration, snapshotRunConfiguration } from "./run-configuration.ts";
 
-type RunRow = { run_id: string; campaign_id: string; brief_id: string; user_id: string; status: RunRecord["status"]; stage: RunRecord["stage"]; policy_version: string; request_key: string; limits: unknown; usage: unknown; coverage: unknown; started_at: Date | string | null; finished_at: Date | string | null; cancel_requested_at: Date | string | null; created_at: Date | string; lease_owner?: string | null; lease_epoch?: number; lease_expires_at?: Date | string | null; checkpoint?: unknown };
-const RUN_COLUMNS = "run_id::text as run_id, campaign_id::text as campaign_id, brief_id::text as brief_id, user_id::text as user_id, status, stage, policy_version, request_key::text as request_key, limits, usage, coverage, started_at, finished_at, cancel_requested_at, created_at";
+type RunRow = { run_id: string; campaign_id: string; brief_id: string; user_id: string; status: RunRecord["status"]; stage: RunRecord["stage"]; policy_version: string; request_key: string; model_config: unknown; limits: unknown; usage: unknown; coverage: unknown; started_at: Date | string | null; finished_at: Date | string | null; cancel_requested_at: Date | string | null; created_at: Date | string; lease_owner?: string | null; lease_epoch?: number; lease_expires_at?: Date | string | null; checkpoint?: unknown };
+const RUN_COLUMNS = "run_id::text as run_id, campaign_id::text as campaign_id, brief_id::text as brief_id, user_id::text as user_id, status, stage, policy_version, request_key::text as request_key, model_config, limits, usage, coverage, started_at, finished_at, cancel_requested_at, created_at";
 
 export function createRunStore(db: QueryExecutor, clock: () => Date) {
   return {
-    async startRun(userId: string, campaignId: string, input: { brief_version: number; brief_hash: string; request_key: string }): Promise<RunRecord> {
+    async startRun(userId: string, campaignId: string, input: { brief_version: number; brief_hash: string; request_key: string; model_config?: unknown; limits?: unknown }): Promise<RunRecord> {
       requireUuid(userId, "user_id"); requireUuid(campaignId, "campaign_id"); requireUuid(input.request_key, "request_key");
       if (!Number.isInteger(input.brief_version) || input.brief_version < 1 || typeof input.brief_hash !== "string") throw new DiscoveryError("validation", "run request is invalid");
+      const configuration = input.model_config === undefined && input.limits === undefined
+        ? defaultRunConfiguration()
+        : snapshotRunConfiguration({ model_config: input.model_config, limits: input.limits });
       return transaction(db, async (tx) => {
         const user = await tx.query("select user_id from users where user_id=$1::uuid for update", [userId]);
         if (!user.rows[0]) throw new DiscoveryError("not_found", "campaign not found");
@@ -34,10 +38,10 @@ export function createRunStore(db: QueryExecutor, clock: () => Date) {
         if (current.approved_at === null) await tx.query("update discovery_briefs set approved_at=$2::timestamptz where brief_id=$1::uuid", [current.brief_id, clock().toISOString()]);
         try {
           const { rows } = await tx.query<RunRow>(
-            `insert into discovery_runs (campaign_id,user_id,brief_id,request_key,status,stage,policy_version,limits,usage,phase_usage,checkpoint,coverage)
-             values ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'queued','queued',$5,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb)
+            `insert into discovery_runs (campaign_id,user_id,brief_id,request_key,status,stage,policy_version,model_config,limits,usage,phase_usage,checkpoint,coverage)
+             values ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'queued','queued',$5,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb)
              returning ${RUN_COLUMNS}`,
-            [campaignId, userId, current.brief_id, input.request_key, POLICY_VERSION, json(DEFAULT_LIMITS), json(EMPTY_USAGE), json(EMPTY_PHASE_USAGE), json(EMPTY_CHECKPOINT), json(EMPTY_COVERAGE)],
+            [campaignId, userId, current.brief_id, input.request_key, POLICY_VERSION, json(configuration.model_config), json(configuration.limits), json(EMPTY_USAGE), json(EMPTY_PHASE_USAGE), json(EMPTY_CHECKPOINT), json(EMPTY_COVERAGE)],
           );
           return runFromRow(rows[0]);
         } catch (error) {
@@ -153,7 +157,8 @@ export function createRunStore(db: QueryExecutor, clock: () => Date) {
 
 function runFromRow(row: RunRow | undefined): RunRecord {
   if (!row) throw new Error("run query returned no row");
-  return { run_id: row.run_id, campaign_id: row.campaign_id, brief_id: row.brief_id, user_id: row.user_id, status: row.status, stage: row.stage, policy_version: row.policy_version, request_key: row.request_key, limits: jsonValue(row.limits, "limits"), usage: jsonValue(row.usage, "usage"), coverage: jsonValue(row.coverage, "coverage"), started_at: isoDate(row.started_at, "started_at"), finished_at: isoDate(row.finished_at, "finished_at"), cancel_requested_at: isoDate(row.cancel_requested_at, "cancel_requested_at") };
+  const configuration = snapshotRunConfiguration({ model_config: jsonValue(row.model_config, "model_config"), limits: jsonValue(row.limits, "limits") });
+  return { run_id: row.run_id, campaign_id: row.campaign_id, brief_id: row.brief_id, user_id: row.user_id, status: row.status, stage: row.stage, policy_version: row.policy_version, request_key: row.request_key, ...configuration, usage: jsonValue(row.usage, "usage"), coverage: jsonValue(row.coverage, "coverage"), started_at: isoDate(row.started_at, "started_at"), finished_at: isoDate(row.finished_at, "finished_at"), cancel_requested_at: isoDate(row.cancel_requested_at, "cancel_requested_at") };
 }
 
 function checkpointFromValue(value: unknown): Checkpoint {

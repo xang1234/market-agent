@@ -27,6 +27,15 @@ export type Limits = {
   candidates: 100; research: 25; shortlist: 10; attempts: Record<Resource, number>;
   input_chars: 64000; output_tokens: 10000; request_timeout_ms: 30000; run_timeout_ms: 2700000;
 };
+/** Immutable, browser-safe model identity captured when a run is queued. */
+export type ModelConfigSnapshot = {
+  role: "planner" | "scout" | "analyst" | "skeptic" | "summary";
+  provider: string;
+  model: string;
+  max_output_tokens: number;
+  as_of: string;
+};
+export type RunConfigurationSnapshot = { model_config: ModelConfigSnapshot[]; limits: Limits };
 export type Campaign = {
   campaign_id: Id; user_id: Id; name: string; question: string; current_brief_version: number;
   created_at: string; updated_at: string; archived_at: string | null;
@@ -44,7 +53,7 @@ export type Coverage = {
 };
 export type RunRecord = {
   run_id: Id; campaign_id: Id; brief_id: Id; user_id: Id; status: RunStatus; stage: Stage;
-  policy_version: string; request_key: Id; limits: Limits; usage: Record<Resource, number>;
+  policy_version: string; request_key: Id; model_config: ModelConfigSnapshot[]; limits: Limits; usage: Record<Resource, number>;
   coverage: Coverage; started_at: string | null; finished_at: string | null; cancel_requested_at: string | null;
 };
 export type CompanyIdentity = {
@@ -102,6 +111,7 @@ export type RunView = RunRecord & { shortlist: CandidateView[]; cost: { status: 
 export type Page<T> = { items: T[]; next_cursor: string | null };
 export type EventPage = { items: CampaignEvent[]; next_sequence: number; has_more: boolean };
 export type Readiness = { ready: boolean; missing: ("model" | "search" | "reference")[] };
+export type MetricOption = { metric_key: string; display_name: string; unit_class: string; aggregation: string; interpretation: string; canonical_source_class: string };
 export type CampaignDetail = { campaign: Campaign; brief: SavedBrief | null; latest_run: RunRecord | null; readiness: Readiness };
 export type ResearchHandoff = {
   kind: "discovery"; campaignId: Id; runId: Id; candidateId: Id;

@@ -6,13 +6,13 @@ import { DiscoveryError } from "./types.ts";
 
 export type DiscoveryReadModel = ReturnType<typeof createDiscoveryReadModel>;
 
-export function createDiscoveryReadModel(db: QueryExecutor) {
+export function createDiscoveryReadModel(db: QueryExecutor, clock: () => Date = () => new Date()) {
   return Object.freeze({
     async runView(repo: DiscoveryRepository, userId: string, runId: string): Promise<RunView> {
       const [run, candidates] = await Promise.all([repo.readRun(userId, runId), repo.candidates(userId, runId)]);
       const [views, worker_waiting] = await Promise.all([
         authorizedCandidateViews(db, userId, candidates),
-        queuedWorkerWaiting(db, userId, runId),
+        queuedWorkerWaiting(db, userId, runId, clock),
       ]);
       return { ...run, shortlist: views.filter((candidate) => candidate.state === "shortlisted"), cost: { status: "unavailable" }, worker_waiting };
     },
@@ -36,13 +36,14 @@ export function createDiscoveryReadModel(db: QueryExecutor) {
   });
 }
 
-async function queuedWorkerWaiting(db: QueryExecutor, userId: string, runId: string): Promise<boolean> {
-  const { rows } = await db.query<{ worker_waiting: boolean }>(
-    `select status='queued' and created_at <= now()-interval '90 seconds' as worker_waiting
+async function queuedWorkerWaiting(db: QueryExecutor, userId: string, runId: string, clock: () => Date): Promise<boolean> {
+  const { rows } = await db.query<{ status: string; created_at: Date | string }>(
+    `select status, created_at
        from discovery_runs where run_id=$1::uuid and user_id=$2::uuid`,
     [runId, userId],
   );
-  return rows[0]?.worker_waiting === true;
+  const row = rows[0];
+  return row?.status === "queued" && new Date(row.created_at).getTime() < clock().getTime() - 90_000;
 }
 
 function cursorOffset(cursor: string | null, candidates: readonly StoredCandidate[]): number {

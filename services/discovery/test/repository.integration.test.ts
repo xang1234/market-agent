@@ -4,6 +4,7 @@ import test from "node:test";
 import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
 import { hashJsonValue } from "../../observability/src/tool-call.ts";
 import { createOperationRunner } from "../src/operations.ts";
+import { DEFAULT_LIMITS } from "../src/policy.ts";
 import type { DiscoveryContext, Providers } from "../src/ports.ts";
 import { discoverCandidates } from "../src/scout.ts";
 import type { CompanyIdentity, DiscoveredCandidate, Origin, RankedDecision, SearchHit } from "../src/types.ts";
@@ -55,6 +56,29 @@ test("starts are idempotent per request and serialize active work per user", dbO
   await assert.rejects(
     repo.startRun(userId, second.campaign_id, { brief_version: secondBrief.version, brief_hash: secondBrief.hash, request_key: crypto.randomUUID() }),
     { code: "active_run" },
+  );
+});
+
+test("run records persist a secret-free model configuration snapshot and limits", dbOptions, async (t) => {
+  const { db, repo, userId } = await withCampaignDb(t);
+  const campaign = await repo.createCampaign(userId, { name: "Model audit", question: "Which US-listed companies benefit from grid modernization spending?" });
+  const brief = await repo.saveBrief(userId, campaign.campaign_id, 0, briefFixture());
+  const modelConfig = [{ role: "planner", provider: "fixture", model: "brief-drafter", max_output_tokens: 800, as_of: "2026-09-13T00:00:00.000Z" }];
+  const run = await repo.startRun(userId, campaign.campaign_id, {
+    brief_version: brief.version, brief_hash: brief.hash, request_key: crypto.randomUUID(), model_config: modelConfig, limits: DEFAULT_LIMITS,
+  } as never);
+
+  assert.deepEqual(run.model_config, modelConfig);
+  assert.deepEqual(run.limits, DEFAULT_LIMITS);
+  assert.equal(JSON.stringify(run).includes("api_key"), false);
+  const stored = await db.query<{ model_config: unknown }>("select model_config from discovery_runs where run_id=$1::uuid", [run.run_id]);
+  assert.deepEqual(stored.rows[0]?.model_config, modelConfig);
+  await assert.rejects(
+    repo.startRun(userId, campaign.campaign_id, {
+      brief_version: brief.version, brief_hash: brief.hash, request_key: crypto.randomUUID(),
+      model_config: [{ ...modelConfig[0], api_key: "must-not-persist" }], limits: DEFAULT_LIMITS,
+    } as never),
+    { code: "validation" },
   );
 });
 
@@ -238,6 +262,19 @@ test("brief saves reject an unregistered metric key", dbOptions, async (t) => {
   const brief = briefFixture();
   brief.criteria[0]!.metric = { metric_key: "not_registered", unit: "ratio", period_kind: "fiscal_q", operator: "gte", threshold: 0.1, max_age_days: 90 };
   await assert.rejects(repo.saveBrief(userId, campaign.campaign_id, 0, brief), { code: "validation" });
+});
+
+test("metric options read the canonical registry without exposing registry internals", dbOptions, async (t) => {
+  const { db, repo, userId } = await withCampaignDb(t);
+  await db.query(
+    `insert into metrics (metric_key,display_name,unit_class,aggregation,interpretation,canonical_source_class,definition_version,notes)
+     values ('revenue_growth','Revenue growth','percentage','period_over_period','Growth in reported revenue','financial_statement',7,'internal revision note'),
+            ('free_cash_flow','Free cash flow','currency','sum','Cash generated after capital expenditure','cash_flow_statement',3,'internal note')`,
+  );
+  assert.deepEqual(await repo.listMetricOptions(userId), [
+    { metric_key: "free_cash_flow", display_name: "Free cash flow", unit_class: "currency", aggregation: "sum", interpretation: "Cash generated after capital expenditure", canonical_source_class: "cash_flow_statement" },
+    { metric_key: "revenue_growth", display_name: "Revenue growth", unit_class: "percentage", aggregation: "period_over_period", interpretation: "Growth in reported revenue", canonical_source_class: "financial_statement" },
+  ]);
 });
 
 test("lease writes reject an epoch mismatch", dbOptions, async (t) => {

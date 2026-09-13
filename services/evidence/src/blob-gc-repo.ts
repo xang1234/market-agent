@@ -2,8 +2,9 @@ import { assertRawBlobId, type ObjectStore } from "./object-store.ts";
 import type { QueryExecutor } from "./types.ts";
 import { assertUuidV4 } from "./validators.ts";
 import { deleteSnapshotIfUnreachable } from "./snapshot-reachability.ts";
+import { deleteUnreferencedCampaignExactQuoteClaims } from "./campaign-quote-lifecycle.ts";
 
-type DiscoveryLifecycleRows = { snapshot_ids: string[]; tool_call_ids: string[] };
+type DiscoveryLifecycleRows = { snapshot_ids: string[]; tool_call_ids: string[]; quote_claim_ids: string[] };
 
 const OBJECT_BLOB_GC_TRANSACTION_CLIENT: unique symbol = Symbol("evidence.objectBlobGcTransactionClient");
 const DEFAULT_REFERENCED_RETRY_AFTER_MS = 60_000;
@@ -112,6 +113,7 @@ export async function deleteUserAndQueueObjectBlobs(
       [userId],
     );
     for (const snapshotId of discovery.snapshot_ids) await deleteSnapshotIfUnreachable(db, snapshotId);
+    await deleteUnreferencedCampaignExactQuoteClaims(db, discovery.quote_claim_ids);
     await deleteUnreferencedDiscoveryToolCalls(db, discovery.tool_call_ids);
     await db.query("commit");
     return Object.freeze({
@@ -140,6 +142,15 @@ async function purgeDiscoveryCampaignsForUser(db: QueryExecutor, userId: string)
       where c.user_id=$1::uuid and a.tool_call_id is not null`,
     [userId],
   );
+  const quoteClaims = await db.query<{ claim_id: string }>(
+    `select q.claim_id::text as claim_id
+       from discovery_quote_claims q
+       join discovery_runs r on q.operation_key like r.run_id::text || '/%'
+       join claims c on c.claim_id=q.claim_id and c.predicate='campaign_exact_quote'
+      where r.user_id=$1::uuid
+      for update of q,c`,
+    [userId],
+  );
   await db.query(
     `delete from discovery_quote_claims q
       using discovery_runs r
@@ -154,6 +165,7 @@ async function purgeDiscoveryCampaignsForUser(db: QueryExecutor, userId: string)
   return {
     snapshot_ids: [...new Set(snapshots.rows.map((row) => row.snapshot_id))],
     tool_call_ids: toolCalls.rows.map((row) => row.tool_call_id),
+    quote_claim_ids: quoteClaims.rows.map((row) => row.claim_id),
   };
 }
 

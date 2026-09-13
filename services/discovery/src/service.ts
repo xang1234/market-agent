@@ -4,7 +4,8 @@ import { hashJsonValue } from "../../observability/src/tool-call.ts";
 import { createOperationRunner } from "./operations.ts";
 import type { DiscoveryReadModel } from "./read-model.ts";
 import type { DiscoveryRepository, DiscoveryService, OperationRunner } from "./ports.ts";
-import type { Brief, CandidateState, Readiness } from "./types.ts";
+import { defaultRunConfiguration, snapshotRunConfiguration } from "./run-configuration.ts";
+import type { Brief, CandidateState, Readiness, RunConfigurationSnapshot } from "./types.ts";
 import { DiscoveryError } from "./types.ts";
 import { parseBrief } from "./validation.ts";
 
@@ -17,10 +18,13 @@ export type DiscoveryServiceDeps = {
   reads: DiscoveryReadModel;
   readiness?: () => Readiness;
   draftPlanner?: DiscoveryDraftPlanner;
+  /** Server-composed identities and policy caps persisted once per queued run. */
+  runConfiguration?: () => RunConfigurationSnapshot;
 };
 
 export function createDiscoveryService(deps: DiscoveryServiceDeps): DiscoveryService {
   const readiness = deps.readiness ?? (() => ({ ready: false, missing: ["model", "search", "reference"] }));
+  const runConfiguration = deps.runConfiguration ?? defaultRunConfiguration;
   return Object.freeze({
     createCampaign: (userId, input) => deps.repo.createCampaign(userId, input),
     listCampaigns: (userId, cursor, limit) => deps.repo.listCampaigns(userId, cursor, limit),
@@ -59,7 +63,8 @@ export function createDiscoveryService(deps: DiscoveryServiceDeps): DiscoverySer
       }
     },
     saveBrief: (userId, campaignId, expectedVersion, brief) => deps.repo.saveBrief(userId, campaignId, expectedVersion, brief),
-    startRun: (userId, campaignId, input) => deps.repo.startRun(userId, campaignId, input),
+    startRun: (userId, campaignId, input) => deps.repo.startRun(userId, campaignId, { ...input, ...snapshotRunConfiguration(runConfiguration()) }),
+    listMetricOptions: (userId) => deps.repo.listMetricOptions(userId),
     listRuns: (userId, campaignId, cursor, limit) => deps.repo.listRuns(userId, campaignId, cursor, limit),
     getRun: (userId, runId) => deps.reads.runView(deps.repo, userId, runId),
     getCandidates: (userId, runId, input) => {

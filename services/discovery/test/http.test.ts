@@ -41,6 +41,18 @@ test("discovery HTTP rejects unauthenticated creation before a draft provider ca
   assert.equal(service.calls.draft, 0);
 });
 
+test("discovery HTTP exposes canonical browser-safe metric options", async (t) => {
+  const { base, service } = await startServer(t);
+  const response = await request(base, "/v1/discovery/metric-options");
+  assert.equal(response.status, 200);
+  const body = await response.json() as { items: Array<Record<string, unknown>> };
+  assert.deepEqual(body.items, [{
+    metric_key: "revenue_growth", display_name: "Revenue growth", unit_class: "percentage", aggregation: "period_over_period", interpretation: "Growth in reported revenue", canonical_source_class: "financial_statement",
+  }]);
+  assert.equal("api_key" in body.items[0]!, false);
+  assert.equal(service.calls.metrics, 1);
+});
+
 test("discovery HTTP exposes every campaign and run endpoint with owned request data", async (t) => {
   const { base, service } = await startServer(t);
   const question = "Which US-listed companies benefit from grid modernization spending?";
@@ -61,7 +73,7 @@ test("discovery HTTP exposes every campaign and run endpoint with owned request 
   assert.equal((await request(base, `/v1/discovery/runs/${RUN}/events?after=0`)).status, 200);
   assert.equal((await request(base, `/v1/discovery/runs/${RUN}/cancel`, { method: "POST" })).status, 200);
   assert.equal((await request(base, `/v1/discovery/campaigns/${CAMPAIGN}`, { method: "DELETE" })).status, 204);
-  assert.deepEqual(service.calls, { create: 1, draft: 1, save: 1, start: 2, cancel: 1, delete: 1 });
+  assert.deepEqual(service.calls, { create: 1, draft: 1, save: 1, start: 2, cancel: 1, delete: 1, metrics: 0 });
 });
 
 test("discovery HTTP maps malformed, foreign, stale, rate-limited, and unavailable requests", async (t) => {
@@ -78,8 +90,26 @@ test("discovery HTTP maps malformed, foreign, stale, rate-limited, and unavailab
   assert.equal((await request(base, `/v1/discovery/campaigns/${CAMPAIGN}/draft`, { method: "POST", body: JSON.stringify({ expected_version: 0 }) })).status, 503);
 });
 
+test("discovery HTTP rejects unknown mutation fields, malformed hashes, and malformed encoded identifiers before service dispatch", async (t) => {
+  const { base, service } = await startServer(t);
+  const question = "Which US-listed companies benefit from grid modernization spending?";
+  const badRequests: Array<[string, RequestInit]> = [
+    ["/v1/discovery/campaigns", { method: "POST", body: JSON.stringify({ name: "Grid", question, extra: true }) }],
+    [`/v1/discovery/campaigns/${CAMPAIGN}/draft`, { method: "POST", body: JSON.stringify({ expected_version: 0, extra: true }) }],
+    [`/v1/discovery/campaigns/${CAMPAIGN}/brief`, { method: "PUT", body: JSON.stringify({ expected_version: 0, brief: briefFixture(), extra: true }) }],
+    [`/v1/discovery/campaigns/${CAMPAIGN}/runs`, { method: "POST", body: JSON.stringify({ brief_version: 1, brief_hash: "sha256:not-a-hash", request_key: REQUEST }) }],
+    [`/v1/discovery/campaigns/${CAMPAIGN}/runs`, { method: "POST", body: JSON.stringify({ brief_version: 1, brief_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", request_key: REQUEST, extra: true }) }],
+    [`/v1/discovery/runs/${RUN}/cancel`, { method: "POST", body: "{}" }],
+    [`/v1/discovery/campaigns/${CAMPAIGN}`, { method: "DELETE", body: "{}" }],
+    ["/v1/discovery/campaigns/%E0%A4%A", {}],
+  ];
+  for (const [path, init] of badRequests) assert.equal((await request(base, path, init)).status, 400, path);
+  assert.deepEqual(service.calls, { create: 0, draft: 0, save: 0, start: 0, cancel: 0, delete: 0, metrics: 0 });
+  assert.equal((await request(base, "/v1/discoverySettings")).status, 404, "only the exact discovery namespace is owned");
+});
+
 function fixtureService() {
-  const calls = { create: 0, draft: 0, save: 0, start: 0, cancel: 0, delete: 0 };
+  const calls = { create: 0, draft: 0, save: 0, start: 0, cancel: 0, delete: 0, metrics: 0 };
   let nextError: Error | null = null;
   let foreign = false;
   const fail = () => {
@@ -93,6 +123,7 @@ function fixtureService() {
     get nextError() { return nextError; }, set nextError(value: Error | null) { nextError = value; },
     get foreign() { return foreign; }, set foreign(value: boolean) { foreign = value; },
     async createCampaign() { calls.create += 1; fail(); return campaign; },
+    async listMetricOptions() { calls.metrics += 1; fail(); return [{ metric_key: "revenue_growth", display_name: "Revenue growth", unit_class: "percentage", aggregation: "period_over_period", interpretation: "Growth in reported revenue", canonical_source_class: "financial_statement" }]; },
     async listCampaigns() { fail(); return { items: [campaign], next_cursor: null }; },
     async getCampaign() { fail(); return { campaign, brief: null, latest_run: run, readiness: { ready: true, missing: [] } }; },
     async draftBrief() { calls.draft += 1; fail(); return { brief: briefFixture(), base_version: 0 }; },

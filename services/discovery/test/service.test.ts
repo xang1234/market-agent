@@ -4,6 +4,7 @@ import test from "node:test";
 
 import { createDiscoveryService } from "../src/service.ts";
 import { DiscoveryError } from "../src/types.ts";
+import { DEFAULT_LIMITS } from "../src/policy.ts";
 import { briefFixture } from "./fixtures.ts";
 
 const USER = "10000000-0000-4000-8000-000000000001";
@@ -47,6 +48,38 @@ test("missing model readiness rejects before acquiring a draft token", async () 
   const service = createDiscoveryService({ repo: h.repo as never, reads: {} as never });
   await assert.rejects(service.draftBrief(USER, CAMPAIGN, 0), (error: unknown) => error instanceof DiscoveryError && error.code === "unavailable");
   assert.equal(h.calls.acquire, 0);
+});
+
+test("starting a run snapshots the configured secret-free model identities and limits", async () => {
+  let received: unknown;
+  const service = createDiscoveryService({
+    repo: {
+      async startRun(_userId: string, _campaignId: string, input: unknown) {
+        received = input;
+        return { run_id: "30000000-0000-4000-8000-000000000001" };
+      },
+    } as never,
+    reads: {} as never,
+    runConfiguration: () => ({
+      model_config: [{ role: "planner", provider: "fixture", model: "brief-drafter", max_output_tokens: 800, as_of: "2026-09-13T00:00:00.000Z" }],
+      limits: DEFAULT_LIMITS,
+    }),
+  });
+
+  await service.startRun(USER, CAMPAIGN, {
+    brief_version: 1,
+    brief_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    request_key: "40000000-0000-4000-8000-000000000001",
+  });
+
+  assert.deepEqual(received, {
+    brief_version: 1,
+    brief_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    request_key: "40000000-0000-4000-8000-000000000001",
+    model_config: [{ role: "planner", provider: "fixture", model: "brief-drafter", max_output_tokens: 800, as_of: "2026-09-13T00:00:00.000Z" }],
+    limits: DEFAULT_LIMITS,
+  });
+  assert.equal(JSON.stringify(received).includes("api_key"), false);
 });
 
 function draftHarness(options: { changeAfterDraft?: boolean } = {}) {

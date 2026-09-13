@@ -29,15 +29,18 @@ test("campaign deletion refuses a run with a live lease", dbOptions, async (t) =
   await assert.rejects(repo.deleteCampaign(userId, campaign.campaign_id), { code: "active_run" });
 });
 
-test("a queued run older than ninety seconds reports worker waiting without fabricating a result", dbOptions, async (t) => {
-  const { db, repo, userId, createApprovedRun } = await withCampaignDb(t);
+test("a queued run reports worker waiting only when it is strictly older than ninety seconds", dbOptions, async (t) => {
+  const { db, repo, userId, clock, createApprovedRun } = await withCampaignDb(t);
   const { run } = await createApprovedRun();
-  await db.query("update discovery_runs set created_at=now()-interval '91 seconds' where run_id=$1::uuid", [run.run_id]);
-  const service = createDiscoveryService({ repo, reads: createDiscoveryReadModel(db) });
+  await db.query("update discovery_runs set created_at=$2::timestamptz where run_id=$1::uuid", [run.run_id, clock.now().toISOString()]);
+  clock.advance(90_000);
+  const service = createDiscoveryService({ repo, reads: createDiscoveryReadModel(db, clock.now) });
   const view = await service.getRun(userId, run.run_id);
   assert.equal(view.status, "queued");
-  assert.equal(view.worker_waiting, true);
+  assert.equal(view.worker_waiting, false);
   assert.deepEqual(view.shortlist, []);
+  clock.advance(1_000);
+  assert.equal((await service.getRun(userId, run.run_id)).worker_waiting, true);
 });
 
 test("campaign deletion removes a sealed snapshot only when no other product branch still reaches it", dbOptions, async (t) => {
@@ -57,6 +60,45 @@ test("campaign deletion removes a sealed snapshot only when no other product bra
   assert.equal((await h.db.query("select 1 from tool_call_logs where tool_call_id=any($1::uuid[])", [toolCalls.rows.map((row) => row.tool_call_id)])).rowCount, 0);
 });
 
+test("campaign deletion removes an unreferenced campaign exact-quote claim and its cascading evidence", dbOptions, async (t) => {
+  const h = await createRunnerHarness(t);
+  await h.executeOnce();
+  const claim = await h.db.query<{ claim_id: string }>(
+    `select q.claim_id::text as claim_id from discovery_quote_claims q
+      where q.operation_key like $1::text || '/%' limit 1`,
+    [h.runId],
+  );
+  const claimId = claim.rows[0]?.claim_id;
+  assert.ok(claimId);
+  const campaign = await h.db.query<{ campaign_id: string }>("select campaign_id::text as campaign_id from discovery_runs where run_id=$1::uuid", [h.runId]);
+  await h.repo.deleteCampaign(h.userId, campaign.rows[0]!.campaign_id);
+  assert.equal((await h.db.query("select 1 from claims where claim_id=$1::uuid", [claimId])).rowCount, 0);
+  assert.equal((await h.db.query("select 1 from claim_evidence where claim_id=$1::uuid", [claimId])).rowCount, 0);
+});
+
+test("campaign deletion keeps a campaign exact-quote claim reached by a shared snapshot", dbOptions, async (t) => {
+  const h = await createRunnerHarness(t);
+  await h.executeOnce();
+  const quote = await h.db.query<{ claim_id: string }>(
+    `select q.claim_id::text as claim_id from discovery_quote_claims q
+      where q.operation_key like $1::text || '/%' limit 1`,
+    [h.runId],
+  );
+  const claimId = quote.rows[0]?.claim_id;
+  assert.ok(claimId);
+  const sharedSnapshot = await h.db.query<{ snapshot_id: string }>(
+    `insert into snapshots (subject_refs,claim_refs,as_of,basis,normalization,allowed_transforms)
+     values ('[]'::jsonb,jsonb_build_array($1::text),now(),'as_reported','none','[]'::jsonb)
+     returning snapshot_id::text as snapshot_id`,
+    [claimId],
+  );
+  const campaign = await h.db.query<{ campaign_id: string }>("select campaign_id::text as campaign_id from discovery_runs where run_id=$1::uuid", [h.runId]);
+  await h.repo.deleteCampaign(h.userId, campaign.rows[0]!.campaign_id);
+  assert.equal((await h.db.query("select 1 from claims where claim_id=$1::uuid", [claimId])).rowCount, 1);
+  assert.equal((await h.db.query("select 1 from claim_evidence where claim_id=$1::uuid", [claimId])).rowCount, 1);
+  assert.equal((await h.db.query("select 1 from snapshots where snapshot_id=$1::uuid", [sharedSnapshot.rows[0]!.snapshot_id])).rowCount, 1);
+});
+
 test("user erasure clears campaign-owned quote mapping and snapshots without deleting shared sources", dbOptions, async (t) => {
   const h = await createRunnerHarness(t);
   await h.executeOnce();
@@ -71,10 +113,33 @@ test("user erasure clears campaign-owned quote mapping and snapshots without del
     "select tool_call_id::text as tool_call_id from discovery_attempts where run_id=$1::uuid and tool_call_id is not null",
     [h.runId],
   );
+  const quote = await h.db.query<{ claim_id: string }>(
+    `select q.claim_id::text as claim_id from discovery_quote_claims q
+      where q.operation_key like $1::text || '/%' limit 1`,
+    [h.runId],
+  );
+  const quoteClaimId = quote.rows[0]?.claim_id;
+  assert.ok(quoteClaimId);
+  const sharedSnapshot = await h.db.query<{ snapshot_id: string }>(
+    `insert into snapshots (subject_refs,claim_refs,as_of,basis,normalization,allowed_transforms)
+     values ('[]'::jsonb,jsonb_build_array($1::text),now(),'as_reported','none','[]'::jsonb)
+     returning snapshot_id::text as snapshot_id`,
+    [quoteClaimId],
+  );
+  const sharedEvent = await h.db.query<{ event_id: string }>(
+    `insert into events (event_type,occurred_at,status,source_claim_ids,source_ids)
+     values ('fixture_quote_reference',now(),'confirmed',jsonb_build_array($1::text),'[]'::jsonb)
+     returning event_id::text as event_id`,
+    [quoteClaimId],
+  );
   await deleteUserAndQueueObjectBlobsWithPool(h.db, h.userId);
   await assert.rejects(h.repo.readRun(h.userId, h.runId), { code: "not_found" });
   assert.equal((await h.db.query("select 1 from discovery_candidates where run_id=$1::uuid", [h.runId])).rowCount, 0, "erasure removes the discovery visibility branch");
   assert.equal((await h.db.query("select 1 from discovery_quote_claims where source_id=$1::uuid", [sourceId])).rowCount, 0);
+  assert.equal((await h.db.query("select 1 from claims where claim_id=$1::uuid", [quoteClaimId])).rowCount, 1, "shared snapshot/event references preserve canonical quote evidence");
+  assert.equal((await h.db.query("select 1 from claim_evidence where claim_id=$1::uuid", [quoteClaimId])).rowCount, 1);
+  assert.equal((await h.db.query("select 1 from snapshots where snapshot_id=$1::uuid", [sharedSnapshot.rows[0]!.snapshot_id])).rowCount, 1);
+  assert.equal((await h.db.query("select 1 from events where event_id=$1::uuid", [sharedEvent.rows[0]!.event_id])).rowCount, 1);
   assert.equal((await h.db.query("select 1 from snapshots where snapshot_id=$1::uuid", [candidate.snapshot_id])).rowCount, 0);
   assert.equal((await h.db.query("select 1 from sources where source_id=$1::uuid", [sourceId])).rowCount, 1);
   assert.equal((await h.db.query("select 1 from tool_call_logs where tool_call_id=any($1::uuid[])", [toolCalls.rows.map((row) => row.tool_call_id)])).rowCount, 0);

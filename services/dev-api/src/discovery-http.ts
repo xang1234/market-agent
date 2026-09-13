@@ -9,7 +9,8 @@ export type DevApiDiscoveryAdapter = { handle(req: IncomingMessage, res: ServerR
 export function createDiscoveryDevApiAdapter(service: DiscoveryService): DevApiDiscoveryAdapter {
   return Object.freeze({
     async handle(req, res) {
-      if (!new URL(req.url ?? "/", "http://localhost").pathname.startsWith("/v1/discovery")) return false;
+      const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+      if (pathname !== "/v1/discovery" && !pathname.startsWith("/v1/discovery/")) return false;
       const userId = typeof req.headers["x-user-id"] === "string" ? req.headers["x-user-id"].trim() : "";
       if (userId === "") {
         res.statusCode = 401;

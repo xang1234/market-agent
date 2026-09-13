@@ -1,7 +1,7 @@
 import { hashJsonValue } from "../../observability/src/tool-call.ts";
 import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
 import { parseBrief } from "./validation.ts";
-import { DiscoveryError, type Brief, type Campaign, type Page, type SavedBrief } from "./types.ts";
+import { DiscoveryError, type Brief, type Campaign, type MetricOption, type Page, type SavedBrief } from "./types.ts";
 import { decodeCursor, encodeCursor, isoDate, json, jsonValue, requireLimit, requireText, requireUuid, transaction } from "./repository-support.ts";
 
 type CampaignRow = Omit<Campaign, "created_at" | "updated_at" | "archived_at"> & { created_at: Date | string; updated_at: Date | string; archived_at: Date | string | null };
@@ -41,6 +41,21 @@ export function createCampaignStore(db: QueryExecutor) {
       const items = rows.slice(0, limit).map(campaignFromRow);
       const next = rows.length > limit ? items.at(-1) : undefined;
       return { items, next_cursor: next ? encodeCursor({ created_at: next.created_at, id: next.campaign_id }) : null };
+    },
+    async listMetricOptions(userId: string): Promise<MetricOption[]> {
+      requireUuid(userId, "user_id");
+      const { rows } = await db.query<MetricOption>(
+        `select metric_key, display_name, unit_class, aggregation, interpretation, canonical_source_class
+           from metrics order by display_name, metric_key`,
+      );
+      return rows.map((row) => ({
+        metric_key: requireText(row.metric_key, "metric_key", 1, 200),
+        display_name: requireText(row.display_name, "display_name", 1, 500),
+        unit_class: requireText(row.unit_class, "unit_class", 1, 200),
+        aggregation: requireText(row.aggregation, "aggregation", 1, 200),
+        interpretation: requireText(row.interpretation, "interpretation", 1, 4_000),
+        canonical_source_class: requireText(row.canonical_source_class, "canonical_source_class", 1, 200),
+      }));
     },
     async getBrief(userId: string, briefId: string): Promise<SavedBrief> {
       requireUuid(userId, "user_id"); requireUuid(briefId, "brief_id");
