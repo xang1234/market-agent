@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { load } from "../web/node_modules/js-yaml/dist/js-yaml.mjs";
 
 const REPO_ROOT = dirname(dirname(new URL(import.meta.url).pathname));
 const OPENAPI_PATH = join(REPO_ROOT, "spec", "finance_research_openapi.yaml");
@@ -162,6 +163,92 @@ test("OpenAPI gives every discovery operation browser-safe response and error sc
   for (const expected of ["metric_key:", "display_name:", "unit_class:", "aggregation:", "interpretation:", "canonical_source_class:"]) assert.match(metric, new RegExp(escapeRegExp(expected)));
 });
 
+test("OpenAPI recursively closes every discovery response object and preserves key DTO fields", async () => {
+  const document = await openApiDocument();
+  const visitedReferences = new Set<string>();
+
+  for (const [label, schema] of discoveryResponseSchemas(document)) {
+    assertClosedResponseObjects(document, schema, label, visitedReferences);
+  }
+
+  const successResponseByOperation = [
+    ["get", "/v1/discovery/metric-options", "200", "DiscoveryMetricOptionsResponse"],
+    ["get", "/v1/discovery/campaigns", "200", "DiscoveryCampaignPageResponse"],
+    ["post", "/v1/discovery/campaigns", "201", "DiscoveryCampaignResponse"],
+    ["get", "/v1/discovery/campaigns/{campaignId}", "200", "DiscoveryCampaignDetailResponse"],
+    ["post", "/v1/discovery/campaigns/{campaignId}/draft", "200", "DiscoveryDraftResponse"],
+    ["put", "/v1/discovery/campaigns/{campaignId}/brief", "200", "DiscoverySavedBriefResponse"],
+    ["get", "/v1/discovery/campaigns/{campaignId}/runs", "200", "DiscoveryRunPageResponse"],
+    ["post", "/v1/discovery/campaigns/{campaignId}/runs", "201", "DiscoveryRunResponse"],
+    ["get", "/v1/discovery/runs/{runId}", "200", "DiscoveryRunViewResponse"],
+    ["get", "/v1/discovery/runs/{runId}/candidates", "200", "DiscoveryCandidatePageResponse"],
+    ["get", "/v1/discovery/runs/{runId}/events", "200", "DiscoveryEventPageResponse"],
+    ["post", "/v1/discovery/runs/{runId}/cancel", "200", "DiscoveryRunResponse"],
+  ] as const;
+  for (const [method, path, status, responseName] of successResponseByOperation) {
+    const operation = record(record(record(document.paths, "paths")[path], `paths.${path}`)[method], `${method} ${path}`);
+    const response = record(record(operation.responses, `${method} ${path}.responses`)[status], `${method} ${path} ${status}`);
+    assert.equal(response.$ref, `#/components/responses/${responseName}`, `${method.toUpperCase()} ${path} uses its named success response`);
+  }
+
+  const requiredByDto: Record<string, readonly string[]> = {
+    DiscoveryMetricOption: ["metric_key", "display_name", "unit_class", "aggregation", "interpretation", "canonical_source_class"],
+    DiscoveryCampaign: ["campaign_id", "user_id", "name", "question", "current_brief_version", "created_at", "updated_at", "archived_at"],
+    DiscoveryCampaignPage: ["items", "next_cursor"],
+    DiscoveryBrief: ["schema_version", "question", "market", "horizon_months", "lookback_months", "mechanisms", "criteria", "seed_queries", "exclusions", "preferences", "queries"],
+    DiscoveryMechanism: ["mechanism_id", "label", "chain"],
+    DiscoveryMetricCheck: ["metric_key", "unit", "period_kind", "operator", "threshold", "max_age_days"],
+    DiscoveryCriterion: ["criterion_id", "importance", "statement", "falsifier"],
+    DiscoveryBriefQuery: ["mechanism_id", "query"],
+    DiscoverySavedBrief: ["brief_id", "campaign_id", "version", "brief", "hash", "approved_at", "created_at"],
+    DiscoveryModelConfig: ["role", "provider", "model", "max_output_tokens", "as_of"],
+    DiscoveryLimits: ["candidates", "research", "shortlist", "attempts", "input_chars", "output_tokens", "request_timeout_ms", "run_timeout_ms"],
+    DiscoveryAttemptLimits: ["search", "document", "identity", "financial", "model"],
+    DiscoveryUsage: ["search", "document", "identity", "financial", "model"],
+    DiscoveryCoverage: ["searches_planned", "searches_completed", "hits_truncated", "leads_overflow", "extraction_batches_skipped", "unresolved", "discovered", "selected", "assessed", "not_selected", "mechanisms", "gaps"],
+    DiscoveryCoverageMechanism: ["mechanism_id", "discovered", "selected", "assessed"],
+    DiscoveryCoverageGap: ["code", "candidate_id", "detail"],
+    DiscoveryRun: ["run_id", "campaign_id", "brief_id", "user_id", "status", "stage", "policy_version", "request_key", "model_config", "limits", "usage", "coverage", "started_at", "finished_at", "cancel_requested_at"],
+    DiscoveryRunPage: ["items", "next_cursor"],
+    DiscoveryRunView: ["run_id", "campaign_id", "brief_id", "user_id", "status", "stage", "policy_version", "request_key", "model_config", "limits", "usage", "coverage", "started_at", "finished_at", "cancel_requested_at", "shortlist", "cost", "worker_waiting"],
+    DiscoveryCost: ["status"],
+    DiscoveryReadiness: ["ready", "missing"],
+    DiscoveryCompanyIdentity: ["issuer_id", "listing_id", "legal_name", "ticker", "mic", "currency", "asset_type", "identity_source_ids"],
+    DiscoveryDimension: ["level", "explanation", "citations"],
+    DiscoveryDimensions: ["theme_exposure", "evidence_strength", "business_quality", "valuation_context"],
+    DiscoveryCriterionOutcome: ["criterion_id", "outcome", "explanation", "citations"],
+    DiscoveryCounterargument: ["text", "citations"],
+    DiscoveryCandidateDecision: ["candidate_id", "identity", "state", "dimensions", "criteria", "counterarguments", "unresolved_questions", "next_action", "reason_codes"],
+    DiscoveryCandidate: ["candidate_id", "identity", "name", "state", "rank", "snapshot_id", "evidence_available", "can_promote", "assessment", "sources", "origins", "mechanism_ids", "reason_codes"],
+    DiscoveryCandidatePage: ["items", "next_cursor"],
+    DiscoveryCampaignDetail: ["campaign", "brief", "latest_run", "readiness"],
+    DiscoveryDraft: ["brief", "base_version"],
+    DiscoveryCitation: ["kind", "id"],
+    DiscoverySourceView: ["citation", "title", "url", "published_at", "retrieved_at"],
+    DiscoveryEvent: ["run_id", "sequence", "stage", "kind", "candidate_id", "summary", "citations", "created_at"],
+    DiscoveryEventPage: ["items", "next_sequence", "has_more"],
+  };
+
+  for (const [name, required] of Object.entries(requiredByDto)) {
+    const schema = componentSchema(document, name);
+    assert.equal(schema.additionalProperties, false, `${name} closes its browser-safe shape`);
+    assert.deepEqual(schema.required, required, `${name} lists every runtime field as required`);
+  }
+
+  const brief = componentSchema(document, "DiscoveryBrief");
+  const briefProperties = record(brief.properties, "DiscoveryBrief.properties");
+  assert.deepEqual(record(briefProperties.mechanisms, "DiscoveryBrief.mechanisms"), { $ref: "#/components/schemas/DiscoveryMechanismList" });
+  assert.deepEqual(record(briefProperties.criteria, "DiscoveryBrief.criteria"), { $ref: "#/components/schemas/DiscoveryCriterionList" });
+  assert.deepEqual(record(briefProperties.queries, "DiscoveryBrief.queries"), { $ref: "#/components/schemas/DiscoveryBriefQueryList" });
+  assert.deepEqual(record(briefProperties.exclusions, "DiscoveryBrief.exclusions"), { $ref: "#/components/schemas/DiscoveryExclusionList" });
+  assert.deepEqual(record(briefProperties.preferences, "DiscoveryBrief.preferences"), { $ref: "#/components/schemas/DiscoveryPreferenceList" });
+
+  const run = componentSchema(document, "DiscoveryRun");
+  const runProperties = record(run.properties, "DiscoveryRun.properties");
+  assert.deepEqual(record(runProperties.usage, "DiscoveryRun.usage"), { $ref: "#/components/schemas/DiscoveryUsage" });
+  assert.deepEqual(record(runProperties.coverage, "DiscoveryRun.coverage"), { $ref: "#/components/schemas/DiscoveryCoverage" });
+});
+
 test("OpenAPI no longer exposes the retired home feed route", async () => {
   const routes = await openApiRoutes();
 
@@ -173,6 +260,79 @@ async function openApiRoutes(): Promise<ReadonlySet<string>> {
   return new Set(
     [...spec.matchAll(/^  (\/v1\/[^:]+):$/gm)].map((match) => match[1]),
   );
+}
+
+type OpenApiDocument = Record<string, unknown>;
+type OpenApiSchema = Record<string, unknown>;
+
+async function openApiDocument(): Promise<OpenApiDocument> {
+  return record(load(await readFile(OPENAPI_PATH, "utf8")), "OpenAPI document");
+}
+
+function discoveryResponseSchemas(document: OpenApiDocument): Array<[string, OpenApiSchema]> {
+  const paths = record(document.paths, "paths");
+  const schemas: Array<[string, OpenApiSchema]> = [];
+  for (const [path, pathItem] of Object.entries(paths)) {
+    if (!path.startsWith("/v1/discovery/")) continue;
+    for (const [method, operation] of Object.entries(record(pathItem, `paths.${path}`))) {
+      if (!/^(get|post|put|delete)$/.test(method)) continue;
+      const responses = record(record(operation, `${method} ${path}`).responses, `${method} ${path}.responses`);
+      for (const [status, response] of Object.entries(responses)) {
+        const resolvedResponse = resolveComponent(document, record(response, `${method} ${path} ${status}`), "responses");
+        const content = resolvedResponse.content;
+        if (content === undefined) continue;
+        const applicationJson = record(record(content, `${method} ${path} ${status}.content`)["application/json"], `${method} ${path} ${status}.application/json`);
+        schemas.push([`${method.toUpperCase()} ${path} ${status}`, record(applicationJson.schema, `${method} ${path} ${status}.schema`)]);
+      }
+    }
+  }
+  return schemas;
+}
+
+function assertClosedResponseObjects(document: OpenApiDocument, schema: OpenApiSchema, label: string, visitedReferences: Set<string>): void {
+  const reference = schema.$ref;
+  if (typeof reference === "string") {
+    if (visitedReferences.has(reference)) return;
+    visitedReferences.add(reference);
+    assertClosedResponseObjects(document, resolveComponent(document, schema, "schemas"), `${label} -> ${reference}`, visitedReferences);
+    return;
+  }
+
+  const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+  if (types.includes("object")) assert.equal(schema.additionalProperties, false, `${label} must close object properties`);
+  const properties = schema.properties;
+  if (properties !== undefined) {
+    for (const [property, child] of Object.entries(record(properties, `${label}.properties`))) {
+      assertClosedResponseObjects(document, record(child, `${label}.${property}`), `${label}.${property}`, visitedReferences);
+    }
+  }
+  const items = schema.items;
+  if (items !== undefined) assertClosedResponseObjects(document, record(items, `${label}.items`), `${label}.items`, visitedReferences);
+  for (const combinator of ["allOf", "anyOf", "oneOf"] as const) {
+    const branches = schema[combinator];
+    if (branches === undefined) continue;
+    assert.ok(Array.isArray(branches), `${label}.${combinator} is an array`);
+    for (const [index, branch] of branches.entries()) {
+      assertClosedResponseObjects(document, record(branch, `${label}.${combinator}[${index}]`), `${label}.${combinator}[${index}]`, visitedReferences);
+    }
+  }
+}
+
+function componentSchema(document: OpenApiDocument, name: string): OpenApiSchema {
+  return record(record(record(document.components, "components").schemas, "components.schemas")[name], `components.schemas.${name}`);
+}
+
+function resolveComponent(document: OpenApiDocument, value: OpenApiSchema, collection: "responses" | "schemas"): OpenApiSchema {
+  const reference = value.$ref;
+  if (typeof reference !== "string") return value;
+  const expectedPrefix = `#/components/${collection}/`;
+  assert.ok(reference.startsWith(expectedPrefix), `expected ${collection} reference, got ${reference}`);
+  return record(record(record(document.components, "components")[collection], `components.${collection}`)[reference.slice(expectedPrefix.length)], reference);
+}
+
+function record(value: unknown, label: string): Record<string, unknown> {
+  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value), `${label} is an object`);
+  return value as Record<string, unknown>;
 }
 
 function escapeRegExp(value: string): string {
