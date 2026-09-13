@@ -68,6 +68,8 @@ export function createAttemptStore(db: QueryExecutor, clock: () => Date) {
       return rows[0] ?? null;
     },
     async acquireDraft(userId: string, campaignId: string, requestId: string): Promise<{ draft_token: string; expires_at: string }> {
+      // The lock is for one logical draft (including its paid repair), while
+      // OperationRunner enforces the separate 30s timeout per provider attempt.
       requireUuid(userId, "user_id"); requireUuid(campaignId, "campaign_id"); requireUuid(requestId, "request_id"); const now = clock(); const expires = new Date(now.getTime() + 90_000);
       return transaction(db, async (tx) => {
         const campaign = await tx.query<{ draft_lock_token: string | null; draft_lock_until: Date | string | null; draft_request_ledger: unknown }>("select draft_lock_token::text as draft_lock_token,draft_lock_until,draft_request_ledger from discovery_campaigns where campaign_id=$1::uuid and user_id=$2::uuid for update", [campaignId, userId]);

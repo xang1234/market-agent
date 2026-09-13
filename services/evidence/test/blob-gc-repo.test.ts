@@ -145,9 +145,11 @@ test("deleteUserAndQueueObjectBlobs queues sha256 user document blobs before del
   assert.match(db.queries[3].text, /sources\.user_id = \$1/i);
   assert.match(db.queries[3].text, /raw_blob_id ~ '\^sha256:\[0-9a-f\]\{64\}\$'/i);
   assert.match(db.queries[3].text, /deleted_at = null/i);
-  assert.match(db.queries[4].text, /delete from analyze_template_runs/i);
-  assert.match(db.queries[4].text, /template_id in \(select template_id from analyze_templates where user_id = \$1\)/i);
-  assert.match(db.queries[5].text, /delete from users where user_id = \$1/i);
+  const discoveryCleanup = db.queries.find((query) => /delete from discovery_campaigns/i.test(query.text));
+  assert.match(discoveryCleanup?.text ?? "", /user_id=\$1/i);
+  const analyzeCleanup = db.queries.find((query) => /delete from analyze_template_runs/i.test(query.text));
+  assert.match(analyzeCleanup?.text ?? "", /template_id in \(select template_id from analyze_templates where user_id = \$1\)/i);
+  assert.match(db.queries.find((query) => /delete from users where user_id = \$1/i.test(query.text))?.text ?? "", /delete from users where user_id = \$1/i);
   assert.match(db.queries.at(-1)?.text ?? "", /^commit$/i);
   assert.deepEqual(result.purged_analyze_run_ids, ["run-1"]);
 });

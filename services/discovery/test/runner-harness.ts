@@ -32,7 +32,7 @@ type ModelCall = { role: Parameters<CampaignModel["complete"]>[0]["role"]; candi
 
 export async function createRunnerHarness(t: TestContext, options: Options = {}) {
   const fixture = await withCampaignDb(t);
-  const { db, repo: baseRepo, userId, clock } = fixture;
+  const { db, repo: baseRepo, userId, otherUserId, clock } = fixture;
   const { run, brief } = await fixture.createApprovedRun(briefFixture());
   const packets = [makePacket(0), makePacket(1)];
   for (const packet of packets) await seedCompany(db, packet);
@@ -158,8 +158,10 @@ export async function createRunnerHarness(t: TestContext, options: Options = {})
   }
 
   return Object.freeze({
+    db,
     repo: baseRepo,
     userId,
+    otherUserId,
     runId: run.run_id,
     advanceClock: clock.advance,
     callsForCompany: (issuerId: string) => calls.filter((call) => call.candidate_id !== undefined && candidateIssuers.get(call.candidate_id) === issuerId).length,

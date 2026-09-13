@@ -98,7 +98,7 @@ export type CampaignEvent = {
   run_id: Id; sequence: number; stage: Stage; kind: EventKind; candidate_id: Id | null;
   summary: string; citations: Citation[]; created_at: string;
 };
-export type RunView = RunRecord & { shortlist: CandidateView[]; cost: { status: "unavailable" } };
+export type RunView = RunRecord & { shortlist: CandidateView[]; cost: { status: "unavailable" }; worker_waiting: boolean };
 export type Page<T> = { items: T[]; next_cursor: string | null };
 export type EventPage = { items: CampaignEvent[]; next_sequence: number; has_more: boolean };
 export type Readiness = { ready: boolean; missing: ("model" | "search" | "reference")[] };

@@ -269,6 +269,8 @@ export {
   runObjectBlobGcBatch,
   runObjectBlobGcBatchWithPool,
 } from "./blob-gc-repo.ts";
+
+export { deleteSnapshotIfUnreachable, snapshotHasCurrentReachability } from "./snapshot-reachability.ts";
 export type {
   DeleteUserBlobQueueResult,
   ObjectBlobGcBatchOptions,

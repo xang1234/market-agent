@@ -69,6 +69,21 @@ test("loadEvidenceInspection hides snapshots that are not visible through a user
   assert.equal(calls.some((call) => call.text.includes("from snapshots")), false);
 });
 
+test("loadEvidenceInspection recognizes discovery candidate ownership as a snapshot visibility branch", async () => {
+  const { db, calls } = stubDb((text) => {
+    if (text.includes("discovery_candidates")) return [{ visible: 1 }];
+    if (text.includes("from snapshots")) return [manifestRow()];
+    if (text.includes("from sources")) return [sourceRow({ source_id: SOURCE_ID })];
+    return [];
+  });
+  const result = await loadEvidenceInspection(db, { user_id: USER_ID, snapshot_id: SNAPSHOT_ID, ref: { kind: "source", id: SOURCE_ID } });
+  assert.equal(result.kind, "source");
+  const ownership = calls.find((call) => call.text.includes("discovery_candidates"))?.text ?? "";
+  assert.match(ownership, /discovery_candidates/);
+  assert.match(ownership, /discovery_runs/);
+  assert.match(ownership, /discovery_campaigns/);
+});
+
 test("loadEvidenceInspection returns source details only when source belongs to snapshot", async () => {
   const { db, calls } = stubDb((text) => {
     if (text.includes("from chat_messages")) return [{ visible: 1 }];

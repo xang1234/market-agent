@@ -5,6 +5,7 @@ import { DiscoveryError, type Coverage, type Page, type RankedDecision, type Run
 import { decodeCursor, encodeCursor, isoDate, json, jsonValue, requireLimit, requireText, requireUuid, transaction } from "./repository-support.ts";
 import { leaseFromRow, lockLiveLease } from "./worker-lock.ts";
 import { appendEventInTransaction } from "./event-repo.ts";
+import { deleteCampaignWithLifecycle } from "./lifecycle.ts";
 
 type RunRow = { run_id: string; campaign_id: string; brief_id: string; user_id: string; status: RunRecord["status"]; stage: RunRecord["stage"]; policy_version: string; request_key: string; limits: unknown; usage: unknown; coverage: unknown; started_at: Date | string | null; finished_at: Date | string | null; cancel_requested_at: Date | string | null; created_at: Date | string; lease_owner?: string | null; lease_epoch?: number; lease_expires_at?: Date | string | null; checkpoint?: unknown };
 const RUN_COLUMNS = "run_id::text as run_id, campaign_id::text as campaign_id, brief_id::text as brief_id, user_id::text as user_id, status, stage, policy_version, request_key::text as request_key, limits, usage, coverage, started_at, finished_at, cancel_requested_at, created_at";
@@ -145,16 +146,7 @@ export function createRunStore(db: QueryExecutor, clock: () => Date) {
       });
     },
     async deleteCampaign(userId: string, campaignId: string): Promise<void> {
-      requireUuid(userId, "user_id"); requireUuid(campaignId, "campaign_id");
-      await transaction(db, async (tx) => {
-        const user = await tx.query("select user_id from users where user_id=$1::uuid for update", [userId]);
-        if (!user.rows[0]) throw new DiscoveryError("not_found", "campaign not found");
-        const campaign = await tx.query("select campaign_id from discovery_campaigns where campaign_id=$1::uuid and user_id=$2::uuid for update", [campaignId, userId]);
-        if (!campaign.rows[0]) throw new DiscoveryError("not_found", "campaign not found");
-        const active = await tx.query("select 1 from discovery_runs where campaign_id=$1::uuid and lease_expires_at > $2::timestamptz limit 1", [campaignId, clock().toISOString()]);
-        if (active.rows[0]) throw new DiscoveryError("active_run", "campaign has a live worker lease");
-        await tx.query("delete from discovery_campaigns where campaign_id=$1::uuid", [campaignId]);
-      });
+      await deleteCampaignWithLifecycle(db, { user_id: userId, campaign_id: campaignId, now: clock() });
     },
   };
 }

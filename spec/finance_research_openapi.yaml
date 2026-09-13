@@ -16,6 +16,7 @@ tags:
   - name: Snapshots
   - name: Chat
   - name: Analyze
+  - name: Discovery
   - name: Agents
   - name: Themes
   - name: Home
@@ -1178,6 +1179,144 @@ paths:
           description: Analyze run not found for the calling user
         '422':
           description: Artifact share rejected by provenance or egress guardrails
+  /v1/discovery/campaigns:
+    get:
+      tags: [Discovery]
+      summary: List owned discovery campaigns
+      operationId: listDiscoveryCampaigns
+      responses:
+        '200': { description: Campaign page }
+    post:
+      tags: [Discovery]
+      summary: Create a discovery campaign without contacting providers
+      operationId: createDiscoveryCampaign
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DiscoveryCampaignInput' }
+      responses:
+        '201': { description: Campaign created }
+        '400': { description: Invalid campaign input }
+  /v1/discovery/campaigns/{campaignId}:
+    parameters:
+      - $ref: '#/components/parameters/DiscoveryCampaignIdPath'
+    get:
+      tags: [Discovery]
+      summary: Get an owned campaign, latest brief, run, and readiness
+      operationId: getDiscoveryCampaign
+      responses:
+        '200': { description: Campaign detail }
+        '404': { description: Campaign unavailable }
+    delete:
+      tags: [Discovery]
+      summary: Delete an owned, quiescent discovery campaign
+      operationId: deleteDiscoveryCampaign
+      responses:
+        '204': { description: Campaign deleted }
+        '409': { description: A live worker lease prevents deletion }
+  /v1/discovery/campaigns/{campaignId}/draft:
+    parameters:
+      - $ref: '#/components/parameters/DiscoveryCampaignIdPath'
+    post:
+      tags: [Discovery]
+      summary: Draft a brief proposal without overwriting the saved brief
+      operationId: draftDiscoveryBrief
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DiscoveryDraftInput' }
+      responses:
+        '200': { description: Proposed brief }
+        '409': { description: Brief changed while drafting }
+        '429': { description: Draft request rate limited }
+        '503': { description: Model provider is unavailable }
+  /v1/discovery/campaigns/{campaignId}/brief:
+    parameters:
+      - $ref: '#/components/parameters/DiscoveryCampaignIdPath'
+    put:
+      tags: [Discovery]
+      summary: Save a versioned discovery brief
+      operationId: saveDiscoveryBrief
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DiscoverySaveBriefInput' }
+      responses:
+        '200': { description: Saved brief }
+        '409': { description: Expected brief version is stale }
+  /v1/discovery/campaigns/{campaignId}/runs:
+    parameters:
+      - $ref: '#/components/parameters/DiscoveryCampaignIdPath'
+    get:
+      tags: [Discovery]
+      summary: List owned campaign runs
+      operationId: listDiscoveryRuns
+      responses:
+        '200': { description: Run page }
+    post:
+      tags: [Discovery]
+      summary: Start an idempotent discovery run from an approved brief
+      operationId: startDiscoveryRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DiscoveryStartRunInput' }
+      responses:
+        '201': { description: Queued or existing idempotent run }
+        '409': { description: Stale brief or another active run }
+  /v1/discovery/runs/{runId}:
+    parameters:
+      - $ref: '#/components/parameters/DiscoveryRunIdPath'
+    get:
+      tags: [Discovery]
+      summary: Read an owned run with currently authorized shortlist evidence
+      operationId: getDiscoveryRun
+      responses:
+        '200': { description: Authorized run view }
+        '404': { description: Run unavailable }
+  /v1/discovery/runs/{runId}/candidates:
+    parameters:
+      - $ref: '#/components/parameters/DiscoveryRunIdPath'
+      - name: cursor
+        in: query
+        schema: { type: string }
+      - name: limit
+        in: query
+        schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      - name: state
+        in: query
+        schema: { type: string }
+    get:
+      tags: [Discovery]
+      summary: Page currently authorized candidate views
+      operationId: listDiscoveryCandidates
+      responses:
+        '200': { description: Candidate page }
+  /v1/discovery/runs/{runId}/events:
+    parameters:
+      - $ref: '#/components/parameters/DiscoveryRunIdPath'
+      - name: after
+        in: query
+        schema: { type: integer, minimum: 0, default: 0 }
+    get:
+      tags: [Discovery]
+      summary: Read current-source-filtered discovery activity
+      operationId: listDiscoveryEvents
+      responses:
+        '200': { description: Event page }
+  /v1/discovery/runs/{runId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/DiscoveryRunIdPath'
+    post:
+      tags: [Discovery]
+      summary: Request cancellation of an owned run
+      operationId: cancelDiscoveryRun
+      responses:
+        '200': { description: Updated run }
   /v1/agents:
     get:
       tags: [Agents]
@@ -1848,12 +1987,50 @@ components:
       schema:
         type: string
         format: uuid
+    DiscoveryCampaignIdPath:
+      in: path
+      name: campaignId
+      required: true
+      schema: { type: string, format: uuid }
+    DiscoveryRunIdPath:
+      in: path
+      name: runId
+      required: true
+      schema: { type: string, format: uuid }
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    DiscoveryCampaignInput:
+      type: object
+      required: [name, question]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        question: { type: string, minLength: 20, maxLength: 4000 }
+    DiscoveryDraftInput:
+      type: object
+      required: [expected_version]
+      additionalProperties: false
+      properties:
+        expected_version: { type: integer, minimum: 0 }
+    DiscoverySaveBriefInput:
+      type: object
+      required: [expected_version, brief]
+      additionalProperties: false
+      properties:
+        expected_version: { type: integer, minimum: 0 }
+        brief: { type: object }
+    DiscoveryStartRunInput:
+      type: object
+      required: [brief_version, brief_hash, request_key]
+      additionalProperties: false
+      properties:
+        brief_version: { type: integer, minimum: 1 }
+        brief_hash: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
+        request_key: { type: string, format: uuid }
     SubjectKind:
       type: string
       description: Canonical subject discriminator. Ticker is a listing locator, not canonical identity.

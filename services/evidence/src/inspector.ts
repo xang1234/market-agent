@@ -154,6 +154,14 @@ async function assertSnapshotVisibleToUser(
            join research_grids g on g.grid_id = gr.grid_id
           where gc.snapshot_id = $1::uuid
             and g.user_id = $2::uuid
+       )
+       or exists (
+         select 1
+           from discovery_candidates dc
+           join discovery_runs dr on dr.run_id=dc.run_id
+           join discovery_campaigns campaign on campaign.campaign_id=dr.campaign_id and campaign.user_id=dr.user_id
+          where dc.snapshot_id=$1::uuid
+            and campaign.user_id=$2::uuid
        )`,
     [snapshotId, userId],
   );

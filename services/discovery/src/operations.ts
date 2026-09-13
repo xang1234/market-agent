@@ -1,12 +1,12 @@
 import { abortError, attemptSignal, storedError } from "./budget.ts";
-import type { DiscoveryRepository, Lease, OperationContext, OperationRunner } from "./ports.ts";
+import type { DiscoveryRepository, DraftScope, Lease, OperationContext, OperationRunner } from "./ports.ts";
 import { DiscoveryError } from "./types.ts";
 
 type RunInput<T> = {
   key: string;
   request_hash: string;
   resource: "search" | "document" | "identity" | "financial" | "model";
-  phase: "discovery" | "research" | "verification";
+  phase: "draft" | "discovery" | "research" | "verification";
   candidate_id?: string;
   model_initial?: boolean;
   model_role?: "analyst" | "skeptic";
@@ -18,16 +18,17 @@ type ProviderAttemptInput<T> = {
   request_hash: string;
   index: 0 | 1;
   resource: "model";
-  phase: "discovery" | "research" | "verification";
+  phase: "draft" | "discovery" | "research" | "verification";
   candidate_id?: string;
   model_initial?: boolean;
   model_role?: "analyst" | "skeptic";
   execute: (signal: AbortSignal) => Promise<T>;
 };
 
-export function createOperationRunner(repo: DiscoveryRepository, lease: Lease, signal: AbortSignal): OperationRunner {
+export function createOperationRunner(repo: DiscoveryRepository, scope: Lease | DraftScope, signal: AbortSignal): OperationRunner {
   async function signalForAttempt(): Promise<AbortSignal> {
-    const run = await repo.readRun(lease.user_id, lease.run_id);
+    if ("draft_token" in scope) return attemptSignal(signal, 30_000);
+    const run = await repo.readRun(scope.user_id, scope.run_id);
     return attemptSignal(signal, run.limits.request_timeout_ms);
   }
 
@@ -35,7 +36,7 @@ export function createOperationRunner(repo: DiscoveryRepository, lease: Lease, s
     async run<T>(input: RunInput<T>): Promise<T> {
       for (const attempt_number of [1, 2] as const) {
         throwIfAborted(signal);
-        const reservation = await repo.reserveAttempt(lease, {
+        const reservation = await repo.reserveAttempt(scope, {
           operation_key: input.key,
           request_hash: input.request_hash,
           resource: input.resource,
@@ -56,7 +57,7 @@ export function createOperationRunner(repo: DiscoveryRepository, lease: Lease, s
         try {
           const result = await input.execute({ signal: attemptSignal, attempt_number });
           throwIfAborted(attemptSignal);
-          await repo.finishAttempt(lease, {
+          await repo.finishAttempt(scope, {
             attempt_id: reservation.attempt_id,
             outcome: "success",
             result,
@@ -64,7 +65,7 @@ export function createOperationRunner(repo: DiscoveryRepository, lease: Lease, s
           });
           return result;
         } catch (error) {
-          await repo.finishAttempt(lease, {
+          await repo.finishAttempt(scope, {
             attempt_id: reservation.attempt_id,
             outcome: "error",
             result: storedError(error),
@@ -77,7 +78,7 @@ export function createOperationRunner(repo: DiscoveryRepository, lease: Lease, s
     },
     async providerAttempt<T>(input: ProviderAttemptInput<T>): Promise<T> {
       throwIfAborted(signal);
-      let reservation = await repo.reserveAttempt(lease, {
+      let reservation = await repo.reserveAttempt(scope, {
         operation_key: input.key,
         request_hash: input.request_hash,
         resource: input.resource,
@@ -88,7 +89,7 @@ export function createOperationRunner(repo: DiscoveryRepository, lease: Lease, s
         model_role: input.model_initial === true ? input.model_role : undefined,
       });
       if (reservation.state === "exhausted" && input.index === 0) {
-        reservation = await repo.reserveAttempt(lease, {
+        reservation = await repo.reserveAttempt(scope, {
           operation_key: input.key,
           request_hash: input.request_hash,
           resource: input.resource,
@@ -105,7 +106,7 @@ export function createOperationRunner(repo: DiscoveryRepository, lease: Lease, s
       try {
         const result = await input.execute(attemptSignal);
         throwIfAborted(attemptSignal);
-        await repo.finishAttempt(lease, {
+        await repo.finishAttempt(scope, {
           attempt_id: reservation.attempt_id,
           outcome: "success",
           result,
@@ -113,7 +114,7 @@ export function createOperationRunner(repo: DiscoveryRepository, lease: Lease, s
         });
         return result;
       } catch (error) {
-        await repo.finishAttempt(lease, {
+        await repo.finishAttempt(scope, {
           attempt_id: reservation.attempt_id,
           outcome: "error",
           result: storedError(error),

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
 import { hashJsonValue } from "../../observability/src/tool-call.ts";
+import { createOperationRunner } from "../src/operations.ts";
 import type { DiscoveryContext, Providers } from "../src/ports.ts";
 import { discoverCandidates } from "../src/scout.ts";
 import type { CompanyIdentity, DiscoveredCandidate, Origin, RankedDecision, SearchHit } from "../src/types.ts";
@@ -342,4 +343,26 @@ test("draft rate limits count logical request IDs rather than provider attempts"
     await repo.releaseDraft(userId, campaign.campaign_id, draft.draft_token);
   }
   await assert.rejects(repo.acquireDraft(userId, campaign.campaign_id, crypto.randomUUID()), { code: "draft_rate_limit" });
+});
+
+test("a 30-second draft provider attempt cannot release the logical draft lock before repair", dbOptions, async (t) => {
+  const { repo, userId, clock } = await withCampaignDb(t);
+  const campaign = await repo.createCampaign(userId, { name: "Draft lock", question: "Which US-listed companies benefit from grid modernization spending?" });
+  const draft = await repo.acquireDraft(userId, campaign.campaign_id, crypto.randomUUID());
+  let finish!: () => void;
+  let started!: () => void;
+  const began = new Promise<void>((resolve) => { started = resolve; });
+  const slow = new Promise<void>((resolve) => { finish = resolve; });
+  const runner = createOperationRunner(repo, { campaign_id: campaign.campaign_id, user_id: userId, draft_token: draft.draft_token }, new AbortController().signal);
+  const pending = runner.run({
+    key: `draft/${draft.draft_token}`,
+    request_hash: hashJsonValue({ draft: campaign.campaign_id }), resource: "model", phase: "draft",
+    execute: async () => { started(); await slow; return { proposal: "ready" }; },
+  });
+  await began;
+  clock.advance(30_001);
+  await assert.rejects(repo.acquireDraft(userId, campaign.campaign_id, crypto.randomUUID()), { code: "draft_rate_limit" });
+  finish();
+  await pending;
+  await repo.releaseDraft(userId, campaign.campaign_id, draft.draft_token);
 });

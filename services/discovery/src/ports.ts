@@ -4,6 +4,7 @@ import type { ThesisFact } from "../../agents/src/thesis-evaluator.ts";
 import type * as D from "./types.ts";
 
 export type Lease = { run_id: D.Id; user_id: D.Id; worker_id: string; epoch: number; expires_at: string };
+export type DraftScope = { campaign_id: D.Id; user_id: D.Id; draft_token: D.Id };
 export type Checkpoint = { version: 1; stage: D.Stage; cohort: D.Id[]; next_company: number; completed_operation_keys: string[] };
 export type Excerpt = { excerpt_id: D.Id; document_id: D.Id; source_id: D.Id; family_key: string; title: string; url: string; published_at: string | null; retrieved_at: string; document_hash: string; normalized_start: number; text: string; primary: boolean; primary_eligible: boolean };
 export type PacketFact = ThesisFact & { currency: string | null; fiscal_year: number | null; fiscal_period: string | null; period_start: string | null };
@@ -11,8 +12,8 @@ export type EvidencePacket = { candidate_id: D.Id; identity: D.CompanyIdentity; 
 export type FinancialReadResult = { facts: PacketFact[]; missing_fields: string[]; coverage_gaps: string[] };
 export type OperationContext = { signal: AbortSignal; attempt_number: 1 | 2 };
 export type OperationRunner = {
-  run<T>(input: { key: string; request_hash: string; resource: D.Resource; phase: "discovery" | "research" | "verification"; candidate_id?: D.Id; model_initial?: boolean; model_role?: "analyst" | "skeptic"; execute: (ctx: OperationContext) => Promise<T> }): Promise<T>;
-  providerAttempt<T>(input: { key: string; request_hash: string; index: 0 | 1; resource: "model"; phase: "discovery" | "research" | "verification"; candidate_id?: D.Id; model_initial?: boolean; model_role?: "analyst" | "skeptic"; execute: (signal: AbortSignal) => Promise<T> }): Promise<T>;
+  run<T>(input: { key: string; request_hash: string; resource: D.Resource; phase: "draft" | "discovery" | "research" | "verification"; candidate_id?: D.Id; model_initial?: boolean; model_role?: "analyst" | "skeptic"; execute: (ctx: OperationContext) => Promise<T> }): Promise<T>;
+  providerAttempt<T>(input: { key: string; request_hash: string; index: 0 | 1; resource: "model"; phase: "draft" | "discovery" | "research" | "verification"; candidate_id?: D.Id; model_initial?: boolean; model_role?: "analyst" | "skeptic"; execute: (signal: AbortSignal) => Promise<T> }): Promise<T>;
 };
 export type CampaignModel = { complete(input: { operation_key: string; request_hash: string; attempt_number?: 1 | 2; role: "planner" | "scout" | "analyst" | "skeptic" | "summary"; phase: "discovery" | "research" | "verification"; candidate_id?: D.Id; model_initial?: boolean; messages: LlmChatMessage[] }): Promise<LlmRouterResult> };
 export type ProviderOperation = { operation_key: string; request_hash: string; phase: "discovery" | "research" | "verification"; candidate_id?: D.Id };
@@ -100,8 +101,8 @@ export interface DiscoveryRepository {
   refreshResearchPacket(lease: Lease, packet: EvidencePacket): Promise<EvidencePacket>;
   saveValidatedRole(lease: Lease, candidateId: D.Id, checkpoint: ValidatedRoleCheckpoint): Promise<void>;
   loadValidatedRoles(lease: Lease, candidateId: D.Id): Promise<AssessmentRoleProgress>;
-  reserveAttempt(scope: Lease | { campaign_id: D.Id; user_id: D.Id; draft_token: D.Id }, input: { operation_key: string; request_hash: string; resource: D.Resource; phase: "draft" | "discovery" | "research" | "verification"; candidate_id?: D.Id; attempt_number: 1 | 2; model_initial?: boolean; model_role?: "analyst" | "skeptic" }): Promise<AttemptReservation>;
-  finishAttempt(scope: Lease | { campaign_id: D.Id; user_id: D.Id; draft_token: D.Id }, input: { attempt_id: D.Id; outcome: "success" | "error" | "unknown"; result: unknown; tool_call_id: D.Id | null }): Promise<void>;
+  reserveAttempt(scope: Lease | DraftScope, input: { operation_key: string; request_hash: string; resource: D.Resource; phase: "draft" | "discovery" | "research" | "verification"; candidate_id?: D.Id; attempt_number: 1 | 2; model_initial?: boolean; model_role?: "analyst" | "skeptic" }): Promise<AttemptReservation>;
+  finishAttempt(scope: Lease | DraftScope, input: { attempt_id: D.Id; outcome: "success" | "error" | "unknown"; result: unknown; tool_call_id: D.Id | null }): Promise<void>;
   getOperation(userId: D.Id, runId: D.Id, key: string): Promise<{ outcome: string; result: unknown } | null>;
   acquireDraft(userId: D.Id, campaignId: D.Id, requestId: D.Id): Promise<{ draft_token: D.Id; expires_at: string }>;
   releaseDraft(userId: D.Id, campaignId: D.Id, token: D.Id): Promise<void>;
