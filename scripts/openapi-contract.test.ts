@@ -330,6 +330,36 @@ test("OpenAPI matches discovery handler query, response, error, and DTO semantic
   assertNullableType(document, "DiscoveryCampaign", "archived_at", "string");
 });
 
+test("OpenAPI response semantic manifest rejects constrained response-schema drift", async () => {
+  const document = await openApiDocument();
+
+  const mutations: ReadonlyArray<readonly [string, (value: OpenApiDocument) => void]> = [
+    ["enum value", (value) => {
+      record(record(schemaProperty(value, "DiscoveryReadiness", "missing").items, "DiscoveryReadiness.missing.items")).enum = ["model", "search"];
+    }],
+    ["const value", (value) => {
+      schemaProperty(value, "DiscoveryCost", "status").const = "available";
+    }],
+    ["primitive array item", (value) => {
+      record(schemaProperty(value, "DiscoveryCompanyIdentity", "identity_source_ids").items, "DiscoveryCompanyIdentity.identity_source_ids.items").type = "integer";
+    }],
+    ["new constrained path", (value) => {
+      schemaProperty(value, "DiscoveryMetricOption", "metric_key").enum = ["price_to_earnings"];
+    }],
+  ];
+
+  assertDiscoveryResponseSemanticManifest(document);
+  for (const [label, mutate] of mutations) {
+    const mutated = structuredClone(document);
+    mutate(mutated);
+    assert.throws(
+      () => assertDiscoveryResponseSemanticManifest(mutated),
+      /discovery response semantic manifest/,
+      `${label} drift is rejected`,
+    );
+  }
+});
+
 test("OpenAPI no longer exposes the retired home feed route", async () => {
   const routes = await openApiRoutes();
 
@@ -348,6 +378,74 @@ type OpenApiSchema = Record<string, unknown>;
 
 async function openApiDocument(): Promise<OpenApiDocument> {
   return record(load(await readFile(OPENAPI_PATH, "utf8")), "OpenAPI document");
+}
+
+function assertDiscoveryResponseSemanticManifest(document: OpenApiDocument): void {
+  assert.deepEqual(
+    discoveryResponseSemanticContracts(document),
+    DISCOVERY_RESPONSE_SEMANTIC_MANIFEST,
+    "discovery response semantic manifest covers every reachable enum, const, and primitive array item",
+  );
+}
+
+function discoveryResponseSemanticContracts(document: OpenApiDocument): Readonly<Record<string, ResponseSchemaSemantic>> {
+  const contracts = new Map<string, ResponseSchemaSemantic>();
+  const visitedReferences = new Set<string>();
+
+  const add = (path: string, schema: OpenApiSchema, reference?: string): void => {
+    const contract: Record<string, unknown> = {};
+    if (reference !== undefined) contract.$ref = reference;
+    for (const key of RESPONSE_SEMANTIC_KEYS) {
+      if (schema[key] !== undefined) contract[key] = schema[key];
+    }
+    contracts.set(path, contract);
+  };
+
+  const walk = (schema: OpenApiSchema, path: string): void => {
+    const reference = schema.$ref;
+    if (typeof reference === "string" && reference.startsWith("#/components/schemas/")) {
+      if (visitedReferences.has(reference)) return;
+      visitedReferences.add(reference);
+      walk(resolveComponent(document, schema, "schemas"), reference);
+      return;
+    }
+
+    if (schema.enum !== undefined || schema.const !== undefined) add(path, schema);
+
+    if (schemaIncludesType(schema, "array") && schema.items !== undefined) {
+      const items = record(schema.items, `${path}.items`);
+      const resolvedItems = typeof items.$ref === "string" ? resolveComponent(document, items, "schemas") : items;
+      if (isPrimitiveSchema(resolvedItems)) add(path + ".items", resolvedItems, typeof items.$ref === "string" ? items.$ref : undefined);
+      walk(items, path + ".items");
+    }
+
+    if (schema.properties !== undefined) {
+      for (const [property, child] of Object.entries(record(schema.properties, `${path}.properties`))) {
+        walk(record(child, `${path}.${property}`), `${path}.${property}`);
+      }
+    }
+    for (const combinator of ["allOf", "anyOf", "oneOf"] as const) {
+      const branches = schema[combinator];
+      if (branches === undefined) continue;
+      assert.ok(Array.isArray(branches), `${path}.${combinator} is an array`);
+      for (const [index, branch] of branches.entries()) {
+        walk(record(branch, `${path}.${combinator}[${index}]`), `${path}.${combinator}[${index}]`);
+      }
+    }
+  };
+
+  for (const [label, schema] of discoveryResponseSchemas(document)) walk(schema, label);
+  return Object.fromEntries([...contracts.entries()].sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function isPrimitiveSchema(schema: OpenApiSchema): boolean {
+  const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+  return types.length > 0 && types.every((type) => type === "null" || PRIMITIVE_SCHEMA_TYPES.has(type));
+}
+
+function schemaIncludesType(schema: OpenApiSchema, expected: string): boolean {
+  const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+  return types.includes(expected);
 }
 
 function discoveryResponseSchemas(document: OpenApiDocument): Array<[string, OpenApiSchema]> {
@@ -423,6 +521,47 @@ const RUN_STATUSES = ["queued", "running", "completed", "partial", "failed", "ca
 const RUN_STAGES = ["queued", "discovery", "research", "finalization"] as const;
 const EVENT_KINDS = ["search_completed", "lead_resolved", "document_acquired", "criterion_assessed", "skeptic_completed", "budget_exhausted", "run_resumed", "run_finalized"] as const;
 const DISCOVERY_ERROR_CODES = ["validation", "not_found", "stale_brief", "active_run", "request_conflict", "draft_rate_limit", "unavailable", "budget_exhausted", "deadline_exceeded", "lease_lost", "cancelled", "operation_in_progress"] as const;
+
+type ResponseSchemaSemantic = Readonly<Record<string, unknown>>;
+
+const PRIMITIVE_SCHEMA_TYPES = new Set(["string", "integer", "number", "boolean"]);
+const RESPONSE_SEMANTIC_KEYS = [
+  "type", "format", "enum", "const", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "minLength", "maxLength", "pattern",
+] as const;
+
+const DISCOVERY_RESPONSE_SEMANTIC_MANIFEST: Readonly<Record<string, ResponseSchemaSemantic>> = {
+  "#/components/schemas/DiscoveryBrief.market": { type: "string", const: "us_listed" },
+  "#/components/schemas/DiscoveryBrief.schema_version": { type: "integer", const: 1 },
+  "#/components/schemas/DiscoveryCandidate.mechanism_ids.items": { type: "string", format: "uuid" },
+  "#/components/schemas/DiscoveryCandidate.origins.items": { type: "string", enum: ["seed", "existing", "web"] },
+  "#/components/schemas/DiscoveryCandidate.reason_codes.items": { type: "string" },
+  "#/components/schemas/DiscoveryCandidate.state": { type: "string", enum: CANDIDATE_STATES },
+  "#/components/schemas/DiscoveryCandidateDecision.reason_codes.items": { type: "string" },
+  "#/components/schemas/DiscoveryCandidateDecision.state": { type: "string", enum: DECISION_STATES },
+  "#/components/schemas/DiscoveryCandidateDecision.unresolved_questions.items": { type: "string" },
+  "#/components/schemas/DiscoveryCitation.kind": { type: "string", enum: ["claim", "fact"] },
+  "#/components/schemas/DiscoveryCompanyIdentity.asset_type": { type: "string", enum: ["common_stock", "adr"] },
+  "#/components/schemas/DiscoveryCompanyIdentity.identity_source_ids.items": { type: "string", format: "uuid" },
+  "#/components/schemas/DiscoveryCost.status": { type: "string", const: "unavailable" },
+  "#/components/schemas/DiscoveryCriterion.importance": { type: "string", enum: ["must", "prefer"] },
+  "#/components/schemas/DiscoveryCriterionOutcome.outcome": { type: "string", enum: ["pass", "fail", "unknown"] },
+  "#/components/schemas/DiscoveryDimension.level": { type: "string", enum: ["strong", "mixed", "weak", "unknown"] },
+  "#/components/schemas/DiscoveryErrorCode": { type: "string", enum: DISCOVERY_ERROR_CODES },
+  "#/components/schemas/DiscoveryEvent.kind": { type: "string", enum: EVENT_KINDS },
+  "#/components/schemas/DiscoveryEvent.stage": { type: "string", enum: RUN_STAGES },
+  "#/components/schemas/DiscoveryExclusionList.items": { type: "string", minLength: 1, maxLength: 300 },
+  "#/components/schemas/DiscoveryMechanism.chain.items": { type: "string", minLength: 1, maxLength: 300 },
+  "#/components/schemas/DiscoveryMetricCheck.operator": { type: "string", enum: ["gte", "lte"] },
+  "#/components/schemas/DiscoveryMetricCheck.period_kind": { type: "string", enum: ["point", "fiscal_q", "fiscal_y", "ttm"] },
+  "#/components/schemas/DiscoveryModelConfig.role": { type: "string", enum: ["planner", "scout", "analyst", "skeptic", "summary"] },
+  "#/components/schemas/DiscoveryPreferenceList.items": { type: "string", minLength: 1, maxLength: 300 },
+  "#/components/schemas/DiscoveryReadiness.missing.items": { type: "string", enum: ["model", "search", "reference"] },
+  "#/components/schemas/DiscoveryRun.status": { type: "string", enum: RUN_STATUSES },
+  "#/components/schemas/DiscoveryRun.stage": { type: "string", enum: RUN_STAGES },
+  "#/components/schemas/DiscoveryRunView.status": { type: "string", enum: RUN_STATUSES },
+  "#/components/schemas/DiscoveryRunView.stage": { type: "string", enum: RUN_STAGES },
+  "#/components/schemas/DiscoverySeedQueryList.items": { type: "string", minLength: 1, maxLength: 200 },
+};
 
 type QuerySchemaExpectation = Readonly<{
   type: "string" | "integer";
