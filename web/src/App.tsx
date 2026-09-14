@@ -16,6 +16,8 @@ import { ChatEmptyState, ChatLayout, ChatThreadView } from './pages/ChatPage'
 import { ScreenerPage } from './pages/ScreenerPage'
 import { AnalyzePage } from './pages/AnalyzePage'
 import { GridsPage } from './analyst-grids/GridsPage.tsx'
+import { CampaignList } from './discovery/CampaignList.tsx'
+import { CampaignPage } from './discovery/CampaignPage.tsx'
 import { ReviewPage } from './pages/ReviewPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SubjectDetailShell } from './shell/SubjectDetailShell'
@@ -35,6 +37,7 @@ const protAgents: RouteHandle = { scope: 'protected', label: 'Agents' }
 const protChat: RouteHandle = { scope: 'protected', label: 'Chat' }
 const protReview: RouteHandle = { scope: 'protected', label: 'Review' }
 const protSettings: RouteHandle = { scope: 'protected', label: 'Settings' }
+const protDiscovery: RouteHandle = { scope: 'protected', label: 'Discover' }
 
 // Route model per spec §3.7 + §3.8. WorkspaceShell is the layout route —
 // persistent across all primary-workspace transitions. Child routes render
@@ -62,6 +65,9 @@ const router = createBrowserRouter(
       <Route path="screener" handle={publicHandle} element={<ScreenerPage />} />
       <Route path="analyze" handle={publicHandle} element={<AnalyzePage />} />
       <Route path="analyst-grids" handle={publicHandle} element={<GridsPage />} />
+      <Route path="discovery" handle={protDiscovery} element={<CampaignList />} />
+      <Route path="discovery/:campaignId" handle={protDiscovery} element={<CampaignPage />} />
+      <Route path="discovery/:campaignId/runs/:runId" handle={protDiscovery} element={<CampaignPage />} />
       <Route path="symbol/:subjectRef" handle={publicHandle} element={<SubjectDetailShell />}>
         <Route index element={<Navigate to="overview" replace />} />
         <Route path="overview" element={<OverviewSection />} />
