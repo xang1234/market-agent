@@ -52,6 +52,7 @@ export async function startRun(args: {
   briefVersion: number;
   briefHash: string;
   requestKey: string;
+  signal?: AbortSignal;
   fetchImpl?: FetchImpl;
 }): Promise<RunRecord> {
   return request(`/v1/discovery/campaigns/${encodeURIComponent(args.campaignId)}/runs`, {
@@ -208,7 +209,7 @@ function runView(value: unknown): RunView {
 function candidatePage(value: unknown): Page<CandidateView> { return { items: array(value, "items").map(candidate), next_cursor: nullableString(field(value, "next_cursor")) }; }
 function candidate(value: unknown): CandidateView {
   const result = object(value, "candidate");
-  const sources = array(result, "sources").map((item) => { const row = object(item, "source"); return { citation: citation(row.citation), title: string(row, "title"), url: string(row, "url"), published_at: nullableString(row.published_at), retrieved_at: string(row, "retrieved_at") }; });
+  const sources = array(result, "sources").map((item) => { const row = object(item, "source"); return { citation: citation(row.citation), title: string(row, "title"), url: httpsUrl(row, "url"), published_at: nullableString(row.published_at), retrieved_at: string(row, "retrieved_at") }; });
   return {
     candidate_id: string(result, "candidate_id"), identity: result.identity === null ? null : identity(result.identity), name: string(result, "name"),
     state: oneOf(string(result, "state"), ["unresolved_identity", "discovered", "not_selected", "researching", "shortlisted", "eligible_not_shortlisted", "excluded", "needs_evidence", "research_error"] as const, "candidate state"),
@@ -248,3 +249,12 @@ function boolean(row: JsonRecord, key: string): boolean { if (typeof row[key] !=
 function nullableString(value: unknown): string | null { if (value === null) return null; return stringValue(value, "nullable string"); }
 function nullableInteger(value: unknown): number | null { if (value === null) return null; if (typeof value !== "number" || !Number.isInteger(value)) throw new Error("Invalid number response."); return value; }
 function oneOf<T extends string | number>(value: string | number, choices: readonly T[], label: string): T { if (!choices.includes(value as T)) throw new Error(`Invalid ${label} response.`); return value as T; }
+function httpsUrl(row: JsonRecord, key: string): string {
+  const value = string(row, key);
+  try {
+    if (new URL(value).protocol !== "https:") throw new Error("non-HTTPS URL");
+    return value;
+  } catch {
+    throw new Error("Invalid source URL response.");
+  }
+}

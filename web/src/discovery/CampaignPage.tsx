@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
-import type { CandidateView, CampaignDetail, RunRecord, SavedBrief } from "../../../services/discovery/src/types.ts";
+import type { CandidateView, CampaignDetail, RunRecord, RunView, SavedBrief } from "../../../services/discovery/src/types.ts";
 import { useAuth } from "../shell/useAuth.ts";
 import { BriefEditor, type BriefSave } from "./BriefEditor.tsx";
 import { cancelRun, discoveryMessage, getCampaign, getRun, listCandidates, listEvents, listRuns, saveBrief, startRun } from "./api.ts";
@@ -18,12 +18,16 @@ export function CampaignPage() {
   const [pageError, setPageError] = useState<{ campaignId: string; message: string } | null>(null);
   const [selectedState, setSelectedState] = useState<{ campaignId: string; runId: string | null }>({ campaignId, runId: routeRunId ?? null });
   const [refreshKey, setRefreshKey] = useState(0);
+  const [resultRefreshKey, setResultRefreshKey] = useState(0);
   const [resultState, setResultState] = useState<{ runId: string; candidates: CandidateView[]; events: CampaignResultsProps["events"] } | null>(null);
   const [runsState, setRunsState] = useState<{ campaignId: string; runs: RunRecord[] } | null>(null);
   const [comparisonChoice, setComparisonChoice] = useState<{ campaignId: string; runId: string }>({ campaignId, runId: "" });
   const [comparisonState, setComparisonState] = useState<{ campaignId: string; runId: string; comparison: CampaignResultsProps["comparison"] } | null>(null);
-  const startInFlight = useRef(false);
-  const retryKey = useRef<string | null>(null);
+  const [cancellingRunId, setCancellingRunId] = useState<string | null>(null);
+  const startRequestKeys = useRef(new Map<string, string>());
+  const startController = useRef<{ campaignId: string; userId: string; routeRunId: string | null; controller: AbortController } | null>(null);
+  const cancellingRun = useRef<string | null>(null);
+  const routeIdentity = useRef({ campaignId, userId, routeRunId: routeRunId ?? null });
 
   const detail = detailState?.campaignId === campaignId ? detailState.detail : null;
   const scopedError = pageError?.campaignId === campaignId ? pageError.message : null;
@@ -40,6 +44,18 @@ export function CampaignPage() {
     return () => controller.abort();
   }, [userId, campaignId, refreshKey]);
 
+  useEffect(() => () => {
+    const pending = startController.current;
+    if (pending?.campaignId === campaignId && pending.userId === userId && pending.routeRunId === (routeRunId ?? null)) {
+      pending.controller.abort();
+      startController.current = null;
+    }
+  }, [campaignId, userId, routeRunId]);
+
+  useEffect(() => {
+    routeIdentity.current = { campaignId, userId, routeRunId: routeRunId ?? null };
+  }, [campaignId, userId, routeRunId]);
+
   useEffect(() => {
     if (!userId || !campaignId) return;
     let current = true;
@@ -47,25 +63,39 @@ export function CampaignPage() {
     return () => { current = false; };
   }, [userId, campaignId, refreshKey]);
 
-  const { run, error: pollingError } = useCampaignRun({ userId: userId ?? "", runId: userId ? selectedRunId : null, refreshKey });
+  const onAcceptedRun = useCallback((next: RunView) => {
+    if (next.status === "queued" || next.status === "running") setResultRefreshKey((key) => key + 1);
+  }, []);
+  const { run, error: pollingError } = useCampaignRun({ userId: userId ?? "", runId: userId ? selectedRunId : null, refreshKey, onAcceptedRun });
 
   useEffect(() => {
     if (!userId || !selectedRunId) return;
-    const controller = new AbortController();
-    Promise.all([
-      listCandidates({ userId, runId: selectedRunId, signal: controller.signal }),
-      listEvents({ userId, runId: selectedRunId, signal: controller.signal }),
-    ]).then(([candidatePage, eventPage]) => {
-      if (!controller.signal.aborted) setResultState({ runId: selectedRunId, candidates: candidatePage.items, events: eventPage.items });
-    }).catch(() => undefined);
-    return () => controller.abort();
-  }, [userId, selectedRunId, refreshKey]);
+    let disposed = false;
+    let controller: AbortController | null = null;
+    const hidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
+    const refresh = () => {
+      if (disposed || hidden()) return;
+      controller?.abort();
+      const request = new AbortController();
+      controller = request;
+      Promise.all([
+        listCandidates({ userId, runId: selectedRunId, signal: request.signal }),
+        listEvents({ userId, runId: selectedRunId, signal: request.signal }),
+      ]).then(([candidatePage, eventPage]) => {
+        if (!disposed && !request.signal.aborted && controller === request) setResultState({ runId: selectedRunId, candidates: candidatePage.items, events: eventPage.items });
+      }).catch(() => undefined);
+    };
+    const onVisibilityChange = () => { if (hidden()) controller?.abort(); else refresh(); };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    refresh();
+    return () => { disposed = true; document.removeEventListener("visibilitychange", onVisibilityChange); controller?.abort(); };
+  }, [userId, selectedRunId, refreshKey, resultRefreshKey]);
 
   useEffect(() => {
     if (!userId || !comparisonId) return;
     const controller = new AbortController();
-    Promise.all([getRun({ userId, runId: comparisonId, signal: controller.signal }), listCandidates({ userId, runId: comparisonId, signal: controller.signal })])
-      .then(([nextRun, candidatePage]) => { if (!controller.signal.aborted) setComparisonState({ campaignId, runId: comparisonId, comparison: { run: nextRun, candidates: candidatePage.items } }); })
+    getRun({ userId, runId: comparisonId, signal: controller.signal })
+      .then((nextRun) => { if (!controller.signal.aborted) setComparisonState({ campaignId, runId: comparisonId, comparison: { run: nextRun } }); })
       .catch(() => undefined);
     return () => controller.abort();
   }, [userId, campaignId, comparisonId]);
@@ -79,33 +109,43 @@ export function CampaignPage() {
   }
 
   async function onApprove(saved: SavedBrief) {
-    if (!userId || startInFlight.current) return;
-    startInFlight.current = true;
-    const requestKey = retryKey.current ?? newId();
-    retryKey.current = requestKey;
+    if (!userId || startController.current) return;
+    const controller = new AbortController();
+    const startedFromRunId = routeRunId ?? null;
+    startController.current = { campaignId, userId, routeRunId: startedFromRunId, controller };
+    const requestKey = startRequestKeys.current.get(campaignId) ?? newId();
+    startRequestKeys.current.set(campaignId, requestKey);
     setPageError(null);
     try {
-      const started = await startRun({ userId, campaignId, briefVersion: saved.version, briefHash: saved.hash, requestKey });
-      retryKey.current = null;
+      const started = await startRun({ userId, campaignId, briefVersion: saved.version, briefHash: saved.hash, requestKey, signal: controller.signal });
+      if (controller.signal.aborted || routeIdentity.current.campaignId !== campaignId || routeIdentity.current.userId !== userId || routeIdentity.current.routeRunId !== startedFromRunId) return;
+      startRequestKeys.current.delete(campaignId);
       setSelectedState({ campaignId, runId: started.run_id });
       setRefreshKey((key) => key + 1);
       navigate(`/discovery/${encodeURIComponent(campaignId)}/runs/${encodeURIComponent(started.run_id)}`);
     } catch (error) {
+      if (controller.signal.aborted || routeIdentity.current.campaignId !== campaignId || routeIdentity.current.userId !== userId || routeIdentity.current.routeRunId !== startedFromRunId) return;
       setPageError({ campaignId, message: discoveryMessage(error, "Research could not start. Your brief is still available to retry.") });
       throw error;
     } finally {
-      startInFlight.current = false;
+      if (startController.current?.controller === controller) startController.current = null;
     }
   }
 
   async function onCancel() {
-    if (!userId || !selectedRunId) return;
+    if (!userId || !selectedRunId || cancellingRun.current === selectedRunId) return;
+    const cancellingId = selectedRunId;
+    cancellingRun.current = cancellingId;
+    setCancellingRunId(cancellingId);
     setPageError(null);
     try {
-      await cancelRun({ userId, runId: selectedRunId });
-      setRefreshKey((key) => key + 1);
+      await cancelRun({ userId, runId: cancellingId });
+      if (routeIdentity.current.campaignId === campaignId && routeIdentity.current.userId === userId) setRefreshKey((key) => key + 1);
     } catch (error) {
-      setPageError({ campaignId, message: discoveryMessage(error, "The cancellation request could not be sent.") });
+      if (routeIdentity.current.campaignId === campaignId && routeIdentity.current.userId === userId) setPageError({ campaignId, message: discoveryMessage(error, "The cancellation request could not be sent.") });
+    } finally {
+      if (cancellingRun.current === cancellingId) cancellingRun.current = null;
+      setCancellingRunId((current) => current === cancellingId ? null : current);
     }
   }
 
@@ -113,7 +153,7 @@ export function CampaignPage() {
   if (!detail && !scopedError) return <div className="p-4 text-sm text-muted">Loading campaign…</div>;
   if (!detail) return <div className="p-4 text-sm text-negative" role="alert">{scopedError}</div>;
   const results = resultState?.runId === selectedRunId ? resultState : null;
-  return <main className="space-y-5 p-4"><header><p className="text-sm text-muted">Discovery campaign</p><h1 className="text-xl font-semibold text-fg">{detail.campaign.name}</h1><p className="mt-1 text-sm text-muted">{detail.campaign.question}</p></header>{!detail.readiness.ready ? <p role="alert" className="rounded-md border border-line p-3 text-sm text-muted">Research setup needs attention before a run can start.</p> : null}<BriefEditor key={campaignId} campaignId={campaignId} savedBrief={detail.brief} fallbackQuestion={detail.campaign.question} onSave={onSave} onApprove={detail.readiness.ready ? onApprove : undefined} />{scopedError ? <p role="alert" className="text-sm text-negative">{scopedError}</p> : null}{pollingError ? <p role="status" className="text-sm text-muted">Progress could not be refreshed. Showing the last available update.</p> : null}{run ? <><RunProgress run={run} onCancel={onCancel} /><CampaignResults run={run} candidates={results?.candidates ?? []} events={results?.events ?? []} comparison={comparison} />{(runsState?.campaignId === campaignId && runsState.runs.length > 1) ? <label className="grid max-w-md gap-1 text-sm text-fg">Compare with another run<select aria-label="Compare with another run" value={comparisonId} onChange={(event) => { setComparisonChoice({ campaignId, runId: event.target.value }); setComparisonState(null); }} className="rounded-md border border-line bg-surface-2 px-3 py-2"><option value="">Choose a run</option>{runsState.runs.filter((item) => item.run_id !== run.run_id).map((item) => <option key={item.run_id} value={item.run_id}>{runLabel(item)}</option>)}</select></label> : null}</> : selectedRunId ? <p className="text-sm text-muted">Loading research run…</p> : null}</main>;
+  return <main className="space-y-5 p-4"><header><p className="text-sm text-muted">Discovery campaign</p><h1 className="text-xl font-semibold text-fg">{detail.campaign.name}</h1><p className="mt-1 text-sm text-muted">{detail.campaign.question}</p></header>{!detail.readiness.ready ? <p role="alert" className="rounded-md border border-line p-3 text-sm text-muted">Research setup needs attention before a run can start.</p> : null}<BriefEditor key={campaignId} campaignId={campaignId} savedBrief={detail.brief} fallbackQuestion={detail.campaign.question} onSave={onSave} onApprove={detail.readiness.ready ? onApprove : undefined} />{scopedError ? <p role="alert" className="text-sm text-negative">{scopedError}</p> : null}{pollingError ? <p role="status" className="text-sm text-muted">Progress could not be refreshed. Showing the last available update.</p> : null}{run ? <><RunProgress run={run} onCancel={onCancel} cancelling={cancellingRunId === selectedRunId} /><CampaignResults run={run} candidates={results?.candidates ?? []} events={results?.events ?? []} comparison={comparison} />{(runsState?.campaignId === campaignId && runsState.runs.length > 1) ? <label className="grid max-w-md gap-1 text-sm text-fg">Compare with another run<select aria-label="Compare with another run" value={comparisonId} onChange={(event) => { setComparisonChoice({ campaignId, runId: event.target.value }); setComparisonState(null); }} className="rounded-md border border-line bg-surface-2 px-3 py-2"><option value="">Choose a run</option>{runsState.runs.filter((item) => item.run_id !== run.run_id).map((item) => <option key={item.run_id} value={item.run_id}>{runLabel(item)}</option>)}</select></label> : null}</> : selectedRunId ? <p className="text-sm text-muted">Loading research run…</p> : null}</main>;
 }
 
 type CampaignResultsProps = Parameters<typeof CampaignResults>[0];

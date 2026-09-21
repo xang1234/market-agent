@@ -3,8 +3,10 @@ import test from "node:test";
 import { JSDOM } from "jsdom";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import type { CandidateView, RunView } from "../../../services/discovery/src/types.ts";
+import { CandidateCard } from "./CandidateCard.tsx";
 import { CampaignResults } from "./CampaignResults.tsx";
 
 test("shows actual shortlist, unknown valuation, unavailable evidence, and a different-brief comparison warning", async () => {
@@ -30,6 +32,59 @@ test("shows actual shortlist, unknown valuation, unavailable evidence, and a dif
     await act(async () => root.unmount());
     restore();
   }
+});
+
+test("compares same-brief shortlists without treating an older non-shortlisted candidate as removed", () => {
+  // This would catch a comparison built from the entire older candidate page.
+  const shortlisted = candidateView();
+  const olderNonShortlisted: CandidateView = {
+    ...candidateView(),
+    candidate_id: "candidate-older",
+    name: "Never shortlisted",
+    state: "not_selected",
+    rank: null,
+    identity: { ...candidateView().identity!, issuer_id: "issuer-older", listing_id: "listing-older", ticker: "OLD" },
+  };
+  const html = renderToStaticMarkup(
+    <CampaignResults
+      run={runView([shortlisted])}
+      candidates={[shortlisted]}
+      events={[]}
+      comparison={{ run: { ...runView([shortlisted]), run_id: "older" }, candidates: [olderNonShortlisted] }}
+    />,
+  );
+  assert.match(html, /Same brief comparison/);
+  assert.match(html, /No longer shortlisted: None/);
+  assert.doesNotMatch(html, /Never shortlisted/);
+});
+
+test("never exposes a non-web source URL as a link", async () => {
+  // This would catch a malformed API payload becoming an executable href.
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>");
+  const restore = installDomGlobals(dom.window as unknown as Window);
+  const root = createRoot(dom.window.document.getElementById("root")!);
+  const candidate: CandidateView = {
+    ...candidateView(),
+    evidence_available: true,
+    sources: [{ ...candidateView().sources[0]!, url: "javascript:alert('unsafe')" }],
+  };
+  try {
+    await act(async () => { root.render(<CandidateCard candidate={candidate} />); });
+    const sources = [...dom.window.document.querySelectorAll("button")].find((button) => button.getAttribute("aria-label") === "View sources for Grid Systems");
+    assert.ok(sources);
+    await act(async () => sources.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })));
+    assert.equal([...dom.window.document.querySelectorAll("a")].some((anchor) => anchor.href.startsWith("javascript:")), false);
+    assert.match(dom.window.document.body.textContent ?? "", /Source links are unavailable/);
+  } finally {
+    await act(async () => root.unmount());
+    restore();
+  }
+});
+
+test("uses ordinary pressed buttons for result groups", () => {
+  const html = renderToStaticMarkup(<CampaignResults run={runView([])} candidates={[]} events={[]} />);
+  assert.doesNotMatch(html, /role="tab(?:list|panel)?"/);
+  assert.match(html, /<button[^>]*aria-pressed="true"[^>]*>Shortlist \(0\)<\/button>/);
 });
 
 function candidateView(): CandidateView {

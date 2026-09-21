@@ -14,8 +14,9 @@ export function useCampaignRun(args: {
   successIntervalMs?: number;
   errorIntervalMs?: number;
   refreshKey?: number;
+  onAcceptedRun?: (run: RunView) => void;
 }): CampaignRunState {
-  const { userId, runId, successIntervalMs = 2_000, errorIntervalMs = 10_000 } = args;
+  const { userId, runId, fetchRun: fetchRunOverride, successIntervalMs = 2_000, errorIntervalMs = 10_000, refreshKey, onAcceptedRun } = args;
   const [result, setResult] = useState<{ runId: string; run: RunView } | null>(null);
   const [failure, setFailure] = useState<{ runId: string; message: string } | null>(null);
 
@@ -26,7 +27,7 @@ export function useCampaignRun(args: {
     let controller: AbortController | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let inFlight = false;
-    const fetchRun = args.fetchRun ?? getRun;
+    const fetchRun = fetchRunOverride ?? getRun;
 
     function clearWork() {
       if (timer) { clearTimeout(timer); timer = null; }
@@ -47,6 +48,7 @@ export function useCampaignRun(args: {
         const next = await fetchRun({ userId, runId: activeRunId, signal: request.signal });
         if (disposed || request.signal.aborted || controller !== request) return;
         setResult({ runId: activeRunId, run: next });
+        onAcceptedRun?.(next);
         setFailure(null);
         if (!TERMINAL.has(next.status)) schedule(successIntervalMs);
       } catch (error) {
@@ -69,7 +71,7 @@ export function useCampaignRun(args: {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       clearWork();
     };
-  }, [userId, runId, successIntervalMs, errorIntervalMs, args.fetchRun, args.refreshKey]);
+  }, [userId, runId, successIntervalMs, errorIntervalMs, fetchRunOverride, refreshKey, onAcceptedRun]);
 
   return {
     run: result?.runId === runId ? result.run : null,
