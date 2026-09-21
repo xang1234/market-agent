@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
-import type { CandidateView, CampaignDetail, RunRecord, RunView, SavedBrief } from "../../../services/discovery/src/types.ts";
+import type { CandidateView, CampaignDetail, RunRecord, SavedBrief } from "../../../services/discovery/src/types.ts";
 import { useAuth } from "../shell/useAuth.ts";
 import { BriefEditor, type BriefSave } from "./BriefEditor.tsx";
 import { cancelRun, discoveryMessage, getCampaign, getRun, listCandidates, listEvents, listRuns, saveBrief, startRun } from "./api.ts";
@@ -63,8 +63,8 @@ export function CampaignPage() {
     return () => { current = false; };
   }, [userId, campaignId, refreshKey]);
 
-  const onAcceptedRun = useCallback((next: RunView) => {
-    if (next.status === "queued" || next.status === "running") setResultRefreshKey((key) => key + 1);
+  const onAcceptedRun = useCallback(() => {
+    setResultRefreshKey((key) => key + 1);
   }, []);
   const { run, error: pollingError } = useCampaignRun({ userId: userId ?? "", runId: userId ? selectedRunId : null, refreshKey, onAcceptedRun });
 

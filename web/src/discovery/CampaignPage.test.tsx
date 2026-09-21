@@ -87,6 +87,37 @@ test("refreshes all result groups and the trail after a later active poll", asyn
   }
 });
 
+test("refreshes all result groups and the trail when a running poll reaches completion", async () => {
+  // This would catch stopping the candidate/event refresh just before terminal work is published.
+  let runReads = 0;
+  const shortlisted = candidate("terminal-shortlisted", "Terminal shortlisted company", "shortlisted");
+  const investigated = candidate("terminal-investigated", "Terminal investigated company", "eligible_not_shortlisted", decision());
+  const unresolved = candidate("terminal-unresolved", "Terminal unresolved company", "not_selected");
+  const event = campaignEvent("Final research activity");
+  const harness = await mountPage(async (url) => {
+    if (url.includes("/campaigns/campaign-1") && !url.endsWith("/runs")) return json(detail("campaign-1", runRecord("running")));
+    if (url.includes("/runs/run-1/candidates")) return json({ items: runReads >= 2 ? [shortlisted, investigated, unresolved] : [], next_cursor: null });
+    if (url.includes("/runs/run-1/events")) return json({ items: runReads >= 2 ? [event] : [], next_sequence: runReads >= 2 ? 1 : 0, has_more: false });
+    if (url.includes("/runs/run-1")) {
+      runReads += 1;
+      return json(runView(runReads >= 2 ? "completed" : "running", runReads >= 2 ? [shortlisted] : []));
+    }
+    return json(emptyResponse(url));
+  });
+  try {
+    await waitFor(() => harness.document.body.textContent?.includes("Investigated (1)") ?? false);
+    assert.match(harness.document.body.textContent ?? "", /Shortlist \(1\)/);
+    assert.match(harness.document.body.textContent ?? "", /Not selected & unresolved \(1\)/);
+    assert.match(harness.document.body.textContent ?? "", /Final research activity/);
+    await harness.click("Investigated (1)");
+    assert.match(harness.document.body.textContent ?? "", /Terminal investigated company/);
+    await harness.click("Not selected & unresolved (1)");
+    assert.match(harness.document.body.textContent ?? "", /Terminal unresolved company/);
+  } finally {
+    await harness.unmount();
+  }
+});
+
 test("does not let a cancelled route's delayed start response change the current page", async () => {
   // This would catch a stale start completion navigating back to its former campaign.
   const pending = deferred<Response>();
