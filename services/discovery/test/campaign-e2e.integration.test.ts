@@ -32,7 +32,7 @@ test("approved theme research reaches an inspectable shortlist without live prov
     await h.assertSnapshotVerifies(candidate.snapshot_id);
   }
   await h.assertFixtureOutcome();
-  await h.assertRecordedAssessmentsExecuted();
+  await h.assertRecordedAssessmentBijection();
   await h.assertAllLimitsRespected();
   await h.assertForeignUserDenied();
 });
@@ -53,7 +53,7 @@ test("recorded fixtures exclude misleading and counterevidenced companies and co
     if (state !== null) assert.ok(candidates.items.every((candidate) => candidate.state === state), fixture);
     assert.equal(result.shortlist.length, 0, fixture);
     await h.assertFixtureOutcome();
-    await h.assertRecordedAssessmentsExecuted();
+    await h.assertRecordedAssessmentBijection();
     await h.assertAllLimitsRespected();
   }
 });

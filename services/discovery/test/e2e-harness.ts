@@ -53,6 +53,7 @@ type Fixture = {
 };
 
 type RecordedAssessment = { fixture: FixtureName; assessment_id: string; candidate_id: string; primary_source_id: string; counter_source_id: string };
+type OperatorReviewRow = Omit<RecordedAssessment, "fixture">;
 
 const FIXTURE_CANDIDATE_COUNTS: Readonly<Record<FixtureName, number>> = Object.freeze({
   "power-infrastructure": 3,
@@ -323,28 +324,57 @@ export async function createCampaignE2eHarness(t: TestContext, name: FixtureName
       }
       if (fixture.expected.quote_cache_before_run === false) assert.equal(quoteCountBeforeRun, 0, "fixture starts without quote cache");
     },
-    async assertRecordedAssessmentsExecuted() {
+    async assertRecordedAssessmentBijection() {
       assert.ok(runId !== null);
+      const reviewRows = (await recordedFixtureAssessments())
+        .filter((record) => record.fixture === fixture.fixture)
+        .map(({ fixture: _fixture, ...record }) => record);
+      const expectedReviewRows = fixture.candidates.map(fixtureReviewRow);
+      assert.deepEqual(reviewRows, expectedReviewRows, "this fixture's operator rows equal its executed fixture candidates");
       const rows = await db.query<{ candidate_id: string; issuer_id: string; state: string; assessment: unknown; snapshot_id: string | null }>(
         "select candidate_id::text,issuer_id::text,state,assessment,snapshot_id::text from discovery_candidates where run_id=$1::uuid order by candidate_id",
         [runId],
       );
-      assert.equal(rows.rowCount, fixture.candidates.length, "every review row has one persisted candidate");
+      assert.equal(rows.rowCount, expectedReviewRows.length, "every review row has one persisted candidate");
       const runtimeIds = fixture.candidates.map((candidate) => runtimeCandidateId(fixture, runId!, candidate));
-      assert.equal(new Set(runtimeIds).size, fixture.candidates.length, "fixture candidates derive distinct run IDs");
-      assert.equal(new Set(fixture.candidates.map((candidate) => candidate.identity.issuer_id)).size, fixture.candidates.length, "fixture candidates have distinct canonical identities");
+      assert.equal(new Set(runtimeIds).size, expectedReviewRows.length, "fixture candidates derive distinct runtime IDs");
+      assert.equal(new Set(fixture.candidates.map((candidate) => candidate.identity.issuer_id)).size, expectedReviewRows.length, "fixture candidates have distinct canonical identities");
+      assert.equal(new Set(rows.rows.map((row) => row.candidate_id)).size, expectedReviewRows.length, "persisted candidate IDs are distinct");
+      assert.deepEqual(sortedUnique(rows.rows.map((row) => row.candidate_id)), sortedUnique(runtimeIds), "persisted candidate IDs equal the executed fixture candidates");
+
+      const persistedAssessmentIds = rows.rows.map((row) => persistedAssessmentCandidateId(row.assessment));
+      assert.equal(new Set(persistedAssessmentIds).size, expectedReviewRows.length, "persisted assessment IDs are distinct");
+      assert.deepEqual(sortedUnique(persistedAssessmentIds), sortedUnique(runtimeIds), "persisted assessment IDs equal the executed fixture candidates");
+
+      const snapshotIds = rows.rows.map((row) => {
+        assert.ok(row.snapshot_id, `persisted candidate ${row.candidate_id} has a sealed snapshot`);
+        return row.snapshot_id;
+      });
+      assert.equal(new Set(snapshotIds).size, expectedReviewRows.length, "sealed snapshot IDs are distinct");
+      const snapshots = await db.query<{ snapshot_id: string; source_ids: string[]; document_refs: string[] }>(
+        "select snapshot_id::text,source_ids,document_refs from snapshots where snapshot_id=any($1::uuid[]) order by snapshot_id",
+        [snapshotIds],
+      );
+      assert.equal(snapshots.rowCount, expectedReviewRows.length, "every candidate has exactly one persisted snapshot");
+      assert.equal(new Set(snapshots.rows.map((snapshot) => snapshot.snapshot_id)).size, expectedReviewRows.length, "snapshot query returns distinct seals");
+      assert.deepEqual(sortedUnique(snapshots.rows.map((snapshot) => snapshot.snapshot_id)), sortedUnique(snapshotIds), "persisted snapshot IDs equal the candidate seals");
+
+      const candidatesByRuntimeId = new Map(rows.rows.map((row) => [row.candidate_id, row]));
+      const snapshotsById = new Map(snapshots.rows.map((snapshot) => [snapshot.snapshot_id, snapshot]));
       for (const fixtureCandidate of fixture.candidates) {
         const runtimeId = runtimeCandidateId(fixture, runId!, fixtureCandidate);
-        const candidate = rows.rows.find((row) => row.candidate_id === runtimeId);
+        const reviewRow = fixtureReviewRow(fixtureCandidate);
+        assert.deepEqual(reviewRows.find((row) => row.assessment_id === reviewRow.assessment_id), reviewRow, `operator row ${reviewRow.assessment_id} exactly maps to its fixture candidate and source pair`);
+        const candidate = candidatesByRuntimeId.get(runtimeId);
         assert.ok(candidate, `assessment ${fixtureCandidate.assessment_id} has an executed candidate`);
         assert.equal(candidate.issuer_id, fixtureCandidate.identity.issuer_id);
         assert.equal(candidate.state, fixtureCandidate.expected.state);
-        assert.ok(candidate.assessment !== null, `assessment ${fixtureCandidate.assessment_id} is persisted`);
-        assert.ok(candidate.snapshot_id, `assessment ${fixtureCandidate.assessment_id} has a sealed snapshot`);
-        const sourceIds = await db.query<{ source_ids: string[] }>("select source_ids from snapshots where snapshot_id=$1::uuid", [candidate.snapshot_id]);
-        assert.equal(sourceIds.rowCount, 1);
-        assert.ok(sourceIds.rows[0]!.source_ids.includes(fixtureCandidate.excerpts[0]!.source_id), `assessment ${fixtureCandidate.assessment_id} cites its primary source`);
-        assert.ok(sourceIds.rows[0]!.source_ids.includes(fixtureCandidate.excerpts[1]!.source_id), `assessment ${fixtureCandidate.assessment_id} cites its counter source`);
+        assert.equal(persistedAssessmentCandidateId(candidate.assessment), runtimeId, `assessment ${fixtureCandidate.assessment_id} belongs only to its candidate`);
+        assert.ok(candidate.snapshot_id);
+        const snapshot = snapshotsById.get(candidate.snapshot_id);
+        assert.ok(snapshot, `assessment ${fixtureCandidate.assessment_id} snapshot is persisted`);
+        assert.deepEqual(sortedUnique(snapshot.source_ids), sortedUnique([reviewRow.primary_source_id, reviewRow.counter_source_id]), `assessment ${fixtureCandidate.assessment_id} snapshot cites exactly its primary and counter sources`);
+        assert.deepEqual(sortedUnique(snapshot.document_refs), sortedUnique(fixtureCandidate.excerpts.map((excerpt) => excerpt.document_id)), `assessment ${fixtureCandidate.assessment_id} snapshot references exactly its primary and counter documents`);
         await this.assertSnapshotVerifies(candidate.snapshot_id);
       }
     },
@@ -454,20 +484,53 @@ export async function recordedFixtureAssessments() {
   const fixtures: FixtureName[] = ["power-infrastructure", "industrial-automation", "supply-disruption"];
   const records = (await Promise.all(fixtures.map(loadFixture))).flatMap((fixture) => fixture.candidates.map((candidate) => ({
     fixture: fixture.fixture,
-    assessment_id: candidate.assessment_id,
-    candidate_id: candidate.candidate_id,
-    primary_source_id: candidate.excerpts[0]!.source_id,
-    counter_source_id: candidate.excerpts[1]!.source_id,
+    ...fixtureReviewRow(candidate),
   } satisfies RecordedAssessment)));
   assert.equal(records.length, 10, "the human-review corpus has exactly ten executed fixture candidates");
   assert.equal(new Set(records.map((record) => record.assessment_id)).size, records.length, "assessment IDs are unique");
   assert.equal(new Set(records.map((record) => record.candidate_id)).size, records.length, "fixture candidate IDs are unique");
   const operatorTable = await readFile(new URL("../../../docs/discovery-campaigns-operations.md", import.meta.url), "utf8");
-  for (const [index, record] of records.entries()) {
-    const row = `| ${index + 1} | \`${record.assessment_id}\` | \`${record.candidate_id}\` | \`${record.primary_source_id}\` / \`${record.counter_source_id}\` | Pending | Pending | Pending |`;
-    assert.ok(operatorTable.includes(row), `operator table must reference executed assessment ${record.assessment_id}`);
-  }
+  assert.deepEqual(parseOperatorReviewRows(operatorTable), records.map(({ fixture: _fixture, ...record }) => record), "operator table has exactly one ordered Pending row for every fixture assessment");
   return records;
+}
+
+function fixtureReviewRow(candidate: FixtureCandidate): OperatorReviewRow {
+  return {
+    assessment_id: candidate.assessment_id,
+    candidate_id: candidate.candidate_id,
+    primary_source_id: candidate.excerpts[0]!.source_id,
+    counter_source_id: candidate.excerpts[1]!.source_id,
+  };
+}
+
+function parseOperatorReviewRows(document: string): OperatorReviewRow[] {
+  const header = "| # | Fixture / assessment ID | Fixture candidate ID | Primary / counter source refs | Reviewer | Verdict | Reason |";
+  const start = document.indexOf(header);
+  assert.notEqual(start, -1, "operator table header is present");
+  const sectionEnd = document.indexOf("\n\n## Configuration", start);
+  assert.notEqual(sectionEnd, -1, "operator table ends before configuration");
+  const lines = document.slice(start, sectionEnd).split("\n");
+  assert.equal(lines[0], header, "operator table has the expected header");
+  assert.equal(lines[1], "| --- | --- | --- | --- | --- | --- | --- |", "operator table has the expected separator");
+  const rows = lines.slice(2).filter((line) => line.length > 0);
+  assert.equal(rows.length, 10, "operator table has exactly ten review rows");
+  return rows.map((line, index) => {
+    const row = /^\| (\d+) \| `([^`]+)` \| `([^`]+)` \| `([^`]+)` \/ `([^`]+)` \| Pending \| Pending \| Pending \|$/u.exec(line);
+    assert.ok(row, `operator table row ${index + 1} has the exact Pending schema`);
+    assert.equal(Number(row[1]), index + 1, `operator table row ${index + 1} has its required ordinal`);
+    return { assessment_id: row[2]!, candidate_id: row[3]!, primary_source_id: row[4]!, counter_source_id: row[5]! };
+  });
+}
+
+function persistedAssessmentCandidateId(value: unknown): string {
+  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value), "persisted assessment is an object");
+  const candidateId = (value as Record<string, unknown>).candidate_id;
+  assert.ok(typeof candidateId === "string", "persisted assessment has a candidate ID");
+  return candidateId;
+}
+
+function sortedUnique(values: readonly string[]): string[] {
+  return [...new Set(values)].sort();
 }
 
 /**

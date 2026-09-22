@@ -32,6 +32,12 @@ The first re-review correctly found that seven round-1 review rows were metadata
 
 Scout selects every recorded lead, the production identity/evidence/financial providers resolve and acquire every candidate, and the real worker assesses all ten. The integration harness proves each run-derived candidate has `web` provenance, a metered identity attempt, persisted assessment, and sealed snapshot containing that candidate's own primary and counter source references. The pending operator table is parsed as part of fixture loading: every row must match one actual candidate assessment ID, stable fixture candidate ID, and its two sources. There is no standalone `recorded_assessments` metadata list.
 
+### Fix round 3: exact persisted assessment bijection
+
+The second re-review correctly found that the prior assertion proved only per-row presence: it used source containment, did not require distinct sealed snapshot IDs, and treated the operator table as unstructured text. This round began RED after the E2E cases invoked the missing `assertRecordedAssessmentBijection` helper: 2 passed and 2 failed with that absent-method error.
+
+GREEN replaces it with an exact bijection proof. The table parser requires its fixed header and separator, exactly ten numbered rows, the exact source-pair/Pending row grammar, and ordered deep equality with the ten fixture records. For every actual fixture run, the harness proves equal sets of executed runtime candidate IDs and persisted `discovery_candidates` IDs; it also proves the persisted decision's `candidate_id` (the durable assessment identity) equals that same candidate, with no duplicate decision identity. Every candidate has a distinct snapshot ID; the queried snapshot set equals the candidate-held seals, and each snapshot has exactly that candidate's two source IDs and two document IDs before the production seal verifier runs. Thus a candidate, persisted assessment, sealed snapshot, or operator row cannot be reused for another candidate.
+
 ## Verification
 
 Docker-backed commands used isolated temporary PostgreSQL containers. Docker socket access was unavailable inside the filesystem sandbox but succeeded with approved test execution privilege. There was no `ENOSPC`; `/private/tmp/discovery-test-bin/docker` was absent, so no wrapper was created. No shared `stockscreenclaude-*` container or data was stopped, pruned, deleted, or changed.
@@ -45,6 +51,7 @@ Docker-backed commands used isolated temporary PostgreSQL containers. Docker soc
 | `node --experimental-strip-types --test services/discovery/test/worker-cli.test.ts` | 2 passed, 0 failed. |
 | Focused fix-round campaign/evaluation tests | 11 passed, 0 failed. |
 | Focused round-2 E2E/evaluation/identity tests | 14 passed, 0 failed. |
+| Focused round-3 E2E/evaluation tests | 11 passed, 0 failed. Final E2E 4/4 in 25.8s; evaluation 7/7 in 20.4s. The prior serial full Discovery 167/167 remains authoritative and was not rerun because this round changes only the E2E harness and report/progress documentation. |
 | `node --experimental-strip-types --test --test-concurrency=1 test/**/*.test.ts` in `services/discovery` | 167 passed, 0 failed, 0 cancelled (363.1s), using owned temporary PostgreSQL. This is the latest authoritative full Discovery gate. |
 | `npm test` in `services/llm`; `npm run typecheck` | 27 passed, 0 failed; typecheck exit 0. |
 | `npm test` in `services/agents` | 85 passed, 0 failed, 3 skipped. |
@@ -90,7 +97,7 @@ inventory contract complete.
 | Authenticated handler and contract | HTTP test covers every discovery route; OpenAPI 10/10. |
 | Feature-off config, worker lifecycle, CI | `.env.dev.example`, `worker-cli.ts`, dev-shell 11/11, CI discovery job. |
 | Recovery, rollback, readiness | `docs/discovery-campaigns-operations.md` and `CONTEXT.md`. |
-| Human review | The parsed ten-row operator table maps one-to-one to the ten actual 3+3+4 fixture candidates and each candidate's own sealed assessment/source pair; every review cell is Pending. |
+| Human review | The exact parsed ten-row operator table maps bijectively to the ten actual 3+3+4 fixture candidates, their distinct persisted decisions and seals, and each candidate's own source/document pair; every review cell is Pending. |
 
 ## Human release gate
 
@@ -102,7 +109,7 @@ Checked the Task 10 brief and design sections 13–14 against the final diff:
 
 - Full-path provider/model calls cross the same attempt runner and model/provider boundaries as production; fixtures reject undeclared calls, a different candidate ID, and over-counted calls.
 - Positive fixtures have nonempty recorded provider payloads and do not use `loadExisting`; the test asserts `web` lead origin, a real identity attempt, no pre-run quote cache, and durable evidence/snapshot sealing.
-- Each of the ten operator rows names an actual candidate that Scout selects and the worker assesses. The E2E assertion verifies the distinct identity, persisted decision, sealed snapshot, and candidate-owned primary/counter sources for every row.
+- Each of the ten operator rows names an actual candidate that Scout selects and the worker assesses. The E2E assertion verifies exact one-to-one candidate, persisted decision, distinct sealed snapshot, and candidate-owned primary/counter source/document mappings for every row.
 - The harness uses durable quote claims and the real snapshot verifier, not an in-memory substitute.
 - Documentation distinguishes API persistence from executable worker readiness, keeps secrets out of examples, describes unknown outcomes, and states limits in the required units.
 - The release document preserves the pending human gate and makes no investment-performance claim.
