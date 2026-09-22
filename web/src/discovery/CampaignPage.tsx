@@ -28,7 +28,7 @@ export function CampaignPage() {
   const [comparisonState, setComparisonState] = useState<{ campaignId: string; runId: string; comparison: CampaignResultsProps["comparison"] } | null>(null);
   const [cancellingRunId, setCancellingRunId] = useState<string | null>(null);
   const [actionStatus, setActionStatus] = useState<string | null>(null);
-  const [exportState, setExportState] = useState<{ campaignId: string; runId: string; markdown: string } | null>(null);
+  const [exportState, setExportState] = useState<{ campaignId: string; runId: string; userId: string; markdown: string } | null>(null);
   const startRequestKeys = useRef(new Map<string, string>());
   const startController = useRef<{ campaignId: string; userId: string; routeRunId: string | null; controller: AbortController } | null>(null);
   const cancellingRun = useRef<string | null>(null);
@@ -236,7 +236,7 @@ export function CampaignPage() {
         || routeIdentity.current.routeRunId !== actionRouteRunId
         || routeIdentity.current.selectedRunId !== actionRunId
       ) throw new Error('This research action was cancelled because the selected run changed.');
-      setExportState({ campaignId: actionCampaignId, runId: actionRunId, markdown });
+      setExportState({ campaignId: actionCampaignId, runId: actionRunId, userId: actionUserId, markdown });
       setActionStatus('Cited research export is ready.');
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
@@ -266,7 +266,7 @@ export function CampaignPage() {
   if (!detail && !scopedError) return <div className="p-4 text-sm text-muted">Loading campaign…</div>;
   if (!detail) return <div className="p-4 text-sm text-negative" role="alert">{scopedError}</div>;
   const results = resultState?.runId === selectedRunId ? resultState : null;
-  const exportMarkdown = exportState?.campaignId === campaignId && exportState.runId === selectedRunId ? exportState.markdown : null;
+  const exportMarkdown = exportState?.campaignId === campaignId && exportState.runId === selectedRunId && exportState.userId === userId ? exportState.markdown : null;
   return <main className="space-y-5 p-4"><header><p className="text-sm text-muted">Discovery campaign</p><h1 className="text-xl font-semibold text-fg">{detail.campaign.name}</h1><p className="mt-1 text-sm text-muted">{detail.campaign.question}</p></header>{!detail.readiness.ready ? <p role="alert" className="rounded-md border border-line p-3 text-sm text-muted">Research setup needs attention before a run can start.</p> : null}<BriefEditor key={campaignId} campaignId={campaignId} savedBrief={detail.brief} fallbackQuestion={detail.campaign.question} onSave={onSave} onApprove={detail.readiness.ready ? onApprove : undefined} />{scopedError ? <p role="alert" className="text-sm text-negative">{scopedError}</p> : null}{pollingError ? <p role="status" className="text-sm text-muted">Progress could not be refreshed. Showing the last available update.</p> : null}{run ? <><RunProgress run={run} onCancel={onCancel} cancelling={cancellingRunId === selectedRunId} /><CampaignResults run={run} candidates={results?.candidates ?? []} events={results?.events ?? []} comparison={comparison} onCopyExport={() => void onCopyExport()} onOpenInAnalyze={onOpenInAnalyze} onDraftThesis={onDraftThesis} actionStatus={actionStatus} hasMoreEvents={results?.hasMoreEvents} onLoadMoreEvents={onLoadMoreEvents} />{exportMarkdown ? <label className="grid gap-1 text-sm text-fg">Cited research export<textarea aria-label="Cited research export" readOnly value={exportMarkdown} rows={12} className="rounded-md border border-line bg-surface-2 p-3 font-mono text-xs" /></label> : null}{(runsState?.campaignId === campaignId && runsState.runs.length > 1) ? <label className="grid max-w-md gap-1 text-sm text-fg">Compare with another run<select aria-label="Compare with another run" value={comparisonId} onChange={(event) => { setComparisonChoice({ campaignId, runId: event.target.value }); setComparisonState(null); }} className="rounded-md border border-line bg-surface-2 px-3 py-2"><option value="">Choose a run</option>{runsState.runs.filter((item) => item.run_id !== run.run_id).map((item) => <option key={item.run_id} value={item.run_id}>{runLabel(item)}</option>)}</select></label> : null}</> : selectedRunId ? <p className="text-sm text-muted">Loading research run…</p> : null}</main>;
 }
 

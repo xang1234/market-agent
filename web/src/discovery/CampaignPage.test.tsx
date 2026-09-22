@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { JSDOM } from "jsdom";
-import { act } from "react";
+import { act, useContext, useLayoutEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
@@ -292,6 +292,30 @@ test("cancels a cited export when the route changes while clipboard writing is p
   }
 });
 
+test("does not render User A's cited export during a direct switch to User B on the same run", async () => {
+  const run = { ...runView("completed"), run_id: "run-a" };
+  const candidate = { ...researchCandidate(), candidate_id: "candidate-a", name: "User A private company" };
+  const harness = await mountPage(async (url) => {
+    if (url.endsWith("/campaigns/campaign-1")) return json(detail("campaign-1", run));
+    if (url.includes("/runs/run-a/candidates")) return json({ items: [candidate], next_cursor: null });
+    if (url.includes("/runs/run-a/events")) return json({ items: [], next_sequence: 0, has_more: false });
+    if (url.includes("/runs/run-a")) return json({ ...run, shortlist: [candidate] });
+    return json(emptyResponse(url));
+  }, "/discovery/campaign-1/runs/run-a");
+  try {
+    await waitFor(() => !!harness.findButton("Copy cited shortlist"));
+    await harness.click("Copy cited shortlist");
+    assert.match(harness.document.querySelector<HTMLTextAreaElement>('[aria-label="Cited research export"]')?.value ?? "", /User A private company/);
+
+    await harness.switchUser("user-2");
+
+    assert.equal(harness.exportVisibleForUser("user-2"), false);
+    assert.equal(harness.document.querySelector('[aria-label="Cited research export"]') === null, true);
+  } finally {
+    await harness.unmount();
+  }
+});
+
 test('opening investigated research in Analyze keeps its recorded status out of a shortlisted claim', async () => {
   const campaignId = '11111111-1111-4111-8111-111111111111';
   const runId = '22222222-2222-4222-8222-222222222222';
@@ -428,16 +452,30 @@ async function mountPage(route: (url: string, init?: RequestInit) => Promise<Res
   };
   const root = createRoot(dom.window.document.getElementById("root")!);
   let navigate: ((path: string) => void) | null = null;
+  let setUserId: ((userId: string) => void) | null = null;
   let lastLocationState: unknown = null;
+  const exportVisibilityByUser = new Map<string, boolean>();
+  function ExportVisibilityProbe() {
+    const session = useContext(AuthContext)?.session ?? null;
+    useLayoutEffect(() => {
+      if (session) exportVisibilityByUser.set(session.userId, dom.window.document.querySelector('[aria-label="Cited research export"]') !== null);
+    }, [session]);
+    return null;
+  }
+  function AuthHarness({ children }: { children: React.ReactNode }) {
+    const [userId, updateUserId] = useState("user-1");
+    setUserId = updateUserId;
+    return <AuthContext.Provider value={{ session: { userId, displayName: "User" }, signIn: () => undefined, signOut: () => undefined }}>{children}</AuthContext.Provider>;
+  }
   function RoutedPage() {
     navigate = useNavigate();
     const location = useLocation();
     lastLocationState = location.state;
-    return <><p aria-label="Current route">{location.pathname}</p><CampaignPage /></>;
+    return <><p aria-label="Current route">{location.pathname}</p><CampaignPage /><ExportVisibilityProbe /></>;
   }
   function Destination() { const location = useLocation(); lastLocationState = location.state; return <p aria-label="Current route">{location.pathname}</p>; }
   await act(async () => {
-    root.render(<AuthContext.Provider value={{ session: { userId: "user-1", displayName: "User" }, signIn: () => undefined, signOut: () => undefined }}><MemoryRouter initialEntries={[initialPath]}><Routes><Route path="/discovery/:campaignId" element={<RoutedPage />} /><Route path="/discovery/:campaignId/runs/:runId" element={<RoutedPage />} /><Route path="/agents" element={<Destination />} /><Route path="/analyze" element={<Destination />} /></Routes></MemoryRouter></AuthContext.Provider>);
+    root.render(<AuthHarness><MemoryRouter initialEntries={[initialPath]}><Routes><Route path="/discovery/:campaignId" element={<RoutedPage />} /><Route path="/discovery/:campaignId/runs/:runId" element={<RoutedPage />} /><Route path="/agents" element={<Destination />} /><Route path="/analyze" element={<Destination />} /></Routes></MemoryRouter></AuthHarness>);
   });
   await act(async () => { await delay(10); });
   return {
@@ -448,6 +486,8 @@ async function mountPage(route: (url: string, init?: RequestInit) => Promise<Res
     button(label: string) { const button = this.findButton(label); assert.ok(button, `missing button ${label}`); return button; },
     async click(label: string) { const button = this.button(label); await act(async () => button.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }))); await act(async () => { await delay(5); }); },
     async navigate(path: string) { assert.ok(navigate, "navigation control is ready"); await act(async () => { navigate!(path); }); await act(async () => { await delay(10); }); },
+    async switchUser(userId: string) { assert.ok(setUserId, "auth control is ready"); await act(async () => { setUserId!(userId); }); },
+    exportVisibleForUser(userId: string) { return exportVisibilityByUser.get(userId) ?? false; },
     route() { return dom.window.document.querySelector('[aria-label="Current route"]')?.textContent; },
     locationState() { return lastLocationState; },
     async unmount() { await act(async () => root.unmount()); (globalThis as { fetch: typeof fetch }).fetch = oldFetch; restore(); },
