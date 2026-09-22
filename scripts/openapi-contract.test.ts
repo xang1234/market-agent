@@ -118,6 +118,18 @@ test("OpenAPI includes frontend-used HTTP methods for mutable agent routes", asy
   );
 });
 
+test("OpenAPI keeps every discovery operation behind inherited bearer authentication", async () => {
+  const document = await openApiDocument();
+  assert.deepEqual(document.security, [{ bearerAuth: [] }]);
+  for (const route of FRONTEND_V1_ROUTES.filter((value) => value.startsWith("/v1/discovery/"))) {
+    const path = record(document.paths[route], route);
+    for (const [method, operation] of Object.entries(path)) {
+      if (!/^(get|post|put|delete)$/u.test(method)) continue;
+      assert.equal(record(operation, `${route}.${method}`).security, undefined, `${route}.${method} must not disable inherited authentication`);
+    }
+  }
+});
+
 test("OpenAPI documents the Analyze run and share-to-chat payload contract", async () => {
   const spec = await readFile(OPENAPI_PATH, "utf8");
   const runSection = openApiRouteSection(spec, "/v1/analyze/runs");

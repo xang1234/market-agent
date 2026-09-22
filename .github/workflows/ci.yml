@@ -546,3 +546,74 @@ jobs:
       - name: Run themes tests
         working-directory: services/themes
         run: npm test
+
+  discovery:
+    name: discovery (synthetic integration tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DISCOVERY_ENABLED: false
+      DISCOVERY_SEARCH_API_KEY: synthetic-ci-key
+      SEC_EDGAR_USER_AGENT: market-agent-ci contact@example.invalid
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            db/package-lock.json
+            services/discovery/package-lock.json
+            services/dev-api/package-lock.json
+            services/evidence/package-lock.json
+            services/llm/package-lock.json
+            services/observability/package-lock.json
+            services/snapshot/package-lock.json
+
+      - name: Install db deps (needed by discovery integration harness)
+        working-directory: db
+        run: npm ci
+
+      - name: Install discovery deps
+        working-directory: services/discovery
+        run: npm ci
+
+      - name: Install fixture-harness dependencies
+        run: |
+          npm --prefix services/dev-api ci
+          npm --prefix services/evidence ci
+          npm --prefix services/llm ci
+          npm --prefix services/observability ci
+          npm --prefix services/snapshot ci
+
+      - name: Run recorded synthetic discovery tests
+        working-directory: services/discovery
+        run: npm test
+
+  analyst-grids:
+    name: analyst-grids (integration tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            db/package-lock.json
+            services/analyst-grids/package-lock.json
+
+      - name: Install db deps (needed by analyst-grids integration harness)
+        working-directory: db
+        run: npm ci
+
+      - name: Install analyst-grids deps
+        working-directory: services/analyst-grids
+        run: npm ci
+
+      - name: Run analyst-grids tests
+        working-directory: services/analyst-grids
+        run: npm test

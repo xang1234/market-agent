@@ -1,0 +1,45 @@
+{
+  "fixture": "power-infrastructure",
+  "question": "Which US-listed companies have documented exposure to grid power infrastructure?",
+  "brief": {
+    "schema_version": 1,
+    "question": "Which US-listed companies have documented exposure to grid power infrastructure?",
+    "market": "us_listed",
+    "horizon_months": 18,
+    "lookback_months": 12,
+    "mechanisms": [
+      { "mechanism_id": "40000000-0000-4000-8000-000000000011", "label": "Grid equipment", "chain": ["Power demand grows", "Utilities order transformers"] },
+      { "mechanism_id": "40000000-0000-4000-8000-000000000012", "label": "Grid modernization", "chain": ["Networks age", "Utilities replace equipment"] }
+    ],
+    "criteria": [
+      { "criterion_id": "50000000-0000-4000-8000-000000000011", "importance": "must", "statement": "The company sells equipment used in grid power infrastructure.", "falsifier": "The company has no documented grid infrastructure product exposure." }
+    ],
+    "seed_queries": ["US listed transformer suppliers"],
+    "exclusions": ["Conglomerates without a cited grid product"],
+    "preferences": ["Primary company disclosures"],
+    "queries": [
+      { "mechanism_id": "40000000-0000-4000-8000-000000000011", "query": "US listed transformer suppliers" },
+      { "mechanism_id": "40000000-0000-4000-8000-000000000012", "query": "US grid modernization equipment suppliers" }
+    ]
+  },
+  "candidate": {
+    "candidate_id": "90000000-0000-4000-8000-000000000011",
+    "lead_key": "fixture:northern-transformer",
+    "name": "Northern Transformer Systems Inc.",
+    "identity": { "issuer_id": "80000000-0000-4000-8000-000000000011", "listing_id": "81000000-0000-4000-8000-000000000011", "legal_name": "Northern Transformer Systems Inc.", "ticker": "NTSI", "mic": "XNAS", "currency": "USD", "asset_type": "common_stock", "identity_source_ids": [] },
+    "excerpts": [
+      { "excerpt_id": "a0000000-0000-4000-8000-000000000011", "document_id": "a1000000-0000-4000-8000-000000000011", "source_id": "a2000000-0000-4000-8000-000000000011", "family_key": "northern-primary", "title": "Northern Transformer grid products", "url": "https://fixture.example.test/northern/grid-products", "published_at": "2026-09-01T00:00:00.000Z", "retrieved_at": "2026-09-10T12:00:00.000Z", "document_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "normalized_start": 0, "text": "Northern Transformer Systems manufactures high-voltage transformers used by electric utilities to expand and modernize transmission networks.", "primary": true, "primary_eligible": true },
+      { "excerpt_id": "a0000000-0000-4000-8000-000000000012", "document_id": "a1000000-0000-4000-8000-000000000012", "source_id": "a2000000-0000-4000-8000-000000000012", "family_key": "northern-risk", "title": "Northern Transformer risk factors", "url": "https://fixture.example.test/northern/risks", "published_at": "2026-09-02T00:00:00.000Z", "retrieved_at": "2026-09-10T12:00:00.000Z", "document_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "normalized_start": 0, "text": "Utility project schedules can delay deliveries and make transformer revenue uneven between reporting periods.", "primary": true, "primary_eligible": true }
+    ]
+  },
+  "search_hits": [],
+  "identities": [{ "issuer_id": "80000000-0000-4000-8000-000000000011", "listing_id": "81000000-0000-4000-8000-000000000011", "legal_name": "Northern Transformer Systems Inc.", "ticker": "NTSI", "mic": "XNAS", "currency": "USD", "asset_type": "common_stock", "identity_source_ids": [] }],
+  "financial_facts": [],
+  "financial_missing_fields": ["valuation"],
+  "role_responses": {
+    "analyst": { "exposure": "strong", "criterion_outcome": "pass", "criterion_source": "primary" },
+    "skeptic": { "exposure": "strong", "criterion_outcome": "pass", "criterion_source": "primary" }
+  },
+  "operation_outcomes": { "search": ["discovery/pool/search/0", "discovery/pool/search/1", "research/{candidate_id}/counter-search"], "document": ["research/{candidate_id}/evidence"], "financial": ["research/{candidate_id}/financial"], "model": ["discovery/pool/scout/0", "research/{candidate_id}/analyst", "research/{candidate_id}/skeptic"] },
+  "expected": { "status": "completed", "states": { "90000000-0000-4000-8000-000000000011": "shortlisted" }, "ranks": { "90000000-0000-4000-8000-000000000011": 1 }, "unknown_valuation": true, "quote_cache_before_run": false }
+}

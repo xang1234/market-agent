@@ -78,7 +78,7 @@ async function dispatch(url: URL, req: IncomingMessage, input: { userId: string;
   if (candidates) {
     if (req.method !== "GET") return methodNotAllowed();
     const state = nullable(url.searchParams.get("state"));
-    return { status: 200, body: await input.service.getCandidates(input.userId, routeId(candidates[1], "run_id"), { cursor: nullable(url.searchParams.get("cursor")), limit: readLimit(url.searchParams.get("limit"), 25), state: state as never }) };
+    return { status: 200, body: await input.service.getCandidates(input.userId, routeId(candidates[1], "run_id"), { cursor: nullable(url.searchParams.get("cursor")), limit: readLimit(url.searchParams.get("limit"), 25), ...(state === null ? {} : { state: state as never }) }) };
   }
   const events = pathname.match(/^\/v1\/discovery\/runs\/([^/]+)\/events$/);
   if (events) return req.method === "GET" ? { status: 200, body: await input.service.getEvents(input.userId, routeId(events[1], "run_id"), integer(Number(url.searchParams.get("after") ?? 0), "after", 0)) } : methodNotAllowed();

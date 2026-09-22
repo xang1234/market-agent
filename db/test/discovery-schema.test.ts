@@ -41,14 +41,10 @@ test("migration path installs discovery schema and rollback removes only discove
   assert.equal(migrated.status, 0, migrated.stderr || migrated.stdout);
   const db = await connectedPool(t, databaseUrl);
   await assertDiscoverySchema(db);
-  const rolledBackLatest = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
-  assert.equal(rolledBackLatest.status, 0, rolledBackLatest.stderr || rolledBackLatest.stdout);
-  const rolledBackQuoteClaims = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
-  assert.equal(rolledBackQuoteClaims.status, 0, rolledBackQuoteClaims.stderr || rolledBackQuoteClaims.stdout);
-  const rolledBackDiscovery = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
-  assert.equal(rolledBackDiscovery.status, 0, rolledBackDiscovery.stderr || rolledBackDiscovery.stdout);
-  const rolledBackBase = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
-  assert.equal(rolledBackBase.status, 0, rolledBackBase.stderr || rolledBackBase.stdout);
+  // Roll back through the named discovery migration rather than assuming it is
+  // the fourth latest migration. Later discovery migrations must not make this
+  // test leave 0040 tables installed while claiming the base schema was tested.
+  await rollbackAfter(db, databaseUrl, 39);
   const after = await db.query<{ discovery: string | null; metrics: string | null }>("select to_regclass('public.discovery_campaigns')::text as discovery,to_regclass('public.metrics')::text as metrics");
   assert.equal(after.rows[0]?.discovery, null);
   assert.equal(after.rows[0]?.metrics, "metrics");
@@ -63,11 +59,10 @@ test("migration 0042 fences legacy reservations and preserves charged cached att
   await waitForPostgres(containerName, databaseUrl);
   const initial = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
   assert.equal(initial.status, 0, initial.stderr || initial.stdout);
-  const before0043 = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
-  assert.equal(before0043.status, 0, before0043.stderr || before0043.stdout);
-  const before0042 = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
-  assert.equal(before0042.status, 0, before0042.stderr || before0042.stdout);
   const db = await connectedPool(t, databaseUrl);
+  // The rows below model the 0041 schema. Explicitly remove 0042 and every
+  // later migration before seeding, even when a newer migration is added.
+  await rollbackAfter(db, databaseUrl, 41);
   const legacy = await seedPre0042Attempts(db);
 
   const upgraded = run("npm", ["run", "migrate", "--", "up", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
@@ -151,6 +146,22 @@ async function assertDiscoverySchema(db: { query: <T extends Record<string, unkn
   ]);
 }
 
+async function rollbackAfter(
+  db: { query: <T extends Record<string, unknown>>(sql: string, values?: unknown[]) => Promise<{ rows: T[] }> },
+  databaseUrl: string,
+  lastKeptVersion: number,
+) {
+  const applied = await db.query<{ version: number }>("select version from schema_migrations order by version desc");
+  const versions = applied.rows.map((row) => Number(row.version));
+  assert.ok(versions.some((version) => version > lastKeptVersion), `expected a migration after ${lastKeptVersion}`);
+  for (const version of versions.filter((value) => value > lastKeptVersion)) {
+    const rolledBack = run("npm", ["run", "migrate", "--", "down", "--database-url", databaseUrl], { cwd: dbRoot, env: { DATABASE_URL: databaseUrl } });
+    assert.equal(rolledBack.status, 0, `rollback ${version}: ${rolledBack.stderr || rolledBack.stdout}`);
+  }
+  const remaining = await db.query<{ version: number }>("select version from schema_migrations order by version desc limit 1");
+  assert.equal(Number(remaining.rows[0]?.version), lastKeptVersion, `rollback reached migration ${lastKeptVersion}`);
+}
+
 async function seedPre0042Attempts(db: { query: <T extends Record<string, unknown>>(sql: string, values?: unknown[]) => Promise<{ rows: T[] }> }) {
   const userId = "10000000-0000-4000-8000-000000000010";
   const campaignId = "20000000-0000-4000-8000-000000000010";
@@ -168,7 +179,7 @@ async function seedPre0042Attempts(db: { query: <T extends Record<string, unknow
   await db.query(
     `insert into discovery_runs (run_id,campaign_id,user_id,brief_id,request_key,status,stage,policy_version,limits,usage,phase_usage,checkpoint,coverage,lease_owner,lease_epoch,lease_expires_at,started_at)
      values ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'70000000-0000-4000-8000-000000000010'::uuid,'running','research','legacy',
-       '{"attempts":{"search":80,"document":100,"identity":100,"financial":100,"model":64},"request_timeout_ms":30000,"run_timeout_ms":2700000}'::jsonb,
+       '{"candidates":100,"research":25,"shortlist":10,"attempts":{"search":80,"document":150,"identity":120,"financial":50,"model":64},"input_chars":64000,"output_tokens":10000,"request_timeout_ms":30000,"run_timeout_ms":2700000}'::jsonb,
        '{"search":0,"document":0,"identity":0,"financial":0,"model":2}'::jsonb,'{}'::jsonb,'{}'::jsonb,'{}'::jsonb,
        'legacy-worker',7,now()+interval '1 hour',now())`,
     [runId, campaignId, userId, briefId],

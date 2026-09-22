@@ -41,6 +41,27 @@ test("discovery HTTP rejects unauthenticated creation before a draft provider ca
   assert.equal(service.calls.draft, 0);
 });
 
+test("every discovery route authenticates before reading or mutating owned campaign data", async (t) => {
+  const { base, service } = await startServer(t);
+  const unauthenticated = async (path: string, init: RequestInit = {}) => fetch(`${base}${path}`, {
+    ...init,
+    headers: { "content-type": "application/json", ...init.headers },
+  });
+  const body = JSON.stringify({ name: "Grid", question: "Which US-listed companies benefit from grid modernization spending?" });
+  const start = JSON.stringify({ brief_version: 1, brief_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", request_key: REQUEST });
+  const brief = JSON.stringify({ expected_version: 0, brief: briefFixture() });
+  const routes: Array<[string, RequestInit?]> = [
+    ["/v1/discovery/metric-options"], ["/v1/discovery/campaigns"], ["/v1/discovery/campaigns", { method: "POST", body }],
+    [`/v1/discovery/campaigns/${CAMPAIGN}`], [`/v1/discovery/campaigns/${CAMPAIGN}`, { method: "DELETE" }],
+    [`/v1/discovery/campaigns/${CAMPAIGN}/draft`, { method: "POST", body: JSON.stringify({ expected_version: 0 }) }],
+    [`/v1/discovery/campaigns/${CAMPAIGN}/brief`, { method: "PUT", body: brief }],
+    [`/v1/discovery/campaigns/${CAMPAIGN}/runs`], [`/v1/discovery/campaigns/${CAMPAIGN}/runs`, { method: "POST", body: start }],
+    [`/v1/discovery/runs/${RUN}`], [`/v1/discovery/runs/${RUN}/candidates`], [`/v1/discovery/runs/${RUN}/events`], [`/v1/discovery/runs/${RUN}/cancel`, { method: "POST" }],
+  ];
+  for (const [path, init] of routes) assert.equal((await unauthenticated(path, init)).status, 401, path);
+  assert.deepEqual(service.calls, { create: 0, draft: 0, save: 0, start: 0, cancel: 0, delete: 0, metrics: 0 });
+});
+
 test("discovery HTTP exposes canonical browser-safe metric options", async (t) => {
   const { base, service } = await startServer(t);
   const response = await request(base, "/v1/discovery/metric-options");
@@ -74,6 +95,13 @@ test("discovery HTTP exposes every campaign and run endpoint with owned request 
   assert.equal((await request(base, `/v1/discovery/runs/${RUN}/cancel`, { method: "POST" })).status, 200);
   assert.equal((await request(base, `/v1/discovery/campaigns/${CAMPAIGN}`, { method: "DELETE" })).status, 204);
   assert.deepEqual(service.calls, { create: 1, draft: 1, save: 1, start: 2, cancel: 1, delete: 1, metrics: 0 });
+});
+
+test("discovery HTTP omits an absent candidate state instead of sending a null filter", async (t) => {
+  const { base, service } = await startServer(t);
+
+  assert.equal((await request(base, `/v1/discovery/runs/${RUN}/candidates?limit=10`)).status, 200);
+  assert.deepEqual(service.candidateInputs, [{ cursor: null, limit: 10 }]);
 });
 
 test("discovery HTTP maps malformed, foreign, stale, rate-limited, and unavailable requests", async (t) => {
@@ -110,6 +138,7 @@ test("discovery HTTP rejects unknown mutation fields, malformed hashes, and malf
 
 function fixtureService() {
   const calls = { create: 0, draft: 0, save: 0, start: 0, cancel: 0, delete: 0, metrics: 0 };
+  const candidateInputs: unknown[] = [];
   let nextError: Error | null = null;
   let foreign = false;
   const fail = () => {
@@ -120,6 +149,7 @@ function fixtureService() {
   const run = { run_id: RUN, campaign_id: CAMPAIGN, brief_id: "50000000-0000-4000-8000-000000000001", user_id: USER, status: "queued", stage: "queued", policy_version: "v1", request_key: REQUEST, limits: {}, usage: {}, coverage: {}, started_at: null, finished_at: null, cancel_requested_at: null };
   return {
     calls,
+    candidateInputs,
     get nextError() { return nextError; }, set nextError(value: Error | null) { nextError = value; },
     get foreign() { return foreign; }, set foreign(value: boolean) { foreign = value; },
     async createCampaign() { calls.create += 1; fail(); return campaign; },
@@ -131,7 +161,7 @@ function fixtureService() {
     async startRun() { calls.start += 1; fail(); return run; },
     async listRuns() { fail(); return { items: [run], next_cursor: null }; },
     async getRun() { fail(); return { ...run, shortlist: [], cost: { status: "unavailable" } }; },
-    async getCandidates() { fail(); return { items: [], next_cursor: null }; },
+    async getCandidates(_userId: string, _runId: string, input: unknown) { candidateInputs.push(input); fail(); return { items: [], next_cursor: null }; },
     async getEvents() { fail(); return { items: [], next_sequence: 0, has_more: false }; },
     async cancelRun() { calls.cancel += 1; fail(); return run; },
     async deleteCampaign() { calls.delete += 1; fail(); },
