@@ -1,8 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createCampaignE2eHarness } from "./e2e-harness.ts";
+import { createCampaignE2eHarness, recordedFixtureAssessments } from "./e2e-harness.ts";
 import { dbOptions } from "./db-fixture.ts";
+
+test("the pending human-review corpus has ten stable recorded assessment and source references", async () => {
+  const assessments = await recordedFixtureAssessments();
+  assert.equal(assessments.length, 10);
+  assert.equal(new Set(assessments.map((assessment) => assessment.assessment_id)).size, 10);
+  assert.equal(new Set(assessments.map((assessment) => assessment.candidate_id)).size, 10);
+  assert.ok(assessments.every((assessment) => assessment.primary_source_id !== assessment.counter_source_id));
+});
+
+test("recorded fixture operation contracts reject another candidate and a duplicate operation", dbOptions, async (t) => {
+  const h = await createCampaignE2eHarness(t, "power-infrastructure");
+  await h.approveAndStart();
+  await h.assertOperationContractRejectsWrongCandidateAndDuplicate();
+});
 
 test("approved theme research reaches an inspectable shortlist without live providers", dbOptions, async (t) => {
   const h = await createCampaignE2eHarness(t, "power-infrastructure");

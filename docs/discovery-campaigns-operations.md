@@ -17,23 +17,23 @@ document does not assert a reviewer, a verdict, or a 9/10 result.
 Review one primary and one counter source for each recorded assessment from the
 three candidate-bearing fixture paths. Confirm that the cited text supports the
 exposure statement, that the candidate is correctly identified and owned, and
-that the counterargument is useful. Record the fixture/candidate identifier,
-reviewer, verdict (`acceptable` or `reject`), and a concise reason. A rejection
-for unsupported exposure keeps the feature disabled until corrected and
-re-reviewed.
+that the counterargument is useful. The fixture assessment IDs and source IDs
+below are stable review inputs, not human verdicts. Record the reviewer, verdict
+(`acceptable` or `reject`), and a concise reason. A rejection for unsupported
+exposure keeps the feature disabled until corrected and re-reviewed.
 
-| # | Fixture / candidate ID | Reviewer | Verdict | Reason |
-| --- | --- | --- | --- | --- |
-| 1 | Pending selection from power-infrastructure | Pending | Pending | Pending |
-| 2 | Pending selection from power-infrastructure | Pending | Pending | Pending |
-| 3 | Pending selection from power-infrastructure | Pending | Pending | Pending |
-| 4 | Pending selection from industrial-automation | Pending | Pending | Pending |
-| 5 | Pending selection from industrial-automation | Pending | Pending | Pending |
-| 6 | Pending selection from industrial-automation | Pending | Pending | Pending |
-| 7 | Pending selection from supply-disruption | Pending | Pending | Pending |
-| 8 | Pending selection from supply-disruption | Pending | Pending | Pending |
-| 9 | Pending selection from supply-disruption | Pending | Pending | Pending |
-| 10 | Pending selection from positive fixtures | Pending | Pending | Pending |
+| # | Fixture / recorded assessment ID | Primary / counter source refs | Reviewer | Verdict | Reason |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `power-infrastructure/northern-transformer` | `a2000000-0000-4000-8000-000000000011` / `a2000000-0000-4000-8000-000000000012` | Pending | Pending | Pending |
+| 2 | `power-infrastructure/utility-transformer-coverage` | `a2000000-0000-4000-8000-000000000011` / `a2000000-0000-4000-8000-000000000012` | Pending | Pending | Pending |
+| 3 | `power-infrastructure/transmission-equipment-coverage` | `a2000000-0000-4000-8000-000000000011` / `a2000000-0000-4000-8000-000000000012` | Pending | Pending | Pending |
+| 4 | `industrial-automation/famous-consumer-platform` | `a2000000-0000-4000-8000-000000000021` / `a2000000-0000-4000-8000-000000000022` | Pending | Pending | Pending |
+| 5 | `industrial-automation/factory-controls-coverage` | `a2000000-0000-4000-8000-000000000021` / `a2000000-0000-4000-8000-000000000022` | Pending | Pending | Pending |
+| 6 | `industrial-automation/software-supplier-coverage` | `a2000000-0000-4000-8000-000000000021` / `a2000000-0000-4000-8000-000000000022` | Pending | Pending | Pending |
+| 7 | `supply-disruption/resilience-components` | `a2000000-0000-4000-8000-000000000031` / `a2000000-0000-4000-8000-000000000032` | Pending | Pending | Pending |
+| 8 | `supply-disruption/qualified-supply-coverage` | `a2000000-0000-4000-8000-000000000031` / `a2000000-0000-4000-8000-000000000032` | Pending | Pending | Pending |
+| 9 | `supply-disruption/local-production-coverage` | `a2000000-0000-4000-8000-000000000031` / `a2000000-0000-4000-8000-000000000032` | Pending | Pending | Pending |
+| 10 | `supply-disruption/overseas-component-risk` | `a2000000-0000-4000-8000-000000000031` / `a2000000-0000-4000-8000-000000000032` | Pending | Pending | Pending |
 
 ## Configuration and readiness
 

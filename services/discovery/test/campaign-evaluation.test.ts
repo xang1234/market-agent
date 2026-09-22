@@ -54,7 +54,29 @@ test("large malformed model output and fabricated citations are rejected before 
   assert.throws(() => validateAnalystOutput(fabricated, briefFixture(), packet), /quote does not match/);
 });
 
-test("duplicate source leads remain one candidate and ranking is stable across input order", () => {
+test("the real worker persists exactly two malformed analyst attempts per candidate and never dispatches a hidden repair", dbOptions, async (t) => {
+  const h = await createRunnerHarness(t, { malformedAnalystOutput: "x".repeat(100_001) });
+  const started = Date.now();
+  await h.executeOnce();
+  assert.ok(Date.now() - started < 15_000, "malformed output terminates promptly");
+
+  const run = await h.repo.readRun(h.userId, h.runId);
+  assert.equal(run.status, "partial");
+  assert.ok(run.usage.model <= run.limits.attempts.model);
+  assert.equal(run.usage.model, 5, "one bounded Scout call plus two Analyst attempts for each selected candidate");
+  const attempts = await h.db.query<{ operation_key: string; attempt_number: number; outcome: string }>(
+    "select operation_key,attempt_number,outcome from discovery_attempts where run_id=$1::uuid and resource='model' order by operation_key,attempt_number",
+    [h.runId],
+  );
+  assert.equal(attempts.rowCount, 5);
+  const analystAttempts = attempts.rows.filter((attempt) => attempt.operation_key.endsWith("/analyst"));
+  assert.equal(analystAttempts.length, 4);
+  assert.ok(analystAttempts.every((attempt) => attempt.outcome === "success"));
+  assert.deepEqual(analystAttempts.map((attempt) => attempt.attempt_number), [1, 2, 1, 2]);
+  assert.equal(attempts.rows.some((attempt) => attempt.operation_key.endsWith("/skeptic")), false);
+});
+
+test("duplicate source leads remain one candidate and ranking stays stable across repeated input permutations", () => {
   const identity = identityFixture();
   const lead: DiscoveredCandidate = {
     candidate_id: "90000000-0000-4000-8000-000000000001", lead_key: "source:https://fixture.example.test/one", name: identity.legal_name,
@@ -70,9 +92,11 @@ test("duplicate source leads remain one candidate and ranking is stable across i
 
   const first = decision("80000000-0000-4000-8000-000000000002");
   const second = decision("80000000-0000-4000-8000-000000000001");
-  const ranks = [rankShortlist([first, second]), rankShortlist([second, first])];
-  assert.deepEqual(ranks[0].map((item) => [item.identity.issuer_id, item.rank]), ranks[1].map((item) => [item.identity.issuer_id, item.rank]));
-  assert.deepEqual(ranks[0].map((item) => item.rank), [1, 2]);
+  const inputs = Array.from({ length: 12 }, (_, index) => index % 2 === 0 ? [first, second] : [second, first]);
+  const ranks = inputs.map((input) => rankShortlist(input));
+  const baseline = ranks[0]!.map((item) => [item.identity.issuer_id, item.rank]);
+  for (const rank of ranks) assert.deepEqual(rank.map((item) => [item.identity.issuer_id, item.rank]), baseline);
+  assert.deepEqual(ranks[0]!.map((item) => item.rank), [1, 2]);
 });
 
 test("real worker records partial work, resumes a fenced lease, and honors cancellation", dbOptions, async (t) => {

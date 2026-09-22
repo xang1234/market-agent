@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 
 import { persistCampaignQuotes } from "../../evidence/src/campaign-claims.ts";
 import { hashJsonValue } from "../../observability/src/tool-call.ts";
+import { parseLlmEnv } from "../../llm/src/channel-config.ts";
+import { createLlmRouter } from "../../llm/src/router.ts";
 import { createAssessmentCommitter } from "../src/assessment-repo.ts";
+import { createCampaignModel } from "../src/model.ts";
 import { ProviderRequestError } from "../src/providers/errors.ts";
 import { canonicalCampaignQuotes } from "../src/quote-claims.ts";
 import { executeDiscoveryRun } from "../src/runner.ts";
@@ -27,6 +30,7 @@ type Options = {
   failEveryReservation?: boolean;
   providerFailure?: ConstructorParameters<typeof ProviderRequestError>[0];
   withoutExisting?: boolean;
+  malformedAnalystOutput?: string;
 };
 type ModelCall = { role: Parameters<CampaignModel["complete"]>[0]["role"]; candidate_id: string | undefined; operation_key: string; request_hash: string };
 
@@ -98,7 +102,7 @@ export async function createRunnerHarness(t: TestContext, options: Options = {})
       return fakeProviders();
     },
     loadExisting: async () => options.withoutExisting ? [] : existing.map((candidate) => structuredClone(candidate)),
-    model: (lease, operations) => ({
+    model: (lease, operations) => options.malformedAnalystOutput === undefined ? ({
       async complete(input) {
         const index = input.attempt_number === 2 ? 1 : 0;
         const result = await operations.providerAttempt({
@@ -133,7 +137,10 @@ export async function createRunnerHarness(t: TestContext, options: Options = {})
         });
         return result;
       },
-    }),
+    }) : createCampaignModel(createLlmRouter({
+      settings: fixtureModelSettings(),
+      client: async () => ({ text: options.malformedAnalystOutput! }),
+    }), operations),
     persistQuotes: async (_lease, packet, raw, request) => persistCampaignQuotes(db, {
       operation_key: request.operation_key,
       request_hash: request.request_hash,
@@ -369,4 +376,16 @@ async function seedCompany(db: { query: Function }, packet: ReturnType<typeof ma
   for (const claim of packet.claims) {
     await db.query("insert into claims (claim_id,document_id,predicate,text_canonical,polarity,modality,reported_by_source_id,confidence,status) values ($1::uuid,$2::uuid,'fixture',$3,'neutral','quoted',$4::uuid,1,'extracted')", [claim.claim_id, claim.document_id, claim.text_canonical, claim.source_id]);
   }
+}
+
+function fixtureModelSettings() {
+  return parseLlmEnv({
+    LLM_CHANNELS: "fixture",
+    LLM_FIXTURE_PROTOCOL: "openai-compatible",
+    LLM_FIXTURE_BASE_URL: "https://fixture.invalid/v1",
+    LLM_FIXTURE_API_KEY: "recorded-fixture-key",
+    LLM_FIXTURE_MODELS: "recorded-fixture-model",
+    LITELLM_MODEL: "fixture/recorded-fixture-model",
+    LITELLM_FALLBACK_MODELS: "",
+  });
 }

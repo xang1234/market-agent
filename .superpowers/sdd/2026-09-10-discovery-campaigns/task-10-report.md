@@ -12,11 +12,19 @@
 
 1. Initial E2E RED: `ERR_MODULE_NOT_FOUND` for the absent harness. GREEN: approval-to-inspect passes through the real service, HTTP handler, worker, temporary database, and verifier.
 2. First path RED: `partial` with `existing_evidence_unavailable`. GREEN: fixture evidence is seeded under the production-authorized `sec_edgar` provider.
-3. Exact-operation RED: research suffix matching rejected a declared operation. GREEN: the matcher binds the run-specific candidate segment and asserts every declared call.
+3. Initial exact-operation RED: research suffix matching rejected a declared operation. GREEN: the first harness bound the run-specific candidate segment and asserted declared calls.
 4. Snapshot RED: PostgreSQL timestamp text was not ISO-formatted for the verifier. GREEN: durable timestamps are canonicalized before verification.
 5. HTTP RED: absent `state` became `null`. GREEN: optional state is omitted and a handler regression passes.
 6. Fixture-outcome RED: quote-cache assertion used the wrong table name. GREEN: it uses `discovery_quote_claims`; all four fixture paths pass.
 7. Dev-shell and CI tests were RED before lifecycle and the discovery job were added. GREEN: dev-shell is 11/11 and the discovery CI contract passes.
+
+### Fix round 1: recorded-campaign fidelity
+
+The Task 10 review correctly found that the first operation matcher still accepted another candidate ID and collapsed duplicate calls, and that the candidate-bearing fixtures entered after discovery. This round started RED with the new wrong-candidate/duplicate regression failing because the harness did not expose a concrete matcher. It then passed with a post-run fixture allowlist whose ordered multiset contains the recorded candidate ID derived from the recorded lead and the real run ID. The regression attempts both a different candidate ID and a duplicate search operation; both are rejected before any fixture response is returned.
+
+The positive and exclusion fixtures now traverse recorded raw Brave hits, Scout, the production canonical identity provider, production evidence and financial providers, the real worker, durable quote persistence, and the snapshot verifier. The fixture loader validates the production brief parser and the production provider-facing data shapes before a response is usable. Candidates are admitted with `web` origin from the selected recorded lead; the harness verifies the identity provider attempt and no pre-run quote cache. The full path exposed a real foreign-key defect: identity lookup precedes candidate admission, so an attempt could not reference that not-yet-durable candidate. The provider now leaves that nullable foreign key empty while retaining the deterministic candidate identity in the operation key.
+
+The actual worker/model repair path also started RED because the runner harness was not feeding malformed output through the campaign model. It is now driven by two oversized malformed Analyst responses for each selected candidate. The run terminates `partial` promptly, records exactly four Analyst attempts at numbers `[1, 2, 1, 2]`, makes five model calls including the bounded Scout call, stays below the 64-attempt cap, and never dispatches Skeptic or a hidden third repair. Rank stability now covers twelve input permutations. The three candidate-bearing fixtures contain ten unique stable recorded review inputs; the operator table identifies those same ten inputs and keeps every human field Pending.
 
 ## Verification
 
@@ -24,12 +32,13 @@ Docker-backed commands used isolated temporary PostgreSQL containers. Docker soc
 
 | Command | Result |
 | --- | --- |
-| `node --experimental-strip-types --test services/discovery/test/campaign-e2e.integration.test.ts` | 2 passed, 0 failed. Real PostgreSQL, HTTP, worker, and snapshot verifier. |
-| `node --experimental-strip-types --test services/discovery/test/campaign-evaluation.test.ts` | 6 passed, 0 failed. |
+| `node --experimental-strip-types --test services/discovery/test/campaign-e2e.integration.test.ts` | 4 passed, 0 failed. Includes fixture-load validation, the exact ten-assessment corpus, wrong-candidate/duplicate operation rejections, real PostgreSQL, HTTP, worker, and snapshot verifier. |
+| `node --experimental-strip-types --test services/discovery/test/campaign-evaluation.test.ts` | 7 passed, 0 failed. Includes actual malformed-output worker repair and twelve rank permutations. |
+| `node --experimental-strip-types --test services/discovery/test/identity-provider.test.ts` | 3 passed, 0 failed. |
 | `node --experimental-strip-types --test services/discovery/test/http.test.ts` | 7 passed, 0 failed. |
 | `node --experimental-strip-types --test services/discovery/test/worker-cli.test.ts` | 2 passed, 0 failed. |
-| Focused Task 10 tests above | 17 passed, 0 failed. |
-| `npm test` in `services/discovery` | Completed against real temporary PostgreSQL; the focused additions above are green. |
+| Focused fix-round campaign/evaluation tests | 11 passed, 0 failed. |
+| `node --experimental-strip-types --test --test-concurrency=1 test/**/*.test.ts` in `services/discovery` | 167 passed, 0 failed, 0 cancelled (492.2s), using owned temporary PostgreSQL. This is the authoritative full Discovery gate. |
 | `npm test` in `services/llm`; `npm run typecheck` | 27 passed, 0 failed; typecheck exit 0. |
 | `npm test` in `services/agents` | 85 passed, 0 failed, 3 skipped. |
 | `npm test` in `services/snapshot` | 110 passed, 0 failed. |
@@ -40,6 +49,8 @@ Docker-backed commands used isolated temporary PostgreSQL containers. Docker soc
 | `node --experimental-strip-types --test scripts/ci-workflow.test.ts` | 9 passed, 0 failed. |
 | `npm test` in `services/analyst-grids` | 103 passed, 0 failed. |
 | `npm test` in `db` | 57 passed, 0 failed, 0 skipped (312.5s). |
+
+The first unbounded parallel invocation of the Discovery file glob completed with 151 passes and 16 cancellations after its database integration files each reached their 120-second deadline. There were no assertion failures; the cancelled files were the E2E, evaluation, lifecycle, recovery, repository, runner, and visibility PostgreSQL tests. Each passed in the serial full gate above, including every changed test. This was temporary-PostgreSQL contention between parallel test files, not a branch regression; the serial command is the release evidence.
 
 ### Release-gate maintenance ruling
 
@@ -64,8 +75,8 @@ inventory contract complete.
 
 | Requirement | Evidence |
 | --- | --- |
-| Approved brief through inspectable shortlist | `campaign-e2e.integration.test.ts`, 2/2. |
-| Strict recorded fixture operations | `e2e-harness.ts` and four named fixture JSON files. |
+| Approved brief through inspectable shortlist | `campaign-e2e.integration.test.ts`, 4/4, from raw recorded search through Scout, identity, evidence, worker, inspect, and snapshot verification. |
+| Strict recorded fixture operations | `e2e-harness.ts` and four named fixture JSON files: concrete post-run candidate IDs, ordered multiset/count assertion, and direct wrong-candidate/duplicate regressions. |
 | Exclusion, unknown valuation, dedupe, fabricated citation, zero result, rank | E2E fixture test and `campaign-evaluation.test.ts`. |
 | Partial, resume, cancellation | Real database runner harness in `campaign-evaluation.test.ts`. |
 | 64k/10k, fallback/repair, malformed output, abort | Evaluation test; production defaults remain 30,000ms attempt and 2,700,000ms run. |
@@ -82,7 +93,8 @@ This is an external human gate. No reviewer identity, candidate verdict, or 9/10
 
 Checked the Task 10 brief and design sections 13–14 against the final diff:
 
-- Full-path provider/model calls cross the same attempt runner and model/provider boundaries as production; fixtures reject undeclared calls.
+- Full-path provider/model calls cross the same attempt runner and model/provider boundaries as production; fixtures reject undeclared calls, a different candidate ID, and over-counted calls.
+- Positive fixtures have nonempty recorded provider payloads and do not use `loadExisting`; the test asserts `web` lead origin, a real identity attempt, no pre-run quote cache, and durable evidence/snapshot sealing.
 - The harness uses durable quote claims and the real snapshot verifier, not an in-memory substitute.
 - Documentation distinguishes API persistence from executable worker readiness, keeps secrets out of examples, describes unknown outcomes, and states limits in the required units.
 - The release document preserves the pending human gate and makes no investment-performance claim.

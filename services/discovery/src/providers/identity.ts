@@ -38,7 +38,11 @@ export function createCanonicalIdentityProvider(options: CanonicalIdentityProvid
         request_hash: input.request_hash,
         resource: "identity",
         phase: input.phase,
-        candidate_id: input.candidate_id,
+        // Scout resolves identity before it admits the candidate row. The
+        // operation key retains the deterministic candidate identity, while
+        // the nullable attempt foreign key cannot name a row that does not yet
+        // exist.
+        candidate_id: undefined,
         execute: () => options.lookup.discover(input),
       });
       return resolution(eligible(discovered));
