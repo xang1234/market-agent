@@ -22,3 +22,17 @@ Focused GREEN evidence:
 - `npm run typecheck` and `npm run build` in `web` — pass. The bounded metric source compile passes with strict TypeScript settings. `npm run lint` has its pre-existing unrelated `web/src/analyst-grids/useGridRun.ts:52` exhaustive-deps warning and no errors.
 
 `DISCOVERY_ENABLED=false` is unchanged. Human release evaluation remains Pending.
+
+## Final re-review 1 fixes
+
+### RED
+
+- `services/dev-api/test/thesis-evidence.test.ts` faithfully emulated the former PostgreSQL `numeric::float8` projection. A `0.1000000000000000000001 × 3 <= 0.3` condition became incorrectly `supported`, and `9007199254740993` became `unresolved` after its unsafe numeric was rounded before the shared evaluator.
+- The expanded OpenAPI contract test found the stale `[gte, lte]` comparison enum and numeric-only threshold schema.
+
+### GREEN
+
+- `loadThesisPacket` projects `value_num` and `scale` with explicit `::text` aliases and preserves the existing NULL/non-finite fact filters. The packet-loader regression now reaches the shared evaluator as strings and produces `challenged` for the above-bound decimal and `supported` for the exact unsafe-in-JavaScript integer text. An audit found only this loader and the already-correct Discovery financial adapter feeding `evaluateThesisMetrics`; no service retains a `value_num::float8` or `scale::float8` projection.
+- `DiscoveryMetricCheck` is the shared request/response component for every reachable Discovery brief surface. Its contract now lists `eq`, `lt`, `lte`, `gt`, and `gte`, preserves deliberately supported legacy JSON numbers, and documents bounded non-exponent decimal strings. Executable mutations of the enum, numeric union branch, and string pattern each fail. The manual web decoder’s `Brief` type remains the shared `ThesisMetricCheck` number-or-string contract; web typecheck/build pass.
+
+Focused verification: dev-api thesis evidence 1/1, Agents thesis 22/22, Discovery assessment/validation/contracts 22/22, OpenAPI 11/11, and web typecheck/build passed. The strict direct source compile reached six pre-existing `services/snapshot` diagnostics through unchanged sealing imports; no changed-source diagnostic was reported. Lint has the existing unrelated `web/src/analyst-grids/useGridRun.ts:52` exhaustive-deps warning and no errors.

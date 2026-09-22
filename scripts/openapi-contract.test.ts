@@ -255,6 +255,8 @@ test("OpenAPI recursively closes every discovery response object and preserves k
   assert.deepEqual(record(briefProperties.exclusions, "DiscoveryBrief.exclusions"), { $ref: "#/components/schemas/DiscoveryExclusionList" });
   assert.deepEqual(record(briefProperties.preferences, "DiscoveryBrief.preferences"), { $ref: "#/components/schemas/DiscoveryPreferenceList" });
 
+  assertDiscoveryMetricCheckContract(document);
+
   const run = componentSchema(document, "DiscoveryRun");
   const runProperties = record(run.properties, "DiscoveryRun.properties");
   assert.deepEqual(record(runProperties.usage, "DiscoveryRun.usage"), { $ref: "#/components/schemas/DiscoveryUsage" });
@@ -301,6 +303,7 @@ test("OpenAPI matches discovery handler query, response, error, and DTO semantic
     ["DiscoveryRateLimited", "DiscoveryError"], ["DiscoveryUnavailable", "DiscoveryError"], ["DiscoveryUnauthorized", "DiscoveryAuthenticationError"],
   ] as const) assertResponseSchemaReference(document, response, schema);
   assertNoContentResponse(document, "DiscoveryNoContent");
+  assertDiscoveryMetricCheckContract(document);
   assertMetricOptionsWrapper(document);
 
   assertClosedRequiredObject(document, "DiscoveryAuthenticationError", ["error"]);
@@ -369,6 +372,32 @@ test("OpenAPI response semantic manifest rejects constrained response-schema dri
       /discovery response semantic manifest/,
       `${label} drift is rejected`,
     );
+  }
+});
+
+test("OpenAPI rejects metric comparison and exact-decimal contract drift", async () => {
+  const document = await openApiDocument();
+  const mutations: ReadonlyArray<readonly [string, (value: OpenApiDocument) => void]> = [
+    ["comparison enum", (value) => {
+      schemaProperty(value, "DiscoveryMetricCheck", "operator").enum = ["gte", "lte"];
+    }],
+    ["threshold numeric branch", (value) => {
+      const branches = schemaProperty(value, "DiscoveryMetricCheck", "threshold").oneOf;
+      assert.ok(Array.isArray(branches));
+      record(branches[0], "DiscoveryMetricCheck.threshold.oneOf[0]").type = "integer";
+    }],
+    ["threshold decimal pattern", (value) => {
+      const branches = schemaProperty(value, "DiscoveryMetricCheck", "threshold").oneOf;
+      assert.ok(Array.isArray(branches));
+      record(branches[1], "DiscoveryMetricCheck.threshold.oneOf[1]").pattern = "^.*$";
+    }],
+  ];
+
+  assertDiscoveryMetricCheckContract(document);
+  for (const [label, mutate] of mutations) {
+    const mutated = structuredClone(document);
+    mutate(mutated);
+    assert.throws(() => assertDiscoveryMetricCheckContract(mutated), /DiscoveryMetricCheck/, `${label} drift is rejected`);
   }
 });
 
@@ -563,7 +592,7 @@ const DISCOVERY_RESPONSE_SEMANTIC_MANIFEST: Readonly<Record<string, ResponseSche
   "#/components/schemas/DiscoveryEvent.stage": { type: "string", enum: RUN_STAGES },
   "#/components/schemas/DiscoveryExclusionList.items": { type: "string", minLength: 1, maxLength: 300 },
   "#/components/schemas/DiscoveryMechanism.chain.items": { type: "string", minLength: 1, maxLength: 300 },
-  "#/components/schemas/DiscoveryMetricCheck.operator": { type: "string", enum: ["gte", "lte"] },
+  "#/components/schemas/DiscoveryMetricCheck.operator": { type: "string", enum: ["eq", "lt", "lte", "gt", "gte"] },
   "#/components/schemas/DiscoveryMetricCheck.period_kind": { type: "string", enum: ["point", "fiscal_q", "fiscal_y", "ttm"] },
   "#/components/schemas/DiscoveryModelConfig.role": { type: "string", enum: ["planner", "scout", "analyst", "skeptic", "summary"] },
   "#/components/schemas/DiscoveryPreferenceList.items": { type: "string", minLength: 1, maxLength: 300 },
@@ -583,7 +612,7 @@ type QuerySchemaExpectation = Readonly<{
   enum?: readonly string[];
 }>;
 
-type PropertyKind = "array" | "boolean" | "integer" | "number" | "string" | `array:${string}` | `nullable:${"integer" | "string"}` | `nullable-ref:${string}` | `ref:${string}`;
+type PropertyKind = "array" | "boolean" | "decimal" | "integer" | "number" | "string" | `array:${string}` | `nullable:${"integer" | "string"}` | `nullable-ref:${string}` | `ref:${string}`;
 type PropertyContract = readonly [component: string, property: string, kind: PropertyKind];
 
 function fields(component: string, kind: PropertyKind, names: readonly string[]): readonly PropertyContract[] {
@@ -604,7 +633,7 @@ const DISCOVERY_PROPERTY_KINDS: readonly PropertyContract[] = [
   ["DiscoveryBrief", "preferences", "ref:DiscoveryPreferenceList"], ["DiscoveryBrief", "queries", "ref:DiscoveryBriefQueryList"],
   ...fields("DiscoveryMechanism", "string", ["mechanism_id", "label"]), ["DiscoveryMechanism", "chain", "array"],
   ...fields("DiscoveryMetricCheck", "string", ["metric_key", "unit", "period_kind", "operator"]),
-  ["DiscoveryMetricCheck", "threshold", "number"], ["DiscoveryMetricCheck", "max_age_days", "integer"],
+  ["DiscoveryMetricCheck", "threshold", "decimal"], ["DiscoveryMetricCheck", "max_age_days", "integer"],
   ...fields("DiscoveryCriterion", "string", ["criterion_id", "importance", "statement", "falsifier"]), ["DiscoveryCriterion", "metric", "ref:DiscoveryMetricCheck"],
   ...fields("DiscoveryBriefQuery", "string", ["mechanism_id", "query"]),
   ...fields("DiscoverySavedBrief", "string", ["brief_id", "campaign_id", "hash", "created_at"]),
@@ -706,6 +735,28 @@ function assertMetricOptionsWrapper(document: OpenApiDocument): void {
   assert.equal(record(items.items, "DiscoveryMetricOptionsResponse.items.items").$ref, "#/components/schemas/DiscoveryMetricOption", "metric options items reference the metric DTO");
 }
 
+function assertDiscoveryMetricCheckContract(document: OpenApiDocument): void {
+  assert.deepEqual(schemaProperty(document, "DiscoveryMetricCheck", "operator"), {
+    type: "string",
+    enum: ["eq", "lt", "lte", "gt", "gte"],
+  }, "DiscoveryMetricCheck.operator has every runtime comparison");
+  assertExactDecimalThreshold(schemaProperty(document, "DiscoveryMetricCheck", "threshold"), "DiscoveryMetricCheck.threshold");
+}
+
+function assertExactDecimalThreshold(schema: OpenApiSchema, label: string): void {
+  assert.deepEqual(schema, {
+    oneOf: [
+      { type: "number" },
+      {
+        type: "string",
+        minLength: 1,
+        maxLength: 102,
+        pattern: "^[+-]?(?:(?:[0-9]+)(?:\\.[0-9]+)?|\\.[0-9]+)$",
+      },
+    ],
+  }, `${label} accepts legacy numbers and bounded canonical decimal strings`);
+}
+
 function assertClosedRequiredObject(document: OpenApiDocument, component: string, required: readonly string[]): void {
   const schema = componentSchema(document, component);
   assert.equal(schema.type, "object", `${component} is an object`);
@@ -719,6 +770,10 @@ function schemaProperty(document: OpenApiDocument, component: string, property: 
 
 function assertPropertyKind(document: OpenApiDocument, component: string, property: string, kind: PropertyKind): void {
   const schema = schemaProperty(document, component, property);
+  if (kind === "decimal") {
+    assertExactDecimalThreshold(schema, `${component}.${property}`);
+    return;
+  }
   if (kind.startsWith("ref:")) {
     assert.equal(schema.$ref, `#/components/schemas/${kind.slice("ref:".length)}`, `${component}.${property} DTO reference`);
     return;

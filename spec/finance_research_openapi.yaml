@@ -2240,8 +2240,16 @@ components:
         metric_key: { type: string, minLength: 1, maxLength: 100 }
         unit: { type: string, minLength: 1, maxLength: 100 }
         period_kind: { type: string, enum: [point, fiscal_q, fiscal_y, ttm] }
-        operator: { type: string, enum: [gte, lte] }
-        threshold: { type: number }
+        operator: { type: string, enum: [eq, lt, lte, gt, gte] }
+        threshold:
+          oneOf:
+            # Legacy numeric JSON remains accepted. Clients needing exact
+            # PostgreSQL numeric precision should send the decimal-string form.
+            - type: number
+            - type: string
+              minLength: 1
+              maxLength: 102
+              pattern: '^[+-]?(?:(?:[0-9]+)(?:\.[0-9]+)?|\.[0-9]+)$'
         max_age_days: { type: integer, minimum: 1, maximum: 730 }
     DiscoveryCriterion:
       type: object
