@@ -62,6 +62,23 @@ test("an unavailable exact document provenance cannot be replaced by an unrelate
   assert.equal((await h.repo.readRun(h.userId, h.runId)).status, "partial");
 });
 
+test("an existing claim with distinct visible reporting and document sources remains eligible", dbOptions, async (t) => {
+  const h = await createRunnerHarness(t);
+  await h.useDistinctReportingSourceForFirstExistingProvenance();
+  await h.executeOnce();
+  assert.ok(h.callsForCompany("80000000-0000-4000-8000-000000000001") > 0);
+  assert.equal((await h.repo.readRun(h.userId, h.runId)).status, "completed");
+});
+
+test("a revoked distinct reporting source cannot authorize an existing claim", dbOptions, async (t) => {
+  const h = await createRunnerHarness(t);
+  const reportingSourceId = await h.useDistinctReportingSourceForFirstExistingProvenance();
+  await h.db.query("update sources set user_id=$2::uuid where source_id=$1::uuid", [reportingSourceId, h.otherUserId]);
+  await h.executeOnce();
+  assert.equal(h.callsForCompany("80000000-0000-4000-8000-000000000001"), 0);
+  assert.equal((await h.repo.readRun(h.userId, h.runId)).status, "partial");
+});
+
 test("an unentitled exact fact provenance cannot be replaced by an unrelated visible issuer document", dbOptions, async (t) => {
   const h = await createRunnerHarness(t);
   await h.useUnentitledFactAsFirstExistingProvenance();

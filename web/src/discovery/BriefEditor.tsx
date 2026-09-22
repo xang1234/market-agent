@@ -1,20 +1,27 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { Brief, Criterion, Mechanism, SavedBrief } from "../../../services/discovery/src/types.ts";
+import { HttpJsonError } from "../http/authFetch.ts";
 
 export type BriefSave = { expectedVersion: number; brief: Brief };
+export type BriefDraft = { expectedVersion: number };
+export type BriefProposal = { brief: Brief; base_version: number };
 
 export function BriefEditor({
   campaignId,
   savedBrief,
   fallbackQuestion,
   onSave,
+  onDraft,
+  draftDisabledReason,
   onApprove,
 }: {
   campaignId: string;
   savedBrief: SavedBrief | null;
   fallbackQuestion?: string;
   onSave(body: BriefSave): Promise<SavedBrief>;
+  onDraft?(body: BriefDraft): Promise<BriefProposal>;
+  draftDisabledReason?: string;
   onApprove?(saved: SavedBrief): Promise<void>;
 }) {
   const initial = savedBrief ?? { brief: defaultBrief(fallbackQuestion ?? "Which US-listed companies could benefit from this theme?"), version: 0, hash: "" };
@@ -22,9 +29,12 @@ export function BriefEditor({
   const [base, setBase] = useState<SavedBrief | null>(savedBrief);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [drafting, setDrafting] = useState(false);
   const [approving, setApproving] = useState(false);
   const initialLoadDone = useRef(savedBrief !== null);
   const changedBeforeLoad = useRef(false);
+  const draftingRef = useRef(false);
+  const draftRevision = useRef(0);
 
   // A first fetched saved brief may initialize an untouched editor. Every
   // later server refresh deliberately leaves the local draft and base alone.
@@ -37,7 +47,30 @@ export function BriefEditor({
   }, [savedBrief]);
 
   const isDirty = base === null || JSON.stringify(draft) !== JSON.stringify(base.brief);
-  const update = (next: Brief) => { changedBeforeLoad.current = true; setDraft(next); };
+  const update = (next: Brief) => { changedBeforeLoad.current = true; draftRevision.current += 1; setDraft(next); };
+
+  async function generate(): Promise<void> {
+    if (!onDraft || draftingRef.current) return;
+    const expectedVersion = base?.version ?? 0;
+    const revision = draftRevision.current;
+    draftingRef.current = true;
+    setDrafting(true);
+    setError(null);
+    try {
+      const proposal = await onDraft({ expectedVersion });
+      if (proposal.base_version !== expectedVersion) {
+        setError("A newer saved brief is available. Your edits are still here; load it only when you are ready.");
+      } else if (draftRevision.current === revision) {
+        changedBeforeLoad.current = true;
+        setDraft(proposal.brief);
+      }
+    } catch (caught) {
+      if (!(caught instanceof DOMException && caught.name === "AbortError")) setError(messageForDraft(caught));
+    } finally {
+      draftingRef.current = false;
+      setDrafting(false);
+    }
+  }
 
   async function save(): Promise<SavedBrief | null> {
     if (saving) return null;
@@ -72,6 +105,7 @@ export function BriefEditor({
 
   function loadSaved() {
     if (savedBrief === null) return;
+    draftRevision.current += 1;
     setDraft(savedBrief.brief);
     setBase(savedBrief);
     setError(null);
@@ -104,10 +138,12 @@ export function BriefEditor({
       </label>
       <TextLines label="Exclusions" value={draft.exclusions} onChange={(exclusions) => update({ ...draft, exclusions })} />
       <TextLines label="Preferences" value={draft.preferences} onChange={(preferences) => update({ ...draft, preferences })} />
+      {draftDisabledReason ? <p className="text-sm text-muted">{draftDisabledReason}</p> : null}
       {error ? <p role="alert" className="text-sm text-negative">{error}</p> : null}
       <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={() => { void save(); }} disabled={saving} className="rounded-md border border-line-strong px-3 py-2 text-sm font-medium text-fg disabled:opacity-60">{saving ? "Saving brief…" : "Save research brief"}</button>
-        {onApprove ? <button type="button" onClick={() => { void approve(); }} disabled={saving || approving} className="rounded-md bg-accent px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">{approving ? "Starting research…" : "Approve brief and start"}</button> : null}
+        {onDraft ? <button type="button" onClick={() => { void generate(); }} disabled={drafting} className="rounded-md border border-line-strong px-3 py-2 text-sm font-medium text-fg disabled:opacity-60">{drafting ? "Generating research brief…" : "Generate research brief"}</button> : null}
+        <button type="button" onClick={() => { void save(); }} disabled={saving || drafting} className="rounded-md border border-line-strong px-3 py-2 text-sm font-medium text-fg disabled:opacity-60">{saving ? "Saving brief…" : "Save research brief"}</button>
+        {onApprove ? <button type="button" onClick={() => { void approve(); }} disabled={saving || drafting || approving} className="rounded-md bg-accent px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">{approving ? "Starting research…" : "Approve brief and start"}</button> : null}
       </div>
       <input type="hidden" value={campaignId} aria-label="Campaign" readOnly />
     </section>
@@ -133,3 +169,12 @@ function queriesFor(mechanisms: Mechanism[], seeds: string[]): Brief["queries"] 
 function newId(): string { return globalThis.crypto?.randomUUID?.() ?? `00000000-0000-4000-8000-${Math.random().toString(16).slice(2).padEnd(12, "0").slice(0, 12)}`; }
 function defaultBrief(question: string): Brief { const mechanisms: Mechanism[] = [{ mechanism_id: newId(), label: "Demand driver", chain: ["Catalyst", "Demand growth"] }, { mechanism_id: newId(), label: "Company benefit", chain: ["Demand growth", "Revenue opportunity"] }]; return { schema_version: 1, question, market: "us_listed", horizon_months: 24, lookback_months: 12, mechanisms, criteria: [{ criterion_id: newId(), importance: "must", statement: "The company has a direct and durable connection to the theme", falsifier: "The company lacks a supported connection to the theme" }], seed_queries: ["US-listed companies exposed to the theme"], exclusions: [], preferences: [], queries: queriesFor(mechanisms, ["US-listed companies exposed to the theme"]) }; }
 function messageForSave(error: unknown): string { const message = error instanceof Error ? error.message : ""; return message.includes("newer") || message.includes("stale") ? "A newer saved brief is available. Your edits are still here; load it only when you are ready." : "The brief could not be saved. Your edits are still here."; }
+function messageForDraft(error: unknown): string {
+  const code = error instanceof HttpJsonError && error.body !== null && typeof error.body === "object" && typeof (error.body as { code?: unknown }).code === "string"
+    ? (error.body as { code: string }).code
+    : "";
+  if (code === "stale_brief") return "A newer saved brief is available. Your edits are still here; load it only when you are ready.";
+  if (code === "draft_rate_limit") return "You have reached the research-brief generation limit. Wait a little, then try again.";
+  if (code === "unavailable") return "Research-brief generation is unavailable right now. Keep editing or try again later.";
+  return "The research brief could not be generated. Your edits are still here; try again.";
+}

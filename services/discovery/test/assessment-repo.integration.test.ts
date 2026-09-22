@@ -113,6 +113,57 @@ test("invalidated or superseded cited facts roll back the assessment before seal
   assert.equal((await db.query<{ count: string }>("select count(*)::text as count from snapshots")).rows[0]?.count, "0");
 });
 
+test("a superseded cited claim rejects the direct final commit and leaves the candidate unsealed", dbOptions, async (t) => {
+  const { db, lease, packet, decision, commit } = await prepareClaimCommit(t);
+  await db.query("update claims set superseded_at=now() where claim_id=$1::uuid", [packet.claims[0]!.claim_id]);
+
+  await assert.rejects(() => commit(lease, packet, decision), /cited claim is no longer current/i);
+
+  await assertCandidateUnsealed(db, packet.candidate_id);
+  assert.equal((await db.query<{ count: string }>("select count(*)::text as count from snapshots")).rows[0]?.count, "0");
+});
+
+test("a deleted cited claim rejects the direct final commit and leaves the candidate unsealed", dbOptions, async (t) => {
+  const { db, lease, packet, decision, commit } = await prepareClaimCommit(t);
+  await db.query("delete from claims where claim_id=$1::uuid", [packet.claims[0]!.claim_id]);
+
+  await assert.rejects(() => commit(lease, packet, decision), /cited claim is no longer current/i);
+
+  await assertCandidateUnsealed(db, packet.candidate_id);
+  assert.equal((await db.query<{ count: string }>("select count(*)::text as count from snapshots")).rows[0]?.count, "0");
+});
+
+async function prepareClaimCommit(t: Parameters<typeof withCampaignDb>[0]) {
+  const { db, repo, clock, createApprovedRun } = await withCampaignDb(t);
+  const { run } = await createApprovedRun();
+  const packet = packetFixture();
+  await insertEligibleListing(db, packet.identity);
+  const lease = await repo.claimNextRun("assessment-worker");
+  assert.ok(lease);
+  await repo.admitCandidate(lease, {
+    candidate_id: packet.candidate_id,
+    lead_key: "assessment-claim-currentness",
+    name: packet.identity.legal_name,
+    identity: packet.identity,
+    origins: ["web"],
+    mechanism_ids: [briefFixture().mechanisms[0]!.mechanism_id],
+    seed: false,
+    primary_domain_lead: true,
+    first_seen: [0, 0],
+    lead_hit_ids: [],
+    reason_codes: [],
+  });
+  await repo.commitCohort(lease, [packet.candidate_id], {} as never);
+  await seedEvidence(db, packet, run.campaign_id, run.run_id, true);
+  return {
+    db,
+    lease,
+    packet,
+    decision: decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z"),
+    commit: createAssessmentCommitter({ db, clock: clock.now }),
+  };
+}
+
 async function insertEligibleListing(db: QueryExecutor, identity: ReturnType<typeof identityFixture>): Promise<void> {
   const instrumentId = crypto.randomUUID();
   await db.query("insert into issuers (issuer_id,legal_name,former_names) values ($1::uuid,$2,'[]'::jsonb)", [identity.issuer_id, identity.legal_name]);

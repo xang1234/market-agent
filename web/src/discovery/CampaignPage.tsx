@@ -3,8 +3,8 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import type { CandidateView, CampaignDetail, RunRecord, RunView, SavedBrief } from "../../../services/discovery/src/types.ts";
 import { useAuth } from "../shell/useAuth.ts";
-import { BriefEditor, type BriefSave } from "./BriefEditor.tsx";
-import { cancelRun, discoveryMessage, getCampaign, getRun, listCandidates, listEvents, listRuns, saveBrief, startRun } from "./api.ts";
+import { BriefEditor, type BriefDraft, type BriefSave } from "./BriefEditor.tsx";
+import { cancelRun, discoveryMessage, draftBrief, getCampaign, getRun, listCandidates, listEvents, listRuns, saveBrief, startRun } from "./api.ts";
 import { CampaignResults } from "./CampaignResults.tsx";
 import { formatCampaignMarkdown } from "./export.ts";
 import { readAuthorizedResearchView, researchHandoffForCandidate, researchSummaryForCandidate } from "./handoff.ts";
@@ -31,6 +31,7 @@ export function CampaignPage() {
   const [exportState, setExportState] = useState<{ campaignId: string; runId: string; userId: string; markdown: string } | null>(null);
   const startRequestKeys = useRef(new Map<string, string>());
   const startController = useRef<{ campaignId: string; userId: string; routeRunId: string | null; controller: AbortController } | null>(null);
+  const draftController = useRef<{ campaignId: string; userId: string; controller: AbortController } | null>(null);
   const cancellingRunRef = useRef<{ userId: string; runId: string } | null>(null);
   const researchActionController = useRef<AbortController | null>(null);
   const routeIdentity = useRef({ campaignId, userId, routeRunId: routeRunId ?? null, selectedRunId: null as string | null });
@@ -58,6 +59,11 @@ export function CampaignPage() {
       if (pending?.campaignId === campaignId && pending.userId === userId && pending.routeRunId === (routeRunId ?? null)) {
         pending.controller.abort();
         startController.current = null;
+      }
+      const pendingDraft = draftController.current;
+      if (pendingDraft?.campaignId === campaignId && pendingDraft.userId === userId) {
+        pendingDraft.controller.abort();
+        draftController.current = null;
       }
       researchActionController.current?.abort();
       researchActionController.current = null;
@@ -134,6 +140,25 @@ export function CampaignPage() {
     setDetailState((current) => current?.userId === userId && current.campaignId === campaignId ? { userId, campaignId, detail: { ...current.detail, brief: saved } } : current);
     setRefreshKey((key) => key + 1);
     return saved;
+  }
+
+  async function onDraft(body: BriefDraft) {
+    if (!userId) throw new Error("signed out");
+    if (draftController.current) throw new Error("A research brief is already being generated.");
+    const actionUserId = userId;
+    const actionCampaignId = campaignId;
+    const controller = new AbortController();
+    draftController.current = { campaignId: actionCampaignId, userId: actionUserId, controller };
+    setPageError(null);
+    try {
+      const proposal = await draftBrief({ userId: actionUserId, campaignId: actionCampaignId, expectedVersion: body.expectedVersion, signal: controller.signal });
+      if (controller.signal.aborted || routeIdentity.current.campaignId !== actionCampaignId || routeIdentity.current.userId !== actionUserId) {
+        throw new DOMException("This research brief request was cancelled because the campaign changed.", "AbortError");
+      }
+      return proposal;
+    } finally {
+      if (draftController.current?.controller === controller) draftController.current = null;
+    }
   }
 
   async function onApprove(saved: SavedBrief) {
@@ -274,7 +299,13 @@ export function CampaignPage() {
   if (!detail) return <div className="p-4 text-sm text-negative" role="alert">{scopedError}</div>;
   const results = resultState?.userId === userId && resultState.runId === selectedRunId ? resultState : null;
   const exportMarkdown = exportState?.campaignId === campaignId && exportState.runId === selectedRunId && exportState.userId === userId ? exportState.markdown : null;
-  return <main className="space-y-5 p-4"><header><p className="text-sm text-muted">Discovery campaign</p><h1 className="text-xl font-semibold text-fg">{detail.campaign.name}</h1><p className="mt-1 text-sm text-muted">{detail.campaign.question}</p></header>{!detail.readiness.ready ? <p role="alert" className="rounded-md border border-line p-3 text-sm text-muted">Research setup needs attention before a run can start.</p> : null}<BriefEditor key={`${userId}:${campaignId}`} campaignId={campaignId} savedBrief={detail.brief} fallbackQuestion={detail.campaign.question} onSave={onSave} onApprove={detail.readiness.ready ? onApprove : undefined} />{scopedError ? <p role="alert" className="text-sm text-negative">{scopedError}</p> : null}{pollingError ? <p role="status" className="text-sm text-muted">Progress could not be refreshed. Showing the last available update.</p> : null}{run ? <><RunProgress run={run} onCancel={onCancel} cancelling={cancellingRun?.userId === userId && cancellingRun.runId === selectedRunId} /><CampaignResults run={run} candidates={results?.candidates ?? []} events={results?.events ?? []} comparison={comparison} onCopyExport={() => void onCopyExport()} onOpenInAnalyze={onOpenInAnalyze} onDraftThesis={onDraftThesis} actionStatus={scopedActionStatus} hasMoreEvents={results?.hasMoreEvents} onLoadMoreEvents={onLoadMoreEvents} />{exportMarkdown ? <label className="grid gap-1 text-sm text-fg">Cited research export<textarea aria-label="Cited research export" readOnly value={exportMarkdown} rows={12} className="rounded-md border border-line bg-surface-2 p-3 font-mono text-xs" /></label> : null}{(runsState?.userId === userId && runsState.campaignId === campaignId && runsState.runs.length > 1) ? <label className="grid max-w-md gap-1 text-sm text-fg">Compare with another run<select aria-label="Compare with another run" value={comparisonId} onChange={(event) => { setComparisonChoice({ userId, campaignId, runId: event.target.value }); setComparisonState(null); }} className="rounded-md border border-line bg-surface-2 px-3 py-2"><option value="">Choose a run</option>{runsState.runs.filter((item) => item.run_id !== run.run_id).map((item) => <option key={item.run_id} value={item.run_id}>{runLabel(item)}</option>)}</select></label> : null}</> : selectedRunId ? <p className="text-sm text-muted">Loading research run…</p> : null}</main>;
+  const canDraft = !detail.readiness.missing.includes("model");
+  return <main className="space-y-5 p-4"><header><p className="text-sm text-muted">Discovery campaign</p><h1 className="text-xl font-semibold text-fg">{detail.campaign.name}</h1><p className="mt-1 text-sm text-muted">{detail.campaign.question}</p></header>{!detail.readiness.ready ? <p role="alert" className="rounded-md border border-line p-3 text-sm text-muted">{readinessMessage(detail.readiness.missing)}</p> : null}<BriefEditor key={`${userId}:${campaignId}`} campaignId={campaignId} savedBrief={detail.brief} fallbackQuestion={detail.campaign.question} onSave={onSave} onDraft={canDraft ? onDraft : undefined} draftDisabledReason={canDraft ? undefined : "Research-brief generation needs the model capability."} onApprove={detail.readiness.ready ? onApprove : undefined} />{scopedError ? <p role="alert" className="text-sm text-negative">{scopedError}</p> : null}{pollingError ? <p role="status" className="text-sm text-muted">Progress could not be refreshed. Showing the last available update.</p> : null}{run ? <><RunProgress run={run} onCancel={onCancel} cancelling={cancellingRun?.userId === userId && cancellingRun.runId === selectedRunId} /><CampaignResults run={run} candidates={results?.candidates ?? []} events={results?.events ?? []} comparison={comparison} onCopyExport={() => void onCopyExport()} onOpenInAnalyze={onOpenInAnalyze} onDraftThesis={onDraftThesis} actionStatus={scopedActionStatus} hasMoreEvents={results?.hasMoreEvents} onLoadMoreEvents={onLoadMoreEvents} />{exportMarkdown ? <label className="grid gap-1 text-sm text-fg">Cited research export<textarea aria-label="Cited research export" readOnly value={exportMarkdown} rows={12} className="rounded-md border border-line bg-surface-2 p-3 font-mono text-xs" /></label> : null}{(runsState?.userId === userId && runsState.campaignId === campaignId && runsState.runs.length > 1) ? <label className="grid max-w-md gap-1 text-sm text-fg">Compare with another run<select aria-label="Compare with another run" value={comparisonId} onChange={(event) => { setComparisonChoice({ userId, campaignId, runId: event.target.value }); setComparisonState(null); }} className="rounded-md border border-line bg-surface-2 px-3 py-2"><option value="">Choose a run</option>{runsState.runs.filter((item) => item.run_id !== run.run_id).map((item) => <option key={item.run_id} value={item.run_id}>{runLabel(item)}</option>)}</select></label> : null}</> : selectedRunId ? <p className="text-sm text-muted">Loading research run…</p> : null}</main>;
+}
+
+function readinessMessage(missing: CampaignDetail["readiness"]["missing"]): string {
+  if (missing.length === 0) return "Research setup needs attention before a run can start.";
+  return `Research cannot start until ${missing.join(missing.length === 2 ? " and " : ", ")} ${missing.length === 1 ? "is" : "are"} configured.`;
 }
 
 type CampaignResultsProps = Parameters<typeof CampaignResults>[0];

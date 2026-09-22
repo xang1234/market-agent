@@ -23,9 +23,10 @@ export async function authorizedCandidateViews(
   const visibleKeys = new Set(visible.map(citationKey));
   const sourceByCandidate = new Map<string, SourceView[]>();
   for (const row of sourceRows) {
+    if (!isBrowserSafeHttpsUrl(row.url)) continue;
     const views = sourceByCandidate.get(row.candidate_id) ?? [];
     views.push({
-      citation: { kind: row.kind, id: row.id }, title: row.title, url: row.url ?? "",
+      citation: { kind: row.kind, id: row.id }, title: row.title, url: row.url,
       published_at: iso(row.published_at), retrieved_at: iso(row.retrieved_at)!,
     });
     sourceByCandidate.set(row.candidate_id, views);
@@ -134,6 +135,10 @@ async function sourceRowsForCitations(db: QueryExecutor, userId: string, request
 }
 
 function citationKey(citation: RequestedCitation): string { return `${citation.candidate_id}:${citation.kind}:${citation.id}`; }
+function isBrowserSafeHttpsUrl(value: string | null): value is string {
+  if (typeof value !== "string") return false;
+  try { return new URL(value).protocol === "https:"; } catch { return false; }
+}
 function iso(value: Date | string | null): string | null {
   if (value === null) return null;
   const date = value instanceof Date ? value : new Date(value);

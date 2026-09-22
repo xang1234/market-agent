@@ -36,6 +36,45 @@ test("campaign documents preserve a document source separately from its reportin
   assert.doesNotMatch(JSON.stringify(loaded), /raw_blob_id|bytes/i);
 });
 
+test("campaign document repository excludes superseded claims during fresh evidence acquisition", async () => {
+  const objectStore = new MemoryObjectStore();
+  const blob = await objectStore.put(new TextEncoder().encode("Grid demand increased."));
+  const db = {
+    async query<R extends Record<string, unknown>>(text: string) {
+      if (text.includes("from documents d")) {
+        return { rows: [{
+          document_id: DOCUMENT,
+          source_id: DOCUMENT_SOURCE,
+          owner_user_id: null,
+          family_key: "sec:10-k",
+          title: "10-K",
+          url: "https://www.sec.gov/Archives/example",
+          published_at: "2026-02-20T00:00:00.000Z",
+          retrieved_at: "2026-02-21T00:00:00.000Z",
+          document_hash: "sha256:document",
+          raw_blob_id: blob.blob.raw_blob_id,
+          primary: true,
+          primary_eligible: true,
+        }] as unknown as R[] };
+      }
+      if (text.includes("from claims c")) {
+        const stale = !text.includes("c.superseded_at is null");
+        return { rows: (stale ? [{
+          claim_id: "66666666-6666-4666-a666-666666666666",
+          reporting_source_id: REPORTING_SOURCE,
+          text_canonical: "Grid demand increased.",
+        }] : []) as unknown as R[] };
+      }
+      throw new Error(`unexpected query: ${text}`);
+    },
+  } as unknown as QueryExecutor;
+  const repository = createPostgresCampaignDocumentRepository({ db, object_store: objectStore });
+
+  const documents = await repository.load({ issuer_id: ISSUER, user_id: USER, limit: 6 });
+
+  assert.deepEqual(documents[0]?.claims, []);
+});
+
 test("campaign documents refuse a repository row owned by another user", async () => {
   const documents = createCampaignDocumentService({
     user_id: USER,
@@ -119,6 +158,35 @@ test("a verified issuer IR document remains primary eligible after durable Postg
     [loaded.documents[0]?.document_id],
   );
   assert.deepEqual(persisted.rows, [{ ir_source_id: IR_SOURCE, issuer_attested: true }]);
+});
+
+test("fresh campaign evidence load excludes a superseded stored claim", { skip: !dockerAvailable(), timeout: 120_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "campaign-documents-current-claims");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  await db.query("insert into issuers (issuer_id, legal_name) values ($1::uuid, 'Acme Inc')", [ISSUER]);
+  const repository = createPostgresCampaignDocumentRepository({ db, object_store: new MemoryObjectStore() });
+  const stored = await repository.store({
+    issuer_id: ISSUER,
+    url: "https://www.sec.gov/Archives/acme-current-claims",
+    title: "Acme filing",
+    published_at: "2026-09-01T00:00:00.000Z",
+    retrieved_at: "2026-09-02T00:00:00.000Z",
+    provider: "sec_edgar",
+    kind: "filing",
+    bytes: new TextEncoder().encode("Acme reports current grid demand."),
+    content_type: "text/html",
+  });
+  await db.query(
+    `insert into claims (claim_id,document_id,predicate,text_canonical,polarity,modality,reported_by_source_id,confidence,status,superseded_at)
+     values ('66666666-6666-4666-a666-666666666666'::uuid,$1::uuid,'campaign_test','Acme reports current grid demand.','neutral','asserted',$2::uuid,1,'extracted',now())`,
+    [stored.document_id, stored.source_id],
+  );
+
+  const loaded = await createCampaignDocumentService({ user_id: USER, repository }).load({ issuer_id: ISSUER });
+
+  assert.equal(loaded.documents.length, 1);
+  assert.deepEqual(loaded.documents[0]?.claims, []);
 });
 
 test("SEC candidate finder meters submissions metadata before selecting current primary filing URLs", async () => {

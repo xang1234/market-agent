@@ -153,7 +153,7 @@ All routes require the current authenticated user; missing and foreign-owned res
 - `POST /v1/discovery/campaigns` `{name, question}` → 201 campaign.
 - `GET /v1/discovery/campaigns` → paginated summaries (default 20, maximum 100).
 - `GET /v1/discovery/campaigns/:id` → campaign, current brief, latest run summary, readiness.
-- `POST /v1/discovery/campaigns/:id/brief/draft` `{expected_version}` → proposed brief; cannot overwrite an edited version.
+- `POST /v1/discovery/campaigns/:id/draft` `{expected_version}` → proposed brief; cannot overwrite an edited version.
 - `PUT /v1/discovery/campaigns/:id/brief` `{expected_version, brief}` → next saved version, optimistic concurrency.
 - `POST /v1/discovery/campaigns/:id/runs` `{brief_version, brief_hash, request_key}` → 202 run; atomically approve the exact current brief and enqueue. A repeated request_key returns the same run; reuse with different content returns 409.
 - `GET /v1/discovery/campaigns/:id/runs` → run summaries, newest first, page 20/max100.

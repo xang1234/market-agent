@@ -38,7 +38,7 @@ export function createAssessmentCommitter(options: {
       throw new DiscoveryError("request_conflict", "candidate is not available for assessment");
     }
     const citations = decisionCitations(decision);
-    await requirePacketVisible(tx, lease.user_id, packet, citations);
+    const documentSources = await requirePacketVisible(tx, lease.user_id, packet, citations);
     const tool_calls = await loadToolCalls(tx, lease, packet.candidate_id);
     const snapshot_id = await sealCandidateAssessment(tx as never, {
       snapshot_id: newSnapshotId(),
@@ -46,6 +46,7 @@ export function createAssessmentCommitter(options: {
       decision,
       as_of: packetAsOf(packet),
       tool_calls,
+      document_sources: documentSources,
     });
     const updated = await tx.query(
       `update discovery_candidates
@@ -147,22 +148,33 @@ async function requirePacketVisible(
   userId: string,
   packet: EvidencePacket,
   citations: ReadonlyArray<{ kind: "claim" | "fact"; id: string }>,
-): Promise<void> {
+): Promise<ReadonlyMap<string, string>> {
   const claimIds = citations.filter((citation) => citation.kind === "claim").map((citation) => citation.id);
   const claims = new Map(packet.claims.map((claim) => [claim.claim_id, claim]));
   const citedClaims = claimIds.map((claimId) => claims.get(claimId)).filter((claim): claim is NonNullable<typeof claim> => claim !== undefined);
   if (citedClaims.length !== claimIds.length) throw new DiscoveryError("validation", "assessment cites a claim outside its evidence packet");
-  const documentIds = unique(citedClaims.map((claim) => claim.document_id));
-  if (documentIds.length > 0) {
-    const { rows } = await tx.query<{ document_id: string; source_id: string }>(
-      `select d.document_id::text as document_id,d.source_id::text as source_id
-         from documents d join sources s on s.source_id=d.source_id
-        where d.document_id=any($1::uuid[]) and d.deleted_at is null and (s.user_id is null or s.user_id=$2::uuid)`,
-      [documentIds, userId],
+  const documentSources = new Map<string, string>();
+  const citedClaimIds = unique(citedClaims.map((claim) => claim.claim_id));
+  if (citedClaimIds.length > 0) {
+    const { rows } = await tx.query<{ claim_id: string; document_id: string; reported_by_source_id: string; document_source_id: string }>(
+      `select c.claim_id::text as claim_id,c.document_id::text as document_id,c.reported_by_source_id::text as reported_by_source_id,d.source_id::text as document_source_id
+         from claims c
+         join documents d on d.document_id=c.document_id and d.deleted_at is null
+         join sources reported on reported.source_id=c.reported_by_source_id
+           and (reported.user_id is null or reported.user_id=$2::uuid)
+         join sources document_source on document_source.source_id=d.source_id
+           and (document_source.user_id is null or document_source.user_id=$2::uuid)
+        where c.claim_id=any($1::uuid[]) and c.superseded_at is null
+        for share of c,d,reported,document_source`,
+      [citedClaimIds, userId],
     );
-    const accessible = new Map(rows.map((row) => [row.document_id, row.source_id]));
-    for (const claim of citedClaims) if (accessible.get(claim.document_id) !== claim.source_id) {
-      throw new DiscoveryError("not_found", "cited evidence is no longer visible");
+    const current = new Map(rows.map((row) => [row.claim_id, row]));
+    for (const claim of citedClaims) {
+      const actual = current.get(claim.claim_id);
+      if (actual === undefined || actual.document_id !== claim.document_id || actual.reported_by_source_id !== claim.source_id) {
+        throw new DiscoveryError("not_found", "cited claim is no longer current");
+      }
+      documentSources.set(actual.document_id, actual.document_source_id);
     }
   }
   const factIds = citations.filter((citation) => citation.kind === "fact").map((citation) => citation.id);
@@ -197,13 +209,14 @@ async function requirePacketVisible(
       }
     }
   }
-  const sourceIds = unique([...citedClaims.map((claim) => claim.source_id), ...citedFacts.map((fact) => fact.source_id)]);
-  if (sourceIds.length === 0) return;
+  const sourceIds = unique(citedFacts.map((fact) => fact.source_id));
+  if (sourceIds.length === 0) return documentSources;
   const { rows } = await tx.query<{ source_id: string }>(
     "select source_id::text as source_id from sources where source_id=any($1::uuid[]) and (user_id is null or user_id=$2::uuid)",
     [sourceIds, userId],
   );
   if (new Set(rows.map((row) => row.source_id)).size !== sourceIds.length) throw new DiscoveryError("not_found", "assessment evidence source is no longer visible");
+  return documentSources;
 }
 
 async function loadToolCalls(tx: QueryExecutor, lease: Lease, candidateId: string): Promise<SealToolCallRef[]> {

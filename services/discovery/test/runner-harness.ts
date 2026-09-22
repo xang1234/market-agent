@@ -192,6 +192,23 @@ export async function createRunnerHarness(t: TestContext, options: Options = {})
       await db.query("update documents set deleted_at=$1::timestamptz where document_id=$2::uuid", [clock.now().toISOString(), packet.excerpts[0]!.document_id]);
       await addUnrelatedVisibleDocument(db, packet.identity.issuer_id, clock.now().toISOString());
     },
+    async useDistinctReportingSourceForFirstExistingProvenance() {
+      const packet = packets[0]!;
+      const reportingSourceId = randomUUID();
+      await db.query(
+        "insert into sources (source_id,provider,kind,canonical_url,trust_tier,license_class,retrieved_at) values ($1::uuid,'fixture-reporting','press_release',$2,'primary','test',$3::timestamptz)",
+        [reportingSourceId, `https://example.test/reporting/${reportingSourceId}`, clock.now().toISOString()],
+      );
+      await db.query("update claims set reported_by_source_id=$1::uuid where claim_id=$2::uuid", [reportingSourceId, packet.claims[0]!.claim_id]);
+      existing[0]!.evidence_refs = [{
+        kind: "document",
+        source_id: packet.excerpts[0]!.source_id,
+        reporting_source_id: reportingSourceId,
+        document_id: packet.excerpts[0]!.document_id,
+        claim_id: packet.claims[0]!.claim_id,
+      }];
+      return reportingSourceId;
+    },
     async useUnentitledFactAsFirstExistingProvenance() {
       const packet = packets[0]!;
       const metric = await db.query<{ metric_id: string }>(

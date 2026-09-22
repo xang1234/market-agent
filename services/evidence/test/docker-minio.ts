@@ -12,7 +12,7 @@ type TestContextLike = { after(callback: Cleanup): void };
 
 // Pinned to a specific release for reproducibility across test runs over time.
 // Bump deliberately when MinIO upstream ships a relevant fix; do not float to :latest.
-const MINIO_IMAGE = "minio/minio:RELEASE.2025-09-07T16-13-09Z";
+const MINIO_IMAGE = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z";
 const MINIO_USER = "minioadmin";
 const MINIO_PASSWORD = "minioadmin";
 

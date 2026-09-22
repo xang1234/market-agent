@@ -87,6 +87,18 @@ test("ci workflow runs discovery through synthetic fixtures with its real databa
   assert.match(section, /working-directory:\s*services\/discovery\s*\n\s*run:\s*npm test/);
 });
 
+test("ci workflow installs evidence before analyst-grids imports its S3 object store", async () => {
+  const workflow = await readFile(CI_WORKFLOW, "utf8");
+  const section = jobSection(workflow, "services/analyst-grids");
+
+  assert.match(section, /services\/evidence\/package-lock\.json/);
+  assert.match(section, /working-directory:\s*services\/evidence\s*\n\s*run:\s*npm ci/);
+  assert.ok(
+    section.indexOf("working-directory: services/evidence") < section.indexOf("working-directory: services/analyst-grids"),
+    "analyst-grids must install evidence dependencies before loading reader-wiring",
+  );
+});
+
 test("ci workflow covers every package with a test script", async () => {
   const workflow = await readFile(CI_WORKFLOW, "utf8");
   const packageDirs = await testedPackageDirs();

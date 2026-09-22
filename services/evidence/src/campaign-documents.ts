@@ -420,7 +420,7 @@ async function loadClaims(db: QueryExecutor, documentId: string, userId: string)
     `select c.claim_id::text as claim_id, c.reported_by_source_id::text as reporting_source_id, c.text_canonical
        from claims c
        join sources s on s.source_id = c.reported_by_source_id
-      where c.document_id = $1::uuid and (s.user_id is null or s.user_id = $2::uuid)
+      where c.document_id = $1::uuid and c.superseded_at is null and (s.user_id is null or s.user_id = $2::uuid)
       order by c.claim_id`,
     [documentId, userId],
   );

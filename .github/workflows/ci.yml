@@ -604,10 +604,17 @@ jobs:
           cache: npm
           cache-dependency-path: |
             db/package-lock.json
+            services/evidence/package-lock.json
             services/analyst-grids/package-lock.json
 
       - name: Install db deps (needed by analyst-grids integration harness)
         working-directory: db
+        run: npm ci
+
+      # reader-wiring imports S3ObjectStore from evidence/, which resolves its
+      # own package dependencies from services/evidence/node_modules.
+      - name: Install evidence deps (needed by analyst-grids reader wiring)
+        working-directory: services/evidence
         run: npm ci
 
       - name: Install analyst-grids deps

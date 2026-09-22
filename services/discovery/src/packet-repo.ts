@@ -37,24 +37,27 @@ export function createPacketStore(db: QueryExecutor, clock: () => Date): Pick<Di
              select supplied.candidate_id,
                case
                  when ref.kind='document' then d.document_id is not null and source_document.source_id is not null
-                   and (ref.claim_id is null or c.claim_id is not null)
+                   and (ref.claim_id is null or (c.claim_id is not null and source_reporting.source_id is not null))
                    and exists (select 1 from mentions m where m.document_id=d.document_id and m.subject_kind='issuer' and m.subject_id=supplied.issuer_id)
                  when ref.kind='fact' then f.fact_id is not null and source_fact.source_id is not null
                    and f.entitlement_channels ? 'app' and f.invalidated_at is null and f.superseded_by is null
                  else false
                end as usable,
                ref.kind='document' and d.document_id is not null and source_document.source_id is not null
-                 and (ref.claim_id is null or c.claim_id is not null)
+                 and (ref.claim_id is null or (c.claim_id is not null and source_reporting.source_id is not null))
                  and exists (select 1 from mentions m where m.document_id=d.document_id and m.subject_kind='issuer' and m.subject_id=supplied.issuer_id)
                  and source_document.trust_tier='primary'
                  and (source_document.provider='sec_edgar' or exists (
                    select 1 from ir_document_assets a where a.document_id=d.document_id and a.issuer_id=supplied.issuer_id and a.issuer_attested
                  )) as primary_usable
              from supplied
-             cross join lateral jsonb_to_recordset(supplied.evidence_refs) as ref(kind text,source_id uuid,document_id uuid,claim_id uuid,fact_id uuid)
+             cross join lateral jsonb_to_recordset(supplied.evidence_refs) as ref(kind text,source_id uuid,document_id uuid,claim_id uuid,reporting_source_id uuid,fact_id uuid)
              left join documents d on ref.kind='document' and d.document_id=ref.document_id and d.source_id=ref.source_id and d.deleted_at is null
              left join sources source_document on source_document.source_id=d.source_id and (source_document.user_id is null or source_document.user_id=$1::uuid)
-             left join claims c on c.claim_id=ref.claim_id and c.document_id=d.document_id and c.reported_by_source_id=ref.source_id and c.superseded_at is null
+             left join claims c on c.claim_id=ref.claim_id and c.document_id=d.document_id
+               and c.reported_by_source_id=coalesce(ref.reporting_source_id,ref.source_id) and c.superseded_at is null
+             left join sources source_reporting on source_reporting.source_id=c.reported_by_source_id
+               and (source_reporting.user_id is null or source_reporting.user_id=$1::uuid)
              left join facts f on ref.kind='fact' and f.fact_id=ref.fact_id and f.source_id=ref.source_id and f.subject_kind='issuer' and f.subject_id=supplied.issuer_id
              left join sources source_fact on source_fact.source_id=f.source_id and (source_fact.user_id is null or source_fact.user_id=$1::uuid)
            )
@@ -130,7 +133,8 @@ export function createPacketStore(db: QueryExecutor, clock: () => Date): Pick<Di
         const factIds = unique(packet.facts.map((item) => item.fact_id));
         const facts = await visibleFacts(tx, lease.user_id, factIds);
         const excerpts = packet.excerpts.filter((item) => documents.get(item.document_id) === item.source_id);
-        const claims = packet.claims.filter((item) => documents.get(item.document_id) === item.source_id);
+        const currentClaimKeys = await visiblePacketClaimKeys(tx, lease.user_id, packet.claims);
+        const claims = packet.claims.filter((item) => currentClaimKeys.has(claimKey(item)));
         const quoteClaims = await visibleQuoteClaims(tx, lease.user_id, documentIds);
         const currentFacts = packet.facts.filter((item) => facts.get(item.fact_id) === item.source_id);
         const removed = packet.excerpts.length - excerpts.length + packet.claims.length - claims.length + packet.facts.length - currentFacts.length;
@@ -153,15 +157,42 @@ async function visibleQuoteClaims(
 ): Promise<EvidencePacket["claims"]> {
   if (ids.length === 0) return [];
   const { rows } = await tx.query<{ claim_id: string; document_id: string; source_id: string; text_canonical: string }>(
-    `select qc.claim_id::text as claim_id,qc.document_id::text as document_id,qc.source_id::text as source_id,c.text_canonical
+    `select c.claim_id::text as claim_id,c.document_id::text as document_id,c.reported_by_source_id::text as source_id,c.text_canonical
        from discovery_quote_claims qc
-       join claims c on c.claim_id=qc.claim_id
-       join documents d on d.document_id=qc.document_id and d.deleted_at is null
-       join sources s on s.source_id=qc.source_id and (s.user_id is null or s.user_id=$2::uuid)
-      where qc.document_id=any($1::uuid[]) and d.source_id=qc.source_id`,
+       join claims c on c.claim_id=qc.claim_id and c.document_id=qc.document_id and c.superseded_at is null
+       join documents d on d.document_id=c.document_id and d.deleted_at is null and d.source_id=qc.source_id
+       join sources reported on reported.source_id=c.reported_by_source_id and (reported.user_id is null or reported.user_id=$2::uuid)
+       join sources document_source on document_source.source_id=d.source_id and (document_source.user_id is null or document_source.user_id=$2::uuid)
+      where qc.document_id=any($1::uuid[])`,
     [ids, userId],
   );
   return rows;
+}
+
+async function visiblePacketClaimKeys(
+  tx: QueryExecutor,
+  userId: string,
+  claims: EvidencePacket["claims"],
+): Promise<Set<string>> {
+  if (claims.length === 0) return new Set();
+  const { rows } = await tx.query<{ claim_id: string; document_id: string; source_id: string }>(
+    `with supplied as (
+       select * from jsonb_to_recordset($1::jsonb) as input(claim_id uuid,document_id uuid,source_id uuid)
+     )
+     select supplied.claim_id::text as claim_id,supplied.document_id::text as document_id,supplied.source_id::text as source_id
+       from supplied
+       join claims c on c.claim_id=supplied.claim_id
+         and c.document_id=supplied.document_id
+         and c.reported_by_source_id=supplied.source_id
+         and c.superseded_at is null
+       join documents d on d.document_id=c.document_id and d.deleted_at is null
+       join sources reported on reported.source_id=c.reported_by_source_id
+         and (reported.user_id is null or reported.user_id=$2::uuid)
+       join sources document_source on document_source.source_id=d.source_id
+         and (document_source.user_id is null or document_source.user_id=$2::uuid)`,
+    [json(claims), userId],
+  );
+  return new Set(rows.map(claimKey));
 }
 
 async function lockedPacketRow(tx: QueryExecutor, lease: Lease, candidateId: string): Promise<PacketRow> {
@@ -200,6 +231,9 @@ async function visibleFacts(tx: QueryExecutor, userId: string, ids: string[]): P
 }
 
 function unique(values: string[]): string[] { return [...new Set(values)]; }
+function claimKey(claim: Pick<EvidencePacket["claims"][number], "claim_id" | "document_id" | "source_id">): string {
+  return `${claim.claim_id}:${claim.document_id}:${claim.source_id}`;
+}
 function uniqueClaims(claims: EvidencePacket["claims"]): EvidencePacket["claims"] {
   const result = new Map<string, EvidencePacket["claims"][number]>();
   for (const claim of claims) result.set(claim.claim_id, claim);

@@ -71,7 +71,7 @@ export type DiscoveredCandidate = {
 };
 /** Exact current evidence that permitted reuse of an existing discovery lead. */
 export type ExistingEvidenceRef =
-  | { kind: "document"; source_id: Id; document_id: Id; claim_id?: Id }
+  | { kind: "document"; source_id: Id; document_id: Id; claim_id?: Id; reporting_source_id?: Id }
   | { kind: "fact"; source_id: Id; fact_id: Id };
 export type ExistingCandidate = DiscoveredCandidate & { evidence_refs: ExistingEvidenceRef[] };
 export type CriterionOutcome<C = Citation> = {

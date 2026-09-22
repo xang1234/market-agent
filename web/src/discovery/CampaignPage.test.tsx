@@ -163,6 +163,89 @@ test("does not let a delayed start response replace a later run choice in the sa
   }
 });
 
+test("allows brief generation with only the model capability ready", async () => {
+  // This would catch reusing run readiness for drafting, even though drafting
+  // only needs the planner model and the run still needs search and references.
+  const unavailableRun = detail();
+  unavailableRun.readiness = { ready: false, missing: ["search", "reference"] };
+  const proposal = { ...saved().brief, question: "Planner-generated transmission research brief" };
+  const harness = await mountPage(async (url, init) => {
+    if (url.endsWith("/campaigns/campaign-1/draft") && init?.method === "POST") return json({ brief: proposal, base_version: 1 });
+    if (url.endsWith("/campaigns/campaign-1")) return json(unavailableRun);
+    return json(emptyResponse(url));
+  });
+  try {
+    await waitFor(() => !!harness.findButton("Generate research brief"));
+    const draft = harness.button("Generate research brief") as HTMLButtonElement;
+    assert.equal(draft.disabled, false);
+    assert.equal(harness.findButton("Approve brief and start"), null);
+    assert.match(harness.document.body.textContent ?? "", /search and reference/i);
+
+    await harness.click("Generate research brief");
+    assert.deepEqual(harness.draftBodies, [{ expected_version: 1 }]);
+    assert.match(harness.document.body.textContent ?? "", /Planner-generated transmission research brief/);
+  } finally {
+    await harness.unmount();
+  }
+});
+
+test("aborts and ignores a delayed draft response after changing campaigns", async () => {
+  // This would catch a planner proposal from the former route replacing the new campaign's brief.
+  const pending = deferred<Response>();
+  const request = { signal: null as AbortSignal | null };
+  const harness = await mountPage(async (url, init) => {
+    if (url.endsWith("/campaigns/campaign-1/draft") && init?.method === "POST") {
+      request.signal = init.signal ?? null;
+      return pending.promise;
+    }
+    if (url.endsWith("/campaigns/campaign-1")) return json(detail("campaign-1"));
+    if (url.endsWith("/campaigns/campaign-2")) return json(detail("campaign-2"));
+    return json(emptyResponse(url));
+  });
+  try {
+    await waitFor(() => !!harness.findButton("Generate research brief"));
+    await harness.click("Generate research brief");
+    await harness.navigate("/discovery/campaign-2");
+    assert.equal(request.signal?.aborted, true);
+    pending.resolve(json({ brief: { ...saved().brief, question: "Former campaign proposal" }, base_version: 1 }));
+    await act(async () => { await delay(20); });
+    assert.equal(harness.route(), "/discovery/campaign-2");
+    assert.match(harness.document.body.textContent ?? "", /Grid research campaign-2/);
+    assert.doesNotMatch(harness.document.body.textContent ?? "", /Former campaign proposal/);
+  } finally {
+    await harness.unmount();
+  }
+});
+
+test("aborts and ignores a delayed draft response after changing accounts", async () => {
+  // This would catch a User A proposal becoming visible in User B's campaign after a session change.
+  const pending = deferred<Response>();
+  const request = { signal: null as AbortSignal | null };
+  const userBDetail = detail();
+  userBDetail.campaign.name = "User B campaign";
+  userBDetail.brief!.brief.question = "User B saved brief";
+  const harness = await mountPage(async (url, init) => {
+    const userId = (init?.headers as Record<string, string> | undefined)?.["x-user-id"];
+    if (url.endsWith("/campaigns/campaign-1")) return json(userId === "user-1" ? detail() : userBDetail);
+    if (url.endsWith("/campaigns/campaign-1/draft") && init?.method === "POST") {
+      request.signal = init.signal ?? null;
+      return pending.promise;
+    }
+    return json(emptyResponse(url));
+  });
+  try {
+    await waitFor(() => !!harness.findButton("Generate research brief"));
+    await harness.click("Generate research brief");
+    await harness.switchUser("user-2");
+    assert.equal(request.signal?.aborted, true);
+    pending.resolve(json({ brief: { ...saved().brief, question: "User A private proposal" }, base_version: 1 }));
+    await waitFor(() => harness.document.body.textContent?.includes("User B campaign") ?? false);
+    assert.doesNotMatch(harness.document.body.textContent ?? "", /User A private proposal/);
+  } finally {
+    await harness.unmount();
+  }
+});
+
 test("shows disabled cancellation feedback while the cancellation request is pending", async () => {
   // This would catch a second cancellation remaining available while the first request is unresolved.
   const pending = deferred<Response>();
@@ -512,9 +595,11 @@ async function mountPage(route: (url: string, init?: RequestInit) => Promise<Res
   const restore = installDomGlobals(dom.window as unknown as Window);
   const oldFetch = globalThis.fetch;
   const startBodies: Array<{ brief_version: number; brief_hash: string; request_key: string }> = [];
+  const draftBodies: Array<{ expected_version: number }> = [];
   (globalThis as { fetch: typeof fetch }).fetch = async (input, init) => {
     const url = String(input);
     if (url.endsWith("/runs") && init?.method === "POST") startBodies.push(JSON.parse(String(init.body)));
+    if (url.endsWith("/draft") && init?.method === "POST") draftBodies.push(JSON.parse(String(init.body)));
     return route(url, init);
   };
   const root = createRoot(dom.window.document.getElementById("root")!);
@@ -549,6 +634,7 @@ async function mountPage(route: (url: string, init?: RequestInit) => Promise<Res
     document: dom.window.document,
     window: dom.window,
     startBodies,
+    draftBodies,
     findButton(label: string) { return [...dom.window.document.querySelectorAll("button")].find((element) => element.textContent?.trim() === label) ?? null; },
     button(label: string) { const button = this.findButton(label); assert.ok(button, `missing button ${label}`); return button; },
     async click(label: string) { const button = this.button(label); await act(async () => button.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }))); await act(async () => { await delay(5); }); },

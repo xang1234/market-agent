@@ -19,6 +19,7 @@ import type {
 import { isExactThresholdInput, type DecimalInput } from "../../../services/agents/src/exact-decimal.ts";
 
 type JsonRecord = Record<string, unknown>;
+export type DraftBriefProposal = { brief: Brief; base_version: number };
 
 export async function listCampaigns(args: { userId: string; cursor?: string; fetchImpl?: FetchImpl }): Promise<Page<Campaign>> {
   const search = args.cursor ? `?cursor=${encodeURIComponent(args.cursor)}` : "";
@@ -31,6 +32,20 @@ export async function createCampaign(args: { userId: string; name: string; quest
 
 export async function getCampaign(args: { userId: string; campaignId: string; signal?: AbortSignal; fetchImpl?: FetchImpl }): Promise<CampaignDetail> {
   return request(`/v1/discovery/campaigns/${encodeURIComponent(args.campaignId)}`, args, campaignDetail);
+}
+
+export async function draftBrief(args: {
+  userId: string;
+  campaignId: string;
+  expectedVersion: number;
+  signal?: AbortSignal;
+  fetchImpl?: FetchImpl;
+}): Promise<DraftBriefProposal> {
+  return request(`/v1/discovery/campaigns/${encodeURIComponent(args.campaignId)}/draft`, {
+    ...args,
+    method: "POST",
+    body: { expected_version: args.expectedVersion },
+  }, draftBriefProposal);
 }
 
 export async function saveBrief(args: {
@@ -148,6 +163,11 @@ function savedBrief(value: unknown): SavedBrief {
     brief_id: string(result, "brief_id"), campaign_id: string(result, "campaign_id"), version: integer(result, "version"), brief: brief(result.brief), hash: string(result, "hash"),
     approved_at: nullableString(result.approved_at), created_at: string(result, "created_at"),
   };
+}
+
+function draftBriefProposal(value: unknown): DraftBriefProposal {
+  const result = object(value, "brief draft");
+  return { brief: brief(result.brief), base_version: integer(result, "base_version") };
 }
 
 function brief(value: unknown): Brief {

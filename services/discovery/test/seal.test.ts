@@ -9,6 +9,7 @@ import { analystFixture, briefFixture, packetFixture, skepticFixture } from "./f
 const SNAPSHOT_ID = "d0000000-0000-4000-8000-000000000001";
 const TOOL_CALL_ID = "d1000000-0000-4000-8000-000000000001";
 const TOOL_HASH = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+const REPORTING_SOURCE = "f2000000-0000-4000-8000-000000000001";
 
 test("sealing verifies cited claim documents and tool provenance before returning a snapshot", async () => {
   const queries: Array<{ text: string; values?: unknown[] }> = [];
@@ -36,6 +37,37 @@ test("sealing verifies cited claim documents and tool provenance before returnin
   assert.equal(snapshotId, SNAPSHOT_ID);
   assert.ok(queries.some((query) => query.text.includes("from tool_call_logs")));
   assert.ok(queries.some((query) => query.text.includes("insert into snapshots")));
+});
+
+test("sealing includes the document source when it differs from a cited claim reporting source", async () => {
+  const queries: Array<{ text: string; values?: unknown[] }> = [];
+  const tx = {
+    release() {},
+    async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
+      queries.push({ text, values });
+      if (text.includes("from tool_call_logs")) return result([{ tool_call_id: TOOL_CALL_ID, result_hash: TOOL_HASH }] as unknown as R[]);
+      if (text.includes("insert into snapshots")) return result([{ snapshot_id: SNAPSHOT_ID, created_at: "2026-09-10T12:00:01.000Z" }] as unknown as R[]);
+      if (text.includes("verifier_fail_logs")) return result([] as R[]);
+      throw new Error(`unexpected query: ${text}`);
+    },
+  };
+  const packet = packetFixture();
+  packet.claims[0] = { ...packet.claims[0]!, source_id: REPORTING_SOURCE };
+  const decision = decideCandidate(briefFixture(), packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z");
+
+  await sealCandidateAssessment(snapshotTransactionClient(tx), {
+    snapshot_id: SNAPSHOT_ID,
+    packet,
+    decision,
+    as_of: "2026-09-10T12:00:00Z",
+    tool_calls: [{ tool_call_id: TOOL_CALL_ID, result_hash: TOOL_HASH }],
+    document_sources: new Map(packet.excerpts.map((excerpt) => [excerpt.document_id, excerpt.source_id])),
+  });
+
+  const insert = queries.find((query) => query.text.includes("insert into snapshots"));
+  assert.ok(insert?.values);
+  const sourceIds = JSON.parse(String(insert.values![7])) as string[];
+  assert.deepEqual(sourceIds.sort(), [REPORTING_SOURCE, ...packet.excerpts.map((excerpt) => excerpt.source_id)].sort());
 });
 
 test("sealing refuses unverifiable tool provenance", async () => {

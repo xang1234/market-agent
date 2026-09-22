@@ -37,6 +37,7 @@ export async function createVisibleCandidateHarness(t: TestContext) {
     otherUserId: worker.otherUserId,
     runId: worker.runId,
     candidateId,
+    primaryClaimId: primary.claim_id,
     privateQuote,
     async assertReadableByOwner() {
       const view = await service.getRun(worker.userId, worker.runId);
@@ -47,6 +48,9 @@ export async function createVisibleCandidateHarness(t: TestContext) {
     },
     async revokePrimarySource() {
       await worker.db.query("update sources set user_id=$2::uuid where source_id=$1::uuid", [primary.source_id, worker.otherUserId]);
+    },
+    async setPrimarySourceCanonicalUrl(canonicalUrl: string | null) {
+      await worker.db.query("update sources set canonical_url=$2 where source_id=$1::uuid", [primary.source_id, canonicalUrl]);
     },
     async deletePrimaryDocument() {
       await worker.db.query("update documents set deleted_at=now() where document_id=$1::uuid", [primary.document_id]);

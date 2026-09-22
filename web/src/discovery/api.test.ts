@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { listCandidates, listEvents, saveBrief } from "./api.ts";
-import { briefFixture } from "../../../services/discovery/test/fixtures.ts";
+import * as discoveryApi from "./api.ts";
+import type { Brief } from "../../../services/discovery/src/types.ts";
+
+const api = discoveryApi as typeof discoveryApi & {
+  draftBrief?: (args: { userId: string; campaignId: string; expectedVersion: number; fetchImpl: typeof fetch }) => Promise<{ brief: Brief; base_version: number }>;
+};
 
 test("rejects candidate responses with a non-HTTPS source URL", async () => {
   // This would catch source URLs being passed to an anchor without scheme validation.
   await assert.rejects(
-    listCandidates({
+    api.listCandidates({
       userId: "user-1",
       runId: "run-1",
       fetchImpl: async () => json({ items: [candidateWithUrl("data:text/html,unsafe")], next_cursor: null }),
@@ -18,7 +22,7 @@ test("rejects candidate responses with a non-HTTPS source URL", async () => {
 
 test('lists a later trail page with the supplied event cursor', async () => {
   let requested = ''
-  await listEvents({
+  await api.listEvents({
     userId: 'user-1',
     runId: 'run-1',
     after: 12,
@@ -44,7 +48,7 @@ test("rejects a fractional numeric metric threshold in a Discovery response", as
   legacyResponseBrief.criteria[0]!.metric!.threshold = 0.0000001;
 
   await assert.rejects(
-    saveBrief({
+    api.saveBrief({
       userId: "user-1",
       campaignId: "campaign-1",
       expectedVersion: 0,
@@ -61,6 +65,30 @@ test("rejects a fractional numeric metric threshold in a Discovery response", as
     }),
     /Invalid exact decimal response/,
   );
+});
+
+test("drafts a versioned brief proposal through the canonical endpoint", async () => {
+  // This would catch the browser calling the stale /brief/draft path, omitting the
+  // concurrency version, or accepting an incomplete proposal response.
+  let requested = "";
+  let body: unknown;
+  assert.equal(typeof api.draftBrief, "function");
+
+  const result = await api.draftBrief!({
+    userId: "user-1",
+    campaignId: "campaign-1",
+    expectedVersion: 0,
+    fetchImpl: async (input, init) => {
+      requested = String(input);
+      body = JSON.parse(String(init?.body));
+      return json({ brief: briefFixture(), base_version: 0 });
+    },
+  });
+
+  assert.equal(requested, "/v1/discovery/campaigns/campaign-1/draft");
+  assert.deepEqual(body, { expected_version: 0 });
+  assert.equal(result.base_version, 0);
+  assert.equal(result.brief.question, "Which US-listed companies benefit from grid modernization spending?");
 });
 
 function candidateWithUrl(url: string): unknown {
@@ -83,4 +111,20 @@ function candidateWithUrl(url: string): unknown {
 
 function json(body: unknown): Response {
   return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
+}
+
+function briefFixture(): Brief {
+  return {
+    schema_version: 1,
+    question: "Which US-listed companies benefit from grid modernization spending?",
+    market: "us_listed",
+    horizon_months: 24,
+    lookback_months: 12,
+    mechanisms: [{ mechanism_id: "grid-demand", label: "Grid demand", chain: ["Investment", "Equipment orders"] }],
+    criteria: [{ criterion_id: "profitability", importance: "must", statement: "Has durable profits", falsifier: "Persistent losses" }],
+    seed_queries: ["grid equipment suppliers"],
+    exclusions: [],
+    preferences: [],
+    queries: [{ mechanism_id: "grid-demand", query: "grid equipment suppliers" }],
+  };
 }

@@ -13,6 +13,7 @@ export async function sealCandidateAssessment(
     as_of: string;
     tool_calls: ReadonlyArray<SealToolCallRef>;
     model_version?: string | null;
+    document_sources?: ReadonlyMap<string, string>;
   },
 ): Promise<string> {
   if (input.decision.candidate_id !== input.packet.candidate_id || input.decision.identity.issuer_id !== input.packet.identity.issuer_id) {
@@ -31,7 +32,15 @@ export async function sealCandidateAssessment(
     if (fact === undefined) throw new Error(`assessment cites a fact missing from the packet: ${citation.id}`);
     return fact;
   });
-  const sourceRefs = unique([...claims.map((claim) => claim.source_id), ...facts.map((fact) => fact.source_id)]);
+  const documents = uniqueBy(claims, (claim) => claim.document_id).map((claim) => ({
+    document_id: claim.document_id,
+    source_id: input.document_sources?.get(claim.document_id) ?? claim.source_id,
+  }));
+  const sourceRefs = unique([
+    ...claims.map((claim) => claim.source_id),
+    ...documents.map((document) => document.source_id),
+    ...facts.map((fact) => fact.source_id),
+  ]);
   const claimSeal = buildClaimBackedSealInput({
     block: {
       id: `campaign-assessment-${input.packet.candidate_id}`,
@@ -46,7 +55,7 @@ export async function sealCandidateAssessment(
       segments: [{ type: "decision", candidate_id: input.decision.candidate_id, state: input.decision.state, reason_codes: input.decision.reason_codes }],
     } as never,
     claims: claims.map((claim) => ({ claim_id: claim.claim_id, source_id: claim.source_id })),
-    documents: uniqueBy(claims, (claim) => claim.document_id).map((claim) => ({ document_id: claim.document_id, source_id: claim.source_id })),
+    documents,
     subjectRefs: [{ kind: "issuer", id: input.packet.identity.issuer_id }],
     toolCalls: input.tool_calls,
     modelVersion: input.model_version,

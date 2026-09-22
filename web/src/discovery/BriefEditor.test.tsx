@@ -5,6 +5,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 
 import type { Brief, SavedBrief } from "../../../services/discovery/src/types.ts";
+import { HttpJsonError } from "../http/authFetch.ts";
 import { BriefEditor } from "./BriefEditor.tsx";
 
 const BRIEF: Brief = {
@@ -84,12 +85,109 @@ test("keeps a stale-save draft and exposes editable research controls", async ()
   }
 });
 
-async function mountEditor(initialBrief: SavedBrief, saveOverride?: (body: { expectedVersion: number; brief: Brief }) => Promise<SavedBrief>) {
+test("generates a version-zero proposal locally and saves it only when asked", async () => {
+  // This would catch generated work being silently saved, or first drafts using a
+  // nonexistent version instead of the API's version-zero concurrency token.
+  const proposal = { ...BRIEF, question: "Find makers of transmission equipment." };
+  const harness = await mountEditor(null, undefined, async (request) => {
+    assert.equal(request.expectedVersion, 0);
+    return { brief: proposal, base_version: 0 };
+  });
+  try {
+    await harness.click("Generate research brief");
+    assert.equal(harness.field("Question").value, proposal.question);
+    assert.equal(harness.saveCalls, 0);
+
+    await harness.click("Save research brief");
+    assert.equal(harness.lastBody?.expectedVersion, 0);
+    assert.equal(harness.saveCalls, 1);
+  } finally {
+    await harness.unmount();
+  }
+});
+
+test("saves a generated proposal against its existing base version", async () => {
+  // This would catch proposal state becoming the save base and sending an
+  // invented version instead of the currently saved brief's version.
+  const harness = await mountEditor(savedBrief(3), undefined, async (request) => ({
+    brief: { ...BRIEF, question: "Find companies that make grid software." },
+    base_version: request.expectedVersion,
+  }));
+  try {
+    await harness.click("Generate research brief");
+    assert.equal(harness.saveCalls, 0);
+    await harness.click("Save research brief");
+    assert.equal(harness.lastBody?.expectedVersion, 3);
+  } finally {
+    await harness.unmount();
+  }
+});
+
+test("suppresses a second draft request while the first is in flight", async () => {
+  // This would catch two planner requests leaving before React has repainted the disabled button.
+  const pending = deferred<{ brief: Brief; base_version: number }>();
+  const harness = await mountEditor(savedBrief(1), undefined, async () => pending.promise);
+  try {
+    const button = harness.button("Generate research brief");
+    await act(async () => {
+      button.dispatchEvent(new harness.window.MouseEvent("click", { bubbles: true }));
+      button.dispatchEvent(new harness.window.MouseEvent("click", { bubbles: true }));
+    });
+    assert.equal(harness.draftCalls, 1);
+    pending.resolve({ brief: BRIEF, base_version: 1 });
+    await harness.settle();
+  } finally {
+    await harness.unmount();
+  }
+});
+
+test("does not replace an edit made after draft generation begins", async () => {
+  // This would catch a delayed planner response overwriting a newer local edit.
+  const pending = deferred<{ brief: Brief; base_version: number }>();
+  const harness = await mountEditor(savedBrief(1), undefined, async () => pending.promise);
+  try {
+    await harness.click("Generate research brief");
+    await harness.edit("Question", "Keep this newer question.");
+    pending.resolve({ brief: { ...BRIEF, question: "Delayed planner response" }, base_version: 1 });
+    await harness.settle();
+    assert.equal(harness.field("Question").value, "Keep this newer question.");
+  } finally {
+    await harness.unmount();
+  }
+});
+
+test("keeps the editable draft and gives recovery guidance for draft failures", async () => {
+  // This would catch stale, rate-limited, or unavailable planner errors clearing the
+  // local brief or leaving the person with no next action.
+  for (const [error, guidance] of [
+    [new HttpJsonError(409, { code: "stale_brief" }), /newer saved brief/i],
+    [new HttpJsonError(429, { code: "draft_rate_limit" }), /wait.*try again/i],
+    [new HttpJsonError(503, { code: "unavailable" }), /try again later/i],
+  ] as const) {
+    const harness = await mountEditor(savedBrief(1), undefined, async () => { throw error; });
+    try {
+      await harness.edit("Question", "Do not discard this draft.");
+      await harness.click("Generate research brief");
+      assert.equal(harness.field("Question").value, "Do not discard this draft.");
+      assert.match(harness.document.body.textContent ?? "", guidance);
+    } finally {
+      await harness.unmount();
+    }
+  }
+});
+
+async function mountEditor(
+  initialBrief: SavedBrief | null,
+  saveOverride?: (body: { expectedVersion: number; brief: Brief }) => Promise<SavedBrief>,
+  draftOverride?: (body: { expectedVersion: number }) => Promise<{ brief: Brief; base_version: number }>,
+) {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>");
   const restore = installDomGlobals(dom.window as unknown as Window);
   const root = createRoot(dom.window.document.getElementById("root")!);
   let serverBrief = initialBrief;
   let lastBody: { expectedVersion: number; brief: Brief } | null = null;
+  let saveCalls = 0;
+  let draftCalls = 0;
 
   const render = async () => {
     await act(async () => {
@@ -98,10 +196,12 @@ async function mountEditor(initialBrief: SavedBrief, saveOverride?: (body: { exp
           campaignId="campaign-1"
           savedBrief={serverBrief}
           onSave={async (body) => {
+            saveCalls += 1;
             lastBody = body;
             if (saveOverride) return saveOverride(body);
             return savedBrief(body.expectedVersion + 1, body.brief.question);
           }}
+          onDraft={draftOverride ? async (body) => { draftCalls += 1; return draftOverride(body); } : undefined}
         />,
       );
     });
@@ -111,7 +211,10 @@ async function mountEditor(initialBrief: SavedBrief, saveOverride?: (body: { exp
 
   return {
     document: dom.window.document,
+    window: dom.window,
     get lastBody() { return lastBody; },
+    get saveCalls() { return saveCalls; },
+    get draftCalls() { return draftCalls; },
     field(label: string) {
       const field = [...dom.window.document.querySelectorAll("textarea, input")].find((element) => element.getAttribute("aria-label") === label);
       assert.ok(field, `missing field: ${label}`);
@@ -131,12 +234,23 @@ async function mountEditor(initialBrief: SavedBrief, saveOverride?: (body: { exp
       await act(async () => button.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })));
       await act(async () => undefined);
     },
+    button(label: string) {
+      const button = [...dom.window.document.querySelectorAll("button")].find((candidate) => candidate.textContent?.trim() === label);
+      assert.ok(button, `missing button: ${label}`);
+      return button;
+    },
+    async settle() {
+      await act(async () => { await delay(10); });
+    },
     async unmount() {
       await act(async () => root.unmount());
       restore();
     },
   };
 }
+
+function deferred<T>() { let resolve!: (value: T) => void; return { promise: new Promise<T>((next) => { resolve = next; }), resolve }; }
+function delay(milliseconds: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
 
 function changeValue(element: HTMLInputElement | HTMLTextAreaElement, value: string) {
   const prototype = element instanceof element.ownerDocument.defaultView!.HTMLTextAreaElement
