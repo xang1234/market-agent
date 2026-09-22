@@ -2,13 +2,9 @@
   "fixture": "unsupported-theme",
   "question": "Which US-listed companies benefit from an unsupported fictional theme?",
   "brief": { "schema_version": 1, "question": "Which US-listed companies benefit from an unsupported fictional theme?", "market": "us_listed", "horizon_months": 18, "lookback_months": 12, "mechanisms": [{ "mechanism_id": "40000000-0000-4000-8000-000000000041", "label": "Unsupported theme", "chain": ["Fictional demand rises", "No documented supplier exists"] }, { "mechanism_id": "40000000-0000-4000-8000-000000000042", "label": "Unsupported mechanism", "chain": ["No market evidence", "No company exposure"] }], "criteria": [{ "criterion_id": "50000000-0000-4000-8000-000000000041", "importance": "must", "statement": "The company documents fictional-theme exposure.", "falsifier": "The company has no documented fictional-theme exposure." }], "seed_queries": [], "exclusions": [], "preferences": ["Primary company disclosures"], "queries": [{ "mechanism_id": "40000000-0000-4000-8000-000000000041", "query": "fictional unsupported theme supplier" }, { "mechanism_id": "40000000-0000-4000-8000-000000000042", "query": "unsupported fictional mechanism company" }] },
-  "candidate": null,
+  "candidates": [],
   "search_hits": [{ "query_index": 0, "title": "Fictional theme commentary (FICT)", "url": "https://fixture.example.test/fictional/commentary", "description": "No issuer-specific primary evidence is supplied." }, { "query_index": 1, "title": "Unsupported mechanism index (UNSP)", "url": "https://fixture.example.test/fictional/index", "description": "No candidate is selected from this general commentary." }],
-  "identities": [],
-  "financial_facts": [],
-  "financial_missing_fields": [],
-  "role_responses": {},
   "operation_outcomes": { "search": ["discovery/pool/search/0", "discovery/pool/search/1"], "identity": [], "document": [], "financial": [], "model": ["discovery/pool/scout/0"] },
   "operation_order": ["discovery/pool/search/0", "discovery/pool/search/1", "discovery/pool/scout/0"],
-  "expected": { "status": "completed", "states": {}, "ranks": {}, "zero_qualified": true }
+  "expected": { "status": "completed", "zero_qualified": true }
 }

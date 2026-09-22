@@ -27,21 +27,39 @@ import { withCampaignDb } from "./db-fixture.ts";
 
 type TestContext = Parameters<typeof withCampaignDb>[0];
 type FixtureName = "power-infrastructure" | "industrial-automation" | "supply-disruption" | "unsupported-theme";
+type FixtureRoleResponse = { exposure: "weak" | "moderate" | "strong"; criterion_outcome: "pass" | "fail" | "unknown"; criterion_source: "primary" | "counter" };
+type FixtureCandidate = {
+  candidate_id: string;
+  assessment_id: string;
+  lead_key: string;
+  name: string;
+  search_url: string;
+  identity: CompanyIdentity;
+  excerpts: EvidencePacket["excerpts"];
+  financial_facts: EvidencePacket["facts"];
+  financial_missing_fields: string[];
+  role_responses: { analyst: FixtureRoleResponse; skeptic: FixtureRoleResponse };
+  expected: { state: string; rank: number | null; unknown_valuation?: boolean };
+};
 type Fixture = {
   fixture: FixtureName;
   question: string;
   brief: Brief;
-  candidate: null | { candidate_id: string; lead_key: string; name: string; search_url: string; identity: CompanyIdentity; excerpts: EvidencePacket["excerpts"] };
+  candidates: FixtureCandidate[];
   search_hits: Array<{ query_index: number; title: string; url: string; description: string }>;
-  identities: CompanyIdentity[];
-  financial_facts: EvidencePacket["facts"];
-  financial_missing_fields: string[];
-  role_responses: Partial<Record<"analyst" | "skeptic", { exposure: "weak" | "moderate" | "strong"; criterion_outcome: "pass" | "fail" | "unknown"; criterion_source: "primary" | "counter" }>>;
   operation_outcomes: Record<"search" | "identity" | "document" | "financial" | "model", string[]>;
   operation_order: string[];
-  expected: { status: "completed"; states: Record<string, string>; ranks: Record<string, number>; unknown_valuation?: boolean; quote_cache_before_run?: boolean; famous_company_excluded?: boolean; counterevidence_excludes?: boolean; zero_qualified?: boolean };
-  recorded_assessments?: Array<{ assessment_id: string; candidate_id: string; primary_source_id: string; counter_source_id: string }>;
+  expected: { status: "completed"; quote_cache_before_run?: boolean; famous_company_excluded?: boolean; counterevidence_excludes?: boolean; zero_qualified?: boolean };
 };
+
+type RecordedAssessment = { fixture: FixtureName; assessment_id: string; candidate_id: string; primary_source_id: string; counter_source_id: string };
+
+const FIXTURE_CANDIDATE_COUNTS: Readonly<Record<FixtureName, number>> = Object.freeze({
+  "power-infrastructure": 3,
+  "industrial-automation": 3,
+  "supply-disruption": 4,
+  "unsupported-theme": 0,
+});
 
 const USER = "10000000-0000-4000-8000-000000000001";
 const FOREIGN_USER = "10000000-0000-4000-8000-000000000002";
@@ -124,7 +142,7 @@ export async function createCampaignE2eHarness(t: TestContext, name: FixtureName
         async discover(input) {
           try {
             expectedOperation(input.operation_key);
-            const resolved = fixture.identities.filter((item) => item.ticker === input.query);
+            const resolved = fixture.candidates.map((candidate) => candidate.identity).filter((item) => item.ticker === input.query);
             assert.equal(resolved.length, 1, `fixture identity lookup must resolve ${input.query}`);
             await seedIdentityPrerequisite(db, resolved[0]!);
             return resolved.map((item) => ({ ...item, active: true }));
@@ -168,8 +186,14 @@ export async function createCampaignE2eHarness(t: TestContext, name: FixtureName
       reader: {
         async readCached(input) {
           assert.ok(runId !== null);
-          expectedOperation(`${runId}/research/${input.identity.issuer_id === fixture.candidate?.identity.issuer_id ? runtimeCandidateId(fixture, runId) : "unknown"}/financial`);
-          return { facts: structuredClone(fixture.financial_facts), missing_fields: [...fixture.financial_missing_fields], coverage_gaps: fixture.financial_missing_fields.length === 0 ? [] : ["valuation_unknown"] };
+          const candidate = fixture.candidates.find((item) => item.identity.issuer_id === input.identity.issuer_id);
+          assert.ok(candidate, `fixture financial reader has no candidate for ${input.identity.issuer_id}`);
+          expectedOperation(`${runId}/research/${runtimeCandidateId(fixture, runId, candidate)}/financial`);
+          return {
+            facts: structuredClone(candidate.financial_facts),
+            missing_fields: [...candidate.financial_missing_fields],
+            coverage_gaps: candidate.financial_missing_fields.length === 0 ? [] : ["valuation_unknown"],
+          };
         },
       },
     });
@@ -199,7 +223,7 @@ export async function createCampaignE2eHarness(t: TestContext, name: FixtureName
         expectedOperation(input.operation_key);
         const response = input.role === "scout"
           ? scoutResponse(fixture)
-          : responseFor(input.role, fixture, packets.get(input.candidate_id ?? ""));
+          : responseFor(input.role, fixture, runId, packets.get(input.candidate_id ?? ""));
         return operations.providerAttempt({
           key: input.operation_key, request_hash: input.request_hash, index: input.attempt_number === 2 ? 1 : 0,
           resource: "model", phase: input.phase, candidate_id: input.candidate_id,
@@ -271,32 +295,58 @@ export async function createCampaignE2eHarness(t: TestContext, name: FixtureName
       const run = await repo.readRun(USER, runId);
       assert.equal(run.status, fixture.expected.status);
       const candidates = await candidateViews();
-      if (fixture.candidate === null) {
+      if (fixture.candidates.length === 0) {
         assert.equal(candidates.length, 0, "the unsupported fixture completes with zero qualified candidates");
         assert.equal(fixture.expected.zero_qualified, true);
         return;
       }
-      const candidate = candidates.find((item) => item.candidate_id === runtimeCandidateId(fixture, runId!));
-      assert.ok(candidate, "fixture candidate is identifiable by canonical issuer identity");
-      const expectedHit = fixture.search_hits.find((hit) => hit.url === fixture.candidate.search_url)!;
-      const provenance = await db.query<{ origins: string[]; lead_hit_ids: string[] }>(
-        "select origins,lead_hit_ids from discovery_candidates where run_id=$1::uuid and candidate_id=$2::uuid",
-        [runId, candidate.candidate_id],
-      );
-      assert.equal(provenance.rowCount, 1);
-      assert.deepEqual(provenance.rows[0]!.origins, ["web"], "candidate is admitted from the recorded web lead, never existing evidence");
-      assert.deepEqual(provenance.rows[0]!.lead_hit_ids, [searchHitId(fixture, expectedHit)]);
-      const identityAttempts = await db.query<{ outcome: string }>(
-        "select outcome from discovery_attempts where run_id=$1::uuid and operation_key=$2 and resource='identity' order by attempt_number",
-        [runId, `${runId}/discovery/${candidate.candidate_id}/identity`],
-      );
-      assert.deepEqual(identityAttempts.rows, [{ outcome: "success" }], "recorded canonical identity resolution is metered");
-      const expectedState = fixture.expected.states[fixture.candidate.candidate_id];
-      assert.equal(candidate.state, expectedState, "fixture candidate state");
-      const expectedRank = fixture.expected.ranks[fixture.candidate.candidate_id] ?? null;
-      assert.equal(candidate.rank, expectedRank, "fixture candidate rank");
-      if (fixture.expected.unknown_valuation === true) assert.equal(candidate.assessment?.dimensions.valuation_context.level, "unknown");
+      assert.equal(candidates.length, fixture.candidates.length, "every declared fixture candidate is admitted once");
+      for (const fixtureCandidate of fixture.candidates) {
+        const candidate = candidates.find((item) => item.candidate_id === runtimeCandidateId(fixture, runId!, fixtureCandidate));
+        assert.ok(candidate, `fixture candidate ${fixtureCandidate.candidate_id} is identifiable by its recorded lead`);
+        const expectedHit = fixture.search_hits.find((hit) => hit.url === fixtureCandidate.search_url)!;
+        const provenance = await db.query<{ origins: string[]; lead_hit_ids: string[] }>(
+          "select origins,lead_hit_ids from discovery_candidates where run_id=$1::uuid and candidate_id=$2::uuid",
+          [runId, candidate.candidate_id],
+        );
+        assert.equal(provenance.rowCount, 1);
+        assert.deepEqual(provenance.rows[0]!.origins, ["web"], "candidate is admitted from the recorded web lead, never existing evidence");
+        assert.deepEqual(provenance.rows[0]!.lead_hit_ids, [searchHitId(fixture, expectedHit)]);
+        const identityAttempts = await db.query<{ outcome: string }>(
+          "select outcome from discovery_attempts where run_id=$1::uuid and operation_key=$2 and resource='identity' order by attempt_number",
+          [runId, `${runId}/discovery/${candidate.candidate_id}/identity`],
+        );
+        assert.deepEqual(identityAttempts.rows, [{ outcome: "success" }], "recorded canonical identity resolution is metered");
+        assert.equal(candidate.state, fixtureCandidate.expected.state, "fixture candidate state");
+        assert.equal(candidate.rank, fixtureCandidate.expected.rank, "fixture candidate rank");
+        if (fixtureCandidate.expected.unknown_valuation === true) assert.equal(candidate.assessment?.dimensions.valuation_context.level, "unknown");
+      }
       if (fixture.expected.quote_cache_before_run === false) assert.equal(quoteCountBeforeRun, 0, "fixture starts without quote cache");
+    },
+    async assertRecordedAssessmentsExecuted() {
+      assert.ok(runId !== null);
+      const rows = await db.query<{ candidate_id: string; issuer_id: string; state: string; assessment: unknown; snapshot_id: string | null }>(
+        "select candidate_id::text,issuer_id::text,state,assessment,snapshot_id::text from discovery_candidates where run_id=$1::uuid order by candidate_id",
+        [runId],
+      );
+      assert.equal(rows.rowCount, fixture.candidates.length, "every review row has one persisted candidate");
+      const runtimeIds = fixture.candidates.map((candidate) => runtimeCandidateId(fixture, runId!, candidate));
+      assert.equal(new Set(runtimeIds).size, fixture.candidates.length, "fixture candidates derive distinct run IDs");
+      assert.equal(new Set(fixture.candidates.map((candidate) => candidate.identity.issuer_id)).size, fixture.candidates.length, "fixture candidates have distinct canonical identities");
+      for (const fixtureCandidate of fixture.candidates) {
+        const runtimeId = runtimeCandidateId(fixture, runId!, fixtureCandidate);
+        const candidate = rows.rows.find((row) => row.candidate_id === runtimeId);
+        assert.ok(candidate, `assessment ${fixtureCandidate.assessment_id} has an executed candidate`);
+        assert.equal(candidate.issuer_id, fixtureCandidate.identity.issuer_id);
+        assert.equal(candidate.state, fixtureCandidate.expected.state);
+        assert.ok(candidate.assessment !== null, `assessment ${fixtureCandidate.assessment_id} is persisted`);
+        assert.ok(candidate.snapshot_id, `assessment ${fixtureCandidate.assessment_id} has a sealed snapshot`);
+        const sourceIds = await db.query<{ source_ids: string[] }>("select source_ids from snapshots where snapshot_id=$1::uuid", [candidate.snapshot_id]);
+        assert.equal(sourceIds.rowCount, 1);
+        assert.ok(sourceIds.rows[0]!.source_ids.includes(fixtureCandidate.excerpts[0]!.source_id), `assessment ${fixtureCandidate.assessment_id} cites its primary source`);
+        assert.ok(sourceIds.rows[0]!.source_ids.includes(fixtureCandidate.excerpts[1]!.source_id), `assessment ${fixtureCandidate.assessment_id} cites its counter source`);
+        await this.assertSnapshotVerifies(candidate.snapshot_id);
+      }
     },
     async assertSnapshotVerifies(snapshotId: string) {
       const snapshot = await db.query<Record<string, unknown>>(
@@ -334,7 +384,7 @@ export async function createCampaignE2eHarness(t: TestContext, name: FixtureName
       operationContract.assertComplete();
     },
     async assertOperationContractRejectsWrongCandidateAndDuplicate() {
-      assert.ok(runId !== null && operationContract !== null && fixture.candidate !== null);
+      assert.ok(runId !== null && operationContract !== null && fixture.candidates.length > 0);
       const valid = `${runId}/discovery/pool/search/0`;
       const wrong = `${runId}/research/${stableUuid("wrong fixture candidate")}/evidence/document/0`;
       assert.throws(() => operationContract!.consume(wrong), /unexpected fixture operation/);
@@ -356,30 +406,35 @@ function isoTimestamp(value: unknown): string {
 }
 
 function scoutResponse(fixture: Fixture): unknown {
-  if (fixture.candidate === null) return { hit_ids: [], seeds: [] };
-  const selected = fixture.search_hits.find((hit) => hit.url === fixture.candidate!.search_url);
-  assert.ok(selected, "fixture candidate must point to a recorded search hit");
-  return { hit_ids: [searchHitId(fixture, selected)], seeds: [] };
+  return {
+    hit_ids: fixture.candidates.map((candidate) => {
+      const selected = fixture.search_hits.find((hit) => hit.url === candidate.search_url);
+      assert.ok(selected, "fixture candidate must point to a recorded search hit");
+      return searchHitId(fixture, selected);
+    }),
+    seeds: [],
+  };
 }
 
-function responseFor(role: "planner" | "analyst" | "skeptic" | "summary", fixture: Fixture, packet: EvidencePacket | undefined): unknown {
-  assert.ok(fixture.candidate !== null, `unsupported fixture cannot call ${role}`);
+function responseFor(role: "planner" | "analyst" | "skeptic" | "summary", fixture: Fixture, runId: string | null, packet: EvidencePacket | undefined): unknown {
   assert.ok(packet, `recorded evidence packet is required for ${role}`);
+  const candidate = fixtureCandidateForRuntimeId(fixture, runId, packet.candidate_id);
+  assert.ok(candidate, `fixture must provide a recorded candidate response for ${packet.candidate_id}`);
   const [primary, counter] = packet.excerpts;
   assert.ok(primary && counter);
   const criterion_id = fixture.brief.criteria[0]!.criterion_id;
   const citation = { kind: "excerpt" as const, id: primary.excerpt_id, quote: primary.text };
   const riskCitation = { kind: "excerpt" as const, id: counter.excerpt_id, quote: counter.text };
-  const analystResponse = fixture.role_responses.analyst;
-  const skepticResponse = fixture.role_responses.skeptic;
-  assert.ok(analystResponse && skepticResponse, `fixture must provide analyst and skeptic responses`);
+  const analystResponse = candidate.role_responses.analyst;
+  const skepticResponse = candidate.role_responses.skeptic;
   const analystCitation = analystResponse.criterion_source === "counter" ? riskCitation : citation;
   const skepticCitation = skepticResponse.criterion_source === "counter" ? riskCitation : citation;
+  const analystCitations = analystCitation.id === citation.id ? [citation] : [citation, analystCitation];
   const analyst: AnalystOutput<RawCitation> = {
-    exposure: { level: analystResponse.exposure, explanation: analystResponse.criterion_outcome === "fail" ? "The recorded source does not support the required exposure." : "The recorded primary source supports the company exposure.", citations: [analystCitation] },
+    exposure: { level: analystResponse.exposure, explanation: analystResponse.criterion_outcome === "fail" ? "The recorded source does not support the required exposure." : "The recorded primary source supports the company exposure.", citations: analystCitations },
     business_quality: { level: "unknown", explanation: "Business quality evidence is unavailable.", citations: [] },
     valuation_context: { level: "unknown", explanation: "Valuation evidence is unavailable.", citations: [] },
-    criteria: [{ criterion_id, outcome: analystResponse.criterion_outcome, explanation: analystResponse.criterion_outcome === "fail" ? "The cited document falsifies the required product exposure." : "The cited document supports the criterion.", citations: [analystCitation] }],
+    criteria: [{ criterion_id, outcome: analystResponse.criterion_outcome, explanation: analystResponse.criterion_outcome === "fail" ? "The cited document falsifies the required product exposure." : "The cited document supports the criterion.", citations: analystCitations }],
     unresolved_questions: [], next_action: "Review the next primary disclosure.",
   };
   if (role === "analyst") return analyst;
@@ -397,7 +452,22 @@ async function loadFixture(name: FixtureName): Promise<Fixture> {
 
 export async function recordedFixtureAssessments() {
   const fixtures: FixtureName[] = ["power-infrastructure", "industrial-automation", "supply-disruption"];
-  return (await Promise.all(fixtures.map(loadFixture))).flatMap((fixture) => fixture.recorded_assessments ?? []);
+  const records = (await Promise.all(fixtures.map(loadFixture))).flatMap((fixture) => fixture.candidates.map((candidate) => ({
+    fixture: fixture.fixture,
+    assessment_id: candidate.assessment_id,
+    candidate_id: candidate.candidate_id,
+    primary_source_id: candidate.excerpts[0]!.source_id,
+    counter_source_id: candidate.excerpts[1]!.source_id,
+  } satisfies RecordedAssessment)));
+  assert.equal(records.length, 10, "the human-review corpus has exactly ten executed fixture candidates");
+  assert.equal(new Set(records.map((record) => record.assessment_id)).size, records.length, "assessment IDs are unique");
+  assert.equal(new Set(records.map((record) => record.candidate_id)).size, records.length, "fixture candidate IDs are unique");
+  const operatorTable = await readFile(new URL("../../../docs/discovery-campaigns-operations.md", import.meta.url), "utf8");
+  for (const [index, record] of records.entries()) {
+    const row = `| ${index + 1} | \`${record.assessment_id}\` | \`${record.candidate_id}\` | \`${record.primary_source_id}\` / \`${record.counter_source_id}\` | Pending | Pending | Pending |`;
+    assert.ok(operatorTable.includes(row), `operator table must reference executed assessment ${record.assessment_id}`);
+  }
+  return records;
 }
 
 /**
@@ -408,8 +478,7 @@ export async function recordedFixtureAssessments() {
  */
 function validateFixture(value: unknown, name: FixtureName): Fixture {
   const root = fixtureRecord(value, "fixture", [
-    "fixture", "question", "brief", "candidate", "search_hits", "identities", "financial_facts", "financial_missing_fields",
-    "role_responses", "operation_outcomes", "operation_order", "expected", "recorded_assessments",
+    "fixture", "question", "brief", "candidates", "search_hits", "operation_outcomes", "operation_order", "expected",
   ]);
   assert.equal(root.fixture, name, "fixture name");
   const question = fixtureText(root.question, "fixture.question", 20, 4_000);
@@ -423,33 +492,37 @@ function validateFixture(value: unknown, name: FixtureName): Fixture {
   });
   for (const index of brief.queries.keys()) assert.ok(search_hits.some((hit) => hit.query_index === index), `fixture must record a valid search result for query ${index}`);
 
-  const identities = fixtureArray(root.identities, "fixture.identities").map((raw, index) => fixtureIdentity(raw, `fixture.identities[${index}]`));
-  const candidate = root.candidate === null ? null : fixtureCandidate(root.candidate, "fixture.candidate");
-  if (candidate === null) assert.equal(identities.length, 0, "empty fixture cannot declare identities");
-  else {
-    assert.ok(search_hits.some((hit) => hit.url === candidate.search_url), "fixture candidate must originate in a recorded search hit");
-    assert.ok(identities.some((identity) => identity.issuer_id === candidate.identity.issuer_id && identity.listing_id === candidate.identity.listing_id), "fixture candidate identity must be a recorded identity response");
-  }
-  const financial_facts = fixtureArray(root.financial_facts, "fixture.financial_facts") as EvidencePacket["facts"];
-  const financial_missing_fields = fixtureArray(root.financial_missing_fields, "fixture.financial_missing_fields").map((field, index) => fixtureText(field, `fixture.financial_missing_fields[${index}]`, 1, 120));
-  const role_responses = fixtureRoleResponses(root.role_responses);
+  const candidates = fixtureArray(root.candidates, "fixture.candidates").map((raw, index) => fixtureCandidate(raw, `fixture.candidates[${index}]`));
+  assert.equal(candidates.length, FIXTURE_CANDIDATE_COUNTS[name], `${name} candidate count`);
+  assert.equal(new Set(candidates.map((candidate) => candidate.candidate_id)).size, candidates.length, "fixture candidate IDs must be unique");
+  assert.equal(new Set(candidates.map((candidate) => candidate.assessment_id)).size, candidates.length, "fixture assessment IDs must be unique");
+  assert.equal(new Set(candidates.map((candidate) => candidate.identity.issuer_id)).size, candidates.length, "fixture identities must be unique");
+  assert.equal(new Set(candidates.map((candidate) => candidate.search_url)).size, candidates.length, "fixture candidates require distinct recorded leads");
+  for (const candidate of candidates) assert.ok(search_hits.some((hit) => hit.url === candidate.search_url), "fixture candidate must originate in a recorded search hit");
   const operation_outcomes = fixtureOperationOutcomes(root.operation_outcomes);
   const operation_order = fixtureArray(root.operation_order, "fixture.operation_order").map((entry, index) => fixtureText(entry, `fixture.operation_order[${index}]`, 1, 300));
   const expected = fixtureExpected(root.expected);
-  const recorded_assessments = root.recorded_assessments === undefined ? undefined : fixtureAssessments(root.recorded_assessments, candidate);
-  const fixture = { fixture: name, question, brief, candidate, search_hits, identities, financial_facts, financial_missing_fields, role_responses, operation_outcomes, operation_order, expected, recorded_assessments } satisfies Fixture;
-  if (candidate !== null) assert.equal(candidate.lead_key, `hit:${searchHitId(fixture, search_hits.find((hit) => hit.url === candidate.search_url)!)}`, "fixture candidate lead_key is grounded in the recorded search hit");
+  const fixture = { fixture: name, question, brief, candidates, search_hits, operation_outcomes, operation_order, expected } satisfies Fixture;
+  for (const candidate of candidates) {
+    assert.equal(candidate.lead_key, `hit:${searchHitId(fixture, search_hits.find((hit) => hit.url === candidate.search_url)!)}`, "fixture candidate lead_key is grounded in the recorded search hit");
+  }
+  validateOperationTemplates(fixture);
   return fixture;
 }
 
-function fixtureCandidate(value: unknown, label: string): NonNullable<Fixture["candidate"]> {
-  const candidate = fixtureRecord(value, label, ["candidate_id", "lead_key", "name", "search_url", "identity", "excerpts"]);
+function fixtureCandidate(value: unknown, label: string): FixtureCandidate {
+  const candidate = fixtureRecord(value, label, ["candidate_id", "assessment_id", "lead_key", "name", "search_url", "identity", "excerpts", "financial_facts", "financial_missing_fields", "role_responses", "expected"]);
   const identity = fixtureIdentity(candidate.identity, `${label}.identity`);
   const excerpts = fixtureArray(candidate.excerpts, `${label}.excerpts`).map((raw, index) => fixtureExcerpt(raw, `${label}.excerpts[${index}]`));
   assert.equal(excerpts.length, 2, `${label}.excerpts requires a primary and counter source`);
+  assert.notEqual(excerpts[0]!.source_id, excerpts[1]!.source_id, `${label} requires independent primary and counter sources`);
   return {
-    candidate_id: fixtureUuid(candidate.candidate_id, `${label}.candidate_id`), lead_key: fixtureText(candidate.lead_key, `${label}.lead_key`, 1, 600),
+    candidate_id: fixtureUuid(candidate.candidate_id, `${label}.candidate_id`), assessment_id: fixtureText(candidate.assessment_id, `${label}.assessment_id`, 4, 160), lead_key: fixtureText(candidate.lead_key, `${label}.lead_key`, 1, 600),
     name: fixtureText(candidate.name, `${label}.name`, 1, 500), search_url: fixtureHttps(candidate.search_url, `${label}.search_url`), identity, excerpts,
+    financial_facts: fixtureArray(candidate.financial_facts, `${label}.financial_facts`) as EvidencePacket["facts"],
+    financial_missing_fields: fixtureArray(candidate.financial_missing_fields, `${label}.financial_missing_fields`).map((field, index) => fixtureText(field, `${label}.financial_missing_fields[${index}]`, 1, 120)),
+    role_responses: fixtureRoleResponses(candidate.role_responses, `${label}.role_responses`),
+    expected: fixtureCandidateExpected(candidate.expected, `${label}.expected`),
   };
 }
 
@@ -477,16 +550,15 @@ function fixtureIdentity(value: unknown, label: string): CompanyIdentity {
   };
 }
 
-function fixtureRoleResponses(value: unknown): Fixture["role_responses"] {
-  const roles = fixtureRecord(value, "fixture.role_responses", ["analyst", "skeptic"]);
-  const result: Fixture["role_responses"] = {};
+function fixtureRoleResponses(value: unknown, label: string): FixtureCandidate["role_responses"] {
+  const roles = fixtureRecord(value, label, ["analyst", "skeptic"]);
+  const result = {} as FixtureCandidate["role_responses"];
   for (const role of ["analyst", "skeptic"] as const) {
-    if (roles[role] === undefined) continue;
-    const response = fixtureRecord(roles[role], `fixture.role_responses.${role}`, ["exposure", "criterion_outcome", "criterion_source"]);
+    const response = fixtureRecord(roles[role], `${label}.${role}`, ["exposure", "criterion_outcome", "criterion_source"]);
     assert.ok(response.exposure === "weak" || response.exposure === "moderate" || response.exposure === "strong", `${role}.exposure`);
     assert.ok(response.criterion_outcome === "pass" || response.criterion_outcome === "fail" || response.criterion_outcome === "unknown", `${role}.criterion_outcome`);
     assert.ok(response.criterion_source === "primary" || response.criterion_source === "counter", `${role}.criterion_source`);
-    result[role] = response as Fixture["role_responses"][typeof role];
+    result[role] = response as FixtureCandidate["role_responses"][typeof role];
   }
   return result;
 }
@@ -497,34 +569,27 @@ function fixtureOperationOutcomes(value: unknown): Fixture["operation_outcomes"]
 }
 
 function fixtureExpected(value: unknown): Fixture["expected"] {
-  const expected = fixtureRecord(value, "fixture.expected", ["status", "states", "ranks", "unknown_valuation", "quote_cache_before_run", "famous_company_excluded", "counterevidence_excludes", "zero_qualified"]);
+  const expected = fixtureRecord(value, "fixture.expected", ["status", "quote_cache_before_run", "famous_company_excluded", "counterevidence_excludes", "zero_qualified"]);
   assert.equal(expected.status, "completed", "fixture.expected.status");
-  const states = fixtureDictionary(expected.states, "fixture.expected.states");
-  const ranks = fixtureDictionary(expected.ranks, "fixture.expected.ranks");
-  for (const [key, state] of Object.entries(states)) { fixtureUuid(key, "fixture.expected.states key"); assert.ok(typeof state === "string"); }
-  for (const [key, rank] of Object.entries(ranks)) { fixtureUuid(key, "fixture.expected.ranks key"); assert.ok(Number.isInteger(rank) && (rank as number) > 0); }
   for (const key of ["unknown_valuation", "quote_cache_before_run", "famous_company_excluded", "counterevidence_excludes", "zero_qualified"] as const) if (expected[key] !== undefined) assert.equal(typeof expected[key], "boolean", `fixture.expected.${key}`);
   return expected as Fixture["expected"];
 }
 
-function fixtureAssessments(value: unknown, candidate: Fixture["candidate"]): NonNullable<Fixture["recorded_assessments"]> {
-  const assessments = fixtureArray(value, "fixture.recorded_assessments").map((raw, index) => {
-    const entry = fixtureRecord(raw, `fixture.recorded_assessments[${index}]`, ["assessment_id", "candidate_id", "primary_source_id", "counter_source_id"]);
-    return { assessment_id: fixtureText(entry.assessment_id, `fixture.recorded_assessments[${index}].assessment_id`, 4, 160), candidate_id: fixtureText(entry.candidate_id, `fixture.recorded_assessments[${index}].candidate_id`, 4, 160), primary_source_id: fixtureUuid(entry.primary_source_id, `fixture.recorded_assessments[${index}].primary_source_id`), counter_source_id: fixtureUuid(entry.counter_source_id, `fixture.recorded_assessments[${index}].counter_source_id`) };
-  });
-  assert.ok(candidate !== null || assessments.length === 0, "empty fixture cannot declare review assessments");
-  const ids = new Set(assessments.map((entry) => entry.assessment_id));
-  assert.equal(ids.size, assessments.length, "fixture review assessment IDs must be unique");
-  const candidateIds = new Set(assessments.map((entry) => entry.candidate_id));
-  assert.equal(candidateIds.size, assessments.length, "fixture review candidate IDs must be unique");
-  if (candidate !== null) {
-    const sourceIds = new Set(candidate.excerpts.map((excerpt) => excerpt.source_id));
-    for (const assessment of assessments) {
-      assert.ok(sourceIds.has(assessment.primary_source_id), "fixture review primary source must be recorded");
-      assert.ok(sourceIds.has(assessment.counter_source_id), "fixture review counter source must be recorded");
+function fixtureCandidateExpected(value: unknown, label: string): FixtureCandidate["expected"] {
+  const expected = fixtureRecord(value, label, ["state", "rank", "unknown_valuation"]);
+  assert.ok(expected.state === "shortlisted" || expected.state === "eligible_not_shortlisted" || expected.state === "excluded" || expected.state === "needs_evidence", `${label}.state`);
+  assert.ok(expected.rank === null || Number.isInteger(expected.rank) && (expected.rank as number) > 0 && (expected.rank as number) <= 10, `${label}.rank`);
+  if (expected.unknown_valuation !== undefined) assert.equal(typeof expected.unknown_valuation, "boolean", `${label}.unknown_valuation`);
+  return expected as FixtureCandidate["expected"];
+}
+
+function validateOperationTemplates(fixture: Fixture): void {
+  const candidateIds = new Set(fixture.candidates.map((candidate) => candidate.candidate_id));
+  for (const operation of [...fixture.operation_order, ...Object.values(fixture.operation_outcomes).flat()]) {
+    for (const match of operation.matchAll(/\{candidate_id:([^}]+)\}/gu)) {
+      assert.ok(candidateIds.has(match[1]!), `operation references undeclared fixture candidate ${match[1]}`);
     }
   }
-  return assessments;
 }
 
 function fixtureRecord(value: unknown, label: string, allowed: readonly string[]): Record<string, unknown> {
@@ -532,10 +597,6 @@ function fixtureRecord(value: unknown, label: string, allowed: readonly string[]
   const record = value as Record<string, unknown>;
   for (const key of Object.keys(record)) assert.ok(allowed.includes(key), `${label}.${key} is not allowed`);
   return record;
-}
-function fixtureDictionary(value: unknown, label: string): Record<string, unknown> {
-  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value), `${label} must be an object`);
-  return value as Record<string, unknown>;
 }
 function fixtureArray(value: unknown, label: string): unknown[] { assert.ok(Array.isArray(value), `${label} must be an array`); return value; }
 function fixtureText(value: unknown, label: string, min: number, max: number): string { assert.ok(typeof value === "string" && value === value.trim() && value.length >= min && value.length <= max, `${label} is invalid`); return value; }
@@ -587,21 +648,22 @@ function counts(values: readonly string[]): Map<string, number> {
 }
 
 function concreteOperation(fixture: Fixture, runId: string, operation: string): string {
-  if (!operation.includes("{candidate_id}")) return operation;
-  assert.ok(fixture.candidate !== null, "empty fixture cannot declare candidate operation");
-  return operation.replaceAll("{candidate_id}", runtimeCandidateId(fixture, runId));
+  return operation.replace(/\{candidate_id:([^}]+)\}/gu, (_match, fixtureCandidateId: string) => {
+    const candidate = fixture.candidates.find((item) => item.candidate_id === fixtureCandidateId);
+    assert.ok(candidate, `operation references undeclared fixture candidate ${fixtureCandidateId}`);
+    return runtimeCandidateId(fixture, runId, candidate);
+  });
 }
 
-function runtimeCandidateId(fixture: Fixture, runId: string): string {
-  assert.ok(fixture.candidate !== null, "empty fixture has no runtime candidate");
-  const hit = fixture.search_hits.find((item) => item.url === fixture.candidate!.search_url);
+function runtimeCandidateId(fixture: Fixture, runId: string, candidate: FixtureCandidate): string {
+  const hit = fixture.search_hits.find((item) => item.url === candidate.search_url);
   assert.ok(hit, "fixture candidate search URL is not recorded");
   return stableUuid(`discovery-candidate\u0000${runId}\u0000hit:${searchHitId(fixture, hit)}`);
 }
 
 function fixtureCandidateForRuntimeId(fixture: Fixture, runId: string | null, candidateId: string | undefined) {
-  if (fixture.candidate === null || runId === null || candidateId !== runtimeCandidateId(fixture, runId)) return null;
-  return fixture.candidate;
+  if (runId === null || candidateId === undefined) return null;
+  return fixture.candidates.find((candidate) => candidateId === runtimeCandidateId(fixture, runId, candidate)) ?? null;
 }
 
 function recordedSearchResults(fixture: Fixture, operationKey: string, runId: string | null): Array<{ title: string; url: string; description: string }> {

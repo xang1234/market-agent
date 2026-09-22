@@ -26,19 +26,26 @@ The positive and exclusion fixtures now traverse recorded raw Brave hits, Scout,
 
 The actual worker/model repair path also started RED because the runner harness was not feeding malformed output through the campaign model. It is now driven by two oversized malformed Analyst responses for each selected candidate. The run terminates `partial` promptly, records exactly four Analyst attempts at numbers `[1, 2, 1, 2]`, makes five model calls including the bounded Scout call, stays below the 64-attempt cap, and never dispatches Skeptic or a hidden third repair. Rank stability now covers twelve input permutations. The three candidate-bearing fixtures contain ten unique stable recorded review inputs; the operator table identifies those same ten inputs and keeps every human field Pending.
 
+### Fix round 2: ten executable human-review candidates
+
+The first re-review correctly found that seven round-1 review rows were metadata only: the worker had executed one candidate in each positive fixture. This round began RED with the new `assertRecordedAssessmentsExecuted` integration assertion absent. The candidate fixtures now contain exactly three grid, three industrial-automation, and four supply-disruption candidates. Each candidate has its own fixture candidate ID, selected recorded search hit, canonical identity, primary and counter source/document/excerpt pair, financial response, role outputs, terminal state/rank, assessment ID, and candidate-specific operation templates.
+
+Scout selects every recorded lead, the production identity/evidence/financial providers resolve and acquire every candidate, and the real worker assesses all ten. The integration harness proves each run-derived candidate has `web` provenance, a metered identity attempt, persisted assessment, and sealed snapshot containing that candidate's own primary and counter source references. The pending operator table is parsed as part of fixture loading: every row must match one actual candidate assessment ID, stable fixture candidate ID, and its two sources. There is no standalone `recorded_assessments` metadata list.
+
 ## Verification
 
 Docker-backed commands used isolated temporary PostgreSQL containers. Docker socket access was unavailable inside the filesystem sandbox but succeeded with approved test execution privilege. There was no `ENOSPC`; `/private/tmp/discovery-test-bin/docker` was absent, so no wrapper was created. No shared `stockscreenclaude-*` container or data was stopped, pruned, deleted, or changed.
 
 | Command | Result |
 | --- | --- |
-| `node --experimental-strip-types --test services/discovery/test/campaign-e2e.integration.test.ts` | 4 passed, 0 failed. Includes fixture-load validation, the exact ten-assessment corpus, wrong-candidate/duplicate operation rejections, real PostgreSQL, HTTP, worker, and snapshot verifier. |
+| `node --experimental-strip-types --test services/discovery/test/campaign-e2e.integration.test.ts` | 4 passed, 0 failed. Includes the parsed Pending operator table, ten actual 3+3+4 candidates, wrong-candidate/duplicate operation rejections, real PostgreSQL, HTTP, worker, persisted assessments, and source-backed snapshot verification. |
 | `node --experimental-strip-types --test services/discovery/test/campaign-evaluation.test.ts` | 7 passed, 0 failed. Includes actual malformed-output worker repair and twelve rank permutations. |
 | `node --experimental-strip-types --test services/discovery/test/identity-provider.test.ts` | 3 passed, 0 failed. |
 | `node --experimental-strip-types --test services/discovery/test/http.test.ts` | 7 passed, 0 failed. |
 | `node --experimental-strip-types --test services/discovery/test/worker-cli.test.ts` | 2 passed, 0 failed. |
 | Focused fix-round campaign/evaluation tests | 11 passed, 0 failed. |
-| `node --experimental-strip-types --test --test-concurrency=1 test/**/*.test.ts` in `services/discovery` | 167 passed, 0 failed, 0 cancelled (492.2s), using owned temporary PostgreSQL. This is the authoritative full Discovery gate. |
+| Focused round-2 E2E/evaluation/identity tests | 14 passed, 0 failed. |
+| `node --experimental-strip-types --test --test-concurrency=1 test/**/*.test.ts` in `services/discovery` | 167 passed, 0 failed, 0 cancelled (363.1s), using owned temporary PostgreSQL. This is the latest authoritative full Discovery gate. |
 | `npm test` in `services/llm`; `npm run typecheck` | 27 passed, 0 failed; typecheck exit 0. |
 | `npm test` in `services/agents` | 85 passed, 0 failed, 3 skipped. |
 | `npm test` in `services/snapshot` | 110 passed, 0 failed. |
@@ -83,7 +90,7 @@ inventory contract complete.
 | Authenticated handler and contract | HTTP test covers every discovery route; OpenAPI 10/10. |
 | Feature-off config, worker lifecycle, CI | `.env.dev.example`, `worker-cli.ts`, dev-shell 11/11, CI discovery job. |
 | Recovery, rollback, readiness | `docs/discovery-campaigns-operations.md` and `CONTEXT.md`. |
-| Human review | Ten-row operator table exists; every review cell is Pending. |
+| Human review | The parsed ten-row operator table maps one-to-one to the ten actual 3+3+4 fixture candidates and each candidate's own sealed assessment/source pair; every review cell is Pending. |
 
 ## Human release gate
 
@@ -95,6 +102,7 @@ Checked the Task 10 brief and design sections 13–14 against the final diff:
 
 - Full-path provider/model calls cross the same attempt runner and model/provider boundaries as production; fixtures reject undeclared calls, a different candidate ID, and over-counted calls.
 - Positive fixtures have nonempty recorded provider payloads and do not use `loadExisting`; the test asserts `web` lead origin, a real identity attempt, no pre-run quote cache, and durable evidence/snapshot sealing.
+- Each of the ten operator rows names an actual candidate that Scout selects and the worker assesses. The E2E assertion verifies the distinct identity, persisted decision, sealed snapshot, and candidate-owned primary/counter sources for every row.
 - The harness uses durable quote claims and the real snapshot verifier, not an in-memory substitute.
 - Documentation distinguishes API persistence from executable worker readiness, keeps secrets out of examples, describes unknown outcomes, and states limits in the required units.
 - The release document preserves the pending human gate and makes no investment-performance claim.
