@@ -87,6 +87,23 @@ test("uses ordinary pressed buttons for result groups", () => {
   assert.match(html, /<button[^>]*aria-pressed="true"[^>]*>Shortlist \(0\)<\/button>/);
 });
 
+test("exposes cited export and candidate handoff controls without treating them as an automatic save", () => {
+  const candidate = { ...candidateView(), can_promote: true };
+  const html = renderToStaticMarkup(
+    <CampaignResults
+      run={runView([candidate])}
+      candidates={[candidate]}
+      events={[]}
+      onCopyExport={() => undefined}
+      onOpenInAnalyze={() => undefined}
+      onDraftThesis={() => undefined}
+    />,
+  );
+  assert.match(html, /Copy cited shortlist/);
+  assert.match(html, /Open in Analyze/);
+  assert.match(html, /Draft thesis for Agents/);
+});
+
 function candidateView(): CandidateView {
   return {
     candidate_id: "candidate-1", identity: { issuer_id: "issuer-1", listing_id: "listing-1", legal_name: "Grid Systems Inc.", ticker: "GRID", mic: "XNAS", currency: "USD", asset_type: "common_stock", identity_source_ids: [] }, name: "Grid Systems", state: "shortlisted", rank: 1, snapshot_id: "snapshot-1", evidence_available: false, can_promote: false,

@@ -1,4 +1,5 @@
 import type { AnalyzeRunDetail } from './runHistory.ts'
+import { readResearchHandoff, type DiscoveryResearchHandoff } from '../discovery/handoff.ts'
 import { isSubjectRef, type SubjectRef } from '../subject/subjectRef.ts'
 
 export type AnalyzeThesisHandoff = {
@@ -7,6 +8,10 @@ export type AnalyzeThesisHandoff = {
   thesis: string
   name: string
 }
+
+export type ThesisHandoff =
+  | ({ kind: 'analyze' } & AnalyzeThesisHandoff)
+  | DiscoveryResearchHandoff
 
 export function analyzeThesisHandoff(run: AnalyzeRunDetail): AnalyzeThesisHandoff | null {
   const metadata = run.run_metadata
@@ -41,6 +46,13 @@ export function readAnalyzeThesisHandoff(state: unknown): AnalyzeThesisHandoff |
     thesis: handoff.thesis,
     name: handoff.name,
   }
+}
+
+export function readThesisHandoff(state: unknown): ThesisHandoff | null {
+  const discovery = readResearchHandoff(state)
+  if (discovery) return discovery
+  const analyze = readAnalyzeThesisHandoff(state)
+  return analyze ? { kind: 'analyze', ...analyze } : null
 }
 
 function memoText(run: AnalyzeRunDetail): string {

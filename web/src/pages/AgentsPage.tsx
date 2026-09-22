@@ -22,7 +22,7 @@ import { AgentRoster } from '../agents/AgentRoster.tsx'
 import { AgentDetailPanels } from '../agents/AgentDetailPanels.tsx'
 import { ThesisPanel } from '../agents/ThesisPanel.tsx'
 import { alertRuleLabel, dynamicUniverseIdFor, universeLabel } from '../agents/agentLabels.ts'
-import { readAnalyzeThesisHandoff } from '../analyze/thesisHandoff.ts'
+import { readThesisHandoff } from '../analyze/thesisHandoff.ts'
 import type { SubjectKind } from '../subject/subjectRef.ts'
 import { authenticatedFetch } from '../http/authFetch.ts'
 import { useAuth } from '../shell/useAuth.ts'
@@ -50,7 +50,8 @@ const DEMO_AGENTS: ReadonlyArray<AgentRow> = [
 export function AgentsPage() {
   const { session } = useAuth()
   const location = useLocation()
-  const analyzeHandoff = useMemo(() => readAnalyzeThesisHandoff(location.state), [location.state])
+  const thesisHandoff = useMemo(() => readThesisHandoff(location.state), [location.state])
+  const discoveryHandoff = thesisHandoff?.kind === 'discovery' ? thesisHandoff : null
   const [agents, setAgents] = useState<ReadonlyArray<AgentRow>>(DEMO_AGENTS)
   const [runs, setRuns] = useState<ReadonlyArray<AgentRunRow>>([])
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
@@ -61,18 +62,18 @@ export function AgentsPage() {
   const [detailsRefreshKey, setDetailsRefreshKey] = useState(0)
   const [thesisRefreshKey, setThesisRefreshKey] = useState(0)
   const [structuredAgentIds, setStructuredAgentIds] = useState<ReadonlySet<string>>(new Set())
-  const [name, setName] = useState(analyzeHandoff?.name ?? '')
-  const [thesis, setThesis] = useState(analyzeHandoff?.thesis ?? '')
+  const [name, setName] = useState(thesisHandoff?.name ?? '')
+  const [thesis, setThesis] = useState(thesisHandoff?.thesis ?? '')
   const [cadence, setCadence] = useState('daily')
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
   const [editingAgent, setEditingAgent] = useState<AgentRow | null>(null)
   const [universeMode, setUniverseMode] = useState<AgentUniverse['mode']>('static')
   const [staticSubjectRefsText, setStaticSubjectRefsText] = useState(
-    analyzeHandoff ? `${analyzeHandoff.subjectRef.kind}:${analyzeHandoff.subjectRef.id}` : '',
+    thesisHandoff ? `${thesisHandoff.subjectRef.kind}:${thesisHandoff.subjectRef.id}` : '',
   )
   const [dynamicUniverseId, setDynamicUniverseId] = useState('')
-  const [subjectKind, setSubjectKind] = useState<SubjectKind>(analyzeHandoff?.subjectRef.kind ?? 'issuer')
-  const [subjectId, setSubjectId] = useState(analyzeHandoff?.subjectRef.id ?? '')
+  const [subjectKind, setSubjectKind] = useState<SubjectKind>(thesisHandoff?.subjectRef.kind ?? 'issuer')
+  const [subjectId, setSubjectId] = useState(thesisHandoff?.subjectRef.id ?? '')
   const [alertRuleId, setAlertRuleId] = useState('')
   const [alertSeverity, setAlertSeverity] = useState('high')
   const [alertHeadline, setAlertHeadline] = useState('')
@@ -81,8 +82,10 @@ export function AgentsPage() {
   const [alertSms, setAlertSms] = useState(false)
   const [alertMobilePush, setAlertMobilePush] = useState(false)
   const [alertDigest, setAlertDigest] = useState(false)
-  const [activity, setActivity] = useState(analyzeHandoff
-    ? 'Review this Analyze memo, create the agent, then draft and save its conditions.'
+  const [activity, setActivity] = useState(thesisHandoff
+    ? thesisHandoff.kind === 'discovery'
+      ? 'Review this cited discovery research, create the agent, then draft and save its conditions.'
+      : 'Review this Analyze memo, create the agent, then draft and save its conditions.'
     : 'Idle')
   const [loadError, setLoadError] = useState<string | null>(null)
   const preservesUnsupportedUniverse =
@@ -419,6 +422,14 @@ export function AgentsPage() {
               className="rounded-md border border-line-strong bg-surface px-3 py-2 text-sm disabled:opacity-60"
             />
           </label>
+          {discoveryHandoff ? (
+            <section aria-label="Discovery research conditions" className="rounded-md border border-line bg-surface-2 p-3 text-sm text-fg">
+              <h3 className="font-medium">Research starter conditions</h3>
+              <p className="mt-1 text-xs text-muted">{discoveryHandoff.conditions.length} of {discoveryHandoff.conditions.length + discoveryHandoff.trimmedConditions} research conditions are shown. They are not saved until you use the existing thesis actions.</p>
+              {discoveryHandoff.trimmedConditions > 0 ? <p className="mt-1 text-xs text-muted">{discoveryHandoff.trimmedConditions} conditions were trimmed to keep this handoff reviewable.</p> : null}
+              {discoveryHandoff.conditions.length > 0 ? <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">{discoveryHandoff.conditions.map((condition, index) => <li key={`${condition.statement}:${index}`}>{condition.statement} — falsifier: {condition.falsifier} · {condition.horizon}</li>)}</ul> : <p className="mt-2 text-xs text-muted">No research conditions were generated from missing financial evidence.</p>}
+            </section>
+          ) : null}
           {editingStructuredThesis ? (
             <p className="rounded-md border border-accent/40 bg-accent-soft px-3 py-2 text-xs text-fg-soft">
               This agent has a versioned thesis. Edit its thesis and conditions in the Thesis conditions panel. Create another agent to monitor a different company.

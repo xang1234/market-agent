@@ -9,7 +9,15 @@ const DIMENSIONS: ReadonlyArray<{ key: DimensionName; label: string }> = [
   { key: "valuation_context", label: "Valuation context" },
 ];
 
-export function CandidateCard({ candidate }: { candidate: CandidateView }) {
+export function CandidateCard({
+  candidate,
+  onOpenInAnalyze,
+  onDraftThesis,
+}: {
+  candidate: CandidateView
+  onOpenInAnalyze?: (candidate: CandidateView) => void
+  onDraftThesis?: (candidate: CandidateView) => void
+}) {
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const identity = candidate.identity;
   return (
@@ -32,6 +40,7 @@ export function CandidateCard({ candidate }: { candidate: CandidateView }) {
       {candidate.assessment?.counterarguments.length ? <section><h4 className="text-xs font-medium uppercase text-muted">Risk</h4><p className="text-sm text-fg">{candidate.assessment.counterarguments[0]?.text}</p></section> : null}
       {candidate.assessment?.unresolved_questions.length ? <section><h4 className="text-xs font-medium uppercase text-muted">Next question</h4><p className="text-sm text-fg">{candidate.assessment.unresolved_questions[0]}</p></section> : null}
       {candidate.assessment?.next_action ? <p className="text-sm text-muted">Next step: {candidate.assessment.next_action}</p> : null}
+      {(candidate.identity && (onOpenInAnalyze || (candidate.can_promote && onDraftThesis))) ? <div className="flex flex-wrap gap-2"><>{onOpenInAnalyze ? <button type="button" onClick={() => onOpenInAnalyze(candidate)} className="rounded-md border border-line-strong px-3 py-1.5 text-sm font-medium text-fg">Open in Analyze</button> : null}{candidate.can_promote && onDraftThesis ? <button type="button" onClick={() => onDraftThesis(candidate)} className="rounded-md border border-line-strong px-3 py-1.5 text-sm font-medium text-fg">Draft thesis for Agents</button> : null}</></div> : null}
       <div>
         <button type="button" aria-label={`View sources for ${candidate.name}`} aria-expanded={sourcesOpen} onClick={() => setSourcesOpen((open) => !open)} className="text-sm font-medium text-accent underline">{sourcesOpen ? "Hide sources" : "View sources"}</button>
         {sourcesOpen ? <SourceDrawer candidate={candidate} onClose={() => setSourcesOpen(false)} /> : null}

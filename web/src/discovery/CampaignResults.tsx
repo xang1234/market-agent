@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 
 import type { CandidateView, CampaignEvent, RunView } from "../../../services/discovery/src/types.ts";
 import { CandidateCard } from "./CandidateCard.tsx";
+import { ResearchTrail } from "./ResearchTrail.tsx";
 
 type Tab = "shortlist" | "investigated" | "unresolved";
 
@@ -10,11 +11,23 @@ export function CampaignResults({
   candidates,
   events,
   comparison,
+  onCopyExport,
+  onOpenInAnalyze,
+  onDraftThesis,
+  actionStatus,
+  hasMoreEvents,
+  onLoadMoreEvents,
 }: {
   run: RunView;
   candidates: CandidateView[];
   events: CampaignEvent[];
   comparison?: { run: RunView; candidates?: CandidateView[] } | null;
+  onCopyExport?: () => void;
+  onOpenInAnalyze?: (candidate: CandidateView) => void;
+  onDraftThesis?: (candidate: CandidateView) => void;
+  actionStatus?: string | null;
+  hasMoreEvents?: boolean;
+  onLoadMoreEvents?: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("shortlist");
   const candidateSet = useMemo(() => uniqueCandidates([...run.shortlist, ...candidates]), [run.shortlist, candidates]);
@@ -24,15 +37,16 @@ export function CampaignResults({
   const rows = tab === "shortlist" ? shortlist : tab === "investigated" ? investigated : unresolved;
   return (
     <section aria-labelledby="campaign-results-heading" className="space-y-4">
-      <div><h2 id="campaign-results-heading" className="text-base font-semibold text-fg">Research results</h2><p className="text-sm text-muted">{shortlist.length} shortlisted from the companies assessed so far.</p></div>
+      <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 id="campaign-results-heading" className="text-base font-semibold text-fg">Research results</h2><p className="text-sm text-muted">{shortlist.length} shortlisted from the companies assessed so far.</p></div>{onCopyExport ? <button type="button" onClick={onCopyExport} className="rounded-md border border-line-strong px-3 py-1.5 text-sm font-medium text-fg">Copy cited shortlist</button> : null}</div>
+      {actionStatus ? <p role="status" className="text-sm text-muted">{actionStatus}</p> : null}
       <div aria-label="Research result groups" className="flex flex-wrap gap-2 border-b border-line pb-2">
         <ResultTab active={tab === "shortlist"} label={`Shortlist (${shortlist.length})`} onClick={() => setTab("shortlist")} />
         <ResultTab active={tab === "investigated"} label={`Investigated (${investigated.length})`} onClick={() => setTab("investigated")} />
         <ResultTab active={tab === "unresolved"} label={`Not selected & unresolved (${unresolved.length})`} onClick={() => setTab("unresolved")} />
       </div>
-      <div aria-label={`${tab} results`} className="space-y-3">{rows.length ? rows.map((candidate) => <CandidateCard key={candidate.candidate_id} candidate={candidate} />) : <p className="rounded-md border border-dashed border-line p-4 text-sm text-muted">{emptyCopy(tab, run)}</p>}</div>
+      <div aria-label={`${tab} results`} className="space-y-3">{rows.length ? rows.map((candidate) => <CandidateCard key={candidate.candidate_id} candidate={candidate} onOpenInAnalyze={onOpenInAnalyze} onDraftThesis={onDraftThesis} />) : <p className="rounded-md border border-dashed border-line p-4 text-sm text-muted">{emptyCopy(tab, run)}</p>}</div>
       <Comparison run={run} comparison={comparison ?? null} />
-      <details className="rounded-md border border-line p-3"><summary className="cursor-pointer text-sm font-medium text-fg">Research trail</summary>{events.length ? <ol className="mt-3 space-y-2">{events.map((event) => <li key={event.sequence} className="text-sm text-muted">{event.summary}</li>)}</ol> : <p className="mt-2 text-sm text-muted">Activity will appear here as research progresses.</p>}</details>
+      <details className="rounded-md border border-line p-3"><summary className="cursor-pointer text-sm font-medium text-fg">Research trail</summary><ResearchTrail events={events} hasMore={hasMoreEvents} onLoadMore={onLoadMoreEvents} /></details>
     </section>
   );
 }

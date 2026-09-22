@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { listCandidates } from "./api.ts";
+import { listCandidates, listEvents } from "./api.ts";
 
 test("rejects candidate responses with a non-HTTPS source URL", async () => {
   // This would catch source URLs being passed to an anchor without scheme validation.
@@ -14,6 +14,20 @@ test("rejects candidate responses with a non-HTTPS source URL", async () => {
     /Invalid source URL response/,
   );
 });
+
+test('lists a later trail page with the supplied event cursor', async () => {
+  let requested = ''
+  await listEvents({
+    userId: 'user-1',
+    runId: 'run-1',
+    after: 12,
+    fetchImpl: async (input) => {
+      requested = String(input)
+      return json({ items: [], next_sequence: 12, has_more: false })
+    },
+  })
+  assert.match(requested, /\/events\?after=12$/)
+})
 
 function candidateWithUrl(url: string): unknown {
   return {

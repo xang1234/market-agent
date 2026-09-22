@@ -82,8 +82,8 @@ export async function listCandidates(args: {
   return request(`/v1/discovery/runs/${encodeURIComponent(args.runId)}/candidates?${params}`, args, candidatePage);
 }
 
-export async function listEvents(args: { userId: string; runId: string; signal?: AbortSignal; fetchImpl?: FetchImpl }): Promise<EventPage> {
-  return request(`/v1/discovery/runs/${encodeURIComponent(args.runId)}/events?after=0`, args, eventPage);
+export async function listEvents(args: { userId: string; runId: string; after?: number; signal?: AbortSignal; fetchImpl?: FetchImpl }): Promise<EventPage> {
+  return request(`/v1/discovery/runs/${encodeURIComponent(args.runId)}/events?after=${args.after ?? 0}`, args, eventPage);
 }
 
 export async function cancelRun(args: { userId: string; runId: string; fetchImpl?: FetchImpl }): Promise<RunRecord> {

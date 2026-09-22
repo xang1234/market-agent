@@ -184,7 +184,154 @@ test("shows disabled cancellation feedback while the cancellation request is pen
   }
 });
 
-async function mountPage(route: (url: string, init?: RequestInit) => Promise<Response>) {
+test("copying a cited shortlist rereads the authorized run and candidates without saving", async () => {
+  let runReads = 0;
+  let candidateReads = 0;
+  const methods: string[] = [];
+  const visible = researchCandidate();
+  const harness = await mountPage(async (url, init) => {
+    methods.push(init?.method ?? "GET");
+    if (url.includes("/campaigns/campaign-1") && !url.endsWith("/runs")) return json(detail("campaign-1", runRecord("completed")));
+    if (url.includes("/runs/run-1/candidates")) { candidateReads += 1; return json({ items: [visible], next_cursor: null }); }
+    if (url.includes("/runs/run-1/events")) return json({ items: [], next_sequence: 0, has_more: false });
+    if (url.includes("/runs/run-1")) { runReads += 1; return json(runView("completed", [visible])); }
+    return json(emptyResponse(url));
+  });
+  try {
+    await waitFor(() => !!harness.findButton("Copy cited shortlist"));
+    await harness.click("Copy cited shortlist");
+    assert.ok(runReads >= 2, "export must fetch a fresh authorized run");
+    assert.ok(candidateReads >= 2, "export must fetch a fresh authorized candidate listing");
+    assert.ok(harness.document.querySelector<HTMLTextAreaElement>('[aria-label="Cited research export"]')?.value.includes("Research shortlist"));
+    assert.equal(methods.some((method) => method !== "GET"), false);
+  } finally {
+    await harness.unmount();
+  }
+});
+
+test("a revoked fresh export read cancels the action and keeps stale research out of the export", async () => {
+  let runReads = 0;
+  const visible = researchCandidate();
+  const harness = await mountPage(async (url) => {
+    if (url.includes("/campaigns/campaign-1") && !url.endsWith("/runs")) return json(detail("campaign-1", runRecord("completed")));
+    if (url.includes("/runs/run-1/candidates")) return json({ items: [visible], next_cursor: null });
+    if (url.includes("/runs/run-1/events")) return json({ items: [], next_sequence: 0, has_more: false });
+    if (url.includes("/runs/run-1")) {
+      runReads += 1;
+      return runReads === 1 ? json(runView("completed", [visible])) : json({ error: "revoked" }, 403);
+    }
+    return json(emptyResponse(url));
+  });
+  try {
+    await waitFor(() => !!harness.findButton("Copy cited shortlist"));
+    await harness.click("Copy cited shortlist");
+    assert.match(harness.document.body.textContent ?? "", /research access changed; export cancelled/i);
+    assert.equal(harness.document.querySelector('[aria-label="Cited research export"]'), null);
+  } finally {
+    await harness.unmount();
+  }
+});
+
+test('drafting a research thesis uses a fresh authorized listing and navigates with exact discovery provenance', async () => {
+  const campaignId = '11111111-1111-4111-8111-111111111111';
+  const runId = '22222222-2222-4222-8222-222222222222';
+  const currentRun = { ...runView('completed'), campaign_id: campaignId, run_id: runId };
+  const visible = validResearchCandidate();
+  const methods: string[] = [];
+  const harness = await mountPage(async (url, init) => {
+    methods.push(init?.method ?? 'GET');
+    if (url.includes(`/campaigns/${campaignId}`) && !url.endsWith('/runs')) return json(detail(campaignId, currentRun));
+    if (url.includes(`/runs/${runId}/candidates`)) return json({ items: [visible], next_cursor: null });
+    if (url.includes(`/runs/${runId}/events`)) return json({ items: [], next_sequence: 0, has_more: false });
+    if (url.includes(`/runs/${runId}`)) return json({ ...currentRun, shortlist: [visible] });
+    return json(emptyResponse(url));
+  }, `/discovery/${campaignId}/runs/${runId}`);
+  try {
+    await waitFor(() => !!harness.findButton('Draft thesis for Agents'));
+    await harness.click('Draft thesis for Agents');
+    await waitFor(() => harness.route() === '/agents');
+    assert.deepEqual(harness.locationState(), {
+      researchHandoff: {
+        kind: 'discovery',
+        campaignId,
+        runId,
+        candidateId: visible.candidate_id,
+        subjectRef: { kind: 'listing', id: visible.identity!.listing_id },
+        name: 'Research candidate research monitor',
+        thesis: 'Research candidate was shortlisted in discovery research. Cited sources: Company filing. Valuation context: unknown.',
+        conditions: [],
+        trimmedConditions: 0,
+      },
+    });
+    assert.equal(methods.some((method) => method !== 'GET'), false);
+  } finally {
+    await harness.unmount();
+  }
+});
+
+test('opening discovery research in Analyze uses the fresh canonical listing and bounded summary', async () => {
+  const campaignId = '11111111-1111-4111-8111-111111111111';
+  const runId = '22222222-2222-4222-8222-222222222222';
+  const currentRun = { ...runView('completed'), campaign_id: campaignId, run_id: runId };
+  const visible = validResearchCandidate();
+  const harness = await mountPage(async (url) => {
+    if (url.includes(`/campaigns/${campaignId}`) && !url.endsWith('/runs')) return json(detail(campaignId, currentRun));
+    if (url.includes(`/runs/${runId}/candidates`)) return json({ items: [visible], next_cursor: null });
+    if (url.includes(`/runs/${runId}/events`)) return json({ items: [], next_sequence: 0, has_more: false });
+    if (url.includes(`/runs/${runId}`)) return json({ ...currentRun, shortlist: [visible] });
+    return json(emptyResponse(url));
+  }, `/discovery/${campaignId}/runs/${runId}`);
+  try {
+    await waitFor(() => !!harness.findButton('Open in Analyze'));
+    await harness.click('Open in Analyze');
+    await waitFor(() => harness.route() === '/analyze');
+    assert.deepEqual(harness.locationState(), {
+      subject: {
+        subject_ref: { kind: 'listing', id: visible.identity!.listing_id },
+        display_name: 'Research candidate',
+        confidence: 1,
+        display_labels: { primary: 'Research candidate' },
+      },
+      researchSummary: {
+        campaignId,
+        runId,
+        candidateId: visible.candidate_id,
+        subjectRef: { kind: 'listing', id: visible.identity!.listing_id },
+        summary: 'Research candidate was shortlisted in discovery research. Cited sources: Company filing. Valuation context: unknown.',
+      },
+    });
+  } finally {
+    await harness.unmount();
+  }
+});
+
+test('loads another recorded trail page from the returned event cursor', async () => {
+  const first = { ...campaignEvent('First recorded event'), sequence: 1 };
+  const second = { ...campaignEvent('Second recorded event'), sequence: 2 };
+  const requested: string[] = [];
+  const harness = await mountPage(async (url) => {
+    if (url.includes('/campaigns/campaign-1') && !url.endsWith('/runs')) return json(detail('campaign-1', runRecord('completed')));
+    if (url.includes('/runs/run-1/candidates')) return json({ items: [], next_cursor: null });
+    if (url.includes('/runs/run-1/events')) {
+      requested.push(url);
+      return url.endsWith('after=0')
+        ? json({ items: [first], next_sequence: 1, has_more: true })
+        : json({ items: [second], next_sequence: 2, has_more: false });
+    }
+    if (url.includes('/runs/run-1')) return json(runView('completed'));
+    return json(emptyResponse(url));
+  });
+  try {
+    await waitFor(() => !!harness.findButton('Load more recorded activity'));
+    await harness.click('Load more recorded activity');
+    await waitFor(() => harness.document.body.textContent?.includes('Second recorded event') ?? false);
+    assert.equal(requested.some((url) => url.endsWith('after=1')), true);
+  } finally {
+    await harness.unmount();
+  }
+});
+
+async function mountPage(route: (url: string, init?: RequestInit) => Promise<Response>, initialPath = "/discovery/campaign-1") {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>");
   const restore = installDomGlobals(dom.window as unknown as Window);
   const oldFetch = globalThis.fetch;
@@ -196,13 +343,16 @@ async function mountPage(route: (url: string, init?: RequestInit) => Promise<Res
   };
   const root = createRoot(dom.window.document.getElementById("root")!);
   let navigate: ((path: string) => void) | null = null;
+  let lastLocationState: unknown = null;
   function RoutedPage() {
     navigate = useNavigate();
     const location = useLocation();
+    lastLocationState = location.state;
     return <><p aria-label="Current route">{location.pathname}</p><CampaignPage /></>;
   }
+  function Destination() { const location = useLocation(); lastLocationState = location.state; return <p aria-label="Current route">{location.pathname}</p>; }
   await act(async () => {
-    root.render(<AuthContext.Provider value={{ session: { userId: "user-1", displayName: "User" }, signIn: () => undefined, signOut: () => undefined }}><MemoryRouter initialEntries={["/discovery/campaign-1"]}><Routes><Route path="/discovery/:campaignId" element={<RoutedPage />} /><Route path="/discovery/:campaignId/runs/:runId" element={<RoutedPage />} /></Routes></MemoryRouter></AuthContext.Provider>);
+    root.render(<AuthContext.Provider value={{ session: { userId: "user-1", displayName: "User" }, signIn: () => undefined, signOut: () => undefined }}><MemoryRouter initialEntries={[initialPath]}><Routes><Route path="/discovery/:campaignId" element={<RoutedPage />} /><Route path="/discovery/:campaignId/runs/:runId" element={<RoutedPage />} /><Route path="/agents" element={<Destination />} /><Route path="/analyze" element={<Destination />} /></Routes></MemoryRouter></AuthContext.Provider>);
   });
   await act(async () => { await delay(10); });
   return {
@@ -214,6 +364,7 @@ async function mountPage(route: (url: string, init?: RequestInit) => Promise<Res
     async click(label: string) { const button = this.button(label); await act(async () => button.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }))); await act(async () => { await delay(5); }); },
     async navigate(path: string) { assert.ok(navigate, "navigation control is ready"); await act(async () => { navigate!(path); }); await act(async () => { await delay(10); }); },
     route() { return dom.window.document.querySelector('[aria-label="Current route"]')?.textContent; },
+    locationState() { return lastLocationState; },
     async unmount() { await act(async () => root.unmount()); (globalThis as { fetch: typeof fetch }).fetch = oldFetch; restore(); },
   };
 }
@@ -224,6 +375,8 @@ function runRecord(status: RunRecord["status"]): RunRecord { return { run_id: "r
 function emptyResponse(url: string): unknown { if (url.includes("/candidates")) return { items: [], next_cursor: null }; if (url.includes("/events")) return { items: [], next_sequence: 0, has_more: false }; if (url.includes("/runs/")) return runView(); if (url.endsWith("/runs")) return { items: [], next_cursor: null }; return {}; }
 function runView(status: RunRecord["status"] = "completed", shortlist: CandidateView[] = []): RunView { return { ...runRecord(status), shortlist, cost: { status: "unavailable" }, worker_waiting: false }; }
 function candidate(id: string, name: string, state: CandidateView["state"], assessment: CandidateView["assessment"] = null): CandidateView { return { candidate_id: id, identity: null, name, state, rank: state === "shortlisted" ? 1 : null, snapshot_id: null, evidence_available: true, can_promote: false, assessment, sources: [], origins: ["web"], mechanism_ids: [], reason_codes: [] }; }
+function researchCandidate(): CandidateView { const assessed = decision(); return { ...candidate("candidate-1", "Research candidate", "shortlisted", assessed), identity: assessed.identity, can_promote: true, sources: [{ citation: { kind: "claim", id: "claim-1" }, title: "Company filing", url: "https://example.com/filing", published_at: "2026-09-01T00:00:00.000Z", retrieved_at: "2026-09-10T00:00:00.000Z" }] }; }
+function validResearchCandidate(): CandidateView { const candidateId = '33333333-3333-4333-8333-333333333333'; const identity = { issuer_id: '44444444-4444-4444-8444-444444444444', listing_id: '55555555-5555-4555-8555-555555555555', legal_name: 'Research candidate', ticker: 'GRID', mic: 'XNAS', currency: 'USD', asset_type: 'common_stock' as const, identity_source_ids: [] }; const assessment = { ...decision(), candidate_id: candidateId, identity }; return { ...researchCandidate(), candidate_id: candidateId, identity, assessment }; }
 function decision(): NonNullable<CandidateView["assessment"]> { const identity = { issuer_id: "issuer-1", listing_id: "listing-1", legal_name: "Investigated company", ticker: "GRID", mic: "XNAS", currency: "USD", asset_type: "common_stock" as const, identity_source_ids: [] }; const dimension = { level: "unknown" as const, explanation: "Unknown", citations: [] }; return { candidate_id: "investigated", identity, state: "eligible_not_shortlisted", dimensions: { theme_exposure: dimension, evidence_strength: dimension, business_quality: dimension, valuation_context: dimension }, criteria: [], counterarguments: [], unresolved_questions: [], next_action: "Continue", reason_codes: [] }; }
 function campaignEvent(summary: string): CampaignEvent { return { run_id: "run-1", sequence: 1, stage: "research", kind: "criterion_assessed", candidate_id: null, summary, citations: [], created_at: "2026-09-10T00:00:00.000Z" }; }
 function json(body: unknown, status = 200): Response { return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }); }

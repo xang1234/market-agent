@@ -2,13 +2,16 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   analyzeEntryFromSubject,
+  analyzeEntryFromResearchSummary,
   analyzeIntentLabel,
   analyzePathForSubject,
   ANALYZE_INTENTS,
   ANALYZE_PATH,
   parseAnalyzeQuery,
   subjectFromAnalyzeEntry,
+  researchSummaryFromAnalyzeEntry,
 } from './analyzeEntry.ts'
+import type { ResearchSummary } from '../discovery/handoff.ts'
 import type { ResolvedSubject, SubjectRef } from '../symbol/search.ts'
 
 const APPLE_REF: SubjectRef = {
@@ -37,6 +40,22 @@ test('analyzeEntryFromSubject pairs a canonical URL with the hydrated subject as
   const entry = analyzeEntryFromSubject(APPLE_SUBJECT, 'compare')
   assert.equal(entry.to, `${ANALYZE_PATH}?subject=issuer%3A${APPLE_REF.id}&intent=compare`)
   assert.equal(entry.state.subject, APPLE_SUBJECT)
+})
+
+test('discovery research enters Analyze with the canonical listing ref and a bounded validated summary', () => {
+  const summary: ResearchSummary = {
+    campaignId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    runId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    candidateId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    subjectRef: { kind: 'listing', id: APPLE_REF.id },
+    summary: 'Cited discovery summary.',
+  }
+  const entry = analyzeEntryFromResearchSummary(summary, 'Apple Inc.')
+
+  assert.equal(entry.to, `${ANALYZE_PATH}?subject=listing%3A${APPLE_REF.id}&intent=memo`)
+  assert.deepEqual(entry.state.subject.subject_ref, { kind: 'listing', id: APPLE_REF.id })
+  assert.deepEqual(researchSummaryFromAnalyzeEntry(entry.state), summary)
+  assert.equal(researchSummaryFromAnalyzeEntry({ researchSummary: { ...summary, summary: 'x'.repeat(1_001) } }), null)
 })
 
 test('parseAnalyzeQuery roundtrips subject_ref + intent built by analyzePathForSubject', () => {

@@ -87,6 +87,83 @@ test('Agents prefill from Analyze remains editable and does not create an agent 
   }
 })
 
+test('Agents accepts a validated discovery handoff, exposes trimmed conditions, and does not save on navigation', async () => {
+  const calls: Array<{ url: string; method: string }> = []
+  const fetchImpl: typeof fetch = async (input, init) => {
+    calls.push({ url: String(input), method: init?.method ?? 'GET' })
+    return json({ agents: [], runs: [] })
+  }
+  const harness = installHarness(fetchImpl)
+  const router = createMemoryRouter([{ path: '/agents', element: <AgentsPage /> }], {
+    initialEntries: [{
+      pathname: '/agents',
+      state: {
+        researchHandoff: {
+          kind: 'discovery',
+          campaignId: '33333333-3333-4333-8333-333333333333',
+          runId: '44444444-4444-4444-8444-444444444444',
+          candidateId: '55555555-5555-4555-8555-555555555555',
+          subjectRef: { kind: 'listing', id: RUN_SUBJECT_ID },
+          name: 'Discovery candidate monitor',
+          thesis: 'A cited discovery draft.',
+          conditions: Array.from({ length: 7 }, (_, index) => ({
+            statement: `Condition ${index + 1}`,
+            falsifier: `Falsifier ${index + 1}`,
+            horizon: 'Next review',
+          })),
+        },
+      },
+    }],
+  })
+  try {
+    await harness.render(<RouterProvider router={router} />)
+    assert.equal(harness.document.querySelector<HTMLInputElement>('[name="agent-name"]')?.value, 'Discovery candidate monitor')
+    assert.equal(harness.document.querySelector<HTMLTextAreaElement>('[name="agent-thesis"]')?.value, 'A cited discovery draft.')
+    assert.match(harness.document.body.textContent ?? '', /5 of 7 research conditions/i)
+    assert.match(harness.document.body.textContent ?? '', /2 conditions were trimmed/i)
+    assert.equal(calls.some((call) => call.method === 'POST'), false)
+  } finally {
+    await harness.unmount()
+  }
+})
+
+test('Analyze shows a bounded carried discovery summary without generating or saving a memo', async () => {
+  const calls: Array<{ url: string; method: string }> = []
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input)
+    calls.push({ url, method: init?.method ?? 'GET' })
+    if (url === '/v1/analyze/templates') return json({ templates: [] })
+    if (url === '/v1/analyze/playbooks') return json({ playbooks: [] })
+    if (url.startsWith('/v1/analyze/runs?')) return json({ runs: [], next_cursor: null })
+    return json({ error: `unexpected ${url}` }, 404)
+  }
+  const harness = installHarness(fetchImpl)
+  const router = createMemoryRouter([{ path: '/analyze', element: <AnalyzePage /> }], {
+    initialEntries: [{
+      pathname: '/analyze',
+      search: `?subject=listing:${RUN_SUBJECT_ID}`,
+      state: {
+        subject: { subject_ref: { kind: 'listing', id: RUN_SUBJECT_ID }, display_name: 'Grid Co', confidence: 1 },
+        researchSummary: {
+          campaignId: '33333333-3333-4333-8333-333333333333',
+          runId: '44444444-4444-4444-8444-444444444444',
+          candidateId: '55555555-5555-4555-8555-555555555555',
+          subjectRef: { kind: 'listing', id: RUN_SUBJECT_ID },
+          summary: 'Cited discovery summary.',
+        },
+      },
+    }],
+  })
+  try {
+    await harness.render(<RouterProvider router={router} />)
+    assert.match(harness.document.body.textContent ?? '', /Cited discovery context/i)
+    assert.match(harness.document.body.textContent ?? '', /Cited discovery summary/i)
+    assert.equal(calls.some((call) => call.method !== 'GET'), false)
+  } finally {
+    await harness.unmount()
+  }
+})
+
 function runSummary() {
   return {
     run_id: 'run-history',

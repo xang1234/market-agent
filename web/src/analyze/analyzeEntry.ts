@@ -15,12 +15,14 @@
 // the URL bar.
 
 import {
+  isUuid,
   parseSubjectRefString,
   subjectFromRef,
   subjectFromRouterState,
   type ResolvedSubject,
   type SubjectRef,
 } from '../symbol/search.ts'
+import type { ResearchSummary } from '../discovery/handoff.ts'
 
 export const ANALYZE_INTENTS = ['memo', 'compare', 'general'] as const
 export type AnalyzeIntent = (typeof ANALYZE_INTENTS)[number]
@@ -32,7 +34,7 @@ const INTENT_PARAM = 'intent'
 
 export type AnalyzeEntryNavigation = {
   to: string
-  state: { subject: ResolvedSubject }
+  state: { subject: ResolvedSubject; researchSummary?: ResearchSummary }
 }
 
 export type AnalyzeEntryQuery = {
@@ -51,6 +53,44 @@ export function analyzeEntryFromSubject(
   return {
     to: analyzePathForSubject(subject.subject_ref, intent),
     state: { subject },
+  }
+}
+
+export function analyzeEntryFromResearchSummary(summary: ResearchSummary, displayName: string): AnalyzeEntryNavigation {
+  return {
+    to: analyzePathForSubject(summary.subjectRef, 'memo'),
+    state: {
+      subject: {
+        subject_ref: summary.subjectRef,
+        display_name: displayName,
+        confidence: 1,
+        display_labels: { primary: displayName },
+      },
+      researchSummary: summary,
+    },
+  }
+}
+
+export function researchSummaryFromAnalyzeEntry(state: unknown): ResearchSummary | null {
+  if (typeof state !== 'object' || state === null) return null
+  const summary = (state as { researchSummary?: unknown }).researchSummary
+  if (typeof summary !== 'object' || summary === null || Array.isArray(summary)) return null
+  const value = summary as Record<string, unknown>
+  if (
+    !isUuid(value.campaignId)
+    || !isUuid(value.runId)
+    || !isUuid(value.candidateId)
+    || !isListingRef(value.subjectRef)
+    || typeof value.summary !== 'string'
+    || value.summary.trim().length === 0
+    || value.summary.length > 1_000
+  ) return null
+  return {
+    campaignId: value.campaignId,
+    runId: value.runId,
+    candidateId: value.candidateId,
+    subjectRef: value.subjectRef,
+    summary: value.summary,
   }
 }
 
@@ -104,4 +144,11 @@ export function analyzeIntentLabel(intent: AnalyzeIntent): string {
 
 function isAnalyzeIntent(value: unknown): value is AnalyzeIntent {
   return typeof value === 'string' && (ANALYZE_INTENTS as ReadonlyArray<string>).includes(value)
+}
+
+function isListingRef(value: unknown): value is ResearchSummary['subjectRef'] {
+  return typeof value === 'object'
+    && value !== null
+    && (value as Record<string, unknown>).kind === 'listing'
+    && isUuid((value as Record<string, unknown>).id)
 }
