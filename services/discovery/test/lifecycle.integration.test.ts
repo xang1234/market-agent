@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { deleteUserAndQueueObjectBlobsWithPool } from "../../evidence/src/blob-gc-repo.ts";
+import { persistCampaignQuotes } from "../../evidence/src/campaign-claims.ts";
 import { createDiscoveryReadModel } from "../src/read-model.ts";
 import { createDiscoveryService } from "../src/service.ts";
 import { dbOptions, withCampaignDb } from "./db-fixture.ts";
@@ -74,6 +75,48 @@ test("campaign deletion removes an unreferenced campaign exact-quote claim and i
   await h.repo.deleteCampaign(h.userId, campaign.rows[0]!.campaign_id);
   assert.equal((await h.db.query("select 1 from claims where claim_id=$1::uuid", [claimId])).rowCount, 0);
   assert.equal((await h.db.query("select 1 from claim_evidence where claim_id=$1::uuid", [claimId])).rowCount, 0);
+});
+
+test("campaign deletion preserves a quote mapping reused by another campaign", dbOptions, async (t) => {
+  const h = await createRunnerHarness(t);
+  await h.executeOnce();
+  const firstRun = await h.repo.readRun(h.userId, h.runId);
+  const firstBrief = await h.repo.getBrief(h.userId, firstRun.brief_id);
+  const secondCampaign = await h.repo.createCampaign(h.otherUserId, {
+    name: "Shared quote consumer",
+    question: "Which US-listed companies benefit from grid modernization spending?",
+  });
+  const secondBrief = await h.repo.saveBrief(h.otherUserId, secondCampaign.campaign_id, 0, firstBrief.brief);
+  const secondRun = await h.repo.startRun(h.otherUserId, secondCampaign.campaign_id, {
+    brief_version: secondBrief.version,
+    brief_hash: secondBrief.hash,
+    request_key: crypto.randomUUID(),
+  });
+  const quote = await h.db.query<{
+    quote_key: string; claim_id: string; document_id: string; source_id: string;
+    document_hash: string; normalized_start: number; quote: string;
+  }>(
+    `select q.quote_key,q.claim_id::text as claim_id,q.document_id::text as document_id,
+            q.source_id::text as source_id,q.document_hash,q.normalized_start,c.text_canonical as quote
+       from discovery_quote_claims q join claims c on c.claim_id=q.claim_id
+      where q.operation_key like $1::text || '/%' limit 1`,
+    [h.runId],
+  );
+  const shared = quote.rows[0];
+  assert.ok(shared);
+  await persistCampaignQuotes(h.db, {
+    operation_key: `${secondRun.run_id}/research/90000000-0000-4000-8000-000000000099/analyst`,
+    request_hash: "sha256:" + "e".repeat(64),
+    quotes: [{
+      excerpt_id: crypto.randomUUID(), document_id: shared.document_id, source_id: shared.source_id,
+      document_hash: shared.document_hash, normalized_start: shared.normalized_start, quote: shared.quote,
+    }],
+  });
+  await h.repo.deleteCampaign(h.userId, firstRun.campaign_id);
+  assert.equal((await h.db.query("select 1 from discovery_quote_claims where quote_key=$1", [shared.quote_key])).rowCount, 1);
+  const refs = await h.db.query<{ run_id: string }>("select run_id::text as run_id from discovery_quote_claim_refs where quote_key=$1", [shared.quote_key]);
+  assert.deepEqual(refs.rows, [{ run_id: secondRun.run_id }]);
+  assert.equal((await h.db.query("select 1 from claims where claim_id=$1::uuid", [shared.claim_id])).rowCount, 1);
 });
 
 test("campaign deletion keeps a campaign exact-quote claim reached by a shared snapshot", dbOptions, async (t) => {

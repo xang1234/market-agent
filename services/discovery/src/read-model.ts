@@ -18,9 +18,10 @@ export function createDiscoveryReadModel(db: QueryExecutor, clock: () => Date = 
     },
     async candidatePage(repo: DiscoveryRepository, userId: string, runId: string, input: { cursor: string | null; limit: number; state?: CandidateState }): Promise<Page<CandidateView>> {
       const candidates = await repo.candidates(userId, runId);
-      const filtered = input.state === undefined ? candidates : candidates.filter((candidate) => candidate.state === input.state);
-      const start = cursorOffset(input.cursor, filtered);
-      const views = await authorizedCandidateViews(db, userId, filtered.slice(start, start + input.limit + 1));
+      const start = cursorOffset(input.cursor, candidates);
+      const remaining = candidates.slice(start);
+      const filtered = input.state === undefined ? remaining : remaining.filter((candidate) => candidate.state === input.state);
+      const views = await authorizedCandidateViews(db, userId, filtered.slice(0, input.limit + 1));
       const items = views.slice(0, input.limit);
       const more = views.length > input.limit;
       return { items, next_cursor: more && items.at(-1) ? encodeCandidateCursor(items.at(-1)!.candidate_id) : null };

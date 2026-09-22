@@ -14,6 +14,7 @@ import { requestHash } from "../src/scout-support.ts";
 import { executeStages } from "../src/stages.ts";
 import type { CampaignModel, Providers, WorkerDeps } from "../src/ports.ts";
 import type { AnalystOutput, ExistingCandidate, RawCitation, SkepticOutput } from "../src/types.ts";
+import { DEFAULT_LIMITS } from "../src/policy.ts";
 import { DiscoveryError } from "../src/types.ts";
 import { analystFixture, briefFixture, identityFixture, packetFixture, skepticFixture } from "./fixtures.ts";
 import { withCampaignDb } from "./db-fixture.ts";
@@ -31,13 +32,19 @@ type Options = {
   providerFailure?: ConstructorParameters<typeof ProviderRequestError>[0];
   withoutExisting?: boolean;
   malformedAnalystOutput?: string;
+  cancelAtFinalization?: boolean;
 };
 type ModelCall = { role: Parameters<CampaignModel["complete"]>[0]["role"]; candidate_id: string | undefined; operation_key: string; request_hash: string };
 
 export async function createRunnerHarness(t: TestContext, options: Options = {}) {
   const fixture = await withCampaignDb(t);
   const { db, repo: baseRepo, userId, otherUserId, clock } = fixture;
-  const { run, brief } = await fixture.createApprovedRun(briefFixture());
+  const { run, brief } = await fixture.createApprovedRun(briefFixture(), {
+    model_config: (["scout", "analyst", "skeptic"] as const).map((role) => ({
+      role, provider: "fixture", model: "recorded-fixture-model", max_output_tokens: 10_000, as_of: clock.now().toISOString(),
+    })),
+    limits: DEFAULT_LIMITS,
+  });
   const packets = [makePacket(0), makePacket(1)];
   for (const packet of packets) await seedCompany(db, packet);
   const existing = packets.map((packet, index) => candidateFromPacket(packet, brief.brief.mechanisms[index % brief.brief.mechanisms.length]!.mechanism_id));
@@ -86,6 +93,10 @@ export async function createRunnerHarness(t: TestContext, options: Options = {})
       }
     },
     async finalize(lease, input) {
+      if (!failureInjected && options.cancelAtFinalization) {
+        failureInjected = true;
+        await baseRepo.requestCancel(userId, run.run_id);
+      }
       if (!failureInjected && options.failOnceAt === "finalization") {
         failureInjected = true;
         throw new Error("injected finalization failure");
@@ -125,7 +136,7 @@ export async function createRunnerHarness(t: TestContext, options: Options = {})
             const tool_call_id = randomUUID();
             const result = {
               text: JSON.stringify(input.role === "scout" ? { hit_ids: [], seeds: [] } : rawRole(input.role, packetForCandidate(input.candidate_id))),
-              deployment: { channel: "fixture", model: "fixture-model" },
+              deployment: { channel: "fixture", model: "recorded-fixture-model" },
               tool_call_id,
             };
             await db.query(

@@ -30,7 +30,7 @@ export async function executeDiscoveryRun(deps: WorkerDeps, lease: Lease, signal
       const candidates = await deps.repo.candidates(lease.user_id, lease.run_id);
       const run = await deps.repo.readRun(lease.user_id, lease.run_id);
       await deps.repo.finalize(lease, {
-        status: outcome?.status ?? status,
+        status: status === "cancelled" ? "cancelled" : outcome?.status ?? status,
         decisions: rankedDecisions(candidates),
         coverage: outcome?.coverage ?? reconciledCoverage(run.coverage, candidates),
       });

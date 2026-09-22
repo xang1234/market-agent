@@ -142,21 +142,30 @@ async function purgeDiscoveryCampaignsForUser(db: QueryExecutor, userId: string)
       where c.user_id=$1::uuid and a.tool_call_id is not null`,
     [userId],
   );
-  const quoteClaims = await db.query<{ claim_id: string }>(
-    `select q.claim_id::text as claim_id
+  const quoteClaims = await db.query<{ quote_key: string; claim_id: string }>(
+    `select q.quote_key,q.claim_id::text as claim_id
        from discovery_quote_claims q
-       join discovery_runs r on q.operation_key like r.run_id::text || '/%'
+       join discovery_quote_claim_refs qr on qr.quote_key=q.quote_key
+       join discovery_runs r on r.run_id=qr.run_id
        join claims c on c.claim_id=q.claim_id and c.predicate='campaign_exact_quote'
       where r.user_id=$1::uuid
-      for update of q,c`,
+      for update of q,c,qr`,
     [userId],
   );
   await db.query(
-    `delete from discovery_quote_claims q
+    `delete from discovery_quote_claim_refs qr
       using discovery_runs r
-      where r.user_id=$1::uuid and q.operation_key like r.run_id::text || '/%'`,
+      where r.user_id=$1::uuid and qr.run_id=r.run_id`,
     [userId],
   );
+  if (quoteClaims.rows.length > 0) {
+    await db.query(
+      `delete from discovery_quote_claims q
+        where q.quote_key=any($1::text[])
+          and not exists (select 1 from discovery_quote_claim_refs qr where qr.quote_key=q.quote_key)`,
+      [quoteClaims.rows.map((row) => row.quote_key)],
+    );
+  }
   await db.query(
     "delete from discovery_attempts where campaign_id in (select campaign_id from discovery_campaigns where user_id=$1::uuid)",
     [userId],

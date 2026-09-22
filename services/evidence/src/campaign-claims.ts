@@ -27,6 +27,8 @@ export async function persistCampaignQuotes(
 ): Promise<Map<string, { kind: "claim"; id: string }>> {
   assertNonEmptyString(input.operation_key, "operation_key");
   assertHash(input.request_hash, "request_hash");
+  const run_id = input.operation_key.split("/", 1)[0]!;
+  assertUuidV4(run_id, "operation_key run_id");
   const quotes = input.quotes.map(normalizeQuote);
   if (new Set(quotes.map((quote) => quote.excerpt_id + "\u0000" + quote.quote)).size !== quotes.length) {
     throw new Error("quote citations must be unique");
@@ -42,6 +44,7 @@ export async function persistCampaignQuotes(
       );
       const existing = known.rows[0]?.claim_id;
       if (existing !== undefined) {
+        await recordQuoteReference(tx, quote_key, run_id, input.operation_key, input.request_hash);
         citations.set(citationMapKey(quote), { kind: "claim", id: existing });
         continue;
       }
@@ -68,6 +71,7 @@ export async function persistCampaignQuotes(
         );
         const racedClaim = raced.rows[0]?.claim_id;
         if (racedClaim === undefined) throw new Error("quote claim mapping was not persisted");
+        await recordQuoteReference(tx, quote_key, run_id, input.operation_key, input.request_hash);
         citations.set(citationMapKey(quote), { kind: "claim", id: racedClaim });
         continue;
       }
@@ -76,10 +80,25 @@ export async function persistCampaignQuotes(
          values ($1::uuid,$2::uuid,$3::jsonb,$4,1)`,
         [mapped, quote.document_id, JSON.stringify({ kind: "normalized_text", offset_start: quote.normalized_start, offset_end: quote.normalized_start + normalizedQuote(quote.quote).length }), sha256(normalizedQuote(quote.quote))],
       );
+      await recordQuoteReference(tx, quote_key, run_id, input.operation_key, input.request_hash);
       citations.set(citationMapKey(quote), { kind: "claim", id: mapped });
     }
     return citations;
   });
+}
+
+async function recordQuoteReference(tx: QueryExecutor, quoteKey: string, runId: string, operationKey: string, requestHash: string): Promise<void> {
+  const result = await tx.query(
+    `insert into discovery_quote_claim_refs (quote_key,run_id,operation_key,request_hash)
+     values ($1,$2::uuid,$3,$4)
+     on conflict (quote_key,operation_key) do update
+       set request_hash=discovery_quote_claim_refs.request_hash
+       where discovery_quote_claim_refs.run_id=excluded.run_id
+         and discovery_quote_claim_refs.request_hash=excluded.request_hash
+     returning quote_key`,
+    [quoteKey, runId, operationKey, requestHash],
+  );
+  if (result.rowCount !== 1) throw new Error("quote reference identity conflicts with an existing operation");
 }
 
 async function requireCanonicalQuoteDocument(tx: QueryExecutor, quote: CampaignQuote): Promise<void> {

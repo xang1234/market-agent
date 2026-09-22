@@ -135,6 +135,13 @@ test("a cancellation request wins over normal completion", dbOptions, async (t) 
   await h.assertCountersReconcile();
 });
 
+test("a cancellation request between stage completion and finalization becomes terminal", dbOptions, async (t) => {
+  const h = await createRunnerHarness(t, { cancelAtFinalization: true });
+  await h.executeOnce();
+  assert.equal((await h.repo.readRun(h.userId, h.runId)).status, "cancelled");
+  assert.equal(await h.repo.claimNextRun("cannot-reclaim-cancelled"), null);
+});
+
 test("a live operation reservation leaves the runner nonterminal until a replacement lease resumes it", dbOptions, async (t) => {
   const h = await createRunnerHarness(t);
   const original = await h.claimWorker("original");

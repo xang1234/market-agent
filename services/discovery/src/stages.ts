@@ -6,7 +6,8 @@ import { rankShortlist } from "./selection.ts";
 import { addGap, requestHash } from "./scout-support.ts";
 import { discoverCandidates } from "./scout.ts";
 import { ProviderRequestError } from "./providers/errors.ts";
-import type { Checkpoint, EvidencePacket, Lease, StoredCandidate, WorkerDeps } from "./ports.ts";
+import { bindModelSnapshot } from "./model-snapshot.ts";
+import type { CampaignModel, Checkpoint, EvidencePacket, Lease, StoredCandidate, WorkerDeps } from "./ports.ts";
 import type { Coverage, RunStatus } from "./types.ts";
 import { DiscoveryError } from "./types.ts";
 
@@ -18,6 +19,7 @@ export async function executeStages(deps: WorkerDeps, lease: Lease, signal: Abor
   const brief = await deps.repo.getBrief(lease.user_id, run.brief_id);
   const providers = deps.providers(lease);
   const operations = createOperationRunner(deps.repo, lease, signal);
+  const model = bindModelSnapshot(deps.model(lease, operations, run.model_config), run.model_config);
   let checkpoint = await deps.repo.checkpoint(lease);
   let coverage = structuredClone(run.coverage);
 
@@ -30,7 +32,7 @@ export async function executeStages(deps: WorkerDeps, lease: Lease, signal: Abor
       run_id: lease.run_id,
       brief: brief.brief,
       providers,
-      model: deps.model(lease, operations),
+      model,
       operations,
       existing,
       canUseExisting: async (candidate) => authorizedExisting.has(candidate.candidate_id),
@@ -62,7 +64,7 @@ export async function executeStages(deps: WorkerDeps, lease: Lease, signal: Abor
     const candidate = selected[index]!;
     if (candidate.assessment === null && candidate.state === "researching") {
       try {
-        await researchCompany(deps, lease, candidate, brief.brief, providers, operations, signal);
+        await researchCompany(deps, lease, candidate, brief.brief, providers, model, operations, signal);
       } catch (error) {
         if (isControl(error)) throw error;
         incomplete = true;
@@ -94,6 +96,7 @@ async function researchCompany(
   candidate: StoredCandidate,
   brief: Parameters<typeof assessCompany>[0]["brief"],
   providers: ReturnType<WorkerDeps["providers"]>,
+  model: CampaignModel,
   operations: ReturnType<typeof createOperationRunner>,
   signal: AbortSignal,
 ): Promise<void> {
@@ -110,7 +113,7 @@ async function researchCompany(
     run_id: lease.run_id,
     brief,
     packet: original,
-    model: deps.model(lease, operations),
+    model,
     as_of: immutablePacketAsOf(original),
     persistQuotes: (raw, visiblePacket, request) => deps.persistQuotes(lease, visiblePacket, raw, request),
     reloadPacket: () => deps.repo.refreshResearchPacket(lease, original),

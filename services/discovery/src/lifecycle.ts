@@ -31,13 +31,14 @@ export async function deleteCampaignWithLifecycle(
         where campaign_id=$1::uuid and tool_call_id is not null`,
       [input.campaign_id],
     );
-    const quoteClaims = await tx.query<{ claim_id: string }>(
-      `select q.claim_id::text as claim_id
+    const quoteClaims = await tx.query<{ quote_key: string; claim_id: string }>(
+      `select q.quote_key,q.claim_id::text as claim_id
          from discovery_quote_claims q
-         join discovery_runs r on q.operation_key like r.run_id::text || '/%'
+         join discovery_quote_claim_refs qr on qr.quote_key=q.quote_key
+         join discovery_runs r on r.run_id=qr.run_id
          join claims c on c.claim_id=q.claim_id and c.predicate='campaign_exact_quote'
         where r.campaign_id=$1::uuid
-        for update of q,c`,
+        for update of q,c,qr`,
       [input.campaign_id],
     );
     await tx.query(
@@ -51,11 +52,12 @@ export async function deleteCampaignWithLifecycle(
     // The operation ledger and quote map retain source-derived request/result data.
     await tx.query("delete from discovery_attempts where campaign_id=$1::uuid", [input.campaign_id]);
     await tx.query(
-      `delete from discovery_quote_claims q
+      `delete from discovery_quote_claim_refs qr
         using discovery_runs r
-        where r.campaign_id=$1::uuid and q.operation_key like r.run_id::text || '/%'`,
+        where r.campaign_id=$1::uuid and qr.run_id=r.run_id`,
       [input.campaign_id],
     );
+    await deleteUnreferencedQuoteMappings(tx, quoteClaims.rows.map((row) => row.quote_key));
     await tx.query("delete from discovery_campaigns where campaign_id=$1::uuid and user_id=$2::uuid", [input.campaign_id, input.user_id]);
     for (const snapshotId of new Set(snapshots.rows.map((snapshot) => snapshot.snapshot_id))) {
       await deleteSnapshotIfUnreachable(tx, snapshotId);
@@ -63,6 +65,16 @@ export async function deleteCampaignWithLifecycle(
     await deleteUnreferencedCampaignExactQuoteClaims(tx, quoteClaims.rows.map((row) => row.claim_id));
     await deleteUnreferencedDiscoveryToolCalls(tx, toolCalls.rows.map((row) => row.tool_call_id));
   });
+}
+
+async function deleteUnreferencedQuoteMappings(db: QueryExecutor, quoteKeys: readonly string[]): Promise<void> {
+  if (quoteKeys.length === 0) return;
+  await db.query(
+    `delete from discovery_quote_claims q
+      where q.quote_key=any($1::text[])
+        and not exists (select 1 from discovery_quote_claim_refs qr where qr.quote_key=q.quote_key)`,
+    [quoteKeys],
+  );
 }
 
 export async function deleteUnreferencedDiscoveryToolCalls(db: QueryExecutor, toolCallIds: readonly string[]): Promise<void> {

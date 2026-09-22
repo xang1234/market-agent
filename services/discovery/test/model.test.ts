@@ -51,6 +51,34 @@ test("campaign model preserves the approved 10,000-token provider ceiling", asyn
   assert.equal(maxTokens, 10_000);
 });
 
+test("campaign model dispatches the role's snapshotted deployment and output cap", async () => {
+  const fake = fakeOperations();
+  const dispatched: string[] = [];
+  let maxTokens: number | undefined;
+  const router = createLlmRouter({
+    settings: settings(),
+    client: async (deployment, request) => {
+      dispatched.push(`${deployment.channel}/${deployment.model}`);
+      maxTokens = request.maxTokens;
+      return { text: "bounded snapshot" };
+    },
+  });
+  const model = createCampaignModel(router, fake.operations, [{
+    role: "scout", provider: "deepseek", model: "deepseek-chat", max_output_tokens: 2_000, as_of: "2026-09-10T12:00:00.000Z",
+  }]);
+
+  await model.complete({
+    operation_key: "00000000-0000-4000-8000-000000000001/discovery/pool/scout",
+    request_hash: "sha256:" + "f".repeat(64),
+    role: "scout",
+    phase: "discovery",
+    messages: [{ role: "user", content: "Find grounded candidates." }],
+  });
+
+  assert.deepEqual(dispatched, ["deepseek/deepseek-chat"]);
+  assert.equal(maxTokens, 2_000);
+});
+
 test("campaign model charges each router fallback as a distinct provider attempt", async () => {
   const fake = fakeOperations();
   const dispatched: string[] = [];

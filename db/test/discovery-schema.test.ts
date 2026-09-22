@@ -17,7 +17,7 @@ import {
 } from "./docker-pg.ts";
 
 const tables = [
-  "discovery_campaigns", "discovery_briefs", "discovery_runs", "discovery_candidates", "discovery_attempts", "discovery_events", "discovery_quote_claims",
+  "discovery_campaigns", "discovery_briefs", "discovery_runs", "discovery_candidates", "discovery_attempts", "discovery_events", "discovery_quote_claims", "discovery_quote_claim_refs",
 ];
 const options = { skip: !dockerAvailable(), timeout: 120_000 };
 

@@ -22,6 +22,7 @@ test("quote keys bind the canonical document, normalized offset, and exact quote
 test("quote persistence is retry-safe and stores the supplied exact quote", async () => {
   const queries: Array<{ text: string; values?: unknown[] }> = [];
   const mappings = new Map<string, string>();
+  const references: string[] = [];
   const db: QueryExecutor = {
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       queries.push({ text, values });
@@ -35,6 +36,10 @@ test("quote persistence is retry-safe and stores the supplied exact quote", asyn
       if (text.includes("insert into discovery_quote_claims")) {
         mappings.set(String(values?.[0]), CLAIM_ID);
         return { rows: [{ claim_id: CLAIM_ID }] as unknown as R[], command: "INSERT", rowCount: 1, oid: 0, fields: [] };
+      }
+      if (text.includes("insert into discovery_quote_claim_refs")) {
+        references.push(String(values?.[2]));
+        return { rows: [{ quote_key: values?.[0] }] as unknown as R[], command: "INSERT", rowCount: 1, oid: 0, fields: [] };
       }
       return { rows: (text.trim().startsWith("insert into claims") ? [{ claim_id: CLAIM_ID }] : []) as unknown as R[], command: "INSERT", rowCount: 1, oid: 0, fields: [] };
     },
@@ -57,6 +62,7 @@ test("quote persistence is retry-safe and stores the supplied exact quote", asyn
   const evidenceInsert = queries.find((query) => query.text.includes("insert into claim_evidence"));
   assert.ok(evidenceInsert);
   assert.equal(String(evidenceInsert.values?.[2]).includes(QUOTE), false);
+  assert.deepEqual(references, [input.operation_key, input.operation_key]);
 });
 
 test("quote persistence rejects a source that does not own the canonical document before cache reuse", async () => {

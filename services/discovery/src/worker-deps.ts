@@ -20,7 +20,8 @@ export function createWorkerDeps(input: {
   repo: DiscoveryRepository;
   clock: () => Date;
   providerFactory: UserScopedProviderFactory;
-  modelFactory: (userId: D.Id, operations: OperationRunner) => CampaignModel;
+  /** Must construct routing from this run's model_config; createCampaignModel accepts it directly. */
+  modelFactory: (input: Readonly<{ user_id: D.Id; model_config: readonly D.ModelConfigSnapshot[]; operations: OperationRunner }>) => CampaignModel;
   loadExisting: (userId: D.Id, brief: D.Brief) => Promise<D.ExistingCandidate[]>;
   persistQuotes: (lease: Lease, packet: EvidencePacket, raw: D.AnalystOutput | D.SkepticOutput, request: AssessmentQuoteRequest) => Promise<Map<string, D.Citation>>;
   commitAssessment: WorkerDeps["commitAssessment"];
@@ -34,7 +35,7 @@ export function createWorkerDeps(input: {
       evidence: input.providerFactory.evidence(lease.user_id),
       financials: input.providerFactory.financials(lease.user_id),
     }),
-    model: (lease, operations) => input.modelFactory(lease.user_id, operations),
+    model: (lease, operations, modelConfig) => input.modelFactory({ user_id: lease.user_id, model_config: modelConfig, operations }),
     loadExisting: (lease, brief) => input.loadExisting(lease.user_id, brief),
     persistQuotes: input.persistQuotes,
     commitAssessment: input.commitAssessment,

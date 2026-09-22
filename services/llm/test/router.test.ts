@@ -42,6 +42,25 @@ test("LLM router falls back after retryable provider failure", async () => {
   assert.deepEqual(result.deployment, { channel: "deepseek", model: "deepseek-chat" });
 });
 
+test("LLM router dispatches only the caller's immutable deployment order", async () => {
+  const calls: string[] = [];
+  const router = createLlmRouter({
+    settings: settings(),
+    client: async (deployment) => {
+      calls.push(`${deployment.channel}/${deployment.model}`);
+      return { text: "snapshotted" };
+    },
+  });
+
+  const result = await router.complete(
+    { messages: [{ role: "user", content: "hello" }] },
+    { deploymentOrder: [{ channel: "deepseek", model: "deepseek-chat" }] },
+  );
+
+  assert.deepEqual(calls, ["deepseek/deepseek-chat"]);
+  assert.deepEqual(result.deployment, { channel: "deepseek", model: "deepseek-chat" });
+});
+
 test("LLM router stops before fallback when attempt admission rejects", async () => {
   const dispatched: string[] = [];
   const reservations: number[] = [];

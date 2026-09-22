@@ -1,6 +1,7 @@
 import {
   buildLlmDeploymentOrder,
   type LlmDeployment,
+  type LlmModelRef,
   type LlmSettings,
 } from "./channel-config.ts";
 
@@ -34,6 +35,8 @@ export type LlmChatClient = (
 export type LlmExecutionControls = {
   signal?: AbortSignal;
   maxAttempts?: number;
+  /** Exact deployment identities and order captured by the caller's durable work item. */
+  deploymentOrder?: ReadonlyArray<LlmModelRef>;
   beforeAttempt?: (attempt: { index: number; channel: string; model: string }) => Promise<void>;
   executeAttempt?: (
     attempt: { index: number; channel: string; model: string },
@@ -98,13 +101,14 @@ export function createLlmRouter(input: CreateLlmRouterInput): ControlledRouter {
   const deployments = buildLlmDeploymentOrder(input.settings);
   return Object.freeze({
     async complete(request, controls = {}) {
-      if (deployments.length === 0) {
+      const selectedDeployments = selectDeployments(deployments, controls.deploymentOrder);
+      if (selectedDeployments.length === 0) {
         throw new LlmRouterError("no_deployments", "no enabled LLM deployments configured", []);
       }
 
-      const maximumAttempts = maxAttemptsFor(deployments.length, controls.maxAttempts);
+      const maximumAttempts = maxAttemptsFor(selectedDeployments.length, controls.maxAttempts);
       const attempts: LlmRouterAttempt[] = [];
-      for (const [index, deployment] of deployments.entries()) {
+      for (const [index, deployment] of selectedDeployments.entries()) {
         if (index >= maximumAttempts) break;
         throwIfAborted(controls.signal);
         const attempt = Object.freeze({ index, channel: deployment.channel, model: deployment.model });
@@ -147,6 +151,15 @@ export function createLlmRouter(input: CreateLlmRouterInput): ControlledRouter {
 
       throw new LlmRouterError("all_deployments_failed", "all LLM deployments failed", attempts);
     },
+  });
+}
+
+function selectDeployments(deployments: readonly LlmDeployment[], requested: ReadonlyArray<LlmModelRef> | undefined): readonly LlmDeployment[] {
+  if (requested === undefined) return deployments;
+  const byIdentity = new Map(deployments.map((deployment) => [`${deployment.channel}\u0000${deployment.model}`, deployment]));
+  return requested.flatMap((entry) => {
+    const deployment = byIdentity.get(`${entry.channel}\u0000${entry.model}`);
+    return deployment === undefined ? [] : [deployment];
   });
 }
 

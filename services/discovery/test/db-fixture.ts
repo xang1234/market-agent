@@ -4,6 +4,7 @@ import { hashJsonValue } from "../../observability/src/tool-call.ts";
 import { bootstrapDatabase, connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { createDiscoveryRepository } from "../src/repository.ts";
 import { briefFixture } from "./fixtures.ts";
+import type { RunConfigurationSnapshot } from "../src/types.ts";
 
 export { dockerAvailable } from "../../../db/test/docker-pg.ts";
 export const dbOptions = { skip: !dockerAvailable(), timeout: 120_000 };
@@ -30,7 +31,7 @@ export async function withCampaignDb(t: TestContext) {
   const clock = testClock();
   const repo = createDiscoveryRepository(pool, { clock: clock.now });
 
-  async function createApprovedRun(brief = briefFixture()) {
+  async function createApprovedRun(brief = briefFixture(), configuration?: RunConfigurationSnapshot) {
     const campaign = await repo.createCampaign(userId, {
       name: "Grid modernization",
       question: "Which US-listed companies benefit from grid modernization spending?",
@@ -40,6 +41,7 @@ export async function withCampaignDb(t: TestContext) {
       brief_version: saved.version,
       brief_hash: saved.hash,
       request_key: crypto.randomUUID(),
+      ...configuration,
     });
     return { campaign, brief: saved, run };
   }
