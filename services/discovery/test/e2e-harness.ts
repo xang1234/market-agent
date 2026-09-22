@@ -13,6 +13,7 @@ import { createAssessmentCommitter } from "../src/assessment-repo.ts";
 import { createDiscoveryReadModel } from "../src/read-model.ts";
 import { createDiscoveryRepository } from "../src/repository.ts";
 import { createDiscoveryService } from "../src/service.ts";
+import { DEFAULT_LIMITS } from "../src/policy.ts";
 import { canonicalCampaignQuotes } from "../src/quote-claims.ts";
 import { createBraveSearchProvider } from "../src/providers/search.ts";
 import { createCanonicalIdentityProvider } from "../src/providers/identity.ts";
@@ -85,7 +86,17 @@ export async function createCampaignE2eHarness(t: TestContext, name: FixtureName
   const database = sharedDatabase ?? await withCampaignDb(t);
   const { db, clock } = database;
   const repo = createDiscoveryRepository(db, { clock: clock.now });
-  const service = createDiscoveryService({ repo, reads: createDiscoveryReadModel(db, clock.now), readiness: () => ({ ready: true, missing: [] }) });
+  const service = createDiscoveryService({
+    repo,
+    reads: createDiscoveryReadModel(db, clock.now),
+    readiness: () => ({ ready: true, missing: [] }),
+    runConfiguration: () => ({
+      model_config: (["scout", "analyst", "skeptic"] as const).map((role) => ({
+        role, provider: "fixture", model: `fixture-${fixture.fixture}`, max_output_tokens: 10_000, as_of: clock.now().toISOString(),
+      })),
+      limits: DEFAULT_LIMITS,
+    }),
+  });
   const packets = new Map<string, EvidencePacket>();
   const providerFailures: string[] = [];
   let runId: string | null = null;

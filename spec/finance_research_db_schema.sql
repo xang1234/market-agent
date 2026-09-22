@@ -1182,6 +1182,15 @@ create table discovery_runs (
 create unique index discovery_request_identity on discovery_runs(campaign_id, request_key);
 create unique index discovery_one_active_run_per_user on discovery_runs(user_id) where status in ('queued','running');
 create index discovery_runs_campaign_created_idx on discovery_runs(campaign_id, created_at desc, run_id desc);
+create table discovery_quote_claim_refs (
+  quote_key text not null references discovery_quote_claims(quote_key) on delete cascade,
+  run_id uuid not null references discovery_runs(run_id) on delete cascade,
+  operation_key text not null check (length(btrim(operation_key)) > 0),
+  request_hash text not null check (request_hash ~ '^sha256:[0-9a-f]{64}$'),
+  created_at timestamptz not null default now(),
+  primary key (quote_key, operation_key)
+);
+create index discovery_quote_claim_refs_run_idx on discovery_quote_claim_refs(run_id, quote_key);
 create table discovery_candidates (
   candidate_id uuid primary key, run_id uuid not null references discovery_runs(run_id) on delete cascade,
   lead_key text not null check (length(btrim(lead_key)) > 0), issuer_id uuid references issuers(issuer_id), listing_id uuid references listings(listing_id),
