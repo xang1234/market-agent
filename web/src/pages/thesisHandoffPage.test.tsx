@@ -127,6 +127,34 @@ test('Agents accepts a validated discovery handoff, exposes trimmed conditions, 
   }
 })
 
+test('Agents describes an empty discovery handoff without inferring missing financial evidence', async () => {
+  const harness = installHarness(async () => json({ agents: [], runs: [] }))
+  const router = createMemoryRouter([{ path: '/agents', element: <AgentsPage /> }], {
+    initialEntries: [{
+      pathname: '/agents',
+      state: {
+        researchHandoff: {
+          kind: 'discovery',
+          campaignId: '33333333-3333-4333-8333-333333333333',
+          runId: '44444444-4444-4444-8444-444444444444',
+          candidateId: '55555555-5555-4555-8555-555555555555',
+          subjectRef: { kind: 'listing', id: RUN_SUBJECT_ID },
+          name: 'Discovery candidate monitor',
+          thesis: 'A cited discovery draft.',
+          conditions: [],
+        },
+      },
+    }],
+  })
+  try {
+    await harness.render(<RouterProvider router={router} />)
+    assert.match(harness.document.body.textContent ?? '', /No research conditions were included in this handoff/i)
+    assert.doesNotMatch(harness.document.body.textContent ?? '', /missing financial evidence/i)
+  } finally {
+    await harness.unmount()
+  }
+})
+
 test('Analyze shows a bounded carried discovery summary without generating or saving a memo', async () => {
   const calls: Array<{ url: string; method: string }> = []
   const fetchImpl: typeof fetch = async (input, init) => {

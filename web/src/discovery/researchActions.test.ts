@@ -98,6 +98,20 @@ test('research thesis handoff uses the canonical listing identity and does not i
   assert.equal(researchSummaryForCandidate(runViewFixture(), { ...candidateFixture(), identity: null }), null)
 })
 
+test('research handoff summaries use the fresh candidate state and never call investigated research shortlisted', () => {
+  const shortlisted = researchSummaryForCandidate(runViewFixture(), candidateFixture())
+  const investigated = researchSummaryForCandidate(runViewFixture(), {
+    ...candidateFixture(),
+    state: 'eligible_not_shortlisted',
+    rank: null,
+    can_promote: false,
+  })
+
+  assert.match(shortlisted?.summary ?? '', /was shortlisted in discovery research/i)
+  assert.match(investigated?.summary ?? '', /was investigated in discovery research/i)
+  assert.doesNotMatch(investigated?.summary ?? '', /shortlisted/i)
+})
+
 test('fresh research actions read current run and candidates then reject changed authorization', async () => {
   let runReads = 0
   let candidateReads = 0

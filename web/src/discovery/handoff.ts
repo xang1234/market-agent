@@ -94,7 +94,11 @@ export function researchSummaryForCandidate(run: RunView, candidate: CandidateVi
     : []
   const valuation = candidate.assessment?.dimensions.valuation_context.level ?? 'unknown'
   const parts = [
-    `${candidate.name} was shortlisted in discovery research.`,
+    candidate.state === 'shortlisted'
+      ? `${candidate.name} was shortlisted in discovery research.`
+      : candidate.state === 'eligible_not_shortlisted'
+        ? `${candidate.name} was investigated in discovery research.`
+        : `${candidate.name} was reviewed in discovery research.`,
     sourceTitles.length > 0 ? `Cited sources: ${sourceTitles.join('; ')}.` : 'Cited source details are unavailable.',
     `Valuation context: ${valuation}.`,
   ]

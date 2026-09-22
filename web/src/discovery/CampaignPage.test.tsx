@@ -232,6 +232,91 @@ test("a revoked fresh export read cancels the action and keeps stale research ou
   }
 });
 
+test("does not retain Run A's cited export after the selected route changes to Run B", { timeout: 5_000 }, async () => {
+  const runA = { ...runView("completed"), run_id: "run-a" };
+  const runB = { ...runView("completed"), run_id: "run-b" };
+  const candidateA = { ...researchCandidate(), candidate_id: "candidate-a", name: "Run A private company" };
+  const candidateB = { ...researchCandidate(), candidate_id: "candidate-b", name: "Run B company" };
+  const harness = await mountPage(async (url) => {
+    if (url.endsWith("/campaigns/campaign-1")) return json(detail("campaign-1", runA));
+    if (url.includes("/runs/run-a/candidates")) return json({ items: [candidateA], next_cursor: null });
+    if (url.includes("/runs/run-b/candidates")) return json({ items: [candidateB], next_cursor: null });
+    if (url.includes("/runs/run-a/events") || url.includes("/runs/run-b/events")) return json({ items: [], next_sequence: 0, has_more: false });
+    if (url.includes("/runs/run-a")) return json({ ...runA, shortlist: [candidateA] });
+    if (url.includes("/runs/run-b")) return json({ ...runB, shortlist: [candidateB] });
+    return json(emptyResponse(url));
+  }, "/discovery/campaign-1/runs/run-a");
+  try {
+    await waitFor(() => !!harness.findButton("Copy cited shortlist"));
+    await harness.click("Copy cited shortlist");
+    assert.match(harness.document.querySelector<HTMLTextAreaElement>('[aria-label="Cited research export"]')?.value ?? "", /Run A private company/);
+
+    await harness.navigate("/discovery/campaign-1/runs/run-b");
+
+    assert.equal(harness.document.querySelector('[aria-label="Cited research export"]') === null, true);
+    assert.doesNotMatch(harness.document.body.textContent ?? "", /Run A private company/);
+  } finally {
+    await harness.unmount();
+  }
+});
+
+test("cancels a cited export when the route changes while clipboard writing is pending", async () => {
+  const runA = { ...runView("completed"), run_id: "run-a" };
+  const runB = { ...runView("completed"), run_id: "run-b" };
+  const candidateA = { ...researchCandidate(), candidate_id: "candidate-a", name: "Run A private company" };
+  const candidateB = { ...researchCandidate(), candidate_id: "candidate-b", name: "Run B company" };
+  const clipboardWrite = deferred<void>();
+  const restoreClipboard = installClipboard(() => clipboardWrite.promise);
+  const harness = await mountPage(async (url) => {
+    if (url.endsWith("/campaigns/campaign-1")) return json(detail("campaign-1", runA));
+    if (url.includes("/runs/run-a/candidates")) return json({ items: [candidateA], next_cursor: null });
+    if (url.includes("/runs/run-b/candidates")) return json({ items: [candidateB], next_cursor: null });
+    if (url.includes("/runs/run-a/events") || url.includes("/runs/run-b/events")) return json({ items: [], next_sequence: 0, has_more: false });
+    if (url.includes("/runs/run-a")) return json({ ...runA, shortlist: [candidateA] });
+    if (url.includes("/runs/run-b")) return json({ ...runB, shortlist: [candidateB] });
+    return json(emptyResponse(url));
+  }, "/discovery/campaign-1/runs/run-a");
+  try {
+    await waitFor(() => !!harness.findButton("Copy cited shortlist"));
+    await harness.click("Copy cited shortlist");
+    await harness.navigate("/discovery/campaign-1/runs/run-b");
+    clipboardWrite.resolve();
+    await act(async () => { await delay(10); });
+
+    assert.equal(harness.document.querySelector('[aria-label="Cited research export"]') === null, true);
+    assert.match(harness.document.body.textContent ?? "", /research action was cancelled because the selected run changed/i);
+    assert.doesNotMatch(harness.document.body.textContent ?? "", /Cited research export is ready/i);
+  } finally {
+    await harness.unmount();
+    restoreClipboard();
+  }
+});
+
+test('opening investigated research in Analyze keeps its recorded status out of a shortlisted claim', async () => {
+  const campaignId = '11111111-1111-4111-8111-111111111111';
+  const runId = '22222222-2222-4222-8222-222222222222';
+  const currentRun = { ...runView('completed'), campaign_id: campaignId, run_id: runId };
+  const investigated = { ...validResearchCandidate(), state: 'eligible_not_shortlisted' as const, rank: null, can_promote: false };
+  const harness = await mountPage(async (url) => {
+    if (url.endsWith(`/campaigns/${campaignId}`)) return json(detail(campaignId, currentRun));
+    if (url.includes(`/runs/${runId}/candidates`)) return json({ items: [investigated], next_cursor: null });
+    if (url.includes(`/runs/${runId}/events`)) return json({ items: [], next_sequence: 0, has_more: false });
+    if (url.includes(`/runs/${runId}`)) return json({ ...currentRun, shortlist: [investigated] });
+    return json(emptyResponse(url));
+  }, `/discovery/${campaignId}/runs/${runId}`);
+  try {
+    await waitFor(() => !!harness.findButton('Investigated (1)'));
+    await harness.click('Investigated (1)');
+    await harness.click('Open in Analyze');
+    await waitFor(() => harness.route() === '/analyze');
+    const summary = (harness.locationState() as { researchSummary?: { summary?: string } } | null)?.researchSummary?.summary ?? '';
+    assert.match(summary, /was investigated in discovery research/i);
+    assert.doesNotMatch(summary, /shortlisted/i);
+  } finally {
+    await harness.unmount();
+  }
+});
+
 test('drafting a research thesis uses a fresh authorized listing and navigates with exact discovery provenance', async () => {
   const campaignId = '11111111-1111-4111-8111-111111111111';
   const runId = '22222222-2222-4222-8222-222222222222';
@@ -381,6 +466,11 @@ function decision(): NonNullable<CandidateView["assessment"]> { const identity =
 function campaignEvent(summary: string): CampaignEvent { return { run_id: "run-1", sequence: 1, stage: "research", kind: "criterion_assessed", candidate_id: null, summary, citations: [], created_at: "2026-09-10T00:00:00.000Z" }; }
 function json(body: unknown, status = 200): Response { return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }); }
 function deferred<T>() { let resolve!: (value: T) => void; return { promise: new Promise<T>((next) => { resolve = next; }), resolve }; }
+function installClipboard(writeText: (text: string) => Promise<void>): () => void {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { clipboard: { writeText } } });
+  return () => { if (original) Object.defineProperty(globalThis, 'navigator', original); else delete (globalThis as { navigator?: Navigator }).navigator; };
+}
 function delay(milliseconds: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
 async function waitFor(predicate: () => boolean, timeoutMs = 2_500): Promise<void> { const started = Date.now(); while (!predicate()) { if (Date.now() - started > timeoutMs) throw new Error("Timed out waiting for page update."); await act(async () => { await delay(25); }); } }
 function installDomGlobals(domWindow: Window): () => void { const globals = globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean; document?: Document; window?: Window }; const prior = { act: globals.IS_REACT_ACT_ENVIRONMENT, document: globals.document, window: globals.window }; globals.IS_REACT_ACT_ENVIRONMENT = true; globals.document = domWindow.document; globals.window = domWindow; return () => { globals.IS_REACT_ACT_ENVIRONMENT = prior.act; globals.document = prior.document; globals.window = prior.window; }; }

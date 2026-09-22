@@ -427,7 +427,7 @@ export function AgentsPage() {
               <h3 className="font-medium">Research starter conditions</h3>
               <p className="mt-1 text-xs text-muted">{discoveryHandoff.conditions.length} of {discoveryHandoff.conditions.length + discoveryHandoff.trimmedConditions} research conditions are shown. They are not saved until you use the existing thesis actions.</p>
               {discoveryHandoff.trimmedConditions > 0 ? <p className="mt-1 text-xs text-muted">{discoveryHandoff.trimmedConditions} conditions were trimmed to keep this handoff reviewable.</p> : null}
-              {discoveryHandoff.conditions.length > 0 ? <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">{discoveryHandoff.conditions.map((condition, index) => <li key={`${condition.statement}:${index}`}>{condition.statement} — falsifier: {condition.falsifier} · {condition.horizon}</li>)}</ul> : <p className="mt-2 text-xs text-muted">No research conditions were generated from missing financial evidence.</p>}
+              {discoveryHandoff.conditions.length > 0 ? <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">{discoveryHandoff.conditions.map((condition, index) => <li key={`${condition.statement}:${index}`}>{condition.statement} — falsifier: {condition.falsifier} · {condition.horizon}</li>)}</ul> : <p className="mt-2 text-xs text-muted">No research conditions were included in this handoff.</p>}
             </section>
           ) : null}
           {editingStructuredThesis ? (
