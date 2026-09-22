@@ -160,6 +160,81 @@ test("a verified issuer IR document remains primary eligible after durable Postg
   assert.deepEqual(persisted.rows, [{ ir_source_id: IR_SOURCE, issuer_attested: true }]);
 });
 
+test("campaign document deduplication reuses the persisted document source and IR asset", { skip: !dockerAvailable(), timeout: 120_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "campaign-documents-deduplicated-source");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  await db.query("insert into issuers (issuer_id, legal_name) values ($1::uuid, 'Acme Inc')", [ISSUER]);
+  await db.query(
+    `insert into ir_source_registry (ir_source_id, issuer_id, source_type, url, enabled)
+     values ($1::uuid, $2::uuid, 'rss', 'https://investors.acme.example/rss', true)`,
+    [IR_SOURCE, ISSUER],
+  );
+  const repository = createPostgresCampaignDocumentRepository({ db, object_store: new MemoryObjectStore() });
+  const bytes = new TextEncoder().encode("Acme reports results. Grid demand increased.");
+  const first = await repository.store({
+    issuer_id: ISSUER,
+    url: "https://investors.acme.example/news/results-original",
+    title: "Acme reports results",
+    published_at: "2026-09-01T00:00:00.000Z",
+    retrieved_at: "2026-09-02T00:00:00.000Z",
+    provider: "issuer_ir",
+    kind: "press_release",
+    ir_source_id: IR_SOURCE,
+    bytes,
+    content_type: "text/html",
+  });
+
+  const duplicate = await repository.store({
+    issuer_id: ISSUER,
+    url: "https://investors.acme.example/news/results-duplicate",
+    title: "Duplicate fetch",
+    published_at: "2026-09-03T00:00:00.000Z",
+    retrieved_at: "2026-09-04T00:00:00.000Z",
+    provider: "issuer_ir",
+    kind: "press_release",
+    ir_source_id: IR_SOURCE,
+    bytes,
+    content_type: "text/html",
+  });
+
+  assert.equal(duplicate.document_id, first.document_id);
+  assert.equal(duplicate.source_id, first.source_id);
+  assert.equal(duplicate.url, first.url);
+  const assets = await db.query<{ document_id: string; source_id: string }>(
+    "select document_id::text as document_id, source_id::text as source_id from ir_document_assets where document_id=$1::uuid",
+    [first.document_id],
+  );
+  assert.deepEqual(assets.rows, [{ document_id: first.document_id, source_id: first.source_id }]);
+
+  const secBytes = new TextEncoder().encode("Acme filed a distinct annual report.");
+  const firstSec = await repository.store({
+    issuer_id: ISSUER,
+    url: "https://www.sec.gov/Archives/acme-original",
+    title: "Acme annual report",
+    published_at: "2026-08-01T00:00:00.000Z",
+    retrieved_at: "2026-08-02T00:00:00.000Z",
+    provider: "sec_edgar",
+    kind: "filing",
+    bytes: secBytes,
+    content_type: "text/html",
+  });
+  const duplicateSec = await repository.store({
+    issuer_id: ISSUER,
+    url: "https://www.sec.gov/Archives/acme-duplicate",
+    title: "Duplicate annual report",
+    published_at: "2026-08-03T00:00:00.000Z",
+    retrieved_at: "2026-08-04T00:00:00.000Z",
+    provider: "sec_edgar",
+    kind: "filing",
+    bytes: secBytes,
+    content_type: "text/html",
+  });
+  assert.equal(duplicateSec.document_id, firstSec.document_id);
+  assert.equal(duplicateSec.source_id, firstSec.source_id);
+  assert.equal(duplicateSec.url, firstSec.url);
+});
+
 test("fresh campaign evidence load excludes a superseded stored claim", { skip: !dockerAvailable(), timeout: 120_000 }, async (t) => {
   const { databaseUrl } = await bootstrapDatabase(t, "campaign-documents-current-claims");
   const client = await connectedClient(t, databaseUrl);

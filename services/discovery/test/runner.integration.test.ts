@@ -142,6 +142,15 @@ test("a cancellation request between stage completion and finalization becomes t
   assert.equal(await h.repo.claimNextRun("cannot-reclaim-cancelled"), null);
 });
 
+test("an expired cancelled lease is reclaimed and finalized after worker loss", dbOptions, async (t) => {
+  const h = await createRunnerHarness(t);
+  assert.ok(await h.claimWorker("crashed-worker"));
+  await h.repo.requestCancel(h.userId, h.runId);
+  h.advanceClock(91_000);
+  await h.resumeWithWorker("replacement-worker");
+  assert.equal((await h.repo.readRun(h.userId, h.runId)).status, "cancelled");
+});
+
 test("a live operation reservation leaves the runner nonterminal until a replacement lease resumes it", dbOptions, async (t) => {
   const h = await createRunnerHarness(t);
   const original = await h.claimWorker("original");

@@ -70,7 +70,7 @@ export function createRunStore(db: QueryExecutor, clock: () => Date) {
       return transaction(db, async (tx) => {
         const candidate = await tx.query<{ run_id: string; user_id: string }>(
           `select r.run_id::text as run_id,r.user_id::text as user_id from discovery_runs r join users u on u.user_id=r.user_id
-             where r.cancel_requested_at is null and (r.status='queued' or (r.status='running' and r.lease_expires_at <= $1::timestamptz))
+             where r.status='queued' or (r.status='running' and r.lease_expires_at <= $1::timestamptz)
              order by r.created_at asc for update of r,u skip locked limit 1`, [now.toISOString()],
         );
         if (!candidate.rows[0]) return null;

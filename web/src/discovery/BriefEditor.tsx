@@ -165,7 +165,14 @@ function Criteria({ value, onChange }: { value: Criterion[]; onChange(value: Cri
 function TextLines({ label, value, onChange }: { label: string; value: string[]; onChange(value: string[]): void }) { return <label className="grid gap-1 text-sm text-fg">{label}<textarea aria-label={label} value={value.join("\n")} onInput={(event) => onChange(lines(event.currentTarget.value))} rows={2} className="rounded-md border border-line bg-surface-2 px-3 py-2" /></label>; }
 function lines(value: string): string[] { return value.split("\n").map((item) => item.trim()).filter(Boolean); }
 function replace<T>(items: T[], index: number, value: T): T[] { return items.map((item, itemIndex) => itemIndex === index ? value : item); }
-function queriesFor(mechanisms: Mechanism[], seeds: string[]): Brief["queries"] { const values = seeds.length > 0 ? seeds : ["US-listed companies exposed to the theme"]; return values.map((query, index) => ({ mechanism_id: mechanisms[index % mechanisms.length]?.mechanism_id ?? "", query })); }
+function queriesFor(mechanisms: Mechanism[], seeds: string[]): Brief["queries"] {
+  if (mechanisms.length === 0) return [];
+  const values = seeds.length > 0 ? seeds : ["US-listed companies exposed to the theme"];
+  return Array.from({ length: Math.max(mechanisms.length, values.length) }, (_, index) => ({
+    mechanism_id: mechanisms[index % mechanisms.length]!.mechanism_id,
+    query: values[index % values.length]!,
+  }));
+}
 function newId(): string { return globalThis.crypto?.randomUUID?.() ?? `00000000-0000-4000-8000-${Math.random().toString(16).slice(2).padEnd(12, "0").slice(0, 12)}`; }
 function defaultBrief(question: string): Brief { const mechanisms: Mechanism[] = [{ mechanism_id: newId(), label: "Demand driver", chain: ["Catalyst", "Demand growth"] }, { mechanism_id: newId(), label: "Company benefit", chain: ["Demand growth", "Revenue opportunity"] }]; return { schema_version: 1, question, market: "us_listed", horizon_months: 24, lookback_months: 12, mechanisms, criteria: [{ criterion_id: newId(), importance: "must", statement: "The company has a direct and durable connection to the theme", falsifier: "The company lacks a supported connection to the theme" }], seed_queries: ["US-listed companies exposed to the theme"], exclusions: [], preferences: [], queries: queriesFor(mechanisms, ["US-listed companies exposed to the theme"]) }; }
 function messageForSave(error: unknown): string { const message = error instanceof Error ? error.message : ""; return message.includes("newer") || message.includes("stale") ? "A newer saved brief is available. Your edits are still here; load it only when you are ready." : "The brief could not be saved. Your edits are still here."; }

@@ -5,6 +5,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 
 import type { Brief, SavedBrief } from "../../../services/discovery/src/types.ts";
+import { parseBrief } from "../../../services/discovery/src/validation.ts";
 import { HttpJsonError } from "../http/authFetch.ts";
 import { BriefEditor } from "./BriefEditor.tsx";
 
@@ -101,6 +102,21 @@ test("generates a version-zero proposal locally and saves it only when asked", a
     await harness.click("Save research brief");
     assert.equal(harness.lastBody?.expectedVersion, 0);
     assert.equal(harness.saveCalls, 1);
+  } finally {
+    await harness.unmount();
+  }
+});
+
+test("the untouched default brief includes a query for every mechanism", async () => {
+  const harness = await mountEditor(null);
+  try {
+    await harness.click("Save research brief");
+    assert.ok(harness.lastBody);
+    const brief = parseBrief(harness.lastBody.brief);
+    assert.deepEqual(
+      new Set(brief.queries.map((query) => query.mechanism_id)),
+      new Set(brief.mechanisms.map((mechanism) => mechanism.mechanism_id)),
+    );
   } finally {
     await harness.unmount();
   }

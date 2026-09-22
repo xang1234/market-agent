@@ -11,7 +11,12 @@ export async function runDiscoveryWorker(deps: WorkerDeps, options: { signal: Ab
       await waitForPoll(options.signal, options.pollMs);
       continue;
     }
-    await executeDiscoveryRun(deps, lease, options.signal);
+    try {
+      await executeDiscoveryRun(deps, lease, options.signal);
+    } catch (error) {
+      if (options.signal.aborted) return;
+      console.error(`Discovery run ${lease.run_id} failed; continuing worker.`, error);
+    }
   }
 }
 

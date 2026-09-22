@@ -3,11 +3,11 @@ import { createMention } from "./mention-repo.ts";
 import { isEphemeralRawBlobId, type ObjectStore } from "./object-store.ts";
 import { issuerIrTextFromBytes } from "./issuer-ir-extraction.ts";
 import { ingestDocument } from "./ingest.ts";
-import { createIrDocumentAsset, listEnabledIrSourceRegistryEntries, type IrSourceRegistryRow } from "./issuer-ir-registry.ts";
+import { createIrDocumentAsset, getIrDocumentAssetForDocument, listEnabledIrSourceRegistryEntries, type IrSourceRegistryRow } from "./issuer-ir-registry.ts";
 import { discoverIssuerIrCandidates, hostedProviderFromUrl } from "./providers/issuer-ir.ts";
 import { createPinnedHttpsFetch, type PublicDocumentDns, type PublicDocumentTransport } from "./public-document-fetch.ts";
 import { SecEdgarClient, filingArchiveUrl, recentSubmissionRows, type SecEdgarClientConfig, type SecSubmissions } from "./sec-edgar.ts";
-import { deleteSource, createSource } from "./source-repo.ts";
+import { deleteSource, createSource, getSource } from "./source-repo.ts";
 import type { QueryExecutor } from "./types.ts";
 
 const MAX_DOCUMENTS_PER_COMPANY = 6;
@@ -362,12 +362,21 @@ export function createPostgresCampaignDocumentRepository(options: {
         retrieved_at: input.retrieved_at,
         user_id: null,
       });
+      let createdSourceStillExists = true;
       try {
         const ingest = await ingestDocument({ db: options.db, objectStore: options.object_store }, {
           source: { source_id: source.source_id, license_class: source.license_class },
           bytes: input.bytes,
           document: { kind: input.kind, title: input.title, published_at: input.published_at },
         });
+        let persistedSource = source;
+        if (ingest.document.source_id !== source.source_id) {
+          const existingSource = await getSource(options.db, ingest.document.source_id);
+          if (!existingSource) throw new Error("deduplicated campaign document source is missing");
+          await deleteSource(options.db, source.source_id);
+          createdSourceStillExists = false;
+          persistedSource = existingSource;
+        }
         await createMention(options.db, {
           document_id: ingest.document.document_id,
           subject_kind: "issuer",
@@ -376,15 +385,16 @@ export function createPostgresCampaignDocumentRepository(options: {
           mention_count: 1,
           confidence: 1,
         });
-        if (input.provider === "issuer_ir" && input.kind !== "filing") {
-          await createIrDocumentAsset(options.db, {
+        let irAsset = await getIrDocumentAssetForDocument(options.db, ingest.document.document_id);
+        if (input.provider === "issuer_ir" && input.kind !== "filing" && irAsset === null) {
+          irAsset = await createIrDocumentAsset(options.db, {
             ir_source_id: input.ir_source_id,
             issuer_id: input.issuer_id,
             document_id: ingest.document.document_id,
-            source_id: source.source_id,
+            source_id: persistedSource.source_id,
             asset_kind: input.kind,
-            canonical_url: input.url,
-            hosted_provider: hostedProviderFromUrl(input.url),
+            canonical_url: persistedSource.canonical_url ?? input.url,
+            hosted_provider: hostedProviderFromUrl(persistedSource.canonical_url ?? input.url),
             issuer_attested: true,
             content_type: input.content_type,
             discovered_at: input.retrieved_at,
@@ -393,22 +403,23 @@ export function createPostgresCampaignDocumentRepository(options: {
         }
         const normalized = issuerIrTextFromBytes({ bytes: input.bytes, contentType: input.content_type });
         if (normalized.status !== "available") throw new Error("stored campaign document could not be normalized");
+        if (!persistedSource.canonical_url) throw new Error("stored campaign document source has no canonical URL");
         return Object.freeze({
           document_id: ingest.document.document_id,
-          source_id: source.source_id,
+          source_id: persistedSource.source_id,
           family_key: ingest.document.provider_doc_id ?? ingest.document.document_id,
-          title: input.title,
-          url: input.url,
-          published_at: input.published_at,
-          retrieved_at: input.retrieved_at,
+          title: ingest.document.title ?? input.title,
+          url: persistedSource.canonical_url,
+          published_at: ingest.document.published_at,
+          retrieved_at: persistedSource.retrieved_at,
           document_hash: ingest.document.content_hash,
           normalized_text: normalized.text,
-          primary: true,
-          primary_eligible: true,
+          primary: persistedSource.trust_tier === "primary",
+          primary_eligible: persistedSource.provider === "sec_edgar" || (irAsset?.issuer_id === input.issuer_id && irAsset.issuer_attested),
           claims: Object.freeze([]),
         });
       } catch (error) {
-        await deleteSource(options.db, source.source_id);
+        if (createdSourceStillExists) await deleteSource(options.db, source.source_id);
         throw error;
       }
     },

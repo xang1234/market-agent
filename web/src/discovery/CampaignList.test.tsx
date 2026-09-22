@@ -39,6 +39,40 @@ test("lists owned campaigns and creates a campaign from the question form", asyn
   }
 });
 
+test("loads later campaign pages from the server cursor", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>");
+  const restore = installDomGlobals(dom.window as unknown as Window);
+  const previousFetch = globalThis.fetch;
+  const requested: string[] = [];
+  (globalThis as { fetch: typeof fetch }).fetch = async (input) => {
+    const url = String(input);
+    requested.push(url);
+    if (url.includes("cursor=page-2")) {
+      return json({ items: [campaign("campaign-older", "Older campaign")], next_cursor: null });
+    }
+    return json({ items: [campaign("campaign-newer", "Newer campaign")], next_cursor: "page-2" });
+  };
+  const root = createRoot(dom.window.document.getElementById("root")!);
+  try {
+    await act(async () => { root.render(<AuthContext.Provider value={{ session: { userId: "user-1", displayName: "User" }, signIn: () => undefined, signOut: () => undefined }}><MemoryRouter><CampaignList /></MemoryRouter></AuthContext.Provider>); });
+    await act(async () => { await delay(10); });
+    const loadMore = [...dom.window.document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Load more campaigns");
+    assert.ok(loadMore);
+    await act(async () => { loadMore.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); await delay(10); });
+    assert.match(dom.window.document.body.textContent ?? "", /Newer campaign/);
+    assert.match(dom.window.document.body.textContent ?? "", /Older campaign/);
+    assert.ok(requested.some((url) => url.includes("cursor=page-2")));
+  } finally {
+    await act(async () => root.unmount());
+    (globalThis as { fetch: typeof fetch }).fetch = previousFetch;
+    restore();
+  }
+});
+
+function campaign(campaignId: string, name: string) {
+  return { campaign_id: campaignId, user_id: "user-1", name, question: "Which US-listed companies benefit from grid modernization?", current_brief_version: 1, created_at: "2026-09-10T00:00:00.000Z", updated_at: "2026-09-10T00:00:00.000Z", archived_at: null };
+}
+
 function setValue(element: HTMLInputElement | HTMLTextAreaElement, value: string) {
   const prototype = element instanceof element.ownerDocument.defaultView!.HTMLTextAreaElement ? element.ownerDocument.defaultView!.HTMLTextAreaElement.prototype : element.ownerDocument.defaultView!.HTMLInputElement.prototype;
   Object.getOwnPropertyDescriptor(prototype, "value")?.set?.call(element, value);
