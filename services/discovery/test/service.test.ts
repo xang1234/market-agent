@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 
+import { hashJsonValue } from "../../observability/src/tool-call.ts";
 import { createDiscoveryService } from "../src/service.ts";
 import { DiscoveryError } from "../src/types.ts";
 import { DEFAULT_LIMITS } from "../src/policy.ts";
@@ -9,14 +10,16 @@ import { briefFixture } from "./fixtures.ts";
 
 const USER = "10000000-0000-4000-8000-000000000001";
 const CAMPAIGN = "20000000-0000-4000-8000-000000000001";
+const QUESTION = "Which US-listed companies benefit from grid modernization spending?";
 
 test("draft proposal is metered, remapped, and never saves the brief", async () => {
   const h = draftHarness();
+  let plannedQuestion: string | undefined;
   const service = createDiscoveryService({
     repo: h.repo as never,
     reads: {} as never,
     readiness: () => ({ ready: true, missing: [] }),
-    draftPlanner: async () => briefFixture(),
+    draftPlanner: async (input) => { plannedQuestion = input.question; return briefFixture(); },
   });
 
   const proposal = await service.draftBrief(USER, CAMPAIGN, 0);
@@ -27,6 +30,14 @@ test("draft proposal is metered, remapped, and never saves the brief", async () 
   assert.equal(h.calls.release, 1);
   assert.equal(h.calls.save, 0, "a draft remains a proposal until the explicit save endpoint");
   assert.deepEqual(h.calls.phase, ["draft"]);
+  assert.equal(plannedQuestion, QUESTION);
+  assert.deepEqual(h.calls.requestHash, [hashJsonValue({
+    kind: "discovery-brief-draft-v1",
+    campaign_id: CAMPAIGN,
+    question: QUESTION,
+    base_version: 0,
+    base_hash: null,
+  })]);
 });
 
 test("draft rechecks expected version after the provider result and returns stale_brief", async () => {
@@ -119,11 +130,11 @@ test("campaign questions and saved briefs remain writable while run readiness is
 });
 
 function draftHarness(options: { changeAfterDraft?: boolean } = {}) {
-  const calls = { acquire: 0, reserve: 0, finish: 0, release: 0, save: 0, phase: [] as string[] };
+  const calls = { acquire: 0, reserve: 0, finish: 0, release: 0, save: 0, phase: [] as string[], requestHash: [] as string[] };
   const token = randomUUID();
   let briefReads = 0;
   const repo = {
-    async getCampaign() { return { campaign_id: CAMPAIGN, user_id: USER }; },
+    async getCampaign() { return { campaign_id: CAMPAIGN, user_id: USER, question: QUESTION }; },
     async currentBrief() {
       briefReads += 1;
       if (options.changeAfterDraft === true && briefReads > 1) return { version: 1, hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", brief: briefFixture() };
@@ -131,8 +142,8 @@ function draftHarness(options: { changeAfterDraft?: boolean } = {}) {
     },
     async acquireDraft() { calls.acquire += 1; return { draft_token: token, expires_at: "2026-09-10T12:01:30.000Z" }; },
     async releaseDraft() { calls.release += 1; },
-    async reserveAttempt(_scope: unknown, input: { phase: string }) {
-      calls.reserve += 1; calls.phase.push(input.phase);
+    async reserveAttempt(_scope: unknown, input: { phase: string; request_hash: string }) {
+      calls.reserve += 1; calls.phase.push(input.phase); calls.requestHash.push(input.request_hash);
       return { attempt_id: randomUUID(), attempt_number: 1 as const, state: "dispatch" as const, result: null };
     },
     async finishAttempt() { calls.finish += 1; },

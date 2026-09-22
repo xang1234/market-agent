@@ -78,8 +78,9 @@ export async function startRun(args: {
   }, runRecord);
 }
 
-export async function listRuns(args: { userId: string; campaignId: string; fetchImpl?: FetchImpl }): Promise<Page<RunRecord>> {
-  return request(`/v1/discovery/campaigns/${encodeURIComponent(args.campaignId)}/runs`, args, runPage);
+export async function listRuns(args: { userId: string; campaignId: string; cursor?: string; fetchImpl?: FetchImpl }): Promise<Page<RunRecord>> {
+  const search = args.cursor ? `?cursor=${encodeURIComponent(args.cursor)}` : "";
+  return request(`/v1/discovery/campaigns/${encodeURIComponent(args.campaignId)}/runs${search}`, args, runPage);
 }
 
 export async function getRun(args: { userId: string; runId: string; signal?: AbortSignal; fetchImpl?: FetchImpl }): Promise<RunView> {

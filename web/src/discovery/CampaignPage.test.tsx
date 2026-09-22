@@ -590,6 +590,29 @@ test('loads another recorded trail page from the returned event cursor', async (
   }
 });
 
+test("loads older campaign runs from the returned cursor", async () => {
+  const first = { ...runRecord("completed"), run_id: "run-1", started_at: "2026-09-10T12:00:00.000Z" };
+  const older = { ...runRecord("completed"), run_id: "run-2", started_at: "2026-08-10T12:00:00.000Z" };
+  const requested: string[] = [];
+  const harness = await mountPage(async (url) => {
+    if (url.endsWith("/campaigns/campaign-1")) return json(detail("campaign-1", first));
+    if (url.includes("/campaigns/campaign-1/runs?cursor=page-2")) { requested.push(url); return json({ items: [older], next_cursor: null }); }
+    if (url.endsWith("/campaigns/campaign-1/runs")) return json({ items: [first], next_cursor: "page-2" });
+    if (url.includes("/runs/run-1/candidates")) return json({ items: [], next_cursor: null });
+    if (url.includes("/runs/run-1/events")) return json({ items: [], next_sequence: 0, has_more: false });
+    if (url.includes("/runs/run-1")) return json({ ...first, shortlist: [], cost: { status: "unavailable" }, worker_waiting: false });
+    return json(emptyResponse(url));
+  });
+  try {
+    await waitFor(() => !!harness.findButton("Load older runs"));
+    await harness.click("Load older runs");
+    await waitFor(() => harness.document.querySelector('option[value="run-2"]') !== null);
+    assert.equal(requested.some((url) => url.includes("cursor=page-2")), true);
+  } finally {
+    await harness.unmount();
+  }
+});
+
 async function mountPage(route: (url: string, init?: RequestInit) => Promise<Response>, initialPath = "/discovery/campaign-1") {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>");
   const restore = installDomGlobals(dom.window as unknown as Window);

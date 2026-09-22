@@ -12,6 +12,15 @@ test("worker commits its immutable cohort before any company model call", dbOpti
   await h.assertCountersReconcile();
 });
 
+test("assessment freshness is anchored to the persisted run start instead of cached evidence time", dbOptions, async (t) => {
+  const h = await createRunnerHarness(t, { evidenceObservedAt: "2020-01-01T00:00:00.000Z" });
+  await h.executeOnce();
+  const userMessage = h.messagesFor("analyst").find((message) => message.role === "user");
+  assert.ok(userMessage);
+  const prompt = JSON.parse(userMessage.content) as { observation_date?: string };
+  assert.equal(prompt.observation_date, "2026-09-10T12:00:00.000Z");
+});
+
 test("only one worker can hold the live run lease", dbOptions, async (t) => {
   const h = await createRunnerHarness(t);
   const [first, second] = await h.claimWorkersConcurrently();

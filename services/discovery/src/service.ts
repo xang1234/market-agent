@@ -10,7 +10,7 @@ import { DiscoveryError } from "./types.ts";
 import { parseBrief } from "./validation.ts";
 
 export type DiscoveryDraftPlanner = (input: {
-  user_id: string; campaign_id: string; base_brief: Brief | null; signal: AbortSignal;
+  user_id: string; campaign_id: string; question: string; base_brief: Brief | null; signal: AbortSignal;
 }) => Promise<unknown>;
 
 export type DiscoveryServiceDeps = {
@@ -50,10 +50,10 @@ export function createDiscoveryService(deps: DiscoveryServiceDeps): DiscoverySer
         const operations = draftOperations(deps.repo, { campaign_id: campaign.campaign_id, user_id: userId, draft_token: token.draft_token });
         const raw = await operations.run({
           key: `draft/${token.draft_token}`,
-          request_hash: hashJsonValue({ kind: "discovery-brief-draft-v1", campaign_id: campaign.campaign_id, base_version: baseVersion, base_hash: base?.hash ?? null }),
+          request_hash: hashJsonValue({ kind: "discovery-brief-draft-v1", campaign_id: campaign.campaign_id, question: campaign.question, base_version: baseVersion, base_hash: base?.hash ?? null }),
           resource: "model",
           phase: "draft",
-          execute: ({ signal }) => deps.draftPlanner!({ user_id: userId, campaign_id: campaign.campaign_id, base_brief: base?.brief ?? null, signal }),
+          execute: ({ signal }) => deps.draftPlanner!({ user_id: userId, campaign_id: campaign.campaign_id, question: campaign.question, base_brief: base?.brief ?? null, signal }),
         });
         const current = await deps.repo.currentBrief(userId, campaignId);
         if ((current?.version ?? 0) !== expectedVersion) throw new DiscoveryError("stale_brief", "brief version changed while drafting");

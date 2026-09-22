@@ -33,8 +33,9 @@ type Options = {
   withoutExisting?: boolean;
   malformedAnalystOutput?: string;
   cancelAtFinalization?: boolean;
+  evidenceObservedAt?: string;
 };
-type ModelCall = { role: Parameters<CampaignModel["complete"]>[0]["role"]; candidate_id: string | undefined; operation_key: string; request_hash: string };
+type ModelCall = { role: Parameters<CampaignModel["complete"]>[0]["role"]; candidate_id: string | undefined; operation_key: string; request_hash: string; messages: Parameters<CampaignModel["complete"]>[0]["messages"] };
 
 export async function createRunnerHarness(t: TestContext, options: Options = {}) {
   const fixture = await withCampaignDb(t);
@@ -45,7 +46,7 @@ export async function createRunnerHarness(t: TestContext, options: Options = {})
     })),
     limits: DEFAULT_LIMITS,
   });
-  const packets = [makePacket(0), makePacket(1)];
+  const packets = [makePacket(0, options.evidenceObservedAt), makePacket(1, options.evidenceObservedAt)];
   for (const packet of packets) await seedCompany(db, packet);
   const existing = packets.map((packet, index) => candidateFromPacket(packet, brief.brief.mechanisms[index % brief.brief.mechanisms.length]!.mechanism_id));
   const calls: ModelCall[] = [];
@@ -126,7 +127,7 @@ export async function createRunnerHarness(t: TestContext, options: Options = {})
           model_initial: input.model_initial === true && index === 0,
           model_role: input.model_initial === true && index === 0 && (input.role === "analyst" || input.role === "skeptic") ? input.role : undefined,
           execute: async () => {
-            calls.push({ role: input.role, candidate_id: input.candidate_id, operation_key: input.operation_key, request_hash: input.request_hash });
+            calls.push({ role: input.role, candidate_id: input.candidate_id, operation_key: input.operation_key, request_hash: input.request_hash, messages: structuredClone(input.messages) });
             if (input.candidate_id !== undefined && cohortAtFirstCompanyModel === null) {
               cohortAtFirstCompanyModel = await selectedIds(baseRepo, userId, run.run_id);
             }
@@ -189,6 +190,11 @@ export async function createRunnerHarness(t: TestContext, options: Options = {})
       const call = calls.find((entry) => entry.role === role);
       assert.ok(call, `expected ${role} request`);
       return { operation_key: call.operation_key, request_hash: call.request_hash };
+    },
+    messagesFor: (role: "analyst" | "skeptic") => {
+      const call = calls.find((entry) => entry.role === role);
+      assert.ok(call, `expected ${role} request`);
+      return call.messages;
     },
     selectedCandidateIds: () => selectedIds(baseRepo, userId, run.run_id),
     cohortAtFirstModelCall: () => cohortAtFirstCompanyModel ?? [],
@@ -323,7 +329,7 @@ export async function createRunnerHarness(t: TestContext, options: Options = {})
   }
 }
 
-function makePacket(index: number) {
+function makePacket(index: number, evidenceObservedAt?: string) {
   const original = packetFixture();
   const identity = identityFixture(index);
   const candidate_id = `90000000-0000-4000-8000-00000000000${index + 1}`;
@@ -334,7 +340,8 @@ function makePacket(index: number) {
     document_id: uuid("a1", ids[excerptIndex]!),
     source_id: uuid("a2", ids[excerptIndex]!),
     document_hash: `sha256:${(index * 2 + excerptIndex + 1).toString(16).repeat(64)}`,
-    published_at: "2026-09-01T00:00:00.000Z",
+    published_at: evidenceObservedAt ?? "2026-09-01T00:00:00.000Z",
+    retrieved_at: evidenceObservedAt ?? excerpt.retrieved_at,
   }));
   return {
     ...original,

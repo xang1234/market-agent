@@ -23,7 +23,7 @@ export function CampaignPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [resultRefreshKey, setResultRefreshKey] = useState(0);
   const [resultState, setResultState] = useState<{ userId: string; runId: string; candidates: CandidateView[]; events: CampaignResultsProps["events"]; nextSequence: number; hasMoreEvents: boolean } | null>(null);
-  const [runsState, setRunsState] = useState<{ userId: string; campaignId: string; runs: RunRecord[] } | null>(null);
+  const [runsState, setRunsState] = useState<{ userId: string; campaignId: string; runs: RunRecord[]; nextCursor: string | null; loadingMore: boolean } | null>(null);
   const [comparisonChoice, setComparisonChoice] = useState<{ userId: string | null; campaignId: string; runId: string }>({ userId, campaignId, runId: "" });
   const [comparisonState, setComparisonState] = useState<{ userId: string; campaignId: string; runId: string; comparison: CampaignResultsProps["comparison"] } | null>(null);
   const [cancellingRun, setCancellingRun] = useState<{ userId: string; runId: string } | null>(null);
@@ -42,6 +42,7 @@ export function CampaignPage() {
   const comparisonId = comparisonChoice.userId === userId && comparisonChoice.campaignId === campaignId ? comparisonChoice.runId : "";
   const comparison = comparisonState?.userId === userId && comparisonState.campaignId === campaignId && comparisonState.runId === comparisonId ? comparisonState.comparison : null;
   const scopedActionStatus = actionStatus?.userId === userId ? actionStatus.message : null;
+  const runHistory = runsState?.userId === userId && runsState.campaignId === campaignId ? runsState : null;
 
   useEffect(() => {
     if (!userId || !campaignId) return;
@@ -77,7 +78,7 @@ export function CampaignPage() {
   useEffect(() => {
     if (!userId || !campaignId) return;
     let current = true;
-    listRuns({ userId, campaignId }).then((page) => { if (current) setRunsState({ userId, campaignId, runs: page.items }); }).catch(() => { if (current) setRunsState({ userId, campaignId, runs: [] }); });
+    listRuns({ userId, campaignId }).then((page) => { if (current) setRunsState({ userId, campaignId, runs: page.items, nextCursor: page.next_cursor, loadingMore: false }); }).catch(() => { if (current) setRunsState({ userId, campaignId, runs: [], nextCursor: null, loadingMore: false }); });
     return () => { current = false; };
   }, [userId, campaignId, refreshKey]);
 
@@ -123,6 +124,25 @@ export function CampaignPage() {
         hasMoreEvents: page.has_more,
       } : current);
     }).catch(() => undefined);
+  }
+
+  function onLoadOlderRuns(): void {
+    if (!userId || !runHistory?.nextCursor || runHistory.loadingMore) return;
+    const actionUserId = userId;
+    const actionCampaignId = campaignId;
+    const cursor = runHistory.nextCursor;
+    setRunsState((current) => current?.userId === actionUserId && current.campaignId === actionCampaignId ? { ...current, loadingMore: true } : current);
+    void listRuns({ userId: actionUserId, campaignId: actionCampaignId, cursor }).then((page) => {
+      if (routeIdentity.current.userId !== actionUserId || routeIdentity.current.campaignId !== actionCampaignId) return;
+      setRunsState((current) => current?.userId === actionUserId && current.campaignId === actionCampaignId ? {
+        ...current,
+        runs: mergeRuns(current.runs, page.items),
+        nextCursor: page.next_cursor,
+        loadingMore: false,
+      } : current);
+    }).catch(() => {
+      setRunsState((current) => current?.userId === actionUserId && current.campaignId === actionCampaignId ? { ...current, loadingMore: false } : current);
+    });
   }
 
   useEffect(() => {
@@ -300,7 +320,7 @@ export function CampaignPage() {
   const results = resultState?.userId === userId && resultState.runId === selectedRunId ? resultState : null;
   const exportMarkdown = exportState?.campaignId === campaignId && exportState.runId === selectedRunId && exportState.userId === userId ? exportState.markdown : null;
   const canDraft = !detail.readiness.missing.includes("model");
-  return <main className="space-y-5 p-4"><header><p className="text-sm text-muted">Discovery campaign</p><h1 className="text-xl font-semibold text-fg">{detail.campaign.name}</h1><p className="mt-1 text-sm text-muted">{detail.campaign.question}</p></header>{!detail.readiness.ready ? <p role="alert" className="rounded-md border border-line p-3 text-sm text-muted">{readinessMessage(detail.readiness.missing)}</p> : null}<BriefEditor key={`${userId}:${campaignId}`} campaignId={campaignId} savedBrief={detail.brief} fallbackQuestion={detail.campaign.question} onSave={onSave} onDraft={canDraft ? onDraft : undefined} draftDisabledReason={canDraft ? undefined : "Research-brief generation needs the model capability."} onApprove={detail.readiness.ready ? onApprove : undefined} />{scopedError ? <p role="alert" className="text-sm text-negative">{scopedError}</p> : null}{pollingError ? <p role="status" className="text-sm text-muted">Progress could not be refreshed. Showing the last available update.</p> : null}{run ? <><RunProgress run={run} onCancel={onCancel} cancelling={cancellingRun?.userId === userId && cancellingRun.runId === selectedRunId} /><CampaignResults run={run} candidates={results?.candidates ?? []} events={results?.events ?? []} comparison={comparison} onCopyExport={() => void onCopyExport()} onOpenInAnalyze={onOpenInAnalyze} onDraftThesis={onDraftThesis} actionStatus={scopedActionStatus} hasMoreEvents={results?.hasMoreEvents} onLoadMoreEvents={onLoadMoreEvents} />{exportMarkdown ? <label className="grid gap-1 text-sm text-fg">Cited research export<textarea aria-label="Cited research export" readOnly value={exportMarkdown} rows={12} className="rounded-md border border-line bg-surface-2 p-3 font-mono text-xs" /></label> : null}{(runsState?.userId === userId && runsState.campaignId === campaignId && runsState.runs.length > 1) ? <label className="grid max-w-md gap-1 text-sm text-fg">Compare with another run<select aria-label="Compare with another run" value={comparisonId} onChange={(event) => { setComparisonChoice({ userId, campaignId, runId: event.target.value }); setComparisonState(null); }} className="rounded-md border border-line bg-surface-2 px-3 py-2"><option value="">Choose a run</option>{runsState.runs.filter((item) => item.run_id !== run.run_id).map((item) => <option key={item.run_id} value={item.run_id}>{runLabel(item)}</option>)}</select></label> : null}</> : selectedRunId ? <p className="text-sm text-muted">Loading research run…</p> : null}</main>;
+  return <main className="space-y-5 p-4"><header><p className="text-sm text-muted">Discovery campaign</p><h1 className="text-xl font-semibold text-fg">{detail.campaign.name}</h1><p className="mt-1 text-sm text-muted">{detail.campaign.question}</p></header>{!detail.readiness.ready ? <p role="alert" className="rounded-md border border-line p-3 text-sm text-muted">{readinessMessage(detail.readiness.missing)}</p> : null}<BriefEditor key={`${userId}:${campaignId}`} campaignId={campaignId} savedBrief={detail.brief} fallbackQuestion={detail.campaign.question} onSave={onSave} onDraft={canDraft ? onDraft : undefined} draftDisabledReason={canDraft ? undefined : "Research-brief generation needs the model capability."} onApprove={detail.readiness.ready ? onApprove : undefined} />{scopedError ? <p role="alert" className="text-sm text-negative">{scopedError}</p> : null}{pollingError ? <p role="status" className="text-sm text-muted">Progress could not be refreshed. Showing the last available update.</p> : null}{run ? <><RunProgress run={run} onCancel={onCancel} cancelling={cancellingRun?.userId === userId && cancellingRun.runId === selectedRunId} /><CampaignResults run={run} candidates={results?.candidates ?? []} events={results?.events ?? []} comparison={comparison} onCopyExport={() => void onCopyExport()} onOpenInAnalyze={onOpenInAnalyze} onDraftThesis={onDraftThesis} actionStatus={scopedActionStatus} hasMoreEvents={results?.hasMoreEvents} onLoadMoreEvents={onLoadMoreEvents} />{exportMarkdown ? <label className="grid gap-1 text-sm text-fg">Cited research export<textarea aria-label="Cited research export" readOnly value={exportMarkdown} rows={12} className="rounded-md border border-line bg-surface-2 p-3 font-mono text-xs" /></label> : null}{runHistory && (runHistory.runs.length > 1 || runHistory.nextCursor) ? <div className="grid max-w-md gap-3">{runHistory.runs.length > 1 ? <label className="grid gap-1 text-sm text-fg">Compare with another run<select aria-label="Compare with another run" value={comparisonId} onChange={(event) => { setComparisonChoice({ userId, campaignId, runId: event.target.value }); setComparisonState(null); }} className="rounded-md border border-line bg-surface-2 px-3 py-2"><option value="">Choose a run</option>{runHistory.runs.filter((item) => item.run_id !== run.run_id).map((item) => <option key={item.run_id} value={item.run_id}>{runLabel(item)}</option>)}</select></label> : null}{runHistory.nextCursor ? <button type="button" onClick={onLoadOlderRuns} disabled={runHistory.loadingMore} className="w-fit rounded-md border border-line-strong px-3 py-2 text-sm font-medium text-fg disabled:opacity-60">{runHistory.loadingMore ? "Loading older runs…" : "Load older runs"}</button> : null}</div> : null}</> : selectedRunId ? <p className="text-sm text-muted">Loading research run…</p> : null}</main>;
 }
 
 function readinessMessage(missing: CampaignDetail["readiness"]["missing"]): string {
@@ -311,4 +331,5 @@ function readinessMessage(missing: CampaignDetail["readiness"]["missing"]): stri
 type CampaignResultsProps = Parameters<typeof CampaignResults>[0];
 function runLabel(run: RunRecord): string { return `${run.status} · ${new Date(run.started_at ?? run.finished_at ?? 0).toLocaleDateString()}`; }
 function mergeEvents(current: CampaignResultsProps["events"], more: CampaignResultsProps["events"]): CampaignResultsProps["events"] { return [...new Map([...current, ...more].map((event) => [event.sequence, event])).values()].sort((left, right) => left.sequence - right.sequence); }
+function mergeRuns(current: RunRecord[], more: RunRecord[]): RunRecord[] { return [...new Map([...current, ...more].map((run) => [run.run_id, run])).values()]; }
 function newId(): string { return globalThis.crypto?.randomUUID?.() ?? `00000000-0000-4000-8000-${Math.random().toString(16).slice(2).padEnd(12, "0").slice(0, 12)}`; }

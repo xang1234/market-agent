@@ -16,6 +16,8 @@ export type StageOutcome = Readonly<{ coverage: Coverage; status: Extract<RunSta
 /** Executes only fenced repository mutations; providers are always outside repository transactions. */
 export async function executeStages(deps: WorkerDeps, lease: Lease, signal: AbortSignal): Promise<StageOutcome> {
   const run = await assertRunnable(deps, lease, signal);
+  if (run.started_at === null) throw new Error("running discovery run has no persisted start time");
+  const observationTime = run.started_at;
   const brief = await deps.repo.getBrief(lease.user_id, run.brief_id);
   const providers = deps.providers(lease);
   const operations = createOperationRunner(deps.repo, lease, signal);
@@ -64,7 +66,7 @@ export async function executeStages(deps: WorkerDeps, lease: Lease, signal: Abor
     const candidate = selected[index]!;
     if (candidate.assessment === null && candidate.state === "researching") {
       try {
-        await researchCompany(deps, lease, candidate, brief.brief, providers, model, operations, signal);
+        await researchCompany(deps, lease, candidate, brief.brief, providers, model, operations, observationTime, signal);
       } catch (error) {
         if (isControl(error)) throw error;
         incomplete = true;
@@ -98,11 +100,12 @@ async function researchCompany(
   providers: ReturnType<WorkerDeps["providers"]>,
   model: CampaignModel,
   operations: ReturnType<typeof createOperationRunner>,
+  observationTime: string,
   signal: AbortSignal,
 ): Promise<void> {
   if (candidate.identity === null) throw new Error("selected candidate is unresolved");
   const stored = await deps.repo.loadResearchPacket(lease, candidate.candidate_id);
-  const packet = stored?.packet ?? await acquirePacket(deps, lease, candidate, brief, providers, operations, signal);
+  const packet = stored?.packet ?? await acquirePacket(deps, lease, candidate, brief, providers, operations, observationTime, signal);
   if (stored === null) await deps.repo.saveResearchPacket(lease, packet);
   // Postgres jsonb normalizes object ordering. Reload before the first model
   // call so its exact serialized prompt is the same one used after restart.
@@ -114,7 +117,7 @@ async function researchCompany(
     brief,
     packet: original,
     model,
-    as_of: immutablePacketAsOf(original),
+    as_of: observationTime,
     persistQuotes: (raw, visiblePacket, request) => deps.persistQuotes(lease, visiblePacket, raw, request),
     reloadPacket: () => deps.repo.refreshResearchPacket(lease, original),
     saveValidatedRole: (role) => deps.repo.saveValidatedRole(lease, candidate.candidate_id, role),
@@ -135,16 +138,17 @@ async function acquirePacket(
   brief: Parameters<typeof assessCompany>[0]["brief"],
   providers: ReturnType<WorkerDeps["providers"]>,
   operations: ReturnType<typeof createOperationRunner>,
+  observationTime: string,
   signal: AbortSignal,
 ): Promise<EvidencePacket> {
   if (candidate.identity === null) throw new Error("cannot acquire an unresolved candidate");
   const identity = candidate.identity;
   await assertRunnable(deps, lease, signal);
   const base = `${lease.run_id}/research/${candidate.candidate_id}`;
-  const as_of = deps.clock().toISOString();
+  const as_of = observationTime;
   const evidence = await providers.evidence.acquire({
     operation_key: `${base}/evidence`,
-    request_hash: requestHash({ kind: "research-evidence-v1", run_id: lease.run_id, candidate_id: candidate.candidate_id, identity, brief }),
+    request_hash: requestHash({ kind: "research-evidence-v1", run_id: lease.run_id, candidate_id: candidate.candidate_id, identity, brief, as_of }),
     phase: "research", candidate_id: candidate.candidate_id, brief, candidate, as_of,
   }, operations);
   await assertRunnable(deps, lease, signal);
@@ -230,15 +234,6 @@ function systemicFailureCode(error: unknown): string | null {
   if (error instanceof LlmProviderError) return `model_${error.code}`;
   if (error instanceof LlmRouterError) return `model_router_${error.code}`;
   return null;
-}
-
-function immutablePacketAsOf(packet: EvidencePacket): string {
-  const observations = [...packet.excerpts.map((excerpt) => excerpt.retrieved_at), ...packet.facts.map((fact) => fact.as_of)]
-    .filter((value) => Number.isFinite(Date.parse(value)))
-    .sort();
-  const asOf = observations.at(-1);
-  if (asOf === undefined) throw new Error("immutable research packet has no valid observation time");
-  return new Date(asOf).toISOString();
 }
 
 export function rankedDecisions(candidates: StoredCandidate[]) {
