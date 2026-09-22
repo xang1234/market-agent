@@ -16,6 +16,7 @@ import type {
   RunView,
   SavedBrief,
 } from "../../../services/discovery/src/types.ts";
+import { isExactThresholdInput, type DecimalInput } from "../../../services/agents/src/exact-decimal.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -249,7 +250,11 @@ function boolean(row: JsonRecord, key: string): boolean { if (typeof row[key] !=
 function nullableString(value: unknown): string | null { if (value === null) return null; return stringValue(value, "nullable string"); }
 function nullableInteger(value: unknown): number | null { if (value === null) return null; if (typeof value !== "number" || !Number.isInteger(value)) throw new Error("Invalid number response."); return value; }
 function oneOf<T extends string | number>(value: string | number, choices: readonly T[], label: string): T { if (!choices.includes(value as T)) throw new Error(`Invalid ${label} response.`); return value as T; }
-function decimal(row: JsonRecord, key: string): number | string { const value = field(row, key); if ((typeof value !== "number" && typeof value !== "string") || (typeof value === "string" && value.trim() !== value)) throw new Error("Invalid decimal response."); return value; }
+function decimal(row: JsonRecord, key: string): DecimalInput {
+  const value = field(row, key);
+  if (!isExactThresholdInput(value)) throw new Error("Invalid exact decimal response.");
+  return value;
+}
 function httpsUrl(row: JsonRecord, key: string): string {
   const value = string(row, key);
   try {

@@ -4,6 +4,7 @@ import { isSubjectRef, type SubjectRef } from "../../shared/src/subject-ref.ts";
 import type { QueryExecutor } from "./agent-repo.ts";
 import {
   parseThesisConditions,
+  parseStoredThesisConditions,
   parseThesisText,
   parseThesisExpectedVersion,
   parseConditionAssessments,
@@ -232,7 +233,7 @@ function thesisVersionFromDb(row: ThesisVersionDbRow | undefined): ThesisVersion
     version: row.version,
     thesis: parseThesisText(row.thesis),
     subject_ref: assertIssuerSubject(jsonValue(row.subject_ref, "subject_ref")),
-    conditions: parseThesisConditions(jsonValue(row.conditions, "conditions")),
+    conditions: parseStoredThesisConditions(jsonValue(row.conditions, "conditions")),
     created_at: isoDate(row.created_at, "created_at"),
   };
 }

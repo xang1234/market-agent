@@ -1,4 +1,4 @@
-import { parseExactDecimal, type DecimalInput } from "./exact-decimal.ts";
+import { isExactThresholdInput, normalizeLegacyExactThreshold, type DecimalInput } from "./exact-decimal.ts";
 
 // Browser-safe thesis contract shared by the editor, API, repository and evaluator.
 export type ThesisPeriodKind = 'point' | 'fiscal_q' | 'fiscal_y' | 'ttm';
@@ -8,7 +8,7 @@ export type ThesisMetricCheck = {
   unit: string;
   period_kind: ThesisPeriodKind;
   operator: ThesisOperator;
-  /** Number keeps old payloads working; decimal text preserves a user's configured precision. */
+  /** Exact fractions are canonical decimal text; safe integer JSON numbers remain compatible. */
   threshold: DecimalInput;
   max_age_days: number;
 };
@@ -152,6 +152,20 @@ export function parseThesisConditions(value: unknown): ThesisCondition[] {
   });
 }
 
+/** Reads durable legacy thesis rows, normalizing prior fractional JSON numbers to exact text. */
+export function parseStoredThesisConditions(value: unknown): ThesisCondition[] {
+  if (!Array.isArray(value)) return parseThesisConditions(value);
+  return parseThesisConditions(value.map((condition) => {
+    if (condition === null || typeof condition !== "object" || Array.isArray(condition)) return condition;
+    const row = condition as Record<string, unknown>;
+    if (row.metric === null || typeof row.metric !== "object" || Array.isArray(row.metric)) return condition;
+    const metric = row.metric as Record<string, unknown>;
+    if (typeof metric.threshold !== "number" && typeof metric.threshold !== "string") return condition;
+    const threshold = normalizeLegacyExactThreshold(metric.threshold);
+    return threshold === null ? condition : { ...row, metric: { ...metric, threshold } };
+  }));
+}
+
 export function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new ThesisValidationError(`${label} must be an object`);
@@ -186,8 +200,8 @@ export function requireTrimmedString(
 }
 
 function requireDecimal(value: unknown, label: string): DecimalInput {
-  if ((typeof value !== "number" && typeof value !== "string") || parseExactDecimal(value) === null) {
-    throw new ThesisValidationError(`${label} must be a bounded decimal number`);
+  if (!isExactThresholdInput(value)) {
+    throw new ThesisValidationError(`${label} must be a canonical decimal string or safe integer`);
   }
   return value;
 }

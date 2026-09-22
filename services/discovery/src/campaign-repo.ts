@@ -1,6 +1,6 @@
 import { hashJsonValue } from "../../observability/src/tool-call.ts";
 import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
-import { parseBrief } from "./validation.ts";
+import { parseBrief, parseStoredBrief } from "./validation.ts";
 import { DiscoveryError, type Brief, type Campaign, type MetricOption, type Page, type SavedBrief } from "./types.ts";
 import { decodeCursor, encodeCursor, isoDate, json, jsonValue, requireLimit, requireText, requireUuid, transaction } from "./repository-support.ts";
 
@@ -108,5 +108,5 @@ function campaignFromRow(row: CampaignRow | undefined): Campaign {
 
 function briefFromRow(row: BriefRow | undefined): SavedBrief {
   if (!row) throw new Error("brief query returned no row");
-  return { brief_id: row.brief_id, campaign_id: row.campaign_id, version: row.version, brief: parseBrief(jsonValue(row.brief, "brief")), hash: row.content_hash, approved_at: isoDate(row.approved_at, "approved_at"), created_at: isoDate(row.created_at, "created_at")! };
+  return { brief_id: row.brief_id, campaign_id: row.campaign_id, version: row.version, brief: parseStoredBrief(jsonValue(row.brief, "brief")), hash: row.content_hash, approved_at: isoDate(row.approved_at, "approved_at"), created_at: isoDate(row.created_at, "created_at")! };
 }

@@ -4,6 +4,7 @@ import { PRIMARY_BUTTON_CLASS } from '../shell/buttonStyles.ts'
 import { draftAgentThesisConditions, saveAgentThesis } from './thesisClient.ts'
 import { parseThesisText, parseThesisConditions, THESIS_CONDITIONS_MAX } from '../../../services/agents/src/thesis-types.ts'
 import type { ThesisCondition, ThesisMetricCheck, ThesisMetricOption, ThesisPeriodKind, ThesisVersion } from '../../../services/agents/src/thesis-types.ts'
+import { normalizeLegacyExactThreshold } from '../../../services/agents/src/exact-decimal.ts'
 
 const FIELD_CLASS = 'rounded-md border border-line-strong bg-surface px-3 py-2 text-sm'
 const SECONDARY_BUTTON_CLASS = 'rounded-md border border-line-strong px-3 py-2 text-sm font-medium disabled:opacity-50'
@@ -264,8 +265,8 @@ function ConditionEditor({
             <label className="flex flex-col gap-1 text-xs font-medium text-fg">
               Threshold ({condition.metric.unit})
               <input
-                type="number"
-                step="any"
+                type="text"
+                inputMode="decimal"
                 value={condition.metric.threshold}
                 onChange={(event) => onChange({ ...condition, metric: { ...condition.metric!, threshold: event.currentTarget.value } })}
                 disabled={disabled}
@@ -330,7 +331,7 @@ function withSelectedMetric(
       unit: selected.unit,
       period_kind: selected.period_kind,
       operator: same ? condition.metric!.operator : 'gte',
-      threshold: same ? condition.metric!.threshold : 0,
+      threshold: same ? condition.metric!.threshold : '0',
       max_age_days: same ? condition.metric!.max_age_days : 90,
     },
   }
@@ -365,7 +366,12 @@ function newConditionId(): string {
 }
 
 function copyCondition(condition: ThesisCondition): ThesisCondition {
-  return { ...condition, ...(condition.metric ? { metric: { ...condition.metric } } : {}) }
+  if (!condition.metric) return { ...condition }
+  const threshold = normalizeLegacyExactThreshold(condition.metric.threshold)
+  return {
+    ...condition,
+    metric: { ...condition.metric, ...(threshold === null ? {} : { threshold }) },
+  }
 }
 
 function normalizeCondition(condition: ThesisCondition): ThesisCondition {

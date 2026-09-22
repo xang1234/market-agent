@@ -3,6 +3,9 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { load } from "../web/node_modules/js-yaml/dist/js-yaml.mjs";
+import Ajv2020 from "../web/node_modules/ajv/dist/2020.js";
+import { parseBrief } from "../services/discovery/src/validation.ts";
+import { briefFixture } from "../services/discovery/test/fixtures.ts";
 
 const REPO_ROOT = dirname(dirname(new URL(import.meta.url).pathname));
 const OPENAPI_PATH = join(REPO_ROOT, "spec", "finance_research_openapi.yaml");
@@ -384,7 +387,7 @@ test("OpenAPI rejects metric comparison and exact-decimal contract drift", async
     ["threshold numeric branch", (value) => {
       const branches = schemaProperty(value, "DiscoveryMetricCheck", "threshold").oneOf;
       assert.ok(Array.isArray(branches));
-      record(branches[0], "DiscoveryMetricCheck.threshold.oneOf[0]").type = "integer";
+      record(branches[0], "DiscoveryMetricCheck.threshold.oneOf[0]").type = "number";
     }],
     ["threshold decimal pattern", (value) => {
       const branches = schemaProperty(value, "DiscoveryMetricCheck", "threshold").oneOf;
@@ -401,6 +404,29 @@ test("OpenAPI rejects metric comparison and exact-decimal contract drift", async
   }
 });
 
+test("OpenAPI threshold validation exactly matches Discovery parsing", async () => {
+  const document = await openApiDocument();
+  const validate = new Ajv2020({ allErrors: true, strict: false }).compile(componentSchema(document, "DiscoveryMetricCheck"));
+  const accepted = ["0.3", "0.0000001", "9".repeat(100), 0, Number.MAX_SAFE_INTEGER, -Number.MAX_SAFE_INTEGER];
+  const rejected = [0.3, 0.0000001, 1e20, Number.MAX_SAFE_INTEGER + 2, -Number.MAX_SAFE_INTEGER - 2, "9".repeat(101), `1.${"1".repeat(101)}`, "00.3", ".3", "+0.3", "1e-7", "1.", "-"];
+
+  for (const operator of ["eq", "lt", "lte", "gt", "gte"] as const) {
+    const metric = metricCheck("0.3", operator);
+    assert.equal(validate(metric), true, `${operator} is schema-valid`);
+    assert.doesNotThrow(() => parseBrief(briefWithMetric(metric)), `${operator} is runtime-valid`);
+  }
+  for (const threshold of accepted) {
+    const metric = metricCheck(threshold);
+    assert.equal(validate(metric), true, `${String(threshold)} is schema-valid`);
+    assert.doesNotThrow(() => parseBrief(briefWithMetric(metric)), `${String(threshold)} is runtime-valid`);
+  }
+  for (const threshold of rejected) {
+    const metric = metricCheck(threshold);
+    assert.equal(validate(metric), false, `${String(threshold)} is schema-invalid`);
+    assert.throws(() => parseBrief(briefWithMetric(metric)), /threshold/i, `${String(threshold)} is runtime-invalid`);
+  }
+});
+
 test("OpenAPI no longer exposes the retired home feed route", async () => {
   const routes = await openApiRoutes();
 
@@ -412,6 +438,25 @@ async function openApiRoutes(): Promise<ReadonlySet<string>> {
   return new Set(
     [...spec.matchAll(/^  (\/v1\/[^:]+):$/gm)].map((match) => match[1]),
   );
+}
+
+function metricCheck(threshold: number | string, operator = "eq") {
+  return {
+    metric_key: "revenue_growth_yoy",
+    unit: "ratio",
+    period_kind: "fiscal_q",
+    operator,
+    threshold,
+    max_age_days: 120,
+  };
+}
+
+function briefWithMetric(metric: ReturnType<typeof metricCheck>): unknown {
+  const brief = briefFixture();
+  return {
+    ...brief,
+    criteria: [{ ...brief.criteria[0], metric }],
+  };
 }
 
 type OpenApiDocument = Record<string, unknown>;
@@ -746,15 +791,15 @@ function assertDiscoveryMetricCheckContract(document: OpenApiDocument): void {
 function assertExactDecimalThreshold(schema: OpenApiSchema, label: string): void {
   assert.deepEqual(schema, {
     oneOf: [
-      { type: "number" },
+      { type: "integer", minimum: -9007199254740991, maximum: 9007199254740991 },
       {
         type: "string",
         minLength: 1,
         maxLength: 102,
-        pattern: "^[+-]?(?:(?:[0-9]+)(?:\\.[0-9]+)?|\\.[0-9]+)$",
+        pattern: "^-?(?=.{1,101}(?![\\s\\S]))(?:0|[1-9][0-9]{0,99})(?:\\.[0-9]{1,100})?(?![\\s\\S])",
       },
     ],
-  }, `${label} accepts legacy numbers and bounded canonical decimal strings`);
+  }, `${label} accepts safe integer compatibility numbers and bounded canonical decimal strings`);
 }
 
 function assertClosedRequiredObject(document: OpenApiDocument, component: string, required: readonly string[]): void {

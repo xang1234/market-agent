@@ -104,7 +104,7 @@ test('ThesisPanel completes drafts and saves under StrictMode', async () => {
   }
 })
 
-test('ThesisPanel accepts and submits fractional metric thresholds', async () => {
+test('ThesisPanel normalizes a legacy fractional metric threshold to exact text before saving', async () => {
   const calls: Array<{ input: string; init?: RequestInit }> = []
   const history = currentHistory()
   history.thesis!.conditions[0]!.metric!.threshold = 40.5
@@ -115,14 +115,13 @@ test('ThesisPanel accepts and submits fractional metric thresholds', async () =>
   }
   const harness = await mountPanel({ fetchImpl })
   try {
-    const threshold = harness.document.querySelector<HTMLInputElement>('input[type="number"][value="40.5"]')!
-    assert.equal(threshold.step, 'any')
-    assert.equal(threshold.validity.stepMismatch, false)
+    const threshold = harness.document.querySelector<HTMLInputElement>('input[type="text"][value="40.5"]')!
+    assert.equal(threshold.inputMode, 'decimal')
 
     await clickButton(harness.document, 'Save thesis')
     const saveCall = calls.find((call) => call.init?.method === 'PUT')
     assert.ok(saveCall)
-    assert.equal(JSON.parse(String(saveCall.init?.body)).conditions[0].metric.threshold, 40.5)
+    assert.equal(JSON.parse(String(saveCall.init?.body)).conditions[0].metric.threshold, '40.5')
   } finally {
     await harness.unmount()
   }

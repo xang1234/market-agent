@@ -2243,13 +2243,15 @@ components:
         operator: { type: string, enum: [eq, lt, lte, gt, gte] }
         threshold:
           oneOf:
-            # Legacy numeric JSON remains accepted. Clients needing exact
-            # PostgreSQL numeric precision should send the decimal-string form.
-            - type: number
+            # Compatibility form: JSON's only exact numeric thresholds are
+            # bounded integers. Fractions must use canonical decimal text.
+            - type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
             - type: string
               minLength: 1
               maxLength: 102
-              pattern: '^[+-]?(?:(?:[0-9]+)(?:\.[0-9]+)?|\.[0-9]+)$'
+              pattern: '^-?(?=.{1,101}(?![\s\S]))(?:0|[1-9][0-9]{0,99})(?:\.[0-9]{1,100})?(?![\s\S])'
         max_age_days: { type: integer, minimum: 1, maximum: 730 }
     DiscoveryCriterion:
       type: object

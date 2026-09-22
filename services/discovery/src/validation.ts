@@ -1,10 +1,19 @@
-import { parseThesisConditions, type ThesisMetricCheck } from "../../agents/src/thesis-types.ts";
+import { parseStoredThesisConditions, parseThesisConditions, type ThesisCondition, type ThesisMetricCheck } from "../../agents/src/thesis-types.ts";
 import type { LlmChatMessage } from "../../llm/src/router.ts";
 import { DiscoveryError, type Brief, type Criterion, type Mechanism } from "./types.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function parseBrief(value: unknown): Brief {
+  return parseBriefWithConditions(value, parseThesisConditions);
+}
+
+/** Converts legacy durable numeric thresholds to canonical text while reading a saved brief. */
+export function parseStoredBrief(value: unknown): Brief {
+  return parseBriefWithConditions(value, parseStoredThesisConditions);
+}
+
+function parseBriefWithConditions(value: unknown, parseConditions: (value: unknown) => ThesisCondition[]): Brief {
   const brief = record(value, "brief", [
     "schema_version", "question", "market", "horizon_months", "lookback_months", "mechanisms", "criteria",
     "seed_queries", "exclusions", "preferences", "queries",
@@ -15,7 +24,7 @@ export function parseBrief(value: unknown): Brief {
     if (mechanismIds.has(mechanism.mechanism_id)) invalid("brief.mechanisms mechanism_id must be unique");
     mechanismIds.add(mechanism.mechanism_id);
   }
-  const criteria = array(brief.criteria, "brief.criteria", 1, 8).map(parseCriterion);
+  const criteria = array(brief.criteria, "brief.criteria", 1, 8).map((criterion, index) => parseCriterion(criterion, index, parseConditions));
   const criterionIds = new Set<string>();
   for (const criterion of criteria) {
     if (criterionIds.has(criterion.criterion_id)) invalid("brief.criteria criterion_id must be unique");
@@ -71,7 +80,7 @@ function parseMechanism(value: unknown, index: number): Mechanism {
   };
 }
 
-function parseCriterion(value: unknown, index: number): Criterion {
+function parseCriterion(value: unknown, index: number, parseConditions: (value: unknown) => ThesisCondition[]): Criterion {
   const criterion = record(value, `brief.criteria[${index}]`, ["criterion_id", "importance", "statement", "falsifier", "metric"]);
   if (criterion.importance !== "must" && criterion.importance !== "prefer") invalid(`brief.criteria[${index}].importance is invalid`);
   const parsed: Criterion = {
@@ -83,7 +92,7 @@ function parseCriterion(value: unknown, index: number): Criterion {
   if (criterion.metric !== undefined) {
     record(criterion.metric, `brief.criteria[${index}].metric`, ["metric_key", "unit", "period_kind", "operator", "threshold", "max_age_days"]);
     try {
-      parsed.metric = parseThesisConditions([{
+      parsed.metric = parseConditions([{
         condition_id: parsed.criterion_id,
         statement: parsed.statement,
         falsifier: parsed.falsifier,

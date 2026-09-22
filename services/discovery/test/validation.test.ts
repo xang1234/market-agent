@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseBrief, validateModelRequest } from "../src/validation.ts";
+import { parseBrief, parseStoredBrief, validateModelRequest } from "../src/validation.ts";
 import { briefFixture, packetFixture, skepticFixture } from "./fixtures.ts";
 
 test("briefs reject unsupported scope and model requests enforce approved ceilings", () => {
@@ -18,6 +18,21 @@ test("brief parsing rejects undeclared IDs and unknown JSON keys", () => {
     queries: [{ mechanism_id: "40000000-0000-4000-8000-000000000099", query: "Unknown mechanism" }],
   }));
   assert.throws(() => parseBrief({ ...briefFixture(), extra: true }));
+});
+
+test("stored briefs normalize legacy fractional thresholds before evaluation", () => {
+  const brief = briefFixture();
+  brief.criteria[0]!.metric = {
+    metric_key: "revenue_growth_yoy",
+    unit: "ratio",
+    period_kind: "fiscal_q",
+    operator: "lte",
+    threshold: 0.0000001,
+    max_age_days: 90,
+  };
+
+  assert.throws(() => parseBrief(brief), /threshold/i);
+  assert.equal(parseStoredBrief(brief).criteria[0]?.metric?.threshold, "0.0000001");
 });
 
 test("skeptic fixture cites its separate risk claim", () => {

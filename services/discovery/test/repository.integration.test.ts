@@ -260,7 +260,7 @@ test("brief saves reject an unregistered metric key", dbOptions, async (t) => {
   const { repo, userId } = await withCampaignDb(t);
   const campaign = await repo.createCampaign(userId, { name: "Metrics", question: "Which US-listed companies benefit from grid modernization spending?" });
   const brief = briefFixture();
-  brief.criteria[0]!.metric = { metric_key: "not_registered", unit: "ratio", period_kind: "fiscal_q", operator: "gte", threshold: 0.1, max_age_days: 90 };
+  brief.criteria[0]!.metric = { metric_key: "not_registered", unit: "ratio", period_kind: "fiscal_q", operator: "gte", threshold: "0.1", max_age_days: 90 };
   await assert.rejects(repo.saveBrief(userId, campaign.campaign_id, 0, brief), { code: "validation" });
 });
 

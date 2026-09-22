@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { listCandidates, listEvents } from "./api.ts";
+import { listCandidates, listEvents, saveBrief } from "./api.ts";
+import { briefFixture } from "../../../services/discovery/test/fixtures.ts";
 
 test("rejects candidate responses with a non-HTTPS source URL", async () => {
   // This would catch source URLs being passed to an anchor without scheme validation.
@@ -28,6 +29,39 @@ test('lists a later trail page with the supplied event cursor', async () => {
   })
   assert.match(requested, /\/events\?after=12$/)
 })
+
+test("rejects a fractional numeric metric threshold in a Discovery response", async () => {
+  const outgoingBrief = briefFixture();
+  outgoingBrief.criteria[0]!.metric = {
+    metric_key: "revenue_growth_yoy",
+    unit: "ratio",
+    period_kind: "fiscal_q",
+    operator: "lte",
+    threshold: "0.3",
+    max_age_days: 90,
+  };
+  const legacyResponseBrief = structuredClone(outgoingBrief);
+  legacyResponseBrief.criteria[0]!.metric!.threshold = 0.0000001;
+
+  await assert.rejects(
+    saveBrief({
+      userId: "user-1",
+      campaignId: "campaign-1",
+      expectedVersion: 0,
+      brief: outgoingBrief,
+      fetchImpl: async () => json({
+        brief_id: "brief-1",
+        campaign_id: "campaign-1",
+        version: 1,
+        brief: legacyResponseBrief,
+        hash: "sha256:brief",
+        approved_at: null,
+        created_at: "2026-09-22T00:00:00.000Z",
+      }),
+    }),
+    /Invalid exact decimal response/,
+  );
+});
 
 function candidateWithUrl(url: string): unknown {
   return {

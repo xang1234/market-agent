@@ -36,3 +36,17 @@ Focused GREEN evidence:
 - `DiscoveryMetricCheck` is the shared request/response component for every reachable Discovery brief surface. Its contract now lists `eq`, `lt`, `lte`, `gt`, and `gte`, preserves deliberately supported legacy JSON numbers, and documents bounded non-exponent decimal strings. Executable mutations of the enum, numeric union branch, and string pattern each fail. The manual web decoder’s `Brief` type remains the shared `ThesisMetricCheck` number-or-string contract; web typecheck/build pass.
 
 Focused verification: dev-api thesis evidence 1/1, Agents thesis 22/22, Discovery assessment/validation/contracts 22/22, OpenAPI 11/11, and web typecheck/build passed. The strict direct source compile reached six pre-existing `services/snapshot` diagnostics through unchanged sealing imports; no changed-source diagnostic was reported. Lint has the existing unrelated `web/src/analyst-grids/useGridRun.ts:52` exhaustive-deps warning and no errors.
+
+## Final re-review 2 fix
+
+### RED
+
+- Actual Ajv validation accepted a JSON numeric `0.0000001` and a 101-digit string through the published `DiscoveryMetricCheck` schema, while `parseBrief` rejected both. JavaScript serializes the fractional number as `1e-7`, which cannot be treated as an exact public decimal; the parser also limits total decimal digits to 100.
+
+### GREEN
+
+- Public fractional thresholds are now canonical decimal strings. The only JSON-number compatibility branch is an exactly representable safe integer from `-9007199254740991` through `9007199254740991`. The parser, OpenAPI schema, and browser decoder use the same canonical grammar: an optional minus sign, one `0` or a nonzero-leading integer, optional fractional digits, at most 100 digits and 100 fractional places, with no whitespace, plus sign, exponent, leading zeros, or trailing decimal point.
+- Durable campaign briefs and thesis versions still accept earlier finite fractional JSON numbers on read, convert their JavaScript representation (including scientific serialization) to bounded canonical text, and then use the normal public parser. New writes and browser responses use the strict contract. The thesis editor displays a text decimal field and normalizes a legacy fractional draft before saving.
+- The executable OpenAPI semantic test compiles the real component with Ajv and checks every comparison operator. It proves agreement with `parseBrief` for `"0.3"`, `"0.0000001"`, a 100-digit integer string, safe integer numbers, numerical `0.0000001`, unsafe numbers, 101 digits, excess scale, signs, exponents, leading zeros, and malformed literals. Contract mutations of the comparison enum, numeric branch, and decimal pattern fail.
+
+Focused verification: Dev API thesis evidence **1/1**; Agents types/evaluator **24/24**; Discovery assessment/validation/contracts **23/23**; OpenAPI **12/12**; focused web API/ThesisPanel **15/15**; web typecheck and production build pass. Strict affected-source TypeScript passes with `--skipLibCheck`; the unskipped direct invocation reaches pre-existing Node declaration incompatibilities only. Lint remains clean apart from the unrelated `web/src/analyst-grids/useGridRun.ts:52` warning. `DISCOVERY_ENABLED=false` is unchanged and the human release evaluation remains Pending.
