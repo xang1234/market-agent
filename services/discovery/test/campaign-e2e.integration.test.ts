@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createCampaignE2eHarness, recordedFixtureAssessments } from "./e2e-harness.ts";
-import { dbOptions } from "./db-fixture.ts";
+import { assertRecordedAssessmentCorpus, createCampaignE2eHarness, recordedFixtureAssessments } from "./e2e-harness.ts";
+import { dbOptions, withCampaignDb } from "./db-fixture.ts";
 
 test("the pending operator table has ten stable actual-candidate assessment and source references", async () => {
   const assessments = await recordedFixtureAssessments();
@@ -56,4 +56,20 @@ test("recorded fixtures exclude misleading and counterevidenced companies and co
     await h.assertRecordedAssessmentBijection();
     await h.assertAllLimitsRespected();
   }
+});
+
+test("the persisted ten-candidate review corpus is globally bijective across actual fixture runs", dbOptions, async (t) => {
+  const database = await withCampaignDb(t);
+  const executions: Array<{ fixture: "power-infrastructure" | "industrial-automation" | "supply-disruption"; run_id: string }> = [];
+  for (const fixture of ["power-infrastructure", "industrial-automation", "supply-disruption"] as const) {
+    const h = await createCampaignE2eHarness(t, fixture, database);
+    const started = await h.approveAndStart();
+    await h.workerUntilTerminal();
+    assert.equal((await h.getRun(started.run_id)).status, "completed", fixture);
+    await h.assertFixtureOutcome();
+    await h.assertRecordedAssessmentBijection();
+    await h.assertAllLimitsRespected();
+    executions.push({ fixture, run_id: started.run_id });
+  }
+  await assertRecordedAssessmentCorpus(database.db, executions);
 });

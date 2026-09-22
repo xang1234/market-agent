@@ -54,6 +54,16 @@ type Fixture = {
 
 type RecordedAssessment = { fixture: FixtureName; assessment_id: string; candidate_id: string; primary_source_id: string; counter_source_id: string };
 type OperatorReviewRow = Omit<RecordedAssessment, "fixture">;
+type CandidateBearingFixture = Exclude<FixtureName, "unsupported-theme">;
+type CampaignDatabase = Awaited<ReturnType<typeof withCampaignDb>>;
+type CorpusExecution = { fixture: CandidateBearingFixture; run_id: string };
+type CorpusRecord = RecordedAssessment & {
+  run_id: string;
+  runtime_candidate_id: string;
+  issuer_id: string;
+  primary_document_id: string;
+  counter_document_id: string;
+};
 
 const FIXTURE_CANDIDATE_COUNTS: Readonly<Record<FixtureName, number>> = Object.freeze({
   "power-infrastructure": 3,
@@ -70,9 +80,9 @@ const FOREIGN_USER = "10000000-0000-4000-8000-000000000002";
  * transports use strict named fixture responses. A new fixture must declare
  * every operation it consumes; unexpected calls fail at the provider boundary.
  */
-export async function createCampaignE2eHarness(t: TestContext, name: FixtureName) {
+export async function createCampaignE2eHarness(t: TestContext, name: FixtureName, sharedDatabase?: CampaignDatabase) {
   const fixture = await loadFixture(name);
-  const database = await withCampaignDb(t);
+  const database = sharedDatabase ?? await withCampaignDb(t);
   const { db, clock } = database;
   const repo = createDiscoveryRepository(db, { clock: clock.now });
   const service = createDiscoveryService({ repo, reads: createDiscoveryReadModel(db, clock.now), readiness: () => ({ ready: true, missing: [] }) });
@@ -373,8 +383,8 @@ export async function createCampaignE2eHarness(t: TestContext, name: FixtureName
         assert.ok(candidate.snapshot_id);
         const snapshot = snapshotsById.get(candidate.snapshot_id);
         assert.ok(snapshot, `assessment ${fixtureCandidate.assessment_id} snapshot is persisted`);
-        assert.deepEqual(sortedUnique(snapshot.source_ids), sortedUnique([reviewRow.primary_source_id, reviewRow.counter_source_id]), `assessment ${fixtureCandidate.assessment_id} snapshot cites exactly its primary and counter sources`);
-        assert.deepEqual(sortedUnique(snapshot.document_refs), sortedUnique(fixtureCandidate.excerpts.map((excerpt) => excerpt.document_id)), `assessment ${fixtureCandidate.assessment_id} snapshot references exactly its primary and counter documents`);
+        assert.deepEqual(sorted(snapshot.source_ids), sorted([reviewRow.primary_source_id, reviewRow.counter_source_id]), `assessment ${fixtureCandidate.assessment_id} snapshot cites exactly its primary and counter sources`);
+        assert.deepEqual(sorted(snapshot.document_refs), sorted(fixtureCandidate.excerpts.map((excerpt) => excerpt.document_id)), `assessment ${fixtureCandidate.assessment_id} snapshot references exactly its primary and counter documents`);
         await this.assertSnapshotVerifies(candidate.snapshot_id);
       }
     },
@@ -494,6 +504,99 @@ export async function recordedFixtureAssessments() {
   return records;
 }
 
+/**
+ * Executes no fixture metadata shortcut: callers provide the three durable run
+ * IDs after the real worker has finished in one database. The query below can
+ * therefore detect reuse that per-run assertions cannot observe.
+ */
+export async function assertRecordedAssessmentCorpus(db: { query: Function }, executions: readonly CorpusExecution[]): Promise<void> {
+  const requiredFixtures: CandidateBearingFixture[] = ["power-infrastructure", "industrial-automation", "supply-disruption"];
+  assert.deepEqual(executions.map((execution) => execution.fixture), requiredFixtures, "the corpus executes every candidate-bearing fixture once in its required order");
+  assert.equal(new Set(executions.map((execution) => execution.run_id)).size, requiredFixtures.length, "the corpus uses distinct persisted runs");
+
+  const fixtures = await Promise.all(executions.map(async (execution) => ({ execution, fixture: await loadFixture(execution.fixture) })));
+  const records = fixtures.flatMap(({ execution, fixture }) => fixture.candidates.map((candidate) => ({
+    fixture: fixture.fixture,
+    run_id: execution.run_id,
+    runtime_candidate_id: runtimeCandidateId(fixture, execution.run_id, candidate),
+    issuer_id: candidate.identity.issuer_id,
+    primary_document_id: candidate.excerpts[0]!.document_id,
+    counter_document_id: candidate.excerpts[1]!.document_id,
+    ...fixtureReviewRow(candidate),
+  } satisfies CorpusRecord)));
+  assert.equal(records.length, 10, "the shared database corpus has ten executed fixture candidates");
+  assert.equal(new Set(records.map((record) => record.assessment_id)).size, records.length, "the corpus assessment labels are globally distinct");
+  assert.equal(new Set(records.map((record) => record.candidate_id)).size, records.length, "the corpus fixture candidate IDs are globally distinct");
+  assert.equal(new Set(records.map((record) => record.runtime_candidate_id)).size, records.length, "the corpus runtime candidate IDs are globally distinct");
+  assert.equal(new Set(records.map((record) => record.issuer_id)).size, records.length, "the corpus canonical identities are globally distinct");
+  assert.equal(new Set(records.map((record) => record.primary_source_id)).size, records.length, "the corpus primary source IDs are globally distinct");
+  assert.equal(new Set(records.map((record) => record.counter_source_id)).size, records.length, "the corpus counter source IDs are globally distinct");
+  assert.equal(new Set(records.flatMap((record) => [record.primary_source_id, record.counter_source_id])).size, records.length * 2, "no source ID can be reused between fixture candidates");
+  assert.equal(new Set(records.map((record) => record.primary_document_id)).size, records.length, "the corpus primary document IDs are globally distinct");
+  assert.equal(new Set(records.map((record) => record.counter_document_id)).size, records.length, "the corpus counter document IDs are globally distinct");
+  assert.equal(new Set(records.flatMap((record) => [record.primary_document_id, record.counter_document_id])).size, records.length * 2, "no document ID can be reused between fixture candidates");
+
+  const tableRows = (await recordedFixtureAssessments()).map(({ fixture: _fixture, ...row }) => row);
+  const expectedTableRows = records.map(({ fixture: _fixture, run_id: _runId, runtime_candidate_id: _runtimeCandidateId, issuer_id: _issuerId, primary_document_id: _primaryDocumentId, counter_document_id: _counterDocumentId, ...row }) => row);
+  assert.deepEqual(tableRows, expectedTableRows, "the exact ten Pending operator rows map to the executed fixture candidates");
+  assert.equal(new Set(tableRows.map((row) => row.assessment_id)).size, records.length, "an operator assessment row cannot be reused");
+  assert.equal(new Set(tableRows.map((row) => row.candidate_id)).size, records.length, "an operator candidate row cannot be reused");
+  assert.equal(new Set(tableRows.map((row) => JSON.stringify([row.primary_source_id, row.counter_source_id]))).size, records.length, "an operator source pair cannot be reused");
+
+  const persisted = await db.query<{ run_id: string; candidate_id: string; issuer_id: string; assessment: unknown; snapshot_id: string | null }>(
+    "select run_id::text,candidate_id::text,issuer_id::text,assessment,snapshot_id::text from discovery_candidates where run_id=any($1::uuid[]) order by run_id,candidate_id",
+    [executions.map((execution) => execution.run_id)],
+  );
+  assert.equal(persisted.rowCount, records.length, "the shared database has exactly ten persisted candidates for the corpus runs");
+  assert.equal(new Set(persisted.rows.map((row) => row.candidate_id)).size, records.length, "persisted corpus candidate IDs are globally distinct");
+  assert.deepEqual(sorted(persisted.rows.map((row) => row.candidate_id)), sorted(records.map((record) => record.runtime_candidate_id)), "persisted candidate IDs equal all ten executed runtime candidates");
+  assert.equal(new Set(persisted.rows.map((row) => row.issuer_id)).size, records.length, "persisted corpus canonical identities are globally distinct");
+  assert.deepEqual(sorted(persisted.rows.map((row) => row.issuer_id)), sorted(records.map((record) => record.issuer_id)), "persisted canonical identities equal the fixture identities");
+
+  const persistedAssessmentIds = persisted.rows.map((row) => persistedAssessmentCandidateId(row.assessment));
+  assert.equal(new Set(persistedAssessmentIds).size, records.length, "persisted decision IDs are globally distinct");
+  assert.deepEqual(sorted(persistedAssessmentIds), sorted(records.map((record) => record.runtime_candidate_id)), "persisted decision IDs equal all ten executed runtime candidates");
+
+  const snapshotIds = persisted.rows.map((row) => {
+    assert.ok(row.snapshot_id, `persisted candidate ${row.candidate_id} has a sealed snapshot`);
+    return row.snapshot_id;
+  });
+  assert.equal(new Set(snapshotIds).size, records.length, "sealed snapshot IDs are globally distinct");
+  const snapshots = await db.query<{ snapshot_id: string; source_ids: string[]; document_refs: string[] }>(
+    "select snapshot_id::text,source_ids,document_refs from snapshots where snapshot_id=any($1::uuid[]) order by snapshot_id",
+    [snapshotIds],
+  );
+  assert.equal(snapshots.rowCount, records.length, "every corpus candidate has one persisted snapshot");
+  assert.equal(new Set(snapshots.rows.map((snapshot) => snapshot.snapshot_id)).size, records.length, "the persisted corpus snapshot IDs are globally distinct");
+  assert.deepEqual(sorted(snapshots.rows.map((snapshot) => snapshot.snapshot_id)), sorted(snapshotIds), "persisted snapshot IDs equal the candidate-held seals");
+
+  const candidatesByRuntimeId = new Map(persisted.rows.map((row) => [row.candidate_id, row]));
+  const snapshotsById = new Map(snapshots.rows.map((snapshot) => [snapshot.snapshot_id, snapshot]));
+  for (const record of records) {
+    const tableRow = tableRows.find((row) => row.assessment_id === record.assessment_id);
+    assert.deepEqual(tableRow, {
+      assessment_id: record.assessment_id,
+      candidate_id: record.candidate_id,
+      primary_source_id: record.primary_source_id,
+      counter_source_id: record.counter_source_id,
+    }, `operator row ${record.assessment_id} exactly maps to its executed candidate and sources`);
+    const candidate = candidatesByRuntimeId.get(record.runtime_candidate_id);
+    assert.ok(candidate, `fixture assessment ${record.assessment_id} has a persisted candidate`);
+    assert.equal(candidate.run_id, record.run_id, `fixture assessment ${record.assessment_id} stays bound to its run`);
+    assert.equal(candidate.issuer_id, record.issuer_id, `fixture assessment ${record.assessment_id} stays bound to its canonical identity`);
+    assert.equal(persistedAssessmentCandidateId(candidate.assessment), record.runtime_candidate_id, `fixture assessment ${record.assessment_id} has its own persisted decision`);
+    assert.ok(candidate.snapshot_id);
+    const snapshot = snapshotsById.get(candidate.snapshot_id);
+    assert.ok(snapshot, `fixture assessment ${record.assessment_id} has its own persisted seal`);
+    assert.deepEqual(snapshot.source_ids, [record.primary_source_id, record.counter_source_id], `fixture assessment ${record.assessment_id} seal has exactly its ordered source pair`);
+    assert.deepEqual(snapshot.document_refs, [record.primary_document_id, record.counter_document_id], `fixture assessment ${record.assessment_id} seal has exactly its ordered document pair`);
+  }
+  assert.equal(new Set(snapshots.rows.map((snapshot) => JSON.stringify(snapshot.source_ids))).size, records.length, "persisted source pairs cannot be reused across fixtures");
+  assert.equal(new Set(snapshots.rows.map((snapshot) => JSON.stringify(snapshot.document_refs))).size, records.length, "persisted document pairs cannot be reused across fixtures");
+  assert.deepEqual(sorted(snapshots.rows.flatMap((snapshot) => snapshot.source_ids)), sorted(records.flatMap((record) => [record.primary_source_id, record.counter_source_id])), "persisted source IDs equal the ten fixture source pairs without deduplication");
+  assert.deepEqual(sorted(snapshots.rows.flatMap((snapshot) => snapshot.document_refs)), sorted(records.flatMap((record) => [record.primary_document_id, record.counter_document_id])), "persisted document IDs equal the ten fixture document pairs without deduplication");
+}
+
 function fixtureReviewRow(candidate: FixtureCandidate): OperatorReviewRow {
   return {
     assessment_id: candidate.assessment_id,
@@ -531,6 +634,10 @@ function persistedAssessmentCandidateId(value: unknown): string {
 
 function sortedUnique(values: readonly string[]): string[] {
   return [...new Set(values)].sort();
+}
+
+function sorted(values: readonly string[]): string[] {
+  return [...values].sort();
 }
 
 /**
