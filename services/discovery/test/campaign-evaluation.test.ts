@@ -135,7 +135,13 @@ test("a controllable slow transport is aborted per attempt and production keeps 
       request_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       resource: "search",
       phase: "research",
-      execute: ({ signal }) => new Promise<never>((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true })),
+      execute: ({ signal }) => new Promise<never>((_resolve, reject) => {
+        const guard = setTimeout(() => reject(new Error("attempt signal did not abort")), 1_000);
+        signal.addEventListener("abort", () => {
+          clearTimeout(guard);
+          reject(signal.reason);
+        }, { once: true });
+      }),
     }),
     (error: unknown) => error instanceof DOMException && error.name === "TimeoutError",
   );
