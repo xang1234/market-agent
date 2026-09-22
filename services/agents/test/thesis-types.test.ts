@@ -85,7 +85,7 @@ test("parseThesisConditions enforces the metric vocabulary and numeric bounds", 
     ["metric_key", { ...baseMetric, metric_key: "" }],
     ["unit", { ...baseMetric, unit: "x".repeat(101) }],
     ["period_kind", { ...baseMetric, period_kind: "calendar_q" }],
-    ["operator", { ...baseMetric, operator: "eq" }],
+    ["operator", { ...baseMetric, operator: "between" }],
     ["threshold", { ...baseMetric, threshold: Number.POSITIVE_INFINITY }],
     ["max_age_days", { ...baseMetric, max_age_days: 1.5 }],
     ["max_age_days", { ...baseMetric, max_age_days: 0 }],
@@ -97,5 +97,21 @@ test("parseThesisConditions enforces the metric vocabulary and numeric bounds", 
       () => parseThesisConditions([validCondition({ metric })]),
       new RegExp(field),
     );
+  }
+});
+
+test("parseThesisConditions accepts bounded decimal strings and rejects malformed or lossy threshold values", () => {
+  const metric = {
+    metric_key: "revenue_growth_yoy",
+    unit: "ratio",
+    period_kind: "fiscal_q",
+    operator: "eq",
+    threshold: "0.3000000000000000000000000001",
+    max_age_days: 120,
+  };
+  assert.deepEqual(parseThesisConditions([validCondition({ metric })])[0]?.metric, metric);
+
+  for (const threshold of ["1e3", "not-a-number", `1.${"1".repeat(101)}`, Number.MAX_SAFE_INTEGER + 2]) {
+    assert.throws(() => parseThesisConditions([validCondition({ metric: { ...metric, threshold } })]), /threshold/i);
   }
 });

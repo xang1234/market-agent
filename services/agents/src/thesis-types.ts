@@ -1,12 +1,15 @@
+import { parseExactDecimal, type DecimalInput } from "./exact-decimal.ts";
+
 // Browser-safe thesis contract shared by the editor, API, repository and evaluator.
 export type ThesisPeriodKind = 'point' | 'fiscal_q' | 'fiscal_y' | 'ttm';
-export type ThesisOperator = 'gte' | 'lte';
+export type ThesisOperator = 'eq' | 'lt' | 'lte' | 'gt' | 'gte';
 export type ThesisMetricCheck = {
   metric_key: string;
   unit: string;
   period_kind: ThesisPeriodKind;
   operator: ThesisOperator;
-  threshold: number;
+  /** Number keeps old payloads working; decimal text preserves a user's configured precision. */
+  threshold: DecimalInput;
   max_age_days: number;
 };
 
@@ -97,7 +100,7 @@ export class ThesisNotFoundError extends Error {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PERIOD_KINDS = new Set(["point", "fiscal_q", "fiscal_y", "ttm"]);
-const OPERATORS = new Set(["gte", "lte"]);
+const OPERATORS = new Set(["eq", "lt", "lte", "gt", "gte"]);
 
 export function parseThesisConditions(value: unknown): ThesisCondition[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > THESIS_CONDITIONS_MAX) {
@@ -132,8 +135,8 @@ export function parseThesisConditions(value: unknown): ThesisCondition[] {
         metric.operator,
         `${label}.metric.operator`,
         OPERATORS,
-      ) as "gte" | "lte";
-      const threshold = requireFiniteNumber(metric.threshold, `${label}.metric.threshold`);
+      ) as ThesisOperator;
+      const threshold = requireDecimal(metric.threshold, `${label}.metric.threshold`);
       const maxAgeDays = requireInteger(metric.max_age_days, `${label}.metric.max_age_days`, 1, 730);
       condition.metric = {
         metric_key: requireTrimmedString(metric.metric_key, `${label}.metric.metric_key`, 1, 100),
@@ -182,9 +185,9 @@ export function requireTrimmedString(
   return value;
 }
 
-function requireFiniteNumber(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new ThesisValidationError(`${label} must be a finite number`);
+function requireDecimal(value: unknown, label: string): DecimalInput {
+  if ((typeof value !== "number" && typeof value !== "string") || parseExactDecimal(value) === null) {
+    throw new ThesisValidationError(`${label} must be a bounded decimal number`);
   }
   return value;
 }

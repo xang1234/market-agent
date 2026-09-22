@@ -1,4 +1,5 @@
 import type { FinancialProvider, FinancialReadResult, PacketFact } from "../ports.ts";
+import type { DecimalInput } from "../../../agents/src/exact-decimal.ts";
 import type { CompanyIdentity } from "../types.ts";
 
 export const SUPPORTED_FINANCIAL_METRIC_KEYS = Object.freeze([
@@ -25,8 +26,8 @@ type QueryExecutor = {
 };
 
 type FactRow = Omit<PacketFact, "value_num" | "scale" | "currency" | "period_start"> & {
-  value_num: number | string;
-  scale: number | string;
+  value_num: DecimalInput;
+  scale: DecimalInput;
   currency: string | null;
   period_start: Date | string | null;
 };
@@ -89,8 +90,8 @@ function packetFactFromRow(row: FactRow): PacketFact {
   return Object.freeze({
     fact_id: row.fact_id,
     metric_key: row.metric_key,
-    value_num: Number(row.value_num),
-    scale: Number(row.scale),
+    value_num: row.value_num,
+    scale: row.scale,
     unit: row.unit,
     currency: row.currency,
     period_kind: row.period_kind,

@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import test from "node:test";
 
 import { DiscoveryError } from "../src/types.ts";
+import { createDiscoveryService } from "../src/service.ts";
 import { createDiscoveryDevApiAdapter } from "../../dev-api/src/discovery-adapter.ts";
 import { createDevApiServer, createFixtureDevApiAdapters } from "../../dev-api/src/http.ts";
 import { briefFixture } from "./fixtures.ts";
@@ -116,6 +117,29 @@ test("discovery HTTP maps malformed, foreign, stale, rate-limited, and unavailab
   assert.equal((await request(base, `/v1/discovery/campaigns/${CAMPAIGN}/draft`, { method: "POST", body: JSON.stringify({ expected_version: 0 }) })).status, 429);
   service.nextError = new DiscoveryError("unavailable", "model provider is unavailable");
   assert.equal((await request(base, `/v1/discovery/campaigns/${CAMPAIGN}/draft`, { method: "POST", body: JSON.stringify({ expected_version: 0 }) })).status, 503);
+});
+
+test("an authenticated run request receives 503 from the real unavailable readiness composition before repository creation", async (t) => {
+  let startRunCalls = 0;
+  const service = createDiscoveryService({
+    repo: { async startRun() { startRunCalls += 1; throw new Error("must not start"); } } as never,
+    reads: {} as never,
+  });
+  const server = createDevApiServer({}, {
+    adapters: { ...createFixtureDevApiAdapters(), discovery: createDiscoveryDevApiAdapter(service) },
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+  const response = await request(base, `/v1/discovery/campaigns/${CAMPAIGN}/runs`, {
+    method: "POST",
+    body: JSON.stringify({ brief_version: 1, brief_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", request_key: REQUEST }),
+  });
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: "Discovery is unavailable: model, search, reference", code: "unavailable" });
+  assert.equal(startRunCalls, 0);
 });
 
 test("discovery HTTP rejects unknown mutation fields, malformed hashes, and malformed encoded identifiers before service dispatch", async (t) => {

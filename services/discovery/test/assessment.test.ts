@@ -167,6 +167,25 @@ test("metric criteria use only canonical finite facts with the exact unit, scale
   }
 });
 
+test("an exact decimal required metric criterion stays eligible at its mathematical boundary", () => {
+  const brief = metricBrief();
+  brief.criteria[0]!.metric = {
+    metric_key: "revenue",
+    unit: "USD",
+    period_kind: "fiscal_y",
+    operator: "lte",
+    threshold: "0.3",
+    max_age_days: 90,
+  };
+  const packet = packetFixture();
+  packet.facts = [metricFact({ value_num: "0.1", scale: "3" })];
+
+  const result = decideCandidate(brief, packet, analystFixture(), skepticFixture(), "2026-09-10T12:00:00Z");
+
+  assert.equal(result.criteria[0]?.outcome, "pass");
+  assert.equal(result.state, "eligible_not_shortlisted");
+});
+
 test("numerical prose may refer to the cited fact's canonical period and observation dates", () => {
   const packet = packetFixture();
   const fact = metricFact();
@@ -331,7 +350,7 @@ function metricBrief(): Brief {
   return brief;
 }
 
-function metricFact(): PacketFact {
+function metricFact(overrides: Partial<PacketFact> = {}): PacketFact {
   return {
     fact_id: "c0000000-0000-4000-8000-000000000001",
     metric_key: "revenue",
@@ -346,5 +365,6 @@ function metricFact(): PacketFact {
     fiscal_year: 2026,
     fiscal_period: "FY",
     period_start: "2025-09-01T00:00:00.000Z",
+    ...overrides,
   };
 }

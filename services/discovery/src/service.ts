@@ -63,7 +63,10 @@ export function createDiscoveryService(deps: DiscoveryServiceDeps): DiscoverySer
       }
     },
     saveBrief: (userId, campaignId, expectedVersion, brief) => deps.repo.saveBrief(userId, campaignId, expectedVersion, brief),
-    startRun: (userId, campaignId, input) => deps.repo.startRun(userId, campaignId, { ...input, ...snapshotRunConfiguration(runConfiguration()) }),
+    async startRun(userId, campaignId, input) {
+      assertRunReadiness(readiness());
+      return await deps.repo.startRun(userId, campaignId, { ...input, ...snapshotRunConfiguration(runConfiguration()) });
+    },
     listMetricOptions: (userId) => deps.repo.listMetricOptions(userId),
     listRuns: (userId, campaignId, cursor, limit) => deps.repo.listRuns(userId, campaignId, cursor, limit),
     getRun: (userId, runId) => deps.reads.runView(deps.repo, userId, runId),
@@ -108,6 +111,10 @@ function proposalWithServerIds(value: unknown): Brief {
 function normalizedReadiness(value: Readiness): Readiness {
   const missing = [...new Set(value.missing.filter((item) => item === "model" || item === "search" || item === "reference"))];
   return { ready: missing.length === 0, missing };
+}
+function assertRunReadiness(value: Readiness): void {
+  const readiness = normalizedReadiness(value);
+  if (!readiness.ready) throw new DiscoveryError("unavailable", `Discovery is unavailable: ${readiness.missing.join(", ")}`);
 }
 function assertVersion(value: unknown): asserts value is number {
   if (!Number.isInteger(value) || (value as number) < 0) throw new DiscoveryError("validation", "expected_version must be a non-negative integer");

@@ -60,6 +60,7 @@ test("starting a run snapshots the configured secret-free model identities and l
       },
     } as never,
     reads: {} as never,
+    readiness: () => ({ ready: true, missing: [] }),
     runConfiguration: () => ({
       model_config: [{ role: "planner", provider: "fixture", model: "brief-drafter", max_output_tokens: 800, as_of: "2026-09-13T00:00:00.000Z" }],
       limits: DEFAULT_LIMITS,
@@ -80,6 +81,41 @@ test("starting a run snapshots the configured secret-free model identities and l
     limits: DEFAULT_LIMITS,
   });
   assert.equal(JSON.stringify(received).includes("api_key"), false);
+});
+
+test("starting a run requires every missing provider capability before it reaches the repository", async () => {
+  for (const missing of ["model", "search", "reference"] as const) {
+    let startRunCalls = 0;
+    const service = createDiscoveryService({
+      repo: { async startRun() { startRunCalls += 1; throw new Error("must not start"); } } as never,
+      reads: {} as never,
+      readiness: () => ({ ready: false, missing: [missing] }),
+    });
+
+    await assert.rejects(
+      service.startRun(USER, CAMPAIGN, { brief_version: 1, brief_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", request_key: "40000000-0000-4000-8000-000000000001" }),
+      (error: unknown) => error instanceof DiscoveryError && error.code === "unavailable" && error.message.includes(missing),
+    );
+    assert.equal(startRunCalls, 0, `${missing} readiness prevents repository run creation`);
+  }
+});
+
+test("campaign questions and saved briefs remain writable while run readiness is unavailable", async () => {
+  let created = 0;
+  let saved = 0;
+  const service = createDiscoveryService({
+    repo: {
+      async createCampaign() { created += 1; return { campaign_id: CAMPAIGN }; },
+      async saveBrief() { saved += 1; return { brief_id: "brief", campaign_id: CAMPAIGN, version: 1, brief: briefFixture(), hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", approved_at: null, created_at: "2026-09-10T00:00:00.000Z" }; },
+    } as never,
+    reads: {} as never,
+  });
+
+  await service.createCampaign(USER, { name: "Grid", question: "Which US-listed companies benefit from grid modernization spending?" });
+  await service.saveBrief(USER, CAMPAIGN, 0, briefFixture());
+
+  assert.equal(created, 1);
+  assert.equal(saved, 1);
 });
 
 function draftHarness(options: { changeAfterDraft?: boolean } = {}) {

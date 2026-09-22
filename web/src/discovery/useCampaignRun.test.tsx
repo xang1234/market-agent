@@ -62,6 +62,42 @@ test("aborts an old campaign request before a changed run can render it", async 
   }
 });
 
+test("does not return a previous account's same-run value or error while the next account resolves", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>");
+  const restore = installDomGlobals(dom.window as unknown as Window);
+  const userBResult = deferred<RunView>();
+  let userACalls = 0;
+  const fetchRun = async ({ userId }: { userId: string }) => {
+    if (userId === "user-a") {
+      userACalls += 1;
+      if (userACalls === 1) return { ...runView("running"), user_id: "user-a" };
+      throw new Error("User A private refresh error");
+    }
+    return userBResult.promise;
+  };
+  function Probe({ userId }: { userId: string }) {
+    const state = useCampaignRun({ userId, runId: "shared-run", fetchRun, successIntervalMs: 5, errorIntervalMs: 1_000 });
+    return <p>{state.run?.user_id ?? "empty"}|{state.error ?? ""}</p>;
+  }
+  const root = createRoot(dom.window.document.getElementById("root")!);
+  try {
+    await act(async () => { root.render(<Probe userId="user-a" />); });
+    await act(async () => { await delay(25); });
+    assert.match(dom.window.document.body.textContent ?? "", /^user-a\|User A private refresh error/);
+
+    await act(async () => { root.render(<Probe userId="user-b" />); });
+    await act(async () => undefined);
+    assert.equal(dom.window.document.body.textContent, "empty|", "the prior account's result and error are immediately ineligible");
+
+    userBResult.resolve({ ...runView("completed"), user_id: "user-b" });
+    await act(async () => undefined);
+    assert.equal(dom.window.document.body.textContent, "user-b|");
+  } finally {
+    await act(async () => root.unmount());
+    restore();
+  }
+});
+
 test("does not apply an aborted hidden-tab response after visibility resumes", async () => {
   // This would catch a response race where an aborted hidden-tab request paints over the resumed poll.
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>");
@@ -104,6 +140,7 @@ function runView(status: RunStatus, runId = "run-1"): RunView {
 }
 
 function delay(milliseconds: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
+function deferred<T>() { let resolve!: (value: T) => void; return { promise: new Promise<T>((next) => { resolve = next; }), resolve }; }
 
 function installDomGlobals(domWindow: Window): () => void {
   const globals = globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean; document?: Document; window?: Window };

@@ -17,8 +17,8 @@ export function useCampaignRun(args: {
   onAcceptedRun?: (run: RunView) => void;
 }): CampaignRunState {
   const { userId, runId, fetchRun: fetchRunOverride, successIntervalMs = 2_000, errorIntervalMs = 10_000, refreshKey, onAcceptedRun } = args;
-  const [result, setResult] = useState<{ runId: string; run: RunView } | null>(null);
-  const [failure, setFailure] = useState<{ runId: string; message: string } | null>(null);
+  const [result, setResult] = useState<{ userId: string; runId: string; run: RunView } | null>(null);
+  const [failure, setFailure] = useState<{ userId: string; runId: string; message: string } | null>(null);
 
   useEffect(() => {
     if (runId === null) return;
@@ -47,13 +47,13 @@ export function useCampaignRun(args: {
       try {
         const next = await fetchRun({ userId, runId: activeRunId, signal: request.signal });
         if (disposed || request.signal.aborted || controller !== request) return;
-        setResult({ runId: activeRunId, run: next });
+        setResult({ userId, runId: activeRunId, run: next });
         onAcceptedRun?.(next);
         setFailure(null);
         if (!TERMINAL.has(next.status)) schedule(successIntervalMs);
       } catch (error) {
         if (disposed || request.signal.aborted || controller !== request) return;
-        setFailure({ runId: activeRunId, message: error instanceof Error ? error.message : "Research progress could not be refreshed." });
+        setFailure({ userId, runId: activeRunId, message: error instanceof Error ? error.message : "Research progress could not be refreshed." });
         schedule(errorIntervalMs);
       } finally {
         if (controller === request) inFlight = false;
@@ -74,7 +74,7 @@ export function useCampaignRun(args: {
   }, [userId, runId, successIntervalMs, errorIntervalMs, fetchRunOverride, refreshKey, onAcceptedRun]);
 
   return {
-    run: result?.runId === runId ? result.run : null,
-    error: failure?.runId === runId ? failure.message : null,
+    run: result?.userId === userId && result.runId === runId ? result.run : null,
+    error: failure?.userId === userId && failure.runId === runId ? failure.message : null,
   };
 }

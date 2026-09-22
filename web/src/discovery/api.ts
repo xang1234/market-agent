@@ -163,7 +163,7 @@ function brief(value: unknown): Brief {
       statement: string(row, "statement"), falsifier: string(row, "falsifier"),
       ...(metric ? { metric: {
         metric_key: string(metric, "metric_key"), unit: string(metric, "unit"), period_kind: oneOf(string(metric, "period_kind"), ["point", "fiscal_q", "fiscal_y", "ttm"] as const, "metric period"),
-        operator: oneOf(string(metric, "operator"), ["gte", "lte"] as const, "metric operator"), threshold: number(metric, "threshold"), max_age_days: integer(metric, "max_age_days"),
+        operator: oneOf(string(metric, "operator"), ["eq", "lt", "lte", "gt", "gte"] as const, "metric operator"), threshold: decimal(metric, "threshold"), max_age_days: integer(metric, "max_age_days"),
       } } : {}),
     };
   });
@@ -249,6 +249,7 @@ function boolean(row: JsonRecord, key: string): boolean { if (typeof row[key] !=
 function nullableString(value: unknown): string | null { if (value === null) return null; return stringValue(value, "nullable string"); }
 function nullableInteger(value: unknown): number | null { if (value === null) return null; if (typeof value !== "number" || !Number.isInteger(value)) throw new Error("Invalid number response."); return value; }
 function oneOf<T extends string | number>(value: string | number, choices: readonly T[], label: string): T { if (!choices.includes(value as T)) throw new Error(`Invalid ${label} response.`); return value as T; }
+function decimal(row: JsonRecord, key: string): number | string { const value = field(row, key); if ((typeof value !== "number" && typeof value !== "string") || (typeof value === "string" && value.trim() !== value)) throw new Error("Invalid decimal response."); return value; }
 function httpsUrl(row: JsonRecord, key: string): string {
   const value = string(row, key);
   try {

@@ -316,6 +316,73 @@ test("does not render User A's cited export during a direct switch to User B on 
   }
 });
 
+test("a same-route account switch never paints User A campaign, brief, result, event, or error data for User B", async () => {
+  const userBDetail = deferred<Response>();
+  const userARun = { ...runView("completed"), run_id: "run-a", user_id: "user-1" };
+  const userACandidate = { ...researchCandidate(), candidate_id: "candidate-a", name: "User A private candidate" };
+  const userAEvent = campaignEvent("User A private research event");
+  const userADetail = detail("campaign-1", userARun);
+  userADetail.campaign.name = "User A private campaign";
+  userADetail.campaign.question = "User A private campaign question";
+  userADetail.brief!.brief.question = "User A private saved draft";
+  const harness = await mountPage(async (url, init) => {
+    const userId = (init?.headers as Record<string, string> | undefined)?.["x-user-id"];
+    if (url.endsWith("/campaigns/campaign-1")) return userId === "user-1" ? json(userADetail) : userBDetail.promise;
+    if (url.includes("/runs/run-a/candidates")) return json({ items: [userACandidate], next_cursor: null });
+    if (url.includes("/runs/run-a/events")) return json({ items: [userAEvent], next_sequence: 1, has_more: false });
+    if (url.includes("/runs/run-a")) return json({ ...userARun, shortlist: [userACandidate] });
+    return json(emptyResponse(url));
+  }, "/discovery/campaign-1/runs/run-a");
+  try {
+    await waitFor(() => harness.document.body.textContent?.includes("User A private candidate") ?? false);
+    await harness.switchUser("user-2");
+
+    assertNoUserAResearch(harness.document.body.textContent ?? "");
+
+    userBDetail.resolve(json({ error: "not found" }, 404));
+    await act(async () => { await delay(10); });
+    assertNoUserAResearch(harness.document.body.textContent ?? "");
+  } finally {
+    await harness.unmount();
+  }
+});
+
+test("an authorized same-route User B response never revives User A campaign data", async () => {
+  const userBDetail = deferred<Response>();
+  const userARun = { ...runView("completed"), run_id: "run-a", user_id: "user-1" };
+  const userACandidate = { ...researchCandidate(), candidate_id: "candidate-a", name: "User A private candidate" };
+  const userADetail = detail("campaign-1", userARun);
+  userADetail.campaign.name = "User A private campaign";
+  userADetail.campaign.question = "User A private campaign question";
+  userADetail.brief!.brief.question = "User A private saved draft";
+  const userBRun = { ...runView("completed"), run_id: "run-a", user_id: "user-2" };
+  const userBData = detail("campaign-1", userBRun);
+  userBData.campaign.name = "User B campaign";
+  userBData.campaign.question = "User B campaign question";
+  userBData.brief!.brief.question = "User B saved draft";
+  const harness = await mountPage(async (url, init) => {
+    const userId = (init?.headers as Record<string, string> | undefined)?.["x-user-id"];
+    if (url.endsWith("/campaigns/campaign-1")) return userId === "user-1" ? json(userADetail) : userBDetail.promise;
+    if (url.includes("/runs/run-a/candidates")) return userId === "user-1"
+      ? json({ items: [userACandidate], next_cursor: null })
+      : json({ items: [], next_cursor: null });
+    if (url.includes("/runs/run-a/events")) return json({ items: [], next_sequence: 0, has_more: false });
+    if (url.includes("/runs/run-a")) return json(userId === "user-1" ? { ...userARun, shortlist: [userACandidate] } : userBRun);
+    return json(emptyResponse(url));
+  }, "/discovery/campaign-1/runs/run-a");
+  try {
+    await waitFor(() => harness.document.body.textContent?.includes("User A private candidate") ?? false);
+    await harness.switchUser("user-2");
+    assertNoUserAResearch(harness.document.body.textContent ?? "");
+
+    userBDetail.resolve(json(userBData));
+    await waitFor(() => harness.document.body.textContent?.includes("User B campaign") ?? false);
+    assertNoUserAResearch(harness.document.body.textContent ?? "");
+  } finally {
+    await harness.unmount();
+  }
+});
+
 test('opening investigated research in Analyze keeps its recorded status out of a shortlisted claim', async () => {
   const campaignId = '11111111-1111-4111-8111-111111111111';
   const runId = '22222222-2222-4222-8222-222222222222';
@@ -504,6 +571,11 @@ function researchCandidate(): CandidateView { const assessed = decision(); retur
 function validResearchCandidate(): CandidateView { const candidateId = '33333333-3333-4333-8333-333333333333'; const identity = { issuer_id: '44444444-4444-4444-8444-444444444444', listing_id: '55555555-5555-4555-8555-555555555555', legal_name: 'Research candidate', ticker: 'GRID', mic: 'XNAS', currency: 'USD', asset_type: 'common_stock' as const, identity_source_ids: [] }; const assessment = { ...decision(), candidate_id: candidateId, identity }; return { ...researchCandidate(), candidate_id: candidateId, identity, assessment }; }
 function decision(): NonNullable<CandidateView["assessment"]> { const identity = { issuer_id: "issuer-1", listing_id: "listing-1", legal_name: "Investigated company", ticker: "GRID", mic: "XNAS", currency: "USD", asset_type: "common_stock" as const, identity_source_ids: [] }; const dimension = { level: "unknown" as const, explanation: "Unknown", citations: [] }; return { candidate_id: "investigated", identity, state: "eligible_not_shortlisted", dimensions: { theme_exposure: dimension, evidence_strength: dimension, business_quality: dimension, valuation_context: dimension }, criteria: [], counterarguments: [], unresolved_questions: [], next_action: "Continue", reason_codes: [] }; }
 function campaignEvent(summary: string): CampaignEvent { return { run_id: "run-1", sequence: 1, stage: "research", kind: "criterion_assessed", candidate_id: null, summary, citations: [], created_at: "2026-09-10T00:00:00.000Z" }; }
+function assertNoUserAResearch(value: string): void {
+  for (const privateValue of ["User A private campaign", "User A private campaign question", "User A private saved draft", "User A private candidate", "User A private research event"]) {
+    assert.doesNotMatch(value, new RegExp(privateValue));
+  }
+}
 function json(body: unknown, status = 200): Response { return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }); }
 function deferred<T>() { let resolve!: (value: T) => void; return { promise: new Promise<T>((next) => { resolve = next; }), resolve }; }
 function installClipboard(writeText: (text: string) => Promise<void>): () => void {

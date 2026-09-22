@@ -250,12 +250,15 @@ function ConditionEditor({
               Comparison
               <select
                 value={condition.metric.operator}
-                onChange={(event) => onChange({ ...condition, metric: { ...condition.metric!, operator: event.currentTarget.value as 'gte' | 'lte' } })}
+                onChange={(event) => onChange({ ...condition, metric: { ...condition.metric!, operator: event.currentTarget.value as ThesisMetricCheck['operator'] } })}
                 disabled={disabled}
                 className={FIELD_CLASS}
               >
                 <option value="gte">At least</option>
                 <option value="lte">At most</option>
+                <option value="eq">Exactly</option>
+                <option value="gt">Greater than</option>
+                <option value="lt">Less than</option>
               </select>
             </label>
             <label className="flex flex-col gap-1 text-xs font-medium text-fg">
@@ -264,7 +267,7 @@ function ConditionEditor({
                 type="number"
                 step="any"
                 value={condition.metric.threshold}
-                onChange={(event) => onChange({ ...condition, metric: { ...condition.metric!, threshold: Number(event.currentTarget.value) } })}
+                onChange={(event) => onChange({ ...condition, metric: { ...condition.metric!, threshold: event.currentTarget.value } })}
                 disabled={disabled}
                 className={FIELD_CLASS}
               />

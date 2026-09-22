@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createFinancialProvider } from "../src/providers/financials.ts";
+import { createCachedFinancialReader, createFinancialProvider } from "../src/providers/financials.ts";
 import { fakeOperations } from "./fake-operations.ts";
 
 const HASH = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
@@ -35,4 +35,25 @@ test("financial provider returns eligible sourced facts and explicit missing met
   assert.equal(result.facts[0]?.scale, 1_000_000);
   assert.equal(result.facts[0]?.currency, "USD");
   assert.equal(fake.ledger.size, 0, "cache reads do not reserve a financial provider attempt");
+});
+
+test("cached financial facts retain PostgreSQL numeric text without rounding", async () => {
+  const reader = createCachedFinancialReader({
+    user_id: "00000000-0000-4000-8000-000000000001",
+    db: {
+      async query() {
+        return { rows: [{
+          fact_id: "33333333-3333-4333-a333-333333333333", metric_key: "revenue",
+          value_num: "12345678901234567890.12345678901234567890", scale: "0.10000000000000000001",
+          unit: "currency", currency: "USD", period_kind: "fiscal_y", period_start: "2025-01-01", period_end: "2025-12-31",
+          as_of: "2026-02-15T00:00:00.000Z", source_id: "44444444-4444-4444-a444-444444444444", fiscal_year: 2025, fiscal_period: "FY",
+        }] };
+      },
+    },
+  });
+
+  const result = await reader.readCached({ identity, as_of: "2026-09-10T00:00:00.000Z" });
+
+  assert.equal(result.facts[0]?.value_num, "12345678901234567890.12345678901234567890");
+  assert.equal(result.facts[0]?.scale, "0.10000000000000000001");
 });

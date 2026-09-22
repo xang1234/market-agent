@@ -10,6 +10,7 @@ import {
   type ThesisCondition,
   type ThesisVersion,
 } from "./thesis-types.ts";
+import { compareExactDecimals, multiplyExactDecimals, parseExactDecimal, type DecimalInput, type ExactDecimal } from "./exact-decimal.ts";
 
 export const THESIS_PROMPT_VERSION = "living-thesis-v1";
 
@@ -24,8 +25,8 @@ export type ThesisLlm = {
 export type ThesisFact = {
   fact_id: string;
   metric_key: string;
-  value_num: number;
-  scale: number;
+  value_num: DecimalInput;
+  scale: DecimalInput;
   unit: string;
   period_kind: string;
   period_end: string | null;
@@ -171,15 +172,15 @@ function evaluateMetricCondition(
   assessmentTime: number,
 ): ConditionAssessment {
   const maxAgeMs = metric.max_age_days * 24 * 60 * 60 * 1_000;
+  const threshold = parseExactDecimal(metric.threshold);
   const eligible = facts
-    .map((fact) => ({ fact, time: metricFactTime(fact, metric.period_kind, assessmentTime) }))
-    .filter(({ fact, time }) =>
+    .map((fact) => ({ fact, time: metricFactTime(fact, metric.period_kind, assessmentTime), value: exactFactValue(fact) }))
+    .filter(({ fact, time, value }) =>
       fact.metric_key === metric.metric_key &&
       fact.unit === metric.unit &&
       fact.period_kind === metric.period_kind &&
-      Number.isFinite(fact.value_num) &&
-      Number.isFinite(fact.scale) &&
-      Number.isFinite(fact.value_num * fact.scale) &&
+      threshold !== null &&
+      value !== null &&
       time !== null &&
       assessmentTime - time <= maxAgeMs
     )
@@ -189,8 +190,8 @@ function evaluateMetricCondition(
       left.fact.fact_id.localeCompare(right.fact.fact_id)
     );
 
-  const selected = eligible[0]?.fact;
-  if (selected === undefined) {
+  const selected = eligible[0];
+  if (selected === undefined || selected.value === null || threshold === null) {
     return {
       condition_id: condition.condition_id,
       status: "unresolved",
@@ -201,10 +202,16 @@ function evaluateMetricCondition(
     };
   }
 
-  const value = selected.value_num * selected.scale;
-  const meetsThreshold = metric.operator === "gte"
-    ? value >= metric.threshold
-    : value <= metric.threshold;
+  const comparison = compareExactDecimals(selected.value, threshold);
+  const meetsThreshold = metric.operator === "eq"
+    ? comparison === 0
+    : metric.operator === "lt"
+      ? comparison < 0
+      : metric.operator === "lte"
+        ? comparison <= 0
+        : metric.operator === "gt"
+          ? comparison > 0
+          : comparison >= 0;
   return {
     condition_id: condition.condition_id,
     status: meetsThreshold ? "supported" : "challenged",
@@ -212,9 +219,15 @@ function evaluateMetricCondition(
       ? "The latest eligible metric evidence meets the configured threshold."
       : "The latest eligible metric evidence does not meet the configured threshold.",
     claim_refs: [],
-    fact_refs: [selected.fact_id],
+    fact_refs: [selected.fact.fact_id],
     method: "metric",
   };
+}
+
+function exactFactValue(fact: ThesisFact): ExactDecimal | null {
+  const value = parseExactDecimal(fact.value_num);
+  const scale = parseExactDecimal(fact.scale);
+  return value === null || scale === null ? null : multiplyExactDecimals(value, scale);
 }
 
 function metricFactTime(

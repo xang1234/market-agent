@@ -1,5 +1,6 @@
 import type { EvidencePacket } from "./ports.ts";
 import type { AnalystOutput, Brief, Citation, CriterionOutcome, Dimension, RawCitation, SkepticOutput } from "./types.ts";
+import { exactDecimalNumericToken, multiplyExactDecimals, parseExactDecimal, type DecimalInput } from "../../agents/src/exact-decimal.ts";
 
 const MAX_RESPONSE_CHARS = 100_000;
 const MAX_TEXT_CHARS = 2_000;
@@ -179,7 +180,7 @@ function supportedNumericTokens(citation: RawCitation, packet: EvidencePacket): 
   }
   return packet.facts.filter((fact) => fact.fact_id === citation.id).flatMap((fact) => [
     canonicalNumber(fact.value_num),
-    canonicalNumber(fact.value_num * fact.scale),
+    canonicalProduct(fact.value_num, fact.scale),
     ...structuredNumericTokens(fact.period_start),
     ...structuredNumericTokens(fact.period_end),
     ...structuredNumericTokens(fact.as_of),
@@ -231,8 +232,16 @@ function structuredNumericTokens(value: string | null): string[] {
   return value === null ? [] : numericTokens(value);
 }
 
-function canonicalNumber(value: number): string | null {
-  return Number.isFinite(value) ? canonicalNumericLiteral(String(Object.is(value, -0) ? 0 : value)) : null;
+function canonicalNumber(value: DecimalInput): string | null {
+  const decimal = parseExactDecimal(value);
+  return decimal === null ? null : exactDecimalNumericToken(decimal);
+}
+function canonicalProduct(left: DecimalInput, right: DecimalInput): string | null {
+  const leftDecimal = parseExactDecimal(left);
+  const rightDecimal = parseExactDecimal(right);
+  if (leftDecimal === null || rightDecimal === null) return null;
+  const product = multiplyExactDecimals(leftDecimal, rightDecimal);
+  return product === null ? null : exactDecimalNumericToken(product);
 }
 
 function canonicalNumericLiteral(literal: string): string | null {
