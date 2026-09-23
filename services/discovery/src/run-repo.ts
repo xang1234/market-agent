@@ -1,7 +1,7 @@
 import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
 import { EMPTY_CHECKPOINT, EMPTY_COVERAGE, EMPTY_PHASE_USAGE, EMPTY_USAGE, POLICY_VERSION } from "./policy.ts";
 import type { Checkpoint, Lease } from "./ports.ts";
-import { DiscoveryError, type Coverage, type Page, type RankedDecision, type RunRecord } from "./types.ts";
+import { DiscoveryError, type CandidateDecision, type Coverage, type Page, type RankedDecision, type RunRecord } from "./types.ts";
 import { decodeCursor, encodeCursor, isoDate, json, jsonValue, requireLimit, requireText, requireUuid, transaction } from "./repository-support.ts";
 import { leaseFromRow, lockLiveLease } from "./worker-lock.ts";
 import { appendEventInTransaction } from "./event-repo.ts";
@@ -140,7 +140,7 @@ export function createRunStore(db: QueryExecutor, clock: () => Date) {
         const candidates = await tx.query<{ candidate_id: string }>("select candidate_id::text as candidate_id from discovery_candidates where run_id=$1::uuid and candidate_id=any($2::uuid[]) for update", [lease.run_id, candidateIds]);
         if (candidates.rows.length !== candidateIds.length) throw new DiscoveryError("not_found", "finalization candidate not found");
         for (const decision of input.decisions) {
-          const updated = await tx.query("update discovery_candidates set state=$2,rank=$3,assessment=$4::jsonb,updated_at=now() where run_id=$1::uuid and candidate_id=$5::uuid", [lease.run_id, decision.state, decision.rank, json(decision), decision.candidate_id]);
+          const updated = await tx.query("update discovery_candidates set state=$2,rank=$3,assessment=$4::jsonb,updated_at=now() where run_id=$1::uuid and candidate_id=$5::uuid", [lease.run_id, decision.state, decision.rank, json(sealedAssessment(decision)), decision.candidate_id]);
           if (updated.rowCount !== 1) throw new DiscoveryError("not_found", "finalization candidate not found");
         }
         await tx.query("update discovery_runs set status=$2,stage='finalization',coverage=$3::jsonb,finished_at=$4::timestamptz,lease_expires_at=null where run_id=$1::uuid", [lease.run_id, input.status, json(input.coverage), clock().toISOString()]);
@@ -153,6 +153,15 @@ export function createRunStore(db: QueryExecutor, clock: () => Date) {
       await deleteCampaignWithLifecycle(db, { user_id: userId, campaign_id: campaignId, now: clock() });
     },
   };
+}
+
+/**
+ * Shortlist state and rank are run-level ranking outcomes stored on the candidate
+ * row; the persisted assessment keeps the sealed CandidateDecision contract.
+ */
+function sealedAssessment(decision: RankedDecision): CandidateDecision {
+  const { rank: _rank, ...assessment } = decision;
+  return { ...assessment, state: decision.state === "shortlisted" ? "eligible_not_shortlisted" : decision.state };
 }
 
 function runFromRow(row: RunRow | undefined): RunRecord {

@@ -1,4 +1,4 @@
-import { hashJsonValue } from "../../observability/src/tool-call.ts";
+import { hashJsonValue, writeToolCallLog } from "../../observability/src/tool-call.ts";
 import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
 import type { AttemptReservation, Lease } from "./ports.ts";
 import { SEARCH_PHASE_LIMITS } from "./policy.ts";
@@ -58,7 +58,10 @@ export function createAttemptStore(db: QueryExecutor, clock: () => Date) {
       requireUuid(input.attempt_id, "attempt_id"); if (input.tool_call_id !== null) requireUuid(input.tool_call_id, "tool_call_id");
       await transaction(db, async (tx) => {
         const identity = await lockScope(tx, scope, clock, { allowCancelled: true });
-        const updated = await tx.query("update discovery_attempts set outcome=$3,result=$4::jsonb,result_hash=$5,tool_call_id=$6::uuid,completed_at=$7::timestamptz where attempt_id=$1::uuid and campaign_id=$2::uuid and outcome='reserved'", [input.attempt_id, identity.campaign_id, input.outcome, json(input.result), hashJsonValue(input.result as never), input.tool_call_id, clock().toISOString()]);
+        const completedAt = clock();
+        const resultHash = hashJsonValue(input.result as never);
+        const toolCallId = input.tool_call_id ?? (input.outcome === "success" ? await auditModelAttempt(tx, identity.campaign_id, input.attempt_id, resultHash, completedAt) : null);
+        const updated = await tx.query("update discovery_attempts set outcome=$3,result=$4::jsonb,result_hash=$5,tool_call_id=$6::uuid,completed_at=$7::timestamptz where attempt_id=$1::uuid and campaign_id=$2::uuid and outcome='reserved'", [input.attempt_id, identity.campaign_id, input.outcome, json(input.result), resultHash, toolCallId, completedAt.toISOString()]);
         if (updated.rowCount !== 1) throw new DiscoveryError("request_conflict", "attempt is not reservable");
       });
     },
@@ -154,6 +157,30 @@ async function enforceModelReservationFloor(
   if (used + 1 + floorAfterReservation > limit) {
     throw new DiscoveryError("budget_exhausted", "model attempt budget is reserved for selected companies");
   }
+}
+
+/**
+ * Model transports that do not audit their own calls (e.g. the default LLM router)
+ * return no tool_call_id. Assessment sealing requires model provenance, so a
+ * successful model attempt without one gets a durable tool_call_logs row here,
+ * in the same transaction that records the attempt result. Campaign deletion
+ * already garbage-collects these rows via discovery_attempts.tool_call_id.
+ */
+async function auditModelAttempt(tx: QueryExecutor, campaignId: string, attemptId: string, resultHash: string, completedAt: Date): Promise<string | null> {
+  const { rows } = await tx.query<{ resource: Resource; run_id: string | null; operation_key: string; request_hash: string; attempt_number: number; phase: string; reserved_at: Date | string }>(
+    "select resource,run_id::text as run_id,operation_key,request_hash,attempt_number,phase,reserved_at from discovery_attempts where attempt_id=$1::uuid and campaign_id=$2::uuid and outcome='reserved'",
+    [attemptId, campaignId],
+  );
+  const attempt = rows[0];
+  if (!attempt || attempt.resource !== "model") return null;
+  const logged = await writeToolCallLog(tx, {
+    tool_name: "discovery.model",
+    args: { campaign_id: campaignId, run_id: attempt.run_id, operation_key: attempt.operation_key, request_hash: attempt.request_hash, attempt_number: attempt.attempt_number, phase: attempt.phase },
+    result_hash: resultHash,
+    duration_ms: Math.max(0, completedAt.getTime() - new Date(attempt.reserved_at).getTime()),
+    status: "ok",
+  });
+  return logged.tool_call_id;
 }
 
 function reservationIsStale(attempt: AttemptRow, scope: LockedScope): boolean {

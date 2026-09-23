@@ -6,6 +6,8 @@ import { ResearchTrail } from "./ResearchTrail.tsx";
 
 type Tab = "shortlist" | "investigated" | "unresolved";
 
+const INCOMPLETE_STATES: ReadonlySet<CandidateView["state"]> = new Set(["discovered", "researching", "not_selected", "unresolved_identity", "needs_evidence", "research_error"]);
+
 export function CampaignResults({
   run,
   candidates,
@@ -33,7 +35,9 @@ export function CampaignResults({
   const candidateSet = useMemo(() => uniqueCandidates([...run.shortlist, ...candidates]), [run.shortlist, candidates]);
   const shortlist = candidateSet.filter((candidate) => candidate.state === "shortlisted");
   const investigated = candidateSet.filter((candidate) => candidate.assessment !== null && candidate.state !== "shortlisted");
-  const unresolved = candidateSet.filter((candidate) => candidate.state === "not_selected" || candidate.state === "unresolved_identity" || candidate.state === "needs_evidence" || candidate.state === "research_error");
+  // Interrupted runs (cancelled, deadline, systemic failure) leave untouched rows
+  // in discovered/researching; they belong with other incomplete companies.
+  const unresolved = candidateSet.filter((candidate) => INCOMPLETE_STATES.has(candidate.state));
   const rows = tab === "shortlist" ? shortlist : tab === "investigated" ? investigated : unresolved;
   return (
     <section aria-labelledby="campaign-results-heading" className="space-y-4">
@@ -42,7 +46,7 @@ export function CampaignResults({
       <div aria-label="Research result groups" className="flex flex-wrap gap-2 border-b border-line pb-2">
         <ResultTab active={tab === "shortlist"} label={`Shortlist (${shortlist.length})`} onClick={() => setTab("shortlist")} />
         <ResultTab active={tab === "investigated"} label={`Investigated (${investigated.length})`} onClick={() => setTab("investigated")} />
-        <ResultTab active={tab === "unresolved"} label={`Not selected & unresolved (${unresolved.length})`} onClick={() => setTab("unresolved")} />
+        <ResultTab active={tab === "unresolved"} label={`Incomplete & not selected (${unresolved.length})`} onClick={() => setTab("unresolved")} />
       </div>
       <div aria-label={`${tab} results`} className="space-y-3">{rows.length ? rows.map((candidate) => <CandidateCard key={candidate.candidate_id} candidate={candidate} onOpenInAnalyze={onOpenInAnalyze} onDraftThesis={onDraftThesis} />) : <p className="rounded-md border border-dashed border-line p-4 text-sm text-muted">{emptyCopy(tab, run)}</p>}</div>
       <Comparison run={run} comparison={comparison ?? null} />

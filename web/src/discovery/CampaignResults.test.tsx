@@ -87,6 +87,25 @@ test("uses ordinary pressed buttons for result groups", () => {
   assert.match(html, /<button[^>]*aria-pressed="true"[^>]*>Shortlist \(0\)<\/button>/);
 });
 
+test("keeps discovered and researching companies visible in the incomplete group", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>");
+  const restore = installDomGlobals(dom.window as unknown as Window);
+  const root = createRoot(dom.window.document.getElementById("root")!);
+  const discovered = { ...candidateView(), candidate_id: "candidate-discovered", name: "Discovered company", state: "discovered" as const, rank: null, assessment: null };
+  const researching = { ...candidateView(), candidate_id: "candidate-researching", name: "Researching company", state: "researching" as const, rank: null, assessment: null };
+  try {
+    await act(async () => { root.render(<CampaignResults run={{ ...runView([]), status: "partial" }} candidates={[discovered, researching]} events={[]} />); });
+    const group = [...dom.window.document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Incomplete & not selected (2)");
+    assert.ok(group);
+    await act(async () => group.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })));
+    assert.match(dom.window.document.body.textContent ?? "", /Discovered company/);
+    assert.match(dom.window.document.body.textContent ?? "", /Researching company/);
+  } finally {
+    await act(async () => root.unmount());
+    restore();
+  }
+});
+
 test("exposes cited export and candidate handoff controls without treating them as an automatic save", () => {
   const candidate = { ...candidateView(), can_promote: true };
   const html = renderToStaticMarkup(

@@ -76,11 +76,11 @@ test("refreshes all result groups and the trail after a later active poll", asyn
   try {
     await waitFor(() => harness.document.body.textContent?.includes("Investigated (1)") ?? false);
     assert.match(harness.document.body.textContent ?? "", /Shortlist \(1\)/);
-    assert.match(harness.document.body.textContent ?? "", /Not selected & unresolved \(1\)/);
+    assert.match(harness.document.body.textContent ?? "", /Incomplete & not selected \(1\)/);
     assert.match(harness.document.body.textContent ?? "", /New research activity/);
     await harness.click("Investigated (1)");
     assert.match(harness.document.body.textContent ?? "", /Investigated company/);
-    await harness.click("Not selected & unresolved (1)");
+    await harness.click("Incomplete & not selected (1)");
     assert.match(harness.document.body.textContent ?? "", /Unresolved company/);
   } finally {
     await harness.unmount();
@@ -107,11 +107,11 @@ test("refreshes all result groups and the trail when a running poll reaches comp
   try {
     await waitFor(() => harness.document.body.textContent?.includes("Investigated (1)") ?? false);
     assert.match(harness.document.body.textContent ?? "", /Shortlist \(1\)/);
-    assert.match(harness.document.body.textContent ?? "", /Not selected & unresolved \(1\)/);
+    assert.match(harness.document.body.textContent ?? "", /Incomplete & not selected \(1\)/);
     assert.match(harness.document.body.textContent ?? "", /Final research activity/);
     await harness.click("Investigated (1)");
     assert.match(harness.document.body.textContent ?? "", /Terminal investigated company/);
-    await harness.click("Not selected & unresolved (1)");
+    await harness.click("Incomplete & not selected (1)");
     assert.match(harness.document.body.textContent ?? "", /Terminal unresolved company/);
   } finally {
     await harness.unmount();

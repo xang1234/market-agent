@@ -307,6 +307,29 @@ test("attempt reservations cache matching results and event sequences are monoto
   assert.equal(events.next_sequence, 2);
 });
 
+test("successful model attempts create durable audit provenance when the transport provides none", dbOptions, async (t) => {
+  const { db, repo, createApprovedRun } = await withCampaignDb(t);
+  const { run } = await createApprovedRun();
+  const lease = await repo.claimNextRun("worker-1"); assert.ok(lease);
+  const key = `${run.run_id}/discovery/pool/scout`;
+  const requestHash = hashJsonValue({ role: "scout" });
+  const reserved = await repo.reserveAttempt(lease, { operation_key: key, request_hash: requestHash, resource: "model", phase: "discovery", attempt_number: 1 });
+  const result = { text: "{}", deployment: { channel: "fixture", model: "fixture-model" } };
+  await repo.finishAttempt(lease, { attempt_id: reserved.attempt_id, outcome: "success", result, tool_call_id: null });
+
+  const audit = await db.query<{ attempt_tool_call_id: string | null; logged_tool_call_id: string | null; attempt_hash: string | null; log_hash: string | null }>(
+    `select a.tool_call_id::text as attempt_tool_call_id,t.tool_call_id::text as logged_tool_call_id,
+            a.result_hash as attempt_hash,t.result_hash as log_hash
+       from discovery_attempts a left join tool_call_logs t on t.tool_call_id=a.tool_call_id
+      where a.attempt_id=$1::uuid`,
+    [reserved.attempt_id],
+  );
+  assert.match(audit.rows[0]?.attempt_tool_call_id ?? "", /^[0-9a-f-]{36}$/u);
+  assert.equal(audit.rows[0]?.logged_tool_call_id, audit.rows[0]?.attempt_tool_call_id);
+  assert.equal(audit.rows[0]?.log_hash, hashJsonValue(result));
+  assert.equal(audit.rows[0]?.attempt_hash, audit.rows[0]?.log_hash);
+});
+
 test("attempt request identity spans both provider attempts", dbOptions, async (t) => {
   const { repo, createApprovedRun } = await withCampaignDb(t);
   const { run } = await createApprovedRun();
@@ -369,6 +392,31 @@ test("finalization assigns ranks only to shortlisted candidates", dbOptions, asy
   const candidateId = crypto.randomUUID();
   await assert.rejects(repo.finalize(lease, { status: "completed", decisions: [rankedDecision(candidateId, "excluded", 1)], coverage: {} as never }), { code: "validation" });
   await assert.rejects(repo.finalize(lease, { status: "completed", decisions: [rankedDecision(candidateId, "shortlisted", null)], coverage: {} as never }), { code: "validation" });
+});
+
+test("finalization keeps shortlist state and rank outside the sealed assessment payload", dbOptions, async (t) => {
+  const { db, repo, createApprovedRun } = await withCampaignDb(t);
+  const { run } = await createApprovedRun();
+  const lease = await repo.claimNextRun("worker-1"); assert.ok(lease);
+  const candidateId = crypto.randomUUID();
+  const identity = identityFixture();
+  await insertEligibleListing(db, identity);
+  await repo.admitCandidate(lease, {
+    candidate_id: candidateId, lead_key: "shortlisted", name: "Shortlisted candidate", identity, origins: ["web"],
+    mechanism_ids: ["40000000-0000-4000-8000-000000000001"], seed: false, primary_domain_lead: false,
+    first_seen: [0, 0], lead_hit_ids: [], reason_codes: [],
+  });
+  const current = await repo.readRun(lease.user_id, run.run_id);
+  await repo.finalize(lease, { status: "completed", decisions: [rankedDecision(candidateId, "shortlisted", 1)], coverage: current.coverage });
+
+  const stored = await db.query<{ state: string; rank: number | null; assessment: Record<string, unknown> }>(
+    "select state,rank,assessment from discovery_candidates where run_id=$1::uuid and candidate_id=$2::uuid",
+    [run.run_id, candidateId],
+  );
+  assert.equal(stored.rows[0]?.state, "shortlisted");
+  assert.equal(stored.rows[0]?.rank, 1);
+  assert.equal(stored.rows[0]?.assessment.state, "eligible_not_shortlisted");
+  assert.equal("rank" in stored.rows[0]!.assessment, false);
 });
 
 test("draft rate limits count logical request IDs rather than provider attempts", dbOptions, async (t) => {
