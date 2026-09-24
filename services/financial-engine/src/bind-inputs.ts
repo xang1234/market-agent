@@ -1,5 +1,6 @@
 // Binds every reported-metric slot of a run's plan to immutable evidence in
-// one consistent read (REPEATABLE READ) and persists the bindings — bound
+// one consistent read (REPEATABLE READ, under the run's lease fence) and
+// persists the bindings — bound
 // payloads or explicit gaps — with the authorized candidate-set digest. A
 // retry reuses the persisted bindings; evidence that arrives later requires an
 // explicit recalculation (a new run), never substitution.
@@ -21,6 +22,7 @@ import {
   type Sha256Hex,
   type SubjectSlot,
 } from "../../financial-core/src/index.ts";
+import { assertLeaseFence, type RunLease } from "./lease.ts";
 import type { FinancialEvidencePort, InputCandidate, SqlExecutor } from "./ports.ts";
 import { SELECTION_POLICY_VERSION, selectInput, type SlotSelection } from "./select-inputs.ts";
 
@@ -47,6 +49,7 @@ export class FinancialBindingError extends Error {
 export async function bindPlanInputs(input: {
   client: SqlExecutor;
   run_id: string;
+  lease: RunLease;
   plan: FinancialPlanV1;
   authority: FinancialRuntimeAuthority;
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
@@ -54,14 +57,10 @@ export async function bindPlanInputs(input: {
   const { client, plan, authority } = input;
   await client.query("begin isolation level repeatable read");
   try {
-    const run = (await client.query<{ user_id: string; plan_id: string; knowledge_cutoff: string; execution_state: string }>(
-      `select user_id::text, plan_id::text, to_char(knowledge_cutoff at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as knowledge_cutoff, execution_state
-         from financial_runs where run_id = $1 for update`,
-      [input.run_id],
-    )).rows[0];
-    if (!run || run.user_id !== authority.owner_user_id) throw new FinancialBindingError("run not found for this owner");
+    // The lease fence locks the run row: a stale, superseded, or cancelled worker cannot bind.
+    const run = await assertLeaseFence(client, input.lease);
+    if (run.run_id !== input.run_id || run.user_id !== authority.owner_user_id) throw new FinancialBindingError("run not found for this owner");
     if (run.plan_id !== plan.plan_id) throw new FinancialBindingError("plan does not belong to this run");
-    if (["completed", "failed", "cancelled"].includes(run.execution_state)) throw new FinancialBindingError(`run is ${run.execution_state}`);
     if (Date.parse(run.knowledge_cutoff) !== Date.parse(plan.time.knowledge_cutoff)) throw new FinancialBindingError("run cutoff differs from its plan");
 
     const existing = await loadBindings(client, input.run_id);
