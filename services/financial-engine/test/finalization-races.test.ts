@@ -7,7 +7,6 @@ import test from "node:test";
 import type { Client } from "pg";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { listFinancialInputCandidates } from "../../evidence/src/financial-input-repo.ts";
-import type { FinancialPlanV1 } from "../../financial-core/src/index.ts";
 import type { SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { finalizeUnit, type PersistParentArtifact } from "../src/finalize.ts";
 import { StaleLeaseError, type RunLease } from "../src/lease.ts";
@@ -17,18 +16,8 @@ import { authorityFor, connectExtraClient, engineDatabase, IDS, marginPlan, pinn
 const authority = authorityFor();
 const noParent: PersistParentArtifact = async () => {};
 
-function finalizeWith(client: SnapshotTransactionClient, lease: RunLease, plan: FinancialPlanV1, unitId: string, persistParent: PersistParentArtifact = noParent) {
-  const snapshotId = randomUUID();
-  const asOf = new Date(plan.time.knowledge_cutoff).toISOString();
-  return finalizeUnit({
-    client,
-    lease,
-    authority,
-    unit_id: unitId,
-    snapshot_id: snapshotId,
-    blocks: [{ id: "answer", kind: "section", snapshot_id: snapshotId, data_ref: { kind: "section", id: "answer" }, source_refs: [], as_of: asOf }],
-    persistParent,
-  });
+function finalizeWith(client: SnapshotTransactionClient, lease: RunLease, unitId: string, persistParent: PersistParentArtifact = noParent) {
+  return finalizeUnit({ client, lease, authority, unit_id: unitId, snapshot_id: randomUUID(), persistParent });
 }
 
 /** A parent callback that parks inside the finalization transaction until released. */
@@ -62,7 +51,7 @@ test("finalization races", { timeout: 300_000 }, async (t) => {
     const plan = marginPlan();
     const { runId, lease } = await readyRun(db, plan);
     await revoker.query(`update facts set invalidated_at = now() where fact_id = $1`, [IDS.original]);
-    const outcome = await finalizeWith(publisher, lease, plan, "screen_unit");
+    const outcome = await finalizeWith(publisher, lease, "screen_unit");
     await restore();
     assert.ok(outcome.status === "rejected" && outcome.reason_code === "verification_failed", JSON.stringify(outcome));
     assert.ok(outcome.status === "rejected" && outcome.failures.some((failure) => failure.details.reason === "fact_invalidated"));
@@ -74,7 +63,7 @@ test("finalization races", { timeout: 300_000 }, async (t) => {
     const { runId, lease } = await readyRun(db, plan);
     await revoker.query("begin");
     await revoker.query(`update facts set invalidated_at = now() where fact_id = $1`, [IDS.original]);
-    const pending = finalizeWith(publisher, lease, plan, "screen_unit");
+    const pending = finalizeWith(publisher, lease, "screen_unit");
     await waitForLockWaiters(db, 1);
     await revoker.query("commit");
     const outcome = await pending;
@@ -87,7 +76,7 @@ test("finalization races", { timeout: 300_000 }, async (t) => {
     const plan = marginPlan();
     const { runId, lease } = await readyRun(db, plan);
     const parked = parkedParent();
-    const pending = finalizeWith(publisher, lease, plan, "screen_unit", parked.persist);
+    const pending = finalizeWith(publisher, lease, "screen_unit", parked.persist);
     await parked.inside;
     const revocation = revoker.query(`update facts set invalidated_at = now() where fact_id = $1`, [IDS.original]);
     await waitForLockWaiters(db, 1);
@@ -102,7 +91,7 @@ test("finalization races", { timeout: 300_000 }, async (t) => {
       metric_key: "revenue", fiscal_year: 2023, fiscal_period: "FY", limit: 10,
     });
     assert.ok(!candidates.candidates.some((candidate) => candidate.fact_id === IDS.original), "later reads no longer see the revoked fact");
-    const next = await finalizeWith(publisher, lease, plan, "rev_unit");
+    const next = await finalizeWith(publisher, lease, "rev_unit");
     assert.ok(next.status === "rejected" && next.failures.some((failure) => failure.details.reason === "fact_invalidated"), "later units cannot certify it either");
     await restore();
   });
@@ -111,20 +100,20 @@ test("finalization races", { timeout: 300_000 }, async (t) => {
     const before = marginPlan();
     const early = await readyRun(db, before);
     await requestCancellation(db, IDS.owner, early.runId);
-    await assert.rejects(() => finalizeWith(publisher, early.lease, before, "rev_unit"), (error: unknown) => error instanceof StaleLeaseError && error.reason === "cancel_requested");
+    await assert.rejects(() => finalizeWith(publisher, early.lease, "rev_unit"), (error: unknown) => error instanceof StaleLeaseError && error.reason === "cancel_requested");
     assert.equal(await certificates(db, early.runId), 0);
 
     const during = marginPlan();
     const late = await readyRun(db, during);
     const parked = parkedParent();
-    const pending = finalizeWith(publisher, late.lease, during, "rev_unit", parked.persist);
+    const pending = finalizeWith(publisher, late.lease, "rev_unit", parked.persist);
     await parked.inside;
     const cancellation = requestCancellation(revoker, IDS.owner, late.runId);
     await waitForLockWaiters(db, 1);
     parked.release();
     assert.equal((await pending).status, "published");
     assert.equal((await cancellation)?.cancel_requested_at !== null, true);
-    await assert.rejects(() => finalizeWith(publisher, late.lease, during, "margin_unit"), (error: unknown) => error instanceof StaleLeaseError && error.reason === "cancel_requested");
+    await assert.rejects(() => finalizeWith(publisher, late.lease, "margin_unit"), (error: unknown) => error instanceof StaleLeaseError && error.reason === "cancel_requested");
     assert.equal(await certificates(db, late.runId), 1, "only the unit finalized before cancellation is published");
   });
 
@@ -132,9 +121,9 @@ test("finalization races", { timeout: 300_000 }, async (t) => {
     const plan = marginPlan();
     const { runId, lease } = await readyRun(db, plan);
     const parked = parkedParent();
-    const first = finalizeWith(publisher, lease, plan, "rev_unit", parked.persist);
+    const first = finalizeWith(publisher, lease, "rev_unit", parked.persist);
     await parked.inside;
-    const duplicate = finalizeWith(second, lease, plan, "rev_unit");
+    const duplicate = finalizeWith(second, lease, "rev_unit");
     await waitForLockWaiters(db, 1);
     parked.release();
     const [winner, loser] = await Promise.all([first, duplicate]);

@@ -3,6 +3,7 @@ import type {
   DisclosureBlock,
   EpsSurpriseBlock,
   FilingsListBlock,
+  FinancialAnswerBlock,
   FindingCardBlock,
   LineChartBlock,
   MentionVolumeBlock,
@@ -501,6 +502,237 @@ export const disclosureFixture: DisclosureBlock = {
   ],
 }
 
+// Generated from services/financial-core `presentFinancialUnit` for a
+// two-company plan with one gap and an incomplete ranking.
+export const financialAnswerFixture: FinancialAnswerBlock = {
+  id: 'fa-1',
+  kind: 'financial_answer',
+  snapshot_id: FIXTURE_SNAPSHOT_ID,
+  data_ref: { kind: 'financial_answer', id: '99999999-9999-4999-9999-999999999999:section' },
+  source_refs: [FIXTURE_SOURCE_REF],
+  as_of: FIXTURE_AS_OF,
+  presentation_hash: 'f62a4ba2aaf4b0066619dd3bd930e0761531267a20c7b05ba9ca9598cecf8206',
+  financial: {
+    "presentation_version": "financial-presentation.v1",
+    "template_version": "financial-answer.v1",
+    "run_id": "99999999-9999-4999-9999-999999999999",
+    "unit_id": "section",
+    "knowledge_cutoff": "2024-01-15T23:59:59.999-05:00",
+    "coverage": {
+      "state": "partial",
+      "requested": 5,
+      "verified": 4
+    },
+    "labels": {
+      "subject:a": {
+        "kind": "subject",
+        "text": "Apple Inc.",
+        "slot_id": "a"
+      },
+      "subject:b": {
+        "kind": "subject",
+        "text": "Microsoft Corp.",
+        "slot_id": "b"
+      },
+      "measure:a_rev": {
+        "kind": "measure",
+        "text": "Revenue"
+      },
+      "period:a_rev": {
+        "kind": "period",
+        "text": "FY2023"
+      },
+      "measure:a_gm": {
+        "kind": "measure",
+        "text": "Gross margin (gross profit / revenue)"
+      },
+      "period:a_gm": {
+        "kind": "period",
+        "text": "FY2023"
+      },
+      "measure:b_gm": {
+        "kind": "measure",
+        "text": "Gross margin (gross profit / revenue)"
+      },
+      "period:b_gm": {
+        "kind": "period",
+        "text": "FY2023"
+      },
+      "measure:a_gm_check": {
+        "kind": "measure",
+        "text": "Gross margin (gross profit / revenue) threshold check"
+      },
+      "period:a_gm_check": {
+        "kind": "period",
+        "text": "FY2023"
+      },
+      "measure:gm_rank": {
+        "kind": "measure",
+        "text": "Gross margin (gross profit / revenue) ranking"
+      },
+      "period:gm_rank": {
+        "kind": "period",
+        "text": "FY2023"
+      }
+    },
+    "results": [
+      {
+        "result_id": "91111111-1111-4111-9111-111111111111",
+        "output_id": "out_a_rev",
+        "disposition": "verified",
+        "label_ids": [
+          "subject:a",
+          "measure:a_rev",
+          "period:a_rev"
+        ],
+        "presented": {
+          "kind": "value",
+          "text": "USD 391,035,000,000.00",
+          "full_text": "USD 391035000000",
+          "value": "391035000000",
+          "unit": {
+            "kind": "currency",
+            "currency": "USD"
+          },
+          "exact": true
+        },
+        "result_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "result_id": "92222222-2222-4222-9222-222222222222",
+        "output_id": "out_a_gm",
+        "disposition": "verified",
+        "label_ids": [
+          "subject:a",
+          "measure:a_gm",
+          "period:a_gm"
+        ],
+        "presented": {
+          "kind": "value",
+          "text": "46.21%",
+          "full_text": "46.206%",
+          "value": "0.46206",
+          "unit": {
+            "kind": "ratio"
+          },
+          "exact": true
+        },
+        "result_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "result_id": "93333333-3333-4333-9333-333333333333",
+        "output_id": "out_b_gm",
+        "disposition": "missing_input",
+        "label_ids": [
+          "subject:b",
+          "measure:b_gm",
+          "period:b_gm"
+        ],
+        "presented": {
+          "kind": "gap",
+          "text": "A required input or calculation is unavailable.",
+          "reason_code": "missing_input"
+        },
+        "result_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "result_id": "94444444-4444-4444-9444-444444444444",
+        "output_id": "out_check",
+        "disposition": "verified",
+        "label_ids": [
+          "subject:a",
+          "measure:a_gm_check",
+          "period:a_gm_check"
+        ],
+        "presented": {
+          "kind": "predicate",
+          "outcome": true,
+          "text": "Apple Inc. \u2014 Gross margin (gross profit / revenue), FY2023, at or above 40.00%: yes"
+        },
+        "result_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "result_id": "95555555-5555-4555-9555-555555555555",
+        "output_id": "out_rank",
+        "disposition": "verified",
+        "label_ids": [
+          "measure:gm_rank",
+          "period:gm_rank"
+        ],
+        "presented": {
+          "kind": "ranking",
+          "text": "Ranked 1 of 2 companies; no overall highest can be stated for an incomplete group",
+          "complete": false,
+          "order": [
+            {
+              "subject_label_id": "subject:a",
+              "rank": 1
+            }
+          ],
+          "leader_label_ids": null
+        },
+        "result_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "presentations": [
+      {
+        "kind": "table",
+        "caption": "Revenue, Gross margin (gross profit / revenue) by company",
+        "columns": [
+          {
+            "column_id": "c0",
+            "label_ids": [
+              "measure:a_rev",
+              "period:a_rev"
+            ]
+          },
+          {
+            "column_id": "c1",
+            "label_ids": [
+              "measure:a_gm",
+              "period:a_gm"
+            ]
+          }
+        ],
+        "rows": [
+          {
+            "label_id": "subject:a",
+            "cells": [
+              "91111111-1111-4111-9111-111111111111",
+              "92222222-2222-4222-9222-222222222222"
+            ]
+          },
+          {
+            "label_id": "subject:b",
+            "cells": [
+              null,
+              "93333333-3333-4333-9333-333333333333"
+            ]
+          }
+        ],
+        "ascending": {
+          "c0": [
+            0,
+            1
+          ],
+          "c1": [
+            0,
+            1
+          ]
+        }
+      },
+      {
+        "kind": "predicate",
+        "result_id": "94444444-4444-4444-9444-444444444444"
+      },
+      {
+        "kind": "predicate",
+        "result_id": "95555555-5555-4555-9555-555555555555"
+      }
+    ]
+  },
+}
+
 export const ALL_BLOCK_FIXTURES = [
   richTextFixture,
   sectionFixture,
@@ -522,4 +754,5 @@ export const ALL_BLOCK_FIXTURES = [
   findingCardFixture,
   sourcesFixture,
   disclosureFixture,
+  financialAnswerFixture,
 ] as const

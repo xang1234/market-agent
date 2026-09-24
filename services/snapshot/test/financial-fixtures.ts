@@ -8,6 +8,7 @@ import {
   hashCanonical,
   nodeLineageHashes,
   planSemanticHash,
+  presentationHash,
   unitClosures,
   unitPublication,
   validateBoundInput,
@@ -17,6 +18,7 @@ import {
   type SlotBinding,
 } from "../../financial-core/src/index.ts";
 import type { FinancialUnitRecords, LoadedEvidence } from "../src/financial-verifier-loader.ts";
+import { financialAnswerFor, type FinancialSealContext } from "../src/financial-verifier.ts";
 
 export const F = {
   owner: "5f000000-0000-4000-8000-000000000001",
@@ -197,13 +199,22 @@ export function validRecords(): FinancialUnitRecords {
       dependencies: [...result.dependencies],
       result_hash: result.result_hash,
     })),
+    subject_names: [{ kind: "issuer", id: F.issuer, name: "Fixture Industries Inc." }],
   };
 }
 
-export const SEAL_CONTEXT = {
-  snapshot_id: F.snapshot,
-  manifest: { fact_refs: [F.revenueFact, F.grossProfitFact], source_ids: [F.source], as_of: F.cutoff },
-} as const;
+/** The seal a correct finalization of `records` would present: its manifest and generated answer block. */
+export function sealContext(records: FinancialUnitRecords = validRecords()): FinancialSealContext {
+  const answer = financialAnswerFor(marginPlan(), records, "section");
+  assert.ok(answer);
+  return {
+    snapshot_id: F.snapshot,
+    manifest: { fact_refs: [F.revenueFact, F.grossProfitFact], source_ids: [F.source], as_of: F.cutoff },
+    answer: { financial: JSON.parse(JSON.stringify(answer)), presentation_hash: presentationHash(answer) },
+  };
+}
+
+export const SEAL_CONTEXT = sealContext();
 
 /** A deep, mutable copy for tampering. */
 export function mutable(records: FinancialUnitRecords): { -readonly [K in keyof FinancialUnitRecords]: any } {

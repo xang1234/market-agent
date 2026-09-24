@@ -13,16 +13,20 @@ import {
   canonicallyEqual,
   ExecutionIntegrityError,
   evaluateBoundPlan,
+  FINANCIAL_PRESENTATION_VERSION,
   hashCanonical,
   nodeLineageHashes,
   NUMERIC_POLICY,
   planSemanticHash,
+  presentationHash,
+  presentFinancialUnit,
   publicAtCutoff,
   unitClosures,
   unitPublication,
   validateBoundInput,
   validateFinancialPlan,
   type BoundFinancialInputV1,
+  type FinancialAnswerContent,
   type FinancialPlanV1,
   type LocalId,
   type ReasonCode,
@@ -50,16 +54,22 @@ export const FINANCIAL_VERIFIER_REASON_CODES = [
   "financial_recompute_mismatch",
   "financial_lineage_mismatch",
   "financial_manifest_mismatch",
+  "financial_presentation_mismatch",
   "financial_verification_unavailable",
 ] as const;
 export type FinancialVerifierReasonCode = (typeof FINANCIAL_VERIFIER_REASON_CODES)[number];
 
 export type FinancialVerifierFailure = Readonly<{ reason_code: FinancialVerifierReasonCode; details: JsonObject }>;
 
-/** What the seal asserts about itself; cross-checked against the unit's bound evidence. */
+/**
+ * What the seal asserts about itself: its manifest, cross-checked against the
+ * unit's bound evidence, and its one `financial_answer` block (null when the
+ * seal has none), which must equal the presentation regenerated here.
+ */
 export type FinancialSealContext = Readonly<{
   snapshot_id: string;
   manifest: Readonly<{ fact_refs: ReadonlyArray<string>; source_ids: ReadonlyArray<string>; as_of: string }>;
+  answer: Readonly<{ financial: unknown; presentation_hash: unknown }> | null;
 }>;
 
 export type FinancialPublicationV1 = Readonly<{
@@ -85,6 +95,7 @@ export type FinancialPublicationV1 = Readonly<{
   definitions: ReadonlyArray<Readonly<{ metric_key: string; definition_version: string }>>;
   computations: ReadonlyArray<Readonly<{ node_id: LocalId; output_hash: Sha256Hex }>>;
   results: ReadonlyArray<Readonly<{ result_id: string; output_id: LocalId; disposition: string; result_hash: Sha256Hex }>>;
+  presentation: Readonly<{ version: string; hash: Sha256Hex }>;
   numeric_policy_version: string;
 }>;
 
@@ -211,6 +222,21 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
   }
   if (failures.length > 0) return { ok: false, failures };
 
+  // The block must be exactly the presentation regenerated from these records:
+  // a changed label, unit, period, denominator, ordering, or added text fails.
+  const content = financialAnswerFor(plan, records, unitId);
+  if (!content) return failed("financial_presentation_mismatch", { run_id: run.run_id, unit_id: unitId, field: "subject_name" });
+  const hash = presentationHash(content);
+  const answer = context.answer;
+  const version = (answer?.financial as { presentation_version?: unknown } | null | undefined)?.presentation_version;
+  const presentationProblem =
+    !answer ? "block"
+    : version !== FINANCIAL_PRESENTATION_VERSION ? "presentation_version"
+    : !canonicallyEqual(answer.financial, content) ? "content"
+    : answer.presentation_hash !== hash ? "presentation_hash"
+    : null;
+  if (presentationProblem) return failed("financial_presentation_mismatch", { run_id: run.run_id, unit_id: unitId, field: presentationProblem });
+
   const certificate: FinancialPublicationV1 = {
     schema_version: "financial_publication.v1",
     verifier_version: FINANCIAL_VERIFIER_VERSION,
@@ -236,6 +262,7 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
       const row = stored.get(result.output_id)!;
       return { result_id: row.result_id, output_id: result.output_id, disposition: result.disposition, result_hash: result.result_hash };
     }),
+    presentation: { version: FINANCIAL_PRESENTATION_VERSION, hash },
     numeric_policy_version: NUMERIC_POLICY.version,
   };
   return {
@@ -244,6 +271,22 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
     certificate_digest: hashCanonical("publication", certificate),
     result_ids: certificate.results.map((result) => result.result_id),
   };
+}
+
+/**
+ * The certified presentation of a unit from its ledger records and the
+ * subjects' current display names; null when a subject has no name. The
+ * engine builds the sealed block with this, and verification regenerates it.
+ */
+export function financialAnswerFor(plan: FinancialPlanV1, records: FinancialUnitRecords, unitId: LocalId): FinancialAnswerContent | null {
+  const names = new Map(records.subject_names.map((subject) => [`${subject.kind}:${subject.id.toLowerCase()}`, subject.name]));
+  const subjectNames: Record<LocalId, string> = {};
+  for (const member of plan.subjects.members) {
+    const name = names.get(`${member.subject_ref.kind}:${member.subject_ref.id.toLowerCase()}`);
+    if (name === undefined) return null;
+    subjectNames[member.slot_id] = name;
+  }
+  return presentFinancialUnit({ plan, run_id: records.run.run_id, unit_id: unitId, results: records.results, subject_names: subjectNames });
 }
 
 type BindingsOutcome =

@@ -113,6 +113,11 @@ export type VerifierBlock = {
   // metrics_comparison value matrix; a null entry is a gap. Only value_ref
   // matters to verification (each is a sealed fact ref).
   cells?: ReadonlyArray<ReadonlyArray<{ value_ref: string } | null>>;
+  // financial_answer: the certified presentation and its hash, compared with
+  // the presentation the financial verifier regenerates from ledger records.
+  financial?: JsonObject;
+  presentation_hash?: string;
+  title?: unknown;
 };
 
 export type VerifierToolAction = {
@@ -228,6 +233,7 @@ const REGISTERED_BLOCK_KINDS = new Set([
   "mention_volume",
   "sources",
   "disclosure",
+  "financial_answer",
 ]);
 
 export async function verifySnapshotSeal(
@@ -255,10 +261,19 @@ export async function verifySnapshotSeal(
   }
 
   let financial: Extract<FinancialVerification, { ok: true }> | undefined;
-  if (normalized.financial !== null) {
+  const answers = flattenBlocks(normalized.blocks).filter((block) => block.kind === "financial_answer");
+  if (normalized.financial === null) {
+    // A certified answer only ever enters a snapshot through its own financial seal.
+    for (const block of answers) addFailure("financial_presentation_mismatch", { block_id: block.id, field: "uncertified_block" });
+  } else {
+    // A financial seal holds at most its one certified answer plus policy disclosures; no narrative rides along.
+    if (answers.length > 1 || normalized.blocks.some((block) => block.kind !== "financial_answer" && block.kind !== "disclosure")) {
+      addFailure("financial_presentation_mismatch", { run_id: normalized.financial.run_id, field: "blocks" });
+    }
+    const answer = answers.length === 1 ? { financial: answers[0]!.financial, presentation_hash: answers[0]!.presentation_hash } : null;
     const outcome = db === undefined
       ? { ok: false as const, failures: [{ reason_code: "financial_verification_unavailable" as const, details: { reason: "no_transaction_client" } }] }
-      : await verifyFinancialSeal(db, normalized.financial, normalized);
+      : await verifyFinancialSeal(db, normalized.financial, { snapshot_id: normalized.snapshot_id, manifest: normalized.manifest, answer });
     if (outcome.ok) financial = outcome;
     else for (const failure of outcome.failures) addFailure(failure.reason_code, failure.details);
   }
@@ -374,6 +389,18 @@ function normalizeInput(input: SnapshotVerificationInput): NormalizedInput {
     ),
     financial: input.financial == null ? null : normalizeFinancialClaim(input.financial),
   });
+}
+
+function financialAnswerFields(block: VerifierBlock, index: number): Pick<VerifierBlock, "financial" | "presentation_hash"> {
+  if (block.kind !== "financial_answer") return {};
+  if (block.title !== undefined) {
+    throw new Error(`verifySnapshotSeal.blocks[${index}].title: a financial_answer carries no free-text title`);
+  }
+  const path = `verifySnapshotSeal.blocks[${index}].financial`;
+  return {
+    financial: cloneJsonObject(assertPlainJsonObject(block.financial, path), path),
+    presentation_hash: assertNonEmptyString(block.presentation_hash, `verifySnapshotSeal.blocks[${index}].presentation_hash`),
+  };
 }
 
 function normalizeFinancialClaim(claim: FinancialSealClaim): FinancialSealClaim {
@@ -575,6 +602,7 @@ function normalizeBlock(block: VerifierBlock, index: number): VerifierBlock {
     ),
     as_of: canonicalTimestamp(block.as_of, `verifySnapshotSeal.blocks[${index}].as_of`),
     ...(block.disclosure_tier === undefined ? {} : { disclosure_tier: block.disclosure_tier }),
+    ...financialAnswerFields(block, index),
     ...(items === undefined ? {} : { items: Object.freeze([...items]) }),
     ...(segments === undefined ? {} : { segments: Object.freeze([...segments]) }),
     ...(children === undefined

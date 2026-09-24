@@ -92,6 +92,9 @@ export type LoadedResult = Readonly<{
   result_hash: string;
 }>;
 
+/** A subject's current display name: an issuer's legal name, or a listing's ticker and venue. */
+export type LoadedSubjectName = Readonly<{ kind: "issuer" | "listing"; id: string; name: string }>;
+
 export type FinancialUnitRecords = Readonly<{
   run: LoadedRun;
   plan: Readonly<{ plan: unknown; semantic_hash: string }>;
@@ -100,6 +103,7 @@ export type FinancialUnitRecords = Readonly<{
   evidence: ReadonlyArray<LoadedEvidence>;
   computations: ReadonlyArray<LoadedComputation>;
   results: ReadonlyArray<LoadedResult>;
+  subject_names: ReadonlyArray<LoadedSubjectName>;
 }>;
 
 const ISO_UTC = `'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'`;
@@ -168,5 +172,33 @@ export async function loadFinancialUnitRecords(db: QueryExecutor, claim: Financi
     [claim.run_id, claim.unit_id],
   )).rows;
 
-  return { run: runRow, plan: { plan, semantic_hash }, unit, bindings, evidence, computations, results };
+  const subject_names = await loadSubjectNames(db, planSubjectRefs(plan));
+
+  return { run: runRow, plan: { plan, semantic_hash }, unit, bindings, evidence, computations, results, subject_names };
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+/** The plan is not validated yet; read its subject refs defensively. */
+function planSubjectRefs(plan: unknown): Array<{ kind: string; id: string }> {
+  const members = (plan as { subjects?: { members?: unknown } } | null)?.subjects?.members;
+  if (!Array.isArray(members)) return [];
+  return members.flatMap((member) => {
+    const ref = (member as { subject_ref?: { kind?: unknown; id?: unknown } } | null)?.subject_ref;
+    return typeof ref?.kind === "string" && typeof ref.id === "string" && UUID.test(ref.id) ? [{ kind: ref.kind, id: ref.id }] : [];
+  });
+}
+
+export async function loadSubjectNames(
+  db: QueryExecutor,
+  refs: ReadonlyArray<{ kind: string; id: string }>,
+): Promise<ReadonlyArray<LoadedSubjectName>> {
+  const ids = (kind: string) => refs.filter((ref) => ref.kind === kind).map((ref) => ref.id);
+  return (await db.query<LoadedSubjectName>(
+    `select 'issuer' as kind, issuer_id::text as id, legal_name as name from issuers where issuer_id = any($1::uuid[])
+     union all
+     select 'listing', listing_id::text, ticker || ' (' || mic || ')' from listings where listing_id = any($2::uuid[])
+     order by kind, id`,
+    [ids("issuer"), ids("listing")],
+  )).rows;
 }

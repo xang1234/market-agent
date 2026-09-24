@@ -81,6 +81,7 @@ async function seedEvidence(db: Client): Promise<void> {
       ${links.supersedes ? `'${links.supersedes}'` : "null"}, ${links.superseded_by ? `'${links.superseded_by}'` : "null"})`;
   await db.query(`
     insert into users (user_id, email) values ('${IDS.owner}', 'owner@example.test'), ('${IDS.other}', 'other@example.test');
+    insert into issuers (issuer_id, legal_name) values ('${IDS.issuerA}', 'Alpha Industries Inc.'), ('${IDS.issuerB}', 'Beta Holdings Corp.');
     insert into metrics (metric_id, metric_key, display_name, unit_class, aggregation, interpretation, canonical_source_class) values
       ('${IDS.revenue}', 'revenue', 'Revenue', 'currency', 'sum', 'higher_is_better', 'gaap'),
       ('${IDS.grossProfit}', 'gross_profit', 'Gross profit', 'currency', 'sum', 'higher_is_better', 'gaap');

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 import blockSchema from './blockSchema.json' with { type: 'json' }
 import {
+  CERTIFIED_FINANCIAL_BLOCK_KINDS,
   CHART_COMPARISON_BLOCK_KINDS,
   NARRATIVE_LAYOUT_BLOCK_KINDS,
   RESEARCH_EVIDENCE_BLOCK_KINDS,
@@ -23,6 +24,7 @@ const ALL_CATALOG_KINDS = [
   ...CHART_COMPARISON_BLOCK_KINDS,
   ...RESEARCH_EVIDENCE_BLOCK_KINDS,
   ...TRUST_PROVENANCE_BLOCK_KINDS,
+  ...CERTIFIED_FINANCIAL_BLOCK_KINDS,
 ]
 
 type BlockSchemaShape = {
@@ -72,6 +74,11 @@ test('each register*Blocks helper covers exactly the kinds in its typed group', 
       expected: TRUST_PROVENANCE_BLOCK_KINDS,
       label: 'trust_provenance',
     },
+    {
+      filename: 'registerCertifiedFinancialBlocks.ts',
+      expected: CERTIFIED_FINANCIAL_BLOCK_KINDS,
+      label: 'certified_financial',
+    },
   ]
 
   for (const { filename, expected, label } of cases) {
@@ -94,6 +101,7 @@ test('defaultBlockRegistry composer invokes every register*Blocks helper', () =>
     'registerChartBlockRenderers',
     'registerResearchEvidenceBlockRenderers',
     'registerTrustProvenanceBlockRenderers',
+    'registerCertifiedFinancialBlockRenderers',
   ]) {
     assert.ok(
       composer.includes(`${helper}(registry)`),

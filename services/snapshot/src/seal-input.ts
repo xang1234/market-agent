@@ -21,6 +21,8 @@ import type {
 } from "./snapshot-verifier.ts";
 import type { UUID } from "../../shared/src/subject-ref.ts";
 import type { FinancialSealClaim } from "./financial-verifier-loader.ts";
+import type { JsonObject } from "./manifest-staging.ts";
+import { presentationHash, type FinancialAnswerContent } from "../../financial-core/src/index.ts";
 
 // A fact row backing a cited ref, loaded from the facts table. source_id is
 // required (the verifier binds every referenced fact to a source); the
@@ -272,14 +274,17 @@ export function withRequiredDisclosures(seal: SnapshotSealInput): SnapshotSealIn
 // unit cites its bound input facts and their sources so the existing
 // source, fact-metadata, and disclosure checks apply, and carries a financial
 // claim the verifier resolves against the ledger in the sealing transaction.
-// The snapshot's as_of is the plan's knowledge cutoff, never the execution
-// time. Callers pass the bound facts' rows as loaded from the facts table; the
-// verifier rejects any seal whose manifest does not cite what the unit bound.
+// Its only block is the unit's `financial_answer`, built here from the
+// presentation the engine generated; the verifier regenerates it and rejects
+// any difference. The snapshot's as_of is the plan's knowledge cutoff, never
+// the execution time. Callers pass the bound facts' rows as loaded from the
+// facts table; the verifier rejects any seal whose manifest does not cite what
+// the unit bound. A null answer seals no block and fails verification.
 export function buildFinancialSealInput(input: {
   snapshot_id: UUID;
   claim: FinancialSealClaim;
   knowledgeCutoff: string;
-  blocks: ReadonlyArray<VerifierBlock>;
+  answer: FinancialAnswerContent | null;
   subjectRefs: ReadonlyArray<{ kind: string; id: string }>;
   boundFacts: ReadonlyArray<FactRow>;
 }): SnapshotSealInput {
@@ -296,9 +301,22 @@ export function buildFinancialSealInput(input: {
   return {
     snapshot_id: input.snapshot_id,
     manifest,
-    blocks: [...input.blocks],
+    blocks: input.answer === null ? [] : [financialAnswerBlock(input.snapshot_id, input.answer, sourceIds, input.knowledgeCutoff)],
     facts: factRefs.map((factId) => ({ ...factById.get(factId)! })),
     sources: sourceIds,
     financial: input.claim,
+  };
+}
+
+function financialAnswerBlock(snapshotId: UUID, answer: FinancialAnswerContent, sourceIds: ReadonlyArray<string>, asOf: string): VerifierBlock {
+  return {
+    id: `financial-answer-${answer.unit_id}`,
+    kind: "financial_answer",
+    snapshot_id: snapshotId,
+    data_ref: { kind: "financial_answer", id: `${answer.run_id}:${answer.unit_id}` },
+    source_refs: [...sourceIds],
+    as_of: new Date(asOf).toISOString(),
+    financial: answer as unknown as JsonObject,
+    presentation_hash: presentationHash(answer),
   };
 }

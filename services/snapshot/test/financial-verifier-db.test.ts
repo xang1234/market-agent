@@ -6,7 +6,9 @@ import { recordFactPrecisionAttestation } from "../../evidence/src/financial-att
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { executeRun } from "../../financial-engine/src/execute.ts";
 import { authorityFor, databaseUrl, engineDatabase, IDS, leasedRun, marginPlan } from "../../financial-engine/test/db-fixtures.ts";
-import { verifyFinancialSeal } from "../src/financial-verifier.ts";
+import { presentationHash, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
+import { loadFinancialUnitRecords, type FinancialSealClaim } from "../src/financial-verifier-loader.ts";
+import { financialAnswerFor, verifyFinancialSeal } from "../src/financial-verifier.ts";
 import { buildFinancialSealInput, toSealFactRow } from "../src/seal-input.ts";
 import { sealSnapshotInTransaction, snapshotTransactionClient } from "../src/snapshot-sealer.ts";
 
@@ -24,6 +26,12 @@ async function boundFacts(db: Client | PoolClient, runId: string, unitId: string
       order by f.fact_id`,
     [runId, unitId],
   )).rows.map(toSealFactRow);
+}
+
+/** The answer a correct finalization would seal for the claimed unit. */
+async function generatedAnswer(db: Client | PoolClient, claim: FinancialSealClaim) {
+  const records = (await loadFinancialUnitRecords(db, claim))!;
+  return financialAnswerFor(records.plan.plan as FinancialPlanV1, records, claim.unit_id);
 }
 
 /** Runs `action` in a transaction that is always rolled back, so each test's tampering is isolated. */
@@ -50,9 +58,11 @@ test("financial verification against ledger records", { timeout: 240_000 }, asyn
 
   const verify = async (unitId: string, owner: string = IDS.owner) => {
     const facts = await boundFacts(db, runId, unitId);
+    const answer = await generatedAnswer(db, { owner_user_id: IDS.owner, run_id: runId, unit_id: unitId });
     return verifyFinancialSeal(db, { owner_user_id: owner, run_id: runId, unit_id: unitId }, {
       snapshot_id: SNAPSHOT,
       manifest: { fact_refs: facts.map((fact) => fact.fact_id), source_ids: [...new Set(facts.map((fact) => fact.source_id))], as_of: cutoff },
+      answer: answer && { financial: answer, presentation_hash: presentationHash(answer) },
     });
   };
   const reasons = (outcome: Awaited<ReturnType<typeof verify>>) =>
@@ -108,12 +118,13 @@ test("financial verification against ledger records", { timeout: 240_000 }, asyn
     const client = snapshotTransactionClient(await pool.connect());
     try {
       const facts = await boundFacts(client, runId, "margin_unit");
+      const claim = { owner_user_id: IDS.owner, run_id: runId, unit_id: "margin_unit" };
       const seal = buildFinancialSealInput({
         snapshot_id: SNAPSHOT,
-        claim: { owner_user_id: IDS.owner, run_id: runId, unit_id: "margin_unit" },
+        claim,
         knowledgeCutoff: cutoff,
+        answer: await generatedAnswer(client, claim),
         subjectRefs: [{ kind: "issuer", id: IDS.issuerA }],
-        blocks: [{ id: "answer", kind: "section", snapshot_id: SNAPSHOT, data_ref: { kind: "section", id: "answer" }, source_refs: [], as_of: cutoff }],
         boundFacts: facts,
       });
 
@@ -123,6 +134,25 @@ test("financial verification against ledger records", { timeout: 240_000 }, asyn
       assert.ok(sealed.ok, JSON.stringify(sealed.verification.failures));
       assert.equal(sealed.verification.financial?.certificate.unit.unit_id, "margin_unit");
       assert.equal(sealed.verification.financial?.certificate.snapshot_id, SNAPSHOT);
+      const [block] = seal.blocks;
+      assert.equal(block?.kind, "financial_answer");
+      assert.deepEqual(sealed.verification.financial?.certificate.presentation, { version: "financial-presentation.v1", hash: block?.presentation_hash });
+      assert.equal((block?.financial as { labels: Record<string, { text: string }> }).labels["subject:a"]?.text, "Alpha Industries Inc.");
+
+      const relabeled = structuredClone(seal);
+      const content = relabeled.blocks[0]!.financial as { labels: Record<string, { text: string }> };
+      content.labels["subject:a"]!.text = "Alpha Industries Inc. (sector leader)";
+      relabeled.blocks[0]!.presentation_hash = presentationHash(content as never);
+      const narrated = { ...seal, blocks: [...seal.blocks, { id: "note", kind: "rich_text", snapshot_id: SNAPSHOT, data_ref: { kind: "rich_text", id: "note" }, source_refs: [], as_of: cutoff, segments: [{ type: "text", text: "Margins doubled." }] }] };
+      for (const [label, tampered, expected] of [
+        ["a relabeled company", relabeled, ["financial_presentation_mismatch:content"]],
+        ["a narrative riding along", narrated, ["financial_presentation_mismatch:blocks"]],
+      ] as const) {
+        await client.query("begin");
+        const outcome = await sealSnapshotInTransaction(client, tampered);
+        await client.query("rollback");
+        assert.deepEqual(outcome.verification.failures.map((failure) => `${failure.reason_code}:${String(failure.details.field)}`), expected, label);
+      }
 
       await client.query("begin");
       await client.query("set local session_replication_role = replica");
@@ -150,5 +180,15 @@ test("financial verification against ledger records", { timeout: 240_000 }, asyn
       financial: { owner_user_id: IDS.owner, run_id: runId, unit_id: "rev_unit" },
     });
     assert.deepEqual(outcome.failures.map((failure) => failure.reason_code), ["financial_verification_unavailable"]);
+  });
+
+  await t.test("a financial_answer block outside a financial seal is rejected", async () => {
+    const { verifySnapshotSeal } = await import("../src/snapshot-verifier.ts");
+    const claim = { owner_user_id: IDS.owner, run_id: runId, unit_id: "rev_unit" };
+    const answer = (await generatedAnswer(db, claim))!;
+    const facts = await boundFacts(db, runId, "rev_unit");
+    const seal = buildFinancialSealInput({ snapshot_id: SNAPSHOT, claim, knowledgeCutoff: cutoff, answer, subjectRefs: [{ kind: "issuer", id: IDS.issuerA }], boundFacts: facts });
+    const outcome = await verifySnapshotSeal({ ...seal, financial: null });
+    assert.deepEqual(outcome.failures.map((failure) => `${failure.reason_code}:${String(failure.details.field)}`), ["financial_presentation_mismatch:uncertified_block"]);
   });
 });

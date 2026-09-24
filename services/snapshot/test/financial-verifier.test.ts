@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hashCanonical, planSemanticHash } from "../../financial-core/src/index.ts";
+import { hashCanonical, planSemanticHash, presentationHash } from "../../financial-core/src/index.ts";
 import { verifyFinancialUnit, type FinancialVerification } from "../src/financial-verifier.ts";
-import { F, mutable, SEAL_CONTEXT, validRecords } from "./financial-fixtures.ts";
+import { F, mutable, SEAL_CONTEXT, sealContext, validRecords } from "./financial-fixtures.ts";
 
 function reasons(outcome: FinancialVerification): string[] {
   return outcome.ok ? [] : outcome.failures.map((failure) => `${failure.reason_code}:${String(failure.details.field ?? failure.details.reason ?? failure.details.state ?? "")}`);
@@ -159,4 +159,52 @@ test("diagnostics carry identifiers and codes, never values", () => {
   const outcome = verifyFinancialUnit(records, "section", SEAL_CONTEXT);
   assert.ok(!outcome.ok);
   assert.doesNotMatch(JSON.stringify(outcome), /383285000000/);
+});
+
+function withAnswer(edit: (answer: any) => void, rehash = true) {
+  const context = sealContext();
+  const financial = JSON.parse(JSON.stringify(context.answer!.financial));
+  edit(financial);
+  return { ...context, answer: { financial, presentation_hash: rehash ? presentationHash(financial) : context.answer!.presentation_hash } };
+}
+
+test("the certificate binds the regenerated presentation", () => {
+  const outcome = verifyFinancialUnit(validRecords(), "section", SEAL_CONTEXT);
+  assert.ok(outcome.ok);
+  assert.deepEqual(outcome.certificate.presentation, { version: "financial-presentation.v1", hash: SEAL_CONTEXT.answer!.presentation_hash });
+  const answer = SEAL_CONTEXT.answer!.financial as { labels: Record<string, { text: string }>; results: Array<{ presented: { text: string } }> };
+  assert.equal(answer.labels["subject:a"]!.text, "Fixture Industries Inc.");
+  assert.equal(answer.labels["measure:a_gm"]!.text, "Gross margin (gross profit / revenue)");
+});
+
+test("a changed company label, unit, period, denominator, or added text is rejected even when rehashed", () => {
+  const cases: Array<[string, (answer: any) => void]> = [
+    ["company label", (answer) => { answer.labels["subject:a"].text = "Other Corp"; }],
+    ["percentage unit", (answer) => { answer.results[1].presented.unit = { kind: "percent" }; }],
+    ["period", (answer) => { answer.labels["period:a_gm"].text = "FY2022"; }],
+    ["hidden denominator", (answer) => { answer.labels["measure:a_gm"].text = "Gross margin"; }],
+    ["rounded label", (answer) => { answer.results[1].presented.text = "44.14%"; }],
+    ["exact value", (answer) => { answer.results[1].presented.full_text = "44.13%"; }],
+    ["added prose", (answer) => { answer.results[1].presented.text += " (highest)"; }],
+    ["coverage", (answer) => { answer.coverage.state = "partial"; answer.coverage.verified -= 1; }],
+  ];
+  for (const [label, edit] of cases) {
+    assert.deepEqual(reasons(verifyFinancialUnit(validRecords(), "section", withAnswer(edit))), ["financial_presentation_mismatch:content"], label);
+  }
+});
+
+test("a stale hash, unknown version, missing block, or unnamed subject is rejected", () => {
+  assert.deepEqual(reasons(verifyFinancialUnit(validRecords(), "section", withAnswer(() => {}, false))), [], "untouched content with its own hash verifies");
+  const staleHash = { ...SEAL_CONTEXT, answer: { ...SEAL_CONTEXT.answer!, presentation_hash: "0".repeat(64) } };
+  assert.deepEqual(reasons(verifyFinancialUnit(validRecords(), "section", staleHash)), ["financial_presentation_mismatch:presentation_hash"]);
+  const future = withAnswer((answer) => { answer.presentation_version = "financial-presentation.v9"; });
+  assert.deepEqual(reasons(verifyFinancialUnit(validRecords(), "section", future)), ["financial_presentation_mismatch:presentation_version"]);
+  assert.deepEqual(reasons(verifyFinancialUnit(validRecords(), "section", { ...SEAL_CONTEXT, answer: null })), ["financial_presentation_mismatch:block"]);
+
+  const renamed = mutable(validRecords());
+  renamed.subject_names[0].name = "Renamed Industries Inc.";
+  assert.deepEqual(reasons(verifyFinancialUnit(renamed, "section", SEAL_CONTEXT)), ["financial_presentation_mismatch:content"], "the label reflects the subject's current name");
+  const unnamed = mutable(validRecords());
+  unnamed.subject_names = [];
+  assert.deepEqual(reasons(verifyFinancialUnit(unnamed, "section", SEAL_CONTEXT)), ["financial_presentation_mismatch:subject_name"]);
 });

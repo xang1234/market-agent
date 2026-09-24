@@ -1,4 +1,3 @@
-import { hashCanonical } from "../../financial-core/src/index.ts";
 import { FINANCIAL_VERIFIER_VERSION } from "./financial-verifier.ts";
 import {
   auditManifestToolCallLog,
@@ -310,7 +309,7 @@ async function insertFinancialCertificate(
       JSON.stringify(certificate),
       financial.certificate_digest,
       JSON.stringify(financial.result_ids),
-      hashCanonical("presentation", { template: "sealed_blocks.v1", blocks: input.blocks }),
+      certificate.presentation.hash,
       FINANCIAL_VERIFIER_VERSION,
     ],
   );
