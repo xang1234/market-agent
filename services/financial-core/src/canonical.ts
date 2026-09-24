@@ -18,6 +18,7 @@ export const HASH_DOMAINS = Object.freeze({
   plan_binding: "market-agent/financial/plan-binding/v1",
   request_identity: "market-agent/financial/request-identity/v1",
   bound_input: "market-agent/financial/bound-input/v1",
+  candidate_set: "market-agent/financial/candidate-set/v1",
   computation: "market-agent/financial/computation/v1",
   result: "market-agent/financial/result/v1",
   presentation: "market-agent/financial/presentation/v1",

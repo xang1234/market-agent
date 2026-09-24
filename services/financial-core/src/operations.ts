@@ -78,6 +78,7 @@ const REASON_DISPOSITIONS: Readonly<Record<ReasonCode, GapDisposition>> = {
   stale_input: "missing",
   publication_time_unknown: "missing",
   precision_unverified: "missing",
+  context_unverified: "missing",
   conflicting_evidence: "incompatible",
   reconciliation_required: "incompatible",
   incompatible_period: "incompatible",

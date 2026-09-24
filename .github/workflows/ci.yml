@@ -670,8 +670,14 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: |
+            db/package-lock.json
             services/financial-core/package-lock.json
             services/financial-engine/package-lock.json
+
+      # Engine integration tests use the shared db/test Docker harness.
+      - name: Install db deps (needed by the engine integration harness)
+        working-directory: db
+        run: npm ci
 
       # The engine imports financial-core sources, which resolve their own
       # dependencies (ajv, decimal.js) from services/financial-core/node_modules.

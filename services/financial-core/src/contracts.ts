@@ -83,6 +83,7 @@ export const REASON_CODES = [
   "stale_input",
   "publication_time_unknown",
   "precision_unverified",
+  "context_unverified",
   "conflicting_evidence",
   "reconciliation_required",
   "incompatible_period",
