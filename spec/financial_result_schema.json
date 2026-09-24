@@ -1,0 +1,356 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/financial_result_schema.json",
+  "title": "Financial Result Schema",
+  "description": "Bound financial inputs and requested-output results. Draft results carry internal state 'computed'; only server finalization assigns 'verified'.",
+  "$defs": {
+    "ReasonCode": {
+      "enum": [
+        "missing_input",
+        "stale_input",
+        "publication_time_unknown",
+        "precision_unverified",
+        "conflicting_evidence",
+        "reconciliation_required",
+        "incompatible_period",
+        "incompatible_unit",
+        "incompatible_currency",
+        "incompatible_scope",
+        "incompatible_basis",
+        "incompatible_definition",
+        "non_positive_base",
+        "zero_denominator",
+        "non_positive_denominator",
+        "non_additive_metric",
+        "incomplete_quarter_set",
+        "overlapping_periods",
+        "unsupported_operation",
+        "unsupported_metric",
+        "unsupported_period",
+        "blocked_by_dependency",
+        "incomplete_cohort",
+        "scope_limit_exceeded",
+        "numeric_limit_exceeded",
+        "precision_indeterminate",
+        "provider_error",
+        "database_error",
+        "integrity_failure",
+        "replay_version_unavailable"
+      ]
+    },
+    "GapDisposition": {
+      "enum": ["missing", "unsupported", "not_applicable", "undefined", "incompatible", "blocked_dependency", "execution_error"]
+    },
+    "Rounding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_version", "significant_digits", "mode"],
+      "properties": {
+        "policy_version": { "$ref": "financial_plan_schema.json#/$defs/VersionTag" },
+        "significant_digits": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "mode": { "const": "half_even" }
+      }
+    },
+    "ValuePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "value", "unit", "exact", "rounding"],
+      "properties": {
+        "kind": { "const": "value" },
+        "value": { "$ref": "financial_plan_schema.json#/$defs/DecimalString" },
+        "unit": { "$ref": "financial_plan_schema.json#/$defs/FinancialUnit" },
+        "exact": { "type": "boolean" },
+        "rounding": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/Rounding" }] }
+      }
+    },
+    "PredicatePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "predicate", "comparison", "outcome"],
+      "properties": {
+        "kind": { "const": "predicate" },
+        "predicate": { "const": "threshold" },
+        "comparison": { "$ref": "financial_plan_schema.json#/$defs/Comparison" },
+        "outcome": { "type": "boolean" }
+      }
+    },
+    "RankingPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "direction", "population", "complete", "ranks", "extreme"],
+      "properties": {
+        "kind": { "const": "ranking" },
+        "direction": { "enum": ["highest", "lowest"] },
+        "population": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requested", "evaluated"],
+          "properties": {
+            "requested": { "type": "integer", "minimum": 2, "maximum": 25 },
+            "evaluated": { "type": "integer", "minimum": 0, "maximum": 25 }
+          }
+        },
+        "complete": { "type": "boolean" },
+        "ranks": {
+          "type": "array",
+          "maxItems": 25,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["node_id", "rank"],
+            "properties": {
+              "node_id": { "$ref": "financial_plan_schema.json#/$defs/LocalId" },
+              "rank": { "type": "integer", "minimum": 1, "maximum": 25 }
+            }
+          }
+        },
+        "extreme": {
+          "description": "Tied leaders of a complete cohort; null whenever the cohort is incomplete.",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 25,
+              "items": { "$ref": "financial_plan_schema.json#/$defs/LocalId" }
+            }
+          ]
+        }
+      }
+    },
+    "GapPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reason_code", "explanation"],
+      "properties": {
+        "kind": { "const": "gap" },
+        "reason_code": { "$ref": "#/$defs/ReasonCode" },
+        "explanation": { "type": "string", "minLength": 1, "maxLength": 500 }
+      }
+    },
+    "SuccessPayload": {
+      "oneOf": [
+        { "$ref": "#/$defs/ValuePayload" },
+        { "$ref": "#/$defs/PredicatePayload" },
+        { "$ref": "#/$defs/RankingPayload" }
+      ]
+    },
+    "ResultIdentity": {
+      "type": "object",
+      "required": ["schema_version", "result_id", "output_id", "node_id", "unit_id", "dependencies"],
+      "properties": {
+        "schema_version": { "const": "financial_result.v1" },
+        "result_id": { "$ref": "financial_plan_schema.json#/$defs/UUID" },
+        "output_id": { "$ref": "financial_plan_schema.json#/$defs/LocalId" },
+        "node_id": { "$ref": "financial_plan_schema.json#/$defs/LocalId" },
+        "unit_id": { "$ref": "financial_plan_schema.json#/$defs/LocalId" },
+        "dependencies": {
+          "type": "array",
+          "maxItems": 512,
+          "uniqueItems": true,
+          "items": { "$ref": "financial_plan_schema.json#/$defs/LocalId" }
+        }
+      }
+    },
+    "DraftFinancialResultV1": {
+      "description": "Engine-produced, not publicly readable. 'verified' is not a draft disposition.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema_version", "result_id", "output_id", "node_id", "unit_id", "dependencies", "state", "disposition", "payload"],
+          "properties": {
+            "schema_version": true,
+            "result_id": true,
+            "output_id": true,
+            "node_id": true,
+            "unit_id": true,
+            "dependencies": true,
+            "state": { "const": "draft" },
+            "disposition": { "const": "computed" },
+            "payload": { "$ref": "#/$defs/SuccessPayload" }
+          },
+          "allOf": [{ "$ref": "#/$defs/ResultIdentity" }]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema_version", "result_id", "output_id", "node_id", "unit_id", "dependencies", "state", "disposition", "payload"],
+          "properties": {
+            "schema_version": true,
+            "result_id": true,
+            "output_id": true,
+            "node_id": true,
+            "unit_id": true,
+            "dependencies": true,
+            "state": { "const": "draft" },
+            "disposition": { "$ref": "#/$defs/GapDisposition" },
+            "payload": { "$ref": "#/$defs/GapPayload" }
+          },
+          "allOf": [{ "$ref": "#/$defs/ResultIdentity" }]
+        }
+      ]
+    },
+    "FinalizedFinancialResultV1": {
+      "description": "Produced only by the server sealing transaction after independent recomputation.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema_version", "result_id", "output_id", "node_id", "unit_id", "dependencies", "state", "disposition", "payload", "result_hash"],
+          "properties": {
+            "schema_version": true,
+            "result_id": true,
+            "output_id": true,
+            "node_id": true,
+            "unit_id": true,
+            "dependencies": true,
+            "state": { "const": "finalized" },
+            "disposition": { "const": "verified" },
+            "payload": { "$ref": "#/$defs/SuccessPayload" },
+            "result_hash": { "$ref": "financial_plan_schema.json#/$defs/Sha256Hex" }
+          },
+          "allOf": [{ "$ref": "#/$defs/ResultIdentity" }]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema_version", "result_id", "output_id", "node_id", "unit_id", "dependencies", "state", "disposition", "payload", "result_hash"],
+          "properties": {
+            "schema_version": true,
+            "result_id": true,
+            "output_id": true,
+            "node_id": true,
+            "unit_id": true,
+            "dependencies": true,
+            "state": { "const": "finalized" },
+            "disposition": { "$ref": "#/$defs/GapDisposition" },
+            "payload": { "$ref": "#/$defs/GapPayload" },
+            "result_hash": { "$ref": "financial_plan_schema.json#/$defs/Sha256Hex" }
+          },
+          "allOf": [{ "$ref": "#/$defs/ResultIdentity" }]
+        }
+      ]
+    },
+    "BoundFinancialInputV1": {
+      "description": "Immutable once bound. Only proven precision statuses can bind; legacy_unverified values produce a precision gap instead.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "input_slot",
+        "fact_id",
+        "subject_ref",
+        "metric",
+        "source",
+        "numeric",
+        "unit",
+        "period",
+        "dimensions",
+        "basis",
+        "publication",
+        "observed_at",
+        "precision_status",
+        "eligibility"
+      ],
+      "properties": {
+        "schema_version": { "const": "financial_bound_input.v1" },
+        "input_slot": { "$ref": "financial_plan_schema.json#/$defs/LocalId" },
+        "fact_id": { "$ref": "financial_plan_schema.json#/$defs/UUID" },
+        "subject_ref": { "$ref": "financial_plan_schema.json#/$defs/SubjectRef" },
+        "metric": { "$ref": "financial_plan_schema.json#/$defs/MetricDefinitionRef" },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source_id", "document_id", "source_version_hash", "locator"],
+          "properties": {
+            "source_id": { "$ref": "financial_plan_schema.json#/$defs/UUID" },
+            "document_id": { "oneOf": [{ "$ref": "financial_plan_schema.json#/$defs/UUID" }, { "type": "null" }] },
+            "source_version_hash": { "$ref": "financial_plan_schema.json#/$defs/Sha256Hex" },
+            "locator": { "oneOf": [{ "type": "string", "minLength": 1, "maxLength": 1000 }, { "type": "null" }] }
+          }
+        },
+        "numeric": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["raw_token", "token_proof_hash", "value", "scale", "native_value"],
+          "properties": {
+            "raw_token": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "token_proof_hash": { "$ref": "financial_plan_schema.json#/$defs/Sha256Hex" },
+            "value": { "$ref": "financial_plan_schema.json#/$defs/DecimalString" },
+            "scale": { "$ref": "financial_plan_schema.json#/$defs/DecimalString" },
+            "native_value": { "$ref": "financial_plan_schema.json#/$defs/DecimalString" }
+          }
+        },
+        "unit": { "$ref": "financial_plan_schema.json#/$defs/FinancialUnit" },
+        "period": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "start", "end", "fiscal_year", "fiscal_period", "calendar_version"],
+          "properties": {
+            "kind": { "enum": ["duration", "instant"] },
+            "start": { "oneOf": [{ "$ref": "financial_plan_schema.json#/$defs/IsoDate" }, { "type": "null" }] },
+            "end": { "$ref": "financial_plan_schema.json#/$defs/IsoDate" },
+            "fiscal_year": { "type": "integer", "minimum": 1900, "maximum": 2200 },
+            "fiscal_period": { "$ref": "financial_plan_schema.json#/$defs/FiscalPeriod" },
+            "calendar_version": { "$ref": "financial_plan_schema.json#/$defs/VersionTag" }
+          }
+        },
+        "dimensions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scope", "members"],
+          "properties": {
+            "scope": { "enum": ["consolidated", "segment"] },
+            "members": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["axis", "member"],
+                "properties": {
+                  "axis": { "type": "string", "minLength": 1, "maxLength": 200 },
+                  "member": { "type": "string", "minLength": 1, "maxLength": 200 }
+                }
+              }
+            }
+          }
+        },
+        "basis": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reporting", "adjustment", "share_basis"],
+          "properties": {
+            "reporting": { "$ref": "financial_plan_schema.json#/$defs/ReportingBasis" },
+            "adjustment": { "enum": ["unadjusted", "split_adjusted"] },
+            "share_basis": { "enum": ["basic", "diluted", "not_applicable"] }
+          }
+        },
+        "publication": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["attestation_id", "available_no_later_than", "precision", "source_timezone"],
+          "properties": {
+            "attestation_id": { "$ref": "financial_plan_schema.json#/$defs/UUID" },
+            "available_no_later_than": { "$ref": "financial_plan_schema.json#/$defs/IsoDateTime" },
+            "precision": { "enum": ["instant", "date", "observed_public"] },
+            "source_timezone": { "$ref": "financial_plan_schema.json#/$defs/TimeZoneName" }
+          }
+        },
+        "observed_at": { "$ref": "financial_plan_schema.json#/$defs/IsoDateTime" },
+        "precision_status": { "enum": ["source_token_preserved", "revalidated_against_source"] },
+        "eligibility": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["selection_policy_version", "promotion_status", "candidate_set_digest"],
+          "properties": {
+            "selection_policy_version": { "$ref": "financial_plan_schema.json#/$defs/VersionTag" },
+            "promotion_status": { "enum": ["authoritative", "corroborated", "reviewed_extraction"] },
+            "candidate_set_digest": { "$ref": "financial_plan_schema.json#/$defs/Sha256Hex" }
+          }
+        }
+      }
+    }
+  }
+}

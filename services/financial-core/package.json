@@ -1,0 +1,16 @@
+{
+  "name": "financial-core",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test \"test/**/*.test.ts\""
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "decimal.js": "10.6.0"
+  }
+}

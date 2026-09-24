@@ -1,0 +1,496 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/financial_plan_schema.json",
+  "title": "Financial Plan Schema",
+  "description": "FinancialPlanV1: a bounded, typed financial calculation plan. Authority (owner, channel, parent, lease, feature mode) is never part of a plan; the server injects it separately as FinancialRuntimeAuthorityV1.",
+  "$ref": "#/$defs/FinancialPlanV1",
+  "$defs": {
+    "UUID": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    },
+    "LocalId": {
+      "description": "Plan-local identifier for subject slots, operation nodes, outputs, publication units, and thresholds.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "MetricKey": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "VersionTag": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+    },
+    "Sha256Hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "DecimalString": {
+      "description": "Canonical finite decimal: optional minus, no leading zeros, no trailing fractional zeros, no exponent, never negative zero.",
+      "type": "string",
+      "maxLength": 8192,
+      "pattern": "^(?!-0$)-?(?:0|[1-9][0-9]*)(?:\\.[0-9]*[1-9])?$"
+    },
+    "IsoDate": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])$"
+    },
+    "IsoDateTime": {
+      "description": "RFC 3339 timestamp with an explicit offset or Z.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,9})?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$"
+    },
+    "TimeZoneName": {
+      "type": "string",
+      "pattern": "^(?:UTC|[A-Za-z_]+(?:/[A-Za-z0-9_+-]+){1,2})$"
+    },
+    "Comparison": {
+      "enum": ["gt", "gte", "lt", "lte", "eq"]
+    },
+    "ReportingBasis": {
+      "enum": ["as_reported", "as_restated"]
+    },
+    "FiscalPeriod": {
+      "enum": ["FY", "Q1", "Q2", "Q3", "Q4"]
+    },
+    "FinancialUnit": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "currency"],
+          "properties": {
+            "kind": { "enum": ["currency", "currency_per_share"] },
+            "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": { "enum": ["shares", "ratio", "percent", "percentage_points", "basis_points", "count"] }
+          }
+        }
+      ]
+    },
+    "SubjectRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "enum": ["issuer", "listing"] },
+        "id": { "$ref": "#/$defs/UUID" }
+      }
+    },
+    "SubjectSlot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slot_id", "subject_ref", "display_order", "role"],
+      "properties": {
+        "slot_id": { "$ref": "#/$defs/LocalId" },
+        "subject_ref": { "$ref": "#/$defs/SubjectRef" },
+        "display_order": { "type": "integer", "minimum": 0, "maximum": 24 },
+        "role": { "enum": ["primary", "peer"] }
+      }
+    },
+    "SubjectSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["membership", "requested_count", "resolved_count", "omitted_count", "members"],
+      "properties": {
+        "membership": { "enum": ["explicit", "frozen_peer_set"] },
+        "requested_count": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "resolved_count": { "type": "integer", "minimum": 1, "maximum": 25 },
+        "omitted_count": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "members": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 25,
+          "items": { "$ref": "#/$defs/SubjectSlot" }
+        }
+      }
+    },
+    "TimeContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["knowledge_cutoff", "cutoff_timezone", "time_mode"],
+      "properties": {
+        "knowledge_cutoff": { "$ref": "#/$defs/IsoDateTime" },
+        "cutoff_timezone": { "$ref": "#/$defs/TimeZoneName" },
+        "time_mode": { "const": "public_information" }
+      }
+    },
+    "Policies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reporting_basis", "period_policy", "freshness", "source_policy_version"],
+      "properties": {
+        "reporting_basis": { "$ref": "#/$defs/ReportingBasis" },
+        "period_policy": { "const": "exact_fiscal" },
+        "freshness": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_age_days"],
+          "properties": {
+            "max_age_days": {
+              "oneOf": [
+                { "type": "integer", "minimum": 1, "maximum": 3660 },
+                { "type": "null" }
+              ]
+            }
+          }
+        },
+        "source_policy_version": { "$ref": "#/$defs/VersionTag" }
+      }
+    },
+    "Planner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "adapter_version", "model", "prompt_version"],
+      "properties": {
+        "kind": { "enum": ["model", "deterministic"] },
+        "adapter_version": { "$ref": "#/$defs/VersionTag" },
+        "model": { "oneOf": [{ "type": "string", "minLength": 1, "maxLength": 128 }, { "type": "null" }] },
+        "prompt_version": { "oneOf": [{ "$ref": "#/$defs/VersionTag" }, { "type": "null" }] }
+      }
+    },
+    "Origin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ref"],
+      "properties": {
+        "kind": { "enum": ["chat_request", "analyze_section", "grid_run", "thesis_condition", "discovery_criterion", "api_request"] },
+        "ref": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9:_./-]+$" }
+      }
+    },
+    "Interpretation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generator_version", "text"],
+      "properties": {
+        "generator_version": { "$ref": "#/$defs/VersionTag" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 4000 }
+      }
+    },
+    "MetricDefinitionRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric_key", "definition_version"],
+      "properties": {
+        "metric_key": { "$ref": "#/$defs/MetricKey" },
+        "definition_version": { "$ref": "#/$defs/VersionTag" }
+      }
+    },
+    "PeriodSelector": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "fiscal_year", "fiscal_period"],
+          "properties": {
+            "kind": { "const": "fiscal_period" },
+            "fiscal_year": { "type": "integer", "minimum": 1900, "maximum": 2200 },
+            "fiscal_period": { "$ref": "#/$defs/FiscalPeriod" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "period_type", "offset"],
+          "properties": {
+            "kind": { "const": "latest" },
+            "period_type": { "enum": ["annual", "quarterly"] },
+            "offset": { "type": "integer", "minimum": 0, "maximum": 19 }
+          }
+        }
+      ]
+    },
+    "OperationNode": {
+      "oneOf": [
+        { "$ref": "#/$defs/ReportedMetricNode" },
+        { "$ref": "#/$defs/ChangeNode" },
+        { "$ref": "#/$defs/MarginNode" },
+        { "$ref": "#/$defs/RatioNode" },
+        { "$ref": "#/$defs/TrailingSumNode" },
+        { "$ref": "#/$defs/ThresholdNode" },
+        { "$ref": "#/$defs/PeerCompareNode" }
+      ]
+    },
+    "ReportedMetricNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "operation", "operation_version", "subject_slot", "metric_key", "period"],
+      "properties": {
+        "node_id": { "$ref": "#/$defs/LocalId" },
+        "operation": { "const": "reported_metric" },
+        "operation_version": { "$ref": "#/$defs/VersionTag" },
+        "subject_slot": { "$ref": "#/$defs/LocalId" },
+        "metric_key": { "$ref": "#/$defs/MetricKey" },
+        "period": { "$ref": "#/$defs/PeriodSelector" }
+      }
+    },
+    "ChangeNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "operation", "operation_version", "current", "prior"],
+      "properties": {
+        "node_id": { "$ref": "#/$defs/LocalId" },
+        "operation": { "enum": ["absolute_change", "percent_change_positive_base"] },
+        "operation_version": { "$ref": "#/$defs/VersionTag" },
+        "current": { "$ref": "#/$defs/LocalId" },
+        "prior": { "$ref": "#/$defs/LocalId" }
+      }
+    },
+    "MarginNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "operation", "operation_version", "numerator", "revenue"],
+      "properties": {
+        "node_id": { "$ref": "#/$defs/LocalId" },
+        "operation": { "enum": ["gross_margin", "operating_margin", "net_margin"] },
+        "operation_version": { "$ref": "#/$defs/VersionTag" },
+        "numerator": { "$ref": "#/$defs/LocalId" },
+        "revenue": { "$ref": "#/$defs/LocalId" }
+      }
+    },
+    "RatioNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "operation", "operation_version", "ratio_key", "numerator", "denominator"],
+      "properties": {
+        "node_id": { "$ref": "#/$defs/LocalId" },
+        "operation": { "const": "ratio" },
+        "operation_version": { "$ref": "#/$defs/VersionTag" },
+        "ratio_key": { "$ref": "#/$defs/MetricKey" },
+        "numerator": { "$ref": "#/$defs/LocalId" },
+        "denominator": { "$ref": "#/$defs/LocalId" }
+      }
+    },
+    "TrailingSumNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "operation", "operation_version", "quarters"],
+      "properties": {
+        "node_id": { "$ref": "#/$defs/LocalId" },
+        "operation": { "const": "trailing_sum" },
+        "operation_version": { "$ref": "#/$defs/VersionTag" },
+        "quarters": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/LocalId" }
+        }
+      }
+    },
+    "ThresholdNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "operation", "operation_version", "subject", "threshold_id", "comparison"],
+      "properties": {
+        "node_id": { "$ref": "#/$defs/LocalId" },
+        "operation": { "const": "threshold" },
+        "operation_version": { "$ref": "#/$defs/VersionTag" },
+        "subject": { "$ref": "#/$defs/LocalId" },
+        "threshold_id": { "$ref": "#/$defs/LocalId" },
+        "comparison": { "$ref": "#/$defs/Comparison" }
+      }
+    },
+    "PeerCompareNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "operation", "operation_version", "members", "direction"],
+      "properties": {
+        "node_id": { "$ref": "#/$defs/LocalId" },
+        "operation": { "const": "peer_compare" },
+        "operation_version": { "$ref": "#/$defs/VersionTag" },
+        "members": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 25,
+          "items": { "$ref": "#/$defs/LocalId" }
+        },
+        "direction": { "enum": ["highest", "lowest"] }
+      }
+    },
+    "RequestedOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["output_id", "node_id", "unit_id"],
+      "properties": {
+        "output_id": { "$ref": "#/$defs/LocalId" },
+        "node_id": { "$ref": "#/$defs/LocalId" },
+        "unit_id": { "$ref": "#/$defs/LocalId" }
+      }
+    },
+    "PublicationUnit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit_id", "kind"],
+      "properties": {
+        "unit_id": { "$ref": "#/$defs/LocalId" },
+        "kind": { "enum": ["chat_section", "analyze_section", "grid_cell", "thesis_condition", "discovery_assessment"] }
+      }
+    },
+    "Threshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["threshold_id", "value", "unit", "attribution"],
+      "properties": {
+        "threshold_id": { "$ref": "#/$defs/LocalId" },
+        "value": { "$ref": "#/$defs/DecimalString" },
+        "unit": { "$ref": "#/$defs/FinancialUnit" },
+        "attribution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "ref"],
+          "properties": {
+            "kind": { "enum": ["user_request", "saved_thesis_condition", "approved_discovery_brief", "grid_configuration"] },
+            "ref": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9:_./-]+$" }
+          }
+        }
+      }
+    },
+    "ExecutionLimits": {
+      "description": "Versioned design defaults. A plan may lower but never raise these; parent limits are applied separately and the lowest wins.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_subjects",
+        "max_periods_per_subject",
+        "max_operations",
+        "max_outputs",
+        "max_input_candidates",
+        "max_concurrent_evidence_tasks"
+      ],
+      "properties": {
+        "max_subjects": { "type": "integer", "minimum": 1, "maximum": 25 },
+        "max_periods_per_subject": { "type": "integer", "minimum": 1, "maximum": 20 },
+        "max_operations": { "type": "integer", "minimum": 1, "maximum": 512 },
+        "max_outputs": { "type": "integer", "minimum": 1, "maximum": 2000 },
+        "max_input_candidates": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "max_concurrent_evidence_tasks": { "type": "integer", "minimum": 1, "maximum": 4 }
+      }
+    },
+    "FinancialPlanV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "plan_id",
+        "origin",
+        "planner",
+        "catalog_version",
+        "interpretation",
+        "subjects",
+        "time",
+        "policies",
+        "metric_definitions",
+        "operations",
+        "outputs",
+        "publication_units",
+        "thresholds",
+        "limits",
+        "presentation_template_version"
+      ],
+      "properties": {
+        "schema_version": { "const": "financial_plan.v1" },
+        "plan_id": { "$ref": "#/$defs/UUID" },
+        "origin": { "$ref": "#/$defs/Origin" },
+        "planner": { "$ref": "#/$defs/Planner" },
+        "catalog_version": { "$ref": "#/$defs/VersionTag" },
+        "interpretation": { "oneOf": [{ "$ref": "#/$defs/Interpretation" }, { "type": "null" }] },
+        "subjects": { "$ref": "#/$defs/SubjectSet" },
+        "time": { "$ref": "#/$defs/TimeContext" },
+        "policies": { "$ref": "#/$defs/Policies" },
+        "metric_definitions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/MetricDefinitionRef" }
+        },
+        "operations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 512,
+          "items": { "$ref": "#/$defs/OperationNode" }
+        },
+        "outputs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2000,
+          "items": { "$ref": "#/$defs/RequestedOutput" }
+        },
+        "publication_units": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2000,
+          "items": { "$ref": "#/$defs/PublicationUnit" }
+        },
+        "thresholds": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/Threshold" }
+        },
+        "limits": { "$ref": "#/$defs/ExecutionLimits" },
+        "presentation_template_version": { "$ref": "#/$defs/VersionTag" }
+      }
+    },
+    "Surface": {
+      "enum": ["chat", "analyze", "analyst_grid", "thesis", "discovery"]
+    },
+    "FinancialRuntimeAuthorityV1": {
+      "description": "Server-owned authority. Constructed only by trusted server code, never parsed from model output.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner_user_id", "egress_channel", "parent", "allowed_source_classes", "feature", "approval_state", "lease"],
+      "properties": {
+        "owner_user_id": { "$ref": "#/$defs/UUID" },
+        "egress_channel": { "enum": ["chat", "analyze", "analyst_grid", "thesis", "discovery", "api"] },
+        "parent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "id", "version"],
+          "properties": {
+            "kind": { "enum": ["chat_thread", "analyze_memo_run", "analyst_grid_run", "thesis_version", "discovery_run"] },
+            "id": { "$ref": "#/$defs/UUID" },
+            "version": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9:._-]+$" }
+          }
+        },
+        "allowed_source_classes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "enum": ["sec_filing", "issuer_disclosure", "licensed_fundamentals", "market_data"] }
+        },
+        "feature": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["surface", "capability", "mode"],
+          "properties": {
+            "surface": { "$ref": "#/$defs/Surface" },
+            "capability": { "$ref": "#/$defs/VersionTag" },
+            "mode": { "enum": ["off", "shadow", "enforce"] }
+          }
+        },
+        "approval_state": { "enum": ["approved", "not_required"] },
+        "lease": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["epoch", "fence_token"],
+              "properties": {
+                "epoch": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                "fence_token": { "type": "string", "minLength": 1, "maxLength": 200 }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
