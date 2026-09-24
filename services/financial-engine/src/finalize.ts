@@ -8,10 +8,9 @@
 //   3. share-lock the bound sources and facts in canonical order (Evidence's
 //      access-lock protocol), so a revocation either commits first and is seen
 //      below, or waits for this commit;
-//   4. generate the unit's certified `financial_answer` block from ledger
-//      records, then reverify the unit and seal the snapshot with its
-//      certificate (Snapshot's sealer regenerates the block and rejects any
-//      difference; nothing verified earlier is trusted);
+//   4. reverify the unit from ledger records and seal the snapshot with its
+//      certificate; verification also generates the unit's certified
+//      `financial_answer` block (nothing verified earlier is trusted);
 //   5. seal the unit, finalize its results, append the publication event, and
 //      let the parent persist its artifact through the same transaction;
 //   6. commit. Any failure rolls every step back: no snapshot, certificate,
@@ -28,11 +27,11 @@ import {
   type LocalId,
 } from "../../financial-core/src/index.ts";
 import { lockEvidenceForPublication } from "../../evidence/src/financial-access-lock.ts";
-import { loadFinancialUnitRecords } from "../../snapshot/src/financial-verifier-loader.ts";
-import { financialAnswerFor } from "../../snapshot/src/financial-verifier.ts";
-import { buildFinancialSealInput, toSealFactRow } from "../../snapshot/src/seal-input.ts";
+import { loadUnitBoundFacts } from "../../snapshot/src/financial-verifier-loader.ts";
+import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
+import { buildFinancialSealInput } from "../../snapshot/src/seal-input.ts";
 import { sealSnapshotInTransaction, type SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
-import type { SnapshotVerifierFailure, VerifierBlock } from "../../snapshot/src/snapshot-verifier.ts";
+import type { SnapshotVerifierFailure } from "../../snapshot/src/snapshot-verifier.ts";
 import { appendRunEvent } from "./events-repo.ts";
 import { fencedTransaction, type FencedTx, type RunLease } from "./lease.ts";
 import { transitionRun } from "./run-repo.ts";
@@ -44,7 +43,7 @@ export type ParentPublication = Readonly<{
   certificate_digest: string;
   result_ids: ReadonlyArray<string>;
   /** The sealed `financial_answer` block, for the parent to store and render. */
-  block: VerifierBlock;
+  block: FinancialAnswerBlock;
 }>;
 
 /** Persists the parent's artifact inside the finalization transaction, through `tx.client` only. */
@@ -83,34 +82,21 @@ export async function finalizeUnit(input: {
     }
     if (unit.state !== "computed") return rejected("unit_not_ready");
 
-    const facts = (await tx.client.query<Parameters<typeof toSealFactRow>[0]>(
-      `select f.fact_id::text, f.source_id::text, f.unit, f.period_kind::text, f.period_start::text, f.period_end::text, f.fiscal_year, f.fiscal_period
-         from financial_run_units u
-         join financial_run_inputs i on i.run_id = u.run_id and u.closure_node_ids ? i.input_slot and i.binding_status = 'bound'
-         join facts f on f.fact_id = i.fact_id
-        where u.run_id = $1 and u.unit_id = $2
-        order by f.fact_id`,
-      [run.run_id, unitId],
-    )).rows.map(toSealFactRow);
+    const facts = await loadUnitBoundFacts(tx.client, run.run_id, unitId);
     const locked = await lockEvidenceForPublication(tx.client, {
       source_ids: facts.map((fact) => fact.source_id),
       fact_ids: facts.map((fact) => fact.fact_id),
     });
     if (locked.missing_source_ids.length > 0 || locked.missing_fact_ids.length > 0) return rejected("evidence_unavailable");
 
-    const claim = { owner_user_id: run.user_id, run_id: run.run_id, unit_id: unitId };
-    const records = await loadFinancialUnitRecords(tx.client, claim);
-    if (!records) throw new ExecutionIntegrityError(`run ${run.run_id} vanished under its lease`);
-    const plan = records.plan.plan as FinancialPlanV1;
-    const seal = buildFinancialSealInput({
+    const plan = (await tx.client.query<{ plan: FinancialPlanV1 }>(`select plan from financial_plans where plan_id = $1`, [run.plan_id])).rows[0]!.plan;
+    const sealed = await sealSnapshotInTransaction(client, buildFinancialSealInput({
       snapshot_id: input.snapshot_id,
-      claim,
+      claim: { owner_user_id: run.user_id, run_id: run.run_id, unit_id: unitId },
       knowledgeCutoff: run.knowledge_cutoff,
-      answer: presentableAnswer(plan, records, unitId),
       subjectRefs: plan.subjects.members.map((member) => member.subject_ref),
       boundFacts: facts,
-    });
-    const sealed = await sealSnapshotInTransaction(client, seal);
+    }));
     if (!sealed.ok) return rejected("verification_failed", sealed.verification.failures);
     const financial = sealed.verification.financial;
     if (!financial) throw new ExecutionIntegrityError("a financial seal verified without a certificate");
@@ -134,7 +120,7 @@ export async function finalizeUnit(input: {
       snapshot_id: input.snapshot_id,
       certificate_digest: financial.certificate_digest,
       result_ids: financial.result_ids,
-      block: seal.blocks[0]!,
+      block: financial.block,
     };
     await input.persistParent(tx, publication);
 
@@ -145,19 +131,6 @@ export async function finalizeUnit(input: {
     if (open === 0) await transitionRun(tx, "completed", { coverage_state: run.coverage_state ?? "none" });
     return { status: "published", publication, run_completed: open === 0 };
   });
-}
-
-/**
- * The block to seal, or null when the records cannot even be presented (a
- * tampered payload, say): the verifier then names the precise failure.
- */
-function presentableAnswer(...args: Parameters<typeof financialAnswerFor>): ReturnType<typeof financialAnswerFor> {
-  try {
-    return financialAnswerFor(...args);
-  } catch (error) {
-    if (error instanceof RangeError) return null;
-    throw error;
-  }
 }
 
 function rejected(reason_code: FinalizationRejection, failures: ReadonlyArray<SnapshotVerifierFailure> = []): FinalizationResult {

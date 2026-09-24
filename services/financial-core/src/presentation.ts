@@ -3,9 +3,9 @@
 // `financial_answer` block may show, generated deterministically from the plan
 // and its committed results. There is no free-text field: a model cannot add
 // "highest", "doubled", or "all" — such statements exist only as evaluated
-// predicate or ranking results. The snapshot verifier regenerates this content
-// from ledger records and requires an exact match, so a changed company label,
-// unit, period, or denominator is rejected, and the renderer only prints it.
+// predicate or ranking results. Only the snapshot verifier calls this, on the
+// results it just recomputed, so a block can never show a label, unit, period,
+// or denominator other than the verified one; the renderer only prints it.
 //
 // Numbers are formatted from canonical decimals with exact arithmetic
 // (half-even to display precision); the full canonical value is always
@@ -50,7 +50,10 @@ export type PresentedResult = Readonly<{
   result_id: string;
   output_id: LocalId;
   disposition: "verified" | GapDisposition;
-  label_ids: ReadonlyArray<string>;
+  /** Null when the result spans subjects (a ranking). */
+  subject_label_id: string | null;
+  measure_label_id: string;
+  period_label_id: string;
   presented: PresentedPayload;
   result_hash: Sha256Hex;
 }>;
@@ -60,8 +63,8 @@ export type Presentation = Readonly<
   | {
       kind: "table";
       caption: string;
-      columns: ReadonlyArray<Readonly<{ column_id: string; label_ids: ReadonlyArray<string> }>>;
-      rows: ReadonlyArray<Readonly<{ label_id: string; cells: ReadonlyArray<string | null> }>>;
+      columns: ReadonlyArray<Readonly<{ column_id: string; measure_label_id: string; period_label_id: string }>>;
+      rows: ReadonlyArray<Readonly<{ subject_label_id: string; cells: ReadonlyArray<string | null> }>>;
       /** Per column: row indexes in ascending exact-value order, rows without a value last. */
       ascending: Readonly<Record<string, ReadonlyArray<number>>>;
     }
@@ -85,7 +88,7 @@ export type CommittedResult = Readonly<{
   result_id: string;
   output_id: LocalId;
   node_id: LocalId;
-  disposition: string;
+  disposition: "computed" | "verified" | GapDisposition;
   payload: unknown;
   result_hash: Sha256Hex;
 }>;
@@ -100,33 +103,27 @@ export function presentFinancialUnit(input: {
 }): FinancialAnswerContent {
   const { plan } = input;
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
-  const outputs = plan.outputs.filter((output) => output.unit_id === input.unit_id);
   const byOutput = new Map(input.results.map((result) => [result.output_id, result]));
-  const labels: Record<string, PresentationLabel> = {};
-  const addLabel = (id: string, label: PresentationLabel) => {
-    labels[id] = label;
-    return id;
-  };
+  const labels = new LabelTable();
   for (const member of plan.subjects.members) {
     const name = input.subject_names[member.slot_id];
     if (name === undefined) throw new RangeError(`no display name for subject slot ${member.slot_id}`);
-    addLabel(`subject:${member.slot_id}`, { kind: "subject", text: name, slot_id: member.slot_id });
+    labels.subject(member.slot_id, name);
   }
 
-  const results: PresentedResult[] = outputs.map((output) => {
+  const results: PresentedResult[] = plan.outputs.filter((output) => output.unit_id === input.unit_id).map((output) => {
     const result = byOutput.get(output.output_id);
     if (!result) throw new RangeError(`no committed result for output ${output.output_id}`);
     const node = nodes.get(output.node_id)!;
     const slot = subjectSlot(plan, node);
-    const measureId = addLabel(`measure:${output.node_id}`, { kind: "measure", text: measureText(plan, node) });
-    const periodId = addLabel(`period:${output.node_id}`, { kind: "period", text: periodText(plan, node) });
-    const labelIds = [...(slot === null ? [] : [`subject:${slot}`]), measureId, periodId];
     return {
       result_id: result.result_id,
       output_id: output.output_id,
-      disposition: result.disposition === "computed" ? "verified" : (result.disposition as "verified" | GapDisposition),
-      label_ids: labelIds,
-      presented: presentPayload(plan, node, result.payload, labels),
+      disposition: result.disposition === "computed" ? "verified" : result.disposition,
+      subject_label_id: slot === null ? null : subjectLabelId(slot),
+      measure_label_id: labels.intern("measure", measureKey(plan, node), measureText(plan, node)),
+      period_label_id: labels.intern("period", JSON.stringify(periodSelectors(plan, node)), periodText(plan, node)),
+      presented: presentPayload(plan, node, result.payload, labels.entries),
       result_hash: result.result_hash,
     };
   });
@@ -139,14 +136,40 @@ export function presentFinancialUnit(input: {
     unit_id: input.unit_id,
     knowledge_cutoff: plan.time.knowledge_cutoff,
     coverage: { state: coverageState(verified, results.length), requested: results.length, verified },
-    labels,
+    labels: labels.entries,
     results,
-    presentations: layout(plan, results, labels),
+    presentations: layout(plan, results, labels.entries),
   };
 }
 
 export function presentationHash(content: FinancialAnswerContent): Sha256Hex {
   return hashCanonical("presentation", content);
+}
+
+const subjectLabelId = (slot: LocalId) => `subject:${slot}`;
+
+/**
+ * Labels keyed by what they denote: one id per distinct measure (by its
+ * structural definition) and per distinct period selection, so equal
+ * measures share a label and layout groups by identity, never by text.
+ */
+class LabelTable {
+  readonly entries: Record<string, PresentationLabel> = {};
+  private readonly interned = new Map<string, string>();
+  private readonly counts = { measure: 0, period: 0 };
+
+  subject(slot: LocalId, name: string): void {
+    this.entries[subjectLabelId(slot)] = { kind: "subject", text: name, slot_id: slot };
+  }
+
+  intern(kind: "measure" | "period", key: string, text: string): string {
+    const existing = this.interned.get(`${kind}|${key}`);
+    if (existing) return existing;
+    const id = `${kind}:${kind[0]}${this.counts[kind]++}`;
+    this.interned.set(`${kind}|${key}`, id);
+    this.entries[id] = { kind, text };
+    return id;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -156,24 +179,24 @@ export function presentationHash(content: FinancialAnswerContent): Sha256Hex {
 
 function layout(plan: FinancialPlanV1, results: ReadonlyArray<PresentedResult>, labels: Readonly<Record<string, PresentationLabel>>): Presentation[] {
   const values = results.filter((result) => result.presented.kind === "value" || result.presented.kind === "gap");
-  const subjectOf = (result: PresentedResult) => result.label_ids.find((id) => id.startsWith("subject:")) ?? null;
-  const subjects = [...new Set(values.map(subjectOf).filter((id): id is string => id !== null))];
+  const subjects = new Set(values.flatMap((result) => (result.subject_label_id === null ? [] : [result.subject_label_id])));
   const placed = new Set<string>();
   const presentations: Presentation[] = [];
 
-  if (subjects.length >= 2) {
-    const columnKey = (result: PresentedResult) => `${labels[result.label_ids.at(-2)!]!.text}|${labels[result.label_ids.at(-1)!]!.text}`;
-    const columns: PresentedResult[] = [];
-    for (const result of values) if (!columns.some((column) => columnKey(column) === columnKey(result))) columns.push(result);
-    const rowSubjects = plan.subjects.members.map((member) => `subject:${member.slot_id}`).filter((id) => subjects.includes(id));
-    const rows = rowSubjects.map((subjectId) => ({
-      label_id: subjectId,
-      cells: columns.map((column) => values.find((result) => subjectOf(result) === subjectId && columnKey(result) === columnKey(column))?.result_id ?? null),
+  if (subjects.size >= 2) {
+    const columnOf = (result: PresentedResult) => `${result.measure_label_id}|${result.period_label_id}`;
+    const columns = new Map<string, { measure_label_id: string; period_label_id: string }>();
+    for (const result of values) {
+      if (!columns.has(columnOf(result))) columns.set(columnOf(result), { measure_label_id: result.measure_label_id, period_label_id: result.period_label_id });
+    }
+    const rows = plan.subjects.members.map((member) => subjectLabelId(member.slot_id)).filter((id) => subjects.has(id)).map((subjectId) => ({
+      subject_label_id: subjectId,
+      cells: [...columns.keys()].map((key) => values.find((result) => result.subject_label_id === subjectId && columnOf(result) === key)?.result_id ?? null),
     }));
     for (const row of rows) for (const cell of row.cells) if (cell) placed.add(cell);
     const byId = new Map(results.map((result) => [result.result_id, result]));
     const ascending: Record<string, number[]> = {};
-    columns.forEach((column, index) => {
+    [...columns.keys()].forEach((_, index) => {
       ascending[`c${index}`] = rows
         .map((row, rowIndex) => ({ rowIndex, value: exactValue(byId.get(row.cells[index] ?? "")) }))
         .sort((left, right) => (left.value && right.value ? compareExactDecimals(left.value, right.value) : left.value ? -1 : right.value ? 1 : 0) || left.rowIndex - right.rowIndex)
@@ -181,23 +204,22 @@ function layout(plan: FinancialPlanV1, results: ReadonlyArray<PresentedResult>, 
     });
     presentations.push({
       kind: "table",
-      caption: `${columns.map((column) => labels[column.label_ids.at(-2)!]!.text).filter(unique).join(", ")} by company`,
-      columns: columns.map((column, index) => ({ column_id: `c${index}`, label_ids: column.label_ids.slice(-2) })),
+      caption: `${[...new Set([...columns.values()].map((column) => labels[column.measure_label_id]!.text))].join(", ")} by company`,
+      columns: [...columns.values()].map((column, index) => ({ column_id: `c${index}`, ...column })),
       rows,
       ascending,
     });
   } else {
-    const measureOf = (result: PresentedResult) => labels[result.label_ids.at(-2)!]!.text;
     const groups = new Map<string, PresentedResult[]>();
-    for (const result of values) groups.set(measureOf(result), [...(groups.get(measureOf(result)) ?? []), result]);
+    for (const result of values) groups.set(result.measure_label_id, [...(groups.get(result.measure_label_id) ?? []), result]);
     for (const group of groups.values()) {
-      const periods = new Set(group.map((result) => labels[result.label_ids.at(-1)!]!.text));
-      if (group.length < 2 || periods.size < 2 || !subjectOf(group[0]!)) continue;
+      const [first] = group;
+      if (group.length < 2 || new Set(group.map((result) => result.period_label_id)).size < 2 || first!.subject_label_id === null) continue;
       presentations.push({
         kind: "series",
-        subject_label_id: subjectOf(group[0]!)!,
-        measure_label_id: group[0]!.label_ids.at(-2)!,
-        points: group.map((result) => ({ period_label_id: result.label_ids.at(-1)!, result_id: result.result_id })),
+        subject_label_id: first!.subject_label_id,
+        measure_label_id: first!.measure_label_id,
+        points: group.map((result) => ({ period_label_id: result.period_label_id, result_id: result.result_id })),
       });
       for (const result of group) placed.add(result.result_id);
     }
@@ -229,7 +251,7 @@ function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unk
       const subjectNode = plan.operations.find((entry) => entry.node_id === subject)!;
       const bound = threshold ? formatValue(parseValue(threshold.value), threshold.unit).text : "the threshold";
       const slot = subjectSlot(plan, subjectNode);
-      const who = slot === null ? "" : `${labels[`subject:${slot}`]!.text} — `;
+      const who = slot === null ? "" : `${labels[subjectLabelId(slot)]!.text} — `;
       return {
         kind: "predicate",
         outcome,
@@ -238,10 +260,10 @@ function presentPayload(plan: FinancialPlanV1, node: OperationNode, payload: unk
     }
     case "ranking": {
       const slotOf = (memberNode: LocalId) => subjectSlot(plan, plan.operations.find((entry) => entry.node_id === memberNode)!);
-      const order = (record.ranks as Array<{ node_id: LocalId; rank: number }>).map((entry) => ({ subject_label_id: `subject:${slotOf(entry.node_id)}`, rank: entry.rank }));
+      const order = (record.ranks as Array<{ node_id: LocalId; rank: number }>).map((entry) => ({ subject_label_id: subjectLabelId(slotOf(entry.node_id)!), rank: entry.rank }));
       const extreme = record.extreme as LocalId[] | null;
       const complete = record.complete as boolean;
-      const leaderIds = complete && extreme ? extreme.map((memberNode) => `subject:${slotOf(memberNode)}`) : null;
+      const leaderIds = complete && extreme ? extreme.map((memberNode) => subjectLabelId(slotOf(memberNode)!)) : null;
       const population = record.population as { requested: number; evaluated: number };
       const direction = (record.direction as string) === "highest" ? "Highest" : "Lowest";
       const text = leaderIds
@@ -352,19 +374,42 @@ function measureText(plan: FinancialPlanV1, node: OperationNode): string {
   }
 }
 
-function periodText(plan: FinancialPlanV1, node: OperationNode): string {
-  const periods = [...dependencyClosure(plan, [node.node_id])]
-    .map((id) => plan.operations.find((entry) => entry.node_id === id)!)
-    .flatMap((entry) => (entry.operation === "reported_metric" ? [selectorText(entry.period)] : []));
-  const ordered = orderedPeriods(plan, node).map((selector) => selectorText(selector));
-  const distinct = (ordered.length > 0 ? ordered : periods).filter(unique);
-  return distinct.join(" vs ");
+/** The structural identity of a measure: equal keys always render the same text. */
+function measureKey(plan: FinancialPlanV1, node: OperationNode): string {
+  const of = (id: LocalId) => measureKey(plan, plan.operations.find((entry) => entry.node_id === id)!);
+  switch (node.operation) {
+    case "reported_metric":
+      return `metric:${node.metric_key}`;
+    case "ratio":
+      return `ratio:${node.ratio_key}`;
+    case "gross_margin":
+    case "operating_margin":
+    case "net_margin":
+      return node.operation;
+    case "absolute_change":
+    case "percent_change_positive_base":
+      return `${node.operation}(${of(node.current)})`;
+    case "trailing_sum":
+      return `trailing_sum(${of(node.quarters[0]!)})`;
+    case "threshold":
+      return `threshold(${of(node.subject)})`;
+    case "peer_compare":
+      return `peer_compare(${of(node.members[0]!)})`;
+  }
 }
 
-/** The node's own period operands in operand order (current before prior), then any others. */
-function orderedPeriods(plan: FinancialPlanV1, node: OperationNode): PeriodSelector[] {
-  if (node.operation === "reported_metric") return [node.period];
-  return operationDependencies(node).flatMap((id) => orderedPeriods(plan, plan.operations.find((entry) => entry.node_id === id)!));
+/** The distinct periods a node reads, in operand order (current before prior). */
+function periodSelectors(plan: FinancialPlanV1, node: OperationNode): PeriodSelector[] {
+  const all = (entry: OperationNode): PeriodSelector[] => entry.operation === "reported_metric"
+    ? [entry.period]
+    : operationDependencies(entry).flatMap((id) => all(plan.operations.find((candidate) => candidate.node_id === id)!));
+  const distinct = new Map<string, PeriodSelector>();
+  for (const selector of all(node)) if (!distinct.has(JSON.stringify(selector))) distinct.set(JSON.stringify(selector), selector);
+  return [...distinct.values()];
+}
+
+function periodText(plan: FinancialPlanV1, node: OperationNode): string {
+  return periodSelectors(plan, node).map(selectorText).join(" vs ");
 }
 
 function selectorText(selector: PeriodSelector): string {
@@ -373,8 +418,4 @@ function selectorText(selector: PeriodSelector): string {
   }
   const unit = selector.period_type === "annual" ? "fiscal year" : "fiscal quarter";
   return selector.offset === 0 ? `latest ${unit}` : `${unit} ${selector.offset} before latest`;
-}
-
-function unique<T>(value: T, index: number, all: ReadonlyArray<T>): boolean {
-  return all.indexOf(value) === index;
 }

@@ -7,14 +7,9 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { FINANCIAL_HTTP_PREFIX, handleFinancialHttp } from "../../financial-engine/src/http.ts";
-import type { SqlExecutor } from "../../financial-engine/src/ports.ts";
+import { FINANCIAL_HTTP_PREFIX, handleFinancialHttp, type FinancialPool } from "../../financial-engine/src/http.ts";
 
 export type FinancialAuthenticator = (req: IncomingMessage) => string | null;
-
-export type FinancialPool = SqlExecutor & {
-  connect(): Promise<SqlExecutor & { release(): void }>;
-};
 
 export type DevApiFinancialAdapter = { handle(req: IncomingMessage, res: ServerResponse): Promise<boolean> };
 
@@ -27,14 +22,6 @@ export const developmentHeaderAuthenticator: FinancialAuthenticator = (req) => {
 };
 
 export function createFinancialDevApiAdapter(input: { db: FinancialPool; authenticate: FinancialAuthenticator }): DevApiFinancialAdapter {
-  const withClient = async <T>(action: (client: SqlExecutor) => Promise<T>): Promise<T> => {
-    const client = await input.db.connect();
-    try {
-      return await action(client);
-    } finally {
-      client.release();
-    }
-  };
   return Object.freeze({
     async handle(req, res) {
       const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
@@ -47,7 +34,7 @@ export function createFinancialDevApiAdapter(input: { db: FinancialPool; authent
         res.end(JSON.stringify({ error: "authentication is required", code: "unauthenticated" }));
         return true;
       }
-      return handleFinancialHttp(req, res, { userId, db: input.db, withClient });
+      return handleFinancialHttp(req, res, { userId, db: input.db });
     },
   });
 }

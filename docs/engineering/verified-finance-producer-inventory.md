@@ -134,7 +134,8 @@ path. The shared foundations are in place:
   `financial_publication.v1` certificate. `finalizeUnit` atomically seals the
   snapshot, certificate, unit, results, event, and parent artifact under
   share locks on the bound sources and facts. `financial_answer` blocks carry
-  a deterministic presentation that the verifier regenerates and the web
+  a deterministic presentation that only the verifier generates, from the
+  records it checked, and the web
   renderer only prints. `/v1/financial` exposes owner-scoped status,
   closure-reauthorized inspection, and idempotent replay requests. Pinned
   verification replay and supervised lease recovery complete the set.

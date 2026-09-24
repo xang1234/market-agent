@@ -84,9 +84,9 @@ test('sorting uses the server exact order; descending keeps rows without a value
   const presentation: FinancialTablePresentation = {
     ...table(block),
     rows: [
-      { label_id: 'subject:a', cells: [null, '92222222-2222-4222-9222-222222222222'] },
-      { label_id: 'subject:b', cells: [null, '93333333-3333-4333-9333-333333333333'] },
-      { label_id: 'subject:c', cells: [null, '96666666-6666-4666-9666-666666666666'] },
+      { subject_label_id: 'subject:a', cells: [null, '92222222-2222-4222-9222-222222222222'] },
+      { subject_label_id: 'subject:b', cells: [null, '93333333-3333-4333-9333-333333333333'] },
+      { subject_label_id: 'subject:c', cells: [null, '96666666-6666-4666-9666-666666666666'] },
     ],
     ascending: { c0: [0, 1, 2], c1: [2, 0, 1] },
   }
@@ -103,7 +103,7 @@ test('sorting uses the server exact order; descending keeps rows without a value
 
 test('series bar geometry is bounded and ignores gaps and non-finite values', () => {
   const value = (text: string): FinancialPresentedResult => ({
-    result_id: 'x', output_id: 'o', disposition: 'verified', label_ids: [], result_hash: '',
+    result_id: 'x', output_id: 'o', disposition: 'verified', subject_label_id: null, measure_label_id: 'measure:m0', period_label_id: 'period:p0', result_hash: '',
     presented: { kind: 'value', text, full_text: text, value: text, unit: { kind: 'count' }, exact: true },
   })
   const gap = content(financialAnswerFixture).results[2]!

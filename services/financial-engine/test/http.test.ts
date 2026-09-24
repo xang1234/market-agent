@@ -8,8 +8,7 @@ import type { Pool } from "pg";
 import { connectedPool, dockerAvailable, registerLifoCleanup } from "../../../db/test/docker-pg.ts";
 import Ajv2020 from "../../financial-core/node_modules/ajv/dist/2020.js";
 import type { SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
-import { handleFinancialHttp } from "../src/http.ts";
-import type { SqlExecutor } from "../src/ports.ts";
+import { handleFinancialHttp, type FinancialPool } from "../src/http.ts";
 import { completedRun, databaseUrl, engineDatabase, IDS, marginPlan, pinnedClients, readyRun } from "./db-fixtures.ts";
 
 const SPEC = new URL("../../../spec/", import.meta.url);
@@ -28,18 +27,13 @@ function schemaValidator() {
 
 /** A test server that authenticates by header — the harness stands in for the deployment's authenticator. */
 async function startServer(t: TestContext, pool: Pool, statements: string[]): Promise<string> {
-  const db: SqlExecutor = { query: (text, values) => { statements.push(text); return pool.query(text, values as unknown[]) as never; } };
-  const withClient = async <T>(action: (client: SqlExecutor) => Promise<T>) => {
-    const client = await pool.connect();
-    try {
-      return await action(client as unknown as SqlExecutor);
-    } finally {
-      client.release();
-    }
+  const db: FinancialPool = {
+    query: (text, values) => { statements.push(text); return pool.query(text, values as unknown[]) as never; },
+    connect: () => pool.connect(),
   };
   const server: Server = createServer((req, res) => {
     const userId = String(req.headers["x-test-user"] ?? "");
-    void handleFinancialHttp(req, res, { userId, db, withClient }).then((handled) => {
+    void handleFinancialHttp(req, res, { userId, db }).then((handled) => {
       if (!handled) { res.statusCode = 418; res.end(); }
     });
   });

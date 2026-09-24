@@ -14,17 +14,14 @@
 // — a warning, not a fresh certificate of evidence that is no longer valid.
 
 import {
-  createRuntimeAuthority,
   evaluateBoundPlan,
   ExecutionIntegrityError,
   nodeLineageHashes,
   unitPublication,
   type FinancialPlanV1,
-  type FinancialRuntimeAuthority,
-  type Surface,
 } from "../../financial-core/src/index.ts";
 import { loadBindings } from "./bind-inputs.ts";
-import { fencedTransaction, type RunLease } from "./lease.ts";
+import { fencedTransaction, type LeaseClaimant, type RunLease } from "./lease.ts";
 import type { SqlExecutor } from "./ports.ts";
 import { readClosureInputs } from "./read-model.ts";
 import type { RunRecord } from "./run-record.ts";
@@ -37,29 +34,9 @@ export type ReplayOutcome =
   | Readonly<{ status: "verified"; run_id: string; replay_of_run_id: string; verified_outputs: ReadonlyArray<string> }>
   | Readonly<{ status: "failed"; run_id: string; reason_code: ReplayFailure; output_ids: ReadonlyArray<string> }>;
 
-const SURFACE_BY_PARENT: Readonly<Record<string, Surface>> = {
-  chat_thread: "chat",
-  analyze_memo_run: "analyze",
-  analyst_grid_run: "analyst_grid",
-  thesis_version: "thesis",
-  discovery_run: "discovery",
-};
-
-/**
- * The authority a replay leases under: the run's owner, parent, and feature
- * mode. Replays never bind or publish; the one source class the contract
- * requires is inert because no evidence port exists here.
- */
-export function replayAuthority(run: RunRecord): FinancialRuntimeAuthority {
-  return createRuntimeAuthority({
-    owner_user_id: run.user_id,
-    egress_channel: "api",
-    parent: { kind: run.parent_kind as FinancialRuntimeAuthority["parent"]["kind"], id: run.parent_id, version: run.parent_version },
-    allowed_source_classes: ["sec_filing"],
-    feature: { surface: SURFACE_BY_PARENT[run.parent_kind] ?? "chat", capability: "financial-replay", mode: run.feature_mode },
-    approval_state: "not_required",
-    lease: null,
-  });
+/** A replay leases as its run's owner and parent; it holds no feature authority because it binds and publishes nothing. */
+export function replayClaimant(run: RunRecord): LeaseClaimant {
+  return { owner_user_id: run.user_id, parent: { kind: run.parent_kind, id: run.parent_id, version: run.parent_version }, lease: null };
 }
 
 /** Executes a leased replay run to its terminal state and reports the comparison. */
@@ -106,7 +83,6 @@ export async function executeReplay(input: {
   const mismatched = [...committed.values()].filter((row) => recomputed.get(row.output_id) !== row.result_hash).map((row) => row.output_id).sort();
   if (mismatched.length > 0) return finish(client, lease, "replay_mismatch", mismatched);
 
-  await fencedTransaction(client, lease, (tx) => transitionRun(tx, "ready_to_seal", { coverage_state: original.coverage_state ?? "none" }));
   await fencedTransaction(client, lease, (tx) => transitionRun(tx, "completed", { coverage_state: original.coverage_state ?? "none" }));
   return { status: "verified", run_id: replay.run_id, replay_of_run_id: original.run_id, verified_outputs: [...committed.keys()].sort() };
 }

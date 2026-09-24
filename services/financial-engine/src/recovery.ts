@@ -19,9 +19,9 @@ import type { ExecutionLimits, FinancialPlanV1, FinancialRuntimeAuthority } from
 import type { SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { executeRun, type ExecutionReport } from "./execute.ts";
 import { finalizeUnit, type PersistParentArtifact } from "./finalize.ts";
-import { acquireLease, type AcquireLeaseResult, type RunLease } from "./lease.ts";
+import { acquireLease, type AcquireLeaseResult, type LeaseClaimant, type RunLease } from "./lease.ts";
 import type { FinancialEvidencePort, SqlExecutor } from "./ports.ts";
-import { executeReplay, replayAuthority, type ReplayOutcome } from "./replay.ts";
+import { executeReplay, replayClaimant, type ReplayOutcome } from "./replay.ts";
 import { RUN_COLUMNS, toRun, type RunRecord } from "./run-record.ts";
 import { requestCancellation } from "./run-repo.ts";
 import type { FinancialVersionRegistry } from "./version-registry.ts";
@@ -71,7 +71,7 @@ export async function recoverRun(client: SnapshotTransactionClient, run: RunReco
     return { run_id: run.run_id, status: "cancelled" };
   }
   if (run.replay_of_run_id !== null) {
-    const lease = await leaseFor(client, run, replayAuthority(run), deps);
+    const lease = await leaseFor(client, run, replayClaimant(run), deps);
     if (!("epoch" in lease)) return lease;
     return { run_id: run.run_id, status: "replayed", replay: await executeReplay({ client, lease, registry: deps.registry }) };
   }
@@ -107,9 +107,9 @@ export async function recoverRun(client: SnapshotTransactionClient, run: RunReco
 async function leaseFor(
   client: SqlExecutor,
   run: RunRecord,
-  authority: FinancialRuntimeAuthority,
+  claimant: LeaseClaimant,
   deps: RecoveryDeps,
 ): Promise<RunLease | Extract<RecoveryOutcome, { status: "skipped" }>> {
-  const acquired = await acquireLease(client, { authority, run_id: run.run_id, worker_id: deps.worker_id, ttl_ms: deps.ttl_ms });
+  const acquired = await acquireLease(client, { authority: claimant, run_id: run.run_id, worker_id: deps.worker_id, ttl_ms: deps.ttl_ms });
   return acquired.status === "acquired" ? acquired.lease : { run_id: run.run_id, status: "skipped", reason: acquired.status };
 }

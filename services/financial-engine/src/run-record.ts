@@ -1,11 +1,14 @@
 // Shape of a financial_runs row as the engine reads it.
 
+import type { FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
+
 export type ExecutionState = "pending" | "running" | "ready_to_seal" | "completed" | "failed" | "cancelled";
 
 export type RunRecord = Readonly<{
   run_id: string;
   user_id: string;
-  parent_kind: string;
+  /** Constrained by the table's check to the authority's parent kinds. */
+  parent_kind: FinancialRuntimeAuthority["parent"]["kind"];
   parent_id: string;
   parent_version: string;
   request_key: string;
@@ -32,7 +35,7 @@ export function toRun(row: Record<string, unknown>): RunRecord {
   return {
     run_id: row.run_id as string,
     user_id: row.user_id as string,
-    parent_kind: row.parent_kind as string,
+    parent_kind: row.parent_kind as RunRecord["parent_kind"],
     parent_id: row.parent_id as string,
     parent_version: row.parent_version as string,
     request_key: row.request_key as string,

@@ -41,7 +41,6 @@ import {
   createFinancialDevApiAdapter,
   developmentHeaderAuthenticator,
   type DevApiFinancialAdapter,
-  type FinancialPool,
 } from "./financial-wiring.ts";
 import type { DiscoveryService } from "../../discovery/src/ports.ts";
 export type {

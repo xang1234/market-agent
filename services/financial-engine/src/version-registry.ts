@@ -14,13 +14,14 @@ import {
   OPERATION_REGISTRY,
   type FinancialPlanV1,
 } from "../../financial-core/src/index.ts";
-import { FINANCIAL_VERIFIER_VERSION } from "../../snapshot/src/financial-verifier.ts";
+import { FINANCIAL_PUBLICATION_SCHEMA_VERSION, FINANCIAL_VERIFIER_VERSION } from "../../snapshot/src/financial-verifier.ts";
 
 export type FinancialVersionRegistry = Readonly<{
   catalog_versions: ReadonlySet<string>;
   operation_versions: ReadonlySet<string>;
   definition_versions: ReadonlySet<string>;
   numeric_policy_versions: ReadonlySet<string>;
+  certificate_versions: ReadonlySet<string>;
   verifier_versions: ReadonlySet<string>;
   presentation_versions: ReadonlySet<string>;
 }>;
@@ -30,6 +31,7 @@ export const FINANCIAL_VERSION_REGISTRY: FinancialVersionRegistry = Object.freez
   operation_versions: new Set(Object.values(OPERATION_REGISTRY).map((spec) => spec.operation_version)),
   definition_versions: new Set([...METRIC_CATALOG_V1.values()].map((definition) => definition.definition_version)),
   numeric_policy_versions: new Set([NUMERIC_POLICY.version]),
+  certificate_versions: new Set([FINANCIAL_PUBLICATION_SCHEMA_VERSION]),
   verifier_versions: new Set([FINANCIAL_VERIFIER_VERSION]),
   presentation_versions: new Set([FINANCIAL_PRESENTATION_VERSION]),
 });
@@ -44,10 +46,11 @@ export function unsupportedPlanVersion(plan: FinancialPlanV1, registry: Financia
 
 /** Whether a sealed certificate and its computation versions are ones this build can explain. */
 export function supportedPublication(
-  input: { verifier_version: unknown; presentation_version: unknown; operation_version: string | null; numeric_policy_version: string | null },
+  input: { certificate_version: unknown; verifier_version: unknown; presentation_version: unknown; operation_version: string | null; numeric_policy_version: string | null },
   registry: FinancialVersionRegistry = FINANCIAL_VERSION_REGISTRY,
 ): boolean {
-  return typeof input.verifier_version === "string" && registry.verifier_versions.has(input.verifier_version)
+  return typeof input.certificate_version === "string" && registry.certificate_versions.has(input.certificate_version)
+    && typeof input.verifier_version === "string" && registry.verifier_versions.has(input.verifier_version)
     && typeof input.presentation_version === "string" && registry.presentation_versions.has(input.presentation_version)
     && (input.operation_version === null || registry.operation_versions.has(input.operation_version))
     && (input.numeric_policy_version === null || registry.numeric_policy_versions.has(input.numeric_policy_version));

@@ -25,6 +25,12 @@ export function labelText(content: FinancialAnswerContent, labelId: string): str
   return content.labels[labelId]?.text ?? ''
 }
 
+/** "Subject, measure, period" for a result; the subject is omitted for cross-subject results. */
+export function resultLabel(content: FinancialAnswerContent, result: FinancialPresentedResult): string {
+  const ids = [result.subject_label_id, result.measure_label_id, result.period_label_id]
+  return ids.flatMap((id) => (id === null ? [] : [labelText(content, id)])).join(', ')
+}
+
 export type SortDirection = 'ascending' | 'descending'
 
 /**

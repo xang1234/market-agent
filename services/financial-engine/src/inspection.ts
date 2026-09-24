@@ -67,9 +67,9 @@ export async function inspectCommittedResult(db: SqlExecutor, ownerUserId: strin
   const inputs = await readClosureInputs(db, ownerUserId, record.run_id, reportedSlots);
   if (inputs.length !== reportedSlots.length || inputs.some((input) => !input.available)) return null;
 
-  const supported = record.certificate.schema_version === "financial_publication.v1"
-    && unsupportedPlanVersion(plan) === null
+  const supported = unsupportedPlanVersion(plan) === null
     && supportedPublication({
+      certificate_version: record.certificate.schema_version,
       verifier_version: record.certificate.verifier_version,
       presentation_version: record.certificate.presentation?.version,
       operation_version: record.computation?.operation_version ?? null,

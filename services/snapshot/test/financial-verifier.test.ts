@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { hashCanonical, planSemanticHash, presentationHash } from "../../financial-core/src/index.ts";
-import { verifyFinancialUnit, type FinancialVerification } from "../src/financial-verifier.ts";
-import { F, mutable, SEAL_CONTEXT, sealContext, validRecords } from "./financial-fixtures.ts";
+import { verifyFinancialSnapshot, verifyFinancialUnit, type FinancialVerification } from "../src/financial-verifier.ts";
+import { F, mutable, SEAL_CONTEXT, validRecords } from "./financial-fixtures.ts";
 
 function reasons(outcome: FinancialVerification): string[] {
   return outcome.ok ? [] : outcome.failures.map((failure) => `${failure.reason_code}:${String(failure.details.field ?? failure.details.reason ?? failure.details.state ?? "")}`);
@@ -161,50 +161,37 @@ test("diagnostics carry identifiers and codes, never values", () => {
   assert.doesNotMatch(JSON.stringify(outcome), /383285000000/);
 });
 
-function withAnswer(edit: (answer: any) => void, rehash = true) {
-  const context = sealContext();
-  const financial = JSON.parse(JSON.stringify(context.answer!.financial));
-  edit(financial);
-  return { ...context, answer: { financial, presentation_hash: rehash ? presentationHash(financial) : context.answer!.presentation_hash } };
-}
-
-test("the certificate binds the regenerated presentation", () => {
+test("verification generates the certified block from the records it checked", () => {
   const outcome = verifyFinancialUnit(validRecords(), "section", SEAL_CONTEXT);
   assert.ok(outcome.ok);
-  assert.deepEqual(outcome.certificate.presentation, { version: "financial-presentation.v1", hash: SEAL_CONTEXT.answer!.presentation_hash });
-  const answer = SEAL_CONTEXT.answer!.financial as { labels: Record<string, { text: string }>; results: Array<{ presented: { text: string } }> };
-  assert.equal(answer.labels["subject:a"]!.text, "Fixture Industries Inc.");
-  assert.equal(answer.labels["measure:a_gm"]!.text, "Gross margin (gross profit / revenue)");
+  const { block, certificate } = outcome;
+  assert.deepEqual(
+    { ...block, financial: undefined },
+    {
+      id: "financial-answer-section", kind: "financial_answer", snapshot_id: F.snapshot,
+      data_ref: { kind: "financial_answer", id: `${F.run}:section` }, source_refs: [F.source], as_of: F.cutoff,
+      presentation_hash: presentationHash(block.financial), financial: undefined,
+    },
+  );
+  assert.deepEqual(certificate.presentation, { version: "financial-presentation.v1", hash: block.presentation_hash });
+  const [revenue, margin] = block.financial.results;
+  assert.deepEqual([revenue!.disposition, margin!.disposition], ["verified", "verified"], "only recomputed results are presented, as verified");
+  assert.equal(block.financial.labels[margin!.subject_label_id!]!.text, "Fixture Industries Inc.");
+  assert.equal(block.financial.labels[margin!.measure_label_id]!.text, "Gross margin (gross profit / revenue)");
 });
 
-test("a changed company label, unit, period, denominator, or added text is rejected even when rehashed", () => {
-  const cases: Array<[string, (answer: any) => void]> = [
-    ["company label", (answer) => { answer.labels["subject:a"].text = "Other Corp"; }],
-    ["percentage unit", (answer) => { answer.results[1].presented.unit = { kind: "percent" }; }],
-    ["period", (answer) => { answer.labels["period:a_gm"].text = "FY2022"; }],
-    ["hidden denominator", (answer) => { answer.labels["measure:a_gm"].text = "Gross margin"; }],
-    ["rounded label", (answer) => { answer.results[1].presented.text = "44.14%"; }],
-    ["exact value", (answer) => { answer.results[1].presented.full_text = "44.13%"; }],
-    ["added prose", (answer) => { answer.results[1].presented.text += " (highest)"; }],
-    ["coverage", (answer) => { answer.coverage.state = "partial"; answer.coverage.verified -= 1; }],
-  ];
-  for (const [label, edit] of cases) {
-    assert.deepEqual(reasons(verifyFinancialUnit(validRecords(), "section", withAnswer(edit))), ["financial_presentation_mismatch:content"], label);
-  }
-});
-
-test("a stale hash, unknown version, missing block, or unnamed subject is rejected", () => {
-  assert.deepEqual(reasons(verifyFinancialUnit(validRecords(), "section", withAnswer(() => {}, false))), [], "untouched content with its own hash verifies");
-  const staleHash = { ...SEAL_CONTEXT, answer: { ...SEAL_CONTEXT.answer!, presentation_hash: "0".repeat(64) } };
-  assert.deepEqual(reasons(verifyFinancialUnit(validRecords(), "section", staleHash)), ["financial_presentation_mismatch:presentation_hash"]);
-  const future = withAnswer((answer) => { answer.presentation_version = "financial-presentation.v9"; });
-  assert.deepEqual(reasons(verifyFinancialUnit(validRecords(), "section", future)), ["financial_presentation_mismatch:presentation_version"]);
-  assert.deepEqual(reasons(verifyFinancialUnit(validRecords(), "section", { ...SEAL_CONTEXT, answer: null })), ["financial_presentation_mismatch:block"]);
-
+test("the block uses the subject's current name, and a subject without one cannot be presented", () => {
   const renamed = mutable(validRecords());
   renamed.subject_names[0].name = "Renamed Industries Inc.";
-  assert.deepEqual(reasons(verifyFinancialUnit(renamed, "section", SEAL_CONTEXT)), ["financial_presentation_mismatch:content"], "the label reflects the subject's current name");
+  const outcome = verifyFinancialUnit(renamed, "section", SEAL_CONTEXT);
+  assert.ok(outcome.ok && Object.values(outcome.block.financial.labels).some((label) => label.text === "Renamed Industries Inc."));
   const unnamed = mutable(validRecords());
   unnamed.subject_names = [];
-  assert.deepEqual(reasons(verifyFinancialUnit(unnamed, "section", SEAL_CONTEXT)), ["financial_presentation_mismatch:subject_name"]);
+  assert.deepEqual(reasons(verifyFinancialUnit(unnamed, "section", SEAL_CONTEXT)), ["financial_presentation_unavailable:subject_name"]);
+});
+
+test("a financial seal carries no caller content and needs a transaction", async () => {
+  const claim = { owner_user_id: F.owner, run_id: F.run, unit_id: "section" };
+  assert.deepEqual(reasons(await verifyFinancialSnapshot(undefined, claim, { ...SEAL_CONTEXT, block_kinds: ["rich_text"] })), ["financial_seal_blocks:"]);
+  assert.deepEqual(reasons(await verifyFinancialSnapshot(undefined, claim, { ...SEAL_CONTEXT, block_kinds: ["disclosure"] })), ["financial_verification_unavailable:no_transaction_client"]);
 });

@@ -124,7 +124,10 @@ export async function getRun(client: SqlExecutor, ownerUserId: string, runId: st
   return row ? toRun(row) : null;
 }
 
-const ALLOWED_TRANSITIONS: Readonly<Record<ExecutionState, ReadonlyArray<ExecutionState>>> = {
+type TransitionTable = Readonly<Record<ExecutionState, ReadonlyArray<ExecutionState>>>;
+
+/** A publishing run completes only through sealing. */
+const PUBLISHING_TRANSITIONS: TransitionTable = {
   pending: ["running", "failed", "cancelled"],
   running: ["ready_to_seal", "failed", "cancelled"],
   ready_to_seal: ["completed", "failed", "cancelled"],
@@ -132,6 +135,9 @@ const ALLOWED_TRANSITIONS: Readonly<Record<ExecutionState, ReadonlyArray<Executi
   failed: [],
   cancelled: [],
 };
+
+/** A replay seals nothing, so it completes straight from running. */
+const REPLAY_TRANSITIONS: TransitionTable = { ...PUBLISHING_TRANSITIONS, running: ["completed", "failed", "cancelled"], ready_to_seal: [] };
 
 export class RunTransitionError extends Error {
   constructor(message: string) {
@@ -151,7 +157,8 @@ export async function transitionRun(
   details: { coverage_state?: CoverageState; failure_code?: string } = {},
 ): Promise<RunRecord> {
   if (current.cancel_requested_at !== null && to !== "cancelled" && to !== "failed") throw new StaleLeaseError("cancel_requested");
-  if (!ALLOWED_TRANSITIONS[current.execution_state].includes(to)) {
+  const allowed = current.replay_of_run_id === null ? PUBLISHING_TRANSITIONS : REPLAY_TRANSITIONS;
+  if (!allowed[current.execution_state].includes(to)) {
     throw new RunTransitionError(`cannot move run from ${current.execution_state} to ${to}`);
   }
   if (to === "failed" && !details.failure_code) throw new RunTransitionError("a failed run needs a failure code");

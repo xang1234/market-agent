@@ -4,7 +4,8 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 
-import { createFinancialDevApiAdapter, developmentHeaderAuthenticator, type FinancialPool } from "../src/financial-wiring.ts";
+import type { FinancialPool } from "../../financial-engine/src/http.ts";
+import { createFinancialDevApiAdapter, developmentHeaderAuthenticator } from "../src/financial-wiring.ts";
 
 function fakePool(queries: string[]): FinancialPool {
   const query = async (text: string) => {

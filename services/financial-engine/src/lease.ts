@@ -14,6 +14,9 @@ import { withTransaction } from "./transaction.ts";
 
 export type RunLease = Readonly<{ run_id: string; owner_user_id: string; worker_id: string; epoch: number }>;
 
+/** What leasing needs from an authority: whose run it is, under which parent, and any parent fence. */
+export type LeaseClaimant = Pick<FinancialRuntimeAuthority, "owner_user_id" | "parent" | "lease">;
+
 declare const fencedBrand: unique symbol;
 
 /** A transaction holding the run row lock under a verified lease. */
@@ -40,7 +43,7 @@ export class StaleLeaseError extends Error {
 
 export async function acquireLease(
   client: SqlExecutor,
-  input: { authority: FinancialRuntimeAuthority; run_id: string; worker_id: string; ttl_ms: number },
+  input: { authority: LeaseClaimant; run_id: string; worker_id: string; ttl_ms: number },
 ): Promise<AcquireLeaseResult> {
   if (!Number.isSafeInteger(input.ttl_ms) || input.ttl_ms < 1_000 || input.ttl_ms > 3_600_000) throw new RangeError("ttl_ms must be from 1s to 1h");
   if (!/^[A-Za-z0-9_:.-]{1,128}$/u.test(input.worker_id)) throw new RangeError("worker_id must be a safe identifier");
@@ -118,6 +121,6 @@ async function lockFencedRun(client: SqlExecutor, lease: RunLease, allowCancelRe
 }
 
 /** A Discovery child run may only be leased under its parent run's fenced authority. */
-function parentAuthorizes(authority: FinancialRuntimeAuthority, run: RunRecord): boolean {
+function parentAuthorizes(authority: LeaseClaimant, run: RunRecord): boolean {
   return authority.parent.kind === "discovery_run" && authority.parent.id === run.parent_id && authority.lease !== null;
 }

@@ -3,6 +3,7 @@ import { ChartCard } from './ChartCard.tsx'
 import {
   coverageText,
   labelText,
+  resultLabel,
   resultsById,
   seriesBarHeights,
   sortedRowIndexes,
@@ -67,7 +68,7 @@ function PresentationView({ blockId, content, results, presentation }: Presentat
 function ResultLine({ content, result }: { content: FinancialAnswerContent; result: FinancialPresentedResult }): ReactElement {
   const { presented } = result
   if (presented.kind === 'value') {
-    const label = result.label_ids.map((id) => labelText(content, id)).join(', ')
+    const label = resultLabel(content, result)
     return (
       <p className="text-sm text-fg" data-result-id={result.result_id}>
         <span className="text-muted">{label}: </span>
@@ -80,7 +81,7 @@ function ResultLine({ content, result }: { content: FinancialAnswerContent; resu
   const tone = presented.kind === 'gap' ? 'text-muted italic' : 'text-fg'
   return (
     <p className={`text-sm ${tone}`} data-result-id={result.result_id} data-result-kind={presented.kind}>
-      {presented.kind === 'gap' ? `${result.label_ids.map((id) => labelText(content, id)).join(', ')}: ${presented.text}` : presented.text}
+      {presented.kind === 'gap' ? `${resultLabel(content, result)}: ${presented.text}` : presented.text}
     </p>
   )
 }
@@ -117,7 +118,7 @@ function CertifiedTable({ blockId, content, results, table }: TableProps): React
               Company
             </th>
             {table.columns.map((column) => {
-              const heading = column.label_ids.map((id) => labelText(content, id)).join(', ')
+              const heading = `${labelText(content, column.measure_label_id)}, ${labelText(content, column.period_label_id)}`
               const active = sort?.columnId === column.column_id
               return (
                 <th
@@ -138,12 +139,12 @@ function CertifiedTable({ blockId, content, results, table }: TableProps): React
           {order.map((rowIndex) => {
             const row = table.rows[rowIndex]!
             return (
-              <tr key={row.label_id} className="border-t border-line" data-row-label={row.label_id}>
+              <tr key={row.subject_label_id} className="border-t border-line" data-row-label={row.subject_label_id}>
                 <th scope="row" className="px-3 py-2 font-normal text-fg">
-                  {labelText(content, row.label_id)}
+                  {labelText(content, row.subject_label_id)}
                 </th>
                 {row.cells.map((cell, cellIndex) => (
-                  <td key={`${row.label_id}-${cellIndex}`} className="num px-3 py-2 text-fg">
+                  <td key={`${row.subject_label_id}-${cellIndex}`} className="num px-3 py-2 text-fg">
                     <Cell result={cell === null ? undefined : results.get(cell)} />
                   </td>
                 ))}

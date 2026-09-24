@@ -26,6 +26,7 @@ import {
   validateBoundInput,
   validateFinancialPlan,
   type BoundFinancialInputV1,
+  type CommittedResult,
   type FinancialAnswerContent,
   type FinancialPlanV1,
   type LocalId,
@@ -42,6 +43,7 @@ import {
 import type { JsonObject, QueryExecutor } from "./manifest-staging.ts";
 
 export const FINANCIAL_VERIFIER_VERSION = "snapshot-financial-verifier.v1";
+export const FINANCIAL_PUBLICATION_SCHEMA_VERSION = "financial_publication.v1";
 
 export const FINANCIAL_VERIFIER_REASON_CODES = [
   "financial_run_not_found",
@@ -54,26 +56,37 @@ export const FINANCIAL_VERIFIER_REASON_CODES = [
   "financial_recompute_mismatch",
   "financial_lineage_mismatch",
   "financial_manifest_mismatch",
-  "financial_presentation_mismatch",
+  "financial_presentation_unavailable",
+  "financial_seal_blocks",
   "financial_verification_unavailable",
 ] as const;
 export type FinancialVerifierReasonCode = (typeof FINANCIAL_VERIFIER_REASON_CODES)[number];
 
 export type FinancialVerifierFailure = Readonly<{ reason_code: FinancialVerifierReasonCode; details: JsonObject }>;
 
-/**
- * What the seal asserts about itself: its manifest, cross-checked against the
- * unit's bound evidence, and its one `financial_answer` block (null when the
- * seal has none), which must equal the presentation regenerated here.
- */
+/** What the seal asserts about itself; cross-checked against the unit's bound evidence. */
 export type FinancialSealContext = Readonly<{
   snapshot_id: string;
   manifest: Readonly<{ fact_refs: ReadonlyArray<string>; source_ids: ReadonlyArray<string>; as_of: string }>;
-  answer: Readonly<{ financial: unknown; presentation_hash: unknown }> | null;
+}>;
+
+/**
+ * The certified `financial_answer` block. Only verification creates it, from
+ * the records it just checked; a caller can never supply one.
+ */
+export type FinancialAnswerBlock = Readonly<{
+  id: string;
+  kind: "financial_answer";
+  snapshot_id: string;
+  data_ref: Readonly<{ kind: "financial_answer"; id: string }>;
+  source_refs: ReadonlyArray<string>;
+  as_of: string;
+  presentation_hash: Sha256Hex;
+  financial: FinancialAnswerContent;
 }>;
 
 export type FinancialPublicationV1 = Readonly<{
-  schema_version: "financial_publication.v1";
+  schema_version: typeof FINANCIAL_PUBLICATION_SCHEMA_VERSION;
   verifier_version: string;
   snapshot_id: string;
   run: Readonly<{
@@ -100,8 +113,23 @@ export type FinancialPublicationV1 = Readonly<{
 }>;
 
 export type FinancialVerification =
-  | Readonly<{ ok: true; certificate: FinancialPublicationV1; certificate_digest: Sha256Hex; result_ids: ReadonlyArray<string> }>
+  | Readonly<{ ok: true; certificate: FinancialPublicationV1; certificate_digest: Sha256Hex; result_ids: ReadonlyArray<string>; block: FinancialAnswerBlock }>
   | Readonly<{ ok: false; failures: ReadonlyArray<FinancialVerifierFailure> }>;
+
+/**
+ * The financial part of a snapshot seal. A financial seal carries no caller
+ * content beyond policy disclosures: its one answer block is generated here.
+ * Without a transaction client nothing can be verified.
+ */
+export async function verifyFinancialSnapshot(
+  db: QueryExecutor | undefined,
+  claim: FinancialSealClaim,
+  context: FinancialSealContext & { block_kinds: ReadonlyArray<string> },
+): Promise<FinancialVerification> {
+  if (context.block_kinds.some((kind) => kind !== "disclosure")) return failed("financial_seal_blocks", { run_id: claim.run_id });
+  if (db === undefined) return failed("financial_verification_unavailable", { reason: "no_transaction_client" });
+  return verifyFinancialSeal(db, claim, context);
+}
 
 /** Loads the unit's records through `db` (the finalization transaction) and verifies them. */
 export async function verifyFinancialSeal(
@@ -222,23 +250,13 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
   }
   if (failures.length > 0) return { ok: false, failures };
 
-  // The block must be exactly the presentation regenerated from these records:
-  // a changed label, unit, period, denominator, ordering, or added text fails.
-  const content = financialAnswerFor(plan, records, unitId);
-  if (!content) return failed("financial_presentation_mismatch", { run_id: run.run_id, unit_id: unitId, field: "subject_name" });
+  // The presentation is generated from the recomputed results, so it can only show what was verified.
+  const content = presentVerifiedUnit(plan, records, unitId, expected.results.map((result) => ({ ...result, result_id: stored.get(result.output_id)!.result_id })));
+  if (!content) return failed("financial_presentation_unavailable", { run_id: run.run_id, unit_id: unitId, field: "subject_name" });
   const hash = presentationHash(content);
-  const answer = context.answer;
-  const version = (answer?.financial as { presentation_version?: unknown } | null | undefined)?.presentation_version;
-  const presentationProblem =
-    !answer ? "block"
-    : version !== FINANCIAL_PRESENTATION_VERSION ? "presentation_version"
-    : !canonicallyEqual(answer.financial, content) ? "content"
-    : answer.presentation_hash !== hash ? "presentation_hash"
-    : null;
-  if (presentationProblem) return failed("financial_presentation_mismatch", { run_id: run.run_id, unit_id: unitId, field: presentationProblem });
 
   const certificate: FinancialPublicationV1 = {
-    schema_version: "financial_publication.v1",
+    schema_version: FINANCIAL_PUBLICATION_SCHEMA_VERSION,
     verifier_version: FINANCIAL_VERIFIER_VERSION,
     snapshot_id: context.snapshot_id,
     run: {
@@ -270,15 +288,21 @@ export function verifyFinancialUnit(records: FinancialUnitRecords, unitId: Local
     certificate,
     certificate_digest: hashCanonical("publication", certificate),
     result_ids: certificate.results.map((result) => result.result_id),
+    block: {
+      id: `financial-answer-${unitId}`,
+      kind: "financial_answer",
+      snapshot_id: context.snapshot_id,
+      data_ref: { kind: "financial_answer", id: `${run.run_id}:${unitId}` },
+      source_refs: [...context.manifest.source_ids],
+      as_of: new Date(plan.time.knowledge_cutoff).toISOString(),
+      presentation_hash: hash,
+      financial: content,
+    },
   };
 }
 
-/**
- * The certified presentation of a unit from its ledger records and the
- * subjects' current display names; null when a subject has no name. The
- * engine builds the sealed block with this, and verification regenerates it.
- */
-export function financialAnswerFor(plan: FinancialPlanV1, records: FinancialUnitRecords, unitId: LocalId): FinancialAnswerContent | null {
+/** The unit's presentation with the subjects' current display names; null when a subject has no name. */
+function presentVerifiedUnit(plan: FinancialPlanV1, records: FinancialUnitRecords, unitId: LocalId, results: ReadonlyArray<CommittedResult>): FinancialAnswerContent | null {
   const names = new Map(records.subject_names.map((subject) => [`${subject.kind}:${subject.id.toLowerCase()}`, subject.name]));
   const subjectNames: Record<LocalId, string> = {};
   for (const member of plan.subjects.members) {
@@ -286,7 +310,7 @@ export function financialAnswerFor(plan: FinancialPlanV1, records: FinancialUnit
     if (name === undefined) return null;
     subjectNames[member.slot_id] = name;
   }
-  return presentFinancialUnit({ plan, run_id: records.run.run_id, unit_id: unitId, results: records.results, subject_names: subjectNames });
+  return presentFinancialUnit({ plan, run_id: records.run.run_id, unit_id: unitId, results, subject_names: subjectNames });
 }
 
 type BindingsOutcome =

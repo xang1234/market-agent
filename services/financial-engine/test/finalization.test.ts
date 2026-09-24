@@ -3,9 +3,9 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import type { Client } from "pg";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { createRuntimeAuthority, presentationHash, type FinancialPlanV1 } from "../../financial-core/src/index.ts";
-import { loadFinancialUnitRecords, type FinancialSealClaim } from "../../snapshot/src/financial-verifier-loader.ts";
-import { financialAnswerFor, verifyFinancialSeal } from "../../snapshot/src/financial-verifier.ts";
+import { createRuntimeAuthority } from "../../financial-core/src/index.ts";
+import { loadUnitBoundFacts } from "../../snapshot/src/financial-verifier-loader.ts";
+import { verifyFinancialSeal } from "../../snapshot/src/financial-verifier.ts";
 import { buildFinancialSealInput } from "../../snapshot/src/seal-input.ts";
 import { sealSnapshot, type SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { listRunEvents } from "../src/events-repo.ts";
@@ -14,12 +14,6 @@ import { acquireLease, StaleLeaseError, type RunLease } from "../src/lease.ts";
 import { authorityFor, engineDatabase, IDS, marginPlan, pinnedClients, readyRun } from "./db-fixtures.ts";
 
 const authority = authorityFor();
-
-/** The answer the finalizer generates for a claimed unit, loaded outside any finalization. */
-async function generatedAnswer(db: Client, claim: FinancialSealClaim) {
-  const records = (await loadFinancialUnitRecords(db, claim))!;
-  return financialAnswerFor(records.plan.plan as FinancialPlanV1, records, claim.unit_id)!;
-}
 
 /** A parent artifact table the callback writes through the finalization transaction. */
 const recordParent: PersistParentArtifact = async (tx, publication) => {
@@ -76,7 +70,7 @@ test("atomic financial finalization", { timeout: 300_000 }, async (t) => {
     assert.equal(block.kind, "financial_answer");
     assert.equal(block.snapshot_id, published.publication.snapshot_id);
     assert.equal(block.presentation_hash, certificate.certificate.presentation.hash, "the block is the certified presentation");
-    const answer = block.financial as { labels: Record<string, { text: string }>; results: Array<{ output_id: string; disposition: string; presented: { text: string } }> };
+    const answer = block.financial;
     assert.equal(answer.labels["subject:a"]?.text, "Alpha Industries Inc.");
     assert.deepEqual(answer.results.map((result) => [result.output_id, result.disposition]), [["out_gm", "verified"], ["out_gm22", "blocked_dependency"]]);
     const events = await listRunEvents(db, { owner_user_id: IDS.owner, run_id: runId, after_sequence: 0, limit: 100 });
@@ -120,13 +114,10 @@ test("atomic financial finalization", { timeout: 300_000 }, async (t) => {
   await t.test("a result that passed an earlier outside check fails the authoritative in-transaction reload", async () => {
     const plan = marginPlan();
     const { runId, lease } = await readyRun(db, plan);
-    const facts = (await db.query(`select distinct f.fact_id::text, f.source_id::text from financial_run_inputs i join facts f on f.fact_id = i.fact_id where i.run_id = $1 and i.input_slot in ('a_rev', 'a_gp')`, [runId])).rows;
-    const claim = { owner_user_id: IDS.owner, run_id: runId, unit_id: "screen_unit" };
-    const answer = await generatedAnswer(db, claim);
-    const outside = await verifyFinancialSeal(db, claim, {
+    const facts = await loadUnitBoundFacts(db, runId, "screen_unit");
+    const outside = await verifyFinancialSeal(db, { owner_user_id: IDS.owner, run_id: runId, unit_id: "screen_unit" }, {
       snapshot_id: randomUUID(),
       manifest: { fact_refs: facts.map((fact) => fact.fact_id), source_ids: [...new Set(facts.map((fact) => fact.source_id))], as_of: new Date(plan.time.knowledge_cutoff).toISOString() },
-      answer: { financial: answer, presentation_hash: presentationHash(answer) },
     });
     assert.ok(outside.ok, "the untampered unit passes outside the transaction");
 
@@ -159,16 +150,12 @@ test("atomic financial finalization", { timeout: 300_000 }, async (t) => {
   await t.test("a certificate can only be committed by the finalization that seals its unit", async () => {
     const plan = marginPlan();
     const { runId } = await readyRun(db, plan);
-    const facts = (await db.query(`select distinct f.fact_id::text, f.source_id::text, f.unit, f.period_kind::text, f.period_start::text, f.period_end::text, f.fiscal_year, f.fiscal_period
-        from financial_run_inputs i join facts f on f.fact_id = i.fact_id where i.run_id = $1 and i.input_slot in ('a_rev', 'a_rev22') order by f.fact_id::text`, [runId])).rows;
-    const claim = { owner_user_id: IDS.owner, run_id: runId, unit_id: "rev_unit" };
     const seal = buildFinancialSealInput({
       snapshot_id: randomUUID(),
-      claim,
+      claim: { owner_user_id: IDS.owner, run_id: runId, unit_id: "rev_unit" },
       knowledgeCutoff: new Date(plan.time.knowledge_cutoff).toISOString(),
       subjectRefs: [{ kind: "issuer", id: IDS.issuerA }],
-      answer: await generatedAnswer(db, claim),
-      boundFacts: facts,
+      boundFacts: await loadUnitBoundFacts(db, runId, "rev_unit"),
     });
     await assert.rejects(() => sealSnapshot(client, seal), /does not match a sealed unit/);
     assert.deepEqual(await counts(db, runId), { certificates: 0, parents: 0, sealed: 0, finalized: 0, snapshots: 0 });

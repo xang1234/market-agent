@@ -8,7 +8,7 @@ import { mutable, planFixture } from "./fixtures.ts";
 const HASH = "a".repeat(64);
 const NAMES = { a: "Alpha Corp", b: "Beta Inc" };
 
-function committed(output_id: string, node_id: string, payload: unknown, disposition = "computed"): CommittedResult {
+function committed(output_id: string, node_id: string, payload: unknown, disposition: CommittedResult["disposition"] = "computed"): CommittedResult {
   return { result_id: `r-${output_id}`, output_id, node_id, disposition, payload, result_hash: HASH };
 }
 
@@ -30,8 +30,18 @@ function present(plan: FinancialPlanV1 = planFixture(), results = comparisonResu
   return presentFinancialUnit({ plan, run_id: "run-1", unit_id: "section", results, subject_names: names });
 }
 
+function result(content: FinancialAnswerContent, outputId: string) {
+  return content.results.find((candidate) => candidate.output_id === outputId)!;
+}
+
 function resultText(content: FinancialAnswerContent, outputId: string): string {
-  return content.results.find((result) => result.output_id === outputId)!.presented.text;
+  return result(content, outputId).presented.text;
+}
+
+/** The subject, measure, and period label texts of a result. */
+function labelTexts(content: FinancialAnswerContent, outputId: string): [string | null, string, string] {
+  const { subject_label_id, measure_label_id, period_label_id } = result(content, outputId);
+  return [subject_label_id && content.labels[subject_label_id]!.text, content.labels[measure_label_id]!.text, content.labels[period_label_id]!.text];
 }
 
 function decimal(text: string) {
@@ -55,15 +65,15 @@ test("a two-company plan presents labels, formatted exact values, a table, a pre
   assert.equal(content.presentation_version, "financial-presentation.v1");
   assert.equal(content.template_version, "financial-answer.v1");
   assert.deepEqual(content.coverage, { state: "complete", requested: 5, verified: 5 });
-  assert.equal(content.labels["subject:a"]!.text, "Alpha Corp");
-  assert.equal(content.labels["measure:a_gm"]!.text, "Gross margin (gross profit / revenue)", "the denominator is visible in the label");
-  assert.equal(content.labels["period:a_gm"]!.text, "FY2023");
+  assert.deepEqual(labelTexts(content, "out_a_gm"), ["Alpha Corp", "Gross margin (gross profit / revenue)", "FY2023"], "the denominator is visible in the label");
+  assert.equal(result(content, "out_a_gm").measure_label_id, result(content, "out_b_gm").measure_label_id, "one measure, one label, across subjects");
+  assert.equal(result(content, "out_rank").subject_label_id, null, "a ranking spans subjects");
 
   const revenue = content.results.find((result) => result.output_id === "out_a_rev")!;
   assert.deepEqual(revenue.presented, {
     kind: "value", text: "USD 1,234,567.89", full_text: "USD 1234567.891", value: "1234567.891", unit: { kind: "currency", currency: "USD" }, exact: true,
   });
-  assert.deepEqual(revenue.label_ids, ["subject:a", "measure:a_rev", "period:a_rev"]);
+  assert.deepEqual(labelTexts(content, "out_a_rev"), ["Alpha Corp", "Revenue", "FY2023"]);
   assert.equal(revenue.disposition, "verified", "a computed result presents as verified");
   assert.equal(resultText(content, "out_a_gm"), "41.24%", "ratios are percentages rounded half-even");
   const margin = content.results.find((result) => result.output_id === "out_a_gm")!.presented;
@@ -73,11 +83,11 @@ test("a two-company plan presents labels, formatted exact values, a table, a pre
 
   const table = content.presentations.find((presentation) => presentation.kind === "table");
   assert.ok(table && table.kind === "table");
-  assert.deepEqual(table.rows.map((row) => row.label_id), ["subject:a", "subject:b"]);
-  const gmColumn = table.columns.findIndex((column) => column.label_ids[0] === "measure:a_gm");
+  assert.deepEqual(table.rows.map((row) => row.subject_label_id), ["subject:a", "subject:b"]);
+  const gmColumn = table.columns.findIndex((column) => column.measure_label_id === result(content, "out_a_gm").measure_label_id);
   assert.deepEqual(table.rows.map((row) => row.cells[gmColumn]), ["r-out_a_gm", "r-out_b_gm"]);
   assert.deepEqual(table.ascending[table.columns[gmColumn]!.column_id], [1, 0], "Beta's 38% sorts before Alpha's 41.235%");
-  const revenueColumn = table.columns.findIndex((column) => column.label_ids[0] === "measure:a_rev");
+  const revenueColumn = table.columns.findIndex((column) => column.measure_label_id === result(content, "out_a_rev").measure_label_id);
   assert.deepEqual(table.rows.map((row) => row.cells[revenueColumn]), ["r-out_a_rev", null], "a missing cell is explicit, not invented");
   assert.deepEqual(table.ascending[table.columns[revenueColumn]!.column_id], [0, 1], "rows without a value sort last");
   assert.deepEqual(
@@ -94,14 +104,14 @@ test("table sorting compares exact decimals, not display text or floats", () => 
   const content = present(planFixture(), results);
   const table = content.presentations.find((presentation) => presentation.kind === "table");
   assert.ok(table && table.kind === "table");
-  const gmColumn = table.columns.findIndex((column) => column.label_ids[0] === "measure:a_gm");
+  const gmColumn = table.columns.findIndex((column) => column.measure_label_id === result(content, "out_a_gm").measure_label_id);
   assert.equal(resultText(content, "out_a_gm"), resultText(content, "out_b_gm"), "the display labels tie");
   assert.deepEqual(table.ascending[table.columns[gmColumn]!.column_id], [1, 0], "the exact values do not");
 });
 
 test("an incomplete ranking can order its members but never names a leader", () => {
   const results = comparisonResults({
-    out_b_gm: committed("out_b_gm", "b_gm", { kind: "gap", reason_code: "missing_input", explanation: "A required input or calculation is unavailable." }, "missing_input"),
+    out_b_gm: committed("out_b_gm", "b_gm", { kind: "gap", reason_code: "missing_input", explanation: "A required input or calculation is unavailable." }, "missing"),
     out_rank: committed("out_rank", "gm_rank", {
       kind: "ranking", direction: "highest", population: { requested: 2, evaluated: 1 }, complete: false,
       ranks: [{ node_id: "a_gm", rank: 1 }], extreme: null,
@@ -117,7 +127,7 @@ test("an incomplete ranking can order its members but never names a leader", () 
   assert.doesNotMatch(ranking.text, /Alpha/u);
 
   const gap = content.results.find((result) => result.output_id === "out_b_gm")!;
-  assert.equal(gap.disposition, "missing_input");
+  assert.equal(gap.disposition, "missing");
   assert.deepEqual(gap.presented, { kind: "gap", text: "A required input or calculation is unavailable.", reason_code: "missing_input" });
   assert.deepEqual(content.coverage, { state: "partial", requested: 5, verified: 4 });
 });
@@ -142,12 +152,11 @@ test("one subject with a measure over several periods is a series in operand ord
     committed("o23", "rev23", usd("125")),
     committed("og", "growth", { kind: "value", value: "25", unit: { kind: "percent" }, exact: true, rounding: null }),
   ], { a: "Alpha Corp" });
-  assert.equal(content.labels["measure:growth"]!.text, "Percent change in Revenue");
-  assert.equal(content.labels["period:growth"]!.text, "FY2023 vs FY2022", "current before prior, from operand order");
+  assert.deepEqual(labelTexts(content, "og"), ["Alpha Corp", "Percent change in Revenue", "FY2023 vs FY2022"], "current before prior, from operand order");
   assert.deepEqual(content.presentations, [
-    { kind: "series", subject_label_id: "subject:a", measure_label_id: "measure:rev22", points: [
-      { period_label_id: "period:rev22", result_id: "r-o22" },
-      { period_label_id: "period:rev23", result_id: "r-o23" },
+    { kind: "series", subject_label_id: "subject:a", measure_label_id: result(content, "o22").measure_label_id, points: [
+      { period_label_id: result(content, "o22").period_label_id, result_id: "r-o22" },
+      { period_label_id: result(content, "o23").period_label_id, result_id: "r-o23" },
     ] },
     { kind: "scalar", result_id: "r-og" },
   ]);
@@ -172,7 +181,7 @@ test("a changed label, unit, period, or denominator changes the presentation has
   const otherDenominator = mutable(planFixture()) as FinancialPlanV1;
   otherDenominator.operations = otherDenominator.operations.map((node) => node.node_id === "a_gm" ? { ...node, operation: "operating_margin", operation_version: "operating_margin.v1" } as never : node);
   const changed = present(otherDenominator);
-  assert.equal(changed.labels["measure:a_gm"]!.text, "Operating margin (operating income / revenue)");
+  assert.equal(labelTexts(changed, "out_a_gm")[1], "Operating margin (operating income / revenue)");
   assert.notEqual(presentationHash(changed), baseline, "hidden denominator");
 });
 

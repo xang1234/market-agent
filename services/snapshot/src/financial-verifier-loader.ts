@@ -7,6 +7,7 @@
 // Snapshot reads these tables directly; it never imports the engine.
 
 import type { QueryExecutor } from "./manifest-staging.ts";
+import { toSealFactRow, type FactRow } from "./seal-input.ts";
 
 export type FinancialSealClaim = Readonly<{ owner_user_id: string; run_id: string; unit_id: string }>;
 
@@ -201,4 +202,17 @@ export async function loadSubjectNames(
      order by kind, id`,
     [ids("issuer"), ids("listing")],
   )).rows;
+}
+
+/** The facts a unit's closure bound, as seal fact rows, in fact-id order: what its seal must cite. */
+export async function loadUnitBoundFacts(db: QueryExecutor, runId: string, unitId: string): Promise<FactRow[]> {
+  return (await db.query<Parameters<typeof toSealFactRow>[0]>(
+    `select f.fact_id::text, f.source_id::text, f.unit, f.period_kind::text, f.period_start::text, f.period_end::text, f.fiscal_year, f.fiscal_period
+       from financial_run_units u
+       join financial_run_inputs i on i.run_id = u.run_id and u.closure_node_ids ? i.input_slot and i.binding_status = 'bound'
+       join facts f on f.fact_id = i.fact_id
+      where u.run_id = $1 and u.unit_id = $2
+      order by f.fact_id`,
+    [runId, unitId],
+  )).rows.map(toSealFactRow);
 }
