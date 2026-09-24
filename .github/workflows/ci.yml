@@ -624,3 +624,52 @@ jobs:
       - name: Run analyst-grids tests
         working-directory: services/analyst-grids
         run: npm test
+
+  financial-core:
+    name: financial-core (tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/financial-core
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: services/financial-core/package-lock.json
+
+      - run: npm ci
+
+      - run: npm test
+
+  financial-engine:
+    name: financial-engine (tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            services/financial-core/package-lock.json
+            services/financial-engine/package-lock.json
+
+      # The engine imports financial-core sources, which resolve their own
+      # dependencies (ajv, decimal.js) from services/financial-core/node_modules.
+      - name: Install financial-core deps (imported by the engine)
+        working-directory: services/financial-core
+        run: npm ci
+
+      - name: Install financial-engine deps
+        working-directory: services/financial-engine
+        run: npm ci
+
+      - name: Run financial-engine tests
+        working-directory: services/financial-engine
+        run: npm test
