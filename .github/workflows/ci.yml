@@ -275,6 +275,17 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      # The financial verifier recomputes through financial-core, which resolves
+      # its own dependencies (ajv, decimal.js) from its node_modules; the
+      # verifier's database test uses the shared db/test Docker harness.
+      - name: Install db deps (needed by the financial verifier database test)
+        working-directory: db
+        run: npm ci
+
+      - name: Install financial-core deps (imported by the financial verifier)
+        working-directory: services/financial-core
+        run: npm ci
+
       - run: npm ci
 
       - run: npm test

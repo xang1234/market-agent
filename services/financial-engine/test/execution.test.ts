@@ -5,10 +5,11 @@ import type { Client } from "pg";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import type { FinancialPlanV1 } from "../../financial-core/src/index.ts";
 import { bindPlanInputs } from "../src/bind-inputs.ts";
-import { buildUnitCheckpoint, checkpointUnit, nodeHashes } from "../src/checkpoints.ts";
+import { buildUnitCheckpoint, checkpointUnit } from "../src/checkpoints.ts";
 import { listRunEvents } from "../src/events-repo.ts";
 import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
-import { evaluateBoundPlan, executeRun } from "../src/execute.ts";
+import { executeRun } from "../src/execute.ts";
+import { evaluateBoundPlan, nodeLineageHashes } from "../../financial-core/src/index.ts";
 import { fencedTransaction } from "../src/lease.ts";
 import type { FinancialEvidencePort, SqlExecutor } from "../src/ports.ts";
 import { loadResults } from "../src/result-repo.ts";
@@ -139,7 +140,7 @@ test("bounded financial graph execution", { timeout: 240_000 }, async (t) => {
     const { bindings } = await bindPlanInputs({ client: db, lease, plan, authority, evidence: createEvidenceFinancialPort });
     await fencedTransaction(db, lease, (tx) => declareUnits(tx, plan));
     const evaluation = evaluateBoundPlan(plan, bindings);
-    await checkpointUnit(db, lease, buildUnitCheckpoint(plan, evaluation, nodeHashes(plan, evaluation, bindings), "rev_unit"));
+    await checkpointUnit(db, lease, buildUnitCheckpoint(plan, evaluation, nodeLineageHashes(plan, evaluation, bindings), "rev_unit"));
 
     await requestCancellation(db, IDS.owner, runId);
     assert.deepEqual(await run(db, plan, lease), { run_id: runId, outcome: "cancelled" });

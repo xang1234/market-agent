@@ -4,23 +4,18 @@
 // tampering), never an overwrite. Draft rows are not publicly readable as
 // verified — only finalization (T15) can award that.
 
-import type { DraftFinancialResultV1, LocalId, Sha256Hex } from "../../financial-core/src/index.ts";
-import { ExecutionIntegrityError } from "./errors.ts";
+import {
+  ExecutionIntegrityError,
+  type ComputationRecord,
+  type DraftFinancialResultV1,
+  type LocalId,
+  type Sha256Hex,
+} from "../../financial-core/src/index.ts";
 import type { SqlExecutor } from "./ports.ts";
-
-export type DraftComputation = Readonly<{
-  node_id: LocalId;
-  operation: string;
-  operation_version: string;
-  numeric_policy_version: string;
-  definition_versions: Readonly<Record<string, string>>;
-  input_refs: ReadonlyArray<Readonly<{ node_id: LocalId; hash: Sha256Hex }>>;
-  output_hash: Sha256Hex;
-}>;
 
 export const FINANCIAL_CODE_VERSION = "financial-core.v1";
 
-export async function persistComputation(client: SqlExecutor, runId: string, computation: DraftComputation): Promise<string> {
+export async function persistComputation(client: SqlExecutor, runId: string, computation: ComputationRecord): Promise<string> {
   await client.query(
     `insert into computations (formula_id, code_version, input_refs, output_ref, financial_run_id, node_id, operation_version,
                                numeric_policy_version, definition_versions, output_hash)

@@ -6,6 +6,7 @@
 // never substitution.
 
 import {
+  ExecutionIntegrityError,
   hashCanonical,
   validateBoundInput,
   type BoundFinancialInputV1,
@@ -17,7 +18,6 @@ import {
   type Sha256Hex,
   type SubjectSlot,
 } from "../../financial-core/src/index.ts";
-import { ExecutionIntegrityError } from "./errors.ts";
 import { appendRunEvent } from "./events-repo.ts";
 import { fencedTransaction, type FencedTx, type RunLease } from "./lease.ts";
 import type { FinancialEvidencePort, InputCandidate, SqlExecutor } from "./ports.ts";

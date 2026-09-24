@@ -20,6 +20,7 @@ import type {
   VerifierFactBinding,
 } from "./snapshot-verifier.ts";
 import type { UUID } from "../../shared/src/subject-ref.ts";
+import type { FinancialSealClaim } from "./financial-verifier-loader.ts";
 
 // A fact row backing a cited ref, loaded from the facts table. source_id is
 // required (the verifier binds every referenced fact to a source); the
@@ -264,5 +265,40 @@ export function withRequiredDisclosures(seal: SnapshotSealInput): SnapshotSealIn
   return {
     ...seal,
     blocks: [...seal.blocks, ...compiled.required_disclosure_blocks],
+  };
+}
+
+// The financial sibling of buildFactBackedSealInput. A certified financial
+// unit cites its bound input facts and their sources so the existing
+// source, fact-metadata, and disclosure checks apply, and carries a financial
+// claim the verifier resolves against the ledger in the sealing transaction.
+// The snapshot's as_of is the plan's knowledge cutoff, never the execution
+// time. Callers pass the bound facts' rows as loaded from the facts table; the
+// verifier rejects any seal whose manifest does not cite what the unit bound.
+export function buildFinancialSealInput(input: {
+  snapshot_id: UUID;
+  claim: FinancialSealClaim;
+  knowledgeCutoff: string;
+  blocks: ReadonlyArray<VerifierBlock>;
+  subjectRefs: ReadonlyArray<{ kind: string; id: string }>;
+  boundFacts: ReadonlyArray<FactRow>;
+}): SnapshotSealInput {
+  const factRefs = distinct(input.boundFacts.map((fact) => fact.fact_id));
+  const sourceIds = distinct(input.boundFacts.map((fact) => fact.source_id));
+  const manifest: SnapshotManifestDraft = Object.freeze({
+    ...stagedManifestBase({ subjectRefs: input.subjectRefs, asOf: input.knowledgeCutoff, modelVersion: null }),
+    // Deterministic ledger content: provenanced by the certified run, not tool calls.
+    [DETERMINISTIC_SNAPSHOT_MANIFEST]: true,
+    fact_refs: Object.freeze(factRefs),
+    source_ids: Object.freeze(sourceIds),
+  });
+  const factById = new Map(input.boundFacts.map((fact) => [fact.fact_id, fact]));
+  return {
+    snapshot_id: input.snapshot_id,
+    manifest,
+    blocks: [...input.blocks],
+    facts: factRefs.map((factId) => ({ ...factById.get(factId)! })),
+    sources: sourceIds,
+    financial: input.claim,
   };
 }

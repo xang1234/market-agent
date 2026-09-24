@@ -15,6 +15,8 @@ import {
 } from "./manifest-staging.ts";
 import { compileDisclosurePolicy, type FreshnessClass, type RequiredDisclosure } from "./disclosure-policy.ts";
 import { validateSnapshotTransformManifest } from "./snapshot-transform.ts";
+import type { FinancialSealClaim } from "./financial-verifier-loader.ts";
+import { verifyFinancialSeal, type FinancialVerification, type FinancialVerifierReasonCode } from "./financial-verifier.ts";
 
 export type SnapshotVerifierManifest = {
   subject_refs: ReadonlyArray<{ kind: SnapshotSubjectKind; id: string }>;
@@ -146,9 +148,13 @@ export type SnapshotVerificationInput = {
   required_disclosures?: ReadonlyArray<RequiredDisclosure>;
   tool_actions?: ReadonlyArray<VerifierToolAction>;
   pending_actions?: ReadonlyArray<VerifierPendingAction>;
+  // A financial publication unit this seal certifies. Verified against the
+  // ledger through the transaction client; never against caller arrays.
+  financial?: FinancialSealClaim | null;
 };
 
 export type SnapshotVerifierReasonCode =
+  | FinancialVerifierReasonCode
   | "invalid_verifier_input"
   | "tool_call_log_audit_failed"
   | "missing_fact_ref"
@@ -171,6 +177,8 @@ export type SnapshotVerifierFailure = {
 export type SnapshotVerificationResult = {
   ok: boolean;
   failures: ReadonlyArray<SnapshotVerifierFailure>;
+  // Present when a financial claim verified: the certificate to publish.
+  financial?: Extract<FinancialVerification, { ok: true }>;
 };
 
 const UUID_V4 =
@@ -246,6 +254,15 @@ export async function verifySnapshotSeal(
     return invalidVerifierInputResult(input, db, error);
   }
 
+  let financial: Extract<FinancialVerification, { ok: true }> | undefined;
+  if (normalized.financial !== null) {
+    const outcome = db === undefined
+      ? { ok: false as const, failures: [{ reason_code: "financial_verification_unavailable" as const, details: { reason: "no_transaction_client" } }] }
+      : await verifyFinancialSeal(db, normalized.financial, normalized);
+    if (outcome.ok) financial = outcome;
+    else for (const failure of outcome.failures) addFailure(failure.reason_code, failure.details);
+  }
+
   const frozenFailures = Object.freeze([...failures]);
   if (db !== undefined) {
     for (const failure of frozenFailures) {
@@ -256,6 +273,7 @@ export async function verifySnapshotSeal(
   return Object.freeze({
     ok: frozenFailures.length === 0,
     failures: frozenFailures,
+    ...(financial !== undefined && frozenFailures.length === 0 ? { financial } : {}),
   });
 }
 
@@ -291,6 +309,7 @@ type NormalizedInput = Required<
     | "required_disclosures"
     | "tool_actions"
     | "pending_actions"
+    | "financial"
   >
 > & {
   thread_id: string | null;
@@ -302,6 +321,7 @@ type NormalizedInput = Required<
   required_disclosures: ReadonlyArray<RequiredDisclosure>;
   tool_actions: ReadonlyArray<VerifierToolAction>;
   pending_actions: ReadonlyArray<VerifierPendingAction>;
+  financial: FinancialSealClaim | null;
 };
 
 function normalizeInput(input: SnapshotVerificationInput): NormalizedInput {
@@ -352,7 +372,23 @@ function normalizeInput(input: SnapshotVerificationInput): NormalizedInput {
     pending_actions: Object.freeze(
       (input.pending_actions ?? []).map((action, index) => normalizePendingAction(action, index)),
     ),
+    financial: input.financial == null ? null : normalizeFinancialClaim(input.financial),
   });
+}
+
+function normalizeFinancialClaim(claim: FinancialSealClaim): FinancialSealClaim {
+  return Object.freeze({
+    owner_user_id: assertUuidV4(claim.owner_user_id, "verifySnapshotSeal.financial.owner_user_id"),
+    run_id: assertUuidV4(claim.run_id, "verifySnapshotSeal.financial.run_id"),
+    unit_id: assertLocalId(claim.unit_id, "verifySnapshotSeal.financial.unit_id"),
+  });
+}
+
+function assertLocalId(value: unknown, label: string): string {
+  if (typeof value !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(value)) {
+    throw new Error(`${label}: must be a plan-local identifier`);
+  }
+  return value;
 }
 
 function normalizeManifest(manifest: SnapshotVerifierManifest): SnapshotVerifierManifest {

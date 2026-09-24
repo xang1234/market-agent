@@ -5,7 +5,7 @@ import type { Client } from "pg";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { createRuntimeAuthority } from "../../financial-core/src/index.ts";
 import { appendRunEvent, listRunEvents, UnsafeEventPayloadError } from "../src/events-repo.ts";
-import { ExecutionIntegrityError } from "../src/errors.ts";
+import { ExecutionIntegrityError } from "../../financial-core/src/index.ts";
 import { acquireLease, fencedTransaction, renewLease, StaleLeaseError, type FencedTx, type RunLease } from "../src/lease.ts";
 import { requestCancellation, reserveRun, RunTransitionError, transitionRun } from "../src/run-repo.ts";
 import { declareUnits, listUnits, markUnitComputed, rejectUnit } from "../src/unit-repo.ts";
