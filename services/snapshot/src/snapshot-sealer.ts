@@ -1,3 +1,5 @@
+import { hashCanonical } from "../../financial-core/src/index.ts";
+import { FINANCIAL_VERIFIER_VERSION } from "./financial-verifier.ts";
 import {
   auditManifestToolCallLog,
   type QueryExecutor,
@@ -225,6 +227,7 @@ async function insertVerifiedSnapshot(
   if (row === undefined) {
     throw new Error("sealSnapshot: snapshot insert returned no row");
   }
+  if (verification.financial !== undefined) await insertFinancialCertificate(db, input, verification.financial);
 
   return Object.freeze({
     ok: true,
@@ -285,6 +288,32 @@ function isPoolLike(db: QueryExecutor): boolean {
 
 function isAcquiredClient(db: QueryExecutor): db is SnapshotPoolClient {
   return typeof (db as { release?: unknown }).release === "function";
+}
+
+// The certificate row for a verified financial unit. A deferred constraint
+// requires the unit to be sealed with this snapshot and digest by commit, so
+// only a finalization transaction that also seals the unit can publish it.
+async function insertFinancialCertificate(
+  db: QueryExecutor,
+  input: SnapshotSealInput,
+  financial: NonNullable<SnapshotVerificationResult["financial"]>,
+): Promise<void> {
+  const { certificate } = financial;
+  await db.query(
+    `insert into snapshot_financial_runs
+       (snapshot_id, run_id, unit_id, certificate, certificate_digest, result_ids, presentation_hash, verifier_version)
+     values ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8)`,
+    [
+      input.snapshot_id,
+      certificate.run.run_id,
+      certificate.unit.unit_id,
+      JSON.stringify(certificate),
+      financial.certificate_digest,
+      JSON.stringify(financial.result_ids),
+      hashCanonical("presentation", { template: "sealed_blocks.v1", blocks: input.blocks }),
+      FINANCIAL_VERIFIER_VERSION,
+    ],
+  );
 }
 
 async function writeSealFailure(

@@ -5,7 +5,7 @@ import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { executeRun } from "../../financial-engine/src/execute.ts";
-import { authorityFor, engineDatabase, IDS, leasedRun, marginPlan } from "../../financial-engine/test/db-fixtures.ts";
+import { authorityFor, databaseUrl, engineDatabase, IDS, leasedRun, marginPlan } from "../../financial-engine/test/db-fixtures.ts";
 import { verifyFinancialSeal } from "../src/financial-verifier.ts";
 import { buildFinancialSealInput, toSealFactRow } from "../src/seal-input.ts";
 import { sealSnapshotInTransaction, snapshotTransactionClient } from "../src/snapshot-sealer.ts";
@@ -24,12 +24,6 @@ async function boundFacts(db: Client | PoolClient, runId: string, unitId: string
       order by f.fact_id`,
     [runId, unitId],
   )).rows.map(toSealFactRow);
-}
-
-/** The URL of the database `db` is connected to, for a pool on the same database. */
-function databaseUrl(db: Client): string {
-  const { user, password, host, port, database } = (db as unknown as { connectionParameters: Record<string, string> }).connectionParameters;
-  return `postgresql://${user}:${password}@${host}:${port}/${database}`;
 }
 
 /** Runs `action` in a transaction that is always rolled back, so each test's tampering is isolated. */

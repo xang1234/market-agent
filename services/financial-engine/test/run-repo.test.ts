@@ -5,16 +5,7 @@ import type { Client } from "pg";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { createRuntimeAuthority } from "../../financial-core/src/index.ts";
 import { getRun, reserveRun } from "../src/run-repo.ts";
-import { authorityFor, connectExtraClient, engineDatabase, IDS, revenuePlan } from "./db-fixtures.ts";
-
-/** Waits until `count` other backends are blocked on a lock — an explicit barrier, not a timed sleep. */
-async function waitForLockWaiters(observer: Client, count: number): Promise<void> {
-  for (;;) {
-    const waiting = Number((await observer.query(`select count(*)::int as n from pg_stat_activity where wait_event_type = 'Lock' and datname = current_database()`)).rows[0].n);
-    if (waiting >= count) return;
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-}
+import { authorityFor, connectExtraClient, engineDatabase, IDS, revenuePlan, waitForLockWaiters } from "./db-fixtures.ts";
 
 function samePlanNewId() {
   return { ...revenuePlan(), plan_id: randomUUID() };

@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import type { TestContext } from "node:test";
 import type { Client } from "pg";
-import { bootstrapDatabase, connectedClient } from "../../../db/test/docker-pg.ts";
+import { bootstrapDatabase, connectedClient, connectedPool, registerLifoCleanup } from "../../../db/test/docker-pg.ts";
 import { recordFactPrecisionAttestation, recordSourcePublicationAttestation } from "../../evidence/src/financial-attestations.ts";
 import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
 import {
@@ -14,6 +14,9 @@ import {
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
 } from "../../financial-core/src/index.ts";
+import { snapshotTransactionClient, type SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
+import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
+import { executeRun } from "../src/execute.ts";
 import { acquireLease, type RunLease } from "../src/lease.ts";
 import { reserveRun } from "../src/run-repo.ts";
 
@@ -45,10 +48,29 @@ export async function engineDatabase(t: TestContext, prefix: string): Promise<Cl
   return db;
 }
 
+/** The URL of the database `db` is connected to. */
+export function databaseUrl(db: Client): string {
+  const { user, password, host, port, database } = (db as unknown as { connectionParameters: Record<string, string> }).connectionParameters;
+  return `postgresql://${user}:${password}@${host}:${port}/${database}`;
+}
+
 export async function connectExtraClient(t: TestContext, db: Client): Promise<Client> {
-  const params = db as unknown as { connectionParameters: { user: string; password: string; host: string; port: number; database: string } };
-  const { user, password, host, port, database } = params.connectionParameters;
-  return connectedClient(t, `postgresql://${user}:${password}@${host}:${port}/${database}`);
+  return connectedClient(t, databaseUrl(db));
+}
+
+/**
+ * Waits until `count` other backends are blocked on a lock — an explicit
+ * barrier, not a timed sleep. Fails after `deadlineMs`, which means an expected
+ * lock conflict never happened.
+ */
+export async function waitForLockWaiters(observer: Client, count: number, deadlineMs = 20_000): Promise<void> {
+  const deadline = Date.now() + deadlineMs;
+  for (;;) {
+    const waiting = Number((await observer.query(`select count(*)::int as n from pg_stat_activity where wait_event_type = 'Lock' and datname = current_database()`)).rows[0].n);
+    if (waiting >= count) return;
+    if (Date.now() > deadline) throw new Error(`expected ${count} backend(s) blocked on a lock; none blocked within ${deadlineMs}ms`);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
 }
 
 async function seedEvidence(db: Client): Promise<void> {
@@ -258,4 +280,29 @@ export async function leasedRun(
   const acquired = await acquireLease(db, { authority, run_id: runId, worker_id: workerId, ttl_ms: 60_000 });
   assert.equal(acquired.status, "acquired");
   return { runId, lease: (acquired as { lease: RunLease }).lease };
+}
+
+/** A run of `plan` executed to ready_to_seal, still leased to `workerId`. */
+export async function readyRun(
+  db: Client,
+  plan: FinancialPlanV1,
+  authority: FinancialRuntimeAuthority = authorityFor(),
+  workerId = "worker-1",
+): Promise<{ runId: string; lease: RunLease }> {
+  const leased = await leasedRun(db, plan, authority, workerId);
+  const report = await executeRun({ client: db, lease: leased.lease, plan, authority, evidence: createEvidenceFinancialPort, parent_limits: {} });
+  assert.equal(report.outcome, "ready_to_seal");
+  return leased;
+}
+
+/** Pinned pool clients on the same database, released when the test ends. */
+export async function pinnedClients(t: TestContext, db: Client, count: number): Promise<SnapshotTransactionClient[]> {
+  const pool = await connectedPool(t, databaseUrl(db), { max: count + 1 });
+  const clients: SnapshotTransactionClient[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const client = await pool.connect();
+    registerLifoCleanup(t, () => client.release());
+    clients.push(snapshotTransactionClient(client));
+  }
+  return clients;
 }
