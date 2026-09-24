@@ -22,6 +22,7 @@ import {
   type Sha256Hex,
   type SubjectSlot,
 } from "../../financial-core/src/index.ts";
+import { appendRunEvent } from "./events-repo.ts";
 import { assertLeaseFence, type RunLease } from "./lease.ts";
 import type { FinancialEvidencePort, InputCandidate, SqlExecutor } from "./ports.ts";
 import { SELECTION_POLICY_VERSION, selectInput, type SlotSelection } from "./select-inputs.ts";
@@ -81,6 +82,10 @@ export async function bindPlanInputs(input: {
       if (candidateBudget <= 0) {
         selection = { status: "gap", reason_code: "scope_limit_exceeded" };
       } else {
+        // A failed evidence read is recorded as an execution-error gap for this
+        // slot, never as absent evidence; the savepoint keeps the binding
+        // transaction usable after a database error.
+        await client.query("savepoint evidence_read");
         const page = await evidence.listInputCandidates({
           authority,
           subject: slot.subject_ref,
@@ -89,7 +94,14 @@ export async function bindPlanInputs(input: {
           fiscal_period: node.period.kind === "fiscal_period" ? node.period.fiscal_period : null,
           limit: candidateBudget,
         });
-        if (page.status === "error") throw new FinancialBindingError(`evidence unavailable (${page.reason_code})`);
+        if (page.status === "error") {
+          await client.query("rollback to savepoint evidence_read");
+          const binding = { slot: node.node_id, status: "gap" as const, reason_code: page.reason_code, candidate_set_digest: candidateSetDigest(node.node_id, [], false) };
+          await persistBinding(client, input.run_id, binding, 0, false);
+          bindings.set(node.node_id, binding);
+          continue;
+        }
+        await client.query("release savepoint evidence_read");
         candidates = page.candidates;
         truncated = page.truncated;
         candidateBudget -= candidates.length;
@@ -107,6 +119,8 @@ export async function bindPlanInputs(input: {
       bindings.set(node.node_id, binding);
     }
     await client.query(`update financial_runs set bound_at = now(), updated_at = now() where run_id = $1`, [input.run_id]);
+    const boundCount = [...bindings.values()].filter((binding) => binding.status === "bound").length;
+    await appendRunEvent(client, input.run_id, "inputs_bound", { payload: { bound_count: boundCount, gap_count: bindings.size - boundCount } });
     await client.query("commit");
     return { run_id: input.run_id, reused: false, bindings };
   } catch (error) {

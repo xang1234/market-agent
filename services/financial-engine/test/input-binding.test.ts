@@ -2,19 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { hashCanonical, validateBoundInput } from "../../financial-core/src/index.ts";
-import type { Client } from "pg";
-import type { FinancialPlanV1, FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
 import { bindPlanInputs, FinancialBindingError, type InputBinding } from "../src/bind-inputs.ts";
-import { acquireLease, StaleLeaseError, type RunLease } from "../src/lease.ts";
+import { StaleLeaseError } from "../src/lease.ts";
 import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
-import { authorityFor, engineDatabase, IDS, insertPlanAndRun, ORIGINAL_REVENUE, revenuePlan } from "./db-fixtures.ts";
-
-async function leasedRun(db: Client, plan: FinancialPlanV1, authority: FinancialRuntimeAuthority): Promise<{ runId: string; lease: RunLease }> {
-  const runId = await insertPlanAndRun(db, plan, authority);
-  const acquired = await acquireLease(db, { authority, run_id: runId, worker_id: "binder", ttl_ms: 60_000 });
-  assert.equal(acquired.status, "acquired");
-  return { runId, lease: (acquired as { lease: RunLease }).lease };
-}
+import { authorityFor, engineDatabase, IDS, leasedRun, ORIGINAL_REVENUE, revenuePlan } from "./db-fixtures.ts";
 
 function bound(binding: InputBinding | undefined) {
   assert.equal(binding?.status, "bound", JSON.stringify(binding));

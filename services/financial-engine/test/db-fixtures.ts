@@ -16,6 +16,7 @@ import {
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
 } from "../../financial-core/src/index.ts";
+import { acquireLease, type RunLease } from "../src/lease.ts";
 
 export const IDS = {
   owner: "4f000000-0000-4000-8000-000000000001",
@@ -182,6 +183,57 @@ export function revenuePlan(options: PlanOptions = {}): FinancialPlanV1 {
   return validated.value;
 }
 
+/**
+ * Issuer A across three units: revenue (FY2023, FY2022), gross margin for both
+ * years (FY2022 has no gross profit), and a margin screen whose threshold no
+ * value meets — a complete, empty screen.
+ */
+export function marginPlan(options: Pick<PlanOptions, "cutoff"> = {}): FinancialPlanV1 {
+  const base = revenuePlan(options);
+  const reported = (nodeId: string, metric: string, year: number) => ({
+    node_id: nodeId,
+    operation: "reported_metric" as const,
+    operation_version: "reported_metric.v1",
+    subject_slot: "a",
+    metric_key: metric,
+    period: { kind: "fiscal_period" as const, fiscal_year: year, fiscal_period: "FY" as const },
+  });
+  const margin = (nodeId: string, numerator: string, revenue: string) =>
+    ({ node_id: nodeId, operation: "gross_margin" as const, operation_version: "gross_margin.v1", numerator, revenue });
+  const validated = validateFinancialPlan({
+    ...base,
+    plan_id: randomUUID(),
+    metric_definitions: [
+      { metric_key: "revenue", definition_version: "revenue.v1" },
+      { metric_key: "gross_profit", definition_version: "gross_profit.v1" },
+    ],
+    operations: [
+      reported("a_rev", "revenue", 2023),
+      reported("a_gp", "gross_profit", 2023),
+      reported("a_rev22", "revenue", 2022),
+      reported("a_gp22", "gross_profit", 2022),
+      margin("a_gm", "a_gp", "a_rev"),
+      margin("a_gm22", "a_gp22", "a_rev22"),
+      { node_id: "a_gm_check", operation: "threshold" as const, operation_version: "threshold.v1", subject: "a_gm", threshold_id: "min_gm", comparison: "gte" as const },
+    ],
+    outputs: [
+      { output_id: "out_rev", node_id: "a_rev", unit_id: "rev_unit" },
+      { output_id: "out_rev22", node_id: "a_rev22", unit_id: "rev_unit" },
+      { output_id: "out_gm", node_id: "a_gm", unit_id: "margin_unit" },
+      { output_id: "out_gm22", node_id: "a_gm22", unit_id: "margin_unit" },
+      { output_id: "out_check", node_id: "a_gm_check", unit_id: "screen_unit" },
+    ],
+    publication_units: [
+      { unit_id: "rev_unit", kind: "chat_section" as const },
+      { unit_id: "margin_unit", kind: "chat_section" as const },
+      { unit_id: "screen_unit", kind: "chat_section" as const },
+    ],
+    thresholds: [{ threshold_id: "min_gm", value: "0.99", unit: { kind: "ratio" as const }, attribution: { kind: "user_request" as const, ref: "chat:turn:1" } }],
+  });
+  assert.ok(validated.ok, JSON.stringify(!validated.ok && validated.issues));
+  return validated.value;
+}
+
 export function authorityFor(owner: string = IDS.owner, overrides: { mode?: "off" | "shadow" | "enforce"; lease?: { epoch: number; fence_token: string } | null } = {}): FinancialRuntimeAuthority {
   return createRuntimeAuthority({
     owner_user_id: owner,
@@ -207,4 +259,17 @@ export async function insertPlanAndRun(db: Client, plan: FinancialPlanV1, author
     [authority.owner_user_id, authority.parent.kind, authority.parent.id, authority.parent.version, requestKey, planBindingHash(plan, authority),
       plan.plan_id, authority.feature.mode, plan.time.knowledge_cutoff, JSON.stringify(plan.policies)],
   )).rows[0]!.run_id;
+}
+
+/** A new pending run for the plan, leased to `workerId`. */
+export async function leasedRun(
+  db: Client,
+  plan: FinancialPlanV1,
+  authority: FinancialRuntimeAuthority = authorityFor(),
+  workerId = "worker-1",
+): Promise<{ runId: string; lease: RunLease }> {
+  const runId = await insertPlanAndRun(db, plan, authority);
+  const acquired = await acquireLease(db, { authority, run_id: runId, worker_id: workerId, ttl_ms: 60_000 });
+  assert.equal(acquired.status, "acquired");
+  return { runId, lease: (acquired as { lease: RunLease }).lease };
 }
