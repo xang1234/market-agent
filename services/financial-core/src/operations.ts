@@ -92,6 +92,7 @@ const REASON_DISPOSITIONS: Partial<Record<ReasonCode, GapDisposition>> = {
   blocked_by_dependency: "blocked_dependency",
   provider_error: "execution_error",
   database_error: "execution_error",
+  integrity_failure: "execution_error",
 };
 
 /** Maps a reason to its disposition; unlisted reasons are incompatibilities. */

@@ -105,6 +105,7 @@ export const REASON_CODES = [
   "precision_indeterminate",
   "provider_error",
   "database_error",
+  "integrity_failure",
   "replay_version_unavailable",
 ] as const;
 export type ReasonCode = (typeof REASON_CODES)[number];

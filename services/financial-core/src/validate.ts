@@ -7,6 +7,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 import type { ErrorObject, ValidateFunction } from "ajv";
 import planSchema from "../../../spec/financial_plan_schema.json" with { type: "json" };
 import resultSchema from "../../../spec/financial_result_schema.json" with { type: "json" };
+import { validatePlanGraph } from "./graph.ts";
 import {
   operationDependencies,
   type BoundFinancialInputV1,
@@ -49,12 +50,19 @@ const validators = {
   finalizedResult: compiled(resultSchema.$id, "FinalizedFinancialResultV1"),
 };
 
+/**
+ * Validates structure, identities, references, the operation graph, and the
+ * plan's own limits. Parent limits are applied again by the engine via
+ * validatePlanGraph(plan, parentLimits) once server authority is known.
+ */
 export function validateFinancialPlan(input: unknown): ValidationResult<FinancialPlanV1> {
   const structural = structuralIssues(validators.plan, input);
   if (structural.length > 0) return { ok: false, issues: structural };
   const plan = input as FinancialPlanV1;
   const issues = planSemanticIssues(plan);
   if (issues.length > 0) return { ok: false, issues };
+  const graphIssues = validatePlanGraph(plan);
+  if (graphIssues.length > 0) return { ok: false, issues: graphIssues };
   return { ok: true, value: deepFreeze(structuredClone(plan)) };
 }
 
