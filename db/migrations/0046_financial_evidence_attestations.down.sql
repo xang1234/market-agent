@@ -10,6 +10,9 @@ begin
 end;
 $$;
 
+drop view current_fact_precision_attestations;
+drop view current_source_publication_attestations;
+drop function normalized_content_hash(text);
 drop table fact_financial_contexts;
 drop table fact_precision_attestations;
 drop table source_publication_attestations;

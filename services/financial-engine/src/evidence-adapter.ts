@@ -12,7 +12,7 @@ export function createEvidenceFinancialPort(db: SqlExecutor): FinancialEvidenceP
     async listInputCandidates(request: CandidateRequest): Promise<CandidatePage> {
       let page;
       try {
-        page = await listFinancialInputCandidates(db as Parameters<typeof listFinancialInputCandidates>[0], {
+        page = await listFinancialInputCandidates(db, {
           user_id: request.authority.owner_user_id,
           channel: "app",
           scope: "public_information",

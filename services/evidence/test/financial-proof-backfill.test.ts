@@ -27,7 +27,7 @@ test("legacy precision proof backfill", { timeout: 180_000 }, async (t) => {
   });
 
   await t.test("a dry run reports outcomes and writes nothing", async () => {
-    const report = await backfillFactPrecisionProofs(db, { dry_run: true, limit: 100, reader: retained, validation_method: "retained_bytes.v1" });
+    const report = await backfillFactPrecisionProofs(db, { dry_run: true, limit: 100, after_fact_id: null, reader: retained, validation_method: "retained_bytes.v1" });
     const byFact = Object.fromEntries(report.outcomes.map((entry) => [entry.fact_id, entry.outcome]));
     assert.equal(byFact[IDS.original], "revalidated");
     assert.equal(byFact[IDS.fy2022], "value_mismatch");
@@ -40,7 +40,7 @@ test("legacy precision proof backfill", { timeout: 180_000 }, async (t) => {
   });
 
   await t.test("a write run proves exact matches only and records explicit gaps for the rest", async () => {
-    const report = await backfillFactPrecisionProofs(db, { dry_run: false, limit: 100, reader: retained, validation_method: "retained_bytes.v1" });
+    const report = await backfillFactPrecisionProofs(db, { dry_run: false, limit: 100, after_fact_id: null, reader: retained, validation_method: "retained_bytes.v1" });
     const rows = await attestations();
     assert.equal(rows.find((row) => row.fact_id === IDS.original)?.precision_class, "revalidated_against_source");
     for (const factId of [IDS.fy2022, IDS.restated, IDS.privateFact]) {
@@ -54,7 +54,7 @@ test("legacy precision proof backfill", { timeout: 180_000 }, async (t) => {
 
   await t.test("reruns are idempotent", async () => {
     const before = await attestations();
-    await backfillFactPrecisionProofs(db, { dry_run: false, limit: 100, reader: retained, validation_method: "retained_bytes.v1" });
+    await backfillFactPrecisionProofs(db, { dry_run: false, limit: 100, after_fact_id: null, reader: retained, validation_method: "retained_bytes.v1" });
     assert.deepEqual(await attestations(), before);
   });
 
@@ -62,16 +62,28 @@ test("legacy precision proof backfill", { timeout: 180_000 }, async (t) => {
     await backfillFactPrecisionProofs(db, {
       dry_run: false,
       limit: 100,
+      after_fact_id: null,
       reader: reader({ [IDS.fy2022]: "365817000000" }),
       validation_method: "retained_bytes.v2",
     });
     const latest = (await db.query(
-      `select a.precision_class, a.supersedes is not null as supersedes
-         from fact_precision_attestations a
-        where a.fact_id = $1
-          and not exists (select 1 from fact_precision_attestations n where n.supersedes = a.precision_attestation_id)`,
+      `select precision_class, supersedes is not null as supersedes from current_fact_precision_attestations where fact_id = $1`,
       [IDS.fy2022],
     )).rows[0];
     assert.deepEqual(latest, { precision_class: "revalidated_against_source", supersedes: true });
+  });
+
+  await t.test("a pass pages past unresolved gaps with a cursor instead of re-reading them", async () => {
+    const unresolved = (await backfillFactPrecisionProofs(db, { dry_run: true, limit: 100, after_fact_id: null, reader: retained, validation_method: "retained_bytes.v1" }))
+      .outcomes.map((entry) => entry.fact_id);
+    assert.ok(unresolved.length >= 2, "legacy gaps remain eligible for later passes");
+    const visited: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const page = await backfillFactPrecisionProofs(db, { dry_run: true, limit: 1, after_fact_id: cursor, reader: retained, validation_method: "retained_bytes.v1" });
+      visited.push(...page.outcomes.map((entry) => entry.fact_id));
+      cursor = page.next_after_fact_id;
+    } while (cursor !== null);
+    assert.deepEqual(visited, unresolved);
   });
 });

@@ -101,22 +101,28 @@ test("0046 financial evidence attestations", { timeout: 300_000 }, async (t) => 
   });
 
   await t.test("precision attestations must name the fact's own source and carry token proof", async () => {
-    const insert = (sourceId: string, precisionClass: string, withProof: boolean) => `
-      insert into fact_precision_attestations (fact_id, source_id, precision_class, raw_token, token_proof_hash, value_text, scale_text, validation_method)
+    const insert = (sourceId: string, precisionClass: string, withProof: boolean, supersedes: string | null) => `
+      insert into fact_precision_attestations (fact_id, source_id, precision_class, raw_token, token_proof_hash, value_text, scale_text, validation_method, supersedes)
       values ('${IDS.originalFact}', '${sourceId}', '${precisionClass}',
               ${withProof ? "'383285000000.123456789012345678'" : "null"}, ${withProof ? `'${HASH}'` : "null"},
-              ${withProof ? "'383285000000.123456789012345678'" : "null"}, ${withProof ? "'1'" : "null"}, 'lossless_json_token')`;
-    await db.query(insert(IDS.publicSource, "source_token_preserved", true));
-    await db.query(insert(IDS.publicSource, "legacy_unverified", false));
-    await expectRejected(db, insert(IDS.privateSource, "source_token_preserved", true), /foreign key/);
-    await expectRejected(db, insert(IDS.publicSource, "source_token_preserved", false), /fact_precision_attestations_proof/);
-    await expectRejected(db, insert(IDS.publicSource, "rounded_guess", true), /precision_class/);
+              ${withProof ? "'383285000000.123456789012345678'" : "null"}, ${withProof ? "'1'" : "null"}, 'lossless_json_token',
+              ${supersedes === null ? "null" : `'${supersedes}'`})
+      returning precision_attestation_id::text as id`;
+    const root = (await db.query(insert(IDS.publicSource, "source_token_preserved", true, null))).rows[0].id;
+    const head = (await db.query(insert(IDS.publicSource, "legacy_unverified", false, root))).rows[0].id;
+    await expectRejected(db, insert(IDS.publicSource, "legacy_unverified", false, null), /fact_precision_attestations_root_uidx/);
+    await expectRejected(db, insert(IDS.publicSource, "legacy_unverified", false, root), /fact_precision_attestations_successor_uidx/);
+    await expectRejected(db, insert(IDS.privateSource, "source_token_preserved", true, head), /foreign key/);
+    await expectRejected(db, insert(IDS.publicSource, "source_token_preserved", false, head), /fact_precision_attestations_proof/);
+    await expectRejected(db, insert(IDS.publicSource, "rounded_guess", true, head), /precision_class/);
     await expectRejected(
       db,
-      `insert into fact_precision_attestations (fact_id, source_id, precision_class, raw_token, token_proof_hash, value_text, scale_text, validation_method)
-       values ('${IDS.originalFact}', '${IDS.publicSource}', 'source_token_preserved', '1.50', '${HASH}', '1.50', '1', 'x')`,
+      `insert into fact_precision_attestations (fact_id, source_id, precision_class, raw_token, token_proof_hash, value_text, scale_text, validation_method, supersedes)
+       values ('${IDS.originalFact}', '${IDS.publicSource}', 'source_token_preserved', '1.50', '${HASH}', '1.50', '1', 'x', '${head}')`,
       /value_text/,
     );
+    const current = (await db.query(`select precision_attestation_id::text as id from current_fact_precision_attestations where fact_id = $1`, [IDS.originalFact])).rows;
+    assert.deepEqual(current, [{ id: head }], "the view exposes exactly the chain head");
     await expectRejected(db, `update fact_precision_attestations set precision_class = 'revalidated_against_source'`, /append-only/);
   });
 

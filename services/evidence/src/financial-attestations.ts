@@ -7,21 +7,25 @@ import {
   compareExactDecimals,
   parseDerivedDecimalText,
   parseFinancialDecimal,
+  type ExactDecimal,
 } from "../../financial-core/src/exact-decimal.ts";
-import type { QueryExecutor } from "./types.ts";
+import {
+  PRECISION_CLASSES,
+  PUBLICATION_TIMING_PRECISIONS,
+  type PrecisionClass,
+  type PublicationTimingPrecision,
+} from "../../financial-core/src/evidence-vocabulary.ts";
+import type { RowQueryExecutor } from "./types.ts";
 import { assertIso8601WithOffset, assertNonEmptyString, assertOneOf, assertUuidV4 } from "./validators.ts";
 
-export const PUBLICATION_TIMING_PRECISIONS = Object.freeze(["instant", "date", "observed_public"] as const);
+export { PRECISION_CLASSES, PUBLICATION_TIMING_PRECISIONS, type PrecisionClass, type PublicationTimingPrecision };
+
 export const PUBLICATION_PROOF_METHODS = Object.freeze([
   "controlled_public_fetch",
   "provider_publication_mapping",
   "accession_bound_archive",
 ] as const);
-export const PRECISION_CLASSES = Object.freeze(["source_token_preserved", "revalidated_against_source", "legacy_unverified"] as const);
-
-export type PublicationTimingPrecision = (typeof PUBLICATION_TIMING_PRECISIONS)[number];
 export type PublicationProofMethod = (typeof PUBLICATION_PROOF_METHODS)[number];
-export type PrecisionClass = (typeof PRECISION_CLASSES)[number];
 
 export class FinancialAttestationError extends Error {
   constructor(message: string) {
@@ -53,15 +57,8 @@ export type SourcePublicationAttestationRow = SourcePublicationAttestationInput 
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 
-/** Content hashes are stored as bare hex or `sha256:<hex>`; proofs compare the hex. */
-export function normalizeContentHash(hash: string | null): string | null {
-  if (hash === null) return null;
-  const hex = hash.startsWith("sha256:") ? hash.slice("sha256:".length) : hash;
-  return SHA256_HEX.test(hex) ? hex : null;
-}
-
 export async function recordSourcePublicationAttestation(
-  db: QueryExecutor,
+  db: RowQueryExecutor,
   input: SourcePublicationAttestationInput,
 ): Promise<SourcePublicationAttestationRow> {
   await assertPublicationInput(db, input);
@@ -70,7 +67,7 @@ export async function recordSourcePublicationAttestation(
 
 /** Corrections are new rows linked to the attestation they replace; nothing is rewritten. */
 export async function supersedeSourcePublicationAttestation(
-  db: QueryExecutor,
+  db: RowQueryExecutor,
   previousAttestationId: string,
   input: SourcePublicationAttestationInput,
   reason: "correction" | "reclassification",
@@ -123,7 +120,7 @@ export type FactPrecisionAttestationRow = Readonly<{
  * promoted by converting it back to text.
  */
 export async function recordFactPrecisionAttestation(
-  db: QueryExecutor,
+  db: RowQueryExecutor,
   input: FactPrecisionAttestationInput,
 ): Promise<FactPrecisionAttestationRow> {
   assertUuidV4(input.fact_id, "fact_id");
@@ -135,10 +132,7 @@ export async function recordFactPrecisionAttestation(
   )).rows[0];
   if (!fact) throw new FinancialAttestationError("fact does not exist");
   const previous = (await db.query<{ precision_attestation_id: string }>(
-    `select a.precision_attestation_id::text
-       from fact_precision_attestations a
-      where a.fact_id = $1
-        and not exists (select 1 from fact_precision_attestations s where s.supersedes = a.precision_attestation_id)`,
+    `select precision_attestation_id::text from current_fact_precision_attestations where fact_id = $1`,
     [input.fact_id],
   )).rows[0];
 
@@ -152,16 +146,15 @@ export async function recordFactPrecisionAttestation(
   if (input.precision_class !== "legacy_unverified") {
     if (!SHA256_HEX.test(input.token_proof_hash)) throw new FinancialAttestationError("token_proof_hash must be a sha256 hex digest");
     const check = checkTokenAgainstStoredValue(input.raw_token, fact.value_text);
-    if (check !== "match") {
-      throw new FinancialAttestationError(check === "invalid_token" ? "raw_token is not a supported decimal" : "raw_token does not equal the stored fact value");
+    if (check.status !== "match") {
+      throw new FinancialAttestationError(check.status === "invalid_token" ? "raw_token is not a supported decimal" : "raw_token does not equal the stored fact value");
     }
     const scale = parseDerivedDecimalText(fact.scale_text);
     if (!scale.ok || scale.value.coefficient <= 0n) throw new FinancialAttestationError("stored fact scale is not a positive decimal");
-    const token = parseFinancialDecimal(input.raw_token);
     proof = {
       raw_token: input.raw_token,
       token_proof_hash: input.token_proof_hash,
-      value_text: token.ok ? canonicalDecimalString(token.value) : null,
+      value_text: canonicalDecimalString(check.token),
       scale_text: canonicalDecimalString(scale.value),
       source_locator: input.source_locator,
     };
@@ -189,16 +182,18 @@ export async function recordFactPrecisionAttestation(
   return inserted.rows[0]!;
 }
 
+export type TokenCheck = { status: "match"; token: ExactDecimal } | { status: "value_mismatch" | "invalid_token" };
+
 /** Whether a source token equals a stored numeric value exactly (text from `value_num::text`). */
-export function checkTokenAgainstStoredValue(rawToken: string, storedValueText: string | null): "match" | "value_mismatch" | "invalid_token" {
+export function checkTokenAgainstStoredValue(rawToken: string, storedValueText: string | null): TokenCheck {
   const token = parseFinancialDecimal(rawToken);
-  if (!token.ok) return "invalid_token";
+  if (!token.ok) return { status: "invalid_token" };
   const stored = storedValueText === null ? null : parseDerivedDecimalText(storedValueText);
-  if (stored === null || !stored.ok) return "value_mismatch";
-  return compareExactDecimals(token.value, stored.value) === 0 ? "match" : "value_mismatch";
+  if (stored === null || !stored.ok || compareExactDecimals(token.value, stored.value) !== 0) return { status: "value_mismatch" };
+  return { status: "match", token: token.value };
 }
 
-async function assertPublicationInput(db: QueryExecutor, input: SourcePublicationAttestationInput): Promise<void> {
+async function assertPublicationInput(db: RowQueryExecutor, input: SourcePublicationAttestationInput): Promise<void> {
   assertUuidV4(input.source_id, "source_id");
   if (input.document_id !== null) assertUuidV4(input.document_id, "document_id");
   if (!SHA256_HEX.test(input.source_version_hash)) throw new FinancialAttestationError("source_version_hash must be a sha256 hex digest");
@@ -217,7 +212,8 @@ async function assertPublicationInput(db: QueryExecutor, input: SourcePublicatio
   if (!isKnownTimeZone(input.source_timezone)) throw new FinancialAttestationError("source_timezone must be an IANA time zone");
 
   const version = (await db.query<{ source_hash: string | null; document_hash: string | null; document_source_id: string | null }>(
-    `select s.content_hash as source_hash, d.content_hash as document_hash, d.source_id::text as document_source_id
+    `select normalized_content_hash(s.content_hash) as source_hash, normalized_content_hash(d.content_hash) as document_hash,
+            d.source_id::text as document_source_id
        from sources s
        left join documents d on d.document_id = $2
       where s.source_id = $1`,
@@ -227,14 +223,14 @@ async function assertPublicationInput(db: QueryExecutor, input: SourcePublicatio
   if (input.document_id !== null && version.document_source_id !== input.source_id) {
     throw new FinancialAttestationError("document does not belong to the attested source");
   }
-  const attestedVersion = normalizeContentHash(input.document_id !== null ? version.document_hash : version.source_hash);
+  const attestedVersion = input.document_id !== null ? version.document_hash : version.source_hash;
   if (attestedVersion !== input.source_version_hash) {
     throw new FinancialAttestationError("source_version_hash does not identify the stored source version");
   }
 }
 
 async function insertPublicationAttestation(
-  db: QueryExecutor,
+  db: RowQueryExecutor,
   input: SourcePublicationAttestationInput,
   supersedes: string | null,
   reason: "correction" | "reclassification" | null,

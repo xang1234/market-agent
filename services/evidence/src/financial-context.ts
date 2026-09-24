@@ -3,33 +3,47 @@
 // an original disclosure, an economic restatement, or an extraction
 // correction. Contexts are append-only; a changed context means a new fact.
 
-import type { QueryExecutor } from "./types.ts";
+import {
+  ADJUSTMENT_BASES,
+  DIMENSION_SCOPES,
+  DISCLOSURE_RELATIONS,
+  PERIOD_TYPES,
+  SHARE_BASES,
+  type AdjustmentBasis,
+  type DimensionScope,
+  type DisclosureRelation,
+  type PeriodType,
+  type ShareBasis,
+} from "../../financial-core/src/evidence-vocabulary.ts";
+import type { RowQueryExecutor } from "./types.ts";
 import { assertNonEmptyString, assertOneOf, assertUuidV4 } from "./validators.ts";
 
-export const DISCLOSURE_RELATIONS = Object.freeze(["original", "economic_restatement", "extraction_correction"] as const);
+export { DISCLOSURE_RELATIONS };
+
+const REPORTING_BASES = ["as_reported", "as_restated"] as const;
 
 export type FactFinancialContext = Readonly<{
   fact_id: string;
   context_version: string;
-  period_type: "duration" | "instant";
-  dimension_scope: "consolidated" | "segment";
+  period_type: PeriodType;
+  dimension_scope: DimensionScope;
   dimension_members: ReadonlyArray<Readonly<{ axis: string; member: string }>>;
-  reporting_basis: "as_reported" | "as_restated";
-  adjustment_basis: "unadjusted" | "split_adjusted";
-  share_basis: "basic" | "diluted" | "not_applicable";
+  reporting_basis: (typeof REPORTING_BASES)[number];
+  adjustment_basis: AdjustmentBasis;
+  share_basis: ShareBasis;
   fiscal_calendar_version: string;
-  disclosure_relation: (typeof DISCLOSURE_RELATIONS)[number];
+  disclosure_relation: DisclosureRelation;
   source_context_ref: string | null;
 }>;
 
-export async function recordFactFinancialContext(db: QueryExecutor, context: FactFinancialContext): Promise<FactFinancialContext> {
+export async function recordFactFinancialContext(db: RowQueryExecutor, context: FactFinancialContext): Promise<FactFinancialContext> {
   assertUuidV4(context.fact_id, "fact_id");
   assertNonEmptyString(context.context_version, "context_version");
-  assertOneOf(context.period_type, ["duration", "instant"] as const, "period_type");
-  assertOneOf(context.dimension_scope, ["consolidated", "segment"] as const, "dimension_scope");
-  assertOneOf(context.reporting_basis, ["as_reported", "as_restated"] as const, "reporting_basis");
-  assertOneOf(context.adjustment_basis, ["unadjusted", "split_adjusted"] as const, "adjustment_basis");
-  assertOneOf(context.share_basis, ["basic", "diluted", "not_applicable"] as const, "share_basis");
+  assertOneOf(context.period_type, PERIOD_TYPES, "period_type");
+  assertOneOf(context.dimension_scope, DIMENSION_SCOPES, "dimension_scope");
+  assertOneOf(context.reporting_basis, REPORTING_BASES, "reporting_basis");
+  assertOneOf(context.adjustment_basis, ADJUSTMENT_BASES, "adjustment_basis");
+  assertOneOf(context.share_basis, SHARE_BASES, "share_basis");
   assertOneOf(context.disclosure_relation, DISCLOSURE_RELATIONS, "disclosure_relation");
   assertNonEmptyString(context.fiscal_calendar_version, "fiscal_calendar_version");
   for (const member of context.dimension_members) {

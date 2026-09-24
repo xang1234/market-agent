@@ -467,7 +467,6 @@ export type {
 
 export {
   FinancialAttestationError,
-  normalizeContentHash,
   PRECISION_CLASSES,
   PUBLICATION_PROOF_METHODS,
   PUBLICATION_TIMING_PRECISIONS,
@@ -483,6 +482,7 @@ export type {
   PublicationTimingPrecision,
   SourcePublicationAttestationInput,
   SourcePublicationAttestationRow,
+  TokenCheck,
 } from "./financial-attestations.ts";
 export { DISCLOSURE_RELATIONS, recordFactFinancialContext } from "./financial-context.ts";
 export type { FactFinancialContext } from "./financial-context.ts";

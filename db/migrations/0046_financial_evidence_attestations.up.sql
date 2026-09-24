@@ -60,6 +60,8 @@ create table fact_precision_attestations (
   )
 );
 create unique index fact_precision_attestations_successor_uidx on fact_precision_attestations(supersedes) where supersedes is not null;
+-- One chain per fact: a single root, each proof superseded at most once.
+create unique index fact_precision_attestations_root_uidx on fact_precision_attestations(fact_id) where supersedes is null;
 create index fact_precision_attestations_fact_idx on fact_precision_attestations(fact_id, attested_at desc);
 create trigger fact_precision_attestations_append_only
 before update on fact_precision_attestations
@@ -83,3 +85,22 @@ create table fact_financial_contexts (
 create trigger fact_financial_contexts_append_only
 before update on fact_financial_contexts
 for each row execute function prevent_financial_record_update();
+
+-- Content hashes are stored as bare hex or `sha256:<hex>`; proofs name the hex.
+create function normalized_content_hash(content_hash text) returns text
+language sql immutable
+as $$
+  select case when content_hash ~ '^(sha256:)?[0-9a-f]{64}$' then regexp_replace(content_hash, '^sha256:', '') end
+$$;
+
+-- A proof chain's current proof is the row nothing supersedes. Readers use
+-- these views instead of repeating the anti-join.
+create view current_source_publication_attestations as
+select p.*
+  from source_publication_attestations p
+ where not exists (select 1 from source_publication_attestations newer where newer.supersedes = p.attestation_id);
+
+create view current_fact_precision_attestations as
+select a.*
+  from fact_precision_attestations a
+ where not exists (select 1 from fact_precision_attestations newer where newer.supersedes = a.precision_attestation_id);

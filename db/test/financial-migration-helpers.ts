@@ -81,7 +81,7 @@ export async function applyFinancialMigrations(client: Client): Promise<void> {
   for (const version of versions) await applyMigration(client, version, "up");
 }
 
-export type CatalogSnapshot = Record<"columns" | "constraints" | "indexes" | "triggers" | "functions" | "enums", string[]>;
+export type CatalogSnapshot = Record<"columns" | "constraints" | "indexes" | "views" | "triggers" | "functions" | "enums", string[]>;
 
 /** Order-insensitive description of everything a migration can change in `public`. */
 export async function catalogSnapshot(client: Client): Promise<CatalogSnapshot> {
@@ -100,6 +100,7 @@ export async function catalogSnapshot(client: Client): Promise<CatalogSnapshot> 
       select conrelid::regclass || ' ' || conname || ' ' || pg_get_constraintdef(oid) as entry
         from pg_constraint where connamespace = 'public'::regnamespace`),
     indexes: await rows(`select indexdef as entry from pg_indexes where schemaname = 'public'`),
+    views: await rows(`select viewname || ': ' || definition as entry from pg_views where schemaname = 'public'`),
     triggers: await rows(`select pg_get_triggerdef(oid) as entry from pg_trigger where not tgisinternal`),
     functions: await rows(`select pg_get_functiondef(oid) as entry from pg_proc where pronamespace = 'public'::regnamespace`),
     enums: await rows(`

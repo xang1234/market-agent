@@ -3,7 +3,6 @@ import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import {
   FinancialAttestationError,
-  normalizeContentHash,
   recordFactPrecisionAttestation,
   recordSourcePublicationAttestation,
   supersedeSourcePublicationAttestation,
@@ -11,19 +10,21 @@ import {
 import { recordFactFinancialContext } from "../src/financial-context.ts";
 import { financialDatabase, H, IDS, ORIGINAL_VALUE, publicationInput } from "./financial-fixtures.ts";
 
-test("content hashes normalize to bare sha256 hex", () => {
-  assert.equal(normalizeContentHash(`sha256:${H.v1}`), H.v1);
-  assert.equal(normalizeContentHash(H.v1), H.v1);
-  assert.equal(normalizeContentHash("md5:abc"), null);
-  assert.equal(normalizeContentHash(null), null);
-});
-
 test("financial attestation writers", { timeout: 180_000 }, async (t) => {
   if (!dockerAvailable()) {
     t.skip("Docker is required for financial attestation coverage");
     return;
   }
   const db = await financialDatabase(t, "fin-attestations");
+
+  await t.test("content hashes normalize to bare sha256 hex in one database function", async () => {
+    const normalized = (await db.query(
+      `select normalized_content_hash($1) as prefixed, normalized_content_hash($2) as bare, normalized_content_hash('md5:abc') as other,
+              normalized_content_hash(null) as missing`,
+      [`sha256:${H.v1}`, H.v1],
+    )).rows[0];
+    assert.deepEqual(normalized, { prefixed: H.v1, bare: H.v1, other: null, missing: null });
+  });
 
   await t.test("a publication proof must name the stored source version it attests", async () => {
     const row = await recordSourcePublicationAttestation(db, publicationInput());
