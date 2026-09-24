@@ -8,14 +8,16 @@ import {
 import {
   buildSecSource,
   fetchCompanyFacts,
-  extractStatement,
+  extractStatementWithTokens,
   SecEdgarFetchError,
   SEC_INCOME_METRIC_KEYS,
   US_GAAP_TO_METRIC_KEY,
   selectSecConceptValue,
   type SecCompanyFacts,
   type SecEdgarFetcher,
+  type SecSourceToken,
 } from "./sec-edgar.ts";
+import { recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
 import { createHash } from "node:crypto";
 import { FundamentalsDataUnavailableError } from "./availability.ts";
 import {
@@ -91,7 +93,7 @@ export function createSecBackedStatementRepository(
               retrievedAt: asOf,
             })
           : options.sourceId;
-        const statement = normalizedStatement(extractStatement({
+        const extracted = extractStatementWithTokens({
           subject: { kind: "issuer", id: lookup.issuer_id },
           facts: companyFacts,
           family: lookup.family,
@@ -100,10 +102,11 @@ export function createSecBackedStatementRepository(
           accession_number: accessionNumber ?? undefined,
           source_id: sourceId,
           as_of: asOf,
-        }));
+        });
+        const statement = normalizedStatement(extracted.statement);
 
         const registry = await loadMetricRegistry(db, statement.lines.map((line) => line.metric_key));
-        await persistStatementFacts(db, mapStatement(registry, statement), clock);
+        await persistStatementFacts(db, mapStatement(registry, statement), clock, { cik: cikNumber, tokens: extracted.tokens });
         return statement;
       } catch (error) {
         const unavailable = classifySecIngestionError(error);
@@ -477,13 +480,20 @@ function firstCurrency(lines: ReadonlyArray<StatementLine>): string | null {
   return null;
 }
 
+// Lines taken verbatim from a losslessly parsed response are written from
+// their exact source token (Postgres numeric parses it without loss) and
+// receive a source_token_preserved precision attestation. Lines without a
+// token (legacy fixtures, derived fourth quarters) keep the legacy number and
+// get no precision proof, so strict financial binding treats them as gaps.
 async function persistStatementFacts(
   db: FundamentalsQueryExecutor,
   statement: MappedStatement,
   clock: () => Date,
+  provenance: { cik: number; tokens: ReadonlyMap<string, SecSourceToken> },
 ): Promise<void> {
   for (const line of statement.lines) {
-    await db.query(
+    const token = provenance.tokens.get(line.metric_key);
+    const inserted = await db.query<{ fact_id: string }>(
       `insert into facts (
          subject_kind, subject_id, metric_id, period_kind, period_start,
          period_end, fiscal_year, fiscal_period, value_num, value_text,
@@ -495,7 +505,8 @@ async function persistStatementFacts(
          $10, $11, $12, $13, $14, $15, $16,
          'reported', 1, 'authoritative', 'filing_time', $17, 1
        )
-       on conflict do nothing`,
+       on conflict do nothing
+       returning fact_id::text as fact_id`,
       [
         statement.subject.id,
         line.metric_id,
@@ -504,7 +515,7 @@ async function persistStatementFacts(
         statement.period_end,
         statement.fiscal_year,
         statement.fiscal_period,
-        line.value_num,
+        token?.token ?? line.value_num,
         line.value_text ?? null,
         line.unit,
         line.currency ?? null,
@@ -516,7 +527,25 @@ async function persistStatementFacts(
         line.coverage_level,
       ],
     );
+    const factId = inserted.rows[0]?.fact_id;
+    if (token && factId) {
+      await recordFactPrecisionAttestation(db, {
+        fact_id: factId,
+        precision_class: "source_token_preserved",
+        raw_token: token.token,
+        token_proof_hash: secTokenProofHash(provenance.cik, token),
+        source_locator: `sec_edgar:companyfacts:CIK${String(provenance.cik).padStart(10, "0")}#${token.concept}|${token.unit}|${token.accn}|${token.start ?? ""}..${token.end}`,
+        validation_method: "sec_companyfacts_lossless_json.v1",
+      });
+    }
   }
+}
+
+/** Binds the exact token to its location in the SEC response. */
+function secTokenProofHash(cik: number, token: SecSourceToken): string {
+  return createHash("sha256")
+    .update(JSON.stringify(["sec_edgar_companyfacts.v1", cik, token.concept, token.unit, token.accn, token.start, token.end, token.token]))
+    .digest("hex");
 }
 
 async function loadLatestFiscalYear(

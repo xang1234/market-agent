@@ -495,3 +495,11 @@ export type {
   PrecisionProof,
   PublicationProof,
 } from "./financial-input-repo.ts";
+export { checkTokenAgainstStoredValue } from "./financial-attestations.ts";
+export { backfillFactPrecisionProofs } from "./financial-proof-backfill.ts";
+export type {
+  BackfillFact,
+  ProofBackfillOutcome,
+  ProofBackfillReport,
+  RetainedSourceReader,
+} from "./financial-proof-backfill.ts";

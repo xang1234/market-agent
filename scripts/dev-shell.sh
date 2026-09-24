@@ -46,7 +46,10 @@ ensure_command() {
 
 ensure_install() {
   local dir="$1"
-  if [[ ! -d "$dir/node_modules" ]]; then
+  # Reinstall when the lockfile changed since the last install (npm records the
+  # installed tree in node_modules/.package-lock.json), so a pulled dependency
+  # addition reaches existing checkouts too.
+  if [[ ! -d "$dir/node_modules" ]] || { [[ -f "$dir/package-lock.json" ]] && [[ "$dir/package-lock.json" -nt "$dir/node_modules/.package-lock.json" ]]; }; then
     (cd "$dir" && npm install)
   fi
 }

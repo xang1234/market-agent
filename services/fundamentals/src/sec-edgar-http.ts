@@ -1,3 +1,4 @@
+import { parseFinancialJson } from "./lossless-financial-json.ts";
 import {
   SecEdgarFetchError,
   type SecEdgarFetcher,
@@ -32,6 +33,8 @@ export function createSecCompanyFactsHttpFetcher(
       throw new SecEdgarFetchError(response.status, `sec_edgar: HTTP ${response.status}`);
     }
 
-    return response.json();
+    // Parse the raw text losslessly: response.json() would already have
+    // rounded financial values through JavaScript numbers.
+    return parseFinancialJson(await response.text());
   };
 }

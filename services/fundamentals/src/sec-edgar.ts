@@ -20,13 +20,17 @@ import {
   assertPositiveInteger,
   assertUuid,
 } from "./validators.ts";
+import { boundedInteger, isSourceNumber } from "./lossless-financial-json.ts";
 
 // --- Companyfacts schema ---------------------------------------------------
 
 export type SecConceptValue = {
   end: string;
   start?: string;
+  /** Legacy JavaScript number; strict financial paths use val_token instead. */
   val: number;
+  /** Exact source token when the response was parsed losslessly. */
+  val_token?: string;
   accn: string;
   fy: number;
   fp: string;
@@ -72,9 +76,28 @@ export async function fetchCompanyFacts(
   fetcher: SecEdgarFetcher,
   cik: number,
 ): Promise<SecCompanyFacts> {
-  const raw = await fetcher(companyFactsPath(cik));
+  const raw = normalizeSourceNumbers(await fetcher(companyFactsPath(cik)), null);
   assertCompanyFacts(raw, "fetchCompanyFacts.response");
   return raw;
+}
+
+// Lossless responses carry SourceNumber tokens. Identifiers and years become
+// bounded integers; each concept value keeps its exact token in val_token
+// beside the legacy JavaScript number. Plain-number fixtures pass through.
+function normalizeSourceNumbers(value: unknown, key: string | null): unknown {
+  if (isSourceNumber(value)) {
+    if (key === "cik") return boundedInteger(value, "cik", { min: 1, max: 9_999_999_999 });
+    if (key === "fy") return boundedInteger(value, "fy", { min: 1900, max: 2200 });
+    return Number(value.token);
+  }
+  if (Array.isArray(value)) return value.map((item) => normalizeSourceNumbers(item, null));
+  if (value === null || typeof value !== "object") return value;
+  const out: Record<string, unknown> = {};
+  for (const [childKey, child] of Object.entries(value)) {
+    out[childKey] = normalizeSourceNumbers(child, childKey);
+    if (childKey === "val" && isSourceNumber(child)) out.val_token = child.token;
+  }
+  return out;
 }
 
 // Top-level shape only — concept and unit walking is defended structurally
@@ -208,9 +231,30 @@ export type ExtractStatementInput = {
   reported_at?: string | null;
 };
 
-export function extractStatement(
-  input: ExtractStatementInput,
-): NormalizedStatementInput {
+/** Exact source token for an extracted line, with the locator that proves it. */
+export type SecSourceToken = Readonly<{
+  token: string;
+  concept: string;
+  unit: string;
+  accn: string;
+  start: string | null;
+  end: string;
+}>;
+
+export function extractStatement(input: ExtractStatementInput): NormalizedStatementInput {
+  return extractStatementWithTokens(input).statement;
+}
+
+/**
+ * One selection pass that yields the legacy statement plus, for each line
+ * taken verbatim from a losslessly parsed value, its exact source token.
+ * Derived values (e.g. a fourth quarter computed from annual minus three
+ * quarters) have no token and are never presented as source-exact.
+ */
+export function extractStatementWithTokens(input: ExtractStatementInput): {
+  statement: NormalizedStatementInput;
+  tokens: ReadonlyMap<string, SecSourceToken>;
+} {
   if (input.family !== "income") {
     throw new Error(
       `extractStatement: family="${input.family}" not yet supported (income-only in this bead)`,
@@ -225,6 +269,7 @@ export function extractStatement(
 
   const selectionDescription = statementSelectionDescription(input.fiscal_period);
   const lines: StatementLine[] = [];
+  const tokens = new Map<string, SecSourceToken>();
   const seenKeys = new Set<string>();
   const observedCurrencies = new Set<string>();
   let resolvedPeriodStart: string | null = null;
@@ -273,6 +318,16 @@ export function extractStatement(
         observedCurrencies.add(lineUnit.currency);
       }
       lines.push(line);
+      if (match.val_token !== undefined) {
+        tokens.set(metricKey, {
+          token: match.val_token,
+          concept: conceptName,
+          unit: unitCode,
+          accn: match.accn,
+          start: match.start ?? null,
+          end: match.end,
+        });
+      }
       seenKeys.add(metricKey);
       break; // one unit per concept per period
     }
@@ -295,7 +350,7 @@ export function extractStatement(
   }
   const reportingCurrency = observedCurrencies.values().next().value as string;
 
-  return {
+  const statement: NormalizedStatementInput = {
     subject: input.subject,
     family: input.family,
     basis: "as_reported",
@@ -310,6 +365,7 @@ export function extractStatement(
     source_id: input.source_id,
     lines,
   };
+  return { statement, tokens };
 }
 
 export type SecStatementValueSelection = Pick<
@@ -372,8 +428,9 @@ function deriveFourthQuarterConceptValue(
     return undefined;
   }
 
+  const { val_token: _annualToken, ...annualWithoutToken } = annual;
   return {
-    ...annual,
+    ...annualWithoutToken,
     val: annual.val - q1.val - q2.val - q3.val,
     fp: "Q4",
     form: annual.form,

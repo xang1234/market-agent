@@ -151,18 +151,17 @@ export async function recordFactPrecisionAttestation(
   };
   if (input.precision_class !== "legacy_unverified") {
     if (!SHA256_HEX.test(input.token_proof_hash)) throw new FinancialAttestationError("token_proof_hash must be a sha256 hex digest");
-    const token = parseFinancialDecimal(input.raw_token);
-    const stored = fact.value_text === null ? null : parseDerivedDecimalText(fact.value_text);
-    const scale = parseDerivedDecimalText(fact.scale_text);
-    if (!token.ok) throw new FinancialAttestationError(`raw_token is not a supported decimal (${token.reason})`);
-    if (stored === null || !stored.ok || compareExactDecimals(token.value, stored.value) !== 0) {
-      throw new FinancialAttestationError("raw_token does not equal the stored fact value");
+    const check = checkTokenAgainstStoredValue(input.raw_token, fact.value_text);
+    if (check !== "match") {
+      throw new FinancialAttestationError(check === "invalid_token" ? "raw_token is not a supported decimal" : "raw_token does not equal the stored fact value");
     }
+    const scale = parseDerivedDecimalText(fact.scale_text);
     if (!scale.ok || scale.value.coefficient <= 0n) throw new FinancialAttestationError("stored fact scale is not a positive decimal");
+    const token = parseFinancialDecimal(input.raw_token);
     proof = {
       raw_token: input.raw_token,
       token_proof_hash: input.token_proof_hash,
-      value_text: canonicalDecimalString(token.value),
+      value_text: token.ok ? canonicalDecimalString(token.value) : null,
       scale_text: canonicalDecimalString(scale.value),
       source_locator: input.source_locator,
     };
@@ -188,6 +187,15 @@ export async function recordFactPrecisionAttestation(
     ],
   );
   return inserted.rows[0]!;
+}
+
+/** Whether a source token equals a stored numeric value exactly (text from `value_num::text`). */
+export function checkTokenAgainstStoredValue(rawToken: string, storedValueText: string | null): "match" | "value_mismatch" | "invalid_token" {
+  const token = parseFinancialDecimal(rawToken);
+  if (!token.ok) return "invalid_token";
+  const stored = storedValueText === null ? null : parseDerivedDecimalText(storedValueText);
+  if (stored === null || !stored.ok) return "value_mismatch";
+  return compareExactDecimals(token.value, stored.value) === 0 ? "match" : "value_mismatch";
 }
 
 async function assertPublicationInput(db: QueryExecutor, input: SourcePublicationAttestationInput): Promise<void> {
