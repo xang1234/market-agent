@@ -2,6 +2,7 @@
 // only these reviewed definitions resolve. No executable user rules.
 
 import type { FinancialUnit, MetricKey, VersionTag } from "./contracts.ts";
+import type { ShareBasis } from "./evidence-vocabulary.ts";
 
 export const FINANCIAL_CATALOG_VERSION = "catalog.v1";
 
@@ -21,7 +22,7 @@ export type MetricDefinition = Readonly<{
   label: string;
   value_kind: MetricValueKind;
   unit_kind: FinancialUnit["kind"];
-  share_basis: "basic" | "diluted" | "not_applicable";
+  share_basis: ShareBasis;
 }>;
 
 function metric(

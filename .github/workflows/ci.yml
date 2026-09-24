@@ -175,11 +175,17 @@ jobs:
           cache-dependency-path: |
             db/package-lock.json
             services/dev-api/package-lock.json
+            services/fundamentals/package-lock.json
 
       # Dev-api tests import the shared db/test Docker harness and invoke
       # `npm run apply:schema` inside db/, so db dependencies must be present.
       - name: Install db deps (needed by dev-api integration harness)
         working-directory: db
+        run: npm ci
+
+      # The dev runtime imports the SEC fetch boundary (lossless-json).
+      - name: Install fundamentals deps (imported by the dev runtime)
+        working-directory: services/fundamentals
         run: npm ci
 
       - name: Install dev-api deps
@@ -461,6 +467,11 @@ jobs:
         working-directory: db
         run: npm ci
 
+      # The SEC fetch boundary parses company facts with lossless-json.
+      - name: Install fundamentals deps
+        working-directory: services/fundamentals
+        run: npm ci
+
       - name: Run fundamentals tests
         working-directory: services/fundamentals
         run: npm test
@@ -567,6 +578,7 @@ jobs:
             services/discovery/package-lock.json
             services/dev-api/package-lock.json
             services/evidence/package-lock.json
+            services/fundamentals/package-lock.json
             services/llm/package-lock.json
             services/observability/package-lock.json
             services/snapshot/package-lock.json
@@ -583,6 +595,7 @@ jobs:
         run: |
           npm --prefix services/dev-api ci
           npm --prefix services/evidence ci
+          npm --prefix services/fundamentals ci
           npm --prefix services/llm ci
           npm --prefix services/observability ci
           npm --prefix services/snapshot ci
@@ -657,8 +670,14 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: |
+            db/package-lock.json
             services/financial-core/package-lock.json
             services/financial-engine/package-lock.json
+
+      # Engine integration tests use the shared db/test Docker harness.
+      - name: Install db deps (needed by the engine integration harness)
+        working-directory: db
+        run: npm ci
 
       # The engine imports financial-core sources, which resolve their own
       # dependencies (ajv, decimal.js) from services/financial-core/node_modules.

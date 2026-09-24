@@ -118,5 +118,18 @@ committed values after enforcement.
 
 ## 3. Status
 
-Only the baseline (this document and the frozen fixture) is recorded here. No
-producer has been migrated; every row above remains on its legacy path.
+No producer has been migrated; every surface row above remains on its legacy
+path. The shared foundations are in place:
+
+- **T00–T04:** the pure financial core (contracts, exact arithmetic, reviewed
+  operations, coverage).
+- **T05–T13:** evidence attestations and the run ledger (migrations
+  0046–0048), authorized strict candidate reads, lossless SEC Company Facts
+  ingestion with source-token precision proofs, the dry-run-first legacy
+  proof backfill, public-information historical binding, the planner, fenced
+  run leases, and checkpointed graph execution to `ready_to_seal`.
+
+Known gap: SEC ingestion records precision proofs but not yet source
+publication attestations, so SEC-ingested facts bind as
+`publication_time_unknown` until a reviewed acceptance-time mapping issues
+them. Nothing is sealed or published before T14–T18.

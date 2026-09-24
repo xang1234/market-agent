@@ -24,3 +24,11 @@ test("engine ports depend only on the core's public entry point", async () => {
   const specifiers = [...source.matchAll(/from\s+["']([^"']+)["']/gu)].map((match) => match[1]);
   assert.deepEqual(specifiers, ["../../financial-core/src/index.ts"]);
 });
+
+test("planning modules cannot reach evidence: nothing is acquired before a plan validates", async () => {
+  for (const file of ["planner.ts", "plan-authority.ts", "plan-interpretation.ts"]) {
+    const source = await readFile(new URL(`../src/${file}`, import.meta.url), "utf8");
+    const specifiers = [...source.matchAll(/from\s+["']([^"']+)["']/gu)].map((match) => match[1]!);
+    assert.ok(specifiers.every((specifier) => !/evidence|bind-inputs|select-inputs|ports/u.test(specifier)), `${file}: ${specifiers.join(", ")}`);
+  }
+});

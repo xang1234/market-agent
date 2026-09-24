@@ -14,6 +14,7 @@ import {
   postSidecar,
   type DevProviderSidecarOptions,
 } from "./dev-provider-sidecar.ts";
+import { withPinnedTransaction, type PinnedTransactionClient, type TransactionalQueryExecutor } from "./pinned-transaction.ts";
 import { FINVIZ_DEV_REFERENCE_SOURCE_ID } from "./provider-sources.ts";
 import type { UUID } from "./subject-ref.ts";
 
@@ -22,13 +23,8 @@ export type DevProvidersIssuerProfileRepositoryOptions = DevProviderSidecarOptio
   db: IssuerProfileTransactionalQueryExecutor;
 };
 
-export type IssuerProfileTransactionClient = IssuerProfileQueryExecutor & {
-  release(): void;
-};
-
-export type IssuerProfileTransactionalQueryExecutor = IssuerProfileQueryExecutor & {
-  connect(): Promise<IssuerProfileTransactionClient>;
-};
+export type IssuerProfileTransactionClient = PinnedTransactionClient<IssuerProfileQueryExecutor>;
+export type IssuerProfileTransactionalQueryExecutor = TransactionalQueryExecutor<IssuerProfileQueryExecutor>;
 
 type SidecarProfile = {
   domicile?: unknown;
@@ -139,22 +135,10 @@ async function persistProfileEnrichment(
   issuerId: UUID,
   fields: Pick<Partial<IssuerProfileRecord>, "domicile" | "sector" | "industry">,
 ): Promise<void> {
-  const client = await db.connect();
-  try {
-    await client.query("begin");
+  await withPinnedTransaction(db, async (client) => {
     await persistProfileEnrichmentProvenance(client, issuerId, fields);
     await persistProfileEnrichmentFields(client, issuerId, fields);
-    await client.query("commit");
-  } catch (error) {
-    try {
-      await client.query("rollback");
-    } catch {
-      // Preserve the original persistence error.
-    }
-    throw error;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 async function persistProfileEnrichmentFields(

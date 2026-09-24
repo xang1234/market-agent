@@ -1230,3 +1230,418 @@ create table discovery_events (
   summary text not null check (length(btrim(summary)) between 1 and 2000), citation_refs jsonb not null check (jsonb_typeof(citation_refs) = 'array'),
   learning_concept_id text, created_at timestamptz not null default now(), primary key (run_id, sequence)
 );
+
+-- Verified finance: evidence attestations (migration 0046).
+create function prevent_financial_record_update() returns trigger
+language plpgsql
+as $$
+begin
+  raise exception '% rows are append-only; record a superseding row instead', tg_table_name;
+end;
+$$;
+
+-- Facts are referenced together with their source so an attestation can only
+-- describe the source a fact actually came from.
+create unique index facts_fact_source_uidx on facts(fact_id, source_id);
+
+create table source_publication_attestations (
+  attestation_id uuid primary key default gen_random_uuid(),
+  source_id uuid not null references sources(source_id) on delete cascade,
+  document_id uuid references documents(document_id) on delete cascade,
+  source_version_hash text not null check (source_version_hash ~ '^[0-9a-f]{64}$'),
+  available_not_before timestamptz,
+  available_no_later_than timestamptz not null,
+  timing_precision text not null check (timing_precision in ('instant', 'date', 'observed_public')),
+  source_timezone text not null check (length(btrim(source_timezone)) > 0),
+  proof_method text not null check (proof_method in ('controlled_public_fetch', 'provider_publication_mapping', 'accession_bound_archive')),
+  proof_ref text not null check (length(btrim(proof_ref)) > 0),
+  proof_hash text not null check (proof_hash ~ '^[0-9a-f]{64}$'),
+  mapping_version text not null check (length(btrim(mapping_version)) > 0),
+  attested_at timestamptz not null default now(),
+  supersedes uuid references source_publication_attestations(attestation_id),
+  supersession_reason text check (supersession_reason in ('correction', 'reclassification')),
+  constraint source_publication_attestations_bounds check (available_not_before is null or available_not_before <= available_no_later_than),
+  constraint source_publication_attestations_supersession check ((supersedes is null) = (supersession_reason is null))
+);
+create unique index source_publication_attestations_successor_uidx on source_publication_attestations(supersedes) where supersedes is not null;
+create index source_publication_attestations_version_idx on source_publication_attestations(source_id, source_version_hash);
+create trigger source_publication_attestations_append_only
+before update on source_publication_attestations
+for each row execute function prevent_financial_record_update();
+
+create table fact_precision_attestations (
+  precision_attestation_id uuid primary key default gen_random_uuid(),
+  fact_id uuid not null,
+  source_id uuid not null,
+  precision_class text not null check (precision_class in ('source_token_preserved', 'revalidated_against_source', 'legacy_unverified')),
+  raw_token text check (raw_token is null or length(raw_token) between 1 and 256),
+  token_proof_hash text check (token_proof_hash is null or token_proof_hash ~ '^[0-9a-f]{64}$'),
+  value_text text check (value_text is null or value_text ~ '^-?(0|[1-9][0-9]*)(\.[0-9]*[1-9])?$'),
+  scale_text text check (scale_text is null or scale_text ~ '^(0|[1-9][0-9]*)(\.[0-9]*[1-9])?$'),
+  source_locator text,
+  validation_method text not null check (length(btrim(validation_method)) > 0),
+  attested_at timestamptz not null default now(),
+  supersedes uuid references fact_precision_attestations(precision_attestation_id),
+  foreign key (fact_id, source_id) references facts(fact_id, source_id) on delete cascade,
+  constraint fact_precision_attestations_proof check (
+    precision_class = 'legacy_unverified'
+    or (raw_token is not null and token_proof_hash is not null and value_text is not null and scale_text is not null)
+  )
+);
+create unique index fact_precision_attestations_successor_uidx on fact_precision_attestations(supersedes) where supersedes is not null;
+-- One chain per fact: a single root, each proof superseded at most once.
+create unique index fact_precision_attestations_root_uidx on fact_precision_attestations(fact_id) where supersedes is null;
+create index fact_precision_attestations_fact_idx on fact_precision_attestations(fact_id, attested_at desc);
+create trigger fact_precision_attestations_append_only
+before update on fact_precision_attestations
+for each row execute function prevent_financial_record_update();
+
+create table fact_financial_contexts (
+  fact_id uuid primary key references facts(fact_id) on delete cascade,
+  context_version text not null check (length(btrim(context_version)) > 0),
+  period_type text not null check (period_type in ('duration', 'instant')),
+  dimension_scope text not null check (dimension_scope in ('consolidated', 'segment')),
+  dimension_members jsonb not null default '[]'::jsonb check (jsonb_typeof(dimension_members) = 'array'),
+  reporting_basis text not null check (reporting_basis in ('as_reported', 'as_restated')),
+  adjustment_basis text not null check (adjustment_basis in ('unadjusted', 'split_adjusted')),
+  share_basis text not null check (share_basis in ('basic', 'diluted', 'not_applicable')),
+  fiscal_calendar_version text not null check (length(btrim(fiscal_calendar_version)) > 0),
+  disclosure_relation text not null check (disclosure_relation in ('original', 'economic_restatement', 'extraction_correction')),
+  source_context_ref text,
+  created_at timestamptz not null default now(),
+  constraint fact_financial_contexts_dimensions check ((dimension_scope = 'segment') = (jsonb_array_length(dimension_members) > 0))
+);
+create trigger fact_financial_contexts_append_only
+before update on fact_financial_contexts
+for each row execute function prevent_financial_record_update();
+
+-- Content hashes are stored as bare hex or `sha256:<hex>`; proofs name the hex.
+create function normalized_content_hash(content_hash text) returns text
+language sql immutable
+as $$
+  select case when content_hash ~ '^(sha256:)?[0-9a-f]{64}$' then regexp_replace(content_hash, '^sha256:', '') end
+$$;
+
+-- A proof chain's current proof is the row nothing supersedes. Readers use
+-- these views instead of repeating the anti-join.
+create view current_source_publication_attestations as
+select p.*
+  from source_publication_attestations p
+ where not exists (select 1 from source_publication_attestations newer where newer.supersedes = p.attestation_id);
+
+create view current_fact_precision_attestations as
+select a.*
+  from fact_precision_attestations a
+ where not exists (select 1 from fact_precision_attestations newer where newer.supersedes = a.precision_attestation_id);
+
+-- Verified finance: definitions and run ledger (migration 0047).
+create table financial_definition_versions (
+  definition_version_id uuid primary key default gen_random_uuid(),
+  catalog_version text not null check (length(btrim(catalog_version)) > 0),
+  definition_kind text not null check (definition_kind in ('metric', 'ratio', 'operation')),
+  definition_key text not null check (definition_key ~ '^[a-z][a-z0-9_]{0,63}$'),
+  definition_version text not null check (length(btrim(definition_version)) > 0),
+  metric_id uuid references metrics(metric_id),
+  definition jsonb not null check (jsonb_typeof(definition) = 'object'),
+  definition_hash text not null check (definition_hash ~ '^[0-9a-f]{64}$'),
+  created_at timestamptz not null default now(),
+  unique (definition_kind, definition_key, definition_version)
+);
+create trigger financial_definition_versions_append_only
+before update on financial_definition_versions
+for each row execute function prevent_financial_record_update();
+
+create table financial_plans (
+  plan_id uuid primary key,
+  user_id uuid not null references users(user_id) on delete cascade,
+  origin_kind text not null check (origin_kind in ('chat_request', 'analyze_section', 'grid_run', 'thesis_condition', 'discovery_criterion', 'api_request')),
+  origin_ref text not null check (length(btrim(origin_ref)) > 0),
+  catalog_version text not null check (length(btrim(catalog_version)) > 0),
+  plan jsonb not null check (jsonb_typeof(plan) = 'object'),
+  semantic_hash text not null check (semantic_hash ~ '^[0-9a-f]{64}$'),
+  binding_hash text not null check (binding_hash ~ '^[0-9a-f]{64}$'),
+  interpretation text,
+  created_at timestamptz not null default now(),
+  unique (plan_id, user_id),
+  constraint financial_plans_identity check (plan->>'plan_id' = plan_id::text)
+);
+create trigger financial_plans_append_only
+before update on financial_plans
+for each row execute function prevent_financial_record_update();
+
+create table financial_runs (
+  run_id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(user_id) on delete cascade,
+  parent_kind text not null check (parent_kind in ('chat_thread', 'analyze_memo_run', 'analyst_grid_run', 'thesis_version', 'discovery_run')),
+  parent_id uuid not null,
+  parent_version text not null check (length(btrim(parent_version)) > 0),
+  request_key text not null check (length(request_key) between 1 and 200),
+  request_hash text not null check (request_hash ~ '^[0-9a-f]{64}$'),
+  plan_id uuid not null,
+  feature_mode text not null check (feature_mode in ('off', 'shadow', 'enforce')),
+  knowledge_cutoff timestamptz not null,
+  policies jsonb not null check (jsonb_typeof(policies) = 'object'),
+  replay_of_run_id uuid references financial_runs(run_id),
+  execution_state text not null default 'pending'
+    check (execution_state in ('pending', 'running', 'ready_to_seal', 'completed', 'failed', 'cancelled')),
+  coverage_state text check (coverage_state in ('complete', 'partial', 'none')),
+  bound_at timestamptz,
+  lease_owner text,
+  lease_epoch bigint not null default 0 check (lease_epoch >= 0),
+  lease_expires_at timestamptz,
+  cancel_requested_at timestamptz,
+  failure_code text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  foreign key (plan_id, user_id) references financial_plans(plan_id, user_id),
+  unique (user_id, parent_kind, parent_id, request_key),
+  constraint financial_runs_lease check ((lease_owner is null) = (lease_expires_at is null)),
+  constraint financial_runs_failure check ((execution_state = 'failed') = (failure_code is not null))
+);
+create index financial_runs_owner_idx on financial_runs(user_id, created_at desc);
+create index financial_runs_expired_lease_idx on financial_runs(lease_expires_at)
+  where execution_state in ('pending', 'running');
+
+create function guard_financial_run_update() returns trigger
+language plpgsql
+as $$
+begin
+  if (new.user_id, new.parent_kind, new.parent_id, new.parent_version, new.request_key, new.request_hash,
+      new.plan_id, new.feature_mode, new.knowledge_cutoff, new.policies, new.replay_of_run_id, new.created_at)
+     is distinct from
+     (old.user_id, old.parent_kind, old.parent_id, old.parent_version, old.request_key, old.request_hash,
+      old.plan_id, old.feature_mode, old.knowledge_cutoff, old.policies, old.replay_of_run_id, old.created_at) then
+    raise exception 'financial_runs identity, plan, and policy columns are immutable';
+  end if;
+  if old.execution_state in ('completed', 'failed', 'cancelled') and new.execution_state is distinct from old.execution_state then
+    raise exception 'financial run % is terminal (%)', old.run_id, old.execution_state;
+  end if;
+  if new.lease_epoch < old.lease_epoch then
+    raise exception 'financial run lease epochs never decrease';
+  end if;
+  return new;
+end;
+$$;
+create trigger financial_runs_guard
+before update on financial_runs
+for each row execute function guard_financial_run_update();
+
+create table financial_run_units (
+  run_id uuid not null references financial_runs(run_id) on delete cascade,
+  unit_id text not null check (unit_id ~ '^[a-z][a-z0-9_]{0,63}$'),
+  unit_kind text not null check (unit_kind in ('chat_section', 'analyze_section', 'grid_cell', 'thesis_condition', 'discovery_assessment')),
+  output_ids jsonb not null check (jsonb_typeof(output_ids) = 'array' and jsonb_array_length(output_ids) > 0),
+  closure_node_ids jsonb not null check (jsonb_typeof(closure_node_ids) = 'array' and jsonb_array_length(closure_node_ids) > 0),
+  closure_hash text not null check (closure_hash ~ '^[0-9a-f]{64}$'),
+  state text not null default 'pending' check (state in ('pending', 'computed', 'sealed', 'rejected')),
+  coverage_state text check (coverage_state in ('complete', 'partial', 'none')),
+  rejection_code text,
+  snapshot_id uuid references snapshots(snapshot_id),
+  certificate_digest text check (certificate_digest ~ '^[0-9a-f]{64}$'),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (run_id, unit_id),
+  constraint financial_run_units_sealed check ((state = 'sealed') = (snapshot_id is not null and certificate_digest is not null)),
+  constraint financial_run_units_rejected check ((state = 'rejected') = (rejection_code is not null))
+);
+create index financial_run_units_pending_idx on financial_run_units(run_id) where state in ('pending', 'computed');
+
+create function guard_financial_run_unit_update() returns trigger
+language plpgsql
+as $$
+begin
+  if (new.run_id, new.unit_id, new.unit_kind, new.output_ids, new.closure_node_ids, new.closure_hash, new.created_at)
+     is distinct from
+     (old.run_id, old.unit_id, old.unit_kind, old.output_ids, old.closure_node_ids, old.closure_hash, old.created_at) then
+    raise exception 'financial_run_units membership and closure are immutable';
+  end if;
+  if old.state in ('sealed', 'rejected') and new is distinct from old then
+    raise exception 'financial run unit %/% is final (%)', old.run_id, old.unit_id, old.state;
+  end if;
+  return new;
+end;
+$$;
+create trigger financial_run_units_guard
+before update on financial_run_units
+for each row execute function guard_financial_run_unit_update();
+
+create table financial_run_inputs (
+  run_id uuid not null references financial_runs(run_id) on delete cascade,
+  input_slot text not null check (input_slot ~ '^[a-z][a-z0-9_]{0,63}$'),
+  binding_status text not null check (binding_status in ('bound', 'gap')),
+  fact_id uuid references facts(fact_id),
+  publication_attestation_id uuid references source_publication_attestations(attestation_id),
+  precision_attestation_id uuid references fact_precision_attestations(precision_attestation_id),
+  bound_payload jsonb check (bound_payload is null or jsonb_typeof(bound_payload) = 'object'),
+  payload_hash text check (payload_hash ~ '^[0-9a-f]{64}$'),
+  gap_reason text,
+  selection_policy_version text not null check (length(btrim(selection_policy_version)) > 0),
+  candidate_set_digest text not null check (candidate_set_digest ~ '^[0-9a-f]{64}$'),
+  candidate_count integer not null check (candidate_count >= 0),
+  truncated boolean not null default false,
+  bound_at timestamptz not null default now(),
+  primary key (run_id, input_slot),
+  constraint financial_run_inputs_binding check (
+    (binding_status = 'bound' and fact_id is not null and publication_attestation_id is not null
+       and precision_attestation_id is not null and bound_payload is not null and payload_hash is not null and gap_reason is null)
+    or (binding_status = 'gap' and gap_reason is not null and bound_payload is null and payload_hash is null)
+  )
+);
+create trigger financial_run_inputs_append_only
+before update on financial_run_inputs
+for each row execute function prevent_financial_record_update();
+
+create table financial_run_events (
+  run_id uuid not null references financial_runs(run_id) on delete cascade,
+  sequence bigint not null check (sequence > 0),
+  event_kind text not null check (event_kind in (
+    'run_created', 'lease_acquired', 'lease_expired', 'inputs_bound', 'unit_computed', 'unit_sealed', 'unit_rejected',
+    'run_ready_to_seal', 'run_completed', 'run_failed', 'run_cancelled'
+  )),
+  unit_id text,
+  payload jsonb not null default '{}'::jsonb check (jsonb_typeof(payload) = 'object'),
+  created_at timestamptz not null default now(),
+  primary key (run_id, sequence)
+);
+create trigger financial_run_events_append_only
+before update on financial_run_events
+for each row execute function prevent_financial_record_update();
+
+-- Verified finance: computation lineage, results, and certificates (migration 0048).
+alter table computations add column financial_run_id uuid references financial_runs(run_id) on delete cascade;
+alter table computations add column node_id text;
+alter table computations add column operation_version text;
+alter table computations add column numeric_policy_version text;
+alter table computations add column definition_versions jsonb;
+alter table computations add column output_hash text;
+alter table computations add constraint computations_financial_lineage check (
+  (financial_run_id is null and node_id is null and operation_version is null and numeric_policy_version is null
+     and definition_versions is null and output_hash is null)
+  or (financial_run_id is not null and node_id ~ '^[a-z][a-z0-9_]{0,63}$' and operation_version is not null
+     and numeric_policy_version is not null and jsonb_typeof(definition_versions) = 'object'
+     and output_hash ~ '^[0-9a-f]{64}$')
+);
+create unique index computations_financial_node_uidx on computations(financial_run_id, node_id) where financial_run_id is not null;
+create unique index computations_financial_run_uidx on computations(computation_id, financial_run_id);
+
+create function guard_financial_computation_update() returns trigger
+language plpgsql
+as $$
+begin
+  if old.financial_run_id is not null or new.financial_run_id is not null then
+    raise exception 'financial computations are immutable';
+  end if;
+  return new;
+end;
+$$;
+create trigger computations_financial_immutable
+before update on computations
+for each row execute function guard_financial_computation_update();
+
+create table financial_results (
+  result_id uuid primary key default gen_random_uuid(),
+  run_id uuid not null references financial_runs(run_id) on delete cascade,
+  output_id text not null check (output_id ~ '^[a-z][a-z0-9_]{0,63}$'),
+  node_id text not null check (node_id ~ '^[a-z][a-z0-9_]{0,63}$'),
+  unit_id text not null,
+  computation_id uuid,
+  state text not null check (state in ('draft', 'finalized')),
+  disposition text not null check (disposition in (
+    'computed', 'verified', 'missing', 'unsupported', 'not_applicable', 'undefined', 'incompatible', 'blocked_dependency', 'execution_error'
+  )),
+  payload jsonb not null check (jsonb_typeof(payload) = 'object'),
+  dependencies jsonb not null check (jsonb_typeof(dependencies) = 'array'),
+  result_hash text not null check (result_hash ~ '^[0-9a-f]{64}$'),
+  created_at timestamptz not null default now(),
+  finalized_at timestamptz,
+  unique (run_id, output_id),
+  foreign key (run_id, unit_id) references financial_run_units(run_id, unit_id),
+  foreign key (computation_id, run_id) references computations(computation_id, financial_run_id),
+  constraint financial_results_state check (
+    (state = 'draft' and disposition <> 'verified' and finalized_at is null)
+    or (state = 'finalized' and disposition <> 'computed' and finalized_at is not null)
+  )
+);
+create index financial_results_node_idx on financial_results(run_id, node_id);
+
+-- Payloads and hashes never change. The only transition is draft -> finalized,
+-- which may award 'verified' only to a computed result; finalized rows are frozen.
+create function guard_financial_result_update() returns trigger
+language plpgsql
+as $$
+begin
+  if old.state = 'finalized' then
+    raise exception 'finalized financial results are immutable';
+  end if;
+  if (new.result_id, new.run_id, new.output_id, new.node_id, new.unit_id, new.computation_id, new.payload, new.dependencies, new.result_hash, new.created_at)
+     is distinct from
+     (old.result_id, old.run_id, old.output_id, old.node_id, old.unit_id, old.computation_id, old.payload, old.dependencies, old.result_hash, old.created_at) then
+    raise exception 'financial result payloads are immutable';
+  end if;
+  if new.state = 'finalized' and new.disposition is distinct from old.disposition
+     and not (old.disposition = 'computed' and new.disposition = 'verified') then
+    raise exception 'finalization may only verify a computed result';
+  end if;
+  return new;
+end;
+$$;
+create trigger financial_results_guard
+before update on financial_results
+for each row execute function guard_financial_result_update();
+
+create table snapshot_financial_runs (
+  snapshot_id uuid not null references snapshots(snapshot_id) on delete cascade,
+  run_id uuid not null,
+  unit_id text not null,
+  certificate jsonb not null check (jsonb_typeof(certificate) = 'object'),
+  certificate_digest text not null check (certificate_digest ~ '^[0-9a-f]{64}$'),
+  result_ids jsonb not null check (jsonb_typeof(result_ids) = 'array'),
+  presentation_hash text not null check (presentation_hash ~ '^[0-9a-f]{64}$'),
+  verifier_version text not null check (length(btrim(verifier_version)) > 0),
+  created_at timestamptz not null default now(),
+  primary key (snapshot_id, run_id, unit_id),
+  unique (run_id, unit_id),
+  foreign key (run_id, unit_id) references financial_run_units(run_id, unit_id)
+);
+create trigger snapshot_financial_runs_append_only
+before update on snapshot_financial_runs
+for each row execute function prevent_financial_record_update();
+
+-- A certificate and its sealed unit must agree at commit, in either write order.
+create function check_financial_certificate_unit() returns trigger
+language plpgsql
+as $$
+begin
+  if not exists (
+    select 1 from financial_run_units u
+     where u.run_id = new.run_id and u.unit_id = new.unit_id and u.state = 'sealed'
+       and u.snapshot_id = new.snapshot_id and u.certificate_digest = new.certificate_digest
+  ) then
+    raise exception 'certificate for %/% does not match a sealed unit', new.run_id, new.unit_id;
+  end if;
+  return null;
+end;
+$$;
+create constraint trigger snapshot_financial_runs_sealed_unit
+after insert on snapshot_financial_runs
+deferrable initially deferred
+for each row execute function check_financial_certificate_unit();
+
+create function check_financial_unit_certificate() returns trigger
+language plpgsql
+as $$
+begin
+  if new.state = 'sealed' and not exists (
+    select 1 from snapshot_financial_runs c
+     where c.run_id = new.run_id and c.unit_id = new.unit_id
+       and c.snapshot_id = new.snapshot_id and c.certificate_digest = new.certificate_digest
+  ) then
+    raise exception 'sealed unit %/% has no matching certificate', new.run_id, new.unit_id;
+  end if;
+  return null;
+end;
+$$;
+create constraint trigger financial_run_units_sealed_certificate
+after insert or update on financial_run_units
+deferrable initially deferred
+for each row execute function check_financial_unit_certificate();

@@ -20,13 +20,17 @@ import {
   assertPositiveInteger,
   assertUuid,
 } from "./validators.ts";
+import { boundedInteger, isSourceNumber } from "./lossless-financial-json.ts";
 
 // --- Companyfacts schema ---------------------------------------------------
 
 export type SecConceptValue = {
   end: string;
   start?: string;
+  /** Legacy JavaScript number; strict financial paths use val_token instead. */
   val: number;
+  /** Exact source token when the response was parsed losslessly. */
+  val_token?: string;
   accn: string;
   fy: number;
   fp: string;
@@ -72,9 +76,55 @@ export async function fetchCompanyFacts(
   fetcher: SecEdgarFetcher,
   cik: number,
 ): Promise<SecCompanyFacts> {
-  const raw = await fetcher(companyFactsPath(cik));
+  const raw = fromLosslessCompanyFacts(await fetcher(companyFactsPath(cik)));
   assertCompanyFacts(raw, "fetchCompanyFacts.response");
   return raw;
+}
+
+// A lossless response carries SourceNumber tokens where the companyfacts
+// schema has numbers: the top-level cik, and each concept value's val and fy.
+// This walks exactly that structure. cik and fy become bounded integers; val
+// keeps its exact token in val_token beside the number the legacy statement
+// reader uses. A token anywhere else is a schema change and is rejected, never
+// silently rounded. Plain-number fixtures pass through unchanged.
+function fromLosslessCompanyFacts(raw: unknown): unknown {
+  if (!isRecord(raw)) return raw;
+  const { cik, facts, ...rest } = raw;
+  rejectStrayNumbers(rest, "companyfacts");
+  return {
+    ...rest,
+    cik: isSourceNumber(cik) ? boundedInteger(cik, "cik", { min: 1, max: 9_999_999_999 }) : cik,
+    facts: mapRecord(facts, (taxonomy) => mapRecord(taxonomy, losslessConcept)),
+  };
+}
+
+function losslessConcept(concept: unknown): unknown {
+  if (!isRecord(concept)) return concept;
+  const { units, ...rest } = concept;
+  rejectStrayNumbers(rest, "companyfacts concept");
+  return { ...rest, units: mapRecord(units, (values) => (Array.isArray(values) ? values.map(losslessConceptValue) : values)) };
+}
+
+function losslessConceptValue(entry: unknown): unknown {
+  if (!isRecord(entry)) return entry;
+  const { val, fy, ...rest } = entry;
+  rejectStrayNumbers(rest, "companyfacts value");
+  const year = isSourceNumber(fy) ? boundedInteger(fy, "fy", { min: 1900, max: 2200 }) : fy;
+  return isSourceNumber(val) ? { ...rest, fy: year, val: Number(val.token), val_token: val.token } : { ...rest, fy: year, val };
+}
+
+function rejectStrayNumbers(fields: Record<string, unknown>, label: string): void {
+  const stray = Object.keys(fields).find((key) => isSourceNumber(fields[key]));
+  if (stray !== undefined) throw new Error(`${label}.${stray}: unexpected numeric field`);
+}
+
+function mapRecord(value: unknown, map: (child: unknown) => unknown): unknown {
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, map(child)]));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value) && !isSourceNumber(value);
 }
 
 // Top-level shape only — concept and unit walking is defended structurally
@@ -208,9 +258,30 @@ export type ExtractStatementInput = {
   reported_at?: string | null;
 };
 
-export function extractStatement(
-  input: ExtractStatementInput,
-): NormalizedStatementInput {
+/** Exact source token for an extracted line, with the locator that proves it. */
+export type SecSourceToken = Readonly<{
+  token: string;
+  concept: string;
+  unit: string;
+  accn: string;
+  start: string | null;
+  end: string;
+}>;
+
+export function extractStatement(input: ExtractStatementInput): NormalizedStatementInput {
+  return extractStatementWithTokens(input).statement;
+}
+
+/**
+ * One selection pass that yields the legacy statement plus, for each line
+ * taken verbatim from a losslessly parsed value, its exact source token.
+ * Derived values (e.g. a fourth quarter computed from annual minus three
+ * quarters) have no token and are never presented as source-exact.
+ */
+export function extractStatementWithTokens(input: ExtractStatementInput): {
+  statement: NormalizedStatementInput;
+  tokens: ReadonlyMap<string, SecSourceToken>;
+} {
   if (input.family !== "income") {
     throw new Error(
       `extractStatement: family="${input.family}" not yet supported (income-only in this bead)`,
@@ -225,6 +296,7 @@ export function extractStatement(
 
   const selectionDescription = statementSelectionDescription(input.fiscal_period);
   const lines: StatementLine[] = [];
+  const tokens = new Map<string, SecSourceToken>();
   const seenKeys = new Set<string>();
   const observedCurrencies = new Set<string>();
   let resolvedPeriodStart: string | null = null;
@@ -273,6 +345,16 @@ export function extractStatement(
         observedCurrencies.add(lineUnit.currency);
       }
       lines.push(line);
+      if (match.val_token !== undefined) {
+        tokens.set(metricKey, {
+          token: match.val_token,
+          concept: conceptName,
+          unit: unitCode,
+          accn: match.accn,
+          start: match.start ?? null,
+          end: match.end,
+        });
+      }
       seenKeys.add(metricKey);
       break; // one unit per concept per period
     }
@@ -295,7 +377,7 @@ export function extractStatement(
   }
   const reportingCurrency = observedCurrencies.values().next().value as string;
 
-  return {
+  const statement: NormalizedStatementInput = {
     subject: input.subject,
     family: input.family,
     basis: "as_reported",
@@ -310,6 +392,7 @@ export function extractStatement(
     source_id: input.source_id,
     lines,
   };
+  return { statement, tokens };
 }
 
 export type SecStatementValueSelection = Pick<
@@ -372,8 +455,9 @@ function deriveFourthQuarterConceptValue(
     return undefined;
   }
 
+  const { val_token: _annualToken, ...annualWithoutToken } = annual;
   return {
-    ...annual,
+    ...annualWithoutToken,
     val: annual.val - q1.val - q2.val - q3.val,
     fp: "Q4",
     form: annual.form,

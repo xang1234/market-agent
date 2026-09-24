@@ -10,9 +10,15 @@ import { NodeHttpHandler } from "@smithy/node-http-handler";
 type Cleanup = () => void | Promise<void>;
 type TestContextLike = { after(callback: Cleanup): void };
 
-// Pinned to a specific release for reproducibility across test runs over time.
-// Bump deliberately when MinIO upstream ships a relevant fix; do not float to :latest.
-const MINIO_IMAGE = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z";
+// Pinned to a specific build for reproducibility across test runs over time;
+// do not float to :latest. Upstream MinIO no longer serves public images
+// (quay.io now refuses anonymous pulls and Docker Hub has no minio/minio), so
+// this uses Bitnami's frozen, publicly pullable build. Its entrypoint script is
+// bypassed: the MinIO binary runs directly, as the upstream image did.
+const MINIO_IMAGE = "bitnamilegacy/minio:2025.7.23";
+const MINIO_BINARY = "/opt/bitnami/minio/bin/minio";
+// The image runs as a non-root user; /tmp is writable.
+const MINIO_DATA_DIR = "/tmp/data";
 const MINIO_USER = "minioadmin";
 const MINIO_PASSWORD = "minioadmin";
 
@@ -69,9 +75,11 @@ function startMinio(containerName: string): { hostPort: string } {
     `MINIO_ROOT_PASSWORD=${MINIO_PASSWORD}`,
     "-p",
     "127.0.0.1::9000",
+    "--entrypoint",
+    MINIO_BINARY,
     MINIO_IMAGE,
     "server",
-    "/data",
+    MINIO_DATA_DIR,
   ], DOCKER_RUN_TIMEOUT_MS);
   interpretDockerResult(result, "run", DOCKER_RUN_TIMEOUT_MS);
 

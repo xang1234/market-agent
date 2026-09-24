@@ -464,3 +464,42 @@ export type {
   IngestGdeltArticleDiscoveriesInput,
   IngestGdeltArticleDiscoveriesResult,
 } from "./gdelt-ingest.ts";
+
+export {
+  FinancialAttestationError,
+  PRECISION_CLASSES,
+  PUBLICATION_PROOF_METHODS,
+  PUBLICATION_TIMING_PRECISIONS,
+  recordFactPrecisionAttestation,
+  recordSourcePublicationAttestation,
+  supersedeSourcePublicationAttestation,
+} from "./financial-attestations.ts";
+export type {
+  FactPrecisionAttestationInput,
+  FactPrecisionAttestationRow,
+  PrecisionClass,
+  PublicationProofMethod,
+  PublicationTimingPrecision,
+  SourcePublicationAttestationInput,
+  SourcePublicationAttestationRow,
+  TokenCheck,
+} from "./financial-attestations.ts";
+export { DISCLOSURE_RELATIONS, recordFactFinancialContext } from "./financial-context.ts";
+export type { FactFinancialContext } from "./financial-context.ts";
+export { FINANCIAL_CANDIDATE_LIMIT, listFinancialInputCandidates } from "./financial-input-repo.ts";
+export type {
+  CandidateScope,
+  FinancialCandidatePage,
+  FinancialCandidateRequest,
+  FinancialInputCandidate,
+  PrecisionProof,
+  PublicationProof,
+} from "./financial-input-repo.ts";
+export { checkTokenAgainstStoredValue } from "./financial-attestations.ts";
+export { backfillFactPrecisionProofs } from "./financial-proof-backfill.ts";
+export type {
+  BackfillFact,
+  ProofBackfillOutcome,
+  ProofBackfillReport,
+  RetainedSourceReader,
+} from "./financial-proof-backfill.ts";

@@ -103,7 +103,7 @@ export function summarizeCoverage(evaluation: GraphEvaluation): CoverageSummary 
   const requested = evaluation.outputs.length;
   const gaps = Object.values(byDisposition).reduce((total, count) => total + count, 0);
   return {
-    state: computed === requested ? "complete" : computed === 0 ? "none" : "partial",
+    state: coverageState(computed, requested),
     requested,
     computed,
     gaps,
@@ -111,6 +111,11 @@ export function summarizeCoverage(evaluation: GraphEvaluation): CoverageSummary 
     rejected,
     by_disposition: byDisposition,
   };
+}
+
+/** Coverage of requested outputs: all computed, none computed, or partial. */
+export function coverageState(computed: number, requested: number): CoverageState {
+  return computed === requested ? "complete" : computed === 0 ? "none" : "partial";
 }
 
 /**
