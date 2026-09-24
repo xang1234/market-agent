@@ -17,6 +17,7 @@ tags:
   - name: Chat
   - name: Analyze
   - name: Discovery
+  - name: Financial
   - name: Agents
   - name: Themes
   - name: Home
@@ -1369,6 +1370,79 @@ paths:
         '400': { $ref: '#/components/responses/DiscoveryBadRequest' }
         '401': { $ref: '#/components/responses/DiscoveryUnauthorized' }
         '404': { $ref: '#/components/responses/DiscoveryNotFound' }
+  /v1/financial/runs/{runId}:
+    parameters:
+      - $ref: '#/components/parameters/FinancialRunIdPath'
+    get:
+      tags: [Financial]
+      summary: Read an owned financial run's status without advancing it
+      description: Read-only. Units expose coverage, snapshots, and committed result ids only once sealed; no draft values or counts.
+      operationId: getFinancialRun
+      responses:
+        '200':
+          description: Run status
+          headers:
+            Cache-Control: { $ref: '#/components/headers/FinancialPrivateCache' }
+          content:
+            application/json:
+              schema: { $ref: './financial_answer_http_schema.json#/$defs/FinancialRunStatus' }
+        '400': { $ref: '#/components/responses/FinancialBadRequest' }
+        '401': { $ref: '#/components/responses/FinancialUnauthorized' }
+        '404': { $ref: '#/components/responses/FinancialNotFound' }
+  /v1/financial/results/{resultId}:
+    parameters:
+      - name: resultId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Financial]
+      summary: Inspect a committed financial result and its lineage
+      description: Re-authorizes the result's entire transitive input closure on every read. Another owner's result, an uncommitted result, and a result with any revoked input are the same not-found.
+      operationId: inspectFinancialResult
+      responses:
+        '200':
+          description: Committed result inspection, or an unsupported-version notice without values
+          headers:
+            Cache-Control: { $ref: '#/components/headers/FinancialPrivateCache' }
+          content:
+            application/json:
+              schema: { $ref: './financial_answer_http_schema.json#/$defs/FinancialResultInspection' }
+        '400': { $ref: '#/components/responses/FinancialBadRequest' }
+        '401': { $ref: '#/components/responses/FinancialUnauthorized' }
+        '404': { $ref: '#/components/responses/FinancialNotFound' }
+  /v1/financial/runs/{runId}/replays:
+    parameters:
+      - $ref: '#/components/parameters/FinancialRunIdPath'
+    post:
+      tags: [Financial]
+      summary: Request an idempotent pinned replay of a completed run
+      description: Reserves a replay with the saved plan, cutoff, and policies; execution happens in a supervised worker. Recalculation with current evidence is a separate parent feature action that creates a new run.
+      operationId: requestFinancialReplay
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: './financial_answer_http_schema.json#/$defs/FinancialReplayRequest' }
+      responses:
+        '200':
+          description: The replay already reserved for this request key
+          content:
+            application/json:
+              schema: { $ref: './financial_answer_http_schema.json#/$defs/FinancialReplayAccepted' }
+        '202':
+          description: Replay reserved
+          content:
+            application/json:
+              schema: { $ref: './financial_answer_http_schema.json#/$defs/FinancialReplayAccepted' }
+        '400': { $ref: '#/components/responses/FinancialBadRequest' }
+        '401': { $ref: '#/components/responses/FinancialUnauthorized' }
+        '404': { $ref: '#/components/responses/FinancialNotFound' }
+        '409':
+          description: The source run is not final, or the request key was used for another replay
+          content:
+            application/json:
+              schema: { $ref: './financial_answer_http_schema.json#/$defs/FinancialHttpError' }
   /v1/agents:
     get:
       tags: [Agents]
@@ -2049,12 +2123,36 @@ components:
       name: runId
       required: true
       schema: { type: string, format: uuid }
+    FinancialRunIdPath:
+      in: path
+      name: runId
+      required: true
+      schema: { type: string, format: uuid }
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
+  headers:
+    FinancialPrivateCache:
+      description: Owner-private responses are never stored by shared caches.
+      schema: { type: string, const: 'private, no-store' }
   responses:
+    FinancialBadRequest:
+      description: Malformed identifier or request body
+      content:
+        application/json:
+          schema: { $ref: './financial_answer_http_schema.json#/$defs/FinancialHttpError' }
+    FinancialUnauthorized:
+      description: Missing or invalid credential
+      content:
+        application/json:
+          schema: { $ref: './financial_answer_http_schema.json#/$defs/FinancialHttpError' }
+    FinancialNotFound:
+      description: Not found, or not available to the caller; indistinguishable by design
+      content:
+        application/json:
+          schema: { $ref: './financial_answer_http_schema.json#/$defs/FinancialHttpError' }
     DiscoveryMetricOptionsResponse:
       description: Canonical metric options available for a discovery brief
       content:

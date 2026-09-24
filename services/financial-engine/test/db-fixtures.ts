@@ -17,6 +17,7 @@ import {
 import { snapshotTransactionClient, type SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
 import { executeRun } from "../src/execute.ts";
+import { finalizeUnit } from "../src/finalize.ts";
 import { acquireLease, type RunLease } from "../src/lease.ts";
 import { reserveRun } from "../src/run-repo.ts";
 
@@ -306,4 +307,23 @@ export async function pinnedClients(t: TestContext, db: Client, count: number): 
     clients.push(snapshotTransactionClient(client));
   }
   return clients;
+}
+
+/**
+ * A run of `plan` with every unit finalized (so the run is completed), and its
+ * committed result ids by output id.
+ */
+export async function completedRun(
+  db: Client,
+  client: SnapshotTransactionClient,
+  plan: FinancialPlanV1 = marginPlan(),
+  authority: FinancialRuntimeAuthority = authorityFor(),
+): Promise<{ runId: string; results: Readonly<Record<string, string>> }> {
+  const { runId, lease } = await readyRun(db, plan, authority);
+  for (const unit of plan.publication_units) {
+    const outcome = await finalizeUnit({ client, lease, authority, unit_id: unit.unit_id, snapshot_id: randomUUID(), persistParent: async () => {} });
+    assert.equal(outcome.status, "published", JSON.stringify(outcome));
+  }
+  const rows = (await db.query<{ output_id: string; result_id: string }>(`select output_id, result_id::text from financial_results where run_id = $1`, [runId])).rows;
+  return { runId, results: Object.fromEntries(rows.map((row) => [row.output_id, row.result_id])) };
 }

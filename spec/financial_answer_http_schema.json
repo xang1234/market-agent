@@ -1,0 +1,622 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/financial_answer_http_schema.json",
+  "title": "Financial answer HTTP payloads",
+  "description": "Response and request bodies for /v1/financial routes, referenced from finance_research_openapi.yaml.",
+  "$defs": {
+    "FinancialUnitStatus": {
+      "type": "object",
+      "required": [
+        "unit_id",
+        "unit_kind",
+        "state",
+        "coverage_state",
+        "snapshot_id",
+        "certificate_digest",
+        "result_ids",
+        "reason_code"
+      ],
+      "properties": {
+        "unit_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "unit_kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "state": {
+          "enum": [
+            "pending",
+            "computed",
+            "sealed",
+            "rejected"
+          ]
+        },
+        "coverage_state": {
+          "enum": [
+            "complete",
+            "partial",
+            "none",
+            null
+          ]
+        },
+        "snapshot_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "certificate_digest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "result_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "reason_code": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z][a-z0-9_]*$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FinancialRunStatus": {
+      "description": "Owner-scoped run status. Units expose coverage, snapshot, and committed result ids only once sealed; no draft values or counts.",
+      "type": "object",
+      "required": [
+        "run_id",
+        "execution_state",
+        "coverage_state",
+        "reason_code",
+        "cancel_requested",
+        "replay_of_run_id",
+        "knowledge_cutoff",
+        "interpretation",
+        "created_at",
+        "updated_at",
+        "units"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "execution_state": {
+          "enum": [
+            "pending",
+            "running",
+            "ready_to_seal",
+            "completed",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "coverage_state": {
+          "enum": [
+            "complete",
+            "partial",
+            "none",
+            null
+          ]
+        },
+        "reason_code": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "cancel_requested": {
+          "type": "boolean"
+        },
+        "replay_of_run_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "knowledge_cutoff": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "interpretation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "units": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FinancialUnitStatus"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "FinancialInspectedInput": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "input_slot",
+            "status",
+            "fact_id",
+            "source",
+            "metric",
+            "value",
+            "unit",
+            "period",
+            "precision_status",
+            "publication"
+          ],
+          "properties": {
+            "input_slot": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]{0,63}$"
+            },
+            "status": {
+              "const": "bound"
+            },
+            "fact_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "source": {
+              "type": "object",
+              "required": [
+                "source_id",
+                "document_id",
+                "source_version_hash",
+                "locator"
+              ],
+              "properties": {
+                "source_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "document_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "source_version_hash": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "locator": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "metric": {
+              "type": "object",
+              "required": [
+                "metric_key",
+                "definition_version"
+              ],
+              "properties": {
+                "metric_key": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                },
+                "definition_version": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "value": {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+            },
+            "unit": {
+              "$ref": "./finance_research_block_schema.json#/$defs/FinancialUnit"
+            },
+            "period": {
+              "type": "object",
+              "required": [
+                "kind",
+                "start",
+                "end",
+                "fiscal_year",
+                "fiscal_period"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "start": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date"
+                },
+                "end": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "fiscal_year": {
+                  "type": "integer"
+                },
+                "fiscal_period": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "precision_status": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$"
+            },
+            "publication": {
+              "type": "object",
+              "required": [
+                "attestation_id",
+                "available_no_later_than",
+                "precision"
+              ],
+              "properties": {
+                "attestation_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "available_no_later_than": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "precision": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]*$"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "input_slot",
+            "status",
+            "reason_code"
+          ],
+          "properties": {
+            "input_slot": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]{0,63}$"
+            },
+            "status": {
+              "const": "gap"
+            },
+            "reason_code": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[a-z][a-z0-9_]*$"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "FinancialResultInspection": {
+      "description": "A committed result with its full lineage, re-authorized over its transitive input closure on every read. An unsupported certificate or operation version carries no values.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "schema_version",
+            "availability",
+            "result_id",
+            "run_id",
+            "unit_id",
+            "output_id",
+            "disposition",
+            "payload",
+            "result_hash",
+            "interpretation",
+            "coverage_state",
+            "time",
+            "publication",
+            "formula",
+            "definitions",
+            "inputs"
+          ],
+          "properties": {
+            "schema_version": {
+              "const": "financial_result_inspection.v1"
+            },
+            "availability": {
+              "const": "available"
+            },
+            "result_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "unit_id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]{0,63}$"
+            },
+            "output_id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]{0,63}$"
+            },
+            "disposition": {
+              "enum": [
+                "verified",
+                "missing",
+                "unsupported",
+                "not_applicable",
+                "undefined",
+                "incompatible",
+                "blocked_dependency",
+                "execution_error"
+              ]
+            },
+            "payload": {
+              "oneOf": [
+                {
+                  "$ref": "./financial_result_schema.json#/$defs/SuccessPayload"
+                },
+                {
+                  "$ref": "./financial_result_schema.json#/$defs/GapPayload"
+                }
+              ]
+            },
+            "result_hash": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "interpretation": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "coverage_state": {
+              "enum": [
+                "complete",
+                "partial",
+                "none",
+                null
+              ]
+            },
+            "time": {
+              "type": "object",
+              "required": [
+                "knowledge_cutoff",
+                "time_mode",
+                "finalized_at"
+              ],
+              "properties": {
+                "knowledge_cutoff": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "time_mode": {
+                  "enum": [
+                    "public_information",
+                    "historical_as_reported"
+                  ]
+                },
+                "finalized_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "additionalProperties": false
+            },
+            "publication": {
+              "type": "object",
+              "required": [
+                "snapshot_id",
+                "certificate_digest"
+              ],
+              "properties": {
+                "snapshot_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "certificate_digest": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "additionalProperties": false
+            },
+            "formula": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "operation",
+                    "operation_version",
+                    "numeric_policy_version"
+                  ],
+                  "properties": {
+                    "operation": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                    },
+                    "operation_version": {
+                      "type": "string"
+                    },
+                    "numeric_policy_version": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "definitions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "metric_key",
+                  "definition_version"
+                ],
+                "properties": {
+                  "metric_key": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                  },
+                  "definition_version": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "inputs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/FinancialInspectedInput"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "schema_version",
+            "availability",
+            "result_id",
+            "run_id",
+            "reason_code"
+          ],
+          "properties": {
+            "schema_version": {
+              "const": "financial_result_inspection.v1"
+            },
+            "availability": {
+              "const": "unsupported_version"
+            },
+            "result_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "reason_code": {
+              "const": "unsupported_version"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "FinancialReplayRequest": {
+      "type": "object",
+      "required": [
+        "request_key"
+      ],
+      "properties": {
+        "request_key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FinancialReplayAccepted": {
+      "type": "object",
+      "required": [
+        "replay_run_id",
+        "replay_of_run_id",
+        "execution_state",
+        "created"
+      ],
+      "properties": {
+        "replay_run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "replay_of_run_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "execution_state": {
+          "enum": [
+            "pending",
+            "running",
+            "ready_to_seal",
+            "completed",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "created": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FinancialHttpError": {
+      "type": "object",
+      "required": [
+        "error",
+        "code"
+      ],
+      "properties": {
+        "error": {
+          "type": "string"
+        },
+        "code": {
+          "enum": [
+            "unauthenticated",
+            "not_found",
+            "invalid_request",
+            "method_not_allowed",
+            "source_not_final",
+            "request_key_conflict",
+            "internal"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
