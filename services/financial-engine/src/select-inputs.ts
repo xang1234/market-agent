@@ -13,8 +13,12 @@
 // 6. Equal values tie-break by fact id; differing values are a conflict —
 //    identifier order never chooses financial truth.
 // 7. Freshness is measured to the cutoff.
+//
+// A selection is a proven input: the chosen candidate with its proofs and
+// context narrowed to non-null, and its numerics parsed exactly once.
 
 import {
+  canonicalDecimalString,
   compareRationals,
   conservativeAvailability,
   freshnessAt,
@@ -22,8 +26,12 @@ import {
   parseDerivedDecimalText,
   publicAtCutoff,
   rationalFromDecimal,
+  rationalToValue,
+  type DecimalString,
   type ExactRational,
+  type FinancialUnit,
   type IsoDateTime,
+  type ProvenPrecisionClass,
   type PeriodSelector,
   type ReasonCode,
   type ReportedMetricNode,
@@ -47,11 +55,27 @@ export type SelectedPublication = {
   source_timezone: string;
 };
 
-export type SlotSelection =
-  | { status: "selected"; candidate: InputCandidate; publication: SelectedPublication }
-  | { status: "gap"; reason_code: ReasonCode };
+/** A candidate whose unit, context, and precision proof are all established. */
+export type ProvenCandidate = Omit<InputCandidate, "unit" | "context" | "precision"> & Readonly<{
+  unit: FinancialUnit;
+  context: NonNullable<InputCandidate["context"]>;
+  precision: Readonly<{
+    precision_attestation_id: string;
+    precision_class: ProvenPrecisionClass;
+    raw_token: string;
+    token_proof_hash: string;
+    source_locator: string | null;
+  }>;
+}>;
 
-type Eligible = { candidate: InputCandidate; publication: SelectedPublication };
+/** Canonical stored value and scale, and their exact product (the native value). */
+export type ExactNumeric = Readonly<{ value: DecimalString; scale: DecimalString; native_value: DecimalString; native: ExactRational }>;
+
+export type SelectedInput = Readonly<{ candidate: ProvenCandidate; publication: SelectedPublication; numeric: ExactNumeric }>;
+
+export type SlotSelection = { status: "selected"; input: SelectedInput } | { status: "gap"; reason_code: ReasonCode };
+
+type Eligible = { candidate: ProvenCandidate; publication: SelectedPublication; numeric: ExactNumeric | null };
 
 // When nothing is eligible, report the reason closest to eligibility.
 const EXCLUSION_PRIORITY: ReadonlyArray<ReasonCode> = ["precision_unverified", "context_unverified", "incompatible_unit", "publication_time_unknown"];
@@ -69,7 +93,7 @@ export function selectInput(
   const exclusions = new Set<ReasonCode>();
   for (const candidate of requested) {
     const verdict = eligibility(candidate, policy.knowledge_cutoff);
-    if ("publication" in verdict) eligible.push({ candidate, publication: verdict.publication });
+    if ("eligible" in verdict) eligible.push(verdict.eligible);
     else if (verdict.reason !== null) exclusions.add(verdict.reason);
   }
   if (eligible.length === 0) return gap(EXCLUSION_PRIORITY.find((reason) => exclusions.has(reason)) ?? "missing_input");
@@ -80,13 +104,13 @@ export function selectInput(
   const disclosures = chooseDisclosure(withoutCorrected(inPeriod), requested, policy.reporting_basis);
   if (disclosures.length === 0) return gap("missing_input");
 
-  const values = disclosures.map((entry) => nativeValue(entry.candidate));
-  if (values.some((value) => value === null)) return gap("precision_unverified");
-  if (values.some((value) => compareRationals(value!, values[0]!) !== 0)) return gap("conflicting_evidence");
-  const chosen = [...disclosures].sort((left, right) => left.candidate.fact_id.localeCompare(right.candidate.fact_id))[0]!;
+  const parsed = disclosures.flatMap(({ numeric, ...rest }) => (numeric === null ? [] : [{ ...rest, numeric }]));
+  if (parsed.length !== disclosures.length) return gap("precision_unverified");
+  if (parsed.some((entry) => compareRationals(entry.numeric.native, parsed[0]!.numeric.native) !== 0)) return gap("conflicting_evidence");
+  const chosen = parsed.sort((left, right) => left.candidate.fact_id.localeCompare(right.candidate.fact_id))[0]!;
 
   if (freshnessAt(chosen.candidate.period.end, policy.knowledge_cutoff, policy.max_age_days) === "stale") return gap("stale_input");
-  return { status: "selected", candidate: chosen.candidate, publication: chosen.publication };
+  return { status: "selected", input: chosen };
 }
 
 function inRequestedPeriod(candidate: InputCandidate, selector: PeriodSelector): boolean {
@@ -96,17 +120,23 @@ function inRequestedPeriod(candidate: InputCandidate, selector: PeriodSelector):
   return selector.period_type === "annual" ? candidate.period.fiscal_period === "FY" : candidate.period.fiscal_period !== "FY";
 }
 
-function eligibility(candidate: InputCandidate, cutoff: IsoDateTime): { publication: SelectedPublication } | { reason: ReasonCode | null } {
+function eligibility(candidate: InputCandidate, cutoff: IsoDateTime): { eligible: Eligible } | { reason: ReasonCode | null } {
   const publication = earliestPublicProof(candidate, cutoff);
   if (publication === "not_yet_public") return { reason: null };
   if (publication === "unknown") return { reason: "publication_time_unknown" };
-  const precision = candidate.precision;
+  const { precision, context, unit } = candidate;
   if (precision === null || precision.precision_class === "legacy_unverified" || precision.raw_token === null || precision.token_proof_hash === null) {
     return { reason: "precision_unverified" };
   }
-  if (candidate.context === null) return { reason: "context_unverified" };
-  if (candidate.unit === null) return { reason: "incompatible_unit" };
-  return { publication };
+  if (context === null) return { reason: "context_unverified" };
+  if (unit === null) return { reason: "incompatible_unit" };
+  const proven: ProvenCandidate = {
+    ...candidate,
+    unit,
+    context,
+    precision: { ...precision, precision_class: precision.precision_class, raw_token: precision.raw_token, token_proof_hash: precision.token_proof_hash },
+  };
+  return { eligible: { candidate: proven, publication, numeric: exactNumeric(candidate) } };
 }
 
 /** The proof with the earliest conservative bound at or before the cutoff. */
@@ -170,13 +200,22 @@ function chooseDisclosure(entries: ReadonlyArray<Eligible>, all: ReadonlyArray<I
   return restated.filter((entry) => Date.parse(entry.publication.available_no_later_than) === latestBound);
 }
 
-function nativeValue(candidate: InputCandidate): ExactRational | null {
+/** Parses the stored value and scale once; null when either is outside the numeric limits. */
+function exactNumeric(candidate: InputCandidate): ExactNumeric | null {
   const value = parseDerivedDecimalText(candidate.value_text);
   const scale = parseDerivedDecimalText(candidate.scale_text);
   if (!value.ok || !scale.ok) return null;
   const valueRational = rationalFromDecimal(value.value);
   const scaleRational = rationalFromDecimal(scale.value);
-  return valueRational && scaleRational ? multiplyRationals(valueRational, scaleRational) : null;
+  const native = valueRational && scaleRational ? multiplyRationals(valueRational, scaleRational) : null;
+  const represented = native === null ? null : rationalToValue(native);
+  if (native === null || represented === null || !represented.exact) return null;
+  return {
+    value: canonicalDecimalString(value.value),
+    scale: canonicalDecimalString(scale.value),
+    native_value: canonicalDecimalString(represented.value),
+    native,
+  };
 }
 
 function gap(reason: ReasonCode): SlotSelection {

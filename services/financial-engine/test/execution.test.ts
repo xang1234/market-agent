@@ -9,6 +9,7 @@ import { buildUnitCheckpoint, checkpointUnit, nodeHashes } from "../src/checkpoi
 import { listRunEvents } from "../src/events-repo.ts";
 import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
 import { evaluateBoundPlan, executeRun } from "../src/execute.ts";
+import { fencedTransaction } from "../src/lease.ts";
 import type { FinancialEvidencePort, SqlExecutor } from "../src/ports.ts";
 import { loadResults } from "../src/result-repo.ts";
 import { requestCancellation } from "../src/run-repo.ts";
@@ -135,10 +136,8 @@ test("bounded financial graph execution", { timeout: 240_000 }, async (t) => {
   await t.test("cancellation is observed between units", async () => {
     const plan = marginPlan();
     const { runId, lease } = await leasedRun(db, plan);
-    const { bindings } = await bindPlanInputs({ client: db, run_id: runId, lease, plan, authority, evidence: createEvidenceFinancialPort });
-    await db.query("begin");
-    await declareUnits(db, lease, plan);
-    await db.query("commit");
+    const { bindings } = await bindPlanInputs({ client: db, lease, plan, authority, evidence: createEvidenceFinancialPort });
+    await fencedTransaction(db, lease, (tx) => declareUnits(tx, plan));
     const evaluation = evaluateBoundPlan(plan, bindings);
     await checkpointUnit(db, lease, buildUnitCheckpoint(plan, evaluation, nodeHashes(plan, evaluation, bindings), "rev_unit"));
 
@@ -162,15 +161,15 @@ test("bounded financial graph execution", { timeout: 240_000 }, async (t) => {
   await t.test("an existing result with a different payload fails the run instead of being overwritten", async () => {
     const plan = revenuePlan();
     const { runId, lease } = await leasedRun(db, plan);
-    await bindPlanInputs({ client: db, run_id: runId, lease, plan, authority, evidence: createEvidenceFinancialPort });
-    await db.query("begin");
-    await declareUnits(db, lease, plan);
-    await db.query(
-      `insert into financial_results (run_id, output_id, node_id, unit_id, state, disposition, payload, dependencies, result_hash)
-       values ($1, 'a_out_rev', 'a_rev', 'a_unit', 'draft', 'missing', '{"kind":"gap","reason_code":"missing_input","explanation":"x"}', '[]', $2)`,
-      [runId, "e".repeat(64)],
-    );
-    await db.query("commit");
+    await bindPlanInputs({ client: db, lease, plan, authority, evidence: createEvidenceFinancialPort });
+    await fencedTransaction(db, lease, async (tx) => {
+      await declareUnits(tx, plan);
+      await tx.client.query(
+        `insert into financial_results (run_id, output_id, node_id, unit_id, state, disposition, payload, dependencies, result_hash)
+         values ($1, 'a_out_rev', 'a_rev', 'a_unit', 'draft', 'missing', '{"kind":"gap","reason_code":"missing_input","explanation":"x"}', '[]', $2)`,
+        [runId, "e".repeat(64)],
+      );
+    });
     assert.deepEqual(await run(db, plan, lease), { run_id: runId, outcome: "failed", failure_code: "integrity_failure" });
     assert.deepEqual((await listUnits(db, runId)).map((unit) => unit.state), ["pending"], "the unit's checkpoint rolled back");
     assert.equal((await resultsByOutput(db, runId)).get("a_out_prev"), undefined);

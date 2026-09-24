@@ -7,6 +7,7 @@
 
 import { randomUUID } from "node:crypto";
 import {
+  coverageState,
   dependencyClosure,
   hashCanonical,
   NUMERIC_POLICY,
@@ -15,6 +16,7 @@ import {
   topologicalOrder,
   unitClosures,
   validateDraftResult,
+  type CoverageState,
   type DraftFinancialResultV1,
   type FinancialPlanV1,
   type GraphEvaluation,
@@ -23,15 +25,16 @@ import {
   type Sha256Hex,
 } from "../../financial-core/src/index.ts";
 import type { InputBinding } from "./bind-inputs.ts";
-import { assertLeaseFence, type RunLease } from "./lease.ts";
+import { ExecutionIntegrityError } from "./errors.ts";
+import { fencedTransaction, type RunLease } from "./lease.ts";
 import type { SqlExecutor } from "./ports.ts";
-import { ExecutionIntegrityError, persistComputation, persistResult, type DraftComputation } from "./result-repo.ts";
+import { persistComputation, persistResult, type DraftComputation } from "./result-repo.ts";
 import { markUnitComputed, rejectUnit } from "./unit-repo.ts";
 
 export type UnitCheckpoint = Readonly<{
   unit_id: LocalId;
   rejected: boolean;
-  coverage: "complete" | "partial" | "none";
+  coverage: CoverageState;
   computations: ReadonlyArray<DraftComputation>;
   results: ReadonlyArray<Readonly<{ result: DraftFinancialResultV1; result_hash: Sha256Hex }>>;
 }>;
@@ -132,8 +135,7 @@ export function buildUnitCheckpoint(
     return { result: validated.value, result_hash: resultHash };
   });
 
-  const computed = results.filter(({ result }) => result.disposition === "computed").length;
-  const coverage = computed === results.length ? "complete" : computed === 0 ? "none" : "partial";
+  const coverage = coverageState(results.filter(({ result }) => result.disposition === "computed").length, results.length);
   return { unit_id: unitId, rejected, coverage, computations, results };
 }
 
@@ -142,33 +144,24 @@ export function buildUnitCheckpoint(
  * transaction. Returns false when the unit was already checkpointed.
  */
 export async function checkpointUnit(client: SqlExecutor, lease: RunLease, checkpoint: UnitCheckpoint): Promise<boolean> {
-  await client.query("begin");
-  try {
-    await assertLeaseFence(client, lease);
-    const state = (await client.query<{ state: string }>(
+  return fencedTransaction(client, lease, async (tx) => {
+    const state = (await tx.client.query<{ state: string }>(
       `select state from financial_run_units where run_id = $1 and unit_id = $2`,
       [lease.run_id, checkpoint.unit_id],
     )).rows[0]?.state;
     if (state === undefined) throw new ExecutionIntegrityError(`unit ${checkpoint.unit_id} was not declared`);
-    if (state !== "pending") {
-      await client.query("commit");
-      return false;
-    }
+    if (state !== "pending") return false;
     const computationIds = new Map<LocalId, string>();
     for (const computation of checkpoint.computations) {
-      computationIds.set(computation.node_id, await persistComputation(client, lease.run_id, computation));
+      computationIds.set(computation.node_id, await persistComputation(tx.client, lease.run_id, computation));
     }
     for (const { result, result_hash } of checkpoint.results) {
-      await persistResult(client, lease.run_id, result, result_hash, computationIds.get(result.node_id) ?? null);
+      await persistResult(tx.client, lease.run_id, result, result_hash, computationIds.get(result.node_id) ?? null);
     }
-    if (checkpoint.rejected) await rejectUnit(client, lease, checkpoint.unit_id, "integrity_failure");
-    else await markUnitComputed(client, lease, checkpoint.unit_id, checkpoint.coverage);
-    await client.query("commit");
+    if (checkpoint.rejected) await rejectUnit(tx, checkpoint.unit_id, "integrity_failure");
+    else await markUnitComputed(tx, checkpoint.unit_id, checkpoint.coverage);
     return true;
-  } catch (error) {
-    await client.query("rollback");
-    throw error;
-  }
+  });
 }
 
 function publishedState(

@@ -1,11 +1,12 @@
 // Predeclared publication units. Units and their dependency closures are
 // written once (from the validated plan) and never revised; progress is
 // derived from unit state, so a retry that repeats a transition changes
-// nothing and emits no duplicate progress event. All writes are fenced.
+// nothing and emits no duplicate progress event. All writes take a FencedTx.
 
-import { hashCanonical, unitClosures, type FinancialPlanV1, type LocalId } from "../../financial-core/src/index.ts";
+import { hashCanonical, unitClosures, type CoverageState, type FinancialPlanV1, type LocalId } from "../../financial-core/src/index.ts";
 import { appendRunEvent } from "./events-repo.ts";
-import { assertLeaseFence, type RunLease } from "./lease.ts";
+import { ExecutionIntegrityError } from "./errors.ts";
+import type { FencedTx } from "./lease.ts";
 import type { SqlExecutor } from "./ports.ts";
 
 export type UnitState = "pending" | "computed" | "sealed" | "rejected";
@@ -16,20 +17,12 @@ export type UnitRecord = Readonly<{
   closure_node_ids: ReadonlyArray<LocalId>;
   closure_hash: string;
   state: UnitState;
-  coverage_state: "complete" | "partial" | "none" | null;
+  coverage_state: CoverageState | null;
   rejection_code: string | null;
 }>;
 
-export class UnitClosureConflictError extends Error {
-  constructor(unitId: string) {
-    super(`unit ${unitId} was already declared with a different closure`);
-    this.name = "UnitClosureConflictError";
-  }
-}
-
 /** Declares every publication unit of the plan; repeat declarations must match exactly. */
-export async function declareUnits(client: SqlExecutor, lease: RunLease, plan: FinancialPlanV1): Promise<void> {
-  await assertLeaseFence(client, lease);
+export async function declareUnits({ client, lease }: FencedTx, plan: FinancialPlanV1): Promise<void> {
   const kinds = new Map(plan.publication_units.map((unit) => [unit.unit_id, unit.kind]));
   for (const closure of unitClosures(plan).values()) {
     const closureHash = hashCanonical("unit_closure", { unit_id: closure.unit_id, output_ids: closure.output_ids, node_ids: closure.node_ids });
@@ -43,18 +36,16 @@ export async function declareUnits(client: SqlExecutor, lease: RunLease, plan: F
       `select closure_hash from financial_run_units where run_id = $1 and unit_id = $2`,
       [lease.run_id, closure.unit_id],
     )).rows[0];
-    if (stored?.closure_hash !== closureHash) throw new UnitClosureConflictError(closure.unit_id);
+    if (stored?.closure_hash !== closureHash) throw new ExecutionIntegrityError(`unit ${closure.unit_id} was already declared with a different closure`);
   }
 }
 
 /** pending -> computed. Returns whether the state changed (progress counts only real transitions). */
 export async function markUnitComputed(
-  client: SqlExecutor,
-  lease: RunLease,
+  { client, lease }: FencedTx,
   unitId: LocalId,
-  coverage: "complete" | "partial" | "none",
+  coverage: CoverageState,
 ): Promise<boolean> {
-  await assertLeaseFence(client, lease);
   const changed = await client.query(
     `update financial_run_units set state = 'computed', coverage_state = $3, updated_at = now()
       where run_id = $1 and unit_id = $2 and state = 'pending' returning unit_id`,
@@ -66,8 +57,7 @@ export async function markUnitComputed(
 }
 
 /** Rejects a unit whose closure failed integrity checks; rejection is final. */
-export async function rejectUnit(client: SqlExecutor, lease: RunLease, unitId: LocalId, reasonCode: string): Promise<boolean> {
-  await assertLeaseFence(client, lease);
+export async function rejectUnit({ client, lease }: FencedTx, unitId: LocalId, reasonCode: string): Promise<boolean> {
   const changed = await client.query(
     `update financial_run_units set state = 'rejected', rejection_code = $3, updated_at = now()
       where run_id = $1 and unit_id = $2 and state in ('pending', 'computed') returning unit_id`,

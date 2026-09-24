@@ -5,14 +5,8 @@
 // verified — only finalization (T15) can award that.
 
 import type { DraftFinancialResultV1, LocalId, Sha256Hex } from "../../financial-core/src/index.ts";
+import { ExecutionIntegrityError } from "./errors.ts";
 import type { SqlExecutor } from "./ports.ts";
-
-export class ExecutionIntegrityError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ExecutionIntegrityError";
-  }
-}
 
 export type DraftComputation = Readonly<{
   node_id: LocalId;

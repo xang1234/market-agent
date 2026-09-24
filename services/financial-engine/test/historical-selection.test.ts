@@ -85,12 +85,12 @@ function policy(overrides: Partial<SelectionPolicy> = {}): SelectionPolicy {
 }
 
 function selectedId(result: ReturnType<typeof selectInput>): string {
-  assert.equal(result.status, "selected", JSON.stringify(result));
-  return result.status === "selected" ? result.candidate.fact_id : "";
+  assert.equal(result.status, "selected", result.status === "gap" ? result.reason_code : "");
+  return result.status === "selected" ? result.input.candidate.fact_id : "";
 }
 
 function gapReason(result: ReturnType<typeof selectInput>): string {
-  assert.equal(result.status, "gap", JSON.stringify(result));
+  assert.equal(result.status, "gap", result.status === "selected" ? result.input.candidate.fact_id : "");
   return result.status === "gap" ? result.reason_code : "";
 }
 
@@ -173,7 +173,7 @@ test("selection reports the conservative publication bound it relied on", () => 
   const result = selectInput(FY2023, [fy2023], policy());
   assert.ok(result.status === "selected");
   if (result.status !== "selected") return;
-  assert.deepEqual(result.publication, {
+  assert.deepEqual(result.input.publication, {
     attestation_id: `a-${fy2023.fact_id}`,
     available_no_later_than: "2024-01-11T04:59:59.999Z",
     timing_precision: "date",

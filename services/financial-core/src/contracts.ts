@@ -2,6 +2,15 @@
 // and spec/financial_result_schema.json are the serialized-boundary authority;
 // these types mirror them (test/contracts.test.ts keeps the enums in sync).
 
+import type {
+  AdjustmentBasis,
+  DimensionScope,
+  PeriodType,
+  ProvenPrecisionClass,
+  PublicationTimingPrecision,
+  ShareBasis,
+} from "./evidence-vocabulary.ts";
+
 export type UUID = string;
 /** Plan-local identifier: ^[a-z][a-z0-9_]{0,63}$ */
 export type LocalId = string;
@@ -370,7 +379,7 @@ export type BoundFinancialInputV1 = {
   };
   unit: FinancialUnit;
   period: {
-    kind: "duration" | "instant";
+    kind: PeriodType;
     start: IsoDate | null;
     end: IsoDate;
     fiscal_year: number;
@@ -378,22 +387,22 @@ export type BoundFinancialInputV1 = {
     calendar_version: VersionTag;
   };
   dimensions: {
-    scope: "consolidated" | "segment";
+    scope: DimensionScope;
     members: Array<{ axis: string; member: string }>;
   };
   basis: {
     reporting: ReportingBasis;
-    adjustment: "unadjusted" | "split_adjusted";
-    share_basis: "basic" | "diluted" | "not_applicable";
+    adjustment: AdjustmentBasis;
+    share_basis: ShareBasis;
   };
   publication: {
     attestation_id: UUID;
     available_no_later_than: IsoDateTime;
-    precision: "instant" | "date" | "observed_public";
+    precision: PublicationTimingPrecision;
     source_timezone: string;
   };
   observed_at: IsoDateTime;
-  precision_status: "source_token_preserved" | "revalidated_against_source";
+  precision_status: ProvenPrecisionClass;
   eligibility: {
     selection_policy_version: VersionTag;
     promotion_status: "authoritative" | "corroborated" | "reviewed_extraction";

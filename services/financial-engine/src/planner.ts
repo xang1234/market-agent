@@ -20,6 +20,7 @@ import {
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
   type FinancialSubjectRef,
+  type OperationKind,
   type PlanOrigin,
   type PublicationUnitKind,
   type ReportingBasis,
@@ -120,8 +121,8 @@ export async function planFinancialRequest(context: PlanningContext, requestText
     const draft = parseDraft(response.text);
     const attempt = draft.ok ? assemblePlan(context, draft.value, { kind: "model", adapter_version: PLANNER_ADAPTER_VERSION, model: response.model, prompt_version: PLANNER_PROMPT_VERSION }) : draft;
     if (attempt.ok) return finish(attempt.value, calls);
-    if (attempt.clarification) return { outcome: "needs_clarification", clarification: attempt.clarification, model_calls: calls };
-    if (attempt.unsupported) return { outcome: "unsupported", reason: attempt.unsupported, issues: attempt.issues, model_calls: calls };
+    if (attempt.kind === "clarify") return { outcome: "needs_clarification", clarification: attempt.clarification, model_calls: calls };
+    if (attempt.kind === "unsupported") return { outcome: "unsupported", reason: attempt.reason, issues: attempt.issues, model_calls: calls };
     lastIssues = attempt.issues;
     messages.push({ role: "assistant", content: response.text }, { role: "user", content: repairPrompt(attempt.issues) });
   }
@@ -144,8 +145,9 @@ export function buildDeterministicPlan(context: PlanningContext, draft: unknown)
   const parsed = checkDraft(draft);
   const attempt = parsed.ok ? assemblePlan(context, parsed.value, { kind: "deterministic", adapter_version: DETERMINISTIC_ADAPTER_VERSION, model: null, prompt_version: null }) : parsed;
   if (attempt.ok) return finish(attempt.value, 0);
-  if (attempt.clarification) return { outcome: "configuration_needed", reason: attempt.clarification.question, model_calls: 0 };
-  return { outcome: "unsupported", reason: attempt.unsupported ?? attempt.issues.map((issue) => issue.code).join(", "), issues: attempt.issues, model_calls: 0 };
+  if (attempt.kind === "clarify") return { outcome: "configuration_needed", reason: attempt.clarification.question, model_calls: 0 };
+  const reason = attempt.kind === "unsupported" ? attempt.reason : attempt.issues.map((issue) => issue.code).join(", ");
+  return { outcome: "unsupported", reason, issues: attempt.issues, model_calls: 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -157,9 +159,12 @@ type Draft = {
   thresholds: Array<Record<string, unknown>>;
 };
 
-type Attempt<T> =
-  | { ok: true; value: T }
-  | { ok: false; issues: ValidationIssue[]; clarification?: Clarification; unsupported?: string };
+type Rejection =
+  | { kind: "invalid"; issues: ValidationIssue[] }
+  | { kind: "clarify"; clarification: Clarification }
+  | { kind: "unsupported"; reason: string; issues: ValidationIssue[] };
+
+type Attempt<T> = { ok: true; value: T } | ({ ok: false } & Rejection);
 
 const READY_KEYS = ["outcome", "subjects", "operations", "outputs", "thresholds"];
 
@@ -172,12 +177,12 @@ function parseDraft(text: string): Attempt<Draft> {
     return invalid("$", "invalid_json", "the response was not a JSON object");
   }
   if (isRecord(value) && value.outcome === "unsupported") {
-    return { ok: false, issues: [], unsupported: typeof value.reason === "string" ? value.reason.slice(0, 200) : "the model reported the request as unsupported" };
+    return { ok: false, kind: "unsupported", reason: typeof value.reason === "string" ? value.reason.slice(0, 200) : "the model reported the request as unsupported", issues: [] };
   }
   if (isRecord(value) && value.outcome === "needs_clarification") {
     const question = typeof value.question === "string" ? value.question.slice(0, 500) : "Please clarify the request.";
     const choices = Array.isArray(value.choices) ? value.choices.filter((choice): choice is string => typeof choice === "string").slice(0, 10) : [];
-    return { ok: false, issues: [], clarification: clarification("request", question, choices.map((label, index) => ({ choice_id: `option_${index + 1}`, label }))) };
+    return { ok: false, kind: "clarify", clarification: clarification("request", question, choices.map((label, index) => ({ choice_id: `option_${index + 1}`, label }))) };
   }
   return checkDraft(value);
 }
@@ -237,7 +242,7 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
     const question = `The metric "${unknownMetric}" has no approved definition. Which approved metric should be used instead?`;
     return {
       ok: false,
-      issues: [],
+      kind: "clarify",
       clarification: clarification(
         "metric",
         question,
@@ -255,7 +260,12 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
     const planned = slot !== undefined && draft.operations.some((operation) => operation.operation === "reported_metric" && operation.subject_slot === slot);
     if (!planned) issues.push({ path: "$.operations", code: "subject_not_planned", message: entry.mention });
   }
-  if (issues.length > 0) return { ok: false, issues };
+  for (const operation of draft.operations) {
+    if (!isApprovedOperation(operation.operation)) {
+      issues.push({ path: "$.operations", code: "unsupported_operation", message: `${String(operation.operation)} is not an approved operation` });
+    }
+  }
+  if (issues.length > 0) return { ok: false, kind: "invalid", issues };
 
   const unitId = "answer";
   const plan = {
@@ -280,11 +290,7 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
       source_policy_version: "sources.v1",
     },
     metric_definitions: metricKeys.map((key) => ({ metric_key: key, definition_version: METRIC_CATALOG_V1.get(key)!.definition_version })),
-    operations: draft.operations.map((operation) => {
-      const kind = operation.operation;
-      const version = typeof kind === "string" && kind in OPERATION_REGISTRY ? OPERATION_REGISTRY[kind as keyof typeof OPERATION_REGISTRY].operation_version : "unknown";
-      return { ...operation, operation_version: version };
-    }),
+    operations: draft.operations.map((operation) => ({ ...operation, operation_version: OPERATION_REGISTRY[operation.operation as OperationKind].operation_version })),
     outputs: draft.outputs.map((output) => ({ output_id: output.output_id, node_id: output.node_id, unit_id: unitId })),
     publication_units: [{ unit_id: unitId, kind: context.publication_unit_kind }],
     thresholds: draft.thresholds.map((threshold) => ({ ...threshold, attribution: { kind: "user_request", ref: context.origin.ref } })),
@@ -292,14 +298,14 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
     presentation_template_version: "financial-answer.v1",
   };
   const validated = validateFinancialPlan(plan);
-  if (!validated.ok) return { ok: false, issues: validated.issues };
+  if (!validated.ok) return { ok: false, kind: "invalid", issues: validated.issues };
   const authorized = authorizePlan(validated.value, context.authority, context.parent_limits);
   if (!authorized.ok) {
-    return { ok: false, issues: authorized.issues, unsupported: authorized.issues.map((issue) => issue.code).join(", ") };
+    return { ok: false, kind: "unsupported", reason: authorized.issues.map((issue) => issue.code).join(", "), issues: authorized.issues };
   }
   const labels = new Map(members.map((member) => [member.slot_id, resolved.find((entry) => entry.ref.id === member.subject_ref.id)!.label]));
   const withInterpretation = validateFinancialPlan({ ...plan, interpretation: interpretPlan(validated.value, labels) });
-  return withInterpretation.ok ? withInterpretation : { ok: false, issues: withInterpretation.issues };
+  return withInterpretation.ok ? withInterpretation : { ok: false, kind: "invalid", issues: withInterpretation.issues };
 }
 
 function finish(plan: FinancialPlanV1, calls: number): PlanningResult {
@@ -327,7 +333,11 @@ function clarification(kind: Clarification["kind"], question: string, choices: R
 }
 
 function invalid(path: string, code: string, message: string): Attempt<never> {
-  return { ok: false, issues: [{ path, code, message }] };
+  return { ok: false, kind: "invalid", issues: [{ path, code, message }] };
+}
+
+function isApprovedOperation(kind: unknown): kind is OperationKind {
+  return typeof kind === "string" && Object.hasOwn(OPERATION_REGISTRY, kind);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

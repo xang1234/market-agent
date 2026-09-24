@@ -1,17 +1,12 @@
 // Binds every reported-metric slot of a run's plan to immutable evidence in
 // one consistent read (REPEATABLE READ, under the run's lease fence) and
-// persists the bindings — bound
-// payloads or explicit gaps — with the authorized candidate-set digest. A
-// retry reuses the persisted bindings; evidence that arrives later requires an
-// explicit recalculation (a new run), never substitution.
+// persists the bindings — bound payloads or explicit gaps — with the
+// authorized candidate-set digest. A retry reuses the persisted bindings;
+// evidence that arrives later requires an explicit recalculation (a new run),
+// never substitution.
 
 import {
-  canonicalDecimalString,
   hashCanonical,
-  multiplyRationals,
-  parseDerivedDecimalText,
-  rationalFromDecimal,
-  rationalToValue,
   validateBoundInput,
   type BoundFinancialInputV1,
   type FinancialPlanV1,
@@ -22,10 +17,11 @@ import {
   type Sha256Hex,
   type SubjectSlot,
 } from "../../financial-core/src/index.ts";
+import { ExecutionIntegrityError } from "./errors.ts";
 import { appendRunEvent } from "./events-repo.ts";
-import { assertLeaseFence, type RunLease } from "./lease.ts";
+import { fencedTransaction, type FencedTx, type RunLease } from "./lease.ts";
 import type { FinancialEvidencePort, InputCandidate, SqlExecutor } from "./ports.ts";
-import { SELECTION_POLICY_VERSION, selectInput, type SlotSelection } from "./select-inputs.ts";
+import { SELECTION_POLICY_VERSION, selectInput, type SelectedInput } from "./select-inputs.ts";
 
 export type InputBinding =
   | {
@@ -40,93 +36,90 @@ export type InputBinding =
 
 export type BindingResult = { run_id: string; reused: boolean; bindings: ReadonlyMap<LocalId, InputBinding> };
 
-export class FinancialBindingError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "FinancialBindingError";
-  }
-}
+type SlotOutcome = { binding: InputBinding; candidate_count: number; truncated: boolean };
 
 export async function bindPlanInputs(input: {
   client: SqlExecutor;
-  run_id: string;
   lease: RunLease;
   plan: FinancialPlanV1;
   authority: FinancialRuntimeAuthority;
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
 }): Promise<BindingResult> {
-  const { client, plan, authority } = input;
-  await client.query("begin isolation level repeatable read");
-  try {
-    // The lease fence locks the run row: a stale, superseded, or cancelled worker cannot bind.
-    const run = await assertLeaseFence(client, input.lease);
-    if (run.run_id !== input.run_id || run.user_id !== authority.owner_user_id) throw new FinancialBindingError("run not found for this owner");
-    if (run.plan_id !== plan.plan_id) throw new FinancialBindingError("plan does not belong to this run");
-    if (Date.parse(run.knowledge_cutoff) !== Date.parse(plan.time.knowledge_cutoff)) throw new FinancialBindingError("run cutoff differs from its plan");
+  const { plan, authority } = input;
+  // The fence locks the run row: a stale, superseded, or cancelled worker cannot bind.
+  return fencedTransaction(input.client, input.lease, async (tx) => {
+    const runId = tx.run.run_id;
+    if (tx.run.user_id !== authority.owner_user_id) throw new ExecutionIntegrityError("run not found for this owner");
+    if (tx.run.plan_id !== plan.plan_id) throw new ExecutionIntegrityError("plan does not belong to this run");
+    if (Date.parse(tx.run.knowledge_cutoff) !== Date.parse(plan.time.knowledge_cutoff)) throw new ExecutionIntegrityError("run cutoff differs from its plan");
 
-    const existing = await loadBindings(client, input.run_id);
-    if (existing.size > 0) {
-      await client.query("commit");
-      return { run_id: input.run_id, reused: true, bindings: existing };
-    }
+    const existing = await loadBindings(tx.client, runId);
+    if (existing.size > 0) return { run_id: runId, reused: true, bindings: existing };
 
-    const evidence = input.evidence(client);
+    const evidence = input.evidence(tx.client);
     const bindings = new Map<LocalId, InputBinding>();
     let candidateBudget = plan.limits.max_input_candidates;
     for (const node of plan.operations) {
       if (node.operation !== "reported_metric") continue;
-      const slot = plan.subjects.members.find((member) => member.slot_id === node.subject_slot)!;
-      let candidates: ReadonlyArray<InputCandidate> = [];
-      let selection: SlotSelection;
-      let truncated = false;
-      if (candidateBudget <= 0) {
-        selection = { status: "gap", reason_code: "scope_limit_exceeded" };
-      } else {
-        // A failed evidence read is recorded as an execution-error gap for this
-        // slot, never as absent evidence; the savepoint keeps the binding
-        // transaction usable after a database error.
-        await client.query("savepoint evidence_read");
-        const page = await evidence.listInputCandidates({
-          authority,
-          subject: slot.subject_ref,
-          metric_key: node.metric_key,
-          fiscal_year: node.period.kind === "fiscal_period" ? node.period.fiscal_year : null,
-          fiscal_period: node.period.kind === "fiscal_period" ? node.period.fiscal_period : null,
-          limit: candidateBudget,
-        });
-        if (page.status === "error") {
-          await client.query("rollback to savepoint evidence_read");
-          const binding = { slot: node.node_id, status: "gap" as const, reason_code: page.reason_code, candidate_set_digest: candidateSetDigest(node.node_id, [], false) };
-          await persistBinding(client, input.run_id, binding, 0, false);
-          bindings.set(node.node_id, binding);
-          continue;
-        }
-        await client.query("release savepoint evidence_read");
-        candidates = page.candidates;
-        truncated = page.truncated;
-        candidateBudget -= candidates.length;
-        selection = selectInput(node, candidates, {
-          knowledge_cutoff: plan.time.knowledge_cutoff,
-          reporting_basis: plan.policies.reporting_basis,
-          max_age_days: plan.policies.freshness.max_age_days,
-        }, { truncated });
-      }
-      const digest = candidateSetDigest(node.node_id, candidates, truncated);
-      const binding = selection.status === "selected"
-        ? boundBinding(node, slot, plan, selection, digest)
-        : { slot: node.node_id, status: "gap" as const, reason_code: selection.reason_code, candidate_set_digest: digest };
-      await persistBinding(client, input.run_id, binding, candidates.length, truncated);
-      bindings.set(node.node_id, binding);
+      const outcome = await bindSlot(tx, node, { plan, authority, evidence, candidate_budget: candidateBudget });
+      candidateBudget -= outcome.candidate_count;
+      await persistBinding(tx.client, runId, outcome);
+      bindings.set(node.node_id, outcome.binding);
     }
-    await client.query(`update financial_runs set bound_at = now(), updated_at = now() where run_id = $1`, [input.run_id]);
+    await tx.client.query(`update financial_runs set bound_at = now(), updated_at = now() where run_id = $1`, [runId]);
     const boundCount = [...bindings.values()].filter((binding) => binding.status === "bound").length;
-    await appendRunEvent(client, input.run_id, "inputs_bound", { payload: { bound_count: boundCount, gap_count: bindings.size - boundCount } });
-    await client.query("commit");
-    return { run_id: input.run_id, reused: false, bindings };
-  } catch (error) {
-    await client.query("rollback");
-    throw error;
+    await appendRunEvent(tx.client, runId, "inputs_bound", { payload: { bound_count: boundCount, gap_count: bindings.size - boundCount } });
+    return { run_id: runId, reused: false, bindings };
+  }, { isolation: "repeatable read" });
+}
+
+/**
+ * Reads and selects one slot's evidence. A failed read is an execution-error
+ * gap for this slot, never absent evidence; the savepoint keeps the binding
+ * transaction usable after a database error.
+ */
+async function bindSlot(
+  { client }: FencedTx,
+  node: ReportedMetricNode,
+  context: { plan: FinancialPlanV1; authority: FinancialRuntimeAuthority; evidence: FinancialEvidencePort; candidate_budget: number },
+): Promise<SlotOutcome> {
+  const { plan } = context;
+  const gapOutcome = (reason: ReasonCode): SlotOutcome => ({
+    binding: { slot: node.node_id, status: "gap", reason_code: reason, candidate_set_digest: candidateSetDigest(node.node_id, [], false) },
+    candidate_count: 0,
+    truncated: false,
+  });
+  if (context.candidate_budget <= 0) return gapOutcome("scope_limit_exceeded");
+
+  const slot = plan.subjects.members.find((member) => member.slot_id === node.subject_slot)!;
+  await client.query("savepoint evidence_read");
+  const page = await context.evidence.listInputCandidates({
+    authority: context.authority,
+    subject: slot.subject_ref,
+    metric_key: node.metric_key,
+    fiscal_year: node.period.kind === "fiscal_period" ? node.period.fiscal_year : null,
+    fiscal_period: node.period.kind === "fiscal_period" ? node.period.fiscal_period : null,
+    limit: context.candidate_budget,
+  });
+  if (page.status === "error") {
+    await client.query("rollback to savepoint evidence_read");
+    return gapOutcome(page.reason_code);
   }
+  await client.query("release savepoint evidence_read");
+
+  const selection = selectInput(node, page.candidates, {
+    knowledge_cutoff: plan.time.knowledge_cutoff,
+    reporting_basis: plan.policies.reporting_basis,
+    max_age_days: plan.policies.freshness.max_age_days,
+  }, { truncated: page.truncated });
+  const digest = candidateSetDigest(node.node_id, page.candidates, page.truncated);
+  return {
+    binding: selection.status === "selected"
+      ? boundBinding(node, slot, plan, selection.input, digest)
+      : { slot: node.node_id, status: "gap", reason_code: selection.reason_code, candidate_set_digest: digest },
+    candidate_count: page.candidates.length,
+    truncated: page.truncated,
+  };
 }
 
 /** Digest of the authorized candidates seen for a slot: facts and the proofs attached to them. */
@@ -144,19 +137,10 @@ export function candidateSetDigest(slot: LocalId, candidates: ReadonlyArray<Inpu
   });
 }
 
-function boundBinding(
-  node: ReportedMetricNode,
-  slot: SubjectSlot,
-  plan: FinancialPlanV1,
-  selection: Extract<SlotSelection, { status: "selected" }>,
-  digest: Sha256Hex,
-): InputBinding {
-  const { candidate, publication } = selection;
-  const context = candidate.context!;
-  const precision = candidate.precision!;
+function boundBinding(node: ReportedMetricNode, slot: SubjectSlot, plan: FinancialPlanV1, selected: SelectedInput, digest: Sha256Hex): InputBinding {
+  const { candidate, publication, numeric } = selected;
+  const { context, precision } = candidate;
   const definition = plan.metric_definitions.find((entry) => entry.metric_key === node.metric_key)!;
-  const value = canonical(candidate.value_text);
-  const scale = canonical(candidate.scale_text);
   const payload = {
     schema_version: "financial_bound_input.v1",
     input_slot: node.node_id,
@@ -164,7 +148,7 @@ function boundBinding(
     subject_ref: slot.subject_ref,
     metric: { metric_key: node.metric_key, definition_version: definition.definition_version },
     source: { source_id: candidate.source_id, document_id: null, source_version_hash: candidate.source_version_hash, locator: precision.source_locator },
-    numeric: { raw_token: precision.raw_token, token_proof_hash: precision.token_proof_hash, value, scale, native_value: nativeValue(value, scale) },
+    numeric: { raw_token: precision.raw_token, token_proof_hash: precision.token_proof_hash, value: numeric.value, scale: numeric.scale, native_value: numeric.native_value },
     unit: candidate.unit,
     period: {
       kind: context.period_type,
@@ -192,7 +176,7 @@ function boundBinding(
   };
   const validated = validateBoundInput(payload);
   if (!validated.ok) {
-    throw new FinancialBindingError(`bound input for ${node.node_id} is invalid: ${validated.issues.map((issue) => `${issue.path} ${issue.message}`).join("; ")}`);
+    throw new ExecutionIntegrityError(`bound input for ${node.node_id} is invalid: ${validated.issues.map((issue) => `${issue.path} ${issue.message}`).join("; ")}`);
   }
   return {
     slot: node.node_id,
@@ -204,7 +188,7 @@ function boundBinding(
   };
 }
 
-async function persistBinding(client: SqlExecutor, runId: string, binding: InputBinding, candidateCount: number, truncated: boolean): Promise<void> {
+async function persistBinding(client: SqlExecutor, runId: string, { binding, candidate_count: candidateCount, truncated }: SlotOutcome): Promise<void> {
   if (binding.status === "bound") {
     await client.query(
       `insert into financial_run_inputs (run_id, input_slot, binding_status, fact_id, publication_attestation_id, precision_attestation_id,
@@ -254,8 +238,8 @@ export async function loadBindings(client: SqlExecutor, runId: string): Promise<
       continue;
     }
     const validated = validateBoundInput(row.bound_payload);
-    if (!validated.ok) throw new FinancialBindingError(`persisted binding ${row.input_slot} is invalid`);
-    if (hashCanonical("bound_input", validated.value) !== row.payload_hash) throw new FinancialBindingError(`persisted binding ${row.input_slot} does not match its hash`);
+    if (!validated.ok) throw new ExecutionIntegrityError(`persisted binding ${row.input_slot} is invalid`);
+    if (hashCanonical("bound_input", validated.value) !== row.payload_hash) throw new ExecutionIntegrityError(`persisted binding ${row.input_slot} does not match its hash`);
     bindings.set(row.input_slot, {
       slot: row.input_slot,
       status: "bound",
@@ -266,24 +250,4 @@ export async function loadBindings(client: SqlExecutor, runId: string): Promise<
     });
   }
   return bindings;
-}
-
-function canonical(text: string): string {
-  const parsed = parseDerivedDecimalText(text);
-  if (!parsed.ok) throw new FinancialBindingError(`stored numeric ${JSON.stringify(text)} is not a supported decimal`);
-  return canonicalDecimalString(parsed.value);
-}
-
-function nativeValue(value: string, scale: string): string {
-  const product = multiplyRationals(toRational(value), toRational(scale));
-  const represented = product === null ? null : rationalToValue(product);
-  if (represented === null || !represented.exact) throw new FinancialBindingError("value x scale exceeds numeric limits");
-  return canonicalDecimalString(represented.value);
-}
-
-function toRational(text: string) {
-  const parsed = parseDerivedDecimalText(text);
-  const rational = parsed.ok ? rationalFromDecimal(parsed.value) : null;
-  if (rational === null) throw new FinancialBindingError(`numeric ${JSON.stringify(text)} exceeds numeric limits`);
-  return rational;
 }

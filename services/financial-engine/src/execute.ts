@@ -23,14 +23,14 @@ import {
   type LocalId,
   type ReasonCode,
 } from "../../financial-core/src/index.ts";
-import { bindPlanInputs, FinancialBindingError, type InputBinding } from "./bind-inputs.ts";
-import { checkExecutionBudget } from "./budget.ts";
+import { bindPlanInputs, type InputBinding } from "./bind-inputs.ts";
 import { buildUnitCheckpoint, checkpointUnit, nodeHashes } from "./checkpoints.ts";
-import { assertLeaseFence, StaleLeaseError, type RunLease } from "./lease.ts";
+import { ExecutionIntegrityError } from "./errors.ts";
+import { fencedTransaction, StaleLeaseError, type RunLease } from "./lease.ts";
+import { authorizePlan } from "./plan-authority.ts";
 import type { FinancialEvidencePort, SqlExecutor } from "./ports.ts";
-import { ExecutionIntegrityError } from "./result-repo.ts";
 import { transitionRun } from "./run-repo.ts";
-import { declareUnits, UnitClosureConflictError } from "./unit-repo.ts";
+import { declareUnits } from "./unit-repo.ts";
 
 export type ExecutionReport =
   | { run_id: string; outcome: "ready_to_seal"; coverage: CoverageSummary }
@@ -48,32 +48,31 @@ export type ExecuteRunInput = {
 
 export async function executeRun(input: ExecuteRunInput): Promise<ExecutionReport> {
   const { client, lease, plan } = input;
-  const budget = checkExecutionBudget(plan, input.authority, input.parent_limits);
-  if (!budget.ok) return fail(client, lease, budget.reason_code);
+  // Limits are enforced before any evidence is acquired. Evidence reads run
+  // sequentially on the run's pinned client: one evidence task in flight.
+  const authorized = authorizePlan(plan, input.authority, input.parent_limits);
+  if (!authorized.ok) return fail(client, lease, authorized.reason_code);
   try {
-    const { bindings } = await bindPlanInputs({ ...input, run_id: lease.run_id });
-    await inTransaction(client, () => declareUnits(client, lease, plan));
+    const { bindings } = await bindPlanInputs(input);
+    await fencedTransaction(client, lease, (tx) => declareUnits(tx, plan));
     const evaluation = evaluateBoundPlan(plan, bindings);
     const hashes = nodeHashes(plan, evaluation, bindings);
     for (const unit of plan.publication_units) {
       await checkpointUnit(client, lease, buildUnitCheckpoint(plan, evaluation, hashes, unit.unit_id));
     }
     const coverage = summarizeCoverage(evaluation);
-    await inTransaction(client, async () => {
-      const run = await assertLeaseFence(client, lease);
-      if (run.execution_state === "running") await transitionRun(client, lease, "ready_to_seal", { coverage_state: coverage.state });
+    await fencedTransaction(client, lease, async (tx) => {
+      if (tx.run.execution_state === "running") await transitionRun(tx, "ready_to_seal", { coverage_state: coverage.state });
     });
     return { run_id: lease.run_id, outcome: "ready_to_seal", coverage };
   } catch (error) {
     if (error instanceof StaleLeaseError && error.reason === "cancel_requested") {
-      await inTransaction(client, () => transitionRun(client, lease, "cancelled"));
+      await fencedTransaction(client, lease, (tx) => transitionRun(tx, "cancelled"), { allowCancelRequested: true });
       return { run_id: lease.run_id, outcome: "cancelled" };
     }
     // A lost lease means another worker owns the run: nothing may be written.
     if (error instanceof StaleLeaseError) throw error;
-    if (error instanceof ExecutionIntegrityError || error instanceof FinancialBindingError || error instanceof UnitClosureConflictError) {
-      return fail(client, lease, "integrity_failure");
-    }
+    if (error instanceof ExecutionIntegrityError) return fail(client, lease, "integrity_failure");
     await fail(client, lease, "internal_error").catch((failure) => {
       if (!(failure instanceof StaleLeaseError)) throw failure;
     });
@@ -108,18 +107,6 @@ function bindingGapExplanation(reason: ReasonCode): string {
 }
 
 async function fail(client: SqlExecutor, lease: RunLease, failureCode: string): Promise<ExecutionReport> {
-  await inTransaction(client, () => transitionRun(client, lease, "failed", { failure_code: failureCode }));
+  await fencedTransaction(client, lease, (tx) => transitionRun(tx, "failed", { failure_code: failureCode }), { allowCancelRequested: true });
   return { run_id: lease.run_id, outcome: "failed", failure_code: failureCode };
-}
-
-async function inTransaction<T>(client: SqlExecutor, action: () => Promise<T>): Promise<T> {
-  await client.query("begin");
-  try {
-    const result = await action();
-    await client.query("commit");
-    return result;
-  } catch (error) {
-    await client.query("rollback");
-    throw error;
-  }
 }

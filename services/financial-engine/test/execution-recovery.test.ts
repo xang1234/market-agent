@@ -6,7 +6,7 @@ import { buildUnitCheckpoint, checkpointUnit, nodeHashes } from "../src/checkpoi
 import { listRunEvents } from "../src/events-repo.ts";
 import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
 import { evaluateBoundPlan, executeRun } from "../src/execute.ts";
-import { acquireLease, StaleLeaseError, type RunLease } from "../src/lease.ts";
+import { acquireLease, fencedTransaction, StaleLeaseError, type RunLease } from "../src/lease.ts";
 import type { FinancialEvidencePort, SqlExecutor } from "../src/ports.ts";
 import { loadResults } from "../src/result-repo.ts";
 import { declareUnits, listUnits } from "../src/unit-repo.ts";
@@ -28,11 +28,9 @@ test("execution recovery after a worker crash", { timeout: 240_000 }, async (t) 
     const real = createEvidenceFinancialPort(executor);
     return { listInputCandidates: (request) => { evidenceReads += 1; return real.listInputCandidates(request); } };
   };
-  const { bindings } = await bindPlanInputs({ client: db, run_id: runId, lease: crashed, plan, authority, evidence: counting });
+  const { bindings } = await bindPlanInputs({ client: db, lease: crashed, plan, authority, evidence: counting });
   assert.equal(evidenceReads, 4);
-  await db.query("begin");
-  await declareUnits(db, crashed, plan);
-  await db.query("commit");
+  await fencedTransaction(db, crashed, (tx) => declareUnits(tx, plan));
   const evaluation = evaluateBoundPlan(plan, bindings);
   const hashes = nodeHashes(plan, evaluation, bindings);
   assert.equal(await checkpointUnit(db, crashed, buildUnitCheckpoint(plan, evaluation, hashes, "rev_unit")), true);

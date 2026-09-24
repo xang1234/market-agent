@@ -10,13 +10,12 @@ import { recordFactPrecisionAttestation, recordSourcePublicationAttestation } fr
 import { recordFactFinancialContext } from "../../evidence/src/financial-context.ts";
 import {
   createRuntimeAuthority,
-  planBindingHash,
-  planSemanticHash,
   validateFinancialPlan,
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
 } from "../../financial-core/src/index.ts";
 import { acquireLease, type RunLease } from "../src/lease.ts";
+import { reserveRun } from "../src/run-repo.ts";
 
 export const IDS = {
   owner: "4f000000-0000-4000-8000-000000000001",
@@ -246,21 +245,6 @@ export function authorityFor(owner: string = IDS.owner, overrides: { mode?: "off
   });
 }
 
-/** Inserts the plan and a pending run directly (the run repository arrives in T12). */
-export async function insertPlanAndRun(db: Client, plan: FinancialPlanV1, authority: FinancialRuntimeAuthority, requestKey = randomUUID()): Promise<string> {
-  await db.query(
-    `insert into financial_plans (plan_id, user_id, origin_kind, origin_ref, catalog_version, plan, semantic_hash, binding_hash)
-     values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)`,
-    [plan.plan_id, authority.owner_user_id, plan.origin.kind, plan.origin.ref, plan.catalog_version, JSON.stringify(plan), planSemanticHash(plan), planBindingHash(plan, authority)],
-  );
-  return (await db.query<{ run_id: string }>(
-    `insert into financial_runs (user_id, parent_kind, parent_id, parent_version, request_key, request_hash, plan_id, feature_mode, knowledge_cutoff, policies)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb) returning run_id::text`,
-    [authority.owner_user_id, authority.parent.kind, authority.parent.id, authority.parent.version, requestKey, planBindingHash(plan, authority),
-      plan.plan_id, authority.feature.mode, plan.time.knowledge_cutoff, JSON.stringify(plan.policies)],
-  )).rows[0]!.run_id;
-}
-
 /** A new pending run for the plan, leased to `workerId`. */
 export async function leasedRun(
   db: Client,
@@ -268,7 +252,9 @@ export async function leasedRun(
   authority: FinancialRuntimeAuthority = authorityFor(),
   workerId = "worker-1",
 ): Promise<{ runId: string; lease: RunLease }> {
-  const runId = await insertPlanAndRun(db, plan, authority);
+  const reserved = await reserveRun(db, { authority, request_key: randomUUID(), plan });
+  assert.equal(reserved.status, "created");
+  const runId = (reserved as { run: { run_id: string } }).run.run_id;
   const acquired = await acquireLease(db, { authority, run_id: runId, worker_id: workerId, ttl_ms: 60_000 });
   assert.equal(acquired.status, "acquired");
   return { runId, lease: (acquired as { lease: RunLease }).lease };

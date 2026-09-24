@@ -7,13 +7,15 @@
 import {
   planBindingHash,
   planSemanticHash,
+  type CoverageState,
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
 } from "../../financial-core/src/index.ts";
 import { appendRunEvent } from "./events-repo.ts";
-import { assertLeaseFence, type RunLease } from "./lease.ts";
+import { StaleLeaseError, type FencedTx } from "./lease.ts";
 import type { SqlExecutor } from "./ports.ts";
 import { RUN_COLUMNS, toRun, type ExecutionState, type RunRecord } from "./run-record.ts";
+import { withTransaction } from "./transaction.ts";
 
 export type { ExecutionState, RunRecord } from "./run-record.ts";
 
@@ -22,28 +24,25 @@ export type ReserveRunResult =
   | { status: "conflict"; reason: "request_hash_mismatch" | "parent_version_mismatch"; run_id: string };
 
 /** The request identity of a run: what is asked, independent of random plan ids. */
-export function runRequestHash(plan: FinancialPlanV1): string {
-  return planSemanticHash(plan);
-}
-
 /**
  * Reserves the run for (owner, parent, request key) or returns the existing
  * one. Concurrent creators serialize on the unique key; the loser's plan row
- * rolls back with its transaction.
+ * rolls back to the savepoint. The request identity is the plan's semantic
+ * hash: what is asked, independent of random plan ids.
  */
 export async function reserveRun(
   client: SqlExecutor,
   input: { authority: FinancialRuntimeAuthority; request_key: string; plan: FinancialPlanV1; replay_of_run_id?: string | null },
 ): Promise<ReserveRunResult> {
   const { authority, plan } = input;
-  const requestHash = runRequestHash(plan);
-  await client.query("begin");
-  try {
+  const requestHash = planSemanticHash(plan);
+  return withTransaction(client, async () => {
+    await client.query("savepoint reserve_run");
     await client.query(
       `insert into financial_plans (plan_id, user_id, origin_kind, origin_ref, catalog_version, plan, semantic_hash, binding_hash, interpretation)
        values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9)`,
       [plan.plan_id, authority.owner_user_id, plan.origin.kind, plan.origin.ref, plan.catalog_version, JSON.stringify(plan),
-        planSemanticHash(plan), planBindingHash(plan, authority), plan.interpretation?.text ?? null],
+        requestHash, planBindingHash(plan, authority), plan.interpretation?.text ?? null],
     );
     const created = (await client.query<Record<string, unknown>>(
       `insert into financial_runs (user_id, parent_kind, parent_id, parent_version, request_key, request_hash, plan_id, feature_mode,
@@ -57,24 +56,20 @@ export async function reserveRun(
     if (created) {
       const run = toRun(created);
       await appendRunEvent(client, run.run_id, "run_created", { payload: { execution_state: "pending" } });
-      await client.query("commit");
       return { status: "created", run };
     }
-    await client.query("rollback");
-  } catch (error) {
-    await client.query("rollback");
-    throw error;
-  }
 
-  const existing = (await client.query<Record<string, unknown>>(
-    `select ${RUN_COLUMNS} from financial_runs where user_id = $1 and parent_kind = $2 and parent_id = $3 and request_key = $4`,
-    [authority.owner_user_id, authority.parent.kind, authority.parent.id, input.request_key],
-  )).rows[0];
-  if (!existing) throw new Error("run reservation lost its conflicting row");
-  const run = toRun(existing);
-  if (run.request_hash !== requestHash) return { status: "conflict", reason: "request_hash_mismatch", run_id: run.run_id };
-  if (run.parent_version !== authority.parent.version) return { status: "conflict", reason: "parent_version_mismatch", run_id: run.run_id };
-  return { status: "existing", run };
+    await client.query("rollback to savepoint reserve_run");
+    const existing = (await client.query<Record<string, unknown>>(
+      `select ${RUN_COLUMNS} from financial_runs where user_id = $1 and parent_kind = $2 and parent_id = $3 and request_key = $4`,
+      [authority.owner_user_id, authority.parent.kind, authority.parent.id, input.request_key],
+    )).rows[0];
+    if (!existing) throw new Error("run reservation lost its conflicting row");
+    const run = toRun(existing);
+    if (run.request_hash !== requestHash) return { status: "conflict", reason: "request_hash_mismatch", run_id: run.run_id };
+    if (run.parent_version !== authority.parent.version) return { status: "conflict", reason: "parent_version_mismatch", run_id: run.run_id };
+    return { status: "existing", run };
+  });
 }
 
 /** Owner-scoped lookup; another owner's run is indistinguishable from a missing one. */
@@ -100,17 +95,16 @@ export class RunTransitionError extends Error {
 }
 
 /**
- * Moves a run to its next execution state under the current lease fence, in
- * the caller's transaction. Coverage is recorded on completion; failures carry
- * a reason code.
+ * Moves a run to its next execution state in the caller's fenced
+ * transaction. Coverage is recorded on completion; failures carry a reason
+ * code. Under a pending cancellation only cancelled or failed are allowed.
  */
 export async function transitionRun(
-  client: SqlExecutor,
-  lease: RunLease,
+  { client, lease, run: current }: FencedTx,
   to: Exclude<ExecutionState, "pending" | "running">,
-  details: { coverage_state?: "complete" | "partial" | "none"; failure_code?: string } = {},
+  details: { coverage_state?: CoverageState; failure_code?: string } = {},
 ): Promise<RunRecord> {
-  const current = await assertLeaseFence(client, lease, { allowCancelRequested: to === "cancelled" || to === "failed" });
+  if (current.cancel_requested_at !== null && to !== "cancelled" && to !== "failed") throw new StaleLeaseError("cancel_requested");
   if (!ALLOWED_TRANSITIONS[current.execution_state].includes(to)) {
     throw new RunTransitionError(`cannot move run from ${current.execution_state} to ${to}`);
   }
@@ -139,8 +133,7 @@ export async function transitionRun(
  * at once; otherwise the lease holder observes the request at its next fence.
  */
 export async function requestCancellation(client: SqlExecutor, ownerUserId: string, runId: string): Promise<RunRecord | null> {
-  await client.query("begin");
-  try {
+  return withTransaction(client, async () => {
     const row = (await client.query<Record<string, unknown>>(
       `update financial_runs
           set cancel_requested_at = coalesce(cancel_requested_at, now()), updated_at = now(),
@@ -154,10 +147,6 @@ export async function requestCancellation(client: SqlExecutor, ownerUserId: stri
     if (row && toRun(row).execution_state === "cancelled") {
       await appendRunEvent(client, runId, "run_cancelled", { payload: { execution_state: "cancelled" } });
     }
-    await client.query("commit");
     return row ? toRun(row) : getRun(client, ownerUserId, runId);
-  } catch (error) {
-    await client.query("rollback");
-    throw error;
-  }
+  });
 }

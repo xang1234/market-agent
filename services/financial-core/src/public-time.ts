@@ -6,12 +6,13 @@
 // measured to the cutoff, never to execution time. No wall-clock access.
 
 import type { IsoDate, IsoDateTime } from "./contracts.ts";
+import type { PublicationTimingPrecision } from "./evidence-vocabulary.ts";
 import { dayNumber } from "./periods.ts";
 
 export type PublicationTiming = {
   available_not_before: string | null;
   available_no_later_than: string;
-  timing_precision: "instant" | "date" | "observed_public";
+  timing_precision: PublicationTimingPrecision;
   source_timezone: string;
 };
 
