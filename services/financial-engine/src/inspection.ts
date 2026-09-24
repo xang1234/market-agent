@@ -7,17 +7,10 @@
 // about it can be enumerated. A certificate or operation version this build
 // does not support is reported as unavailable, never reinterpreted.
 
-import {
-  dependencyClosure,
-  FINANCIAL_PRESENTATION_VERSION,
-  OPERATION_REGISTRY,
-  type BoundFinancialInputV1,
-  type LocalId,
-  type OperationKind,
-} from "../../financial-core/src/index.ts";
-import { FINANCIAL_VERIFIER_VERSION } from "../../snapshot/src/financial-verifier.ts";
+import { dependencyClosure, type BoundFinancialInputV1, type LocalId } from "../../financial-core/src/index.ts";
 import type { SqlExecutor } from "./ports.ts";
-import { readClosureInputs, readCommittedResult, type CommittedResultRecord } from "./read-model.ts";
+import { readClosureInputs, readCommittedResult } from "./read-model.ts";
+import { supportedPublication, unsupportedPlanVersion } from "./version-registry.ts";
 
 export const INSPECTION_SCHEMA_VERSION = "financial_result_inspection.v1";
 
@@ -74,7 +67,15 @@ export async function inspectCommittedResult(db: SqlExecutor, ownerUserId: strin
   const inputs = await readClosureInputs(db, ownerUserId, record.run_id, reportedSlots);
   if (inputs.length !== reportedSlots.length || inputs.some((input) => !input.available)) return null;
 
-  if (!supportedVersions(record)) {
+  const supported = record.certificate.schema_version === "financial_publication.v1"
+    && unsupportedPlanVersion(plan) === null
+    && supportedPublication({
+      verifier_version: record.certificate.verifier_version,
+      presentation_version: record.certificate.presentation?.version,
+      operation_version: record.computation?.operation_version ?? null,
+      numeric_policy_version: record.computation?.numeric_policy_version ?? null,
+    });
+  if (!supported) {
     return { schema_version: INSPECTION_SCHEMA_VERSION, availability: "unsupported_version", result_id: record.result_id, run_id: record.run_id, reason_code: "unsupported_version" };
   }
   const metricKeys = new Set(inputs.flatMap((input) => (input.binding_status === "bound" ? [(input.bound_payload as BoundFinancialInputV1).metric.metric_key] : [])));
@@ -115,12 +116,4 @@ export async function inspectCommittedResult(db: SqlExecutor, ownerUserId: strin
       };
     }),
   };
-}
-
-function supportedVersions(record: CommittedResultRecord): boolean {
-  const { certificate, computation } = record;
-  if (certificate.schema_version !== "financial_publication.v1" || certificate.verifier_version !== FINANCIAL_VERIFIER_VERSION) return false;
-  if (certificate.presentation?.version !== FINANCIAL_PRESENTATION_VERSION) return false;
-  if (computation === null) return true;
-  return OPERATION_REGISTRY[computation.formula_id as OperationKind]?.operation_version === computation.operation_version;
 }

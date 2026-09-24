@@ -8,8 +8,9 @@ import {
   type DevApiServiceAdapterDeps,
 } from "./http.ts";
 import type { DiscoveryService } from "../../discovery/src/ports.ts";
+import { startFinancialWorkerFromEnv, type FinancialWorkerEnv } from "./financial-worker-bootstrap.ts";
 
-export type DevApiRuntimeEnv = {
+export type DevApiRuntimeEnv = FinancialWorkerEnv & {
   MA_DEV_API_FIXTURE_ADAPTER?: string;
   DEV_API_DATABASE_URL?: string;
   DATABASE_URL?: string;
@@ -54,6 +55,7 @@ export async function createDevApiAdaptersFromEnv(
 
   const { Pool } = await import("pg");
   const pool = new Pool({ connectionString: databaseUrl });
+  startFinancialWorkerFromEnv(pool, env);
   const discovery = module.createDiscoveryService === undefined
     ? undefined
     : await module.createDiscoveryService({ db: pool }) as DiscoveryService;
