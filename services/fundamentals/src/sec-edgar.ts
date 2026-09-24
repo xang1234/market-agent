@@ -76,28 +76,55 @@ export async function fetchCompanyFacts(
   fetcher: SecEdgarFetcher,
   cik: number,
 ): Promise<SecCompanyFacts> {
-  const raw = normalizeSourceNumbers(await fetcher(companyFactsPath(cik)), null);
+  const raw = fromLosslessCompanyFacts(await fetcher(companyFactsPath(cik)));
   assertCompanyFacts(raw, "fetchCompanyFacts.response");
   return raw;
 }
 
-// Lossless responses carry SourceNumber tokens. Identifiers and years become
-// bounded integers; each concept value keeps its exact token in val_token
-// beside the legacy JavaScript number. Plain-number fixtures pass through.
-function normalizeSourceNumbers(value: unknown, key: string | null): unknown {
-  if (isSourceNumber(value)) {
-    if (key === "cik") return boundedInteger(value, "cik", { min: 1, max: 9_999_999_999 });
-    if (key === "fy") return boundedInteger(value, "fy", { min: 1900, max: 2200 });
-    return Number(value.token);
-  }
-  if (Array.isArray(value)) return value.map((item) => normalizeSourceNumbers(item, null));
-  if (value === null || typeof value !== "object") return value;
-  const out: Record<string, unknown> = {};
-  for (const [childKey, child] of Object.entries(value)) {
-    out[childKey] = normalizeSourceNumbers(child, childKey);
-    if (childKey === "val" && isSourceNumber(child)) out.val_token = child.token;
-  }
-  return out;
+// A lossless response carries SourceNumber tokens where the companyfacts
+// schema has numbers: the top-level cik, and each concept value's val and fy.
+// This walks exactly that structure. cik and fy become bounded integers; val
+// keeps its exact token in val_token beside the number the legacy statement
+// reader uses. A token anywhere else is a schema change and is rejected, never
+// silently rounded. Plain-number fixtures pass through unchanged.
+function fromLosslessCompanyFacts(raw: unknown): unknown {
+  if (!isRecord(raw)) return raw;
+  const { cik, facts, ...rest } = raw;
+  rejectStrayNumbers(rest, "companyfacts");
+  return {
+    ...rest,
+    cik: isSourceNumber(cik) ? boundedInteger(cik, "cik", { min: 1, max: 9_999_999_999 }) : cik,
+    facts: mapRecord(facts, (taxonomy) => mapRecord(taxonomy, losslessConcept)),
+  };
+}
+
+function losslessConcept(concept: unknown): unknown {
+  if (!isRecord(concept)) return concept;
+  const { units, ...rest } = concept;
+  rejectStrayNumbers(rest, "companyfacts concept");
+  return { ...rest, units: mapRecord(units, (values) => (Array.isArray(values) ? values.map(losslessConceptValue) : values)) };
+}
+
+function losslessConceptValue(entry: unknown): unknown {
+  if (!isRecord(entry)) return entry;
+  const { val, fy, ...rest } = entry;
+  rejectStrayNumbers(rest, "companyfacts value");
+  const year = isSourceNumber(fy) ? boundedInteger(fy, "fy", { min: 1900, max: 2200 }) : fy;
+  return isSourceNumber(val) ? { ...rest, fy: year, val: Number(val.token), val_token: val.token } : { ...rest, fy: year, val };
+}
+
+function rejectStrayNumbers(fields: Record<string, unknown>, label: string): void {
+  const stray = Object.keys(fields).find((key) => isSourceNumber(fields[key]));
+  if (stray !== undefined) throw new Error(`${label}.${stray}: unexpected numeric field`);
+}
+
+function mapRecord(value: unknown, map: (child: unknown) => unknown): unknown {
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, map(child)]));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value) && !isSourceNumber(value);
 }
 
 // Top-level shape only — concept and unit walking is defended structurally

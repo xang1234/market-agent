@@ -260,12 +260,21 @@ class FakeFundamentalsDb {
   readonly metrics = metricDefinitions();
   readonly facts: FactRecord[] = [];
   readonly sources: unknown[][] = [];
+  readonly transactions: string[] = [];
+
+  async connect() {
+    return { query: this.query.bind(this), release: () => {} };
+  }
 
   async query<R extends Record<string, unknown> = Record<string, unknown>>(
     text: string,
     values: unknown[] = [],
   ): Promise<{ rows: R[] }> {
     const sql = text.toLowerCase();
+    if (sql === "begin" || sql === "commit" || sql === "rollback") {
+      this.transactions.push(sql);
+      return rows([]);
+    }
     if (sql.includes("from issuers")) {
       return rows([{ issuer_id: ISSUER_ID, cik: "320193" }]);
     }

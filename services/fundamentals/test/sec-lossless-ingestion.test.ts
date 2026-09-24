@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { bootstrapDatabase, connectedClient, dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
+import { bootstrapDatabase, connectedPool, dockerAvailable, workspaceRoot } from "../../../db/test/docker-pg.ts";
 import { listFinancialInputCandidates } from "../../evidence/src/financial-input-repo.ts";
 import { createSecCompanyFactsHttpFetcher } from "../src/sec-edgar-http.ts";
 import { createSecBackedStatementRepository } from "../src/sec-facts-repository.ts";
@@ -33,7 +33,7 @@ test("SEC company facts reach storage and strict reads without losing digits", {
     return;
   }
   const { databaseUrl } = await bootstrapDatabase(t, "fin-sec-lossless");
-  const db = await connectedClient(t, databaseUrl);
+  const db = await connectedPool(t, databaseUrl);
   await db.query(await readFile(join(workspaceRoot, "db", "seed", "metrics.sql"), "utf8"));
   await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, 'Example Corp', '320193')`, [ISSUER_ID]);
   await db.query(`insert into users (user_id, email) values ($1, 'reader@example.test')`, [USER_ID]);
@@ -92,4 +92,24 @@ test("SEC company facts reach storage and strict reads without losing digits", {
   assert.equal(typeof second?.lines.find((line) => line.metric_key === "revenue")?.value_num, "number");
   assert.equal(fetches, 1);
   assert.equal((await db.query(`select count(*)::int as n from fact_precision_attestations`)).rows[0].n, 3);
+
+  // A proof that cannot be written takes its facts with it: no fact lands unproven.
+  const otherIssuer = "31000000-0000-4000-8000-000000000004";
+  await db.query(`insert into issuers (issuer_id, legal_name, cik) values ($1, 'Other Corp', '320194')`, [otherIssuer]);
+  await db.query(`create function refuse_proof() returns trigger language plpgsql as $$ begin raise exception 'proof store unavailable'; end $$`);
+  await db.query(`create trigger refuse_proof before insert on fact_precision_attestations for each row execute function refuse_proof()`);
+  const otherLookup = { ...lookup, issuer_id: otherIssuer };
+  assert.equal(await statements.find(otherLookup).catch(() => null), null);
+  const factsFor = async (issuerId: string) =>
+    (await db.query(`select count(*)::int as n from facts where subject_id = $1`, [issuerId])).rows[0].n;
+  assert.equal(await factsFor(otherIssuer), 0);
+
+  await db.query(`drop trigger refuse_proof on fact_precision_attestations`);
+  assert.ok(await statements.find(otherLookup));
+  assert.equal(await factsFor(otherIssuer), 3);
+  const proven = (await db.query(
+    `select count(*)::int as n from current_fact_precision_attestations a join facts f on f.fact_id = a.fact_id where f.subject_id = $1`,
+    [otherIssuer],
+  )).rows[0].n;
+  assert.equal(proven, 3);
 });

@@ -18,6 +18,7 @@ import {
   type SecSourceToken,
 } from "./sec-edgar.ts";
 import { recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
+import { withPinnedTransaction, type TransactionalQueryExecutor } from "./pinned-transaction.ts";
 import { createHash } from "node:crypto";
 import { FundamentalsDataUnavailableError } from "./availability.ts";
 import {
@@ -46,6 +47,8 @@ export type FundamentalsQueryExecutor = {
   ): Promise<{ rows: R[] }>;
 };
 
+export type FundamentalsTransactionalQueryExecutor = TransactionalQueryExecutor<FundamentalsQueryExecutor>;
+
 export type SecBackedStatementRepositoryOptions = {
   fetcher?: SecEdgarFetcher | null;
   sourceId: UUID;
@@ -54,7 +57,7 @@ export type SecBackedStatementRepositoryOptions = {
 };
 
 export function createSecBackedStatementRepository(
-  db: FundamentalsQueryExecutor,
+  db: FundamentalsTransactionalQueryExecutor,
   options: SecBackedStatementRepositoryOptions,
 ): StatementRepository {
   const clock = options.clock ?? (() => new Date());
@@ -106,7 +109,8 @@ export function createSecBackedStatementRepository(
         const statement = normalizedStatement(extracted.statement);
 
         const registry = await loadMetricRegistry(db, statement.lines.map((line) => line.metric_key));
-        await persistStatementFacts(db, mapStatement(registry, statement), clock, { cik: cikNumber, tokens: extracted.tokens });
+        const mapped = mapStatement(registry, statement);
+        await withPinnedTransaction(db, (client) => persistStatementFacts(client, mapped, clock, { cik: cikNumber, tokens: extracted.tokens }));
         return statement;
       } catch (error) {
         const unavailable = classifySecIngestionError(error);
@@ -482,9 +486,12 @@ function firstCurrency(lines: ReadonlyArray<StatementLine>): string | null {
 
 // Lines taken verbatim from a losslessly parsed response are written from
 // their exact source token (Postgres numeric parses it without loss) and
-// receive a source_token_preserved precision attestation. Lines without a
-// token (legacy fixtures, derived fourth quarters) keep the legacy number and
-// get no precision proof, so strict financial binding treats them as gaps.
+// receive a source_token_preserved precision attestation in the same
+// transaction, so a fact never lands without its proof. Lines without a token
+// (legacy fixtures, derived fourth quarters) keep the legacy number and get no
+// precision proof, so strict financial binding treats them as gaps. A line
+// that conflicts was written by another ingestion, which recorded its own
+// proof atomically; older legacy facts are proven only by the backfill.
 async function persistStatementFacts(
   db: FundamentalsQueryExecutor,
   statement: MappedStatement,

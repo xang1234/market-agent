@@ -131,3 +131,12 @@ test("a derived fourth quarter never inherits the annual source token", async ()
   assert.equal(statement.lines.find((line) => line.metric_key === "revenue")?.value_num, 250);
   assert.equal(tokens.has("revenue"), false);
 });
+
+test("only the schema's numeric fields accept source numbers; anything else is rejected, not rounded", async () => {
+  const withValueExtra = companyFactsText("1").replace('"fp":"FY"', '"fp":"FY","restated_val":12345678901234567890');
+  await assert.rejects(() => fetchCompanyFacts(async () => parseFinancialJson(withValueExtra), 320193), /companyfacts value\.restated_val: unexpected numeric field/);
+  const withTopLevelExtra = companyFactsText("1").replace('"entityName"', '"schemaVersion":2,"entityName"');
+  await assert.rejects(() => fetchCompanyFacts(async () => parseFinancialJson(withTopLevelExtra), 320193), /companyfacts\.schemaVersion: unexpected numeric field/);
+  const withConceptExtra = companyFactsText("1").replace('"label":"Revenues"', '"label":"Revenues","decimals":-6');
+  await assert.rejects(() => fetchCompanyFacts(async () => parseFinancialJson(withConceptExtra), 320193), /companyfacts concept\.decimals: unexpected numeric field/);
+});
