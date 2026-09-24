@@ -1,13 +1,13 @@
-// Exact finite-decimal arithmetic shared by the financial core and legacy
+// Exact finite decimals shared by the financial core and legacy
 // callers. BigInt stays internal; JSON and APIs carry decimal strings.
 //
 // Two layers:
 //   * Legacy (moved verbatim from services/agents): the strict public
 //     threshold-write contract and its bounded multiply/compare. Re-exported
 //     unchanged by the services/agents compatibility facade.
-//   * Financial (numeric-policy.v1 limits): lossless source-token parsing,
-//     canonical rendering, bounded add/subtract/multiply, and cross-product
-//     ratio comparisons that never consult a rounded display value.
+//   * Financial (numeric-policy.v1 limits): lossless source-token parsing and
+//     canonical rendering. Financial arithmetic is exact rational arithmetic
+//     in rational.ts; this layer only converts between text and values.
 //
 // This module must stay dependency-free: the web build type-checks it through
 // the agents facade.
@@ -171,50 +171,6 @@ export function canonicalDecimalString(value: ExactDecimal): string {
   return negative ? `-${text}` : text;
 }
 
-export function addExactDecimals(left: ExactDecimal, right: ExactDecimal): FinancialDecimalResult {
-  if (!withinFinancialBounds(left) || !withinFinancialBounds(right)) return limitExceeded();
-  const scale = Math.max(left.scale, right.scale);
-  const sum = left.coefficient * powerOfTen(scale - left.scale) + right.coefficient * powerOfTen(scale - right.scale);
-  return normalizeFinancial(sum, scale);
-}
-
-export function subtractExactDecimals(left: ExactDecimal, right: ExactDecimal): FinancialDecimalResult {
-  return addExactDecimals(left, Object.freeze({ coefficient: -right.coefficient, scale: right.scale }));
-}
-
-/** Exact product within financial limits (e.g. value x declared scale = native value). */
-export function multiplyFinancialDecimals(left: ExactDecimal, right: ExactDecimal): FinancialDecimalResult {
-  if (!withinFinancialBounds(left) || !withinFinancialBounds(right)) return limitExceeded();
-  return normalizeFinancial(left.coefficient * right.coefficient, left.scale + right.scale);
-}
-
-/**
- * Compares numerator / denominator with a threshold using the exact
- * cross-product and the denominator's sign. Returns null for a zero
- * denominator; callers map that to an explicit undefined disposition.
- */
-export function compareRatioToThreshold(numerator: ExactDecimal, denominator: ExactDecimal, threshold: ExactDecimal): -1 | 0 | 1 | null {
-  assertFinancialBounds(numerator);
-  assertFinancialBounds(denominator);
-  assertFinancialBounds(threshold);
-  if (denominator.coefficient === 0n) return null;
-  const comparison = compareExactDecimals(numerator, rawProduct(threshold, denominator));
-  return denominator.coefficient > 0n ? comparison : flip(comparison);
-}
-
-/** Compares two ratios exactly: sign(d1*d2) * (n1*d2 - n2*d1). Null for any zero denominator. */
-export function compareRatios(
-  leftNumerator: ExactDecimal,
-  leftDenominator: ExactDecimal,
-  rightNumerator: ExactDecimal,
-  rightDenominator: ExactDecimal,
-): -1 | 0 | 1 | null {
-  for (const value of [leftNumerator, leftDenominator, rightNumerator, rightDenominator]) assertFinancialBounds(value);
-  if (leftDenominator.coefficient === 0n || rightDenominator.coefficient === 0n) return null;
-  const comparison = compareExactDecimals(rawProduct(leftNumerator, rightDenominator), rawProduct(rightNumerator, leftDenominator));
-  return (leftDenominator.coefficient > 0n) === (rightDenominator.coefficient > 0n) ? comparison : flip(comparison);
-}
-
 /**
  * Parses plain or exponent decimal text under the exponent/coefficient limits
  * without the source-token length limit. For derived values (e.g. rounded
@@ -256,30 +212,10 @@ function parseDecimalText(text: string): FinancialDecimalResult {
   return { ok: true, value: Object.freeze({ coefficient, scale }) };
 }
 
-function normalizeFinancial(coefficient: bigint, scale: number): FinancialDecimalResult {
-  if (coefficient === 0n) return { ok: true, value: ZERO };
-  let normalized = coefficient;
-  let normalizedScale = scale;
-  while (normalized % 10n === 0n) {
-    normalized /= 10n;
-    normalizedScale -= 1;
-  }
-  const value = Object.freeze({ coefficient: normalized, scale: normalizedScale });
-  return withinFinancialBounds(value) ? { ok: true, value } : limitExceeded();
-}
-
-function rawProduct(left: ExactDecimal, right: ExactDecimal): ExactDecimal {
-  return { coefficient: left.coefficient * right.coefficient, scale: left.scale + right.scale };
-}
-
 function assertFinancialBounds(value: ExactDecimal): void {
   if (!withinFinancialBounds(value)) throw new RangeError("numeric_limit_exceeded");
 }
 
 function limitExceeded(): FinancialDecimalResult {
   return { ok: false, reason: "numeric_limit_exceeded" };
-}
-
-function flip(comparison: -1 | 0 | 1): -1 | 0 | 1 {
-  return comparison === 0 ? 0 : comparison === 1 ? -1 : 1;
 }

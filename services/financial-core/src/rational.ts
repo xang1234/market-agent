@@ -1,14 +1,11 @@
-// Exact rational lineage for chained operations. Every operand carries its
-// exact value as a reduced integer fraction (denominator > 0) so predicates and
-// rankings compare exact cross-products even when the published representation
-// was rounded by the numeric policy. Arithmetic beyond the numeric limits
-// returns null, and callers surface numeric_limit_exceeded.
+// Exact arithmetic for financial operations. Every operand's value is a reduced
+// integer fraction with a positive denominator, so sums, differences, products,
+// quotients, thresholds, and rankings are all exact. Decimal text is only a
+// representation: parsed at the input edge (exact-decimal.ts) and rendered at
+// the output edge (rationalToValue, via the numeric policy). Results beyond the
+// numeric limits return null, and callers surface numeric_limit_exceeded.
 
-import {
-  compareRatios,
-  withinFinancialBounds,
-  type ExactDecimal,
-} from "./exact-decimal.ts";
+import { withinFinancialBounds, type ExactDecimal } from "./exact-decimal.ts";
 import { divideRounded, NUMERIC_POLICY } from "./numeric-policy.ts";
 
 export type ExactRational = Readonly<{ numerator: ExactDecimal; denominator: ExactDecimal }>;
@@ -37,6 +34,12 @@ export function subtractRationals(left: ExactRational, right: ExactRational): Ex
   return fromFraction(ln * rd - rn * ld, ld * rd);
 }
 
+export function multiplyRationals(left: ExactRational, right: ExactRational): ExactRational | null {
+  const [ln, ld] = fraction(left);
+  const [rn, rd] = fraction(right);
+  return fromFraction(ln * rn, ld * rd);
+}
+
 /** Null when the divisor is zero or the result exceeds numeric limits. */
 export function divideRationals(left: ExactRational, right: ExactRational): ExactRational | null {
   const [ln, ld] = fraction(left);
@@ -50,10 +53,12 @@ export function rationalSign(value: ExactRational): -1 | 0 | 1 {
   return coefficient === 0n ? 0 : coefficient > 0n ? 1 : -1;
 }
 
+/** Exact cross-product comparison; denominators are positive by construction. */
 export function compareRationals(left: ExactRational, right: ExactRational): -1 | 0 | 1 {
-  const comparison = compareRatios(left.numerator, left.denominator, right.numerator, right.denominator);
-  if (comparison === null) throw new RangeError("rational with zero denominator");
-  return comparison;
+  const [ln, ld] = fraction(left);
+  const [rn, rd] = fraction(right);
+  const difference = ln * rd - rn * ld;
+  return difference < 0n ? -1 : difference > 0n ? 1 : 0;
 }
 
 /** Published representation: exact when the fraction terminates within policy digits. */

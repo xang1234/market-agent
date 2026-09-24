@@ -11,12 +11,10 @@ import {
   type FinancialPlanV1,
   type LocalId,
   type OperationNode,
+  type ValidationIssue,
 } from "./contracts.ts";
 import { canonicalJson } from "./canonical.ts";
-import { OPERATION_CATALOG_V1 } from "./definitions.ts";
-import type { ValidationIssue } from "./validate.ts";
-
-const PREDICATE_OPERATIONS: ReadonlySet<OperationNode["operation"]> = new Set(["threshold", "peer_compare"]);
+import { OPERATION_REGISTRY } from "./operation-registry.ts";
 
 export function effectiveLimits(planLimits: ExecutionLimits, parent: Partial<ExecutionLimits> = {}): ExecutionLimits {
   const result = { ...DEFAULT_EXECUTION_LIMITS };
@@ -34,15 +32,14 @@ export function validatePlanGraph(plan: FinancialPlanV1, parent: Partial<Executi
 
   plan.operations.forEach((node, index) => {
     const path = `$.operations[${index}]`;
-    const approved = OPERATION_CATALOG_V1.get(node.operation);
-    if (!approved || approved.operation_version !== node.operation_version) {
+    if (OPERATION_REGISTRY[node.operation].operation_version !== node.operation_version) {
       add(`${path}.operation_version`, "unsupported_operation_version", `${node.operation_version} is not an approved version of ${node.operation}`);
     }
     const dependencies = operationDependencies(node);
     if (new Set(dependencies).size !== dependencies.length) add(path, "invalid_parameters", "references the same operand more than once");
     for (const dependency of dependencies) {
       const target = nodes.get(dependency);
-      if (target && PREDICATE_OPERATIONS.has(target.operation)) {
+      if (target && OPERATION_REGISTRY[target.operation].produces === "predicate") {
         add(path, "invalid_operand", `uses predicate node ${dependency} as a numeric operand`);
       }
     }

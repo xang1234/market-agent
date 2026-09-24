@@ -12,6 +12,7 @@
 //   and is independent of execution status.
 
 import {
+  GAP_DISPOSITIONS,
   operationDependencies,
   type CoverageState,
   type FinancialPlanV1,
@@ -19,23 +20,11 @@ import {
   type LocalId,
   type OperationNode,
   type ReasonCode,
-  type ReportedMetricNode,
   type SuccessPayload,
-  GAP_DISPOSITIONS,
 } from "./contracts.ts";
-import { OPERATION_CATALOG_V1 } from "./definitions.ts";
 import { dependencyClosure, topologicalOrder } from "./graph.ts";
-import {
-  absoluteChange,
-  FinancialIntegrityError,
-  margin,
-  percentChangePositiveBase,
-  ratio,
-  trailingSum,
-  type FinancialOperand,
-  type OperandOutcome,
-} from "./operations.ts";
-import { peerCompare, thresholdPredicate, type PredicateOutcome } from "./predicates.ts";
+import { evaluateOperation, OPERATION_REGISTRY, type ReportedMetricEvaluator } from "./operation-registry.ts";
+import { FinancialIntegrityError, type FinancialOperand, type OperationOutcome } from "./operations.ts";
 import { unitClosures } from "./publication-units.ts";
 
 export type NodeState =
@@ -76,9 +65,6 @@ export type CoverageSummary = {
   by_disposition: Record<GapDisposition, number>;
 };
 
-/** Supplies reported inputs; the engine binds evidence, the core never does. */
-export type ReportedMetricEvaluator = (node: ReportedMetricNode) => OperandOutcome;
-
 export function evaluatePlan(plan: FinancialPlanV1, reported: ReportedMetricEvaluator): GraphEvaluation {
   const needed = dependencyClosure(plan, plan.outputs.map((output) => output.node_id));
   const nodes = new Map(plan.operations.map((node) => [node.node_id, node]));
@@ -86,7 +72,7 @@ export function evaluatePlan(plan: FinancialPlanV1, reported: ReportedMetricEval
 
   for (const nodeId of topologicalOrder(plan)) {
     if (!needed.has(nodeId)) continue;
-    states.set(nodeId, evaluateNode(plan, nodes.get(nodeId)!, states, reported));
+    states.set(nodeId, evaluateNode(nodes.get(nodeId)!, states, { plan, reported }));
   }
 
   const units: UnitOutcome[] = [...unitClosures(plan).values()].map((closure) => ({
@@ -159,28 +145,27 @@ export function capPopulation<T>(items: ReadonlyArray<T>, cap: number): { items:
 }
 
 function evaluateNode(
-  plan: FinancialPlanV1,
   node: OperationNode,
   states: ReadonlyMap<LocalId, NodeState>,
-  reported: ReportedMetricEvaluator,
+  context: Parameters<typeof evaluateOperation>[2],
 ): NodeState {
   const dependencies = operationDependencies(node).map((dependency) => states.get(dependency)!);
-  const failed = dependencies.find((state) => state.status === "integrity_failure");
-  if (failed && failed.status === "integrity_failure") {
-    return { status: "integrity_failure", code: failed.code, explanation: "Depends on an input that failed integrity checks." };
+  for (const state of dependencies) {
+    if (state.status === "integrity_failure") {
+      return { status: "integrity_failure", code: state.code, explanation: "Depends on an input that failed integrity checks." };
+    }
   }
-  const tolerant = OPERATION_CATALOG_V1.get(node.operation)?.tolerates_missing_dependencies === true;
-  const blocking = dependencies.find(
-    (state) => state.status === "gap" && (!tolerant || state.cause === "execution"),
-  );
-  if (blocking && blocking.status === "gap") {
-    return {
-      status: "gap",
-      disposition: "blocked_dependency",
-      reason_code: "blocked_by_dependency",
-      explanation: "A required input or calculation is unavailable.",
-      cause: blocking.cause,
-    };
+  const tolerant = OPERATION_REGISTRY[node.operation].tolerates_missing_operands;
+  for (const state of dependencies) {
+    if (state.status === "gap" && (!tolerant || state.cause === "execution")) {
+      return {
+        status: "gap",
+        disposition: "blocked_dependency",
+        reason_code: "blocked_by_dependency",
+        explanation: "A required input or calculation is unavailable.",
+        cause: state.cause,
+      };
+    }
   }
   const operands = dependencies.map((state) => {
     if (state.status !== "computed") return null;
@@ -188,9 +173,9 @@ function evaluateNode(
     return state.operand;
   });
 
-  let outcome: OperandOutcome | PredicateOutcome;
+  let outcome: OperationOutcome;
   try {
-    outcome = node.operation === "reported_metric" ? reported(node) : evaluateOperation(plan, node, operands);
+    outcome = evaluateOperation(node, operands, context);
   } catch (error) {
     if (error instanceof FinancialIntegrityError) {
       return { status: "integrity_failure", code: error.code, explanation: "A bound input failed integrity checks." };
@@ -206,38 +191,5 @@ function evaluateNode(
       cause: outcome.disposition === "execution_error" ? "execution" : "evidence",
     };
   }
-  return { status: "computed", payload: outcome.payload, operand: "operand" in outcome ? outcome.operand : null };
-}
-
-function evaluateOperation(
-  plan: FinancialPlanV1,
-  node: Exclude<OperationNode, ReportedMetricNode>,
-  operands: ReadonlyArray<FinancialOperand | null>,
-): OperandOutcome | PredicateOutcome {
-  const required = (index: number) => {
-    const operand = operands[index];
-    if (!operand) throw new Error(`node ${node.node_id} is missing a required operand`);
-    return operand;
-  };
-  switch (node.operation) {
-    case "absolute_change":
-      return absoluteChange(node, required(0), required(1));
-    case "percent_change_positive_base":
-      return percentChangePositiveBase(node, required(0), required(1));
-    case "gross_margin":
-    case "operating_margin":
-    case "net_margin":
-      return margin(node, required(0), required(1));
-    case "ratio":
-      return ratio(node, required(0), required(1));
-    case "trailing_sum":
-      return trailingSum(node, node.quarters.map((_, index) => required(index)));
-    case "threshold": {
-      const threshold = plan.thresholds.find((entry) => entry.threshold_id === node.threshold_id);
-      if (!threshold) throw new Error(`node ${node.node_id} references an undeclared threshold`);
-      return thresholdPredicate(node, required(0), threshold);
-    }
-    case "peer_compare":
-      return peerCompare(node, operands);
-  }
+  return { status: "computed", payload: outcome.payload, operand: outcome.operand };
 }

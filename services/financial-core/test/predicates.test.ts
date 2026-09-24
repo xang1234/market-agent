@@ -80,12 +80,6 @@ test("threshold converts percentages exactly and rejects incompatible units", ()
   assert.deepEqual(gap(thresholdPredicate(thresholdNode("gt"), quarter, limit("1", { kind: "percentage_points" }))), ["incompatible", "incompatible_unit"]);
 });
 
-test("threshold on a rounded value without exact lineage is precision_indeterminate", () => {
-  const third = marginOperand("value", "a", "1", "3");
-  const withoutLineage: FinancialOperand = { ...third, rational: null };
-  assert.deepEqual(gap(thresholdPredicate(thresholdNode("gt"), withoutLineage, limit("0.3", { kind: "ratio" }))), ["unsupported", "precision_indeterminate"]);
-});
-
 const rank = (members: string[], direction: PeerCompareNode["direction"] = "highest"): PeerCompareNode => ({
   node_id: "rank",
   operation: "peer_compare",

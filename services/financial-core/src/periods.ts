@@ -67,10 +67,6 @@ export function dayNumber(date: IsoDate): number {
   return Date.UTC(year!, month! - 1, day!) / DAY_MS;
 }
 
-export function isoDateFromDayNumber(days: number): IsoDate {
-  return new Date(days * DAY_MS).toISOString().slice(0, 10);
-}
-
 function dayRange(period: PeriodIdentity): [number, number] {
   const end = dayNumber(period.end);
   return [period.kind === "instant" || period.start === null ? end : dayNumber(period.start), end];

@@ -1,7 +1,8 @@
 // numeric-policy.v1: division and display rounding through a private decimal.js
 // constructor (50 significant digits, half-even). This is a versioned design
 // default, not a universal financial standard. The global Decimal constructor
-// is never configured; predicates never compare display-rounded values.
+// is never configured. Predicates never use these rounded values; they compare
+// exact rationals (rational.ts).
 
 import Decimal from "decimal.js";
 import {
@@ -78,17 +79,4 @@ export function roundHalfEvenSignificant(value: ExactDecimal, significantDigits:
   const parsed = parseDerivedDecimalText(rounded);
   if (!parsed.ok) throw new RangeError("numeric_limit_exceeded");
   return canonicalDecimalString(parsed.value);
-}
-
-/**
- * Compares an exact value with a threshold. A rounded representation cannot
- * decide a predicate; callers holding exact operands use the cross-product
- * comparisons in exact-decimal.ts instead.
- */
-export function comparePredicateValue(
-  input: { value: ExactDecimal; exact: boolean },
-  threshold: ExactDecimal,
-): -1 | 0 | 1 | "precision_indeterminate" {
-  if (!input.exact) return "precision_indeterminate";
-  return compareExactDecimals(input.value, threshold);
 }

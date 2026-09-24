@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ChangeNode, MarginNode, RatioNode, TrailingSumNode } from "../src/contracts.ts";
-import { OPERATION_CATALOG_V1, RATIO_CATALOG_V1 } from "../src/definitions.ts";
-import { convertDimensionless } from "../src/dimensions.ts";
+import { RATIO_CATALOG_V1 } from "../src/definitions.ts";
+import { OPERATION_REGISTRY } from "../src/operation-registry.ts";
+import { convertDimensionless, type DimensionlessUnit } from "../src/dimensions.ts";
 import { canonicalDecimalString, parseFinancialDecimal, type ExactDecimal } from "../src/exact-decimal.ts";
+import { rationalFromDecimal, type ExactRational } from "../src/rational.ts";
 import {
   absoluteChange,
   FinancialIntegrityError,
@@ -31,6 +33,11 @@ function gap(outcome: OperandOutcome): [string, string] {
   return outcome.ok ? ["", ""] : [outcome.disposition, outcome.reason_code];
 }
 
+/** The oracle's view of an exact operand value. */
+function asRational(value: ExactRational) {
+  return divideRational(rational(canonicalDecimalString(value.numerator)), rational(canonicalDecimalString(value.denominator)));
+}
+
 function dec(token: string): ExactDecimal {
   const parsed = parseFinancialDecimal(token);
   assert.ok(parsed.ok);
@@ -39,22 +46,21 @@ function dec(token: string): ExactDecimal {
 
 test("the catalog registers exactly the approved operations, each versioned", () => {
   assert.deepEqual(
-    [...OPERATION_CATALOG_V1.keys()].sort(),
+    Object.keys(OPERATION_REGISTRY).sort(),
     ["absolute_change", "gross_margin", "net_margin", "operating_margin", "peer_compare", "percent_change_positive_base", "ratio", "reported_metric", "threshold", "trailing_sum"],
   );
-  for (const definition of OPERATION_CATALOG_V1.values()) assert.match(definition.operation_version, /\.v1$/u);
+  for (const [kind, spec] of Object.entries(OPERATION_REGISTRY)) assert.equal(spec.operation_version, `${kind}.v1`);
 });
 
 // --- reported_metric -------------------------------------------------------
 
 test("reported_metric applies scale exactly once and exposes agreeing lineage", () => {
   const revenue = operand("rev", { metric: "revenue", value: "383285", scale: "1000000", native: "383285000000", ...FY2023 });
-  assert.equal(canonicalDecimalString(revenue.value), "383285000000");
-  assert.equal(revenue.exact, true);
-  assert.equal(revenue.context.period.end, "2023-12-31");
+  assert.ok(equalRational(asRational(revenue.value), rational("383285000000")));
+  assert.equal(revenue.period.end, "2023-12-31");
 
   const precise = operand("big", { metric: "revenue", value: "9007199254740993", ...FY2023 });
-  assert.equal(canonicalDecimalString(precise.value), "9007199254740993");
+  assert.ok(equalRational(asRational(precise.value), rational("9007199254740993")));
 });
 
 test("reported_metric rejects a native value that disagrees with value x scale", () => {
@@ -136,14 +142,7 @@ test("percent_change_positive_base: exact growth, rounded repeating growth, and 
   assert.equal(third.ok && third.payload.exact, false);
   assert.deepEqual(third.ok && third.payload.rounding, { policy_version: "numeric-policy.v1", significant_digits: 50, mode: "half_even" });
   // Exact lineage survives rounding.
-  assert.ok(third.ok && third.operand.rational !== null);
-  assert.ok(
-    third.ok &&
-      equalRational(
-        divideRational(rational(canonicalDecimalString(third.operand.rational!.numerator)), rational(canonicalDecimalString(third.operand.rational!.denominator))),
-        { n: 1n, d: 3n },
-      ),
-  );
+  assert.ok(third.ok && equalRational(asRational(third.operand.value), { n: 1n, d: 3n }));
 
   const zeroBase = operand("pri", { metric: "revenue", value: "0", ...FY2022 });
   assert.deepEqual(gap(percentChangePositiveBase(change("percent_change_positive_base"), cur, zeroBase)), ["not_applicable", "non_positive_base"]);
@@ -162,13 +161,7 @@ test("gross_margin: success, zero revenue, negative revenue, and mismatched cont
   const result = margin(grossMargin, gp, rev);
   assert.ok(result.ok);
   // Exact lineage is the reduced fraction 169148/383285.
-  assert.ok(
-    result.ok &&
-      equalRational(
-        divideRational(rational(canonicalDecimalString(result.operand.rational!.numerator)), rational(canonicalDecimalString(result.operand.rational!.denominator))),
-        divideRational(rational("169148"), rational("383285")),
-      ),
-  );
+  assert.ok(result.ok && equalRational(asRational(result.operand.value), divideRational(rational("169148"), rational("383285"))));
   // Independently computed with Python decimal (prec 50, ROUND_HALF_EVEN).
   assert.equal(value(result), "0.44131129577207560953337594740206373847137247739932");
   assert.equal(result.ok && result.payload.exact, false);
@@ -240,8 +233,8 @@ function quarters(metric = "revenue", values = ["10.1", "20.2", "30.3", "40.4"],
 test("trailing_sum adds four consecutive quarters exactly, including 52/53-week quarters", () => {
   const result = trailingSum(ttm, quarters());
   assert.equal(value(result), "101");
-  assert.ok(result.ok && result.operand.context.period.start === "2023-01-01" && result.operand.context.period.end === "2023-12-31");
-  assert.equal(result.ok && result.operand.context.period.fiscal_period, "TTM");
+  assert.ok(result.ok && result.operand.period.start === "2023-01-01" && result.operand.period.end === "2023-12-31");
+  assert.equal(result.ok && result.operand.period.fiscal_period, "TTM");
 
   const weeks = [
     { start: "2022-09-25", end: "2022-12-31", fiscal_period: "Q1" as const },
@@ -296,11 +289,13 @@ test("trailing_sum rejects mixed subjects, currencies, and definitions", () => {
 // --- dimensionless scaling ---------------------------------------------------
 
 test("ratios, percentages, and basis points convert exactly with typed rules", () => {
-  assert.equal(canonicalDecimalString(convertDimensionless(dec("0.4413"), "ratio", "percent")), "44.13");
-  assert.equal(canonicalDecimalString(convertDimensionless(dec("0.4413"), "ratio", "basis_points")), "4413");
-  assert.equal(canonicalDecimalString(convertDimensionless(dec("12.5"), "percent", "ratio")), "0.125");
-  assert.equal(canonicalDecimalString(convertDimensionless(dec("25"), "basis_points", "percent")), "0.25");
-  assert.equal(canonicalDecimalString(convertDimensionless(dec("0.1"), "ratio", "ratio")), "0.1");
+  const convert = (token: string, from: DimensionlessUnit, to: DimensionlessUnit) =>
+    asRational(convertDimensionless(rationalFromDecimal(dec(token))!, from, to));
+  assert.ok(equalRational(convert("0.4413", "ratio", "percent"), rational("44.13")));
+  assert.ok(equalRational(convert("0.4413", "ratio", "basis_points"), rational("4413")));
+  assert.ok(equalRational(convert("12.5", "percent", "ratio"), rational("0.125")));
+  assert.ok(equalRational(convert("25", "basis_points", "percent"), rational("0.25")));
+  assert.ok(equalRational(convert("0.1", "ratio", "ratio"), rational("0.1")));
 });
 
 test("net_margin: a loss yields a valid negative margin; only net income may be the numerator", () => {

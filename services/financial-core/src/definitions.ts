@@ -1,12 +1,13 @@
 // Approved financial definitions, catalog v1. Models may propose metric keys;
 // only these reviewed definitions resolve. No executable user rules.
 
-import type { FinancialUnit, MetricKey, OperationKind, VersionTag } from "./contracts.ts";
+import type { FinancialUnit, MetricKey, VersionTag } from "./contracts.ts";
 
 export const FINANCIAL_CATALOG_VERSION = "catalog.v1";
 
 /**
- * flow: duration value, additive across contiguous periods (revenue).
+ * flow: duration value, additive across contiguous quarters (revenue); the
+ * only kind trailing_sum accepts.
  * balance: instant value, never summed across periods (total assets).
  * per_share / share_count_average: duration values that are not additive (EPS,
  * weighted-average shares).
@@ -19,7 +20,6 @@ export type MetricDefinition = Readonly<{
   definition_version: VersionTag;
   label: string;
   value_kind: MetricValueKind;
-  additive: boolean;
   unit_kind: FinancialUnit["kind"];
   share_basis: "basic" | "diluted" | "not_applicable";
 }>;
@@ -36,7 +36,6 @@ function metric(
     definition_version: `${metric_key}.v1`,
     label,
     value_kind,
-    additive: value_kind === "flow",
     unit_kind,
     share_basis,
   });
@@ -107,46 +106,6 @@ export const RATIO_CATALOG_V1: ReadonlyMap<MetricKey, RatioDefinition> = new Map
       timing: "same_duration" as const,
     },
   ].map((definition) => [definition.ratio_key, Object.freeze(definition)]),
-);
-
-export type OperationDefinition = Readonly<{
-  operation: OperationKind;
-  operation_version: VersionTag;
-  interpretation: string;
-  /** How the published value is represented. */
-  precision_rule: "exact" | "exact_or_policy_rounded" | "predicate";
-  /** peer_compare evaluates the available members and reports incompleteness. */
-  tolerates_missing_dependencies: boolean;
-}>;
-
-function operation(
-  kind: OperationKind,
-  interpretation: string,
-  precision_rule: OperationDefinition["precision_rule"],
-  tolerates_missing_dependencies = false,
-): OperationDefinition {
-  return Object.freeze({
-    operation: kind,
-    operation_version: `${kind}.v1`,
-    interpretation,
-    precision_rule,
-    tolerates_missing_dependencies,
-  });
-}
-
-export const OPERATION_CATALOG_V1: ReadonlyMap<OperationKind, OperationDefinition> = new Map(
-  [
-    operation("reported_metric", "Eligible reported value for the exact subject, metric, period, and basis.", "exact"),
-    operation("absolute_change", "Current minus prior for compatible periods, units, scope, and basis.", "exact"),
-    operation("percent_change_positive_base", "(current - prior) / prior, defined only for a positive prior value.", "exact_or_policy_rounded"),
-    operation("gross_margin", "Gross profit / revenue for the identical period, scope, and basis; revenue must be positive.", "exact_or_policy_rounded"),
-    operation("operating_margin", "Operating income / revenue for the identical period, scope, and basis; revenue must be positive.", "exact_or_policy_rounded"),
-    operation("net_margin", "Net income / revenue for the identical period, scope, and basis; revenue must be positive.", "exact_or_policy_rounded"),
-    operation("ratio", "Approved metric pair with an explicit denominator constraint and timing.", "exact_or_policy_rounded"),
-    operation("trailing_sum", "Sum of four consecutive, non-overlapping fiscal quarters of an additive flow metric.", "exact"),
-    operation("threshold", "Exact comparison with an attributed threshold in compatible units.", "predicate"),
-    operation("peer_compare", "Ranking of a frozen cohort on identical definitions and periods; ties explicit.", "predicate", true),
-  ].map((definition) => [definition.operation, definition]),
 );
 
 export function resolveMetricDefinition(metricKey: MetricKey): MetricDefinition | null {

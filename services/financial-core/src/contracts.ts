@@ -13,6 +13,8 @@ export type DecimalString = string;
 export type IsoDate = string;
 export type IsoDateTime = string;
 
+export type ValidationIssue = { path: string; code: string; message: string };
+
 export const FINANCIAL_PLAN_SCHEMA_VERSION = "financial_plan.v1";
 export const FINANCIAL_RESULT_SCHEMA_VERSION = "financial_result.v1";
 export const BOUND_INPUT_SCHEMA_VERSION = "financial_bound_input.v1";

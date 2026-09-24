@@ -16,9 +16,9 @@ import {
   type FinancialPlanV1,
   type FinancialRuntimeAuthority,
   type FinancialRuntimeAuthorityV1,
+  type ValidationIssue,
 } from "./contracts.ts";
 
-export type ValidationIssue = { path: string; code: string; message: string };
 export type ValidationResult<T> = { ok: true; value: T } | { ok: false; issues: ValidationIssue[] };
 
 export class FinancialContractError extends Error {

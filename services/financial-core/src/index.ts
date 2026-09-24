@@ -11,6 +11,7 @@ export * from "./periods.ts";
 export * from "./rational.ts";
 export * from "./operations.ts";
 export * from "./predicates.ts";
+export * from "./operation-registry.ts";
 export * from "./graph.ts";
 export * from "./publication-units.ts";
 export * from "./coverage.ts";

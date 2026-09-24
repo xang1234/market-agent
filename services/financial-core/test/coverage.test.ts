@@ -4,6 +4,7 @@ import type { FinancialPlanV1, ReportedMetricNode } from "../src/contracts.ts";
 import { capPopulation, cohortAssertion, evaluatePlan, summarizeCoverage, type GraphEvaluation, type NodeState } from "../src/coverage.ts";
 import { FinancialIntegrityError, operandFromBoundInput, operationGap, type OperandOutcome } from "../src/operations.ts";
 import { validateFinancialPlan } from "../src/validate.ts";
+import { mutable } from "./fixtures.ts";
 import { boundInput, FY2023, type InputSpec } from "./operand-fixtures.ts";
 
 const ISSUERS = [
@@ -227,7 +228,3 @@ test("population caps disclose truncation explicitly", () => {
   assert.deepEqual(capPopulation(["a", "b", "c"], 2), { items: ["a", "b"], omitted_count: 1, truncated: true });
   assert.throws(() => capPopulation(["a"], 0), RangeError);
 });
-
-function mutable<T>(value: T): any {
-  return JSON.parse(JSON.stringify(value));
-}

@@ -11,12 +11,13 @@ configuration, or feature-service imports — `test/boundaries.test.ts` enforces
 | `contracts.ts` | `FinancialPlanV1`, bound-input, draft/finalized result types, server-only runtime authority. Mirrors `spec/financial_plan_schema.json` and `spec/financial_result_schema.json`. |
 | `validate.ts` | Strict Ajv validation (`additionalProperties: false` everywhere), identity/reference checks, graph checks; returns deep-frozen copies. |
 | `canonical.ts` | `canonical_json.v1` serialization and domain-separated SHA-256 (semantic vs. owner-bound binding hashes). |
-| `exact-decimal.ts` | Legacy threshold contract (moved from `services/agents`, which keeps a facade) plus lossless source-token parsing and bounded exact arithmetic. Dependency-free: the web build type-checks it. |
-| `numeric-policy.ts` | `numeric-policy.v1`: private 50-significant-digit, half-even `decimal.js` clone for division and display. |
-| `rational.ts` | Exact rational lineage so chained results are compared exactly even when their published representation is rounded. |
-| `definitions.ts` | Catalog v1: approved metrics, margin numerators, ratio pairs, and operation versions. |
-| `periods.ts`, `dimensions.ts` | Exact period identity (52/53-week aware), scope/basis/unit compatibility, typed dimensionless conversions. |
-| `operations.ts`, `predicates.ts` | The approved operations and exact threshold/peer predicates; incompatibilities are named gaps. |
+| `exact-decimal.ts` | Legacy threshold contract (moved from `services/agents`, which keeps a facade) plus lossless source-token parsing and canonical rendering. No financial arithmetic. Dependency-free: the web build type-checks it. |
+| `rational.ts` | All financial arithmetic: every operand value is an exact reduced fraction, so sums, quotients, thresholds, and rankings are exact. |
+| `numeric-policy.ts` | `numeric-policy.v1`: private 50-significant-digit, half-even `decimal.js` clone that renders published values and display rounding. Never used by predicates. |
+| `definitions.ts` | Catalog v1: approved metrics, margin numerators, and ratio pairs. |
+| `operation-registry.ts` | The single table of per-operation facts: approved version, value vs. predicate, missing-operand tolerance, and evaluation. |
+| `periods.ts`, `dimensions.ts` | Exact period identity (52/53-week aware), unit/scope/basis compatibility, typed dimensionless conversions. |
+| `operations.ts`, `predicates.ts` | The approved operations and exact threshold/peer predicates; each composes its own compatibility checks; incompatibilities are named gaps. |
 | `graph.ts`, `publication-units.ts`, `coverage.ts` | DAG validation and limits, frozen unit closures, dependency propagation, integrity isolation, and coverage. |
 
 ## Numeric limits (numeric-policy.v1)

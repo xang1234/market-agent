@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import Decimal from "decimal.js";
 import { canonicalDecimalString, parseFinancialDecimal, type ExactDecimal } from "../src/exact-decimal.ts";
-import { comparePredicateValue, divideRounded, NUMERIC_POLICY, roundHalfEvenSignificant } from "../src/numeric-policy.ts";
+import { divideRounded, NUMERIC_POLICY, roundHalfEvenSignificant } from "../src/numeric-policy.ts";
 import { compareRational, divideRational, rational } from "./rational-oracle.ts";
 
 function d(token: string): ExactDecimal {
@@ -61,15 +61,4 @@ test("display rounding is half-even and separate from predicates", () => {
   assert.equal(roundHalfEvenSignificant(d("9007199254740993"), 3), "9010000000000000");
   assert.equal(roundHalfEvenSignificant(d("0"), 3), "0");
   assert.throws(() => roundHalfEvenSignificant(d("1"), 0), RangeError);
-});
-
-test("predicates on rounded values return precision_indeterminate instead of guessing", () => {
-  const third = divideRounded(d("1"), d("3"));
-  assert.ok(third.ok);
-  if (!third.ok) return;
-  assert.equal(comparePredicateValue({ value: third.value, exact: false }, d(`0.${"3".repeat(50)}`)), "precision_indeterminate");
-  assert.equal(comparePredicateValue({ value: third.value, exact: false }, d("0.3")), "precision_indeterminate");
-  assert.equal(comparePredicateValue({ value: d("0.125"), exact: true }, d("0.12")), 1);
-  assert.equal(comparePredicateValue({ value: d("0.125"), exact: true }, d("0.125")), 0);
-  assert.equal(comparePredicateValue({ value: d("-0.125"), exact: true }, d("0")), -1);
 });
