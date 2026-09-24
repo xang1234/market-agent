@@ -4,9 +4,11 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import {
   analyzeIntentLabel,
   parseAnalyzeQuery,
+  researchSummaryFromAnalyzeEntry,
   subjectFromAnalyzeEntry,
   type AnalyzeIntent,
 } from '../analyze/analyzeEntry'
+import type { ResearchSummary } from '../discovery/handoff.ts'
 import { sectionProgress } from '../analyze/sectionProgress.ts'
 import { SectionProgressList } from '../analyze/SectionProgressList.tsx'
 import { fetchAnalyzePlaybooks, type AnalyzePlaybook } from '../analyze/playbooks.ts'
@@ -79,6 +81,7 @@ export function AnalyzePage() {
   const location = useLocation()
   const query = parseAnalyzeQuery(searchParams)
   const subject = subjectFromAnalyzeEntry(query, location.state)
+  const researchSummary = researchSummaryFromAnalyzeEntry(location.state)
 
   return (
     <div className="flex flex-1 flex-col gap-4 overflow-auto p-6">
@@ -90,8 +93,24 @@ export function AnalyzePage() {
         </p>
       </header>
       {subject ? <CarriedSubjectContext subject={subject} intent={query.intent} /> : null}
+      {researchSummary ? <CarriedResearchSummary summary={researchSummary} /> : null}
       <AnalyzeWorkspace subject={subject} />
     </div>
+  )
+}
+
+function CarriedResearchSummary({ summary }: { summary: ResearchSummary }) {
+  return (
+    <section aria-labelledby="analyze-carried-research-heading" className="rounded-md border border-line bg-surface p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <p className="text-xs uppercase text-muted">Cited discovery context</p>
+          <h2 id="analyze-carried-research-heading" className="text-lg font-semibold text-fg">Research summary</h2>
+        </div>
+        <span className="font-mono text-xs text-muted">run {summary.runId.slice(0, 8)}</span>
+      </div>
+      <p className="mt-2 whitespace-pre-wrap text-sm text-fg">{summary.summary}</p>
+    </section>
   )
 }
 

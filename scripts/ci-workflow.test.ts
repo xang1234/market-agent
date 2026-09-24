@@ -8,8 +8,10 @@ const CI_WORKFLOW = join(REPO_ROOT, ".github", "workflows", "ci.yml");
 const MIN_NODE_VERSION = "22.19.0";
 const DB_HARNESS_SERVICE_DIRS = [
   "services/analyze",
+  "services/analyst-grids",
   "services/chat",
   "services/dev-api",
+  "services/discovery",
   "services/evidence",
   "services/observability",
   "services/portfolio",
@@ -71,6 +73,30 @@ test("ci workflow includes services/market coverage", async () => {
   assert.match(workflow, /\bmarket\b/);
   assert.match(workflow, /working-directory:\s*services\/market/);
   assert.match(workflow, /cache-dependency-path:\s*services\/market\/package-lock\.json/);
+});
+
+test("ci workflow runs discovery through synthetic fixtures with its real database dependencies", async () => {
+  const workflow = await readFile(CI_WORKFLOW, "utf8");
+  const section = jobSection(workflow, "services/discovery");
+
+  assert.match(section, /DISCOVERY_ENABLED:\s*false/);
+  assert.match(section, /DISCOVERY_SEARCH_API_KEY:\s*synthetic-ci-key/);
+  assert.match(section, /cache-dependency-path:[\s\S]*services\/discovery\/package-lock\.json/);
+  assert.match(section, /working-directory:\s*db\s*\n\s*run:\s*npm ci/);
+  assert.match(section, /working-directory:\s*services\/discovery\s*\n\s*run:\s*npm ci/);
+  assert.match(section, /working-directory:\s*services\/discovery\s*\n\s*run:\s*npm test/);
+});
+
+test("ci workflow installs evidence before analyst-grids imports its S3 object store", async () => {
+  const workflow = await readFile(CI_WORKFLOW, "utf8");
+  const section = jobSection(workflow, "services/analyst-grids");
+
+  assert.match(section, /services\/evidence\/package-lock\.json/);
+  assert.match(section, /working-directory:\s*services\/evidence\s*\n\s*run:\s*npm ci/);
+  assert.ok(
+    section.indexOf("working-directory: services/evidence") < section.indexOf("working-directory: services/analyst-grids"),
+    "analyst-grids must install evidence dependencies before loading reader-wiring",
+  );
 });
 
 test("ci workflow covers every package with a test script", async () => {

@@ -82,3 +82,33 @@ relevance; evidence quality and stored issuer impacts contribute to severity.
 An identical current packet is reused without duplicate findings. An earlier packet that
 recurs after a different assessment receives a new assessment. A version changed during
 assessment invalidates that run before its side effects commit.
+
+## Discovery Campaigns
+
+**Discovery campaign** is a user-owned, versioned research question and its approved
+brief. A campaign has durable runs; creating or saving it does not contact a provider.
+Only a worker with a fenced lease may execute the approved brief.
+
+**Discovery run** is a bounded, checkpointed execution of one immutable brief version.
+It records provider/model attempt reservations, coverage, candidate states, activity,
+and terminal status. A run can complete with an empty shortlist. `partial`,
+`cancelled`, and `failed` preserve completed work and diagnostic coverage rather than
+silently returning a successful empty result.
+
+**Discovery candidate** is a resolved issuer/listing with an evidence-backed mechanism
+and criterion assessment. Candidate identity is canonical UUID identity; names, tickers,
+search text, and model suggestions are not enough. Duplicate leads collapse by the
+canonical lead/issuer identity, and deterministic selection/ranking decides shortlist
+order.
+
+**Evidence packet** is the current user-authorized set of excerpts, claims, and facts
+for one candidate. Analyst and skeptic outputs cite only packet content. A citation quote
+must match the canonical excerpt; a fabricated or stale citation rejects the assessment.
+The accepted assessment is sealed into a snapshot and may be shown only while its source
+access remains authorized.
+
+**Discovery readiness** distinguishes durable API operations from execution readiness.
+The API may save a campaign while model/search/reference adapters are unavailable. A
+worker requires explicit feature enablement and deployment-owned, user-scoped provider
+composition. `DISCOVERY_ENABLED` defaults to false until deterministic and human release
+evaluation gates are satisfied.

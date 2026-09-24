@@ -21,7 +21,9 @@ set +a
 : "${ANALYST_GRIDS_PORT:=8093}"
 : "${HOME_PULSE_TICKERS:=AAPL,MSFT,GOOGL}"
 : "${ENABLE_UNOFFICIAL_DEV_PROVIDERS:=false}"
-export HOME_PORT EVIDENCE_PORT DEV_PROVIDERS_PORT ANALYST_GRIDS_PORT HOME_PULSE_TICKERS ENABLE_UNOFFICIAL_DEV_PROVIDERS
+: "${DISCOVERY_ENABLED:=false}"
+: "${DISCOVERY_WORKER_POLL_MS:=1000}"
+export HOME_PORT EVIDENCE_PORT DEV_PROVIDERS_PORT ANALYST_GRIDS_PORT HOME_PULSE_TICKERS ENABLE_UNOFFICIAL_DEV_PROVIDERS DISCOVERY_ENABLED DISCOVERY_WORKER_POLL_MS
 
 DEV_DIR="$ROOT/.dev"
 LOG_DIR="$DEV_DIR/logs"
@@ -365,6 +367,9 @@ up() {
   ensure_install "$ROOT/services/themes"
   ensure_install "$ROOT/services/tools"
   ensure_install "$ROOT/services/llm"
+  if [[ "$DISCOVERY_ENABLED" == "true" ]]; then
+    ensure_install "$ROOT/services/discovery"
+  fi
   if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
     ensure_python_service_install "$ROOT/services/dev-providers"
   fi
@@ -451,6 +456,9 @@ up() {
   start_and_track_process home "$ROOT/services/home" "npm run dev"
   start_and_track_process evidence "$ROOT/services/evidence" "npm run dev"
   start_and_track_process analyst-grids "$ROOT/services/analyst-grids" "npm run dev"
+  if [[ "$DISCOVERY_ENABLED" == "true" ]]; then
+    start_and_track_process discovery-worker "$ROOT/services/discovery" "npm run worker"
+  fi
 
   if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]] && ! wait_for_service dev-providers "$DEV_PROVIDERS_PORT"; then
     cleanup_failed_up
@@ -542,6 +550,11 @@ status() {
   printf "analyst-grids %-3s http://127.0.0.1:%s  log=%s\n" "$(service_status analyst-grids "$ANALYST_GRIDS_PORT")" "$ANALYST_GRIDS_PORT" "$LOG_DIR/analyst-grids.log"
   if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
     printf "dev-providers %-3s http://127.0.0.1:%s  log=%s\n" "$(service_status dev-providers "$DEV_PROVIDERS_PORT")" "$DEV_PROVIDERS_PORT" "$LOG_DIR/dev-providers.log"
+  fi
+  if [[ "$DISCOVERY_ENABLED" == "true" ]]; then
+    printf "discovery %-4s worker log=%s\n" "$(process_running "$PID_DIR/discovery-worker.pid" && printf running || printf stopped)" "$LOG_DIR/discovery-worker.log"
+  else
+    printf "discovery %-4s feature disabled\n" "off"
   fi
   printf "analyze   %-8s %s\n" "bff" "/v1/analyze via dev-api"
   printf "agents    %-8s %s\n" "bff" "/v1/agents via dev-api"

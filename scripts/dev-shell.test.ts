@@ -316,6 +316,45 @@ test("unofficial dev providers are opt-in and set a local sidecar origin", async
   await rm(enabled.root, { recursive: true, force: true });
 });
 
+test("discovery is feature-off by default and its worker joins dev-shell cleanup only when enabled", async () => {
+  const disabled = await createShellFixture();
+  const disabledResult = await runBash(
+    ["MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh", 'printf "%s" "$DISCOVERY_ENABLED"'].join("\n"),
+    disabled.root,
+  );
+  assert.equal(disabledResult.code, 0);
+  assert.equal(disabledResult.stdout.trim(), "false");
+  await rm(disabled.root, { recursive: true, force: true });
+
+  const fixture = await createShellFixture({ DISCOVERY_ENABLED: "true" });
+  const traceFile = join(fixture.root, "trace.log");
+  const result = await runBash(
+    [
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      `TRACE_FILE="${traceFile}"`,
+      'mkdir -p "$ROOT/db" "$ROOT/web" "$ROOT/services/chat" "$ROOT/services/resolver" "$ROOT/services/dev-api" "$ROOT/services/watchlists" "$ROOT/services/market" "$ROOT/services/fundamentals" "$ROOT/services/screener" "$ROOT/services/portfolio" "$ROOT/services/home" "$ROOT/services/evidence" "$ROOT/services/analyst-grids" "$ROOT/services/agents" "$ROOT/services/analyze" "$ROOT/services/artifact" "$ROOT/services/notifications" "$ROOT/services/observability" "$ROOT/services/snapshot" "$ROOT/services/summary" "$ROOT/services/themes" "$ROOT/services/tools" "$ROOT/services/llm" "$ROOT/services/discovery"',
+      "ensure_command(){ :; }",
+      'ensure_install(){ printf "install:%s\\n" "$1" >> "$TRACE_FILE"; }',
+      "assert_port_available(){ :; }",
+      "npm(){ :; }",
+      "export -f npm",
+      "compose(){ :; }",
+      "wait_for_postgres(){ :; }",
+      'start_process(){ local name="$1"; printf "start:%s:%s\\n" "$name" "$3" >> "$TRACE_FILE"; sleep 60 >/dev/null 2>&1 & echo $! > "$PID_DIR/$name.pid"; }',
+      'wait_for_service(){ :; }',
+      "status(){ :; }",
+      "up",
+    ].join("\n"),
+    fixture.root,
+  );
+  assert.equal(result.code, 0, result.stderr);
+  const trace = await readFile(traceFile, "utf8");
+  assert.match(trace, /install:.*services\/discovery/);
+  assert.match(trace, /start:discovery-worker:npm run worker/);
+  await killTrackedPids(fixture.root).catch(() => {});
+  await rm(fixture.root, { recursive: true, force: true });
+});
+
 test("up starts the unofficial dev provider sidecar only when explicitly enabled", async () => {
   const fixture = await createShellFixture({ ENABLE_UNOFFICIAL_DEV_PROVIDERS: "true" });
   const traceFile = join(fixture.root, "trace.log");

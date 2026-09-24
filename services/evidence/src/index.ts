@@ -191,6 +191,9 @@ export type {
 } from "./document-repo.ts";
 export type { QueryExecutor } from "./types.ts";
 
+export { campaignQuoteKey, persistCampaignQuotes } from "./campaign-claims.ts";
+export type { CampaignQuote } from "./campaign-claims.ts";
+
 export * from "./inspector.ts";
 
 export { createEvidenceReviewServer } from "./review-http.ts";
@@ -266,6 +269,8 @@ export {
   runObjectBlobGcBatch,
   runObjectBlobGcBatchWithPool,
 } from "./blob-gc-repo.ts";
+
+export { deleteSnapshotIfUnreachable, snapshotHasCurrentReachability } from "./snapshot-reachability.ts";
 export type {
   DeleteUserBlobQueueResult,
   ObjectBlobGcBatchOptions,

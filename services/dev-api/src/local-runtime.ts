@@ -1,4 +1,7 @@
 import { getCurrentThesis } from "../../agents/src/thesis-repo.ts";
+import { createDiscoveryRepository } from "../../discovery/src/repository.ts";
+import { createDiscoveryReadModel } from "../../discovery/src/read-model.ts";
+import { createDiscoveryService as createDiscoveryCampaignService } from "../../discovery/src/service.ts";
 import { createThesisAgentLoopStages } from "./thesis-runtime.ts";
 import { randomUUID } from "node:crypto";
 
@@ -51,6 +54,15 @@ import type {
   DevApiAnalyzeWorkflowResult,
   DevApiServiceAdapterDeps,
 } from "./http.ts";
+
+/** Durable campaign reads and saves are available locally; provider wiring remains Task 10-owned. */
+export function createDiscoveryService(input: { db: Pool }) {
+  return createDiscoveryCampaignService({
+    repo: createDiscoveryRepository(input.db, { clock: () => new Date() }),
+    reads: createDiscoveryReadModel(input.db),
+    readiness: () => ({ ready: false, missing: ["model", "search", "reference"] }),
+  });
+}
 
 let localPool: Pool | null = null;
 

@@ -35,6 +35,9 @@ import {
   type DevApiAnalyzeAdapter,
 } from "./analyze-adapter.ts";
 import { createFixtureAnalyzeAdapter } from "./analyze-fixture.ts";
+import type { DevApiDiscoveryAdapter } from "./discovery-http.ts";
+import { createDiscoveryDevApiAdapter } from "./discovery-http.ts";
+import type { DiscoveryService } from "../../discovery/src/ports.ts";
 export type {
   DevApiAnalyzeWorkflowInput,
   DevApiAnalyzeWorkflowResult,
@@ -152,6 +155,7 @@ export type DevApiEvidenceAdapter = {
 
 export type DevApiAdapters = {
   theses?: ThesisAdapter;
+  discovery?: DevApiDiscoveryAdapter;
   analyze: DevApiAnalyzeAdapter;
   agents: DevApiAgentsAdapter;
   themes: DevApiThemesAdapter;
@@ -202,6 +206,8 @@ export function createDevApiServer(
     }
 
     const url = new URL(req.url ?? "/", "http://localhost");
+
+    if (adapters?.discovery && await adapters.discovery.handle(req, res)) return;
 
     const thesisMatch = url.pathname.match(/^\/v1\/agents\/([^/]+)\/thesis(\/draft)?$/);
     if (thesisMatch) {
@@ -683,6 +689,7 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
 }
 
 export type DevApiServiceAdapterDeps = AnalyzeServiceDeps & {
+  discovery?: DiscoveryService;
   createAgentLoopStages?: DevApiAgentLoopStageFactory;
   inspectEvidence?(input: {
     userId: string;
@@ -693,6 +700,7 @@ export type DevApiServiceAdapterDeps = AnalyzeServiceDeps & {
 
 export function createServiceDevApiAdapters(deps: DevApiServiceAdapterDeps): DevApiAdapters {
   return {
+    ...(deps.discovery === undefined ? {} : { discovery: createDiscoveryDevApiAdapter(deps.discovery) }),
     analyze: createServiceAnalyzeAdapter(deps),
     theses: createThesisAdapter(deps.db),
     agents: {

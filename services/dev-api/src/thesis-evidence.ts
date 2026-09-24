@@ -41,7 +41,7 @@ export async function loadThesisPacket(db: QueryExecutor, input: {
   const { rows } = await db.query<PacketFact>(`select packet.*
   from jsonb_to_recordset($2::jsonb) requested(metric_key text,unit text,period_kind text)
   cross join lateral (
-   select f.fact_id::text,m.metric_key,f.value_num::float8,f.scale::float8,f.unit,f.period_kind,
+   select f.fact_id::text,m.metric_key,f.value_num::text as value_num,f.scale::text as scale,f.unit,f.period_kind,
     f.period_end::text,f.period_start::text,f.fiscal_year,f.fiscal_period,f.as_of::text,f.source_id::text,f.confidence::float8,s.trust_tier
    from facts f join metrics m on m.metric_id=f.metric_id join sources s on s.source_id=f.source_id
    where f.subject_kind='issuer' and f.subject_id=$1::uuid and m.metric_key=requested.metric_key

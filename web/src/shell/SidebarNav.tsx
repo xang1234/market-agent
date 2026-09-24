@@ -5,6 +5,7 @@ import {
   Home,
   LineChart,
   MessageSquare,
+  Search,
   Settings,
   SlidersHorizontal,
   Table2,
@@ -30,6 +31,7 @@ const PRIMARY_WORKSPACES: ReadonlyArray<{ to: string; label: string; icon: Lucid
   { to: '/screener', label: 'Screener', icon: SlidersHorizontal },
   { to: ANALYZE_PATH, label: 'Analyze', icon: LineChart },
   { to: '/analyst-grids', label: 'Grids', icon: Table2 },
+  { to: '/discovery', label: 'Discover', icon: Search },
   ...(webDevFlags.llmSettingsEnabled
     ? [{ to: '/settings', label: 'Settings', icon: Settings }]
     : []),

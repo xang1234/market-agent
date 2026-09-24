@@ -1,12 +1,15 @@
+import { isExactThresholdInput, normalizeLegacyExactThreshold, type DecimalInput } from "./exact-decimal.ts";
+
 // Browser-safe thesis contract shared by the editor, API, repository and evaluator.
 export type ThesisPeriodKind = 'point' | 'fiscal_q' | 'fiscal_y' | 'ttm';
-export type ThesisOperator = 'gte' | 'lte';
+export type ThesisOperator = 'eq' | 'lt' | 'lte' | 'gt' | 'gte';
 export type ThesisMetricCheck = {
   metric_key: string;
   unit: string;
   period_kind: ThesisPeriodKind;
   operator: ThesisOperator;
-  threshold: number;
+  /** Exact fractions are canonical decimal text; safe integer JSON numbers remain compatible. */
+  threshold: DecimalInput;
   max_age_days: number;
 };
 
@@ -97,7 +100,7 @@ export class ThesisNotFoundError extends Error {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PERIOD_KINDS = new Set(["point", "fiscal_q", "fiscal_y", "ttm"]);
-const OPERATORS = new Set(["gte", "lte"]);
+const OPERATORS = new Set(["eq", "lt", "lte", "gt", "gte"]);
 
 export function parseThesisConditions(value: unknown): ThesisCondition[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > THESIS_CONDITIONS_MAX) {
@@ -132,8 +135,8 @@ export function parseThesisConditions(value: unknown): ThesisCondition[] {
         metric.operator,
         `${label}.metric.operator`,
         OPERATORS,
-      ) as "gte" | "lte";
-      const threshold = requireFiniteNumber(metric.threshold, `${label}.metric.threshold`);
+      ) as ThesisOperator;
+      const threshold = requireDecimal(metric.threshold, `${label}.metric.threshold`);
       const maxAgeDays = requireInteger(metric.max_age_days, `${label}.metric.max_age_days`, 1, 730);
       condition.metric = {
         metric_key: requireTrimmedString(metric.metric_key, `${label}.metric.metric_key`, 1, 100),
@@ -147,6 +150,20 @@ export function parseThesisConditions(value: unknown): ThesisCondition[] {
 
     return condition;
   });
+}
+
+/** Reads durable legacy thesis rows, normalizing prior fractional JSON numbers to exact text. */
+export function parseStoredThesisConditions(value: unknown): ThesisCondition[] {
+  if (!Array.isArray(value)) return parseThesisConditions(value);
+  return parseThesisConditions(value.map((condition) => {
+    if (condition === null || typeof condition !== "object" || Array.isArray(condition)) return condition;
+    const row = condition as Record<string, unknown>;
+    if (row.metric === null || typeof row.metric !== "object" || Array.isArray(row.metric)) return condition;
+    const metric = row.metric as Record<string, unknown>;
+    if (typeof metric.threshold !== "number" && typeof metric.threshold !== "string") return condition;
+    const threshold = normalizeLegacyExactThreshold(metric.threshold);
+    return threshold === null ? condition : { ...row, metric: { ...metric, threshold } };
+  }));
 }
 
 export function requireRecord(value: unknown, label: string): Record<string, unknown> {
@@ -182,9 +199,9 @@ export function requireTrimmedString(
   return value;
 }
 
-function requireFiniteNumber(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new ThesisValidationError(`${label} must be a finite number`);
+function requireDecimal(value: unknown, label: string): DecimalInput {
+  if (!isExactThresholdInput(value)) {
+    throw new ThesisValidationError(`${label} must be a canonical decimal string or safe integer`);
   }
   return value;
 }

@@ -205,6 +205,55 @@ test("evaluateThesis compares scaled metric values at the exact threshold", asyn
   assert.doesNotMatch(result.results[0]?.reason ?? "", /\d/);
 });
 
+test("evaluateThesis compares scaled decimal facts exactly across every threshold operator", async () => {
+  const cases = [
+    { operator: "eq", value_num: "0.1", scale: "3", threshold: "0.3", status: "supported" },
+    { operator: "lte", value_num: "0.1000000000000000000001", scale: "3", threshold: "0.3", status: "challenged" },
+    { operator: "lt", value_num: "0.0999999999999999999999", scale: "3", threshold: "0.3", status: "supported" },
+    { operator: "gt", value_num: "0.1000000000000000000001", scale: "3", threshold: "0.3", status: "supported" },
+    { operator: "gte", value_num: "0.1", scale: "3", threshold: "0.3", status: "supported" },
+  ] as const;
+
+  for (const item of cases) {
+    const result = await evaluateThesis({
+      thesis: thesis([condition(METRIC_ID, {
+        metric: { metric_key: "revenue", unit: "USDm", period_kind: "fiscal_q", operator: item.operator, threshold: item.threshold, max_age_days: 30 },
+      })]),
+      claims: [],
+      facts: [fact({ value_num: item.value_num, scale: item.scale })],
+      as_of: AS_OF,
+      llm: null,
+    });
+    assert.equal(result.results[0]?.status, item.status, item.operator);
+  }
+});
+
+test("evaluateThesis preserves bounded high-precision PostgreSQL numerics and fails closed for lossy facts", async () => {
+  const metric = (threshold: string) => condition(METRIC_ID, {
+    metric: { metric_key: "revenue", unit: "USDm", period_kind: "fiscal_q", operator: "eq", threshold, max_age_days: 30 },
+  });
+  const highPrecision = "12345678901234567890.12345678901234567890";
+  const exact = await evaluateThesis({ thesis: thesis([metric(highPrecision)]), claims: [], facts: [fact({ value_num: highPrecision, scale: "1" })], as_of: AS_OF, llm: null });
+  assert.equal(exact.results[0]?.status, "supported");
+
+  for (const invalidFact of [
+    fact({ value_num: Number.MAX_SAFE_INTEGER + 2, scale: 1 }),
+    fact({ value_num: "not-a-number", scale: "1" }),
+    fact({ value_num: `1.${"1".repeat(101)}`, scale: "1" }),
+    fact({ value_num: "1", scale: `1.${"1".repeat(101)}` }),
+  ]) {
+    const result = await evaluateThesis({ thesis: thesis([metric("1")]), claims: [], facts: [invalidFact], as_of: AS_OF, llm: null });
+    assert.deepEqual(result.results[0], {
+      condition_id: METRIC_ID,
+      status: "unresolved",
+      reason: "No eligible metric evidence was available.",
+      claim_refs: [],
+      fact_refs: [],
+      method: "no_evidence",
+    });
+  }
+});
+
 test("evaluateThesis ignores stale, wrong-unit, wrong-period, nonfinite, future, and invalid-date metric facts", async () => {
   const metricCondition = condition(METRIC_ID, {
     metric: {

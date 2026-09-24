@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { analyzeThesisHandoff, readAnalyzeThesisHandoff } from './thesisHandoff.ts'
+import { analyzeThesisHandoff, readAnalyzeThesisHandoff, readThesisHandoff } from './thesisHandoff.ts'
 import type { AnalyzeRunDetail } from './runHistory.ts'
 
 const CURRENT_SUBJECT_ID = '11111111-1111-4111-8111-111111111111'
@@ -46,6 +46,31 @@ test('Analyze thesis handoff is unavailable for empty, multiple, or unsupported 
     subjectRefs: [{ kind: 'theme', id: CURRENT_SUBJECT_ID }],
   })), null)
   assert.equal(readAnalyzeThesisHandoff({ thesisHandoff: { subjectRef: null } }), null)
+})
+
+test('the additive thesis handoff reader discriminates discovery provenance without changing legacy Analyze handoffs', () => {
+  const legacy = readThesisHandoff({ thesisHandoff: {
+    sourceRunId: 'run-historical',
+    subjectRef: { kind: 'listing', id: HISTORICAL_SUBJECT_ID },
+    thesis: 'Historical memo.',
+    name: 'Historical monitor',
+  } })
+  const discovery = readThesisHandoff({ researchHandoff: {
+    kind: 'discovery',
+    campaignId: '33333333-3333-4333-8333-333333333333',
+    runId: '44444444-4444-4444-8444-444444444444',
+    candidateId: '55555555-5555-4555-8555-555555555555',
+    subjectRef: { kind: 'listing', id: HISTORICAL_SUBJECT_ID },
+    name: 'Discovery monitor',
+    thesis: 'Cited research draft.',
+    conditions: [],
+  } })
+
+  assert.equal(legacy?.kind, 'analyze')
+  assert.equal(legacy?.kind === 'analyze' ? legacy.sourceRunId : null, 'run-historical')
+  assert.equal(discovery?.kind, 'discovery')
+  assert.equal(discovery?.kind === 'discovery' ? discovery.runId : null, '44444444-4444-4444-8444-444444444444')
+  assert.equal(readThesisHandoff({ thesisHandoff: { kind: 'discovery', sourceRunId: 'run-historical' } }), null)
 })
 
 function runDetail(input: {

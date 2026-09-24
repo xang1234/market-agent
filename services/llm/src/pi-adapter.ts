@@ -1,5 +1,6 @@
 import {
   type LlmChatClient,
+  type LlmClientExecutionOptions,
   type LlmChatMessage,
   type LlmChatRequest,
   type LlmChatResult,
@@ -53,6 +54,7 @@ type PiCompleteOptions = {
   apiKey?: string;
   temperature?: number;
   maxTokens?: number;
+  signal?: AbortSignal;
 };
 
 export type PiComplete = (
@@ -73,12 +75,12 @@ export async function createDefaultPiLlmChatClient(): Promise<LlmChatClient> {
 }
 
 export function createPiLlmChatClient(input: CreatePiLlmChatClientInput): LlmChatClient {
-  return async (deployment, request) => {
+  return async (deployment, request, execution = {}) => {
     try {
       const message = await input.complete(
         modelFromDeployment(deployment, request),
         contextFromRequest(request),
-        optionsFromDeployment(deployment, request),
+        optionsFromDeployment(deployment, request, execution),
       );
       if (message.stopReason === "error" || message.stopReason === "aborted") {
         throw providerErrorFromMessage(message);
@@ -134,11 +136,16 @@ function isConversationMessage(
   return message.role === "user" || message.role === "assistant";
 }
 
-function optionsFromDeployment(deployment: LlmDeployment, request: LlmChatRequest): PiCompleteOptions {
+function optionsFromDeployment(
+  deployment: LlmDeployment,
+  request: LlmChatRequest,
+  execution: LlmClientExecutionOptions,
+): PiCompleteOptions {
   return Object.freeze({
     ...(deployment.apiKeys[0] ? { apiKey: deployment.apiKeys[0] } : {}),
     ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
     ...(request.maxTokens === undefined ? {} : { maxTokens: request.maxTokens }),
+    ...(execution.signal === undefined ? {} : { signal: execution.signal }),
   });
 }
 

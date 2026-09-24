@@ -16,6 +16,7 @@ tags:
   - name: Snapshots
   - name: Chat
   - name: Analyze
+  - name: Discovery
   - name: Agents
   - name: Themes
   - name: Home
@@ -1178,6 +1179,196 @@ paths:
           description: Analyze run not found for the calling user
         '422':
           description: Artifact share rejected by provenance or egress guardrails
+  /v1/discovery/metric-options:
+    get:
+      tags: [Discovery]
+      summary: List canonical metric options for discovery brief criteria
+      operationId: listDiscoveryMetricOptions
+      responses:
+        '200': { $ref: '#/components/responses/DiscoveryMetricOptionsResponse' }
+        '401': { $ref: '#/components/responses/DiscoveryUnauthorized' }
+  /v1/discovery/campaigns:
+    get:
+      tags: [Discovery]
+      summary: List owned discovery campaigns
+      operationId: listDiscoveryCampaigns
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200': { $ref: '#/components/responses/DiscoveryCampaignPageResponse' }
+        '401': { $ref: '#/components/responses/DiscoveryUnauthorized' }
+    post:
+      tags: [Discovery]
+      summary: Create a discovery campaign without contacting providers
+      operationId: createDiscoveryCampaign
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DiscoveryCampaignInput' }
+      responses:
+        '201': { $ref: '#/components/responses/DiscoveryCampaignResponse' }
+        '400': { $ref: '#/components/responses/DiscoveryBadRequest' }
+        '401': { $ref: '#/components/responses/DiscoveryUnauthorized' }
+  /v1/discovery/campaigns/{campaignId}:
+    parameters:
+      - $ref: '#/components/parameters/DiscoveryCampaignIdPath'
+    get:
+      tags: [Discovery]
+      summary: Get an owned campaign, latest brief, run, and readiness
+      operationId: getDiscoveryCampaign
+      responses:
+        '200': { $ref: '#/components/responses/DiscoveryCampaignDetailResponse' }
+        '400': { $ref: '#/components/responses/DiscoveryBadRequest' }
+        '401': { $ref: '#/components/responses/DiscoveryUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscoveryNotFound' }
+    delete:
+      tags: [Discovery]
+      summary: Delete an owned, quiescent discovery campaign
+      operationId: deleteDiscoveryCampaign
+      responses:
+        '204': { $ref: '#/components/responses/DiscoveryNoContent' }
+        '400': { $ref: '#/components/responses/DiscoveryBadRequest' }
+        '401': { $ref: '#/components/responses/DiscoveryUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscoveryNotFound' }
+        '409': { $ref: '#/components/responses/DiscoveryConflict' }
+  /v1/discovery/campaigns/{campaignId}/draft:
+    parameters:
+      - $ref: '#/components/parameters/DiscoveryCampaignIdPath'
+    post:
+      tags: [Discovery]
+      summary: Draft a brief proposal without overwriting the saved brief
+      operationId: draftDiscoveryBrief
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DiscoveryDraftInput' }
+      responses:
+        '200': { $ref: '#/components/responses/DiscoveryDraftResponse' }
+        '400': { $ref: '#/components/responses/DiscoveryBadRequest' }
+        '401': { $ref: '#/components/responses/DiscoveryUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscoveryNotFound' }
+        '409': { $ref: '#/components/responses/DiscoveryConflict' }
+        '429': { $ref: '#/components/responses/DiscoveryRateLimited' }
+        '503': { $ref: '#/components/responses/DiscoveryUnavailable' }
+  /v1/discovery/campaigns/{campaignId}/brief:
+    parameters:
+      - $ref: '#/components/parameters/DiscoveryCampaignIdPath'
+    put:
+      tags: [Discovery]
+      summary: Save a versioned discovery brief
+      operationId: saveDiscoveryBrief
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DiscoverySaveBriefInput' }
+      responses:
+        '200': { $ref: '#/components/responses/DiscoverySavedBriefResponse' }
+        '400': { $ref: '#/components/responses/DiscoveryBadRequest' }
+        '401': { $ref: '#/components/responses/DiscoveryUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscoveryNotFound' }
+        '409': { $ref: '#/components/responses/DiscoveryConflict' }
+  /v1/discovery/campaigns/{campaignId}/runs:
+    parameters:
+      - $ref: '#/components/parameters/DiscoveryCampaignIdPath'
+    get:
+      tags: [Discovery]
+      summary: List owned campaign runs
+      operationId: listDiscoveryRuns
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200': { $ref: '#/components/responses/DiscoveryRunPageResponse' }
+        '400': { $ref: '#/components/responses/DiscoveryBadRequest' }
+        '401': { $ref: '#/components/responses/DiscoveryUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscoveryNotFound' }
+    post:
+      tags: [Discovery]
+      summary: Start an idempotent discovery run from an approved brief
+      operationId: startDiscoveryRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DiscoveryStartRunInput' }
+      responses:
+        '201': { $ref: '#/components/responses/DiscoveryRunResponse' }
+        '400': { $ref: '#/components/responses/DiscoveryBadRequest' }
+        '401': { $ref: '#/components/responses/DiscoveryUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscoveryNotFound' }
+        '409': { $ref: '#/components/responses/DiscoveryConflict' }
+  /v1/discovery/runs/{runId}:
+    parameters:
+      - $ref: '#/components/parameters/DiscoveryRunIdPath'
+    get:
+      tags: [Discovery]
+      summary: Read an owned run with currently authorized shortlist evidence
+      operationId: getDiscoveryRun
+      responses:
+        '200': { $ref: '#/components/responses/DiscoveryRunViewResponse' }
+        '400': { $ref: '#/components/responses/DiscoveryBadRequest' }
+        '401': { $ref: '#/components/responses/DiscoveryUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscoveryNotFound' }
+  /v1/discovery/runs/{runId}/candidates:
+    parameters:
+      - $ref: '#/components/parameters/DiscoveryRunIdPath'
+      - name: cursor
+        in: query
+        schema: { type: string }
+      - name: limit
+        in: query
+        schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      - name: state
+        in: query
+        schema: { type: string, enum: [unresolved_identity, discovered, not_selected, researching, shortlisted, eligible_not_shortlisted, excluded, needs_evidence, research_error] }
+    get:
+      tags: [Discovery]
+      summary: Page currently authorized candidate views
+      operationId: listDiscoveryCandidates
+      responses:
+        '200': { $ref: '#/components/responses/DiscoveryCandidatePageResponse' }
+        '400': { $ref: '#/components/responses/DiscoveryBadRequest' }
+        '401': { $ref: '#/components/responses/DiscoveryUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscoveryNotFound' }
+  /v1/discovery/runs/{runId}/events:
+    parameters:
+      - $ref: '#/components/parameters/DiscoveryRunIdPath'
+      - name: after
+        in: query
+        schema: { type: integer, minimum: 0, default: 0 }
+    get:
+      tags: [Discovery]
+      summary: Read current-source-filtered discovery activity
+      operationId: listDiscoveryEvents
+      responses:
+        '200': { $ref: '#/components/responses/DiscoveryEventPageResponse' }
+        '400': { $ref: '#/components/responses/DiscoveryBadRequest' }
+        '401': { $ref: '#/components/responses/DiscoveryUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscoveryNotFound' }
+  /v1/discovery/runs/{runId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/DiscoveryRunIdPath'
+    post:
+      tags: [Discovery]
+      summary: Request cancellation of an owned run
+      operationId: cancelDiscoveryRun
+      responses:
+        '200': { $ref: '#/components/responses/DiscoveryRunResponse' }
+        '400': { $ref: '#/components/responses/DiscoveryBadRequest' }
+        '401': { $ref: '#/components/responses/DiscoveryUnauthorized' }
+        '404': { $ref: '#/components/responses/DiscoveryNotFound' }
   /v1/agents:
     get:
       tags: [Agents]
@@ -1848,12 +2039,581 @@ components:
       schema:
         type: string
         format: uuid
+    DiscoveryCampaignIdPath:
+      in: path
+      name: campaignId
+      required: true
+      schema: { type: string, format: uuid }
+    DiscoveryRunIdPath:
+      in: path
+      name: runId
+      required: true
+      schema: { type: string, format: uuid }
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
+  responses:
+    DiscoveryMetricOptionsResponse:
+      description: Canonical metric options available for a discovery brief
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [items]
+            additionalProperties: false
+            properties:
+              items:
+                type: array
+                items: { $ref: '#/components/schemas/DiscoveryMetricOption' }
+    DiscoveryCampaignResponse:
+      description: Owned discovery campaign
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DiscoveryCampaign' }
+    DiscoveryCampaignPageResponse:
+      description: Page of owned discovery campaigns
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DiscoveryCampaignPage' }
+    DiscoveryCampaignDetailResponse:
+      description: Campaign, current brief, latest run, and readiness
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DiscoveryCampaignDetail' }
+    DiscoveryDraftResponse:
+      description: Unsaved brief proposal based on the requested version
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DiscoveryDraft' }
+    DiscoverySavedBriefResponse:
+      description: Persisted immutable discovery brief
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DiscoverySavedBrief' }
+    DiscoveryRunResponse:
+      description: Owned queued, running, or completed discovery run
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DiscoveryRun' }
+    DiscoveryRunPageResponse:
+      description: Page of owned campaign runs
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DiscoveryRunPage' }
+    DiscoveryRunViewResponse:
+      description: Owned run with currently authorized shortlist evidence
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DiscoveryRunView' }
+    DiscoveryCandidatePageResponse:
+      description: Page of currently authorized discovery candidates
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DiscoveryCandidatePage' }
+    DiscoveryEventPageResponse:
+      description: Page of current-source-filtered discovery activity
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DiscoveryEventPage' }
+    DiscoveryNoContent:
+      description: Discovery resource deleted
+    DiscoveryBadRequest:
+      description: Malformed discovery request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DiscoveryError' }
+    DiscoveryUnauthorized:
+      description: Missing or malformed user credential
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DiscoveryAuthenticationError' }
+    DiscoveryNotFound:
+      description: Requested discovery resource is unavailable to the caller
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DiscoveryError' }
+    DiscoveryConflict:
+      description: Discovery request conflicts with current campaign state
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DiscoveryError' }
+    DiscoveryRateLimited:
+      description: Draft request rate limit is exhausted
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DiscoveryError' }
+    DiscoveryUnavailable:
+      description: Required discovery provider configuration is unavailable
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DiscoveryError' }
   schemas:
+    DiscoveryError:
+      type: object
+      required: [error, code]
+      additionalProperties: false
+      properties:
+        error: { type: string }
+        code: { $ref: '#/components/schemas/DiscoveryErrorCode' }
+    DiscoveryAuthenticationError:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error: { type: string }
+    DiscoveryErrorCode:
+      type: string
+      enum: [validation, not_found, stale_brief, active_run, request_conflict, draft_rate_limit, unavailable, budget_exhausted, deadline_exceeded, lease_lost, cancelled, operation_in_progress]
+    DiscoveryMetricOption:
+      type: object
+      required: [metric_key, display_name, unit_class, aggregation, interpretation, canonical_source_class]
+      additionalProperties: false
+      properties:
+        metric_key: { type: string }
+        display_name: { type: string }
+        unit_class: { type: string }
+        aggregation: { type: string }
+        interpretation: { type: string }
+        canonical_source_class: { type: string }
+    DiscoveryCampaign:
+      type: object
+      required: [campaign_id, user_id, name, question, current_brief_version, created_at, updated_at, archived_at]
+      additionalProperties: false
+      properties:
+        campaign_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        name: { type: string }
+        question: { type: string }
+        current_brief_version: { type: integer, minimum: 0 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        archived_at: { type: [string, 'null'], format: date-time }
+    DiscoveryCampaignPage:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/DiscoveryCampaign' }
+        next_cursor: { type: [string, 'null'] }
+    DiscoveryBrief:
+      type: object
+      required: [schema_version, question, market, horizon_months, lookback_months, mechanisms, criteria, seed_queries, exclusions, preferences, queries]
+      additionalProperties: false
+      properties:
+        schema_version: { type: integer, const: 1 }
+        question: { type: string, minLength: 20, maxLength: 4000 }
+        market: { type: string, const: us_listed }
+        horizon_months: { type: integer, minimum: 1, maximum: 60 }
+        lookback_months: { type: integer, minimum: 1, maximum: 24 }
+        mechanisms: { $ref: '#/components/schemas/DiscoveryMechanismList' }
+        criteria: { $ref: '#/components/schemas/DiscoveryCriterionList' }
+        seed_queries: { $ref: '#/components/schemas/DiscoverySeedQueryList' }
+        exclusions: { $ref: '#/components/schemas/DiscoveryExclusionList' }
+        preferences: { $ref: '#/components/schemas/DiscoveryPreferenceList' }
+        queries: { $ref: '#/components/schemas/DiscoveryBriefQueryList' }
+    DiscoveryMechanism:
+      type: object
+      required: [mechanism_id, label, chain]
+      additionalProperties: false
+      properties:
+        mechanism_id: { type: string, format: uuid }
+        label: { type: string, minLength: 1, maxLength: 160 }
+        chain:
+          type: array
+          minItems: 2
+          maxItems: 5
+          items: { type: string, minLength: 1, maxLength: 300 }
+    DiscoveryMechanismList:
+      type: array
+      minItems: 2
+      maxItems: 4
+      items: { $ref: '#/components/schemas/DiscoveryMechanism' }
+    DiscoveryMetricCheck:
+      type: object
+      required: [metric_key, unit, period_kind, operator, threshold, max_age_days]
+      additionalProperties: false
+      properties:
+        metric_key: { type: string, minLength: 1, maxLength: 100 }
+        unit: { type: string, minLength: 1, maxLength: 100 }
+        period_kind: { type: string, enum: [point, fiscal_q, fiscal_y, ttm] }
+        operator: { type: string, enum: [eq, lt, lte, gt, gte] }
+        threshold:
+          oneOf:
+            # Compatibility form: JSON's only exact numeric thresholds are
+            # bounded integers. Fractions must use canonical decimal text.
+            - type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            - type: string
+              minLength: 1
+              maxLength: 102
+              pattern: '^-?(?=.{1,101}(?![\s\S]))(?:0|[1-9][0-9]{0,99})(?:\.[0-9]{1,100})?(?![\s\S])'
+        max_age_days: { type: integer, minimum: 1, maximum: 730 }
+    DiscoveryCriterion:
+      type: object
+      required: [criterion_id, importance, statement, falsifier]
+      additionalProperties: false
+      properties:
+        criterion_id: { type: string, format: uuid }
+        importance: { type: string, enum: [must, prefer] }
+        statement: { type: string, minLength: 8, maxLength: 1000 }
+        falsifier: { type: string, minLength: 8, maxLength: 1000 }
+        metric: { $ref: '#/components/schemas/DiscoveryMetricCheck' }
+    DiscoveryCriterionList:
+      type: array
+      minItems: 1
+      maxItems: 8
+      items: { $ref: '#/components/schemas/DiscoveryCriterion' }
+    DiscoverySeedQueryList:
+      type: array
+      minItems: 0
+      maxItems: 5
+      items: { type: string, minLength: 1, maxLength: 200 }
+    DiscoveryExclusionList:
+      type: array
+      minItems: 0
+      maxItems: 10
+      items: { type: string, minLength: 1, maxLength: 300 }
+    DiscoveryPreferenceList:
+      type: array
+      minItems: 0
+      maxItems: 10
+      items: { type: string, minLength: 1, maxLength: 300 }
+    DiscoveryBriefQuery:
+      type: object
+      required: [mechanism_id, query]
+      additionalProperties: false
+      properties:
+        mechanism_id: { type: string, format: uuid }
+        query: { type: string, minLength: 1, maxLength: 600 }
+    DiscoveryBriefQueryList:
+      type: array
+      minItems: 1
+      maxItems: 20
+      items: { $ref: '#/components/schemas/DiscoveryBriefQuery' }
+    DiscoverySavedBrief:
+      type: object
+      required: [brief_id, campaign_id, version, brief, hash, approved_at, created_at]
+      additionalProperties: false
+      properties:
+        brief_id: { type: string, format: uuid }
+        campaign_id: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
+        brief: { $ref: '#/components/schemas/DiscoveryBrief' }
+        hash: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
+        approved_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+    DiscoveryModelConfig:
+      type: object
+      required: [role, provider, model, max_output_tokens, as_of]
+      additionalProperties: false
+      properties:
+        role: { type: string, enum: [planner, scout, analyst, skeptic, summary] }
+        provider: { type: string }
+        model: { type: string }
+        max_output_tokens: { type: integer, minimum: 1, maximum: 10000 }
+        as_of: { type: string, format: date-time }
+    DiscoveryLimits:
+      type: object
+      required: [candidates, research, shortlist, attempts, input_chars, output_tokens, request_timeout_ms, run_timeout_ms]
+      additionalProperties: false
+      properties:
+        candidates: { type: integer, minimum: 1 }
+        research: { type: integer, minimum: 1 }
+        shortlist: { type: integer, minimum: 1 }
+        attempts: { $ref: '#/components/schemas/DiscoveryAttemptLimits' }
+        input_chars: { type: integer, minimum: 1 }
+        output_tokens: { type: integer, minimum: 1 }
+        request_timeout_ms: { type: integer, minimum: 1 }
+        run_timeout_ms: { type: integer, minimum: 1 }
+    DiscoveryAttemptLimits:
+      type: object
+      required: [search, document, identity, financial, model]
+      additionalProperties: false
+      properties:
+        search: { type: integer, minimum: 1 }
+        document: { type: integer, minimum: 1 }
+        identity: { type: integer, minimum: 1 }
+        financial: { type: integer, minimum: 1 }
+        model: { type: integer, minimum: 1 }
+    DiscoveryUsage:
+      type: object
+      required: [search, document, identity, financial, model]
+      additionalProperties: false
+      properties:
+        search: { type: integer, minimum: 0 }
+        document: { type: integer, minimum: 0 }
+        identity: { type: integer, minimum: 0 }
+        financial: { type: integer, minimum: 0 }
+        model: { type: integer, minimum: 0 }
+    DiscoveryCoverageMechanism:
+      type: object
+      required: [mechanism_id, discovered, selected, assessed]
+      additionalProperties: false
+      properties:
+        mechanism_id: { type: string, format: uuid }
+        discovered: { type: integer, minimum: 0 }
+        selected: { type: integer, minimum: 0 }
+        assessed: { type: integer, minimum: 0 }
+    DiscoveryCoverageGap:
+      type: object
+      required: [code, candidate_id, detail]
+      additionalProperties: false
+      properties:
+        code: { type: string }
+        candidate_id: { type: [string, 'null'], format: uuid }
+        detail: { type: string }
+    DiscoveryCoverage:
+      type: object
+      required: [searches_planned, searches_completed, hits_truncated, leads_overflow, extraction_batches_skipped, unresolved, discovered, selected, assessed, not_selected, mechanisms, gaps]
+      additionalProperties: false
+      properties:
+        searches_planned: { type: integer, minimum: 0 }
+        searches_completed: { type: integer, minimum: 0 }
+        hits_truncated: { type: integer, minimum: 0 }
+        leads_overflow: { type: integer, minimum: 0 }
+        extraction_batches_skipped: { type: integer, minimum: 0 }
+        unresolved: { type: integer, minimum: 0 }
+        discovered: { type: integer, minimum: 0 }
+        selected: { type: integer, minimum: 0 }
+        assessed: { type: integer, minimum: 0 }
+        not_selected: { type: integer, minimum: 0 }
+        mechanisms: { type: array, items: { $ref: '#/components/schemas/DiscoveryCoverageMechanism' } }
+        gaps: { type: array, items: { $ref: '#/components/schemas/DiscoveryCoverageGap' } }
+    DiscoveryRun:
+      type: object
+      required: [run_id, campaign_id, brief_id, user_id, status, stage, policy_version, request_key, model_config, limits, usage, coverage, started_at, finished_at, cancel_requested_at]
+      additionalProperties: false
+      properties:
+        run_id: { type: string, format: uuid }
+        campaign_id: { type: string, format: uuid }
+        brief_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, running, completed, partial, failed, cancelled] }
+        stage: { type: string, enum: [queued, discovery, research, finalization] }
+        policy_version: { type: string }
+        request_key: { type: string, format: uuid }
+        model_config: { type: array, items: { $ref: '#/components/schemas/DiscoveryModelConfig' } }
+        limits: { $ref: '#/components/schemas/DiscoveryLimits' }
+        usage: { $ref: '#/components/schemas/DiscoveryUsage' }
+        coverage: { $ref: '#/components/schemas/DiscoveryCoverage' }
+        started_at: { type: [string, 'null'], format: date-time }
+        finished_at: { type: [string, 'null'], format: date-time }
+        cancel_requested_at: { type: [string, 'null'], format: date-time }
+    DiscoveryRunPage:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/DiscoveryRun' } }
+        next_cursor: { type: [string, 'null'] }
+    DiscoveryRunView:
+      type: object
+      required: [run_id, campaign_id, brief_id, user_id, status, stage, policy_version, request_key, model_config, limits, usage, coverage, started_at, finished_at, cancel_requested_at, shortlist, cost, worker_waiting]
+      additionalProperties: false
+      properties:
+        run_id: { type: string, format: uuid }
+        campaign_id: { type: string, format: uuid }
+        brief_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, running, completed, partial, failed, cancelled] }
+        stage: { type: string, enum: [queued, discovery, research, finalization] }
+        policy_version: { type: string }
+        request_key: { type: string, format: uuid }
+        model_config: { type: array, items: { $ref: '#/components/schemas/DiscoveryModelConfig' } }
+        limits: { $ref: '#/components/schemas/DiscoveryLimits' }
+        usage: { $ref: '#/components/schemas/DiscoveryUsage' }
+        coverage: { $ref: '#/components/schemas/DiscoveryCoverage' }
+        started_at: { type: [string, 'null'], format: date-time }
+        finished_at: { type: [string, 'null'], format: date-time }
+        cancel_requested_at: { type: [string, 'null'], format: date-time }
+        shortlist: { type: array, items: { $ref: '#/components/schemas/DiscoveryCandidate' } }
+        cost: { $ref: '#/components/schemas/DiscoveryCost' }
+        worker_waiting: { type: boolean }
+    DiscoveryCost:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        status: { type: string, const: unavailable }
+    DiscoveryReadiness:
+      type: object
+      required: [ready, missing]
+      additionalProperties: false
+      properties:
+        ready: { type: boolean }
+        missing: { type: array, items: { type: string, enum: [model, search, reference] } }
+    DiscoveryCampaignDetail:
+      type: object
+      required: [campaign, brief, latest_run, readiness]
+      additionalProperties: false
+      properties:
+        campaign: { $ref: '#/components/schemas/DiscoveryCampaign' }
+        brief: { anyOf: [{ $ref: '#/components/schemas/DiscoverySavedBrief' }, { type: 'null' }] }
+        latest_run: { anyOf: [{ $ref: '#/components/schemas/DiscoveryRun' }, { type: 'null' }] }
+        readiness: { $ref: '#/components/schemas/DiscoveryReadiness' }
+    DiscoveryDraft:
+      type: object
+      required: [brief, base_version]
+      additionalProperties: false
+      properties:
+        brief: { $ref: '#/components/schemas/DiscoveryBrief' }
+        base_version: { type: integer, minimum: 0 }
+    DiscoveryCitation:
+      type: object
+      required: [kind, id]
+      additionalProperties: false
+      properties:
+        kind: { type: string, enum: [claim, fact] }
+        id: { type: string, format: uuid }
+    DiscoverySourceView:
+      type: object
+      required: [citation, title, url, published_at, retrieved_at]
+      additionalProperties: false
+      properties:
+        citation: { $ref: '#/components/schemas/DiscoveryCitation' }
+        title: { type: string }
+        url: { type: string, format: uri }
+        published_at: { type: [string, 'null'], format: date-time }
+        retrieved_at: { type: string, format: date-time }
+    DiscoveryCandidate:
+      type: object
+      required: [candidate_id, identity, name, state, rank, snapshot_id, evidence_available, can_promote, assessment, sources, origins, mechanism_ids, reason_codes]
+      additionalProperties: false
+      properties:
+        candidate_id: { type: string, format: uuid }
+        identity: { anyOf: [{ $ref: '#/components/schemas/DiscoveryCompanyIdentity' }, { type: 'null' }] }
+        name: { type: string }
+        state: { type: string, enum: [unresolved_identity, discovered, not_selected, researching, shortlisted, eligible_not_shortlisted, excluded, needs_evidence, research_error] }
+        rank: { type: [integer, 'null'], minimum: 1 }
+        snapshot_id: { type: [string, 'null'], format: uuid }
+        evidence_available: { type: boolean }
+        can_promote: { type: boolean }
+        assessment: { anyOf: [{ $ref: '#/components/schemas/DiscoveryCandidateDecision' }, { type: 'null' }] }
+        sources: { type: array, items: { $ref: '#/components/schemas/DiscoverySourceView' } }
+        origins: { type: array, items: { type: string, enum: [seed, existing, web] } }
+        mechanism_ids: { type: array, items: { type: string, format: uuid } }
+        reason_codes: { type: array, items: { type: string } }
+    DiscoveryCompanyIdentity:
+      type: object
+      required: [issuer_id, listing_id, legal_name, ticker, mic, currency, asset_type, identity_source_ids]
+      additionalProperties: false
+      properties:
+        issuer_id: { type: string, format: uuid }
+        listing_id: { type: string, format: uuid }
+        legal_name: { type: string }
+        ticker: { type: string }
+        mic: { type: string }
+        currency: { type: string }
+        asset_type: { type: string, enum: [common_stock, adr] }
+        identity_source_ids: { type: array, items: { type: string, format: uuid } }
+    DiscoveryDimension:
+      type: object
+      required: [level, explanation, citations]
+      additionalProperties: false
+      properties:
+        level: { type: string, enum: [strong, mixed, weak, unknown] }
+        explanation: { type: string }
+        citations: { type: array, items: { $ref: '#/components/schemas/DiscoveryCitation' } }
+    DiscoveryDimensions:
+      type: object
+      required: [theme_exposure, evidence_strength, business_quality, valuation_context]
+      additionalProperties: false
+      properties:
+        theme_exposure: { $ref: '#/components/schemas/DiscoveryDimension' }
+        evidence_strength: { $ref: '#/components/schemas/DiscoveryDimension' }
+        business_quality: { $ref: '#/components/schemas/DiscoveryDimension' }
+        valuation_context: { $ref: '#/components/schemas/DiscoveryDimension' }
+    DiscoveryCriterionOutcome:
+      type: object
+      required: [criterion_id, outcome, explanation, citations]
+      additionalProperties: false
+      properties:
+        criterion_id: { type: string, format: uuid }
+        outcome: { type: string, enum: [pass, fail, unknown] }
+        explanation: { type: string }
+        citations: { type: array, items: { $ref: '#/components/schemas/DiscoveryCitation' } }
+    DiscoveryCounterargument:
+      type: object
+      required: [text, citations]
+      additionalProperties: false
+      properties:
+        text: { type: string }
+        citations: { type: array, items: { $ref: '#/components/schemas/DiscoveryCitation' } }
+    DiscoveryCandidateDecision:
+      type: object
+      required: [candidate_id, identity, state, dimensions, criteria, counterarguments, unresolved_questions, next_action, reason_codes]
+      additionalProperties: false
+      properties:
+        candidate_id: { type: string, format: uuid }
+        identity: { $ref: '#/components/schemas/DiscoveryCompanyIdentity' }
+        state: { type: string, enum: [excluded, needs_evidence, eligible_not_shortlisted] }
+        dimensions: { $ref: '#/components/schemas/DiscoveryDimensions' }
+        criteria: { type: array, items: { $ref: '#/components/schemas/DiscoveryCriterionOutcome' } }
+        counterarguments: { type: array, items: { $ref: '#/components/schemas/DiscoveryCounterargument' } }
+        unresolved_questions: { type: array, items: { type: string } }
+        next_action: { type: string }
+        reason_codes: { type: array, items: { type: string } }
+    DiscoveryCandidatePage:
+      type: object
+      required: [items, next_cursor]
+      additionalProperties: false
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/DiscoveryCandidate' } }
+        next_cursor: { type: [string, 'null'] }
+    DiscoveryEvent:
+      type: object
+      required: [run_id, sequence, stage, kind, candidate_id, summary, citations, created_at]
+      additionalProperties: false
+      properties:
+        run_id: { type: string, format: uuid }
+        sequence: { type: integer, minimum: 0 }
+        stage: { type: string, enum: [queued, discovery, research, finalization] }
+        kind: { type: string, enum: [search_completed, lead_resolved, document_acquired, criterion_assessed, skeptic_completed, budget_exhausted, run_resumed, run_finalized] }
+        candidate_id: { type: [string, 'null'], format: uuid }
+        summary: { type: string }
+        citations: { type: array, items: { $ref: '#/components/schemas/DiscoveryCitation' } }
+        created_at: { type: string, format: date-time }
+    DiscoveryEventPage:
+      type: object
+      required: [items, next_sequence, has_more]
+      additionalProperties: false
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/DiscoveryEvent' } }
+        next_sequence: { type: integer, minimum: 0 }
+        has_more: { type: boolean }
+    DiscoveryCampaignInput:
+      type: object
+      required: [name, question]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        question: { type: string, minLength: 20, maxLength: 4000 }
+    DiscoveryDraftInput:
+      type: object
+      required: [expected_version]
+      additionalProperties: false
+      properties:
+        expected_version: { type: integer, minimum: 0 }
+    DiscoverySaveBriefInput:
+      type: object
+      required: [expected_version, brief]
+      additionalProperties: false
+      properties:
+        expected_version: { type: integer, minimum: 0 }
+        brief: { $ref: '#/components/schemas/DiscoveryBrief' }
+    DiscoveryStartRunInput:
+      type: object
+      required: [brief_version, brief_hash, request_key]
+      additionalProperties: false
+      properties:
+        brief_version: { type: integer, minimum: 1 }
+        brief_hash: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
+        request_key: { type: string, format: uuid }
     SubjectKind:
       type: string
       description: Canonical subject discriminator. Ticker is a listing locator, not canonical identity.

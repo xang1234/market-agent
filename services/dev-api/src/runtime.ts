@@ -7,6 +7,7 @@ import {
   type DevApiAdapters,
   type DevApiServiceAdapterDeps,
 } from "./http.ts";
+import type { DiscoveryService } from "../../discovery/src/ports.ts";
 
 export type DevApiRuntimeEnv = {
   MA_DEV_API_FIXTURE_ADAPTER?: string;
@@ -47,9 +48,15 @@ export async function createDevApiAdaptersFromEnv(
   if (module.buildAnalyzeRunSeals !== undefined && typeof module.buildAnalyzeRunSeals !== "function") {
     throw new Error("DEV_API_RUNTIME_MODULE buildAnalyzeRunSeals export must be a function");
   }
+  if (module.createDiscoveryService !== undefined && typeof module.createDiscoveryService !== "function") {
+    throw new Error("DEV_API_RUNTIME_MODULE createDiscoveryService export must be a function");
+  }
 
   const { Pool } = await import("pg");
   const pool = new Pool({ connectionString: databaseUrl });
+  const discovery = module.createDiscoveryService === undefined
+    ? undefined
+    : await module.createDiscoveryService({ db: pool }) as DiscoveryService;
   return createServiceDevApiAdapters({
     db: pool,
     sealAnalyzeSnapshot: module.sealAnalyzeSnapshot as DevApiServiceAdapterDeps["sealAnalyzeSnapshot"],
@@ -57,6 +64,7 @@ export async function createDevApiAdaptersFromEnv(
     runAnalyzeWorkflow: module.runAnalyzeWorkflow as DevApiServiceAdapterDeps["runAnalyzeWorkflow"],
     createAgentLoopStages: module.createAgentLoopStages as DevApiServiceAdapterDeps["createAgentLoopStages"],
     inspectEvidence: module.inspectEvidence as DevApiServiceAdapterDeps["inspectEvidence"],
+    discovery,
   });
 }
 
