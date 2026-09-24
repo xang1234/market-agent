@@ -3,3 +3,5 @@
 export * from "./contracts.ts";
 export * from "./canonical.ts";
 export * from "./validate.ts";
+export * from "./exact-decimal.ts";
+export * from "./numeric-policy.ts";
