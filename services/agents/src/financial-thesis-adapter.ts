@@ -18,6 +18,9 @@ import {
   METRIC_CATALOG_V1,
   type FinancialRuntimeAuthority,
   type FinancialUnit,
+  type PlanOrigin,
+  type PublicationUnitKind,
+  type ThresholdAttribution,
 } from "../../financial-core/src/index.ts";
 import type { PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
 import type { FinancialPool } from "../../financial-engine/src/http.ts";
@@ -26,7 +29,7 @@ import type { FinancialEvidencePort, SqlExecutor } from "../../financial-engine/
 import { reserveAndPublish, type PublishResult } from "../../financial-engine/src/publish.ts";
 import { findRunForRequest } from "../../financial-engine/src/run-repo.ts";
 import { snapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
-import type { ConditionAssessment, ThesisCondition, ThesisMetricCheck, ThesisVersion } from "./thesis-types.ts";
+import type { ConditionAssessment, ConditionFinancialRef, ThesisCondition, ThesisMetricCheck, ThesisVersion } from "./thesis-types.ts";
 
 export type ThesisFinancialDeps = Readonly<{
   pool: FinancialPool;
@@ -35,6 +38,7 @@ export type ThesisFinancialDeps = Readonly<{
 }>;
 
 const UNIT_ID = "condition";
+const SUBJECT_MENTION = "saved subject";
 const LEASE_TTL_MS = 120_000;
 
 type Translation =
@@ -90,48 +94,99 @@ export function thesisReuseProjection(results: ReadonlyArray<ConditionAssessment
   }));
 }
 
-// ---------------------------------------------------------------------------
+/** One saved numerical rule for one subject at one cutoff, with the parent's own authority and publication guard. */
+export type VerifiedMetricSpec = Readonly<{
+  authority: FinancialRuntimeAuthority;
+  request_key: string;
+  subject: Readonly<{ kind: "issuer"; id: string }>;
+  metric: ThesisMetricCheck;
+  as_of: string;
+  origin: PlanOrigin;
+  threshold_attribution: ThresholdAttribution;
+  publication_unit_kind: PublicationUnitKind;
+  /** Runs in the finalization transaction; throwing keeps the unit unsealed. */
+  persistParent: PersistParentArtifact;
+}>;
 
-async function evaluateCondition(deps: ThesisFinancialDeps, run: ThesisConditionRun, condition: ThesisCondition, metric: ThesisMetricCheck): Promise<ConditionAssessment> {
+export type VerifiedMetricOutcome = Readonly<{
+  status: "supported" | "challenged" | "unresolved";
+  reason_code: string | null;
+  reason: string;
+  fact_refs: string[];
+  financial: ConditionFinancialRef | null;
+}>;
+
+/**
+ * The shared evaluation of a saved numerical rule — a thesis condition or an
+ * approved Discovery criterion: plan it exactly as saved, compute and seal it
+ * under the parent's authority, and read the outcome back from committed
+ * records. A retry with the same request key resumes; it never recomputes.
+ */
+export async function evaluateVerifiedMetric(deps: ThesisFinancialDeps, spec: VerifiedMetricSpec): Promise<VerifiedMetricOutcome> {
   const client = snapshotTransactionClient(await deps.pool.connect());
   try {
-    const authority = thesisAuthority(run);
-    const requestKey = `${run.run_key}:${condition.condition_id}`;
-    const earlier = await findRunForRequest(client, { authority, request_key: requestKey });
+    const earlier = await findRunForRequest(client, { authority: spec.authority, request_key: spec.request_key });
     let plan = earlier?.plan;
     if (!plan) {
-      const translation = await translateThesisCondition(client, run.thesis.subject_ref.id, metric);
-      if (!translation.ok) return unresolved(condition, translation.reason);
+      const translation = await translateThesisCondition(client, spec.subject.id, spec.metric);
+      if (!translation.ok) return unresolvedOutcome(translation.reason);
       const planned = buildDeterministicPlan(
-        await planningContext(client, run, condition, authority, translation.freshness),
+        await planningContext(client, spec, translation.freshness),
         translation.draft,
         [{ unit_id: UNIT_ID, output_ids: ["value", "predicate"] }],
       );
-      if (planned.outcome !== "ready") return unresolved(condition, planned.outcome === "unsupported" ? "unsupported" : "configuration_needed");
+      if (planned.outcome !== "ready") return unresolvedOutcome(planned.outcome === "unsupported" ? "unsupported" : "configuration_needed");
       plan = planned.plan;
     }
     let outcome: PublishResult;
     try {
       outcome = await reserveAndPublish(client, {
         plan,
-        authority,
-        request_key: requestKey,
-        worker_id: deps.workerId ?? `thesis-${process.pid}`,
+        authority: spec.authority,
+        request_key: spec.request_key,
+        worker_id: deps.workerId ?? `metric-${process.pid}`,
         ttl_ms: LEASE_TTL_MS,
         evidence: deps.evidence,
         parent_limits: {},
-        persistParent: requireCurrentThesis(run.thesis.thesis_version_id),
+        persistParent: spec.persistParent,
       });
     } catch {
-      return unresolved(condition, "publication_failed");
+      return unresolvedOutcome("publication_failed");
     }
-    if (outcome.status === "conflict") return unresolved(condition, "request_conflict");
-    if (outcome.status === "unavailable") return unresolved(condition, outcome.reason === "busy" ? "run_in_progress" : "run_unavailable");
-    if (outcome.status === "cancelled" || outcome.status === "failed") return unresolved(condition, `run_${outcome.status}`);
-    return committedAssessment(client, condition, outcome.status === "driven" ? outcome.report.run_id : outcome.run.run_id);
+    if (outcome.status === "conflict") return unresolvedOutcome("request_conflict");
+    if (outcome.status === "unavailable") {
+      return unresolvedOutcome(outcome.reason === "busy" ? "run_in_progress" : outcome.reason === "parent_authority_required" ? "parent_authority_required" : "run_unavailable");
+    }
+    if (outcome.status === "cancelled" || outcome.status === "failed") return unresolvedOutcome(`run_${outcome.status}`);
+    return committedOutcome(client, outcome.status === "driven" ? outcome.report.run_id : outcome.run.run_id);
   } finally {
     client.release();
   }
+}
+
+// ---------------------------------------------------------------------------
+
+async function evaluateCondition(deps: ThesisFinancialDeps, run: ThesisConditionRun, condition: ThesisCondition, metric: ThesisMetricCheck): Promise<ConditionAssessment> {
+  const outcome = await evaluateVerifiedMetric(deps, {
+    authority: thesisAuthority(run),
+    request_key: `${run.run_key}:${condition.condition_id}`,
+    subject: run.thesis.subject_ref,
+    metric,
+    as_of: run.as_of,
+    origin: { kind: "thesis_condition", ref: `thesis:${run.thesis.thesis_version_id}:${condition.condition_id}` },
+    threshold_attribution: { kind: "saved_thesis_condition", ref: condition.condition_id },
+    publication_unit_kind: "thesis_condition",
+    persistParent: requireCurrentThesis(run.thesis.thesis_version_id),
+  });
+  return {
+    condition_id: condition.condition_id,
+    status: outcome.status,
+    reason: outcome.reason,
+    claim_refs: [],
+    fact_refs: outcome.fact_refs,
+    method: outcome.status === "unresolved" ? "no_evidence" : "metric",
+    ...(outcome.financial ? { financial: outcome.financial } : {}),
+  };
 }
 
 function thesisAuthority(run: ThesisConditionRun): FinancialRuntimeAuthority {
@@ -175,7 +230,7 @@ function conditionDraft(metric: ThesisMetricCheck, unit: FinancialUnit) {
     ? [quarter(0), quarter(1), quarter(2), quarter(3), { node_id: "value", operation: "trailing_sum", quarters: ["quarter_0", "quarter_1", "quarter_2", "quarter_3"] }]
     : [{ node_id: "value", ...(periodOperation(metric) as Record<string, unknown>) }];
   return {
-    subjects: [{ slot_id: "subject", mention: "thesis subject" }],
+    subjects: [{ slot_id: "subject", mention: SUBJECT_MENTION }],
     operations: [...value, { node_id: "predicate", operation: "threshold", subject: "value", threshold_id: "saved", comparison: metric.operator }],
     outputs: [{ output_id: "value", node_id: "value" }, { output_id: "predicate", node_id: "predicate" }],
     // The saved threshold, verbatim as exact decimal text.
@@ -196,22 +251,21 @@ async function thresholdUnit(db: SqlExecutor, subjectId: string, metric: ThesisM
   return currencies.length === 1 ? { kind: unitKind, currency: currencies[0]!.currency } : null;
 }
 
-async function planningContext(db: SqlExecutor, run: ThesisConditionRun, condition: ThesisCondition, authority: FinancialRuntimeAuthority, freshness: number): Promise<PlanningContext> {
-  const subject = run.thesis.subject_ref;
-  const name = (await db.query<{ legal_name: string }>(`select legal_name from issuers where issuer_id = $1::uuid`, [subject.id])).rows[0]?.legal_name;
+async function planningContext(db: SqlExecutor, spec: VerifiedMetricSpec, freshness: number): Promise<PlanningContext> {
+  const name = (await db.query<{ legal_name: string }>(`select legal_name from issuers where issuer_id = $1::uuid`, [spec.subject.id])).rows[0]?.legal_name;
   return {
     plan_id: randomUUID(),
-    origin: { kind: "thesis_condition", ref: `thesis:${run.thesis.thesis_version_id}:${condition.condition_id}` },
-    knowledge_cutoff: new Date(run.as_of).toISOString(),
+    origin: spec.origin,
+    knowledge_cutoff: new Date(spec.as_of).toISOString(),
     cutoff_timezone: "UTC",
     reporting_basis: "as_reported",
     freshness_max_age_days: freshness,
-    authority,
+    authority: spec.authority,
     parent_limits: {},
     max_model_calls: 0,
-    requested_subjects: [{ mention: "thesis subject", resolution: { status: "resolved", subject_ref: subject, label: name ?? subject.id } }],
-    publication_unit_kind: "thesis_condition",
-    threshold_attribution: { kind: "saved_thesis_condition", ref: condition.condition_id },
+    requested_subjects: [{ mention: SUBJECT_MENTION, resolution: { status: "resolved", subject_ref: spec.subject, label: name ?? spec.subject.id } }],
+    publication_unit_kind: spec.publication_unit_kind,
+    threshold_attribution: spec.threshold_attribution,
   };
 }
 
@@ -231,12 +285,12 @@ function requireCurrentThesis(thesisVersionId: string): PersistParentArtifact {
 }
 
 /** Reads the committed unit: the predicate's outcome, its result hash, the certificate, and the bound facts. */
-async function committedAssessment(db: SqlExecutor, condition: ThesisCondition, runId: string): Promise<ConditionAssessment> {
+async function committedOutcome(db: SqlExecutor, runId: string): Promise<VerifiedMetricOutcome> {
   const unit = (await db.query<{ state: string; snapshot_id: string | null; certificate_digest: string | null }>(
     `select state, snapshot_id::text, certificate_digest from financial_run_units where run_id = $1 and unit_id = $2`,
     [runId, UNIT_ID],
   )).rows[0];
-  if (unit?.state !== "sealed") return unresolved(condition, "verification_failed");
+  if (unit?.state !== "sealed") return unresolvedOutcome("verification_failed");
   const outputs = new Map((await db.query<{ output_id: string; disposition: string; payload: { kind: string; outcome?: boolean; reason_code?: string }; result_hash: string }>(
     `select output_id, disposition, payload, result_hash from financial_results where run_id = $1 and state = 'finalized'`,
     [runId],
@@ -250,19 +304,17 @@ async function committedAssessment(db: SqlExecutor, condition: ThesisCondition, 
   const financial = { run_id: runId, unit_id: UNIT_ID, snapshot_id: unit.snapshot_id, certificate_digest: unit.certificate_digest, result_hash: predicate?.result_hash ?? null };
   if (predicate?.disposition !== "verified" || predicate.payload.kind !== "predicate") {
     // A predicate without a value is blocked; the value's own gap says why (e.g. older than the saved maximum age).
-    const reasonCode = value?.disposition !== "verified" ? value?.payload.reason_code : predicate?.payload.reason_code;
-    return { ...unresolved(condition, reasonCode ?? "no_result"), fact_refs: facts, financial };
+    const reasonCode = (value?.disposition !== "verified" ? value?.payload.reason_code : predicate?.payload.reason_code) ?? "no_result";
+    return { ...unresolvedOutcome(reasonCode), fact_refs: facts, financial };
   }
   const met = predicate.payload.outcome === true;
   return {
-    condition_id: condition.condition_id,
     status: met ? "supported" : "challenged",
+    reason_code: null,
     reason: met
       ? "The verified calculation at the assessment cutoff meets the saved threshold."
       : "The verified calculation at the assessment cutoff does not meet the saved threshold.",
-    claim_refs: [],
     fact_refs: facts,
-    method: "metric",
     financial,
   };
 }
@@ -273,13 +325,12 @@ const UNRESOLVED_REASONS: Readonly<Record<string, string>> = {
   blocked_by_dependency: "No eligible value was public at the assessment cutoff.",
 };
 
-function unresolved(condition: ThesisCondition, reasonCode: string): ConditionAssessment {
+function unresolvedOutcome(reasonCode: string): VerifiedMetricOutcome {
   return {
-    condition_id: condition.condition_id,
     status: "unresolved",
-    reason: UNRESOLVED_REASONS[reasonCode] ?? `The saved condition could not be verified (${reasonCode}).`,
-    claim_refs: [],
+    reason_code: reasonCode,
+    reason: UNRESOLVED_REASONS[reasonCode] ?? `The saved rule could not be verified (${reasonCode}).`,
     fact_refs: [],
-    method: "no_evidence",
+    financial: null,
   };
 }

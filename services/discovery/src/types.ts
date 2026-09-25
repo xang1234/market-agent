@@ -1,4 +1,4 @@
-import type { ThesisMetricCheck } from "../../agents/src/thesis-types.ts";
+import type { ConditionFinancialRef, ThesisMetricCheck } from "../../agents/src/thesis-types.ts";
 
 export type Id = string;
 export type Level = "strong" | "mixed" | "weak" | "unknown";
@@ -76,6 +76,8 @@ export type ExistingEvidenceRef =
 export type ExistingCandidate = DiscoveredCandidate & { evidence_refs: ExistingEvidenceRef[] };
 export type CriterionOutcome<C = Citation> = {
   criterion_id: Id; outcome: "pass" | "fail" | "unknown"; explanation: string; citations: C[];
+  /** A numerical criterion's certified calculation, reloaded server-side; never accepted from a model role. */
+  certified?: ConditionFinancialRef;
 };
 export type AnalystOutput<C = RawCitation> = {
   exposure: Dimension<C>; business_quality: Dimension<C>; valuation_context: Dimension<C>;

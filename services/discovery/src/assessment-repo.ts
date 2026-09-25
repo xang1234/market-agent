@@ -8,6 +8,7 @@ import { requestHash } from "./scout-support.ts";
 import { sealCandidateAssessment } from "./seal.ts";
 import { appendEventInTransaction } from "./event-repo.ts";
 import { lockLiveLease } from "./worker-lock.ts";
+import { requireCertifiedResults } from "./financial-packet.ts";
 import type { AssessedCandidate, CandidateDecision, Id } from "./types.ts";
 import type { EvidencePacket } from "./ports.ts";
 import { DiscoveryError } from "./types.ts";
@@ -39,6 +40,7 @@ export function createAssessmentCommitter(options: {
     }
     const citations = decisionCitations(decision);
     const documentSources = await requirePacketVisible(tx, lease.user_id, packet, citations);
+    await requireCertifiedResults(tx, lease, decision);
     const tool_calls = await loadToolCalls(tx, lease, packet.candidate_id);
     const snapshot_id = await sealCandidateAssessment(tx as never, {
       snapshot_id: newSnapshotId(),
