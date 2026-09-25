@@ -393,11 +393,19 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: db/package-lock.json
+          cache-dependency-path: |
+            db/package-lock.json
+            services/financial-core/package-lock.json
 
       # Analyze integration tests import the shared db/test Docker harness.
       - name: Install db deps (needed by analyze integration harness)
         working-directory: db
+        run: npm ci
+
+      # Numerical memo sections import financial-core sources, which resolve
+      # their own dependencies (ajv, decimal.js) from services/financial-core/node_modules.
+      - name: Install financial-core deps (imported by analyze financial sections)
+        working-directory: services/financial-core
         run: npm ci
 
       - name: Run analyze tests

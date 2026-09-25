@@ -137,13 +137,20 @@ export async function planFinancialRequest(context: PlanningContext, requestText
   return { outcome: "unsupported", reason: lastIssues.map((issue) => issue.code).join(", "), issues: lastIssues, model_calls: calls };
 }
 
+/**
+ * Groups a deterministic plan's outputs into publication units, each sealed
+ * under its own certificate (e.g. one per memo section). Every output belongs
+ * to exactly one unit. Only server-structured callers may declare units.
+ */
+export type DeterministicUnits = ReadonlyArray<Readonly<{ unit_id: string; output_ids: ReadonlyArray<string> }>>;
+
 /** Plans an already-structured draft (grid column, saved condition, approved criterion) with zero model calls. */
-export function buildDeterministicPlan(context: PlanningContext, draft: unknown): PlanningResult {
+export function buildDeterministicPlan(context: PlanningContext, draft: unknown, units?: DeterministicUnits): PlanningResult {
   if (unresolvedSubjectClarification(context)) {
     return { outcome: "configuration_needed", reason: "a configured subject does not resolve to one canonical identity", model_calls: 0 };
   }
   const parsed = checkDraft(draft);
-  const attempt = parsed.ok ? assemblePlan(context, parsed.value, { kind: "deterministic", adapter_version: DETERMINISTIC_ADAPTER_VERSION, model: null, prompt_version: null }) : parsed;
+  const attempt = parsed.ok ? assemblePlan(context, parsed.value, { kind: "deterministic", adapter_version: DETERMINISTIC_ADAPTER_VERSION, model: null, prompt_version: null }, units) : parsed;
   if (attempt.ok) return finish(attempt.value, 0);
   if (attempt.kind === "clarify") return { outcome: "configuration_needed", reason: attempt.clarification.question, model_calls: 0 };
   const reason = attempt.kind === "unsupported" ? attempt.reason : attempt.issues.map((issue) => issue.code).join(", ");
@@ -220,7 +227,7 @@ function checkDraft(value: unknown): Attempt<Draft> {
   };
 }
 
-function assemblePlan(context: PlanningContext, draft: Draft, planner: FinancialPlanV1["planner"]): Attempt<FinancialPlanV1> {
+function assemblePlan(context: PlanningContext, draft: Draft, planner: FinancialPlanV1["planner"], units: DeterministicUnits = [{ unit_id: "answer", output_ids: draft.outputs.map((output) => output.output_id) }]): Attempt<FinancialPlanV1> {
   const resolved = context.requested_subjects.flatMap((subject) =>
     subject.resolution.status === "resolved" ? [{ mention: subject.mention, ref: subject.resolution.subject_ref, label: subject.resolution.label }] : [],
   );
@@ -265,9 +272,18 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
       issues.push({ path: "$.operations", code: "unsupported_operation", message: `${String(operation.operation)} is not an approved operation` });
     }
   }
+  const unitOf = new Map<string, string>();
+  for (const unit of units) {
+    for (const outputId of unit.output_ids) {
+      if (unitOf.has(outputId)) issues.push({ path: "$.outputs", code: "duplicate_unit_assignment", message: `${outputId} is assigned to more than one unit` });
+      unitOf.set(outputId, unit.unit_id);
+    }
+  }
+  for (const output of draft.outputs) {
+    if (!unitOf.has(output.output_id)) issues.push({ path: "$.outputs", code: "unassigned_output", message: `${output.output_id} belongs to no publication unit` });
+  }
   if (issues.length > 0) return { ok: false, kind: "invalid", issues };
 
-  const unitId = "answer";
   const plan = {
     schema_version: "financial_plan.v1",
     plan_id: context.plan_id,
@@ -291,8 +307,8 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
     },
     metric_definitions: metricKeys.map((key) => ({ metric_key: key, definition_version: METRIC_CATALOG_V1.get(key)!.definition_version })),
     operations: draft.operations.map((operation) => ({ ...operation, operation_version: OPERATION_REGISTRY[operation.operation as OperationKind].operation_version })),
-    outputs: draft.outputs.map((output) => ({ output_id: output.output_id, node_id: output.node_id, unit_id: unitId })),
-    publication_units: [{ unit_id: unitId, kind: context.publication_unit_kind }],
+    outputs: draft.outputs.map((output) => ({ output_id: output.output_id, node_id: output.node_id, unit_id: unitOf.get(output.output_id)! })),
+    publication_units: units.map((unit) => ({ unit_id: unit.unit_id, kind: context.publication_unit_kind })),
     thresholds: draft.thresholds.map((threshold) => ({ ...threshold, attribution: { kind: "user_request", ref: context.origin.ref } })),
     limits: { ...DEFAULT_EXECUTION_LIMITS },
     presentation_template_version: "financial-answer.v1",
