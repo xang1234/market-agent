@@ -109,8 +109,12 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
         thesis_version_id: input.thesis.thesis_version_id, run_id: input.runId, snapshot_id: snapshot.snapshot_id,
         input_hash: analysis.input_hash, results: analysis.results, model_version: analysis.model_version, prompt_version: THESIS_PROMPT_VERSION,
       });
+      const sealedFacts = new Set(evidence.facts.map(fact => fact.fact_id));
       for (const result of analysis.results) {
         if (result.status === 'unresolved' || previous?.results.find(r => r.condition_id === result.condition_id)?.status === result.status)
+          continue;
+        // A verified condition alerts only with evidence sealed into this snapshot; its certificate stays on the assessment.
+        if (result.financial && !result.fact_refs.some(id => sealedFacts.has(id)))
           continue;
         findings.push(await generateThesisFinding(tx, {
           thesis: input.thesis, result, packet: evidence, agentName: input.agent.name, snapshot,

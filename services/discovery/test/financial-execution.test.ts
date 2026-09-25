@@ -46,7 +46,7 @@ test("discovery numerical criteria execution", { timeout: 300_000 }, async (t) =
         approval_state: "approved", lease: null,
       }),
       request_key: "unfenced", subject: { kind: "issuer", id: IDS.issuerA },
-      metric: brief.brief.criteria[1]!.metric!, as_of: CUTOFF,
+      metric: brief.brief.criteria[1]!.metric!, as_of: CUTOFF, reporting_basis: "as_restated",
       origin: { kind: "discovery_criterion", ref: "unfenced" }, threshold_attribution: { kind: "approved_discovery_brief", ref: "unfenced" },
       publication_unit_kind: "discovery_assessment", persistParent: async () => {},
     });

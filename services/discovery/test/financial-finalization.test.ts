@@ -84,12 +84,14 @@ test("discovery numerical criteria finalization", { timeout: 300_000 }, async (t
   });
 
   await t.test("a calculation whose input becomes invisible no longer counts", async () => {
+    // Gross profit binds the original filing; revenue binds its restatement, filed separately.
     await db.query(`update sources set user_id = $2 where source_id = $1`, [IDS.sourceV1, IDS.other]);
     try {
-      const hidden = await outcomesWithHiddenInputs(pool, IDS.owner, [...outcomes.values()]);
-      assert.deepEqual([...hidden].sort(), [MARGIN_ID, REVENUE_ID].sort());
+      assert.deepEqual([...await outcomesWithHiddenInputs(pool, IDS.owner, [...outcomes.values()])], [MARGIN_ID]);
+      await db.query(`update sources set user_id = $2 where source_id = $1`, [IDS.sourceV2, IDS.other]);
+      assert.deepEqual([...await outcomesWithHiddenInputs(pool, IDS.owner, [...outcomes.values()])].sort(), [MARGIN_ID, REVENUE_ID].sort());
     } finally {
-      await db.query(`update sources set user_id = null where source_id = $1`, [IDS.sourceV1]);
+      await db.query(`update sources set user_id = null where source_id = any($1::uuid[])`, [[IDS.sourceV1, IDS.sourceV2]]);
     }
   });
 });

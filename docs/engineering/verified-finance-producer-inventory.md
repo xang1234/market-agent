@@ -118,8 +118,9 @@ committed values after enforcement.
 
 ## 3. Status
 
-No producer has been migrated; every surface row above remains on its legacy
-path. The shared foundations are in place:
+Every surface in section 2 now has a certified lane behind a per-surface
+flag. With a flag off (the default), that surface stays on the legacy path
+listed above. The shared foundations are in place:
 
 - **T00–T04:** the pure financial core (contracts, exact arithmetic, reviewed
   operations, coverage).
@@ -140,11 +141,27 @@ path. The shared foundations are in place:
   closure-reauthorized inspection, and idempotent replay requests. Pinned
   verification replay and supervised lease recovery complete the set.
 
+- **T19–T27:** surface integrations. Each surface publishes through
+  `reserveAndPublish` / `finalizeUnit`, and its parent artifact is written
+  in the finalization transaction:
+
+  | Surface | Flag | What is certified | Parent write in finalization |
+  |---|---|---|---|
+  | Chat | `CHAT_FINANCIAL_MODE` | Model-planned requests over resolved subjects | Assistant message |
+  | Analyze | `ANALYZE_FINANCIAL_MODE` | One deterministic plan per memo, one unit per numerical section | `analyze_run_financial_sections` row (0049) |
+  | Grids | `GRID_FINANCIAL_MODE` | One plan per run, one unit per numerical cell | Cell write and progress count (0050) |
+  | Thesis | `THESIS_FINANCIAL_MODE=enforce` | One plan per saved metric condition | Current-version check under the agent lock |
+  | Discovery | `WorkerDeps.financialCriteria` | One plan per candidate × approved criterion | Campaign-fence check (live lease, running, same brief, candidate researching) |
+
+  The web shows every certified result through one inspector, with four
+  labels: verified calculation, partial coverage, source-linked narrative,
+  and legacy output.
+
 Known gap: SEC ingestion records precision proofs but not yet source
 publication attestations, so SEC-ingested facts bind as
 `publication_time_unknown` until a reviewed acceptance-time mapping issues
-them. Such units cannot be certified. No producer publishes through
-`finalizeUnit` until T19–T26 migrate them.
+them. Such units cannot be certified; with a lane enforced, those values
+appear as declared gaps rather than numbers.
 
 ### Wave 3 plan deviations
 
@@ -156,3 +173,25 @@ them. Such units cannot be certified. No producer publishes through
 | `db/test/schema-openapi-alignment.test.ts` | `scripts/openapi-contract.test.ts` checks that the `/v1/financial` operations reference `spec/financial_answer_http_schema.json`, that each reference resolves, and that the schema compiles. |
 | Trusted authentication for financial HTTP | The handler takes an already authenticated `userId`. The dev authenticator accepts only a UUID `x-user-id`, the same header the other dev routes use, and is documented as non-production. A deployment supplies its own authenticator. |
 | Replay execution | `POST …/replays` reserves a pending run with `replay_of_run_id` and the original's plan, cutoff, policies, and parent version. The supervised worker executes it through `executeReplay`, which never seals. |
+
+### Wave 4 plan deviations
+
+| Plan reference | Actual |
+|---|---|
+| Chat: coordinator imports for stable ids | `services/chat/src/chat-ids.ts` holds `contentHashForText`/`stableUuid`, breaking a coordinator ↔ financial-turn import cycle. |
+| `services/analyze/src/section-seal.ts`, `memo-run.ts`, `run-metadata.ts` | Not present. The equivalents are `template-runner.ts` (optional pre-assigned `run_id`), `runMetadata.ts` (`financial` context), and the new `financial-section.ts`. |
+| Analyze: memo run saved in the finalization transaction | The narrative memo row commits first (its own snapshot). Each numerical section's snapshot, certificate, and `analyze_run_financial_sections` row then commit together. Coverage is derived from committed rows against the sections the metadata declares, so a failed section reads as a gap, never as complete. |
+| Analyze: derived emitters require certified lineage | With the lane enforced, engine-served sections skip their legacy producers (`runDeterministicSections` `servedByEngine`). The legacy metrics-comparison emitter itself is unchanged for the off/shadow lanes. |
+| Strict merge: owner/definitions/run provenance | `mergeSealInputs` requires equal snapshot, thread, `as_of`, basis, normalization, and coverage start. It rejects conflicting duplicate facts and repeated block ids, and refuses any certified input: certified units are sealed alone, so there is no definition or run provenance to reconcile. |
+| Grids: `fiscal-fact-column.ts`, `period-context.ts`, `cell-runner.ts` rework | Numerical columns route through `financial-column.ts` when enforced; legacy producers are untouched for the off lane. The row period header still uses the legacy resolver; each certified cell carries its own period labels. |
+| Grids: restart recovery for non-numerical cells | Only engine-backed cells are recoverable (`gridFinancialRecovery`, registered with the dev-api financial worker when `GRID_FINANCIAL_MODE=enforce`). Reader-question cells keep their existing behavior. |
+| Thesis: `thesis-repo.ts`, `thesis-seal-input.ts`, `thesis-finding-generator.ts` | Not present or unchanged. Certified references ride on `ConditionAssessment.financial`. Findings cite the engine-bound facts that are still current (loaded into the sealed packet); a verified transition whose inputs cannot be sealed keeps its certificate but issues no alert. Dedup is unchanged. |
+| Thesis and Discovery reporting basis | Saved monitoring rules plan with `as_restated`: the latest disclosure public by the cutoff, matching the stored-fact checks, which always read active facts. Chat, memo sections, and grid cells stay `as_reported`. |
+| Thesis: freshness and reuse | Engine freshness is plan-wide, so each condition is its own plan. The reuse key compares status, cited facts, and result hashes (never run, snapshot, or certificate ids). |
+| Discovery: versioned numerical criterion union | Brief schema v1 already carries `Criterion.metric` (`ThesisMetricCheck`), versioned with the brief and approved at run start. No new union was added; prose criteria stay narrative. |
+| Discovery: certified facts in the sealed packet | The certified-result reference is the citation (`CriterionOutcome.certified`). Bound facts are not re-cited as current facts, because an as-reported original may since have been restated and the legacy fact verifier rejects superseded facts. The commit transaction re-checks the reference and input visibility. |
+| `services/dev-api/src/discovery-wiring.ts`; worker composition | Not present. Production worker deps come from `DISCOVERY_WORKER_MODULE`. `createWorkerDeps` accepts an optional `financialCriteria` from `createFinancialCriteriaEvaluator({ pool, evidence, clock })`. |
+| `scripts/discovery-fixture.test.ts`, `scripts/discovery-eval.test.ts` | Not present in the repository; Discovery coverage is the service suite plus the new `financial-*.test.ts` files. |
+| Discovery: `financial-packet.test.ts` | Packet binding is covered by `financial-assessment-validation.test.ts` (decision rules, hidden inputs) and `financial-finalization.test.ts` (commit-time reference and visibility checks). |
+| Web: Chat stream consumer changes | None needed beyond T20. The stream carries references only, and the consumer refetches the committed message. |
+| Shared semantics for thesis and Discovery | `evaluateVerifiedMetric` in `services/agents/src/financial-thesis-adapter.ts` is the one evaluation for saved numerical rules. Callers supply the authority, request key, threshold attribution (the planner now accepts one), and publication guard. The deterministic planner can also split outputs across publication units. |

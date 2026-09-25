@@ -20,6 +20,7 @@ import {
   type FinancialUnit,
   type PlanOrigin,
   type PublicationUnitKind,
+  type ReportingBasis,
   type ThresholdAttribution,
 } from "../../financial-core/src/index.ts";
 import type { PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
@@ -101,6 +102,11 @@ export type VerifiedMetricSpec = Readonly<{
   subject: Readonly<{ kind: "issuer"; id: string }>;
   metric: ThesisMetricCheck;
   as_of: string;
+  /**
+   * Saved monitoring rules read the latest disclosure public by the cutoff
+   * (`as_restated`), as their stored-fact checks always did with active facts.
+   */
+  reporting_basis: ReportingBasis;
   origin: PlanOrigin;
   threshold_attribution: ThresholdAttribution;
   publication_unit_kind: PublicationUnitKind;
@@ -173,6 +179,7 @@ async function evaluateCondition(deps: ThesisFinancialDeps, run: ThesisCondition
     subject: run.thesis.subject_ref,
     metric,
     as_of: run.as_of,
+    reporting_basis: "as_restated",
     origin: { kind: "thesis_condition", ref: `thesis:${run.thesis.thesis_version_id}:${condition.condition_id}` },
     threshold_attribution: { kind: "saved_thesis_condition", ref: condition.condition_id },
     publication_unit_kind: "thesis_condition",
@@ -258,7 +265,7 @@ async function planningContext(db: SqlExecutor, spec: VerifiedMetricSpec, freshn
     origin: spec.origin,
     knowledge_cutoff: new Date(spec.as_of).toISOString(),
     cutoff_timezone: "UTC",
-    reporting_basis: "as_reported",
+    reporting_basis: spec.reporting_basis,
     freshness_max_age_days: freshness,
     authority: spec.authority,
     parent_limits: {},

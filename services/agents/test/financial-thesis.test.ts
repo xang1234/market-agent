@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { IDS, ORIGINAL_REVENUE } from "../../financial-engine/test/db-fixtures.ts";
+import { IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { translateThesisCondition } from "../src/financial-thesis-adapter.ts";
 import { parseConditionAssessments } from "../src/thesis-types.ts";
 import { assess, revenueCondition, saveVersion, thesisDatabase } from "./financial-thesis-fixtures.ts";
@@ -16,24 +16,27 @@ test("thesis conditions through the financial engine", { timeout: 300_000 }, asy
   const { db, pool, agentId } = await thesisDatabase(t, "thesis-fin");
 
   await t.test("a value just beyond a decimal threshold keeps its exact result", async () => {
-    const below = revenueCondition("gt", "383285000000.123456789012345677");
-    const above = revenueCondition("gt", "383285000000.123456789012345679");
-    const equal = revenueCondition("eq", ORIGINAL_REVENUE);
+    // FY2023 gross profit is exactly 169148000000.
+    const grossProfit = (operator: "gt" | "eq", threshold: string) => revenueCondition(operator, threshold, { metric_key: "gross_profit" });
+    const below = grossProfit("gt", "169147999999.999999999999999999");
+    const above = grossProfit("gt", "169148000000.000000000000000001");
+    const equal = grossProfit("eq", "169148000000");
+    const restated = revenueCondition("eq", "383000000000");
     const narrative = { condition_id: crypto.randomUUID(), statement: "Enterprise demand stays durable.", falsifier: "Enterprise demand contracts.", horizon: "12 months" };
-    const thesis = await saveVersion(pool, agentId, 0, [below, above, equal, narrative]);
+    const thesis = await saveVersion(pool, agentId, 0, [below, above, equal, restated, narrative]);
     const results = await assess(pool, thesis, CUTOFF);
     assert.deepEqual(results.map((result) => [result.condition_id, result.status, result.method]), [
       [below.condition_id, "supported", "metric"],
       [above.condition_id, "challenged", "metric"],
       [equal.condition_id, "supported", "metric"],
+      [restated.condition_id, "supported", "metric"],
     ], "narrative conditions are left to the narrative method");
-    for (const result of results) {
-      assert.deepEqual(result.fact_refs, [IDS.original], "the as-reported FY2023 disclosure is the cited input");
-      assert.ok(result.financial?.certificate_digest && result.financial.snapshot_id && result.financial.result_hash);
-    }
+    for (const result of results.slice(0, 3)) assert.deepEqual(result.fact_refs, [IDS.grossProfit2023]);
+    assert.deepEqual(results[3]!.fact_refs, [IDS.restated], "a saved rule reads the latest disclosure public by the cutoff, as the stored-fact check read active facts");
+    for (const result of results) assert.ok(result.financial?.certificate_digest && result.financial.snapshot_id && result.financial.result_hash);
     const plans = (await db.query(`select plan->'thresholds'->0 as threshold from financial_plans p join financial_runs r on r.plan_id = p.plan_id where r.parent_id = $1 order by r.created_at`, [thesis.thesis_version_id])).rows;
     assert.deepEqual(plans[0].threshold.attribution, { kind: "saved_thesis_condition", ref: below.condition_id });
-    assert.equal(plans[0].threshold.value, "383285000000.123456789012345677", "the saved threshold, verbatim");
+    assert.equal(plans[0].threshold.value, "169147999999.999999999999999999", "the saved threshold, verbatim");
     assert.deepEqual(parseConditionAssessments(JSON.parse(JSON.stringify(results))), results, "results round-trip through storage");
   });
 

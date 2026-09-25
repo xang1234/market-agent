@@ -39,6 +39,7 @@ export function createFinancialCriteriaEvaluator(deps: ThesisFinancialDeps & {
         subject: { kind: "issuer", id: input.identity.issuer_id },
         metric: criterion.metric,
         as_of: input.as_of,
+        reporting_basis: "as_restated",
         origin: { kind: "discovery_criterion", ref: `discovery:${lease.run_id}:${input.candidate_id}:${criterion.criterion_id}` },
         threshold_attribution: { kind: "approved_discovery_brief", ref: `${input.brief.brief_id}:${criterion.criterion_id}` },
         publication_unit_kind: "discovery_assessment",
