@@ -5,6 +5,7 @@ import { useAuth } from '../shell/useAuth.ts'
 import { EvidenceInspectorContext, type EvidenceInspectorContextValue } from './evidenceInspectorContext.ts'
 import { EvidenceInspectorDrawer, type EvidenceInspectorState } from './EvidenceInspectorDrawer.tsx'
 import { fetchEvidenceInspection } from './inspectionClient.ts'
+import { fetchFinancialResultInspection } from '../blocks/financialInspection.ts'
 
 const EVIDENCE_INSPECTION_UNAVAILABLE_MESSAGE = 'Evidence is not available for this artifact.'
 
@@ -41,6 +42,26 @@ export function EvidenceInspectorProvider({ children }: { children: ReactNode })
       openBlockInspection(inspection) {
         requestSeqRef.current += 1
         setState({ kind: 'block', inspection })
+      },
+      openFinancialResult(resultId) {
+        if (!session) {
+          setState({ kind: 'financial', load: { kind: 'error', resultId, message: 'Sign in to inspect this calculation.' } })
+          return
+        }
+        const requestSeq = requestSeqRef.current + 1
+        requestSeqRef.current = requestSeq
+        setState({ kind: 'financial', load: { kind: 'loading', resultId } })
+        fetchFinancialResultInspection({ userId: session.userId, resultId })
+          .then((inspection) => {
+            if (requestSeqRef.current === requestSeq) setState({ kind: 'financial', load: { kind: 'ready', inspection } })
+          })
+          .catch((error) => {
+            if (requestSeqRef.current !== requestSeq) return
+            const message = error instanceof HttpJsonError && error.status === 404
+              ? 'This calculation is not available to inspect.'
+              : 'The calculation could not be loaded. Try again.'
+            setState({ kind: 'financial', load: { kind: 'error', resultId, message } })
+          })
       },
       closeInspection() {
         requestSeqRef.current += 1

@@ -1,3 +1,4 @@
+import type { FinancialAnswerBlock } from "../blocks/types.ts";
 export type CellTone = "best" | "worst" | null;
 export type CellDisplay = { value: string; tone: CellTone };
 export type CellRef = { kind: "fact" | "claim"; id: string };
@@ -32,6 +33,10 @@ export type GridCellDetail = {
   snapshot_id: string | null;
   primary_ref: CellRef | null;
   coverage_flag: string | null;
+  /** The run's frozen column instance; two instances of one column are different cells. */
+  column_instance_id?: string;
+  /** The sealed financial_answer block of a certified numerical cell; null otherwise. */
+  financial_block?: FinancialAnswerBlock | null;
 };
 
 export type GridRunDetail = { run: GridRunSummary; rows: GridRowDetail[]; cells: GridCellDetail[] };

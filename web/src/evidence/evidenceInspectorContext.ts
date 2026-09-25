@@ -5,6 +5,8 @@ import type { EvidenceBlockInspection, EvidenceInspectionRef } from './inspectio
 export type EvidenceInspectorContextValue = {
   openInspection(input: { snapshotId: string; ref: EvidenceInspectionRef }): void
   openBlockInspection(inspection: EvidenceBlockInspection): void
+  /** Opens the shared inspector for one certified financial result. Absent where the host cannot fetch one. */
+  openFinancialResult?(resultId: string): void
   closeInspection(): void
 }
 

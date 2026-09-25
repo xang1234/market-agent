@@ -1,5 +1,6 @@
 import type { EvidenceBlockInspection, EvidenceInspection, EvidenceInspectionRef } from './inspectionTypes.ts'
 import { InspectableRef } from './InspectableRef.tsx'
+import { FinancialResultInspector, type FinancialInspectorLoad } from '../blocks/renderers/FinancialResultInspector.tsx'
 
 export type EvidenceInspectorState =
   | { kind: 'closed' }
@@ -7,6 +8,7 @@ export type EvidenceInspectorState =
   | { kind: 'ready'; inspection: EvidenceInspection }
   | { kind: 'block'; inspection: EvidenceBlockInspection }
   | { kind: 'error'; snapshotId: string; ref: EvidenceInspectionRef; message: string }
+  | { kind: 'financial'; load: FinancialInspectorLoad }
 
 export function EvidenceInspectorDrawer({
   state,
@@ -16,6 +18,7 @@ export function EvidenceInspectorDrawer({
   onClose(): void
 }) {
   if (state.kind === 'closed') return null
+  if (state.kind === 'financial') return <FinancialDrawer load={state.load} onClose={onClose} />
 
   const snapshotId = state.kind === 'ready' || state.kind === 'block' ? state.inspection.snapshot_id : state.snapshotId
 
@@ -46,6 +49,36 @@ export function EvidenceInspectorDrawer({
         ) : null}
         {state.kind === 'ready' ? <InspectionBody inspection={state.inspection} /> : null}
         {state.kind === 'block' ? <BlockInspectionBody inspection={state.inspection} /> : null}
+      </div>
+    </aside>
+  )
+}
+
+function FinancialDrawer({ load, onClose }: { load: FinancialInspectorLoad; onClose(): void }) {
+  const resultId = load.kind === 'ready' ? load.inspection.result_id : load.resultId
+  return (
+    <aside
+      aria-label="Verified calculation inspector"
+      className="fixed bottom-0 right-0 top-0 z-50 flex w-[420px] max-w-full flex-col border-l border-line bg-surface shadow-xl"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') onClose()
+      }}
+    >
+      <header className="flex items-start justify-between gap-3 border-b border-line p-4">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-fg">Verified calculation</h2>
+          <p className="mt-1 break-all text-xs text-muted">{resultId}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="shrink-0 rounded-md border border-line-strong px-2 py-1 text-xs text-fg hover:bg-surface-2"
+        >
+          Close
+        </button>
+      </header>
+      <div className="min-h-0 flex-1 overflow-auto p-4">
+        <FinancialResultInspector load={load} onCopy={(text) => void globalThis.navigator?.clipboard?.writeText(text)} />
       </div>
     </aside>
   )

@@ -27,9 +27,19 @@ export type AnalyzeRunHistoryItem = {
   snapshot_id: string
 }
 
+/** A memo's verified numerical sections (services/analyze/src/financial-section.ts); declared sections without a commit are gaps. */
+export type AnalyzeFinancialSections = {
+  coverage: 'complete' | 'partial' | 'none'
+  sections: ReadonlyArray<
+    | { section_id: string; status: 'published'; run_id: string; snapshot_id: string; block: Record<string, unknown> }
+    | { section_id: string; status: 'gap'; reason_code: string }
+  >
+}
+
 export type AnalyzeRunDetail = AnalyzeRunHistoryItem & {
   run_metadata: AnalyzeRunMetadata | Record<string, unknown>
   blocks: ReadonlyArray<Record<string, unknown>>
+  financial_sections?: AnalyzeFinancialSections
 }
 
 export type AnalyzeRunDiffRow = {

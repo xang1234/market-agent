@@ -2,6 +2,20 @@ import type { ReactElement } from "react";
 import { useEvidenceInspector } from "../evidence/useEvidenceInspector.ts";
 import type { EvidenceInspectionRef } from "../evidence/inspectionTypes.ts";
 import type { GridColumn, GridCellDetail, GridRunDetail } from "./gridsTypes.ts";
+import { VerificationLabel } from "../blocks/VerificationLabel.tsx";
+import type { FinancialAnswerContent } from "../blocks/types.ts";
+
+/** The certified result a numerical cell shows, when its block is in a format this client knows. */
+function certifiedResultId(cell: GridCellDetail | undefined): string | null {
+  const content = cell?.financial_block?.financial as Partial<FinancialAnswerContent> | undefined;
+  return content?.results?.[0]?.result_id ?? null;
+}
+
+/** Why a cell has no value, in words, for assistive technology; the row itself never disappears. */
+function gapText(cell: GridCellDetail | undefined): string | null {
+  if (!cell || cell.status === "ok" || cell.status === "pending") return null;
+  return cell.coverage_flag ? `Not available: ${cell.coverage_flag.replaceAll("_", " ")}` : "Not available";
+}
 
 function cellKey(rowId: string, columnKey: string): string {
   return `${rowId}::${columnKey}`;
@@ -56,6 +70,8 @@ export function GridTable({ columns, detail }: GridTableProps): ReactElement {
                 const cell = byKey.get(cellKey(row.grid_row_id, col.column_key));
                 const inspectable = Boolean(cell && cell.snapshot_id && cell.primary_ref);
                 const tone = toneClasses(cell);
+                const certified = certifiedResultId(cell);
+                const gap = gapText(cell);
                 return (
                   <td
                     key={col.column_key}
@@ -63,8 +79,18 @@ export function GridTable({ columns, detail }: GridTableProps): ReactElement {
                     data-cell-status={cell?.status ?? "pending"}
                     data-cell-inspectable={inspectable ? "true" : "false"}
                     data-snapshot-id={cell?.snapshot_id ?? undefined}
+                    data-certified={cell?.financial_block ? "true" : "false"}
                   >
-                    {inspectable && cell?.snapshot_id && cell.primary_ref ? (
+                    {certified !== null && inspector?.openFinancialResult ? (
+                      <button
+                        type="button"
+                        className={`num text-left text-fg underline decoration-dotted${tone.text}`}
+                        aria-label={`Inspect the verified calculation: ${cellText(cell)}`}
+                        onClick={() => inspector.openFinancialResult?.(certified)}
+                      >
+                        {cellText(cell)}
+                      </button>
+                    ) : inspectable && cell?.snapshot_id && cell.primary_ref ? (
                       // A real button so the cell is keyboard-operable (Enter/
                       // Space) and reachable by tab — a clickable <td> is not.
                       <button
@@ -82,6 +108,12 @@ export function GridTable({ columns, detail }: GridTableProps): ReactElement {
                     ) : (
                       <span className={`num text-fg${tone.text}`}>{cellText(cell)}</span>
                     )}
+                    {cell?.financial_block ? (
+                      <span className="ml-2 align-middle">
+                        <VerificationLabel kind={cell.status === "ok" ? "verified" : "partial"} />
+                      </span>
+                    ) : null}
+                    {gap ? <span className="sr-only">{gap}</span> : null}
                   </td>
                 );
               })}

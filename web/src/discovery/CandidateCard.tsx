@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import type { CandidateView, DimensionName } from "../../../services/discovery/src/types.ts";
+import { VerificationLabel } from "../blocks/VerificationLabel.tsx";
 
 const DIMENSIONS: ReadonlyArray<{ key: DimensionName; label: string }> = [
   { key: "theme_exposure", label: "Theme exposure" },
@@ -37,6 +38,20 @@ export function CandidateCard({
           })}
         </dl>
       ) : <p className="text-sm text-muted">Assessment has not been completed yet.</p>}
+      {candidate.assessment?.criteria.some((criterion) => criterion.certified) ? (
+        <section>
+          <h4 className="text-xs font-medium uppercase text-muted">Numerical criteria</h4>
+          <ul className="mt-1 flex flex-col gap-1">
+            {candidate.assessment.criteria.filter((criterion) => criterion.certified).map((criterion) => (
+              <li key={criterion.criterion_id} className="flex flex-wrap items-center gap-2 text-sm text-fg" data-criterion-id={criterion.criterion_id}>
+                <VerificationLabel kind="verified" />
+                <span className="font-medium">{criterionOutcomeLabel(criterion.outcome)}</span>
+                <span className="text-muted">{criterion.explanation}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       {candidate.assessment?.counterarguments.length ? <section><h4 className="text-xs font-medium uppercase text-muted">Risk</h4><p className="text-sm text-fg">{candidate.assessment.counterarguments[0]?.text}</p></section> : null}
       {candidate.assessment?.unresolved_questions.length ? <section><h4 className="text-xs font-medium uppercase text-muted">Next question</h4><p className="text-sm text-fg">{candidate.assessment.unresolved_questions[0]}</p></section> : null}
       {candidate.assessment?.next_action ? <p className="text-sm text-muted">Next step: {candidate.assessment.next_action}</p> : null}
@@ -60,3 +75,7 @@ function candidateStateLabel(state: CandidateView["state"]): string {
   return ({ unresolved_identity: "Unresolved", discovered: "Discovered", not_selected: "Not selected", researching: "Researching", shortlisted: "Shortlisted", eligible_not_shortlisted: "Investigated", excluded: "Excluded", needs_evidence: "Needs evidence", research_error: "Needs follow-up" } as const)[state];
 }
 function levelLabel(level: "strong" | "mixed" | "weak" | "unknown"): string { return ({ strong: "Strong", mixed: "Mixed", weak: "Weak", unknown: "Unknown" } as const)[level]; }
+
+function criterionOutcomeLabel(outcome: "pass" | "fail" | "unknown"): string {
+  return outcome === "pass" ? "Met" : outcome === "fail" ? "Not met" : "Unknown";
+}
