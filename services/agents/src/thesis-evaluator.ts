@@ -45,11 +45,13 @@ export async function evaluateThesis(input: {
   facts: ReadonlyArray<ThesisFact>;
   as_of: string;
   llm: ThesisLlm | null;
+  /** Metric conditions already assessed by the verified financial engine; they replace the stored-fact checks. */
+  metric_results?: ReadonlyArray<ConditionAssessment>;
 }): Promise<{ results: ConditionAssessment[]; model_version: string | null }> {
   const thesisText = parseThesisText(input.thesis.thesis);
   const conditions = parseThesisConditions(input.thesis.conditions);
   const metricResults = new Map(
-    evaluateThesisMetrics(conditions, input.facts, input.as_of).map(result => [result.condition_id, result]),
+    (input.metric_results ?? evaluateThesisMetrics(conditions, input.facts, input.as_of)).map(result => [result.condition_id, result]),
   );
   const narrativeConditions = conditions.filter(condition => condition.metric === undefined);
 

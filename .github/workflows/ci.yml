@@ -369,9 +369,16 @@ jobs:
           cache-dependency-path: |
             db/package-lock.json
             services/agents/package-lock.json
+            services/financial-core/package-lock.json
 
       - name: Install db deps (needed by agents integration harness)
         working-directory: db
+        run: npm ci
+
+      # Numerical thesis conditions import financial-core sources, which resolve
+      # their own dependencies (ajv, decimal.js) from services/financial-core/node_modules.
+      - name: Install financial-core deps (imported by verified thesis conditions)
+        working-directory: services/financial-core
         run: npm ci
 
       - name: Install agents deps

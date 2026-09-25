@@ -24,6 +24,7 @@ import {
   type PlanOrigin,
   type PublicationUnitKind,
   type ReportingBasis,
+  type ThresholdAttribution,
   type ValidationIssue,
 } from "../../financial-core/src/index.ts";
 import { authorizePlan } from "./plan-authority.ts";
@@ -73,6 +74,8 @@ export type PlanningContext = Readonly<{
   max_model_calls: number;
   requested_subjects: ReadonlyArray<RequestedSubject>;
   publication_unit_kind: PublicationUnitKind;
+  /** Who set the thresholds: a saved thesis condition, an approved brief, a grid. Defaults to the user's request. */
+  threshold_attribution?: ThresholdAttribution;
 }>;
 
 export type ClarificationChoice = Readonly<{ choice_id: string; label: string; subject_ref?: FinancialSubjectRef }>;
@@ -309,7 +312,7 @@ function assemblePlan(context: PlanningContext, draft: Draft, planner: Financial
     operations: draft.operations.map((operation) => ({ ...operation, operation_version: OPERATION_REGISTRY[operation.operation as OperationKind].operation_version })),
     outputs: draft.outputs.map((output) => ({ output_id: output.output_id, node_id: output.node_id, unit_id: unitOf.get(output.output_id)! })),
     publication_units: units.map((unit) => ({ unit_id: unit.unit_id, kind: context.publication_unit_kind })),
-    thresholds: draft.thresholds.map((threshold) => ({ ...threshold, attribution: { kind: "user_request", ref: context.origin.ref } })),
+    thresholds: draft.thresholds.map((threshold) => ({ ...threshold, attribution: context.threshold_attribution ?? { kind: "user_request", ref: context.origin.ref } })),
     limits: { ...DEFAULT_EXECUTION_LIMITS },
     presentation_template_version: "financial-answer.v1",
   };

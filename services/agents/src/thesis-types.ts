@@ -56,6 +56,16 @@ export type ThesisVersion = {
   created_at: string;
 };
 
+/** The certified calculation behind a numerical condition's status. */
+export type ConditionFinancialRef = {
+  run_id: string;
+  unit_id: string;
+  snapshot_id: string | null;
+  certificate_digest: string | null;
+  /** Deterministic over definition, inputs, and outcome; the same evidence yields the same hash on every run. */
+  result_hash: string | null;
+};
+
 export type ConditionAssessment = {
   condition_id: string;
   status: "supported" | "challenged" | "unresolved";
@@ -63,6 +73,7 @@ export type ConditionAssessment = {
   claim_refs: string[];
   fact_refs: string[];
   method: "metric" | "model" | "no_evidence";
+  financial?: ConditionFinancialRef;
 };
 
 export type ThesisAssessment = {
@@ -256,8 +267,27 @@ export function parseConditionAssessments(value: unknown): ConditionAssessment[]
       claim_refs: claimRefs,
       fact_refs: factRefs,
       method: row.method,
+      ...(row.financial === undefined ? {} : { financial: parseFinancialRef(row.financial, `${label}.financial`) }),
     };
   });
+}
+
+const HEX64 = /^[0-9a-f]{64}$/;
+
+function parseFinancialRef(value: unknown, label: string): ConditionFinancialRef {
+  const row = requireRecord(value, label);
+  const nullableHex = (item: unknown, field: string) => {
+    if (item === null) return null;
+    if (typeof item !== "string" || !HEX64.test(item)) throw new ThesisValidationError(`${label}.${field} must be a sha-256 hex digest`);
+    return item;
+  };
+  return {
+    run_id: requireUuid(row.run_id, `${label}.run_id`),
+    unit_id: requireTrimmedString(row.unit_id, `${label}.unit_id`, 1, 64),
+    snapshot_id: row.snapshot_id === null ? null : requireUuid(row.snapshot_id, `${label}.snapshot_id`),
+    certificate_digest: nullableHex(row.certificate_digest, "certificate_digest"),
+    result_hash: nullableHex(row.result_hash, "result_hash"),
+  };
 }
 
 function parseUuidArray(value: unknown, label: string): string[] {

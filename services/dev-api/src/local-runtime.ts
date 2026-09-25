@@ -290,7 +290,13 @@ export const createAgentLoopStages: DevApiAgentLoopStageFactory = async (input) 
   // Select and bind the thesis version once before executing the loop.
   const thesis = await getCurrentThesis(pool(), input.agent.agent_id);
   return thesis
-    ? createThesisAgentLoopStages({ ...input, db: pool(), thesis })
+    ? createThesisAgentLoopStages({
+        ...input,
+        db: pool(),
+        thesis,
+        // THESIS_FINANCIAL_MODE=enforce verifies numerical conditions through the financial engine.
+        ...(process.env.THESIS_FINANCIAL_MODE === "enforce" ? { financial: { pool: pool(), evidence: createEvidenceFinancialPort } } : {}),
+      })
     : createLegacyAgentLoopStages(input);
 };
 
