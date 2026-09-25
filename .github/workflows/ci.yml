@@ -654,9 +654,16 @@ jobs:
             db/package-lock.json
             services/evidence/package-lock.json
             services/analyst-grids/package-lock.json
+            services/financial-core/package-lock.json
 
       - name: Install db deps (needed by analyst-grids integration harness)
         working-directory: db
+        run: npm ci
+
+      # Numerical columns import financial-core sources, which resolve their
+      # own dependencies (ajv, decimal.js) from services/financial-core/node_modules.
+      - name: Install financial-core deps (imported by financial grid columns)
+        working-directory: services/financial-core
         run: npm ci
 
       # reader-wiring imports S3ObjectStore from evidence/, which resolves its

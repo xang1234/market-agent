@@ -10,6 +10,7 @@ import {
 import type { DiscoveryService } from "../../discovery/src/ports.ts";
 import { startFinancialWorkerFromEnv, type FinancialWorkerEnv } from "./financial-worker-bootstrap.ts";
 import { analyzeFinancialRecovery } from "../../analyze/src/financial-section.ts";
+import { gridFinancialRecovery } from "../../analyst-grids/src/financial-column.ts";
 
 export type DevApiRuntimeEnv = FinancialWorkerEnv & {
   MA_DEV_API_FIXTURE_ADAPTER?: string;
@@ -17,6 +18,7 @@ export type DevApiRuntimeEnv = FinancialWorkerEnv & {
   DATABASE_URL?: string;
   DEV_API_RUNTIME_MODULE?: string;
   DEV_API_ANALYZE_SEAL_MODULE?: string;
+  GRID_FINANCIAL_MODE?: string;
 };
 
 const DEFAULT_DEV_API_RUNTIME_MODULE = new URL("./local-runtime.ts", import.meta.url).href;
@@ -59,8 +61,11 @@ export async function createDevApiAdaptersFromEnv(
 
   const { Pool } = await import("pg");
   const pool = new Pool({ connectionString: databaseUrl });
-  // Memos with verified sections are resumable after a restart; other parents register as they adopt the engine.
-  startFinancialWorkerFromEnv(pool, env, module.analyzeFinancial ? { analyze_memo_run: analyzeFinancialRecovery(pool) } : {});
+  // Parents whose verified units are resumable after a restart; others register as they adopt the engine.
+  startFinancialWorkerFromEnv(pool, env, {
+    ...(module.analyzeFinancial ? { analyze_memo_run: analyzeFinancialRecovery(pool) } : {}),
+    ...(env.GRID_FINANCIAL_MODE === "enforce" ? { analyst_grid_run: gridFinancialRecovery(pool) } : {}),
+  });
   const discovery = module.createDiscoveryService === undefined
     ? undefined
     : await module.createDiscoveryService({ db: pool }) as DiscoveryService;

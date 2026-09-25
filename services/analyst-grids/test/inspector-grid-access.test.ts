@@ -64,8 +64,8 @@ test("grid owner can inspect a snapshot referenced by their grid cell", async (t
     [rowId, runId, JSON.stringify({ kind: "issuer", id: issuerId })],
   );
   await db.query(
-    `insert into grid_cells (grid_row_id, grid_run_id, column_key, status, snapshot_id, primary_ref)
-     values ($1,$2,'latest_market_cap','ok',$3,$4::jsonb)`,
+    `insert into grid_cells (grid_row_id, grid_run_id, column_key, column_instance_id, status, snapshot_id, primary_ref)
+     values ($1,$2,'latest_market_cap','c0','ok',$3,$4::jsonb)`,
     [rowId, runId, snapshotId, JSON.stringify({ kind: "fact", id: factId })],
   );
 

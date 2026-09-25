@@ -14,6 +14,7 @@ export type CellRunnerDeps = { db: QueryExecutor; pool: SnapshotClientPool; read
 
 export type ComputeCellInput = {
   column: ColumnCatalogEntry;
+  columnInstanceId: string;
   params: JsonValue | null;
   gridRowId: string;
   subject: SubjectRef;
@@ -32,7 +33,7 @@ export async function computeAndPersistCell(
   const persist = (fields: CellWrite) =>
     updateCellResult(deps.db, {
       gridRowId: input.gridRowId,
-      columnKey: input.column.column_key,
+      columnInstanceId: input.columnInstanceId,
       ...fields,
     });
   const persistError = async (): Promise<CellResultStatus> => {

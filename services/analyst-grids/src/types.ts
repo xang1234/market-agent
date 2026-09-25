@@ -25,6 +25,10 @@ export type UniverseSpec =
 
 export type ColumnSpec = { column_key: string; params?: JsonValue };
 
+// One column of a run, frozen when the run starts: its id, catalog key,
+// verbatim params, and position. Two instances of one key are distinct cells.
+export type ColumnInstance = { column_instance_id: string; column_key: string; params: JsonValue | null; position: number };
+
 export type ResearchGridRow = {
   grid_id: string;
   user_id: string;
