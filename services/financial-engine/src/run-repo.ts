@@ -72,13 +72,62 @@ export async function reserveRun(
   });
 }
 
+export type ReserveReplayResult =
+  | { status: "created" | "existing"; run: RunRecord }
+  | { status: "not_found" }
+  | { status: "conflict"; reason: "source_not_final" | "request_key_conflict" };
+
+/**
+ * Reserves a pinned replay of a completed run: the same plan, cutoff,
+ * policies, and parent version, marked `replay_of_run_id`. Replaying a replay
+ * pins to the original. The owner's request key is idempotent within the
+ * source's parent; reusing it for a different source is a conflict. No
+ * execution happens here — a supervised worker picks the pending run up.
+ * Recalculation is a different action: a new run from its parent feature.
+ */
+export async function reserveReplayRun(
+  client: SqlExecutor,
+  input: { owner_user_id: string; source_run_id: string; request_key: string },
+): Promise<ReserveReplayResult> {
+  return withTransaction(client, async () => {
+    const source = await getRun(client, input.owner_user_id, input.source_run_id);
+    if (!source) return { status: "not_found" };
+    const root = source.replay_of_run_id === null ? source : await getRun(client, input.owner_user_id, source.replay_of_run_id);
+    if (!root) return { status: "not_found" };
+    if (root.execution_state !== "completed") return { status: "conflict", reason: "source_not_final" };
+    const requestKey = `replay:${input.request_key}`;
+    const created = (await client.query<Record<string, unknown>>(
+      `insert into financial_runs (user_id, parent_kind, parent_id, parent_version, request_key, request_hash, plan_id, feature_mode,
+                                   knowledge_cutoff, policies, replay_of_run_id)
+       select user_id, parent_kind, parent_id, parent_version, $3, request_hash, plan_id, feature_mode, knowledge_cutoff, policies, run_id
+         from financial_runs where run_id = $1 and user_id = $2
+       on conflict (user_id, parent_kind, parent_id, request_key) do nothing
+       returning ${RUN_COLUMNS}`,
+      [root.run_id, input.owner_user_id, requestKey],
+    )).rows[0];
+    if (created) {
+      const run = toRun(created);
+      await appendRunEvent(client, run.run_id, "run_created", { payload: { execution_state: "pending" } });
+      return { status: "created", run };
+    }
+    const existing = toRun((await client.query<Record<string, unknown>>(
+      `select ${RUN_COLUMNS} from financial_runs where user_id = $1 and parent_kind = $2 and parent_id = $3 and request_key = $4`,
+      [input.owner_user_id, root.parent_kind, root.parent_id, requestKey],
+    )).rows[0]!);
+    return existing.replay_of_run_id === root.run_id ? { status: "existing", run: existing } : { status: "conflict", reason: "request_key_conflict" };
+  });
+}
+
 /** Owner-scoped lookup; another owner's run is indistinguishable from a missing one. */
 export async function getRun(client: SqlExecutor, ownerUserId: string, runId: string): Promise<RunRecord | null> {
   const row = (await client.query<Record<string, unknown>>(`select ${RUN_COLUMNS} from financial_runs where run_id = $1 and user_id = $2`, [runId, ownerUserId])).rows[0];
   return row ? toRun(row) : null;
 }
 
-const ALLOWED_TRANSITIONS: Readonly<Record<ExecutionState, ReadonlyArray<ExecutionState>>> = {
+type TransitionTable = Readonly<Record<ExecutionState, ReadonlyArray<ExecutionState>>>;
+
+/** A publishing run completes only through sealing. */
+const PUBLISHING_TRANSITIONS: TransitionTable = {
   pending: ["running", "failed", "cancelled"],
   running: ["ready_to_seal", "failed", "cancelled"],
   ready_to_seal: ["completed", "failed", "cancelled"],
@@ -86,6 +135,9 @@ const ALLOWED_TRANSITIONS: Readonly<Record<ExecutionState, ReadonlyArray<Executi
   failed: [],
   cancelled: [],
 };
+
+/** A replay seals nothing, so it completes straight from running. */
+const REPLAY_TRANSITIONS: TransitionTable = { ...PUBLISHING_TRANSITIONS, running: ["completed", "failed", "cancelled"], ready_to_seal: [] };
 
 export class RunTransitionError extends Error {
   constructor(message: string) {
@@ -105,7 +157,8 @@ export async function transitionRun(
   details: { coverage_state?: CoverageState; failure_code?: string } = {},
 ): Promise<RunRecord> {
   if (current.cancel_requested_at !== null && to !== "cancelled" && to !== "failed") throw new StaleLeaseError("cancel_requested");
-  if (!ALLOWED_TRANSITIONS[current.execution_state].includes(to)) {
+  const allowed = current.replay_of_run_id === null ? PUBLISHING_TRANSITIONS : REPLAY_TRANSITIONS;
+  if (!allowed[current.execution_state].includes(to)) {
     throw new RunTransitionError(`cannot move run from ${current.execution_state} to ${to}`);
   }
   if (to === "failed" && !details.failure_code) throw new RunTransitionError("a failed run needs a failure code");

@@ -16,4 +16,6 @@ export * from "./operation-registry.ts";
 export * from "./graph.ts";
 export * from "./publication-units.ts";
 export * from "./coverage.ts";
+export * from "./bound-evaluation.ts";
 export * from "./public-time.ts";
+export * from "./presentation.ts";

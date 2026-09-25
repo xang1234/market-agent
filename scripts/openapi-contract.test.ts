@@ -66,6 +66,9 @@ const IMPLEMENTED_SERVICE_V1_ROUTES = [
   "/v1/dev/placeholders",
   "/v1/dev/services",
   "/v1/evidence/healthz",
+  "/v1/financial/results/{resultId}",
+  "/v1/financial/runs/{runId}",
+  "/v1/financial/runs/{runId}/replays",
   "/v1/home/healthz",
   "/v1/market/cache-audit",
 ] as const;
@@ -431,6 +434,41 @@ test("OpenAPI no longer exposes the retired home feed route", async () => {
   const routes = await openApiRoutes();
 
   assert.equal(routes.has("/v1/home/feed"), false);
+});
+
+test("OpenAPI financial operations reference the one shared financial HTTP payload schema", async () => {
+  const document = await openApiDocument();
+  const httpSchemaText = await readFile(join(REPO_ROOT, "spec", "financial_answer_http_schema.json"), "utf8");
+  const httpSchema = JSON.parse(httpSchemaText) as { $defs: Record<string, unknown> };
+  const shared = (name: string) => `./financial_answer_http_schema.json#/$defs/${name}`;
+  const operations = [
+    ["get", "/v1/financial/runs/{runId}", "200", "FinancialRunStatus"],
+    ["get", "/v1/financial/results/{resultId}", "200", "FinancialResultInspection"],
+    ["post", "/v1/financial/runs/{runId}/replays", "202", "FinancialReplayAccepted"],
+    ["post", "/v1/financial/runs/{runId}/replays", "200", "FinancialReplayAccepted"],
+  ] as const;
+  for (const [method, path, status, name] of operations) {
+    const operation = record(record(record(document.paths, "paths")[path], `paths.${path}`)[method], `${method} ${path}`);
+    assert.equal(operation.security, undefined, `${method.toUpperCase()} ${path} inherits bearer authentication`);
+    const responses = record(operation.responses, `${method} ${path}.responses`);
+    const content = record(record(record(responses[status], `${path} ${status}`).content, `${path} ${status}.content`)["application/json"], `${path} ${status} json`);
+    assert.deepEqual(content.schema, { $ref: shared(name) }, `${method.toUpperCase()} ${path} ${status} uses the shared ${name}`);
+    assert.deepEqual(responses["404"], { $ref: "#/components/responses/FinancialNotFound" }, `${method.toUpperCase()} ${path} has one indistinguishable not-found`);
+    assert.ok(httpSchema.$defs[name], `${name} exists in the shared schema`);
+  }
+  const spec = await readFile(OPENAPI_PATH, "utf8");
+  for (const [, name] of spec.matchAll(/financial_answer_http_schema\.json#\/\$defs\/([A-Za-z]+)/gu)) {
+    assert.ok(httpSchema.$defs[name!], `OpenAPI reference ${name} resolves in the shared schema`);
+  }
+
+  const ajv = new Ajv2020({ allErrors: true, strict: false, validateFormats: false });
+  for (const file of ["finance_research_block_schema.json", "financial_plan_schema.json", "financial_result_schema.json"]) {
+    ajv.addSchema(JSON.parse(await readFile(join(REPO_ROOT, "spec", file), "utf8")));
+  }
+  ajv.addSchema(httpSchema);
+  for (const name of Object.keys(httpSchema.$defs)) {
+    assert.ok(ajv.getSchema(`https://example.com/schemas/financial_answer_http_schema.json#/$defs/${name}`), `${name} compiles with its cross-file references`);
+  }
 });
 
 async function openApiRoutes(): Promise<ReadonlySet<string>> {

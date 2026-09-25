@@ -129,7 +129,30 @@ path. The shared foundations are in place:
   proof backfill, public-information historical binding, the planner, fenced
   run leases, and checkpointed graph execution to `ready_to_seal`.
 
+- **T14–T18:** trusted publication. The snapshot verifier recomputes a unit
+  from ledger records inside the sealing transaction and issues a
+  `financial_publication.v1` certificate. `finalizeUnit` atomically seals the
+  snapshot, certificate, unit, results, event, and parent artifact under
+  share locks on the bound sources and facts. `financial_answer` blocks carry
+  a deterministic presentation that only the verifier generates, from the
+  records it checked, and the web
+  renderer only prints. `/v1/financial` exposes owner-scoped status,
+  closure-reauthorized inspection, and idempotent replay requests. Pinned
+  verification replay and supervised lease recovery complete the set.
+
 Known gap: SEC ingestion records precision proofs but not yet source
 publication attestations, so SEC-ingested facts bind as
 `publication_time_unknown` until a reviewed acceptance-time mapping issues
-them. Nothing is sealed or published before T14–T18.
+them. Such units cannot be certified. No producer publishes through
+`finalizeUnit` until T19–T26 migrate them.
+
+### Wave 3 plan deviations
+
+| Plan reference | Actual |
+|---|---|
+| `services/evidence/src/zero-export-erasure.ts` (T15 access-lock protocol) | Not present. The lock rows are the `sources` and `facts` rows themselves (`lockEvidenceForPublication`, `FOR SHARE` in id order). Every revocation writer conflicts with it, so writers need no changes. `facts.source_id` has no cascade, so `deleteSource` cannot remove a source that still has facts. |
+| `web/src/blocks/renderers/FinancialAnswerBlock.tsx`, `BlockRenderer.tsx` | `web/src/blocks/FinancialAnswer.tsx` plus the `financialAnswer.ts` view helpers, registered through `registerCertifiedFinancialBlocks.ts`, following the existing flat renderer layout and `BlockView` registry. |
+| `services/dev-api/src/api.ts`; narrow `local-runtime.ts` wiring | Routes are composed in `services/dev-api/src/financial-wiring.ts` and dispatched from `http.ts`. `local-runtime.ts` is unchanged. The worker starts from `runtime.ts` through `financial-worker-bootstrap.ts` when `FINANCIAL_WORKER_ENABLED=true`. |
+| `db/test/schema-openapi-alignment.test.ts` | `scripts/openapi-contract.test.ts` checks that the `/v1/financial` operations reference `spec/financial_answer_http_schema.json`, that each reference resolves, and that the schema compiles. |
+| Trusted authentication for financial HTTP | The handler takes an already authenticated `userId`. The dev authenticator accepts only a UUID `x-user-id`, the same header the other dev routes use, and is documented as non-production. A deployment supplies its own authenticator. |
+| Replay execution | `POST …/replays` reserves a pending run with `replay_of_run_id` and the original's plan, cutoff, policies, and parent version. The supervised worker executes it through `executeReplay`, which never seals. |

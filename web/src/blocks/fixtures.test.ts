@@ -25,6 +25,7 @@ import {
 } from './fixtures.ts'
 import type { BaseBlock, Series } from './types.ts'
 import {
+  CERTIFIED_FINANCIAL_BLOCK_KINDS,
   CHART_COMPARISON_BLOCK_KINDS,
   DISCLOSURE_TIERS,
   FINDING_SEVERITIES,
@@ -286,6 +287,7 @@ test('ALL_BLOCK_FIXTURES carries one fixture per catalogued block kind so adding
     ...CHART_COMPARISON_BLOCK_KINDS,
     ...RESEARCH_EVIDENCE_BLOCK_KINDS,
     ...TRUST_PROVENANCE_BLOCK_KINDS,
+    ...CERTIFIED_FINANCIAL_BLOCK_KINDS,
   ])
   assert.deepEqual(
     [...fixtureKinds].sort(),

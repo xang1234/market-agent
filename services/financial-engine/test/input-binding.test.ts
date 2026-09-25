@@ -3,7 +3,7 @@ import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { hashCanonical, validateBoundInput } from "../../financial-core/src/index.ts";
 import { bindPlanInputs, type InputBinding } from "../src/bind-inputs.ts";
-import { ExecutionIntegrityError } from "../src/errors.ts";
+import { ExecutionIntegrityError } from "../../financial-core/src/index.ts";
 import { StaleLeaseError } from "../src/lease.ts";
 import { createEvidenceFinancialPort } from "../src/evidence-adapter.ts";
 import { authorityFor, engineDatabase, IDS, leasedRun, ORIGINAL_REVENUE, revenuePlan } from "./db-fixtures.ts";

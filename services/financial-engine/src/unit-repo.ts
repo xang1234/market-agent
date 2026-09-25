@@ -3,9 +3,15 @@
 // derived from unit state, so a retry that repeats a transition changes
 // nothing and emits no duplicate progress event. All writes take a FencedTx.
 
-import { hashCanonical, unitClosures, type CoverageState, type FinancialPlanV1, type LocalId } from "../../financial-core/src/index.ts";
+import {
+  ExecutionIntegrityError,
+  hashCanonical,
+  unitClosures,
+  type CoverageState,
+  type FinancialPlanV1,
+  type LocalId,
+} from "../../financial-core/src/index.ts";
 import { appendRunEvent } from "./events-repo.ts";
-import { ExecutionIntegrityError } from "./errors.ts";
 import type { FencedTx } from "./lease.ts";
 import type { SqlExecutor } from "./ports.ts";
 

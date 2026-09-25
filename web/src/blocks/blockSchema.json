@@ -1088,6 +1088,596 @@
       ],
       "unevaluatedProperties": false
     },
+    "FinancialUnit": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "currency"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "currency",
+                "currency_per_share"
+              ]
+            },
+            "currency": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "ratio",
+                "percent",
+                "percentage_points",
+                "basis_points",
+                "shares",
+                "count"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "FinancialPresentationLabel": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "text",
+            "slot_id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "subject"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1
+            },
+            "slot_id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]{0,63}$"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "text"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "measure",
+                "period"
+              ]
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "FinancialPresentedPayload": {
+      "description": "Server-generated text only. A value's text is a formatted number; comparative words (highest, above, all) appear only in evaluated predicate or ranking results, and an incomplete ranking can never name a leader.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "text",
+            "full_text",
+            "value",
+            "unit",
+            "exact"
+          ],
+          "properties": {
+            "kind": {
+              "const": "value"
+            },
+            "text": {
+              "type": "string",
+              "pattern": "^(?:[A-Z]{3} )?-?[0-9][0-9,]*(?:\\.[0-9]+)?(?:%| pp| bp| shares| per share)?$"
+            },
+            "full_text": {
+              "type": "string",
+              "pattern": "^(?:[A-Z]{3} )?-?[0-9][0-9,]*(?:\\.[0-9]+)?(?:%| pp| bp| shares| per share)?$"
+            },
+            "value": {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+            },
+            "unit": {
+              "$ref": "#/$defs/FinancialUnit"
+            },
+            "exact": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "text",
+            "outcome"
+          ],
+          "properties": {
+            "kind": {
+              "const": "predicate"
+            },
+            "text": {
+              "type": "string"
+            },
+            "outcome": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "text",
+            "complete",
+            "order",
+            "leader_label_ids"
+          ],
+          "properties": {
+            "kind": {
+              "const": "ranking"
+            },
+            "text": {
+              "type": "string"
+            },
+            "complete": {
+              "type": "boolean"
+            },
+            "order": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "subject_label_id",
+                  "rank"
+                ],
+                "properties": {
+                  "subject_label_id": {
+                    "type": "string",
+                    "pattern": "^subject:[a-z][a-z0-9_]{0,63}$"
+                  },
+                  "rank": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "leader_label_ids": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^subject:[a-z][a-z0-9_]{0,63}$"
+                  }
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "if": {
+            "properties": {
+              "complete": {
+                "const": false
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "leader_label_ids": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "text",
+            "reason_code"
+          ],
+          "properties": {
+            "kind": {
+              "const": "gap"
+            },
+            "text": {
+              "type": "string"
+            },
+            "reason_code": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "FinancialPresentedResult": {
+      "type": "object",
+      "required": [
+        "result_id",
+        "output_id",
+        "disposition",
+        "subject_label_id",
+        "measure_label_id",
+        "period_label_id",
+        "presented",
+        "result_hash"
+      ],
+      "properties": {
+        "result_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "output_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "disposition": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "subject_label_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^subject:[a-z][a-z0-9_]{0,63}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "measure_label_id": {
+          "type": "string",
+          "pattern": "^measure:m[0-9]+$"
+        },
+        "period_label_id": {
+          "type": "string",
+          "pattern": "^period:p[0-9]+$"
+        },
+        "presented": {
+          "$ref": "#/$defs/FinancialPresentedPayload"
+        },
+        "result_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FinancialPresentation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "result_id"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "scalar",
+                "predicate",
+                "gap"
+              ]
+            },
+            "result_id": {
+              "$ref": "#/$defs/UUID"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "caption",
+            "columns",
+            "rows",
+            "ascending"
+          ],
+          "properties": {
+            "kind": {
+              "const": "table"
+            },
+            "caption": {
+              "type": "string"
+            },
+            "columns": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "column_id",
+                  "measure_label_id",
+                  "period_label_id"
+                ],
+                "properties": {
+                  "column_id": {
+                    "type": "string",
+                    "pattern": "^c[0-9]+$"
+                  },
+                  "measure_label_id": {
+                    "type": "string",
+                    "pattern": "^measure:m[0-9]+$"
+                  },
+                  "period_label_id": {
+                    "type": "string",
+                    "pattern": "^period:p[0-9]+$"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "rows": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "type": "object",
+                "required": [
+                  "subject_label_id",
+                  "cells"
+                ],
+                "properties": {
+                  "subject_label_id": {
+                    "type": "string",
+                    "pattern": "^subject:[a-z][a-z0-9_]{0,63}$"
+                  },
+                  "cells": {
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/$defs/UUID"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "ascending": {
+              "type": "object",
+              "propertyNames": {
+                "pattern": "^c[0-9]+$"
+              },
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "subject_label_id",
+            "measure_label_id",
+            "points"
+          ],
+          "properties": {
+            "kind": {
+              "const": "series"
+            },
+            "subject_label_id": {
+              "type": "string",
+              "pattern": "^subject:[a-z][a-z0-9_]{0,63}$"
+            },
+            "measure_label_id": {
+              "type": "string",
+              "pattern": "^measure:m[0-9]+$"
+            },
+            "points": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "type": "object",
+                "required": [
+                  "period_label_id",
+                  "result_id"
+                ],
+                "properties": {
+                  "period_label_id": {
+                    "type": "string",
+                    "pattern": "^period:p[0-9]+$"
+                  },
+                  "result_id": {
+                    "$ref": "#/$defs/UUID"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "FinancialAnswerContentV1": {
+      "type": "object",
+      "required": [
+        "presentation_version",
+        "template_version",
+        "run_id",
+        "unit_id",
+        "knowledge_cutoff",
+        "coverage",
+        "labels",
+        "results",
+        "presentations"
+      ],
+      "properties": {
+        "presentation_version": {
+          "const": "financial-presentation.v1"
+        },
+        "template_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "unit_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "knowledge_cutoff": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "coverage": {
+          "type": "object",
+          "required": [
+            "state",
+            "requested",
+            "verified"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "complete",
+                "partial",
+                "none"
+              ]
+            },
+            "requested": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "verified": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "labels": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^(subject:[a-z][a-z0-9_]{0,63}|measure:m[0-9]+|period:p[0-9]+)$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/FinancialPresentationLabel"
+          }
+        },
+        "results": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/FinancialPresentedResult"
+          }
+        },
+        "presentations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/FinancialPresentation"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "FinancialAnswer": {
+      "description": "A certified quantitative answer. Every string is server-generated from committed results; there is no title or prose field, so a model cannot add unverified numerical or comparative claims.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/BaseBlock"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "financial_answer"
+            },
+            "presentation_hash": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "financial": {
+              "description": "Generated by the snapshot verifier from the results it verified; callers cannot supply one. A version this schema does not know is accepted only so clients can show it as unsupported; it is never rendered as verified content.",
+              "type": "object",
+              "required": [
+                "presentation_version"
+              ],
+              "properties": {
+                "presentation_version": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "if": {
+                "properties": {
+                  "presentation_version": {
+                    "const": "financial-presentation.v1"
+                  }
+                }
+              },
+              "then": {
+                "$ref": "#/$defs/FinancialAnswerContentV1"
+              }
+            }
+          },
+          "required": [
+            "presentation_hash",
+            "financial"
+          ]
+        }
+      ],
+      "not": {
+        "required": [
+          "title"
+        ]
+      },
+      "unevaluatedProperties": false
+    },
     "Block": {
       "oneOf": [
         {
@@ -1149,6 +1739,9 @@
         },
         {
           "$ref": "#/$defs/Disclosure"
+        },
+        {
+          "$ref": "#/$defs/FinancialAnswer"
         }
       ]
     }

@@ -3,6 +3,7 @@ export type {
   AnalystDistributionBucket,
   BaseBlock,
   Block,
+  CertifiedFinancialBlockKind,
   ChartComparisonBlock,
   ChartComparisonBlockKind,
   DataRef,
@@ -13,6 +14,10 @@ export type {
   EpsSurpriseQuarter,
   FilingItem,
   FilingsListBlock,
+  FinancialAnswerBlock,
+  FinancialAnswerContent,
+  FinancialPresentation,
+  FinancialPresentedResult,
   FindingCardBlock,
   FindingSeverity,
   InteractiveSpec,
@@ -53,6 +58,7 @@ export type {
   XAxisType,
 } from './types.ts'
 export {
+  CERTIFIED_FINANCIAL_BLOCK_KINDS,
   CHART_COMPARISON_BLOCK_KINDS,
   DISCLOSURE_TIERS,
   FINDING_SEVERITIES,
@@ -62,6 +68,7 @@ export {
   RESEARCH_EVIDENCE_BLOCK_KINDS,
   STREAMING_DATA_REF_KIND,
   SUBJECT_KINDS,
+  SUPPORTED_FINANCIAL_PRESENTATION_VERSION,
   TRUST_PROVENANCE_BLOCK_KINDS,
   X_AXIS_TYPES,
 } from './types.ts'

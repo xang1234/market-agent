@@ -497,6 +497,8 @@ export type {
 } from "./financial-input-repo.ts";
 export { checkTokenAgainstStoredValue } from "./financial-attestations.ts";
 export { backfillFactPrecisionProofs } from "./financial-proof-backfill.ts";
+export { lockEvidenceForPublication } from "./financial-access-lock.ts";
+export type { PublicationEvidence } from "./financial-access-lock.ts";
 export type {
   BackfillFact,
   ProofBackfillOutcome,
