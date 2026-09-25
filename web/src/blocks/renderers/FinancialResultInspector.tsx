@@ -4,7 +4,6 @@ import {
   canonicalValue,
   inspectableDetails,
   payloadSummary,
-  replayEligible,
   unitText,
   type FinancialInspectedInput,
   type FinancialResultInspection,
@@ -92,7 +91,8 @@ export function FinancialResultInspector({ load, onCopy }: { load: FinancialInsp
           ['Snapshot', details.publication.snapshot_id],
           ['Certificate digest', details.publication.certificate_digest],
           ['Result hash', details.result_hash],
-          ['Pinned replay', replayEligible(details) ? 'Eligible' : 'Not available'],
+          // Only inspectable details reach here, and those are exactly the results pinned replay accepts.
+          ['Pinned replay', 'Eligible'],
         ]}
       />
     </div>

@@ -58,7 +58,6 @@ export type SavedRuleOutcome = Readonly<{
 export type SavedRuleDeps = Readonly<{
   pool: FinancialPool;
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
-  workerId?: string;
 }>;
 
 /** One saved rule for one subject at one cutoff, under the parent's own authority and publication guard. */
@@ -137,7 +136,6 @@ export async function evaluateSavedRule(deps: SavedRuleDeps, request: SavedRuleR
     ),
     evidence: deps.evidence,
     persistParent: request.persistParent,
-    worker_id: deps.workerId ?? `saved-rule-${process.pid}`,
   });
   switch (outcome.status) {
     case "driven":

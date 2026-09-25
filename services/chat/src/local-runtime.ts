@@ -16,6 +16,7 @@ import { STAGED_SNAPSHOT_MANIFEST } from "../../snapshot/src/manifest-staging.ts
 import { sealSnapshotWithPool } from "../../snapshot/src/snapshot-sealer.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { planningModelFromRouter } from "../../financial-engine/src/planner.ts";
+import { parseFinancialMode } from "../../financial-engine/src/request.ts";
 import { createLlmRouterFromEnv } from "../../llm/src/index.ts";
 import {
   createRegistryBackedAnalystToolRuntime,
@@ -36,7 +37,7 @@ import {
   structuredEvidenceStatus,
   structuredRefsFromHandoff,
 } from "./local-runtime-structured.ts";
-import { createChatFinancialRuntime, type ChatFinancialMode, type ChatFinancialRuntime } from "./financial-runtime.ts";
+import { createChatFinancialRuntime, type ChatFinancialRuntime } from "./financial-runtime.ts";
 import { createChatMessagePersistence } from "./messages.ts";
 import {
   preResolveChatSubjectWithResolver,
@@ -166,7 +167,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
 // CHAT_FINANCIAL_MODE is "shadow" or "enforce"; without a configured LLM router,
 // financial turns in enforce mode get a structured gap instead of a guess.
 export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime({
-  mode: financialMode(process.env.CHAT_FINANCIAL_MODE),
+  mode: parseFinancialMode(process.env.CHAT_FINANCIAL_MODE),
   pool: { query: (text, values) => pool().query(text, values), connect: () => pool().connect() },
   planningModel: async (request) => {
     const router = await createLlmRouterFromEnv(process.env);
@@ -176,10 +177,6 @@ export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime
   resolveMention: (mention) => preResolveSubject({ text: mention }),
   evidence: createEvidenceFinancialPort,
 });
-
-function financialMode(value: string | undefined): ChatFinancialMode {
-  return value === "shadow" || value === "enforce" ? value : "off";
-}
 
 export const persistAssistantMessage: ChatAssistantMessagePersistence = async (message) =>
   createChatMessagePersistence({

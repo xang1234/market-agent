@@ -3,6 +3,7 @@ import { createAnalystGridsServer } from "./http.ts";
 import { createUniverseResolverDeps } from "./universe-wiring.ts";
 import { createReaderColumnDepsFromEnv } from "./reader-wiring.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
+import { parseFinancialMode } from "../../financial-engine/src/request.ts";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required");
@@ -17,9 +18,7 @@ const pool = new Pool({ connectionString: databaseUrl });
 const reader = await createReaderColumnDepsFromEnv();
 if (!reader) console.log("analyst-grids: reader columns disabled (LLM or S3 env not configured)");
 // Verified numerical columns: GRID_FINANCIAL_MODE = off (default) | shadow | enforce.
-const financialMode = process.env.GRID_FINANCIAL_MODE === "shadow" || process.env.GRID_FINANCIAL_MODE === "enforce"
-  ? process.env.GRID_FINANCIAL_MODE
-  : "off";
+const financialMode = parseFinancialMode(process.env.GRID_FINANCIAL_MODE);
 const server = createAnalystGridsServer({
   db: pool,
   pool,

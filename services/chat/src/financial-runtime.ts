@@ -30,14 +30,14 @@ import {
   type RequestedSubject,
 } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
-import { publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
+import { publishRequest, type FinancialMode, type RequestGap } from "../../financial-engine/src/request.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import type { ChatTurnRunContext } from "./coordinator.ts";
 import { contentHashForText, stableUuid } from "./chat-ids.ts";
 import { extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatSubjectPreResolution } from "./subjects.ts";
 
-export type ChatFinancialMode = "off" | "shadow" | "enforce";
+export type ChatFinancialMode = FinancialMode;
 
 /** The user's pick for a clarification this lane offered earlier. */
 export type ChatClarificationAnswer = Readonly<{ clarification_id: string; choice_id: string }>;
@@ -64,8 +64,6 @@ export type ChatFinancialRuntimeDeps = Readonly<{
   planningModel: PlanningModel | null;
   resolveMention(mention: string): Promise<ChatSubjectPreResolution>;
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
-  now?: () => Date;
-  workerId?: string;
 }>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -87,7 +85,6 @@ const GAP_TEXT: Readonly<Record<ChatGap, string>> = {
 };
 
 export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): ChatFinancialRuntime {
-  const now = deps.now ?? (() => new Date());
   const answers = (context: ChatFinancialTurnContext) =>
     deps.mode !== "off" && isFinancialRequest(context.userIntent ?? "") && Boolean(context.userId) && UUID.test(context.threadId);
   const run = async (context: ChatFinancialTurnContext): Promise<ChatFinancialTurn | null> => {
@@ -103,10 +100,9 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       request_key: turnId,
       // Shadow mode validates that the request plans; the narrative analyst still answers it.
       mode: deps.mode === "shadow" ? "shadow" : "enforce",
-      plan: () => planTurn(deps, context, text, authority, now()),
+      plan: () => planTurn(deps, context, text, authority, new Date()),
       evidence: deps.evidence,
       persistParent: persistAssistantMessage(context.threadId, messageId),
-      worker_id: deps.workerId ?? `chat-${process.pid}`,
     });
     switch (outcome.status) {
       case "planned":

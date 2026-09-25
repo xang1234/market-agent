@@ -142,7 +142,8 @@ listed above. The shared foundations are in place:
   verification replay and supervised lease recovery complete the set.
 
 - **T19–T27:** surface integrations. Each surface publishes through
-  `reserveAndPublish` / `finalizeUnit`, and its parent artifact is written
+  `publishRequest` (`financial-engine/src/request.ts`) / `finalizeUnit`, and
+  its parent artifact is written
   in the finalization transaction:
 
   | Surface | Flag | What is certified | Parent write in finalization |

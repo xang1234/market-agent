@@ -52,7 +52,10 @@ export async function fetchFinancialResultInspection(input: { userId: string; re
   })
 }
 
-/** Whether this client can show the inspection's details; anything else is shown as legacy output, never as verified. */
+/**
+ * Whether this client can show the inspection's details, and so offer pinned
+ * replay; anything else is shown as legacy output, never as verified.
+ */
 export function inspectableDetails(inspection: FinancialResultInspection): Extract<FinancialResultInspection, { availability: 'available' }> | null {
   return inspection.availability === 'available' && inspection.schema_version === SUPPORTED_INSPECTION_SCHEMA_VERSION ? inspection : null
 }
@@ -88,9 +91,4 @@ export function payloadSummary(payload: unknown): string {
     default:
       return 'Unrecognized result'
   }
-}
-
-/** Pinned replay is offered only for a result this client fully understands. */
-export function replayEligible(inspection: FinancialResultInspection): boolean {
-  return inspectableDetails(inspection) !== null
 }

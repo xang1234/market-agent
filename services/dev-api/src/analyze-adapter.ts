@@ -184,7 +184,7 @@ async function newFinancialContext(
   subjectRefs: ReadonlyArray<SubjectRef>,
 ): Promise<AnalyzeRunFinancialMetadata | null> {
   const lane = deps.analyzeFinancial;
-  if (!lane || lane.mode === "off") return null;
+  if (!lane) return null;
   const primary = subjectRefs.find((ref) => ref.kind === "issuer");
   if (!primary) return null;
   const peers = financialSectionIds(playbook).includes("peer_table") ? await lane.resolvePeers(primary.id) : [];

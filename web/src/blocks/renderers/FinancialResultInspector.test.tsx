@@ -4,7 +4,7 @@ import test from 'node:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import type { FinancialResultInspection } from '../financialInspection.ts'
-import { canonicalValue, payloadSummary, replayEligible, SUPPORTED_INSPECTION_SCHEMA_VERSION } from '../financialInspection.ts'
+import { canonicalValue, payloadSummary, SUPPORTED_INSPECTION_SCHEMA_VERSION } from '../financialInspection.ts'
 import { FinancialResultInspector } from './FinancialResultInspector.tsx'
 
 const LARGE = '383285000000.123456789012345678'
@@ -80,7 +80,7 @@ test('an unknown or legacy version is legacy output, never verified values', () 
     const html = renderToStaticMarkup(<FinancialResultInspector load={{ kind: 'ready', inspection: legacy }} />)
     assert.ok(html.includes('Legacy output'))
     assert.ok(!html.includes('Verified calculation') && !html.includes(LARGE))
-    assert.equal(replayEligible(legacy), false)
+    assert.ok(!html.includes('Pinned replay'), 'pinned replay is offered only for a result this client fully understands')
   }
 })
 

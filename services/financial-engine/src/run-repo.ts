@@ -129,22 +129,20 @@ export async function reserveReplayRun(
 }
 
 /**
- * The run an earlier attempt reserved for this request, with its saved plan.
- * A retry resumes it instead of planning again, so a model that would plan
- * differently the second time cannot turn a retry into a conflict.
+ * The plan an earlier attempt reserved for this request. A retry resumes it
+ * instead of planning again, so a model that would plan differently the second
+ * time cannot turn a retry into a conflict.
  */
-export async function findRunForRequest(
+export async function findPlanForRequest(
   client: SqlExecutor,
   input: { authority: FinancialRuntimeAuthority; request_key: string },
-): Promise<{ run: RunRecord; plan: FinancialPlanV1 } | null> {
-  const row = (await client.query<Record<string, unknown>>(
-    `select ${RUN_COLUMNS} from financial_runs where user_id = $1 and parent_kind = $2 and parent_id = $3 and request_key = $4`,
+): Promise<FinancialPlanV1 | null> {
+  const row = (await client.query<{ plan: FinancialPlanV1 }>(
+    `select p.plan from financial_runs r join financial_plans p on p.plan_id = r.plan_id and p.user_id = r.user_id
+      where r.user_id = $1 and r.parent_kind = $2 and r.parent_id = $3 and r.request_key = $4`,
     [input.authority.owner_user_id, input.authority.parent.kind, input.authority.parent.id, input.request_key],
   )).rows[0];
-  if (!row) return null;
-  const run = toRun(row);
-  const { plan } = (await client.query<{ plan: FinancialPlanV1 }>(`select plan from financial_plans where plan_id = $1 and user_id = $2`, [run.plan_id, run.user_id])).rows[0]!;
-  return { run, plan };
+  return row?.plan ?? null;
 }
 
 /** Owner-scoped lookup; another owner's run is indistinguishable from a missing one. */

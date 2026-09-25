@@ -7,13 +7,22 @@
 
 import type { FinancialPlanV1, FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
 import type { PersistParentArtifact } from "./finalize.ts";
+import { acquireLease, releaseLease, type AcquireLeaseResult } from "./lease.ts";
 import type { Clarification, PlanningResult } from "./planner.ts";
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "./ports.ts";
-import { reserveAndPublish, type DriveReport, type PublishResult } from "./publish.ts";
-import { findRunForRequest } from "./run-repo.ts";
-import { snapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
+import { driveLeasedRun, type DriveReport } from "./publish.ts";
+import { findPlanForRequest, reserveRun } from "./run-repo.ts";
+import { snapshotTransactionClient, type SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 
 const LEASE_TTL_MS = 120_000;
+
+/** A surface's financial lane: off, planning only beside the legacy answer, or the engine's answer alone. */
+export type FinancialMode = "off" | "shadow" | "enforce";
+
+/** Reads a surface's mode flag; anything unrecognized is off. */
+export function parseFinancialMode(value: string | undefined): FinancialMode {
+  return value === "shadow" || value === "enforce" ? value : "off";
+}
 
 /** Why a request did not publish; surfaces word these, they never invent their own. */
 export type RequestGap =
@@ -43,41 +52,65 @@ export type FinancialRequest = Readonly<{
   plan: (db: SqlExecutor) => Promise<PlanningResult>;
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
   persistParent: PersistParentArtifact;
-  worker_id: string;
 }>;
 
 export async function publishRequest(pool: FinancialPool, request: FinancialRequest): Promise<RequestOutcome> {
   const client = snapshotTransactionClient(await pool.connect());
   try {
-    const earlier = await findRunForRequest(client, { authority: request.authority, request_key: request.request_key });
-    let plan = earlier?.plan;
+    let plan = await findPlanForRequest(client, request);
     if (!plan) {
       const planned = await planOrGap(client, request);
       if (planned.status !== "planned") return planned;
       plan = planned.plan;
     }
     if (request.mode === "shadow") return { status: "planned", plan };
-    let published: PublishResult;
     try {
-      published = await reserveAndPublish(client, {
-        plan,
-        authority: request.authority,
-        request_key: request.request_key,
-        worker_id: request.worker_id,
-        ttl_ms: LEASE_TTL_MS,
-        evidence: request.evidence,
-        parent_limits: {},
-        persistParent: request.persistParent,
-      });
+      return await reserveAndDrive(client, request, plan);
     } catch {
       // A finalization that rolled back leaves units computed and the run checkpointed: a retry or recovery finishes it.
       return { status: "gap", reason: "publication_failed" };
     }
-    return outcomeOf(published);
   } finally {
     client.release();
   }
 }
+
+/**
+ * Reserves the run for the request key (or finds the one an earlier attempt
+ * reserved), leases it, and drives it to published units. A retry after a
+ * commit the caller never heard about lands on a completed run or on existing
+ * units, never on a second publication.
+ */
+async function reserveAndDrive(client: SnapshotTransactionClient, request: FinancialRequest, plan: FinancialPlanV1): Promise<RequestOutcome> {
+  const reserved = await reserveRun(client, { authority: request.authority, request_key: request.request_key, plan });
+  if (reserved.status === "conflict") return { status: "gap", reason: "request_conflict" };
+  const { run } = reserved;
+  if (run.execution_state === "completed") return { status: "driven", run_id: run.run_id, report: null };
+  if (run.execution_state === "failed") return { status: "gap", reason: "run_failed" };
+  if (run.execution_state === "cancelled") return { status: "gap", reason: "run_cancelled" };
+  const acquired = await acquireLease(client, {
+    authority: request.authority,
+    run_id: run.run_id,
+    worker_id: `${request.authority.feature.surface}-${process.pid}`,
+    ttl_ms: LEASE_TTL_MS,
+  });
+  if (acquired.status !== "acquired") return { status: "gap", reason: UNAVAILABLE[acquired.status] };
+  try {
+    const report = await driveLeasedRun(client, acquired.lease, acquired.run, { ...request, parent_limits: {} });
+    return { status: "driven", run_id: run.run_id, report };
+  } finally {
+    // Whatever stopped this drive short (a failure, a rejected unit), the next attempt need not wait out the lease.
+    await releaseLease(client, acquired.lease);
+  }
+}
+
+const UNAVAILABLE: Readonly<Record<Exclude<AcquireLeaseResult["status"], "acquired">, RequestGap>> = {
+  busy: "run_in_progress",
+  cancel_requested: "run_cancelled",
+  parent_authority_required: "parent_authority_required",
+  not_found: "run_failed",
+  terminal: "run_failed",
+};
 
 async function planOrGap(db: SqlExecutor, request: FinancialRequest): Promise<RequestOutcome> {
   let result: PlanningResult;
@@ -96,32 +129,6 @@ async function planOrGap(db: SqlExecutor, request: FinancialRequest): Promise<Re
       return { status: "gap", reason: "configuration_needed" };
     case "unsupported":
       return { status: "gap", reason: result.issues.some((issue) => issue.code === "no_model_budget") ? "planning_unavailable" : "unsupported" };
-  }
-}
-
-function outcomeOf(result: PublishResult): RequestOutcome {
-  switch (result.status) {
-    case "driven":
-      return { status: "driven", run_id: result.report.run_id, report: result.report };
-    case "completed":
-      return { status: "driven", run_id: result.run.run_id, report: null };
-    case "failed":
-      return { status: "gap", reason: "run_failed" };
-    case "cancelled":
-      return { status: "gap", reason: "run_cancelled" };
-    case "conflict":
-      return { status: "gap", reason: "request_conflict" };
-    case "unavailable":
-      switch (result.reason) {
-        case "busy":
-          return { status: "gap", reason: "run_in_progress" };
-        case "cancel_requested":
-          return { status: "gap", reason: "run_cancelled" };
-        case "parent_authority_required":
-          return { status: "gap", reason: "parent_authority_required" };
-        default:
-          return { status: "gap", reason: "run_failed" };
-      }
   }
 }
 

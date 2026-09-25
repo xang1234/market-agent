@@ -12,18 +12,14 @@
 // adapter.ts), so one saved rule means the same calculation on every surface.
 
 import type { ThesisMetricCheck } from "../../agents/src/thesis-types.ts";
-import type { Brief, Criterion, Id, SavedBrief } from "./types.ts";
+import type { Brief, Criterion, SavedBrief } from "./types.ts";
 
-export type NumericalCriterion = Readonly<{
-  criterion_id: Id;
-  mandatory: boolean;
-  metric: ThesisMetricCheck;
-}>;
+/** A criterion saved with a metric rule; its importance says whether it is mandatory. */
+export type NumericalCriterion = Criterion & { metric: ThesisMetricCheck };
 
 /** The approved brief's numerical criteria, in brief order. Narrative criteria are never included. */
 export function numericalCriteria(brief: Brief): NumericalCriterion[] {
-  return brief.criteria.flatMap((criterion: Criterion) =>
-    criterion.metric === undefined ? [] : [{ criterion_id: criterion.criterion_id, mandatory: criterion.importance === "must", metric: criterion.metric }]);
+  return brief.criteria.filter((criterion): criterion is NumericalCriterion => criterion.metric !== undefined);
 }
 
 /** Numerical criteria may only be evaluated for an approved brief version. */

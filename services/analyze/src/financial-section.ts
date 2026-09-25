@@ -15,18 +15,18 @@
 
 import { randomUUID } from "node:crypto";
 
-import { createRuntimeAuthority, type FinancialRuntimeAuthority, type ReportingBasis } from "../../financial-core/src/index.ts";
+import { createRuntimeAuthority, type FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
 import type { PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
 import { buildDeterministicPlan, type DeterministicUnits, type PlanningContext, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
-import { issuerLabels, publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
+import { issuerLabels, publishRequest, type FinancialMode, type RequestGap } from "../../financial-engine/src/request.ts";
 import type { RunRecord } from "../../financial-engine/src/run-record.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import type { AnalyzePlaybook } from "./playbook.ts";
 import { AnalyzeRunMetadataError, parseAnalyzeRunMetadata, type AnalyzeRunFinancialMetadata } from "./runMetadata.ts";
 
-export type AnalyzeFinancialMode = "off" | "shadow" | "enforce";
+export type AnalyzeFinancialMode = FinancialMode;
 
 /** Why a declared section has no committed row: the engine's reason, or what committed state shows. */
 export type AnalyzeFinancialGapReason = RequestGap | "verification_failed" | "not_started";
@@ -43,7 +43,6 @@ export type AnalyzeFinancialSections = Readonly<{
 export type AnalyzeFinancialDeps = Readonly<{
   pool: FinancialPool;
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
-  workerId?: string;
 }>;
 
 const CATALOG_VERSION = "catalog.v1";
@@ -110,7 +109,6 @@ export function prepareAnalyzeFinancialContext(input: {
   primary: Readonly<{ kind: "issuer"; id: string }> | null;
   peers: ReadonlyArray<Readonly<{ kind: "issuer"; id: string }>>;
   knowledge_cutoff: string;
-  reporting_basis?: ReportingBasis;
 }): AnalyzeRunFinancialMetadata | null {
   if (input.mode === "off" || input.primary === null) return null;
   const sections = financialSectionIds(input.playbook);
@@ -121,7 +119,7 @@ export function prepareAnalyzeFinancialContext(input: {
   return Object.freeze({
     mode: input.mode,
     knowledge_cutoff: new Date(input.knowledge_cutoff).toISOString(),
-    reporting_basis: input.reporting_basis ?? "as_reported",
+    reporting_basis: "as_reported",
     catalog_version: CATALOG_VERSION,
     primary: Object.freeze({ kind: "issuer", id: input.primary.id }),
     requested_peers: Object.freeze(peers.map((peer) => Object.freeze({ kind: "issuer" as const, id: peer.id }))),
@@ -159,8 +157,7 @@ export async function publishAnalyzeFinancialSections(deps: AnalyzeFinancialDeps
       return buildDeterministicPlan(await planningContext(db, run, authority), shape.draft, shape.units);
     },
     evidence: deps.evidence,
-    persistParent: persistMemoSection(run.analyze_run_id),
-    worker_id: deps.workerId ?? `analyze-${process.pid}`,
+    persistParent: persistMemoSection,
   });
   switch (outcome.status) {
     case "planned":
@@ -191,7 +188,7 @@ export function analyzeFinancialRecovery(db: SqlExecutor): ParentRecovery {
       if (!memo || memo.user_id !== run.user_id || memo.context?.mode !== "enforce") return null;
       return analyzeAuthority(memo.user_id, run.parent_id, memo.template_id, memo.template_version, "enforce");
     },
-    persistParent: persistMemoSection(null),
+    persistParent: persistMemoSection,
   };
 }
 
@@ -257,21 +254,18 @@ async function planningContext(db: SqlExecutor, run: AnalyzeFinancialRun, author
 }
 
 /** Records the section against the memo run inside the finalization transaction, under the memo's owner. */
-function persistMemoSection(expectedRunId: string | null): PersistParentArtifact {
-  return async (tx, publication) => {
-    if (expectedRunId !== null && tx.run.parent_id !== expectedRunId) throw new Error("the financial run belongs to another memo");
-    const inserted = await tx.client.query(
-      `insert into analyze_run_financial_sections (analyze_run_id, section_id, financial_run_id, unit_id, snapshot_id, certificate_digest, block)
-       select r.run_id, $2, $3::uuid, $2, $4::uuid, $5, $6::jsonb
-         from analyze_template_runs r
-         join analyze_templates t on t.template_id = r.template_id
-        where r.run_id = $1::uuid and t.user_id = $7::uuid
-       returning section_id`,
-      [tx.run.parent_id, publication.unit_id, publication.run_id, publication.snapshot_id, publication.certificate_digest, JSON.stringify(publication.block), tx.run.user_id],
-    );
-    if (inserted.rows.length === 0) throw new Error("the memo run no longer belongs to the financial run's owner");
-  };
-}
+const persistMemoSection: PersistParentArtifact = async (tx, publication) => {
+  const inserted = await tx.client.query(
+    `insert into analyze_run_financial_sections (analyze_run_id, section_id, financial_run_id, unit_id, snapshot_id, certificate_digest, block)
+     select r.run_id, $2, $3::uuid, $2, $4::uuid, $5, $6::jsonb
+       from analyze_template_runs r
+       join analyze_templates t on t.template_id = r.template_id
+      where r.run_id = $1::uuid and t.user_id = $7::uuid
+     returning section_id`,
+    [tx.run.parent_id, publication.unit_id, publication.run_id, publication.snapshot_id, publication.certificate_digest, JSON.stringify(publication.block), tx.run.user_id],
+  );
+  if (inserted.rows.length === 0) throw new Error("the memo run no longer belongs to the financial run's owner");
+};
 
 type MemoRun = { user_id: string; template_id: string; template_version: number; context: AnalyzeRunFinancialMetadata | null };
 

@@ -24,20 +24,19 @@ import type { PersistParentArtifact } from "../../financial-engine/src/finalize.
 import { buildDeterministicPlan, type DeterministicUnits, type PlanningContext, type RequestedSubject } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
-import { issuerLabels, publishRequest, type RequestGap, type RequestOutcome } from "../../financial-engine/src/request.ts";
+import { issuerLabels, publishRequest, type FinancialMode, type RequestGap, type RequestOutcome } from "../../financial-engine/src/request.ts";
 import type { RunRecord } from "../../financial-engine/src/run-record.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
 import { writePendingCellOnce } from "./queries.ts";
 import { EMPTY_DISPLAY, GridValidationError, type CellWrite, type ColumnInstance } from "./types.ts";
 
-export type GridFinancialMode = "off" | "shadow" | "enforce";
+export type GridFinancialMode = FinancialMode;
 
 export type GridFinancialDeps = Readonly<{
   mode: GridFinancialMode;
   pool: FinancialPool;
   evidence: (executor: SqlExecutor) => FinancialEvidencePort;
-  workerId?: string;
 }>;
 
 type FinancialColumn = Readonly<{ metric_key: string }> | Readonly<{ unsupported: string }>;
@@ -106,7 +105,7 @@ export async function publishGridFinancialCells(deps: GridFinancialDeps, run: Gr
   const write = (rowNumber: number, instance: ColumnInstance, cell: CellWrite) =>
     writePendingCellOnce(db, { ...cell, gridRunId: run.grid_run_id, ownerId: run.user_id, rowNumber, columnInstanceId: instance.column_instance_id });
 
-  const computed: Array<{ rowNumber: number; subject: FinancialSubjectRef; instance: ColumnInstance; metric_key: string; params: FinancialColumnParams }> = [];
+  const computed: ComputedCell[] = [];
   for (const instance of run.instances) {
     const column = FINANCIAL_COLUMNS[instance.column_key];
     if (!column) continue;
@@ -130,8 +129,7 @@ export async function publishGridFinancialCells(deps: GridFinancialDeps, run: Gr
       return buildDeterministicPlan(await planningContext(planDb, run, authority, computed), shape.draft, shape.units);
     },
     evidence: deps.evidence,
-    persistParent: persistGridCell(run.grid_run_id),
-    worker_id: deps.workerId ?? `grid-${process.pid}`,
+    persistParent: persistGridCell,
   });
   const outcome = gridOutcome(request);
   if (outcome === "planned" || STILL_OWED.has(outcome)) return outcome;
@@ -151,7 +149,7 @@ export function gridFinancialRecovery(db: SqlExecutor): ParentRecovery {
       if (!grid || grid.user_id !== run.user_id || grid.financial_mode !== "enforce") return null;
       return gridAuthority(grid.user_id, run.parent_id, "enforce");
     },
-    persistParent: persistGridCell(null),
+    persistParent: persistGridCell,
   };
 }
 
@@ -220,23 +218,20 @@ async function planningContext(db: SqlExecutor, run: GridFinancialRun, authority
 }
 
 /** Writes the cell and counts it done inside the finalization transaction, under the run's owner. */
-function persistGridCell(expectedRunId: string | null): PersistParentArtifact {
-  return async (tx, publication) => {
-    if (expectedRunId !== null && tx.run.parent_id !== expectedRunId) throw new Error("the financial run belongs to another grid run");
-    const match = UNIT_ID.exec(publication.unit_id);
-    if (!match) throw new Error(`unit ${publication.unit_id} is not a grid cell`);
-    const written = await writePendingCellOnce(tx.client, {
-      ...certifiedCell(publication.block),
-      gridRunId: tx.run.parent_id,
-      ownerId: tx.run.user_id,
-      rowNumber: Number(match[2]),
-      columnInstanceId: match[1]!,
-      snapshotId: publication.snapshot_id,
-      certified: { financialRunId: publication.run_id, financialUnitId: publication.unit_id, certificateDigest: publication.certificate_digest, block: publication.block },
-    });
-    if (!written) throw new Error("the grid cell is no longer pending under the run's owner");
-  };
-}
+const persistGridCell: PersistParentArtifact = async (tx, publication) => {
+  const match = UNIT_ID.exec(publication.unit_id);
+  if (!match) throw new Error(`unit ${publication.unit_id} is not a grid cell`);
+  const written = await writePendingCellOnce(tx.client, {
+    ...certifiedCell(publication.block),
+    gridRunId: tx.run.parent_id,
+    ownerId: tx.run.user_id,
+    rowNumber: Number(match[2]),
+    columnInstanceId: match[1]!,
+    snapshotId: publication.snapshot_id,
+    certified: { financialRunId: publication.run_id, financialUnitId: publication.unit_id, certificateDigest: publication.certificate_digest, block: publication.block },
+  });
+  if (!written) throw new Error("the grid cell is no longer pending under the run's owner");
+};
 
 function certifiedCell(block: FinancialAnswerBlock): CellWrite {
   const [result] = block.financial.results;

@@ -8,9 +8,9 @@ import { MARGIN_ID, NARRATIVE_ID, numericalBrief, REVENUE_ID } from "./financial
 
 test("numerical criteria are exactly the approved brief's structured metric rules", () => {
   const brief = parseBrief(numericalBrief());
-  assert.deepEqual(numericalCriteria(brief).map((criterion) => [criterion.criterion_id, criterion.mandatory, criterion.metric.metric_key, criterion.metric.threshold]), [
-    [REVENUE_ID, true, "revenue", "1"],
-    [MARGIN_ID, false, "gross_profit", "1"],
+  assert.deepEqual(numericalCriteria(brief).map((criterion) => [criterion.criterion_id, criterion.importance, criterion.metric.metric_key, criterion.metric.threshold]), [
+    [REVENUE_ID, "must", "revenue", "1"],
+    [MARGIN_ID, "prefer", "gross_profit", "1"],
   ]);
 });
 
