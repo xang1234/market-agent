@@ -9,12 +9,17 @@ export type ColumnSpecInput = { column_key: string; params?: { prompt: string } 
 
 export type GridRunStatus = "pending" | "running" | "partial" | "completed" | "failed";
 
+/** A run's column, frozen when it started; two instances of one column are different cells. */
+export type GridColumnInstance = { column_instance_id: string; column_key: string; params: unknown; position: number };
+
 export type GridRunSummary = {
   grid_run_id: string;
   status: GridRunStatus;
   cell_total: number;
   cell_done: number;
   dropped_row_count: number;
+  /** Absent for runs recorded before column instances existed. */
+  column_instances?: ReadonlyArray<GridColumnInstance> | null;
 };
 
 export type GridRowDetail = {

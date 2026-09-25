@@ -11,7 +11,7 @@ import {
   bumpCellDone,
   settleRunIfDone,
 } from "./queries.ts";
-import { isFinancialColumn, publishGridFinancialCells, type GridFinancialDeps } from "./financial-column.ts";
+import { isFinancialColumn, publishGridFinancialCells, type GridFinancialDeps, type GridFinancialMode } from "./financial-column.ts";
 import { withTransaction } from "../../evidence/src/transaction.ts";
 import { resolveUniverse, type UniverseResolverDeps } from "./universe.ts";
 import { normalizeUniverseToIssuers } from "./subject-normalization.ts";
@@ -94,7 +94,6 @@ export async function startGridRun(
     const params = spec.params ?? null;
     return { entry, params, instance: { column_instance_id: `c${position}`, column_key: spec.column_key, params, position } };
   });
-  const financialMode = deps.financial?.mode ?? "off";
 
   const resolved = await resolveUniverse(deps.universe, input.userId, grid.universe_spec);
   // Watchlist/portfolio/screen universes carry listing refs; columns are
@@ -114,7 +113,7 @@ export async function startGridRun(
       cellTotal,
       droppedRowCount,
       columnInstances: columns.map((column) => column.instance),
-      financialMode: financialMode === "off" ? null : financialMode,
+      financialMode: deps.financial && deps.financial.mode !== "off" ? deps.financial.mode : null,
     });
     const rows: Array<{ gridRowId: string; rowNumber: number; subject: SubjectRef }> = [];
     for (const [rowNumber, subject] of capped.entries()) {
@@ -147,18 +146,28 @@ export async function startGridRun(
   return { runId, status: "pending" };
 }
 
+/**
+ * Which columns the run's producers compute and which the engine does, decided
+ * once when the run starts. Enforced: numerical columns are the engine's alone.
+ * Shadow: producers compute everything and the engine only plans the numerical
+ * columns. Off: producers compute everything.
+ */
+function routeColumns(columns: ReadonlyArray<RunColumn>, mode: GridFinancialMode): { producer: RunColumn[]; engine: ColumnInstance[] } {
+  const numerical = columns.filter((column) => isFinancialColumn(column.entry.column_key));
+  return {
+    producer: mode === "enforce" ? columns.filter((column) => !numerical.includes(column)) : [...columns],
+    engine: mode === "off" ? [] : numerical.map((column) => column.instance),
+  };
+}
+
 async function runWorker(
   deps: RunEngineDeps,
   ctx: { runId: string; rows: Array<{ gridRowId: string; rowNumber: number; subject: SubjectRef }>; columns: RunColumn[]; asOf: string; userId: string },
 ): Promise<void> {
-  const enforced = deps.financial?.mode === "enforce";
-  // Enforced: numerical columns never run their legacy producers; the engine computes them after the rows.
-  const legacyColumns = enforced ? ctx.columns.filter((column) => !isFinancialColumn(column.entry.column_key)) : ctx.columns;
+  const route = routeColumns(ctx.columns, deps.financial?.mode ?? "off");
   try {
     await setRunStatus(deps.db, ctx.runId, "running");
-    // Each row reports whether any of its cells errored; the worker finalizes
-    // from these outcomes rather than re-reading every cell back.
-    const rowHadError = await runWithConcurrency(ctx.rows, ROW_CONCURRENCY, async ({ gridRowId, subject }) => {
+    await runWithConcurrency(ctx.rows, ROW_CONCURRENCY, async ({ gridRowId, subject }) => {
       let period: PeriodContext = null;
       try {
         period = await resolvePeriodContext(deps.db, subject);
@@ -167,9 +176,8 @@ async function runWorker(
         await markRowFailed(deps.db, gridRowId);
         period = null;
       }
-      let errored = false;
-      for (const column of legacyColumns) {
-        const status = await computeAndPersistCell(
+      for (const column of route.producer) {
+        await computeAndPersistCell(
           { db: deps.db, pool: deps.pool, reader: deps.reader },
           {
             column: column.entry,
@@ -182,32 +190,23 @@ async function runWorker(
             userId: ctx.userId,
           },
         );
-        if (status === "error") errored = true;
         await bumpCellDone(deps.db, ctx.runId);
       }
-      return errored;
     });
-
-    if (deps.financial && deps.financial.mode !== "off") {
-      const numerical = ctx.columns.filter((column) => isFinancialColumn(column.entry.column_key)).map((column) => column.instance);
+    if (route.engine.length > 0 && deps.financial && deps.financial.mode !== "off") {
       await publishGridFinancialCells(deps.financial, {
         user_id: ctx.userId,
         grid_run_id: ctx.runId,
         knowledge_cutoff: ctx.asOf,
         mode: deps.financial.mode,
         rows: ctx.rows.map(({ rowNumber, subject }) => ({ rowNumber, subject })),
-        instances: numerical,
+        instances: route.engine,
       });
     }
-    if (enforced) {
-      // Completed only when every cell is a value; a gap, unsupported, or error cell makes the run partial.
-      // Settles once every cell is written, here or by the finalization that writes the last one.
-      await settleRunIfDone(deps.db, ctx.runId);
-      return;
-    }
-    // partial when any cell errored, else completed.
-    const anyError = rowHadError.some(Boolean);
-    await setRunStatus(deps.db, ctx.runId, anyError ? "partial" : "completed", { completedAt: true });
+    // One completion rule for every run: completed only when every cell is a value; any gap,
+    // unsupported, or error cell makes it partial. A cell still owed by another worker or by
+    // recovery keeps the run open until the write that finishes it settles the run.
+    await settleRunIfDone(deps.db, ctx.runId);
   } catch (error) {
     try {
       await setRunStatus(deps.db, ctx.runId, "failed", {

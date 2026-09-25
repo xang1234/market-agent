@@ -23,6 +23,9 @@ export type SqlExecutor = {
   query<R extends Record<string, unknown> = Record<string, unknown>>(text: string, values?: unknown[]): Promise<{ rows: R[] }>;
 };
 
+/** A pool that can also hand out one client for a transaction. */
+export type FinancialPool = SqlExecutor & { connect(): Promise<SqlExecutor & { release(): void }> };
+
 /** One authorized evidence candidate, as the engine sees it (numerics as exact text). */
 export type InputCandidate = Readonly<{
   fact_id: string;

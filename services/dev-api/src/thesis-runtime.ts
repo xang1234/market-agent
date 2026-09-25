@@ -9,7 +9,8 @@ import { writeRunActivity } from '../../observability/src/run-activity.ts';
 import { hashJsonValue } from '../../observability/src/tool-call.ts';
 import { createLlmRouterFromEnv, loadLlmSettingsFromEnv, buildLlmDeploymentOrder } from '../../llm/src/settings-loader.ts';
 import { loadThesisFactsById, loadThesisPacket, sealThesisPacket, type ThesisPacket } from './thesis-evidence.ts';
-import { evaluateFinancialThesisConditions, thesisReuseProjection, type ThesisFinancialDeps } from '../../agents/src/financial-thesis-adapter.ts';
+import { evaluateFinancialThesisConditions, thesisReuseProjection } from '../../agents/src/financial-thesis-adapter.ts';
+import type { SavedRuleDeps } from '../../financial-engine/src/saved-rule.ts';
 type Model = {
   llm: ThesisLlm | null;
   identity: string;
@@ -22,7 +23,7 @@ export type ThesisRuntimeInput = {
   thesis: ThesisVersion;
   getModel?: () => Promise<Model>;
   /** Verified numerical conditions (THESIS_FINANCIAL_MODE=enforce); absent, metric conditions use the stored-fact checks. */
-  financial?: ThesisFinancialDeps;
+  financial?: SavedRuleDeps;
 };
 type ThesisRunStart = { thesis_version_id: string; as_of: string };
 type PreparedAssessment = {

@@ -19,6 +19,7 @@ import {
   resolveAnalyzePlaybookRequest,
   serializeAnalyzeRunMetadataV1,
   SourceCategoryMappingError,
+  type AnalyzeRunFinancialMetadata,
   type AnalyzeRunMetadataV1,
   type AnalyzeTemplateRow,
   type AnalyzeTemplateRunRow,
@@ -31,7 +32,6 @@ import {
   loadAnalyzeFinancialSections,
   prepareAnalyzeFinancialContext,
   sectionsServedByEngine,
-  type AnalyzeFinancialContext,
   type AnalyzeFinancialMode,
   type AnalyzeFinancialRun,
   type AnalyzeFinancialSections,
@@ -182,7 +182,7 @@ async function newFinancialContext(
   deps: AnalyzeServiceDeps,
   playbook: AnalyzePlaybook,
   subjectRefs: ReadonlyArray<SubjectRef>,
-): Promise<AnalyzeFinancialContext | null> {
+): Promise<AnalyzeRunFinancialMetadata | null> {
   const lane = deps.analyzeFinancial;
   if (!lane || lane.mode === "off") return null;
   const primary = subjectRefs.find((ref) => ref.kind === "issuer");
@@ -307,9 +307,11 @@ async function persistAnalyzeRun(
         template_version: input.template.version,
         context: financial,
       });
-    } catch {
-      // The memo is committed; its declared sections read as gaps until a
-      // retry or the recovery worker publishes them. Never a false complete.
+    } catch (error) {
+      // The memo is committed and publication failures are already declared
+      // gaps; anything reaching here is unexpected. The declared sections read
+      // as gaps until a retry or the recovery worker publishes them.
+      console.error(`analyze run ${persisted.run.run_id}: financial sections were not published`, error);
     }
   }
   return toDevAnalyzeRun(deps.db, persisted.run, input.template.name, input.userId);

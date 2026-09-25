@@ -73,21 +73,30 @@ test('memo: a requested section that did not publish stays visible as a gap', ()
 
 test('grid: a peer without a value keeps its row, and its reason is readable', () => {
   const detail: GridRunDetail = {
-    run: { grid_run_id: 'g', status: 'partial', cell_total: 2, cell_done: 2, dropped_row_count: 0 },
+    run: {
+      grid_run_id: 'g', status: 'partial', cell_total: 3, cell_done: 3, dropped_row_count: 0,
+      column_instances: [
+        { column_instance_id: 'c0', column_key: 'latest_revenue', params: null, position: 0 },
+        { column_instance_id: 'c1', column_key: 'latest_revenue', params: { offset: 1 }, position: 1 },
+      ],
+    },
     rows: [
       { grid_row_id: 'row-a', row_number: 0, subject_ref: { kind: 'issuer', id: 'a' }, subject_label: 'Alpha Industries Inc.', status: 'resolved' },
       { grid_row_id: 'row-b', row_number: 1, subject_ref: { kind: 'issuer', id: 'b' }, subject_label: 'Beta Holdings Corp.', status: 'resolved' },
     ],
     cells: [
       { grid_row_id: 'row-a', column_key: 'latest_revenue', column_instance_id: 'c0', status: 'ok', display: { value: '$383.29B', tone: null }, snapshot_id: 's', primary_ref: null, coverage_flag: null, financial_block: financialAnswerFixture },
+      { grid_row_id: 'row-a', column_key: 'latest_revenue', column_instance_id: 'c1', status: 'ok', display: { value: '$365.82B', tone: null }, snapshot_id: 's3', primary_ref: null, coverage_flag: null, financial_block: null },
       { grid_row_id: 'row-b', column_key: 'latest_revenue', column_instance_id: 'c0', status: 'missing_data', display: { value: '—', tone: null }, snapshot_id: 's2', primary_ref: null, coverage_flag: 'missing_input', financial_block: financialAnswerFixture },
     ],
   }
   const html = withInspector(<GridTable columns={[{ column_key: 'latest_revenue', label: 'Revenue (latest)', kind: 'deterministic' }]} detail={detail} />)
   assert.ok(html.includes('Alpha Industries Inc.') && html.includes('Beta Holdings Corp.'), 'both requested companies stay in the table')
   assert.ok(html.includes('Not available: missing input'))
-  assert.deepEqual([count(html, 'Verified calculation'), count(html, 'Partial coverage')], [1, 1])
+  assert.deepEqual([count(html, 'Verified calculation'), count(html, 'Partial coverage')], [1, 0], 'only a value is labelled verified; a gap says why instead')
   assert.ok(html.includes('aria-label="Inspect the verified calculation: $383.29B"'))
+  assert.ok(html.includes('$365.82B'), 'two instances of one column are two columns, not one overwritten cell')
+  assert.equal(count(html, 'Revenue (latest)</th>'), 2)
 })
 
 test('thesis: each condition is labelled by how it was assessed', () => {

@@ -8,7 +8,7 @@ import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { decideCandidate } from "../src/assessment.ts";
 import { createAssessmentCommitter } from "../src/assessment-repo.ts";
-import { outcomesWithHiddenInputs, requireCertifiedResults } from "../src/financial-packet.ts";
+import { outcomesWithHiddenInputs, requireCertifiedResults } from "../src/financial-outcomes.ts";
 import type { EvidencePacket } from "../src/ports.ts";
 import type { AnalystOutput, SkepticOutput } from "../src/types.ts";
 import { ALPHA, CUTOFF, financialCampaign, MARGIN_ID, REVENUE_ID } from "./financial-fixtures.ts";

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { IDS } from "../../financial-engine/test/db-fixtures.ts";
-import { translateThesisCondition } from "../src/financial-thesis-adapter.ts";
+import { translateSavedRule } from "../../financial-engine/src/saved-rule.ts";
 import { parseConditionAssessments } from "../src/thesis-types.ts";
 import { assess, revenueCondition, saveVersion, thesisDatabase } from "./financial-thesis-fixtures.ts";
 
@@ -47,7 +47,7 @@ test("thesis conditions through the financial engine", { timeout: 300_000 }, asy
       [{ metric_key: "revenue", unit: "shares", period_kind: "fiscal_y", operator: "gt", threshold: "1", max_age_days: 30 }, "unit_does_not_match_definition"],
       [{ metric_key: "total_assets", unit: "currency", period_kind: "ttm", operator: "gt", threshold: "1", max_age_days: 30 }, "trailing_sum_needs_a_flow_metric"],
     ] as const) {
-      assert.deepEqual(await translateThesisCondition(db, IDS.issuerA, metric), { ok: false, reason }, JSON.stringify(metric));
+      assert.deepEqual(await translateSavedRule(db, IDS.issuerA, metric), { ok: false, reason }, JSON.stringify(metric));
     }
     const thesis = await saveVersion(pool, agentId, 1, [revenueCondition("gt", "1", { period_kind: "point" })]);
     const [result] = await assess(pool, thesis, CUTOFF);

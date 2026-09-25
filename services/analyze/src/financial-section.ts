@@ -15,48 +15,21 @@
 
 import { randomUUID } from "node:crypto";
 
-import {
-  createRuntimeAuthority,
-  type FinancialRuntimeAuthority,
-  type FinancialSubjectRef,
-  type ReportingBasis,
-} from "../../financial-core/src/index.ts";
+import { createRuntimeAuthority, type FinancialRuntimeAuthority, type ReportingBasis } from "../../financial-core/src/index.ts";
 import type { PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
-import type { FinancialPool } from "../../financial-engine/src/http.ts";
 import { buildDeterministicPlan, type DeterministicUnits, type PlanningContext, type RequestedSubject } from "../../financial-engine/src/planner.ts";
-import type { FinancialEvidencePort, SqlExecutor } from "../../financial-engine/src/ports.ts";
-import { reserveAndPublish, type PublishResult } from "../../financial-engine/src/publish.ts";
+import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
+import { issuerLabels, publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import type { RunRecord } from "../../financial-engine/src/run-record.ts";
-import { findRunForRequest } from "../../financial-engine/src/run-repo.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
-import { snapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import type { AnalyzePlaybook } from "./playbook.ts";
+import { AnalyzeRunMetadataError, parseAnalyzeRunMetadata, type AnalyzeRunFinancialMetadata } from "./runMetadata.ts";
 
 export type AnalyzeFinancialMode = "off" | "shadow" | "enforce";
 
-/** The financial context a memo run fixes at start; saved in its run metadata and reused by reruns. */
-export type AnalyzeFinancialContext = Readonly<{
-  mode: "shadow" | "enforce";
-  knowledge_cutoff: string;
-  reporting_basis: ReportingBasis;
-  catalog_version: string;
-  primary: Readonly<{ kind: "issuer"; id: string }>;
-  requested_peers: ReadonlyArray<Readonly<{ kind: "issuer"; id: string }>>;
-  /** Section ids, in playbook order; each is also the section's publication unit id. */
-  sections: ReadonlyArray<string>;
-}>;
-
-export type AnalyzeFinancialGapReason =
-  | "configuration_needed"
-  | "unsupported"
-  | "request_conflict"
-  | "run_in_progress"
-  | "run_failed"
-  | "run_cancelled"
-  | "verification_failed"
-  | "publication_failed"
-  | "not_started";
+/** Why a declared section has no committed row: the engine's reason, or what committed state shows. */
+export type AnalyzeFinancialGapReason = RequestGap | "verification_failed" | "not_started";
 
 export type AnalyzeFinancialSection =
   | Readonly<{ section_id: string; status: "published"; run_id: string; snapshot_id: string; block: FinancialAnswerBlock }>
@@ -74,7 +47,6 @@ export type AnalyzeFinancialDeps = Readonly<{
 }>;
 
 const CATALOG_VERSION = "catalog.v1";
-const LEASE_TTL_MS = 120_000;
 const PRIMARY_SLOT = "s0";
 
 type Operation = Record<string, unknown> & { node_id: string };
@@ -139,7 +111,7 @@ export function prepareAnalyzeFinancialContext(input: {
   peers: ReadonlyArray<Readonly<{ kind: "issuer"; id: string }>>;
   knowledge_cutoff: string;
   reporting_basis?: ReportingBasis;
-}): AnalyzeFinancialContext | null {
+}): AnalyzeRunFinancialMetadata | null {
   if (input.mode === "off" || input.primary === null) return null;
   const sections = financialSectionIds(input.playbook);
   if (sections.length === 0) return null;
@@ -158,7 +130,7 @@ export function prepareAnalyzeFinancialContext(input: {
 }
 
 /** Sections the engine answers for this memo; legacy producers must not also emit them. */
-export function sectionsServedByEngine(context: AnalyzeFinancialContext | null): ReadonlySet<string> {
+export function sectionsServedByEngine(context: AnalyzeRunFinancialMetadata | null): ReadonlySet<string> {
   return new Set(context?.mode === "enforce" ? context.sections : []);
 }
 
@@ -167,7 +139,7 @@ export type AnalyzeFinancialRun = Readonly<{
   analyze_run_id: string;
   template_id: string;
   template_version: number;
-  context: AnalyzeFinancialContext;
+  context: AnalyzeRunFinancialMetadata;
 }>;
 
 /**
@@ -178,38 +150,28 @@ export type AnalyzeFinancialRun = Readonly<{
  */
 export async function publishAnalyzeFinancialSections(deps: AnalyzeFinancialDeps, run: AnalyzeFinancialRun): Promise<AnalyzeFinancialSections> {
   const authority = analyzeAuthority(run.user_id, run.analyze_run_id, run.template_id, run.template_version, run.context.mode);
-  const client = snapshotTransactionClient(await deps.pool.connect());
-  try {
-    const earlier = await findRunForRequest(client, { authority, request_key: run.analyze_run_id });
-    let plan = earlier?.plan;
-    if (!plan) {
-      const planned = buildDeterministicPlan(await planningContext(client, run, authority), sectionDraft(run.context), sectionUnits(run.context));
-      if (planned.outcome !== "ready") {
-        return allGaps(run.context, planned.outcome === "unsupported" ? "unsupported" : "configuration_needed");
-      }
-      plan = planned.plan;
-    }
-    if (run.context.mode === "shadow") return { coverage: "none", sections: [] };
-    let override: AnalyzeFinancialGapReason | null;
-    try {
-      override = publishOverride(await reserveAndPublish(client, {
-        plan,
-        authority,
-        request_key: run.analyze_run_id,
-        worker_id: deps.workerId ?? `analyze-${process.pid}`,
-        ttl_ms: LEASE_TTL_MS,
-        evidence: deps.evidence,
-        parent_limits: {},
-        persistParent: persistMemoSection(run.analyze_run_id),
-      }));
-    } catch {
-      // A section whose finalization rolled back stays unpublished; sections committed before it remain.
-      // The run keeps its checkpoints, so a retry or the recovery worker finishes it.
-      override = "publication_failed";
-    }
-    return await readSections(client, run.user_id, run.analyze_run_id, run.context, override);
-  } finally {
-    client.release();
+  const outcome = await publishRequest(deps.pool, {
+    authority,
+    request_key: run.analyze_run_id,
+    mode: run.context.mode,
+    plan: async (db) => {
+      const shape = planShape(run.context);
+      return buildDeterministicPlan(await planningContext(db, run, authority), shape.draft, shape.units);
+    },
+    evidence: deps.evidence,
+    persistParent: persistMemoSection(run.analyze_run_id),
+    worker_id: deps.workerId ?? `analyze-${process.pid}`,
+  });
+  switch (outcome.status) {
+    case "planned":
+      return { coverage: "none", sections: [] };
+    case "driven":
+      return readSections(deps.pool, run.user_id, run.analyze_run_id, run.context, null);
+    case "gap":
+      // This call's reason is more precise than committed state for every section it left unpublished.
+      return readSections(deps.pool, run.user_id, run.analyze_run_id, run.context, outcome.reason);
+    case "clarification":
+      return readSections(deps.pool, run.user_id, run.analyze_run_id, run.context, "configuration_needed");
   }
 }
 
@@ -248,44 +210,35 @@ function analyzeAuthority(userId: string, analyzeRunId: string, templateId: stri
   });
 }
 
-function slots(context: AnalyzeFinancialContext): string[] {
-  return [PRIMARY_SLOT, ...context.requested_peers.map((_peer, index) => `s${index + 1}`)];
-}
-
-function sectionDraft(context: AnalyzeFinancialContext) {
-  const subjectSlots = slots(context);
+/** The memo's plan draft and its units (one per section), built in one pass over the requested sections. */
+function planShape(context: AnalyzeRunFinancialMetadata): { draft: object; units: DeterministicUnits } {
+  const slots = [PRIMARY_SLOT, ...context.requested_peers.map((_peer, index) => `s${index + 1}`)];
+  const subjects = [context.primary, ...context.requested_peers];
   const operations = new Map<string, Operation>();
   const outputs: Array<{ output_id: string; node_id: string }> = [];
+  const units: Array<{ unit_id: string; output_ids: string[] }> = [];
   for (const sectionId of context.sections) {
-    const draft = FINANCIAL_SECTIONS[sectionId]!(subjectSlots);
-    for (const operation of draft.operations) operations.set(operation.node_id, operation);
-    outputs.push(...draft.outputs);
+    const section = FINANCIAL_SECTIONS[sectionId]!(slots);
+    for (const operation of section.operations) operations.set(operation.node_id, operation);
+    outputs.push(...section.outputs);
+    units.push({ unit_id: sectionId, output_ids: section.outputs.map((output) => output.output_id) });
   }
-  const subjects = [context.primary, ...context.requested_peers];
   return {
-    subjects: subjectSlots.map((slot, index) => ({ slot_id: slot, mention: subjects[index]!.id })),
-    operations: [...operations.values()],
-    outputs,
-    thresholds: [],
+    draft: {
+      subjects: slots.map((slot, index) => ({ slot_id: slot, mention: subjects[index]!.id })),
+      operations: [...operations.values()],
+      outputs,
+      thresholds: [],
+    },
+    units,
   };
 }
 
-function sectionUnits(context: AnalyzeFinancialContext): DeterministicUnits {
-  const subjectSlots = slots(context);
-  return context.sections.map((sectionId) => ({
-    unit_id: sectionId,
-    output_ids: FINANCIAL_SECTIONS[sectionId]!(subjectSlots).outputs.map((output) => output.output_id),
-  }));
-}
-
 async function planningContext(db: SqlExecutor, run: AnalyzeFinancialRun, authority: FinancialRuntimeAuthority): Promise<PlanningContext> {
-  const subjects: FinancialSubjectRef[] = [run.context.primary, ...run.context.requested_peers];
-  const names = new Map((await db.query<{ issuer_id: string; legal_name: string }>(
-    `select issuer_id::text, legal_name from issuers where issuer_id = any($1::uuid[])`,
-    [subjects.map((subject) => subject.id)],
-  )).rows.map((row) => [row.issuer_id, row.legal_name]));
+  const subjects = [run.context.primary, ...run.context.requested_peers];
+  const labels = await issuerLabels(db, subjects.map((subject) => subject.id));
   const requested: RequestedSubject[] = subjects.map((subject) => {
-    const label = names.get(subject.id);
+    const label = labels.get(subject.id);
     return { mention: subject.id, resolution: label === undefined ? { status: "not_found" } : { status: "resolved", subject_ref: subject, label } };
   });
   return {
@@ -320,27 +273,26 @@ function persistMemoSection(expectedRunId: string | null): PersistParentArtifact
   };
 }
 
-type MemoRun = { user_id: string; template_id: string; template_version: number; context: AnalyzeFinancialContext | null };
+type MemoRun = { user_id: string; template_id: string; template_version: number; context: AnalyzeRunFinancialMetadata | null };
 
 async function loadMemoRun(db: SqlExecutor, analyzeRunId: string): Promise<MemoRun | null> {
-  const row = (await db.query<{ user_id: string; template_id: string; template_version: number; run_metadata: { financial?: AnalyzeFinancialContext } }>(
+  const row = (await db.query<{ user_id: string; template_id: string; template_version: number; run_metadata: unknown }>(
     `select t.user_id::text, r.template_id::text, r.template_version, r.run_metadata
        from analyze_template_runs r join analyze_templates t on t.template_id = r.template_id
       where r.run_id = $1::uuid`,
     [analyzeRunId],
   )).rows[0];
-  return row ? { user_id: row.user_id, template_id: row.template_id, template_version: Number(row.template_version), context: row.run_metadata?.financial ?? null } : null;
+  if (!row) return null;
+  return { user_id: row.user_id, template_id: row.template_id, template_version: Number(row.template_version), context: financialContextOf(row.run_metadata) };
 }
 
-/** A gap this call knows more precisely than committed state can show. */
-function publishOverride(outcome: PublishResult): AnalyzeFinancialGapReason | null {
-  switch (outcome.status) {
-    case "conflict":
-      return "request_conflict";
-    case "unavailable":
-      return outcome.reason === "busy" ? "run_in_progress" : outcome.reason === "cancel_requested" ? "run_cancelled" : "run_failed";
-    default:
-      return null;
+/** The saved financial context, validated; metadata from before the lane existed has none. */
+function financialContextOf(metadata: unknown): AnalyzeRunFinancialMetadata | null {
+  try {
+    return parseAnalyzeRunMetadata(metadata).financial ?? null;
+  } catch (error) {
+    if (error instanceof AnalyzeRunMetadataError) return null;
+    throw error;
   }
 }
 
@@ -348,7 +300,7 @@ async function readSections(
   db: SqlExecutor,
   userId: string,
   analyzeRunId: string,
-  context: AnalyzeFinancialContext,
+  context: AnalyzeRunFinancialMetadata,
   override: AnalyzeFinancialGapReason | null,
 ): Promise<AnalyzeFinancialSections> {
   const published = new Map((await db.query<{ section_id: string; financial_run_id: string; snapshot_id: string; block: FinancialAnswerBlock }>(
@@ -388,8 +340,4 @@ function coverageOf(sections: ReadonlyArray<AnalyzeFinancialSection>): AnalyzeFi
   const states = sections.map((section) => (section.status === "published" ? section.block.financial.coverage.state : "none"));
   if (states.every((state) => state === "complete")) return "complete";
   return states.every((state) => state === "none") ? "none" : "partial";
-}
-
-function allGaps(context: AnalyzeFinancialContext, reason_code: AnalyzeFinancialGapReason): AnalyzeFinancialSections {
-  return { coverage: "none", sections: context.sections.map((section_id) => ({ section_id, status: "gap", reason_code })) };
 }

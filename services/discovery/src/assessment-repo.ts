@@ -8,7 +8,7 @@ import { requestHash } from "./scout-support.ts";
 import { sealCandidateAssessment } from "./seal.ts";
 import { appendEventInTransaction } from "./event-repo.ts";
 import { lockLiveLease } from "./worker-lock.ts";
-import { requireCertifiedResults } from "./financial-packet.ts";
+import { requireCertifiedResults } from "./financial-outcomes.ts";
 import type { AssessedCandidate, CandidateDecision, Id } from "./types.ts";
 import type { EvidencePacket } from "./ports.ts";
 import { DiscoveryError } from "./types.ts";

@@ -12,11 +12,10 @@ import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
 import {
   prepareAnalyzeFinancialContext,
   publishAnalyzeFinancialSections,
-  type AnalyzeFinancialContext,
   type AnalyzeFinancialMode,
 } from "../src/financial-section.ts";
 import { ANALYZE_PLAYBOOKS, type AnalyzePlaybook } from "../src/playbook.ts";
-import { serializeAnalyzeRunMetadataV1 } from "../src/runMetadata.ts";
+import { serializeAnalyzeRunMetadataV1, type AnalyzeRunFinancialMetadata } from "../src/runMetadata.ts";
 import { persistAnalyzeTemplateRunAfterSnapshotSealWithPool } from "../src/template-runner.ts";
 
 /** After both fixture filings are public; as-reported revenue is the original FY2023 disclosure. */
@@ -43,7 +42,7 @@ export async function memoDatabase(t: TestContext, prefix: string): Promise<{ db
 export async function createMemoRun(
   db: Client,
   pool: Pool,
-  input: { templateId: string; playbookId: string; peers?: string[]; mode?: AnalyzeFinancialMode; cutoff?: string; context?: AnalyzeFinancialContext },
+  input: { templateId: string; playbookId: string; peers?: string[]; mode?: AnalyzeFinancialMode; cutoff?: string; context?: AnalyzeRunFinancialMetadata },
 ) {
   const book = playbook(input.playbookId);
   const context = input.context ?? prepareAnalyzeFinancialContext({

@@ -10,6 +10,7 @@ import {
   type ResearchGridRow,
 } from "./types.ts";
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
+import type { SqlExecutor } from "../../financial-engine/src/ports.ts";
 
 const GRID_COLUMNS = `grid_id::text as grid_id,
        user_id::text as user_id,
@@ -174,11 +175,6 @@ export async function updateCellResult(
   }
 }
 
-/** The minimal executor the finalization helpers need; a pg pool or the engine's transaction client both fit. */
-type RowsExecutor = {
-  query<R extends Record<string, unknown> = Record<string, unknown>>(text: string, values?: unknown[]): Promise<{ rows: R[] }>;
-};
-
 /** The certified parts of a cell, written only by its finalization transaction. */
 export type CertifiedCell = {
   financialRunId: string;
@@ -189,11 +185,12 @@ export type CertifiedCell = {
 
 /**
  * Writes a still-pending cell and counts it done in one statement, so a retry,
- * a restart, or a second worker can never count one cell twice. Returns
- * whether this call wrote it. `ownerId` scopes the write to the run's owner.
+ * a restart, or a second worker can never count one cell twice; the write that
+ * completes the run also settles it. Returns whether this call wrote the cell.
+ * `ownerId` scopes the write to the run's owner.
  */
 export async function writePendingCellOnce(
-  db: RowsExecutor,
+  db: SqlExecutor,
   input: CellWrite & { gridRunId: string; ownerId: string; rowNumber: number; columnInstanceId: string; certified?: CertifiedCell },
 ): Promise<boolean> {
   const result = await db.query<{ n: number }>(
@@ -217,7 +214,9 @@ export async function writePendingCellOnce(
       input.certified?.certificateDigest ?? null, input.certified ? JSON.stringify(input.certified.block) : null,
     ],
   );
-  return Number(result.rows[0]?.n ?? 0) === 1;
+  const written = Number(result.rows[0]?.n ?? 0) === 1;
+  if (written) await settleRunIfDone(db, input.gridRunId);
+  return written;
 }
 
 /**
@@ -225,7 +224,7 @@ export async function writePendingCellOnce(
  * a verified or ok value; any gap, unsupported, or error cell makes it partial.
  * A no-op while cells are outstanding or once the run is settled.
  */
-export async function settleRunIfDone(db: RowsExecutor, runId: string): Promise<void> {
+export async function settleRunIfDone(db: SqlExecutor, runId: string): Promise<void> {
   await db.query(
     `update grid_runs r
         set status = case when exists (select 1 from grid_cells c where c.grid_run_id = r.grid_run_id and c.status <> 'ok') then 'partial' else 'completed' end,

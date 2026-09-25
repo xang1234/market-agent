@@ -16,24 +16,21 @@ import {
   createRuntimeAuthority,
   METRIC_CATALOG_V1,
   RATIO_CATALOG_V1,
-  type FinancialPlanV1,
   type FinancialRuntimeAuthority,
   type FinancialSubjectRef,
 } from "../../financial-core/src/index.ts";
 import type { PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
-import type { FinancialPool } from "../../financial-engine/src/http.ts";
 import {
   planFinancialRequest,
   resolveClarification,
   type Clarification,
   type PlanningContext,
   type PlanningModel,
+  type PlanningResult,
   type RequestedSubject,
 } from "../../financial-engine/src/planner.ts";
-import type { FinancialEvidencePort, SqlExecutor } from "../../financial-engine/src/ports.ts";
-import { reserveAndPublish } from "../../financial-engine/src/publish.ts";
-import { findRunForRequest } from "../../financial-engine/src/run-repo.ts";
-import { snapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
+import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
+import { publishRequest, type RequestGap } from "../../financial-engine/src/request.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import type { ChatTurnRunContext } from "./coordinator.ts";
 import { contentHashForText, stableUuid } from "./chat-ids.ts";
@@ -73,9 +70,11 @@ export type ChatFinancialRuntimeDeps = Readonly<{
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MAX_PLANNING_MODEL_CALLS = 2;
-const LEASE_TTL_MS = 120_000;
 
-const GAP_TEXT: Readonly<Record<string, string>> = {
+/** A turn's gap: the engine's reason, or a unit the verifier refused. A failed commit is a turn error instead. */
+type ChatGap = Exclude<RequestGap, "publication_failed"> | "verification_failed";
+
+const GAP_TEXT: Readonly<Record<ChatGap, string>> = {
   planning_unavailable: "I can't verify a calculation for this request right now, so I won't give an unverified number.",
   unsupported: "This request asks for a calculation outside the verified financial definitions I can compute.",
   configuration_needed: "This request needs a subject or definition I can't resolve to one verified meaning.",
@@ -84,6 +83,7 @@ const GAP_TEXT: Readonly<Record<string, string>> = {
   run_in_progress: "This calculation is already running. Its verified answer will appear when it finishes.",
   run_cancelled: "This calculation was cancelled, so no number is shown.",
   request_conflict: "This turn was already answered with a different calculation.",
+  parent_authority_required: "This calculation could not be run for this conversation.",
 };
 
 export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): ChatFinancialRuntime {
@@ -96,59 +96,41 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
     const turnId = context.turnId ?? context.runId;
     const authority = chatAuthority(context.userId!, context.threadId, turnId, deps.mode);
 
+    const messageId = financialMessageId(context.threadId, turnId);
     // A retry of this turn resumes what the first attempt reserved; it never plans again.
-    const client = snapshotTransactionClient(await deps.pool.connect());
-    try {
-      const earlier = await findRunForRequest(client, { authority, request_key: turnId });
-      let plan = earlier?.plan;
-      if (!plan) {
-        const planned = await planTurn(deps, context, text, authority, now());
-        if (planned.kind !== "plan") return planned;
-        plan = planned.plan;
-      }
+    const outcome = await publishRequest(deps.pool, {
+      authority,
+      request_key: turnId,
       // Shadow mode validates that the request plans; the narrative analyst still answers it.
-      if (deps.mode === "shadow") return null;
-
-      const messageId = financialMessageId(context.threadId, turnId);
-      const outcome = await reserveAndPublish(client, {
-        plan,
-        authority,
-        request_key: turnId,
-        worker_id: deps.workerId ?? `chat-${process.pid}`,
-        ttl_ms: LEASE_TTL_MS,
-        evidence: deps.evidence,
-        parent_limits: {},
-        persistParent: persistAssistantMessage(context.threadId, messageId),
-      });
-      switch (outcome.status) {
-        case "conflict":
-          return gap("request_conflict");
-        case "unavailable":
-          return gap(outcome.reason === "busy" ? "run_in_progress" : outcome.reason === "cancel_requested" ? "run_cancelled" : "run_failed");
-        case "cancelled":
-          return gap("run_cancelled");
-        case "failed":
-          return gap("run_failed");
-        case "completed":
-          return publishedFromMessage(client, outcome.run.run_id, messageId);
-        case "driven": {
-          const [unit] = outcome.report.finalized;
-          if (unit?.result.status === "published") {
-            const { publication } = unit.result;
-            return { kind: "published", run_id: publication.run_id, message_id: messageId, snapshot_id: publication.snapshot_id, block: publication.block };
-          }
-          if (unit?.result.status === "existing" || (!unit && outcome.report.existing > 0)) return publishedFromMessage(client, outcome.report.run_id, messageId);
-          return gap(unit?.result.status === "rejected" ? "verification_failed" : "run_failed");
+      mode: deps.mode === "shadow" ? "shadow" : "enforce",
+      plan: () => planTurn(deps, context, text, authority, now()),
+      evidence: deps.evidence,
+      persistParent: persistAssistantMessage(context.threadId, messageId),
+      worker_id: deps.workerId ?? `chat-${process.pid}`,
+    });
+    switch (outcome.status) {
+      case "planned":
+        return null;
+      case "clarification":
+        return { kind: "clarification", clarification: outcome.clarification };
+      case "gap":
+        // A commit that failed is an error of this turn, not an answer; the retry publishes it.
+        if (outcome.reason === "publication_failed") throw new Error("the financial answer could not be committed");
+        return gap(outcome.reason);
+      case "driven": {
+        if (outcome.report === null) return publishedFromMessage(deps.pool, outcome.run_id, messageId);
+        const [unit] = outcome.report.finalized;
+        if (unit?.result.status === "published") {
+          const { publication } = unit.result;
+          return { kind: "published", run_id: publication.run_id, message_id: messageId, snapshot_id: publication.snapshot_id, block: publication.block };
         }
+        if (unit?.result.status === "existing" || (!unit && outcome.report.existing > 0)) return publishedFromMessage(deps.pool, outcome.run_id, messageId);
+        return gap(unit?.result.status === "rejected" ? "verification_failed" : "run_failed");
       }
-    } finally {
-      client.release();
     }
   };
   return Object.freeze({ mode: deps.mode, answers, run });
 }
-
-type PlannedTurn = Readonly<{ kind: "plan"; plan: FinancialPlanV1 }> | Extract<ChatFinancialTurn, { kind: "clarification" | "gap" }>;
 
 async function planTurn(
   deps: ChatFinancialRuntimeDeps,
@@ -156,7 +138,7 @@ async function planTurn(
   text: string,
   authority: FinancialRuntimeAuthority,
   cutoff: Date,
-): Promise<PlannedTurn> {
+): Promise<PlanningResult> {
   const requested = await Promise.all(extractSubjectMentions(text).map(async (mention): Promise<RequestedSubject> => ({
     mention,
     resolution: requestedResolution(await deps.resolveMention(mention)),
@@ -177,23 +159,8 @@ async function planTurn(
 
   let subjects: ReadonlyArray<RequestedSubject> = requested;
   if (context.clarificationAnswer) subjects = await applyAnswer(subjects, context.clarificationAnswer, planningContext, text);
-  let result;
-  try {
-    result = await planFinancialRequest(planningContext(subjects), text, deps.planningModel ?? noModel);
-  } catch {
-    // A failing or unreachable model yields a gap; the narrative composer is never a fallback for numbers.
-    return gap("planning_unavailable");
-  }
-  switch (result.outcome) {
-    case "ready":
-      return { kind: "plan", plan: result.plan };
-    case "needs_clarification":
-      return { kind: "clarification", clarification: result.clarification };
-    case "configuration_needed":
-      return gap("configuration_needed");
-    case "unsupported":
-      return gap(result.issues.some((issue) => issue.code === "no_model_budget") ? "planning_unavailable" : "unsupported");
-  }
+  // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
+  return planFinancialRequest(planningContext(subjects), text, deps.planningModel ?? noModel);
 }
 
 /**
@@ -289,8 +256,8 @@ async function publishedFromMessage(db: SqlExecutor, runId: string, messageId: s
   return row ? { kind: "published", run_id: runId, message_id: messageId, snapshot_id: row.snapshot_id, block: null } : gap("run_failed");
 }
 
-function gap(reason_code: keyof typeof GAP_TEXT): Extract<ChatFinancialTurn, { kind: "gap" }> {
-  return { kind: "gap", reason_code, text: GAP_TEXT[reason_code]! };
+function gap(reason_code: ChatGap): Extract<ChatFinancialTurn, { kind: "gap" }> {
+  return { kind: "gap", reason_code, text: GAP_TEXT[reason_code] };
 }
 
 const FINANCIAL_TERMS = new RegExp(

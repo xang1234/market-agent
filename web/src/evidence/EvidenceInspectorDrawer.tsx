@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+
 import type { EvidenceBlockInspection, EvidenceInspection, EvidenceInspectionRef } from './inspectionTypes.ts'
 import { InspectableRef } from './InspectableRef.tsx'
 import { FinancialResultInspector, type FinancialInspectorLoad } from '../blocks/renderers/FinancialResultInspector.tsx'
@@ -18,47 +20,51 @@ export function EvidenceInspectorDrawer({
   onClose(): void
 }) {
   if (state.kind === 'closed') return null
-  if (state.kind === 'financial') return <FinancialDrawer load={state.load} onClose={onClose} />
+  if (state.kind === 'financial') {
+    return (
+      <DrawerFrame
+        label="Verified calculation inspector"
+        title="Verified calculation"
+        subtitle={state.load.kind === 'ready' ? state.load.inspection.result_id : state.load.resultId}
+        onClose={onClose}
+      >
+        <FinancialResultInspector load={state.load} onCopy={(text) => void globalThis.navigator?.clipboard?.writeText(text)} />
+      </DrawerFrame>
+    )
+  }
 
   const snapshotId = state.kind === 'ready' || state.kind === 'block' ? state.inspection.snapshot_id : state.snapshotId
-
   return (
-    <aside
-      aria-label="Evidence inspector"
-      className="fixed bottom-0 right-0 top-0 z-50 flex w-[420px] max-w-full flex-col border-l border-line bg-surface shadow-xl"
-    >
-      <header className="flex items-start justify-between gap-3 border-b border-line p-4">
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-fg">Evidence</h2>
-          <p className="mt-1 break-all text-xs text-muted">{snapshotId}</p>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="shrink-0 rounded-md border border-line-strong px-2 py-1 text-xs text-fg hover:bg-surface-2"
-        >
-          Close
-        </button>
-      </header>
-      <div className="min-h-0 flex-1 overflow-auto p-4">
-        {state.kind === 'loading' ? (
-          <p className="text-sm text-muted">Loading evidence.</p>
-        ) : null}
-        {state.kind === 'error' ? (
-          <p className="text-sm text-fg-soft">{state.message}</p>
-        ) : null}
-        {state.kind === 'ready' ? <InspectionBody inspection={state.inspection} /> : null}
-        {state.kind === 'block' ? <BlockInspectionBody inspection={state.inspection} /> : null}
-      </div>
-    </aside>
+    <DrawerFrame label="Evidence inspector" title="Evidence" subtitle={snapshotId} onClose={onClose}>
+      {state.kind === 'loading' ? (
+        <p className="text-sm text-muted">Loading evidence.</p>
+      ) : null}
+      {state.kind === 'error' ? (
+        <p className="text-sm text-fg-soft">{state.message}</p>
+      ) : null}
+      {state.kind === 'ready' ? <InspectionBody inspection={state.inspection} /> : null}
+      {state.kind === 'block' ? <BlockInspectionBody inspection={state.inspection} /> : null}
+    </DrawerFrame>
   )
 }
 
-function FinancialDrawer({ load, onClose }: { load: FinancialInspectorLoad; onClose(): void }) {
-  const resultId = load.kind === 'ready' ? load.inspection.result_id : load.resultId
+/** The inspector panel: a titled side drawer that Close or Escape dismisses. */
+function DrawerFrame({
+  label,
+  title,
+  subtitle,
+  onClose,
+  children,
+}: {
+  label: string
+  title: string
+  subtitle: string
+  onClose(): void
+  children: ReactNode
+}) {
   return (
     <aside
-      aria-label="Verified calculation inspector"
+      aria-label={label}
       className="fixed bottom-0 right-0 top-0 z-50 flex w-[420px] max-w-full flex-col border-l border-line bg-surface shadow-xl"
       onKeyDown={(event) => {
         if (event.key === 'Escape') onClose()
@@ -66,8 +72,8 @@ function FinancialDrawer({ load, onClose }: { load: FinancialInspectorLoad; onCl
     >
       <header className="flex items-start justify-between gap-3 border-b border-line p-4">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-fg">Verified calculation</h2>
-          <p className="mt-1 break-all text-xs text-muted">{resultId}</p>
+          <h2 className="text-sm font-semibold text-fg">{title}</h2>
+          <p className="mt-1 break-all text-xs text-muted">{subtitle}</p>
         </div>
         <button
           type="button"
@@ -77,9 +83,7 @@ function FinancialDrawer({ load, onClose }: { load: FinancialInspectorLoad; onCl
           Close
         </button>
       </header>
-      <div className="min-h-0 flex-1 overflow-auto p-4">
-        <FinancialResultInspector load={load} onCopy={(text) => void globalThis.navigator?.clipboard?.writeText(text)} />
-      </div>
+      <div className="min-h-0 flex-1 overflow-auto p-4">{children}</div>
     </aside>
   )
 }

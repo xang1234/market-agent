@@ -1,4 +1,4 @@
-// Binding a candidate's assessment to verified calculated results.
+// Numerical criterion outcomes: certified calculations bound to a candidate's assessment.
 //
 // A numerical criterion's outcome comes only from a committed, certified
 // calculation reloaded server-side. Its citation is the certified-result
@@ -11,20 +11,20 @@
 // Authorization is transitive: a certified outcome counts only while its run
 // belongs to this campaign run and its inputs are visible to the user.
 
-import type { VerifiedMetricOutcome } from "../../agents/src/financial-thesis-adapter.ts";
-import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
+import type { SqlExecutor } from "../../financial-engine/src/ports.ts";
+import type { SavedRuleOutcome } from "../../financial-engine/src/saved-rule.ts";
 import type { NumericalCriterion } from "./financial-criteria.ts";
 import type { Lease } from "./ports.ts";
 import type { CandidateDecision, Citation, CriterionOutcome, Id } from "./types.ts";
 
-/** The deterministic outcome of a numerical criterion; supported/challenged map to pass/fail, anything else is unknown. */
-export function certifiedCriterionOutcome(criterion: NumericalCriterion, outcome: VerifiedMetricOutcome): CriterionOutcome<Citation> {
+/** The deterministic outcome of a numerical criterion: met or not met is pass or fail; anything else is unknown. */
+export function certifiedCriterionOutcome(criterion: NumericalCriterion, outcome: SavedRuleOutcome): CriterionOutcome<Citation> {
   return Object.freeze({
     criterion_id: criterion.criterion_id,
-    outcome: outcome.status === "supported" ? "pass" : outcome.status === "challenged" ? "fail" : "unknown",
+    outcome: outcome.status === "met" ? "pass" : outcome.status === "not_met" ? "fail" : "unknown",
     explanation: outcome.reason,
     citations: [],
-    ...(outcome.financial ? { certified: outcome.financial } : {}),
+    ...(outcome.certified ? { certified: outcome.certified } : {}),
   });
 }
 
@@ -35,25 +35,20 @@ export function assertCertifiedOutcomes(criteria: ReadonlyArray<NumericalCriteri
   }
 }
 
-/** The minimal executor these checks need; a pg pool, a transaction, or the engine's client all fit. */
-type RowsExecutor = { query<R extends Record<string, unknown>>(text: string, values?: unknown[]): Promise<{ rows: R[] }> };
-
-/** The run's certified outcomes whose inputs are no longer all visible to the user, by criterion id. */
-export async function outcomesWithHiddenInputs(db: RowsExecutor, userId: Id, outcomes: ReadonlyArray<CriterionOutcome<Citation>>): Promise<Set<Id>> {
-  const hidden = new Set<Id>();
-  for (const outcome of outcomes) {
-    if (!outcome.certified) continue;
-    const { rows } = await db.query<{ n: number }>(
-      `select count(*)::int as n
-         from financial_run_inputs i
-         left join facts f on f.fact_id = i.fact_id and f.invalidated_at is null
-         left join sources s on s.source_id = f.source_id and (s.user_id is null or s.user_id = $2::uuid)
-        where i.run_id = $1::uuid and i.binding_status = 'bound' and s.source_id is null`,
-      [outcome.certified.run_id, userId],
-    );
-    if (Number(rows[0]?.n ?? 0) > 0) hidden.add(outcome.criterion_id);
-  }
-  return hidden;
+/** The certified outcomes whose inputs are no longer all visible to the user, by criterion id. */
+export async function outcomesWithHiddenInputs(db: SqlExecutor, userId: Id, outcomes: ReadonlyArray<CriterionOutcome<Citation>>): Promise<Set<Id>> {
+  const certified = outcomes.filter((outcome) => outcome.certified);
+  if (certified.length === 0) return new Set();
+  const { rows } = await db.query<{ run_id: string }>(
+    `select distinct i.run_id::text
+       from financial_run_inputs i
+       left join facts f on f.fact_id = i.fact_id and f.invalidated_at is null
+       left join sources s on s.source_id = f.source_id and (s.user_id is null or s.user_id = $2::uuid)
+      where i.run_id = any($1::uuid[]) and i.binding_status = 'bound' and s.source_id is null`,
+    [certified.map((outcome) => outcome.certified!.run_id), userId],
+  );
+  const hiddenRuns = new Set(rows.map((row) => row.run_id));
+  return new Set(certified.filter((outcome) => hiddenRuns.has(outcome.certified!.run_id)).map((outcome) => outcome.criterion_id));
 }
 
 /** A certified outcome whose inputs became invisible or erased is unknown: the dependent criterion is hidden safely. */
@@ -68,7 +63,7 @@ export function hideOutcomes(outcomes: ReadonlyMap<Id, CriterionOutcome<Citation
  * the decision names a sealed unit of a financial run owned by this user and
  * parented by this campaign run, with every input still visible.
  */
-export async function requireCertifiedResults(tx: QueryExecutor, lease: Lease, decision: CandidateDecision): Promise<void> {
+export async function requireCertifiedResults(tx: SqlExecutor, lease: Lease, decision: CandidateDecision): Promise<void> {
   const certified = decision.criteria.filter((criterion) => criterion.certified !== undefined);
   for (const criterion of certified) {
     const ref = criterion.certified!;

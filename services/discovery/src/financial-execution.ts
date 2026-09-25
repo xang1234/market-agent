@@ -10,10 +10,10 @@
 // evidence, never permission for extra network work or budget.
 
 import { createRuntimeAuthority, type FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
-import { evaluateVerifiedMetric, type ThesisFinancialDeps } from "../../agents/src/financial-thesis-adapter.ts";
 import type { PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
+import { evaluateSavedRule, type SavedRuleDeps } from "../../financial-engine/src/saved-rule.ts";
 import { assertApprovedBrief, briefAuthorityVersion, numericalCriteria } from "./financial-criteria.ts";
-import { certifiedCriterionOutcome, hideOutcomes, outcomesWithHiddenInputs } from "./financial-packet.ts";
+import { certifiedCriterionOutcome, hideOutcomes, outcomesWithHiddenInputs } from "./financial-outcomes.ts";
 import type { Lease } from "./ports.ts";
 import type { Citation, CompanyIdentity, CriterionOutcome, Id, SavedBrief } from "./types.ts";
 
@@ -23,7 +23,7 @@ export type FinancialCriteriaEvaluator = (
   input: { brief: SavedBrief; candidate_id: Id; identity: CompanyIdentity; as_of: string },
 ) => Promise<ReadonlyMap<Id, CriterionOutcome<Citation>>>;
 
-export function createFinancialCriteriaEvaluator(deps: ThesisFinancialDeps & {
+export function createFinancialCriteriaEvaluator(deps: SavedRuleDeps & {
   /** The worker's clock, the same one its campaign lease is judged by (worker-lock.ts). */
   clock?: () => Date;
 }): FinancialCriteriaEvaluator {
@@ -32,12 +32,12 @@ export function createFinancialCriteriaEvaluator(deps: ThesisFinancialDeps & {
     assertApprovedBrief(input.brief);
     const outcomes = new Map<Id, CriterionOutcome<Citation>>();
     for (const criterion of numericalCriteria(input.brief.brief)) {
-      const outcome = await evaluateVerifiedMetric(deps, {
+      const outcome = await evaluateSavedRule(deps, {
         authority: campaignAuthority(lease, input.brief),
         // Stable per candidate and criterion, so a resumed run reuses the committed calculation.
         request_key: `${input.candidate_id}:${criterion.criterion_id}`,
         subject: { kind: "issuer", id: input.identity.issuer_id },
-        metric: criterion.metric,
+        rule: criterion.metric,
         as_of: input.as_of,
         reporting_basis: "as_restated",
         origin: { kind: "discovery_criterion", ref: `discovery:${lease.run_id}:${input.candidate_id}:${criterion.criterion_id}` },

@@ -8,12 +8,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { inspectCommittedResult } from "./inspection.ts";
-import type { SqlExecutor } from "./ports.ts";
+import type { FinancialPool, SqlExecutor } from "./ports.ts";
 import { readRunStatus } from "./read-model.ts";
 import { reserveReplayRun } from "./run-repo.ts";
 
 /** Reads go through the pool; the one transactional write (replay reservation) pins a connection. */
-export type FinancialPool = SqlExecutor & { connect(): Promise<SqlExecutor & { release(): void }> };
+export type { FinancialPool } from "./ports.ts";
 
 export type FinancialHttpDeps = Readonly<{ userId: string; db: FinancialPool }>;
 

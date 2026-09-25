@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { evaluateVerifiedMetric } from "../../agents/src/financial-thesis-adapter.ts";
+import { evaluateSavedRule } from "../../financial-engine/src/saved-rule.ts";
 import { createRuntimeAuthority } from "../../financial-core/src/index.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { listRecoverableRuns } from "../../financial-engine/src/recovery.ts";
@@ -38,7 +38,7 @@ test("discovery numerical criteria execution", { timeout: 300_000 }, async (t) =
   });
 
   await t.test("a calculation parented by the campaign run cannot be leased without the campaign's fence", async () => {
-    const outcome = await evaluateVerifiedMetric({ pool, evidence: createEvidenceFinancialPort }, {
+    const outcome = await evaluateSavedRule({ pool, evidence: createEvidenceFinancialPort }, {
       authority: createRuntimeAuthority({
         owner_user_id: IDS.owner, egress_channel: "discovery",
         parent: { kind: "discovery_run", id: lease.run_id, version: "brief:unfenced" },
@@ -46,7 +46,7 @@ test("discovery numerical criteria execution", { timeout: 300_000 }, async (t) =
         approval_state: "approved", lease: null,
       }),
       request_key: "unfenced", subject: { kind: "issuer", id: IDS.issuerA },
-      metric: brief.brief.criteria[1]!.metric!, as_of: CUTOFF, reporting_basis: "as_restated",
+      rule: brief.brief.criteria[1]!.metric!, as_of: CUTOFF, reporting_basis: "as_restated",
       origin: { kind: "discovery_criterion", ref: "unfenced" }, threshold_attribution: { kind: "approved_discovery_brief", ref: "unfenced" },
       publication_unit_kind: "discovery_assessment", persistParent: async () => {},
     });

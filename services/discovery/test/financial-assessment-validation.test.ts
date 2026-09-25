@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { decideCandidate } from "../src/assessment.ts";
-import { hideOutcomes } from "../src/financial-packet.ts";
+import { hideOutcomes } from "../src/financial-outcomes.ts";
 import { parseBrief } from "../src/validation.ts";
 import type { AnalystOutput, Citation, CriterionOutcome, SkepticOutput } from "../src/types.ts";
 import { analystFixture, packetFixture, skepticFixture } from "./fixtures.ts";

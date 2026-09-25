@@ -21,17 +21,14 @@ import {
   type FinancialSubjectRef,
 } from "../../financial-core/src/index.ts";
 import type { PersistParentArtifact } from "../../financial-engine/src/finalize.ts";
-import type { FinancialPool } from "../../financial-engine/src/http.ts";
 import { buildDeterministicPlan, type DeterministicUnits, type PlanningContext, type RequestedSubject } from "../../financial-engine/src/planner.ts";
-import type { FinancialEvidencePort, SqlExecutor } from "../../financial-engine/src/ports.ts";
-import { reserveAndPublish, type PublishResult } from "../../financial-engine/src/publish.ts";
+import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
 import type { ParentRecovery } from "../../financial-engine/src/recovery.ts";
+import { issuerLabels, publishRequest, type RequestGap, type RequestOutcome } from "../../financial-engine/src/request.ts";
 import type { RunRecord } from "../../financial-engine/src/run-record.ts";
-import { findRunForRequest } from "../../financial-engine/src/run-repo.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
-import { snapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
-import { settleRunIfDone, writePendingCellOnce } from "./queries.ts";
+import { writePendingCellOnce } from "./queries.ts";
 import { EMPTY_DISPLAY, GridValidationError, type CellWrite, type ColumnInstance } from "./types.ts";
 
 export type GridFinancialMode = "off" | "shadow" | "enforce";
@@ -54,7 +51,6 @@ const FINANCIAL_COLUMNS: Readonly<Record<string, FinancialColumn>> = {
 export type FinancialColumnParams = Readonly<{ period_type: "annual" | "quarterly"; offset: number }>;
 
 const MAX_PERIOD_OFFSET = 19;
-const LEASE_TTL_MS = 120_000;
 const PARENT_VERSION = "grid-run.v1";
 
 /** Whether a column is numerical and so answered by the engine (or declared unsupported) when the lane is enforced. */
@@ -93,16 +89,11 @@ export type GridFinancialRun = Readonly<{
   instances: ReadonlyArray<ColumnInstance>;
 }>;
 
-export type GridFinancialOutcome =
-  | "published"
-  | "shadow"
-  | "configuration_needed"
-  | "unsupported"
-  | "request_conflict"
-  | "run_in_progress"
-  | "run_cancelled"
-  | "run_failed"
-  | "publication_failed";
+/** The run was driven, shadow mode only planned it, or the engine's reason it did not publish. */
+export type GridFinancialOutcome = "published" | "planned" | RequestGap;
+
+// Cells another worker or the recovery worker still owes stay pending for them.
+const STILL_OWED: ReadonlySet<GridFinancialOutcome> = new Set(["run_in_progress", "publication_failed"]);
 
 /**
  * Computes and publishes a run's numerical cells. Unsupported columns and
@@ -127,51 +118,25 @@ export async function publishGridFinancialCells(deps: GridFinancialDeps, run: Gr
       computed.push({ rowNumber: row.rowNumber, subject: { kind: "issuer", id: row.subject.id }, instance, metric_key: column.metric_key, params: parseFinancialColumnParams(instance.column_key, instance.params) });
     }
   }
-  if (computed.length === 0) {
-    if (run.mode === "enforce") await settleRunIfDone(db, run.grid_run_id);
-    return "published";
-  }
+  if (computed.length === 0) return "published";
 
   const authority = gridAuthority(run.user_id, run.grid_run_id, run.mode);
-  const client = snapshotTransactionClient(await deps.pool.connect());
-  let outcome: GridFinancialOutcome;
-  try {
-    const earlier = await findRunForRequest(client, { authority, request_key: run.grid_run_id });
-    let plan = earlier?.plan;
-    if (!plan) {
-      const planned = buildDeterministicPlan(await planningContext(client, run, authority, computed), cellDraft(computed), cellUnits(computed));
-      if (planned.outcome !== "ready") {
-        outcome = planned.outcome === "unsupported" ? "unsupported" : "configuration_needed";
-        if (run.mode === "enforce") for (const cell of computed) await write(cell.rowNumber, cell.instance, gapCell(outcome));
-        return outcome;
-      }
-      plan = planned.plan;
-    }
-    if (run.mode === "shadow") return "shadow";
-    try {
-      outcome = outcomeOf(await reserveAndPublish(client, {
-        plan,
-        authority,
-        request_key: run.grid_run_id,
-        worker_id: deps.workerId ?? `grid-${process.pid}`,
-        ttl_ms: LEASE_TTL_MS,
-        evidence: deps.evidence,
-        parent_limits: {},
-        persistParent: persistGridCell(run.grid_run_id),
-      }));
-    } catch {
-      // Cells committed before the failure stay committed; the run keeps its checkpoints.
-      outcome = "publication_failed";
-    }
-  } finally {
-    client.release();
-  }
-  // Whatever the engine will not publish is a declared gap. A run another worker holds, or one whose
-  // publication failed part-way, keeps its cells pending: that worker or the recovery worker finishes them.
-  if (outcome !== "run_in_progress" && outcome !== "publication_failed") {
-    for (const cell of computed) await write(cell.rowNumber, cell.instance, gapCell(outcome === "published" ? "verification_failed" : outcome));
-  }
-  await settleRunIfDone(db, run.grid_run_id);
+  const request = await publishRequest(deps.pool, {
+    authority,
+    request_key: run.grid_run_id,
+    mode: run.mode,
+    plan: async (planDb) => {
+      const shape = planShape(computed);
+      return buildDeterministicPlan(await planningContext(planDb, run, authority, computed), shape.draft, shape.units);
+    },
+    evidence: deps.evidence,
+    persistParent: persistGridCell(run.grid_run_id),
+    worker_id: deps.workerId ?? `grid-${process.pid}`,
+  });
+  const outcome = gridOutcome(request);
+  if (outcome === "planned" || STILL_OWED.has(outcome)) return outcome;
+  // Whatever the engine did not publish is a declared gap; a driven run's unsealed cell was refused at finalization.
+  for (const cell of computed) await write(cell.rowNumber, cell.instance, gapCell(outcome === "published" ? "verification_failed" : outcome));
   return outcome;
 }
 
@@ -211,32 +176,29 @@ const slotOf = (rowNumber: number) => `r${rowNumber}`;
 const unitOf = (cell: ComputedCell) => `${cell.instance.column_instance_id}_r${cell.rowNumber}`;
 const UNIT_ID = /^(c\d+)_r(\d+)$/u;
 
-function cellDraft(cells: ReadonlyArray<ComputedCell>) {
-  const subjects = new Map(cells.map((cell) => [cell.rowNumber, cell.subject]));
+/** The run's plan draft and its units: one reported value, output, and unit per numerical cell. */
+function planShape(cells: ReadonlyArray<ComputedCell>): { draft: object; units: DeterministicUnits } {
+  const rows = [...new Set(cells.map((cell) => cell.rowNumber))].sort((left, right) => left - right);
   return {
-    subjects: [...subjects.keys()].sort((left, right) => left - right).map((rowNumber) => ({ slot_id: slotOf(rowNumber), mention: `row ${rowNumber}` })),
-    operations: cells.map((cell) => ({
-      node_id: unitOf(cell),
-      operation: "reported_metric",
-      subject_slot: slotOf(cell.rowNumber),
-      metric_key: cell.metric_key,
-      period: { kind: "latest", period_type: cell.params.period_type, offset: cell.params.offset },
-    })),
-    outputs: cells.map((cell) => ({ output_id: `o_${unitOf(cell)}`, node_id: unitOf(cell) })),
-    thresholds: [],
+    draft: {
+      subjects: rows.map((rowNumber) => ({ slot_id: slotOf(rowNumber), mention: `row ${rowNumber}` })),
+      operations: cells.map((cell) => ({
+        node_id: unitOf(cell),
+        operation: "reported_metric",
+        subject_slot: slotOf(cell.rowNumber),
+        metric_key: cell.metric_key,
+        period: { kind: "latest", period_type: cell.params.period_type, offset: cell.params.offset },
+      })),
+      outputs: cells.map((cell) => ({ output_id: `o_${unitOf(cell)}`, node_id: unitOf(cell) })),
+      thresholds: [],
+    },
+    units: cells.map((cell) => ({ unit_id: unitOf(cell), output_ids: [`o_${unitOf(cell)}`] })),
   };
-}
-
-function cellUnits(cells: ReadonlyArray<ComputedCell>): DeterministicUnits {
-  return cells.map((cell) => ({ unit_id: unitOf(cell), output_ids: [`o_${unitOf(cell)}`] }));
 }
 
 async function planningContext(db: SqlExecutor, run: GridFinancialRun, authority: FinancialRuntimeAuthority, cells: ReadonlyArray<ComputedCell>): Promise<PlanningContext> {
   const subjects = new Map(cells.map((cell) => [cell.rowNumber, cell.subject]));
-  const names = new Map((await db.query<{ issuer_id: string; legal_name: string }>(
-    `select issuer_id::text, legal_name from issuers where issuer_id = any($1::uuid[])`,
-    [[...subjects.values()].map((subject) => subject.id)],
-  )).rows.map((row) => [row.issuer_id, row.legal_name]));
+  const names = await issuerLabels(db, [...subjects.values()].map((subject) => subject.id));
   // Rows are canonical identities resolved when the run started; a row whose issuer has no name is labelled by its id.
   const requested: RequestedSubject[] = [...subjects.entries()].sort(([left], [right]) => left - right).map(([rowNumber, subject]) => ({
     mention: `row ${rowNumber}`,
@@ -273,7 +235,6 @@ function persistGridCell(expectedRunId: string | null): PersistParentArtifact {
       certified: { financialRunId: publication.run_id, financialUnitId: publication.unit_id, certificateDigest: publication.certificate_digest, block: publication.block },
     });
     if (!written) throw new Error("the grid cell is no longer pending under the run's owner");
-    await settleRunIfDone(tx.client, tx.run.parent_id);
   };
 }
 
@@ -297,18 +258,16 @@ function gapCell(reason: string): CellWrite {
   return { status: "error", display: EMPTY_DISPLAY, snapshotId: null, primaryRef: null, coverageFlag: reason };
 }
 
-function outcomeOf(result: PublishResult): GridFinancialOutcome {
-  switch (result.status) {
-    case "conflict":
-      return "request_conflict";
-    case "unavailable":
-      return result.reason === "busy" ? "run_in_progress" : result.reason === "cancel_requested" ? "run_cancelled" : "run_failed";
-    case "cancelled":
-      return "run_cancelled";
-    case "failed":
-      return "run_failed";
-    case "completed":
+function gridOutcome(request: RequestOutcome): GridFinancialOutcome {
+  switch (request.status) {
     case "driven":
       return "published";
+    case "planned":
+      return "planned";
+    case "gap":
+      return request.reason;
+    case "clarification":
+      // A deterministic grid plan never asks; treat it as a configuration the run cannot compute.
+      return "configuration_needed";
   }
 }

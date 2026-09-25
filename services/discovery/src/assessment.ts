@@ -5,7 +5,7 @@ import { buildAssessmentMessages } from "./assessment-prompts.ts";
 import { normalizeRoleCitations, validateAnalystOutput, validateSkepticOutput } from "./assessment-validation.ts";
 import { requestHash } from "./scout-support.ts";
 import { numericalCriteria } from "./financial-criteria.ts";
-import { assertCertifiedOutcomes } from "./financial-packet.ts";
+import { assertCertifiedOutcomes } from "./financial-outcomes.ts";
 import type { AnalystOutput, Brief, CandidateDecision, Citation, CriterionOutcome, Dimension, Level, RawCitation, SkepticOutput } from "./types.ts";
 import type { AssessmentContext, AssessmentQuoteRequest, ValidatedRoleCheckpoint } from "./ports.ts";
 
