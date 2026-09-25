@@ -453,10 +453,17 @@ jobs:
           cache-dependency-path: |
             db/package-lock.json
             services/chat/package-lock.json
+            services/financial-core/package-lock.json
 
       # Chat repository integration tests import the shared db/test Docker harness.
       - name: Install db deps (needed by chat integration harness)
         working-directory: db
+        run: npm ci
+
+      # The financial lane imports financial-core sources, which resolve their
+      # own dependencies (ajv, decimal.js) from services/financial-core/node_modules.
+      - name: Install financial-core deps (imported by the chat financial lane)
+        working-directory: services/financial-core
         run: npm ci
 
       - name: Install chat deps

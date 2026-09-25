@@ -13,12 +13,11 @@
 // A replay needs no parent registration: it reads pinned records and publishes
 // nothing.
 
-import { randomUUID } from "node:crypto";
-
-import type { ExecutionLimits, FinancialPlanV1, FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
+import type { ExecutionLimits, FinancialRuntimeAuthority } from "../../financial-core/src/index.ts";
 import type { SnapshotTransactionClient } from "../../snapshot/src/snapshot-sealer.ts";
-import { executeRun, type ExecutionReport } from "./execute.ts";
-import { finalizeUnit, type PersistParentArtifact } from "./finalize.ts";
+import type { ExecutionReport } from "./execute.ts";
+import type { FinalizationResult, PersistParentArtifact } from "./finalize.ts";
+import { driveLeasedRun } from "./publish.ts";
 import { acquireLease, type AcquireLeaseResult, type LeaseClaimant, type RunLease } from "./lease.ts";
 import type { FinancialEvidencePort, SqlExecutor } from "./ports.ts";
 import { executeReplay, replayClaimant, type ReplayOutcome } from "./replay.ts";
@@ -83,25 +82,14 @@ export async function recoverRun(client: SnapshotTransactionClient, run: RunReco
   const lease = await leaseFor(client, run, authority, deps);
   if (!("epoch" in lease)) return lease;
 
-  let execution: ExecutionReport["outcome"] | "skipped" = "skipped";
-  if (run.execution_state !== "ready_to_seal") {
-    const plan = (await client.query<{ plan: FinancialPlanV1 }>(`select plan from financial_plans where plan_id = $1 and user_id = $2`, [run.plan_id, run.user_id])).rows[0]!.plan;
-    const report = await executeRun({ client, lease, plan, authority, evidence: deps.evidence, parent_limits: parent.parentLimits ?? {} });
-    execution = report.outcome;
-    if (report.outcome !== "ready_to_seal") return { run_id: run.run_id, status: "resumed", execution, published: 0, existing: 0, rejected: 0 };
-  }
-
-  // Units sealed before the crash keep their publication; the parent is not called for them again.
-  const units = (await client.query<{ unit_id: string; state: string }>(
-    `select unit_id, state from financial_run_units where run_id = $1 and state in ('computed', 'sealed') order by unit_id`,
-    [run.run_id],
-  )).rows;
-  const counts = { published: 0, existing: units.filter((unit) => unit.state === "sealed").length, rejected: 0 };
-  for (const { unit_id } of units.filter((unit) => unit.state === "computed")) {
-    const outcome = await finalizeUnit({ client, lease, authority, unit_id, snapshot_id: randomUUID(), persistParent: parent.persistParent });
-    counts[outcome.status] += 1;
-  }
-  return { run_id: run.run_id, status: "resumed", execution, ...counts };
+  const report = await driveLeasedRun(client, lease, run, {
+    authority,
+    evidence: deps.evidence,
+    parent_limits: parent.parentLimits ?? {},
+    persistParent: parent.persistParent,
+  });
+  const count = (status: FinalizationResult["status"]) => report.finalized.filter((unit) => unit.result.status === status).length;
+  return { run_id: run.run_id, status: "resumed", execution: report.execution, published: count("published"), existing: report.existing + count("existing"), rejected: count("rejected") };
 }
 
 async function leaseFor(

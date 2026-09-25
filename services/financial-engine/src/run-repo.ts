@@ -21,7 +21,7 @@ export type { ExecutionState, RunRecord } from "./run-record.ts";
 
 export type ReserveRunResult =
   | { status: "created" | "existing"; run: RunRecord }
-  | { status: "conflict"; reason: "request_hash_mismatch" | "parent_version_mismatch"; run_id: string };
+  | { status: "conflict"; reason: "request_hash_mismatch" | "parent_version_mismatch"; run_id: string | null };
 
 /** The request identity of a run: what is asked, independent of random plan ids. */
 /**
@@ -38,12 +38,22 @@ export async function reserveRun(
   const requestHash = planSemanticHash(plan);
   return withTransaction(client, async () => {
     await client.query("savepoint reserve_run");
+    // A retry may bring the plan its first attempt already stored; it must be that same owner's same plan.
     await client.query(
       `insert into financial_plans (plan_id, user_id, origin_kind, origin_ref, catalog_version, plan, semantic_hash, binding_hash, interpretation)
-       values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9)`,
+       values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9)
+       on conflict (plan_id) do nothing`,
       [plan.plan_id, authority.owner_user_id, plan.origin.kind, plan.origin.ref, plan.catalog_version, JSON.stringify(plan),
         requestHash, planBindingHash(plan, authority), plan.interpretation?.text ?? null],
     );
+    const stored = (await client.query<{ user_id: string; semantic_hash: string }>(
+      `select user_id::text, semantic_hash from financial_plans where plan_id = $1`,
+      [plan.plan_id],
+    )).rows[0]!;
+    if (stored.user_id !== authority.owner_user_id || stored.semantic_hash !== requestHash) {
+      await client.query("rollback to savepoint reserve_run");
+      return { status: "conflict", reason: "request_hash_mismatch", run_id: null };
+    }
     const created = (await client.query<Record<string, unknown>>(
       `insert into financial_runs (user_id, parent_kind, parent_id, parent_version, request_key, request_hash, plan_id, feature_mode,
                                    knowledge_cutoff, policies, replay_of_run_id)
@@ -116,6 +126,25 @@ export async function reserveReplayRun(
     )).rows[0]!);
     return existing.replay_of_run_id === root.run_id ? { status: "existing", run: existing } : { status: "conflict", reason: "request_key_conflict" };
   });
+}
+
+/**
+ * The run an earlier attempt reserved for this request, with its saved plan.
+ * A retry resumes it instead of planning again, so a model that would plan
+ * differently the second time cannot turn a retry into a conflict.
+ */
+export async function findRunForRequest(
+  client: SqlExecutor,
+  input: { authority: FinancialRuntimeAuthority; request_key: string },
+): Promise<{ run: RunRecord; plan: FinancialPlanV1 } | null> {
+  const row = (await client.query<Record<string, unknown>>(
+    `select ${RUN_COLUMNS} from financial_runs where user_id = $1 and parent_kind = $2 and parent_id = $3 and request_key = $4`,
+    [input.authority.owner_user_id, input.authority.parent.kind, input.authority.parent.id, input.request_key],
+  )).rows[0];
+  if (!row) return null;
+  const run = toRun(row);
+  const { plan } = (await client.query<{ plan: FinancialPlanV1 }>(`select plan from financial_plans where plan_id = $1 and user_id = $2`, [run.plan_id, run.user_id])).rows[0]!;
+  return { run, plan };
 }
 
 /** Owner-scoped lookup; another owner's run is indistinguishable from a missing one. */

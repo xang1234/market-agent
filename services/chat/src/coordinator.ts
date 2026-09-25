@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { contentHashForText, stableUuid } from "./chat-ids.ts";
 import { DEFAULT_BUNDLE_ID, chooseBundleIdForSubjectKind } from "./bundle-routing.ts";
 import { extractSubjectCandidates } from "./subject-extraction.ts";
 import {
@@ -27,6 +27,9 @@ import {
   type ToolRegistry,
 } from "../../tools/src/index.ts";
 
+import type { ChatClarificationAnswer, ChatFinancialRuntime } from "./financial-runtime.ts";
+import { financialAwareRunner } from "./financial-turn.ts";
+
 export type ChatTurnInput = {
   threadId: string;
   runId: string;
@@ -34,6 +37,8 @@ export type ChatTurnInput = {
   subjectText?: string;
   userIntent?: string;
   userId?: string;
+  /** The user's pick for a financial clarification offered by an earlier turn. */
+  clarificationAnswer?: ChatClarificationAnswer;
 };
 
 export type ChatTurnEmit = (
@@ -165,6 +170,7 @@ export type ChatCoordinator = {
 
 export type ChatCoordinatorOptions = {
   runner?: ChatTurnRunner;
+  financialRuntime?: ChatFinancialRuntime;
   analystToolRuntime?: ChatAnalystToolRuntime;
   allowSyntheticAnalystFallback?: boolean;
   persistAssistantMessage?: ChatAssistantMessagePersistence;
@@ -237,11 +243,11 @@ export function createChatCoordinator(
     : options.allowSyntheticAnalystFallback
     ? ((context) => syntheticAnalystTurnRunner(context, persistAssistantMessage))
     : missingAnalystToolRuntimeRunner);
-  const runner = threadTitleGenerationRunner(runActivityReportingRunner(subjectAwareRunner(baseRunner, {
+  const runner = threadTitleGenerationRunner(runActivityReportingRunner(financialAwareRunner(subjectAwareRunner(baseRunner, {
     persistAssistantMessage,
     preResolveSubject,
     renderSubjectClarification: options.renderSubjectClarification,
-  }), options.runActivity), {
+  }), { financialRuntime: options.financialRuntime, persistAssistantMessage }), options.runActivity), {
     generateThreadTitle: options.generateThreadTitle,
     onThreadTitleGenerationError: options.onThreadTitleGenerationError,
   });
@@ -550,6 +556,7 @@ function normalizeTurnInput(input: ChatTurnInput): NormalizedChatTurnInput {
     ...(subjectText ? { subjectText } : {}),
     ...(userIntent ? { userIntent } : {}),
     ...(input.userId ? { userId: input.userId } : {}),
+    ...(input.clarificationAnswer ? { clarificationAnswer: { ...input.clarificationAnswer } } : {}),
   };
 }
 
@@ -564,7 +571,9 @@ function assertSameTurnInput(existing: ChatTurnInput, incoming: ChatTurnInput) {
     existing.turnId !== incoming.turnId ||
     existing.subjectText !== incoming.subjectText ||
     existing.userIntent !== incoming.userIntent ||
-    existing.userId !== incoming.userId
+    existing.userId !== incoming.userId ||
+    existing.clarificationAnswer?.clarification_id !== incoming.clarificationAnswer?.clarification_id ||
+    existing.clarificationAnswer?.choice_id !== incoming.clarificationAnswer?.choice_id
   ) {
     throw new ChatTurnInputMismatchError();
   }
@@ -1351,21 +1360,6 @@ function createRichTextBlock(input: {
       }),
     ]),
   });
-}
-
-function contentHashForText(text: string): string {
-  return `sha256:${createHash("sha256").update(text).digest("hex")}`;
-}
-
-function stableUuid(seed: string): string {
-  const hex = createHash("sha256").update(seed).digest("hex");
-  return [
-    hex.slice(0, 8),
-    hex.slice(8, 12),
-    `4${hex.slice(13, 16)}`,
-    `8${hex.slice(17, 20)}`,
-    hex.slice(20, 32),
-  ].join("-");
 }
 
 function errorCode(error: unknown): string {

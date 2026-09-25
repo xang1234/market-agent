@@ -91,6 +91,19 @@ export async function renewLease(client: SqlExecutor, lease: RunLease, ttlMs: nu
 }
 
 /**
+ * Gives a lease up early, so a retry or recovery can take the run at once
+ * instead of waiting for it to expire. A no-op when the lease is no longer the
+ * current one (superseded, or cleared because the run finished).
+ */
+export async function releaseLease(client: SqlExecutor, lease: RunLease): Promise<void> {
+  await client.query(
+    `update financial_runs set lease_expires_at = now(), updated_at = now()
+      where run_id = $1 and user_id = $2 and lease_owner = $3 and lease_epoch = $4 and lease_expires_at > now()`,
+    [lease.run_id, lease.owner_user_id, lease.worker_id, lease.epoch],
+  );
+}
+
+/**
  * Runs `action` in one transaction that first locks the run row and verifies
  * the lease is still the current, live one. A pending cancellation fails the
  * fence unless the transaction is the one that honours it.

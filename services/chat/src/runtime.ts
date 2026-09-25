@@ -7,6 +7,7 @@ import type {
   ChatSubjectClarificationRenderer,
   ChatThreadTitleGenerator,
 } from "./coordinator.ts";
+import type { ChatFinancialRuntime } from "./financial-runtime.ts";
 import type { ChatServerOptions } from "./http.ts";
 import type { ChatSubjectPreResolver } from "./subjects.ts";
 
@@ -77,6 +78,12 @@ export async function loadChatServerOptionsFromEnv(
     }
 
     options.analystToolRuntime = module.analystToolRuntime as ChatAnalystToolRuntime;
+    if (module.financialRuntime !== undefined) {
+      if (typeof module.financialRuntime !== "object" || typeof module.financialRuntime.run !== "function") {
+        throw new Error("CHAT_ANALYST_RUNTIME_MODULE financialRuntime export must be a ChatFinancialRuntime");
+      }
+      options.financialRuntime = module.financialRuntime as ChatFinancialRuntime;
+    }
   }
 
   return options;

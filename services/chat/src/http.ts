@@ -9,7 +9,9 @@ import {
   type ChatRunActivityReporter,
   type ChatSubjectClarificationRenderer,
   type ChatThreadTitleGenerator,
+  type ChatTurnInput,
 } from "./coordinator.ts";
+import type { ChatClarificationAnswer, ChatFinancialRuntime } from "./financial-runtime.ts";
 import type { ChatSubjectPreResolver } from "./subjects.ts";
 import { tryHandleThreadsRequest } from "./threads-http.ts";
 import {
@@ -42,6 +44,7 @@ type StreamRoute = {
   subjectText: string | null;
   userIntent: string | null;
   userId: string | null;
+  clarificationAnswer: ChatClarificationAnswer | null;
 };
 
 type SseWritable = {
@@ -67,6 +70,7 @@ export type ChatServerOptions = {
   generateThreadTitle?: ChatThreadTitleGenerator;
   onThreadTitleGenerationError?: Parameters<typeof createChatCoordinator>[0]["onThreadTitleGenerationError"];
   analystToolRuntime?: ChatAnalystToolRuntime;
+  financialRuntime?: ChatFinancialRuntime;
   allowSyntheticAnalystFallback?: boolean;
   runActivityHub?: RunActivityHub;
   auth?: RequestAuthConfig;
@@ -83,6 +87,7 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
     generateThreadTitle: options.generateThreadTitle,
     onThreadTitleGenerationError: options.onThreadTitleGenerationError,
     analystToolRuntime: options.analystToolRuntime,
+    financialRuntime: options.financialRuntime,
     allowSyntheticAnalystFallback: options.allowSyntheticAnalystFallback,
   });
   const threadsDb = options.threadsDb;
@@ -149,6 +154,7 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
       ...(route.subjectText ? { subjectText: route.subjectText } : {}),
       ...(route.userIntent ? { userIntent: route.userIntent } : {}),
       ...(userId ? { userId } : {}),
+      ...(route.clarificationAnswer ? { clarificationAnswer: route.clarificationAnswer } : {}),
     };
     const turn = getTurnForRoute(coordinator, turnInput, resumeAfterSeq > 0);
     if (turn === INPUT_MISMATCH) {
@@ -277,7 +283,7 @@ const INPUT_MISMATCH = Symbol("INPUT_MISMATCH");
 
 function getTurnForRoute(
   coordinator: ChatCoordinator,
-  input: { threadId: string; runId: string; turnId?: string; subjectText?: string },
+  input: ChatTurnInput,
   resume: boolean,
 ): ReturnType<ChatCoordinator["getTurn"]> | typeof INPUT_MISMATCH {
   try {
@@ -328,6 +334,9 @@ function matchStreamRoute(method: string, rawUrl: string): StreamRoute | typeof 
   const subjectText = nonEmptyQueryParam(url.searchParams.get("subject"));
   const userIntent = nonEmptyQueryParam(url.searchParams.get("user_intent"));
   const userId = nonEmptyQueryParam(url.searchParams.get("user_id"));
+  const clarificationId = nonEmptyQueryParam(url.searchParams.get("clarification_id"));
+  const choiceId = nonEmptyQueryParam(url.searchParams.get("choice_id"));
+  if ((clarificationId === null) !== (choiceId === null)) return INVALID_STREAM_ROUTE;
   let threadId: string;
   try {
     threadId = decodeURIComponent(match[1]);
@@ -341,6 +350,7 @@ function matchStreamRoute(method: string, rawUrl: string): StreamRoute | typeof 
     subjectText,
     userIntent,
     userId,
+    clarificationAnswer: clarificationId && choiceId ? { clarification_id: clarificationId, choice_id: choiceId } : null,
   };
 }
 
