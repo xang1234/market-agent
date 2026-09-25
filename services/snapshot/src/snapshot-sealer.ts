@@ -1,4 +1,3 @@
-import { FINANCIAL_VERIFIER_VERSION } from "./financial-verifier.ts";
 import {
   auditManifestToolCallLog,
   type QueryExecutor,
@@ -310,7 +309,7 @@ async function insertFinancialCertificate(
       financial.certificate_digest,
       JSON.stringify(financial.result_ids),
       certificate.presentation.hash,
-      FINANCIAL_VERIFIER_VERSION,
+      certificate.verifier_version,
     ],
   );
 }

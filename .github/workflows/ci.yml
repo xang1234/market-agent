@@ -596,6 +596,7 @@ jobs:
             services/discovery/package-lock.json
             services/dev-api/package-lock.json
             services/evidence/package-lock.json
+            services/financial-core/package-lock.json
             services/fundamentals/package-lock.json
             services/llm/package-lock.json
             services/observability/package-lock.json
@@ -613,6 +614,7 @@ jobs:
         run: |
           npm --prefix services/dev-api ci
           npm --prefix services/evidence ci
+          npm --prefix services/financial-core ci
           npm --prefix services/fundamentals ci
           npm --prefix services/llm ci
           npm --prefix services/observability ci

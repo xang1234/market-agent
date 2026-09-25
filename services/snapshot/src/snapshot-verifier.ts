@@ -16,7 +16,7 @@ import {
 import { compileDisclosurePolicy, type FreshnessClass, type RequiredDisclosure } from "./disclosure-policy.ts";
 import { validateSnapshotTransformManifest } from "./snapshot-transform.ts";
 import type { FinancialSealClaim } from "./financial-verifier-loader.ts";
-import { verifyFinancialSnapshot, type FinancialVerification, type FinancialVerifierReasonCode } from "./financial-verifier.ts";
+import type { FinancialVerification, FinancialVerifierReasonCode } from "./financial-verifier.ts";
 
 export type SnapshotVerifierManifest = {
   subject_refs: ReadonlyArray<{ kind: SnapshotSubjectKind; id: string }>;
@@ -255,8 +255,11 @@ export async function verifySnapshotSeal(
   }
 
   // A financial claim is verified against the ledger, which also generates its answer block.
+  // The financial verifier (and the financial core it recomputes with) loads only
+  // for financial seals, so every other snapshot producer stays free of it.
   let financial: Extract<FinancialVerification, { ok: true }> | undefined;
   if (normalized.financial !== null) {
+    const { verifyFinancialSnapshot } = await import("./financial-verifier.ts");
     const outcome = await verifyFinancialSnapshot(db, normalized.financial, { ...normalized, block_kinds: normalized.blocks.map((block) => block.kind) });
     if (outcome.ok) financial = outcome;
     else for (const failure of outcome.failures) addFailure(failure.reason_code, failure.details);
