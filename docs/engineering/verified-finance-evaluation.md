@@ -166,5 +166,6 @@ The same three skip on `main`.
 - **No SEC publication attestations.** SEC-ingested facts bind as
   `publication_time_unknown` until a reviewed acceptance-time mapping exists,
   so enforced surfaces show declared gaps for them.
-- **Open dispositions** (inventory §2.7): legacy numeric blocks and Chat
-  narrative turns are not labelled, and some Analyze producers stay legacy.
+- **Legacy producers remain.** Analyze price targets and analyst consensus
+  are not engine-backed, so they render as "Legacy output". Uncited prose
+  carries no label (inventory §2.7).

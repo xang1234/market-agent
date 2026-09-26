@@ -9,12 +9,13 @@ import { SegmentTrajectory } from './SegmentTrajectory.tsx'
 import { SentimentTrend } from './SentimentTrend.tsx'
 
 export function registerChartBlockRenderers(registry: BlockRegistry): void {
-  registry.register('line_chart', LineChart)
-  registry.register('revenue_bars', RevenueBars)
-  registry.register('perf_comparison', PerfComparison)
-  registry.register('segment_donut', SegmentDonut)
-  registry.register('segment_trajectory', SegmentTrajectory)
-  registry.register('metrics_comparison', MetricsComparison)
+  // Financial and market figures charted from stored facts and quotes, not certified calculations.
+  registry.register('line_chart', LineChart, 'legacy')
+  registry.register('revenue_bars', RevenueBars, 'legacy')
+  registry.register('perf_comparison', PerfComparison, 'legacy')
+  registry.register('segment_donut', SegmentDonut, 'legacy')
+  registry.register('segment_trajectory', SegmentTrajectory, 'legacy')
+  registry.register('metrics_comparison', MetricsComparison, 'legacy')
   registry.register('sentiment_trend', SentimentTrend)
   registry.register('mention_volume', MentionVolume)
 }

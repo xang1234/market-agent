@@ -9,6 +9,7 @@ import { extractInspectableRefs } from '../evidence/inspectableRefs.ts'
 import type { EvidenceBlockInspection } from '../evidence/inspectionTypes.ts'
 import { useEvidenceInspector } from '../evidence/useEvidenceInspector.ts'
 import type { SnapshotManifest } from './snapshotManifest.ts'
+import { VerificationLabel } from './VerificationLabel.tsx'
 import { SnapshotManifestContext } from './snapshotManifestContext.ts'
 
 type BlockRegistryProviderProps = {
@@ -53,7 +54,15 @@ export function BlockView({ block }: BlockViewProps): ReactElement {
   // Registry returns an existing component reference; createElement
   // sidesteps the react-hooks/static-components heuristic that treats
   // capitalized JSX identifiers as locally-declared components.
-  const rendered = createElement(renderer, { block })
+  const content = createElement(renderer, { block })
+  const verification = registry.verification(block)
+  // The label sits on the block itself, so neighbouring blocks never borrow each other's status.
+  const rendered = verification === null ? content : (
+    <div className="flex flex-col items-start gap-1" data-block-verification={verification}>
+      <VerificationLabel kind={verification} />
+      <div className="w-full">{content}</div>
+    </div>
+  )
   if (inspector === null) return rendered
   return (
     <div className="group relative" data-testid={`block-shell-${block.id}`}>

@@ -127,11 +127,11 @@ done; it is not counted as complete.
 | SEC Company Facts / fact repo | Lossless tokens and precision proofs; no publication attestations yet, so SEC facts bind as `publication_time_unknown` (declared gaps) until a reviewed mapping issues them | `services/fundamentals` + `services/evidence` financial tests; known gap below |
 | Snapshot verifier / sealer | Recomputes every unit from ledger records; rejects every mutant in the release gate | `services/snapshot/test/financial-verifier*.test.ts`, `scripts/verified-finance-fixture.test.ts` |
 | `financial_answer` block + inspector | Certified values only, labelled verified/partial; an unknown version renders as legacy | `web/src/blocks/*financial*.test.tsx` |
-| Legacy numeric blocks (`MetricRow`, `RevenueBars`, `MetricsComparison`, `PriceTargetRange`, `AnalystConsensus`, …) | **Open:** still rendered without a legacy label | — |
+| Legacy numeric blocks (`MetricRow`, `Table`, charts, `RevenueBars`, `MetricsComparison`, segments, `PriceTargetRange`, `AnalystConsensus`, `EpsSurprise`) | Labelled "Legacy output" wherever they render; each block kind declares its label when it is registered | `web/src/blocks/financial-surface-contracts.test.tsx` |
 | Chat financial turns | Engine only; a turn that cannot verify is a structured gap, never composer prose | `services/chat/test/financial-*.test.ts`, parity |
-| Chat non-financial turns | Narrative composer, unchanged; **open:** not labelled narrative | — |
+| Chat non-financial turns | Narrative composer, unchanged. Prose that cites sources is labelled "Source-linked narrative" (so is memo prose). Uncited text, such as a gap or a clarification, makes no sourced claim and carries no label. | `financial-surface-contracts.test.tsx` |
 | Analyze numerical sections (`revenue_trend`, `peer_table`, `financial_health`) | Engine sections; their legacy producers do not run | `services/analyze/test/financial-*.test.ts`, parity |
-| Analyze price targets / analyst consensus / price facts | Legacy producers, unchanged and unlabelled (estimates are not reported facts) | — |
+| Analyze price targets / analyst consensus / price facts | Legacy producers (estimates are not reported facts); their blocks render as "Legacy output" | `financial-surface-contracts.test.tsx` |
 | Grid `latest_revenue`, `latest_eps_diluted` | Engine cells at the run's pinned cutoff | `services/analyst-grids/test/financial-*.test.ts`, parity |
 | Grid `latest_market_cap` | Explicit unsupported gap | `financial-column.test.ts` |
 | Grid reader questions | Narrative, unchanged | — |
