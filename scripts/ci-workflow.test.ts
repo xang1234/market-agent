@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 
 const REPO_ROOT = dirname(dirname(new URL(import.meta.url).pathname));
@@ -180,3 +180,73 @@ function jobSection(workflow: string, packageDir: string): string {
   const after = nextJob === -1 ? workflow.length : jobStart + 1 + nextJob;
   return workflow.slice(jobStart, after);
 }
+
+const read = (path: string) => readFile(join(REPO_ROOT, path), "utf8");
+
+const IMPORT = /(?:import|export)\s[^;]*?from\s+["']([^"']+)["']/gu;
+
+async function tsFiles(dir: string): Promise<string[]> {
+  const entries = await readdir(join(REPO_ROOT, dir), { withFileTypes: true }).catch(() => []);
+  const files: string[] = [];
+  for (const entry of entries) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory() && entry.name !== "node_modules") files.push(...await tsFiles(path));
+    else if (entry.isFile() && entry.name.endsWith(".ts")) files.push(path);
+  }
+  return files;
+}
+
+/** financial-core source files whose import closure reaches a third-party package (ajv, decimal.js). */
+async function coreFilesNeedingDependencies(): Promise<Set<string>> {
+  const files = await tsFiles("services/financial-core/src");
+  const imports = new Map<string, string[]>();
+  for (const file of files) imports.set(file, [...(await read(file)).matchAll(IMPORT)].map((match) => match[1]!));
+  const needs = new Set<string>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [file, specifiers] of imports) {
+      if (needs.has(file)) continue;
+      const reaches = specifiers.some((specifier) =>
+        !specifier.startsWith(".") && !specifier.startsWith("node:")
+          ? true
+          : needs.has(join(dirname(file), specifier)));
+      if (reaches) { needs.add(file); changed = true; }
+    }
+  }
+  return needs;
+}
+
+test("every CI job whose service reaches financial-core's dependencies installs them", async () => {
+  const needs = await coreFilesNeedingDependencies();
+  assert.ok(needs.has("services/financial-core/src/index.ts"), "the package entry point needs its dependencies");
+  const workflow = await read(".github/workflows/ci.yml");
+  const packages = [
+    ...(await readdir(join(REPO_ROOT, "services"))).filter((name) => name !== "financial-core").map((name) => `services/${name}`),
+    "scripts",
+  ];
+  for (const packageDir of packages) {
+    const files = packageDir === "scripts"
+      ? (await tsFiles("scripts")).filter((file) => file.startsWith("scripts/") && !file.slice("scripts/".length).includes("/"))
+      : [...await tsFiles(`${packageDir}/src`), ...await tsFiles(`${packageDir}/test`)];
+    let reaches = false;
+    for (const file of files) {
+      for (const [, specifier] of (await read(file)).matchAll(IMPORT)) {
+        const target = resolve(REPO_ROOT, dirname(file), specifier!).slice(REPO_ROOT.length + 1);
+        // The engine's entry points import the core index.
+        if (needs.has(target) || target.startsWith("services/financial-engine/src/")) reaches = true;
+      }
+    }
+    if (!reaches) continue;
+    // The scripts job has no working directory of its own; every other job is found by its package.
+    const job = packageDir === "scripts" ? /\n  scripts:\n[\s\S]*?(?=\n  [a-z][a-z0-9-]*:\n|$)/u.exec(workflow)?.[0] ?? "" : jobSection(workflow, packageDir);
+    assert.match(job, /services\/financial-core\s+ci|working-directory: services\/financial-core\s+run: npm ci/u, `CI job for ${packageDir} must install services/financial-core dependencies`);
+  }
+});
+
+test("CI runs Docker-backed suites instead of skipping them, and runs these contract tests", async () => {
+  const workflow = await read(".github/workflows/ci.yml");
+  assert.match(workflow, /\nenv:\n(?:\s{2}.*\n)*\s{2}REQUIRE_DOCKER: '1'/u);
+  assert.match(await read("db/test/docker-pg.ts"), /env\.REQUIRE_DOCKER === "1"/u);
+  assert.match(workflow, /\n  scripts:\n[\s\S]*?--test "scripts\/\*\.test\.ts"/u);
+});

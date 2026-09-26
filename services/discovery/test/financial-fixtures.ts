@@ -41,7 +41,14 @@ export function numericalBrief(): Brief {
 
 export async function financialCampaign(t: TestContext, prefix: string) {
   const db = await engineDatabase(t, prefix);
-  const pool = await connectedPool(t, databaseUrl(db), { max: 8 });
+  return setupFinancialCampaign(db, await connectedPool(t, databaseUrl(db), { max: 8 }));
+}
+
+/** The campaign, lease, and candidate on an existing engine database (shared with other surfaces in parity tests). */
+/** Only queries are run on it; structural, so any pg client type fits. */
+type Queryable = { query(text: string, values?: unknown[]): Promise<{ rows: any[] }> };
+
+export async function setupFinancialCampaign<P>(db: Queryable, pool: P) {
   const repo = createDiscoveryRepository(pool as never, { clock: () => new Date() });
   const instrumentId = randomUUID();
   await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1, $2, 'common_stock')`, [instrumentId, IDS.issuerA]);

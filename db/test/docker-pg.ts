@@ -59,15 +59,21 @@ export function interpretDockerResult(
   assert.equal(result.status, 0, result.stderr || result.stdout);
 }
 
+/**
+ * Whether Docker can run the Postgres harness, so integration suites can skip
+ * locally. With REQUIRE_DOCKER=1 (set in CI) a missing Docker is an error
+ * instead: a skipped integration suite must never report as a pass there.
+ */
 export function dockerAvailable() {
-  if (cachedDockerAvailable !== undefined) {
-    return cachedDockerAvailable;
+  if (cachedDockerAvailable === undefined) {
+    const result = run("docker", ["version", "--format", "{{.Server.Version}}"], {
+      timeoutMs: DOCKER_PROBE_TIMEOUT_MS,
+    });
+    cachedDockerAvailable = !result.error && result.status === 0;
   }
-
-  const result = run("docker", ["version", "--format", "{{.Server.Version}}"], {
-    timeoutMs: DOCKER_PROBE_TIMEOUT_MS,
-  });
-  cachedDockerAvailable = !result.error && result.status === 0;
+  if (!cachedDockerAvailable && process.env.REQUIRE_DOCKER === "1") {
+    throw new Error("REQUIRE_DOCKER=1 but Docker is unavailable: integration suites would silently skip");
+  }
   return cachedDockerAvailable;
 }
 

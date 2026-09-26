@@ -43,8 +43,28 @@ test('chat: model commentary beside certified values never acquires the verified
   )
   assert.equal(count(html, 'Verified calculation'), 1, 'one badge, on the certified block only')
   const narrative = html.slice(0, html.indexOf('block-financial-answer'))
-  assert.ok(!narrative.includes('data-verification'), 'the narrative block carries no verification label')
+  assert.ok(narrative.includes('data-verification="narrative"'), 'cited commentary is labelled narrative')
+  assert.ok(!narrative.includes('data-verification="verified"'), 'and never verified')
   assert.ok(html.includes('data-inspect-result='), 'certified values open the shared inspector')
+})
+
+test('every block labels its own status: legacy figures, cited narrative, and certified answers', () => {
+  const registry = createDefaultBlockRegistry()
+  const block = (kind: string, sourceRefs: string[] = []) => ({ ...richTextFixture, kind, source_refs: sourceRefs }) as Block
+  const LEGACY = ['metric_row', 'table', 'line_chart', 'revenue_bars', 'perf_comparison', 'segment_donut', 'segment_trajectory', 'metrics_comparison', 'analyst_consensus', 'price_target_range', 'eps_surprise']
+  for (const kind of LEGACY) assert.equal(registry.verification(block(kind)), 'legacy', kind)
+  assert.equal(registry.verification(block('rich_text', ['00000000-0000-4000-8000-000000000001'])), 'narrative')
+  assert.equal(registry.verification(block('rich_text')), null, 'an uncited gap or question makes no sourced claim')
+  for (const kind of ['financial_answer', 'section', 'filings_list', 'sources', 'sentiment_trend']) assert.equal(registry.verification(block(kind)), null, kind)
+  // Rendered: a legacy block and a certified answer side by side keep their own labels.
+  const html = withInspector(
+    <>
+      <BlockView block={{ ...richTextFixture, id: 'legacy-row', kind: 'metric_row', items: [] } as unknown as Block} />
+      <BlockView block={financialAnswerFixture as Block} />
+    </>,
+  )
+  assert.equal(count(html, 'Legacy output'), 1)
+  assert.equal(count(html, 'Verified calculation'), 1)
 })
 
 test('an old client meeting a newer answer format shows legacy output and no values', () => {

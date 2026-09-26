@@ -191,6 +191,14 @@ test("deterministic plans need no model and match an equivalent model plan seman
   assert.equal(ambiguous.outcome, "configuration_needed");
 });
 
+test("the surface's mode is server-owned: a model draft cannot carry one", async () => {
+  const draft = { ...revenueProposal([0, 1, 2, 3]), mode: "enforce", feature: { surface: "chat", capability: "financial-answer", mode: "enforce" } };
+  const result = await planFinancialRequest(context(), "Compare revenue", scripted(draft, draft));
+  assert.equal(result.outcome, "unsupported");
+  assert.ok(result.outcome === "unsupported" && result.issues.some((issue) => issue.code === "unknown_field"));
+  assert.equal(buildDeterministicPlan(context(), draft).outcome, "unsupported");
+});
+
 test("clarification answers are bound to the clarification they answer", async () => {
   const result = await planFinancialRequest(context({ requested_subjects: [{ mention: "Zzzz", resolution: { status: "ambiguous", options: [{ subject_ref: { kind: "issuer", id: IDS[0]! }, label: "Apple Inc." }] } }] }), "x", scripted());
   assert.ok(result.outcome === "needs_clarification");

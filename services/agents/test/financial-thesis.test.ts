@@ -71,4 +71,14 @@ test("thesis conditions through the financial engine", { timeout: 300_000 }, asy
     const certificates = (await db.query(`select count(*)::int as n from snapshot_financial_runs c join financial_runs r on r.run_id = c.run_id where r.parent_id = $1`, [stale.thesis_version_id])).rows[0].n;
     assert.equal(certificates, 0, "an edited thesis gets no certificate for its old version");
   });
+
+  await t.test("deleting the agent erases every condition's run and certificate", async () => {
+    const thesis = await saveVersion(pool, agentId, 5, [revenueCondition("gt", "1")]);
+    const [result] = await assess(pool, thesis, CUTOFF);
+    assert.ok(result!.financial, "the condition was certified");
+    await db.query(`delete from agents where agent_id = $1`, [agentId]);
+    const left = (await db.query(`select count(*)::int as n from financial_runs where parent_kind = 'thesis_version'`)).rows[0].n;
+    const certificates = (await db.query(`select count(*)::int as n from snapshot_financial_runs where run_id = $1`, [result!.financial!.run_id])).rows[0].n;
+    assert.deepEqual([left, certificates], [0, 0]);
+  });
 });

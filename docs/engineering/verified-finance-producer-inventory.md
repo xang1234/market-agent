@@ -116,6 +116,30 @@ committed values after enforcement.
 | Metric checks in brief | `services/discovery/src/types.ts`, `validation.ts`; web `web/src/discovery/api.ts` | `isExactThresholdInput` | Versioned numerical criteria | T24 |
 | Assessment/ranking/seal | `services/discovery/src/{assessment,selection,seal}.ts` | Model assessment + seal | Deterministic numerical outcomes authoritative | T26 |
 
+## 2.7 Final dispositions (T30)
+
+What each producer actually does with its surface's flag set to `enforce`,
+and the test that shows it. "Open" marks a planned disposition that is not
+done; it is not counted as complete.
+
+| Producer | Final disposition under enforcement | Evidence |
+|---|---|---|
+| SEC Company Facts / fact repo | Lossless tokens and precision proofs; no publication attestations yet, so SEC facts bind as `publication_time_unknown` (declared gaps) until a reviewed mapping issues them | `services/fundamentals` + `services/evidence` financial tests; known gap below |
+| Snapshot verifier / sealer | Recomputes every unit from ledger records; rejects every mutant in the release gate | `services/snapshot/test/financial-verifier*.test.ts`, `scripts/verified-finance-fixture.test.ts` |
+| `financial_answer` block + inspector | Certified values only, labelled verified/partial; an unknown version renders as legacy | `web/src/blocks/*financial*.test.tsx` |
+| Legacy numeric blocks (`MetricRow`, `Table`, charts, `RevenueBars`, `MetricsComparison`, segments, `PriceTargetRange`, `AnalystConsensus`, `EpsSurprise`) | Labelled "Legacy output" wherever they render; each block kind declares its label when it is registered | `web/src/blocks/financial-surface-contracts.test.tsx` |
+| Chat financial turns | Engine only; a turn that cannot verify is a structured gap, never composer prose | `services/chat/test/financial-*.test.ts`, parity |
+| Chat non-financial turns | Narrative composer, unchanged. Prose that cites sources is labelled "Source-linked narrative" (so is memo prose). Uncited text, such as a gap or a clarification, makes no sourced claim and carries no label. | `financial-surface-contracts.test.tsx` |
+| Analyze numerical sections (`revenue_trend`, `peer_table`, `financial_health`) | Engine sections; their legacy producers do not run | `services/analyze/test/financial-*.test.ts`, parity |
+| Analyze price targets / analyst consensus / price facts | Legacy producers (estimates are not reported facts); their blocks render as "Legacy output" | `financial-surface-contracts.test.tsx` |
+| Grid `latest_revenue`, `latest_eps_diluted` | Engine cells at the run's pinned cutoff | `services/analyst-grids/test/financial-*.test.ts`, parity |
+| Grid `latest_market_cap` | Explicit unsupported gap | `financial-column.test.ts` |
+| Grid reader questions | Narrative, unchanged | — |
+| Thesis metric conditions | Engine saved rule (`as_restated`), certified reference on the assessment | `services/agents/test/financial-thesis*.test.ts`, parity |
+| Discovery numerical criteria | Engine saved rule; certified outcome is authoritative over model roles | `services/discovery/test/financial-*.test.ts`, parity |
+| Discovery financial packet provider | Model-facing packet unchanged; numerical verdicts come only from certified criteria | `financial-assessment-validation.test.ts` |
+| Erasure / revocation | Whole-run erasure of every copy; reads recheck access | `services/financial-engine/test/financial-erasure.test.ts` |
+
 ## 3. Status
 
 Every surface in section 2 now has a certified lane behind a per-surface
@@ -158,6 +182,45 @@ listed above. The shared foundations are in place:
   labels: verified calculation, partial coverage, source-linked narrative,
   and legacy output.
 
+- **T28:** erasure (migration 0051). Deleting a financial run removes its
+  replays, then its certificates, results, and units, then its certificate
+  snapshots, which belong to their unit alone. Its plan (the owner's words and
+  thresholds) goes with its last run. Each surface owns its copy's reaction
+  to the certificate going away:
+  - memo sections cascade from it;
+  - the chat message is deleted;
+  - the grid cell stays as an explicit `financial_result_erased` gap;
+  - thesis and Discovery keep only ids and hashes, which read as unavailable.
+
+  Runs are deleted when their owner is erased, when their parent (thread,
+  memo run, grid run, thesis version, Discovery run) is deleted, and when a
+  fact or publication attestation they bound is deleted. One function,
+  `erase_financial_runs_referencing`, serves both parents and evidence.
+  Evidence deletion takes the finalization share locks, so it waits for an
+  in-flight publication and then erases it.
+
+- **T29:** staged readiness. Each surface's mode is server-owned (`off`,
+  `shadow`, `enforce`). An unset flag is off, a malformed one stops startup,
+  and model JSON cannot carry a mode. Each run records the mode it ran under.
+  With any surface on (or the recovery worker enabled), a service refuses to
+  start until `checkFinancialReadiness` passes. That check covers the tables,
+  columns, views, and functions the engine, its evidence adapter, and erasure
+  depend on, and a version registry covering everything this build emits.
+  `createDevApiRuntimeFromEnv` returns the worker to its caller, and
+  `worker.stop({ timeoutMs })` bounds shutdown. CI sets `REQUIRE_DOCKER=1`, so
+  Docker-backed suites fail rather than skip, and runs the `scripts/` contract
+  tests. `ci-workflow.test.ts` requires financial-core dependency installation
+  in every job that reaches it. `financial-readiness.test.ts` checks web and
+  server version alignment.
+
+- **T30:** the release gate (`docs/engineering/verified-finance-evaluation.md`).
+  - Golden cases for every reviewed rule, checked against an independent BigInt oracle.
+  - Mutants the snapshot verifier must reject; the harness fails a verifier that
+    rejects everything or accepts everything.
+  - Parity across all five surfaces through their real adapters.
+  - Plan fidelity on held-out questions: recorded in CI, `--live` when budgeted.
+  - A machine-readable report that states what was not measured.
+
 Known gap: SEC ingestion records precision proofs but not yet source
 publication attestations, so SEC-ingested facts bind as
 `publication_time_unknown` until a reviewed acceptance-time mapping issues
@@ -198,3 +261,21 @@ appear as declared gaps rather than numbers.
 | Shared engine request path | Every surface calls `publishRequest` (`services/financial-engine/src/request.ts`). It resumes an earlier attempt's plan or plans anew, then reserves, leases, and publishes, and it owns the lease TTL and the one list of gap reasons (`RequestGap`). Surfaces supply their authority, planner, and parent write, and read back their own records. The deterministic planner can split outputs across publication units. |
 | Shared semantics for thesis and Discovery | `evaluateSavedRule` in `services/financial-engine/src/saved-rule.ts` is the one evaluation for saved numerical rules. Callers supply the authority, request key, threshold attribution (the planner now accepts one), and publication guard. |
 | Grid run completion | One rule for every run and mode: completed only when every cell is a value; any gap, unsupported, or error cell makes it partial. The write that finishes the last cell settles the run. Legacy runs whose cells lack coverage (for example a reader question with no documents) are now partial rather than completed. |
+
+### Wave 5 plan deviations
+
+| Plan reference | Actual |
+|---|---|
+| `services/evidence/src/zero-export-erasure.ts`, `services/tools/src/erasure-tools.ts` | Not present. User erasure is `deleteUserAndQueueObjectBlobs` (`services/evidence/src/blob-gc-repo.ts`). Before 0051 it failed for any user with a sealed financial result: `snapshot_financial_runs` blocked the cascade. Erasure is now enforced by triggers in `db/migrations/0051_financial_erasure.up.sql`, so every deleting writer, cascade, and later migration is covered without calling anything. |
+| `services/evidence/test/financial-erasure.test.ts` | `services/financial-engine/test/financial-erasure.test.ts` (it needs the engine fixtures), plus one erasure subtest in each surface's financial test. |
+| `services/financial-engine/src/cache-key.ts`, owner-scoped caches | No result cache exists, so none was added. Runs are keyed by (owner, parent, request key), results are read owner-scoped with access rechecked, and plan ids are server-generated. Reserving another owner's plan returns a conflict with no run id. A future cache must key on owner, parent authority, input/definition/cutoff versions, and access generation. |
+| Reauthorization on every read and replay | Already in place since T17/T18 (`inspection.ts`, `read-model.ts`, `replay.ts`). T28 adds erased results, which read as unavailable. |
+| Safe logs | Run events carry only counts, lease epochs, digests, coverage states, and reason codes. The engine writes no console output. |
+| `services/dev-api/src/main.ts` | The entry point is `services/dev-api/src/dev.ts`. The readiness gate is in `runtime.ts` (`createDevApiRuntimeFromEnv`), before any lane or the worker starts. Chat (`runtime.ts` via `ChatFinancialRuntime.assertReady`) and analyst-grids (`dev.ts`) gate their own startup. |
+| `services/dev-api/src/financial-env.ts` scope | It holds the dev API's surfaces (analyze, grid recovery, thesis, worker). Chat and grids read `CHAT_FINANCIAL_MODE`/`GRID_FINANCIAL_MODE` in their own services with the same strict parser. Discovery has no finance flag: its criteria are composed by `DISCOVERY_WORKER_MODULE`, and only `DISCOVERY_ENABLED` starts it. |
+| `db/test/schema-openapi-alignment.test.ts` | Covered by `scripts/openapi-contract.test.ts` (Wave 3), which now runs in CI in the new `scripts` job. |
+| Readiness: definition catalog in the database | `financial_definition_versions` is not populated by any writer; definitions are compiled in. Readiness checks the compiled registry against everything the build emits. |
+| T30 file layout | Held-out questions and their recorded drafts live in `scripts/verified-finance-fixtures.ts` beside the golden cases and mutants, so one fixture revision hash covers all of them. |
+| T30 mutation target | Mutants tamper a sealed unit's ledger records and run `verifyFinancialUnit`, the component that decides what may be certified. Word-only claims are a result value written in words; presentation text is generated by the verifier and never accepted from a caller. |
+| T30 unexpected skips | The pure gate cannot skip. The Docker-backed parity and surface suites run with `REQUIRE_DOCKER=1` in CI, so a missing Docker fails instead of skipping. The report lists what it did not measure (live plan quality, latency, cost). |
+

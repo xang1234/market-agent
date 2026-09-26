@@ -16,7 +16,8 @@ export type WorkerTickEntry = RecoveryOutcome | Readonly<{ run_id: string; statu
 export type FinancialWorker = Readonly<{
   tick(): Promise<ReadonlyArray<WorkerTickEntry>>;
   start(): void;
-  stop(): Promise<void>;
+  /** Stops scheduling and waits for the tick in flight, at most `timeoutMs`; an abandoned tick's lease expires and recovery resumes it. */
+  stop(options?: { timeoutMs?: number }): Promise<void>;
 }>;
 
 export function createFinancialWorker(input: RecoveryDeps & {
@@ -69,10 +70,16 @@ export function createFinancialWorker(input: RecoveryDeps & {
       stopped = false;
       schedule();
     },
-    async stop() {
+    async stop(options = {}) {
       stopped = true;
       if (timer) clearTimeout(timer);
-      await running;
+      if (options.timeoutMs === undefined) {
+        await running;
+        return;
+      }
+      let deadline: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([running, new Promise<void>((resolve) => { deadline = setTimeout(resolve, options.timeoutMs); })]);
+      clearTimeout(deadline);
     },
   });
 }

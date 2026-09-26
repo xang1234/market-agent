@@ -30,6 +30,7 @@ import {
   type RequestedSubject,
 } from "../../financial-engine/src/planner.ts";
 import type { FinancialEvidencePort, FinancialPool, SqlExecutor } from "../../financial-engine/src/ports.ts";
+import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
 import { publishRequest, type FinancialMode, type RequestGap } from "../../financial-engine/src/request.ts";
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import type { ChatTurnRunContext } from "./coordinator.ts";
@@ -55,6 +56,8 @@ export type ChatFinancialRuntime = Readonly<{
   answers(context: ChatFinancialTurnContext): boolean;
   /** The lane's outcome; null in shadow mode, where the narrative analyst still answers. */
   run(context: ChatFinancialTurnContext): Promise<ChatFinancialTurn | null>;
+  /** Throws unless verified finance is ready; the server awaits it before serving turns with the lane on. */
+  assertReady(): Promise<void>;
 }>;
 
 export type ChatFinancialRuntimeDeps = Readonly<{
@@ -125,7 +128,8 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       }
     }
   };
-  return Object.freeze({ mode: deps.mode, answers, run });
+  const assertReady = () => requireFinancialReadiness(deps.pool, deps.mode === "off" ? [] : ["chat"]);
+  return Object.freeze({ mode: deps.mode, answers, run, assertReady });
 }
 
 async function planTurn(

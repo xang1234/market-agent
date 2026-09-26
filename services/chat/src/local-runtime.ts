@@ -167,7 +167,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
 // CHAT_FINANCIAL_MODE is "shadow" or "enforce"; without a configured LLM router,
 // financial turns in enforce mode get a structured gap instead of a guess.
 export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime({
-  mode: parseFinancialMode(process.env.CHAT_FINANCIAL_MODE),
+  mode: parseFinancialMode(process.env.CHAT_FINANCIAL_MODE, "CHAT_FINANCIAL_MODE"),
   pool: { query: (text, values) => pool().query(text, values), connect: () => pool().connect() },
   planningModel: async (request) => {
     const router = await createLlmRouterFromEnv(process.env);

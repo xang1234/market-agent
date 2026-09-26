@@ -5,12 +5,22 @@ import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import type { PlanningModel } from "../../financial-engine/src/planner.ts";
 import { IDS } from "../../financial-engine/test/db-fixtures.ts";
 import type { ChatAnalystToolRuntime } from "../src/coordinator.ts";
-import { isFinancialRequest } from "../src/financial-runtime.ts";
+import { createChatFinancialRuntime, isFinancialRequest } from "../src/financial-runtime.ts";
+import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
+import type { FinancialPool } from "../../financial-engine/src/ports.ts";
 import { chatDatabase, chatHarness, completed, revenueModel } from "./financial-fixtures.ts";
 
 test("financial intent is recognized from the definition catalog", () => {
   for (const text of ["Compare revenue for AAA and BBB", "What was AAA's gross margin?", "EPS for AAA", "net income trend"]) assert.ok(isFinancialRequest(text), text);
   for (const text of ["tell me about AAA", "what is the latest news", "who is the CEO"]) assert.ok(!isFinancialRequest(text), text);
+});
+
+test("with the lane on, an unready engine stops the server instead of leaving turns on legacy numbers", async () => {
+  // A database missing every financial table: every readiness check reports absent.
+  const unready = { query: async () => ({ rows: [{ kind: "relation", name: "financial_runs", present: false }] }), connect: async () => assert.fail("no turn runs") } as unknown as FinancialPool;
+  const lane = (mode: "off" | "enforce") => createChatFinancialRuntime({ mode, pool: unready, planningModel: null, resolveMention: async () => assert.fail("no turn runs"), evidence: createEvidenceFinancialPort });
+  await assert.rejects(() => lane("enforce").assertReady(), /verified finance is not ready for chat: schema: relation financial_runs is missing/u);
+  await lane("off").assertReady();
 });
 
 test("chat financial lane", { timeout: 300_000 }, async (t) => {

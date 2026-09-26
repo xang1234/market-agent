@@ -12,6 +12,8 @@ concurrency:
 
 env:
   NODE_VERSION: '22.19.0'
+  # Docker-backed integration suites fail here instead of skipping (db/test/docker-pg.ts).
+  REQUIRE_DOCKER: '1'
 
 jobs:
   web:
@@ -741,3 +743,36 @@ jobs:
       - name: Run financial-engine tests
         working-directory: services/financial-engine
         run: npm test
+
+  scripts:
+    name: scripts (repository contract tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            services/market/package-lock.json
+            services/resolver/package-lock.json
+            services/discovery/package-lock.json
+            services/financial-core/package-lock.json
+
+      # The contract tests import web's js-yaml/ajv and service sources that
+      # resolve their own dependencies from each service's node_modules; the
+      # verified-finance gate runs financial-core (ajv, decimal.js).
+      - name: Install imported package dependencies
+        run: |
+          npm --prefix web ci
+          npm --prefix services/market ci
+          npm --prefix services/resolver ci
+          npm --prefix services/discovery ci
+          npm --prefix services/financial-core ci
+
+      - name: Run repository contract tests
+        run: node --experimental-strip-types --test "scripts/*.test.ts"
+

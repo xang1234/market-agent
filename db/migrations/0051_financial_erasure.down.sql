@@ -1,0 +1,19 @@
+drop trigger source_publication_attestations_erase_financial_runs on source_publication_attestations;
+drop trigger facts_erase_financial_runs on facts;
+drop trigger discovery_runs_erase_financial_runs on discovery_runs;
+drop trigger agent_thesis_versions_erase_financial_runs on agent_thesis_versions;
+drop trigger grid_runs_erase_financial_runs on grid_runs;
+drop trigger analyze_template_runs_erase_financial_runs on analyze_template_runs;
+drop trigger chat_threads_erase_financial_runs on chat_threads;
+drop function erase_financial_runs_referencing();
+drop trigger snapshot_financial_runs_erase_grid_copy on snapshot_financial_runs;
+drop function erase_grid_financial_copy();
+drop trigger snapshot_financial_runs_erase_chat_copy on snapshot_financial_runs;
+drop function erase_chat_financial_copy();
+alter table analyze_run_financial_sections drop constraint analyze_run_financial_section_snapshot_id_financial_run_id_fkey;
+alter table analyze_run_financial_sections add constraint analyze_run_financial_section_snapshot_id_financial_run_id_fkey
+  foreign key (snapshot_id, financial_run_id, unit_id) references snapshot_financial_runs(snapshot_id, run_id, unit_id);
+drop trigger financial_runs_erase_orphaned_plan on financial_runs;
+drop function erase_orphaned_financial_plan();
+drop trigger financial_runs_erase_dependents on financial_runs;
+drop function erase_financial_run_dependents();
