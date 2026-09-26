@@ -1,5 +1,5 @@
 import { createDevApiServer } from "./http.ts";
-import { createDevApiAdaptersFromEnv } from "./runtime.ts";
+import { createDevApiAdaptersFromEnv, stopDevApiWorkers } from "./runtime.ts";
 
 const host = process.env.DEV_API_HOST ?? "127.0.0.1";
 const port = Number(process.env.DEV_API_PORT ?? "4312");
@@ -12,6 +12,7 @@ server.listen(port, host, () => {
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    server.close(() => process.exit(0));
+    // Bounded: an in-flight financial tick gets 10s, then its lease expires and recovery resumes it.
+    void stopDevApiWorkers(10_000).finally(() => server.close(() => process.exit(0)));
   });
 }

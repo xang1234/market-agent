@@ -37,7 +37,7 @@ import { mergeSealInputs } from "../../analyze/src/seal-input-merge.ts";
 import { runDeterministicSections } from "../../analyze/src/section-runner.ts";
 import type { AnalyzePlaybook } from "../../analyze/src/playbook.ts";
 import { publishAnalyzeFinancialSections } from "../../analyze/src/financial-section.ts";
-import { parseFinancialMode } from "../../financial-engine/src/request.ts";
+import { loadFinancialModes } from "./financial-env.ts";
 import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
 import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolver.ts";
 import {
@@ -262,12 +262,12 @@ export async function buildAnalyzeRunSeals(input: {
 // starts and frozen in its metadata.
 const ANALYZE_FINANCIAL_PEER_LIMIT = 5;
 
-const analyzeFinancialMode = parseFinancialMode(process.env.ANALYZE_FINANCIAL_MODE);
+const financialModes = loadFinancialModes(process.env);
 
-export const analyzeFinancial = analyzeFinancialMode === "off"
+export const analyzeFinancial = financialModes.analyze === "off"
   ? undefined
   : {
-      mode: analyzeFinancialMode,
+      mode: financialModes.analyze,
       resolvePeers: async (primaryIssuerId: string) =>
         (await createSqlPeerSetResolver(pool()).resolvePeers(primaryIssuerId, { limit: ANALYZE_FINANCIAL_PEER_LIMIT }))
           .map((peer) => ({ kind: "issuer" as const, id: peer.id })),
@@ -294,7 +294,7 @@ export const createAgentLoopStages: DevApiAgentLoopStageFactory = async (input) 
         db: pool(),
         thesis,
         // THESIS_FINANCIAL_MODE=enforce verifies numerical conditions through the financial engine.
-        ...(process.env.THESIS_FINANCIAL_MODE === "enforce" ? { financial: { pool: pool(), evidence: createEvidenceFinancialPort } } : {}),
+        ...(financialModes.thesis === "enforce" ? { financial: { pool: pool(), evidence: createEvidenceFinancialPort } } : {}),
       })
     : createLegacyAgentLoopStages(input);
 };

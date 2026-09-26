@@ -9,17 +9,31 @@ import {
 } from "./http.ts";
 import type { DiscoveryService } from "../../discovery/src/ports.ts";
 import { startFinancialWorkerFromEnv, type FinancialWorkerEnv } from "./financial-worker-bootstrap.ts";
+import { loadFinancialModes, type FinancialEnv } from "./financial-env.ts";
 import { analyzeFinancialRecovery } from "../../analyze/src/financial-section.ts";
 import { gridFinancialRecovery } from "../../analyst-grids/src/financial-column.ts";
+import { requireFinancialReadiness } from "../../financial-engine/src/readiness.ts";
+import type { FinancialWorker } from "../../financial-engine/src/worker.ts";
 
-export type DevApiRuntimeEnv = FinancialWorkerEnv & {
+export type DevApiRuntimeEnv = FinancialWorkerEnv & FinancialEnv & {
   MA_DEV_API_FIXTURE_ADAPTER?: string;
   DEV_API_DATABASE_URL?: string;
   DATABASE_URL?: string;
   DEV_API_RUNTIME_MODULE?: string;
   DEV_API_ANALYZE_SEAL_MODULE?: string;
-  GRID_FINANCIAL_MODE?: string;
 };
+
+let financialWorker: FinancialWorker | null = null;
+
+/** Stops the financial worker, waiting at most `timeoutMs` for the tick in flight; its lease then expires and recovery resumes it. */
+export async function stopDevApiWorkers(timeoutMs = 10_000): Promise<void> {
+  const worker = financialWorker;
+  financialWorker = null;
+  if (!worker) return;
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([worker.stop(), new Promise<void>((resolve) => { timer = setTimeout(resolve, timeoutMs); })]);
+  clearTimeout(timer);
+}
 
 const DEFAULT_DEV_API_RUNTIME_MODULE = new URL("./local-runtime.ts", import.meta.url).href;
 
@@ -35,6 +49,7 @@ export async function createDevApiAdaptersFromEnv(
     env.DEV_API_ANALYZE_SEAL_MODULE?.trim() ||
     DEFAULT_DEV_API_RUNTIME_MODULE;
   if (!databaseUrl) return undefined;
+  const financialModes = loadFinancialModes(env);
 
   const module = await import(moduleSpecifier(sealModulePath, cwd));
   if (typeof module.sealAnalyzeSnapshot !== "function") {
@@ -61,10 +76,12 @@ export async function createDevApiAdaptersFromEnv(
 
   const { Pool } = await import("pg");
   const pool = new Pool({ connectionString: databaseUrl });
+  // Nothing financial starts, the worker included, until its schema and versions are in place.
+  await requireFinancialReadiness(pool, financialModes);
   // Parents whose verified units are resumable after a restart; others register as they adopt the engine.
-  startFinancialWorkerFromEnv(pool, env, {
+  financialWorker = startFinancialWorkerFromEnv(pool, env, {
     ...(module.analyzeFinancial ? { analyze_memo_run: analyzeFinancialRecovery(pool) } : {}),
-    ...(env.GRID_FINANCIAL_MODE === "enforce" ? { analyst_grid_run: gridFinancialRecovery(pool) } : {}),
+    ...(financialModes.grid === "enforce" ? { analyst_grid_run: gridFinancialRecovery(pool) } : {}),
   });
   const discovery = module.createDiscoveryService === undefined
     ? undefined

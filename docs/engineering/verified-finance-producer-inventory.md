@@ -170,6 +170,19 @@ listed above. The shared foundations are in place:
   they bound is deleted. Evidence deletion takes the finalization share
   locks, so it waits for an in-flight publication and then erases it.
 
+- **T29:** staged readiness. Each surface's mode is server-owned (`off`,
+  `shadow`, `enforce`). An unset flag is off, a malformed one stops startup,
+  and model JSON cannot carry a mode. Each run records the mode it ran under.
+  With any surface on (or the recovery worker enabled), a service refuses to
+  start until `checkFinancialReadiness` passes. That check covers the tables,
+  columns, views, and functions the engine, its evidence adapter, and erasure
+  depend on, and a version registry covering everything this build emits.
+  Dev-api stops the worker within a bounded time on shutdown. CI sets
+  `REQUIRE_DOCKER=1`, so Docker-backed suites fail rather than skip, and runs
+  the `scripts/` contract tests. Those tests include web and server version
+  alignment and financial-core dependency installation for every job that
+  reaches it.
+
 Known gap: SEC ingestion records precision proofs but not yet source
 publication attestations, so SEC-ingested facts bind as
 `publication_time_unknown` until a reviewed acceptance-time mapping issues
@@ -220,4 +233,8 @@ appear as declared gaps rather than numbers.
 | `services/financial-engine/src/cache-key.ts`, owner-scoped caches | No result cache exists, so none was added. Runs are keyed by (owner, parent, request key), results are read owner-scoped with access rechecked, and plan ids are server-generated. Reserving another owner's plan returns a conflict with no run id. A future cache must key on owner, parent authority, input/definition/cutoff versions, and access generation. |
 | Reauthorization on every read and replay | Already in place since T17/T18 (`inspection.ts`, `read-model.ts`, `replay.ts`). T28 adds erased results, which read as unavailable. |
 | Safe logs | Run events carry only counts, lease epochs, digests, coverage states, and reason codes. The engine writes no console output. |
+| `services/dev-api/src/main.ts` | The entry point is `services/dev-api/src/dev.ts`. The readiness gate is in `runtime.ts` (`createDevApiAdaptersFromEnv`), before any lane or the worker starts. Chat (`runtime.ts` via `ChatFinancialRuntime.assertReady`) and analyst-grids (`dev.ts`) gate their own startup. |
+| `services/dev-api/src/financial-env.ts` scope | It holds the dev API's surfaces (analyze, grid recovery, thesis, worker). Chat and grids read `CHAT_FINANCIAL_MODE`/`GRID_FINANCIAL_MODE` in their own services with the same strict parser. Discovery has no finance flag: its criteria are composed by `DISCOVERY_WORKER_MODULE`, and only `DISCOVERY_ENABLED` starts it. |
+| `db/test/schema-openapi-alignment.test.ts` | Covered by `scripts/openapi-contract.test.ts` (Wave 3), which now runs in CI in the new `scripts` job. |
+| Readiness: definition catalog in the database | `financial_definition_versions` is not populated by any writer; definitions are compiled in. Readiness checks the compiled registry against everything the build emits. |
 

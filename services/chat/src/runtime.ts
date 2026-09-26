@@ -79,10 +79,13 @@ export async function loadChatServerOptionsFromEnv(
 
     options.analystToolRuntime = module.analystToolRuntime as ChatAnalystToolRuntime;
     if (module.financialRuntime !== undefined) {
-      if (typeof module.financialRuntime !== "object" || typeof module.financialRuntime.run !== "function") {
+      if (typeof module.financialRuntime !== "object" || typeof module.financialRuntime.run !== "function" || typeof module.financialRuntime.assertReady !== "function") {
         throw new Error("CHAT_ANALYST_RUNTIME_MODULE financialRuntime export must be a ChatFinancialRuntime");
       }
-      options.financialRuntime = module.financialRuntime as ChatFinancialRuntime;
+      const financialRuntime = module.financialRuntime as ChatFinancialRuntime;
+      // With the lane on, the server does not start until verified finance is ready.
+      await financialRuntime.assertReady();
+      options.financialRuntime = financialRuntime;
     }
   }
 
