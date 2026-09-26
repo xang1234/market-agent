@@ -10,8 +10,8 @@ drop trigger snapshot_financial_runs_erase_grid_copy on snapshot_financial_runs;
 drop function erase_grid_financial_copy();
 drop trigger snapshot_financial_runs_erase_chat_copy on snapshot_financial_runs;
 drop function erase_chat_financial_copy();
-alter table analyze_run_financial_sections drop constraint analyze_run_financial_sections_snapshot_id_financial_run_id_unit_id_fkey;
-alter table analyze_run_financial_sections add constraint analyze_run_financial_sections_snapshot_id_financial_run_id_unit_id_fkey
+alter table analyze_run_financial_sections drop constraint analyze_run_financial_section_snapshot_id_financial_run_id_fkey;
+alter table analyze_run_financial_sections add constraint analyze_run_financial_section_snapshot_id_financial_run_id_fkey
   foreign key (snapshot_id, financial_run_id, unit_id) references snapshot_financial_runs(snapshot_id, run_id, unit_id);
 drop trigger financial_runs_erase_orphaned_plan on financial_runs;
 drop function erase_orphaned_financial_plan();
