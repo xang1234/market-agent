@@ -221,9 +221,14 @@ test("every CI job whose service reaches financial-core's dependencies installs 
   const needs = await coreFilesNeedingDependencies();
   assert.ok(needs.has("services/financial-core/src/index.ts"), "the package entry point needs its dependencies");
   const workflow = await read(".github/workflows/ci.yml");
-  const services = (await readdir(join(REPO_ROOT, "services"))).filter((name) => name !== "financial-core");
-  for (const service of services) {
-    const files = [...await tsFiles(`services/${service}/src`), ...await tsFiles(`services/${service}/test`)];
+  const packages = [
+    ...(await readdir(join(REPO_ROOT, "services"))).filter((name) => name !== "financial-core").map((name) => `services/${name}`),
+    "scripts",
+  ];
+  for (const packageDir of packages) {
+    const files = packageDir === "scripts"
+      ? (await tsFiles("scripts")).filter((file) => file.startsWith("scripts/") && !file.slice("scripts/".length).includes("/"))
+      : [...await tsFiles(`${packageDir}/src`), ...await tsFiles(`${packageDir}/test`)];
     let reaches = false;
     for (const file of files) {
       for (const [, specifier] of (await read(file)).matchAll(IMPORT)) {
@@ -233,8 +238,9 @@ test("every CI job whose service reaches financial-core's dependencies installs 
       }
     }
     if (!reaches) continue;
-    const job = jobSection(workflow, `services/${service}`);
-    assert.match(job, /services\/financial-core\s+ci|working-directory: services\/financial-core\s+run: npm ci/u, `CI job ${service} must install services/financial-core dependencies`);
+    // The scripts job has no working directory of its own; every other job is found by its package.
+    const job = packageDir === "scripts" ? /\n  scripts:\n[\s\S]*?(?=\n  [a-z][a-z0-9-]*:\n|$)/u.exec(workflow)?.[0] ?? "" : jobSection(workflow, packageDir);
+    assert.match(job, /services\/financial-core\s+ci|working-directory: services\/financial-core\s+run: npm ci/u, `CI job for ${packageDir} must install services/financial-core dependencies`);
   }
 });
 

@@ -116,6 +116,30 @@ committed values after enforcement.
 | Metric checks in brief | `services/discovery/src/types.ts`, `validation.ts`; web `web/src/discovery/api.ts` | `isExactThresholdInput` | Versioned numerical criteria | T24 |
 | Assessment/ranking/seal | `services/discovery/src/{assessment,selection,seal}.ts` | Model assessment + seal | Deterministic numerical outcomes authoritative | T26 |
 
+## 2.7 Final dispositions (T30)
+
+What each producer actually does with its surface's flag set to `enforce`,
+and the test that shows it. "Open" marks a planned disposition that is not
+done; it is not counted as complete.
+
+| Producer | Final disposition under enforcement | Evidence |
+|---|---|---|
+| SEC Company Facts / fact repo | Lossless tokens and precision proofs; no publication attestations yet, so SEC facts bind as `publication_time_unknown` (declared gaps) until a reviewed mapping issues them | `services/fundamentals` + `services/evidence` financial tests; known gap below |
+| Snapshot verifier / sealer | Recomputes every unit from ledger records; rejects every mutant in the release gate | `services/snapshot/test/financial-verifier*.test.ts`, `scripts/verified-finance-fixture.test.ts` |
+| `financial_answer` block + inspector | Certified values only, labelled verified/partial; an unknown version renders as legacy | `web/src/blocks/*financial*.test.tsx` |
+| Legacy numeric blocks (`MetricRow`, `RevenueBars`, `MetricsComparison`, `PriceTargetRange`, `AnalystConsensus`, …) | **Open:** still rendered without a legacy label | — |
+| Chat financial turns | Engine only; a turn that cannot verify is a structured gap, never composer prose | `services/chat/test/financial-*.test.ts`, parity |
+| Chat non-financial turns | Narrative composer, unchanged; **open:** not labelled narrative | — |
+| Analyze numerical sections (`revenue_trend`, `peer_table`, `financial_health`) | Engine sections; their legacy producers do not run | `services/analyze/test/financial-*.test.ts`, parity |
+| Analyze price targets / analyst consensus / price facts | Legacy producers, unchanged and unlabelled (estimates are not reported facts) | — |
+| Grid `latest_revenue`, `latest_eps_diluted` | Engine cells at the run's pinned cutoff | `services/analyst-grids/test/financial-*.test.ts`, parity |
+| Grid `latest_market_cap` | Explicit unsupported gap | `financial-column.test.ts` |
+| Grid reader questions | Narrative, unchanged | — |
+| Thesis metric conditions | Engine saved rule (`as_restated`), certified reference on the assessment | `services/agents/test/financial-thesis*.test.ts`, parity |
+| Discovery numerical criteria | Engine saved rule; certified outcome is authoritative over model roles | `services/discovery/test/financial-*.test.ts`, parity |
+| Discovery financial packet provider | Model-facing packet unchanged; numerical verdicts come only from certified criteria | `financial-assessment-validation.test.ts` |
+| Erasure / revocation | Whole-run erasure of every copy; reads recheck access | `services/financial-engine/test/financial-erasure.test.ts` |
+
 ## 3. Status
 
 Every surface in section 2 now has a certified lane behind a per-surface
@@ -189,6 +213,14 @@ listed above. The shared foundations are in place:
   in every job that reaches it. `financial-readiness.test.ts` checks web and
   server version alignment.
 
+- **T30:** the release gate (`docs/engineering/verified-finance-evaluation.md`).
+  - Golden cases for every reviewed rule, checked against an independent BigInt oracle.
+  - Mutants the snapshot verifier must reject; the harness fails a verifier that
+    rejects everything or accepts everything.
+  - Parity across all five surfaces through their real adapters.
+  - Plan fidelity on held-out questions: recorded in CI, `--live` when budgeted.
+  - A machine-readable report that states what was not measured.
+
 Known gap: SEC ingestion records precision proofs but not yet source
 publication attestations, so SEC-ingested facts bind as
 `publication_time_unknown` until a reviewed acceptance-time mapping issues
@@ -243,4 +275,7 @@ appear as declared gaps rather than numbers.
 | `services/dev-api/src/financial-env.ts` scope | It holds the dev API's surfaces (analyze, grid recovery, thesis, worker). Chat and grids read `CHAT_FINANCIAL_MODE`/`GRID_FINANCIAL_MODE` in their own services with the same strict parser. Discovery has no finance flag: its criteria are composed by `DISCOVERY_WORKER_MODULE`, and only `DISCOVERY_ENABLED` starts it. |
 | `db/test/schema-openapi-alignment.test.ts` | Covered by `scripts/openapi-contract.test.ts` (Wave 3), which now runs in CI in the new `scripts` job. |
 | Readiness: definition catalog in the database | `financial_definition_versions` is not populated by any writer; definitions are compiled in. Readiness checks the compiled registry against everything the build emits. |
+| T30 file layout | Held-out questions and their recorded drafts live in `scripts/verified-finance-fixtures.ts` beside the golden cases and mutants, so one fixture revision hash covers all of them. |
+| T30 mutation target | Mutants tamper a sealed unit's ledger records and run `verifyFinancialUnit`, the component that decides what may be certified. Word-only claims are a result value written in words; presentation text is generated by the verifier and never accepted from a caller. |
+| T30 unexpected skips | The pure gate cannot skip. The Docker-backed parity and surface suites run with `REQUIRE_DOCKER=1` in CI, so a missing Docker fails instead of skipping. The report lists what it did not measure (live plan quality, latency, cost). |
 
