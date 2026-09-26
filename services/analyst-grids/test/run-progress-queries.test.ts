@@ -38,13 +38,13 @@ test("run progress helpers advance run/row/cell state and read detail", async (t
     universe_spec: { source: "manual", subject_refs: [{ kind: "issuer", id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa" }] },
     column_specs: [{ column_key: "latest_market_cap" }],
   });
-  const runId = await createRun(db, { gridId: grid.grid_id, userId: USER, asOf: "2026-06-09T00:00:00.000Z", cellTotal: 1, droppedRowCount: 0 });
+  const runId = await createRun(db, { gridId: grid.grid_id, userId: USER, asOf: "2026-06-09T00:00:00.000Z", cellTotal: 1, droppedRowCount: 0, columnInstances: [{ column_instance_id: "c0", column_key: "latest_market_cap", params: null, position: 0 }] });
 
   assert.equal((await loadRunForUser(db, USER, runId))?.grid_run_id, runId);
   assert.equal(await loadRunForUser(db, "22222222-2222-4222-a222-222222222222", runId), null);
 
   const rowId = await insertRow(db, { gridRunId: runId, rowNumber: 0, subjectRef: { kind: "issuer", id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa" } });
-  await insertPendingCell(db, { gridRowId: rowId, gridRunId: runId, columnKey: "latest_market_cap" });
+  await insertPendingCell(db, { gridRowId: rowId, gridRunId: runId, columnKey: "latest_market_cap", columnInstanceId: "c0" });
 
   await setRunStatus(db, runId, "running");
   await markRowResolved(db, rowId, { period_kind: "point", fiscal_year: null, fiscal_period: null, period_start: null, period_end: null, document_refs: [] });

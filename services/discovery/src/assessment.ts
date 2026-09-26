@@ -4,6 +4,8 @@ import type { EvidencePacket } from "./ports.ts";
 import { buildAssessmentMessages } from "./assessment-prompts.ts";
 import { normalizeRoleCitations, validateAnalystOutput, validateSkepticOutput } from "./assessment-validation.ts";
 import { requestHash } from "./scout-support.ts";
+import { numericalCriteria } from "./financial-criteria.ts";
+import { assertCertifiedOutcomes } from "./financial-outcomes.ts";
 import type { AnalystOutput, Brief, CandidateDecision, Citation, CriterionOutcome, Dimension, Level, RawCitation, SkepticOutput } from "./types.ts";
 import type { AssessmentContext, AssessmentQuoteRequest, ValidatedRoleCheckpoint } from "./ports.ts";
 
@@ -25,7 +27,7 @@ export async function assessCompany(context: AssessmentContext): Promise<Candida
   const packet = await reloadAssessmentPacket(context);
   const validatedAnalyst = revalidateNormalizedRole("analyst", analyst.output, context, packet) as AnalystOutput<Citation>;
   const validatedSkeptic = revalidateNormalizedRole("skeptic", skeptic.output, context, packet) as SkepticOutput<Citation>;
-  return decideCandidate(context.brief, packet, validatedAnalyst, validatedSkeptic, context.as_of);
+  return decideCandidate(context.brief, packet, validatedAnalyst, validatedSkeptic, context.as_of, context.metric_outcomes);
 }
 
 async function reloadAssessmentPacket(context: AssessmentContext): Promise<EvidencePacket> {
@@ -136,12 +138,15 @@ export function decideCandidate(
   analyst: AnalystOutput,
   skeptic: SkepticOutput,
   asOf: string,
+  metricOutcomes?: ReadonlyMap<string, CriterionOutcome<Citation>>,
 ): CandidateDecision {
   const analystCriteria = criterionMap(analyst.criteria, brief);
   const skepticCriteria = criterionMap(skeptic.criteria, brief);
+  if (metricOutcomes !== undefined) assertCertifiedOutcomes(numericalCriteria(brief), metricOutcomes);
+  // Numerical criteria are decided by calculation alone; the roles' view of them is never consulted.
   const criteria = brief.criteria.map((criterion) => criterion.metric === undefined
     ? combineNarrativeCriterion(criterion.criterion_id, analystCriteria.get(criterion.criterion_id)!, skepticCriteria.get(criterion.criterion_id)!)
-    : deterministicMetricCriterion(criterion, packet, asOf));
+    : metricOutcomes?.get(criterion.criterion_id) ?? deterministicMetricCriterion(criterion, packet, asOf));
   const exposure = conservativeDimension(analyst.exposure, skeptic.exposure);
   const quality = conservativeDimension(analyst.business_quality, skeptic.business_quality);
   const valuation = conservativeDimension(analyst.valuation_context, skeptic.valuation_context);

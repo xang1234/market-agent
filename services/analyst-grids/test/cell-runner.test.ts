@@ -42,14 +42,15 @@ test("computeAndPersistCell seals a snapshot and writes an ok cell", async (t) =
     universe_spec: { source: "manual", subject_refs: [{ kind: "issuer", id: issuerId }] },
     column_specs: [{ column_key: "latest_market_cap" }],
   });
-  const runId = await createRun(db, { gridId: grid.grid_id, userId, asOf: new Date().toISOString(), cellTotal: 1, droppedRowCount: 0 });
+  const runId = await createRun(db, { gridId: grid.grid_id, userId, asOf: new Date().toISOString(), cellTotal: 1, droppedRowCount: 0, columnInstances: [{ column_instance_id: "c0", column_key: "latest_market_cap", params: null, position: 0 }] });
   const rowId = await insertRow(db, { gridRunId: runId, rowNumber: 0, subjectRef: { kind: "issuer", id: issuerId } });
-  await insertPendingCell(db, { gridRowId: rowId, gridRunId: runId, columnKey: "latest_market_cap" });
+  await insertPendingCell(db, { gridRowId: rowId, gridRunId: runId, columnKey: "latest_market_cap", columnInstanceId: "c0" });
 
   await computeAndPersistCell(
     { db, pool },
     {
       column: getColumn("latest_market_cap")!,
+      columnInstanceId: "c0",
       params: null,
       gridRowId: rowId,
       subject: { kind: "issuer", id: issuerId },

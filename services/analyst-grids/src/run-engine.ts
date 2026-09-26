@@ -9,14 +9,16 @@ import {
   markRowResolved,
   markRowFailed,
   bumpCellDone,
+  settleRunIfDone,
 } from "./queries.ts";
+import { isFinancialColumn, publishGridFinancialCells, type GridFinancialDeps, type GridFinancialMode } from "./financial-column.ts";
 import { withTransaction } from "../../evidence/src/transaction.ts";
 import { resolveUniverse, type UniverseResolverDeps } from "./universe.ts";
 import { normalizeUniverseToIssuers } from "./subject-normalization.ts";
 import { resolvePeriodContext } from "./period-context.ts";
 import { getColumn, type ColumnCatalogEntry, type PeriodContext, type ReaderColumnDeps } from "./column-catalog.ts";
 import { computeAndPersistCell } from "./cell-runner.ts";
-import { GridValidationError, type QueryExecutor } from "./types.ts";
+import { GridValidationError, type ColumnInstance, type QueryExecutor } from "./types.ts";
 import type { JsonValue } from "../../observability/src/types.ts";
 
 export const MAX_GRID_ROWS = 25;
@@ -27,9 +29,11 @@ export type RunEngineDeps = {
   pool: SnapshotClientPool;
   universe: UniverseResolverDeps;
   reader?: ReaderColumnDeps;
+  // Verified numerical columns (financial-column.ts). Absent or off: every column uses its legacy producer.
+  financial?: GridFinancialDeps;
 };
 
-type RunColumn = { entry: ColumnCatalogEntry; params: JsonValue | null };
+type RunColumn = { entry: ColumnCatalogEntry; params: JsonValue | null; instance: ColumnInstance };
 
 export function capUniverse(refs: ReadonlyArray<SubjectRef>): { capped: ReadonlyArray<SubjectRef>; droppedRowCount: number } {
   if (refs.length <= MAX_GRID_ROWS) return { capped: refs, droppedRowCount: 0 };
@@ -83,10 +87,12 @@ export async function startGridRun(
   input: { gridId: string; userId: string; asOf: string },
 ): Promise<StartRunResult> {
   const grid = await getGrid(deps.db, input.userId, input.gridId);
-  const columns: RunColumn[] = grid.column_specs.map((spec) => {
+  // Freeze the columns now: an edit to the grid while this run executes cannot change what it computes.
+  const columns: RunColumn[] = grid.column_specs.map((spec, position) => {
     const entry = getColumn(spec.column_key);
     if (!entry) throw new GridValidationError(`unknown column_key: ${spec.column_key}`);
-    return { entry, params: spec.params ?? null };
+    const params = spec.params ?? null;
+    return { entry, params, instance: { column_instance_id: `c${position}`, column_key: spec.column_key, params, position } };
   });
 
   const resolved = await resolveUniverse(deps.universe, input.userId, grid.universe_spec);
@@ -106,14 +112,21 @@ export async function startGridRun(
       asOf: input.asOf,
       cellTotal,
       droppedRowCount,
+      columnInstances: columns.map((column) => column.instance),
+      financialMode: deps.financial && deps.financial.mode !== "off" ? deps.financial.mode : null,
     });
-    const rows: Array<{ gridRowId: string; subject: SubjectRef }> = [];
+    const rows: Array<{ gridRowId: string; rowNumber: number; subject: SubjectRef }> = [];
     for (const [rowNumber, subject] of capped.entries()) {
       const gridRowId = await insertRow(tx.db, { gridRunId: runId, rowNumber, subjectRef: subject });
       for (const column of columns) {
-        await insertPendingCell(tx.db, { gridRowId, gridRunId: runId, columnKey: column.entry.column_key });
+        await insertPendingCell(tx.db, {
+          gridRowId,
+          gridRunId: runId,
+          columnKey: column.entry.column_key,
+          columnInstanceId: column.instance.column_instance_id,
+        });
       }
-      rows.push({ gridRowId, subject });
+      rows.push({ gridRowId, rowNumber, subject });
     }
     return { runId, rows };
   });
@@ -133,15 +146,28 @@ export async function startGridRun(
   return { runId, status: "pending" };
 }
 
+/**
+ * Which columns the run's producers compute and which the engine does, decided
+ * once when the run starts. Enforced: numerical columns are the engine's alone.
+ * Shadow: producers compute everything and the engine only plans the numerical
+ * columns. Off: producers compute everything.
+ */
+function routeColumns(columns: ReadonlyArray<RunColumn>, mode: GridFinancialMode): { producer: RunColumn[]; engine: ColumnInstance[] } {
+  const numerical = columns.filter((column) => isFinancialColumn(column.entry.column_key));
+  return {
+    producer: mode === "enforce" ? columns.filter((column) => !numerical.includes(column)) : [...columns],
+    engine: mode === "off" ? [] : numerical.map((column) => column.instance),
+  };
+}
+
 async function runWorker(
   deps: RunEngineDeps,
-  ctx: { runId: string; rows: Array<{ gridRowId: string; subject: SubjectRef }>; columns: RunColumn[]; asOf: string; userId: string },
+  ctx: { runId: string; rows: Array<{ gridRowId: string; rowNumber: number; subject: SubjectRef }>; columns: RunColumn[]; asOf: string; userId: string },
 ): Promise<void> {
+  const route = routeColumns(ctx.columns, deps.financial?.mode ?? "off");
   try {
     await setRunStatus(deps.db, ctx.runId, "running");
-    // Each row reports whether any of its cells errored; the worker finalizes
-    // from these outcomes rather than re-reading every cell back.
-    const rowHadError = await runWithConcurrency(ctx.rows, ROW_CONCURRENCY, async ({ gridRowId, subject }) => {
+    await runWithConcurrency(ctx.rows, ROW_CONCURRENCY, async ({ gridRowId, subject }) => {
       let period: PeriodContext = null;
       try {
         period = await resolvePeriodContext(deps.db, subject);
@@ -150,21 +176,37 @@ async function runWorker(
         await markRowFailed(deps.db, gridRowId);
         period = null;
       }
-      let errored = false;
-      for (const column of ctx.columns) {
-        const status = await computeAndPersistCell(
+      for (const column of route.producer) {
+        await computeAndPersistCell(
           { db: deps.db, pool: deps.pool, reader: deps.reader },
-          { column: column.entry, params: column.params, gridRowId, subject, period, asOf: ctx.asOf, userId: ctx.userId },
+          {
+            column: column.entry,
+            columnInstanceId: column.instance.column_instance_id,
+            params: column.params,
+            gridRowId,
+            subject,
+            period,
+            asOf: ctx.asOf,
+            userId: ctx.userId,
+          },
         );
-        if (status === "error") errored = true;
         await bumpCellDone(deps.db, ctx.runId);
       }
-      return errored;
     });
-
-    // partial when any cell errored, else completed.
-    const anyError = rowHadError.some(Boolean);
-    await setRunStatus(deps.db, ctx.runId, anyError ? "partial" : "completed", { completedAt: true });
+    if (route.engine.length > 0 && deps.financial && deps.financial.mode !== "off") {
+      await publishGridFinancialCells(deps.financial, {
+        user_id: ctx.userId,
+        grid_run_id: ctx.runId,
+        knowledge_cutoff: ctx.asOf,
+        mode: deps.financial.mode,
+        rows: ctx.rows.map(({ rowNumber, subject }) => ({ rowNumber, subject })),
+        instances: route.engine,
+      });
+    }
+    // One completion rule for every run: completed only when every cell is a value; any gap,
+    // unsupported, or error cell makes it partial. A cell still owed by another worker or by
+    // recovery keeps the run open until the write that finishes it settles the run.
+    await settleRunIfDone(deps.db, ctx.runId);
   } catch (error) {
     try {
       await setRunStatus(deps.db, ctx.runId, "failed", {

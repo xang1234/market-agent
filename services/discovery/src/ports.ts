@@ -73,6 +73,8 @@ export type AssessmentContext = {
   reloadPacket: () => Promise<EvidencePacket>;
   saveValidatedRole: (checkpoint: ValidatedRoleCheckpoint) => Promise<void>;
   loadValidatedRoles: () => Promise<AssessmentRoleProgress>;
+  /** Certified numerical criterion outcomes; when present they replace the stored-fact checks and cannot be overridden. */
+  metric_outcomes?: ReadonlyMap<D.Id, D.CriterionOutcome<D.Citation>>;
 };
 export type AttemptReservation = { attempt_id: D.Id; attempt_number: 1 | 2; state: "dispatch" | "cached" | "exhausted" | "in_progress"; result: unknown };
 export type StoredCandidate = D.DiscoveredCandidate & { state: D.CandidateState; ordinal: number | null; assessment: D.CandidateDecision | null; snapshot_id: D.Id | null; rank: number | null };
@@ -123,6 +125,8 @@ export type WorkerDeps = {
   loadExisting: (lease: Lease, brief: D.Brief) => Promise<D.ExistingCandidate[]>;
   persistQuotes: (lease: Lease, packet: EvidencePacket, raw: D.AnalystOutput | D.SkepticOutput, request: AssessmentQuoteRequest) => Promise<Map<string, D.Citation>>;
   commitAssessment: (lease: Lease, packet: EvidencePacket, decision: D.CandidateDecision) => Promise<D.AssessedCandidate>;
+  /** Verified numerical criteria (financial-execution.ts); absent, numerical criteria use the stored-fact checks. */
+  financialCriteria?: import("./financial-execution.ts").FinancialCriteriaEvaluator;
 };
 export type DiscoveryService = {
   createCampaign(userId: D.Id, input: { name: string; question: string }): Promise<D.Campaign>;

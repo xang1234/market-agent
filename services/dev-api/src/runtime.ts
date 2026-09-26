@@ -9,6 +9,8 @@ import {
 } from "./http.ts";
 import type { DiscoveryService } from "../../discovery/src/ports.ts";
 import { startFinancialWorkerFromEnv, type FinancialWorkerEnv } from "./financial-worker-bootstrap.ts";
+import { analyzeFinancialRecovery } from "../../analyze/src/financial-section.ts";
+import { gridFinancialRecovery } from "../../analyst-grids/src/financial-column.ts";
 
 export type DevApiRuntimeEnv = FinancialWorkerEnv & {
   MA_DEV_API_FIXTURE_ADAPTER?: string;
@@ -16,6 +18,7 @@ export type DevApiRuntimeEnv = FinancialWorkerEnv & {
   DATABASE_URL?: string;
   DEV_API_RUNTIME_MODULE?: string;
   DEV_API_ANALYZE_SEAL_MODULE?: string;
+  GRID_FINANCIAL_MODE?: string;
 };
 
 const DEFAULT_DEV_API_RUNTIME_MODULE = new URL("./local-runtime.ts", import.meta.url).href;
@@ -52,10 +55,17 @@ export async function createDevApiAdaptersFromEnv(
   if (module.createDiscoveryService !== undefined && typeof module.createDiscoveryService !== "function") {
     throw new Error("DEV_API_RUNTIME_MODULE createDiscoveryService export must be a function");
   }
+  if (module.analyzeFinancial !== undefined && typeof module.analyzeFinancial?.publish !== "function") {
+    throw new Error("DEV_API_RUNTIME_MODULE analyzeFinancial export must provide publish()");
+  }
 
   const { Pool } = await import("pg");
   const pool = new Pool({ connectionString: databaseUrl });
-  startFinancialWorkerFromEnv(pool, env);
+  // Parents whose verified units are resumable after a restart; others register as they adopt the engine.
+  startFinancialWorkerFromEnv(pool, env, {
+    ...(module.analyzeFinancial ? { analyze_memo_run: analyzeFinancialRecovery(pool) } : {}),
+    ...(env.GRID_FINANCIAL_MODE === "enforce" ? { analyst_grid_run: gridFinancialRecovery(pool) } : {}),
+  });
   const discovery = module.createDiscoveryService === undefined
     ? undefined
     : await module.createDiscoveryService({ db: pool }) as DiscoveryService;
@@ -66,6 +76,7 @@ export async function createDevApiAdaptersFromEnv(
     runAnalyzeWorkflow: module.runAnalyzeWorkflow as DevApiServiceAdapterDeps["runAnalyzeWorkflow"],
     createAgentLoopStages: module.createAgentLoopStages as DevApiServiceAdapterDeps["createAgentLoopStages"],
     inspectEvidence: module.inspectEvidence as DevApiServiceAdapterDeps["inspectEvidence"],
+    analyzeFinancial: module.analyzeFinancial as DevApiServiceAdapterDeps["analyzeFinancial"],
     discovery,
   });
 }

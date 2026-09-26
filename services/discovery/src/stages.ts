@@ -8,7 +8,7 @@ import { discoverCandidates } from "./scout.ts";
 import { ProviderRequestError } from "./providers/errors.ts";
 import { bindModelSnapshot } from "./model-snapshot.ts";
 import type { CampaignModel, Checkpoint, EvidencePacket, Lease, StoredCandidate, WorkerDeps } from "./ports.ts";
-import type { Coverage, RunStatus } from "./types.ts";
+import type { Coverage, RunStatus, SavedBrief } from "./types.ts";
 import { DiscoveryError } from "./types.ts";
 
 export type StageOutcome = Readonly<{ coverage: Coverage; status: Extract<RunStatus, "completed" | "partial" | "failed"> }>;
@@ -66,7 +66,7 @@ export async function executeStages(deps: WorkerDeps, lease: Lease, signal: Abor
     const candidate = selected[index]!;
     if (candidate.assessment === null && candidate.state === "researching") {
       try {
-        await researchCompany(deps, lease, candidate, brief.brief, providers, model, operations, observationTime, signal);
+        await researchCompany(deps, lease, candidate, brief, providers, model, operations, observationTime, signal);
       } catch (error) {
         if (isControl(error)) throw error;
         incomplete = true;
@@ -96,7 +96,7 @@ async function researchCompany(
   deps: WorkerDeps,
   lease: Lease,
   candidate: StoredCandidate,
-  brief: Parameters<typeof assessCompany>[0]["brief"],
+  savedBrief: SavedBrief,
   providers: ReturnType<WorkerDeps["providers"]>,
   model: CampaignModel,
   operations: ReturnType<typeof createOperationRunner>,
@@ -104,6 +104,7 @@ async function researchCompany(
   signal: AbortSignal,
 ): Promise<void> {
   if (candidate.identity === null) throw new Error("selected candidate is unresolved");
+  const brief = savedBrief.brief;
   const stored = await deps.repo.loadResearchPacket(lease, candidate.candidate_id);
   const packet = stored?.packet ?? await acquirePacket(deps, lease, candidate, brief, providers, operations, observationTime, signal);
   if (stored === null) await deps.repo.saveResearchPacket(lease, packet);
@@ -111,6 +112,11 @@ async function researchCompany(
   // call so its exact serialized prompt is the same one used after restart.
   const original = (await deps.repo.loadResearchPacket(lease, candidate.candidate_id))?.packet;
   if (original === undefined) throw new Error("durable research packet was not saved");
+  await assertRunnable(deps, lease, signal);
+  // Numerical criteria are calculated under this worker's campaign fence before any role runs; a retry reuses them.
+  const certified = deps.financialCriteria
+    ? await deps.financialCriteria(lease, { brief: savedBrief, candidate_id: candidate.candidate_id, identity: candidate.identity, as_of: observationTime })
+    : null;
   await assertRunnable(deps, lease, signal);
   const decision = await assessCompany({
     run_id: lease.run_id,
@@ -122,6 +128,7 @@ async function researchCompany(
     reloadPacket: () => deps.repo.refreshResearchPacket(lease, original),
     saveValidatedRole: (role) => deps.repo.saveValidatedRole(lease, candidate.candidate_id, role),
     loadValidatedRoles: () => deps.repo.loadValidatedRoles(lease, candidate.candidate_id),
+    ...(certified ? { metric_outcomes: certified } : {}),
   });
   await assertRunnable(deps, lease, signal);
   // The original packet remains the immutable model request. A fresh packet

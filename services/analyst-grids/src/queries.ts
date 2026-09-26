@@ -4,11 +4,13 @@ import {
   type CellRef,
   type CellStatus,
   type CellWrite,
+  type ColumnInstance,
   type CreateGridInput,
   type QueryExecutor,
   type ResearchGridRow,
 } from "./types.ts";
 import type { SubjectRef } from "../../shared/src/subject-ref.ts";
+import type { SqlExecutor } from "../../financial-engine/src/ports.ts";
 
 const GRID_COLUMNS = `grid_id::text as grid_id,
        user_id::text as user_id,
@@ -101,13 +103,15 @@ export async function createRun(
     asOf: string;
     cellTotal: number;
     droppedRowCount: number;
+    columnInstances: ReadonlyArray<ColumnInstance>;
+    financialMode?: "shadow" | "enforce" | null;
   },
 ): Promise<string> {
   const result = await db.query<{ grid_run_id: string }>(
-    `insert into grid_runs (grid_id, user_id, status, as_of, cell_total, dropped_row_count)
-     values ($1, $2, 'pending', $3, $4, $5)
+    `insert into grid_runs (grid_id, user_id, status, as_of, cell_total, dropped_row_count, column_instances, financial_mode)
+     values ($1, $2, 'pending', $3, $4, $5, $6::jsonb, $7)
      returning grid_run_id::text as grid_run_id`,
-    [input.gridId, input.userId, input.asOf, input.cellTotal, input.droppedRowCount],
+    [input.gridId, input.userId, input.asOf, input.cellTotal, input.droppedRowCount, JSON.stringify(input.columnInstances), input.financialMode ?? null],
   );
   return result.rows[0].grid_run_id;
 }
@@ -127,20 +131,20 @@ export async function insertRow(
 
 export async function insertPendingCell(
   db: QueryExecutor,
-  input: { gridRowId: string; gridRunId: string; columnKey: string },
+  input: { gridRowId: string; gridRunId: string; columnKey: string; columnInstanceId: string },
 ): Promise<string> {
   const result = await db.query<{ grid_cell_id: string }>(
-    `insert into grid_cells (grid_row_id, grid_run_id, column_key, status)
-     values ($1, $2, $3, 'pending')
+    `insert into grid_cells (grid_row_id, grid_run_id, column_key, column_instance_id, status)
+     values ($1, $2, $3, $4, 'pending')
      returning grid_cell_id::text as grid_cell_id`,
-    [input.gridRowId, input.gridRunId, input.columnKey],
+    [input.gridRowId, input.gridRunId, input.columnKey, input.columnInstanceId],
   );
   return result.rows[0].grid_cell_id;
 }
 
 export async function updateCellResult(
   db: QueryExecutor,
-  input: CellWrite & { gridRowId: string; columnKey: string },
+  input: CellWrite & { gridRowId: string; columnInstanceId: string },
 ): Promise<void> {
   const result = await db.query(
     `update grid_cells
@@ -150,10 +154,10 @@ export async function updateCellResult(
             primary_ref = $6::jsonb,
             coverage_flag = $7,
             computed_at = now()
-      where grid_row_id = $1 and column_key = $2`,
+      where grid_row_id = $1 and column_instance_id = $2`,
     [
       input.gridRowId,
-      input.columnKey,
+      input.columnInstanceId,
       input.status,
       JSON.stringify(input.display),
       input.snapshotId,
@@ -166,9 +170,68 @@ export async function updateCellResult(
   // not a benign no-op — surface it instead of silently dropping the result.
   if ((result.rowCount ?? 0) === 0) {
     throw new Error(
-      `updateCellResult matched no cell for grid_row_id=${input.gridRowId} column_key=${input.columnKey}`,
+      `updateCellResult matched no cell for grid_row_id=${input.gridRowId} column_instance_id=${input.columnInstanceId}`,
     );
   }
+}
+
+/** The certified parts of a cell, written only by its finalization transaction. */
+export type CertifiedCell = {
+  financialRunId: string;
+  financialUnitId: string;
+  certificateDigest: string;
+  block: unknown;
+};
+
+/**
+ * Writes a still-pending cell and counts it done in one statement, so a retry,
+ * a restart, or a second worker can never count one cell twice; the write that
+ * completes the run also settles it. Returns whether this call wrote the cell.
+ * `ownerId` scopes the write to the run's owner.
+ */
+export async function writePendingCellOnce(
+  db: SqlExecutor,
+  input: CellWrite & { gridRunId: string; ownerId: string; rowNumber: number; columnInstanceId: string; certified?: CertifiedCell },
+): Promise<boolean> {
+  const result = await db.query<{ n: number }>(
+    `with written as (
+       update grid_cells c
+          set status = $5, display = $6::jsonb, snapshot_id = $7, primary_ref = $8::jsonb, coverage_flag = $9, computed_at = now(),
+              financial_run_id = $10, financial_unit_id = $11, certificate_digest = $12, financial_block = $13::jsonb
+         from grid_rows gr, grid_runs r
+        where gr.grid_row_id = c.grid_row_id and r.grid_run_id = c.grid_run_id
+          and c.grid_run_id = $1 and r.user_id = $2 and gr.row_number = $3 and c.column_instance_id = $4 and c.status = 'pending'
+       returning c.grid_run_id
+     ), counted as (
+       update grid_runs set cell_done = cell_done + (select count(*) from written) where grid_run_id = $1
+     )
+     select count(*)::int as n from written`,
+    [
+      input.gridRunId, input.ownerId, input.rowNumber, input.columnInstanceId,
+      input.status, JSON.stringify(input.display), input.snapshotId,
+      input.primaryRef === null ? null : JSON.stringify(input.primaryRef), input.coverageFlag,
+      input.certified?.financialRunId ?? null, input.certified?.financialUnitId ?? null,
+      input.certified?.certificateDigest ?? null, input.certified ? JSON.stringify(input.certified.block) : null,
+    ],
+  );
+  const written = Number(result.rows[0]?.n ?? 0) === 1;
+  if (written) await settleRunIfDone(db, input.gridRunId);
+  return written;
+}
+
+/**
+ * Settles a run once every cell is written: completed only when every cell is
+ * a verified or ok value; any gap, unsupported, or error cell makes it partial.
+ * A no-op while cells are outstanding or once the run is settled.
+ */
+export async function settleRunIfDone(db: SqlExecutor, runId: string): Promise<void> {
+  await db.query(
+    `update grid_runs r
+        set status = case when exists (select 1 from grid_cells c where c.grid_run_id = r.grid_run_id and c.status <> 'ok') then 'partial' else 'completed' end,
+            completed_at = now()
+      where r.grid_run_id = $1 and r.cell_done = r.cell_total and r.status in ('pending', 'running')`,
+    [runId],
+  );
 }
 
 // ---- Run progress + detail (Plan 2) ----
@@ -188,13 +251,16 @@ export type GridRunRow = {
   error_message: string | null;
   started_at: string;
   completed_at: string | null;
+  // Frozen at start; null for runs recorded before column instances existed.
+  column_instances: ReadonlyArray<ColumnInstance> | null;
+  financial_mode: "shadow" | "enforce" | null;
 };
 
 const RUN_COLUMNS = `grid_run_id::text as grid_run_id,
        grid_id::text as grid_id,
        user_id::text as user_id,
        status, as_of, cell_total, cell_done, dropped_row_count,
-       error_message, started_at, completed_at`;
+       error_message, started_at, completed_at, column_instances, financial_mode`;
 
 type GridRunDbRow = {
   grid_run_id: string;
@@ -208,6 +274,8 @@ type GridRunDbRow = {
   error_message: string | null;
   started_at: Date | string;
   completed_at: Date | string | null;
+  column_instances: ReadonlyArray<ColumnInstance> | null;
+  financial_mode: "shadow" | "enforce" | null;
 };
 
 function runFromDb(row: GridRunDbRow): GridRunRow {
@@ -223,6 +291,8 @@ function runFromDb(row: GridRunDbRow): GridRunRow {
     error_message: row.error_message ?? null,
     started_at: iso(row.started_at),
     completed_at: row.completed_at == null ? null : iso(row.completed_at),
+    column_instances: row.column_instances ?? null,
+    financial_mode: row.financial_mode ?? null,
   };
 }
 
@@ -293,14 +363,20 @@ export type GridCellDetail = {
   grid_cell_id: string;
   grid_row_id: string;
   column_key: string;
+  column_instance_id: string;
   status: CellStatus;
   display: CellDisplay | null;
   snapshot_id: string | null;
   primary_ref: CellRef | null;
   coverage_flag: string | null;
+  // The sealed financial_answer block of a verified numerical cell; null otherwise.
+  financial_block: Record<string, unknown> | null;
 };
 
-export type GridRunDetail = { run: GridRunRow; rows: GridRowDetail[]; cells: GridCellDetail[] };
+/** Requested cells by outcome; `verified` counts only certified cells, never thrown errors alone. */
+export type GridRunCounts = { requested: number; verified: number; ok: number; gap: number; error: number; pending: number };
+
+export type GridRunDetail = { run: GridRunRow; rows: GridRowDetail[]; cells: GridCellDetail[]; counts: GridRunCounts };
 
 export async function getRunDetail(db: QueryExecutor, runId: string): Promise<GridRunDetail> {
   const runRes = await db.query<GridRunDbRow>(`select ${RUN_COLUMNS} from grid_runs where grid_run_id = $1`, [runId]);
@@ -316,11 +392,24 @@ export async function getRunDetail(db: QueryExecutor, runId: string): Promise<Gr
     [runId],
   );
   const cellsRes = await db.query(
-    `select grid_cell_id::text as grid_cell_id, grid_row_id::text as grid_row_id, column_key,
-            status, display, snapshot_id::text as snapshot_id, primary_ref, coverage_flag
+    `select grid_cell_id::text as grid_cell_id, grid_row_id::text as grid_row_id, column_key, column_instance_id,
+            status, display, snapshot_id::text as snapshot_id, primary_ref, coverage_flag, financial_block
        from grid_cells where grid_run_id = $1`,
     [runId],
   );
+  const cells = cellsRes.rows.map((c): GridCellDetail => ({
+    grid_cell_id: String(c.grid_cell_id),
+    grid_row_id: String(c.grid_row_id),
+    column_key: String(c.column_key),
+    column_instance_id: String(c.column_instance_id),
+    status: c.status as CellStatus,
+    display: (c.display as GridCellDetail["display"]) ?? null,
+    snapshot_id: (c.snapshot_id as string | null) ?? null,
+    primary_ref: (c.primary_ref as GridCellDetail["primary_ref"]) ?? null,
+    coverage_flag: (c.coverage_flag as string | null) ?? null,
+    financial_block: (c.financial_block as Record<string, unknown> | null) ?? null,
+  }));
+  const count = (predicate: (cell: GridCellDetail) => boolean) => cells.filter(predicate).length;
   return {
     run: runFromDb(runRes.rows[0]),
     rows: rowsRes.rows.map((r) => ({
@@ -331,15 +420,14 @@ export async function getRunDetail(db: QueryExecutor, runId: string): Promise<Gr
       period_context: (r.period_context as Record<string, unknown> | null) ?? null,
       status: r.status as RowStatus,
     })),
-    cells: cellsRes.rows.map((c) => ({
-      grid_cell_id: String(c.grid_cell_id),
-      grid_row_id: String(c.grid_row_id),
-      column_key: String(c.column_key),
-      status: c.status as CellStatus,
-      display: (c.display as GridCellDetail["display"]) ?? null,
-      snapshot_id: (c.snapshot_id as string | null) ?? null,
-      primary_ref: (c.primary_ref as GridCellDetail["primary_ref"]) ?? null,
-      coverage_flag: (c.coverage_flag as string | null) ?? null,
-    })),
+    cells,
+    counts: {
+      requested: cells.length,
+      verified: count((cell) => cell.financial_block !== null && cell.status === "ok"),
+      ok: count((cell) => cell.status === "ok"),
+      gap: count((cell) => cell.status === "missing_data" || cell.status === "no_coverage"),
+      error: count((cell) => cell.status === "error"),
+      pending: count((cell) => cell.status === "pending"),
+    },
   };
 }

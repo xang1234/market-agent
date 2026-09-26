@@ -13,6 +13,7 @@ import {
   type QueryExecutor,
 } from "./types.ts";
 import { startGridRun, type RunEngineDeps } from "./run-engine.ts";
+import type { GridFinancialDeps } from "./financial-column.ts";
 import { validateUniverseSpec, type UniverseResolverDeps } from "./universe.ts";
 import type { SnapshotClientPool } from "../../snapshot/src/snapshot-sealer.ts";
 import type { ReaderColumnDeps } from "./column-catalog.ts";
@@ -65,10 +66,11 @@ export type AnalystGridsServerDeps = {
   universe: UniverseResolverDeps;
   reader?: ReaderColumnDeps;
   auth?: RequestAuthConfig;
+  financial?: GridFinancialDeps;
 };
 
 export function createAnalystGridsServer(deps: AnalystGridsServerDeps): Server {
-  const { db, pool, universe, reader, auth } = deps;
+  const { db, pool, universe, reader, auth, financial } = deps;
   return createServer(async (req, res) => {
     try {
       const method = req.method ?? "GET";
@@ -101,7 +103,7 @@ export function createAnalystGridsServer(deps: AnalystGridsServerDeps): Server {
       // POST /v1/analyst-grids/:gridId/runs — start an async run
       const runStartMatch = path.match(/^\/v1\/analyst-grids\/([^/]+)\/runs$/);
       if (method === "POST" && runStartMatch && UUID_RE.test(runStartMatch[1])) {
-        const engineDeps: RunEngineDeps = { db, pool, universe, reader };
+        const engineDeps: RunEngineDeps = { db, pool, universe, reader, financial };
         const result = await startGridRun(engineDeps, { gridId: runStartMatch[1], userId, asOf: new Date().toISOString() });
         respond(res, 202, result);
         return;

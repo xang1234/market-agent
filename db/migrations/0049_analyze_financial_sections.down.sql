@@ -1,0 +1,2 @@
+drop trigger analyze_run_financial_sections_append_only on analyze_run_financial_sections;
+drop table analyze_run_financial_sections;

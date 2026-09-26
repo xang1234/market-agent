@@ -27,6 +27,7 @@ import {
 import { shareAnalyzeRunToChat, type AnalyzeRun } from '../analyze/shareToChat.ts'
 import { analyzeThesisHandoff } from '../analyze/thesisHandoff.ts'
 import { BlockView, type Block } from '../blocks'
+import { FinancialSections } from '../analyze/FinancialSections.tsx'
 import { authenticatedJson } from '../http/authFetch.ts'
 import { subjectDisplayName } from '../symbol/quote'
 import { symbolDetailPathForSubject, type ResolvedSubject } from '../symbol/search'
@@ -416,7 +417,10 @@ function AnalyzeWorkspace({ subject }: { subject: ResolvedSubject | null }) {
         <p className="mt-3 text-xs text-muted">{status}</p>
         <article className="mt-5 flex flex-1 flex-col gap-3 rounded-md border border-dashed border-line-strong p-4">
           {memoRun ? (
-            memoRun.blocks.map((block) => <BlockView key={blockKey(block)} block={block as Block} />)
+            <>
+              {memoRun.blocks.map((block) => <BlockView key={blockKey(block)} block={block as Block} />)}
+              {memoRun.financial_sections ? <FinancialSections sections={memoRun.financial_sections} /> : null}
+            </>
           ) : (
             <>
               <h3 className="text-sm font-semibold text-fg">{selectedPlaybook?.name ?? selectedTemplate.name}</h3>

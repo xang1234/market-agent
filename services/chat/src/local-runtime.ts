@@ -14,6 +14,10 @@ import { serializeJsonValue, type JsonValue } from "../../observability/src/type
 import type { SnapshotManifestDraft, SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
 import { STAGED_SNAPSHOT_MANIFEST } from "../../snapshot/src/manifest-staging.ts";
 import { sealSnapshotWithPool } from "../../snapshot/src/snapshot-sealer.ts";
+import { createEvidenceFinancialPort } from "../../financial-engine/src/evidence-adapter.ts";
+import { planningModelFromRouter } from "../../financial-engine/src/planner.ts";
+import { parseFinancialMode } from "../../financial-engine/src/request.ts";
+import { createLlmRouterFromEnv } from "../../llm/src/index.ts";
 import {
   createRegistryBackedAnalystToolRuntime,
   type ChatAnalystToolRuntime,
@@ -33,6 +37,7 @@ import {
   structuredEvidenceStatus,
   structuredRefsFromHandoff,
 } from "./local-runtime-structured.ts";
+import { createChatFinancialRuntime, type ChatFinancialRuntime } from "./financial-runtime.ts";
 import { createChatMessagePersistence } from "./messages.ts";
 import {
   preResolveChatSubjectWithResolver,
@@ -157,6 +162,21 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     ),
   } satisfies ChatAnalystToolRuntimeResult;
 };
+
+// Financial requests go through the verified engine. Off unless
+// CHAT_FINANCIAL_MODE is "shadow" or "enforce"; without a configured LLM router,
+// financial turns in enforce mode get a structured gap instead of a guess.
+export const financialRuntime: ChatFinancialRuntime = createChatFinancialRuntime({
+  mode: parseFinancialMode(process.env.CHAT_FINANCIAL_MODE),
+  pool: { query: (text, values) => pool().query(text, values), connect: () => pool().connect() },
+  planningModel: async (request) => {
+    const router = await createLlmRouterFromEnv(process.env);
+    if (!router) throw new Error("LLM router is not configured");
+    return planningModelFromRouter(router)(request);
+  },
+  resolveMention: (mention) => preResolveSubject({ text: mention }),
+  evidence: createEvidenceFinancialPort,
+});
 
 export const persistAssistantMessage: ChatAssistantMessagePersistence = async (message) =>
   createChatMessagePersistence({

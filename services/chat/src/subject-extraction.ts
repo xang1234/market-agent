@@ -39,3 +39,23 @@ export function extractSubjectCandidates(text: string | null | undefined): strin
 
   return candidates;
 }
+
+// Finance and calendar acronyms that are written in capitals but never name a
+// company in a financial request ("EPS for AAPL in FY2023").
+const NON_SUBJECT_TOKENS = new Set([
+  "A", "I", "H", "Q", "AND", "OR", "VS", "FY", "TTM", "LTM", "YTD", "YOY", "QOQ",
+  "EPS", "USD", "GAAP", "SEC", "CEO", "CFO", "IPO", "ETF",
+]);
+
+/**
+ * Every company a multi-subject request names, in the order written. A
+ * comparison must cover each one or ask about it — never silently drop one —
+ * so unlike extractSubjectCandidates this returns all ticker-like mentions.
+ */
+export function extractSubjectMentions(text: string | null | undefined): string[] {
+  const mentions: string[] = [];
+  for (const token of (text ?? "").split(/[^A-Za-z]+/)) {
+    if (TICKER_TOKEN.test(token) && !NON_SUBJECT_TOKENS.has(token) && !mentions.includes(token)) mentions.push(token);
+  }
+  return mentions;
+}

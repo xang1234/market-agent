@@ -62,6 +62,21 @@ export async function loadThesisPacket(db: QueryExecutor, input: {
   order by packet.metric_key,packet.unit,packet.period_kind,packet.period_end desc,packet.as_of desc,packet.fact_id`, [input.thesis.subject_ref.id, JSON.stringify(metrics), input.asOf, input.userId]);
   return { claims, documents, facts: rows };
 }
+/**
+ * Loads facts a verified condition cited that the packet's own bounded query
+ * did not include: current (not superseded or invalidated) and visible to the
+ * user, since only those can be sealed into the thesis evidence snapshot.
+ */
+export async function loadThesisFactsById(db: QueryExecutor, input: { factIds: ReadonlyArray<string>; userId: string }): Promise<ThesisPacket['facts']> {
+  if (!input.factIds.length) return [];
+  const { rows } = await db.query<ThesisPacket['facts'][number]>(`select f.fact_id::text,m.metric_key,f.value_num::text as value_num,f.scale::text as scale,f.unit,f.period_kind,
+    f.period_end::text,f.period_start::text,f.fiscal_year,f.fiscal_period,f.as_of::text,f.source_id::text,f.confidence::float8,s.trust_tier
+   from facts f join metrics m on m.metric_id=f.metric_id join sources s on s.source_id=f.source_id
+   where f.fact_id=any($1::uuid[]) and (s.user_id is null or s.user_id=$2::uuid)
+     and f.superseded_by is null and f.invalidated_at is null
+   order by f.fact_id`, [input.factIds, input.userId]);
+  return rows;
+}
 export async function sealThesisPacket(db: QueryExecutor, input: {
   thesis: ThesisVersion;
   packet: ThesisPacket;

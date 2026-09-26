@@ -19,6 +19,7 @@ import {
   resolveAnalyzePlaybookRequest,
   serializeAnalyzeRunMetadataV1,
   SourceCategoryMappingError,
+  type AnalyzeRunFinancialMetadata,
   type AnalyzeRunMetadataV1,
   type AnalyzeTemplateRow,
   type AnalyzeTemplateRunRow,
@@ -26,6 +27,15 @@ import {
   type AnalyzeTemplateRunWithTemplateRow,
   type AnalyzeTemplateRunClientPool,
 } from "../../analyze/src/index.ts";
+import {
+  financialSectionIds,
+  loadAnalyzeFinancialSections,
+  prepareAnalyzeFinancialContext,
+  sectionsServedByEngine,
+  type AnalyzeFinancialMode,
+  type AnalyzeFinancialRun,
+  type AnalyzeFinancialSections,
+} from "../../analyze/src/financial-section.ts";
 import type { AnalyzePlaybook } from "../../analyze/src/playbook.ts";
 import {
   shareArtifactToChat,
@@ -68,6 +78,9 @@ export type DevAnalyzeRunSummary = {
 export type DevAnalyzeRun = DevAnalyzeRunSummary & {
   run_metadata: unknown;
   blocks: ReadonlyArray<Record<string, unknown>>;
+  // Verified numerical sections, each sealed under its own certificate. Absent
+  // when the memo requested none; declared sections without a commit are gaps.
+  financial_sections?: AnalyzeFinancialSections;
 };
 
 export type DevAnalyzeTemplate = {
@@ -147,11 +160,42 @@ export type AnalyzeServiceDeps = {
     playbook: AnalyzePlaybook;
     subjectRefs: ReadonlyArray<{ kind: string; id: string }>;
     asOf: string;
+    // Sections the verified financial engine answers; their legacy producers must not run.
+    servedByEngine?: ReadonlySet<string>;
   }): Promise<{
     blocks: ReadonlyArray<Record<string, unknown>>;
     sealSnapshot: () => Promise<SnapshotSealResult>;
   }>;
+  // Optional verified numerical sections (analyze/src/financial-section.ts).
+  analyzeFinancial?: AnalyzeFinancialComposition;
 };
+
+export type AnalyzeFinancialComposition = {
+  mode: AnalyzeFinancialMode;
+  resolvePeers(primaryIssuerId: string): Promise<ReadonlyArray<{ kind: "issuer"; id: string }>>;
+  publish(run: AnalyzeFinancialRun): Promise<AnalyzeFinancialSections>;
+};
+
+// Freezes a new memo's numerical context (cutoff, basis, catalog, exact peers)
+// before any work, so every numerical section is computed under it.
+async function newFinancialContext(
+  deps: AnalyzeServiceDeps,
+  playbook: AnalyzePlaybook,
+  subjectRefs: ReadonlyArray<SubjectRef>,
+): Promise<AnalyzeRunFinancialMetadata | null> {
+  const lane = deps.analyzeFinancial;
+  if (!lane) return null;
+  const primary = subjectRefs.find((ref) => ref.kind === "issuer");
+  if (!primary) return null;
+  const peers = financialSectionIds(playbook).includes("peer_table") ? await lane.resolvePeers(primary.id) : [];
+  return prepareAnalyzeFinancialContext({
+    mode: lane.mode,
+    playbook,
+    primary: { kind: "issuer", id: primary.id },
+    peers,
+    knowledge_cutoff: new Date().toISOString(),
+  });
+}
 
 function requireNonEmpty(value: unknown, label: string): string {
   const text = nonEmptyString(value);
@@ -194,6 +238,8 @@ async function persistAnalyzeRun(
   },
 ): Promise<DevAnalyzeRun> {
   const runAsOf = (input.memoBlocks[0]?.as_of as string | undefined) ?? new Date().toISOString();
+  const runId = randomUUID();
+  const financial = deps.analyzeFinancial ? input.runMetadata.financial ?? null : null;
   let blocks: ReadonlyArray<Record<string, unknown>>;
   let sealRun: () => Promise<SnapshotSealResult>;
   if (deps.buildAnalyzeRunSeals && input.playbook) {
@@ -204,6 +250,7 @@ async function persistAnalyzeRun(
       playbook: input.playbook,
       subjectRefs: input.subjectRefs,
       asOf: runAsOf,
+      servedByEngine: sectionsServedByEngine(financial),
     });
     blocks = Object.freeze(runSeals.blocks.map((block) => Object.freeze({ ...block })));
     sealRun = runSeals.sealSnapshot;
@@ -219,6 +266,7 @@ async function persistAnalyzeRun(
       });
   }
   const persisted = await persistAnalyzeTemplateRunAfterSnapshotSealWithPool(deps.db, {
+    run_id: runId,
     template_id: input.template.template_id,
     template_version: input.template.version,
     blocks: blocks as JsonValue,
@@ -250,7 +298,23 @@ async function persistAnalyzeRun(
   if (!persisted.ok) {
     throw new DevApiHttpError(422, "snapshot seal failed");
   }
-  return toDevAnalyzeRun(deps.db, persisted.run, input.template.name);
+  if (financial !== null) {
+    try {
+      await deps.analyzeFinancial!.publish({
+        user_id: input.userId,
+        analyze_run_id: persisted.run.run_id,
+        template_id: input.template.template_id,
+        template_version: input.template.version,
+        context: financial,
+      });
+    } catch (error) {
+      // The memo is committed and publication failures are already declared
+      // gaps; anything reaching here is unexpected. The declared sections read
+      // as gaps until a retry or the recovery worker publishes them.
+      console.error(`analyze run ${persisted.run.run_id}: financial sections were not published`, error);
+    }
+  }
+  return toDevAnalyzeRun(deps.db, persisted.run, input.template.name, input.userId);
 }
 
 export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAnalyzeAdapter {
@@ -283,7 +347,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
     async getRun({ userId, runId }) {
       const run = await getAnalyzeTemplateRunForUser(deps.db, { userId, runId });
       if (run === null) throw new DevApiHttpError(404, "analyze run not found");
-      return toDevAnalyzeRun(deps.db, run, run.template_name);
+      return toDevAnalyzeRun(deps.db, run, run.template_name, userId);
     },
     async createRun({ userId, body }) {
       const templateId = requireNonEmpty(body.template_id, "template_id");
@@ -308,6 +372,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         added: template.added_subject_refs,
       });
       const instructions = resolvedPlaybook.instructions;
+      const financial = await newFinancialContext(deps, resolvedPlaybook.playbook, subjectRefs);
       const runMetadata = serializeAnalyzeRunMetadataV1({
         template_id: template.template_id,
         template_version: template.version,
@@ -316,6 +381,7 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         instructions,
         source_categories: sourceCategories,
         subject_refs: subjectRefs,
+        ...(financial ? { financial } : {}),
       });
       if (!deps.runAnalyzeWorkflow) {
         throw new DevApiHttpError(503, "durable analyze workflow is not configured");
@@ -381,6 +447,8 @@ export function createServiceAnalyzeAdapter(deps: AnalyzeServiceDeps): DevApiAna
         source_categories: sourceCategories,
         subject_refs: subjectRefs,
         rerun_of_run_id: original.run_id,
+        // A rerun keeps the original's numerical context (cutoff, basis, peers), so it reproduces, not re-asks.
+        ...(metadata.financial ? { financial: metadata.financial } : {}),
       });
       const snapshotId = randomUUID();
       const body = {
@@ -606,16 +674,20 @@ async function toDevAnalyzeRun(
   db: QueryExecutor,
   row: AnalyzeTemplateRunRow | AnalyzeTemplateRunWithTemplateRow,
   templateName = "template_name" in row ? row.template_name : "Analyze template",
+  userId: string | null = null,
 ): Promise<DevAnalyzeRun> {
   const summary = await withDurableAnalyzeRerunEligibility(
     db,
     toDevAnalyzeRunSummaryFields(row, templateName),
     row,
   );
+  const declaresFinancial = userId !== null && safeParseStoredAnalyzeRunMetadata(row.run_metadata)?.financial?.mode === "enforce";
+  const financial = declaresFinancial ? await loadAnalyzeFinancialSections(db, { userId, analyzeRunId: row.run_id }) : null;
   return {
     ...summary,
     run_metadata: row.run_metadata,
     blocks: row.blocks as ReadonlyArray<Record<string, unknown>>,
+    ...(financial ? { financial_sections: financial } : {}),
   };
 }
 

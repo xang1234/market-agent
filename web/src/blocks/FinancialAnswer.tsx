@@ -1,5 +1,7 @@
-import { useState, type ReactElement } from 'react'
+import { useState, type ReactElement, type ReactNode } from 'react'
 import { ChartCard } from './ChartCard.tsx'
+import { useEvidenceInspector } from '../evidence/useEvidenceInspector.ts'
+import { VerificationLabel } from './VerificationLabel.tsx'
 import {
   coverageText,
   labelText,
@@ -29,6 +31,7 @@ export function FinancialAnswer({ block }: FinancialAnswerProps): ReactElement {
   if (content === null) {
     return (
       <ChartCard testId={`block-financial-answer-${block.id}`} blockKind="financial_answer" title={undefined} dataAttrs={{ 'data-certified': 'false' }}>
+        <VerificationLabel kind="legacy" />
         <p role="note" className="text-sm text-muted" data-testid={`block-financial-answer-${block.id}-unsupported`}>
           This verified financial answer uses a newer format than this app supports. Refresh or update to view it.
         </p>
@@ -38,9 +41,13 @@ export function FinancialAnswer({ block }: FinancialAnswerProps): ReactElement {
   const results = resultsById(content)
   return (
     <ChartCard testId={`block-financial-answer-${block.id}`} blockKind="financial_answer" title={undefined} dataAttrs={{ 'data-certified': 'true' }}>
-      <p className="text-xs text-muted" data-testid={`block-financial-answer-${block.id}-coverage`} data-coverage={content.coverage.state}>
-        {coverageText(content)}
-      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <VerificationLabel kind="verified" />
+        {content.coverage.state === 'complete' ? null : <VerificationLabel kind="partial" />}
+        <p className="text-xs text-muted" data-testid={`block-financial-answer-${block.id}-coverage`} data-coverage={content.coverage.state}>
+          {coverageText(content)}
+        </p>
+      </div>
       {content.presentations.map((presentation, index) => (
         <PresentationView key={`${block.id}-p${index}`} blockId={block.id} content={content} results={results} presentation={presentation} />
       ))}
@@ -72,9 +79,11 @@ function ResultLine({ content, result }: { content: FinancialAnswerContent; resu
     return (
       <p className="text-sm text-fg" data-result-id={result.result_id}>
         <span className="text-muted">{label}: </span>
-        <span className="num" title={presented.full_text} aria-label={`${label}: ${presented.full_text}`}>
-          {presented.text}
-        </span>
+        <InspectableResult resultId={result.result_id} label={`${label}: ${presented.full_text}`}>
+          <span className="num" title={presented.full_text} aria-label={`${label}: ${presented.full_text}`}>
+            {presented.text}
+          </span>
+        </InspectableResult>
       </p>
     )
   }
@@ -91,12 +100,33 @@ function Cell({ result }: { result: FinancialPresentedResult | undefined }): Rea
   const { presented } = result
   if (presented.kind === 'value') {
     return (
-      <span title={presented.full_text} aria-label={presented.full_text}>
-        {presented.text}
-      </span>
+      <InspectableResult resultId={result.result_id} label={presented.full_text}>
+        <span title={presented.full_text} aria-label={presented.full_text}>
+          {presented.text}
+        </span>
+      </InspectableResult>
     )
   }
   return <span className="text-muted italic">{presented.text}</span>
+}
+
+// A certified value opens the shared result inspector where the host provides
+// one; a real button, so it is reachable by keyboard. Without a host it is text.
+function InspectableResult({ resultId, label, children }: { resultId: string; label: string; children: ReactNode }): ReactElement {
+  const inspector = useEvidenceInspector()
+  const open = inspector?.openFinancialResult
+  if (!open) return <>{children}</>
+  return (
+    <button
+      type="button"
+      className="border-0 bg-transparent p-0 text-left underline decoration-dotted underline-offset-2"
+      data-inspect-result={resultId}
+      aria-label={`Inspect the verified calculation for ${label}`}
+      onClick={() => open(resultId)}
+    >
+      {children}
+    </button>
+  )
 }
 
 type TableProps = { blockId: string; content: FinancialAnswerContent; results: Results; table: FinancialTablePresentation }

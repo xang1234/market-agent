@@ -1009,6 +1009,9 @@ create table grid_runs (
   user_id uuid not null references users(user_id) on delete cascade,
   status text not null check (status in ('pending','running','partial','completed','failed')),
   as_of timestamptz not null,
+  -- Frozen at start: [{column_instance_id, column_key, params, position}] (0050).
+  column_instances jsonb check (column_instances is null or jsonb_typeof(column_instances) = 'array'),
+  financial_mode text check (financial_mode in ('shadow', 'enforce')),
   cell_total integer not null default 0 check (cell_total >= 0),
   cell_done integer not null default 0 check (cell_done >= 0),
   dropped_row_count integer not null default 0 check (dropped_row_count >= 0),
@@ -1035,13 +1038,23 @@ create table grid_cells (
   grid_row_id uuid not null references grid_rows(grid_row_id) on delete cascade,
   grid_run_id uuid not null references grid_runs(grid_run_id) on delete cascade,
   column_key text not null,
+  column_instance_id text not null,
   status text not null check (status in ('pending','ok','missing_data','no_coverage','error')),
   display jsonb,
   snapshot_id uuid references snapshots(snapshot_id),
   primary_ref jsonb,
   coverage_flag text,
   computed_at timestamptz,
-  unique (grid_row_id, column_key)
+  financial_run_id uuid,
+  financial_unit_id text,
+  certificate_digest text check (certificate_digest is null or certificate_digest ~ '^[0-9a-f]{64}$'),
+  financial_block jsonb,
+  constraint grid_cells_row_instance_key unique (grid_row_id, column_instance_id),
+  constraint grid_cells_financial_lineage check (
+    (financial_run_id is null and financial_unit_id is null and certificate_digest is null and financial_block is null)
+    or (financial_run_id is not null and financial_unit_id is not null and certificate_digest is not null and snapshot_id is not null
+        and jsonb_typeof(financial_block) = 'object' and financial_block->>'kind' = 'financial_answer')
+  )
 );
 
 create index research_grids_user_idx on research_grids(user_id);
@@ -1645,3 +1658,28 @@ create constraint trigger financial_run_units_sealed_certificate
 after insert or update on financial_run_units
 deferrable initially deferred
 for each row execute function check_financial_unit_certificate();
+
+-- Verified numerical memo sections, written only by the finalization transaction
+-- that seals their snapshot and certificate (0049).
+create table analyze_run_financial_sections (
+  analyze_run_id uuid not null references analyze_template_runs(run_id) on delete cascade,
+  section_id text not null check (section_id ~ '^[a-z][a-z0-9_]{0,63}$'),
+  financial_run_id uuid not null,
+  unit_id text not null,
+  snapshot_id uuid not null,
+  certificate_digest text not null check (certificate_digest ~ '^[0-9a-f]{64}$'),
+  block jsonb not null check (jsonb_typeof(block) = 'object' and block->>'kind' = 'financial_answer'),
+  created_at timestamptz not null default now(),
+  primary key (analyze_run_id, section_id),
+  unique (financial_run_id, unit_id),
+  foreign key (snapshot_id, financial_run_id, unit_id) references snapshot_financial_runs(snapshot_id, run_id, unit_id)
+);
+create trigger analyze_run_financial_sections_append_only
+before update on analyze_run_financial_sections
+for each row execute function prevent_financial_record_update();
+
+-- Certified grid cells reference their certificate (0050); declared here
+-- because snapshot_financial_runs is created after grid_cells.
+alter table grid_cells add constraint grid_cells_financial_certificate
+  foreign key (snapshot_id, financial_run_id, financial_unit_id) references snapshot_financial_runs(snapshot_id, run_id, unit_id);
+create unique index grid_cells_financial_unit_uidx on grid_cells(financial_run_id, financial_unit_id) where financial_run_id is not null;

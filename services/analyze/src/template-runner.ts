@@ -91,6 +91,9 @@ type AnalyzeTemplateRunDbRow = {
 };
 
 export type PersistAnalyzeTemplateRunInput = {
+  // Optional pre-assigned run id, for callers that name the run before it
+  // commits (verified financial sections are published against it afterwards).
+  run_id?: string;
   template_id: string;
   // Pinned at run time. analyze_templates.version starts at 1 and only
   // increments; the caller passes the value they read off the template
@@ -339,8 +342,8 @@ async function persistSealedAnalyzeTemplateRun(
   try {
     const { rows } = await db.query<AnalyzeTemplateRunDbRow>(
       `insert into analyze_template_runs
-         (template_id, template_version, playbook_id, run_metadata, snapshot_id, blocks)
-       values ($1::uuid, $2::integer, $3, $4::jsonb, $5::uuid, $6::jsonb)
+         (run_id, template_id, template_version, playbook_id, run_metadata, snapshot_id, blocks)
+       values (coalesce($7::uuid, gen_random_uuid()), $1::uuid, $2::integer, $3, $4::jsonb, $5::uuid, $6::jsonb)
        returning ${SELECT_COLUMNS}`,
       [
         input.template_id,
@@ -352,6 +355,7 @@ async function persistSealedAnalyzeTemplateRun(
         serializeJsonLike(input.run_metadata),
         snapshotId,
         serializeJsonLike(input.blocks),
+        input.run_id ?? null,
       ],
     );
     const row = rows[0];
@@ -377,6 +381,7 @@ async function persistSealedAnalyzeTemplateRun(
 
 function validatePersistInput(input: PersistAnalyzeTemplateRunInput): void {
   assertNonEmptyString(input.template_id, "template_id");
+  if (input.run_id !== undefined) assertNonEmptyString(input.run_id, "run_id");
   if (
     typeof input.template_version !== "number" ||
     !Number.isInteger(input.template_version) ||

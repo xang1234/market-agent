@@ -5,6 +5,22 @@ export type AnalyzeRunMetadataSubjectRef = {
   id: string;
 };
 
+/**
+ * The memo's numerical context, fixed at run start: cutoff, basis, definition
+ * catalog, the exact peers asked for, and which sections the engine answers.
+ * It declares what was requested, never what succeeded; section outcomes are
+ * read from committed financial records.
+ */
+export type AnalyzeRunFinancialMetadata = {
+  mode: "shadow" | "enforce";
+  knowledge_cutoff: string;
+  reporting_basis: "as_reported" | "as_restated";
+  catalog_version: string;
+  primary: { kind: "issuer"; id: string };
+  requested_peers: ReadonlyArray<{ kind: "issuer"; id: string }>;
+  sections: ReadonlyArray<string>;
+};
+
 export type AnalyzeRunMetadataV1 = {
   schema_version: 1;
   template_id: string;
@@ -15,6 +31,7 @@ export type AnalyzeRunMetadataV1 = {
   source_categories: ReadonlyArray<string>;
   subject_refs: ReadonlyArray<AnalyzeRunMetadataSubjectRef>;
   rerun_of_run_id?: string;
+  financial?: AnalyzeRunFinancialMetadata;
 };
 
 export class AnalyzeRunMetadataError extends Error {
@@ -41,6 +58,7 @@ export function serializeAnalyzeRunMetadataV1(
     ...(input.rerun_of_run_id
       ? { rerun_of_run_id: expectString(input.rerun_of_run_id, "rerun_of_run_id") }
       : {}),
+    ...(input.financial ? { financial: parseFinancialMetadata(input.financial) } : {}),
   });
 }
 
@@ -59,6 +77,7 @@ export function parseAnalyzeRunMetadata(value: unknown): AnalyzeRunMetadataV1 {
     source_categories: expectStringArray(value.source_categories, "source_categories"),
     subject_refs: expectSubjectRefs(value.subject_refs),
     rerun_of_run_id: typeof value.rerun_of_run_id === "string" ? value.rerun_of_run_id : undefined,
+    financial: value.financial === undefined ? undefined : (value.financial as AnalyzeRunFinancialMetadata),
   });
 }
 
@@ -66,6 +85,30 @@ export function withRerunOfRunId(metadata: AnalyzeRunMetadataV1, runId: string):
   return serializeAnalyzeRunMetadataV1({
     ...metadata,
     rerun_of_run_id: runId,
+  });
+}
+
+function parseFinancialMetadata(value: unknown): AnalyzeRunFinancialMetadata {
+  if (!isRecord(value)) throw new AnalyzeRunMetadataError("financial must be an object");
+  if (value.mode !== "shadow" && value.mode !== "enforce") throw new AnalyzeRunMetadataError("financial.mode is invalid");
+  if (value.reporting_basis !== "as_reported" && value.reporting_basis !== "as_restated") {
+    throw new AnalyzeRunMetadataError("financial.reporting_basis is invalid");
+  }
+  const cutoff = expectString(value.knowledge_cutoff, "financial.knowledge_cutoff");
+  if (Number.isNaN(Date.parse(cutoff))) throw new AnalyzeRunMetadataError("financial.knowledge_cutoff must be a timestamp");
+  const issuer = (ref: unknown, field: string) => {
+    if (!isRecord(ref) || ref.kind !== "issuer") throw new AnalyzeRunMetadataError(`${field} must be an issuer ref`);
+    return Object.freeze({ kind: "issuer" as const, id: expectString(ref.id, `${field}.id`) });
+  };
+  if (!Array.isArray(value.requested_peers)) throw new AnalyzeRunMetadataError("financial.requested_peers must be an array");
+  return Object.freeze({
+    mode: value.mode,
+    knowledge_cutoff: cutoff,
+    reporting_basis: value.reporting_basis,
+    catalog_version: expectString(value.catalog_version, "financial.catalog_version"),
+    primary: issuer(value.primary, "financial.primary"),
+    requested_peers: Object.freeze(value.requested_peers.map((peer) => issuer(peer, "financial.requested_peers"))),
+    sections: expectStringArray(value.sections, "financial.sections"),
   });
 }
 

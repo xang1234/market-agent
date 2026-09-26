@@ -267,7 +267,8 @@ test("Scenario B: reader_question column returns no_coverage when issuer has no 
     (d) => ["completed", "partial", "failed"].includes(d.run.status),
   );
 
-  assert.equal(detail.run.status, "completed", `run failed: ${JSON.stringify(detail.run)}`);
+  // A run whose only cell has no coverage is partial: completed means every cell is a value.
+  assert.equal(detail.run.status, "partial", `run failed: ${JSON.stringify(detail.run)}`);
   assert.equal(detail.cells.length, 1);
   const cell = detail.cells[0];
   assert.equal(cell.status, "no_coverage");

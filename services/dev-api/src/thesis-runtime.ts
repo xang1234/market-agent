@@ -8,7 +8,9 @@ import type { FindingRow } from '../../agents/src/finding-generator.ts';
 import { writeRunActivity } from '../../observability/src/run-activity.ts';
 import { hashJsonValue } from '../../observability/src/tool-call.ts';
 import { createLlmRouterFromEnv, loadLlmSettingsFromEnv, buildLlmDeploymentOrder } from '../../llm/src/settings-loader.ts';
-import { loadThesisPacket, sealThesisPacket, type ThesisPacket } from './thesis-evidence.ts';
+import { loadThesisFactsById, loadThesisPacket, sealThesisPacket, type ThesisPacket } from './thesis-evidence.ts';
+import { evaluateFinancialThesisConditions, thesisReuseProjection } from '../../agents/src/financial-thesis-adapter.ts';
+import type { SavedRuleDeps } from '../../financial-engine/src/saved-rule.ts';
 type Model = {
   llm: ThesisLlm | null;
   identity: string;
@@ -20,6 +22,8 @@ export type ThesisRuntimeInput = {
   agent: AgentRow;
   thesis: ThesisVersion;
   getModel?: () => Promise<Model>;
+  /** Verified numerical conditions (THESIS_FINANCIAL_MODE=enforce); absent, metric conditions use the stored-fact checks. */
+  financial?: SavedRuleDeps;
 };
 type ThesisRunStart = { thesis_version_id: string; as_of: string };
 type PreparedAssessment = {
@@ -28,6 +32,8 @@ type PreparedAssessment = {
   packet_hash: string;
   input_hash: string;
   reused: boolean;
+  /** Facts the verified conditions cited beyond the packet's own; sealed and cited with it. */
+  cited_facts: ThesisPacket['facts'];
 };
 
 // Each stage passes its typed output to the next through the existing loop.
@@ -47,12 +53,23 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
     async analyze({ deltas, evidence }) {
       const needsModel = evidence.claims.length > 0 && input.thesis.conditions.some(c => !c.metric);
       const model = needsModel ? await (input.getModel ?? configuredModel)() : { llm: null, identity: 'deterministic' };
-      const metricResults = evaluateThesisMetrics(input.thesis.conditions, evidence.facts, deltas.as_of);
-      const packetHash = hashJsonValue({ metricResults, version: input.thesis.thesis_version_id, packet: evidence, day: deltas.as_of.slice(0, 10), model: model.identity, prompt: THESIS_PROMPT_VERSION });
+      // Verified conditions are computed at this run's pinned cutoff; a retry of the run resumes them.
+      const metricResults = input.financial
+        ? await evaluateFinancialThesisConditions(input.financial, { user_id: input.userId, thesis: input.thesis, run_key: input.runId, as_of: deltas.as_of })
+        : evaluateThesisMetrics(input.thesis.conditions, evidence.facts, deltas.as_of);
+      // The reuse key compares definitions, inputs, and outcomes — never run or snapshot identities.
+      const metricKey = input.financial ? thesisReuseProjection(metricResults) : metricResults;
+      const packetHash = hashJsonValue({ metricResults: metricKey, version: input.thesis.thesis_version_id, packet: evidence, day: deltas.as_of.slice(0, 10), model: model.identity, prompt: THESIS_PROMPT_VERSION });
       const previous = await getLatestThesisAssessment(input.db, input.thesis.thesis_version_id);
       const reused = previous?.input_hash.split('/')[0] === packetHash;
       const evaluation = reused && previous ? previous : await evaluateThesis({
         thesis: input.thesis, claims: evidence.claims, facts: evidence.facts, as_of: deltas.as_of, llm: model.llm,
+        ...(input.financial ? { metric_results: metricResults } : {}),
+      });
+      const packetFacts = new Set(evidence.facts.map(fact => fact.fact_id));
+      const citedFacts = await loadThesisFactsById(input.db, {
+        factIds: [...new Set(evaluation.results.flatMap(result => result.fact_refs))].filter(id => !packetFacts.has(id)),
+        userId: input.userId,
       });
       return {
         results: evaluation.results,
@@ -60,14 +77,16 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
         packet_hash: packetHash,
         input_hash: reused && previous ? previous.input_hash : `${packetHash}/${previous?.assessment_id ?? 'initial'}`,
         reused,
+        cited_facts: citedFacts,
       };
     },
     async nextWatermarks({ current_watermarks, deltas, analysis }) {
       const current = current_watermarks !== null && typeof current_watermarks === 'object' && !Array.isArray(current_watermarks) ? current_watermarks : {};
       return { ...current, thesis_monitor: { thesis_version_id: input.thesis.thesis_version_id, last_checked_at: deltas.as_of, input_hash: analysis.input_hash } };
     },
-    async applySideEffects({ tx, deltas, evidence, analysis }) {
+    async applySideEffects({ tx, deltas, evidence: packet, analysis }) {
       findings = [];
+      const evidence: ThesisPacket = { ...packet, facts: [...packet.facts, ...analysis.cited_facts] };
       const lock = await tx.query('select agent_id from agents where agent_id=$1::uuid and user_id=$2::uuid for update', [input.agent.agent_id, input.userId]);
       if (!lock.rows.length)
         throw new Error('Thesis agent no longer exists');
@@ -91,8 +110,12 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
         thesis_version_id: input.thesis.thesis_version_id, run_id: input.runId, snapshot_id: snapshot.snapshot_id,
         input_hash: analysis.input_hash, results: analysis.results, model_version: analysis.model_version, prompt_version: THESIS_PROMPT_VERSION,
       });
+      const sealedFacts = new Set(evidence.facts.map(fact => fact.fact_id));
       for (const result of analysis.results) {
         if (result.status === 'unresolved' || previous?.results.find(r => r.condition_id === result.condition_id)?.status === result.status)
+          continue;
+        // A verified condition alerts only with evidence sealed into this snapshot; its certificate stays on the assessment.
+        if (result.financial && !result.fact_refs.some(id => sealedFacts.has(id)))
           continue;
         findings.push(await generateThesisFinding(tx, {
           thesis: input.thesis, result, packet: evidence, agentName: input.agent.name, snapshot,

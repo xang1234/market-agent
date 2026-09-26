@@ -1,5 +1,15 @@
 import { InspectableRef } from '../evidence/InspectableRef.tsx'
+import { VerificationLabel } from '../blocks/VerificationLabel.tsx'
+import type { VerificationKind } from '../blocks/verification.ts'
 import type { ConditionAssessment, ThesisAssessment, ThesisHistoryResponse, ThesisVersion } from '../../../services/agents/src/thesis-types.ts'
+
+/** One label per condition: a certified calculation, model commentary on cited sources, or an older stored-fact check. */
+function verificationOf(result: ConditionAssessment): VerificationKind | null {
+  if (result.financial) return 'verified'
+  if (result.method === 'model') return 'narrative'
+  if (result.method === 'metric') return 'legacy'
+  return null
+}
 
 const METHOD_LABELS: Readonly<Record<ConditionAssessment['method'], string>> = {
   metric: 'Checked an authoritative numeric fact against this threshold.',
@@ -66,10 +76,17 @@ function AssessmentCard({
               <p className="text-sm font-medium text-fg">
                 {conditions.get(result.condition_id)?.statement ?? 'Condition details are outside recent history'}
               </p>
-              <StatusBadge status={result.status} />
+              <span className="flex items-center gap-2">
+                {verificationOf(result) ? <VerificationLabel kind={verificationOf(result)!} /> : null}
+                <StatusBadge status={result.status} />
+              </span>
             </div>
             <p className="mt-2 text-sm text-fg-soft">{result.reason}</p>
-            <p className="mt-2 text-xs text-muted">{METHOD_LABELS[result.method]}</p>
+            <p className="mt-2 text-xs text-muted">
+              {result.financial
+                ? `Verified against the saved threshold at the assessment cutoff · certificate ${result.financial.certificate_digest?.slice(0, 12) ?? 'unavailable'}`
+                : METHOD_LABELS[result.method]}
+            </p>
             {(result.fact_refs.length > 0 || result.claim_refs.length > 0) ? (
               <div className="mt-2 flex flex-wrap gap-2">
                 {result.fact_refs.map((id) => (

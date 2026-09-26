@@ -25,6 +25,7 @@ export function createWorkerDeps(input: {
   loadExisting: (userId: D.Id, brief: D.Brief) => Promise<D.ExistingCandidate[]>;
   persistQuotes: (lease: Lease, packet: EvidencePacket, raw: D.AnalystOutput | D.SkepticOutput, request: AssessmentQuoteRequest) => Promise<Map<string, D.Citation>>;
   commitAssessment: WorkerDeps["commitAssessment"];
+  financialCriteria?: WorkerDeps["financialCriteria"];
 }): WorkerDeps {
   return Object.freeze({
     repo: input.repo,
@@ -39,5 +40,6 @@ export function createWorkerDeps(input: {
     loadExisting: (lease, brief) => input.loadExisting(lease.user_id, brief),
     persistQuotes: input.persistQuotes,
     commitAssessment: input.commitAssessment,
+    ...(input.financialCriteria ? { financialCriteria: input.financialCriteria } : {}),
   });
 }
