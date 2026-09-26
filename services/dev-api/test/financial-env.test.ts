@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { runDiscoveryWorkerFromEnvironment } from "../../discovery/src/worker-cli.ts";
-import { loadFinancialModes } from "../src/financial-env.ts";
+import { activeFinancialSurfaces, loadFinancialModes } from "../src/financial-env.ts";
 
 const EVERY_FINANCE_FLAG = {
   CHAT_FINANCIAL_MODE: "enforce",
@@ -13,8 +13,10 @@ const EVERY_FINANCE_FLAG = {
 };
 
 test("every surface is off unless the server's environment says otherwise", () => {
-  assert.deepEqual(loadFinancialModes({}), { analyze: "off", grid: "off", thesis: "off", worker: "off" });
-  assert.deepEqual(loadFinancialModes(EVERY_FINANCE_FLAG), { analyze: "enforce", grid: "enforce", thesis: "enforce", worker: "enforce" });
+  assert.deepEqual(loadFinancialModes({}), { analyze: "off", grid: "off", thesis: "off", worker: false });
+  assert.deepEqual(activeFinancialSurfaces(loadFinancialModes({})), []);
+  assert.deepEqual(loadFinancialModes(EVERY_FINANCE_FLAG), { analyze: "enforce", grid: "enforce", thesis: "enforce", worker: true });
+  assert.deepEqual(activeFinancialSurfaces(loadFinancialModes(EVERY_FINANCE_FLAG)), ["analyze", "grid", "thesis", "worker"]);
   assert.equal(loadFinancialModes({ ANALYZE_FINANCIAL_MODE: "shadow" }).analyze, "shadow");
 });
 

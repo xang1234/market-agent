@@ -20,9 +20,17 @@ export type FinancialModes = Readonly<{
   grid: FinancialMode;
   /** Saved conditions are verified or not: there is no shadow thesis assessment. */
   thesis: "off" | "enforce";
-  /** The supervised recovery worker counts as a surface: it writes certificates too. */
-  worker: "off" | "enforce";
+  /** The supervised recovery worker, which writes certificates too. */
+  worker: boolean;
 }>;
+
+/** What must be ready before this process starts: every surface not off, and the worker. */
+export function activeFinancialSurfaces(modes: FinancialModes): string[] {
+  return [
+    ...(["analyze", "grid", "thesis"] as const).filter((surface) => modes[surface] !== "off"),
+    ...(modes.worker ? ["worker"] : []),
+  ];
+}
 
 export function loadFinancialModes(env: FinancialEnv): FinancialModes {
   const thesis = parseFinancialMode(env.THESIS_FINANCIAL_MODE, "THESIS_FINANCIAL_MODE");
@@ -31,6 +39,6 @@ export function loadFinancialModes(env: FinancialEnv): FinancialModes {
     analyze: parseFinancialMode(env.ANALYZE_FINANCIAL_MODE, "ANALYZE_FINANCIAL_MODE"),
     grid: parseFinancialMode(env.GRID_FINANCIAL_MODE, "GRID_FINANCIAL_MODE"),
     thesis,
-    worker: env.FINANCIAL_WORKER_ENABLED === "true" ? "enforce" : "off",
+    worker: env.FINANCIAL_WORKER_ENABLED === "true",
   });
 }

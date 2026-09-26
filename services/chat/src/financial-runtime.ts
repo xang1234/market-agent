@@ -128,7 +128,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       }
     }
   };
-  const assertReady = () => requireFinancialReadiness(deps.pool, { chat: deps.mode });
+  const assertReady = () => requireFinancialReadiness(deps.pool, deps.mode === "off" ? [] : ["chat"]);
   return Object.freeze({ mode: deps.mode, answers, run, assertReady });
 }
 

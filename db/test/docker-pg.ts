@@ -64,14 +64,14 @@ export function interpretDockerResult(
  * locally. With REQUIRE_DOCKER=1 (set in CI) a missing Docker is an error
  * instead: a skipped integration suite must never report as a pass there.
  */
-export function dockerAvailable(env: NodeJS.ProcessEnv = process.env) {
+export function dockerAvailable() {
   if (cachedDockerAvailable === undefined) {
     const result = run("docker", ["version", "--format", "{{.Server.Version}}"], {
       timeoutMs: DOCKER_PROBE_TIMEOUT_MS,
     });
     cachedDockerAvailable = !result.error && result.status === 0;
   }
-  if (!cachedDockerAvailable && env.REQUIRE_DOCKER === "1") {
+  if (!cachedDockerAvailable && process.env.REQUIRE_DOCKER === "1") {
     throw new Error("REQUIRE_DOCKER=1 but Docker is unavailable: integration suites would silently skip");
   }
   return cachedDockerAvailable;

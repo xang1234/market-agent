@@ -13,7 +13,6 @@ import {
 } from "../../financial-core/src/index.ts";
 import { FINANCIAL_PUBLICATION_SCHEMA_VERSION, FINANCIAL_VERIFIER_VERSION } from "../../snapshot/src/financial-verifier.ts";
 import type { SqlExecutor } from "./ports.ts";
-import type { FinancialMode } from "./request.ts";
 import { FINANCIAL_VERSION_REGISTRY, type FinancialVersionRegistry } from "./version-registry.ts";
 
 export type FinancialReadiness = Readonly<{ ready: boolean; problems: ReadonlyArray<string> }>;
@@ -28,7 +27,10 @@ const RELATIONS = [
 const COLUMNS: ReadonlyArray<readonly [string, string]> = [
   ["computations", "financial_run_id"], ["grid_runs", "financial_mode"], ["grid_cells", "financial_block"],
 ];
-const FUNCTIONS = ["normalized_content_hash", "erase_financial_run_dependents", "erase_financial_runs_of_parent", "erase_financial_runs_binding_evidence"];
+const FUNCTIONS = [
+  "normalized_content_hash", "erase_financial_run_dependents", "erase_orphaned_financial_plan",
+  "erase_chat_financial_copy", "erase_grid_financial_copy", "erase_financial_runs_referencing",
+];
 
 export async function checkFinancialReadiness(db: SqlExecutor, registry: FinancialVersionRegistry = FINANCIAL_VERSION_REGISTRY): Promise<FinancialReadiness> {
   const problems: string[] = [];
@@ -58,15 +60,14 @@ export async function checkFinancialReadiness(db: SqlExecutor, registry: Financi
 }
 
 /**
- * Refuses to start any surface in shadow or enforce mode unless verified
- * finance is ready. With every surface off, nothing is checked.
+ * Refuses to start the named surfaces (those in shadow or enforce mode, or a
+ * recovery worker) unless verified finance is ready. With none, nothing is checked.
  */
 export async function requireFinancialReadiness(
   db: SqlExecutor,
-  modes: Readonly<Record<string, FinancialMode>>,
+  active: ReadonlyArray<string>,
   registry?: FinancialVersionRegistry,
 ): Promise<void> {
-  const active = Object.entries(modes).filter(([, mode]) => mode !== "off").map(([surface]) => surface);
   if (active.length === 0) return;
   const readiness = await checkFinancialReadiness(db, registry);
   if (!readiness.ready) {
