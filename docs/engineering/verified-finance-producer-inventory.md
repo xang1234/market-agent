@@ -158,6 +158,18 @@ listed above. The shared foundations are in place:
   labels: verified calculation, partial coverage, source-linked narrative,
   and legacy output.
 
+- **T28:** erasure (migration 0051). Deleting a financial run removes its
+  replays, its certificates, results, and units, the copy of its sealed
+  block on each surface, and its certificate snapshots once nothing else
+  references them. Its plan (the owner's words and thresholds) goes with its
+  last run. The chat message and memo section are deleted. The grid cell
+  stays as an explicit `financial_result_erased` gap. Thesis and Discovery
+  keep only ids and hashes, which then read as unavailable. Runs are deleted
+  when their owner is erased, when their parent (thread, memo run, grid run,
+  thesis version, Discovery run) is deleted, and when a fact or attestation
+  they bound is deleted. Evidence deletion takes the finalization share
+  locks, so it waits for an in-flight publication and then erases it.
+
 Known gap: SEC ingestion records precision proofs but not yet source
 publication attestations, so SEC-ingested facts bind as
 `publication_time_unknown` until a reviewed acceptance-time mapping issues
@@ -198,3 +210,14 @@ appear as declared gaps rather than numbers.
 | Shared engine request path | Every surface calls `publishRequest` (`services/financial-engine/src/request.ts`). It resumes an earlier attempt's plan or plans anew, then reserves, leases, and publishes, and it owns the lease TTL and the one list of gap reasons (`RequestGap`). Surfaces supply their authority, planner, and parent write, and read back their own records. The deterministic planner can split outputs across publication units. |
 | Shared semantics for thesis and Discovery | `evaluateSavedRule` in `services/financial-engine/src/saved-rule.ts` is the one evaluation for saved numerical rules. Callers supply the authority, request key, threshold attribution (the planner now accepts one), and publication guard. |
 | Grid run completion | One rule for every run and mode: completed only when every cell is a value; any gap, unsupported, or error cell makes it partial. The write that finishes the last cell settles the run. Legacy runs whose cells lack coverage (for example a reader question with no documents) are now partial rather than completed. |
+
+### Wave 5 plan deviations
+
+| Plan reference | Actual |
+|---|---|
+| `services/evidence/src/zero-export-erasure.ts`, `services/tools/src/erasure-tools.ts` | Not present. User erasure is `deleteUserAndQueueObjectBlobs` (`services/evidence/src/blob-gc-repo.ts`). Before 0051 it failed for any user with a sealed financial result: `snapshot_financial_runs` blocked the cascade. Erasure is now enforced by triggers in `db/migrations/0051_financial_erasure.up.sql`, so every deleting writer, cascade, and later migration is covered without calling anything. |
+| `services/evidence/test/financial-erasure.test.ts` | `services/financial-engine/test/financial-erasure.test.ts` (it needs the engine fixtures), plus one erasure subtest in each surface's financial test. |
+| `services/financial-engine/src/cache-key.ts`, owner-scoped caches | No result cache exists, so none was added. Runs are keyed by (owner, parent, request key), results are read owner-scoped with access rechecked, and plan ids are server-generated. Reserving another owner's plan returns a conflict with no run id. A future cache must key on owner, parent authority, input/definition/cutoff versions, and access generation. |
+| Reauthorization on every read and replay | Already in place since T17/T18 (`inspection.ts`, `read-model.ts`, `replay.ts`). T28 adds erased results, which read as unavailable. |
+| Safe logs | Run events carry only counts, lease epochs, digests, coverage states, and reason codes. The engine writes no console output. |
+

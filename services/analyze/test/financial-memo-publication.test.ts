@@ -106,4 +106,18 @@ test("analyze memo financial publication", { timeout: 300_000 }, async (t) => {
     assert.equal(result.coverage, "partial");
     assert.deepEqual(await committed(db, memo.runId), { sections: 1, certificates: 1, plans: 1 });
   });
+
+  await t.test("an erased run's sections read as gaps, and deleting the memo run erases its runs", async () => {
+    const memo = await createMemoRun(db, pool, { templateId, playbookId: "earnings_quality" });
+    assert.deepEqual(statuses(await memo.publish()), { revenue_trend: "published" });
+    // What the deletion of evidence the run bound does (db/migrations/0051).
+    await db.query(`delete from financial_runs where parent_kind = 'analyze_memo_run' and parent_id = $1`, [memo.runId]);
+    assert.deepEqual(await committed(db, memo.runId), { sections: 0, certificates: 0, plans: 0 });
+    assert.deepEqual(statuses((await loadAnalyzeFinancialSections(db, { userId: IDS.owner, analyzeRunId: memo.runId }))!), { revenue_trend: "gap:not_started" });
+
+    const deleted = await createMemoRun(db, pool, { templateId, playbookId: "earnings_quality" });
+    await deleted.publish();
+    await db.query(`delete from analyze_template_runs where run_id = $1`, [deleted.runId]);
+    assert.equal((await db.query(`select count(*)::int as n from financial_runs where parent_id = $1`, [deleted.runId])).rows[0].n, 0);
+  });
 });

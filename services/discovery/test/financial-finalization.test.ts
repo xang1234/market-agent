@@ -94,4 +94,11 @@ test("discovery numerical criteria finalization", { timeout: 300_000 }, async (t
       await db.query(`update sources set user_id = null where source_id = any($1::uuid[])`, [[IDS.sourceV1, IDS.sourceV2]]);
     }
   });
+
+  await t.test("deleting the campaign run erases its calculations", async () => {
+    assert.ok(await certificates() > 0);
+    await db.query(`delete from discovery_runs where run_id = $1`, [lease.run_id]);
+    assert.equal(await certificates(), 0);
+    assert.equal((await db.query(`select count(*)::int as n from financial_runs where parent_id = $1`, [lease.run_id])).rows[0].n, 0);
+  });
 });

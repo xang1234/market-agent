@@ -85,4 +85,21 @@ test("grid financial columns", { timeout: 300_000 }, async (t) => {
     assert.equal(detail.run.financial_mode, null);
     assert.equal((await db.query(`select count(*)::int as n from financial_runs where parent_id = $1`, [runId])).rows[0].n, 0);
   });
+
+  await t.test("an erased run leaves its cells as explicit gaps with no value, and deleting the grid run erases its runs", async () => {
+    const { runId } = await startRun(pool, { columns: [{ column_key: "latest_revenue" }] });
+    await waitForRun(pool, runId, settled);
+    // What the deletion of evidence the run bound does (db/migrations/0051).
+    await db.query(`delete from financial_runs where parent_kind = 'analyst_grid_run' and parent_id = $1`, [runId]);
+    const cell = cellsByPosition(await waitForRun(pool, runId, settled))["0:c0"]!;
+    assert.deepEqual(
+      [cell.status, cell.coverage_flag, cell.display?.value, cell.snapshot_id, cell.financial_block],
+      ["error", "financial_result_erased", "—", null, null],
+    );
+
+    const kept = await startRun(pool, { columns: [{ column_key: "latest_revenue" }] });
+    await waitForRun(pool, kept.runId, settled);
+    await db.query(`delete from grid_runs where grid_run_id = $1`, [kept.runId]);
+    assert.equal((await db.query(`select count(*)::int as n from financial_runs where parent_id = $1`, [kept.runId])).rows[0].n, 0);
+  });
 });

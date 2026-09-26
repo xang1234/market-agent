@@ -1,0 +1,14 @@
+drop trigger fact_precision_attestations_erase_financial_runs on fact_precision_attestations;
+drop trigger source_publication_attestations_erase_financial_runs on source_publication_attestations;
+drop trigger facts_erase_financial_runs on facts;
+drop function erase_financial_runs_binding_evidence();
+drop trigger discovery_runs_erase_financial_runs on discovery_runs;
+drop trigger agent_thesis_versions_erase_financial_runs on agent_thesis_versions;
+drop trigger grid_runs_erase_financial_runs on grid_runs;
+drop trigger analyze_template_runs_erase_financial_runs on analyze_template_runs;
+drop trigger chat_threads_erase_financial_runs on chat_threads;
+drop function erase_financial_runs_of_parent();
+drop trigger financial_runs_erase_orphaned_plan on financial_runs;
+drop function erase_orphaned_financial_plan();
+drop trigger financial_runs_erase_dependents on financial_runs;
+drop function erase_financial_run_dependents();
