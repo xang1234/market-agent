@@ -26,7 +26,7 @@ services:
       retries: 20
 
   minio:
-    image: minio/minio:latest
+    image: cgr.dev/chainguard/minio:latest  # minio/minio was removed from Docker Hub
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
