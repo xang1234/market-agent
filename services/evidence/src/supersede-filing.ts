@@ -26,9 +26,9 @@ export async function supersedeFilingArtifacts(
   spec: { sourceIds: readonly string[]; claimPredicate: ClaimPredicateMatch; eventType: string },
 ): Promise<SupersededArtifactCounts> {
   // predicateClause is one of two fixed internal strings (never caller text); the value
-  // is bound as $2.
-  const predicateClause = "equals" in spec.claimPredicate ? "predicate = $2" : "predicate like $2";
-  const predicateArg = "equals" in spec.claimPredicate ? spec.claimPredicate.equals : `${spec.claimPredicate.prefix}.%`;
+  // is bound as $2. starts_with (not LIKE) so a "_" or "%" in the prefix is literal.
+  const predicateClause = "equals" in spec.claimPredicate ? "predicate = $2" : "starts_with(predicate, $2)";
+  const predicateArg = "equals" in spec.claimPredicate ? spec.claimPredicate.equals : `${spec.claimPredicate.prefix}.`;
   const sourceIds = [...spec.sourceIds];
 
   const claims = await db.query(

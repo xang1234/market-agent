@@ -77,12 +77,12 @@ test("holdingsByFiler returns the filer's portfolio for a period, numerics mappe
 
 test("findFilerIssuerHolding returns the holding or null", async () => {
   const hit = await findFilerIssuerHolding(
-    fakeDb([{ shares: "100", value_usd: "5000" }]).db,
+    fakeDb([{ shares: "100", value_usd: "5000", accession: "0001067983-26-000001" }]).db,
     BERKSHIRE,
     ISSUER,
     "2025-12-31",
   );
-  assert.deepEqual(hit, { shares: 100, value_usd: 5000 });
+  assert.deepEqual(hit, { shares: 100, value_usd: 5000, accession: "0001067983-26-000001" });
   const miss = await findFilerIssuerHolding(fakeDb([]).db, BERKSHIRE, ISSUER, "2025-12-31");
   assert.equal(miss, null);
 });
@@ -109,8 +109,8 @@ test("supersede13fFiling deletes the period's holdings and delegates the artifac
   assert.deepEqual(calls[0].values, [BERKSHIRE, "2026-03-31"]);
 
   // The deduped source set is forwarded to the shared helper (predicate/event SQL is
-  // asserted in supersede-filing.test.ts). 13F uses the position_change.* LIKE prefix.
-  assert.deepEqual(calls[1].values, [[SOURCE], "position_change.%"], "deduped sources + position_change LIKE prefix");
+  // asserted in supersede-filing.test.ts). 13F uses the literal position_change. prefix.
+  assert.deepEqual(calls[1].values, [[SOURCE], "position_change."], "deduped sources + literal position_change. prefix");
 });
 
 test("supersede13fFiling no-ops (single query, zero counts) when no prior holdings match", async () => {

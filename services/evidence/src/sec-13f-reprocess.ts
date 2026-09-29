@@ -22,7 +22,7 @@
 import { parse13fInfoTable } from "./sec-13f-extractor.ts";
 import { resolveHoldingsByIssuer } from "./sec-13f-resolve.ts";
 import { isSuperinvestorFiler, superinvestorName } from "./superinvestor-filers.ts";
-import { insertHolding, sourceIdForAccession } from "./institutional-holdings-repo.ts";
+import { findFilerIssuerHolding, insertHolding, sourceIdForAccession } from "./institutional-holdings-repo.ts";
 import { isAccessionSuperseded } from "./document-repo.ts";
 import { createSource } from "./source-repo.ts";
 import { withTransaction } from "./transaction.ts";
@@ -168,6 +168,16 @@ export async function reprocessFiler13f(
           })
         ).source_id;
       for (const h of resolved) {
+        // Never overwrite a row another accession owns (a 13F-HR/A NEW HOLDINGS supplement
+        // stored this issuer after the original's CUSIP failed to resolve): the upsert on
+        // (filer, issuer, period) would clobber the supplement's total with the original's.
+        const existing = await findFilerIssuerHolding(tx.db, filerCik, h.issuerId, filing.periodOfReport);
+        if (existing && existing.accession !== candidate.accession) {
+          console.warn(
+            `[sec-13f-reprocess] ${candidate.accession}: ${h.nameOfIssuer} row owned by ${existing.accession} — skipped`,
+          );
+          continue;
+        }
         await insertHolding(tx.db, {
           filer_cik: filerCik,
           filer_name: filerName,

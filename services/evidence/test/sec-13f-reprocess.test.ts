@@ -289,3 +289,38 @@ test("reprocessFiler13f skips an original superseded by a 13F-HR/A amendment (do
     "the stale portfolio is NOT re-added under a fresh source",
   );
 });
+
+test("reprocessFiler13f does not overwrite a holding row owned by another accession (13F-HR/A supplement)", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-reprocess-foreign-row");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  // One issuer, two share classes. Only GOOG resolves at first ingest.
+  const alphabetId = await seedIssuerWithCusip(client, "Alphabet Inc.", "02079K107"); // GOOG
+
+  // A NEW HOLDINGS supplement stores GOOG 200 under ITS accession.
+  const SUPP = "0001067983-26-000011";
+  const suppTxt = submission("03-31-2026", [{ name: "ALPHABET INC CL C", cusip: "02079K107", value: 2000, shares: 200 }], "NEW HOLDINGS");
+  await handle13f(
+    { cik: BERKSHIRE, form: "13F-HR/A", filedDate: "2026-05-20", accession: SUPP },
+    { db, objectStore: new MemoryObjectStore(), client: fakeSecClient(SUPP, suppTxt) } as unknown as FormHandlerDeps,
+  );
+
+  // GOOGL becomes resolvable to the same issuer; reprocessing the original would upsert
+  // GOOGL 100 onto (filer, issuer, period) and clobber the supplement's row.
+  await client.query(`insert into instruments (issuer_id, asset_type, cusip) values ($1, 'common_stock', '02079K305')`, [alphabetId]);
+  const ORIG = "0001067983-26-000010";
+  const origTxt = submission("03-31-2026", [{ name: "ALPHABET INC CL A", cusip: "02079K305", value: 1000, shares: 100 }]);
+  const result = await reprocessFiler13f(
+    { db, secClient: fakeSecClient(ORIG, origTxt), openfigi: OPENFIGI, openfigiFetch: fakeOpenFigiFetch() },
+    { cik: BERKSHIRE, now: NOW },
+  );
+
+  assert.equal(result.holdingsUpserted, 0, "the supplement-owned row is not overwritten");
+  const row = await client.query<{ shares: string; accession: string }>(
+    `select shares, accession from institutional_holdings where issuer_id = $1 and filing_period = '2026-03-31'`,
+    [alphabetId],
+  );
+  assert.equal(Number(row.rows[0]!.shares), 200);
+  assert.equal(row.rows[0]!.accession, SUPP);
+});

@@ -356,9 +356,9 @@ test("handle13f (13F-HR/A NEW HOLDINGS) merges supplemental rows without flaggin
   );
 });
 
-test("handle13f (13F-HR/A NEW HOLDINGS) adds a supplemental share class to an already-held issuer's total", async (t) => {
+test("handle13f (13F-HR/A NEW HOLDINGS) skips a supplemental share class of an already-held issuer (fra-f1hx)", async (t) => {
   if (!dockerAvailable()) return t.skip("docker unavailable");
-  const { databaseUrl } = await bootstrapDatabase(t, "f13f-supp-merge");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-supp-overlap");
   const client = await connectedClient(t, databaseUrl);
   const db = client as unknown as QueryExecutor;
   // One issuer, two share classes (GOOGL + GOOG) → both resolve to the same issuer_id.
@@ -381,14 +381,16 @@ test("handle13f (13F-HR/A NEW HOLDINGS) adds a supplemental share class to an al
   );
   assert.equal(res.ingested, true);
 
-  // The supplement is ADDED to the existing total (100 + 200), not overwritten (200).
-  const row = await client.query<{ shares: string; value_usd: string }>(
-    `select shares, value_usd from institutional_holdings where issuer_id = $1 and filing_period = '2026-03-31'`,
+  // The overlapping issuer is skipped: the original's row is neither merged into nor
+  // overwritten. Merging needs stale-claim retirement + an amendment-aware reprocess (fra-f1hx).
+  const row = await client.query<{ shares: string; value_usd: string; accession: string }>(
+    `select shares, value_usd, accession from institutional_holdings where issuer_id = $1 and filing_period = '2026-03-31'`,
     [alphabetId],
   );
   assert.equal(row.rows.length, 1, "still one issuer-level row for the period");
-  assert.equal(Number(row.rows[0]!.shares), 300, "supplemental merged into the existing total (100 + 200), not overwritten");
-  assert.equal(Number(row.rows[0]!.value_usd), 3000, "value merged (1000 + 2000)");
+  assert.equal(Number(row.rows[0]!.shares), 100, "original total kept, not merged or overwritten");
+  assert.equal(Number(row.rows[0]!.value_usd), 1000);
+  assert.equal(row.rows[0]!.accession, "0001193125-26-000061", "row still owned by the original filing");
 });
 
 test("handle13f skips a 13F-HR/A with an unrecognized amendmentType rather than guessing", async (t) => {

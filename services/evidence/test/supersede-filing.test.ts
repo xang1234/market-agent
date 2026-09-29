@@ -45,15 +45,17 @@ test("supersedeFilingArtifacts soft-supersedes claims, hard-deletes events, mark
   assert.deepEqual(calls[2].values, [[S1, S2]]);
 });
 
-test("supersedeFilingArtifacts uses a LIKE prefix for multi-kind predicates (13F position_change.*)", async () => {
+test("supersedeFilingArtifacts matches a literal prefix for multi-kind predicates (13F position_change.*)", async () => {
   const { db, calls } = fakeDb();
   await supersedeFilingArtifacts(db, {
     sourceIds: [S1],
     claimPredicate: { prefix: "position_change" },
     eventType: "position_change",
   });
-  assert.match(calls[0].text, /predicate like \$2/i, "prefix uses LIKE");
-  assert.deepEqual(calls[0].values, [[S1], "position_change.%"], "prefix becomes a LIKE pattern");
+  // starts_with, not LIKE: the "_" in position_change must not act as a wildcard.
+  assert.match(calls[0].text, /starts_with\(predicate, \$2\)/i, "prefix uses starts_with");
+  assert.doesNotMatch(calls[0].text, /\blike\b/i);
+  assert.deepEqual(calls[0].values, [[S1], "position_change."], "prefix passed literally with its dot");
   assert.deepEqual(calls[1].values, [[S1], "position_change"]);
 });
 

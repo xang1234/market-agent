@@ -172,16 +172,16 @@ export async function findFilerIssuerHolding(
   filerCik: string,
   issuerId: string,
   period: string,
-): Promise<{ shares: number; value_usd: number } | null> {
-  const { rows } = await db.query<{ shares: number | string; value_usd: number | string }>(
-    `select shares, value_usd
+): Promise<{ shares: number; value_usd: number; accession: string } | null> {
+  const { rows } = await db.query<{ shares: number | string; value_usd: number | string; accession: string }>(
+    `select shares, value_usd, accession
        from institutional_holdings
       where filer_cik = $1 and issuer_id = $2 and filing_period = $3::date
       limit 1`,
     [filerCik, issuerId, period],
   );
   const row = rows[0];
-  return row ? { shares: Number(row.shares), value_usd: Number(row.value_usd) } : null;
+  return row ? { shares: Number(row.shares), value_usd: Number(row.value_usd), accession: row.accession } : null;
 }
 
 // The filer's most recent reporting period strictly before `beforePeriod` (the

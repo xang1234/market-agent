@@ -191,22 +191,21 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
       }
     }
 
-    // Insert each resolved holding and emit a notable change vs the prior quarter. For a
-    // NEW HOLDINGS supplemental amendment the row is ADDED to the period: insertHolding
-    // upserts on (filer, issuer, period), so if this issuer is already held — e.g. the
-    // original reported a different share class (GOOGL) and the supplement adds another
-    // (GOOG), both resolving to the same issuer — the supplement must be MERGED into the
-    // existing total rather than overwriting it, and the change claim computed from the
-    // merged total. An original/restatement is the full portfolio, so it overwrites as-is.
+    // Insert each resolved holding and emit a notable change vs the prior quarter. A NEW
+    // HOLDINGS supplement is add-only: insertHolding upserts on (filer, issuer, period), so
+    // an issuer already held that period — e.g. the original reported GOOGL and the
+    // supplement adds GOOG, both resolving to the same issuer — is SKIPPED, not merged or
+    // overwritten. Merging would also need the original's position_change claim retired and
+    // an amendment-aware reprocess (fra-f1hx), so the overlap under-reports the extra class
+    // until then. An original/restatement is the full portfolio, so it overwrites as-is.
     for (const h of resolved) {
-      let shares = h.shares;
-      let valueUsd = h.valueUsd;
-      if (supplemental) {
-        const existing = await findFilerIssuerHolding(tx.db, filerCik, h.issuerId, period);
-        if (existing) {
-          shares += existing.shares;
-          valueUsd += existing.value_usd;
-        }
+      const { shares, valueUsd } = h;
+      if (supplemental && (await findFilerIssuerHolding(tx.db, filerCik, h.issuerId, period))) {
+        console.warn(
+          `[sec-13f] ${entry.accession} (13F-HR/A NEW HOLDINGS): ${h.nameOfIssuer} already held by ` +
+            `${filerName} @ ${period} — overlapping share class skipped (fra-f1hx)`,
+        );
+        continue;
       }
       await insertHolding(tx.db, {
         filer_cik: filerCik,
