@@ -92,13 +92,15 @@ export function keepSupportedSentences(
         // ("versus AMD's 49.2%").
         const comparisons = stretch.filter((mention) => COMPARED_WITH.test(sentence.slice(0, mention.index)));
         const subjects = stretch.filter((mention) => !comparisons.includes(mention));
-        const before = subjects.length > 0
-          ? subjects
-          : comparisons.filter((mention) => !PRONOUN.test(sentence.slice(mention.index + mention.company.length, index)));
+        // A pronoun with no company subject ("Its margin was 49.2% in AMD's
+        // filing") refers back: nothing named nearby may claim the figure.
+        const pronounSubject = subjects.length === 0 && PRONOUN.test(sentence.slice(from, index));
+        const before = subjects.length > 0 ? subjects : pronounSubject ? [] : comparisons;
         // Only the first name after it, and only when a preposition ties it to
         // the figure ("74.6% for NVDA"); "49.2%, exceeding AMD" names a comparison.
         const next = named.find((mention) => mention.index >= end && mention.index < to);
-        const after = before.length === 0 && next !== undefined && OWNED_BY.test(sentence.slice(end, next.index))
+        const after = before.length === 0 && !pronounSubject && next !== undefined &&
+            OWNED_BY.test(sentence.slice(end, next.index))
           ? next
           : undefined;
         if (after !== undefined) usedUpTo = after.index + after.company.length;
@@ -115,9 +117,11 @@ export function keepSupportedSentences(
       // Only a sentence the user will see can name the company for the next one,
       // and only when it names one: "NVDA trails AMD. Its..." is ambiguous. A
       // company named only as a comparison ("Unlike AMD, it...") leaves the
-      // carried subject as it was.
+      // carried subject as it was, and so does a pronoun sentence ("It
+      // outperformed AMD."), whose subject is the carried one.
       const subjects = named.filter((mention) => !COMPARED_WITH.test(sentence.slice(0, mention.index)));
-      if (isSupported && subjects.length > 0) {
+      const refersBack = PRONOUN.test(sentence) && lastNamed !== undefined;
+      if (isSupported && subjects.length > 0 && !refersBack) {
         const distinct = new Set(subjects.map((mention) => mention.company));
         lastNamed = distinct.size === 1 ? subjects[0].company : undefined;
       }

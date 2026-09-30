@@ -92,7 +92,9 @@ fixed rule, not a tool loop.
   any on the line (none if it named several: "NVDA trails AMD. Its..." is ambiguous). A company introduced as a
   comparison ("compared with", "unlike", "versus") yields to another company or a pronoun as the figure's subject
   ("Compared with AMD, its margin was 49.2%" credits "its"), and a sentence naming a company only that way leaves
-  the carried subject unchanged. Naming another company in that stretch is ambiguous and drops the sentence, as does a "respectively" construction, so a real figure quoted for the
+  the carried subject unchanged. A pronoun before a figure with no company subject is the figure's subject: no
+  company named near it can claim it ("Its margin was 49.2% in AMD's filing"), and a pronoun sentence never replaces
+  the carried company ("It outperformed AMD."). Naming another company in that stretch is ambiguous and drops the sentence, as does a "respectively" construction, so a real figure quoted for the
   wrong company never survives; the cost is some valid sentences dropped (tracked for tuning against the eval).
   Companies are recognized by their displayed label (ticker), case-sensitively, which the prompt tells the model to
   use; digits inside a label are not figures.

@@ -211,3 +211,14 @@ test("'from' after a figure names a comparison, not its owner", () => {
   const result = keepSupportedSentences("NVDA led. Its margin rose to 49.2% from AMD's level.", [], COMPARED);
   assert.deepEqual(result.removed, ["Its margin rose to 49.2% from AMD's level."]);
 });
+
+test("a pronoun sentence never replaces the carried subject", () => {
+  const result = keepSupportedSentences("NVDA led. It outperformed AMD. Its gross margin was 49.2%.", [], COMPARED);
+  assert.deepEqual(result.removed, ["Its gross margin was 49.2%."]);
+});
+
+test("a pronoun before a figure is its subject; a company named after cannot override it", () => {
+  const result = keepSupportedSentences("NVDA led. Its margin was 49.2% in AMD's filing.", [], COMPARED);
+  assert.deepEqual(result.removed, ["Its margin was 49.2% in AMD's filing."]);
+  assert.deepEqual(keepSupportedSentences("NVDA led. Its margin was 74.6% in the year.", [], COMPARED).removed, []);
+});
