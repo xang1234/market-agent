@@ -762,6 +762,24 @@ function subjectAwareRunner(
         });
         return;
       }
+      // A comparison adds the companies the message names, with the explicit
+      // subject kept primary ("Compare with AMD" from the NVDA page).
+      const text = nonEmptySubjectText(context.userIntent);
+      if (text && COMPARATIVE.test(text)) {
+        const named = await resolveNamedSubjects(text, options.preResolveSubject);
+        const ambiguous = named.unresolved.find((resolution) => resolution.status === "needs_clarification");
+        if (ambiguous) {
+          await emitSubjectClarificationTurn(context, ambiguous, {
+            persistAssistantMessage: options.persistAssistantMessage,
+            renderSubjectClarification: options.renderSubjectClarification,
+          });
+          return;
+        }
+        const subjects = distinctCompanies([preResolution, ...named.resolved]).slice(0, MAX_TURN_SUBJECTS);
+        const unresolvedMentions = named.unresolved.map((resolution) => resolution.input_text);
+        await runResolvedSubjectTurn(runner, { ...context, unresolvedMentions }, subjects);
+        return;
+      }
       await runResolvedSubjectTurn(runner, context, [preResolution]);
       return;
     }
