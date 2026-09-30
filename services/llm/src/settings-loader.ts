@@ -75,6 +75,9 @@ export async function createLlmRouterFromEnv(
 // ponytail: tokens only; dollar cost needs per-model prices, which aren't configured.
 function formatCompletion(completion: LlmCompletion): string {
   const { channel, model } = completion.deployment;
+  if (completion.outcome === "failed") {
+    return `[llm] ${channel}/${model} ${completion.latencyMs}ms failed (${completion.code ?? "unknown"})`;
+  }
   const tokens = completion.usage
     ? `tokens in=${completion.usage.inputTokens} out=${completion.usage.outputTokens} total=${completion.usage.totalTokens}`
     : "tokens n/a";

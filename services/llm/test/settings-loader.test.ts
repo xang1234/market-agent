@@ -9,6 +9,7 @@ import {
   createLlmRouterFromEnv,
   loadLlmSettingsFromEnv,
 } from "../src/settings-loader.ts";
+import { LlmProviderError } from "../src/router.ts";
 
 test("loadLlmSettingsFromEnv merges shell env with LLM_SETTINGS_ENV_FILE overrides", async () => {
   const dir = await mkdtemp(join(tmpdir(), "llm-settings-"));
@@ -97,6 +98,25 @@ test("createLlmRouterFromEnv logs one usage line per completion only when LLM_US
   const off = await createLlmRouterFromEnv(env, { createClient, log: (line) => quiet.push(line) });
   await off!.complete({ messages: [{ role: "user", content: "hello" }] });
   assert.deepEqual(quiet, []);
+});
+
+test("createLlmRouterFromEnv logs a failed attempt with its error code", async () => {
+  const logged: string[] = [];
+  const router = await createLlmRouterFromEnv({
+    LLM_CHANNELS: "openai",
+    LLM_OPENAI_PROTOCOL: "openai",
+    LLM_OPENAI_MODELS: "gpt-4.1",
+    LITELLM_MODEL: "openai/gpt-4.1",
+    LLM_USAGE_LOG: "true",
+  }, {
+    createClient: () => async () => {
+      throw new LlmProviderError("timeout", "too slow");
+    },
+    log: (line) => logged.push(line),
+  });
+  await assert.rejects(() => router!.complete({ messages: [{ role: "user", content: "hello" }] }));
+  assert.equal(logged.length, 1);
+  assert.match(logged[0]!, /^\[llm\] openai\/gpt-4\.1 \d+ms failed \(timeout\)$/);
 });
 
 test("createLlmRouterFromEnv usage line says tokens are unknown when the client reports none", async () => {

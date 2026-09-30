@@ -43,6 +43,28 @@ test("LLM router reports each completion's deployment, latency and usage", async
   assert.deepEqual(completion.usage, { inputTokens: 10, outputTokens: 5, totalTokens: 15 });
 });
 
+test("LLM router reports a failed attempt before its fallback, with the failure code", async () => {
+  const completions: Array<{ deployment: { channel: string; model: string }; outcome: string; code?: string; latencyMs: number }> = [];
+  let calls = 0;
+  const router = createLlmRouter({
+    settings: settings(),
+    client: async () => {
+      calls += 1;
+      if (calls === 1) throw new LlmProviderError("rate_limited", "slow down");
+      return { text: "fallback ok" };
+    },
+    onCompletion: (completion) => completions.push(completion as never),
+  });
+
+  await router.complete({ messages: [{ role: "user", content: "hello" }] });
+
+  assert.deepEqual(
+    completions.map((c) => [`${c.deployment.channel}/${c.deployment.model}`, c.outcome, c.code]),
+    [["openai/gpt-4.1", "failed", "rate_limited"], ["deepseek/deepseek-chat", "ok", undefined]],
+  );
+  assert.ok(completions.every((c) => Number.isFinite(c.latencyMs)));
+});
+
 test("LLM router falls back after retryable provider failure", async () => {
   const calls: string[] = [];
   const client: LlmChatClient = async (deployment) => {

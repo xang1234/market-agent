@@ -30,10 +30,14 @@ export type LlmChatResult = {
   usage?: LlmUsage;
 };
 
-/** One successful completion, for cost/latency logging (analyst mode, #123). */
+/** One provider attempt, for cost/latency logging (analyst mode, #123). A failed
+ * attempt is reported too: it may still have been billed, and it explains a fallback. */
 export type LlmCompletion = {
   deployment: Pick<LlmDeployment, "channel" | "model">;
   latencyMs: number;
+  outcome: "ok" | "failed";
+  /** Failure code, for a failed attempt. */
+  code?: LlmProviderErrorCode | "unknown";
   usage?: LlmUsage;
 };
 
@@ -130,6 +134,11 @@ export function createLlmRouter(input: CreateLlmRouterInput): ControlledRouter {
         const attempt = Object.freeze({ index, channel: deployment.channel, model: deployment.model });
         await controls.beforeAttempt?.(attempt);
         throwIfAborted(controls.signal);
+        const startedAt = performance.now();
+        const attemptDeployment = Object.freeze({
+          channel: deployment.channel,
+          model: deployment.model,
+        });
         try {
           const dispatch = async (attemptSignal?: AbortSignal): Promise<LlmChatResult> => {
             const signal = combineSignals(controls.signal, attemptSignal);
@@ -145,26 +154,28 @@ export function createLlmRouter(input: CreateLlmRouterInput): ControlledRouter {
               throw new ProviderDispatchError(error);
             }
           };
-          const startedAt = performance.now();
           const result = controls.executeAttempt === undefined
             ? await dispatch()
             : await controls.executeAttempt(attempt, dispatch);
-          const completedDeployment = Object.freeze({
-            channel: deployment.channel,
-            model: deployment.model,
-          });
           input.onCompletion?.({
-            deployment: completedDeployment,
+            deployment: attemptDeployment,
             latencyMs: Math.round(performance.now() - startedAt),
+            outcome: "ok",
             ...(result.usage === undefined ? {} : { usage: result.usage }),
           });
           return Object.freeze({
             ...result,
-            deployment: completedDeployment,
+            deployment: attemptDeployment,
           });
         } catch (error) {
           if (!(error instanceof ProviderDispatchError)) throw error;
           const providerAttempt = attemptFromError(deployment, error.cause);
+          input.onCompletion?.({
+            deployment: attemptDeployment,
+            latencyMs: Math.round(performance.now() - startedAt),
+            outcome: "failed",
+            code: providerAttempt.code,
+          });
           attempts.push(providerAttempt);
           if (isTerminalProviderCode(providerAttempt.code)) {
             throw new LlmRouterError(providerAttempt.code, providerAttempt.message, attempts);
