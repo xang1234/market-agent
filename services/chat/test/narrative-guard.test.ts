@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { formatCompactCurrency } from "../../analyze/src/block-format.ts";
 import { keepSupportedSentences } from "../src/narrative-guard.ts";
 
 const DISPLAYED = ["Revenue", "$62.1B", "Q4 2026", "Quarterly revenue (Q1 2025 to Q4 2026)"];
@@ -241,4 +242,103 @@ test("a one-letter ticker is never read as a company mention", () => {
   const withTickerA = [{ company: "A", value: "74.6%" }, { company: "AMD", value: "49.2%" }];
   assert.equal(keepSupportedSentences("A margin of 74.6% makes AMD the leader.", [], withTickerA).removed.length, 1);
   assert.deepEqual(keepSupportedSentences("AMD's margin is 49.2%.", [], withTickerA).removed, []);
+});
+
+test("a company introduced as a comparison owns a figure only when directly attached to it (#146)", () => {
+  assert.equal(
+    keepSupportedSentences("NVDA led. Unlike AMD, the company achieved a 49.2% margin.", [], COMPARED).removed.length,
+    1,
+  );
+  assert.equal(keepSupportedSentences("Unlike AMD, the company achieved a 49.2% margin.", [], COMPARED).removed.length, 1);
+  // Directly attached, the comparison names the figure's owner.
+  assert.deepEqual(keepSupportedSentences("NVDA grew faster, versus AMD's 49.2% margin.", [], COMPARED).removed, []);
+  assert.deepEqual(keepSupportedSentences("NVDA grew faster, compared with AMD at 49.2%.", [], COMPARED).removed, []);
+});
+
+test("the minus sign carries across a currency-code prefix (#147)", () => {
+  for (const displayed of ["-CN¥3.1B", "-CA$3.1B", "-HK$3.1B", "-CHF 3.1B", "-₹3.1B"]) {
+    assert.equal(keepSupportedSentences("Operating income was $3.1B.", [displayed]).removed.length, 1, displayed);
+    assert.deepEqual(keepSupportedSentences(`Operating income was ${displayed}.`, [displayed]).removed, [], displayed);
+  }
+  // A hyphen inside a word or between numbers is still not a sign.
+  assert.deepEqual(keepSupportedSentences("Revenue rose over 2025-2026.", ["FY 2025 to FY 2026"]).removed, []);
+});
+
+test("the sign survives every currency prefix the formatter can write", () => {
+  for (const currency of Intl.supportedValuesOf("currency")) {
+    const loss = formatCompactCurrency(-3.1e9, currency);
+    const gain = formatCompactCurrency(3.1e9, currency);
+    assert.equal(keepSupportedSentences(`Operating income was ${gain}.`, [loss]).removed.length, 1, `${currency}: ${loss}`);
+    assert.deepEqual(keepSupportedSentences(`Operating income was ${loss}.`, [loss]).removed, [], `${currency}: ${loss}`);
+  }
+});
+
+test("a dotted currency prefix still compares the amount", () => {
+  const loss = formatCompactCurrency(-3.1e9, "XCG");
+  const other = formatCompactCurrency(-8.7e9, "XCG");
+  assert.equal(keepSupportedSentences(`Operating income was ${other}.`, [loss]).removed.length, 1);
+  assert.equal(keepSupportedSentences("Operating income was -Foo. 8.7B.", [loss]).removed.length, 1);
+});
+
+test("a sentence starting with a digit is still its own sentence", () => {
+  const figures = [...COMPARED, { company: "NVDA", value: "$130.5B" }];
+  const result = keepSupportedSentences("NVDA's revenue was $130.5B. 74.6% was AMD's margin.", [], figures);
+  assert.deepEqual(result.removed, ["74.6% was AMD's margin."]);
+});
+
+test("sentences separated by a no-break space are still split", () => {
+  for (const space of [" ", " "]) {
+    const result = keepSupportedSentences(`NVDA led.${space}74.6% was AMD's margin.`, [], COMPARED);
+    assert.equal(result.removed.length, 1, JSON.stringify(space));
+  }
+});
+
+test("only the formatter's own 'Cg.' plus no-break space is kept together", () => {
+  const result = keepSupportedSentences("NVDA reports in Cg. 74.6% was AMD's margin.", [], COMPARED);
+  assert.equal(result.removed.length, 1);
+  assert.deepEqual(result.removed, ["74.6% was AMD's margin."]);
+});
+
+test("a Markdown bullet marker is not a minus sign", () => {
+  assert.equal(keepSupportedSentences("- 3.1% revenue growth", ["-3.1%"]).removed.length, 1);
+  assert.deepEqual(keepSupportedSentences("- -3.1% revenue growth", ["-3.1%"]).removed, []);
+  assert.deepEqual(keepSupportedSentences("- 3.1% revenue growth", ["3.1%"]).removed, []);
+});
+
+test("'Cg.' plus a no-break space is kept together only inside a signed figure", () => {
+  const result = keepSupportedSentences("NVDA reports in Cg. 74.6% was AMD's margin.", [], COMPARED);
+  assert.deepEqual(result.removed, ["74.6% was AMD's margin."]);
+});
+
+test("an unattached comparison company blocks the carried owner", () => {
+  const figures = [
+    { company: "NVDA", value: "$130.5B" },
+    { company: "NVDA", value: "$74.6B" },
+    { company: "AMD", value: "$49.2B" },
+  ];
+  const result = keepSupportedSentences(
+    "NVDA's revenue was $130.5B, compared with AMD's revenue of $74.6B.",
+    [],
+    figures,
+  );
+  assert.equal(result.removed.length, 1);
+});
+
+test("a ticker that is also a currency prefix does not break that currency's figures", () => {
+  const figures = [{ company: "CHF", value: "-CHF 3.1B" }, { company: "AMD", value: "$3.1B" }];
+  assert.deepEqual(keepSupportedSentences("CHF's operating income was -CHF 3.1B.", [], figures).removed, []);
+  assert.equal(keepSupportedSentences("AMD's operating income was -CHF 3.1B.", [], figures).removed.length, 1);
+});
+
+test("'-Cg.' ends a sentence unless a complete currency figure follows", () => {
+  const figures = [{ company: "NVDA", value: "-74.6%" }, { company: "AMD", value: "74.6%" }];
+  const result = keepSupportedSentences("NVDA reports in -Cg. 74.6% was AMD's margin.", [], figures);
+  // Split: NVDA no longer lends its name to a figure in the next sentence.
+  assert.deepEqual(result.removed, ["74.6% was AMD's margin."]);
+});
+
+test("a company label starting with a digit is still a mention", () => {
+  const figures = [{ company: "3M Company", value: "49.2%" }, { company: "NVDA", value: "74.6%" }];
+  assert.deepEqual(keepSupportedSentences("3M Company's margin is 49.2%.", [], figures).removed, []);
+  assert.equal(keepSupportedSentences("3M Company's margin is 74.6%.", [], figures).removed.length, 1);
 });

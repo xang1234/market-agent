@@ -28,11 +28,23 @@
 // prompt asks the model to use the label. Add legal-name aliases if the eval
 // shows "NVIDIA" sentences being dropped (#144).
 
-// A leading minus is part of the figure ("-10.0%" is not "10.0%", "-$3.1B" is
-// not "$3.1B"), unless it joins two numbers or words ("2025-2026").
-const NUMBER = /(?:(?<![A-Za-z0-9.])[-−][$€£¥]?)?\d+(?:,\d{3})*(?:\.\d+)?/g;
-const SENTENCE_BREAK = /(?<=[.!?])\s+/;
+// A leading minus is part of the figure ("-10.0%" is not "10.0%"), across any
+// currency prefix the formatter writes ("-$3.1B", "-CN¥3.1B", "-CHF 3.1B",
+// "-F CFA 3.1B", "-Cg. 3.1B"; a test checks every supported currency), unless
+// it joins two numbers or words ("2025-2026").
+// A space after the minus only follows a currency prefix; a bare minus touches
+// its digits, so a Markdown bullet ("- 3.1%") is not a sign.
+const NUMBER =
+  /(?:(?<![A-Za-z0-9.])[-−](?:(?:[A-Za-z]{1,4}\.?(?:[ \u00a0\u202f][A-Za-z]{1,4})?\p{Sc}?|\p{Sc})[ \u00a0\u202f]?)?)?\d+(?:,\d{3})*(?:\.\d+)?/gu;
+// Not inside the formatter's one dotted prefix: a signed "-Cg.", a no-break
+// space and a complete currency amount ("-Cg. 3.1B" is one figure; prose
+// "in Cg. 74.6%" or "-Cg. 74.6%" still splits); the all-currency test flags
+// any new dotted prefix.
+const SENTENCE_BREAK = /(?<=[.!?])(?!(?<=[-−]Cg\.)\u00a0\d+(?:,\d{3})*(?:\.\d+)?[KMBT]?(?![\d%]|[.,]\d))\s+/;
 const COMPARED_WITH = /(?:compared (?:with|to)|unlike|versus|vs\.?|than|relative to|against)\s+$/i;
+// Between a comparison company and a figure it owns: nothing but a possessive
+// or "at"/"with" ("versus AMD's 49.2%", "compared with AMD at 49.2%").
+const ATTACHED = /^(?:['’]s)?\s*(?:(?:at|with)\s+)?$/i;
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition
 // ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
@@ -70,9 +82,13 @@ export function keepSupportedSentences(
       continue;
     }
     const kept = line.trim().split(SENTENCE_BREAK).filter((sentence) => {
-      const named = companyMentions(sentence, companies);
-      // Digits inside a label ("issuer:12ab34cd") are not figures.
-      const numbers = numberMatches(maskMentions(sentence, named));
+      const allNumbers = numberMatches(sentence);
+      const mentions = companyMentions(sentence, companies);
+      // Digits inside a label ("issuer:12ab34cd") are not figures, and a label
+      // inside a figure ("-CHF 3.1B" when CHF is a ticker) is not a mention.
+      const within = (at: number, start: number, length: number) => at >= start && at < start + length;
+      const numbers = allNumbers.filter((n) => !mentions.some((m) => within(n.index, m.index, m.company.length)));
+      const named = mentions.filter((m) => !numbers.some((n) => within(m.index, n.index, n.end - n.index)));
       if (numbers.some(({ number }) => !supported.has(number) && !owners.has(number))) {
         removed.push(sentence);
         return false;
@@ -88,21 +104,29 @@ export function keepSupportedSentences(
         const from = Math.max(i === 0 ? 0 : attributed[i - 1].end, usedUpTo);
         const to = i === attributed.length - 1 ? sentence.length : attributed[i + 1].index;
         const stretch = named.filter((mention) => mention.index >= from && mention.index < index);
-        // A company introduced as a comparison yields to the figure's own
-        // subject: another company ("Compared with AMD, NVDA's 74.6%") or a
-        // pronoun ("Compared with AMD, its 49.2%"). Alone, it is the owner
-        // ("versus AMD's 49.2%").
+        // A company introduced as a comparison is not the figure's owner
+        // ("Unlike AMD, the company achieved 49.2%"; "Compared with AMD,
+        // NVDA's 74.6%"), unless it is directly attached to the figure
+        // ("NVDA grew faster, versus AMD's 49.2%"), which then outranks any
+        // other company in the stretch.
         const comparisons = stretch.filter((mention) => COMPARED_WITH.test(sentence.slice(0, mention.index)));
         const subjects = stretch.filter((mention) => !comparisons.includes(mention));
         // A pronoun with no company subject ("Its margin was 49.2% in AMD's
         // filing") refers back to an earlier figure's company in the sentence,
         // if any: nothing named near this figure may claim it.
         const pronounSubject = subjects.length === 0 && PRONOUN.test(sentence.slice(from, index));
-        const before = subjects.length > 0 ? subjects : pronounSubject ? [] : comparisons;
+        const attached = comparisons.filter((mention) =>
+          ATTACHED.test(sentence.slice(mention.index + mention.company.length, index))
+        );
+        const before = attached.length > 0 ? attached : subjects;
+        // An unattached comparison company ("compared with AMD's revenue of
+        // $74.6B") may be the figure's real subject, so nothing else may claim
+        // it: neither a name after the figure nor the carried company.
+        const blocked = before.length === 0 && comparisons.length > 0;
         // Only the first name after it, and only when a preposition ties it to
         // the figure ("74.6% for NVDA"); "49.2%, exceeding AMD" names a comparison.
         const next = named.find((mention) => mention.index >= end && mention.index < to);
-        const after = before.length === 0 && !pronounSubject && next !== undefined &&
+        const after = before.length === 0 && !pronounSubject && !blocked && next !== undefined &&
             OWNED_BY.test(sentence.slice(end, next.index))
           ? next
           : undefined;
@@ -111,6 +135,8 @@ export function keepSupportedSentences(
           ? before.map((mention) => mention.company)
           : after !== undefined
           ? [after.company]
+          : blocked
+          ? []
           : carried;
         carried = credited;
         return credited.length > 0 && credited.every((company) => owners.get(number)!.has(company));
@@ -148,19 +174,12 @@ function companyMentions(
     .sort((a, b) => a.index - b.index);
 }
 
-// The sentence with each company label blanked out, same length, so indices hold.
-function maskMentions(sentence: string, named: ReadonlyArray<{ company: string; index: number }>): string {
-  let masked = sentence;
-  for (const { company, index } of named) {
-    masked = masked.slice(0, index) + " ".repeat(company.length) + masked.slice(index + company.length);
-  }
-  return masked;
-}
-
 // The comparable value: "62.1" for "$62.1B", "-10" for "-10.0%", and "-0" kept
 // apart from "0" ("-0.0%" is a displayed decline).
 function numberKey(raw: string): string {
-  const value = Number(raw.replace("−", "-").replace(/[$€£¥,]/g, ""));
+  // The sign plus the digits: a currency prefix ("-Cg. ") must not leak in.
+  const sign = /^[-−]/.test(raw) ? "-" : "";
+  const value = Number(sign + raw.match(/\d+(?:,\d{3})*(?:\.\d+)?$/)![0].replaceAll(",", ""));
   return Object.is(value, -0) ? "-0" : String(value);
 }
 

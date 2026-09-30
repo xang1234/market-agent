@@ -89,7 +89,9 @@ fixed rule, not a tool loop.
   across sentences ("NVDA leads. Its margin is 74.6%." drops the second sentence). Within a sentence, the companies
   named since the previous figure must own it; else the first one named after it when for/at/in ties them (unless a
   pronoun is the subject); else the previous figure's company. A company introduced as a comparison ("compared
-  with", "unlike") yields to another company or a pronoun. Anything ambiguous (two companies before a figure,
+  with", "unlike") owns a figure only when directly attached to it ("versus AMD's 49.2%", "compared with AMD at
+  49.2%"); "Unlike AMD, the company achieved 49.2%" credits nobody. A figure's sign carries across the currency
+  prefix the formatter writes ("-CN¥3.1B", "-CHF 3.1B"). Anything ambiguous (two companies before a figure,
   "respectively", no company) is dropped, so a real figure quoted for the wrong company never survives; the cost is
   some valid sentences dropped (#144). Companies are recognized by their displayed ticker, case-sensitively, never by
   a one-letter ticker; digits inside a label are not figures.
