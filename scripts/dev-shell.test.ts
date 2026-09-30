@@ -421,7 +421,7 @@ test("docker compose declares persistent storage for Postgres dev data", async (
 });
 
 // Runs `up` with every side effect stubbed and returns the trace of what it would do.
-async function traceUp(envOverrides: Record<string, string> = {}) {
+async function traceUp(envOverrides: Record<string, string> = {}, preamble: string[] = []) {
   const fixture = await createShellFixture(envOverrides);
   const traceFile = join(fixture.root, "trace.log");
   const result = await runBash(
@@ -441,6 +441,7 @@ async function traceUp(envOverrides: Record<string, string> = {}) {
       'start_process(){ local name="$1"; printf "start:%s\\n" "$name" >> "$TRACE_FILE"; sleep 60 >/dev/null 2>&1 & echo $! > "$PID_DIR/$name.pid"; }',
       'wait_for_service(){ printf "ready:%s\\n" "$1" >> "$TRACE_FILE"; }',
       "status(){ :; }",
+      ...preamble,
       "up",
     ].join("\n"),
     fixture.root,
@@ -474,9 +475,21 @@ test("DEV_PROFILE=chat starts only the golden-chat services and only the Postgre
   assert.deepEqual(lines("port:"), CHAT_SERVICES);
   assert.deepEqual(lines("start:"), CHAT_SERVICES, "parked services (and the discovery worker) are not started");
   assert.deepEqual(lines("ready:"), CHAT_SERVICES);
-  assert.deepEqual(lines("compose:"), ["up -d postgres"]);
+  assert.deepEqual(lines("compose:"), ["stop redis minio", "up -d postgres"]);
   // chat imports financial-core sources, which resolve ajv/decimal.js from its own node_modules.
   assert.ok(lines("install:").includes("services/financial-core"), "financial-core deps are installed");
+});
+
+test("switching a running full stack to DEV_PROFILE=chat stops the now-parked processes and containers", async () => {
+  // A full stack is already up: chat, watchlists and the discovery worker are tracked.
+  const { result, lines } = await traceUp({ DEV_PROFILE: "chat" }, [
+    'stop_process(){ printf "stop:%s\\n" "$1" >> "$TRACE_FILE"; kill "$(cat "$PID_DIR/$1.pid")" 2>/dev/null; rm -f "$PID_DIR/$1.pid"; }',
+    'for name in chat watchlists discovery-worker; do sleep 60 >/dev/null 2>&1 & echo $! > "$PID_DIR/$name.pid"; done',
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(lines("stop:"), ["discovery-worker", "watchlists"], "out-of-profile processes are stopped; chat keeps running");
+  assert.deepEqual(lines("compose:"), ["stop redis minio", "up -d postgres"]);
+  assert.ok(!lines("start:").includes("chat"), "the running chat service is left alone");
 });
 
 test("DEV_PROFILE=chat still honours the unofficial dev-provider sidecar opt-in", async () => {

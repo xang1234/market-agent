@@ -379,6 +379,23 @@ discovery_active() {
   [[ "$DISCOVERY_ENABLED" == "true" && "$DEV_PROFILE" == "full" ]]
 }
 
+# Stop tracked processes the active profile doesn't run, so switching a running full
+# stack to DEV_PROFILE=chat actually parks them (status would otherwise mislabel them).
+stop_parked_processes() {
+  local services="$1" pid_file name
+  for pid_file in "$PID_DIR"/*.pid; do
+    [[ -e "$pid_file" ]] || continue
+    name="$(basename "$pid_file" .pid)"
+    if [[ " $services " == *" $name "* ]]; then
+      continue
+    fi
+    if [[ "$name" == "discovery-worker" ]] && discovery_active; then
+      continue
+    fi
+    stop_process "$name"
+  done
+}
+
 start_and_track_process() {
   local name="$1"
   local dir="$2"
@@ -445,6 +462,12 @@ up() {
   fi
   if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
     ensure_python_service_install "$ROOT/services/dev-providers"
+  fi
+
+  stop_parked_processes "$services"
+  # The chat profile needs only postgres from docker-compose.dev.yml; park the others.
+  if [[ -n "$compose_services" ]]; then
+    compose stop redis minio
   fi
 
   for name in $services; do
