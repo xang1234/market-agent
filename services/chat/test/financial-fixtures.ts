@@ -19,6 +19,8 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
   const resolved = (id: string, label: string) => ({ status: "resolved", subject_ref: { kind: "issuer", id }, display_label: label }) as unknown as ChatSubjectPreResolution;
   const table: Record<string, ChatSubjectPreResolution> = {
     AAA: resolved(IDS.issuerA, "Alpha Industries Inc."),
+    // Another name for the same company as AAA.
+    ALPHA: resolved(IDS.issuerA, "Alpha Industries Inc."),
     BBB: resolved(IDS.issuerB, "Beta Holdings Corp."),
     CCC: resolved(MISSING_ISSUER, "Gamma Unlisted"),
     AMB: {

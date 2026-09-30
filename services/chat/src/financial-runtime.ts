@@ -35,7 +35,7 @@ import { publishRequest, type FinancialMode, type RequestGap } from "../../finan
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import type { ChatTurnRunContext } from "./coordinator.ts";
 import { contentHashForText, stableUuid } from "./chat-ids.ts";
-import { extractSubjectMentions } from "./subject-extraction.ts";
+import { COMPARATIVE, companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatSubjectPreResolution } from "./subjects.ts";
 
 export type ChatFinancialMode = FinancialMode;
@@ -139,14 +139,23 @@ async function planTurn(
   authority: FinancialRuntimeAuthority,
   cutoff: Date,
 ): Promise<PlanningResult> {
-  // An explicit subject (a thread opened from a ticker page) is requested first,
-  // so "Compare revenue with AMD" from the NVDA page plans both.
+  // An explicit subject (a thread opened from a ticker page) is requested first;
+  // like the analyst path, the message's companies join it only in a comparison
+  // ("Compare revenue with AMD" from the NVDA page plans both, "Revenue for AMD"
+  // plans NVDA).
   const explicit = context.subjectText?.trim();
-  const mentions = [...new Set([...(explicit ? [explicit] : []), ...extractSubjectMentions(text)])];
-  const requested = await Promise.all(mentions.map(async (mention): Promise<RequestedSubject> => ({
-    mention,
-    resolution: requestedResolution(await deps.resolveMention(mention)),
-  })));
+  const mentions = explicit
+    ? [explicit, ...(COMPARATIVE.test(text) ? extractSubjectMentions(text) : [])]
+    : extractSubjectMentions(text);
+  const resolutions = await Promise.all(mentions.map(async (mention) => ({ mention, resolution: await deps.resolveMention(mention) })));
+  // One entry per company: "NVIDIA" (the page) and "NVDA" (the message) are one.
+  const seen = new Set<string>();
+  const requested = resolutions.flatMap(({ mention, resolution }): RequestedSubject[] => {
+    const key = resolution.status === "resolved" ? companyKey(resolution) : `mention:${mention}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ mention, resolution: requestedResolution(resolution) }];
+  });
   const planningContext = (subjects: ReadonlyArray<RequestedSubject>): PlanningContext => ({
     plan_id: randomUUID(),
     origin: { kind: "chat_request", ref: `chat:${context.threadId}:${context.turnId ?? context.runId}` },
