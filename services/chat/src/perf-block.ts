@@ -5,9 +5,16 @@
 // (data_ref.params.series_refs), and the points travel in the block, so the
 // chart shows exactly what was sealed; nothing is fetched live.
 //
+// Lines are drawn over the dates every company has (an IPO mid-window or a
+// venue holiday would otherwise misalign them), each measured from the first
+// shared close. Delayed or end-of-day prices get the pricing disclosure the
+// verifier requires for their series.
+//
 // ponytail: uses each listing's latest stored window and requires them to be
 // identical; a shared sub-window across different stored ranges is the upgrade.
 
+import { compileDisclosurePolicy } from "../../snapshot/src/disclosure-policy.ts";
+import type { SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
 import { stableUuid } from "./chat-ids.ts";
 
 type QueryExecutor = {
@@ -28,6 +35,7 @@ export type SealedPriceRange = {
   source_id: string;
   interval: string;
   adjustment_basis: string;
+  delay_class: string;
   range_start: string;
   range_end: string;
   as_of: string;
@@ -36,19 +44,37 @@ export type SealedPriceRange = {
 
 type Block = Record<string, unknown>;
 
-// Null on failure: the price chart is optional, so an unavailable market read
-// omits only the chart and never the comparison it sits next to.
-export async function loadPerfComparisonBlock(
+// The chart plus any pricing disclosure it requires. Empty on failure: the price
+// chart is optional, so an unavailable market read omits only the chart and
+// never the comparison it sits next to.
+export async function loadPerfComparisonBlocks(
   db: QueryExecutor,
   input: { listings: ReadonlyArray<{ id: string; label: string }>; snapshotId: string; asOf: string },
-): Promise<Block | null> {
-  if (input.listings.length < 2) return null;
+): Promise<ReadonlyArray<Block>> {
+  if (input.listings.length < 2) return [];
   try {
-    return await loadSealedRanges(db, input);
+    const chart = await loadSealedRanges(db, input);
+    return chart ? [chart, ...perfDisclosureBlocks(chart)] : [];
   } catch (reason) {
     console.warn("[chat] price performance unavailable; showing the comparison without it", reason);
-    return null;
+    return [];
   }
+}
+
+// The disclosures the verifier derives from the chart's sealed series (e.g.
+// end-of-day or delayed pricing), built by the same policy so they match.
+export function perfDisclosureBlocks(chart: Block): ReadonlyArray<Block> {
+  return compileDisclosurePolicy({
+    snapshot_id: String(chart.snapshot_id),
+    manifest: {
+      subject_refs: chart.subject_refs as ReadonlyArray<SnapshotSubjectRef>,
+      source_ids: chart.source_refs as ReadonlyArray<string>,
+      series_specs: chart.provenance_series_specs as never,
+      as_of: String(chart.as_of),
+      basis: ADJUSTMENT_BASIS,
+      normalization: NORMALIZATION,
+    },
+  }).required_disclosure_blocks;
 }
 
 async function loadSealedRanges(
@@ -59,6 +85,7 @@ async function loadSealedRanges(
     bar_range_id: string;
     listing_id: string;
     source_id: string;
+    delay_class: string;
     range_start: Date | string;
     range_end: Date | string;
     as_of: Date | string;
@@ -67,6 +94,7 @@ async function loadSealedRanges(
             bar_range_id::text as bar_range_id,
             listing_id::text as listing_id,
             source_id::text as source_id,
+            delay_class,
             range_start,
             range_end,
             as_of
@@ -96,6 +124,7 @@ async function loadSealedRanges(
       source_id: range.source_id,
       interval: INTERVAL,
       adjustment_basis: ADJUSTMENT_BASIS,
+      delay_class: range.delay_class,
       range_start: iso(range.range_start),
       range_end: iso(range.range_end),
       as_of: iso(range.as_of),
@@ -112,13 +141,19 @@ export function buildPerfComparisonBlock(input: {
   snapshotId: string;
   asOf: string;
 }): Block | null {
-  const ranges = input.ranges.filter((range) => range.bars.length > 0 && range.bars[0].close > 0);
-  if (ranges.length < 2 || ranges.length !== input.ranges.length) return null;
+  const ranges = input.ranges;
+  if (ranges.length < 2) return null;
   const [first] = ranges;
-  // Lines are only comparable over the same window.
+  // Lines are only comparable over the same window...
   if (ranges.some((range) => range.range_start !== first.range_start || range.range_end !== first.range_end)) {
     return null;
   }
+  // ...and on the same dates: keep only dates every company has.
+  const closesByDate = ranges.map((range) => new Map(range.bars.map((bar) => [bar.ts.slice(0, 10), bar.close])));
+  const sharedDates = [...closesByDate[0].keys()]
+    .filter((date) => closesByDate.every((closes) => closes.has(date)))
+    .sort();
+  if (sharedDates.length < 2 || closesByDate.some((closes) => !(closes.get(sharedDates[0])! > 0))) return null;
 
   const specs = ranges.map((range) => ({
     series_ref: stableUuid(`series:${input.snapshotId}:${range.bar_range_id}`),
@@ -128,6 +163,7 @@ export function buildPerfComparisonBlock(input: {
     interval: range.interval,
     adjustment_basis: range.adjustment_basis,
     normalization: NORMALIZATION,
+    delay_class: range.delay_class,
     range: { start: range.range_start, end: range.range_end },
     as_of: range.as_of,
   }));
@@ -145,14 +181,15 @@ export function buildPerfComparisonBlock(input: {
     default_range: `${first.range_start.slice(0, 10)} to ${first.range_end.slice(0, 10)}`,
     basis: ADJUSTMENT_BASIS,
     normalization: NORMALIZATION,
-    series: ranges.map((range) => ({
-      name: range.label,
-      unit: "%",
-      points: range.bars.map((bar) => ({
-        x: bar.ts.slice(0, 10),
-        y: (bar.close / range.bars[0].close - 1) * 100,
-      })),
-    })),
+    series: ranges.map((range, index) => {
+      const closes = closesByDate[index];
+      const base = closes.get(sharedDates[0])!;
+      return {
+        name: range.label,
+        unit: "%",
+        points: sharedDates.map((date) => ({ x: date, y: (closes.get(date)! / base - 1) * 100 })),
+      };
+    }),
     // Promoted to manifest.series_specs when the answer is sealed.
     provenance_series_specs: specs,
   };

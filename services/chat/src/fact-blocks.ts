@@ -29,7 +29,7 @@ import {
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 import { stableUuid } from "./chat-ids.ts";
-import { loadPerfComparisonBlock } from "./perf-block.ts";
+import { loadPerfComparisonBlocks } from "./perf-block.ts";
 
 const QUARTERS_SHOWN = 8;
 const LATEST_QUARTER_METRICS = [
@@ -131,8 +131,9 @@ async function loadComparisonFactBlocks(
     const issuerIds = block.subjects.map((subject) => subject.id);
     const companies = listingsForComparison(issuerIds, input.requestedListings, await companyListings(db, issuerIds));
     const labelOf = (issuerId: string) => companies.get(issuerId)?.label ?? `issuer:${issuerId.slice(0, 8)}`;
-    // Price performance for the same companies, from sealed daily bars (perf-block.ts).
-    const performance = await loadPerfComparisonBlock(db, {
+    // Price performance for the same companies, from sealed daily bars, with any
+    // pricing disclosure it requires (perf-block.ts).
+    const performance = await loadPerfComparisonBlocks(db, {
       listings: block.subjects.flatMap((subject) => {
         const listingId = companies.get(subject.id)?.listing_id;
         return listingId ? [{ id: listingId, label: labelOf(subject.id) }] : [];
@@ -147,7 +148,7 @@ async function loadComparisonFactBlocks(
         subject_labels: block.subjects.map((subject) => labelOf(subject.id)),
         ...blockBase("metrics_comparison", input, cited.map(citedFact), loadable),
       },
-      ...(performance ? [performance] : []),
+      ...performance,
     ]);
   } catch (reason) {
     console.warn("[chat] comparison unavailable; answering with narrative only", reason);

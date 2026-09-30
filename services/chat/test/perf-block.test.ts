@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildPerfComparisonBlock, loadPerfComparisonBlock, type SealedPriceRange } from "../src/perf-block.ts";
+import {
+  buildPerfComparisonBlock,
+  loadPerfComparisonBlocks,
+  perfDisclosureBlocks,
+  type SealedPriceRange,
+} from "../src/perf-block.ts";
 import { fakeQuery } from "./fake-query.ts";
 
 const SNAPSHOT_ID = "11111111-1111-4111-a111-111111111111";
@@ -16,6 +21,7 @@ function range(ticker: string, listingId: string, closes: number[], start = "202
     source_id: MARKET_SOURCE,
     interval: "1d",
     adjustment_basis: "split_and_div_adjusted",
+    delay_class: "eod",
     range_start: start,
     range_end: AS_OF,
     as_of: AS_OF,
@@ -79,10 +85,49 @@ test("each sealed series records its basis and normalization", () => {
 
 test("a failed price read omits only the chart", async () => {
   const db = { query: fakeQuery(() => { throw new Error("market cache unavailable"); }) };
-  const block = await loadPerfComparisonBlock(db, {
+  const blocks = await loadPerfComparisonBlocks(db, {
     listings: [{ id: NVDA.listing_id, label: "NVDA" }, { id: AMD.listing_id, label: "AMD" }],
     snapshotId: SNAPSHOT_ID,
     asOf: AS_OF,
   });
-  assert.equal(block, null);
+  assert.deepEqual(blocks, []);
+});
+
+test("each sealed series carries its stored delay class", () => {
+  const block = buildPerfComparisonBlock({ ranges: [NVDA, AMD], snapshotId: SNAPSHOT_ID, asOf: AS_OF });
+  const specs = block?.provenance_series_specs as Array<Record<string, unknown>>;
+  assert.deepEqual(specs.map((spec) => spec.delay_class), ["eod", "eod"]);
+});
+
+test("end-of-day prices come with the pricing disclosure the verifier requires, covering each series", () => {
+  const block = buildPerfComparisonBlock({ ranges: [NVDA, AMD], snapshotId: SNAPSHOT_ID, asOf: AS_OF });
+  assert.ok(block);
+  const disclosures = perfDisclosureBlocks(block);
+  assert.equal(disclosures.length, 1);
+  assert.equal(disclosures[0].kind, "disclosure");
+  assert.equal(disclosures[0].snapshot_id, SNAPSHOT_ID);
+  assert.deepEqual(disclosures[0].source_refs, [MARKET_SOURCE]);
+  assert.match(JSON.stringify(disclosures[0].items), /end[- ]of[- ]day|EOD/i);
+});
+
+test("lines use only the dates every company has, each measured from the first shared close", () => {
+  // AMD is missing 08-22 (e.g. a holiday or a mid-window listing); NVDA has it.
+  const amdLate = {
+    ...AMD,
+    bars: [
+      { ts: "2026-08-23T00:00:00.000Z", close: 40 },
+      { ts: "2026-08-24T00:00:00.000Z", close: 44 },
+    ],
+  };
+  const block = buildPerfComparisonBlock({ ranges: [NVDA, amdLate], snapshotId: SNAPSHOT_ID, asOf: AS_OF });
+  assert.ok(block);
+  const series = block.series as Array<{ points: Array<{ x: string; y: number }> }>;
+  for (const line of series) assert.deepEqual(line.points.map((p) => p.x), ["2026-08-23", "2026-08-24"]);
+  assert.deepEqual(series[0].points.map((p) => Number(p.y.toFixed(6))), [0, 10]);
+  assert.deepEqual(series[1].points.map((p) => Number(p.y.toFixed(6))), [0, 10]);
+});
+
+test("fewer than two shared dates means no chart", () => {
+  const amdOneShared = { ...AMD, bars: [{ ts: "2026-08-24T00:00:00.000Z", close: 55 }] };
+  assert.equal(buildPerfComparisonBlock({ ranges: [NVDA, amdOneShared], snapshotId: SNAPSHOT_ID, asOf: AS_OF }), null);
 });

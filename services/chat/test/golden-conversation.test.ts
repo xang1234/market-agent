@@ -163,6 +163,11 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       `select series_specs, basis, normalization from snapshots where snapshot_id = $1::uuid`,
       [answer.snapshot_id],
     );
+    // End-of-day prices are disclosed as such.
+    assert.ok(
+      answer.blocks.some((block) => block.kind === "disclosure"),
+      `expected a pricing disclosure; got [${answer.blocks.map((b) => b.kind).join(", ")}]`,
+    );
     // The seal describes the chart's data: adjusted prices as percent returns.
     assert.equal(rows[0]?.basis, "split_and_div_adjusted");
     assert.equal(rows[0]?.normalization, "pct_return");
