@@ -23,9 +23,6 @@ web/node_modules/
 .dev/
 .env.dev
 
-# bv (beads viewer) local config and caches
-.bv/
-
 # Brainstorming visual companion (local, not committed)
 .superpowers/
 
