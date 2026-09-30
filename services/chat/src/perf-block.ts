@@ -178,7 +178,8 @@ export function buildPerfComparisonBlock(input: {
     title: "Price performance",
     subject_refs: ranges.map((range) => ({ kind: "listing", id: range.listing_id })),
     subject_labels: ranges.map((range) => range.label),
-    default_range: `${first.range_start.slice(0, 10)} to ${first.range_end.slice(0, 10)}`,
+    // The window actually drawn: the shared dates, not the stored range.
+    default_range: `${sharedDates[0]} to ${sharedDates[sharedDates.length - 1]}`,
     basis: ADJUSTMENT_BASIS,
     normalization: NORMALIZATION,
     series: ranges.map((range, index) => {

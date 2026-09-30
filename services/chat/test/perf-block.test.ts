@@ -123,6 +123,8 @@ test("lines use only the dates every company has, each measured from the first s
   assert.ok(block);
   const series = block.series as Array<{ points: Array<{ x: string; y: number }> }>;
   for (const line of series) assert.deepEqual(line.points.map((p) => p.x), ["2026-08-23", "2026-08-24"]);
+  // The label describes the window actually drawn, not the stored range.
+  assert.equal(block.default_range, "2026-08-23 to 2026-08-24");
   assert.deepEqual(series[0].points.map((p) => Number(p.y.toFixed(6))), [0, 10]);
   assert.deepEqual(series[1].points.map((p) => Number(p.y.toFixed(6))), [0, 10]);
 });

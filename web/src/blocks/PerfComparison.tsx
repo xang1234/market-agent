@@ -23,7 +23,8 @@ type PerfComparisonProps = { block: PerfComparisonBlock }
 // (non-listing subjects, missing coverage, tests without a network) the block
 // falls back to the original metadata card.
 export function PerfComparison({ block }: PerfComparisonProps): ReactElement {
-  if (block.series !== undefined && block.series.length > 0) {
+  // `series` present (even empty) marks a sealed block: never fall back to live data.
+  if (block.series !== undefined) {
     return <SealedPerfComparison block={block} series={block.series} />
   }
   return <LivePerfComparison block={block} />
@@ -59,11 +60,15 @@ function SealedPerfComparison({
         />
         <span className="text-xs text-muted">{block.default_range}</span>
       </div>
-      <SeriesChart
-        testId={`block-perf-comparison-${block.id}-chart`}
-        ariaLabel={`${block.default_range} performance comparison`}
-        series={series}
-      />
+      {series.length > 0 ? (
+        <SeriesChart
+          testId={`block-perf-comparison-${block.id}-chart`}
+          ariaLabel={`${block.default_range} performance comparison`}
+          series={series}
+        />
+      ) : (
+        <p className="text-xs text-muted">No sealed price data for this comparison.</p>
+      )}
     </ChartCard>
   )
 }

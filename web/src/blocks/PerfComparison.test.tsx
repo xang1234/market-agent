@@ -46,3 +46,11 @@ test('PerfComparison without sealed series keeps the live range toggle', () => {
   const html = renderToStaticMarkup(<PerfComparison block={BASE} />)
   assert.match(html, /block-perf-comparison-perf-1-range/)
 })
+
+test('PerfComparison with explicitly empty sealed series shows it as unavailable, never live data', () => {
+  const html = renderToStaticMarkup(<PerfComparison block={{ ...BASE, series: [] }} />)
+  assert.doesNotMatch(html, /block-perf-comparison-perf-1-range/)
+  assert.doesNotMatch(html, /block-perf-comparison-perf-1-chart/)
+  assert.match(html, /No sealed price data/)
+})
+
