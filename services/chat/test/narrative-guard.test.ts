@@ -164,3 +164,13 @@ test("a comparison phrase after a figure does not make that company its owner", 
   assert.equal(keepSupportedSentences("AMD lagged. Its margin was 74.6% ahead of NVDA.", [], COMPARED).removed.length, 1);
   assert.deepEqual(keepSupportedSentences("Gross margin was 74.6 percent for NVDA.", [], COMPARED).removed, []);
 });
+
+test("a figure's sign is part of it: a displayed decline cannot approve a gain", () => {
+  const growth = [{ company: "NVDA", value: "-10.0%" }, { company: "AMD", value: "12.0%" }];
+  assert.equal(keepSupportedSentences("NVDA's revenue growth was 10.0%.", [], growth).removed.length, 1);
+  assert.deepEqual(keepSupportedSentences("NVDA's revenue growth was -10.0%.", [], growth).removed, []);
+  assert.deepEqual(keepSupportedSentences("NVDA's revenue growth was −10.0%.", [], growth).removed, []);
+  assert.equal(keepSupportedSentences("Operating margin was 3.1%.", ["-3.1%"]).removed.length, 1);
+  // A hyphen between numbers is a range, not a sign.
+  assert.deepEqual(keepSupportedSentences("Revenue rose over 2025-2026.", ["FY 2025 to FY 2026"]).removed, []);
+});

@@ -26,7 +26,9 @@
 // model to use it. Add legal-name aliases if the eval shows "NVIDIA" sentences
 // being dropped.
 
-const NUMBER = /\d+(?:,\d{3})*(?:\.\d+)?/g;
+// A leading minus is part of the figure ("-10.0%" is not "10.0%"), unless it
+// joins two numbers or words ("2025-2026").
+const NUMBER = /(?:(?<![A-Za-z0-9.])[-−])?\d+(?:,\d{3})*(?:\.\d+)?/g;
 const SENTENCE_BREAK = /(?<=[.!?])\s+/;
 // Between a figure and the company that owns it: its unit, then a preposition
 // ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
@@ -118,7 +120,7 @@ function numbersIn(text: string): string[] {
 
 function numberMatches(text: string): Array<{ number: string; index: number; end: number }> {
   return [...text.matchAll(NUMBER)].map((match) => ({
-    number: String(Number(match[0].replaceAll(",", ""))),
+    number: String(Number(match[0].replace("−", "-").replaceAll(",", ""))),
     index: match.index,
     end: match.index + match[0].length,
   }));
