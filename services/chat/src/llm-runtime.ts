@@ -7,7 +7,7 @@ import type { ThreadTitleModel } from "../../summary/src/title-generator.ts";
 import type {
   ChatAnalystToolRuntimeToolCall,
 } from "./coordinator.ts";
-import { displayTextsForBlocks } from "./fact-blocks.ts";
+import { displayedFigures, displayTextsForBlocks } from "./fact-blocks.ts";
 import { keepSupportedSentences } from "./narrative-guard.ts";
 
 // Shown when the guard strips every sentence of the model's prose.
@@ -79,8 +79,10 @@ export async function composeAnalystBlocksWithLlm(input: {
         content: [
           "Write a concise investment research answer for the chat user.",
           "Use the provided tool context only; do not invent citations or data.",
-          "The figures shown to the user are listed in displayed_figures. Quote a figure only",
-          "exactly as it appears there, and never compute new figures such as growth rates,",
+          "The figures shown to the user are listed in displayed_figures, each with the metric",
+          "and, in a comparison, the company it belongs to. Quote a figure only exactly as it",
+          "appears there, in a sentence that names its company exactly as given in company",
+          "(e.g. NVDA), and never compute new figures such as growth rates,",
           "margins, or ratios; describe direction and comparison in words instead.",
           "If the tool context flags data as stale (quote.stale, or",
           "fact_recency.stale / a large fact_recency.age_days), explicitly note",
@@ -95,7 +97,7 @@ export async function composeAnalystBlocksWithLlm(input: {
           conversation: input.conversation ?? [],
           bundle_id: input.context.bundleId,
           existing_blocks: input.blocks,
-          displayed_figures: displayTextsForBlocks(input.factBlocks ?? []),
+          displayed_figures: displayedFigures(input.factBlocks ?? []),
           tool_calls: input.toolCalls.map(summarizeToolCall),
         }),
       },
@@ -107,10 +109,13 @@ export async function composeAnalystBlocksWithLlm(input: {
   if (text.length === 0) return input.blocks;
   if (!input.factBlocks?.length) return rewriteFirstRichTextBlock(input.blocks, text);
 
-  const guarded = keepSupportedSentences(text, [
-    ...displayTextsForBlocks(input.factBlocks),
-    ...claimTextsFromToolCalls(input.toolCalls),
-  ]);
+  const guarded = keepSupportedSentences(
+    text,
+    [...displayTextsForBlocks(input.factBlocks), ...claimTextsFromToolCalls(input.toolCalls)],
+    displayedFigures(input.factBlocks).flatMap((figure) =>
+      figure.company === undefined ? [] : [{ company: figure.company, value: figure.value }]
+    ),
+  );
   if (guarded.removed.length > 0) {
     console.warn(`[chat] removed ${guarded.removed.length} narrative sentence(s) quoting figures not shown to the user`);
   }

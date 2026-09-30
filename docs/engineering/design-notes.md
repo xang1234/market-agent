@@ -83,6 +83,16 @@ fixed rule, not a tool loop.
   and told not to compute new ones. Any sentence whose numbers don't appear in the displayed figures or in a cited
   claim is dropped. If nothing survives, a fixed pointer to the figures is shown instead. Numbers are compared by
   value only, not unit (see the `ponytail:` note in the file).
+- The displayed figures reach the model as rows (`displayedFigures`, `fact-blocks.ts`): `{company, metric, value}`
+  for comparison cells, `{metric, value}` / `{metric, period, value}` for single-company blocks. A comparison figure
+  must also be credited to its company **in the same sentence**, even when a claim repeats the number; nothing carries
+  across sentences ("NVDA leads. Its margin is 74.6%." drops the second sentence). Within a sentence, the companies
+  named since the previous figure must own it; else the first one named after it when for/at/in ties them (unless a
+  pronoun is the subject); else the previous figure's company. A company introduced as a comparison ("compared
+  with", "unlike") yields to another company or a pronoun. Anything ambiguous (two companies before a figure,
+  "respectively", no company) is dropped, so a real figure quoted for the wrong company never survives; the cost is
+  some valid sentences dropped (#144). Companies are recognized by their displayed ticker, case-sensitively, never by
+  a one-letter ticker; digits inside a label are not figures.
 - A failure while building fact blocks degrades to a narrative-only answer; it never costs the user the answer.
 
 ## Which companies a chat turn covers
