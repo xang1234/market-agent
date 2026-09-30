@@ -1,7 +1,8 @@
 # Agent Instructions
 
 This project tracks work in **GitHub Issues** (`xang1234/market-agent`, a public repo) using the `gh` CLI.
-Beads (`bd`) is no longer used; its full history lives in git (see the last commit touching `.beads/issues.jsonl`).
+Beads (`bd`) is no longer used; its final export (all 522 issues, 2 memories, and the interaction log) is archived in
+`docs/archive/beads-issues-2026-09-30.jsonl` and `docs/archive/beads-interactions-2026-09-30.jsonl`.
 
 ## Quick Reference
 

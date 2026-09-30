@@ -20,7 +20,10 @@ analyze re-exports it). `auditManifestToolCallLog` (`services/snapshot/src/manif
 - Analyze's merged seals are unaffected: `seal-input-merge` spreads only `base.manifest` symbols, never DETERMINISTIC.
 - Approved by the project owner on 2026-06-09.
 - **Gotchas:** grid cell provenance blocks must use a REGISTERED block kind (`metric_row` for facts, `rich_text` for
-  reader cells), and `point`-period facts need a non-null `period_end` for the fact-binding check.
+  reader cells). A `point`-period fact needs a temporal anchor for the fact-binding check: an undated point fact
+  (`period_end` null) binds by `as_of`, and a dated legacy point fact binds by `period_end`
+  (`requiredFactBindingFields` in `services/snapshot/src/snapshot-verifier.ts`; covered by
+  `services/snapshot/test/point-fact-binding.test.ts`). Do not invent a `period_end` for undated facts.
 
 This is the path the chat-recovery epic uses to seal chart and table blocks built from facts.
 
