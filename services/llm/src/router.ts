@@ -16,10 +16,25 @@ export type LlmChatRequest = {
   maxTokens?: number;
 };
 
+export type LlmUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+};
+
 export type LlmChatResult = {
   text: string;
   /** Optional audit record created by the concrete provider transport. */
   tool_call_id?: string;
+  /** Token counts, when the provider reports them. */
+  usage?: LlmUsage;
+};
+
+/** One successful completion, for cost/latency logging (analyst mode, #123). */
+export type LlmCompletion = {
+  deployment: Pick<LlmDeployment, "channel" | "model">;
+  latencyMs: number;
+  usage?: LlmUsage;
 };
 
 export type LlmClientExecutionOptions = {
@@ -95,6 +110,7 @@ export class LlmRouterError extends Error {
 export type CreateLlmRouterInput = {
   settings: LlmSettings;
   client: LlmChatClient;
+  onCompletion?: (completion: LlmCompletion) => void;
 };
 
 export function createLlmRouter(input: CreateLlmRouterInput): ControlledRouter {
@@ -129,15 +145,22 @@ export function createLlmRouter(input: CreateLlmRouterInput): ControlledRouter {
               throw new ProviderDispatchError(error);
             }
           };
+          const startedAt = performance.now();
           const result = controls.executeAttempt === undefined
             ? await dispatch()
             : await controls.executeAttempt(attempt, dispatch);
+          const completedDeployment = Object.freeze({
+            channel: deployment.channel,
+            model: deployment.model,
+          });
+          input.onCompletion?.({
+            deployment: completedDeployment,
+            latencyMs: Math.round(performance.now() - startedAt),
+            ...(result.usage === undefined ? {} : { usage: result.usage }),
+          });
           return Object.freeze({
             ...result,
-            deployment: Object.freeze({
-              channel: deployment.channel,
-              model: deployment.model,
-            }),
+            deployment: completedDeployment,
           });
         } catch (error) {
           if (!(error instanceof ProviderDispatchError)) throw error;

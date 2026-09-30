@@ -26,6 +26,23 @@ test("LLM router returns the primary deployment response", async () => {
   assert.deepEqual(result.deployment, { channel: "openai", model: "gpt-4.1" });
 });
 
+test("LLM router reports each completion's deployment, latency and usage", async () => {
+  const completions: unknown[] = [];
+  const router = createLlmRouter({
+    settings: settings(),
+    client: async () => ({ text: "ok", usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 } }),
+    onCompletion: (completion) => completions.push(completion),
+  });
+
+  await router.complete({ messages: [{ role: "user", content: "hello" }] });
+
+  assert.equal(completions.length, 1);
+  const [completion] = completions as Array<{ deployment: unknown; latencyMs: number; usage: unknown }>;
+  assert.deepEqual(completion.deployment, { channel: "openai", model: "gpt-4.1" });
+  assert.ok(Number.isFinite(completion.latencyMs) && completion.latencyMs >= 0);
+  assert.deepEqual(completion.usage, { inputTokens: 10, outputTokens: 5, totalTokens: 15 });
+});
+
 test("LLM router falls back after retryable provider failure", async () => {
   const calls: string[] = [];
   const client: LlmChatClient = async (deployment) => {

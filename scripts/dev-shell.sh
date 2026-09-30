@@ -7,11 +7,12 @@ if [[ ! -f "$ENV_FILE" ]]; then
   ENV_FILE="$ROOT/.env.dev.example"
 fi
 
-# DEV_PROFILE and DEV_NO_KEYS are per-invocation switches
+# DEV_PROFILE, DEV_NO_KEYS and DEV_MODE are per-invocation switches
 # (DEV_PROFILE=chat DEV_NO_KEYS=true ./scripts/dev-shell.sh up), so the caller's value
 # beats the env file's.
 CALLER_DEV_PROFILE="${DEV_PROFILE:-}"
 CALLER_DEV_NO_KEYS="${DEV_NO_KEYS:-}"
+CALLER_DEV_MODE="${DEV_MODE:-}"
 
 set -a
 # shellcheck source=/dev/null
@@ -20,6 +21,7 @@ set +a
 
 DEV_PROFILE="${CALLER_DEV_PROFILE:-${DEV_PROFILE:-}}"
 DEV_NO_KEYS="${CALLER_DEV_NO_KEYS:-${DEV_NO_KEYS:-}}"
+DEV_MODE="${CALLER_DEV_MODE:-${DEV_MODE:-}}"
 
 # Defaults for variables that may be missing from an older .env.dev so `set -u`
 # expansion below doesn't abort, and so child processes receive them.
@@ -35,9 +37,11 @@ DEV_NO_KEYS="${CALLER_DEV_NO_KEYS:-${DEV_NO_KEYS:-}}"
 : "${DEV_PROFILE:=full}"
 # No API keys needed: recorded LLM replies + the golden frozen dataset (#122).
 : "${DEV_NO_KEYS:=false}"
+# Development mode (#123): analyst (frozen data + live LLM) or data (live providers).
+: "${DEV_MODE:=}"
 # The one-process chat-profile app serves the web UI, so it takes the web port.
 : "${APP_PORT:=${WEB_PORT:-5173}}"
-export HOME_PORT EVIDENCE_PORT DEV_PROVIDERS_PORT ANALYST_GRIDS_PORT HOME_PULSE_TICKERS ENABLE_UNOFFICIAL_DEV_PROVIDERS DISCOVERY_ENABLED DISCOVERY_WORKER_POLL_MS DEV_PROFILE DEV_NO_KEYS APP_PORT
+export HOME_PORT EVIDENCE_PORT DEV_PROVIDERS_PORT ANALYST_GRIDS_PORT HOME_PULSE_TICKERS ENABLE_UNOFFICIAL_DEV_PROVIDERS DISCOVERY_ENABLED DISCOVERY_WORKER_POLL_MS DEV_PROFILE DEV_NO_KEYS DEV_MODE APP_PORT
 
 # HTTP dev services, in start order. DEV_PROFILE=chat runs only what the golden chat
 # conversation needs (#117), as one process: services/app hosts APP_SERVES (#122).
@@ -321,6 +325,10 @@ configure_runtime_env() {
     export LLM_REPLAY_FILE="$ROOT/services/chat/test/golden/llm-replies.json"
     export LLM_SETTINGS_ENV_FILE="" MA_FLAG_LLM_SETTINGS=false VITE_MA_FLAG_LLM_SETTINGS=false
   fi
+  if [[ "$DEV_MODE" == "analyst" ]]; then
+    # One line per model completion: model, latency, tokens (services/llm).
+    export LLM_USAGE_LOG=true
+  fi
   if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
     export DEV_PROVIDERS_ORIGIN
     DEV_PROVIDERS_ORIGIN="${DEV_PROVIDERS_ORIGIN:-http://127.0.0.1:$DEV_PROVIDERS_PORT}"
@@ -350,6 +358,40 @@ cleanup_failed_up() {
   if [[ "$COMPOSE_STARTED" -eq 1 ]]; then
     compose down >/dev/null 2>&1 || true
   fi
+}
+
+# Validates DEV_MODE (#123) and fails fast when a mode's live credentials are missing.
+check_dev_mode() {
+  local missing=()
+  case "$DEV_MODE" in
+    "") return 0 ;;
+    analyst | data) ;;
+    *)
+      echo "Unknown DEV_MODE '$DEV_MODE' (expected analyst or data, or unset)" >&2
+      return 1
+      ;;
+  esac
+  if [[ "$DEV_NO_KEYS" == "true" ]]; then
+    echo "DEV_NO_KEYS=true (recorded replies) contradicts DEV_MODE=$DEV_MODE (live LLM); pick one" >&2
+    return 1
+  fi
+  [[ -n "${LITELLM_MODEL:-}" ]] || missing+=(LITELLM_MODEL)
+  if [[ "$DEV_MODE" == "data" ]]; then
+    [[ -n "${POLYGON_API_KEY:-}" ]] || missing+=(POLYGON_API_KEY)
+    [[ -n "${SEC_EDGAR_USER_AGENT:-}" ]] || missing+=(SEC_EDGAR_USER_AGENT)
+  fi
+  if ((${#missing[@]} > 0)); then
+    echo "DEV_MODE=$DEV_MODE needs live credentials in .env.dev: ${missing[*]} is not set" >&2
+    if [[ "$DEV_MODE" == "analyst" ]]; then
+      echo "  (analyst mode runs a live LLM; for no keys at all use DEV_NO_KEYS=true)" >&2
+    fi
+    return 1
+  fi
+}
+
+# The golden conversation's frozen dataset backs the no-keys and analyst modes.
+seeds_frozen_data() {
+  [[ "$DEV_NO_KEYS" == "true" || "$DEV_MODE" == "analyst" ]]
 }
 
 profile_services() {
@@ -491,6 +533,7 @@ up() {
   # Unquoted on use: empty means every compose service.
   local compose_services=""
 
+  check_dev_mode || return 1
   services="$(active_services)" || return 1
   if [[ "$DEV_PROFILE" == "chat" ]]; then
     compose_services="postgres"
@@ -584,7 +627,7 @@ up() {
   fi
 
   # Idempotent; fails (all-or-nothing) if provider-hydrated tickers already clash.
-  if [[ "$DEV_NO_KEYS" == "true" ]] && ! (cd "$ROOT/services/chat" && npm run seed:golden); then
+  if seeds_frozen_data && ! (cd "$ROOT/services/chat" && npm run seed:golden); then
     cleanup_failed_up
     return 1
   fi
