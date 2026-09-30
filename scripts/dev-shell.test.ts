@@ -309,6 +309,24 @@ test("the web app signs in with the dev mock session by default, unless opted ou
   assert.equal(offResult.stdout.trim(), "false");
 });
 
+test("up restarts a running web process when its VITE_* settings changed, and only then", async () => {
+  const { result, trace } = await traceUp({}, [
+    'stop_process(){ printf "stop:%s\\n" "$1" >> "$TRACE_FILE"; kill "$(cat "$PID_DIR/$1.pid")" 2>/dev/null; rm -f "$PID_DIR/$1.pid"; }',
+    "port_listening(){ return 1; }",
+    "up",
+    'printf "mark:unchanged\\n" >> "$TRACE_FILE"',
+    "up",
+    'printf "mark:opt-out\\n" >> "$TRACE_FILE"',
+    "export VITE_MA_FLAG_DEV_AUTO_LOGIN=false",
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  const [first, unchanged, optOut] = trace.split(/mark:\S+\n/);
+  assert.match(first, /^start:web$/m);
+  assert.doesNotMatch(unchanged, /^(stop|start):web$/m, "same VITE_* settings: web keeps running");
+  assert.match(optOut, /^stop:web$/m, "a changed VITE_* setting restarts web");
+  assert.match(optOut, /^start:web$/m);
+});
+
 test("unofficial dev providers are opt-in and set a local sidecar origin", async () => {
   const disabled = await createShellFixture();
   const disabledResult = await runBash(
