@@ -367,8 +367,42 @@ function byFiscalQuarter(a: IssuerFundamentalFact, b: IssuerFundamentalFact): nu
     ((QUARTER_ORDER[a.fiscal_period!] ?? 0) - (QUARTER_ORDER[b.fiscal_period!] ?? 0));
 }
 
+// Each figure the fact blocks display, with what it belongs to: the company
+// (comparison cells), the metric, and where it is shown. The model reads these
+// to quote figures, so it knows whose value each one is.
+export type DisplayedFigure = { company?: string; metric: string; period?: string; value: string; shown_in?: string };
+
+export function displayedFigures(blocks: ReadonlyArray<Block>): DisplayedFigure[] {
+  return blocks.flatMap((block): DisplayedFigure[] => {
+    const shownIn = typeof block.title === "string" ? { shown_in: block.title } : {};
+    if (block.kind === "metrics_comparison") {
+      const labels = (block.subject_labels ?? []) as ReadonlyArray<string>;
+      const metrics = (block.metrics ?? []) as ReadonlyArray<string>;
+      const cells = (block.cells ?? []) as ReadonlyArray<ReadonlyArray<{ format?: string } | null>>;
+      return cells.flatMap((row, subjectIndex) =>
+        row.flatMap((cell, metricIndex) =>
+          cell?.format && labels[subjectIndex] && metrics[metricIndex]
+            ? [{ company: labels[subjectIndex], metric: metrics[metricIndex], value: cell.format, ...shownIn }]
+            : []
+        )
+      );
+    }
+    if (block.kind === "metric_row") {
+      const items = (block.items ?? []) as ReadonlyArray<{ label?: string; format?: string }>;
+      return items.flatMap((item) => item.label && item.format ? [{ metric: item.label, value: item.format, ...shownIn }] : []);
+    }
+    if (block.kind === "revenue_bars") {
+      const bars = (block.bars ?? []) as ReadonlyArray<{ label?: string; format?: string }>;
+      return bars.flatMap((bar) => bar.label && bar.format ? [{ metric: "Revenue", period: bar.label, value: bar.format }] : []);
+    }
+    return [];
+  });
+}
+
 // The human-readable text of fact blocks (titles, labels, formatted values):
-// what the user sees, and so what the narrative may quote.
+// what the user sees, and so what the narrative may quote without naming a
+// company. Comparison cells are left out: each belongs to one company, and the
+// guard checks those through displayedFigures instead.
 export function displayTextsForBlocks(blocks: ReadonlyArray<Block>): string[] {
   const texts: string[] = [];
   const visit = (value: unknown): void => {
@@ -381,7 +415,7 @@ export function displayTextsForBlocks(blocks: ReadonlyArray<Block>): string[] {
       }
     }
   };
-  blocks.forEach(visit);
+  blocks.forEach((block) => visit(block.kind === "metrics_comparison" ? { ...block, cells: undefined } : block));
   return texts;
 }
 

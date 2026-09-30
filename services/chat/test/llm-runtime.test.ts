@@ -232,3 +232,47 @@ test("without fact blocks the narrative is passed through unguarded, as before",
   });
   assert.equal((blocks[0].segments as Array<{ text: string }>)[0].text, "Demand rose 12% per the cited note.");
 });
+
+const COMPARISON_BLOCKS = [{
+  id: "comparison-1",
+  kind: "metrics_comparison",
+  title: "Side by side (latest fiscal year)",
+  subjects: [{ kind: "issuer", id: "issuer-nvda" }, { kind: "issuer", id: "issuer-amd" }],
+  subject_labels: ["NVDA", "AMD"],
+  metrics: ["Revenue", "Gross Margin"],
+  cells: [
+    [{ value_ref: "f1", format: "$130.5B" }, { value_ref: "f2", format: "74.6%" }],
+    [{ value_ref: "f3", format: "$25.8B" }, { value_ref: "f4", format: "49.2%" }],
+  ],
+}];
+
+async function compareWithReply(reply: string) {
+  let prompt = "";
+  const blocks = await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "Compare NVDA with AMD", bundleId: "peer_comparison" },
+    blocks: [NARRATIVE_BLOCK],
+    toolCalls: [],
+    factBlocks: COMPARISON_BLOCKS,
+    createClient: () => async (_deployment, request) => {
+      prompt = request.messages.map((message) => message.content).join("\n");
+      return { text: reply };
+    },
+  });
+  return { text: (blocks[0].segments as Array<{ text: string }>)[0].text, prompt };
+}
+
+test("the model sees each comparison figure with the company and metric it belongs to", async () => {
+  const { prompt } = await compareWithReply("NVDA leads.");
+  assert.ok(
+    prompt.includes(JSON.stringify({ company: "AMD", metric: "Gross Margin", value: "49.2%", shown_in: "Side by side (latest fiscal year)" })),
+    prompt,
+  );
+});
+
+test("a replayed reply crediting AMD's margin to NVIDIA loses that sentence; the correct one is kept", async () => {
+  const wrong = await compareWithReply("NVDA's gross margin is 49.2%. NVDA is larger.");
+  assert.equal(wrong.text, "NVDA is larger.");
+  const right = await compareWithReply("AMD's gross margin is 49.2%. NVDA is larger.");
+  assert.equal(right.text, "AMD's gross margin is 49.2%. NVDA is larger.");
+});

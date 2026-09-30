@@ -49,3 +49,33 @@ test("keeps paragraph breaks between supported paragraphs", () => {
   const text = "Revenue reached $62.1B in Q4 2026.\n\nMargins held up.";
   assert.deepEqual(keepSupportedSentences(text, DISPLAYED), { text, removed: [] });
 });
+
+// A comparison's cells: each figure belongs to one company.
+const COMPARED = [
+  { company: "NVDA", value: "74.6%" },
+  { company: "AMD", value: "49.2%" },
+];
+
+test("a comparison figure credited to the wrong company is removed; the right company keeps it", () => {
+  const wrong = keepSupportedSentences("AMD's gross margin is 74.6%. Both grew.", [], COMPARED);
+  assert.deepEqual(wrong.removed, ["AMD's gross margin is 74.6%."]);
+  assert.equal(wrong.text, "Both grew.");
+  const right = keepSupportedSentences("NVDA's gross margin is 74.6%, ahead of AMD at 49.2%.", [], COMPARED);
+  assert.deepEqual(right.removed, []);
+});
+
+test("each figure is credited to the company named before it, or else after it", () => {
+  const swapped = keepSupportedSentences("AMD's gross margin is 74.6%, ahead of NVDA at 49.2%.", [], COMPARED);
+  assert.equal(swapped.removed.length, 1);
+  assert.deepEqual(keepSupportedSentences("Gross margin: 74.6% at NVDA.", [], COMPARED).removed, []);
+});
+
+test("a comparison figure with no company named is removed, unless the line already named one", () => {
+  assert.equal(keepSupportedSentences("Gross margin is 74.6%.", [], COMPARED).removed.length, 1);
+  const carried = keepSupportedSentences("NVDA leads on margins. Its gross margin is 74.6%.", [], COMPARED);
+  assert.deepEqual(carried.removed, []);
+});
+
+test("company names match regardless of case", () => {
+  assert.deepEqual(keepSupportedSentences("nvda's gross margin is 74.6%.", [], COMPARED).removed, []);
+});
