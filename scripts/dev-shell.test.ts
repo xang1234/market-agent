@@ -419,3 +419,105 @@ test("docker compose declares persistent storage for Postgres dev data", async (
   assert.match(composeFile, /postgres-data:\/var\/lib\/postgresql\/data/);
   assert.match(composeFile, /^volumes:\n(?:[\s\S]*\n)?  postgres-data:/m);
 });
+
+// Runs `up` with every side effect stubbed and returns the trace of what it would do.
+async function traceUp(envOverrides: Record<string, string> = {}) {
+  const fixture = await createShellFixture(envOverrides);
+  const traceFile = join(fixture.root, "trace.log");
+  const result = await runBash(
+    [
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      `TRACE_FILE="${traceFile}"`,
+      'mkdir -p "$ROOT/db" "$ROOT/services/resolver"',
+      "ensure_command(){ :; }",
+      'ensure_install(){ printf "install:%s\\n" "${1#"$ROOT"/}" >> "$TRACE_FILE"; }',
+      "ensure_python_service_install(){ :; }",
+      'assert_port_available(){ printf "port:%s\\n" "$1" >> "$TRACE_FILE"; }',
+      "npm(){ :; }",
+      "export -f npm",
+      'compose(){ printf "compose:%s\\n" "$*" >> "$TRACE_FILE"; }',
+      "container_status(){ printf stopped; }",
+      "wait_for_postgres(){ :; }",
+      'start_process(){ local name="$1"; printf "start:%s\\n" "$name" >> "$TRACE_FILE"; sleep 60 >/dev/null 2>&1 & echo $! > "$PID_DIR/$name.pid"; }',
+      'wait_for_service(){ printf "ready:%s\\n" "$1" >> "$TRACE_FILE"; }',
+      "status(){ :; }",
+      "up",
+    ].join("\n"),
+    fixture.root,
+  );
+  const trace = await readFile(traceFile, "utf8").catch(() => "");
+  await killTrackedPids(fixture.root).catch(() => {});
+  await rm(fixture.root, { recursive: true, force: true });
+  const lines = (prefix: string) =>
+    trace.split("\n").filter((l) => l.startsWith(prefix)).map((l) => l.slice(prefix.length));
+  return { result, trace, lines };
+}
+
+const FULL_SERVICES = [
+  "web", "chat", "resolver", "dev-api", "watchlists", "market", "fundamentals",
+  "screener", "portfolio", "home", "evidence", "analyst-grids",
+];
+const CHAT_SERVICES = ["web", "chat", "resolver", "dev-api", "market", "fundamentals"];
+
+test("DEV_PROFILE defaults to full: every service is checked, started and awaited, with all containers", async () => {
+  const { result, lines } = await traceUp();
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(lines("port:"), FULL_SERVICES);
+  assert.deepEqual(lines("start:"), FULL_SERVICES);
+  assert.deepEqual(lines("ready:"), FULL_SERVICES);
+  assert.deepEqual(lines("compose:"), ["up -d"]);
+});
+
+test("DEV_PROFILE=chat starts only the golden-chat services and only the Postgres container", async () => {
+  const { result, lines } = await traceUp({ DEV_PROFILE: "chat", DISCOVERY_ENABLED: "true" });
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(lines("port:"), CHAT_SERVICES);
+  assert.deepEqual(lines("start:"), CHAT_SERVICES, "parked services (and the discovery worker) are not started");
+  assert.deepEqual(lines("ready:"), CHAT_SERVICES);
+  assert.deepEqual(lines("compose:"), ["up -d postgres"]);
+  // chat imports financial-core sources, which resolve ajv/decimal.js from its own node_modules.
+  assert.ok(lines("install:").includes("services/financial-core"), "financial-core deps are installed");
+});
+
+test("DEV_PROFILE=chat still honours the unofficial dev-provider sidecar opt-in", async () => {
+  const { result, lines } = await traceUp({ DEV_PROFILE: "chat", ENABLE_UNOFFICIAL_DEV_PROVIDERS: "true" });
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(lines("start:"), ["dev-providers", ...CHAT_SERVICES]);
+});
+
+test("DEV_PROFILE from the command line wins over the env file", async () => {
+  const fixture = await createShellFixture({ DEV_PROFILE: "full" });
+  const result = await runBash(
+    ["export DEV_PROFILE=chat", "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh", 'printf "%s" "$DEV_PROFILE"'].join("\n"),
+    fixture.root,
+  );
+  await rm(fixture.root, { recursive: true, force: true });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout.trim(), "chat");
+});
+
+test("an unknown DEV_PROFILE fails before starting anything", async () => {
+  const { result, trace } = await traceUp({ DEV_PROFILE: "everything" });
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /DEV_PROFILE.*everything.*chat.*full/);
+  assert.equal(trace, "");
+});
+
+test("status lists parked services as parked under DEV_PROFILE=chat", async () => {
+  const fixture = await createShellFixture({ DEV_PROFILE: "chat" });
+  const result = await runBash(
+    [
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      "container_status(){ printf stopped; }",
+      "status",
+    ].join("\n"),
+    fixture.root,
+  );
+  await rm(fixture.root, { recursive: true, force: true });
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /^profile\s+chat$/m);
+  assert.match(result.stdout, /^chat\s+stopped\s+http:\/\/127\.0\.0\.1:4310/m);
+  for (const parked of ["watchlists", "screener", "portfolio", "home", "evidence", "analyst-grids", "discovery"]) {
+    assert.match(result.stdout, new RegExp(`^${parked}\\s+parked`, "m"), parked);
+  }
+});
