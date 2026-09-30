@@ -311,12 +311,14 @@ test("reprocessFiler13f does not overwrite a holding row owned by another access
   await client.query(`insert into instruments (issuer_id, asset_type, cusip) values ($1, 'common_stock', '02079K305')`, [alphabetId]);
   const ORIG = "0001067983-26-000010";
   const origTxt = submission("03-31-2026", [{ name: "ALPHABET INC CL A", cusip: "02079K305", value: 1000, shares: 100 }]);
-  const result = await reprocessFiler13f(
-    { db, secClient: fakeSecClient(ORIG, origTxt), openfigi: OPENFIGI, openfigiFetch: fakeOpenFigiFetch() },
-    { cik: BERKSHIRE, now: NOW },
-  );
+  const countSources = async () => (await client.query<{ n: number }>(`select count(*)::int as n from sources`)).rows[0]!.n;
+  const sourcesBefore = await countSources();
+  const reprocessDeps = { db, secClient: fakeSecClient(ORIG, origTxt), openfigi: OPENFIGI, openfigiFetch: fakeOpenFigiFetch() };
+  const result = await reprocessFiler13f(reprocessDeps, { cik: BERKSHIRE, now: NOW });
+  await reprocessFiler13f(reprocessDeps, { cik: BERKSHIRE, now: NOW });
 
   assert.equal(result.holdingsUpserted, 0, "the supplement-owned row is not overwritten");
+  assert.equal(await countSources(), sourcesBefore, "no orphan source minted when every row is skipped");
   const row = await client.query<{ shares: string; accession: string }>(
     `select shares, accession from institutional_holdings where issuer_id = $1 and filing_period = '2026-03-31'`,
     [alphabetId],

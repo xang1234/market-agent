@@ -94,7 +94,20 @@ export async function supersede13fFiling(
      returning source_id::text as source_id`,
     [key.filer_cik, key.filing_period],
   );
-  const sourceIds = [...new Set(deleted.rows.map((r) => r.source_id))];
+  // A filing that stored NO rows (an earlier restatement to an empty portfolio) can still
+  // have emitted exit claims for the period, so also collect the sources behind this
+  // filer's active position_change claims for it. Claims are stamped at the period's
+  // midnight UTC (the handler's occurredAt).
+  const claimSources = await db.query<{ source_id: string }>(
+    `select distinct reported_by_source_id::text as source_id
+       from claims
+      where attributed_to_type = 'institution' and attributed_to_id = $1
+        and effective_time = $2::date::timestamp at time zone 'UTC'
+        and starts_with(predicate, 'position_change.')
+        and superseded_at is null`,
+    [key.filer_cik, key.filing_period],
+  );
+  const sourceIds = [...new Set([...deleted.rows, ...claimSources.rows].map((r) => r.source_id))];
   if (sourceIds.length === 0) return { holdings: 0, claims: 0, events: 0, documents: 0 };
 
   const counts = await supersedeFilingArtifacts(db, {

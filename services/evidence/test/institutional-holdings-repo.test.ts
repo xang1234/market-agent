@@ -101,22 +101,26 @@ test("supersede13fFiling deletes the period's holdings and delegates the artifac
   // which is then forwarded to supersedeFilingArtifacts (claims, events, documents).
   const { db, calls } = fakeDb([{ source_id: SOURCE }, { source_id: SOURCE }]);
   await supersede13fFiling(db, { filer_cik: BERKSHIRE, filing_period: "2026-03-31" });
-  assert.equal(calls.length, 4, "the read-model delete + the helper's 3 artifact queries");
+  assert.equal(calls.length, 5, "the read-model delete + the claim-source lookup + the helper's 3 artifact queries");
 
   // Step 1 (this repo's job): delete the whole (filer, period) portfolio, capture sources.
   assert.match(calls[0].text, /delete from institutional_holdings\s+where filer_cik = \$1 and filing_period = \$2::date/i);
   assert.match(calls[0].text, /returning source_id/i);
   assert.deepEqual(calls[0].values, [BERKSHIRE, "2026-03-31"]);
 
+  // Step 2: sources behind the period's active claims (a row-less empty restatement).
+  assert.match(calls[1].text, /from claims[\s\S]*attributed_to_id = \$1[\s\S]*superseded_at is null/i);
+  assert.deepEqual(calls[1].values, [BERKSHIRE, "2026-03-31"]);
+
   // The deduped source set is forwarded to the shared helper (predicate/event SQL is
   // asserted in supersede-filing.test.ts). 13F uses the literal position_change. prefix.
-  assert.deepEqual(calls[1].values, [[SOURCE], "position_change."], "deduped sources + literal position_change. prefix");
+  assert.deepEqual(calls[2].values, [[SOURCE], "position_change."], "deduped sources + literal position_change. prefix");
 });
 
-test("supersede13fFiling no-ops (single query, zero counts) when no prior holdings match", async () => {
-  const { db, calls } = fakeDb([]); // delete matched nothing → out-of-order amendment-before-original
+test("supersede13fFiling no-ops (zero counts) when no prior holdings or claims match", async () => {
+  const { db, calls } = fakeDb([]); // nothing matched → out-of-order amendment-before-original
   const result = await supersede13fFiling(db, { filer_cik: BERKSHIRE, filing_period: "2026-03-31" });
-  assert.equal(calls.length, 1, "no claims/events/documents work when nothing was superseded");
+  assert.equal(calls.length, 2, "only the two lookups; no claims/events/documents work");
   assert.deepEqual(result, { holdings: 0, claims: 0, events: 0, documents: 0 });
 });
 

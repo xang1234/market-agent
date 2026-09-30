@@ -465,3 +465,35 @@ test("handle13f (original 13F-HR) with zero holdings records the empty period an
   );
   assert.deepEqual(periods.rows.map((r) => r.p), ["2025-12-31", "2026-03-31"]);
 });
+
+test("handle13f (13F-HR/A RESTATEMENT) retires the exit claims of an earlier empty restatement of the same period", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-restate-twice");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  const aaplId = await seedIssuerWithCusip(client, "Apple Inc.", AAPL_CUSIP);
+  const sourceId = await seedSource(client);
+  await insertHolding(db, {
+    filer_cik: "0001067983", filer_name: "Berkshire Hathaway Inc", issuer_id: aaplId, cusip: AAPL_CUSIP,
+    shares: 100, value_usd: 5000, filing_period: "2025-12-31", filing_date: "2026-02-14",
+    source_id: sourceId, accession: "0001193125-26-000080",
+  });
+
+  // First restatement empties Q1 → AAPL exit claim, but no holdings row carries its source.
+  await handle13f(
+    entry("0001193125-26-000081", "2026-06-01", BERKSHIRE, "13F-HR/A"),
+    memDeps(db, submission("03-31-2026", [], "RESTATEMENT")),
+  );
+  // Second restatement puts AAPL back at the Q4 size (unchanged → no claim of its own).
+  await handle13f(
+    entry("0001193125-26-000082", "2026-06-15", BERKSHIRE, "13F-HR/A"),
+    memDeps(db, submission("03-31-2026", [{ name: "APPLE INC", cusip: AAPL_CUSIP, value: 5000, shares: 100 }], "RESTATEMENT")),
+  );
+
+  const active = await client.query<{ predicate: string }>(
+    `select predicate from claims where predicate like 'position_change.%' and superseded_at is null`,
+  );
+  assert.deepEqual(active.rows.map((r) => r.predicate), [], "the first restatement's exit claim is retired");
+  const events = await client.query<{ n: number }>(`select count(*)::int as n from events where event_type = 'position_change'`);
+  assert.equal(events.rows[0]!.n, 0, "and its exit event deleted");
+});

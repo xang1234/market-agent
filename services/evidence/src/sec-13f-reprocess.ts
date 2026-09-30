@@ -155,18 +155,9 @@ export async function reprocessFiler13f(
     // re-archival (the bytes are already content-addressed at first ingest; no S3).
     const existingSourceId = await sourceIdForAccession(deps.db, candidate.accession);
     await withTransaction(deps.db, async (tx) => {
-      const sourceId =
-        existingSourceId ??
-        (
-          await createSource(tx.db, {
-            provider: "sec_edgar",
-            kind: "filing",
-            canonical_url: fetched.url,
-            trust_tier: "primary",
-            license_class: "public",
-            retrieved_at: fetched.retrievedAt,
-          })
-        ).source_id;
+      // Minted lazily on the first row written: if the guard below skips every row, no
+      // holding would reference a new source, so each rerun would leak another one.
+      let sourceId = existingSourceId;
       for (const h of resolved) {
         // Never overwrite a row another accession owns (a 13F-HR/A NEW HOLDINGS supplement
         // stored this issuer after the original's CUSIP failed to resolve): the upsert on
@@ -178,6 +169,16 @@ export async function reprocessFiler13f(
           );
           continue;
         }
+        sourceId ??= (
+          await createSource(tx.db, {
+            provider: "sec_edgar",
+            kind: "filing",
+            canonical_url: fetched.url,
+            trust_tier: "primary",
+            license_class: "public",
+            retrieved_at: fetched.retrievedAt,
+          })
+        ).source_id;
         await insertHolding(tx.db, {
           filer_cik: filerCik,
           filer_name: filerName,
