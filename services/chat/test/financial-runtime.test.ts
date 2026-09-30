@@ -55,6 +55,16 @@ test("chat financial lane", { timeout: 300_000 }, async (t) => {
     assert.equal(block.financial.coverage.state, "partial", "two companies were asked about; the answer covers both");
   });
 
+  await t.test("an explicit subject is planned first, alongside the companies the message names (#138)", async () => {
+    const model = revenueModel(["AAA", "BBB"]);
+    const { events } = await chatHarness(pool, { model }).run({ ...base, subjectText: "AAA", userIntent: "Compare revenue with BBB" });
+    const done = completed(events);
+    const message = (await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id])).rows[0];
+    assert.ok(message, `expected a published answer; got ${JSON.stringify(done)}`);
+    const [block] = message.blocks;
+    assert.deepEqual(block.financial.results.map((result: { disposition: string }) => result.disposition), ["verified", "missing"]);
+  });
+
   await t.test("a missing or failing planning model yields a gap, never the narrative composer", async () => {
     for (const model of [null, (async () => { throw new Error("provider down"); }) as PlanningModel]) {
       const { events } = await chatHarness(pool, { model }).run({ ...base, userIntent: "Compare revenue for AAA and BBB" });

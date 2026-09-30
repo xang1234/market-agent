@@ -139,7 +139,11 @@ async function planTurn(
   authority: FinancialRuntimeAuthority,
   cutoff: Date,
 ): Promise<PlanningResult> {
-  const requested = await Promise.all(extractSubjectMentions(text).map(async (mention): Promise<RequestedSubject> => ({
+  // An explicit subject (a thread opened from a ticker page) is requested first,
+  // so "Compare revenue with AMD" from the NVDA page plans both.
+  const explicit = context.subjectText?.trim();
+  const mentions = [...new Set([...(explicit ? [explicit] : []), ...extractSubjectMentions(text)])];
+  const requested = await Promise.all(mentions.map(async (mention): Promise<RequestedSubject> => ({
     mention,
     resolution: requestedResolution(await deps.resolveMention(mention)),
   })));
