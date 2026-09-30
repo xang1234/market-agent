@@ -156,7 +156,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.deepEqual(series.map((line) => line.name), ["NVDA", "AMD"]);
     assert.ok(series.every((line) => line.points.length > 1), "each company needs a price line");
     const { rows } = await client.query<{
-      series_specs: Array<{ series_ref: string; bar_range_id: string }>;
+      series_specs: Array<{ series_ref: string; bar_range_id: string; as_of: string }>;
       basis: string;
       normalization: string;
     }>(
@@ -175,6 +175,9 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const seriesRefs = (performance.data_ref as { params: { series_refs: string[] } }).params.series_refs;
     assert.equal(seriesRefs.length, 2);
     for (const ref of seriesRefs) assert.ok(sealed.has(ref), `series ${ref} is not sealed in the snapshot`);
+    // The chart is dated by its stored prices, not the answer time.
+    const oldest = (rows[0]?.series_specs ?? []).map((spec) => spec.as_of).sort()[0];
+    assert.equal(performance.as_of, oldest);
   });
 
   await t.test("'Explain the differences and show the evidence' keeps both companies and cites facts from each", async () => {

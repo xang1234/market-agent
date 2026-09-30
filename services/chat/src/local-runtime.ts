@@ -536,7 +536,12 @@ function normalizeAssistantBlock(
       ? block.provenance_fact_refs
       : input.defaultRefs.provenance_fact_refs,
     tool_call_ids: input.toolCallIds,
-    as_of: input.asOf,
+    // A block built from sealed price series keeps its stored range's date (it
+    // may be stale); every other block, including any the model wrote, is dated
+    // by the answer. Never later than the answer.
+    as_of: Array.isArray(block.provenance_series_specs) && typeof block.as_of === "string" && block.as_of <= input.asOf
+      ? block.as_of
+      : input.asOf,
     subject_refs: subjectRefsForBlock(block, input.subjectRefs),
   };
 }
