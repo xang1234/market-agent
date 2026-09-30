@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import * as dockerPg from "./docker-pg.ts";
 
 type Cleanup = () => void | Promise<void>;
@@ -221,4 +222,23 @@ test("waitForDatabaseConnection does not retry non-transient connection failures
   );
 
   assert.equal(calls, 1);
+});
+
+test("stopPostgres removes the container's data volume, so test databases leave nothing behind", { timeout: 120_000 }, (t) => {
+  if (!dockerPg.dockerAvailable()) {
+    t.skip("Docker is required for container cleanup coverage");
+    return;
+  }
+  const containerName = dockerPg.createContainerName("volume-cleanup");
+  dockerPg.startPostgres(containerName, "postgres");
+  const inspect = spawnSync("docker", ["inspect", "--format", "{{range .Mounts}}{{.Name}} {{end}}", containerName], { encoding: "utf8" });
+  const volumes = inspect.stdout.trim().split(/\s+/).filter(Boolean);
+  assert.ok(volumes.length > 0, "postgres declares a data volume");
+
+  dockerPg.stopPostgres(containerName);
+
+  for (const volume of volumes) {
+    const exists = spawnSync("docker", ["volume", "inspect", volume], { encoding: "utf8" });
+    assert.notEqual(exists.status, 0, `volume ${volume} was left behind`);
+  }
 });

@@ -111,7 +111,9 @@ export function startPostgres(containerName: string, password: string) {
 }
 
 export function stopPostgres(containerName: string) {
-  run("docker", ["rm", "--force", containerName], { timeoutMs: DOCKER_CMD_TIMEOUT_MS });
+  // --volumes: the postgres image declares a data VOLUME; `docker run --rm` drops it
+  // only when the container exits by itself, so an explicit rm must too.
+  run("docker", ["rm", "--force", "--volumes", containerName], { timeoutMs: DOCKER_CMD_TIMEOUT_MS });
 }
 
 function isTransientConnectionFailure(error: unknown) {
