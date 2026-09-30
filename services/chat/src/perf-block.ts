@@ -81,6 +81,9 @@ async function loadSealedRanges(
   db: QueryExecutor,
   input: { listings: ReadonlyArray<{ id: string; label: string }>; snapshotId: string; asOf: string },
 ): Promise<Block | null> {
+  // One statement, so the range and its bars come from one consistent view: a
+  // cache refresh upserts the same bar_range_id and replaces its bars, and two
+  // reads could pair old metadata with new prices.
   const { rows: ranges } = await db.query<{
     bar_range_id: string;
     listing_id: string;
@@ -89,38 +92,40 @@ async function loadSealedRanges(
     range_start: Date | string;
     range_end: Date | string;
     as_of: Date | string;
+    bars: Array<{ ts: string; close: number }>;
   }>(
-    `select distinct on (listing_id)
-            bar_range_id::text as bar_range_id,
-            listing_id::text as listing_id,
-            source_id::text as source_id,
-            delay_class,
-            range_start,
-            range_end,
-            as_of
-       from market_bar_ranges
-      where listing_id = any($1::uuid[])
-        and interval = $2
-        and adjustment_basis = $3
-        -- Nothing stored after the turn's cutoff: a refresh landing mid-turn
-        -- must not seal prices later than the snapshot's as_of.
-        and as_of <= $4::timestamptz
-      order by listing_id, range_end desc, fetched_at desc`,
+    `with picked as (
+       select distinct on (listing_id)
+              bar_range_id, listing_id, source_id, delay_class, range_start, range_end, as_of
+         from market_bar_ranges
+        where listing_id = any($1::uuid[])
+          and interval = $2
+          and adjustment_basis = $3
+          -- Nothing stored after the turn's cutoff: a refresh landing mid-turn
+          -- must not seal prices later than the snapshot's as_of.
+          and as_of <= $4::timestamptz
+        order by listing_id, range_end desc, fetched_at desc
+     )
+     select picked.bar_range_id::text as bar_range_id,
+            picked.listing_id::text as listing_id,
+            picked.source_id::text as source_id,
+            picked.delay_class, picked.range_start, picked.range_end, picked.as_of,
+            coalesce(
+              (select json_agg(json_build_object('ts', bar.ts, 'close', bar.close::float8) order by bar.ts)
+                 from market_bars bar
+                where bar.bar_range_id = picked.bar_range_id),
+              '[]'::json
+            ) as bars
+       from picked`,
     [input.listings.map((listing) => listing.id), INTERVAL, ADJUSTMENT_BASIS, input.asOf],
   );
-  if (ranges.length === 0) return null;
-  const { rows: bars } = await db.query<{ bar_range_id: string; ts: Date | string; close: number }>(
-    `select bar_range_id::text as bar_range_id, ts, close::float8 as close
-       from market_bars
-      where bar_range_id = any($1::uuid[])
-      order by ts`,
-    [ranges.map((range) => range.bar_range_id)],
-  );
   const byListing = new Map(ranges.map((range) => [range.listing_id, range]));
-  const sealed = input.listings.flatMap((listing): SealedPriceRange[] => {
-    const range = byListing.get(listing.id);
-    if (range === undefined) return [];
-    return [{
+  // Every company or no chart: a chart quietly missing one would cover fewer
+  // companies than the comparison beside it.
+  if (input.listings.some((listing) => !byListing.has(listing.id))) return null;
+  const sealed = input.listings.map((listing): SealedPriceRange => {
+    const range = byListing.get(listing.id)!;
+    return {
       listing_id: listing.id,
       label: listing.label,
       bar_range_id: range.bar_range_id,
@@ -131,10 +136,8 @@ async function loadSealedRanges(
       range_start: iso(range.range_start),
       range_end: iso(range.range_end),
       as_of: iso(range.as_of),
-      bars: bars
-        .filter((bar) => bar.bar_range_id === range.bar_range_id)
-        .map((bar) => ({ ts: iso(bar.ts), close: bar.close })),
-    }];
+      bars: range.bars.map((bar) => ({ ts: iso(bar.ts), close: bar.close })),
+    };
   });
   return buildPerfComparisonBlock({ ranges: sealed, snapshotId: input.snapshotId, asOf: input.asOf });
 }

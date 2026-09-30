@@ -162,3 +162,44 @@ test("only ranges stored by the turn's cutoff are selected, so a mid-turn refres
   assert.match(ranges.text, /as_of <= \$4::timestamptz/);
   assert.equal(ranges.values?.[3], AS_OF);
 });
+
+function storedRow(r: SealedPriceRange) {
+  return {
+    bar_range_id: r.bar_range_id,
+    listing_id: r.listing_id,
+    source_id: r.source_id,
+    delay_class: r.delay_class,
+    range_start: r.range_start,
+    range_end: r.range_end,
+    as_of: r.as_of,
+    bars: r.bars,
+  };
+}
+
+test("range metadata and its bars are read in one statement, so a concurrent refresh cannot mix them", async () => {
+  let queries = 0;
+  const db = { query: fakeQuery(() => { queries += 1; return { rows: [storedRow(NVDA), storedRow(AMD)] }; }) };
+  const blocks = await loadPerfComparisonBlocks(db, {
+    listings: [{ id: NVDA.listing_id, label: "NVDA" }, { id: AMD.listing_id, label: "AMD" }],
+    snapshotId: SNAPSHOT_ID,
+    asOf: AS_OF,
+  });
+  assert.equal(queries, 1);
+  assert.equal(blocks[0]?.kind, "perf_comparison");
+});
+
+test("a company without stored prices means no chart, rather than a chart missing a company", async (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
+  const db = { query: fakeQuery(() => ({ rows: [storedRow(NVDA), storedRow(AMD)] })) };
+  const blocks = await loadPerfComparisonBlocks(db, {
+    listings: [
+      { id: NVDA.listing_id, label: "NVDA" },
+      { id: AMD.listing_id, label: "AMD" },
+      { id: "62000000-0000-4000-8000-000000000003", label: "INTC" },
+    ],
+    snapshotId: SNAPSHOT_ID,
+    asOf: AS_OF,
+  });
+  assert.deepEqual(blocks, []);
+  assert.equal(warn.mock.callCount(), 0, "refused deliberately, not by a swallowed error");
+});
