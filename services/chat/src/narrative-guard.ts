@@ -6,8 +6,8 @@
 // A figure that belongs to one company (a comparison cell) must also be
 // credited to that company: the company named last before it in the sentence
 // ("AMD's margin is 49.2%"), else first after it ("49.2% at AMD"), else the
-// last one named earlier on the same line ("Its margin..."), must be one the
-// figure belongs to. Otherwise a real value quoted for the
+// last one named in a kept sentence earlier on the line ("Its margin..."),
+// must be one the figure belongs to. Otherwise a real value quoted for the
 // wrong company would pass.
 //
 // ponytail: compares numbers by value ("62.1" in "$62.1B" and "62.1 billion"),
@@ -56,7 +56,8 @@ export function keepSupportedSentences(
         const credited = creditedCompany(named, index) ?? lastNamed;
         return credited !== undefined && belongsTo.has(credited);
       });
-      if (named.length > 0) lastNamed = named[named.length - 1].company;
+      // Only a sentence the user will see can name the company for the next one.
+      if (isSupported && named.length > 0) lastNamed = named[named.length - 1].company;
       if (!isSupported) removed.push(sentence);
       return isSupported;
     });

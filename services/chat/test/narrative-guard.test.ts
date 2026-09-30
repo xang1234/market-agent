@@ -79,3 +79,8 @@ test("a comparison figure with no company named is removed, unless the line alre
 test("company names match regardless of case", () => {
   assert.deepEqual(keepSupportedSentences("nvda's gross margin is 74.6%.", [], COMPARED).removed, []);
 });
+
+test("a removed sentence cannot name the company for the next one", () => {
+  const result = keepSupportedSentences("AMD's margin is 74.6%. Its margin is 49.2%.", [], COMPARED);
+  assert.deepEqual(result.removed, ["AMD's margin is 74.6%.", "Its margin is 49.2%."]);
+});
