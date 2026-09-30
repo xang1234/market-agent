@@ -149,3 +149,16 @@ test("a stale stored range is disclosed as of its own timestamp, not the answer 
   assert.ok(text.includes(older), text);
   assert.ok(!text.includes(AS_OF), text);
 });
+
+test("only ranges stored by the turn's cutoff are selected, so a mid-turn refresh cannot seal later prices", async () => {
+  const seen: Array<{ text: string; values?: unknown[] }> = [];
+  const db = { query: fakeQuery((text, values) => { seen.push({ text, values }); return { rows: [] }; }) };
+  await loadPerfComparisonBlocks(db, {
+    listings: [{ id: NVDA.listing_id, label: "NVDA" }, { id: AMD.listing_id, label: "AMD" }],
+    snapshotId: SNAPSHOT_ID,
+    asOf: AS_OF,
+  });
+  const [ranges] = seen;
+  assert.match(ranges.text, /as_of <= \$4::timestamptz/);
+  assert.equal(ranges.values?.[3], AS_OF);
+});

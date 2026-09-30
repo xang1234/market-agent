@@ -102,8 +102,11 @@ async function loadSealedRanges(
       where listing_id = any($1::uuid[])
         and interval = $2
         and adjustment_basis = $3
+        -- Nothing stored after the turn's cutoff: a refresh landing mid-turn
+        -- must not seal prices later than the snapshot's as_of.
+        and as_of <= $4::timestamptz
       order by listing_id, range_end desc, fetched_at desc`,
-    [input.listings.map((listing) => listing.id), INTERVAL, ADJUSTMENT_BASIS],
+    [input.listings.map((listing) => listing.id), INTERVAL, ADJUSTMENT_BASIS, input.asOf],
   );
   if (ranges.length === 0) return null;
   const { rows: bars } = await db.query<{ bar_range_id: string; ts: Date | string; close: number }>(
