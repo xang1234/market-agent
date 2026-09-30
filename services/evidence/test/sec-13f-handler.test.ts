@@ -409,3 +409,59 @@ test("handle13f skips a 13F-HR/A with an unrecognized amendmentType rather than 
   assert.equal((await client.query(`select count(*)::int as n from institutional_holdings`)).rows[0]!.n, 0, "no holdings written");
   assert.equal((await client.query(`select count(*)::int as n from documents`)).rows[0]!.n, 0, "no document written");
 });
+
+test("handle13f (13F-HR/A RESTATEMENT) to an empty portfolio is still the next quarter's prior period (fra-zpet)", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-empty-prior");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  const aaplId = await seedIssuerWithCusip(client, "Apple Inc.", AAPL_CUSIP);
+  const sourceId = await seedSource(client);
+  await insertHolding(db, {
+    filer_cik: "0001067983", filer_name: "Berkshire Hathaway Inc", issuer_id: aaplId, cusip: AAPL_CUSIP,
+    shares: 100, value_usd: 5000, filing_period: "2025-12-31", filing_date: "2026-02-14",
+    source_id: sourceId, accession: "0001193125-26-000070",
+  });
+
+  // Q1 restated to an empty portfolio: no rows stored, AAPL exits vs Q4.
+  await handle13f(
+    entry("0001193125-26-000071", "2026-06-01", BERKSHIRE, "13F-HR/A"),
+    memDeps(db, submission("03-31-2026", [], "RESTATEMENT")),
+  );
+  // Q2 reopens AAPL at the Q4 size: it's NEW vs the empty Q1, not unchanged vs Q4.
+  await handle13f(entry("0001193125-26-000072", "2026-08-14"), memDeps(db, submission("06-30-2026", [
+    { name: "APPLE INC", cusip: AAPL_CUSIP, value: 5000, shares: 100 },
+  ])));
+
+  const claims = await client.query<{ predicate: string; effective_time: string }>(
+    `select predicate, to_char(effective_time at time zone 'UTC', 'YYYY-MM-DD') as effective_time
+       from claims where predicate like 'position_change.%' and superseded_at is null order by effective_time`,
+  );
+  assert.deepEqual(
+    claims.rows.map((r) => `${r.effective_time} ${r.predicate}`),
+    ["2026-03-31 position_change.exit", "2026-06-30 position_change.new_position"],
+  );
+});
+
+test("handle13f (original 13F-HR) with zero holdings records the empty period and emits exits (fra-zpet)", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-empty-original");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  const aaplId = await seedIssuerWithCusip(client, "Apple Inc.", AAPL_CUSIP);
+  const sourceId = await seedSource(client);
+  await insertHolding(db, {
+    filer_cik: "0001067983", filer_name: "Berkshire Hathaway Inc", issuer_id: aaplId, cusip: AAPL_CUSIP,
+    shares: 100, value_usd: 5000, filing_period: "2025-12-31", filing_date: "2026-02-14",
+    source_id: sourceId, accession: "0001193125-26-000073",
+  });
+
+  const res = await handle13f(entry("0001193125-26-000074"), memDeps(db, submission("03-31-2026", [])));
+  assert.equal(res.ingested, true, "a genuinely empty portfolio is ingested, not skipped");
+  const exits = await client.query<{ n: number }>(`select count(*)::int as n from claims where predicate = 'position_change.exit'`);
+  assert.equal(exits.rows[0]!.n, 1, "AAPL exits vs Q4");
+  const periods = await client.query<{ p: string }>(
+    `select to_char(filing_period, 'YYYY-MM-DD') as p from institutional_filing_periods where filer_cik = '0001067983' order by 1`,
+  );
+  assert.deepEqual(periods.rows.map((r) => r.p), ["2025-12-31", "2026-03-31"]);
+});

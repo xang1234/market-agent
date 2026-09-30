@@ -14,7 +14,7 @@ import { createClaimArgument } from "./claim-argument-repo.ts";
 import { parse13fInfoTable, classify13fAmendment } from "./sec-13f-extractor.ts";
 import { isSuperinvestorFiler, superinvestorName } from "./superinvestor-filers.ts";
 import { resolveHoldingsByIssuer } from "./sec-13f-resolve.ts";
-import { insertHolding, holdingsByFiler, priorPeriodForFiler, supersede13fFiling, findFilerIssuerHolding } from "./institutional-holdings-repo.ts";
+import { insertHolding, holdingsByFiler, priorPeriodForFiler, supersede13fFiling, findFilerIssuerHolding, recordFilingPeriod } from "./institutional-holdings-repo.ts";
 
 export type Form13fFilingRef = Pick<FilingIndexEntry, "cik" | "accession" | "form" | "filedDate">;
 
@@ -86,10 +86,11 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
   const hadUnresolved = unresolved.length > 0;
   // A RESTATEMENT with no resolvable holdings must STILL proceed: it authoritatively
   // restates the portfolio (possibly to empty), so the transaction below has to supersede
-  // the original's rows + claims — returning here would leave them stale. For an original
-  // or a supplemental amendment, an empty resolve has nothing to do (no rows to insert,
-  // nothing to supersede).
-  if (resolved.length === 0 && !restate) {
+  // the original's rows + claims — returning here would leave them stale. So must an
+  // original reporting a genuinely empty portfolio (nothing unresolved): its period is
+  // recorded and prior holdings exit (fra-zpet). An original whose holdings all failed to
+  // resolve is unknown, not empty, and a supplement with nothing resolved adds nothing.
+  if (resolved.length === 0 && !restate && (supplemental || hadUnresolved)) {
     console.warn(`[sec-13f] skip ${entry.accession}: no resolvable holdings for ${filerName}`);
     return { ingested: false };
   }
@@ -190,6 +191,9 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
         );
       }
     }
+    // Recorded even when no row below is stored, so an emptied period stays the next
+    // quarter's prior (insertHolding records it too, idempotently).
+    await recordFilingPeriod(tx.db, filerCik, period);
 
     // Insert each resolved holding and emit a notable change vs the prior quarter. A NEW
     // HOLDINGS supplement is add-only: insertHolding upserts on (filer, issuer, period), so

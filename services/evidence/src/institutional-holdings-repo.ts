@@ -46,6 +46,19 @@ export async function insertHolding(db: QueryExecutor, input: InstitutionalHoldi
       input.accession,
     ],
   );
+  await recordFilingPeriod(db, input.filer_cik, input.filing_period);
+}
+
+// Mark (filer, period) as filed, idempotently. insertHolding does this for every row;
+// the 13F handler also calls it directly so a period that stores NO rows (an empty
+// restatement or portfolio) still counts as the next quarter's prior period (fra-zpet).
+export async function recordFilingPeriod(db: QueryExecutor, filerCik: string, period: string): Promise<void> {
+  await db.query(
+    `insert into institutional_filing_periods (filer_cik, filing_period)
+     values ($1, $2::date)
+     on conflict do nothing`,
+    [filerCik, period],
+  );
 }
 
 export type Supersede13fFilingKey = {
@@ -185,7 +198,8 @@ export async function findFilerIssuerHolding(
 }
 
 // The filer's most recent reporting period strictly before `beforePeriod` (the
-// "prior period" for change detection), or null when this is their first.
+// "prior period" for change detection), or null when this is their first. Read from the
+// filed-periods table so an empty prior quarter isn't skipped for an older one.
 export async function priorPeriodForFiler(
   db: QueryExecutor,
   filerCik: string,
@@ -193,7 +207,7 @@ export async function priorPeriodForFiler(
 ): Promise<string | null> {
   const { rows } = await db.query<{ filing_period: string | null }>(
     `select to_char(max(filing_period), 'YYYY-MM-DD') as filing_period
-       from institutional_holdings
+       from institutional_filing_periods
       where filer_cik = $1 and filing_period < $2::date`,
     [filerCik, beforePeriod],
   );
