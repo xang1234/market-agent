@@ -45,6 +45,15 @@ function resolved(ticker: string): ChatResolvedSubjectPreResolution {
 
 async function preResolveSubject({ text }: { text: string }): Promise<ChatSubjectPreResolution> {
   if (LISTING_IDS[text]) return resolved(text);
+  if (text === "GOOGL") {
+    return {
+      status: "needs_clarification",
+      input_text: text,
+      normalized_input: text,
+      candidates: [],
+      message: "Which Alphabet share class do you mean?",
+    } as ChatSubjectPreResolution;
+  }
   return { status: "not_found", input_text: text, normalized_input: text, message: `no ${text}` };
 }
 
@@ -129,3 +138,48 @@ test("turn.completed lists every company the answer covers", async () => {
     { kind: "listing", id: LISTING_IDS.AMD },
   ]);
 });
+
+test("a follow-up after a five-company answer keeps the newly named company", async () => {
+  const { tickers } = await subjectsForTurn("Compare it with AAPL", {
+    loadPriorSubjects: priorOf("NVDA", "AMD", "MSFT", "GOOG", "META"),
+  });
+  assert.deepEqual(tickers, ["NVDA", "AMD", "MSFT", "GOOG", "AAPL"]);
+});
+
+test("an ambiguous company in a comparison asks which one instead of answering partially", async () => {
+  let ran = false;
+  const turn = createChatCoordinator({
+    preResolveSubject,
+    runner: () => {
+      ran = true;
+    },
+  }).getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent: "Compare GOOGL and NVDA" });
+  await turn.completed;
+
+  assert.equal(ran, false, "the analyst must not answer about NVDA alone");
+  const completed = turn.events.find((event) => event.type === "turn.completed") as Record<string, unknown> | undefined;
+  assert.equal(completed?.clarification, true);
+  assert.match(JSON.stringify(turn.events), /Which Alphabet share class do you mean\?/);
+});
+
+test("a company that cannot be found in a comparison is named in the answer, not dropped silently", async () => {
+  const runtime: ChatAnalystToolRuntime = async () => ({
+    snapshot_id: "11111111-1111-4111-a111-111111111111",
+    verification: { ok: true, failures: [] },
+    tool_calls: [],
+    blocks: [{ id: "b1", kind: "rich_text", segments: [{ type: "text", text: "NVIDIA leads." }] }],
+  });
+  const turn = createChatCoordinator({ preResolveSubject, analystToolRuntime: runtime })
+    .getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent: "Compare NVDA and XYZQ" });
+  await turn.completed;
+
+  const completed = turn.events.find((event) => event.type === "turn.completed") as Record<string, unknown> | undefined;
+  assert.deepEqual(completed?.subject_refs, [{ kind: "listing", id: LISTING_IDS.NVDA }]);
+  const text = turn.events
+    .filter((event) => event.type === "block.delta")
+    .map((event) => JSON.stringify(event))
+    .join(" ");
+  assert.match(text, /could not find XYZQ/);
+  assert.match(text, /NVIDIA leads\./);
+});
+
