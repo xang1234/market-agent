@@ -546,6 +546,20 @@ test("switching a running full stack to DEV_PROFILE=chat stops the separate proc
   assert.deepEqual(lines("start:"), ["app"]);
 });
 
+test("switching chat to full waits for the stopped app to free the shared web port before checking it", async () => {
+  const { result, trace } = await traceUp({}, [
+    'stop_process(){ printf "stop:%s\\n" "$1" >> "$TRACE_FILE"; kill "$(cat "$PID_DIR/$1.pid")" 2>/dev/null; rm -f "$PID_DIR/$1.pid"; }',
+    'port_listening(){ printf "listening?:%s\\n" "$1" >> "$TRACE_FILE"; return 1; }',
+    'sleep 60 >/dev/null 2>&1 & echo $! > "$PID_DIR/app.pid"',
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  const stop = trace.indexOf("stop:app\n");
+  const waited = trace.indexOf("listening?:5173\n");
+  const checked = trace.indexOf("port:web\n");
+  assert.ok(stop !== -1 && waited > stop, "waits on app's port after stopping it");
+  assert.ok(checked > waited, "only then checks the web port");
+});
+
 test("DEV_PROFILE=chat still honours the unofficial dev-provider sidecar opt-in", async () => {
   const { result, lines } = await traceUp({ DEV_PROFILE: "chat", ENABLE_UNOFFICIAL_DEV_PROVIDERS: "true" });
   assert.equal(result.code, 0, result.stderr);

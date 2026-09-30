@@ -363,7 +363,8 @@ active_services() {
 service_port() {
   local var
   var="$(printf '%s' "$1" | tr 'a-z-' 'A-Z_')_PORT"
-  printf '%s' "${!var}"
+  # Empty for portless processes (discovery-worker).
+  printf '%s' "${!var:-}"
 }
 
 service_dir() {
@@ -400,6 +401,7 @@ stop_parked_processes() {
       continue
     fi
     stop_process "$name"
+    wait_for_port_free "$(service_port "$name")"
   done
 }
 
@@ -431,8 +433,16 @@ restart_web_if_vite_env_changed() {
   fi
   stop_process "$name"
   # Wait for the port so the restarted Vite doesn't drift to the next free one.
+  wait_for_port_free "$(service_port "$name")"
+}
+
+# SIGTERM and server shutdown are asynchronous: a stopped process can hold its port
+# for a moment, and web and app share one, so wait before checking or reusing it.
+wait_for_port_free() {
+  local port="$1" attempt
+  [[ -n "$port" ]] || return 0
   for attempt in $(seq 1 20); do
-    port_listening "$(service_port "$name")" || return 0
+    port_listening "$port" || return 0
     sleep 0.5
   done
 }
