@@ -30,12 +30,16 @@ DEV_PROFILE="${CALLER_DEV_PROFILE:-${DEV_PROFILE:-}}"
 : "${DISCOVERY_ENABLED:=false}"
 : "${DISCOVERY_WORKER_POLL_MS:=1000}"
 : "${DEV_PROFILE:=full}"
-export HOME_PORT EVIDENCE_PORT DEV_PROVIDERS_PORT ANALYST_GRIDS_PORT HOME_PULSE_TICKERS ENABLE_UNOFFICIAL_DEV_PROVIDERS DISCOVERY_ENABLED DISCOVERY_WORKER_POLL_MS DEV_PROFILE
+# The one-process chat-profile app serves the web UI, so it takes the web port.
+: "${APP_PORT:=${WEB_PORT:-5173}}"
+export HOME_PORT EVIDENCE_PORT DEV_PROVIDERS_PORT ANALYST_GRIDS_PORT HOME_PULSE_TICKERS ENABLE_UNOFFICIAL_DEV_PROVIDERS DISCOVERY_ENABLED DISCOVERY_WORKER_POLL_MS DEV_PROFILE APP_PORT
 
 # HTTP dev services, in start order. DEV_PROFILE=chat runs only what the golden chat
-# conversation needs (#117); the rest are parked (not started), never deleted.
+# conversation needs (#117), as one process: services/app hosts APP_SERVES (#122).
+# The rest are parked (not started), never deleted.
 FULL_SERVICES="web chat resolver dev-api watchlists market fundamentals screener portfolio home evidence analyst-grids"
-CHAT_SERVICES="web chat resolver dev-api market fundamentals"
+CHAT_SERVICES="app"
+APP_SERVES="web chat resolver dev-api market fundamentals"
 
 DEV_DIR="$ROOT/.dev"
 LOG_DIR="$DEV_DIR/logs"
@@ -399,26 +403,36 @@ stop_parked_processes() {
   done
 }
 
-# Vite bakes VITE_* into the client when the web process starts, so a running web
-# keeps stale flags (e.g. VITE_MA_FLAG_DEV_AUTO_LOGIN=false) until restarted.
+# Vite bakes VITE_* into the client when the process serving the UI starts, so a
+# running one keeps stale flags (e.g. VITE_MA_FLAG_DEV_AUTO_LOGIN=false) until restarted.
 WEB_VITE_ENV_STAMP="$PID_DIR/web.vite-env"
 
 web_vite_env() {
   env | grep '^VITE_' | LC_ALL=C sort || true
 }
 
+# The process that runs Vite: web on its own, or the one-process app under chat.
+ui_process() {
+  if [[ "$DEV_PROFILE" == "chat" ]]; then
+    printf app
+  else
+    printf web
+  fi
+}
+
 restart_web_if_vite_env_changed() {
-  local attempt
-  if ! process_running "$PID_DIR/web.pid"; then
+  local attempt name
+  name="$(ui_process)"
+  if ! process_running "$PID_DIR/$name.pid"; then
     return 0
   fi
   if [[ "$(cat "$WEB_VITE_ENV_STAMP" 2>/dev/null)" == "$(web_vite_env)" ]]; then
     return 0
   fi
-  stop_process web
+  stop_process "$name"
   # Wait for the port so the restarted Vite doesn't drift to the next free one.
   for attempt in $(seq 1 20); do
-    port_listening "$WEB_PORT" || return 0
+    port_listening "$(service_port "$name")" || return 0
     sleep 0.5
   done
 }
@@ -586,10 +600,14 @@ status() {
   printf "profile   %s\n" "$DEV_PROFILE"
   printf "postgres  %-8s 127.0.0.1:%s\n" "$(container_status postgres)" "$DEV_POSTGRES_PORT"
   printf "redis     %-8s 127.0.0.1:%s\n" "$(container_status redis)" "$DEV_REDIS_PORT"
-  for name in $FULL_SERVICES $( [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]] && printf dev-providers ); do
+  for name in $CHAT_SERVICES $FULL_SERVICES $( [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]] && printf dev-providers ); do
     if [[ " $services " == *" $name "* ]]; then
       port="$(service_port "$name")"
       printf "%-13s %-8s http://127.0.0.1:%s  log=%s\n" "$name" "$(service_status "$name" "$port")" "$port" "$LOG_DIR/$name.log"
+    elif [[ "$DEV_PROFILE" == "chat" && " $APP_SERVES " == *" $name "* ]]; then
+      printf "%-13s %-8s one process on :%s\n" "$name" "in app" "$APP_PORT"
+    elif [[ "$name" == "app" ]]; then
+      continue
     else
       printf "%-13s %-8s DEV_PROFILE=%s\n" "$name" "parked" "$DEV_PROFILE"
     fi

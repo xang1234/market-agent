@@ -731,6 +731,31 @@ jobs:
 
       - run: npm test
 
+  app:
+    name: app (tests)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # The route test loads web/vite.config.ts to keep the one-process app's
+      # prefixes in step with the Vite dev proxy, so web's deps must be present.
+      - name: Install web deps
+        working-directory: web
+        run: npm ci
+
+      - name: Run app tests
+        working-directory: services/app
+        run: npm test
+
   financial-engine:
     name: financial-engine (tests)
     runs-on: ubuntu-latest

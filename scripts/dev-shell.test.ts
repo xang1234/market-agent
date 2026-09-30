@@ -327,6 +327,20 @@ test("up restarts a running web process when its VITE_* settings changed, and on
   assert.match(optOut, /^start:web$/m);
 });
 
+test("under DEV_PROFILE=chat a VITE_* change restarts the app process, which serves the UI", async () => {
+  const { result, trace } = await traceUp({ DEV_PROFILE: "chat" }, [
+    'stop_process(){ printf "stop:%s\\n" "$1" >> "$TRACE_FILE"; kill "$(cat "$PID_DIR/$1.pid")" 2>/dev/null; rm -f "$PID_DIR/$1.pid"; }',
+    "port_listening(){ return 1; }",
+    "up",
+    'printf "mark:opt-out\\n" >> "$TRACE_FILE"',
+    "export VITE_MA_FLAG_DEV_AUTO_LOGIN=false",
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  const [, optOut] = trace.split(/mark:\S+\n/);
+  assert.match(optOut, /^stop:app$/m);
+  assert.match(optOut, /^start:app$/m);
+});
+
 test("unofficial dev providers are opt-in and set a local sidecar origin", async () => {
   const disabled = await createShellFixture();
   const disabledResult = await runBash(
@@ -495,7 +509,9 @@ const FULL_SERVICES = [
   "web", "chat", "resolver", "dev-api", "watchlists", "market", "fundamentals",
   "screener", "portfolio", "home", "evidence", "analyst-grids",
 ];
-const CHAT_SERVICES = ["web", "chat", "resolver", "dev-api", "market", "fundamentals"];
+// DEV_PROFILE=chat runs one process (services/app) serving web, chat, resolver,
+// dev-api, market and fundamentals on the web port (#122).
+const CHAT_SERVICES = ["app"];
 
 test("DEV_PROFILE defaults to full: every service is checked, started and awaited, with all containers", async () => {
   const { result, lines } = await traceUp();
@@ -517,16 +533,17 @@ test("DEV_PROFILE=chat starts only the golden-chat services and only the Postgre
   assert.ok(lines("install:").includes("services/financial-core"), "financial-core deps are installed");
 });
 
-test("switching a running full stack to DEV_PROFILE=chat stops the now-parked processes and containers", async () => {
-  // A full stack is already up: chat, watchlists and the discovery worker are tracked.
+test("switching a running full stack to DEV_PROFILE=chat stops the separate processes and parked containers", async () => {
+  // A full stack is already up: web, chat, watchlists and the discovery worker are tracked.
   const { result, lines } = await traceUp({ DEV_PROFILE: "chat" }, [
     'stop_process(){ printf "stop:%s\\n" "$1" >> "$TRACE_FILE"; kill "$(cat "$PID_DIR/$1.pid")" 2>/dev/null; rm -f "$PID_DIR/$1.pid"; }',
-    'for name in chat watchlists discovery-worker; do sleep 60 >/dev/null 2>&1 & echo $! > "$PID_DIR/$name.pid"; done',
+    'for name in web chat watchlists discovery-worker; do sleep 60 >/dev/null 2>&1 & echo $! > "$PID_DIR/$name.pid"; done',
   ]);
   assert.equal(result.code, 0, result.stderr);
-  assert.deepEqual(lines("stop:"), ["discovery-worker", "watchlists"], "out-of-profile processes are stopped; chat keeps running");
+  // web and chat now run inside app; their standalone processes would hold its ports.
+  assert.deepEqual(lines("stop:"), ["chat", "discovery-worker", "watchlists", "web"]);
   assert.deepEqual(lines("compose:"), ["stop redis minio", "up -d postgres"]);
-  assert.ok(!lines("start:").includes("chat"), "the running chat service is left alone");
+  assert.deepEqual(lines("start:"), ["app"]);
 });
 
 test("DEV_PROFILE=chat still honours the unofficial dev-provider sidecar opt-in", async () => {
@@ -553,8 +570,9 @@ test("an unknown DEV_PROFILE fails before starting anything", async () => {
   assert.equal(trace, "");
 });
 
-test("status lists parked services as parked under DEV_PROFILE=chat", async () => {
-  const fixture = await createShellFixture({ DEV_PROFILE: "chat" });
+test("status shows the one app process, the services it hosts, and parked services under DEV_PROFILE=chat", async () => {
+  // An unused web port, so a local dev server on 5173 can't make app read "blocked".
+  const fixture = await createShellFixture({ DEV_PROFILE: "chat", WEB_PORT: "59173" });
   const result = await runBash(
     [
       "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
@@ -566,7 +584,10 @@ test("status lists parked services as parked under DEV_PROFILE=chat", async () =
   await rm(fixture.root, { recursive: true, force: true });
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /^profile\s+chat$/m);
-  assert.match(result.stdout, /^chat\s+stopped\s+http:\/\/127\.0\.0\.1:4310/m);
+  assert.match(result.stdout, /^app\s+stopped\s+http:\/\/127\.0\.0\.1:59173/m, "app serves on the web port");
+  for (const hosted of ["web", "chat", "resolver", "dev-api", "market", "fundamentals"]) {
+    assert.match(result.stdout, new RegExp(`^${hosted}\\s+in app`, "m"), hosted);
+  }
   for (const parked of ["watchlists", "screener", "portfolio", "home", "evidence", "analyst-grids", "discovery"]) {
     assert.match(result.stdout, new RegExp(`^${parked}\\s+parked`, "m"), parked);
   }

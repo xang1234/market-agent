@@ -103,7 +103,7 @@ cp .env.dev.example .env.dev      # safe defaults; ports + flags
 
 When `up` completes, open **<http://localhost:5173>**.
 
-Working on chat only? `DEV_PROFILE=chat ./scripts/dev-shell.sh up` starts just web, chat, resolver, dev-api, market and fundamentals plus Postgres. The other services are parked, not removed: `status` lists them as `parked`, and their tabs won't load. The default, `DEV_PROFILE=full`, runs everything.
+Working on chat only? `DEV_PROFILE=chat ./scripts/dev-shell.sh up` starts one process (`services/app`) that serves the web UI plus chat, resolver, dev-api, market and fundamentals on the same port, and Postgres. The other services are parked, not removed: `status` lists them as `parked`, their API routes answer `503`, and their tabs won't load. The default, `DEV_PROFILE=full`, runs every service as its own process.
 
 ### Bring your own keys & models
 
