@@ -57,7 +57,12 @@ async function api<T>(base: string, method: string, path: string, body?: unknown
 }
 
 // As the web client does: save the user's message, then stream the turn until it ends.
-async function runTurn(base: string, threadId: string, question: string): Promise<TurnOutcome> {
+export async function runTurn(
+  base: string,
+  threadId: string,
+  question: string,
+  timeoutMs = 180_000,
+): Promise<TurnOutcome> {
   const messageId = randomUUID();
   await api(base, "POST", `/v1/chat/threads/${threadId}/messages`, {
     message_id: messageId,
@@ -65,22 +70,30 @@ async function runTurn(base: string, threadId: string, question: string): Promis
     content: question,
   });
   const params = new URLSearchParams({ run_id: randomUUID(), turn_id: messageId, user_intent: question, user_id: USER_ID });
-  const response = await fetch(`${base}/v1/chat/threads/${threadId}/stream?${params}`, { headers: { "x-user-id": USER_ID } });
-  const reader = response.body!.getReader();
+  // The signal also rejects a pending body read, so a stream that goes silent (server
+  // crash, half-open connection) still ends at the deadline instead of hanging.
+  const signal = AbortSignal.timeout(timeoutMs);
   const decoder = new TextDecoder();
   let transcript = "";
-  const deadline = Date.now() + 180_000;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   try {
-    while (Date.now() < deadline) {
+    const response = await fetch(`${base}/v1/chat/threads/${threadId}/stream?${params}`, {
+      headers: { "x-user-id": USER_ID },
+      signal,
+    });
+    reader = response.body!.getReader();
+    for (;;) {
       const { value, done } = await reader.read();
-      if (done) break;
+      if (done) return "timeout"; // the server closed the stream before the turn ended
       transcript += decoder.decode(value, { stream: true });
       if (/event: turn\.completed/.test(transcript)) return "turn.completed";
       if (/event: turn\.error/.test(transcript)) return "turn.error";
     }
-    return "timeout";
+  } catch (error) {
+    if (signal.aborted) return "timeout";
+    throw error;
   } finally {
-    await reader.cancel();
+    await reader?.cancel().catch(() => {});
   }
 }
 

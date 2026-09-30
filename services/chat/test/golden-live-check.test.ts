@@ -1,7 +1,31 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import test from "node:test";
 
-import { GOLDEN_TURNS, evaluateGoldenTurn } from "../scripts/golden-live-check.ts";
+import { GOLDEN_TURNS, evaluateGoldenTurn, runTurn } from "../scripts/golden-live-check.ts";
+
+test("runTurn gives up at its deadline when the stream goes silent", async (t) => {
+  // Accepts the user's message, then opens the turn stream and never writes to it.
+  const server = createServer((req, res) => {
+    if (req.method === "POST") {
+      res.writeHead(200, { "content-type": "application/json" }).end("{}");
+      return;
+    }
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.flushHeaders();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+  const startedAt = Date.now();
+  assert.equal(await runTurn(base, "thread-1", "Analyze NVDA", 300), "timeout");
+  assert.ok(Date.now() - startedAt < 5_000, "returned near the deadline, not hung");
+});
 
 const blocks = (...kinds: string[]) => kinds.map((kind, index) => ({ id: `b${index}`, kind }));
 
