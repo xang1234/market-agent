@@ -132,3 +132,21 @@ test("a figure takes only the first company named after it, and that name is use
   // The first name after a figure must still own it.
   assert.equal(keepSupportedSentences("74.6% for AMD, compared with NVDA at 49.2%.", [], COMPARED).removed.length, 1);
 });
+
+test("a company named after a figure owns it only when a preposition ties them", () => {
+  // "Its" is NVDA; AMD is only the comparison, so 49.2% is credited to NVDA and dropped.
+  const result = keepSupportedSentences("NVDA led. Its margin was 49.2%, exceeding AMD.", [], COMPARED);
+  assert.deepEqual(result.removed, ["Its margin was 49.2%, exceeding AMD."]);
+  assert.deepEqual(keepSupportedSentences("Margins were 49.2% for AMD.", [], COMPARED).removed, []);
+});
+
+test("a 'respectively' sentence pairs companies with figures in order", () => {
+  assert.deepEqual(
+    keepSupportedSentences("NVDA and AMD had gross margins of 74.6% and 49.2%, respectively.", [], COMPARED).removed,
+    [],
+  );
+  assert.equal(
+    keepSupportedSentences("AMD and NVDA had gross margins of 74.6% and 49.2%, respectively.", [], COMPARED).removed.length,
+    1,
+  );
+});

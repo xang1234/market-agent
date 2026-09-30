@@ -7,12 +7,12 @@
 // credited to that company, even when a claim or title repeats the number. The
 // companies named between the previous such figure (or the sentence start) and
 // this one must all own it ("NVDA's 74.6%, ahead of AMD at 49.2%"); if none is
-// named there, the first one named after it, before the next figure ("74.6% at
-// NVDA, 49.2% at AMD"), which is then used up; a possessive is skipped, as it
-// points forward ("..., versus AMD's 49.2%"); if none, the company of the
-// previous figure in the sentence ("NVDA's revenue was $130.5B and margin
-// 74.6%"); if none, the last one named in a kept sentence earlier on the line
-// ("Its margin..."). Naming another company in that
+// named there, the first one named after it when a preposition ties them
+// ("74.6% at NVDA, 49.2% at AMD"; not "49.2%, exceeding AMD"), which is then
+// used up; if none, the company of the previous figure in the sentence ("NVDA's
+// revenue was $130.5B and margin 74.6%"); if none, the last one named in a kept
+// sentence earlier on the line ("Its margin..."). A "respectively" sentence
+// pairs the companies named before its figures with them in order. Naming another company in that
 // stretch ("AMD's margin, unlike NVDA, is 74.6%") is ambiguous and drops the
 // sentence: the guard cannot parse who the figure belongs to, so it only keeps
 // what is unambiguous.
@@ -27,6 +27,9 @@
 
 const NUMBER = /\d+(?:,\d{3})*(?:\.\d+)?/g;
 const SENTENCE_BREAK = /(?<=[.!?])\s+/;
+// Between a figure and the company that owns it: its unit, then a preposition
+// ("% for ", "B at ", " percent in ").
+const OWNED_BY = /^\S*\s*(?:[A-Za-z]+\s+)?(?:for|at|from|by|of|in)\s+$/i;
 
 export type AttributedFigure = { company: string; value: string };
 
@@ -69,26 +72,30 @@ export function keepSupportedSentences(
       // A name after a figure that the figure took is used up; the next figure's
       // stretch starts past it.
       let usedUpTo = 0;
-      const isSupported = attributed.every(({ number, index, end }, i) => {
-        const from = Math.max(i === 0 ? 0 : attributed[i - 1].end, usedUpTo);
-        const to = i === attributed.length - 1 ? sentence.length : attributed[i + 1].index;
-        const before = named.filter((mention) => mention.index >= from && mention.index < index);
-        // Only the first name after it ("74.6% for NVDA, compared with AMD...");
-        // "AMD's" points forward to the figure it owns, never back to this one.
-        const after = before.length > 0
-          ? undefined
-          : named.find((mention) => mention.index >= end && mention.index < to && !mention.possessive);
-        if (after !== undefined) usedUpTo = after.index + after.company.length;
-        const credited = before.length > 0
-          ? before.map((mention) => mention.company)
-          : after !== undefined
-          ? [after.company]
-          : carried.length > 0
-          ? carried
-          : lastNamed === undefined ? [] : [lastNamed];
-        carried = credited;
-        return credited.length > 0 && credited.every((company) => owners.get(number)!.has(company));
-      });
+      const respectively = respectivelyPairs(sentence, named, attributed);
+      const isSupported = respectively !== undefined
+        ? respectively.every(({ number, company }) => owners.get(number)!.has(company))
+        : attributed.every(({ number, index, end }, i) => {
+          const from = Math.max(i === 0 ? 0 : attributed[i - 1].end, usedUpTo);
+          const to = i === attributed.length - 1 ? sentence.length : attributed[i + 1].index;
+          const before = named.filter((mention) => mention.index >= from && mention.index < index);
+          // Only the first name after it, and only when a preposition ties it to
+          // the figure ("74.6% for NVDA"); "49.2%, exceeding AMD" names a comparison.
+          const next = named.find((mention) => mention.index >= end && mention.index < to);
+          const after = before.length === 0 && next !== undefined && OWNED_BY.test(sentence.slice(end, next.index))
+            ? next
+            : undefined;
+          if (after !== undefined) usedUpTo = after.index + after.company.length;
+          const credited = before.length > 0
+            ? before.map((mention) => mention.company)
+            : after !== undefined
+            ? [after.company]
+            : carried.length > 0
+            ? carried
+            : lastNamed === undefined ? [] : [lastNamed];
+          carried = credited;
+          return credited.length > 0 && credited.every((company) => owners.get(number)!.has(company));
+        });
       // Only a sentence the user will see can name the company for the next one.
       if (isSupported && named.length > 0) lastNamed = named[named.length - 1].company;
       if (!isSupported) removed.push(sentence);
@@ -115,17 +122,26 @@ function numberMatches(text: string): Array<{ number: string; index: number; end
 function companyMentions(
   sentence: string,
   companies: ReadonlyArray<string>,
-): Array<{ company: string; index: number; possessive: boolean }> {
+): Array<{ company: string; index: number }> {
   return companies
     .flatMap((company) => {
       const pattern = new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(company)}(?![A-Za-z0-9])`, "g");
-      return [...sentence.matchAll(pattern)].map((match) => ({
-        company,
-        index: match.index,
-        possessive: /^['’]s?(?![A-Za-z])/.test(sentence.slice(match.index + company.length)),
-      }));
+      return [...sentence.matchAll(pattern)].map((match) => ({ company, index: match.index }));
     })
     .sort((a, b) => a.index - b.index);
+}
+
+// "NVDA and AMD had margins of 74.6% and 49.2%, respectively": one company named
+// before the first figure per figure, paired in order. Undefined otherwise.
+function respectivelyPairs(
+  sentence: string,
+  named: ReadonlyArray<{ company: string; index: number }>,
+  figures: ReadonlyArray<{ number: string; index: number }>,
+): Array<{ number: string; company: string }> | undefined {
+  if (figures.length < 2 || !/\brespectively\b/i.test(sentence)) return undefined;
+  const leading = named.filter((mention) => mention.index < figures[0].index);
+  if (leading.length !== figures.length) return undefined;
+  return figures.map((figure, i) => ({ number: figure.number, company: leading[i].company }));
 }
 
 function escapeRegExp(text: string): string {
