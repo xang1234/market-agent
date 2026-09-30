@@ -272,3 +272,16 @@ test("the sign survives every currency prefix the formatter can write", () => {
     assert.deepEqual(keepSupportedSentences(`Operating income was ${loss}.`, [loss]).removed, [], `${currency}: ${loss}`);
   }
 });
+
+test("a dotted currency prefix still compares the amount", () => {
+  const loss = formatCompactCurrency(-3.1e9, "XCG");
+  const other = formatCompactCurrency(-8.7e9, "XCG");
+  assert.equal(keepSupportedSentences(`Operating income was ${other}.`, [loss]).removed.length, 1);
+  assert.equal(keepSupportedSentences("Operating income was -Foo. 8.7B.", [loss]).removed.length, 1);
+});
+
+test("a sentence starting with a digit is still its own sentence", () => {
+  const figures = [...COMPARED, { company: "NVDA", value: "$130.5B" }];
+  const result = keepSupportedSentences("NVDA's revenue was $130.5B. 74.6% was AMD's margin.", [], figures);
+  assert.deepEqual(result.removed, ["74.6% was AMD's margin."]);
+});

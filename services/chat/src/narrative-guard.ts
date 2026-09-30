@@ -34,8 +34,9 @@
 // it joins two numbers or words ("2025-2026").
 const NUMBER =
   /(?:(?<![A-Za-z0-9.])[-−](?:[A-Za-z]{1,4}\.?(?:[ \u00a0\u202f][A-Za-z]{1,4})?)?\p{Sc}?[ \u00a0\u202f]?)?\d+(?:,\d{3})*(?:\.\d+)?/gu;
-// Not before a digit: "-Cg. 3.1B" is one figure, not two sentences.
-const SENTENCE_BREAK = /(?<=[.!?])\s+(?=\D)/;
+// Ordinary whitespace only: the formatter puts a no-break space inside a figure
+// ("-Cg. 3.1B"), prose separates sentences with ordinary spaces.
+const SENTENCE_BREAK = /(?<=[.!?])[^\S\u00a0\u202f]+/;
 const COMPARED_WITH = /(?:compared (?:with|to)|unlike|versus|vs\.?|than|relative to|against)\s+$/i;
 // Between a comparison company and a figure it owns: nothing but a possessive
 // or "at"/"with" ("versus AMD's 49.2%", "compared with AMD at 49.2%").
@@ -171,7 +172,9 @@ function maskMentions(sentence: string, named: ReadonlyArray<{ company: string; 
 // The comparable value: "62.1" for "$62.1B", "-10" for "-10.0%", and "-0" kept
 // apart from "0" ("-0.0%" is a displayed decline).
 function numberKey(raw: string): string {
-  const value = Number(raw.replace("−", "-").replace(/[^\d.-]/g, ""));
+  // The sign plus the digits: a currency prefix ("-Cg. ") must not leak in.
+  const sign = /^[-−]/.test(raw) ? "-" : "";
+  const value = Number(sign + raw.match(/\d+(?:,\d{3})*(?:\.\d+)?$/)![0].replaceAll(",", ""));
   return Object.is(value, -0) ? "-0" : String(value);
 }
 
