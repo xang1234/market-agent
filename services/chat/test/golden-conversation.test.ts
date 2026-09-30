@@ -141,6 +141,8 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       (comparison.subjects as Array<{ id: string }>).map((subject) => subject.id),
       [NVDA.issuer_id, AMD.issuer_id],
     );
+    // Rows are labelled for people, not by reference id.
+    assert.deepEqual(comparison.subject_labels, ["NVDA", "AMD"]);
     const cited = await citedFacts(answer);
     const refs = valueRefs(comparison);
     assert.ok(refs.length >= 2, "the comparison shows too few figures");
@@ -171,11 +173,12 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.deepEqual(completedTurn(turnEvents).data.subject_refs, [{ kind: "listing", id: NVDA.listing_id }]);
 
     const comparison = comparisonBlock(await latestAssistantMessage(base, peersThread.thread_id));
-    // AMD shares NVDA's industry; AAPL does not.
+    // AMD shares NVDA's industry; AAPL does not. The auto-selected peer is labelled too.
     assert.deepEqual(
       (comparison.subjects as Array<{ id: string }>).map((subject) => subject.id),
       [NVDA.issuer_id, AMD.issuer_id],
     );
+    assert.deepEqual(comparison.subject_labels, ["NVDA", "AMD"]);
   });
 
   function completedTurn(turnEvents: ParsedSseEvent[]): ParsedSseEvent {

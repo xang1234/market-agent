@@ -64,7 +64,7 @@ export function MetricsComparison({ block }: MetricsComparisonProps): ReactEleme
                   scope="row"
                   className={`px-3 py-2 text-left ${isPrimary ? 'font-semibold text-accent' : 'text-fg'}`}
                 >
-                  {formatSubjectRefShort(subject)}
+                  {block.subject_labels?.[rowIndex] ?? formatSubjectRefShort(subject)}
                 </th>
                 {block.metrics.map((_metric, cellIndex) => (
                   <ComparisonCell

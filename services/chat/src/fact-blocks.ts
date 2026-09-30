@@ -110,14 +110,38 @@ async function loadComparisonFactBlocks(
         title: "Side by side (latest fiscal year)",
       },
     });
+    const labels = await companyLabels(db, block.subjects.map((subject) => subject.id));
     return Object.freeze([{
       ...block,
+      // Rows are shown by ticker (or name), not by reference id.
+      subject_labels: block.subjects.map((subject) => labels.get(subject.id) ?? `issuer:${subject.id.slice(0, 8)}`),
       ...blockBase("metrics_comparison", input, cited.map(citedFact), loadable),
     }]);
   } catch (reason) {
     console.warn("[chat] comparison unavailable; answering with narrative only", reason);
     return [];
   }
+}
+
+// Each company's display label: its active ticker, else its legal name.
+async function companyLabels(db: QueryExecutor, issuerIds: ReadonlyArray<string>): Promise<Map<string, string>> {
+  const { rows } = await db.query<{ issuer_id: string; label: string }>(
+    `select i.issuer_id::text as issuer_id,
+            coalesce(
+              (select l.ticker
+                 from instruments ins
+                 join listings l on l.instrument_id = ins.instrument_id
+                where ins.issuer_id = i.issuer_id
+                  and l.active_to is null
+                order by l.ticker
+                limit 1),
+              i.legal_name
+            ) as label
+       from issuers i
+      where i.issuer_id = any($1::uuid[])`,
+    [issuerIds],
+  );
+  return new Map(rows.map((row) => [row.issuer_id, row.label]));
 }
 
 function citedFact(fact: VerifierFact): CitedFact {

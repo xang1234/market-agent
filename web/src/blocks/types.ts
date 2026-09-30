@@ -204,6 +204,9 @@ export type MetricsComparisonCell = {
 export type MetricsComparisonBlock = BaseBlock & {
   kind: 'metrics_comparison'
   subjects: ReadonlyArray<SubjectRef>
+  // Display label per subject (e.g. a ticker), in subjects order; the row falls
+  // back to the short reference when a label is absent.
+  subject_labels?: ReadonlyArray<string>
   metrics: ReadonlyArray<string>
   // Value matrix indexed [subjectIndex][metricIndex]. Optional: when absent the
   // block renders metric labels with empty cells (the pre-values behavior). A

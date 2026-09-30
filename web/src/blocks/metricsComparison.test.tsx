@@ -93,3 +93,18 @@ test('the emitted metrics_comparison block renders cells, a tone, a gap, and an 
   // Present cells link to their backing fact.
   assert.match(html, /data-inspection-id="55555555-5555-4555-9555-000000000001"/)
 })
+
+test('MetricsComparison labels rows with subject_labels, falling back to the reference', () => {
+  const [first, second] = metricsComparisonFixture.subjects
+  const labelled: MetricsComparisonBlock = {
+    ...metricsComparisonFixture,
+    subjects: [first, second],
+    cells: metricsComparisonFixture.cells?.slice(0, 2),
+    subject_labels: ['NVDA'],
+  }
+  const html = renderToStaticMarkup(<MetricsComparison block={labelled} />)
+
+  assert.match(html, />NVDA</)
+  // No label for the second row: the short reference is shown instead.
+  assert.match(html, new RegExp(`>${second.kind}:${second.id.slice(0, 8)}<`))
+})
