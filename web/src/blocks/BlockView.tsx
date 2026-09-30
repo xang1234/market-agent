@@ -10,6 +10,7 @@ import type { EvidenceBlockInspection } from '../evidence/inspectionTypes.ts'
 import { useEvidenceInspector } from '../evidence/useEvidenceInspector.ts'
 import type { SnapshotManifest } from './snapshotManifest.ts'
 import { VerificationLabel } from './VerificationLabel.tsx'
+import type { VerificationKind } from './verification.ts'
 import { SnapshotManifestContext } from './snapshotManifestContext.ts'
 
 type BlockRegistryProviderProps = {
@@ -30,13 +31,14 @@ export function SnapshotManifestProvider({ manifest, children }: SnapshotManifes
   return <SnapshotManifestContext.Provider value={manifest}>{children}</SnapshotManifestContext.Provider>
 }
 
-type BlockViewProps = { block: Block }
+// `verification` overrides the kind's own label, e.g. for an answer that failed verification.
+type BlockViewProps = { block: Block; verification?: VerificationKind }
 
 // Dispatches a block to its registered renderer. If no renderer is
 // registered for the kind (e.g., a sibling-bead kind hasn't shipped yet),
 // renders an unobtrusive placeholder so a snapshot still surfaces the
 // gap to a reviewer instead of silently dropping content.
-export function BlockView({ block }: BlockViewProps): ReactElement {
+export function BlockView({ block, verification: verificationOverride }: BlockViewProps): ReactElement {
   const registry = useBlockRegistry()
   const inspector = useEvidenceInspector()
   const renderer = registry.resolve(block.kind)
@@ -55,7 +57,7 @@ export function BlockView({ block }: BlockViewProps): ReactElement {
   // sidesteps the react-hooks/static-components heuristic that treats
   // capitalized JSX identifiers as locally-declared components.
   const content = createElement(renderer, { block })
-  const verification = registry.verification(block)
+  const verification = verificationOverride ?? registry.verification(block)
   // The label sits on the block itself, so neighbouring blocks never borrow each other's status.
   const rendered = verification === null ? content : (
     <div className="flex flex-col items-start gap-1" data-block-verification={verification}>

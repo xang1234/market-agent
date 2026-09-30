@@ -37,6 +37,8 @@ const GOLDEN_ENV: Record<string, string> = {
   LLM_FIXTURE_MODELS: "recorded",
   LITELLM_MODEL: "fixture/recorded",
   LLM_REPLAY_FILE: join(import.meta.dirname, "golden", "llm-replies.json"),
+  // The finish line is always judged strictly, whatever the developer has set locally.
+  CHAT_VERIFICATION_MODE: "strict",
 };
 
 type Block = Record<string, unknown> & { id?: string; kind?: string };

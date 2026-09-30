@@ -416,3 +416,35 @@ test('multi-block sequence preserves block_order and per-block segments through 
   assert.equal(state.turn_status, 'completed')
   assert.equal(state.completed_message_id, 'msg-1')
 })
+
+const UNVERIFIED_BLOCK = {
+  id: 'b-unverified',
+  kind: 'revenue_bars',
+  snapshot_id: '11111111-1111-4111-a111-111111111111',
+  data_ref: { kind: 'chat_turn', id: 'turn-1' },
+  source_refs: [],
+  as_of: '2026-05-06T00:00:00.000Z',
+}
+
+test('turn.completed with unverified keeps the blocks and reasons instead of waiting for a saved message', () => {
+  const started = applyChatStreamEvent(INITIAL_STREAM_STATE, event('turn.started', 1))
+  const next = applyChatStreamEvent(started, event('turn.completed', 2, {
+    unverified: { persisted: false, failures: [{ reason_code: 'missing_fact_ref' }], blocks: [UNVERIFIED_BLOCK] },
+  }))
+
+  assert.equal(next.turn_status, 'unverified')
+  assert.equal(next.completed_message_id, null)
+  assert.equal(next.error, null)
+  assert.deepEqual(next.unverified, { failures: [{ reason_code: 'missing_fact_ref' }], blocks: [UNVERIFIED_BLOCK] })
+})
+
+test('turn.started clears a previous unverified turn', () => {
+  const unverified = applyChatStreamEvent(
+    applyChatStreamEvent(INITIAL_STREAM_STATE, event('turn.started', 1)),
+    event('turn.completed', 2, { unverified: { persisted: false, failures: [], blocks: [UNVERIFIED_BLOCK] } }),
+  )
+  const restarted = applyChatStreamEvent(unverified, event('turn.started', 1))
+
+  assert.equal(restarted.turn_status, 'started')
+  assert.equal(restarted.unverified ?? null, null)
+})

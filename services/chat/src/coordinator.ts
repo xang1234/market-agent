@@ -28,6 +28,7 @@ import {
 } from "../../tools/src/index.ts";
 
 import type { ChatClarificationAnswer, ChatFinancialRuntime } from "./financial-runtime.ts";
+import { ChatSnapshotSealError } from "./messages.ts";
 import { financialAwareRunner } from "./financial-turn.ts";
 
 export type ChatTurnInput = {
@@ -168,8 +169,14 @@ export type ChatCoordinator = {
   stats(): ChatCoordinatorStats;
 };
 
+// strict (default): an answer that fails verification is a turn.error and nothing
+// is shown. display_unverified (development only): the blocks are shown, labelled
+// unverified with the failure reasons, and never persisted.
+export type ChatVerificationMode = "strict" | "display_unverified";
+
 export type ChatCoordinatorOptions = {
   runner?: ChatTurnRunner;
+  verificationMode?: ChatVerificationMode;
   financialRuntime?: ChatFinancialRuntime;
   analystToolRuntime?: ChatAnalystToolRuntime;
   allowSyntheticAnalystFallback?: boolean;
@@ -239,6 +246,7 @@ export function createChatCoordinator(
     ? ((context) => toolBackedAnalystTurnRunner(context, {
       persistAssistantMessage,
       runtime: options.analystToolRuntime,
+      verificationMode: options.verificationMode ?? "strict",
     }))
     : options.allowSyntheticAnalystFallback
     ? ((context) => syntheticAnalystTurnRunner(context, persistAssistantMessage))
@@ -465,7 +473,8 @@ function threadTitleGenerationRunner(
       }
       if (type === "turn.completed") {
         completed = true;
-        clarification = payload.clarification === true;
+        // Unverified answers (display_unverified mode) are not saved, so they don't title the thread.
+        clarification = payload.clarification === true || payload.unverified !== undefined;
       }
       return context.emit(type, payload);
     };
@@ -866,10 +875,12 @@ async function toolBackedAnalystTurnRunner(
   options: {
     persistAssistantMessage?: ChatAssistantMessagePersistence;
     runtime: ChatAnalystToolRuntime;
+    verificationMode: ChatVerificationMode;
   },
 ) {
   const { emit } = context;
   const preResolution = context.subjectPreResolution ?? null;
+  const subjectRef = preResolution?.status === "resolved" ? { subject_ref: preResolution.subject_ref } : {};
   const turnId = context.turnId ?? context.runId;
   if (!preResolution) {
     emit("turn.started", { bundle_id: context.bundleId });
@@ -889,7 +900,31 @@ async function toolBackedAnalystTurnRunner(
     });
   }
 
+  const assistantBlocks = Object.freeze(result.blocks.map((block) => Object.freeze({ ...block })));
+  const contentHash = contentHashForText(JSON.stringify(assistantBlocks));
+
+  // display_unverified: show what failed verification, labelled, and save nothing.
+  // turn.completed carries the full blocks because there is no message to reload.
+  const showUnverified = (failures: ReadonlyArray<unknown>) => {
+    emit("snapshot.staged", {
+      snapshot_id: result.snapshot_id,
+      status: "staged",
+      verification: { ok: false, failures },
+    });
+    emitAssistantBlocks(emit, assistantBlocks, contentHash);
+    emit("turn.completed", {
+      bundle_id: context.bundleId,
+      ...subjectRef,
+      unverified: { persisted: false, failures, blocks: assistantBlocks },
+    });
+  };
+
   if (!result.verification.ok) {
+    const failures = result.verification.failures ?? [];
+    if (options.verificationMode === "display_unverified") {
+      showUnverified(failures);
+      return;
+    }
     emit("snapshot.staged", {
       snapshot_id: result.snapshot_id,
       status: "staged",
@@ -898,25 +933,32 @@ async function toolBackedAnalystTurnRunner(
     emit("turn.error", {
       error_code: "snapshot_verification_failed",
       message: "snapshot verification failed",
-      failures: result.verification.failures ?? [],
+      failures,
     });
     return;
   }
 
-  const assistantBlocks = Object.freeze(result.blocks.map((block) => Object.freeze({ ...block })));
-  const contentHash = contentHashForText(JSON.stringify(assistantBlocks));
   let snapshotId = result.snapshot_id;
   let messageId = stableUuid(`message:${context.threadId}:${context.runId}:${turnId}`);
 
   if (options.persistAssistantMessage) {
-    const persisted = await options.persistAssistantMessage({
-      threadId: context.threadId,
-      runId: context.runId,
-      turnId,
-      role: "assistant",
-      blocks: assistantBlocks,
-      content_hash: contentHash,
-    });
+    let persisted: Awaited<ReturnType<ChatAssistantMessagePersistence>>;
+    try {
+      persisted = await options.persistAssistantMessage({
+        threadId: context.threadId,
+        runId: context.runId,
+        turnId,
+        role: "assistant",
+        blocks: assistantBlocks,
+        content_hash: contentHash,
+      });
+    } catch (error) {
+      if (options.verificationMode === "display_unverified" && error instanceof ChatSnapshotSealError) {
+        showUnverified(error.failures);
+        return;
+      }
+      throw error;
+    }
     snapshotId = persisted.snapshot_id;
     messageId = persisted.message_id;
   }
@@ -931,7 +973,20 @@ async function toolBackedAnalystTurnRunner(
     status: "sealed",
     verification: result.verification,
   });
-  for (const block of assistantBlocks) {
+  emitAssistantBlocks(emit, assistantBlocks, contentHash);
+  emit("turn.completed", {
+    message_id: messageId,
+    bundle_id: context.bundleId,
+    ...subjectRef,
+  });
+}
+
+function emitAssistantBlocks(
+  emit: ChatTurnEmit,
+  blocks: ReadonlyArray<Record<string, unknown>>,
+  contentHash: string,
+): void {
+  for (const block of blocks) {
     const blockId = nonEmptyString((block as { id?: unknown }).id) ?? stableUuid(`block:${contentHash}`);
     emit("block.began", {
       block_id: blockId,
@@ -951,11 +1006,6 @@ async function toolBackedAnalystTurnRunner(
       content_hash: contentHash,
     });
   }
-  emit("turn.completed", {
-    message_id: messageId,
-    bundle_id: context.bundleId,
-    ...(preResolution?.status === "resolved" ? { subject_ref: preResolution.subject_ref } : {}),
-  });
 }
 
 async function missingAnalystToolRuntimeRunner(context: ChatTurnRunContext) {

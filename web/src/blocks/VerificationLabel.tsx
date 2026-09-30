@@ -7,6 +7,7 @@ const CLASSES: Readonly<Record<VerificationKind, string>> = {
   partial: 'border-line-strong bg-surface-2 text-fg-soft',
   narrative: 'border-line bg-surface text-muted',
   legacy: 'border-line bg-surface text-muted',
+  unverified: 'border-negative/40 bg-negative-soft text-negative',
 }
 
 export function VerificationLabel({ kind }: { kind: VerificationKind }): ReactElement {

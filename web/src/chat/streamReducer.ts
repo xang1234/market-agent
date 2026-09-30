@@ -1,4 +1,4 @@
-import { REF_SEGMENT_KINDS, type RefSegmentKind, type RichTextSegment } from '../blocks/types.ts'
+import { REF_SEGMENT_KINDS, type Block, type RefSegmentKind, type RichTextSegment } from '../blocks/types.ts'
 import type { ChatSseEvent } from './sseEventTypes.ts'
 import {
   markPlanStepDone,
@@ -33,7 +33,15 @@ export function isStreamingRichText(block: StreamingBlock): block is StreamingRi
   return block.kind === 'rich_text'
 }
 
-export type StreamingTurnStatus = 'idle' | 'started' | 'completed' | 'error'
+export type StreamingTurnStatus = 'idle' | 'started' | 'completed' | 'error' | 'unverified'
+
+// A turn that failed verification but was shown anyway (development only,
+// CHAT_VERIFICATION_MODE=display_unverified). It was not saved, so the full
+// blocks arrive on turn.completed instead of via the thread's messages.
+export type UnverifiedTurn = {
+  failures: ReadonlyArray<Record<string, unknown>>
+  blocks: ReadonlyArray<Block>
+}
 
 export type StreamState = {
   turn_status: StreamingTurnStatus
@@ -45,6 +53,7 @@ export type StreamState = {
   completed_message_id: string | null
   // Captured from turn.error.
   error: string | null
+  unverified?: UnverifiedTurn | null
 }
 
 export const INITIAL_STREAM_STATE: StreamState = Object.freeze({
@@ -69,9 +78,22 @@ export function applyChatStreamEvent(state: StreamState, event: ChatSseEvent): S
         plan_steps: planStepsForTurnStarted(event),
         completed_message_id: null,
         error: null,
+        unverified: null,
       }
 
     case 'turn.completed': {
+      const unverified = readUnverified(event.unverified)
+      if (unverified !== null) {
+        return {
+          ...state,
+          turn_status: 'unverified',
+          blocks_by_id: new Map(),
+          block_order: [],
+          completed_message_id: null,
+          error: null,
+          unverified,
+        }
+      }
       // Only drop the streaming block graph when we actually have a sealed
       // message_id for the parent to fetch. Without it, clearing the blocks
       // would unmount StreamingTurnView and the assistant response would
@@ -202,6 +224,13 @@ function applyBlockCompleted(state: StreamState, event: ChatSseEvent): StreamSta
       ? markPlanStepDone(state.plan_steps, 'composer')
       : state.plan_steps,
   }
+}
+
+function readUnverified(value: unknown): UnverifiedTurn | null {
+  if (value === null || typeof value !== 'object') return null
+  const { failures, blocks } = value as { failures?: unknown; blocks?: unknown }
+  if (!Array.isArray(failures) || !Array.isArray(blocks)) return null
+  return { failures, blocks: blocks as Block[] }
 }
 
 function readString(value: unknown): string | null {
