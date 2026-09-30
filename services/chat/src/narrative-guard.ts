@@ -15,13 +15,22 @@ export function keepSupportedSentences(
   supportingTexts: ReadonlyArray<string>,
 ): { text: string; removed: string[] } {
   const supported = new Set(supportingTexts.flatMap(numbersIn));
-  const kept: string[] = [];
   const removed: string[] = [];
-  for (const sentence of text.trim().split(SENTENCE_BREAK)) {
-    if (sentence === "") continue;
-    (numbersIn(sentence).every((number) => supported.has(number)) ? kept : removed).push(sentence);
+  const lines: string[] = [];
+  // Lines are boundaries too, so each bullet of a list is judged on its own.
+  for (const line of text.trim().split(/\r?\n/)) {
+    if (line.trim() === "") {
+      lines.push("");
+      continue;
+    }
+    const kept = line.trim().split(SENTENCE_BREAK).filter((sentence) => {
+      const isSupported = numbersIn(sentence).every((number) => supported.has(number));
+      if (!isSupported) removed.push(sentence);
+      return isSupported;
+    });
+    if (kept.length > 0) lines.push(line.match(/^\s*/)![0] + kept.join(" "));
   }
-  return { text: kept.join(" "), removed };
+  return { text: lines.join("\n").replace(/\n{3,}/g, "\n\n").trim(), removed };
 }
 
 function numbersIn(text: string): string[] {

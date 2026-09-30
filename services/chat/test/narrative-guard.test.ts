@@ -35,3 +35,17 @@ test("when every sentence is unsupported, nothing of the model's prose is kept",
   assert.equal(result.text, "");
   assert.equal(result.removed.length, 2);
 });
+
+test("guards each line of a bulleted answer on its own and keeps the line structure", () => {
+  const result = keepSupportedSentences(
+    "- Revenue reached $62.1B in Q4 2026\n- Grew 38% year over year\n- Margins held up",
+    DISPLAYED,
+  );
+  assert.equal(result.text, "- Revenue reached $62.1B in Q4 2026\n- Margins held up");
+  assert.deepEqual(result.removed, ["- Grew 38% year over year"]);
+});
+
+test("keeps paragraph breaks between supported paragraphs", () => {
+  const text = "Revenue reached $62.1B in Q4 2026.\n\nMargins held up.";
+  assert.deepEqual(keepSupportedSentences(text, DISPLAYED), { text, removed: [] });
+});
