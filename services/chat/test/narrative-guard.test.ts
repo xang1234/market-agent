@@ -304,3 +304,8 @@ test("a Markdown bullet marker is not a minus sign", () => {
   assert.deepEqual(keepSupportedSentences("- -3.1% revenue growth", ["-3.1%"]).removed, []);
   assert.deepEqual(keepSupportedSentences("- 3.1% revenue growth", ["3.1%"]).removed, []);
 });
+
+test("'Cg.' plus a no-break space is kept together only inside a signed figure", () => {
+  const result = keepSupportedSentences("NVDA reports in Cg. 74.6% was AMD's margin.", [], COMPARED);
+  assert.deepEqual(result.removed, ["74.6% was AMD's margin."]);
+});
