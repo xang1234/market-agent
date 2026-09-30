@@ -171,7 +171,11 @@ async function planTurn(
   });
 
   let subjects: ReadonlyArray<RequestedSubject> = requested;
-  if (context.clarificationAnswer) subjects = await applyAnswer(subjects, context.clarificationAnswer, planningContext, text);
+  if (context.clarificationAnswer) {
+    // The chosen company may already be requested (the explicit subject), so
+    // de-duplicate again once the answer resolves the ambiguous mention.
+    subjects = distinctRequested(await applyAnswer(subjects, context.clarificationAnswer, planningContext, text));
+  }
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
   return planFinancialRequest(planningContext(subjects), text, deps.planningModel ?? noModel);
 }
@@ -225,6 +229,16 @@ function requestedResolution(resolution: ChatSubjectPreResolution): RequestedSub
 
 function financialRef(ref: { kind: string; id: string }): FinancialSubjectRef | null {
   return ref.kind === "issuer" || ref.kind === "listing" ? { kind: ref.kind, id: ref.id } : null;
+}
+
+function distinctRequested(subjects: ReadonlyArray<RequestedSubject>): ReadonlyArray<RequestedSubject> {
+  return subjects.filter((subject, index) => {
+    const { resolution } = subject;
+    if (resolution.status !== "resolved") return true;
+    return !subjects.slice(0, index).some((earlier) =>
+      earlier.resolution.status === "resolved" && sameRef(earlier.resolution.subject_ref, resolution.subject_ref)
+    );
+  });
 }
 
 function sameRef(left: FinancialSubjectRef, right: FinancialSubjectRef): boolean {
