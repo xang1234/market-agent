@@ -105,6 +105,8 @@ When `up` completes, open **<http://localhost:5173>**.
 
 Working on chat only? `DEV_PROFILE=chat ./scripts/dev-shell.sh up` starts one process (`services/app`) that serves the web UI plus chat, resolver, dev-api, market and fundamentals on the same port, and Postgres. The other services are parked, not removed: `status` lists them as `parked`, their API routes answer `503`, and their tabs won't load. The default, `DEV_PROFILE=full`, runs every service as its own process.
 
+No API keys? `DEV_PROFILE=chat DEV_NO_KEYS=true ./scripts/dev-shell.sh up` seeds the golden test's frozen dataset (NVDA, AMD, AAPL) and answers with its recorded model replies, so the golden conversation works offline: *Analyze NVDA* → *Compare it with AMD* → *Explain the differences and show the evidence*. Other questions have no recorded reply and fail. The LLM settings in `.env.dev` are ignored in this mode. It needs a database without provider-hydrated NVDA/AMD/AAPL: if seeding reports a clash, reset with `docker compose -f docker-compose.dev.yml --env-file .env.dev down -v`.
+
 ### Bring your own keys & models
 
 The terminal works out of the box, but a few keys unlock live data and the AI features. Add them to `.env.dev`:

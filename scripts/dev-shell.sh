@@ -7,9 +7,11 @@ if [[ ! -f "$ENV_FILE" ]]; then
   ENV_FILE="$ROOT/.env.dev.example"
 fi
 
-# DEV_PROFILE is a per-invocation switch (DEV_PROFILE=chat ./scripts/dev-shell.sh up),
-# so the caller's value beats the env file's.
+# DEV_PROFILE and DEV_NO_KEYS are per-invocation switches
+# (DEV_PROFILE=chat DEV_NO_KEYS=true ./scripts/dev-shell.sh up), so the caller's value
+# beats the env file's.
 CALLER_DEV_PROFILE="${DEV_PROFILE:-}"
+CALLER_DEV_NO_KEYS="${DEV_NO_KEYS:-}"
 
 set -a
 # shellcheck source=/dev/null
@@ -17,6 +19,7 @@ source "$ENV_FILE"
 set +a
 
 DEV_PROFILE="${CALLER_DEV_PROFILE:-${DEV_PROFILE:-}}"
+DEV_NO_KEYS="${CALLER_DEV_NO_KEYS:-${DEV_NO_KEYS:-}}"
 
 # Defaults for variables that may be missing from an older .env.dev so `set -u`
 # expansion below doesn't abort, and so child processes receive them.
@@ -30,9 +33,11 @@ DEV_PROFILE="${CALLER_DEV_PROFILE:-${DEV_PROFILE:-}}"
 : "${DISCOVERY_ENABLED:=false}"
 : "${DISCOVERY_WORKER_POLL_MS:=1000}"
 : "${DEV_PROFILE:=full}"
+# No API keys needed: recorded LLM replies + the golden frozen dataset (#122).
+: "${DEV_NO_KEYS:=false}"
 # The one-process chat-profile app serves the web UI, so it takes the web port.
 : "${APP_PORT:=${WEB_PORT:-5173}}"
-export HOME_PORT EVIDENCE_PORT DEV_PROVIDERS_PORT ANALYST_GRIDS_PORT HOME_PULSE_TICKERS ENABLE_UNOFFICIAL_DEV_PROVIDERS DISCOVERY_ENABLED DISCOVERY_WORKER_POLL_MS DEV_PROFILE APP_PORT
+export HOME_PORT EVIDENCE_PORT DEV_PROVIDERS_PORT ANALYST_GRIDS_PORT HOME_PULSE_TICKERS ENABLE_UNOFFICIAL_DEV_PROVIDERS DISCOVERY_ENABLED DISCOVERY_WORKER_POLL_MS DEV_PROFILE DEV_NO_KEYS APP_PORT
 
 # HTTP dev services, in start order. DEV_PROFILE=chat runs only what the golden chat
 # conversation needs (#117), as one process: services/app hosts APP_SERVES (#122).
@@ -203,7 +208,7 @@ stop_process() {
   local pid
   pid="$(cat "$pid_file")"
   kill "$pid" 2>/dev/null || true
-  rm -f "$pid_file"
+  rm -f "$pid_file" "$PID_DIR/$name.launch-env"
 }
 
 start_process() {
@@ -307,6 +312,15 @@ configure_runtime_env() {
   # The web app starts signed in with the dev mock session (#122); set false to test sign-in.
   export VITE_MA_FLAG_DEV_AUTO_LOGIN
   VITE_MA_FLAG_DEV_AUTO_LOGIN="${VITE_MA_FLAG_DEV_AUTO_LOGIN:-true}"
+  if [[ "$DEV_NO_KEYS" == "true" ]]; then
+    # The golden test's recorded replies (services/chat/test/golden), on the same
+    # fixture channel it uses. Overrides whatever .env.dev set: the settings file is
+    # dropped (it would override the process env) and the Settings UI hidden.
+    export LLM_CHANNELS=fixture LLM_FIXTURE_PROTOCOL=openai LLM_FIXTURE_MODELS=recorded
+    export LITELLM_MODEL=fixture/recorded LITELLM_FALLBACK_MODELS="" AGENT_LITELLM_MODEL=""
+    export LLM_REPLAY_FILE="$ROOT/services/chat/test/golden/llm-replies.json"
+    export LLM_SETTINGS_ENV_FILE="" MA_FLAG_LLM_SETTINGS=false VITE_MA_FLAG_LLM_SETTINGS=false
+  fi
   if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
     export DEV_PROVIDERS_ORIGIN
     DEV_PROVIDERS_ORIGIN="${DEV_PROVIDERS_ORIGIN:-http://127.0.0.1:$DEV_PROVIDERS_PORT}"
@@ -405,35 +419,44 @@ stop_parked_processes() {
   done
 }
 
-# Vite bakes VITE_* into the client when the process serving the UI starts, so a
-# running one keeps stale flags (e.g. VITE_MA_FLAG_DEV_AUTO_LOGIN=false) until restarted.
-WEB_VITE_ENV_STAMP="$PID_DIR/web.vite-env"
-
-web_vite_env() {
-  env | grep '^VITE_' | LC_ALL=C sort || true
+# `up` leaves running processes alone, but some settings are read only at start:
+# Vite bakes VITE_* into the client (web, or app under chat), and chat/dev-api build
+# their LLM router from LLM_*/LITELLM_* (DEV_NO_KEYS rewrites those). Each such process
+# gets a stamp of that env when it starts; a running one whose stamp differs is
+# restarted. The stamp is a checksum so LLM API keys are not copied into .dev.
+launch_env_pattern() {
+  local llm='LLM_|LITELLM_|AGENT_LITELLM_'
+  case "$1" in
+    web) printf '^VITE_' ;;
+    app) printf '^(VITE_|%s)' "$llm" ;;
+    chat | dev-api) printf '^(%s)' "$llm" ;;
+    *) return 1 ;;
+  esac
 }
 
-# The process that runs Vite: web on its own, or the one-process app under chat.
-ui_process() {
-  if [[ "$DEV_PROFILE" == "chat" ]]; then
-    printf app
-  else
-    printf web
-  fi
+launch_env_checksum() {
+  local pattern
+  pattern="$(launch_env_pattern "$1")" || return 0
+  { env | grep -E "$pattern" || true; } | LC_ALL=C sort | cksum
 }
 
-restart_web_if_vite_env_changed() {
-  local attempt name
-  name="$(ui_process)"
-  if ! process_running "$PID_DIR/$name.pid"; then
-    return 0
-  fi
-  if [[ "$(cat "$WEB_VITE_ENV_STAMP" 2>/dev/null)" == "$(web_vite_env)" ]]; then
-    return 0
-  fi
-  stop_process "$name"
-  # Wait for the port so the restarted Vite doesn't drift to the next free one.
-  wait_for_port_free "$(service_port "$name")"
+write_launch_env_stamp() {
+  launch_env_pattern "$1" >/dev/null || return 0
+  launch_env_checksum "$1" >"$PID_DIR/$1.launch-env"
+}
+
+restart_if_launch_env_changed() {
+  local name
+  for name in "$@"; do
+    launch_env_pattern "$name" >/dev/null || continue
+    process_running "$PID_DIR/$name.pid" || continue
+    if [[ "$(cat "$PID_DIR/$name.launch-env" 2>/dev/null)" == "$(launch_env_checksum "$name")" ]]; then
+      continue
+    fi
+    stop_process "$name"
+    # Wait for the port so the restarted server doesn't drift to the next free one.
+    wait_for_port_free "$(service_port "$name")"
+  done
 }
 
 # SIGTERM and server shutdown are asynchronous: a stopped process can hold its port
@@ -560,6 +583,12 @@ up() {
     return 1
   fi
 
+  # Idempotent; fails (all-or-nothing) if provider-hydrated tickers already clash.
+  if [[ "$DEV_NO_KEYS" == "true" ]] && ! (cd "$ROOT/services/chat" && npm run seed:golden); then
+    cleanup_failed_up
+    return 1
+  fi
+
   if ! (cd "$ROOT/services/resolver" && npm run repair:provider-identities); then
     cleanup_failed_up
     return 1
@@ -579,7 +608,8 @@ up() {
   export EVIDENCE_ORIGIN="${EVIDENCE_ORIGIN:-http://127.0.0.1:$EVIDENCE_PORT}"
   export ANALYST_GRIDS_ORIGIN="${ANALYST_GRIDS_ORIGIN:-http://127.0.0.1:$ANALYST_GRIDS_PORT}"
 
-  restart_web_if_vite_env_changed
+  # shellcheck disable=SC2086
+  restart_if_launch_env_changed $services
   for name in $services; do
     start_and_track_process "$name" "$(service_dir "$name")" "$(service_command "$name")"
   done
@@ -593,7 +623,9 @@ up() {
       return 1
     fi
   done
-  web_vite_env >"$WEB_VITE_ENV_STAMP"
+  for name in $services; do
+    write_launch_env_stamp "$name"
+  done
 
   status
 }
