@@ -13,6 +13,8 @@
 // ponytail: uses each listing's latest stored window and requires them to be
 // identical; a shared sub-window across different stored ranges is the upgrade.
 
+import { createHash } from "node:crypto";
+
 import { compileDisclosurePolicy } from "../../snapshot/src/disclosure-policy.ts";
 import type { SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
 import { stableUuid } from "./chat-ids.ts";
@@ -166,6 +168,11 @@ export function buildPerfComparisonBlock(input: {
     source_id: range.source_id,
     listing_id: range.listing_id,
     bar_range_id: range.bar_range_id,
+    // The cache reuses bar_range_id when it refreshes a range, so the ID alone
+    // does not pin these prices; the digest of the stored bars does.
+    bars_sha256: createHash("sha256")
+      .update(JSON.stringify(range.bars.map((bar) => [bar.ts, bar.close])))
+      .digest("hex"),
     interval: range.interval,
     adjustment_basis: range.adjustment_basis,
     normalization: NORMALIZATION,

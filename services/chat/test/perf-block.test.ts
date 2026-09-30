@@ -203,3 +203,16 @@ test("a company without stored prices means no chart, rather than a chart missin
   assert.deepEqual(blocks, []);
   assert.equal(warn.mock.callCount(), 0, "refused deliberately, not by a swallowed error");
 });
+
+test("each sealed series pins a digest of the stored bars, so a later refresh of the same range is detectable", () => {
+  const block = buildPerfComparisonBlock({ ranges: [NVDA, AMD], snapshotId: SNAPSHOT_ID, asOf: AS_OF });
+  const refreshed = buildPerfComparisonBlock({
+    ranges: [NVDA, { ...AMD, bars: AMD.bars.map((bar) => ({ ...bar, close: bar.close + 1 })) }],
+    snapshotId: SNAPSHOT_ID,
+    asOf: AS_OF,
+  });
+  const digests = (b: typeof block) => (b?.provenance_series_specs as Array<{ bars_sha256: string }>).map((s) => s.bars_sha256);
+  for (const digest of digests(block)) assert.match(digest, /^[0-9a-f]{64}$/);
+  assert.equal(digests(block)[0], digests(refreshed)[0]);
+  assert.notEqual(digests(block)[1], digests(refreshed)[1]);
+});

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type { IssuerFundamentalFact } from "../../fundamentals/src/issuer-fundamentals-reader.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
-import { buildIssuerFactBlocks, listingsForComparison } from "../src/fact-blocks.ts";
+import { buildIssuerFactBlocks, listingsForComparison, priceListingsForComparison } from "../src/fact-blocks.ts";
 
 const SNAPSHOT_ID = "11111111-1111-4111-a111-111111111111";
 const AS_OF = "2026-09-01T00:00:00.000Z";
@@ -142,4 +142,18 @@ test("a comparison charts the listing the user asked for, not an arbitrary one o
   assert.deepEqual(listings.get(issuer), { listing_id: "listing-requested", label: "GOOG" });
   // Auto-selected peers were never resolved, so they use the issuer's active listing.
   assert.deepEqual(listings.get(peer), { listing_id: "listing-peer", label: "MSFT" });
+});
+
+test("the price chart gets every compared company's listing, or none when one has no listing", () => {
+  const companies = new Map<string, { listing_id: string | null; label: string }>([
+    ["i1", { listing_id: "l1", label: "NVDA" }],
+    ["i2", { listing_id: "l2", label: "AMD" }],
+  ]);
+  assert.deepEqual(priceListingsForComparison(["i1", "i2"], companies), [
+    { id: "l1", label: "NVDA" },
+    { id: "l2", label: "AMD" },
+  ]);
+  assert.deepEqual(priceListingsForComparison(["i1", "i2", "i3"], companies), []);
+  const unlisted = new Map([...companies, ["i3", { listing_id: null, label: "Private Co" }]]);
+  assert.deepEqual(priceListingsForComparison(["i1", "i2", "i3"], unlisted), []);
 });

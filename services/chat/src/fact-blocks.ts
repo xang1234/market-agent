@@ -134,10 +134,7 @@ async function loadComparisonFactBlocks(
     // Price performance for the same companies, from sealed daily bars, with any
     // pricing disclosure it requires (perf-block.ts).
     const performance = await loadPerfComparisonBlocks(db, {
-      listings: block.subjects.flatMap((subject) => {
-        const listingId = companies.get(subject.id)?.listing_id;
-        return listingId ? [{ id: listingId, label: labelOf(subject.id) }] : [];
-      }),
+      listings: priceListingsForComparison(issuerIds, companies),
       snapshotId: input.snapshotId,
       asOf: input.asOf,
     });
@@ -157,6 +154,19 @@ async function loadComparisonFactBlocks(
 }
 
 export type CompanyListing = { listing_id: string | null; label: string };
+
+// The listings to chart: every compared company's, or none if any has no
+// listing, so the chart never covers fewer companies than the comparison.
+export function priceListingsForComparison(
+  issuerIds: ReadonlyArray<string>,
+  companies: ReadonlyMap<string, CompanyListing>,
+): Array<{ id: string; label: string }> {
+  const listings = issuerIds.flatMap((issuerId) => {
+    const company = companies.get(issuerId);
+    return company?.listing_id ? [{ id: company.listing_id, label: company.label }] : [];
+  });
+  return listings.length === issuerIds.length ? listings : [];
+}
 
 // The listing to chart and label for each company: the one the user asked for
 // when they named a listing (a specific share class or venue), otherwise the
