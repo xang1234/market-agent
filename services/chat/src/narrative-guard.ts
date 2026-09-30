@@ -114,10 +114,14 @@ export function keepSupportedSentences(
           ATTACHED.test(sentence.slice(mention.index + mention.company.length, index))
         );
         const before = attached.length > 0 ? attached : subjects;
+        // An unattached comparison company ("compared with AMD's revenue of
+        // $74.6B") may be the figure's real subject, so nothing else may claim
+        // it: neither a name after the figure nor the carried company.
+        const blocked = before.length === 0 && comparisons.length > 0;
         // Only the first name after it, and only when a preposition ties it to
         // the figure ("74.6% for NVDA"); "49.2%, exceeding AMD" names a comparison.
         const next = named.find((mention) => mention.index >= end && mention.index < to);
-        const after = before.length === 0 && !pronounSubject && next !== undefined &&
+        const after = before.length === 0 && !pronounSubject && !blocked && next !== undefined &&
             OWNED_BY.test(sentence.slice(end, next.index))
           ? next
           : undefined;
@@ -126,6 +130,8 @@ export function keepSupportedSentences(
           ? before.map((mention) => mention.company)
           : after !== undefined
           ? [after.company]
+          : blocked
+          ? []
           : carried;
         carried = credited;
         return credited.length > 0 && credited.every((company) => owners.get(number)!.has(company));

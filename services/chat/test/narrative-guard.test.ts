@@ -309,3 +309,17 @@ test("'Cg.' plus a no-break space is kept together only inside a signed figure",
   const result = keepSupportedSentences("NVDA reports in Cg. 74.6% was AMD's margin.", [], COMPARED);
   assert.deepEqual(result.removed, ["74.6% was AMD's margin."]);
 });
+
+test("an unattached comparison company blocks the carried owner", () => {
+  const figures = [
+    { company: "NVDA", value: "$130.5B" },
+    { company: "NVDA", value: "$74.6B" },
+    { company: "AMD", value: "$49.2B" },
+  ];
+  const result = keepSupportedSentences(
+    "NVDA's revenue was $130.5B, compared with AMD's revenue of $74.6B.",
+    [],
+    figures,
+  );
+  assert.equal(result.removed.length, 1);
+});
