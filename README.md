@@ -103,6 +103,8 @@ cp .env.dev.example .env.dev      # safe defaults; ports + flags
 
 When `up` completes, open **<http://localhost:5173>**.
 
+Working on chat only? `DEV_PROFILE=chat ./scripts/dev-shell.sh up` starts just web, chat, resolver, dev-api, market and fundamentals plus Postgres. The other services are parked, not removed: `status` lists them as `parked`, and their tabs won't load. The default, `DEV_PROFILE=full`, runs everything.
+
 ### Bring your own keys & models
 
 The terminal works out of the box, but a few keys unlock live data and the AI features. Add them to `.env.dev`:

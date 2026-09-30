@@ -7,10 +7,16 @@ if [[ ! -f "$ENV_FILE" ]]; then
   ENV_FILE="$ROOT/.env.dev.example"
 fi
 
+# DEV_PROFILE is a per-invocation switch (DEV_PROFILE=chat ./scripts/dev-shell.sh up),
+# so the caller's value beats the env file's.
+CALLER_DEV_PROFILE="${DEV_PROFILE:-}"
+
 set -a
 # shellcheck source=/dev/null
 source "$ENV_FILE"
 set +a
+
+DEV_PROFILE="${CALLER_DEV_PROFILE:-${DEV_PROFILE:-}}"
 
 # Defaults for variables that may be missing from an older .env.dev so `set -u`
 # expansion below doesn't abort, and so child processes receive them.
@@ -23,7 +29,13 @@ set +a
 : "${ENABLE_UNOFFICIAL_DEV_PROVIDERS:=false}"
 : "${DISCOVERY_ENABLED:=false}"
 : "${DISCOVERY_WORKER_POLL_MS:=1000}"
-export HOME_PORT EVIDENCE_PORT DEV_PROVIDERS_PORT ANALYST_GRIDS_PORT HOME_PULSE_TICKERS ENABLE_UNOFFICIAL_DEV_PROVIDERS DISCOVERY_ENABLED DISCOVERY_WORKER_POLL_MS
+: "${DEV_PROFILE:=full}"
+export HOME_PORT EVIDENCE_PORT DEV_PROVIDERS_PORT ANALYST_GRIDS_PORT HOME_PULSE_TICKERS ENABLE_UNOFFICIAL_DEV_PROVIDERS DISCOVERY_ENABLED DISCOVERY_WORKER_POLL_MS DEV_PROFILE
+
+# HTTP dev services, in start order. DEV_PROFILE=chat runs only what the golden chat
+# conversation needs (#117); the rest are parked (not started), never deleted.
+FULL_SERVICES="web chat resolver dev-api watchlists market fundamentals screener portfolio home evidence analyst-grids"
+CHAT_SERVICES="web chat resolver dev-api market fundamentals"
 
 DEV_DIR="$ROOT/.dev"
 LOG_DIR="$DEV_DIR/logs"
@@ -319,6 +331,71 @@ cleanup_failed_up() {
   fi
 }
 
+profile_services() {
+  case "$DEV_PROFILE" in
+    full) printf '%s' "$FULL_SERVICES" ;;
+    chat) printf '%s' "$CHAT_SERVICES" ;;
+    *)
+      echo "Unknown DEV_PROFILE '$DEV_PROFILE' (expected chat or full)" >&2
+      return 1
+      ;;
+  esac
+}
+
+# The profile's services, preceded by the opt-in dev-providers sidecar.
+active_services() {
+  local services
+  services="$(profile_services)" || return 1
+  if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
+    services="dev-providers $services"
+  fi
+  printf '%s' "$services"
+}
+
+# Every service's port lives in <NAME>_PORT (dev-api -> DEV_API_PORT).
+service_port() {
+  local var
+  var="$(printf '%s' "$1" | tr 'a-z-' 'A-Z_')_PORT"
+  printf '%s' "${!var}"
+}
+
+service_dir() {
+  case "$1" in
+    web) printf '%s' "$ROOT/web" ;;
+    *) printf '%s' "$ROOT/services/$1" ;;
+  esac
+}
+
+service_command() {
+  case "$1" in
+    web) printf 'npm run dev -- --host 127.0.0.1 --port %s' "$WEB_PORT" ;;
+    dev-providers) python_service_command "$ROOT/services/dev-providers" "dev_providers.main:app" "$DEV_PROVIDERS_PORT" ;;
+    *) printf 'npm run dev' ;;
+  esac
+}
+
+# The discovery worker has no port; the chat profile parks it even when enabled.
+discovery_active() {
+  [[ "$DISCOVERY_ENABLED" == "true" && "$DEV_PROFILE" == "full" ]]
+}
+
+# Stop tracked processes the active profile doesn't run, so switching a running full
+# stack to DEV_PROFILE=chat actually parks them (status would otherwise mislabel them).
+stop_parked_processes() {
+  local services="$1" pid_file name
+  for pid_file in "$PID_DIR"/*.pid; do
+    [[ -e "$pid_file" ]] || continue
+    name="$(basename "$pid_file" .pid)"
+    if [[ " $services " == *" $name "* ]]; then
+      continue
+    fi
+    if [[ "$name" == "discovery-worker" ]] && discovery_active; then
+      continue
+    fi
+    stop_process "$name"
+  done
+}
+
 start_and_track_process() {
   local name="$1"
   local dir="$2"
@@ -336,6 +413,14 @@ start_and_track_process() {
 up() {
   local postgres_was_running=0
   local redis_was_running=0
+  local services name
+  # Unquoted on use: empty means every compose service.
+  local compose_services=""
+
+  services="$(active_services)" || return 1
+  if [[ "$DEV_PROFILE" == "chat" ]]; then
+    compose_services="postgres"
+  fi
 
   ensure_command docker
   ensure_command lsof
@@ -370,38 +455,37 @@ up() {
   ensure_install "$ROOT/services/themes"
   ensure_install "$ROOT/services/tools"
   ensure_install "$ROOT/services/llm"
-  if [[ "$DISCOVERY_ENABLED" == "true" ]]; then
+  # Imported as sources by chat and others; resolves ajv/decimal.js from its own node_modules.
+  ensure_install "$ROOT/services/financial-core"
+  if discovery_active; then
     ensure_install "$ROOT/services/discovery"
   fi
   if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
     ensure_python_service_install "$ROOT/services/dev-providers"
   fi
 
-  assert_port_available web "$WEB_PORT"
-  assert_port_available chat "$CHAT_PORT"
-  assert_port_available resolver "$RESOLVER_PORT"
-  assert_port_available dev-api "$DEV_API_PORT"
-  assert_port_available watchlists "$WATCHLISTS_PORT"
-  assert_port_available market "$MARKET_PORT"
-  assert_port_available fundamentals "$FUNDAMENTALS_PORT"
-  assert_port_available screener "$SCREENER_PORT"
-  assert_port_available portfolio "$PORTFOLIO_PORT"
-  assert_port_available home "$HOME_PORT"
-  assert_port_available evidence "$EVIDENCE_PORT"
-  assert_port_available analyst-grids "$ANALYST_GRIDS_PORT"
-  if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
-    assert_port_available dev-providers "$DEV_PROVIDERS_PORT"
+  stop_parked_processes "$services"
+  # The chat profile needs only postgres from docker-compose.dev.yml; park the others.
+  if [[ -n "$compose_services" ]]; then
+    compose stop redis minio
   fi
+
+  for name in $services; do
+    assert_port_available "$name" "$(service_port "$name")"
+  done
 
   if [[ "$(container_status postgres)" == "running" ]]; then
     postgres_was_running=1
   fi
 
-  if [[ "$(container_status redis)" == "running" ]]; then
+  # The chat profile doesn't start redis, so only postgres decides whether this run
+  # brought the containers up (and must take them down on failure).
+  if [[ "$(container_status redis)" == "running" || -n "$compose_services" ]]; then
     redis_was_running=1
   fi
 
-  if ! compose up -d; then
+  # shellcheck disable=SC2086
+  if ! compose up -d $compose_services; then
     cleanup_failed_up
     return 1
   fi
@@ -444,89 +528,19 @@ up() {
   export EVIDENCE_ORIGIN="${EVIDENCE_ORIGIN:-http://127.0.0.1:$EVIDENCE_PORT}"
   export ANALYST_GRIDS_ORIGIN="${ANALYST_GRIDS_ORIGIN:-http://127.0.0.1:$ANALYST_GRIDS_PORT}"
 
-  if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
-    start_and_track_process dev-providers "$ROOT/services/dev-providers" "$(python_service_command "$ROOT/services/dev-providers" "dev_providers.main:app" "$DEV_PROVIDERS_PORT")"
-  fi
-  start_and_track_process web "$ROOT/web" "npm run dev -- --host 127.0.0.1 --port $WEB_PORT"
-  start_and_track_process chat "$ROOT/services/chat" "npm run dev"
-  start_and_track_process resolver "$ROOT/services/resolver" "npm run dev"
-  start_and_track_process dev-api "$ROOT/services/dev-api" "npm run dev"
-  start_and_track_process watchlists "$ROOT/services/watchlists" "npm run dev"
-  start_and_track_process market "$ROOT/services/market" "npm run dev"
-  start_and_track_process fundamentals "$ROOT/services/fundamentals" "npm run dev"
-  start_and_track_process screener "$ROOT/services/screener" "npm run dev"
-  start_and_track_process portfolio "$ROOT/services/portfolio" "npm run dev"
-  start_and_track_process home "$ROOT/services/home" "npm run dev"
-  start_and_track_process evidence "$ROOT/services/evidence" "npm run dev"
-  start_and_track_process analyst-grids "$ROOT/services/analyst-grids" "npm run dev"
-  if [[ "$DISCOVERY_ENABLED" == "true" ]]; then
+  for name in $services; do
+    start_and_track_process "$name" "$(service_dir "$name")" "$(service_command "$name")"
+  done
+  if discovery_active; then
     start_and_track_process discovery-worker "$ROOT/services/discovery" "npm run worker"
   fi
 
-  if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]] && ! wait_for_service dev-providers "$DEV_PROVIDERS_PORT"; then
-    cleanup_failed_up
-    return 1
-  fi
-
-  if ! wait_for_service web "$WEB_PORT"; then
-    cleanup_failed_up
-    return 1
-  fi
-
-  if ! wait_for_service chat "$CHAT_PORT"; then
-    cleanup_failed_up
-    return 1
-  fi
-
-  if ! wait_for_service resolver "$RESOLVER_PORT"; then
-    cleanup_failed_up
-    return 1
-  fi
-
-  if ! wait_for_service dev-api "$DEV_API_PORT"; then
-    cleanup_failed_up
-    return 1
-  fi
-
-  if ! wait_for_service watchlists "$WATCHLISTS_PORT"; then
-    cleanup_failed_up
-    return 1
-  fi
-
-  if ! wait_for_service market "$MARKET_PORT"; then
-    cleanup_failed_up
-    return 1
-  fi
-
-  if ! wait_for_service fundamentals "$FUNDAMENTALS_PORT"; then
-    cleanup_failed_up
-    return 1
-  fi
-
-  if ! wait_for_service screener "$SCREENER_PORT"; then
-    cleanup_failed_up
-    return 1
-  fi
-
-  if ! wait_for_service portfolio "$PORTFOLIO_PORT"; then
-    cleanup_failed_up
-    return 1
-  fi
-
-  if ! wait_for_service home "$HOME_PORT"; then
-    cleanup_failed_up
-    return 1
-  fi
-
-  if ! wait_for_service evidence "$EVIDENCE_PORT"; then
-    cleanup_failed_up
-    return 1
-  fi
-
-  if ! wait_for_service analyst-grids "$ANALYST_GRIDS_PORT"; then
-    cleanup_failed_up
-    return 1
-  fi
+  for name in $services; do
+    if ! wait_for_service "$name" "$(service_port "$name")"; then
+      cleanup_failed_up
+      return 1
+    fi
+  done
 
   status
 }
@@ -537,24 +551,23 @@ down() {
 }
 
 status() {
+  local services name port
+  services="$(active_services)" || return 1
+
+  printf "profile   %s\n" "$DEV_PROFILE"
   printf "postgres  %-8s 127.0.0.1:%s\n" "$(container_status postgres)" "$DEV_POSTGRES_PORT"
   printf "redis     %-8s 127.0.0.1:%s\n" "$(container_status redis)" "$DEV_REDIS_PORT"
-  printf "web       %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status web "$WEB_PORT")" "$WEB_PORT" "$LOG_DIR/web.log"
-  printf "chat      %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status chat "$CHAT_PORT")" "$CHAT_PORT" "$LOG_DIR/chat.log"
-  printf "resolver  %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status resolver "$RESOLVER_PORT")" "$RESOLVER_PORT" "$LOG_DIR/resolver.log"
-  printf "dev-api   %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status dev-api "$DEV_API_PORT")" "$DEV_API_PORT" "$LOG_DIR/dev-api.log"
-  printf "watchlists %-7s http://127.0.0.1:%s  log=%s\n" "$(service_status watchlists "$WATCHLISTS_PORT")" "$WATCHLISTS_PORT" "$LOG_DIR/watchlists.log"
-  printf "market    %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status market "$MARKET_PORT")" "$MARKET_PORT" "$LOG_DIR/market.log"
-  printf "fundamentals %-4s http://127.0.0.1:%s  log=%s\n" "$(service_status fundamentals "$FUNDAMENTALS_PORT")" "$FUNDAMENTALS_PORT" "$LOG_DIR/fundamentals.log"
-  printf "screener  %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status screener "$SCREENER_PORT")" "$SCREENER_PORT" "$LOG_DIR/screener.log"
-  printf "portfolio %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status portfolio "$PORTFOLIO_PORT")" "$PORTFOLIO_PORT" "$LOG_DIR/portfolio.log"
-  printf "home      %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status home "$HOME_PORT")" "$HOME_PORT" "$LOG_DIR/home.log"
-  printf "evidence  %-8s http://127.0.0.1:%s  log=%s\n" "$(service_status evidence "$EVIDENCE_PORT")" "$EVIDENCE_PORT" "$LOG_DIR/evidence.log"
-  printf "analyst-grids %-3s http://127.0.0.1:%s  log=%s\n" "$(service_status analyst-grids "$ANALYST_GRIDS_PORT")" "$ANALYST_GRIDS_PORT" "$LOG_DIR/analyst-grids.log"
-  if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
-    printf "dev-providers %-3s http://127.0.0.1:%s  log=%s\n" "$(service_status dev-providers "$DEV_PROVIDERS_PORT")" "$DEV_PROVIDERS_PORT" "$LOG_DIR/dev-providers.log"
-  fi
-  if [[ "$DISCOVERY_ENABLED" == "true" ]]; then
+  for name in $FULL_SERVICES $( [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]] && printf dev-providers ); do
+    if [[ " $services " == *" $name "* ]]; then
+      port="$(service_port "$name")"
+      printf "%-13s %-8s http://127.0.0.1:%s  log=%s\n" "$name" "$(service_status "$name" "$port")" "$port" "$LOG_DIR/$name.log"
+    else
+      printf "%-13s %-8s DEV_PROFILE=%s\n" "$name" "parked" "$DEV_PROFILE"
+    fi
+  done
+  if [[ "$DEV_PROFILE" != "full" ]]; then
+    printf "%-13s %-8s DEV_PROFILE=%s\n" "discovery" "parked" "$DEV_PROFILE"
+  elif discovery_active; then
     printf "discovery %-4s worker log=%s\n" "$(process_running "$PID_DIR/discovery-worker.pid" && printf running || printf stopped)" "$LOG_DIR/discovery-worker.log"
   else
     printf "discovery %-4s feature disabled\n" "off"
@@ -581,7 +594,7 @@ case "${1:-}" in
   down) down ;;
   status) status ;;
   *)
-    echo "Usage: ./scripts/dev-shell.sh <up|down|status>" >&2
+    echo "Usage: [DEV_PROFILE=chat|full] ./scripts/dev-shell.sh <up|down|status>" >&2
     exit 1
     ;;
 esac
