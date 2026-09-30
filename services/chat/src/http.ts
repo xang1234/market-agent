@@ -10,6 +10,7 @@ import {
   type ChatSubjectClarificationRenderer,
   type ChatThreadTitleGenerator,
   type ChatTurnInput,
+  type ChatVerificationMode,
 } from "./coordinator.ts";
 import type { ChatClarificationAnswer, ChatFinancialRuntime } from "./financial-runtime.ts";
 import type { ChatSubjectPreResolver } from "./subjects.ts";
@@ -72,6 +73,7 @@ export type ChatServerOptions = {
   analystToolRuntime?: ChatAnalystToolRuntime;
   financialRuntime?: ChatFinancialRuntime;
   allowSyntheticAnalystFallback?: boolean;
+  verificationMode?: ChatVerificationMode;
   runActivityHub?: RunActivityHub;
   auth?: RequestAuthConfig;
   threadsDb?: ChatThreadsDb;
@@ -89,6 +91,7 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
     analystToolRuntime: options.analystToolRuntime,
     financialRuntime: options.financialRuntime,
     allowSyntheticAnalystFallback: options.allowSyntheticAnalystFallback,
+    verificationMode: options.verificationMode,
   });
   const threadsDb = options.threadsDb;
 

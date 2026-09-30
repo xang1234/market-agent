@@ -24,6 +24,18 @@ export class ChatMessageIdempotencyConflictError extends Error {
   }
 }
 
+// The snapshot verifier rejected the answer. Carries the verifier's failures so
+// display_unverified mode can show why; strict mode surfaces it as turn.error.
+export class ChatSnapshotSealError extends Error {
+  readonly failures: ReadonlyArray<unknown>;
+
+  constructor(failures: ReadonlyArray<unknown>) {
+    super("snapshot seal failed; chat message was not persisted");
+    this.name = "ChatSnapshotSealError";
+    this.failures = failures;
+  }
+}
+
 const CHAT_MESSAGE_TRANSACTION_CLIENT: unique symbol = Symbol("chat.messageTransactionClient");
 
 type ChatMessageTransactionClientBrand = {
@@ -147,7 +159,7 @@ export function createChatMessagePersistence(
     });
 
     if (!result.ok) {
-      throw new Error("snapshot seal failed; chat message was not persisted");
+      throw new ChatSnapshotSealError(result.seal.verification.failures);
     }
 
     return {

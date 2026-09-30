@@ -44,3 +44,23 @@ served by `createHomeServer(db, deps)` following the `services/watchlists` patte
 
 Verification is per-section service tests, an HTTP test, and a frontend render test against a mock payload; there is
 no full-stack test.
+
+## Unverified chat answers in development
+
+`CHAT_VERIFICATION_MODE` (`services/chat/src/runtime.ts`) controls what happens when an answer fails verification.
+
+- **`strict`** (default, and always used by the golden test): the turn ends with `turn.error`, and nothing is shown or
+  saved.
+- **`display_unverified`**: for debugging charts and tables while they're being built. The coordinator still streams
+  the blocks, then emits `turn.completed` with no `message_id` and an `unverified: { persisted: false, failures, blocks }`
+  payload. The web client labels each block "Unverified" and lists the failure reason codes under "Why unverified".
+
+This covers both failure points: the runtime's own verification, and the snapshot seal at persistence (a
+`ChatSnapshotSealError` carrying the verifier's failures). Other persistence errors, such as a lost database
+connection, are still `turn.error`.
+
+**Decision: unverified answers are never persisted.** Saving them would put an unsealed answer in the thread
+history next to verified ones, and the evidence inspector only works on sealed snapshots. An unverified answer
+disappears on reload, which is acceptable for a debugging mode. The server refuses to start with `display_unverified`
+when `NODE_ENV=production`.
+
