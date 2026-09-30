@@ -88,7 +88,7 @@ export function keepSupportedSentences(
       // inside a figure ("-CHF 3.1B" when CHF is a ticker) is not a mention.
       const within = (at: number, start: number, length: number) => at >= start && at < start + length;
       const numbers = allNumbers.filter((n) => !mentions.some((m) => within(n.index, m.index, m.company.length)));
-      const named = mentions.filter((m) => !allNumbers.some((n) => within(m.index, n.index, n.end - n.index)));
+      const named = mentions.filter((m) => !numbers.some((n) => within(m.index, n.index, n.end - n.index)));
       if (numbers.some(({ number }) => !supported.has(number) && !owners.has(number))) {
         removed.push(sentence);
         return false;

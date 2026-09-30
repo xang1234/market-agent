@@ -336,3 +336,9 @@ test("'-Cg.' ends a sentence unless a complete currency figure follows", () => {
   // Split: NVDA no longer lends its name to a figure in the next sentence.
   assert.deepEqual(result.removed, ["74.6% was AMD's margin."]);
 });
+
+test("a company label starting with a digit is still a mention", () => {
+  const figures = [{ company: "3M Company", value: "49.2%" }, { company: "NVDA", value: "74.6%" }];
+  assert.deepEqual(keepSupportedSentences("3M Company's margin is 49.2%.", [], figures).removed, []);
+  assert.equal(keepSupportedSentences("3M Company's margin is 74.6%.", [], figures).removed.length, 1);
+});
