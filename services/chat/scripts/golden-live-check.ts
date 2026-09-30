@@ -1,6 +1,8 @@
 // Data mode (#123): the golden conversation (#118) against a live stack, as an opt-in
 // check. Live figures and model wording vary, so this checks structure only (turns
 // complete; the charts and tables the frozen golden test pins appear), never values.
+// Prerequisite: NVDA's and AMD's live identities and SEC facts are already in the
+// database (chat reads persisted facts only); a fresh database fails until #152.
 //
 //   npm run golden:live -- [base URL, default http://127.0.0.1:5173]
 import { randomUUID } from "node:crypto";
@@ -114,6 +116,12 @@ async function main(base: string): Promise<number> {
     failed += failures.length === 0 ? 0 : 1;
   }
   console.log(`thread: ${base}/chat/${thread.thread_id}`);
+  if (failed > 0) {
+    console.log(
+      "hint: on a fresh database NVDA/AMD live identities and SEC facts aren't ingested yet; " +
+        "chat reads persisted facts only (see #152).",
+    );
+  }
   return failed === 0 ? 0 : 1;
 }
 
