@@ -1157,6 +1157,9 @@ create index institutional_holdings_filer_period_idx on institutional_holdings(f
 create table institutional_filing_periods (
   filer_cik      text not null,
   filing_period  date not null,
+  -- The 13F-HR/A RESTATEMENT that replaced this period, if any: an original arriving
+  -- later (out-of-order backfill) is stale and must not overwrite it.
+  restated_accession text,
   primary key (filer_cik, filing_period)
 );
 

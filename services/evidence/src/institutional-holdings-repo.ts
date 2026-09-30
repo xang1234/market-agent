@@ -52,13 +52,32 @@ export async function insertHolding(db: QueryExecutor, input: InstitutionalHoldi
 // Mark (filer, period) as filed, idempotently. insertHolding does this for every row;
 // the 13F handler also calls it directly so a period that stores NO rows (an empty
 // restatement or portfolio) still counts as the next quarter's prior period (fra-zpet).
-export async function recordFilingPeriod(db: QueryExecutor, filerCik: string, period: string): Promise<void> {
+// A RESTATEMENT passes its accession to mark the period restated; later calls without
+// one keep the mark.
+export async function recordFilingPeriod(
+  db: QueryExecutor,
+  filerCik: string,
+  period: string,
+  restatedAccession: string | null = null,
+): Promise<void> {
   await db.query(
-    `insert into institutional_filing_periods (filer_cik, filing_period)
-     values ($1, $2::date)
-     on conflict do nothing`,
+    `insert into institutional_filing_periods (filer_cik, filing_period, restated_accession)
+     values ($1, $2::date, $3)
+     on conflict (filer_cik, filing_period) do update
+       set restated_accession = coalesce(excluded.restated_accession, institutional_filing_periods.restated_accession)`,
+    [filerCik, period, restatedAccession],
+  );
+}
+
+// The RESTATEMENT accession that replaced (filer, period), or null. An original 13F-HR
+// for a restated period is stale (it arrived after its amendment) and must be skipped.
+export async function periodRestatedBy(db: QueryExecutor, filerCik: string, period: string): Promise<string | null> {
+  const { rows } = await db.query<{ restated_accession: string | null }>(
+    `select restated_accession from institutional_filing_periods
+      where filer_cik = $1 and filing_period = $2::date`,
     [filerCik, period],
   );
+  return rows[0]?.restated_accession ?? null;
 }
 
 export type Supersede13fFilingKey = {

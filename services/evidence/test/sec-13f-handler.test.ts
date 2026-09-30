@@ -497,3 +497,29 @@ test("handle13f (13F-HR/A RESTATEMENT) retires the exit claims of an earlier emp
   const events = await client.query<{ n: number }>(`select count(*)::int as n from events where event_type = 'position_change'`);
   assert.equal(events.rows[0]!.n, 0, "and its exit event deleted");
 });
+
+test("handle13f skips an original 13F-HR arriving after its period was already restated (out-of-order backfill)", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-restate-first");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  const aaplId = await seedIssuerWithCusip(client, "Apple Inc.", AAPL_CUSIP);
+  await seedIssuerWithCusip(client, "Coca-Cola Co", KO_CUSIP);
+
+  // The RESTATEMENT is crawled first: AAPL 50 is the authoritative Q1 portfolio.
+  await handle13f(
+    entry("0001193125-26-000091", "2026-06-01", BERKSHIRE, "13F-HR/A"),
+    memDeps(db, submission("03-31-2026", [{ name: "APPLE INC", cusip: AAPL_CUSIP, value: 2500, shares: 50 }], "RESTATEMENT")),
+  );
+  // The superseded original arrives later; it must not overwrite AAPL or re-add KO.
+  const res = await handle13f(entry("0001193125-26-000090"), memDeps(db, submission("03-31-2026", [
+    { name: "APPLE INC", cusip: AAPL_CUSIP, value: 5000, shares: 100 },
+    { name: "COCA COLA CO", cusip: KO_CUSIP, value: 600, shares: 10 },
+  ])));
+  assert.equal(res.ingested, false);
+
+  const rows = await client.query<{ issuer_id: string; shares: string }>(
+    `select issuer_id::text as issuer_id, shares from institutional_holdings where filing_period = '2026-03-31'`,
+  );
+  assert.deepEqual(rows.rows.map((r) => [r.issuer_id, Number(r.shares)]), [[aaplId, 50]]);
+});

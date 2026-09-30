@@ -14,7 +14,7 @@ import { createClaimArgument } from "./claim-argument-repo.ts";
 import { parse13fInfoTable, classify13fAmendment } from "./sec-13f-extractor.ts";
 import { isSuperinvestorFiler, superinvestorName } from "./superinvestor-filers.ts";
 import { resolveHoldingsByIssuer } from "./sec-13f-resolve.ts";
-import { insertHolding, holdingsByFiler, priorPeriodForFiler, supersede13fFiling, findFilerIssuerHolding, recordFilingPeriod } from "./institutional-holdings-repo.ts";
+import { insertHolding, holdingsByFiler, priorPeriodForFiler, supersede13fFiling, findFilerIssuerHolding, recordFilingPeriod, periodRestatedBy } from "./institutional-holdings-repo.ts";
 
 export type Form13fFilingRef = Pick<FilingIndexEntry, "cik" | "accession" | "form" | "filedDate">;
 
@@ -75,6 +75,17 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
   }
   const restate = isAmendment && amendmentType === "RESTATEMENT";
   const supplemental = isAmendment && amendmentType === "NEW HOLDINGS";
+
+  // Out-of-order backfill: an original arriving after a RESTATEMENT of its period is the
+  // stale version it replaced. Upserting it would overwrite the restated rows (and re-add
+  // issuers the restatement dropped), and the amendment never re-runs to fix that.
+  if (!isAmendment) {
+    const restatedBy = await periodRestatedBy(deps.db, filerCik, filing.periodOfReport);
+    if (restatedBy) {
+      console.warn(`[sec-13f] skip ${entry.accession}: ${filerName} @ ${filing.periodOfReport} already restated by ${restatedBy}`);
+      return { ingested: false };
+    }
+  }
 
   // Resolve holdings to tracked issuers (aggregation + value normalization live in
   // the shared resolver). Misses are skipped + logged with this accession's context;
@@ -183,8 +194,8 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
         );
       } else {
         // No prior filing matched — the original may not be ingested yet (out-of-order
-        // backfill). Surface it so an otherwise-silent gap is visible (robust handling
-        // of amendment-before-original is a follow-up, mirroring fra-28yi).
+        // backfill). The period is marked restated below, so that original is skipped
+        // when it arrives instead of overwriting this restatement.
         console.warn(
           `[sec-13f] ${entry.accession} (13F-HR/A RESTATEMENT): no prior filing matched for ` +
             `${filerName} @ ${period} — inserting without supersede`,
@@ -193,7 +204,7 @@ export const handle13f = async (entry: Form13fFilingRef, deps: FormHandlerDeps) 
     }
     // Recorded even when no row below is stored, so an emptied period stays the next
     // quarter's prior (insertHolding records it too, idempotently).
-    await recordFilingPeriod(tx.db, filerCik, period);
+    await recordFilingPeriod(tx.db, filerCik, period, restate ? entry.accession : null);
 
     // Insert each resolved holding and emit a notable change vs the prior quarter. A NEW
     // HOLDINGS supplement is add-only: insertHolding upserts on (filer, issuer, period), so

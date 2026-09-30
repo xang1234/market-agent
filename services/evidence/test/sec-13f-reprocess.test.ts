@@ -326,3 +326,38 @@ test("reprocessFiler13f does not overwrite a holding row owned by another access
   assert.equal(Number(row.rows[0]!.shares), 200);
   assert.equal(row.rows[0]!.accession, SUPP);
 });
+
+test("reprocessFiler13f skips an original whose period a 13F-HR/A RESTATEMENT already replaced", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-reprocess-restated-period");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  await seedIssuerWithCusip(client, "Apple Inc.", AAPL_CUSIP);
+
+  // Restatement ingested (original never was): AAPL 500 is the Q1 portfolio.
+  const AMEND = "0001067983-26-000021";
+  await handle13f(
+    { cik: BERKSHIRE, form: "13F-HR/A", filedDate: "2026-05-20", accession: AMEND },
+    {
+      db,
+      objectStore: new MemoryObjectStore(),
+      client: fakeSecClient(AMEND, submission("03-31-2026", [{ name: "APPLE INC", cusip: AAPL_CUSIP, value: 100000, shares: 500 }], "RESTATEMENT")),
+    } as unknown as FormHandlerDeps,
+  );
+
+  // Reprocessing the stale original (AAPL 1000 + NVDA) must not touch the restated period.
+  const ORIG = "0001067983-26-000020";
+  const origTxt = submission("03-31-2026", [
+    { name: "APPLE INC", cusip: AAPL_CUSIP, value: 200000, shares: 1000 },
+    { name: "NVIDIA CORP", cusip: NVDA_CUSIP, value: 90000, shares: 300 },
+  ]);
+  const result = await reprocessFiler13f(
+    { db, secClient: fakeSecClient(ORIG, origTxt), openfigi: OPENFIGI, openfigiFetch: fakeOpenFigiFetch() },
+    { cik: BERKSHIRE, now: NOW },
+  );
+
+  assert.equal(result.supersededSkipped, 1);
+  assert.equal(result.holdingsUpserted, 0);
+  const rows = await client.query<{ shares: string }>(`select shares from institutional_holdings where filing_period = '2026-03-31'`);
+  assert.deepEqual(rows.rows.map((r) => Number(r.shares)), [500]);
+});

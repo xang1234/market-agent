@@ -22,7 +22,7 @@
 import { parse13fInfoTable } from "./sec-13f-extractor.ts";
 import { resolveHoldingsByIssuer } from "./sec-13f-resolve.ts";
 import { isSuperinvestorFiler, superinvestorName } from "./superinvestor-filers.ts";
-import { findFilerIssuerHolding, insertHolding, sourceIdForAccession } from "./institutional-holdings-repo.ts";
+import { findFilerIssuerHolding, insertHolding, periodRestatedBy, sourceIdForAccession } from "./institutional-holdings-repo.ts";
 import { isAccessionSuperseded } from "./document-repo.ts";
 import { createSource } from "./source-repo.ts";
 import { withTransaction } from "./transaction.ts";
@@ -125,6 +125,14 @@ export async function reprocessFiler13f(
       document: `${candidate.accession}.txt`,
     });
     const filing = parse13fInfoTable(new TextDecoder("utf-8").decode(fetched.bytes));
+    // Its period was restated by an amendment ingested without this original ever being
+    // (out-of-order backfill): the original is stale, so treat it like a superseded one.
+    const restatedBy = await periodRestatedBy(deps.db, filerCik, filing.periodOfReport);
+    if (restatedBy) {
+      console.warn(`[sec-13f-reprocess] ${candidate.accession}: period restated by ${restatedBy} — skipped`);
+      result.supersededSkipped += 1;
+      continue;
+    }
 
     // HARVEST: enrich each distinct reported CUSIP. enrichCusip DB-checks first, so
     // an already-resolvable CUSIP costs one cheap query (status "already"); only an
