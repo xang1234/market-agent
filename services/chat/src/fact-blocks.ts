@@ -99,6 +99,31 @@ async function loadComparisonFactBlocks(
     requestedListings: ReadonlyMap<string, CompanyListing>;
   },
 ): Promise<ReadonlyArray<Block>> {
+  const issuerIds = input.companies.map((company) => company.id);
+  const active = await companyListings(db, issuerIds, input.asOf).catch((reason) => {
+    console.warn("[chat] company listings unavailable; comparing without tickers or prices", reason);
+    return new Map<string, CompanyListing>();
+  });
+  const companies = listingsForComparison(issuerIds, input.requestedListings, active);
+  const labelOf = (issuerId: string) => companies.get(issuerId)?.label ?? `issuer:${issuerId.slice(0, 8)}`;
+  // The metrics and the price chart load independently: either can be missing
+  // (no SEC-derived metrics, no cached prices) without dropping the other.
+  const metrics = await loadMetricsComparisonBlocks(db, input, labelOf);
+  // Price performance from sealed daily bars, with any pricing disclosure it
+  // requires (perf-block.ts). Never throws.
+  const performance = await loadPerfComparisonBlocks(db, {
+    listings: priceListingsForComparison(issuerIds, companies),
+    snapshotId: input.snapshotId,
+    asOf: input.asOf,
+  });
+  return Object.freeze([...metrics, ...performance]);
+}
+
+async function loadMetricsComparisonBlocks(
+  db: QueryExecutor,
+  input: { companies: ReadonlyArray<IssuerSubjectRef>; snapshotId: string; asOf: string },
+  labelOf: (issuerId: string) => string,
+): Promise<ReadonlyArray<Block>> {
   try {
     const statements = createSecBackedStatementRepository(db, { fetcher: null, sourceId: SEC_EDGAR_FILING_SOURCE_ID });
     const stats = createSecBackedStatsRepository(db, { statements, fetcher: null });
@@ -128,27 +153,16 @@ async function loadComparisonFactBlocks(
         title: "Side by side (latest fiscal year)",
       },
     });
-    const issuerIds = block.subjects.map((subject) => subject.id);
-    const companies = listingsForComparison(issuerIds, input.requestedListings, await companyListings(db, issuerIds, input.asOf));
-    const labelOf = (issuerId: string) => companies.get(issuerId)?.label ?? `issuer:${issuerId.slice(0, 8)}`;
-    // Price performance for the same companies, from sealed daily bars, with any
-    // pricing disclosure it requires (perf-block.ts).
-    const performance = await loadPerfComparisonBlocks(db, {
-      listings: priceListingsForComparison(issuerIds, companies),
-      snapshotId: input.snapshotId,
-      asOf: input.asOf,
-    });
-    return Object.freeze([
+    return [
       {
         ...block,
         // Rows are shown by ticker (or name), not by reference id.
         subject_labels: block.subjects.map((subject) => labelOf(subject.id)),
         ...blockBase("metrics_comparison", input, cited.map(citedFact), loadable),
       },
-      ...performance,
-    ]);
+    ];
   } catch (reason) {
-    console.warn("[chat] comparison unavailable; answering with narrative only", reason);
+    console.warn("[chat] metrics comparison unavailable", reason);
     return [];
   }
 }
