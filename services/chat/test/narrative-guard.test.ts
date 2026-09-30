@@ -292,3 +292,9 @@ test("sentences separated by a no-break space are still split", () => {
     assert.equal(result.removed.length, 1, JSON.stringify(space));
   }
 });
+
+test("only the formatter's own 'Cg.' plus no-break space is kept together", () => {
+  const result = keepSupportedSentences("NVDA reports in Cg. 74.6% was AMD's margin.", [], COMPARED);
+  assert.equal(result.removed.length, 1);
+  assert.deepEqual(result.removed, ["74.6% was AMD's margin."]);
+});
