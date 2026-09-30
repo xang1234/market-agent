@@ -53,7 +53,14 @@ type CitedFact = { fact_id: string; source_id: string };
 // The fact blocks for a turn's companies (primary first).
 export async function loadTurnFactBlocks(
   db: QueryExecutor,
-  input: { issuers: ReadonlyArray<IssuerSubjectRef>; wantsPeers: boolean; snapshotId: string; asOf: string },
+  input: {
+    issuers: ReadonlyArray<IssuerSubjectRef>;
+    wantsPeers: boolean;
+    snapshotId: string;
+    asOf: string;
+    // The listing the user asked for, per issuer (see listingsForComparison).
+    requestedListings?: ReadonlyMap<string, CompanyListing>;
+  },
 ): Promise<ReadonlyArray<Block>> {
   const [primary] = input.issuers;
   if (primary === undefined) return [];
@@ -61,7 +68,12 @@ export async function loadTurnFactBlocks(
     ? [primary, ...(await peersOf(db, primary))]
     : input.issuers;
   if (companies.length === 1) return loadIssuerFactBlocks(db, { issuer: primary, snapshotId: input.snapshotId, asOf: input.asOf });
-  return loadComparisonFactBlocks(db, { companies, snapshotId: input.snapshotId, asOf: input.asOf });
+  return loadComparisonFactBlocks(db, {
+    companies,
+    snapshotId: input.snapshotId,
+    asOf: input.asOf,
+    requestedListings: input.requestedListings ?? new Map(),
+  });
 }
 
 async function peersOf(db: QueryExecutor, issuer: IssuerSubjectRef): Promise<ReadonlyArray<IssuerSubjectRef>> {
@@ -80,7 +92,12 @@ async function peersOf(db: QueryExecutor, issuer: IssuerSubjectRef): Promise<Rea
 // analyze runs do); reuse identical ones if repeated comparisons bloat facts.
 async function loadComparisonFactBlocks(
   db: QueryExecutor,
-  input: { companies: ReadonlyArray<IssuerSubjectRef>; snapshotId: string; asOf: string },
+  input: {
+    companies: ReadonlyArray<IssuerSubjectRef>;
+    snapshotId: string;
+    asOf: string;
+    requestedListings: ReadonlyMap<string, CompanyListing>;
+  },
 ): Promise<ReadonlyArray<Block>> {
   try {
     const statements = createSecBackedStatementRepository(db, { fetcher: null, sourceId: SEC_EDGAR_FILING_SOURCE_ID });
@@ -111,7 +128,8 @@ async function loadComparisonFactBlocks(
         title: "Side by side (latest fiscal year)",
       },
     });
-    const companies = await companyListings(db, block.subjects.map((subject) => subject.id));
+    const issuerIds = block.subjects.map((subject) => subject.id);
+    const companies = listingsForComparison(issuerIds, input.requestedListings, await companyListings(db, issuerIds));
     const labelOf = (issuerId: string) => companies.get(issuerId)?.label ?? `issuer:${issuerId.slice(0, 8)}`;
     // Price performance for the same companies, from sealed daily bars (perf-block.ts).
     const performance = await loadPerfComparisonBlock(db, {
@@ -137,12 +155,30 @@ async function loadComparisonFactBlocks(
   }
 }
 
+export type CompanyListing = { listing_id: string | null; label: string };
+
+// The listing to chart and label for each company: the one the user asked for
+// when they named a listing (a specific share class or venue), otherwise the
+// issuer's active listing (e.g. an auto-selected peer).
+export function listingsForComparison(
+  issuerIds: ReadonlyArray<string>,
+  requested: ReadonlyMap<string, CompanyListing>,
+  active: ReadonlyMap<string, CompanyListing>,
+): Map<string, CompanyListing> {
+  const out = new Map<string, CompanyListing>();
+  for (const issuerId of issuerIds) {
+    const listing = requested.get(issuerId) ?? active.get(issuerId);
+    if (listing) out.set(issuerId, listing);
+  }
+  return out;
+}
+
 // Each company's active listing (for prices) and display label: its ticker,
 // else its legal name.
 async function companyListings(
   db: QueryExecutor,
   issuerIds: ReadonlyArray<string>,
-): Promise<Map<string, { listing_id: string | null; label: string }>> {
+): Promise<Map<string, CompanyListing>> {
   const { rows } = await db.query<{ issuer_id: string; listing_id: string | null; ticker: string | null; legal_name: string }>(
     `select i.issuer_id::text as issuer_id,
             l.listing_id::text as listing_id,

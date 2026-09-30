@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildPerfComparisonBlock, type SealedPriceRange } from "../src/perf-block.ts";
+import { buildPerfComparisonBlock, loadPerfComparisonBlock, type SealedPriceRange } from "../src/perf-block.ts";
+import { fakeQuery } from "./fake-query.ts";
 
 const SNAPSHOT_ID = "11111111-1111-4111-a111-111111111111";
 const AS_OF = "2026-09-01T00:00:00.000Z";
@@ -68,4 +69,20 @@ test("fewer than two companies with bars means no chart", () => {
   assert.equal(buildPerfComparisonBlock({ ranges: [NVDA], snapshotId: SNAPSHOT_ID, asOf: AS_OF }), null);
   const empty = { ...AMD, bars: [] };
   assert.equal(buildPerfComparisonBlock({ ranges: [NVDA, empty], snapshotId: SNAPSHOT_ID, asOf: AS_OF }), null);
+});
+
+test("each sealed series records its basis and normalization", () => {
+  const block = buildPerfComparisonBlock({ ranges: [NVDA, AMD], snapshotId: SNAPSHOT_ID, asOf: AS_OF });
+  const specs = block?.provenance_series_specs as Array<Record<string, unknown>>;
+  assert.ok(specs.every((spec) => spec.adjustment_basis === "split_and_div_adjusted" && spec.normalization === "pct_return"));
+});
+
+test("a failed price read omits only the chart", async () => {
+  const db = { query: fakeQuery(() => { throw new Error("market cache unavailable"); }) };
+  const block = await loadPerfComparisonBlock(db, {
+    listings: [{ id: NVDA.listing_id, label: "NVDA" }, { id: AMD.listing_id, label: "AMD" }],
+    snapshotId: SNAPSHOT_ID,
+    asOf: AS_OF,
+  });
+  assert.equal(block, null);
 });

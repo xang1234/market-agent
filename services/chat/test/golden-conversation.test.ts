@@ -155,10 +155,17 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const series = performance.series as Array<{ name: string; points: unknown[] }>;
     assert.deepEqual(series.map((line) => line.name), ["NVDA", "AMD"]);
     assert.ok(series.every((line) => line.points.length > 1), "each company needs a price line");
-    const { rows } = await client.query<{ series_specs: Array<{ series_ref: string; bar_range_id: string }> }>(
-      `select series_specs from snapshots where snapshot_id = $1::uuid`,
+    const { rows } = await client.query<{
+      series_specs: Array<{ series_ref: string; bar_range_id: string }>;
+      basis: string;
+      normalization: string;
+    }>(
+      `select series_specs, basis, normalization from snapshots where snapshot_id = $1::uuid`,
       [answer.snapshot_id],
     );
+    // The seal describes the chart's data: adjusted prices as percent returns.
+    assert.equal(rows[0]?.basis, "split_and_div_adjusted");
+    assert.equal(rows[0]?.normalization, "pct_return");
     const sealed = new Set((rows[0]?.series_specs ?? []).map((spec) => spec.series_ref));
     const seriesRefs = (performance.data_ref as { params: { series_refs: string[] } }).params.series_refs;
     assert.equal(seriesRefs.length, 2);

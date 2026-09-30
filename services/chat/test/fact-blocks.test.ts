@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type { IssuerFundamentalFact } from "../../fundamentals/src/issuer-fundamentals-reader.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
-import { buildIssuerFactBlocks } from "../src/fact-blocks.ts";
+import { buildIssuerFactBlocks, listingsForComparison } from "../src/fact-blocks.ts";
 
 const SNAPSHOT_ID = "11111111-1111-4111-a111-111111111111";
 const AS_OF = "2026-09-01T00:00:00.000Z";
@@ -126,4 +126,20 @@ test("facts the verifier cannot load are left out rather than rendered unbound",
   const loadable = verifierFacts(facts).filter((f) => f.fact_id !== facts[0].fact_id);
   const blocks = buildIssuerFactBlocks({ facts, verifierFacts: loadable, snapshotId: SNAPSHOT_ID, asOf: AS_OF });
   assert.equal(JSON.stringify(blocks).includes(facts[0].fact_id), false);
+});
+
+test("a comparison charts the listing the user asked for, not an arbitrary one of the issuer's", () => {
+  const issuer = "60000000-0000-4000-8000-000000000001";
+  const peer = "60000000-0000-4000-8000-000000000002";
+  const listings = listingsForComparison(
+    [issuer, peer],
+    new Map([[issuer, { listing_id: "listing-requested", label: "GOOG" }]]),
+    new Map([
+      [issuer, { listing_id: "listing-alphabetical", label: "GOOGA" }],
+      [peer, { listing_id: "listing-peer", label: "MSFT" }],
+    ]),
+  );
+  assert.deepEqual(listings.get(issuer), { listing_id: "listing-requested", label: "GOOG" });
+  // Auto-selected peers were never resolved, so they use the issuer's active listing.
+  assert.deepEqual(listings.get(peer), { listing_id: "listing-peer", label: "MSFT" });
 });

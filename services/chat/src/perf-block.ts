@@ -19,6 +19,7 @@ type QueryExecutor = {
 
 const INTERVAL = "1d";
 const ADJUSTMENT_BASIS = "split_and_div_adjusted";
+const NORMALIZATION = "pct_return";
 
 export type SealedPriceRange = {
   listing_id: string;
@@ -35,11 +36,25 @@ export type SealedPriceRange = {
 
 type Block = Record<string, unknown>;
 
+// Null on failure: the price chart is optional, so an unavailable market read
+// omits only the chart and never the comparison it sits next to.
 export async function loadPerfComparisonBlock(
   db: QueryExecutor,
   input: { listings: ReadonlyArray<{ id: string; label: string }>; snapshotId: string; asOf: string },
 ): Promise<Block | null> {
   if (input.listings.length < 2) return null;
+  try {
+    return await loadSealedRanges(db, input);
+  } catch (reason) {
+    console.warn("[chat] price performance unavailable; showing the comparison without it", reason);
+    return null;
+  }
+}
+
+async function loadSealedRanges(
+  db: QueryExecutor,
+  input: { listings: ReadonlyArray<{ id: string; label: string }>; snapshotId: string; asOf: string },
+): Promise<Block | null> {
   const { rows: ranges } = await db.query<{
     bar_range_id: string;
     listing_id: string;
@@ -112,6 +127,7 @@ export function buildPerfComparisonBlock(input: {
     bar_range_id: range.bar_range_id,
     interval: range.interval,
     adjustment_basis: range.adjustment_basis,
+    normalization: NORMALIZATION,
     range: { start: range.range_start, end: range.range_end },
     as_of: range.as_of,
   }));
@@ -128,7 +144,7 @@ export function buildPerfComparisonBlock(input: {
     subject_labels: ranges.map((range) => range.label),
     default_range: `${first.range_start.slice(0, 10)} to ${first.range_end.slice(0, 10)}`,
     basis: ADJUSTMENT_BASIS,
-    normalization: "pct_return",
+    normalization: NORMALIZATION,
     series: ranges.map((range) => ({
       name: range.label,
       unit: "%",
