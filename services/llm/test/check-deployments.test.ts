@@ -30,7 +30,8 @@ test("check-deployments fails, with the parser's issues, when LITELLM_MODEL name
   assert.match(result.stderr, /LITELLM_MODEL/);
 });
 
-test("check-deployments ignores an LLM_SETTINGS_ENV_FILE that doesn't exist", () => {
+test("check-deployments fails on a missing LLM_SETTINGS_ENV_FILE, as the services would", () => {
+  // The services read this file on every model call; a missing one fails them with ENOENT.
   const result = run({
     LLM_SETTINGS_ENV_FILE: "/nonexistent/.env.dev",
     LLM_CHANNELS: "openai",
@@ -38,5 +39,6 @@ test("check-deployments ignores an LLM_SETTINGS_ENV_FILE that doesn't exist", ()
     LLM_OPENAI_MODELS: "gpt-4.1",
     LITELLM_MODEL: "openai/gpt-4.1",
   });
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /LLM_SETTINGS_ENV_FILE.*\/nonexistent\/\.env\.dev/);
 });
