@@ -2,6 +2,8 @@ export type WebDevFlags = {
   llmSettingsEnabled: boolean;
   placeholderApiEnabled: boolean;
   showDevBanner: boolean;
+  // Start signed in with the dev mock session (#122). Never in a production build.
+  devAutoLogin: boolean;
 };
 
 export function readWebDevFlags(env: Record<string, string | undefined>): WebDevFlags {
@@ -9,6 +11,7 @@ export function readWebDevFlags(env: Record<string, string | undefined>): WebDev
     llmSettingsEnabled: parseBoolean(env.VITE_MA_FLAG_LLM_SETTINGS, false),
     placeholderApiEnabled: parseBoolean(env.VITE_MA_FLAG_PLACEHOLDER_API, true),
     showDevBanner: parseBoolean(env.VITE_MA_FLAG_SHOW_DEV_BANNER, false),
+    devAutoLogin: env.MODE !== "production" && parseBoolean(env.VITE_MA_FLAG_DEV_AUTO_LOGIN, false),
   };
 }
 

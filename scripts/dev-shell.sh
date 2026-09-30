@@ -300,6 +300,9 @@ configure_runtime_env() {
   MA_FLAG_LLM_SETTINGS="${MA_FLAG_LLM_SETTINGS:-true}"
   export VITE_MA_FLAG_LLM_SETTINGS
   VITE_MA_FLAG_LLM_SETTINGS="${VITE_MA_FLAG_LLM_SETTINGS:-true}"
+  # The web app starts signed in with the dev mock session (#122); set false to test sign-in.
+  export VITE_MA_FLAG_DEV_AUTO_LOGIN
+  VITE_MA_FLAG_DEV_AUTO_LOGIN="${VITE_MA_FLAG_DEV_AUTO_LOGIN:-true}"
   if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
     export DEV_PROVIDERS_ORIGIN
     DEV_PROVIDERS_ORIGIN="${DEV_PROVIDERS_ORIGIN:-http://127.0.0.1:$DEV_PROVIDERS_PORT}"

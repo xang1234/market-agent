@@ -290,6 +290,25 @@ test("runtime module env vars default to in-repo durable local stack wiring", as
   await rm(fixture.root, { recursive: true, force: true });
 });
 
+test("the web app signs in with the dev mock session by default, unless opted out", async () => {
+  const on = await createShellFixture();
+  const onResult = await runBash(
+    ["MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh", 'printf "%s" "$VITE_MA_FLAG_DEV_AUTO_LOGIN"'].join("\n"),
+    on.root,
+  );
+  await rm(on.root, { recursive: true, force: true });
+  assert.equal(onResult.code, 0, onResult.stderr);
+  assert.equal(onResult.stdout.trim(), "true");
+
+  const off = await createShellFixture({ VITE_MA_FLAG_DEV_AUTO_LOGIN: "false" });
+  const offResult = await runBash(
+    ["MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh", 'printf "%s" "$VITE_MA_FLAG_DEV_AUTO_LOGIN"'].join("\n"),
+    off.root,
+  );
+  await rm(off.root, { recursive: true, force: true });
+  assert.equal(offResult.stdout.trim(), "false");
+});
+
 test("unofficial dev providers are opt-in and set a local sidecar origin", async () => {
   const disabled = await createShellFixture();
   const disabledResult = await runBash(
