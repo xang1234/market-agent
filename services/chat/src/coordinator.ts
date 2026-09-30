@@ -1,6 +1,6 @@
 import { contentHashForText, stableUuid } from "./chat-ids.ts";
 import { DEFAULT_BUNDLE_ID, chooseBundleIdForSubjectKind } from "./bundle-routing.ts";
-import { extractSubjectCandidates } from "./subject-extraction.ts";
+import { extractSubjectMentions } from "./subject-extraction.ts";
 import {
   createChatSseSequencer,
   type ChatSseEvent,
@@ -48,7 +48,10 @@ export type ChatTurnEmit = (
 ) => ChatSseEvent;
 
 export type ChatTurnRunContext = ChatTurnInput & {
+  // The turn's primary company (the first of subjectPreResolutions).
   subjectPreResolution?: ChatResolvedSubjectPreResolution;
+  // Every company the turn covers, primary first (see resolveTurnSubjects).
+  subjectPreResolutions?: ReadonlyArray<ChatResolvedSubjectPreResolution>;
   // Analyst prompt-template bundle selected for this turn. Derived from the
   // resolved subject's kind via chooseBundleIdForSubjectKind; falls back to
   // DEFAULT_BUNDLE_ID when no subject was provided. Same routing function
@@ -174,8 +177,16 @@ export type ChatCoordinator = {
 // unverified with the failure reasons, and never persisted.
 export type ChatVerificationMode = "strict" | "display_unverified";
 
+// The companies the thread's previous answer covered, re-hydrated, so a
+// follow-up ("compare it with AMD") can refer back to them.
+export type ChatPriorSubjectsLoader = (input: {
+  threadId: string;
+  userId?: string;
+}) => Promise<ReadonlyArray<ChatResolvedSubjectPreResolution>>;
+
 export type ChatCoordinatorOptions = {
   runner?: ChatTurnRunner;
+  loadPriorSubjects?: ChatPriorSubjectsLoader;
   verificationMode?: ChatVerificationMode;
   financialRuntime?: ChatFinancialRuntime;
   analystToolRuntime?: ChatAnalystToolRuntime;
@@ -255,6 +266,7 @@ export function createChatCoordinator(
   const runner = threadTitleGenerationRunner(runActivityReportingRunner(financialAwareRunner(subjectAwareRunner(baseRunner, {
     persistAssistantMessage,
     preResolveSubject,
+    loadPriorSubjects: options.loadPriorSubjects,
     renderSubjectClarification: options.renderSubjectClarification,
   }), { financialRuntime: options.financialRuntime, persistAssistantMessage }), options.runActivity), {
     generateThreadTitle: options.generateThreadTitle,
@@ -727,6 +739,7 @@ function subjectAwareRunner(
   options: {
     persistAssistantMessage?: ChatAssistantMessagePersistence;
     preResolveSubject?: ChatSubjectPreResolver;
+    loadPriorSubjects?: ChatPriorSubjectsLoader;
     renderSubjectClarification?: ChatSubjectClarificationRenderer;
   } = {},
 ): ChatTurnRunner {
@@ -747,21 +760,19 @@ function subjectAwareRunner(
         });
         return;
       }
-      await runResolvedSubjectTurn(runner, context, preResolution);
+      await runResolvedSubjectTurn(runner, context, [preResolution]);
       return;
     }
 
-    // The chat UI attaches no subject, so ground the turn by extracting a
-    // resolvable ticker from the user's message ("tell me about MU" -> MU).
-    // Messages with no resolvable subject fall through to the default analyst
-    // bundle — exactly as before, and without nagging for clarification.
+    // The chat UI attaches no subject, so ground the turn in the companies the
+    // message names ("compare NVDA and AMD"), or the ones a follow-up refers
+    // back to ("compare it with AMD"). Messages with no company fall through to
+    // the default analyst bundle, without nagging for clarification.
     if (options.preResolveSubject) {
-      for (const candidate of extractSubjectCandidates(nonEmptySubjectText(context.userIntent))) {
-        const preResolution = await options.preResolveSubject({ text: candidate });
-        if (preResolution.status === "resolved") {
-          await runResolvedSubjectTurn(runner, context, preResolution);
-          return;
-        }
+      const subjects = await resolveTurnSubjects(context, options.preResolveSubject, options.loadPriorSubjects);
+      if (subjects.length > 0) {
+        await runResolvedSubjectTurn(runner, context, subjects);
+        return;
       }
     }
 
@@ -769,11 +780,59 @@ function subjectAwareRunner(
   };
 }
 
+const MAX_TURN_SUBJECTS = 5;
+// Words that ask to set companies side by side, so a follow-up that names a new
+// company keeps the previous ones ("compare it with AMD") instead of replacing
+// them ("analyze AAPL and its margins").
+const COMPARATIVE = /\b(compare|comparison|comparing|versus|vs\.?|against|relative to|peers?|stacks? up)\b/i;
+
+async function resolveTurnSubjects(
+  context: ChatTurnRunContext,
+  preResolve: ChatSubjectPreResolver,
+  loadPriorSubjects: ChatPriorSubjectsLoader | undefined,
+): Promise<ReadonlyArray<ChatResolvedSubjectPreResolution>> {
+  const text = nonEmptySubjectText(context.userIntent);
+  const named = text ? await resolveNamedSubjects(text, preResolve) : [];
+  const carryForward = loadPriorSubjects !== undefined && (named.length === 0 || COMPARATIVE.test(text ?? ""));
+  const prior = carryForward
+    ? await loadPriorSubjects({ threadId: context.threadId, ...(context.userId ? { userId: context.userId } : {}) })
+    : [];
+  return distinctCompanies([...prior, ...named]).slice(0, MAX_TURN_SUBJECTS);
+}
+
+async function resolveNamedSubjects(
+  text: string,
+  preResolve: ChatSubjectPreResolver,
+): Promise<ChatResolvedSubjectPreResolution[]> {
+  // The whole message first, so a bare ticker, a company name, or a theme
+  // resolves exactly as before; otherwise every ticker it mentions, in order.
+  const whole = await preResolve({ text });
+  if (whole.status === "resolved") return [whole];
+  const resolutions = await Promise.all(extractSubjectMentions(text).map((mention) => preResolve({ text: mention })));
+  return resolutions.filter((resolution) => resolution.status === "resolved");
+}
+
+// One entry per company: two listings of the same issuer collapse.
+function distinctCompanies(
+  subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>,
+): ChatResolvedSubjectPreResolution[] {
+  const seen = new Set<string>();
+  return subjects.filter((subject) => {
+    const context = subject.handoff.context;
+    const issuer = context.issuer?.subject_ref ?? context.listing?.issuer_ref ?? context.instrument?.issuer_ref;
+    const key = issuer ? `issuer:${issuer.id}` : `${subject.subject_ref.kind}:${subject.subject_ref.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 async function runResolvedSubjectTurn(
   runner: ChatTurnRunner,
   context: ChatTurnRunContext,
-  preResolution: ChatResolvedSubjectPreResolution,
+  subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>,
 ): Promise<void> {
+  const preResolution = subjects[0];
   const bundleId = chooseBundleIdForSubjectKind(preResolution.subject_ref.kind);
   // Emit turn.started with the resolved bundle_id BEFORE any tool events. The
   // runner's emit wrapper auto-fabricates an empty turn.started on the first
@@ -788,6 +847,7 @@ async function runResolvedSubjectTurn(
   await runner({
     ...context,
     subjectPreResolution: preResolution,
+    subjectPreResolutions: subjects,
     bundleId,
   });
 }
@@ -882,7 +942,11 @@ async function toolBackedAnalystTurnRunner(
 ) {
   const { emit } = context;
   const preResolution = context.subjectPreResolution ?? null;
-  const subjectRef = preResolution?.status === "resolved" ? { subject_ref: preResolution.subject_ref } : {};
+  const coveredRefs = context.subjectPreResolutions?.map((subject) => subject.subject_ref) ?? [];
+  const subjectRef = {
+    ...(preResolution?.status === "resolved" ? { subject_ref: preResolution.subject_ref } : {}),
+    ...(coveredRefs.length > 0 ? { subject_refs: coveredRefs } : {}),
+  };
   const turnId = context.turnId ?? context.runId;
   if (!preResolution) {
     emit("turn.started", { bundle_id: context.bundleId });
