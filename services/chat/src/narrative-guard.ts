@@ -4,18 +4,22 @@
 // else is dropped rather than shown unsupported.
 //
 // A figure that belongs to one company (a comparison cell) must also be
-// credited to that company: the company named last before it in the sentence
-// ("AMD's margin is 49.2%"), else first after it ("49.2% at AMD"), else the
-// last one named in a kept sentence earlier on the line ("Its margin..."),
-// must be one the figure belongs to. Otherwise a real value quoted for the
-// wrong company would pass.
+// credited to that company. The companies named between the previous such
+// figure (or the sentence start) and this one must all own it ("NVDA's 74.6%,
+// ahead of AMD at 49.2%"); if none is named there, those named after it up to
+// the next such figure ("74.6% at NVDA"); if none, the last one named in a kept
+// sentence earlier on the line ("Its margin..."). Naming another company in
+// that stretch ("AMD's margin, unlike NVDA, is 74.6%") is ambiguous and drops
+// the sentence: the guard cannot parse who the figure belongs to, so it only
+// keeps what is unambiguous.
 //
 // ponytail: compares numbers by value ("62.1" in "$62.1B" and "62.1 billion"),
 // not by magnitude or unit; a derived figure that coincidentally equals a shown
 // one would pass. Tighten to unit-aware matching if that shows up in the eval.
-// ponytail: companies are recognized by their displayed label (ticker) only;
-// the prompt asks the model to use it. Add legal-name aliases if the eval shows
-// "NVIDIA" sentences being dropped.
+// ponytail: companies are recognized by their displayed label (ticker) only,
+// case-sensitively (the ticker "A" is not the article "a"); the prompt asks the
+// model to use it. Add legal-name aliases if the eval shows "NVIDIA" sentences
+// being dropped.
 
 const NUMBER = /\d+(?:,\d{3})*(?:\.\d+)?/g;
 const SENTENCE_BREAK = /(?<=[.!?])\s+/;
@@ -32,7 +36,7 @@ export function keepSupportedSentences(
   for (const figure of attributedFigures) {
     for (const number of numbersIn(figure.value)) {
       const companies = owners.get(number) ?? new Set<string>();
-      companies.add(figure.company.toLowerCase());
+      companies.add(figure.company);
       owners.set(number, companies);
     }
   }
@@ -49,12 +53,24 @@ export function keepSupportedSentences(
     let lastNamed: string | undefined;
     const kept = line.trim().split(SENTENCE_BREAK).filter((sentence) => {
       const named = companyMentions(sentence, companies);
-      const isSupported = numberMatches(sentence).every(({ number, index }) => {
-        if (supported.has(number)) return true;
-        const belongsTo = owners.get(number);
-        if (belongsTo === undefined) return false;
-        const credited = creditedCompany(named, index) ?? lastNamed;
-        return credited !== undefined && belongsTo.has(credited);
+      const numbers = numberMatches(sentence);
+      if (numbers.some(({ number }) => !supported.has(number) && !owners.has(number))) {
+        removed.push(sentence);
+        return false;
+      }
+      // Figures that need a company; each claims the stretch of text around it.
+      const attributed = numbers.filter(({ number }) => !supported.has(number));
+      const isSupported = attributed.every(({ number, index, end }, i) => {
+        const from = i === 0 ? 0 : attributed[i - 1].end;
+        const to = i === attributed.length - 1 ? sentence.length : attributed[i + 1].index;
+        const before = named.filter((mention) => mention.index >= from && mention.index < index);
+        const after = named.filter((mention) => mention.index >= end && mention.index < to);
+        const credited = before.length > 0
+          ? before.map((mention) => mention.company)
+          : after.length > 0
+          ? after.map((mention) => mention.company)
+          : lastNamed === undefined ? [] : [lastNamed];
+        return credited.length > 0 && credited.every((company) => owners.get(number)!.has(company));
       });
       // Only a sentence the user will see can name the company for the next one.
       if (isSupported && named.length > 0) lastNamed = named[named.length - 1].company;
@@ -70,10 +86,11 @@ function numbersIn(text: string): string[] {
   return numberMatches(text).map(({ number }) => number);
 }
 
-function numberMatches(text: string): Array<{ number: string; index: number }> {
+function numberMatches(text: string): Array<{ number: string; index: number; end: number }> {
   return [...text.matchAll(NUMBER)].map((match) => ({
     number: String(Number(match[0].replaceAll(",", ""))),
     index: match.index,
+    end: match.index + match[0].length,
   }));
 }
 
@@ -84,18 +101,10 @@ function companyMentions(
 ): Array<{ company: string; index: number }> {
   return companies
     .flatMap((company) => {
-      const pattern = new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(company)}(?![A-Za-z0-9])`, "gi");
-      return [...sentence.matchAll(pattern)].map((match) => ({ company: company.toLowerCase(), index: match.index }));
+      const pattern = new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(company)}(?![A-Za-z0-9])`, "g");
+      return [...sentence.matchAll(pattern)].map((match) => ({ company, index: match.index }));
     })
     .sort((a, b) => a.index - b.index);
-}
-
-function creditedCompany(
-  mentions: ReadonlyArray<{ company: string; index: number }>,
-  index: number,
-): string | undefined {
-  const before = mentions.filter((mention) => mention.index < index);
-  return (before.at(-1) ?? mentions.find((mention) => mention.index > index))?.company;
 }
 
 function escapeRegExp(text: string): string {

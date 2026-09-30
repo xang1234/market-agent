@@ -85,9 +85,11 @@ fixed rule, not a tool loop.
   value only, not unit (see the `ponytail:` note in the file).
 - The displayed figures reach the model as rows (`displayedFigures`, `fact-blocks.ts`): `{company, metric, value}`
   for comparison cells, `{metric, value}` / `{metric, period, value}` for single-company blocks. A comparison figure
-  must also be credited to its company: the company named last before it in the sentence (else first after it,
-  else last named in a kept sentence earlier on the line) must own that value, so a real figure quoted for the wrong company is
-  dropped. Companies are recognized by their displayed label (ticker), which the prompt tells the model to use.
+  must also be credited to its company: every company named between the previous such figure (or the sentence start)
+  and this one must own it; if none is named there, those named after it; if none, the last one named in a kept
+  sentence earlier on the line. Naming another company in that stretch is ambiguous and drops the sentence, so a
+  real figure quoted for the wrong company never survives. Companies are recognized by their displayed label (ticker),
+  case-sensitively, which the prompt tells the model to use.
 - A failure while building fact blocks degrades to a narrative-only answer; it never costs the user the answer.
 
 ## Which companies a chat turn covers

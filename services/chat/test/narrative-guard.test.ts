@@ -76,8 +76,19 @@ test("a comparison figure with no company named is removed, unless the line alre
   assert.deepEqual(carried.removed, []);
 });
 
-test("company names match regardless of case", () => {
-  assert.deepEqual(keepSupportedSentences("nvda's gross margin is 74.6%.", [], COMPARED).removed, []);
+test("company labels match exactly, so an ordinary word is not a ticker", () => {
+  const withTickerA = [{ company: "A", value: "74.6%" }, { company: "AMD", value: "49.2%" }];
+  assert.equal(keepSupportedSentences("AMD has a 74.6% margin.", [], withTickerA).removed.length, 1);
+  assert.deepEqual(keepSupportedSentences("A has a 74.6% margin.", [], withTickerA).removed, []);
+});
+
+test("a figure with more than one company named before it is ambiguous and removed", () => {
+  assert.equal(keepSupportedSentences("AMD's margin, unlike NVDA, is 74.6%.", [], COMPARED).removed.length, 1);
+  assert.equal(keepSupportedSentences("Unlike AMD, NVDA's margin is 74.6%.", [], COMPARED).removed.length, 1);
+});
+
+test("an unattributed number between a company and its figure does not break the attribution", () => {
+  assert.deepEqual(keepSupportedSentences("NVDA in fiscal 2026 had a 74.6% margin.", ["FY 2026"], COMPARED).removed, []);
 });
 
 test("a removed sentence cannot name the company for the next one", () => {
