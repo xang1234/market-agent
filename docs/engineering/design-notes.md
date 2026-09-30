@@ -86,9 +86,9 @@ fixed rule, not a tool loop.
 - The displayed figures reach the model as rows (`displayedFigures`, `fact-blocks.ts`): `{company, metric, value}`
   for comparison cells, `{metric, value}` / `{metric, period, value}` for single-company blocks. A comparison figure
   must also be credited to its company, even when a claim repeats the number: every company named between the
-  previous such figure (or the sentence start) and this one must own it; if none is named there, those named after
-  it (except possessives like "AMD's", which point forward), else the company of the previous figure in the
-  sentence, else the last one named in a kept sentence earlier on the line. Naming another company in that stretch is ambiguous and drops the sentence, so a
+  previous such figure (or the sentence start) and this one must own it; if none is named there, the first one named
+  after it (skipping possessives like "AMD's", which point forward), which is then used up, else the company of the
+  previous figure in the sentence, else the last one named in a kept sentence earlier on the line. Naming another company in that stretch is ambiguous and drops the sentence, so a
   real figure quoted for the wrong company never survives. Companies are recognized by their displayed label (ticker),
   case-sensitively, which the prompt tells the model to use.
 - A failure while building fact blocks degrades to a narrative-only answer; it never costs the user the answer.

@@ -125,3 +125,10 @@ test("a company named right after a figure owns it, unless written possessively 
     [],
   );
 });
+
+test("a figure takes only the first company named after it, and that name is used up", () => {
+  assert.deepEqual(keepSupportedSentences("74.6% for NVDA, compared with AMD at 49.2%.", [], COMPARED).removed, []);
+  assert.deepEqual(keepSupportedSentences("Gross margin: 74.6% at NVDA, 49.2% at AMD.", [], COMPARED).removed, []);
+  // The first name after a figure must still own it.
+  assert.equal(keepSupportedSentences("74.6% for AMD, compared with NVDA at 49.2%.", [], COMPARED).removed.length, 1);
+});

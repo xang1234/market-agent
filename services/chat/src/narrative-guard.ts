@@ -7,11 +7,12 @@
 // credited to that company, even when a claim or title repeats the number. The
 // companies named between the previous such figure (or the sentence start) and
 // this one must all own it ("NVDA's 74.6%, ahead of AMD at 49.2%"); if none is
-// named there, those named after it up to the next figure ("74.6% at NVDA"),
-// except possessives, which point forward ("..., versus AMD's 49.2%"); if none,
-// the company of the previous figure in the sentence ("NVDA's revenue was
-// $130.5B and margin 74.6%"); if none, the last one named in a kept sentence
-// earlier on the line ("Its margin..."). Naming another company in that
+// named there, the first one named after it, before the next figure ("74.6% at
+// NVDA, 49.2% at AMD"), which is then used up; a possessive is skipped, as it
+// points forward ("..., versus AMD's 49.2%"); if none, the company of the
+// previous figure in the sentence ("NVDA's revenue was $130.5B and margin
+// 74.6%"); if none, the last one named in a kept sentence earlier on the line
+// ("Its margin..."). Naming another company in that
 // stretch ("AMD's margin, unlike NVDA, is 74.6%") is ambiguous and drops the
 // sentence: the guard cannot parse who the figure belongs to, so it only keeps
 // what is unambiguous.
@@ -65,16 +66,23 @@ export function keepSupportedSentences(
       // title repeats); each claims the stretch of text around it.
       const attributed = numbers.filter(({ number }) => owners.has(number));
       let carried: string[] = [];
+      // A name after a figure that the figure took is used up; the next figure's
+      // stretch starts past it.
+      let usedUpTo = 0;
       const isSupported = attributed.every(({ number, index, end }, i) => {
-        const from = i === 0 ? 0 : attributed[i - 1].end;
+        const from = Math.max(i === 0 ? 0 : attributed[i - 1].end, usedUpTo);
         const to = i === attributed.length - 1 ? sentence.length : attributed[i + 1].index;
         const before = named.filter((mention) => mention.index >= from && mention.index < index);
+        // Only the first name after it ("74.6% for NVDA, compared with AMD...");
         // "AMD's" points forward to the figure it owns, never back to this one.
-        const after = named.filter((mention) => mention.index >= end && mention.index < to && !mention.possessive);
+        const after = before.length > 0
+          ? undefined
+          : named.find((mention) => mention.index >= end && mention.index < to && !mention.possessive);
+        if (after !== undefined) usedUpTo = after.index + after.company.length;
         const credited = before.length > 0
           ? before.map((mention) => mention.company)
-          : after.length > 0
-          ? after.map((mention) => mention.company)
+          : after !== undefined
+          ? [after.company]
           : carried.length > 0
           ? carried
           : lastNamed === undefined ? [] : [lastNamed];
