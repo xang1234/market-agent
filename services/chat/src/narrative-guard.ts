@@ -26,9 +26,9 @@
 // model to use it. Add legal-name aliases if the eval shows "NVIDIA" sentences
 // being dropped.
 
-// A leading minus is part of the figure ("-10.0%" is not "10.0%"), unless it
-// joins two numbers or words ("2025-2026").
-const NUMBER = /(?:(?<![A-Za-z0-9.])[-−])?\d+(?:,\d{3})*(?:\.\d+)?/g;
+// A leading minus is part of the figure ("-10.0%" is not "10.0%", "-$3.1B" is
+// not "$3.1B"), unless it joins two numbers or words ("2025-2026").
+const NUMBER = /(?:(?<![A-Za-z0-9.])[-−][$€£¥]?)?\d+(?:,\d{3})*(?:\.\d+)?/g;
 const SENTENCE_BREAK = /(?<=[.!?])\s+/;
 // Between a figure and the company that owns it: its unit, then a preposition
 // ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
@@ -120,7 +120,7 @@ function numbersIn(text: string): string[] {
 
 function numberMatches(text: string): Array<{ number: string; index: number; end: number }> {
   return [...text.matchAll(NUMBER)].map((match) => ({
-    number: String(Number(match[0].replace("−", "-").replaceAll(",", ""))),
+    number: String(Number(match[0].replace("−", "-").replace(/[$€£¥,]/g, ""))),
     index: match.index,
     end: match.index + match[0].length,
   }));
@@ -149,6 +149,14 @@ function respectivelyPairs(
   if (figures.length < 2 || !/\brespectively\b/i.test(sentence)) return undefined;
   const leading = named.filter((mention) => mention.index < figures[0].index);
   if (leading.length !== figures.length) return undefined;
+  // Only a coordinated list ("NVDA and AMD", "NVDA, AMD, and INTC"); in
+  // "Compared with NVDA, AMD's margins..." NVDA is a comparison, not an item.
+  const joins = leading.slice(1).map((mention, i) =>
+    sentence.slice(leading[i].index + leading[i].company.length, mention.index)
+  );
+  const isList = joins.every((join) => /^\s*,?\s*(?:(?:and|&)\s+)?$/i.test(join)) &&
+    /\b(?:and)\b|&/i.test(joins[joins.length - 1]);
+  if (!isList) return undefined;
   return figures.map((figure, i) => ({ number: figure.number, company: leading[i].company }));
 }
 

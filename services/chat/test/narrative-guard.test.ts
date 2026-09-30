@@ -174,3 +174,22 @@ test("a figure's sign is part of it: a displayed decline cannot approve a gain",
   // A hyphen between numbers is a range, not a sign.
   assert.deepEqual(keepSupportedSentences("Revenue rose over 2025-2026.", ["FY 2025 to FY 2026"]).removed, []);
 });
+
+test("a minus before a currency symbol is the figure's sign", () => {
+  assert.equal(keepSupportedSentences("Operating income was $3.1B.", ["-$3.1B"]).removed.length, 1);
+  assert.deepEqual(keepSupportedSentences("Operating income was -$3.1B.", ["-$3.1B"]).removed, []);
+  assert.deepEqual(keepSupportedSentences("Revenue was $3.1B.", ["$3.1B"]).removed, []);
+});
+
+test("'respectively' pairs only a coordinated list of companies", () => {
+  const result = keepSupportedSentences(
+    "Compared with NVDA, AMD's gross and net margins were 74.6% and 49.2%, respectively.",
+    [],
+    COMPARED,
+  );
+  assert.equal(result.removed.length, 1);
+  assert.deepEqual(
+    keepSupportedSentences("NVDA & AMD posted 74.6% and 49.2%, respectively.", [], COMPARED).removed,
+    [],
+  );
+});
