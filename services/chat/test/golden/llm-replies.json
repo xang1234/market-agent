@@ -1,0 +1,12 @@
+{
+  "replies": [
+    {
+      "match": "Create a short, specific research chat title",
+      "text": "NVIDIA revenue and margins"
+    },
+    {
+      "match": "Write a concise investment research answer",
+      "text": "NVIDIA's reported revenue rose in every quarter shown, and gross and operating profit rose with it. The chart and figures below carry the reported values and link to their filings."
+    }
+  ]
+}
