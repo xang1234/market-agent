@@ -65,6 +65,30 @@ test("LLM router reports a failed attempt before its fallback, with the failure 
   assert.ok(completions.every((c) => Number.isFinite(c.latencyMs)));
 });
 
+test("LLM router isolates a throwing completion hook from the model result and the fallback", async () => {
+  const throwingHook = () => {
+    throw new Error("logging sink down");
+  };
+  const ok = createLlmRouter({
+    settings: settings(),
+    client: async () => ({ text: "billable answer" }),
+    onCompletion: throwingHook,
+  });
+  assert.equal((await ok.complete({ messages: [{ role: "user", content: "hello" }] })).text, "billable answer");
+
+  let calls = 0;
+  const withFallback = createLlmRouter({
+    settings: settings(),
+    client: async () => {
+      calls += 1;
+      if (calls === 1) throw new LlmProviderError("rate_limited", "slow down");
+      return { text: "fallback ok" };
+    },
+    onCompletion: throwingHook,
+  });
+  assert.equal((await withFallback.complete({ messages: [{ role: "user", content: "hello" }] })).text, "fallback ok");
+});
+
 test("LLM router falls back after retryable provider failure", async () => {
   const calls: string[] = [];
   const client: LlmChatClient = async (deployment) => {

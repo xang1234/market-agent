@@ -119,6 +119,15 @@ export type CreateLlmRouterInput = {
 
 export function createLlmRouter(input: CreateLlmRouterInput): ControlledRouter {
   const deployments = buildLlmDeploymentOrder(input.settings);
+  // Telemetry must never change routing: a throwing hook or log sink can't turn a
+  // (billed) success into a failure or stop a fallback.
+  const report = (completion: LlmCompletion) => {
+    try {
+      input.onCompletion?.(completion);
+    } catch {
+      // ponytail: dropped silently; a broken sink shouldn't also flood the logs.
+    }
+  };
   return Object.freeze({
     async complete(request, controls = {}) {
       const selectedDeployments = selectDeployments(deployments, controls.deploymentOrder);
@@ -157,7 +166,7 @@ export function createLlmRouter(input: CreateLlmRouterInput): ControlledRouter {
           const result = controls.executeAttempt === undefined
             ? await dispatch()
             : await controls.executeAttempt(attempt, dispatch);
-          input.onCompletion?.({
+          report({
             deployment: attemptDeployment,
             latencyMs: Math.round(performance.now() - startedAt),
             outcome: "ok",
@@ -170,7 +179,7 @@ export function createLlmRouter(input: CreateLlmRouterInput): ControlledRouter {
         } catch (error) {
           if (!(error instanceof ProviderDispatchError)) throw error;
           const providerAttempt = attemptFromError(deployment, error.cause);
-          input.onCompletion?.({
+          report({
             deployment: attemptDeployment,
             latencyMs: Math.round(performance.now() - startedAt),
             outcome: "failed",

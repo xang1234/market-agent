@@ -481,6 +481,17 @@ test("an unknown DEV_MODE, or DEV_NO_KEYS with a live mode, fails before startin
   assert.equal(clash.trace, "");
 });
 
+test("an explicitly empty DEV_MODE on the command line returns to the default mode", async () => {
+  const fixture = await createShellFixture({ DEV_MODE: "analyst" });
+  const result = await runBash(
+    ["export DEV_MODE=", "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh", 'printf "<%s>" "$DEV_MODE"'].join("\n"),
+    fixture.root,
+  );
+  await rm(fixture.root, { recursive: true, force: true });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout.trim(), "<>");
+});
+
 test("DEV_MODE from the command line wins over the env file", async () => {
   const fixture = await createShellFixture({ DEV_MODE: "data" });
   const result = await runBash(

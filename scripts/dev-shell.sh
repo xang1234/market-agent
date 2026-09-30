@@ -8,20 +8,23 @@ if [[ ! -f "$ENV_FILE" ]]; then
 fi
 
 # DEV_PROFILE, DEV_NO_KEYS and DEV_MODE are per-invocation switches
-# (DEV_PROFILE=chat DEV_NO_KEYS=true ./scripts/dev-shell.sh up), so the caller's value
-# beats the env file's.
-CALLER_DEV_PROFILE="${DEV_PROFILE:-}"
-CALLER_DEV_NO_KEYS="${DEV_NO_KEYS:-}"
-CALLER_DEV_MODE="${DEV_MODE:-}"
+# (DEV_PROFILE=chat DEV_NO_KEYS=true ./scripts/dev-shell.sh up), so a value the caller
+# set beats the env file's, even an empty one (DEV_MODE= returns to the default mode).
+CALLER_SWITCHES=()
+for switch in DEV_PROFILE DEV_NO_KEYS DEV_MODE; do
+  if [[ -n "${!switch+set}" ]]; then
+    CALLER_SWITCHES+=("$switch=${!switch}")
+  fi
+done
 
 set -a
 # shellcheck source=/dev/null
 source "$ENV_FILE"
 set +a
 
-DEV_PROFILE="${CALLER_DEV_PROFILE:-${DEV_PROFILE:-}}"
-DEV_NO_KEYS="${CALLER_DEV_NO_KEYS:-${DEV_NO_KEYS:-}}"
-DEV_MODE="${CALLER_DEV_MODE:-${DEV_MODE:-}}"
+for assignment in ${CALLER_SWITCHES[@]+"${CALLER_SWITCHES[@]}"}; do
+  export "$assignment"
+done
 
 # Defaults for variables that may be missing from an older .env.dev so `set -u`
 # expansion below doesn't abort, and so child processes receive them.
