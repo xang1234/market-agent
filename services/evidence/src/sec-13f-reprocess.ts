@@ -22,7 +22,8 @@
 import { parse13fInfoTable } from "./sec-13f-extractor.ts";
 import { resolveHoldingsByIssuer } from "./sec-13f-resolve.ts";
 import { isSuperinvestorFiler, superinvestorName } from "./superinvestor-filers.ts";
-import { insertHolding, sourceIdForAccession } from "./institutional-holdings-repo.ts";
+import { findFilerIssuerHolding, insertHolding, periodRestatedBy, sourceIdForAccession } from "./institutional-holdings-repo.ts";
+import { isAccessionSuperseded } from "./document-repo.ts";
 import { createSource } from "./source-repo.ts";
 import { withTransaction } from "./transaction.ts";
 import { recentSubmissionRows, type SecFilingFetcher, type SecSubmissions } from "./sec-edgar.ts";
@@ -31,8 +32,10 @@ import { enrichCusip } from "../../resolver/src/cusip-enrichment.ts";
 import type { OpenReferenceProviderConfig } from "../../resolver/src/provider-sources.ts";
 import type { FetchImpl } from "../../resolver/src/open-reference-providers.ts";
 
-// Only the original 13F-HR is reprocessed — amendments (13F-HR/A) are not ingested
-// by the crawl either (their partial-update semantics are tracked in fra-kb2p).
+// Only the original 13F-HR is reprocessed here. 13F-HR/A amendments are now ingested
+// by the crawl (fra-kb2p: restate vs supplement branch), but reprocessing them on a
+// CUSIP-coverage pass needs the same supersede/merge semantics and is deferred to the
+// reprocess follow-up (fra-msx1).
 const FORM_13F_HR = "13F-HR";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -62,6 +65,7 @@ export type Reprocess13fResult = {
   cusipsEnriched: number; // newly mapped to an issuer via OpenFIGI this run
   cusipsUnmapped: number; // OpenFIGI returned no/ambiguous/non-equity match
   holdingsUpserted: number; // read-model rows written across all accessions
+  supersededSkipped: number; // originals replaced by a 13F-HR/A amendment — left untouched
 };
 
 export async function reprocessFiler13f(
@@ -103,14 +107,32 @@ export async function reprocessFiler13f(
   }
   const candidates = inWindow.slice(0, maxFilings);
 
-  const result: Reprocess13fResult = { accessionsProcessed: 0, cusipsEnriched: 0, cusipsUnmapped: 0, holdingsUpserted: 0 };
+  const result: Reprocess13fResult = { accessionsProcessed: 0, cusipsEnriched: 0, cusipsUnmapped: 0, holdingsUpserted: 0, supersededSkipped: 0 };
   for (const candidate of candidates) {
+    // Skip an original whose filing a later 13F-HR/A RESTATEMENT already superseded:
+    // supersede13fFiling deleted its read-model rows and flipped its document to
+    // 'superseded'. Re-resolving + upserting it here would re-add the stale portfolio
+    // under a fresh source (sourceIdForAccession returns null after the delete), undoing
+    // the amendment. Reprocessing amendment chains for coverage is a follow-up (fra-msx1).
+    if (await isAccessionSuperseded(deps.db, candidate.accession)) {
+      console.warn(`[sec-13f-reprocess] ${candidate.accession}: superseded by a 13F-HR/A amendment — skipped`);
+      result.supersededSkipped += 1;
+      continue;
+    }
     const fetched = await deps.secClient.fetchFiling({
       cik: input.cik,
       accession_number: candidate.accession,
       document: `${candidate.accession}.txt`,
     });
     const filing = parse13fInfoTable(new TextDecoder("utf-8").decode(fetched.bytes));
+    // Its period was restated by an amendment ingested without this original ever being
+    // (out-of-order backfill): the original is stale, so treat it like a superseded one.
+    const restatedBy = await periodRestatedBy(deps.db, filerCik, filing.periodOfReport);
+    if (restatedBy) {
+      console.warn(`[sec-13f-reprocess] ${candidate.accession}: period restated by ${restatedBy} — skipped`);
+      result.supersededSkipped += 1;
+      continue;
+    }
 
     // HARVEST: enrich each distinct reported CUSIP. enrichCusip DB-checks first, so
     // an already-resolvable CUSIP costs one cheap query (status "already"); only an
@@ -141,9 +163,21 @@ export async function reprocessFiler13f(
     // re-archival (the bytes are already content-addressed at first ingest; no S3).
     const existingSourceId = await sourceIdForAccession(deps.db, candidate.accession);
     await withTransaction(deps.db, async (tx) => {
-      const sourceId =
-        existingSourceId ??
-        (
+      // Minted lazily on the first row written: if the guard below skips every row, no
+      // holding would reference a new source, so each rerun would leak another one.
+      let sourceId = existingSourceId;
+      for (const h of resolved) {
+        // Never overwrite a row another accession owns (a 13F-HR/A NEW HOLDINGS supplement
+        // stored this issuer after the original's CUSIP failed to resolve): the upsert on
+        // (filer, issuer, period) would clobber the supplement's total with the original's.
+        const existing = await findFilerIssuerHolding(tx.db, filerCik, h.issuerId, filing.periodOfReport);
+        if (existing && existing.accession !== candidate.accession) {
+          console.warn(
+            `[sec-13f-reprocess] ${candidate.accession}: ${h.nameOfIssuer} row owned by ${existing.accession} — skipped`,
+          );
+          continue;
+        }
+        sourceId ??= (
           await createSource(tx.db, {
             provider: "sec_edgar",
             kind: "filing",
@@ -153,7 +187,6 @@ export async function reprocessFiler13f(
             retrieved_at: fetched.retrievedAt,
           })
         ).source_id;
-      for (const h of resolved) {
         await insertHolding(tx.db, {
           filer_cik: filerCik,
           filer_name: filerName,

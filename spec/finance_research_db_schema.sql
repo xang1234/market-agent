@@ -1152,6 +1152,17 @@ create table institutional_holdings (
 create index institutional_holdings_issuer_period_idx on institutional_holdings(issuer_id, filing_period desc);
 create index institutional_holdings_filer_period_idx on institutional_holdings(filer_cik, filing_period desc);
 
+-- Every (filer, period) a 13F was ingested for, including periods storing no holdings
+-- rows, so prior-period change detection doesn't skip an empty quarter (fra-zpet).
+create table institutional_filing_periods (
+  filer_cik      text not null,
+  filing_period  date not null,
+  -- The 13F-HR/A RESTATEMENT that replaced this period, if any: an original arriving
+  -- later (out-of-order backfill) is stale and must not overwrite it.
+  restated_accession text,
+  primary key (filer_cik, filing_period)
+);
+
 create table discovery_campaigns (
   campaign_id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(user_id) on delete cascade,

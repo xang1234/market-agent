@@ -34,19 +34,19 @@ export function resolveCrawlDate(argv: string[], now: () => Date = () => new Dat
   return date;
 }
 
-// Form handlers. Form 4 + 8-K + 13F are registered.
-// NOTE: only the original 13F-HR (full holdings report) is processed. A 13F-HR/A
-// amendment may be SUPPLEMENTAL (add-only) rather than a full restatement, so
-// routing it through handle13f's full-period path would treat the partial
-// amendment as the whole portfolio and flag omitted prior holdings as false
-// exits. Amendment handling (parse amendmentType, restate vs supplement) is
-// tracked in fra-kb2p; until then 13F-HR/A is intentionally not registered.
+// Form handlers. Form 4 + 8-K + 13F (incl. amendments) are registered.
+// handle13f branches on the cover's <amendmentType> for a 13F-HR/A: a RESTATEMENT
+// supersedes the original (filer, period) then re-ingests as a full filing; a NEW
+// HOLDINGS amendment merges its supplemental rows without exit detection (so unlisted
+// originals aren't flagged as false exits); an unclassifiable amendment is skipped
+// (fra-kb2p). The original 13F-HR remains the full-portfolio path.
 export const FORM_HANDLERS: Record<string, FormHandler> = {
   "4": handleForm4,
   "4/A": handleForm4,
   "8-K": handle8k,
   "8-K/A": handle8k,
   "13F-HR": handle13f,
+  "13F-HR/A": handle13f,
 };
 
 // ---------------------------------------------------------------------------

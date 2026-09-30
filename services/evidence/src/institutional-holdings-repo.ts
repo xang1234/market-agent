@@ -1,4 +1,5 @@
 import type { QueryExecutor } from "./types.ts";
+import { supersedeFilingArtifacts, type SupersededArtifactCounts } from "./supersede-filing.ts";
 
 // Read model for 13F institutional holdings. One aggregated row per
 // (filer, issuer, reporting period) — the handler sums the multiple infoTable
@@ -45,6 +46,95 @@ export async function insertHolding(db: QueryExecutor, input: InstitutionalHoldi
       input.accession,
     ],
   );
+  await recordFilingPeriod(db, input.filer_cik, input.filing_period);
+}
+
+// Mark (filer, period) as filed, idempotently. insertHolding does this for every row;
+// the 13F handler also calls it directly so a period that stores NO rows (an empty
+// restatement or portfolio) still counts as the next quarter's prior period (fra-zpet).
+// A RESTATEMENT passes its accession to mark the period restated; later calls without
+// one keep the mark.
+export async function recordFilingPeriod(
+  db: QueryExecutor,
+  filerCik: string,
+  period: string,
+  restatedAccession: string | null = null,
+): Promise<void> {
+  await db.query(
+    `insert into institutional_filing_periods (filer_cik, filing_period, restated_accession)
+     values ($1, $2::date, $3)
+     on conflict (filer_cik, filing_period) do update
+       set restated_accession = coalesce(excluded.restated_accession, institutional_filing_periods.restated_accession)`,
+    [filerCik, period, restatedAccession],
+  );
+}
+
+// The RESTATEMENT accession that replaced (filer, period), or null. An original 13F-HR
+// for a restated period is stale (it arrived after its amendment) and must be skipped.
+export async function periodRestatedBy(db: QueryExecutor, filerCik: string, period: string): Promise<string | null> {
+  const { rows } = await db.query<{ restated_accession: string | null }>(
+    `select restated_accession from institutional_filing_periods
+      where filer_cik = $1 and filing_period = $2::date`,
+    [filerCik, period],
+  );
+  return rows[0]?.restated_accession ?? null;
+}
+
+export type Supersede13fFilingKey = {
+  filer_cik: string;
+  filing_period: string; // YYYY-MM-DD (reporting quarter end)
+};
+
+export type Supersede13fFilingResult = { holdings: number } & SupersededArtifactCounts;
+
+// Supersede the prior 13F filing for a (filer, reporting period) so a 13F-HR/A
+// RESTATEMENT replaces — rather than double-counts or leaves stale — the original.
+// A restatement is a full-portfolio re-file, so deleting the whole period's rows is what
+// removes an issuer the amendment dropped (the stale-row bug, fra-kb2p). Deletes the
+// read-model rows, then retires the derived claims/events/documents via the shared
+// supersedeFilingArtifacts. Call inside the amendment's transaction so a failure leaves
+// neither the supersede nor the re-insert applied.
+export async function supersede13fFiling(
+  db: QueryExecutor,
+  key: Supersede13fFilingKey,
+): Promise<Supersede13fFilingResult> {
+  // Types are erased at runtime; an empty period would compare as `= ''` and supersede
+  // nothing silently, so fail loudly instead.
+  if (!key.filing_period) {
+    throw new Error("supersede13fFiling: filing_period is required");
+  }
+
+  // Delete the prior read-model rows for the whole (filer, period) portfolio, capturing
+  // the source(s) that produced them. One source per filing, so the per-issuer rows
+  // collapse to a single source id.
+  const deleted = await db.query<{ source_id: string }>(
+    `delete from institutional_holdings
+       where filer_cik = $1 and filing_period = $2::date
+     returning source_id::text as source_id`,
+    [key.filer_cik, key.filing_period],
+  );
+  // A filing that stored NO rows (an earlier restatement to an empty portfolio) can still
+  // have emitted exit claims for the period, so also collect the sources behind this
+  // filer's active position_change claims for it. Claims are stamped at the period's
+  // midnight UTC (the handler's occurredAt).
+  const claimSources = await db.query<{ source_id: string }>(
+    `select distinct reported_by_source_id::text as source_id
+       from claims
+      where attributed_to_type = 'institution' and attributed_to_id = $1
+        and effective_time = $2::date::timestamp at time zone 'UTC'
+        and starts_with(predicate, 'position_change.')
+        and superseded_at is null`,
+    [key.filer_cik, key.filing_period],
+  );
+  const sourceIds = [...new Set([...deleted.rows, ...claimSources.rows].map((r) => r.source_id))];
+  if (sourceIds.length === 0) return { holdings: 0, claims: 0, events: 0, documents: 0 };
+
+  const counts = await supersedeFilingArtifacts(db, {
+    sourceIds,
+    claimPredicate: { prefix: "position_change" },
+    eventType: "position_change",
+  });
+  return { holdings: deleted.rowCount ?? 0, ...counts };
 }
 
 export type IssuerTopHolder = {
@@ -127,20 +217,21 @@ export async function findFilerIssuerHolding(
   filerCik: string,
   issuerId: string,
   period: string,
-): Promise<{ shares: number; value_usd: number } | null> {
-  const { rows } = await db.query<{ shares: number | string; value_usd: number | string }>(
-    `select shares, value_usd
+): Promise<{ shares: number; value_usd: number; accession: string } | null> {
+  const { rows } = await db.query<{ shares: number | string; value_usd: number | string; accession: string }>(
+    `select shares, value_usd, accession
        from institutional_holdings
       where filer_cik = $1 and issuer_id = $2 and filing_period = $3::date
       limit 1`,
     [filerCik, issuerId, period],
   );
   const row = rows[0];
-  return row ? { shares: Number(row.shares), value_usd: Number(row.value_usd) } : null;
+  return row ? { shares: Number(row.shares), value_usd: Number(row.value_usd), accession: row.accession } : null;
 }
 
 // The filer's most recent reporting period strictly before `beforePeriod` (the
-// "prior period" for change detection), or null when this is their first.
+// "prior period" for change detection), or null when this is their first. Read from the
+// filed-periods table so an empty prior quarter isn't skipped for an older one.
 export async function priorPeriodForFiler(
   db: QueryExecutor,
   filerCik: string,
@@ -148,7 +239,7 @@ export async function priorPeriodForFiler(
 ): Promise<string | null> {
   const { rows } = await db.query<{ filing_period: string | null }>(
     `select to_char(max(filing_period), 'YYYY-MM-DD') as filing_period
-       from institutional_holdings
+       from institutional_filing_periods
       where filer_cik = $1 and filing_period < $2::date`,
     [filerCik, beforePeriod],
   );

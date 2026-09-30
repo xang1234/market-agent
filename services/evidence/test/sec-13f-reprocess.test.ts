@@ -253,3 +253,111 @@ test("reprocessFiler13f keeps per-filer rows distinct when two filers hold the s
   const rows = (await client.query<{ n: number }>(`select count(*)::int as n from institutional_holdings where issuer_id = $1`, [aapl])).rows[0]!.n;
   assert.equal(rows, 2, "two filers holding AAPL → two distinct rows (unique on filer_cik,issuer,period), not a collision");
 });
+
+test("reprocessFiler13f skips an original superseded by a 13F-HR/A amendment (does not re-add the stale portfolio)", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-reprocess-superseded");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  await seedIssuerWithCusip(client, "Apple Inc.", AAPL_CUSIP);
+
+  // Simulate the post-supersede state: a RESTATEMENT retired this original, so its
+  // read-model rows are gone and its document is parse_status='superseded'.
+  const ACC = "0001067983-26-000009";
+  const src = await client.query<{ id: string }>(
+    `insert into sources (provider, kind, trust_tier, license_class, retrieved_at)
+     values ('sec_edgar', 'filing', 'primary', 'public', now()) returning source_id::text as id`,
+  );
+  await client.query(
+    `insert into documents (source_id, provider_doc_id, kind, content_hash, raw_blob_id, parse_status)
+     values ($1, $2, 'filing', $3, $4, 'superseded')`,
+    [src.rows[0]!.id, ACC, `h-${ACC}`, `sha256:${ACC}`],
+  );
+
+  const txt = submission("03-31-2026", [{ name: "APPLE INC", cusip: AAPL_CUSIP, value: 200000, shares: 1000 }]);
+  const result = await reprocessFiler13f(
+    { db, secClient: fakeSecClient(ACC, txt), openfigi: OPENFIGI, openfigiFetch: fakeOpenFigiFetch() },
+    { cik: BERKSHIRE, now: NOW },
+  );
+
+  assert.equal(result.supersededSkipped, 1, "the superseded original is skipped");
+  assert.equal(result.accessionsProcessed, 0, "no reprocessing of the superseded original");
+  assert.equal(result.holdingsUpserted, 0);
+  assert.equal(
+    (await client.query<{ n: number }>(`select count(*)::int as n from institutional_holdings`)).rows[0]!.n,
+    0,
+    "the stale portfolio is NOT re-added under a fresh source",
+  );
+});
+
+test("reprocessFiler13f does not overwrite a holding row owned by another accession (13F-HR/A supplement)", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-reprocess-foreign-row");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  // One issuer, two share classes. Only GOOG resolves at first ingest.
+  const alphabetId = await seedIssuerWithCusip(client, "Alphabet Inc.", "02079K107"); // GOOG
+
+  // A NEW HOLDINGS supplement stores GOOG 200 under ITS accession.
+  const SUPP = "0001067983-26-000011";
+  const suppTxt = submission("03-31-2026", [{ name: "ALPHABET INC CL C", cusip: "02079K107", value: 2000, shares: 200 }], "NEW HOLDINGS");
+  await handle13f(
+    { cik: BERKSHIRE, form: "13F-HR/A", filedDate: "2026-05-20", accession: SUPP },
+    { db, objectStore: new MemoryObjectStore(), client: fakeSecClient(SUPP, suppTxt) } as unknown as FormHandlerDeps,
+  );
+
+  // GOOGL becomes resolvable to the same issuer; reprocessing the original would upsert
+  // GOOGL 100 onto (filer, issuer, period) and clobber the supplement's row.
+  await client.query(`insert into instruments (issuer_id, asset_type, cusip) values ($1, 'common_stock', '02079K305')`, [alphabetId]);
+  const ORIG = "0001067983-26-000010";
+  const origTxt = submission("03-31-2026", [{ name: "ALPHABET INC CL A", cusip: "02079K305", value: 1000, shares: 100 }]);
+  const countSources = async () => (await client.query<{ n: number }>(`select count(*)::int as n from sources`)).rows[0]!.n;
+  const sourcesBefore = await countSources();
+  const reprocessDeps = { db, secClient: fakeSecClient(ORIG, origTxt), openfigi: OPENFIGI, openfigiFetch: fakeOpenFigiFetch() };
+  const result = await reprocessFiler13f(reprocessDeps, { cik: BERKSHIRE, now: NOW });
+  await reprocessFiler13f(reprocessDeps, { cik: BERKSHIRE, now: NOW });
+
+  assert.equal(result.holdingsUpserted, 0, "the supplement-owned row is not overwritten");
+  assert.equal(await countSources(), sourcesBefore, "no orphan source minted when every row is skipped");
+  const row = await client.query<{ shares: string; accession: string }>(
+    `select shares, accession from institutional_holdings where issuer_id = $1 and filing_period = '2026-03-31'`,
+    [alphabetId],
+  );
+  assert.equal(Number(row.rows[0]!.shares), 200);
+  assert.equal(row.rows[0]!.accession, SUPP);
+});
+
+test("reprocessFiler13f skips an original whose period a 13F-HR/A RESTATEMENT already replaced", async (t) => {
+  if (!dockerAvailable()) return t.skip("docker unavailable");
+  const { databaseUrl } = await bootstrapDatabase(t, "f13f-reprocess-restated-period");
+  const client = await connectedClient(t, databaseUrl);
+  const db = client as unknown as QueryExecutor;
+  await seedIssuerWithCusip(client, "Apple Inc.", AAPL_CUSIP);
+
+  // Restatement ingested (original never was): AAPL 500 is the Q1 portfolio.
+  const AMEND = "0001067983-26-000021";
+  await handle13f(
+    { cik: BERKSHIRE, form: "13F-HR/A", filedDate: "2026-05-20", accession: AMEND },
+    {
+      db,
+      objectStore: new MemoryObjectStore(),
+      client: fakeSecClient(AMEND, submission("03-31-2026", [{ name: "APPLE INC", cusip: AAPL_CUSIP, value: 100000, shares: 500 }], "RESTATEMENT")),
+    } as unknown as FormHandlerDeps,
+  );
+
+  // Reprocessing the stale original (AAPL 1000 + NVDA) must not touch the restated period.
+  const ORIG = "0001067983-26-000020";
+  const origTxt = submission("03-31-2026", [
+    { name: "APPLE INC", cusip: AAPL_CUSIP, value: 200000, shares: 1000 },
+    { name: "NVIDIA CORP", cusip: NVDA_CUSIP, value: 90000, shares: 300 },
+  ]);
+  const result = await reprocessFiler13f(
+    { db, secClient: fakeSecClient(ORIG, origTxt), openfigi: OPENFIGI, openfigiFetch: fakeOpenFigiFetch() },
+    { cik: BERKSHIRE, now: NOW },
+  );
+
+  assert.equal(result.supersededSkipped, 1);
+  assert.equal(result.holdingsUpserted, 0);
+  const rows = await client.query<{ shares: string }>(`select shares from institutional_holdings where filing_period = '2026-03-31'`);
+  assert.deepEqual(rows.rows.map((r) => Number(r.shares)), [500]);
+});
