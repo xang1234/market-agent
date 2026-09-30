@@ -8,6 +8,7 @@ import {
   type LlmSettings,
 } from "./channel-config.ts";
 import { createDefaultPiLlmChatClient } from "./pi-adapter.ts";
+import { createReplayLlmChatClient } from "./replay-client.ts";
 import {
   createLlmRouter,
   type LlmChatClient,
@@ -17,6 +18,7 @@ export { buildLlmDeploymentOrder };
 
 export type LlmSettingsLoaderEnv = LlmEnv & {
   LLM_SETTINGS_ENV_FILE?: string;
+  LLM_REPLAY_FILE?: string;
 };
 
 export async function loadLlmSettingsFromEnv(
@@ -52,7 +54,11 @@ export async function createLlmRouterFromEnv(
 ): Promise<LlmRouterFromEnv | null> {
   const settings = await loadLlmSettingsFromEnv(env);
   if (buildLlmDeploymentOrder(settings).length === 0) return null;
-  const client = await (options.createClient ?? createDefaultPiLlmChatClient)();
+  const replayFile = readTrimmed(env.LLM_REPLAY_FILE);
+  const client = await (
+    options.createClient ??
+    (replayFile ? () => createReplayLlmChatClient(replayFile) : createDefaultPiLlmChatClient)
+  )();
   return createLlmRouter({ settings, client });
 }
 
