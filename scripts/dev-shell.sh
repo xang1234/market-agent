@@ -360,6 +360,12 @@ cleanup_failed_up() {
   fi
 }
 
+# Whether the LLM settings the services will load yield a deployable model; asks the llm
+# package itself (it prints the settings issues when not).
+llm_deployable() {
+  node --experimental-strip-types "$ROOT/services/llm/scripts/check-deployments.ts" >/dev/null
+}
+
 # Validates DEV_MODE (#123) and fails fast when a mode's live credentials are missing.
 check_dev_mode() {
   local missing=()
@@ -375,13 +381,17 @@ check_dev_mode() {
     echo "DEV_NO_KEYS=true (recorded replies) contradicts DEV_MODE=$DEV_MODE (live LLM); pick one" >&2
     return 1
   fi
-  [[ -n "${LITELLM_MODEL:-}" ]] || missing+=(LITELLM_MODEL)
   if [[ "$DEV_MODE" == "data" ]]; then
     [[ -n "${POLYGON_API_KEY:-}" ]] || missing+=(POLYGON_API_KEY)
     [[ -n "${SEC_EDGAR_USER_AGENT:-}" ]] || missing+=(SEC_EDGAR_USER_AGENT)
   fi
   if ((${#missing[@]} > 0)); then
     echo "DEV_MODE=$DEV_MODE needs live credentials in .env.dev: ${missing[*]} is not set" >&2
+    return 1
+  fi
+  # A set LITELLM_MODEL isn't enough: it must name a configured channel and model.
+  if ! llm_deployable; then
+    echo "DEV_MODE=$DEV_MODE needs a live LLM: set LLM_CHANNELS, the channel's settings and LITELLM_MODEL in .env.dev" >&2
     if [[ "$DEV_MODE" == "analyst" ]]; then
       echo "  (analyst mode runs a live LLM; for no keys at all use DEV_NO_KEYS=true)" >&2
     fi

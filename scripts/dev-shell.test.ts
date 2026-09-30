@@ -446,10 +446,13 @@ test("DEV_MODE=analyst: frozen dataset + the developer's live LLM, with per-comp
   assert.ok(lines("npm:").includes("chat:run seed:golden"), "the frozen dataset is seeded");
 });
 
-test("DEV_MODE=analyst fails fast without a live LLM, pointing at DEV_NO_KEYS", async () => {
-  const { result, trace } = await traceUp({ DEV_MODE: "analyst" });
+test("DEV_MODE=analyst fails fast without a deployable LLM, pointing at DEV_NO_KEYS", async () => {
+  // LITELLM_MODEL is set but names no configured channel: the llm check says no.
+  const { result, trace } = await traceUp({ DEV_MODE: "analyst", LITELLM_MODEL: "openai/gpt-4.1" }, [
+    "llm_deployable(){ return 1; }",
+  ]);
   assert.notEqual(result.code, 0);
-  assert.match(result.stderr, /analyst.*LITELLM_MODEL.*DEV_NO_KEYS/s);
+  assert.match(result.stderr, /analyst.*live LLM.*LITELLM_MODEL.*DEV_NO_KEYS/s);
   assert.equal(trace, "", "nothing starts");
 });
 
@@ -659,6 +662,8 @@ async function traceUp(envOverrides: Record<string, string> = {}, preamble: stri
       'start_process(){ local name="$1"; printf "start:%s\\n" "$name" >> "$TRACE_FILE"; sleep 60 >/dev/null 2>&1 & echo $! > "$PID_DIR/$name.pid"; }',
       'wait_for_service(){ printf "ready:%s\\n" "$1" >> "$TRACE_FILE"; }',
       "status(){ :; }",
+      // The real check runs services/llm, absent from the fixture; tests opt in to failure.
+      "llm_deployable(){ :; }",
       ...preamble,
       "up",
     ].join("\n"),
