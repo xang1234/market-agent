@@ -285,3 +285,10 @@ test("a sentence starting with a digit is still its own sentence", () => {
   const result = keepSupportedSentences("NVDA's revenue was $130.5B. 74.6% was AMD's margin.", [], figures);
   assert.deepEqual(result.removed, ["74.6% was AMD's margin."]);
 });
+
+test("sentences separated by a no-break space are still split", () => {
+  for (const space of [" ", " "]) {
+    const result = keepSupportedSentences(`NVDA led.${space}74.6% was AMD's margin.`, [], COMPARED);
+    assert.equal(result.removed.length, 1, JSON.stringify(space));
+  }
+});

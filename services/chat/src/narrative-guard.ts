@@ -34,9 +34,9 @@
 // it joins two numbers or words ("2025-2026").
 const NUMBER =
   /(?:(?<![A-Za-z0-9.])[-−](?:[A-Za-z]{1,4}\.?(?:[ \u00a0\u202f][A-Za-z]{1,4})?)?\p{Sc}?[ \u00a0\u202f]?)?\d+(?:,\d{3})*(?:\.\d+)?/gu;
-// Ordinary whitespace only: the formatter puts a no-break space inside a figure
-// ("-Cg. 3.1B"), prose separates sentences with ordinary spaces.
-const SENTENCE_BREAK = /(?<=[.!?])[^\S\u00a0\u202f]+/;
+// Not after "Cg.", the one dotted prefix the currency formatter writes
+// ("-Cg. 3.1B" is one figure); the all-currency test flags any new one.
+const SENTENCE_BREAK = /(?<=[.!?])(?<!\bCg\.)\s+/;
 const COMPARED_WITH = /(?:compared (?:with|to)|unlike|versus|vs\.?|than|relative to|against)\s+$/i;
 // Between a comparison company and a figure it owns: nothing but a possessive
 // or "at"/"with" ("versus AMD's 49.2%", "compared with AMD at 49.2%").
