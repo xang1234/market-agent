@@ -474,6 +474,7 @@ jobs:
             services/chat/package-lock.json
             services/financial-core/package-lock.json
             services/llm/package-lock.json
+            services/fundamentals/package-lock.json
 
       # Chat repository integration tests import the shared db/test Docker harness.
       - name: Install db deps (needed by chat integration harness)
@@ -490,6 +491,12 @@ jobs:
       # resolve from services/llm/node_modules.
       - name: Install llm deps (types reached by the chat typecheck)
         working-directory: services/llm
+        run: npm ci
+
+      # Chat's fact blocks read statements and key stats through fundamentals,
+      # which resolves its own dependencies (lossless-json) from its node_modules.
+      - name: Install fundamentals deps (imported by chat's fact blocks)
+        working-directory: services/fundamentals
         run: npm ci
 
       - name: Install chat deps

@@ -1,10 +1,10 @@
 // Frozen research dataset for the golden chat conversation (#118).
 //
-// Three issuers (NVDA, AMD, AAPL) with identity, eight fiscal quarters of
-// income-statement facts, a cached quote, and a short run of daily bars. Facts
-// are written through the evidence repo's createFact — the same validation path
-// live ingestion uses — so the golden test exercises real provenance, not a
-// bypass. Values are approximate, illustrative figures for tests and offline
+// Three issuers (NVDA, AMD, AAPL) with identity, eight fiscal quarters and two
+// fiscal years of income-statement facts, a cached quote, and a short run of
+// daily bars. Facts are written through the evidence repo's createFact — the
+// same validation path live ingestion uses — so the golden test exercises real
+// provenance, not a bypass. Values are approximate, illustrative figures for tests and offline
 // development; they are not a data source.
 //
 // ponytail: NVDA segment facts are not seeded. The default chat path has no
@@ -41,11 +41,18 @@ export type GoldenCompany = {
   ticker: string;
   legal_name: string;
   cik: string;
+  // Peers are companies in the same industry (fundamentals peer-set resolver).
+  sector: string;
+  industry: string;
   issuer_id: string;
   instrument_id: string;
   listing_id: string;
   quote: { price: number; prev_close: number };
   quarters: ReadonlyArray<Quarter>;
+  // Two fiscal years of annual statements, for the comparison's margins and
+  // year-over-year growth: [fiscal_year, start, end, revenue, gross_profit,
+  // operating_income, net_income] in USD millions.
+  years: ReadonlyArray<readonly [number, string, string, number, number, number, number]>;
 };
 
 // USD millions, oldest first.
@@ -69,6 +76,8 @@ export const GOLDEN_COMPANIES: ReadonlyArray<GoldenCompany> = Object.freeze([
     ticker: "NVDA",
     legal_name: "NVIDIA Corporation",
     cik: "0001045810",
+    sector: "Technology",
+    industry: "Semiconductors",
     issuer_id: "60000000-0000-4000-8000-000000000001",
     instrument_id: "61000000-0000-4000-8000-000000000001",
     listing_id: "62000000-0000-4000-8000-000000000001",
@@ -83,11 +92,17 @@ export const GOLDEN_COMPANIES: ReadonlyArray<GoldenCompany> = Object.freeze([
       [2026, "Q3", "2025-07-28", "2025-10-26", 57006, 41849, 36010, 31910],
       [2026, "Q4", "2025-10-27", "2026-01-25", 62100, 46200, 40300, 35400],
     ]),
+    years: [
+      [2025, "2024-01-29", "2025-01-26", 130497, 97859, 81454, 72880],
+      [2026, "2025-01-27", "2026-01-25", 209911, 148570, 126388, 112507],
+    ],
   },
   {
     ticker: "AMD",
     legal_name: "Advanced Micro Devices, Inc.",
     cik: "0000002488",
+    sector: "Technology",
+    industry: "Semiconductors",
     issuer_id: "60000000-0000-4000-8000-000000000002",
     instrument_id: "61000000-0000-4000-8000-000000000002",
     listing_id: "62000000-0000-4000-8000-000000000002",
@@ -102,11 +117,17 @@ export const GOLDEN_COMPANIES: ReadonlyArray<GoldenCompany> = Object.freeze([
       [2026, "Q1", "2025-12-28", "2026-03-28", 10700, 5780, 1520, 1400],
       [2026, "Q2", "2026-03-29", "2026-06-27", 11200, 6050, 1610, 1480],
     ]),
+    years: [
+      [2024, "2023-12-31", "2024-12-28", 25785, 12725, 401, 1641],
+      [2025, "2024-12-29", "2025-12-27", 34669, 17307, 3392, 4174],
+    ],
   },
   {
     ticker: "AAPL",
     legal_name: "Apple Inc.",
     cik: "0000320193",
+    sector: "Technology",
+    industry: "Consumer Electronics",
     issuer_id: "60000000-0000-4000-8000-000000000003",
     instrument_id: "61000000-0000-4000-8000-000000000003",
     listing_id: "62000000-0000-4000-8000-000000000003",
@@ -121,6 +142,10 @@ export const GOLDEN_COMPANIES: ReadonlyArray<GoldenCompany> = Object.freeze([
       [2026, "Q2", "2025-12-28", "2026-03-28", 98700, 46600, 30900, 25900],
       [2026, "Q3", "2026-03-29", "2026-06-27", 97100, 45700, 29800, 24900],
     ]),
+    years: [
+      [2024, "2023-10-01", "2024-09-28", 391035, 180683, 123216, 93736],
+      [2025, "2024-09-29", "2025-09-27", 416161, 195201, 133050, 112010],
+    ],
   },
 ]);
 
@@ -136,8 +161,8 @@ export async function seedGoldenDataset(client: Client): Promise<void> {
 
   for (const company of GOLDEN_COMPANIES) {
     await client.query(
-      `insert into issuers (issuer_id, legal_name, cik) values ($1::uuid, $2, $3)`,
-      [company.issuer_id, company.legal_name, company.cik],
+      `insert into issuers (issuer_id, legal_name, cik, sector, industry) values ($1::uuid, $2, $3, $4, $5)`,
+      [company.issuer_id, company.legal_name, company.cik, company.sector, company.industry],
     );
     await client.query(
       `insert into instruments (instrument_id, issuer_id, asset_type, share_class)
@@ -162,6 +187,34 @@ export async function seedGoldenDataset(client: Client): Promise<void> {
           fiscal_year: quarter.fiscal_year,
           fiscal_period: quarter.fiscal_period,
           value_num: quarter[metricKey],
+          unit: "currency",
+          currency: "USD",
+          as_of: GOLDEN_AS_OF,
+          reported_at: GOLDEN_AS_OF,
+          observed_at: GOLDEN_AS_OF,
+          source_id: SEC_FILING_SOURCE_ID,
+          method: "reported",
+          verification_status: "authoritative",
+          freshness_class: "filing_time",
+          coverage_level: "full",
+          entitlement_channels: ["app"],
+          confidence: 1,
+        });
+      }
+    }
+
+    for (const [fiscal_year, period_start, period_end, ...values] of company.years) {
+      for (const [index, metricKey] of INCOME_METRICS.entries()) {
+        await createFact(client, {
+          subject_kind: "issuer",
+          subject_id: company.issuer_id,
+          metric_id: metricIds.get(metricKey)!,
+          period_kind: "fiscal_y",
+          period_start,
+          period_end,
+          fiscal_year,
+          fiscal_period: "FY",
+          value_num: values[index] * 1e6,
           unit: "currency",
           currency: "USD",
           as_of: GOLDEN_AS_OF,

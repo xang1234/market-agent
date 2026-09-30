@@ -5,6 +5,18 @@
       "text": "NVIDIA revenue and margins"
     },
     {
+      "match": "How does NVDA compare with its peers?",
+      "text": "Against its closest industry peer, NVIDIA reports larger revenue and wider margins; the table below has the reported figures."
+    },
+    {
+      "match": "Explain the differences and show the evidence",
+      "text": "NVIDIA is far larger than AMD and converts more of its revenue into profit, as the table below shows; each figure links to its filing."
+    },
+    {
+      "match": "Compare it with AMD",
+      "text": "Side by side, NVIDIA reports much higher revenue and wider margins than AMD in their latest fiscal years."
+    },
+    {
       "match": "Write a concise investment research answer",
       "text": "NVIDIA's reported revenue rose in every quarter shown, and gross and operating profit rose with it. The chart and figures below carry the reported values and link to their filings."
     }

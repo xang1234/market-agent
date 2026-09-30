@@ -85,3 +85,24 @@ fixed rule, not a tool loop.
   value only, not unit (see the `ponytail:` note in the file).
 - A failure while building fact blocks degrades to a narrative-only answer; it never costs the user the answer.
 
+## Which companies a chat turn covers
+
+`resolveTurnSubjects` (`services/chat/src/coordinator.ts`) decides a turn's companies, primary first:
+
+1. The **whole message** is resolved first, so a bare ticker, a company name, or a theme behaves as before.
+2. Otherwise, **every ticker** the message mentions is resolved (`extractSubjectMentions`), de-duplicated by canonical
+   issuer (two listings of one company count once), and capped at 5.
+3. The **previous answer's companies** are prepended when the message names none ("explain the differences") or is
+   comparative ("compare it with AMD", "vs", "against", "peers"). They come from the last assistant message's sealed
+   snapshot `subject_refs`, re-hydrated via `hydrateSubjectRef` (`services/chat/src/thread-context.ts`). Naming a new
+   company without comparing replaces them ("analyze AAPL and its margins").
+
+The turn's fact blocks follow from that list:
+- one company gets the metric row and revenue chart;
+- two or more get a `metrics_comparison` of the latest fiscal year, via analyze's peer pipeline (key stats, then the
+  materializer, then the builder);
+- one company plus "peers" uses the industry peer set (`createSqlPeerSetResolver`).
+
+A block that names its own subjects (a comparison's issuers) adds them to the snapshot's subject refs. The model also
+sees the last 6 messages of the thread. The price-performance chart is tracked separately (#133).
+

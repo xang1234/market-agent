@@ -25,9 +25,12 @@ import {
   type ChatAnalystToolRuntimeToolCall,
   type ChatAssistantMessagePersistence,
   type ChatAssistantMessagePersistenceInput,
+  type ChatPriorSubjectsLoader,
   type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
-import { loadIssuerFactBlocks } from "./fact-blocks.ts";
+import { loadTurnFactBlocks } from "./fact-blocks.ts";
+import { loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
+import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import {
   composeAnalystBlocksWithLlm,
   createLlmThreadTitleModel,
@@ -42,6 +45,7 @@ import { createChatFinancialRuntime, type ChatFinancialRuntime } from "./financi
 import { createChatMessagePersistence } from "./messages.ts";
 import {
   preResolveChatSubjectWithResolver,
+  type ChatResolvedSubjectPreResolution,
   type ChatSubjectPreResolution,
   type ChatSubjectPreResolveRequest,
 } from "./subjects.ts";
@@ -82,8 +86,10 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const resolved = context.subjectPreResolution?.status === "resolved"
     ? context.subjectPreResolution
     : null;
-  const subjectRefs = resolved
-    ? [resolved.subject_ref]
+  // Every company the turn covers (primary first); see resolveTurnSubjects.
+  const covered = context.subjectPreResolutions ?? (resolved ? [resolved] : []);
+  const subjectRefs = covered.length > 0
+    ? covered.map((subject) => subject.subject_ref)
     : [{ kind: "screen" as const, id: context.threadId }];
   // Structured loaders key off the resolver's already-hydrated issuer/listings,
   // not the raw subject_ref — no SQL re-derivation of the subject graph.
@@ -147,16 +153,21 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     .filter((toolCall) => toolCall.status === "ok")
     .map((toolCall) => toolCall.tool_call_id);
   // Charts and tables come from facts, never from the model (see fact-blocks.ts).
-  const factBlocks = await loadIssuerFactBlocks(pool(), {
-    issuer: structuredRefs.issuer,
-    snapshotId: result.snapshot_id,
-    asOf,
-  });
+  const [factBlocks, conversation] = await Promise.all([
+    loadTurnFactBlocks(pool(), {
+      issuers: issuersOf(covered),
+      wantsPeers: /\bpeers?\b/i.test(context.userIntent ?? ""),
+      snapshotId: result.snapshot_id,
+      asOf,
+    }),
+    loadRecentConversation(pool(), { threadId: context.threadId, limit: CONVERSATION_MESSAGES }),
+  ]);
   const llmBlocks = await composeAnalystBlocksWithLlm({
     context,
     blocks: result.blocks,
     toolCalls,
     factBlocks,
+    conversation,
   });
   const normalize = (block: Record<string, unknown>, refs: typeof defaultRefs) =>
     normalizeAssistantBlock(block, {
@@ -176,6 +187,22 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     ],
   } satisfies ChatAnalystToolRuntimeResult;
 };
+
+const CONVERSATION_MESSAGES = 6;
+
+// The previous answer's companies, for follow-ups ("compare it with AMD").
+export const loadPriorSubjects: ChatPriorSubjectsLoader = ({ threadId }) =>
+  loadThreadPriorSubjects(pool(), { threadId });
+
+function issuersOf(subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>): IssuerSubjectRef[] {
+  const seen = new Set<string>();
+  return subjects.flatMap((subject) => {
+    const issuer = structuredRefsFromHandoff(subject.handoff).issuer;
+    if (issuer === null || seen.has(issuer.id)) return [];
+    seen.add(issuer.id);
+    return [{ kind: "issuer" as const, id: issuer.id }];
+  });
+}
 
 const NO_DEFAULT_REFS = Object.freeze({
   source_refs: [],
@@ -473,8 +500,28 @@ function normalizeAssistantBlock(
       : input.defaultRefs.provenance_fact_refs,
     tool_call_ids: input.toolCallIds,
     as_of: input.asOf,
-    subject_refs: input.subjectRefs,
+    // The turn's companies plus any the block names itself (a comparison names
+    // its issuers), so the sealed manifest covers every subject shown.
+    subject_refs: distinctSubjectRefs([...input.subjectRefs, ...blockSubjectRefs(block)]),
   };
+}
+
+function blockSubjectRefs(block: Record<string, unknown>): SnapshotSubjectRef[] {
+  const named = [
+    ...(Array.isArray(block.subject_refs) ? block.subject_refs : []),
+    ...(Array.isArray(block.subjects) ? block.subjects : []),
+  ];
+  return named.filter(isSnapshotSubjectRef);
+}
+
+function distinctSubjectRefs(refs: ReadonlyArray<SnapshotSubjectRef>): SnapshotSubjectRef[] {
+  const seen = new Set<string>();
+  return refs.filter((ref) => {
+    const key = `${ref.kind}:${ref.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function snapshotIdFromBlocks(blocks: ReadonlyArray<Record<string, unknown>>): string {
