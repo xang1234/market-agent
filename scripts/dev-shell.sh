@@ -208,7 +208,7 @@ stop_process() {
   local pid
   pid="$(cat "$pid_file")"
   kill "$pid" 2>/dev/null || true
-  rm -f "$pid_file"
+  rm -f "$pid_file" "$PID_DIR/$name.launch-env"
 }
 
 start_process() {
@@ -419,35 +419,44 @@ stop_parked_processes() {
   done
 }
 
-# Vite bakes VITE_* into the client when the process serving the UI starts, so a
-# running one keeps stale flags (e.g. VITE_MA_FLAG_DEV_AUTO_LOGIN=false) until restarted.
-WEB_VITE_ENV_STAMP="$PID_DIR/web.vite-env"
-
-web_vite_env() {
-  env | grep '^VITE_' | LC_ALL=C sort || true
+# `up` leaves running processes alone, but some settings are read only at start:
+# Vite bakes VITE_* into the client (web, or app under chat), and chat/dev-api build
+# their LLM router from LLM_*/LITELLM_* (DEV_NO_KEYS rewrites those). Each such process
+# gets a stamp of that env when it starts; a running one whose stamp differs is
+# restarted. The stamp is a checksum so LLM API keys are not copied into .dev.
+launch_env_pattern() {
+  local llm='LLM_|LITELLM_|AGENT_LITELLM_'
+  case "$1" in
+    web) printf '^VITE_' ;;
+    app) printf '^(VITE_|%s)' "$llm" ;;
+    chat | dev-api) printf '^(%s)' "$llm" ;;
+    *) return 1 ;;
+  esac
 }
 
-# The process that runs Vite: web on its own, or the one-process app under chat.
-ui_process() {
-  if [[ "$DEV_PROFILE" == "chat" ]]; then
-    printf app
-  else
-    printf web
-  fi
+launch_env_checksum() {
+  local pattern
+  pattern="$(launch_env_pattern "$1")" || return 0
+  { env | grep -E "$pattern" || true; } | LC_ALL=C sort | cksum
 }
 
-restart_web_if_vite_env_changed() {
-  local attempt name
-  name="$(ui_process)"
-  if ! process_running "$PID_DIR/$name.pid"; then
-    return 0
-  fi
-  if [[ "$(cat "$WEB_VITE_ENV_STAMP" 2>/dev/null)" == "$(web_vite_env)" ]]; then
-    return 0
-  fi
-  stop_process "$name"
-  # Wait for the port so the restarted Vite doesn't drift to the next free one.
-  wait_for_port_free "$(service_port "$name")"
+write_launch_env_stamp() {
+  launch_env_pattern "$1" >/dev/null || return 0
+  launch_env_checksum "$1" >"$PID_DIR/$1.launch-env"
+}
+
+restart_if_launch_env_changed() {
+  local name
+  for name in "$@"; do
+    launch_env_pattern "$name" >/dev/null || continue
+    process_running "$PID_DIR/$name.pid" || continue
+    if [[ "$(cat "$PID_DIR/$name.launch-env" 2>/dev/null)" == "$(launch_env_checksum "$name")" ]]; then
+      continue
+    fi
+    stop_process "$name"
+    # Wait for the port so the restarted server doesn't drift to the next free one.
+    wait_for_port_free "$(service_port "$name")"
+  done
 }
 
 # SIGTERM and server shutdown are asynchronous: a stopped process can hold its port
@@ -599,7 +608,8 @@ up() {
   export EVIDENCE_ORIGIN="${EVIDENCE_ORIGIN:-http://127.0.0.1:$EVIDENCE_PORT}"
   export ANALYST_GRIDS_ORIGIN="${ANALYST_GRIDS_ORIGIN:-http://127.0.0.1:$ANALYST_GRIDS_PORT}"
 
-  restart_web_if_vite_env_changed
+  # shellcheck disable=SC2086
+  restart_if_launch_env_changed $services
   for name in $services; do
     start_and_track_process "$name" "$(service_dir "$name")" "$(service_command "$name")"
   done
@@ -613,7 +623,9 @@ up() {
       return 1
     fi
   done
-  web_vite_env >"$WEB_VITE_ENV_STAMP"
+  for name in $services; do
+    write_launch_env_stamp "$name"
+  done
 
   status
 }

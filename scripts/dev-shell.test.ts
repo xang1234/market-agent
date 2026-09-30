@@ -378,6 +378,53 @@ test("DEV_NO_KEYS from the command line wins over the env file", async () => {
   assert.equal(result.stdout.trim(), "true|fixture");
 });
 
+test("turning on DEV_NO_KEYS restarts the running processes that own the LLM runtime, and only those", async () => {
+  // .env.dev already hides the Settings UI, so the VITE_* stamp alone would not change.
+  const { result, trace } = await traceUp({ VITE_MA_FLAG_LLM_SETTINGS: "false" }, [
+    'stop_process(){ printf "stop:%s\\n" "$1" >> "$TRACE_FILE"; kill "$(cat "$PID_DIR/$1.pid")" 2>/dev/null; rm -f "$PID_DIR/$1.pid"; }',
+    "port_listening(){ return 1; }",
+    'mkdir -p "$ROOT/services/chat"',
+    "up",
+    'printf "mark:no-keys\\n" >> "$TRACE_FILE"',
+    "DEV_NO_KEYS=true",
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  const [, noKeys] = trace.split(/mark:\S+\n/);
+  const stopped = noKeys.split("\n").filter((l) => l.startsWith("stop:")).map((l) => l.slice(5)).sort();
+  assert.deepEqual(stopped, ["chat", "dev-api"], "chat and dev-api run the LLM; the rest keep running");
+});
+
+test("under DEV_PROFILE=chat, turning on DEV_NO_KEYS restarts the app process", async () => {
+  const { result, trace } = await traceUp({ DEV_PROFILE: "chat", VITE_MA_FLAG_LLM_SETTINGS: "false" }, [
+    'stop_process(){ printf "stop:%s\\n" "$1" >> "$TRACE_FILE"; kill "$(cat "$PID_DIR/$1.pid")" 2>/dev/null; rm -f "$PID_DIR/$1.pid"; }',
+    "port_listening(){ return 1; }",
+    'mkdir -p "$ROOT/services/chat"',
+    "up",
+    'printf "mark:no-keys\\n" >> "$TRACE_FILE"',
+    "DEV_NO_KEYS=true",
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  const [, noKeys] = trace.split(/mark:\S+\n/);
+  assert.match(noKeys, /^stop:app$/m);
+  assert.match(noKeys, /^start:app$/m);
+});
+
+test("launch-env stamps are checksums, so LLM API keys are not copied into .dev", async () => {
+  const fixture = await createShellFixture({ LLM_OPENAI_API_KEY: "sk-secret-value" });
+  const result = await runBash(
+    [
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      "write_launch_env_stamp chat",
+      'cat "$PID_DIR/chat.launch-env"',
+    ].join("\n"),
+    fixture.root,
+  );
+  await rm(fixture.root, { recursive: true, force: true });
+  assert.equal(result.code, 0, result.stderr);
+  assert.ok(result.stdout.trim().length > 0);
+  assert.doesNotMatch(result.stdout, /sk-secret-value/);
+});
+
 test("DEV_NO_KEYS=true seeds the golden dataset after the dev seeds", async () => {
   const { result, lines } = await traceUp({ DEV_NO_KEYS: "true" }, [
     'npm(){ printf "npm:%s:%s\\n" "${PWD##*/}" "$*" >> "$TRACE_FILE"; }',
