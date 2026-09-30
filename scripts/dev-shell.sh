@@ -7,9 +7,11 @@ if [[ ! -f "$ENV_FILE" ]]; then
   ENV_FILE="$ROOT/.env.dev.example"
 fi
 
-# DEV_PROFILE is a per-invocation switch (DEV_PROFILE=chat ./scripts/dev-shell.sh up),
-# so the caller's value beats the env file's.
+# DEV_PROFILE and DEV_NO_KEYS are per-invocation switches
+# (DEV_PROFILE=chat DEV_NO_KEYS=true ./scripts/dev-shell.sh up), so the caller's value
+# beats the env file's.
 CALLER_DEV_PROFILE="${DEV_PROFILE:-}"
+CALLER_DEV_NO_KEYS="${DEV_NO_KEYS:-}"
 
 set -a
 # shellcheck source=/dev/null
@@ -17,6 +19,7 @@ source "$ENV_FILE"
 set +a
 
 DEV_PROFILE="${CALLER_DEV_PROFILE:-${DEV_PROFILE:-}}"
+DEV_NO_KEYS="${CALLER_DEV_NO_KEYS:-${DEV_NO_KEYS:-}}"
 
 # Defaults for variables that may be missing from an older .env.dev so `set -u`
 # expansion below doesn't abort, and so child processes receive them.
@@ -30,9 +33,11 @@ DEV_PROFILE="${CALLER_DEV_PROFILE:-${DEV_PROFILE:-}}"
 : "${DISCOVERY_ENABLED:=false}"
 : "${DISCOVERY_WORKER_POLL_MS:=1000}"
 : "${DEV_PROFILE:=full}"
+# No API keys needed: recorded LLM replies + the golden frozen dataset (#122).
+: "${DEV_NO_KEYS:=false}"
 # The one-process chat-profile app serves the web UI, so it takes the web port.
 : "${APP_PORT:=${WEB_PORT:-5173}}"
-export HOME_PORT EVIDENCE_PORT DEV_PROVIDERS_PORT ANALYST_GRIDS_PORT HOME_PULSE_TICKERS ENABLE_UNOFFICIAL_DEV_PROVIDERS DISCOVERY_ENABLED DISCOVERY_WORKER_POLL_MS DEV_PROFILE APP_PORT
+export HOME_PORT EVIDENCE_PORT DEV_PROVIDERS_PORT ANALYST_GRIDS_PORT HOME_PULSE_TICKERS ENABLE_UNOFFICIAL_DEV_PROVIDERS DISCOVERY_ENABLED DISCOVERY_WORKER_POLL_MS DEV_PROFILE DEV_NO_KEYS APP_PORT
 
 # HTTP dev services, in start order. DEV_PROFILE=chat runs only what the golden chat
 # conversation needs (#117), as one process: services/app hosts APP_SERVES (#122).
@@ -307,6 +312,15 @@ configure_runtime_env() {
   # The web app starts signed in with the dev mock session (#122); set false to test sign-in.
   export VITE_MA_FLAG_DEV_AUTO_LOGIN
   VITE_MA_FLAG_DEV_AUTO_LOGIN="${VITE_MA_FLAG_DEV_AUTO_LOGIN:-true}"
+  if [[ "$DEV_NO_KEYS" == "true" ]]; then
+    # The golden test's recorded replies (services/chat/test/golden), on the same
+    # fixture channel it uses. Overrides whatever .env.dev set: the settings file is
+    # dropped (it would override the process env) and the Settings UI hidden.
+    export LLM_CHANNELS=fixture LLM_FIXTURE_PROTOCOL=openai LLM_FIXTURE_MODELS=recorded
+    export LITELLM_MODEL=fixture/recorded LITELLM_FALLBACK_MODELS="" AGENT_LITELLM_MODEL=""
+    export LLM_REPLAY_FILE="$ROOT/services/chat/test/golden/llm-replies.json"
+    export LLM_SETTINGS_ENV_FILE="" MA_FLAG_LLM_SETTINGS=false VITE_MA_FLAG_LLM_SETTINGS=false
+  fi
   if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
     export DEV_PROVIDERS_ORIGIN
     DEV_PROVIDERS_ORIGIN="${DEV_PROVIDERS_ORIGIN:-http://127.0.0.1:$DEV_PROVIDERS_PORT}"
@@ -556,6 +570,12 @@ up() {
   fi
 
   if ! (cd "$ROOT/db" && npm run seed); then
+    cleanup_failed_up
+    return 1
+  fi
+
+  # Idempotent; fails (all-or-nothing) if provider-hydrated tickers already clash.
+  if [[ "$DEV_NO_KEYS" == "true" ]] && ! (cd "$ROOT/services/chat" && npm run seed:golden); then
     cleanup_failed_up
     return 1
   fi

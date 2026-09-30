@@ -341,6 +341,63 @@ test("under DEV_PROFILE=chat a VITE_* change restarts the app process, which ser
   assert.match(optOut, /^start:app$/m);
 });
 
+test("DEV_NO_KEYS=true pins recorded LLM replies and ignores .env.dev's LLM settings", async () => {
+  const printLlmEnv =
+    'printf "%s|%s|%s|%s|%s|<%s>|<%s>|%s" "${LLM_CHANNELS:-}" "${LLM_FIXTURE_MODELS:-}" "${LITELLM_MODEL:-}" "${LLM_REPLAY_FILE:-}" "${VITE_MA_FLAG_LLM_SETTINGS:-}" "${LITELLM_FALLBACK_MODELS-unset}" "${LLM_SETTINGS_ENV_FILE-unset}" "${MA_FLAG_LLM_SETTINGS:-}"';
+
+  // A developer's real LLM settings in the env file must not leak into no-keys mode.
+  const on = await createShellFixture({
+    DEV_NO_KEYS: "true",
+    LLM_CHANNELS: "openai",
+    LITELLM_MODEL: "openai/gpt-4.1",
+    LITELLM_FALLBACK_MODELS: "openai/o3",
+  });
+  const onResult = await runBash(["MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh", printLlmEnv].join("\n"), on.root);
+  const root = await realpath(on.root);
+  await rm(on.root, { recursive: true, force: true });
+  assert.equal(onResult.code, 0, onResult.stderr);
+  assert.equal(
+    onResult.stdout.trim(),
+    `fixture|recorded|fixture/recorded|${root}/services/chat/test/golden/llm-replies.json|false|<>|<>|false`,
+  );
+
+  const off = await createShellFixture();
+  const offResult = await runBash(["MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh", 'printf "<%s>" "${LLM_REPLAY_FILE:-}"'].join("\n"), off.root);
+  await rm(off.root, { recursive: true, force: true });
+  assert.equal(offResult.stdout.trim(), "<>", "no replay unless asked");
+});
+
+test("DEV_NO_KEYS from the command line wins over the env file", async () => {
+  const fixture = await createShellFixture({ DEV_NO_KEYS: "false" });
+  const result = await runBash(
+    ["export DEV_NO_KEYS=true", "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh", 'printf "%s|%s" "$DEV_NO_KEYS" "${LLM_CHANNELS:-}"'].join("\n"),
+    fixture.root,
+  );
+  await rm(fixture.root, { recursive: true, force: true });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout.trim(), "true|fixture");
+});
+
+test("DEV_NO_KEYS=true seeds the golden dataset after the dev seeds", async () => {
+  const { result, lines } = await traceUp({ DEV_NO_KEYS: "true" }, [
+    'npm(){ printf "npm:%s:%s\\n" "${PWD##*/}" "$*" >> "$TRACE_FILE"; }',
+    "export -f npm",
+    'mkdir -p "$ROOT/services/chat"',
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  const npm = lines("npm:");
+  assert.ok(npm.indexOf("chat:run seed:golden") > npm.indexOf("db:run seed"), npm.join(", "));
+});
+
+test("without DEV_NO_KEYS, up does not seed the golden dataset", async () => {
+  const { result, lines } = await traceUp({}, [
+    'npm(){ printf "npm:%s:%s\\n" "${PWD##*/}" "$*" >> "$TRACE_FILE"; }',
+    "export -f npm",
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.ok(!lines("npm:").some((l) => l.includes("seed:golden")));
+});
+
 test("unofficial dev providers are opt-in and set a local sidecar origin", async () => {
   const disabled = await createShellFixture();
   const disabledResult = await runBash(
