@@ -28,11 +28,15 @@
 // prompt asks the model to use the label. Add legal-name aliases if the eval
 // shows "NVIDIA" sentences being dropped (#144).
 
-// A leading minus is part of the figure ("-10.0%" is not "10.0%", "-$3.1B" is
-// not "$3.1B"), unless it joins two numbers or words ("2025-2026").
-const NUMBER = /(?:(?<![A-Za-z0-9.])[-−][$€£¥]?)?\d+(?:,\d{3})*(?:\.\d+)?/g;
+// A leading minus is part of the figure ("-10.0%" is not "10.0%"), across the
+// currency prefix the formatter writes ("-$3.1B", "-CN¥3.1B", "-CHF 3.1B"),
+// unless it joins two numbers or words ("2025-2026").
+const NUMBER = /(?:(?<![A-Za-z0-9.])[-−][A-Z]{0,3}\p{Sc}?[ \u00a0]?)?\d+(?:,\d{3})*(?:\.\d+)?/gu;
 const SENTENCE_BREAK = /(?<=[.!?])\s+/;
 const COMPARED_WITH = /(?:compared (?:with|to)|unlike|versus|vs\.?|than|relative to|against)\s+$/i;
+// Between a comparison company and a figure it owns: nothing but a possessive
+// or "at"/"with" ("versus AMD's 49.2%", "compared with AMD at 49.2%").
+const ATTACHED = /^(?:['’]s)?\s*(?:(?:at|with)\s+)?$/i;
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition
 // ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
@@ -88,17 +92,21 @@ export function keepSupportedSentences(
         const from = Math.max(i === 0 ? 0 : attributed[i - 1].end, usedUpTo);
         const to = i === attributed.length - 1 ? sentence.length : attributed[i + 1].index;
         const stretch = named.filter((mention) => mention.index >= from && mention.index < index);
-        // A company introduced as a comparison yields to the figure's own
-        // subject: another company ("Compared with AMD, NVDA's 74.6%") or a
-        // pronoun ("Compared with AMD, its 49.2%"). Alone, it is the owner
-        // ("versus AMD's 49.2%").
+        // A company introduced as a comparison is not the figure's owner
+        // ("Unlike AMD, the company achieved 49.2%"; "Compared with AMD,
+        // NVDA's 74.6%"), unless it is directly attached to the figure
+        // ("NVDA grew faster, versus AMD's 49.2%"), which then outranks any
+        // other company in the stretch.
         const comparisons = stretch.filter((mention) => COMPARED_WITH.test(sentence.slice(0, mention.index)));
         const subjects = stretch.filter((mention) => !comparisons.includes(mention));
         // A pronoun with no company subject ("Its margin was 49.2% in AMD's
         // filing") refers back to an earlier figure's company in the sentence,
         // if any: nothing named near this figure may claim it.
         const pronounSubject = subjects.length === 0 && PRONOUN.test(sentence.slice(from, index));
-        const before = subjects.length > 0 ? subjects : pronounSubject ? [] : comparisons;
+        const attached = comparisons.filter((mention) =>
+          ATTACHED.test(sentence.slice(mention.index + mention.company.length, index))
+        );
+        const before = attached.length > 0 ? attached : subjects;
         // Only the first name after it, and only when a preposition ties it to
         // the figure ("74.6% for NVDA"); "49.2%, exceeding AMD" names a comparison.
         const next = named.find((mention) => mention.index >= end && mention.index < to);
@@ -160,7 +168,7 @@ function maskMentions(sentence: string, named: ReadonlyArray<{ company: string; 
 // The comparable value: "62.1" for "$62.1B", "-10" for "-10.0%", and "-0" kept
 // apart from "0" ("-0.0%" is a displayed decline).
 function numberKey(raw: string): string {
-  const value = Number(raw.replace("−", "-").replace(/[$€£¥,]/g, ""));
+  const value = Number(raw.replace("−", "-").replace(/[^\d.-]/g, ""));
   return Object.is(value, -0) ? "-0" : String(value);
 }
 

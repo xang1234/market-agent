@@ -242,3 +242,23 @@ test("a one-letter ticker is never read as a company mention", () => {
   assert.equal(keepSupportedSentences("A margin of 74.6% makes AMD the leader.", [], withTickerA).removed.length, 1);
   assert.deepEqual(keepSupportedSentences("AMD's margin is 49.2%.", [], withTickerA).removed, []);
 });
+
+test("a company introduced as a comparison owns a figure only when directly attached to it (#146)", () => {
+  assert.equal(
+    keepSupportedSentences("NVDA led. Unlike AMD, the company achieved a 49.2% margin.", [], COMPARED).removed.length,
+    1,
+  );
+  assert.equal(keepSupportedSentences("Unlike AMD, the company achieved a 49.2% margin.", [], COMPARED).removed.length, 1);
+  // Directly attached, the comparison names the figure's owner.
+  assert.deepEqual(keepSupportedSentences("NVDA grew faster, versus AMD's 49.2% margin.", [], COMPARED).removed, []);
+  assert.deepEqual(keepSupportedSentences("NVDA grew faster, compared with AMD at 49.2%.", [], COMPARED).removed, []);
+});
+
+test("the minus sign carries across a currency-code prefix (#147)", () => {
+  for (const displayed of ["-CN¥3.1B", "-CA$3.1B", "-HK$3.1B", "-CHF 3.1B", "-₹3.1B"]) {
+    assert.equal(keepSupportedSentences("Operating income was $3.1B.", [displayed]).removed.length, 1, displayed);
+    assert.deepEqual(keepSupportedSentences(`Operating income was ${displayed}.`, [displayed]).removed, [], displayed);
+  }
+  // A hyphen inside a word or between numbers is still not a sign.
+  assert.deepEqual(keepSupportedSentences("Revenue rose over 2025-2026.", ["FY 2025 to FY 2026"]).removed, []);
+});
