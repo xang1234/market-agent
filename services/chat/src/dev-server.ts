@@ -1,4 +1,5 @@
 import type { Server } from "node:http";
+import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 import { createChatServer } from "./http.ts";
 import { loadChatServerOptionsFromEnv } from "./runtime.ts";
@@ -9,6 +10,8 @@ import {
   writeAndPublishRunActivity,
 } from "../../observability/src/run-activity.ts";
 
+const SERVICE_DIR = fileURLToPath(new URL("..", import.meta.url));
+
 // The chat dev server, unlistened, so it can run alone (dev.ts) or inside the
 // one-process dev app (services/app, #122).
 export async function buildChatDevServer(
@@ -18,7 +21,9 @@ export async function buildChatDevServer(
   const runActivityAgentId = env.CHAT_RUN_ACTIVITY_AGENT_ID;
   const threadTitleModelModule = env.CHAT_THREAD_TITLE_MODEL_MODULE;
 
-  const baseOptions = await loadChatServerOptionsFromEnv();
+  // Relative *_MODULE settings resolve from services/chat, as they do standalone, even
+  // when the one-process app (cwd services/app) builds this server.
+  const baseOptions = await loadChatServerOptionsFromEnv(env, SERVICE_DIR);
   const pool = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null;
   if (pool && !baseOptions.generateThreadTitle && threadTitleModelModule) {
     const module = await import(threadTitleModelModule);
