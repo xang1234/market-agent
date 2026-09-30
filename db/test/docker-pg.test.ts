@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import * as dockerPg from "./docker-pg.ts";
 
 type Cleanup = () => void | Promise<void>;
@@ -230,15 +229,18 @@ test("stopPostgres removes the container's data volume, so test databases leave 
     return;
   }
   const containerName = dockerPg.createContainerName("volume-cleanup");
+  // Cleans up even if an assertion below throws; a second rm is harmless.
+  t.after(() => dockerPg.stopPostgres(containerName));
   dockerPg.startPostgres(containerName, "postgres");
-  const inspect = spawnSync("docker", ["inspect", "--format", "{{range .Mounts}}{{.Name}} {{end}}", containerName], { encoding: "utf8" });
+  // dockerPg.run bounds every docker call, so a wedged daemon cannot hang the job.
+  const inspect = dockerPg.run("docker", ["inspect", "--format", "{{range .Mounts}}{{.Name}} {{end}}", containerName], { timeoutMs: 15_000 });
   const volumes = inspect.stdout.trim().split(/\s+/).filter(Boolean);
   assert.ok(volumes.length > 0, "postgres declares a data volume");
 
   dockerPg.stopPostgres(containerName);
 
   for (const volume of volumes) {
-    const exists = spawnSync("docker", ["volume", "inspect", volume], { encoding: "utf8" });
+    const exists = dockerPg.run("docker", ["volume", "inspect", volume], { timeoutMs: 15_000 });
     assert.notEqual(exists.status, 0, `volume ${volume} was left behind`);
   }
 });
