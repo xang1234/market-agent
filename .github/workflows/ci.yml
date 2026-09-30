@@ -40,6 +40,47 @@ jobs:
 
       - run: npm test
 
+  golden-e2e:
+    name: golden conversation (Playwright, no keys)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # The same path a developer runs (#122): one app process + Postgres, the golden
+      # frozen dataset, recorded model replies, auto-login. No API keys in CI.
+      - name: Start the no-keys chat stack
+        run: DEV_PROFILE=chat DEV_NO_KEYS=true ./scripts/dev-shell.sh up
+
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the golden conversation in a browser
+        working-directory: web
+        run: npm run e2e
+
+      - name: Upload Playwright report and dev logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-e2e-debug
+          path: |
+            web/playwright-report
+            web/test-results
+            .dev/logs
+          retention-days: 7
+
+      - name: Stop the stack
+        if: always()
+        run: ./scripts/dev-shell.sh down
+
   db:
     name: db (integration tests)
     runs-on: ubuntu-latest
