@@ -37,3 +37,11 @@ test('RevenueBars falls back to a stub height + em-dash when magnitude/format ar
   assert.match(html, /height:60%/)
   assert.match(html, /—/)
 })
+
+test('RevenueBars wires each bar value to its backing fact via InspectableRef', () => {
+  const html = renderToStaticMarkup(<RevenueBars block={revenueBarsFixture} />)
+
+  for (const bar of revenueBarsFixture.bars) {
+    assert.match(html, new RegExp(`data-inspection-kind="fact" data-inspection-id="${bar.value_ref}"`))
+  }
+})

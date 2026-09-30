@@ -64,3 +64,24 @@ history next to verified ones, and the evidence inspector only works on sealed s
 disappears on reload, which is acceptable for a debugging mode. The server refuses to start with `display_unverified`
 when `NODE_ENV=production`.
 
+## Charts and tables in chat answers
+
+Chat answers carry deterministic fact blocks (`services/chat/src/fact-blocks.ts`). For a resolved company, those are
+a latest-quarter `metric_row` and a `revenue_bars` chart covering 8 quarters. Both are built from reported facts
+through the shared eligibility reader (`loadRecentIssuerFundamentals`), with no model involvement. Block choice is a
+fixed rule, not a tool loop.
+
+- Every value cites its fact (`value_ref`), and the fact is bound in `data_ref.params.fact_bindings`. Bindings come
+  from the same loader the seal verifies with (`loadVerifierFactsForRefs`), so they match by construction. Only facts
+  that loader returns are rendered.
+- **Chat seals one snapshot per message.** Fact blocks join the message's existing staged manifest: their facts go in
+  via `provenance_fact_refs`, and the tool-call audit still applies to the narrative. They don't use
+  `buildFactBackedSealInput`, which seals per block. `normalizeAssistantBlock` keeps `data_ref.params`, and fact
+  blocks don't inherit the narrative's default claim/document refs, because the verifier would then demand those
+  sources on the chart.
+- **Narrative guard** (`narrative-guard.ts`): when fact blocks are shown, the model is given the displayed figures
+  and told not to compute new ones. Any sentence whose numbers don't appear in the displayed figures or in a cited
+  claim is dropped. If nothing survives, a fixed pointer to the figures is shown instead. Numbers are compared by
+  value only, not unit (see the `ponytail:` note in the file).
+- A failure while building fact blocks degrades to a narrative-only answer; it never costs the user the answer.
+
