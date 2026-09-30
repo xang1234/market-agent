@@ -36,10 +36,11 @@
 // its digits, so a Markdown bullet ("- 3.1%") is not a sign.
 const NUMBER =
   /(?:(?<![A-Za-z0-9.])[-−](?:(?:[A-Za-z]{1,4}\.?(?:[ \u00a0\u202f][A-Za-z]{1,4})?\p{Sc}?|\p{Sc})[ \u00a0\u202f]?)?)?\d+(?:,\d{3})*(?:\.\d+)?/gu;
-// Not inside the formatter's one dotted prefix, a signed "-Cg." plus a no-break
-// space ("-Cg. 3.1B" is one figure; prose "in Cg. 74.6%" still splits); the
-// all-currency test flags any new dotted prefix.
-const SENTENCE_BREAK = /(?<=[.!?])(?!(?<=[-−]Cg\.)\u00a0)\s+/;
+// Not inside the formatter's one dotted prefix: a signed "-Cg.", a no-break
+// space and a complete currency amount ("-Cg. 3.1B" is one figure; prose
+// "in Cg. 74.6%" or "-Cg. 74.6%" still splits); the all-currency test flags
+// any new dotted prefix.
+const SENTENCE_BREAK = /(?<=[.!?])(?!(?<=[-−]Cg\.)\u00a0\d+(?:,\d{3})*(?:\.\d+)?[KMBT]?(?![\d%]|[.,]\d))\s+/;
 const COMPARED_WITH = /(?:compared (?:with|to)|unlike|versus|vs\.?|than|relative to|against)\s+$/i;
 // Between a comparison company and a figure it owns: nothing but a possessive
 // or "at"/"with" ("versus AMD's 49.2%", "compared with AMD at 49.2%").

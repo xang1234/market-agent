@@ -329,3 +329,10 @@ test("a ticker that is also a currency prefix does not break that currency's fig
   assert.deepEqual(keepSupportedSentences("CHF's operating income was -CHF 3.1B.", [], figures).removed, []);
   assert.equal(keepSupportedSentences("AMD's operating income was -CHF 3.1B.", [], figures).removed.length, 1);
 });
+
+test("'-Cg.' ends a sentence unless a complete currency figure follows", () => {
+  const figures = [{ company: "NVDA", value: "-74.6%" }, { company: "AMD", value: "74.6%" }];
+  const result = keepSupportedSentences("NVDA reports in -Cg. 74.6% was AMD's margin.", [], figures);
+  // Split: NVDA no longer lends its name to a figure in the next sentence.
+  assert.deepEqual(result.removed, ["74.6% was AMD's margin."]);
+});
