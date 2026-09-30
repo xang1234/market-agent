@@ -158,7 +158,7 @@ test("auditManifestToolCallLog reports missing staged tool calls", async () => {
     ) {
       queries.push({ text, values });
       return {
-        rows: [{ tool_call_id: firstToolCallId, result_hash: fakeFirstHash }] as R[],
+        rows: [{ tool_call_id: firstToolCallId, result_hash: fakeFirstHash }] as unknown as R[],
         rowCount: 1,
         command: "SELECT",
         oid: 0,
@@ -200,7 +200,7 @@ test("auditManifestToolCallLog scopes audit to successful thread and agent calls
     ) {
       queries.push({ text, values });
       return {
-        rows: [{ tool_call_id: firstToolCallId, result_hash: fakeFirstHash }] as R[],
+        rows: [{ tool_call_id: firstToolCallId, result_hash: fakeFirstHash }] as unknown as R[],
         rowCount: 1,
         command: "SELECT",
         oid: 0,
@@ -245,7 +245,7 @@ test("auditManifestToolCallLog reports missing result hash entries without throw
   const db = {
     async query<R extends Record<string, unknown>>() {
       return {
-        rows: [{ tool_call_id: firstToolCallId, result_hash: fakeFirstHash }] as R[],
+        rows: [{ tool_call_id: firstToolCallId, result_hash: fakeFirstHash }] as unknown as R[],
         rowCount: 1,
         command: "SELECT",
         oid: 0,
@@ -293,7 +293,7 @@ test("auditManifestToolCallLog rejects refs whose contribution hash differs from
             tool_call_id: firstToolCallId,
             result_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
           },
-        ] as R[],
+        ] as unknown as R[],
         rowCount: 1,
         command: "SELECT",
         oid: 0,
@@ -323,7 +323,7 @@ test("auditManifestToolCallLog rejects extra and duplicate result hash entries",
         rows: [
           { tool_call_id: firstToolCallId, result_hash: fakeFirstHash },
           { tool_call_id: secondToolCallId, result_hash: fakeSecondHash },
-        ] as R[],
+        ] as unknown as R[],
         rowCount: 2,
         command: "SELECT",
         oid: 0,
@@ -449,7 +449,7 @@ test("auditManifestToolCallLog accepts full tool result hashes with embedded man
             tool_call_id: firstToolCallId,
             result_hash: hashJsonValue(result),
           },
-        ] as R[],
+        ] as unknown as R[],
         rowCount: 1,
         command: "SELECT",
         oid: 0,

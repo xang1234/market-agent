@@ -6,6 +6,7 @@ import {
   type ChatAnalystToolRuntime,
   type ChatAssistantMessagePersistence,
   type ChatCoordinator,
+  type ChatCoordinatorOptions,
   type ChatRunActivityReporter,
   type ChatSubjectClarificationRenderer,
   type ChatThreadTitleGenerator,
@@ -13,6 +14,7 @@ import {
   type ChatVerificationMode,
 } from "./coordinator.ts";
 import type { ChatClarificationAnswer, ChatFinancialRuntime } from "./financial-runtime.ts";
+import type { ChatSseEvent } from "./sse.ts";
 import type { ChatSubjectPreResolver } from "./subjects.ts";
 import { tryHandleThreadsRequest } from "./threads-http.ts";
 import {
@@ -69,7 +71,7 @@ export type ChatServerOptions = {
   renderSubjectClarification?: ChatSubjectClarificationRenderer;
   runActivity?: ChatRunActivityReporter;
   generateThreadTitle?: ChatThreadTitleGenerator;
-  onThreadTitleGenerationError?: Parameters<typeof createChatCoordinator>[0]["onThreadTitleGenerationError"];
+  onThreadTitleGenerationError?: ChatCoordinatorOptions["onThreadTitleGenerationError"];
   analystToolRuntime?: ChatAnalystToolRuntime;
   financialRuntime?: ChatFinancialRuntime;
   allowSyntheticAnalystFallback?: boolean;

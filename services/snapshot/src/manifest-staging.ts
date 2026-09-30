@@ -1,14 +1,8 @@
 import { createHash } from "node:crypto";
 
-export type JsonObject = { [key: string]: JsonValue };
+import type { JsonObject, JsonValue } from "../../shared/src/json.ts";
 
-export type JsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | JsonValue[]
-  | JsonObject;
+export type { JsonObject, JsonValue };
 
 export const STAGED_SNAPSHOT_MANIFEST: unique symbol = Symbol("snapshot.stagedManifest");
 // Marks a manifest built by a deterministic (non-LLM) producer. Such manifests
@@ -226,7 +220,7 @@ export function stageSnapshotManifest(
   );
 
   return Object.freeze({
-    [STAGED_SNAPSHOT_MANIFEST]: true,
+    [STAGED_SNAPSHOT_MANIFEST]: true as const,
     subject_refs: Object.freeze(subject_refs.values()),
     fact_refs: Object.freeze(fact_refs.values()),
     claim_refs: Object.freeze(claim_refs.values()),
@@ -541,7 +535,7 @@ function manifestContributionPayload(
   toolCall: ToolCallManifestContribution,
   index: number,
 ): JsonObject {
-  const payload: JsonObject = {};
+  const payload: Record<string, JsonValue> = {};
 
   if (toolCall.subject_refs !== undefined) {
     assertArray<SnapshotSubjectRef>(

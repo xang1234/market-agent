@@ -93,7 +93,11 @@ export function structuredRefsFromHandoff(handoff: HydratedSubjectHandoff): Stru
     ref: listing.subject_ref,
     ticker: listing.ticker,
   }));
-  return Object.freeze({ issuer: issuer ?? null, listings: Object.freeze(listings) });
+  return Object.freeze({ issuer: issuer && isIssuerRef(issuer) ? issuer : null, listings: Object.freeze(listings) });
+}
+
+function isIssuerRef(ref: SubjectRef): ref is SubjectRef & { kind: "issuer" } {
+  return ref.kind === "issuer";
 }
 
 export async function loadStructuredSubjectContext(

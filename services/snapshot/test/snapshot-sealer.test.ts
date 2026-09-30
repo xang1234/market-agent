@@ -258,6 +258,7 @@ test("sealSnapshot rejects unmarked executors before starting a transaction", as
   const { db, queries } = recordingDb();
 
   await assert.rejects(
+    // @ts-expect-error -- deliberately passes an unmarked executor to prove it is rejected at runtime
     () => sealSnapshot(db, validSealInput()),
     /requires a pinned transaction client/i,
   );
@@ -427,7 +428,7 @@ function recordingDb(
       }
 
       if (normalized === "select from tool_call_logs") {
-        return { rows: toolCallRows as R[] };
+        return { rows: toolCallRows as unknown as R[] };
       }
 
       if (normalized === "insert into snapshots") {
@@ -457,7 +458,7 @@ function recordingDb(
               model_version: values?.[15],
               parent_snapshot: values?.[16],
             },
-          ] as R[],
+          ] as unknown as R[],
         };
       }
 
@@ -484,6 +485,6 @@ function normalizedSql(text: string): string {
 
 function jsonValueAt(values: unknown[] | undefined, index: number): unknown {
   const value = values?.[index];
-  assert.equal(typeof value, "string");
+  assert.ok(typeof value === "string");
   return JSON.parse(value);
 }

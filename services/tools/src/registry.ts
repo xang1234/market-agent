@@ -15,14 +15,9 @@ export const TOOL_COST_CLASSES: ReadonlyArray<ToolCostClass> = [
   "high",
 ];
 
-export type JsonObject = { readonly [key: string]: JsonValue };
-export type JsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | ReadonlyArray<JsonValue>
-  | JsonObject;
+import type { JsonObject, JsonValue } from "../../shared/src/json.ts";
+
+export type { JsonObject, JsonValue };
 
 export type ToolBundleDefinition = {
   bundle_id: string;

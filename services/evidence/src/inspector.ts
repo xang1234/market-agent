@@ -325,7 +325,7 @@ async function inspectDocument(
       ...disclosureRows(row),
     ]),
     links: sourceLinks(row.canonical_url),
-    related_refs: Object.freeze([{ kind: "source", id: row.source_id }]),
+    related_refs: Object.freeze([{ kind: "source" as const, id: row.source_id }]),
   });
 }
 
@@ -391,8 +391,8 @@ async function inspectClaim(
     ]),
     links: sourceLinks(row.canonical_url),
     related_refs: Object.freeze([
-      { kind: "document", id: row.document_id },
-      { kind: "source", id: row.reported_by_source_id },
+      { kind: "document" as const, id: row.document_id },
+      { kind: "source" as const, id: row.reported_by_source_id },
     ]),
   });
 }
@@ -512,7 +512,7 @@ async function inspectFact(
       { label: "Confidence", value: String(row.confidence) },
     ]),
     links: sourceLinks(row.canonical_url),
-    related_refs: Object.freeze([{ kind: "source", id: row.source_id }]),
+    related_refs: Object.freeze([{ kind: "source" as const, id: row.source_id }]),
   });
 }
 

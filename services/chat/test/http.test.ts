@@ -8,7 +8,7 @@ import {
   type ChatAnalystToolRuntime,
   type ChatTurnRunner,
 } from "../src/coordinator.ts";
-import { createChatServer, createSseFrameWriter } from "../src/http.ts";
+import { createChatServer, createSseFrameWriter, type ChatServerOptions } from "../src/http.ts";
 import type { ChatThreadsDb } from "../src/threads-repo.ts";
 import {
   createRunActivityHub,
@@ -71,9 +71,7 @@ const defaultTestRuntime: ChatAnalystToolRuntime = async (context) => {
   };
 };
 
-function withDefaultTestRuntime(
-  options: Parameters<typeof createChatServer>[0],
-): Parameters<typeof createChatServer>[0] {
+function withDefaultTestRuntime(options: ChatServerOptions): ChatServerOptions {
   if (
     options.coordinator
     || options.analystToolRuntime
@@ -982,7 +980,7 @@ test("stream route rejects future Last-Event-ID without waiting for a running tu
 
   releaseTurn.resolve();
 
-  assert.notEqual(response, "timeout");
+  assert.ok(response !== "timeout");
   assert.equal(response.status, 400);
   const body = await response.json() as { error?: string };
   assert.equal(body.error, "'Last-Event-ID' is not available for this stream");

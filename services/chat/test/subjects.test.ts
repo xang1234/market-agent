@@ -114,7 +114,7 @@ test("chat subject pre-resolve can call the P0.3 search-to-subject flow directly
   const db: QueryExecutor = {
     async query(text) {
       queries.push(text);
-      return { rows: [] };
+      return { rows: [], command: "SELECT", rowCount: 0, oid: 0, fields: [] };
     },
   };
 

@@ -11,6 +11,7 @@ import {
   DETERMINISTIC_SNAPSHOT_MANIFEST,
   STAGED_SNAPSHOT_MANIFEST,
   type SnapshotManifestDraft,
+  type SnapshotSubjectRef,
 } from "./manifest-staging.ts";
 import { compileDisclosurePolicy } from "./disclosure-policy.ts";
 import type { SnapshotSealInput } from "./snapshot-sealer.ts";
@@ -75,7 +76,7 @@ export type SealableBlock = {
 // lists their content actually populates, so the two builders below can't
 // drift on the fields they have no opinion about.
 function stagedManifestBase(input: {
-  subjectRefs: ReadonlyArray<{ kind: string; id: string }>;
+  subjectRefs: ReadonlyArray<SnapshotSubjectRef>;
   asOf: string;
   modelVersion: string | null;
 }) {
@@ -103,7 +104,7 @@ function stagedManifestBase(input: {
 export function buildFactBackedSealInput(input: {
   block: SealableBlock;
   factRefs: ReadonlyArray<UUID>;
-  subjectRefs: ReadonlyArray<{ kind: string; id: string }>;
+  subjectRefs: ReadonlyArray<SnapshotSubjectRef>;
   facts: ReadonlyArray<FactRow>;
   modelVersion?: string | null;
 }): SnapshotSealInput {
@@ -138,7 +139,7 @@ export function buildFactBackedSealInput(input: {
     // Deterministic DB-fact content: exempt from the tool-call provenance
     // audit (facts are provenanced by fact.source_id, enforced by the
     // verifier's fact→source binding check).
-    [DETERMINISTIC_SNAPSHOT_MANIFEST]: true,
+    [DETERMINISTIC_SNAPSHOT_MANIFEST]: true as const,
     fact_refs: Object.freeze([...factRefs]),
     source_ids: Object.freeze(sourceIds),
   });
@@ -180,7 +181,7 @@ export function buildClaimBackedSealInput(input: {
   };
   claims: ReadonlyArray<ClaimSealClaim>;
   documents: ReadonlyArray<ClaimSealDocument>;
-  subjectRefs: ReadonlyArray<{ kind: string; id: string }>;
+  subjectRefs: ReadonlyArray<SnapshotSubjectRef>;
   toolCalls: ReadonlyArray<SealToolCallRef>;
   modelVersion?: string | null;
 }): SnapshotSealInput {
@@ -255,7 +256,7 @@ export function withRequiredDisclosures(seal: SnapshotSealInput): SnapshotSealIn
       basis: seal.manifest.basis,
       normalization: seal.manifest.normalization,
     },
-    facts: seal.facts.map((fact) => ({
+    facts: (seal.facts ?? []).map((fact) => ({
       fact_id: fact.fact_id,
       source_id: fact.source_id ?? null,
       freshness_class: fact.freshness_class,
@@ -281,7 +282,7 @@ export function buildFinancialSealInput(input: {
   snapshot_id: UUID;
   claim: FinancialSealClaim;
   knowledgeCutoff: string;
-  subjectRefs: ReadonlyArray<{ kind: string; id: string }>;
+  subjectRefs: ReadonlyArray<SnapshotSubjectRef>;
   boundFacts: ReadonlyArray<FactRow>;
 }): SnapshotSealInput {
   const factRefs = distinct(input.boundFacts.map((fact) => fact.fact_id));
@@ -289,7 +290,7 @@ export function buildFinancialSealInput(input: {
   const manifest: SnapshotManifestDraft = Object.freeze({
     ...stagedManifestBase({ subjectRefs: input.subjectRefs, asOf: input.knowledgeCutoff, modelVersion: null }),
     // Deterministic ledger content: provenanced by the certified run, not tool calls.
-    [DETERMINISTIC_SNAPSHOT_MANIFEST]: true,
+    [DETERMINISTIC_SNAPSHOT_MANIFEST]: true as const,
     fact_refs: Object.freeze(factRefs),
     source_ids: Object.freeze(sourceIds),
   });

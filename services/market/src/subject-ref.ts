@@ -3,6 +3,8 @@
 // enough to resolve a market snapshot.
 import { assertSubjectRef as assertCanonicalSubjectRef, type UUID } from "../../shared/src/subject-ref.ts";
 
+export type { UUID };
+
 export type ListingSubjectRef = {
   kind: "listing";
   id: UUID;

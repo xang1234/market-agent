@@ -137,17 +137,18 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     },
   });
   const result = await registryRuntime(context);
-  const evidence = evidenceForToolCalls(result.tool_calls);
-  await writeLocalToolCallLogs(context.threadId, result.tool_calls);
-  const structured = structuredContextForToolCalls(result.tool_calls ?? []);
+  const toolCalls = result.tool_calls ?? [];
+  const evidence = evidenceForToolCalls(toolCalls);
+  await writeLocalToolCallLogs(context.threadId, toolCalls);
+  const structured = structuredContextForToolCalls(toolCalls);
   const defaultRefs = combinedDefaultRefs(evidence, structured);
-  const toolCallIds = result.tool_calls
-    ?.filter((toolCall) => toolCall.status === "ok")
-    .map((toolCall) => toolCall.tool_call_id) ?? [];
+  const toolCallIds = toolCalls
+    .filter((toolCall) => toolCall.status === "ok")
+    .map((toolCall) => toolCall.tool_call_id);
   const llmBlocks = await composeAnalystBlocksWithLlm({
     context,
     blocks: result.blocks,
-    toolCalls: result.tool_calls ?? [],
+    toolCalls,
   });
   return {
     ...result,
@@ -322,7 +323,7 @@ async function manifestFromBlockRefs(input: {
   const toolCallIds = uuidRefsFromBlocks(input.blocks, "tool_call_ids");
   const toolCallResultHashes = await loadToolCallResultHashes(toolCallIds);
   return Object.freeze({
-    [STAGED_SNAPSHOT_MANIFEST]: true,
+    [STAGED_SNAPSHOT_MANIFEST]: true as const,
     subject_refs: Object.freeze([...input.subjectRefs]),
     fact_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "provenance_fact_refs")),
     claim_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "claim_refs")),
