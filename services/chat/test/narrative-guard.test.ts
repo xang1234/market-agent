@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { formatCompactCurrency } from "../../analyze/src/block-format.ts";
 import { keepSupportedSentences } from "../src/narrative-guard.ts";
 
 const DISPLAYED = ["Revenue", "$62.1B", "Q4 2026", "Quarterly revenue (Q1 2025 to Q4 2026)"];
@@ -261,4 +262,13 @@ test("the minus sign carries across a currency-code prefix (#147)", () => {
   }
   // A hyphen inside a word or between numbers is still not a sign.
   assert.deepEqual(keepSupportedSentences("Revenue rose over 2025-2026.", ["FY 2025 to FY 2026"]).removed, []);
+});
+
+test("the sign survives every currency prefix the formatter can write", () => {
+  for (const currency of Intl.supportedValuesOf("currency")) {
+    const loss = formatCompactCurrency(-3.1e9, currency);
+    const gain = formatCompactCurrency(3.1e9, currency);
+    assert.equal(keepSupportedSentences(`Operating income was ${gain}.`, [loss]).removed.length, 1, `${currency}: ${loss}`);
+    assert.deepEqual(keepSupportedSentences(`Operating income was ${loss}.`, [loss]).removed, [], `${currency}: ${loss}`);
+  }
 });

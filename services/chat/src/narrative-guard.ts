@@ -28,11 +28,14 @@
 // prompt asks the model to use the label. Add legal-name aliases if the eval
 // shows "NVIDIA" sentences being dropped (#144).
 
-// A leading minus is part of the figure ("-10.0%" is not "10.0%"), across the
-// currency prefix the formatter writes ("-$3.1B", "-CN¥3.1B", "-CHF 3.1B"),
-// unless it joins two numbers or words ("2025-2026").
-const NUMBER = /(?:(?<![A-Za-z0-9.])[-−][A-Z]{0,3}\p{Sc}?[ \u00a0]?)?\d+(?:,\d{3})*(?:\.\d+)?/gu;
-const SENTENCE_BREAK = /(?<=[.!?])\s+/;
+// A leading minus is part of the figure ("-10.0%" is not "10.0%"), across any
+// currency prefix the formatter writes ("-$3.1B", "-CN¥3.1B", "-CHF 3.1B",
+// "-F CFA 3.1B", "-Cg. 3.1B"; a test checks every supported currency), unless
+// it joins two numbers or words ("2025-2026").
+const NUMBER =
+  /(?:(?<![A-Za-z0-9.])[-−](?:[A-Za-z]{1,4}\.?(?:[ \u00a0\u202f][A-Za-z]{1,4})?)?\p{Sc}?[ \u00a0\u202f]?)?\d+(?:,\d{3})*(?:\.\d+)?/gu;
+// Not before a digit: "-Cg. 3.1B" is one figure, not two sentences.
+const SENTENCE_BREAK = /(?<=[.!?])\s+(?=\D)/;
 const COMPARED_WITH = /(?:compared (?:with|to)|unlike|versus|vs\.?|than|relative to|against)\s+$/i;
 // Between a comparison company and a figure it owns: nothing but a possessive
 // or "at"/"with" ("versus AMD's 49.2%", "compared with AMD at 49.2%").
