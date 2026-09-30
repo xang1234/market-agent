@@ -43,6 +43,18 @@ test("financial clarifications", { timeout: 300_000 }, async (t) => {
     assert.ok(Object.values(block.financial.labels as Record<string, { text: string }>).some((label) => label.text === "Alpha Industries Inc."));
   });
 
+  await t.test("choosing the explicit subject's own company for an ambiguous mention plans it once", async () => {
+    const explicit = { threadId, userId: IDS.owner, subjectText: "AAA", userIntent: "Compare revenue for AMB and BBB" };
+    const run = (clarificationAnswer?: { clarification_id: string; choice_id: string }) =>
+      chatHarness(pool, { model: revenueModel(["AAA", "BBB"]) }).run({ ...explicit, ...(clarificationAnswer ? { clarificationAnswer } : {}) });
+    const asked = completed((await run()).events).financial_clarification as Offered;
+    const alpha = asked.choices.find((choice) => choice.label === "Alpha Industries Inc.")!;
+    const done = completed((await run({ clarification_id: asked.clarification_id, choice_id: alpha.choice_id })).events);
+    assert.ok(done.message_id && !done.clarification && !done.financial_gap, JSON.stringify(done));
+    const [block] = (await db.query(`select blocks from chat_messages where message_id = $1`, [done.message_id])).rows[0].blocks;
+    assert.equal(block.financial.results.length, 2);
+  });
+
   await t.test("a stale or forged answer changes nothing: the same question is asked again", async () => {
     for (const answer of [
       { clarification_id: "0".repeat(64), choice_id: offered.choices[0]!.choice_id },

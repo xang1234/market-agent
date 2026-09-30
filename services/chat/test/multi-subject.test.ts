@@ -60,6 +60,7 @@ async function preResolveSubject({ text }: { text: string }): Promise<ChatSubjec
 async function subjectsForTurn(
   userIntent: string,
   options: Partial<ChatCoordinatorOptions> = {},
+  subjectText?: string,
 ): Promise<{ tickers: string[]; primary: string | undefined; context: ChatTurnRunContext | null }> {
   let observed = null as ChatTurnRunContext | null;
   const coordinator = createChatCoordinator({
@@ -70,7 +71,12 @@ async function subjectsForTurn(
     },
     ...options,
   });
-  const turn = coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent });
+  const turn = coordinator.getOrCreateTurn({
+    threadId: "thread-1",
+    runId: "run-1",
+    userIntent,
+    ...(subjectText ? { subjectText } : {}),
+  });
   await turn.completed;
   return {
     tickers: (observed?.subjectPreResolutions ?? []).map((subject) => subject.input_text),
@@ -183,3 +189,34 @@ test("a company that cannot be found in a comparison is named in the answer, not
   assert.match(text, /NVIDIA leads\./);
 });
 
+
+// A thread opened from a ticker page arrives with an explicit subject (#138).
+test("an explicit subject stays primary and a comparison adds the companies it names", async () => {
+  const { tickers, primary } = await subjectsForTurn("Compare with AMD", {}, "NVDA");
+  assert.deepEqual(tickers, ["NVDA", "AMD"]);
+  assert.equal(primary, "NVDA");
+});
+
+test("an explicit subject with a non-comparative message covers that subject only", async () => {
+  const { tickers } = await subjectsForTurn("Summarize the quarter for AMD", {}, "NVDA");
+  assert.deepEqual(tickers, ["NVDA"]);
+});
+
+test("an explicit subject named again in the comparison is covered once, and the cap still holds", async () => {
+  assert.deepEqual((await subjectsForTurn("Compare NVDA with AMD", {}, "NVDA")).tickers, ["NVDA", "AMD"]);
+  const capped = await subjectsForTurn("Compare with AMD AAPL MSFT GOOG META TSLA", {}, "NVDA");
+  assert.deepEqual(capped.tickers, ["NVDA", "AMD", "AAPL", "MSFT", "GOOG"]);
+});
+
+test("an explicit subject's comparison asks about an ambiguous company and names one not found", async () => {
+  let ran = false;
+  const turn = createChatCoordinator({ preResolveSubject, runner: () => { ran = true; } })
+    .getOrCreateTurn({ threadId: "thread-1", runId: "run-1", userIntent: "Compare with GOOGL", subjectText: "NVDA" });
+  await turn.completed;
+  assert.equal(ran, false);
+  assert.match(JSON.stringify(turn.events), /Which Alphabet share class do you mean\?/);
+
+  const { tickers, context } = await subjectsForTurn("Compare with XYZQ", {}, "NVDA");
+  assert.deepEqual(tickers, ["NVDA"]);
+  assert.deepEqual(context?.unresolvedMentions, ["XYZQ"]);
+});

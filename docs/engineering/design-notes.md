@@ -109,6 +109,11 @@ fixed rule, not a tool loop.
    snapshot `subject_refs`, re-hydrated via `hydrateSubjectRef` (`services/chat/src/thread-context.ts`). Naming a new
    company without comparing replaces them ("analyze AAPL and its margins").
 
+A turn with an **explicit subject** (`subjectText`, e.g. a thread opened from a ticker page) must resolve it or gets a
+clarification turn. That subject is primary; a comparative message adds the companies it names by the same rules
+(ambiguous one asks, one not found is named in the answer, de-duplicated, capped at 5). A non-comparative message
+covers the explicit subject only.
+
 The turn's fact blocks follow from that list:
 - one company gets the metric row and revenue chart;
 - two or more get a `metrics_comparison` of the latest fiscal year, via analyze's peer pipeline (key stats, then the

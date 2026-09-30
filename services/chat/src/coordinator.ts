@@ -1,6 +1,6 @@
 import { contentHashForText, stableUuid } from "./chat-ids.ts";
 import { DEFAULT_BUNDLE_ID, chooseBundleIdForSubjectKind } from "./bundle-routing.ts";
-import { extractSubjectMentions } from "./subject-extraction.ts";
+import { COMPARATIVE, companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import {
   createChatSseSequencer,
   type ChatSseEvent,
@@ -762,6 +762,24 @@ function subjectAwareRunner(
         });
         return;
       }
+      // A comparison adds the companies the message names, with the explicit
+      // subject kept primary ("Compare with AMD" from the NVDA page).
+      const text = nonEmptySubjectText(context.userIntent);
+      if (text && COMPARATIVE.test(text)) {
+        const named = await resolveNamedSubjects(text, options.preResolveSubject);
+        const ambiguous = named.unresolved.find((resolution) => resolution.status === "needs_clarification");
+        if (ambiguous) {
+          await emitSubjectClarificationTurn(context, ambiguous, {
+            persistAssistantMessage: options.persistAssistantMessage,
+            renderSubjectClarification: options.renderSubjectClarification,
+          });
+          return;
+        }
+        const subjects = distinctCompanies([preResolution, ...named.resolved]).slice(0, MAX_TURN_SUBJECTS);
+        const unresolvedMentions = named.unresolved.map((resolution) => resolution.input_text);
+        await runResolvedSubjectTurn(runner, { ...context, unresolvedMentions }, subjects);
+        return;
+      }
       await runResolvedSubjectTurn(runner, context, [preResolution]);
       return;
     }
@@ -792,10 +810,6 @@ function subjectAwareRunner(
 }
 
 const MAX_TURN_SUBJECTS = 5;
-// Words that ask to set companies side by side, so a follow-up that names a new
-// company keeps the previous ones ("compare it with AMD") instead of replacing
-// them ("analyze AAPL and its margins").
-const COMPARATIVE = /\b(compare|comparison|comparing|versus|vs\.?|against|relative to|peers?|stacks? up)\b/i;
 
 type TurnSubjects = {
   subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>;
@@ -862,11 +876,6 @@ function distinctCompanies(
   });
 }
 
-function companyKey(subject: ChatResolvedSubjectPreResolution): string {
-  const context = subject.handoff.context;
-  const issuer = context.issuer?.subject_ref ?? context.listing?.issuer_ref ?? context.instrument?.issuer_ref;
-  return issuer ? `issuer:${issuer.id}` : `${subject.subject_ref.kind}:${subject.subject_ref.id}`;
-}
 
 async function runResolvedSubjectTurn(
   runner: ChatTurnRunner,

@@ -35,7 +35,7 @@ import { publishRequest, type FinancialMode, type RequestGap } from "../../finan
 import type { FinancialAnswerBlock } from "../../snapshot/src/financial-verifier.ts";
 import type { ChatTurnRunContext } from "./coordinator.ts";
 import { contentHashForText, stableUuid } from "./chat-ids.ts";
-import { extractSubjectMentions } from "./subject-extraction.ts";
+import { COMPARATIVE, companyKey, extractSubjectMentions } from "./subject-extraction.ts";
 import type { ChatSubjectPreResolution } from "./subjects.ts";
 
 export type ChatFinancialMode = FinancialMode;
@@ -139,10 +139,23 @@ async function planTurn(
   authority: FinancialRuntimeAuthority,
   cutoff: Date,
 ): Promise<PlanningResult> {
-  const requested = await Promise.all(extractSubjectMentions(text).map(async (mention): Promise<RequestedSubject> => ({
-    mention,
-    resolution: requestedResolution(await deps.resolveMention(mention)),
-  })));
+  // An explicit subject (a thread opened from a ticker page) is requested first;
+  // like the analyst path, the message's companies join it only in a comparison
+  // ("Compare revenue with AMD" from the NVDA page plans both, "Revenue for AMD"
+  // plans NVDA).
+  const explicit = context.subjectText?.trim();
+  const mentions = explicit
+    ? [explicit, ...(COMPARATIVE.test(text) ? extractSubjectMentions(text) : [])]
+    : extractSubjectMentions(text);
+  const resolutions = await Promise.all(mentions.map(async (mention) => ({ mention, resolution: await deps.resolveMention(mention) })));
+  // One entry per company: "NVIDIA" (the page) and "NVDA" (the message) are one.
+  const seen = new Set<string>();
+  const requested = resolutions.flatMap(({ mention, resolution }): RequestedSubject[] => {
+    const key = resolution.status === "resolved" ? companyKey(resolution) : `mention:${mention}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ mention, resolution: requestedResolution(resolution) }];
+  });
   const planningContext = (subjects: ReadonlyArray<RequestedSubject>): PlanningContext => ({
     plan_id: randomUUID(),
     origin: { kind: "chat_request", ref: `chat:${context.threadId}:${context.turnId ?? context.runId}` },
@@ -158,7 +171,11 @@ async function planTurn(
   });
 
   let subjects: ReadonlyArray<RequestedSubject> = requested;
-  if (context.clarificationAnswer) subjects = await applyAnswer(subjects, context.clarificationAnswer, planningContext, text);
+  if (context.clarificationAnswer) {
+    // The chosen company may already be requested (the explicit subject), so
+    // de-duplicate again once the answer resolves the ambiguous mention.
+    subjects = distinctRequested(await applyAnswer(subjects, context.clarificationAnswer, planningContext, text));
+  }
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
   return planFinancialRequest(planningContext(subjects), text, deps.planningModel ?? noModel);
 }
@@ -212,6 +229,16 @@ function requestedResolution(resolution: ChatSubjectPreResolution): RequestedSub
 
 function financialRef(ref: { kind: string; id: string }): FinancialSubjectRef | null {
   return ref.kind === "issuer" || ref.kind === "listing" ? { kind: ref.kind, id: ref.id } : null;
+}
+
+function distinctRequested(subjects: ReadonlyArray<RequestedSubject>): ReadonlyArray<RequestedSubject> {
+  return subjects.filter((subject, index) => {
+    const { resolution } = subject;
+    if (resolution.status !== "resolved") return true;
+    return !subjects.slice(0, index).some((earlier) =>
+      earlier.resolution.status === "resolved" && sameRef(earlier.resolution.subject_ref, resolution.subject_ref)
+    );
+  });
 }
 
 function sameRef(left: FinancialSubjectRef, right: FinancialSubjectRef): boolean {

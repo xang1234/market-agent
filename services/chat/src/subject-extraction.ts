@@ -33,3 +33,19 @@ export function extractSubjectMentions(text: string | null | undefined): string[
   }
   return mentions;
 }
+
+// Words that ask to set companies side by side, so a follow-up that names a new
+// company keeps the previous ones ("compare it with AMD") instead of replacing
+// them ("analyze AAPL and its margins").
+export const COMPARATIVE = /\b(compare|comparison|comparing|versus|vs\.?|against|relative to|peers?|stacks? up)\b/i;
+
+// One key per company: two listings (or names) of the same issuer share it.
+export function companyKey(subject: {
+  subject_ref: { kind: string; id: string };
+  handoff?: { context?: { issuer?: { subject_ref?: { id: string } }; listing?: { issuer_ref?: { id: string } }; instrument?: { issuer_ref?: { id: string } } } };
+}): string {
+  const context = subject.handoff?.context;
+  const issuer = context?.issuer?.subject_ref ?? context?.listing?.issuer_ref ?? context?.instrument?.issuer_ref;
+  if (issuer) return `issuer:${issuer.id}`;
+  return subject.subject_ref.kind === "issuer" ? `issuer:${subject.subject_ref.id}` : `${subject.subject_ref.kind}:${subject.subject_ref.id}`;
+}
