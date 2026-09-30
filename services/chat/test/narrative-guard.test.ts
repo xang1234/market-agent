@@ -298,3 +298,9 @@ test("only the formatter's own 'Cg.' plus no-break space is kept together", () =
   assert.equal(result.removed.length, 1);
   assert.deepEqual(result.removed, ["74.6% was AMD's margin."]);
 });
+
+test("a Markdown bullet marker is not a minus sign", () => {
+  assert.equal(keepSupportedSentences("- 3.1% revenue growth", ["-3.1%"]).removed.length, 1);
+  assert.deepEqual(keepSupportedSentences("- -3.1% revenue growth", ["-3.1%"]).removed, []);
+  assert.deepEqual(keepSupportedSentences("- 3.1% revenue growth", ["3.1%"]).removed, []);
+});

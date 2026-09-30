@@ -32,8 +32,10 @@
 // currency prefix the formatter writes ("-$3.1B", "-CN¥3.1B", "-CHF 3.1B",
 // "-F CFA 3.1B", "-Cg. 3.1B"; a test checks every supported currency), unless
 // it joins two numbers or words ("2025-2026").
+// A space after the minus only follows a currency prefix; a bare minus touches
+// its digits, so a Markdown bullet ("- 3.1%") is not a sign.
 const NUMBER =
-  /(?:(?<![A-Za-z0-9.])[-−](?:[A-Za-z]{1,4}\.?(?:[ \u00a0\u202f][A-Za-z]{1,4})?)?\p{Sc}?[ \u00a0\u202f]?)?\d+(?:,\d{3})*(?:\.\d+)?/gu;
+  /(?:(?<![A-Za-z0-9.])[-−](?:(?:[A-Za-z]{1,4}\.?(?:[ \u00a0\u202f][A-Za-z]{1,4})?\p{Sc}?|\p{Sc})[ \u00a0\u202f]?)?)?\d+(?:,\d{3})*(?:\.\d+)?/gu;
 // Not inside the formatter's one dotted prefix, "Cg." plus a no-break space
 // ("-Cg. 3.1B" is one figure; prose "in Cg. 74.6%" still splits); the
 // all-currency test flags any new dotted prefix.
