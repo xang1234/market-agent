@@ -29,6 +29,7 @@ import {
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 import { stableUuid } from "./chat-ids.ts";
+import { loadPerfComparisonBlock } from "./perf-block.ts";
 
 const QUARTERS_SHOWN = 8;
 const LATEST_QUARTER_METRICS = [
@@ -110,38 +111,57 @@ async function loadComparisonFactBlocks(
         title: "Side by side (latest fiscal year)",
       },
     });
-    const labels = await companyLabels(db, block.subjects.map((subject) => subject.id));
-    return Object.freeze([{
-      ...block,
-      // Rows are shown by ticker (or name), not by reference id.
-      subject_labels: block.subjects.map((subject) => labels.get(subject.id) ?? `issuer:${subject.id.slice(0, 8)}`),
-      ...blockBase("metrics_comparison", input, cited.map(citedFact), loadable),
-    }]);
+    const companies = await companyListings(db, block.subjects.map((subject) => subject.id));
+    const labelOf = (issuerId: string) => companies.get(issuerId)?.label ?? `issuer:${issuerId.slice(0, 8)}`;
+    // Price performance for the same companies, from sealed daily bars (perf-block.ts).
+    const performance = await loadPerfComparisonBlock(db, {
+      listings: block.subjects.flatMap((subject) => {
+        const listingId = companies.get(subject.id)?.listing_id;
+        return listingId ? [{ id: listingId, label: labelOf(subject.id) }] : [];
+      }),
+      snapshotId: input.snapshotId,
+      asOf: input.asOf,
+    });
+    return Object.freeze([
+      {
+        ...block,
+        // Rows are shown by ticker (or name), not by reference id.
+        subject_labels: block.subjects.map((subject) => labelOf(subject.id)),
+        ...blockBase("metrics_comparison", input, cited.map(citedFact), loadable),
+      },
+      ...(performance ? [performance] : []),
+    ]);
   } catch (reason) {
     console.warn("[chat] comparison unavailable; answering with narrative only", reason);
     return [];
   }
 }
 
-// Each company's display label: its active ticker, else its legal name.
-async function companyLabels(db: QueryExecutor, issuerIds: ReadonlyArray<string>): Promise<Map<string, string>> {
-  const { rows } = await db.query<{ issuer_id: string; label: string }>(
+// Each company's active listing (for prices) and display label: its ticker,
+// else its legal name.
+async function companyListings(
+  db: QueryExecutor,
+  issuerIds: ReadonlyArray<string>,
+): Promise<Map<string, { listing_id: string | null; label: string }>> {
+  const { rows } = await db.query<{ issuer_id: string; listing_id: string | null; ticker: string | null; legal_name: string }>(
     `select i.issuer_id::text as issuer_id,
-            coalesce(
-              (select l.ticker
-                 from instruments ins
-                 join listings l on l.instrument_id = ins.instrument_id
-                where ins.issuer_id = i.issuer_id
-                  and l.active_to is null
-                order by l.ticker
-                limit 1),
-              i.legal_name
-            ) as label
+            l.listing_id::text as listing_id,
+            l.ticker,
+            i.legal_name
        from issuers i
+       left join lateral (
+         select l.listing_id, l.ticker
+           from instruments ins
+           join listings l on l.instrument_id = ins.instrument_id
+          where ins.issuer_id = i.issuer_id
+            and l.active_to is null
+          order by l.ticker
+          limit 1
+       ) l on true
       where i.issuer_id = any($1::uuid[])`,
     [issuerIds],
   );
-  return new Map(rows.map((row) => [row.issuer_id, row.label]));
+  return new Map(rows.map((row) => [row.issuer_id, { listing_id: row.listing_id, label: row.ticker ?? row.legal_name }]));
 }
 
 function citedFact(fact: VerifierFact): CitedFact {
@@ -301,4 +321,4 @@ export function displayTextsForBlocks(blocks: ReadonlyArray<Block>): string[] {
   return texts;
 }
 
-const DISPLAY_KEYS = new Set(["title", "label", "format"]);
+const DISPLAY_KEYS = new Set(["title", "label", "format", "default_range"]);

@@ -106,3 +106,19 @@ The turn's fact blocks follow from that list:
 A block that names its own subjects (a comparison's issuers) adds them to the snapshot's subject refs. The model also
 sees the last 6 messages of the thread. The price-performance chart is tracked separately (#133).
 
+## Sealed price series (`perf_comparison`)
+
+A comparison of two or more listed companies also gets a price-performance chart (`services/chat/src/perf-block.ts`).
+Each company's line comes from its latest stored daily bar range (`market_bar_ranges` / `market_bars`,
+`split_and_div_adjusted`), normalized to percent return. The companies' windows must be identical, or there is no
+chart.
+
+- **Sealing:** every series has a `series_specs` entry in the snapshot manifest. The entry holds the `series_ref`, the
+  bar range's `source_id`, `listing_id`, `bar_range_id`, interval, range and `as_of`. The block cites these through
+  `data_ref.params.series_refs` and lists the sources in `source_refs`, which is what the verifier requires of
+  `perf_comparison` (`requiresSealedDataSupport`).
+- **The points travel in the block** (`series`, a schema addition along with `subject_labels`). The web draws a sealed
+  block exactly as sealed, with no live `/v1/market/series` fetch and no range toggle, because only one window is
+  sealed. Blocks without `series` keep the live behaviour. Other ranges for a sealed answer would need the ADR-0002
+  transform/refresh flow.
+

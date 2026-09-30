@@ -376,7 +376,10 @@ async function manifestFromBlockRefs(input: {
     claim_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "claim_refs")),
     event_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "event_refs")),
     document_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "document_refs")),
-    series_specs: Object.freeze([]),
+    // Sealed price series cited by chart blocks (see perf-block.ts).
+    series_specs: Object.freeze(input.blocks.flatMap((block) =>
+      Array.isArray(block.provenance_series_specs) ? block.provenance_series_specs as JsonValue[] : []
+    )),
     source_ids: Object.freeze(uuidRefsFromBlocks(input.blocks, "source_refs")),
     tool_call_ids: Object.freeze(toolCallIds),
     tool_call_result_hashes: Object.freeze(toolCallResultHashes),

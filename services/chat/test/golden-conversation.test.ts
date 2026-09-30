@@ -147,6 +147,22 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const refs = valueRefs(comparison);
     assert.ok(refs.length >= 2, "the comparison shows too few figures");
     for (const ref of refs) assert.ok(cited.has(ref), `metrics_comparison value_ref ${ref} is not a cited fact`);
+
+    // Price performance alongside, drawn only from series the snapshot sealed (#133).
+    const performance = answer.blocks.find((block) => block.kind === "perf_comparison");
+    assert.ok(performance, `expected a perf_comparison; got [${answer.blocks.map((b) => b.kind).join(", ")}]`);
+    assert.deepEqual(performance.subject_labels, ["NVDA", "AMD"]);
+    const series = performance.series as Array<{ name: string; points: unknown[] }>;
+    assert.deepEqual(series.map((line) => line.name), ["NVDA", "AMD"]);
+    assert.ok(series.every((line) => line.points.length > 1), "each company needs a price line");
+    const { rows } = await client.query<{ series_specs: Array<{ series_ref: string; bar_range_id: string }> }>(
+      `select series_specs from snapshots where snapshot_id = $1::uuid`,
+      [answer.snapshot_id],
+    );
+    const sealed = new Set((rows[0]?.series_specs ?? []).map((spec) => spec.series_ref));
+    const seriesRefs = (performance.data_ref as { params: { series_refs: string[] } }).params.series_refs;
+    assert.equal(seriesRefs.length, 2);
+    for (const ref of seriesRefs) assert.ok(sealed.has(ref), `series ${ref} is not sealed in the snapshot`);
   });
 
   await t.test("'Explain the differences and show the evidence' keeps both companies and cites facts from each", async () => {
