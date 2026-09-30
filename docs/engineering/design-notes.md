@@ -88,7 +88,8 @@ fixed rule, not a tool loop.
   must also be credited to its company, even when a claim repeats the number: every company named between the
   previous such figure (or the sentence start) and this one must own it; if none is named there, the first one named
   after it when a preposition ties them ("49.2% for AMD", not "49.2%, exceeding AMD"), which is then used up, else
-  the company of the previous figure in the sentence, else the last one named in a kept sentence earlier on the line.
+  the company of the previous figure in the sentence, else the one company named by the last kept sentence naming
+  any on the line (none if it named several: "NVDA trails AMD. Its..." is ambiguous).
   A "respectively" sentence pairs the companies named before its figures with them in order. Naming another company in that stretch is ambiguous and drops the sentence, so a
   real figure quoted for the wrong company never survives. Companies are recognized by their displayed label (ticker),
   case-sensitively, which the prompt tells the model to use.

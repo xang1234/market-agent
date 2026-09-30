@@ -10,12 +10,13 @@
 // named there, the first one named after it when a preposition ties them
 // ("74.6% at NVDA, 49.2% at AMD"; not "49.2%, exceeding AMD"), which is then
 // used up; if none, the company of the previous figure in the sentence ("NVDA's
-// revenue was $130.5B and margin 74.6%"); if none, the last one named in a kept
-// sentence earlier on the line ("Its margin..."). A "respectively" sentence
-// pairs the companies named before its figures with them in order. Naming another company in that
-// stretch ("AMD's margin, unlike NVDA, is 74.6%") is ambiguous and drops the
-// sentence: the guard cannot parse who the figure belongs to, so it only keeps
-// what is unambiguous.
+// revenue was $130.5B and margin 74.6%"); if none, the one company named by
+// the last kept sentence naming any on the line ("Its margin..."; none if that
+// sentence named several). A "respectively" sentence pairs the companies named
+// before its figures with them in order. Naming another company in that stretch
+// ("AMD's margin, unlike NVDA, is 74.6%") is ambiguous and drops the sentence:
+// the guard cannot parse who the figure belongs to, so it only keeps what is
+// unambiguous.
 //
 // ponytail: compares numbers by value ("62.1" in "$62.1B" and "62.1 billion"),
 // not by magnitude or unit; a derived figure that coincidentally equals a shown
@@ -96,8 +97,12 @@ export function keepSupportedSentences(
           carried = credited;
           return credited.length > 0 && credited.every((company) => owners.get(number)!.has(company));
         });
-      // Only a sentence the user will see can name the company for the next one.
-      if (isSupported && named.length > 0) lastNamed = named[named.length - 1].company;
+      // Only a sentence the user will see can name the company for the next one,
+      // and only when it names one: "NVDA trails AMD. Its..." is ambiguous.
+      if (isSupported && named.length > 0) {
+        const distinct = new Set(named.map((mention) => mention.company));
+        lastNamed = distinct.size === 1 ? named[0].company : undefined;
+      }
       if (!isSupported) removed.push(sentence);
       return isSupported;
     });

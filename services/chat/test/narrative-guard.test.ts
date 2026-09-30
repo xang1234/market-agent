@@ -150,3 +150,10 @@ test("a 'respectively' sentence pairs companies with figures in order", () => {
     1,
   );
 });
+
+test("a sentence naming several companies passes none on to the next", () => {
+  const result = keepSupportedSentences("NVDA trails AMD. Its gross margin is 49.2%.", [], COMPARED);
+  assert.deepEqual(result.removed, ["Its gross margin is 49.2%."]);
+  // One company named: it carries.
+  assert.deepEqual(keepSupportedSentences("AMD trails. Its gross margin is 49.2%.", [], COMPARED).removed, []);
+});
