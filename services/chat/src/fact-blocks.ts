@@ -4,16 +4,28 @@
 // fact_bindings), and attributed to its source. The model only writes the
 // narrative around them.
 //
-// Block choice is a fixed rule, not a model-driven tool loop: for one company,
-// the latest quarter as a metric_row plus revenue over the last 8 quarters.
+// Block choice is a fixed rule, not a model-driven tool loop:
+// - one company: the latest quarter as a metric_row plus revenue over the last
+//   8 quarters;
+// - several companies (or one plus "peers"): a metrics_comparison of the latest
+//   fiscal year, built by analyze's peer-comparison pipeline.
 
 import { formatCompactCurrency } from "../../analyze/src/block-format.ts";
+import { buildMetricsComparisonBlock } from "../../analyze/src/metrics-comparison-block-builder.ts";
+import { materializePeerMetricFacts } from "../../analyze/src/metrics-comparison-materializer.ts";
 import { buildRevenueBarsBlock } from "../../analyze/src/revenue-bars-block-builder.ts";
 import { loadVerifierFactsForRefs } from "../../evidence/src/local-runtime-evidence.ts";
 import {
   loadRecentIssuerFundamentals,
   type IssuerFundamentalFact,
 } from "../../fundamentals/src/issuer-fundamentals-reader.ts";
+import { fetchPeerMetrics } from "../../fundamentals/src/peer-metrics.ts";
+import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolver.ts";
+import { SEC_EDGAR_FILING_SOURCE_ID } from "../../fundamentals/src/provider-sources.ts";
+import {
+  createSecBackedStatementRepository,
+  createSecBackedStatsRepository,
+} from "../../fundamentals/src/sec-facts-repository.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 import { stableUuid } from "./chat-ids.ts";
@@ -28,9 +40,113 @@ const LATEST_QUARTER_METRICS = [
 const METRIC_KEYS = LATEST_QUARTER_METRICS.map(([key]) => key);
 const QUARTER_ORDER: Readonly<Record<string, number>> = { Q1: 1, Q2: 2, Q3: 3, Q4: 4 };
 
+const PEER_LIMIT = 4;
+
 type QueryExecutor = Parameters<typeof loadRecentIssuerFundamentals>[0] &
-  Parameters<typeof loadVerifierFactsForRefs>[0];
+  Parameters<typeof loadVerifierFactsForRefs>[0] &
+  Parameters<typeof materializePeerMetricFacts>[0] &
+  Parameters<typeof createSecBackedStatementRepository>[0];
 type Block = Record<string, unknown>;
+type CitedFact = { fact_id: string; source_id: string };
+
+// The fact blocks for a turn's companies (primary first).
+export async function loadTurnFactBlocks(
+  db: QueryExecutor,
+  input: { issuers: ReadonlyArray<IssuerSubjectRef>; wantsPeers: boolean; snapshotId: string; asOf: string },
+): Promise<ReadonlyArray<Block>> {
+  const [primary] = input.issuers;
+  if (primary === undefined) return [];
+  const companies = input.issuers.length === 1 && input.wantsPeers
+    ? [primary, ...(await peersOf(db, primary))]
+    : input.issuers;
+  if (companies.length === 1) return loadIssuerFactBlocks(db, { issuer: primary, snapshotId: input.snapshotId, asOf: input.asOf });
+  return loadComparisonFactBlocks(db, { companies, snapshotId: input.snapshotId, asOf: input.asOf });
+}
+
+async function peersOf(db: QueryExecutor, issuer: IssuerSubjectRef): Promise<ReadonlyArray<IssuerSubjectRef>> {
+  try {
+    return await createSqlPeerSetResolver(db).resolvePeers(issuer.id, { limit: PEER_LIMIT });
+  } catch (reason) {
+    console.warn("[chat] peer set unavailable; answering about the company alone", reason);
+    return [];
+  }
+}
+
+// Side-by-side latest-fiscal-year metrics (revenue, margins, growth). Margins
+// and growth are minted as derived facts with lineage by analyze's materializer,
+// so every cell still cites a fact.
+// ponytail: the materializer inserts fresh derived facts on each call (as
+// analyze runs do); reuse identical ones if repeated comparisons bloat facts.
+async function loadComparisonFactBlocks(
+  db: QueryExecutor,
+  input: { companies: ReadonlyArray<IssuerSubjectRef>; snapshotId: string; asOf: string },
+): Promise<ReadonlyArray<Block>> {
+  try {
+    const statements = createSecBackedStatementRepository(db, { fetcher: null, sourceId: SEC_EDGAR_FILING_SOURCE_ID });
+    const stats = createSecBackedStatsRepository(db, { statements, fetcher: null });
+    const materialized = await materializePeerMetricFacts(
+      db,
+      await fetchPeerMetrics(stats, input.companies.map((company) => company.id)),
+    );
+    const factIds = [...new Set(materialized.flatMap((peer) => peer.metrics.map((metric) => metric.value_ref)))];
+    const loadable = new Map(
+      (await loadVerifierFactsForRefs(db, { fact_refs: factIds })).map((fact) => [fact.fact_id, fact]),
+    );
+    // Only cells the seal can load and bind render; the rest show as gaps.
+    const peers = materialized.map((peer) => ({
+      ...peer,
+      metrics: peer.metrics.filter((metric) => loadable.has(metric.value_ref)),
+    }));
+    const cited = peers.flatMap((peer) => peer.metrics.map((metric) => loadable.get(metric.value_ref)!));
+    if (cited.length === 0) return [];
+    const block = buildMetricsComparisonBlock({
+      peers,
+      primary: input.companies[0],
+      base: {
+        id: blockId("metrics_comparison", input.snapshotId),
+        snapshot_id: input.snapshotId,
+        as_of: input.asOf,
+        source_refs: [],
+        title: "Side by side (latest fiscal year)",
+      },
+    });
+    const labels = await companyLabels(db, block.subjects.map((subject) => subject.id));
+    return Object.freeze([{
+      ...block,
+      // Rows are shown by ticker (or name), not by reference id.
+      subject_labels: block.subjects.map((subject) => labels.get(subject.id) ?? `issuer:${subject.id.slice(0, 8)}`),
+      ...blockBase("metrics_comparison", input, cited.map(citedFact), loadable),
+    }]);
+  } catch (reason) {
+    console.warn("[chat] comparison unavailable; answering with narrative only", reason);
+    return [];
+  }
+}
+
+// Each company's display label: its active ticker, else its legal name.
+async function companyLabels(db: QueryExecutor, issuerIds: ReadonlyArray<string>): Promise<Map<string, string>> {
+  const { rows } = await db.query<{ issuer_id: string; label: string }>(
+    `select i.issuer_id::text as issuer_id,
+            coalesce(
+              (select l.ticker
+                 from instruments ins
+                 join listings l on l.instrument_id = ins.instrument_id
+                where ins.issuer_id = i.issuer_id
+                  and l.active_to is null
+                order by l.ticker
+                limit 1),
+              i.legal_name
+            ) as label
+       from issuers i
+      where i.issuer_id = any($1::uuid[])`,
+    [issuerIds],
+  );
+  return new Map(rows.map((row) => [row.issuer_id, row.label]));
+}
+
+function citedFact(fact: VerifierFact): CitedFact {
+  return { fact_id: fact.fact_id, source_id: fact.source_id ?? "" };
+}
 
 // Loads the issuer's quarterly facts through the shared eligibility rule and
 // builds the blocks. Empty on failure: a chart must never cost the user the
@@ -119,7 +235,7 @@ export function buildIssuerFactBlocks(input: {
 function blockBase(
   kind: string,
   input: { snapshotId: string; asOf: string },
-  facts: ReadonlyArray<IssuerFundamentalFact>,
+  facts: ReadonlyArray<CitedFact>,
   loadable: ReadonlyMap<string, VerifierFact>,
 ): Block {
   const id = blockId(kind, input.snapshotId);
@@ -132,7 +248,7 @@ function blockBase(
       id,
       params: { fact_bindings: facts.map((fact) => bindingFor(loadable.get(fact.fact_id)!)) },
     },
-    source_refs: [...new Set(facts.map((fact) => fact.source_id))],
+    source_refs: [...new Set(facts.map((fact) => fact.source_id).filter((id) => id !== ""))],
     as_of: input.asOf,
     // Promoted to manifest.fact_refs when the answer is sealed.
     provenance_fact_refs: facts.map((fact) => fact.fact_id),

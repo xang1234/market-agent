@@ -1,9 +1,11 @@
 // Golden chat conversation (#118): the finish line for the chat-recovery epic (#125).
 //
 // Drives the default chat server the way the web client does — create a thread,
-// open the turn stream, reload the thread — against the frozen dataset in
-// test/golden/, with a recorded model reply (no provider keys). Every subtest
-// is strict, including the fact-built chart and metric row (#120).
+// save each user message, open the turn stream, reload the thread — against the
+// frozen dataset in test/golden/, with recorded model replies (no provider
+// keys). Three turns: "Analyze NVDA" (chart + metric row, #120), then the
+// follow-ups "Compare it with AMD" and "Explain the differences and show the
+// evidence" (both companies side by side, #121). Every subtest is strict.
 
 import assert from "node:assert/strict";
 import { join } from "node:path";
@@ -27,6 +29,11 @@ import type { AddressInfo } from "node:net";
 
 const USER_ID = "70000000-0000-4000-8000-000000000001";
 const NVDA = GOLDEN_COMPANIES.find((company) => company.ticker === "NVDA")!;
+const AMD = GOLDEN_COMPANIES.find((company) => company.ticker === "AMD")!;
+const BOTH_LISTINGS = [
+  { kind: "listing", id: NVDA.listing_id },
+  { kind: "listing", id: AMD.listing_id },
+];
 const CHART_KINDS = new Set(["revenue_bars", "line_chart"]);
 
 const GOLDEN_ENV: Record<string, string> = {
@@ -122,7 +129,87 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       for (const ref of refs) assert.ok(cited.has(ref), `${block.kind} value_ref ${ref} is not a cited fact`);
     }
   });
+
+  await t.test("follow-up 'Compare it with AMD' sets both companies side by side", async () => {
+    const turnEvents = await runTurn(base, thread.thread_id, "Compare it with AMD");
+    const completed = completedTurn(turnEvents);
+    assert.deepEqual(completed.data.subject_refs, BOTH_LISTINGS, "'it' should carry NVDA forward and add AMD");
+
+    const answer = await latestAssistantMessage(base, thread.thread_id);
+    const comparison = comparisonBlock(answer);
+    assert.deepEqual(
+      (comparison.subjects as Array<{ id: string }>).map((subject) => subject.id),
+      [NVDA.issuer_id, AMD.issuer_id],
+    );
+    // Rows are labelled for people, not by reference id.
+    assert.deepEqual(comparison.subject_labels, ["NVDA", "AMD"]);
+    const cited = await citedFacts(answer);
+    const refs = valueRefs(comparison);
+    assert.ok(refs.length >= 2, "the comparison shows too few figures");
+    for (const ref of refs) assert.ok(cited.has(ref), `metrics_comparison value_ref ${ref} is not a cited fact`);
+  });
+
+  await t.test("'Explain the differences and show the evidence' keeps both companies and cites facts from each", async () => {
+    const turnEvents = await runTurn(base, thread.thread_id, "Explain the differences and show the evidence");
+    assert.deepEqual(completedTurn(turnEvents).data.subject_refs, BOTH_LISTINGS);
+
+    const answer = await latestAssistantMessage(base, thread.thread_id);
+    assert.match(JSON.stringify(answer.blocks), /each figure links to its filing/);
+    comparisonBlock(answer);
+    const { rows } = await client.query<{ subject_id: string }>(
+      `select distinct subject_id::text as subject_id from facts where fact_id = any($1::uuid[])`,
+      [[...(await citedFacts(answer))]],
+    );
+    assert.deepEqual(
+      rows.map((row) => row.subject_id).sort(),
+      [NVDA.issuer_id, AMD.issuer_id].sort(),
+      "the answer should cite facts about both companies",
+    );
+  });
+
+  await t.test("'How does NVDA compare with its peers?' brings in its industry peers", async () => {
+    const peersThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Peers" });
+    const turnEvents = await runTurn(base, peersThread.thread_id, "How does NVDA compare with its peers?");
+    assert.deepEqual(completedTurn(turnEvents).data.subject_refs, [{ kind: "listing", id: NVDA.listing_id }]);
+
+    const comparison = comparisonBlock(await latestAssistantMessage(base, peersThread.thread_id));
+    // AMD shares NVDA's industry; AAPL does not. The auto-selected peer is labelled too.
+    assert.deepEqual(
+      (comparison.subjects as Array<{ id: string }>).map((subject) => subject.id),
+      [NVDA.issuer_id, AMD.issuer_id],
+    );
+    assert.deepEqual(comparison.subject_labels, ["NVDA", "AMD"]);
+  });
+
+  function completedTurn(turnEvents: ParsedSseEvent[]): ParsedSseEvent {
+    const error = turnEvents.find((event) => event.event === "turn.error");
+    assert.equal(error, undefined, `turn.error: ${JSON.stringify(error?.data)}`);
+    const completed = turnEvents.find((event) => event.event === "turn.completed");
+    assert.ok(completed, `no turn.completed; events: ${turnEvents.map((event) => event.event).join(", ")}`);
+    return completed;
+  }
+
+  async function citedFacts(message: ChatMessage): Promise<Set<string>> {
+    const { rows } = await client.query<{ fact_refs: string[] }>(
+      `select fact_refs from snapshots where snapshot_id = $1::uuid`,
+      [message.snapshot_id],
+    );
+    return new Set(rows[0]?.fact_refs ?? []);
+  }
 });
+
+async function latestAssistantMessage(base: string, threadId: string): Promise<ChatMessage> {
+  const { messages } = await api<{ messages: ChatMessage[] }>(base, "GET", `/v1/chat/threads/${threadId}/messages`);
+  const answer = messages.filter((message) => message.role === "assistant").at(-1);
+  assert.ok(answer, "no assistant message in the thread");
+  return answer;
+}
+
+function comparisonBlock(message: ChatMessage): Block {
+  const block = message.blocks.find((candidate) => candidate.kind === "metrics_comparison");
+  assert.ok(block, `expected a metrics_comparison; got [${message.blocks.map((b) => b.kind).join(", ")}]`);
+  return block;
+}
 
 async function startGoldenServer(t: TestContext, databaseUrl: string): Promise<string> {
   const pool = await connectedPool(t, databaseUrl);
@@ -145,8 +232,14 @@ async function api<T>(base: string, method: string, path: string, body?: unknown
 // Reads the turn's SSE stream until it completes or errors; the server keeps the
 // connection open for reconnects, so the reader is cancelled once the turn ends.
 async function runTurn(base: string, threadId: string, userIntent: string): Promise<ParsedSseEvent[]> {
-  const runId = randomUUID();
-  const params = new URLSearchParams({ run_id: runId, turn_id: runId, user_intent: userIntent, user_id: USER_ID });
+  // As the web client does: save the user's message, then stream the turn.
+  const messageId = randomUUID();
+  await api(base, "POST", `/v1/chat/threads/${threadId}/messages`, {
+    message_id: messageId,
+    snapshot_id: randomUUID(),
+    content: userIntent,
+  });
+  const params = new URLSearchParams({ run_id: randomUUID(), turn_id: messageId, user_intent: userIntent, user_id: USER_ID });
   const response = await fetch(`${base}/v1/chat/threads/${threadId}/stream?${params}`);
   assert.equal(response.status, 200);
   const reader = response.body!.getReader();

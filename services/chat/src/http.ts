@@ -7,6 +7,7 @@ import {
   type ChatAssistantMessagePersistence,
   type ChatCoordinator,
   type ChatCoordinatorOptions,
+  type ChatPriorSubjectsLoader,
   type ChatRunActivityReporter,
   type ChatSubjectClarificationRenderer,
   type ChatThreadTitleGenerator,
@@ -68,6 +69,7 @@ export type ChatServerOptions = {
   coordinator?: ChatCoordinator;
   persistAssistantMessage?: ChatAssistantMessagePersistence;
   preResolveSubject?: ChatSubjectPreResolver;
+  loadPriorSubjects?: ChatPriorSubjectsLoader;
   renderSubjectClarification?: ChatSubjectClarificationRenderer;
   runActivity?: ChatRunActivityReporter;
   generateThreadTitle?: ChatThreadTitleGenerator;
@@ -86,6 +88,7 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
   const coordinator = options.coordinator ?? createChatCoordinator({
     persistAssistantMessage: options.persistAssistantMessage,
     preResolveSubject: options.preResolveSubject,
+    loadPriorSubjects: options.loadPriorSubjects,
     renderSubjectClarification: options.renderSubjectClarification,
     runActivity: options.runActivity,
     generateThreadTitle: options.generateThreadTitle,

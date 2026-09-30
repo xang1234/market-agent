@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import type {
   ChatAnalystToolRuntime,
   ChatAssistantMessagePersistence,
+  ChatPriorSubjectsLoader,
   ChatSubjectClarificationRenderer,
   ChatThreadTitleGenerator,
   ChatVerificationMode,
@@ -59,6 +60,12 @@ export async function loadChatServerOptionsFromEnv(
     }
 
     options.preResolveSubject = module.preResolveSubject as ChatSubjectPreResolver;
+    if (module.loadPriorSubjects !== undefined) {
+      if (typeof module.loadPriorSubjects !== "function") {
+        throw new Error("CHAT_SUBJECT_RESOLVER_MODULE loadPriorSubjects export must be a function");
+      }
+      options.loadPriorSubjects = module.loadPriorSubjects as ChatPriorSubjectsLoader;
+    }
     if (module.renderSubjectClarification !== undefined) {
       if (typeof module.renderSubjectClarification !== "function") {
         throw new Error("CHAT_SUBJECT_RESOLVER_MODULE renderSubjectClarification export must be a function");

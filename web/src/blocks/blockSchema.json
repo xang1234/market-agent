@@ -644,6 +644,11 @@
                 "$ref": "#/$defs/SubjectRef"
               }
             },
+            "subject_labels": {
+              "description": "Display label per subject, in subjects order (e.g. a ticker). Renderers fall back to the subject reference when a label is absent.",
+              "type": "array",
+              "items": { "type": "string" }
+            },
             "metrics": {
               "type": "array",
               "items": {

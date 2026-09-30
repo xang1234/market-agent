@@ -63,6 +63,8 @@ export async function composeAnalystBlocksWithLlm(input: {
   // Deterministic chart/table blocks shown with the answer. When present, the
   // prose may only quote figures they display (or that cited claims state).
   factBlocks?: ReadonlyArray<Record<string, unknown>>;
+  // Recent thread messages, oldest first, so the answer reads as a reply.
+  conversation?: ReadonlyArray<{ role: string; text: string }>;
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
 }): Promise<ReadonlyArray<Record<string, unknown>>> {
   const router = await createLlmRouterFromEnv(input.env ?? process.env, {
@@ -90,6 +92,7 @@ export async function composeAnalystBlocksWithLlm(input: {
         role: "user",
         content: JSON.stringify({
           user_intent: input.context.userIntent ?? "Start a research thread",
+          conversation: input.conversation ?? [],
           bundle_id: input.context.bundleId,
           existing_blocks: input.blocks,
           displayed_figures: displayTextsForBlocks(input.factBlocks ?? []),
