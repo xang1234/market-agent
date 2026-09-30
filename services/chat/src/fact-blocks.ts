@@ -29,6 +29,7 @@ import {
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 import { stableUuid } from "./chat-ids.ts";
+import { loadPerfComparisonBlocks } from "./perf-block.ts";
 
 const QUARTERS_SHOWN = 8;
 const LATEST_QUARTER_METRICS = [
@@ -52,7 +53,14 @@ type CitedFact = { fact_id: string; source_id: string };
 // The fact blocks for a turn's companies (primary first).
 export async function loadTurnFactBlocks(
   db: QueryExecutor,
-  input: { issuers: ReadonlyArray<IssuerSubjectRef>; wantsPeers: boolean; snapshotId: string; asOf: string },
+  input: {
+    issuers: ReadonlyArray<IssuerSubjectRef>;
+    wantsPeers: boolean;
+    snapshotId: string;
+    asOf: string;
+    // The listing the user asked for, per issuer (see listingsForComparison).
+    requestedListings?: ReadonlyMap<string, CompanyListing>;
+  },
 ): Promise<ReadonlyArray<Block>> {
   const [primary] = input.issuers;
   if (primary === undefined) return [];
@@ -60,7 +68,12 @@ export async function loadTurnFactBlocks(
     ? [primary, ...(await peersOf(db, primary))]
     : input.issuers;
   if (companies.length === 1) return loadIssuerFactBlocks(db, { issuer: primary, snapshotId: input.snapshotId, asOf: input.asOf });
-  return loadComparisonFactBlocks(db, { companies, snapshotId: input.snapshotId, asOf: input.asOf });
+  return loadComparisonFactBlocks(db, {
+    companies,
+    snapshotId: input.snapshotId,
+    asOf: input.asOf,
+    requestedListings: input.requestedListings ?? new Map(),
+  });
 }
 
 async function peersOf(db: QueryExecutor, issuer: IssuerSubjectRef): Promise<ReadonlyArray<IssuerSubjectRef>> {
@@ -79,7 +92,37 @@ async function peersOf(db: QueryExecutor, issuer: IssuerSubjectRef): Promise<Rea
 // analyze runs do); reuse identical ones if repeated comparisons bloat facts.
 async function loadComparisonFactBlocks(
   db: QueryExecutor,
+  input: {
+    companies: ReadonlyArray<IssuerSubjectRef>;
+    snapshotId: string;
+    asOf: string;
+    requestedListings: ReadonlyMap<string, CompanyListing>;
+  },
+): Promise<ReadonlyArray<Block>> {
+  const issuerIds = input.companies.map((company) => company.id);
+  const active = await companyListings(db, issuerIds, input.asOf).catch((reason) => {
+    console.warn("[chat] company listings unavailable; comparing without tickers or prices", reason);
+    return new Map<string, CompanyListing>();
+  });
+  const companies = listingsForComparison(issuerIds, input.requestedListings, active);
+  const labelOf = (issuerId: string) => companies.get(issuerId)?.label ?? `issuer:${issuerId.slice(0, 8)}`;
+  // The metrics and the price chart load independently: either can be missing
+  // (no SEC-derived metrics, no cached prices) without dropping the other.
+  const metrics = await loadMetricsComparisonBlocks(db, input, labelOf);
+  // Price performance from sealed daily bars, with any pricing disclosure it
+  // requires (perf-block.ts). Never throws.
+  const performance = await loadPerfComparisonBlocks(db, {
+    listings: priceListingsForComparison(issuerIds, companies),
+    snapshotId: input.snapshotId,
+    asOf: input.asOf,
+  });
+  return Object.freeze([...metrics, ...performance]);
+}
+
+async function loadMetricsComparisonBlocks(
+  db: QueryExecutor,
   input: { companies: ReadonlyArray<IssuerSubjectRef>; snapshotId: string; asOf: string },
+  labelOf: (issuerId: string) => string,
 ): Promise<ReadonlyArray<Block>> {
   try {
     const statements = createSecBackedStatementRepository(db, { fetcher: null, sourceId: SEC_EDGAR_FILING_SOURCE_ID });
@@ -110,38 +153,79 @@ async function loadComparisonFactBlocks(
         title: "Side by side (latest fiscal year)",
       },
     });
-    const labels = await companyLabels(db, block.subjects.map((subject) => subject.id));
-    return Object.freeze([{
-      ...block,
-      // Rows are shown by ticker (or name), not by reference id.
-      subject_labels: block.subjects.map((subject) => labels.get(subject.id) ?? `issuer:${subject.id.slice(0, 8)}`),
-      ...blockBase("metrics_comparison", input, cited.map(citedFact), loadable),
-    }]);
+    return [
+      {
+        ...block,
+        // Rows are shown by ticker (or name), not by reference id.
+        subject_labels: block.subjects.map((subject) => labelOf(subject.id)),
+        ...blockBase("metrics_comparison", input, cited.map(citedFact), loadable),
+      },
+    ];
   } catch (reason) {
-    console.warn("[chat] comparison unavailable; answering with narrative only", reason);
+    console.warn("[chat] metrics comparison unavailable", reason);
     return [];
   }
 }
 
-// Each company's display label: its active ticker, else its legal name.
-async function companyLabels(db: QueryExecutor, issuerIds: ReadonlyArray<string>): Promise<Map<string, string>> {
-  const { rows } = await db.query<{ issuer_id: string; label: string }>(
+export type CompanyListing = { listing_id: string | null; label: string };
+
+// The listings to chart: every compared company's, or none if any has no
+// listing, so the chart never covers fewer companies than the comparison.
+export function priceListingsForComparison(
+  issuerIds: ReadonlyArray<string>,
+  companies: ReadonlyMap<string, CompanyListing>,
+): Array<{ id: string; label: string }> {
+  const listings = issuerIds.flatMap((issuerId) => {
+    const company = companies.get(issuerId);
+    return company?.listing_id ? [{ id: company.listing_id, label: company.label }] : [];
+  });
+  return listings.length === issuerIds.length ? listings : [];
+}
+
+// The listing to chart and label for each company: the one the user asked for
+// when they named a listing (a specific share class or venue), otherwise the
+// issuer's active listing (e.g. an auto-selected peer).
+export function listingsForComparison(
+  issuerIds: ReadonlyArray<string>,
+  requested: ReadonlyMap<string, CompanyListing>,
+  active: ReadonlyMap<string, CompanyListing>,
+): Map<string, CompanyListing> {
+  const out = new Map<string, CompanyListing>();
+  for (const issuerId of issuerIds) {
+    const listing = requested.get(issuerId) ?? active.get(issuerId);
+    if (listing) out.set(issuerId, listing);
+  }
+  return out;
+}
+
+// Each company's active listing (for prices) and display label: its ticker,
+// else its legal name.
+export async function companyListings(
+  db: Pick<QueryExecutor, "query">,
+  issuerIds: ReadonlyArray<string>,
+  asOf: string,
+): Promise<Map<string, CompanyListing>> {
+  const { rows } = await db.query<{ issuer_id: string; listing_id: string | null; ticker: string | null; legal_name: string }>(
     `select i.issuer_id::text as issuer_id,
-            coalesce(
-              (select l.ticker
-                 from instruments ins
-                 join listings l on l.instrument_id = ins.instrument_id
-                where ins.issuer_id = i.issuer_id
-                  and l.active_to is null
-                order by l.ticker
-                limit 1),
-              i.legal_name
-            ) as label
+            l.listing_id::text as listing_id,
+            l.ticker,
+            i.legal_name
        from issuers i
+       left join lateral (
+         select l.listing_id, l.ticker
+           from instruments ins
+           join listings l on l.instrument_id = ins.instrument_id
+          where ins.issuer_id = i.issuer_id
+            -- Active at the turn's cutoff (the resolver's rule, lookup.ts).
+            and (l.active_from is null or l.active_from <= $2::timestamptz)
+            and (l.active_to is null or l.active_to > $2::timestamptz)
+          order by l.ticker
+          limit 1
+       ) l on true
       where i.issuer_id = any($1::uuid[])`,
-    [issuerIds],
+    [issuerIds, asOf],
   );
-  return new Map(rows.map((row) => [row.issuer_id, row.label]));
+  return new Map(rows.map((row) => [row.issuer_id, { listing_id: row.listing_id, label: row.ticker ?? row.legal_name }]));
 }
 
 function citedFact(fact: VerifierFact): CitedFact {
@@ -301,4 +385,4 @@ export function displayTextsForBlocks(blocks: ReadonlyArray<Block>): string[] {
   return texts;
 }
 
-const DISPLAY_KEYS = new Set(["title", "label", "format"]);
+const DISPLAY_KEYS = new Set(["title", "label", "format", "default_range"]);

@@ -173,9 +173,14 @@ export type PerfNormalization = (typeof PERF_NORMALIZATIONS)[number]
 export type PerfComparisonBlock = BaseBlock & {
   kind: 'perf_comparison'
   subject_refs: ReadonlyArray<SubjectRef>
+  // Display label per subject (e.g. a ticker), in subject_refs order.
+  subject_labels?: ReadonlyArray<string>
   default_range: string
   basis: string
   normalization: PerfNormalization
+  // Sealed series (one per subject, already normalized). When present the chart
+  // shows exactly these and fetches nothing live.
+  series?: ReadonlyArray<Series>
 }
 
 export type DonutSegment = {

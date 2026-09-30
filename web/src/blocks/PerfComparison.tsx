@@ -16,12 +16,64 @@ import type { PerfComparisonBlock, Series } from './types.ts'
 
 type PerfComparisonProps = { block: PerfComparisonBlock }
 
-// Live multi-series performance chart (the reference terminal's centerpiece):
-// the block carries subjects + range metadata, and the client fetches the
-// normalized %-return series from /v1/market/series per selected range. When
-// no series is fetchable (non-listing subjects, missing coverage, tests
-// without a network) the block falls back to the original metadata card.
+// Multi-series performance chart (the reference terminal's centerpiece). A
+// sealed block (a chat answer) carries its series and is drawn exactly as
+// sealed. Otherwise the client fetches the normalized %-return series from
+// /v1/market/series per selected range; when no series is fetchable
+// (non-listing subjects, missing coverage, tests without a network) the block
+// falls back to the original metadata card.
 export function PerfComparison({ block }: PerfComparisonProps): ReactElement {
+  // `series` present (even empty) marks a sealed block: never fall back to live data.
+  if (block.series !== undefined) {
+    return <SealedPerfComparison block={block} series={block.series} />
+  }
+  return <LivePerfComparison block={block} />
+}
+
+// Only the sealed window exists, so there is no range toggle and no fetch.
+function SealedPerfComparison({
+  block,
+  series,
+}: {
+  block: PerfComparisonBlock
+  series: ReadonlyArray<Series>
+}): ReactElement {
+  return (
+    <ChartCard
+      testId={`block-perf-comparison-${block.id}`}
+      blockKind="perf_comparison"
+      title={block.title}
+      dataAttrs={{
+        'data-default-range': block.default_range,
+        'data-basis': block.basis,
+        'data-normalization': block.normalization,
+        'data-active-range': block.default_range,
+      }}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <SubjectChipList
+          testId={`block-perf-comparison-${block.id}-subjects`}
+          keyPrefix={`${block.id}-subj`}
+          subjects={block.subject_refs}
+          labels={block.subject_labels}
+          dense
+        />
+        <span className="text-xs text-muted">{block.default_range}</span>
+      </div>
+      {series.length > 0 ? (
+        <SeriesChart
+          testId={`block-perf-comparison-${block.id}-chart`}
+          ariaLabel={`${block.default_range} performance comparison`}
+          series={series}
+        />
+      ) : (
+        <p className="text-xs text-muted">No sealed price data for this comparison.</p>
+      )}
+    </ChartCard>
+  )
+}
+
+function LivePerfComparison({ block }: PerfComparisonProps): ReactElement {
   const ranges = perfRangeOptions(block)
   const [range, setRange] = useState<string>(
     ranges.includes(block.default_range) ? block.default_range : ranges[0],
@@ -55,6 +107,7 @@ export function PerfComparison({ block }: PerfComparisonProps): ReactElement {
           testId={`block-perf-comparison-${block.id}-subjects`}
           keyPrefix={`${block.id}-subj`}
           subjects={block.subject_refs}
+          labels={block.subject_labels}
           dense
         />
         <SegmentedToggle

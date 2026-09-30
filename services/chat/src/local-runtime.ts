@@ -157,6 +157,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     loadTurnFactBlocks(pool(), {
       issuers: issuersOf(covered),
       wantsPeers: /\bpeers?\b/i.test(context.userIntent ?? ""),
+      requestedListings: requestedListingsOf(covered),
       snapshotId: result.snapshot_id,
       asOf,
     }),
@@ -193,6 +194,21 @@ const CONVERSATION_MESSAGES = 6;
 // The previous answer's companies, for follow-ups ("compare it with AMD").
 export const loadPriorSubjects: ChatPriorSubjectsLoader = ({ threadId }) =>
   loadThreadPriorSubjects(pool(), { threadId });
+
+// For companies the user named by listing, that listing (and its ticker).
+function requestedListingsOf(
+  subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>,
+): Map<string, { listing_id: string; label: string }> {
+  const out = new Map<string, { listing_id: string; label: string }>();
+  for (const subject of subjects) {
+    if (subject.subject_ref.kind !== "listing") continue;
+    const refs = structuredRefsFromHandoff(subject.handoff);
+    const listing = refs.listings.find((candidate) => candidate.ref.id === subject.subject_ref.id);
+    if (refs.issuer === null || listing === undefined || out.has(refs.issuer.id)) continue;
+    out.set(refs.issuer.id, { listing_id: listing.ref.id, label: listing.ticker ?? subject.display_label });
+  }
+  return out;
+}
 
 function issuersOf(subjects: ReadonlyArray<ChatResolvedSubjectPreResolution>): IssuerSubjectRef[] {
   const seen = new Set<string>();
@@ -369,6 +385,9 @@ async function manifestFromBlockRefs(input: {
 }): Promise<SnapshotManifestDraft> {
   const toolCallIds = uuidRefsFromBlocks(input.blocks, "tool_call_ids");
   const toolCallResultHashes = await loadToolCallResultHashes(toolCallIds);
+  const seriesSpecs = input.blocks.flatMap((block) =>
+    Array.isArray(block.provenance_series_specs) ? block.provenance_series_specs as JsonValue[] : []
+  );
   return Object.freeze({
     [STAGED_SNAPSHOT_MANIFEST]: true as const,
     subject_refs: Object.freeze([...input.subjectRefs]),
@@ -376,18 +395,36 @@ async function manifestFromBlockRefs(input: {
     claim_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "claim_refs")),
     event_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "event_refs")),
     document_refs: Object.freeze(uuidRefsFromBlocks(input.blocks, "document_refs")),
-    series_specs: Object.freeze([]),
+    // Sealed price series cited by chart blocks (see perf-block.ts).
+    series_specs: Object.freeze(seriesSpecs),
     source_ids: Object.freeze(uuidRefsFromBlocks(input.blocks, "source_refs")),
     tool_call_ids: Object.freeze(toolCallIds),
     tool_call_result_hashes: Object.freeze(toolCallResultHashes),
     as_of: input.asOf,
-    basis: "unadjusted",
-    normalization: "raw",
+    // Describe the sealed series' data (adjusted percent returns) when there is
+    // one; a snapshot with no price series keeps the raw defaults.
+    ...seriesSemantics(seriesSpecs),
     coverage_start: null,
     allowed_transforms: Object.freeze({}),
     model_version: input.modelVersion,
     parent_snapshot: null,
   });
+}
+
+function seriesSemantics(specs: ReadonlyArray<JsonValue>): {
+  basis: SnapshotManifestDraft["basis"];
+  normalization: SnapshotManifestDraft["normalization"];
+} {
+  const bases = new Set(specs.map((spec) => (spec as { adjustment_basis?: unknown }).adjustment_basis));
+  const normalizations = new Set(specs.map((spec) => (spec as { normalization?: unknown }).normalization));
+  const [basis] = bases;
+  const [normalization] = normalizations;
+  // One chart, one basis: a mixed set would not describe any single series.
+  if (bases.size !== 1 || normalizations.size !== 1) return { basis: "unadjusted", normalization: "raw" };
+  return {
+    basis: basis as SnapshotManifestDraft["basis"],
+    normalization: normalization as SnapshotManifestDraft["normalization"],
+  };
 }
 
 async function loadToolCallResultHashes(
@@ -499,19 +536,28 @@ function normalizeAssistantBlock(
       ? block.provenance_fact_refs
       : input.defaultRefs.provenance_fact_refs,
     tool_call_ids: input.toolCallIds,
-    as_of: input.asOf,
-    // The turn's companies plus any the block names itself (a comparison names
-    // its issuers), so the sealed manifest covers every subject shown.
-    subject_refs: distinctSubjectRefs([...input.subjectRefs, ...blockSubjectRefs(block)]),
+    // A block built from sealed price series keeps its stored range's date (it
+    // may be stale); every other block, including any the model wrote, is dated
+    // by the answer. Never later than the answer.
+    as_of: Array.isArray(block.provenance_series_specs) && typeof block.as_of === "string" && block.as_of <= input.asOf
+      ? block.as_of
+      : input.asOf,
+    subject_refs: subjectRefsForBlock(block, input.subjectRefs),
   };
 }
 
-function blockSubjectRefs(block: Record<string, unknown>): SnapshotSubjectRef[] {
-  const named = [
-    ...(Array.isArray(block.subject_refs) ? block.subject_refs : []),
-    ...(Array.isArray(block.subjects) ? block.subjects : []),
-  ];
-  return named.filter(isSnapshotSubjectRef);
+// A block that lists its own subjects (perf_comparison: one per label and line)
+// keeps exactly those. Other blocks carry the turn's companies plus any they
+// name (a comparison's issuers). The sealed manifest collects every block's
+// subject_refs, so it covers every subject shown either way.
+export function subjectRefsForBlock(
+  block: Record<string, unknown>,
+  turnRefs: ReadonlyArray<SnapshotSubjectRef>,
+): SnapshotSubjectRef[] {
+  const own = Array.isArray(block.subject_refs) ? block.subject_refs.filter(isSnapshotSubjectRef) : [];
+  if (own.length > 0) return own;
+  const named = Array.isArray(block.subjects) ? block.subjects.filter(isSnapshotSubjectRef) : [];
+  return distinctSubjectRefs([...turnRefs, ...named]);
 }
 
 function distinctSubjectRefs(refs: ReadonlyArray<SnapshotSubjectRef>): SnapshotSubjectRef[] {

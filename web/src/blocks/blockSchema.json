@@ -506,6 +506,16 @@
                 "$ref": "#/$defs/SubjectRef"
               }
             },
+            "subject_labels": {
+              "description": "Display label per subject, in subject_refs order (e.g. a ticker).",
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "series": {
+              "description": "Sealed series, one per subject and already normalized. When present, renderers draw exactly these and fetch nothing live.",
+              "type": "array",
+              "items": { "$ref": "#/$defs/Series" }
+            },
             "default_range": {
               "type": "string"
             },

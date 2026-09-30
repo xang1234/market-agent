@@ -3,7 +3,13 @@ import test from "node:test";
 
 import type { IssuerFundamentalFact } from "../../fundamentals/src/issuer-fundamentals-reader.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
-import { buildIssuerFactBlocks } from "../src/fact-blocks.ts";
+import {
+  buildIssuerFactBlocks,
+  listingsForComparison,
+  loadTurnFactBlocks,
+  priceListingsForComparison,
+} from "../src/fact-blocks.ts";
+import { fakeQuery } from "./fake-query.ts";
 
 const SNAPSHOT_ID = "11111111-1111-4111-a111-111111111111";
 const AS_OF = "2026-09-01T00:00:00.000Z";
@@ -126,4 +132,75 @@ test("facts the verifier cannot load are left out rather than rendered unbound",
   const loadable = verifierFacts(facts).filter((f) => f.fact_id !== facts[0].fact_id);
   const blocks = buildIssuerFactBlocks({ facts, verifierFacts: loadable, snapshotId: SNAPSHOT_ID, asOf: AS_OF });
   assert.equal(JSON.stringify(blocks).includes(facts[0].fact_id), false);
+});
+
+test("a comparison charts the listing the user asked for, not an arbitrary one of the issuer's", () => {
+  const issuer = "60000000-0000-4000-8000-000000000001";
+  const peer = "60000000-0000-4000-8000-000000000002";
+  const listings = listingsForComparison(
+    [issuer, peer],
+    new Map([[issuer, { listing_id: "listing-requested", label: "GOOG" }]]),
+    new Map([
+      [issuer, { listing_id: "listing-alphabetical", label: "GOOGA" }],
+      [peer, { listing_id: "listing-peer", label: "MSFT" }],
+    ]),
+  );
+  assert.deepEqual(listings.get(issuer), { listing_id: "listing-requested", label: "GOOG" });
+  // Auto-selected peers were never resolved, so they use the issuer's active listing.
+  assert.deepEqual(listings.get(peer), { listing_id: "listing-peer", label: "MSFT" });
+});
+
+test("the price chart gets every compared company's listing, or none when one has no listing", () => {
+  const companies = new Map<string, { listing_id: string | null; label: string }>([
+    ["i1", { listing_id: "l1", label: "NVDA" }],
+    ["i2", { listing_id: "l2", label: "AMD" }],
+  ]);
+  assert.deepEqual(priceListingsForComparison(["i1", "i2"], companies), [
+    { id: "l1", label: "NVDA" },
+    { id: "l2", label: "AMD" },
+  ]);
+  assert.deepEqual(priceListingsForComparison(["i1", "i2", "i3"], companies), []);
+  const unlisted = new Map([...companies, ["i3", { listing_id: null, label: "Private Co" }]]);
+  assert.deepEqual(priceListingsForComparison(["i1", "i2", "i3"], unlisted), []);
+});
+
+test("a comparison keeps its price chart when the fundamentals are unavailable", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const issuers = [
+    { kind: "issuer" as const, id: "64000000-0000-4000-8000-000000000001" },
+    { kind: "issuer" as const, id: "64000000-0000-4000-8000-000000000002" },
+  ];
+  const listingIds = ["64000000-0000-4000-8000-00000000000a", "64000000-0000-4000-8000-00000000000b"];
+  const asOf = "2026-09-01T00:00:00.000Z";
+  const query = fakeQuery((text) => {
+    if (text.includes("from issuers i")) {
+      return { rows: issuers.map((issuer, i) => ({ issuer_id: issuer.id, listing_id: listingIds[i], ticker: `T${i}`, legal_name: `Co ${i}` })) };
+    }
+    if (text.includes("market_bar_ranges")) {
+      return {
+        rows: listingIds.map((listingId, i) => ({
+          bar_range_id: `64000000-0000-4000-8000-00000000010${i}`,
+          listing_id: listingId,
+          source_id: "00000000-0000-4000-a000-000000000009",
+          delay_class: "eod",
+          range_start: "2026-08-22T00:00:00.000Z",
+          range_end: asOf,
+          as_of: asOf,
+          bars: [
+            { ts: "2026-08-22T00:00:00.000Z", close: 100 + i },
+            { ts: "2026-08-23T00:00:00.000Z", close: 110 + i },
+          ],
+        })),
+      };
+    }
+    throw new Error("fundamentals unavailable");
+  });
+  const blocks = await loadTurnFactBlocks({ query } as never, {
+    issuers,
+    wantsPeers: false,
+    snapshotId: "64000000-0000-4000-8000-0000000000ff",
+    asOf,
+  });
+  assert.deepEqual(blocks.map((block) => block.kind), ["perf_comparison", "disclosure"]);
+  assert.deepEqual(blocks[0].subject_labels, ["T0", "T1"]);
 });
