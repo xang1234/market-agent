@@ -129,7 +129,7 @@ async function loadComparisonFactBlocks(
       },
     });
     const issuerIds = block.subjects.map((subject) => subject.id);
-    const companies = listingsForComparison(issuerIds, input.requestedListings, await companyListings(db, issuerIds));
+    const companies = listingsForComparison(issuerIds, input.requestedListings, await companyListings(db, issuerIds, input.asOf));
     const labelOf = (issuerId: string) => companies.get(issuerId)?.label ?? `issuer:${issuerId.slice(0, 8)}`;
     // Price performance for the same companies, from sealed daily bars, with any
     // pricing disclosure it requires (perf-block.ts).
@@ -186,9 +186,10 @@ export function listingsForComparison(
 
 // Each company's active listing (for prices) and display label: its ticker,
 // else its legal name.
-async function companyListings(
-  db: QueryExecutor,
+export async function companyListings(
+  db: Pick<QueryExecutor, "query">,
   issuerIds: ReadonlyArray<string>,
+  asOf: string,
 ): Promise<Map<string, CompanyListing>> {
   const { rows } = await db.query<{ issuer_id: string; listing_id: string | null; ticker: string | null; legal_name: string }>(
     `select i.issuer_id::text as issuer_id,
@@ -201,12 +202,14 @@ async function companyListings(
            from instruments ins
            join listings l on l.instrument_id = ins.instrument_id
           where ins.issuer_id = i.issuer_id
-            and l.active_to is null
+            -- Active at the turn's cutoff (the resolver's rule, lookup.ts).
+            and (l.active_from is null or l.active_from <= $2::timestamptz)
+            and (l.active_to is null or l.active_to > $2::timestamptz)
           order by l.ticker
           limit 1
        ) l on true
       where i.issuer_id = any($1::uuid[])`,
-    [issuerIds],
+    [issuerIds, asOf],
   );
   return new Map(rows.map((row) => [row.issuer_id, { listing_id: row.listing_id, label: row.ticker ?? row.legal_name }]));
 }
