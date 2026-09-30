@@ -176,3 +176,59 @@ function richTextBlock(text: string): Record<string, unknown> {
     segments: [{ type: "text", text }],
   };
 }
+
+const NARRATIVE_BLOCK = {
+  id: "narrative-1",
+  kind: "rich_text",
+  segments: [{ type: "text", text: "placeholder" }],
+};
+const FACT_BLOCKS = [{
+  id: "metric-row-1",
+  kind: "metric_row",
+  title: "Latest quarter (Q4 2026)",
+  items: [{ label: "Revenue", value_ref: "fact-1", format: "$62.1B" }],
+}];
+
+async function composeWithReply(reply: string) {
+  let prompt = "";
+  const blocks = await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "Analyze NVDA", bundleId: "single_subject_analysis" },
+    blocks: [NARRATIVE_BLOCK],
+    toolCalls: [],
+    factBlocks: FACT_BLOCKS,
+    createClient: () => async (_deployment, request) => {
+      prompt = request.messages.map((message) => message.content).join("\n");
+      return { text: reply };
+    },
+  });
+  const text = (blocks[0].segments as Array<{ text: string }>)[0].text;
+  return { text, prompt };
+}
+
+test("a replayed reply quoting a figure the user is not shown has that sentence stripped", async () => {
+  const { text, prompt } = await composeWithReply(
+    "Revenue reached $62.1B in Q4 2026. That is 38% growth year over year.",
+  );
+  assert.equal(text, "Revenue reached $62.1B in Q4 2026.");
+  // The model is told which figures it may quote.
+  assert.match(prompt, /displayed_figures/);
+  assert.match(prompt, /\$62\.1B/);
+});
+
+test("a reply with no supported sentence falls back to a pointer at the cited figures", async () => {
+  const { text } = await composeWithReply("Revenue grew 45%. EPS hit $3.10.");
+  assert.match(text, /select any value to see its source/);
+  assert.doesNotMatch(text, /45|3\.10/);
+});
+
+test("without fact blocks the narrative is passed through unguarded, as before", async () => {
+  const blocks = await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "Summarize demand", bundleId: "single_subject_analysis" },
+    blocks: [NARRATIVE_BLOCK],
+    toolCalls: [],
+    createClient: () => async () => ({ text: "Demand rose 12% per the cited note." }),
+  });
+  assert.equal((blocks[0].segments as Array<{ text: string }>)[0].text, "Demand rose 12% per the cited note.");
+});

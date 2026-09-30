@@ -25,6 +25,8 @@ export type IssuerFundamentalFact = {
   value_text: string | null;
   unit: string | null;
   currency: string | null;
+  // Multiplier to native units (value_num * scale); 1 for most SEC facts.
+  scale: number;
   fiscal_year: number | null;
   fiscal_period: string | null;
   as_of: string;
@@ -52,6 +54,7 @@ type FactRow = {
   value_text: string | null;
   unit: string | null;
   currency: string | null;
+  scale: number | string | null;
   fiscal_year: number | null;
   fiscal_period: string | null;
   as_of: Date | string;
@@ -95,6 +98,7 @@ export async function loadRecentIssuerFundamentals(
             f.value_text,
             f.unit,
             f.currency,
+            f.scale,
             f.fiscal_year,
             f.fiscal_period,
             f.as_of,
@@ -125,6 +129,7 @@ function factFromRow(row: FactRow): IssuerFundamentalFact {
     value_text: row.value_text,
     unit: row.unit,
     currency: row.currency,
+    scale: numericOrNull(row.scale) ?? 1,
     fiscal_year: row.fiscal_year,
     fiscal_period: row.fiscal_period,
     as_of: isoString(row.as_of),

@@ -2,10 +2,8 @@
 //
 // Drives the default chat server the way the web client does — create a thread,
 // open the turn stream, reload the thread — against the frozen dataset in
-// test/golden/, with a recorded model reply (no provider keys). Everything the
-// product already does is asserted strictly; the capability still missing
-// (charts and tables in chat, #120) is a `todo` subtest that flips to a normal
-// assertion when #120 lands.
+// test/golden/, with a recorded model reply (no provider keys). Every subtest
+// is strict, including the fact-built chart and metric row (#120).
 
 import assert from "node:assert/strict";
 import { join } from "node:path";
@@ -106,9 +104,7 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     }
   });
 
-  await t.test("answer includes a chart and a metric row bound to cited facts", {
-    todo: "#120: chat does not emit chart/table blocks yet",
-  }, async () => {
+  await t.test("answer includes a chart and a metric row bound to cited facts", async () => {
     assert.ok(assistant);
     const kinds = assistant.blocks.map((block) => block.kind);
     const chart = assistant.blocks.find((block) => CHART_KINDS.has(String(block.kind)));

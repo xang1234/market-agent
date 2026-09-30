@@ -7,6 +7,12 @@ import type { ThreadTitleModel } from "../../summary/src/title-generator.ts";
 import type {
   ChatAnalystToolRuntimeToolCall,
 } from "./coordinator.ts";
+import { displayTextsForBlocks } from "./fact-blocks.ts";
+import { keepSupportedSentences } from "./narrative-guard.ts";
+
+// Shown when the guard strips every sentence of the model's prose.
+const FACT_BLOCKS_FALLBACK_TEXT =
+  "The reported figures below come from the company's filings; select any value to see its source.";
 
 type LlmRuntimeContext = {
   userIntent?: string;
@@ -54,6 +60,9 @@ export async function composeAnalystBlocksWithLlm(input: {
   context: LlmRuntimeContext;
   blocks: ReadonlyArray<Record<string, unknown>>;
   toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>;
+  // Deterministic chart/table blocks shown with the answer. When present, the
+  // prose may only quote figures they display (or that cited claims state).
+  factBlocks?: ReadonlyArray<Record<string, unknown>>;
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
 }): Promise<ReadonlyArray<Record<string, unknown>>> {
   const router = await createLlmRouterFromEnv(input.env ?? process.env, {
@@ -68,6 +77,9 @@ export async function composeAnalystBlocksWithLlm(input: {
         content: [
           "Write a concise investment research answer for the chat user.",
           "Use the provided tool context only; do not invent citations or data.",
+          "The figures shown to the user are listed in displayed_figures. Quote a figure only",
+          "exactly as it appears there, and never compute new figures such as growth rates,",
+          "margins, or ratios; describe direction and comparison in words instead.",
           "If the tool context flags data as stale (quote.stale, or",
           "fact_recency.stale / a large fact_recency.age_days), explicitly note",
           "that the figure may be out of date and say how old it is.",
@@ -80,6 +92,7 @@ export async function composeAnalystBlocksWithLlm(input: {
           user_intent: input.context.userIntent ?? "Start a research thread",
           bundle_id: input.context.bundleId,
           existing_blocks: input.blocks,
+          displayed_figures: displayTextsForBlocks(input.factBlocks ?? []),
           tool_calls: input.toolCalls.map(summarizeToolCall),
         }),
       },
@@ -89,7 +102,28 @@ export async function composeAnalystBlocksWithLlm(input: {
   });
   const text = result.text.trim();
   if (text.length === 0) return input.blocks;
-  return rewriteFirstRichTextBlock(input.blocks, text);
+  if (!input.factBlocks?.length) return rewriteFirstRichTextBlock(input.blocks, text);
+
+  const guarded = keepSupportedSentences(text, [
+    ...displayTextsForBlocks(input.factBlocks),
+    ...claimTextsFromToolCalls(input.toolCalls),
+  ]);
+  if (guarded.removed.length > 0) {
+    console.warn(`[chat] removed ${guarded.removed.length} narrative sentence(s) quoting figures not shown to the user`);
+  }
+  return rewriteFirstRichTextBlock(input.blocks, guarded.text || FACT_BLOCKS_FALLBACK_TEXT);
+}
+
+// Claim text the answer cites; a figure a claim states is supported.
+function claimTextsFromToolCalls(toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>): string[] {
+  return toolCalls.flatMap((toolCall) => {
+    const evidence = (toolCall.result as { evidence?: { claims?: unknown } } | undefined)?.evidence;
+    if (!Array.isArray(evidence?.claims)) return [];
+    return evidence.claims.flatMap((claim: unknown) => {
+      const text = (claim as { text_canonical?: unknown } | null)?.text_canonical;
+      return typeof text === "string" ? [text] : [];
+    });
+  });
 }
 
 function summarizeToolCall(toolCall: ChatAnalystToolRuntimeToolCall): Record<string, unknown> {

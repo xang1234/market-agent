@@ -27,6 +27,7 @@ import {
   type ChatAssistantMessagePersistenceInput,
   type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
+import { loadIssuerFactBlocks } from "./fact-blocks.ts";
 import {
   composeAnalystBlocksWithLlm,
   createLlmThreadTitleModel,
@@ -145,24 +146,43 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const toolCallIds = toolCalls
     .filter((toolCall) => toolCall.status === "ok")
     .map((toolCall) => toolCall.tool_call_id);
+  // Charts and tables come from facts, never from the model (see fact-blocks.ts).
+  const factBlocks = await loadIssuerFactBlocks(pool(), {
+    issuer: structuredRefs.issuer,
+    snapshotId: result.snapshot_id,
+    asOf,
+  });
   const llmBlocks = await composeAnalystBlocksWithLlm({
     context,
     blocks: result.blocks,
     toolCalls,
+    factBlocks,
   });
+  const normalize = (block: Record<string, unknown>, refs: typeof defaultRefs) =>
+    normalizeAssistantBlock(block, {
+      snapshotId: result.snapshot_id,
+      asOf,
+      subjectRefs,
+      defaultRefs: refs,
+      toolCallIds,
+    });
   return {
     ...result,
-    blocks: llmBlocks.map((block) =>
-      normalizeAssistantBlock(block, {
-        snapshotId: result.snapshot_id,
-        asOf,
-        subjectRefs,
-        defaultRefs,
-        toolCallIds,
-      })
-    ),
+    blocks: [
+      ...llmBlocks.map((block) => normalize(block, defaultRefs)),
+      // Fact blocks cite exactly their own facts and sources; the narrative's
+      // default claim/document refs would demand sources they do not show.
+      ...factBlocks.map((block) => normalize(block, NO_DEFAULT_REFS)),
+    ],
   } satisfies ChatAnalystToolRuntimeResult;
 };
+
+const NO_DEFAULT_REFS = Object.freeze({
+  source_refs: [],
+  claim_refs: [],
+  document_refs: [],
+  provenance_fact_refs: [],
+});
 
 // Financial requests go through the verified engine. Off unless
 // CHAT_FINANCIAL_MODE is "shadow" or "enforce"; without a configured LLM router,
@@ -429,11 +449,13 @@ function normalizeAssistantBlock(
   },
 ): Record<string, unknown> {
   const kind = typeof block.kind === "string" && block.kind.length > 0 ? block.kind : "rich_text";
+  // Keep data_ref.params: fact blocks carry their fact_bindings there.
+  const params = (block.data_ref as { params?: unknown } | undefined)?.params;
   return {
     ...block,
     kind,
     snapshot_id: input.snapshotId,
-    data_ref: { kind, id: String(block.id ?? input.snapshotId) },
+    data_ref: { kind, id: String(block.id ?? input.snapshotId), ...(params === undefined ? {} : { params }) },
     source_refs: Array.isArray(block.source_refs) && block.source_refs.length > 0
       ? block.source_refs
       : input.defaultRefs.source_refs,
