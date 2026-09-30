@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { seedGoldenDevDatabase } from "../scripts/seed-golden-dev.ts";
+import { assertNoGoldenDataset, seedGoldenDevDatabase } from "../scripts/seed-golden-dev.ts";
 import { GOLDEN_COMPANIES } from "./golden/dataset.ts";
 
 test("seedGoldenDevDatabase seeds the frozen dataset once and is a no-op on rerun", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
@@ -20,6 +20,13 @@ test("seedGoldenDevDatabase seeds the frozen dataset once and is a no-op on reru
 
   const tickers = (await client.query<{ ticker: string }>(`select ticker from listings order by ticker`)).rows.map((r) => r.ticker);
   assert.deepEqual(tickers, GOLDEN_COMPANIES.map((c) => c.ticker).sort());
+});
+
+test("assertNoGoldenDataset passes on a live database and rejects one holding the frozen dataset", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-golden-dev-assert-absent");
+  await assertNoGoldenDataset(databaseUrl);
+  await seedGoldenDevDatabase(databaseUrl);
+  await assert.rejects(() => assertNoGoldenDataset(databaseUrl), /frozen golden dataset.*down -v/s);
 });
 
 test("seedGoldenDevDatabase leaves nothing half-seeded when a golden ticker is already taken", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {

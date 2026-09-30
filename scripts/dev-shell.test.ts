@@ -467,7 +467,25 @@ test("DEV_MODE=data needs live provider credentials and does not seed frozen dat
     NPM_TRACE,
   );
   assert.equal(result.code, 0, result.stderr);
-  assert.ok(!lines("npm:").some((l) => l.includes("seed:golden")));
+  // It only checks the golden dataset is absent; it never seeds it.
+  assert.ok(!lines("npm:").includes("chat:run seed:golden"), lines("npm:").join(", "));
+});
+
+test("DEV_MODE=data refuses a database that still holds the frozen golden dataset", async () => {
+  const LIVE = { DEV_MODE: "data", ...LIVE_LLM, POLYGON_API_KEY: "pk", SEC_EDGAR_USER_AGENT: "market-agent-dev@example.com" };
+  const { result, lines } = await traceUp(LIVE, NPM_TRACE);
+  assert.equal(result.code, 0, result.stderr);
+  const npm = lines("npm:");
+  assert.ok(npm.indexOf("chat:run seed:golden -- --assert-absent") > npm.indexOf("db:run migrate -- up"), npm.join(", "));
+
+  // The check fails: up stops and rolls back instead of starting on frozen data.
+  const frozen = await traceUp(LIVE, [
+    'npm(){ printf "npm:%s:%s\\n" "${PWD##*/}" "$*" >> "$TRACE_FILE"; [[ "$*" != *--assert-absent* ]]; }',
+    "export -f npm",
+    'mkdir -p "$ROOT/services/chat"',
+  ]);
+  assert.notEqual(frozen.result.code, 0);
+  assert.deepEqual(frozen.lines("start:"), [], "nothing starts on frozen data");
 });
 
 test("an unknown DEV_MODE, or DEV_NO_KEYS with a live mode, fails before starting anything", async () => {

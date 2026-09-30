@@ -640,6 +640,13 @@ up() {
   fi
 
   # Idempotent; fails (all-or-nothing) if provider-hydrated tickers already clash.
+  # Data mode must not run on a database a frozen mode seeded: its golden facts and
+  # long-lived caches would let a live check pass on frozen values.
+  if [[ "$DEV_MODE" == "data" ]] && ! (cd "$ROOT/services/chat" && npm run seed:golden -- --assert-absent); then
+    cleanup_failed_up
+    return 1
+  fi
+
   if seeds_frozen_data && ! (cd "$ROOT/services/chat" && npm run seed:golden); then
     cleanup_failed_up
     return 1
