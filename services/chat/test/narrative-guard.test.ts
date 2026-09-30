@@ -323,3 +323,9 @@ test("an unattached comparison company blocks the carried owner", () => {
   );
   assert.equal(result.removed.length, 1);
 });
+
+test("a ticker that is also a currency prefix does not break that currency's figures", () => {
+  const figures = [{ company: "CHF", value: "-CHF 3.1B" }, { company: "AMD", value: "$3.1B" }];
+  assert.deepEqual(keepSupportedSentences("CHF's operating income was -CHF 3.1B.", [], figures).removed, []);
+  assert.equal(keepSupportedSentences("AMD's operating income was -CHF 3.1B.", [], figures).removed.length, 1);
+});

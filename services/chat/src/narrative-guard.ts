@@ -81,9 +81,13 @@ export function keepSupportedSentences(
       continue;
     }
     const kept = line.trim().split(SENTENCE_BREAK).filter((sentence) => {
-      const named = companyMentions(sentence, companies);
-      // Digits inside a label ("issuer:12ab34cd") are not figures.
-      const numbers = numberMatches(maskMentions(sentence, named));
+      const allNumbers = numberMatches(sentence);
+      const mentions = companyMentions(sentence, companies);
+      // Digits inside a label ("issuer:12ab34cd") are not figures, and a label
+      // inside a figure ("-CHF 3.1B" when CHF is a ticker) is not a mention.
+      const within = (at: number, start: number, length: number) => at >= start && at < start + length;
+      const numbers = allNumbers.filter((n) => !mentions.some((m) => within(n.index, m.index, m.company.length)));
+      const named = mentions.filter((m) => !allNumbers.some((n) => within(m.index, n.index, n.end - n.index)));
       if (numbers.some(({ number }) => !supported.has(number) && !owners.has(number))) {
         removed.push(sentence);
         return false;
@@ -167,15 +171,6 @@ function companyMentions(
       return [...sentence.matchAll(pattern)].map((match) => ({ company, index: match.index }));
     })
     .sort((a, b) => a.index - b.index);
-}
-
-// The sentence with each company label blanked out, same length, so indices hold.
-function maskMentions(sentence: string, named: ReadonlyArray<{ company: string; index: number }>): string {
-  let masked = sentence;
-  for (const { company, index } of named) {
-    masked = masked.slice(0, index) + " ".repeat(company.length) + masked.slice(index + company.length);
-  }
-  return masked;
 }
 
 // The comparable value: "62.1" for "$62.1B", "-10" for "-10.0%", and "-0" kept
