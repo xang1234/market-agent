@@ -13,6 +13,7 @@
     "lint": "eslint .",
     "sync:schema": "node -e \"require('node:fs').copyFileSync('../spec/finance_research_block_schema.json', 'src/blocks/blockSchema.json')\"",
     "test": "TSX_TSCONFIG_PATH=tsconfig.app.json node --import tsx --test 'src/**/*.test.ts' 'src/**/*.test.tsx'",
+    "e2e": "playwright test",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -29,6 +30,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/vite": "^4.2.4",
     "@types/jsdom": "^28.0.1",
     "@types/node": "^24.12.2",

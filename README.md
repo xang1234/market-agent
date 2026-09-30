@@ -107,6 +107,8 @@ Working on chat only? `DEV_PROFILE=chat ./scripts/dev-shell.sh up` starts one pr
 
 No API keys? `DEV_PROFILE=chat DEV_NO_KEYS=true ./scripts/dev-shell.sh up` seeds the golden test's frozen dataset (NVDA, AMD, AAPL) and answers with its recorded model replies, so the golden conversation works offline: *Analyze NVDA* → *Compare it with AMD* → *Explain the differences and show the evidence*. Other questions have no recorded reply and fail. The LLM settings in `.env.dev` are ignored in this mode. It needs a database without provider-hydrated NVDA/AMD/AAPL: if seeding reports a clash, reset with `docker compose -f docker-compose.dev.yml --env-file .env.dev down -v`.
 
+The same stack backs a browser smoke test of that conversation (`web/e2e/`, also run in CI): with it up, run `cd web && npx playwright install chromium && npm run e2e` (set `E2E_BASE_URL` if `WEB_PORT` isn't 5173).
+
 ### Bring your own keys & models
 
 The terminal works out of the box, but a few keys unlock live data and the AI features. Add them to `.env.dev`:
