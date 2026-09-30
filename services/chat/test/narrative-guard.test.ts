@@ -157,3 +157,10 @@ test("a sentence naming several companies passes none on to the next", () => {
   // One company named: it carries.
   assert.deepEqual(keepSupportedSentences("AMD trails. Its gross margin is 49.2%.", [], COMPARED).removed, []);
 });
+
+test("a comparison phrase after a figure does not make that company its owner", () => {
+  const result = keepSupportedSentences("AMD lagged. Its margin was 74.6%, ahead of NVDA.", [], COMPARED);
+  assert.deepEqual(result.removed, ["Its margin was 74.6%, ahead of NVDA."]);
+  assert.equal(keepSupportedSentences("AMD lagged. Its margin was 74.6% ahead of NVDA.", [], COMPARED).removed.length, 1);
+  assert.deepEqual(keepSupportedSentences("Gross margin was 74.6 percent for NVDA.", [], COMPARED).removed, []);
+});

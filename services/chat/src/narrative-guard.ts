@@ -29,8 +29,9 @@
 const NUMBER = /\d+(?:,\d{3})*(?:\.\d+)?/g;
 const SENTENCE_BREAK = /(?<=[.!?])\s+/;
 // Between a figure and the company that owns it: its unit, then a preposition
-// ("% for ", "B at ", " percent in ").
-const OWNED_BY = /^\S*\s*(?:[A-Za-z]+\s+)?(?:for|at|from|by|of|in)\s+$/i;
+// ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
+// comparison ("74.6%, ahead of NVDA", "beaten by NVDA") never reads as owner.
+const OWNED_BY = /^[^\s,;:]*\s*(?:(?:percent|billion|million|trillion|bn|mn)\s+)?(?:for|at|from|in)\s+$/i;
 
 export type AttributedFigure = { company: string; value: string };
 
