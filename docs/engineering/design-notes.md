@@ -85,19 +85,14 @@ fixed rule, not a tool loop.
   value only, not unit (see the `ponytail:` note in the file).
 - The displayed figures reach the model as rows (`displayedFigures`, `fact-blocks.ts`): `{company, metric, value}`
   for comparison cells, `{metric, value}` / `{metric, period, value}` for single-company blocks. A comparison figure
-  must also be credited to its company, even when a claim repeats the number: every company named between the
-  previous such figure (or the sentence start) and this one must own it; if none is named there, the first one named
-  after it when for/at/in ties them ("49.2% for AMD", not "49.2%, exceeding AMD" or "from AMD's"), which is then used up, else
-  the company of the previous figure in the sentence, else the one company named by the last kept sentence naming
-  any on the line (none if it named several: "NVDA trails AMD. Its..." is ambiguous). A company introduced as a
-  comparison ("compared with", "unlike", "versus") yields to another company or a pronoun as the figure's subject
-  ("Compared with AMD, its margin was 49.2%" credits "its"), and a sentence naming a company only that way leaves
-  the carried subject unchanged. A pronoun before a figure with no company subject is the figure's subject: no
-  company named near it can claim it ("Its margin was 49.2% in AMD's filing"), and a pronoun sentence never replaces
-  the carried company ("It outperformed AMD."). Naming another company in that stretch is ambiguous and drops the sentence, as does a "respectively" construction, so a real figure quoted for the
-  wrong company never survives; the cost is some valid sentences dropped (tracked for tuning against the eval).
-  Companies are recognized by their displayed label (ticker), case-sensitively, which the prompt tells the model to
-  use; digits inside a label are not figures.
+  must also be credited to its company **in the same sentence**, even when a claim repeats the number; nothing carries
+  across sentences ("NVDA leads. Its margin is 74.6%." drops the second sentence). Within a sentence, the companies
+  named since the previous figure must own it; else the first one named after it when for/at/in ties them (unless a
+  pronoun is the subject); else the previous figure's company. A company introduced as a comparison ("compared
+  with", "unlike") yields to another company or a pronoun. Anything ambiguous (two companies before a figure,
+  "respectively", no company) is dropped, so a real figure quoted for the wrong company never survives; the cost is
+  some valid sentences dropped (#144). Companies are recognized by their displayed ticker, case-sensitively, never by
+  a one-letter ticker; digits inside a label are not figures.
 - A failure while building fact blocks degrades to a narrative-only answer; it never costs the user the answer.
 
 ## Which companies a chat turn covers

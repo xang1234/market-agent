@@ -70,16 +70,17 @@ test("each figure is credited to the company named before it, or else after it",
   assert.deepEqual(keepSupportedSentences("Gross margin: 74.6% at NVDA.", [], COMPARED).removed, []);
 });
 
-test("a comparison figure with no company named is removed, unless the line already named one", () => {
+test("a comparison figure must have its company named in the same sentence", () => {
   assert.equal(keepSupportedSentences("Gross margin is 74.6%.", [], COMPARED).removed.length, 1);
+  // Nothing carries across sentences: "Its" could mean any company named earlier.
   const carried = keepSupportedSentences("NVDA leads on margins. Its gross margin is 74.6%.", [], COMPARED);
-  assert.deepEqual(carried.removed, []);
+  assert.deepEqual(carried.removed, ["Its gross margin is 74.6%."]);
 });
 
 test("company labels match exactly, so an ordinary word is not a ticker", () => {
-  const withTickerA = [{ company: "A", value: "74.6%" }, { company: "AMD", value: "49.2%" }];
-  assert.equal(keepSupportedSentences("AMD has a 74.6% margin.", [], withTickerA).removed.length, 1);
-  assert.deepEqual(keepSupportedSentences("A has a 74.6% margin.", [], withTickerA).removed, []);
+  const figures = [{ company: "ON", value: "74.6%" }, { company: "AMD", value: "49.2%" }];
+  assert.equal(keepSupportedSentences("AMD has 74.6% on margin.", [], figures).removed.length, 1);
+  assert.deepEqual(keepSupportedSentences("ON has a 74.6% margin.", [], figures).removed, []);
 });
 
 test("a figure with more than one company named before it is ambiguous and removed", () => {
@@ -144,8 +145,7 @@ test("a company named after a figure owns it only when a preposition ties them",
 test("a sentence naming several companies passes none on to the next", () => {
   const result = keepSupportedSentences("NVDA trails AMD. Its gross margin is 49.2%.", [], COMPARED);
   assert.deepEqual(result.removed, ["Its gross margin is 49.2%."]);
-  // One company named: it carries.
-  assert.deepEqual(keepSupportedSentences("AMD trails. Its gross margin is 49.2%.", [], COMPARED).removed, []);
+  assert.equal(keepSupportedSentences("AMD trails. Its gross margin is 49.2%.", [], COMPARED).removed.length, 1);
 });
 
 test("a comparison phrase after a figure does not make that company its owner", () => {
@@ -220,5 +220,25 @@ test("a pronoun sentence never replaces the carried subject", () => {
 test("a pronoun before a figure is its subject; a company named after cannot override it", () => {
   const result = keepSupportedSentences("NVDA led. Its margin was 49.2% in AMD's filing.", [], COMPARED);
   assert.deepEqual(result.removed, ["Its margin was 49.2% in AMD's filing."]);
-  assert.deepEqual(keepSupportedSentences("NVDA led. Its margin was 74.6% in the year.", [], COMPARED).removed, []);
+  // Within one sentence, the pronoun refers to the earlier figure's company.
+  const figures = [...COMPARED, { company: "NVDA", value: "$130.5B" }];
+  assert.deepEqual(
+    keepSupportedSentences("NVDA's revenue was $130.5B, and its margin was 74.6% in the year.", [], figures).removed,
+    [],
+  );
+  assert.equal(
+    keepSupportedSentences("NVDA's revenue was $130.5B, and its margin was 49.2% in AMD's filing.", [], figures).removed.length,
+    1,
+  );
+});
+
+test("a nominal reference such as 'the company' cannot pass a company to the next sentence", () => {
+  const result = keepSupportedSentences("NVDA led. The company outperformed AMD. Its gross margin was 49.2%.", [], COMPARED);
+  assert.deepEqual(result.removed, ["Its gross margin was 49.2%."]);
+});
+
+test("a one-letter ticker is never read as a company mention", () => {
+  const withTickerA = [{ company: "A", value: "74.6%" }, { company: "AMD", value: "49.2%" }];
+  assert.equal(keepSupportedSentences("A margin of 74.6% makes AMD the leader.", [], withTickerA).removed.length, 1);
+  assert.deepEqual(keepSupportedSentences("AMD's margin is 49.2%.", [], withTickerA).removed, []);
 });

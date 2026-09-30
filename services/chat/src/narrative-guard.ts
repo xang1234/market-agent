@@ -4,40 +4,40 @@
 // else is dropped rather than shown unsupported.
 //
 // A figure that belongs to one company (a comparison cell) must also be
-// credited to that company, even when a claim or title repeats the number. The
-// companies named between the previous such figure (or the sentence start) and
-// this one must all own it ("NVDA's 74.6%, ahead of AMD at 49.2%"); if none is
-// named there, the first one named after it when a preposition ties them
-// ("74.6% at NVDA, 49.2% at AMD"; not "49.2%, exceeding AMD"), which is then
-// used up; if none, the company of the previous figure in the sentence ("NVDA's
-// revenue was $130.5B and margin 74.6%"); if none, the one company named by
-// the last kept sentence naming any on the line ("Its margin..."; none if that
-// sentence named several). A company introduced as a comparison ("compared
-// with", "unlike", "versus", "than") yields to another company or a pronoun
-// ("Compared with AMD, its margin...") as the figure's subject.
-// Naming another company in that stretch ("NVDA and AMD had 74.6%") is
-// ambiguous and drops the sentence, as does
-// "respectively" (it may pair companies or metrics): the guard cannot parse who
-// the figure belongs to, so it only keeps what is unambiguous.
+// credited to that company in the same sentence, even when a claim or title
+// repeats the number. Nothing carries across sentences: "Its margin..." could
+// mean any company named earlier, so it is dropped. Within the sentence:
+// - the companies named between the previous such figure (or the sentence
+//   start) and this one must all own it ("NVDA's 74.6%, ahead of AMD at 49.2%");
+//   a company introduced as a comparison ("compared with", "unlike", "versus")
+//   yields to another company or a pronoun there;
+// - if none is named there, the first one named after it when for/at/in ties
+//   them ("74.6% at NVDA"; not "49.2%, exceeding AMD"), which is then used up,
+//   unless a pronoun is the subject ("its margin was 49.2% in AMD's filing");
+// - if none, the company of the previous figure ("NVDA's revenue was $130.5B
+//   and margin 74.6%").
+// Anything else (two companies before a figure, "respectively", no company) is
+// dropped: the guard cannot parse who the figure belongs to, so it only keeps
+// what is unambiguous. The cost, valid sentences dropped, is tracked in #144.
 //
 // ponytail: compares numbers by value ("62.1" in "$62.1B" and "62.1 billion"),
 // not by magnitude or unit; a derived figure that coincidentally equals a shown
 // one would pass. Tighten to unit-aware matching if that shows up in the eval.
 // ponytail: companies are recognized by their displayed label (ticker) only,
-// case-sensitively (the ticker "A" is not the article "a"); the prompt asks the
-// model to use it. Add legal-name aliases if the eval shows "NVIDIA" sentences
-// being dropped.
+// case-sensitively, and never by a one-letter ticker (the article "A"); the
+// prompt asks the model to use the label. Add legal-name aliases if the eval
+// shows "NVIDIA" sentences being dropped (#144).
 
 // A leading minus is part of the figure ("-10.0%" is not "10.0%", "-$3.1B" is
 // not "$3.1B"), unless it joins two numbers or words ("2025-2026").
 const NUMBER = /(?:(?<![A-Za-z0-9.])[-−][$€£¥]?)?\d+(?:,\d{3})*(?:\.\d+)?/g;
 const SENTENCE_BREAK = /(?<=[.!?])\s+/;
+const COMPARED_WITH = /(?:compared (?:with|to)|unlike|versus|vs\.?|than|relative to|against)\s+$/i;
+const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition
 // ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
 // comparison ("74.6%, ahead of NVDA", "beaten by NVDA", "49.2% from AMD's
 // level") never reads as owner.
-const COMPARED_WITH = /(?:compared (?:with|to)|unlike|versus|vs\.?|than|relative to|against)\s+$/i;
-const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 const OWNED_BY = /^[^\s,;:]*\s*(?:(?:percent|billion|million|trillion|bn|mn)\s+)?(?:for|at|in)\s+$/i;
 
 export type AttributedFigure = { company: string; value: string };
@@ -56,7 +56,10 @@ export function keepSupportedSentences(
       owners.set(number, companies);
     }
   }
-  const companies = [...new Set(attributedFigures.map((figure) => figure.company))];
+  // A one-letter ticker ("A") cannot be told from the article, so it is never
+  // recognized; sentences quoting its figures are dropped.
+  const companies = [...new Set(attributedFigures.map((figure) => figure.company))]
+    .filter((company) => company.length > 1);
 
   const removed: string[] = [];
   const lines: string[] = [];
@@ -66,7 +69,6 @@ export function keepSupportedSentences(
       lines.push("");
       continue;
     }
-    let lastNamed: string | undefined;
     const kept = line.trim().split(SENTENCE_BREAK).filter((sentence) => {
       const named = companyMentions(sentence, companies);
       // Digits inside a label ("issuer:12ab34cd") are not figures.
@@ -93,7 +95,8 @@ export function keepSupportedSentences(
         const comparisons = stretch.filter((mention) => COMPARED_WITH.test(sentence.slice(0, mention.index)));
         const subjects = stretch.filter((mention) => !comparisons.includes(mention));
         // A pronoun with no company subject ("Its margin was 49.2% in AMD's
-        // filing") refers back: nothing named nearby may claim the figure.
+        // filing") refers back to an earlier figure's company in the sentence,
+        // if any: nothing named near this figure may claim it.
         const pronounSubject = subjects.length === 0 && PRONOUN.test(sentence.slice(from, index));
         const before = subjects.length > 0 ? subjects : pronounSubject ? [] : comparisons;
         // Only the first name after it, and only when a preposition ties it to
@@ -108,23 +111,10 @@ export function keepSupportedSentences(
           ? before.map((mention) => mention.company)
           : after !== undefined
           ? [after.company]
-          : carried.length > 0
-          ? carried
-          : lastNamed === undefined ? [] : [lastNamed];
+          : carried;
         carried = credited;
         return credited.length > 0 && credited.every((company) => owners.get(number)!.has(company));
       });
-      // Only a sentence the user will see can name the company for the next one,
-      // and only when it names one: "NVDA trails AMD. Its..." is ambiguous. A
-      // company named only as a comparison ("Unlike AMD, it...") leaves the
-      // carried subject as it was, and so does a pronoun sentence ("It
-      // outperformed AMD."), whose subject is the carried one.
-      const subjects = named.filter((mention) => !COMPARED_WITH.test(sentence.slice(0, mention.index)));
-      const refersBack = PRONOUN.test(sentence) && lastNamed !== undefined;
-      if (isSupported && subjects.length > 0 && !refersBack) {
-        const distinct = new Set(subjects.map((mention) => mention.company));
-        lastNamed = distinct.size === 1 ? subjects[0].company : undefined;
-      }
       if (!isSupported) removed.push(sentence);
       return isSupported;
     });
