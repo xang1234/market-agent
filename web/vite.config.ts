@@ -59,6 +59,12 @@ export default defineConfig({
         target: process.env.HOME_ORIGIN ?? 'http://127.0.0.1:4334',
         changeOrigin: true,
       },
+      // dev-api serves citation inspection; the evidence service is only the review
+      // server. Must precede '/v1/evidence' because Vite uses the first matching key.
+      '/v1/evidence/inspect': {
+        target: process.env.DEV_API_ORIGIN ?? 'http://127.0.0.1:4312',
+        changeOrigin: true,
+      },
       '/v1/evidence': {
         target: process.env.EVIDENCE_ORIGIN ?? 'http://127.0.0.1:4335',
         changeOrigin: true,
