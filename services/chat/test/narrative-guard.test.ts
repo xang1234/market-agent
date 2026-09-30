@@ -84,7 +84,8 @@ test("company labels match exactly, so an ordinary word is not a ticker", () => 
 
 test("a figure with more than one company named before it is ambiguous and removed", () => {
   assert.equal(keepSupportedSentences("AMD's margin, unlike NVDA, is 74.6%.", [], COMPARED).removed.length, 1);
-  assert.equal(keepSupportedSentences("Unlike AMD, NVDA's margin is 74.6%.", [], COMPARED).removed.length, 1);
+  // A company introduced as a comparison ("Unlike AMD, ...") is not the owner.
+  assert.deepEqual(keepSupportedSentences("Unlike AMD, NVDA's margin is 74.6%.", [], COMPARED).removed, []);
 });
 
 test("an unattributed number between a company and its figure does not break the attribution", () => {
@@ -183,4 +184,16 @@ test("a 'respectively' sentence is not paired up: it is dropped rather than gues
 test("digits inside a company label are not figures", () => {
   const figures = [{ company: "issuer:12ab34cd", value: "49.2%" }, { company: "NVDA", value: "74.6%" }];
   assert.deepEqual(keepSupportedSentences("issuer:12ab34cd's margin is 49.2%.", [], figures).removed, []);
+});
+
+test("a company introduced as a comparison before the figure does not own it", () => {
+  const result = keepSupportedSentences("NVDA led. Compared with AMD, its gross margin was 49.2%.", [], COMPARED);
+  assert.deepEqual(result.removed, ["Compared with AMD, its gross margin was 49.2%."]);
+  assert.deepEqual(keepSupportedSentences("Compared with AMD, NVDA's gross margin was 74.6%.", [], COMPARED).removed, []);
+});
+
+test("negative zero keeps its sign", () => {
+  const flat = [{ company: "NVDA", value: "-0.0%" }, { company: "AMD", value: "12.0%" }];
+  assert.equal(keepSupportedSentences("NVDA's revenue growth was 0.0%.", [], flat).removed.length, 1);
+  assert.deepEqual(keepSupportedSentences("NVDA's revenue growth was -0.0%.", [], flat).removed, []);
 });

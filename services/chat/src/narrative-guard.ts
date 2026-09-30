@@ -12,8 +12,11 @@
 // used up; if none, the company of the previous figure in the sentence ("NVDA's
 // revenue was $130.5B and margin 74.6%"); if none, the one company named by
 // the last kept sentence naming any on the line ("Its margin..."; none if that
-// sentence named several). Naming another company in that stretch ("AMD's
-// margin, unlike NVDA, is 74.6%") is ambiguous and drops the sentence, as does
+// sentence named several). A company introduced as a comparison ("compared
+// with", "unlike", "versus", "than") yields to another company or a pronoun
+// ("Compared with AMD, its margin...") as the figure's subject.
+// Naming another company in that stretch ("NVDA and AMD had 74.6%") is
+// ambiguous and drops the sentence, as does
 // "respectively" (it may pair companies or metrics): the guard cannot parse who
 // the figure belongs to, so it only keeps what is unambiguous.
 //
@@ -32,6 +35,8 @@ const SENTENCE_BREAK = /(?<=[.!?])\s+/;
 // Between a figure and the company that owns it: its unit, then a preposition
 // ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
 // comparison ("74.6%, ahead of NVDA", "beaten by NVDA") never reads as owner.
+const COMPARED_WITH = /(?:compared (?:with|to)|unlike|versus|vs\.?|than|relative to|against)\s+$/i;
+const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 const OWNED_BY = /^[^\s,;:]*\s*(?:(?:percent|billion|million|trillion|bn|mn)\s+)?(?:for|at|from|in)\s+$/i;
 
 export type AttributedFigure = { company: string; value: string };
@@ -79,7 +84,16 @@ export function keepSupportedSentences(
       const isSupported = attributed.every(({ number, index, end }, i) => {
         const from = Math.max(i === 0 ? 0 : attributed[i - 1].end, usedUpTo);
         const to = i === attributed.length - 1 ? sentence.length : attributed[i + 1].index;
-        const before = named.filter((mention) => mention.index >= from && mention.index < index);
+        const stretch = named.filter((mention) => mention.index >= from && mention.index < index);
+        // A company introduced as a comparison yields to the figure's own
+        // subject: another company ("Compared with AMD, NVDA's 74.6%") or a
+        // pronoun ("Compared with AMD, its 49.2%"). Alone, it is the owner
+        // ("versus AMD's 49.2%").
+        const comparisons = stretch.filter((mention) => COMPARED_WITH.test(sentence.slice(0, mention.index)));
+        const subjects = stretch.filter((mention) => !comparisons.includes(mention));
+        const before = subjects.length > 0
+          ? subjects
+          : comparisons.filter((mention) => !PRONOUN.test(sentence.slice(mention.index + mention.company.length, index)));
         // Only the first name after it, and only when a preposition ties it to
         // the figure ("74.6% for NVDA"); "49.2%, exceeding AMD" names a comparison.
         const next = named.find((mention) => mention.index >= end && mention.index < to);
@@ -117,7 +131,7 @@ function numbersIn(text: string): string[] {
 
 function numberMatches(text: string): Array<{ number: string; index: number; end: number }> {
   return [...text.matchAll(NUMBER)].map((match) => ({
-    number: String(Number(match[0].replace("−", "-").replace(/[$€£¥,]/g, ""))),
+    number: numberKey(match[0]),
     index: match.index,
     end: match.index + match[0].length,
   }));
@@ -143,6 +157,13 @@ function maskMentions(sentence: string, named: ReadonlyArray<{ company: string; 
     masked = masked.slice(0, index) + " ".repeat(company.length) + masked.slice(index + company.length);
   }
   return masked;
+}
+
+// The comparable value: "62.1" for "$62.1B", "-10" for "-10.0%", and "-0" kept
+// apart from "0" ("-0.0%" is a displayed decline).
+function numberKey(raw: string): string {
+  const value = Number(raw.replace("−", "-").replace(/[$€£¥,]/g, ""));
+  return Object.is(value, -0) ? "-0" : String(value);
 }
 
 function escapeRegExp(text: string): string {
