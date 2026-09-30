@@ -23,6 +23,7 @@ function input() {
 test('point facts without period ends seal with their precise observation time', async () => {
   const seal = input();
   assert.deepEqual(await verifySnapshotSeal(seal), { ok: true, failures: [] });
+  assert.ok(seal.facts);
   assert.equal(seal.facts[0].as_of, fact.as_of);
 });
 

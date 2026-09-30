@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createThreadTitleGenerationJob } from "../src/thread-title.ts";
 import type { ChatThreadsDb } from "../src/threads-repo.ts";
+import { fakeQuery } from "./fake-query.ts";
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const THREAD_ID = "22222222-2222-4222-8222-222222222222";
@@ -9,7 +10,7 @@ const THREAD_ID = "22222222-2222-4222-8222-222222222222";
 test("thread title generation job writes the generated title to chat_threads", async () => {
   const queries: Array<{ text: string; values?: unknown[] }> = [];
   const db: ChatThreadsDb = {
-    async query(text, values) {
+    query: fakeQuery(async (text, values) => {
       queries.push({ text, values });
       if (/select title/i.test(text)) {
         return { rows: [{ title: null }] };
@@ -29,7 +30,7 @@ test("thread title generation job writes the generated title to chat_threads", a
           },
         ],
       };
-    },
+    }),
   };
   const job = createThreadTitleGenerationJob({
     db,
@@ -55,9 +56,9 @@ test("thread title generation job writes the generated title to chat_threads", a
 test("thread title generation job does not call the model when a title already exists", async () => {
   let modelCalls = 0;
   const db: ChatThreadsDb = {
-    async query() {
+    query: fakeQuery(async () => {
       return { rows: [{ title: "User edited title" }] };
-    },
+    }),
   };
   const job = createThreadTitleGenerationJob({
     db,

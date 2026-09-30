@@ -45,14 +45,14 @@ test("in-repo chat runtime runs without the local stub tool executor mode", asyn
     }, repoRoot);
 
     await assert.rejects(
-      () =>
+      async () =>
         options.analystToolRuntime!({
           threadId: "11111111-1111-4111-a111-111111111111",
           runId: "22222222-2222-4222-a222-222222222222",
           turnId: "33333333-3333-4333-a333-333333333333",
           bundleId: "single_subject_analysis",
           userIntent: "Summarize the latest filing",
-          emit() {},
+          emit: () => ({}) as never,
         }),
       /DATABASE_URL|ENOTFOUND|getaddrinfo|connect/i,
     );

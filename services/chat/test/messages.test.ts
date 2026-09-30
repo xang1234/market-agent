@@ -12,6 +12,7 @@ import {
   type ChatMessageTransactionClient,
 } from "../src/messages.ts";
 import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
+import { fakeQuery } from "./fake-query.ts";
 
 test("chat message persistence does not insert when snapshot sealing fails", async () => {
   const db = recordingDb();
@@ -79,6 +80,7 @@ test("chat message persistence rejects unpinned executors before sealing", async
 
   await assert.rejects(
     () =>
+      // @ts-expect-error -- deliberately passes an unpinned executor to prove it is rejected at runtime
       persistChatMessageAfterSnapshotSeal(db, {
         thread_id: "11111111-1111-4111-a111-111111111111",
         role: "assistant",
@@ -414,7 +416,7 @@ function unpinnedRecordingDb(steps: string[] = []): ChatMessagePersistenceDb & {
       // Test clients model an acquired pool client; release behavior is asserted
       // explicitly in pool-backed persistence tests.
     },
-    query: async (text, values) => {
+    query: fakeQuery(async (text, values) => {
       queries.push({ text, values });
       if (text === "begin") {
         steps.push("begin");
@@ -446,7 +448,7 @@ function unpinnedRecordingDb(steps: string[] = []): ChatMessagePersistenceDb & {
         return { rows: [] };
       }
       throw new Error(`Unexpected query: ${text}`);
-    },
+    }),
   };
 }
 
@@ -456,10 +458,10 @@ function messageListDb(
   const queries: Array<{ text: string; values?: unknown[] }> = [];
   return {
     queries,
-    async query(text, values) {
+    query: fakeQuery(async (text, values) => {
       queries.push({ text, values });
       return { rows: responder(text, values) };
-    },
+    }),
   };
 }
 
@@ -469,9 +471,9 @@ function importedMessageDb(
   const queries: Array<{ text: string; values?: unknown[] }> = [];
   return {
     queries,
-    async query(text, values) {
+    query: fakeQuery(async (text, values) => {
       queries.push({ text, values });
       return { rows: responder(text, values) };
-    },
+    }),
   };
 }

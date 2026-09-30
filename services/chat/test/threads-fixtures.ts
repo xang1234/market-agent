@@ -1,4 +1,5 @@
 import type { ChatThreadsDb } from "../src/threads-repo.ts";
+import { fakeQuery } from "./fake-query.ts";
 
 export const USER_ID = "11111111-1111-4111-a111-111111111111";
 export const THREAD_ID = "22222222-2222-4222-a222-222222222222";
@@ -13,12 +14,12 @@ export function fakeDb(handler: (query: RecordedQuery) => unknown[]): {
 } {
   const queries: RecordedQuery[] = [];
   const db: ChatThreadsDb = {
-    async query(text: string, values?: unknown[]) {
+    query: fakeQuery(async (text: string, values?: unknown[]) => {
       const query = { text, values };
       queries.push(query);
       const rows = handler(query);
-      return { rows: rows as Record<string, unknown>[], rowCount: rows.length };
-    },
+      return { rows, rowCount: rows.length };
+    }),
   };
   return { db, queries };
 }

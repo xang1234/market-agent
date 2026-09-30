@@ -297,6 +297,8 @@ jobs:
 
       - run: npm ci
 
+      - run: npm run typecheck
+
       - run: npm test
 
   observability:
@@ -471,6 +473,7 @@ jobs:
             db/package-lock.json
             services/chat/package-lock.json
             services/financial-core/package-lock.json
+            services/llm/package-lock.json
 
       # Chat repository integration tests import the shared db/test Docker harness.
       - name: Install db deps (needed by chat integration harness)
@@ -483,9 +486,19 @@ jobs:
         working-directory: services/financial-core
         run: npm ci
 
+      # Typechecking follows chat's imports into llm, whose provider SDK types
+      # resolve from services/llm/node_modules.
+      - name: Install llm deps (types reached by the chat typecheck)
+        working-directory: services/llm
+        run: npm ci
+
       - name: Install chat deps
         working-directory: services/chat
         run: npm ci
+
+      - name: Typecheck chat
+        working-directory: services/chat
+        run: npm run typecheck
 
       - name: Run chat tests
         working-directory: services/chat

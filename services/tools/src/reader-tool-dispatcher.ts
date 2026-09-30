@@ -380,11 +380,12 @@ function parseSearchRawDocumentsInput(args: JsonValue): ParseInputResult {
     }
   }
 
-  if (record.limit !== undefined) {
-    if (!Number.isInteger(record.limit) || record.limit <= 0) {
+  const limit = record.limit;
+  if (limit !== undefined) {
+    if (typeof limit !== "number" || !Number.isInteger(limit) || limit <= 0) {
       return { kind: "error", code: "INVALID_ARGUMENT", message: "limit: must be a positive integer" };
     }
-    input.limit = record.limit;
+    input.limit = limit;
   }
 
   if (record.subject_refs !== undefined) {

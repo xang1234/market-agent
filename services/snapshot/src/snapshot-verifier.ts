@@ -100,6 +100,7 @@ export type VerifierBlock = {
   segments?: ReadonlyArray<unknown>;
   children?: ReadonlyArray<VerifierBlock>;
   bars?: ReadonlyArray<unknown>;
+  series?: ReadonlyArray<unknown>;
   distribution?: ReadonlyArray<unknown>;
   quarters?: ReadonlyArray<unknown>;
   analyst_count_ref?: string;
@@ -865,7 +866,8 @@ function normalizePendingAction(action: VerifierPendingAction, index: number): V
   if (normalized.read_only !== false) {
     throw new Error(`verifySnapshotSeal.pending_actions[${index}].read_only: must be false`);
   }
-  return Object.freeze(normalized);
+  // The checks above pin both flags; restate them as literals for the declared type.
+  return Object.freeze({ ...normalized, approval_required: true, read_only: false });
 }
 
 function verifyManifestRefs(
@@ -1953,7 +1955,7 @@ function nullableDateString(value: unknown, label: string): string | null {
 
 function nullableInteger(value: unknown, label: string): number | null {
   if (value === null) return null;
-  if (!Number.isInteger(value)) {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
     throw new Error(`${label}: must be an integer or null`);
   }
   return value;

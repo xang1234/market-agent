@@ -9,15 +9,9 @@ export type QueryExecutor = {
   ): Promise<QueryResult<R>>;
 };
 
-export type JsonObject = { [key: string]: JsonValue };
+import type { JsonObject, JsonValue } from "../../shared/src/json.ts";
 
-export type JsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | JsonValue[]
-  | JsonObject;
+export type { JsonObject, JsonValue };
 
 function assertJsonValue(value: unknown, path: string, seen: Set<object>): asserts value is JsonValue {
   if (value === null) return;

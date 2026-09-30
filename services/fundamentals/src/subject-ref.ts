@@ -2,6 +2,8 @@
 // lives here so the profile envelope can cite exchanges by canonical identity.
 import { assertSubjectRef as assertCanonicalSubjectRef, type UUID } from "../../shared/src/subject-ref.ts";
 
+export type { UUID };
+
 export type IssuerSubjectRef = {
   kind: "issuer";
   id: UUID;

@@ -242,10 +242,11 @@ export function createChatCoordinator(
 ): ChatCoordinator {
   const persistAssistantMessage = options.persistAssistantMessage;
   const preResolveSubject = options.preResolveSubject;
-  const baseRunner = options.runner ?? (options.analystToolRuntime
+  const analystToolRuntime = options.analystToolRuntime;
+  const baseRunner = options.runner ?? (analystToolRuntime
     ? ((context) => toolBackedAnalystTurnRunner(context, {
       persistAssistantMessage,
-      runtime: options.analystToolRuntime,
+      runtime: analystToolRuntime,
       verificationMode: options.verificationMode ?? "strict",
     }))
     : options.allowSyntheticAnalystFallback
@@ -460,7 +461,8 @@ function threadTitleGenerationRunner(
     ) => void;
   },
 ): ChatTurnRunner {
-  if (!options.generateThreadTitle) return runner;
+  const generateThreadTitle = options.generateThreadTitle;
+  if (!generateThreadTitle) return runner;
 
   return async (context) => {
     const assistantTextParts: string[] = [];
@@ -494,7 +496,7 @@ function threadTitleGenerationRunner(
     };
 
     try {
-      const result = options.generateThreadTitle(input);
+      const result = generateThreadTitle(input);
       if (result && typeof result.then === "function") {
         result.catch((error) => {
           options.onThreadTitleGenerationError?.(error, input);
@@ -1213,7 +1215,7 @@ async function runtimeToolCallFromDecision(input: {
     return {
       tool_call_id: input.toolCallId,
       tool_name: input.toolName,
-      status: input.decision.action === "partial_answer" ? "skipped" : "rejected",
+      status: "action" in input.decision && input.decision.action === "partial_answer" ? "skipped" : "rejected",
       bundle_id: input.bundleId,
       arguments: input.arguments,
       result: input.decision as unknown as JsonValue,

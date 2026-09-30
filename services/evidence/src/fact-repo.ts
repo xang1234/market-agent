@@ -1203,7 +1203,8 @@ function hasPgClientConnectionParameters(value: QueryExecutor): boolean {
 
 function isConnectionError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
-  const code = typeof (error as { code?: unknown }).code === "string" ? (error as { code: string }).code : "";
+  const rawCode = (error as { code?: unknown }).code;
+  const code = typeof rawCode === "string" ? rawCode : "";
   return (
     CONNECTION_ERROR_CODES.has(code) ||
     error.name === "ConnectionError" ||

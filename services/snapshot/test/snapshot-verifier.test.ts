@@ -4,7 +4,9 @@ import test from "node:test";
 import {
   verifySnapshotSeal,
   type SnapshotVerificationInput,
+  type VerifierFact,
 } from "../src/snapshot-verifier.ts";
+import type { JsonObject } from "../src/manifest-staging.ts";
 import { compileDisclosurePolicy } from "../src/disclosure-policy.ts";
 
 const snapshotId = "00000000-0000-4000-8000-000000000001";
@@ -189,7 +191,8 @@ test("verifySnapshotSeal flags a metrics_comparison cell fact missing from the m
 });
 
 test("verifySnapshotSeal accepts valid point, range, and ttm period dates", async () => {
-  const datedFacts = [
+  // Used both as seal facts and as JSON fact_bindings, so each entry must be both.
+  const datedFacts: Array<JsonObject & VerifierFact> = [
     {
       fact_id: pointFactId,
       source_id: sourceId,
@@ -467,7 +470,7 @@ test("verifySnapshotSeal reports refs, sources, units, periods, disclosures, and
             verifier_fail_log_id: missingId,
             created_at: new Date("2026-04-29T00:00:00.000Z"),
           },
-        ] as R[],
+        ] as unknown as R[],
       };
     },
   };
@@ -1204,6 +1207,7 @@ test("verifySnapshotSeal logs malformed late verifier inputs", async () => {
       },
     };
 
+    // @ts-expect-error -- the cases are deliberately invalid inputs (e.g. a 'watchlist' subject kind)
     const result = await verifySnapshotSeal(testCase.input, db);
 
     assert.deepEqual(

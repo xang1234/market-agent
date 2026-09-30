@@ -250,6 +250,7 @@ const DAY = 86_400_000;
 
 function factAt(as_of: string, fiscal_year: number | null, fiscal_period: string | null): IssuerFactSummary {
   return {
+    fact_id: `fact-${as_of}`,
     metric_key: "revenue",
     display_name: "Revenue",
     value_num: 100,

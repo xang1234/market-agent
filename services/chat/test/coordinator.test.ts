@@ -330,7 +330,8 @@ test("per-thread coordinator exposes event history as a defensive copy", async (
   const turn = coordinator.getOrCreateTurn({ threadId: "thread-1", runId: "run-1" });
   await turn.completed;
 
-  (turn.events as ChatTurnEventMutation[]).pop();
+  // Deliberately mutates the readonly event log to prove currentSeq() does not depend on it.
+  (turn.events as unknown as ChatTurnEventMutation[]).pop();
 
   assert.equal(turn.currentSeq(), 2);
   assert.deepEqual(
@@ -795,7 +796,7 @@ test("subject pre-resolution short-circuits ambiguous subjects before custom run
 });
 
 test("subject pre-resolution passes hydrated context and subject text to custom runners", async () => {
-  let observedContext: ChatTurnRunContext | null = null;
+  let observedContext = null as ChatTurnRunContext | null;
   const coordinator = createChatCoordinator({
     preResolveSubject: async () => resolvedAaplPreResolution(),
     runner: (context) => {
@@ -858,7 +859,7 @@ test("subject pre-resolution emits resolved handoff before custom runner failure
 });
 
 test("grounds the turn by extracting a ticker from the message when no subject is attached", async () => {
-  let observed: ChatTurnRunContext | null = null;
+  let observed = null as ChatTurnRunContext | null;
   const resolveCalls: string[] = [];
   const coordinator = createChatCoordinator({
     preResolveSubject: async ({ text }) => {
@@ -889,7 +890,7 @@ test("grounds the turn by extracting a ticker from the message when no subject i
 });
 
 test("falls through to the default bundle when the message has no resolvable subject", async () => {
-  let observed: ChatTurnRunContext | null = null;
+  let observed = null as ChatTurnRunContext | null;
   const coordinator = createChatCoordinator({
     preResolveSubject: async ({ text }) => ({
       status: "not_found",
@@ -998,7 +999,7 @@ test("subject clarification emits resolver result before renderer failures", asy
 });
 
 test("bundleId is single_subject_analysis when the resolved subject is a ticker (fra-95e contract)", async () => {
-  let observedContext: ChatTurnRunContext | null = null;
+  let observedContext = null as ChatTurnRunContext | null;
   const coordinator = createChatCoordinator({
     preResolveSubject: async () => resolvedAaplPreResolution(),
     runner: (context) => {
@@ -1016,7 +1017,7 @@ test("bundleId is single_subject_analysis when the resolved subject is a ticker 
 });
 
 test("bundleId is theme_research when the resolved subject is a theme (fra-95e contract)", async () => {
-  let observedContext: ChatTurnRunContext | null = null;
+  let observedContext = null as ChatTurnRunContext | null;
   const coordinator = createChatCoordinator({
     preResolveSubject: async () => resolvedThemePreResolution(),
     runner: (context) => {
@@ -1034,7 +1035,7 @@ test("bundleId is theme_research when the resolved subject is a theme (fra-95e c
 });
 
 test("bundleId falls back to DEFAULT_BUNDLE_ID when the turn has no subjectText (brand-new thread)", async () => {
-  let observedContext: ChatTurnRunContext | null = null;
+  let observedContext = null as ChatTurnRunContext | null;
   const coordinator = createChatCoordinator({
     runner: (context) => {
       observedContext = context;
@@ -1132,7 +1133,7 @@ function resolvedThemePreResolution(): ChatResolvedSubjectPreResolution {
     subject_ref: subjectRef,
     identity_level: "theme",
     display_label: "AI Chips Alpha",
-    resolution_path: "exact_name",
+    resolution_path: "auto_advanced",
     confidence: 0.99,
     handoff: {
       subject_ref: subjectRef,
@@ -1140,7 +1141,7 @@ function resolvedThemePreResolution(): ChatResolvedSubjectPreResolution {
       display_label: "AI Chips Alpha",
       display_labels: { primary: "AI Chips Alpha" },
       normalized_input: "ai chips alpha",
-      resolution_path: "exact_name",
+      resolution_path: "auto_advanced",
       confidence: 0.99,
       context: {},
     },

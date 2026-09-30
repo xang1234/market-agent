@@ -272,7 +272,7 @@ export async function applySchemaWithRetry(
     await sleep(retryDelayMs);
   }
 
-  assert.notEqual(lastResult, null);
+  assert.ok(lastResult);
   assert.equal(lastResult.status, 0, lastResult.stderr || lastResult.stdout);
 }
 

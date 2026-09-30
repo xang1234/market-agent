@@ -1,4 +1,5 @@
 import type {
+  JsonObject,
   JsonValue,
   ToolAudience,
   ToolDefinition,
@@ -324,7 +325,7 @@ function permissiveAdditionalPropertiesMatches(
 
   const matches: PermissiveAdditionalPropertiesMatch[] = [];
 
-  if (Array.isArray(value)) {
+  if (isJsonArray(value)) {
     value.forEach((item, index) => {
       matches.push(
         ...permissiveAdditionalPropertiesMatches(item, `${path}[${index}]`),
@@ -359,6 +360,11 @@ function permissiveAdditionalPropertiesMatches(
   return Object.freeze(matches);
 }
 
+// Array.isArray does not narrow ReadonlyArray members out of a union; this does.
+function isJsonArray(value: JsonValue): value is ReadonlyArray<JsonValue> {
+  return Array.isArray(value);
+}
+
 function isObjectSchema(value: JsonObject): boolean {
   return (
     value.type === "object" ||
@@ -373,13 +379,13 @@ function hasRawPropertyNameGuard(value: JsonObject): boolean {
   if (
     propertyNames === null ||
     typeof propertyNames !== "object" ||
-    Array.isArray(propertyNames)
+    isJsonArray(propertyNames)
   ) {
     return false;
   }
 
   const notSchema = propertyNames.not;
-  if (notSchema === null || typeof notSchema !== "object" || Array.isArray(notSchema)) {
+  if (notSchema === null || typeof notSchema !== "object" || isJsonArray(notSchema)) {
     return false;
   }
 
@@ -403,7 +409,7 @@ function rawDocumentFieldMatches(
 
   const matches: RawDocumentFieldMatch[] = [];
 
-  if (Array.isArray(value)) {
+  if (isJsonArray(value)) {
     value.forEach((item, index) => {
       matches.push(...rawDocumentFieldMatches(item, `${path}[${index}]`));
     });
