@@ -4,11 +4,12 @@
 // else is dropped rather than shown unsupported.
 //
 // A figure that belongs to one company (a comparison cell) must also be
-// credited to that company. The companies named between the previous such
-// figure (or the sentence start) and this one must all own it ("NVDA's 74.6%,
-// ahead of AMD at 49.2%"); if none is named there, those named after it up to
-// the next such figure ("74.6% at NVDA"), unless an earlier figure in the
-// sentence already has a company, which then carries ("NVDA's revenue was
+// credited to that company, even when a claim or title repeats the number. The
+// companies named between the previous such figure (or the sentence start) and
+// this one must all own it ("NVDA's 74.6%, ahead of AMD at 49.2%"); if none is
+// named there, those named after it up to the next figure ("74.6% at NVDA"),
+// except possessives, which point forward ("..., versus AMD's 49.2%"); if none,
+// the company of the previous figure in the sentence ("NVDA's revenue was
 // $130.5B and margin 74.6%"); if none, the last one named in a kept sentence
 // earlier on the line ("Its margin..."). Naming another company in that
 // stretch ("AMD's margin, unlike NVDA, is 74.6%") is ambiguous and drops the
@@ -60,20 +61,22 @@ export function keepSupportedSentences(
         removed.push(sentence);
         return false;
       }
-      // Figures that need a company; each claims the stretch of text around it.
-      const attributed = numbers.filter(({ number }) => !supported.has(number));
+      // Figures that need a company (any comparison value, even one a claim or
+      // title repeats); each claims the stretch of text around it.
+      const attributed = numbers.filter(({ number }) => owners.has(number));
       let carried: string[] = [];
       const isSupported = attributed.every(({ number, index, end }, i) => {
         const from = i === 0 ? 0 : attributed[i - 1].end;
         const to = i === attributed.length - 1 ? sentence.length : attributed[i + 1].index;
         const before = named.filter((mention) => mention.index >= from && mention.index < index);
-        const after = named.filter((mention) => mention.index >= end && mention.index < to);
+        // "AMD's" points forward to the figure it owns, never back to this one.
+        const after = named.filter((mention) => mention.index >= end && mention.index < to && !mention.possessive);
         const credited = before.length > 0
           ? before.map((mention) => mention.company)
-          : carried.length > 0
-          ? carried
           : after.length > 0
           ? after.map((mention) => mention.company)
+          : carried.length > 0
+          ? carried
           : lastNamed === undefined ? [] : [lastNamed];
         carried = credited;
         return credited.length > 0 && credited.every((company) => owners.get(number)!.has(company));
@@ -104,11 +107,15 @@ function numberMatches(text: string): Array<{ number: string; index: number; end
 function companyMentions(
   sentence: string,
   companies: ReadonlyArray<string>,
-): Array<{ company: string; index: number }> {
+): Array<{ company: string; index: number; possessive: boolean }> {
   return companies
     .flatMap((company) => {
       const pattern = new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(company)}(?![A-Za-z0-9])`, "g");
-      return [...sentence.matchAll(pattern)].map((match) => ({ company, index: match.index }));
+      return [...sentence.matchAll(pattern)].map((match) => ({
+        company,
+        index: match.index,
+        possessive: /^['’]s?(?![A-Za-z])/.test(sentence.slice(match.index + company.length)),
+      }));
     })
     .sort((a, b) => a.index - b.index);
 }

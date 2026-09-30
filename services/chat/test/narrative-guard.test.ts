@@ -109,3 +109,19 @@ test("one company named once governs the figures that follow it in the sentence"
   // The carried company still has to own the figure.
   assert.equal(keepSupportedSentences("NVDA's revenue was $130.5B and gross margin was 49.2%.", [], figures).removed.length, 1);
 });
+
+test("a comparison figure is checked for its company even when a cited claim repeats the number", () => {
+  const claim = "Industry gross margins reached 74.6% at the leader.";
+  assert.equal(keepSupportedSentences("AMD's gross margin is 74.6%.", [claim], COMPARED).removed.length, 1);
+  assert.deepEqual(keepSupportedSentences("NVDA's gross margin is 74.6%.", [claim], COMPARED).removed, []);
+});
+
+test("a company named right after a figure owns it, unless written possessively for the next figure", () => {
+  assert.deepEqual(keepSupportedSentences("NVDA delivered 74.6%, versus 49.2% for AMD.", [], COMPARED).removed, []);
+  // "AMD's" points forward to 49.2%, so 74.6% keeps NVDA from earlier in the sentence.
+  const figures = [...COMPARED, { company: "NVDA", value: "$130.5B" }];
+  assert.deepEqual(
+    keepSupportedSentences("NVDA's revenue was $130.5B and gross margin 74.6%, versus AMD's 49.2%.", [], figures).removed,
+    [],
+  );
+});
