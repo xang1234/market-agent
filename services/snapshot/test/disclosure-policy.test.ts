@@ -268,3 +268,19 @@ test("compileDisclosurePolicy requires snapshot_id for schema-valid disclosure b
     /snapshot_id: must be a UUID v4/,
   );
 });
+
+test("compileDisclosurePolicy words pricing disclosures by the oldest sealed series timestamp", () => {
+  const policy = compileDisclosurePolicy({
+    ...baseInput,
+    manifest: {
+      ...baseInput.manifest,
+      series_specs: [
+        { series_ref: delayedSeriesId, source_id: delayedSourceId, delay_class: "eod", as_of: "2026-04-20T21:00:00Z" },
+        { source_id: delayedSourceId, delay_class: "eod", as_of: "2026-04-21T21:00:00Z" },
+      ],
+    },
+  });
+  const [eod] = policy.required_disclosures;
+  assert.equal(eod.code, "eod_pricing");
+  assert.match(eod.item, /as of 2026-04-20T21:00:00\.000Z;/);
+});

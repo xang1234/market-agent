@@ -137,6 +137,8 @@ type FrozenDisclosureSnapshotState = Omit<DisclosureSnapshotState, "series_specs
 type DisclosureSeriesSignal = Omit<DisclosureSeriesState, "series_ref" | "source_id"> & {
   series_ref?: string;
   source_refs: ReadonlyArray<string>;
+  // When the sealed series was current; a stale series is disclosed as of this.
+  as_of?: string;
 };
 
 const UUID_V4 =
@@ -188,6 +190,7 @@ export function compileDisclosurePolicy(
         tier: "delayed_15m",
         series_refs: nullableId(item.series_ref),
         source_refs: item.source_refs,
+        as_of: item.as_of,
       });
     }
     if (item.freshness_class === "eod" || item.delay_class === "eod") {
@@ -195,6 +198,7 @@ export function compileDisclosurePolicy(
         tier: "eod",
         series_refs: nullableId(item.series_ref),
         source_refs: item.source_refs,
+        as_of: item.as_of,
       });
     }
     if (isLowCoverage(item.coverage_level)) {
@@ -303,6 +307,7 @@ type RequirementPatch = {
   fact_refs?: ReadonlyArray<string>;
   series_refs?: ReadonlyArray<string>;
   source_refs?: ReadonlyArray<string>;
+  as_of?: string;
 };
 
 class RequirementAccumulator {
@@ -317,12 +322,15 @@ class RequirementAccumulator {
     const existing = this.byCode.get(code) ?? {
       code,
       tier: patch.tier,
-      item: disclosureText(code, this.asOf),
+      as_of: patch.as_of ?? this.asOf,
       fact_refs: [],
       series_refs: [],
       source_refs: [],
     };
 
+    // The disclosure names the oldest data it covers (canonical ISO strings sort).
+    const asOf = patch.as_of ?? this.asOf;
+    if (asOf < existing.as_of) existing.as_of = asOf;
     if (TIER_RANK[patch.tier] > TIER_RANK[existing.tier]) {
       existing.tier = patch.tier;
     }
@@ -341,7 +349,7 @@ class RequirementAccumulator {
         Object.freeze({
           code: item.code,
           tier: item.tier,
-          item: item.item,
+          item: disclosureText(item.code, item.as_of),
           fact_refs: Object.freeze([...item.fact_refs]),
           series_refs: Object.freeze([...item.series_refs]),
           source_refs: Object.freeze([...item.source_refs]),
@@ -354,7 +362,7 @@ class RequirementAccumulator {
 type MutableRequirement = {
   code: DisclosureReasonCode;
   tier: DisclosureTier;
-  item: string;
+  as_of: string;
   fact_refs: string[];
   series_refs: string[];
   source_refs: string[];
@@ -509,6 +517,14 @@ function freezeManifestSeriesSpecs(
                 fx_converted: assertBoolean(
                   spec.fx_converted,
                   `compileDisclosurePolicy.manifest.series_specs[${index}].fx_converted`,
+                ),
+              }),
+          ...(spec.as_of === undefined
+            ? {}
+            : {
+                as_of: canonicalTimestamp(
+                  spec.as_of,
+                  `compileDisclosurePolicy.manifest.series_specs[${index}].as_of`,
                 ),
               }),
           source_refs: sourceRefs,

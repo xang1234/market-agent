@@ -133,3 +133,19 @@ test("fewer than two shared dates means no chart", () => {
   const amdOneShared = { ...AMD, bars: [{ ts: "2026-08-24T00:00:00.000Z", close: 55 }] };
   assert.equal(buildPerfComparisonBlock({ ranges: [NVDA, amdOneShared], snapshotId: SNAPSHOT_ID, asOf: AS_OF }), null);
 });
+
+test("a stale stored range is disclosed as of its own timestamp, not the answer time", () => {
+  const stale = "2026-08-24T21:00:00.000Z";
+  const older = "2026-08-24T20:00:00.000Z";
+  const block = buildPerfComparisonBlock({
+    ranges: [{ ...NVDA, as_of: stale }, { ...AMD, as_of: older }],
+    snapshotId: SNAPSHOT_ID,
+    asOf: AS_OF,
+  });
+  assert.ok(block);
+  assert.equal(block.as_of, older);
+  const [disclosure] = perfDisclosureBlocks(block);
+  const text = JSON.stringify(disclosure.items);
+  assert.ok(text.includes(older), text);
+  assert.ok(!text.includes(AS_OF), text);
+});

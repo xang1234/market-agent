@@ -174,7 +174,9 @@ export function buildPerfComparisonBlock(input: {
     snapshot_id: input.snapshotId,
     data_ref: { kind: "perf_comparison", id, params: { series_refs: specs.map((spec) => spec.series_ref) } },
     source_refs: [...new Set(ranges.map((range) => range.source_id))],
-    as_of: input.asOf,
+    // As fresh as its oldest stored range, not the answer time: a cached range
+    // may be stale, and the pricing disclosure must not overstate freshness.
+    as_of: ranges.map((range) => range.as_of).sort()[0],
     title: "Price performance",
     subject_refs: ranges.map((range) => ({ kind: "listing", id: range.listing_id })),
     subject_labels: ranges.map((range) => range.label),
