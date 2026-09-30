@@ -95,3 +95,17 @@ test("a removed sentence cannot name the company for the next one", () => {
   const result = keepSupportedSentences("AMD's margin is 74.6%. Its margin is 49.2%.", [], COMPARED);
   assert.deepEqual(result.removed, ["AMD's margin is 74.6%.", "Its margin is 49.2%."]);
 });
+
+test("one company named once governs the figures that follow it in the sentence", () => {
+  const figures = [...COMPARED, { company: "NVDA", value: "$130.5B" }];
+  assert.deepEqual(
+    keepSupportedSentences("NVDA's revenue was $130.5B and gross margin was 74.6%.", [], figures).removed,
+    [],
+  );
+  assert.deepEqual(
+    keepSupportedSentences("NVDA's revenue was $130.5B and gross margin 74.6%, versus AMD's 49.2%.", [], figures).removed,
+    [],
+  );
+  // The carried company still has to own the figure.
+  assert.equal(keepSupportedSentences("NVDA's revenue was $130.5B and gross margin was 49.2%.", [], figures).removed.length, 1);
+});

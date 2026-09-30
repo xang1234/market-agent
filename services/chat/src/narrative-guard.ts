@@ -7,11 +7,13 @@
 // credited to that company. The companies named between the previous such
 // figure (or the sentence start) and this one must all own it ("NVDA's 74.6%,
 // ahead of AMD at 49.2%"); if none is named there, those named after it up to
-// the next such figure ("74.6% at NVDA"); if none, the last one named in a kept
-// sentence earlier on the line ("Its margin..."). Naming another company in
-// that stretch ("AMD's margin, unlike NVDA, is 74.6%") is ambiguous and drops
-// the sentence: the guard cannot parse who the figure belongs to, so it only
-// keeps what is unambiguous.
+// the next such figure ("74.6% at NVDA"), unless an earlier figure in the
+// sentence already has a company, which then carries ("NVDA's revenue was
+// $130.5B and margin 74.6%"); if none, the last one named in a kept sentence
+// earlier on the line ("Its margin..."). Naming another company in that
+// stretch ("AMD's margin, unlike NVDA, is 74.6%") is ambiguous and drops the
+// sentence: the guard cannot parse who the figure belongs to, so it only keeps
+// what is unambiguous.
 //
 // ponytail: compares numbers by value ("62.1" in "$62.1B" and "62.1 billion"),
 // not by magnitude or unit; a derived figure that coincidentally equals a shown
@@ -60,6 +62,7 @@ export function keepSupportedSentences(
       }
       // Figures that need a company; each claims the stretch of text around it.
       const attributed = numbers.filter(({ number }) => !supported.has(number));
+      let carried: string[] = [];
       const isSupported = attributed.every(({ number, index, end }, i) => {
         const from = i === 0 ? 0 : attributed[i - 1].end;
         const to = i === attributed.length - 1 ? sentence.length : attributed[i + 1].index;
@@ -67,9 +70,12 @@ export function keepSupportedSentences(
         const after = named.filter((mention) => mention.index >= end && mention.index < to);
         const credited = before.length > 0
           ? before.map((mention) => mention.company)
+          : carried.length > 0
+          ? carried
           : after.length > 0
           ? after.map((mention) => mention.company)
           : lastNamed === undefined ? [] : [lastNamed];
+        carried = credited;
         return credited.length > 0 && credited.every((company) => owners.get(number)!.has(company));
       });
       // Only a sentence the user will see can name the company for the next one.
