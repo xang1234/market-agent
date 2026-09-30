@@ -140,17 +140,6 @@ test("a company named after a figure owns it only when a preposition ties them",
   assert.deepEqual(keepSupportedSentences("Margins were 49.2% for AMD.", [], COMPARED).removed, []);
 });
 
-test("a 'respectively' sentence pairs companies with figures in order", () => {
-  assert.deepEqual(
-    keepSupportedSentences("NVDA and AMD had gross margins of 74.6% and 49.2%, respectively.", [], COMPARED).removed,
-    [],
-  );
-  assert.equal(
-    keepSupportedSentences("AMD and NVDA had gross margins of 74.6% and 49.2%, respectively.", [], COMPARED).removed.length,
-    1,
-  );
-});
-
 test("a sentence naming several companies passes none on to the next", () => {
   const result = keepSupportedSentences("NVDA trails AMD. Its gross margin is 49.2%.", [], COMPARED);
   assert.deepEqual(result.removed, ["Its gross margin is 49.2%."]);
@@ -181,15 +170,17 @@ test("a minus before a currency symbol is the figure's sign", () => {
   assert.deepEqual(keepSupportedSentences("Revenue was $3.1B.", ["$3.1B"]).removed, []);
 });
 
-test("'respectively' pairs only a coordinated list of companies", () => {
-  const result = keepSupportedSentences(
+test("a 'respectively' sentence is not paired up: it is dropped rather than guessed", () => {
+  for (const sentence of [
+    "NVDA and AMD had gross margins of 74.6% and 49.2%, respectively.",
     "Compared with NVDA, AMD's gross and net margins were 74.6% and 49.2%, respectively.",
-    [],
-    COMPARED,
-  );
-  assert.equal(result.removed.length, 1);
-  assert.deepEqual(
-    keepSupportedSentences("NVDA & AMD posted 74.6% and 49.2%, respectively.", [], COMPARED).removed,
-    [],
-  );
+    "NVDA and AMD were discussed, but the former's gross and net margins were 74.6% and 49.2%, respectively.",
+  ]) {
+    assert.equal(keepSupportedSentences(sentence, [], COMPARED).removed.length, 1, sentence);
+  }
+});
+
+test("digits inside a company label are not figures", () => {
+  const figures = [{ company: "issuer:12ab34cd", value: "49.2%" }, { company: "NVDA", value: "74.6%" }];
+  assert.deepEqual(keepSupportedSentences("issuer:12ab34cd's margin is 49.2%.", [], figures).removed, []);
 });
