@@ -300,6 +300,9 @@ configure_runtime_env() {
   MA_FLAG_LLM_SETTINGS="${MA_FLAG_LLM_SETTINGS:-true}"
   export VITE_MA_FLAG_LLM_SETTINGS
   VITE_MA_FLAG_LLM_SETTINGS="${VITE_MA_FLAG_LLM_SETTINGS:-true}"
+  # The web app starts signed in with the dev mock session (#122); set false to test sign-in.
+  export VITE_MA_FLAG_DEV_AUTO_LOGIN
+  VITE_MA_FLAG_DEV_AUTO_LOGIN="${VITE_MA_FLAG_DEV_AUTO_LOGIN:-true}"
   if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
     export DEV_PROVIDERS_ORIGIN
     DEV_PROVIDERS_ORIGIN="${DEV_PROVIDERS_ORIGIN:-http://127.0.0.1:$DEV_PROVIDERS_PORT}"
@@ -393,6 +396,30 @@ stop_parked_processes() {
       continue
     fi
     stop_process "$name"
+  done
+}
+
+# Vite bakes VITE_* into the client when the web process starts, so a running web
+# keeps stale flags (e.g. VITE_MA_FLAG_DEV_AUTO_LOGIN=false) until restarted.
+WEB_VITE_ENV_STAMP="$PID_DIR/web.vite-env"
+
+web_vite_env() {
+  env | grep '^VITE_' | LC_ALL=C sort || true
+}
+
+restart_web_if_vite_env_changed() {
+  local attempt
+  if ! process_running "$PID_DIR/web.pid"; then
+    return 0
+  fi
+  if [[ "$(cat "$WEB_VITE_ENV_STAMP" 2>/dev/null)" == "$(web_vite_env)" ]]; then
+    return 0
+  fi
+  stop_process web
+  # Wait for the port so the restarted Vite doesn't drift to the next free one.
+  for attempt in $(seq 1 20); do
+    port_listening "$WEB_PORT" || return 0
+    sleep 0.5
   done
 }
 
@@ -528,6 +555,7 @@ up() {
   export EVIDENCE_ORIGIN="${EVIDENCE_ORIGIN:-http://127.0.0.1:$EVIDENCE_PORT}"
   export ANALYST_GRIDS_ORIGIN="${ANALYST_GRIDS_ORIGIN:-http://127.0.0.1:$ANALYST_GRIDS_PORT}"
 
+  restart_web_if_vite_env_changed
   for name in $services; do
     start_and_track_process "$name" "$(service_dir "$name")" "$(service_command "$name")"
   done
@@ -541,6 +569,7 @@ up() {
       return 1
     fi
   done
+  web_vite_env >"$WEB_VITE_ENV_STAMP"
 
   status
 }

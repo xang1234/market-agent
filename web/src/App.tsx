@@ -7,6 +7,8 @@ import {
 } from 'react-router-dom'
 import { BlockRegistryProvider, createDefaultBlockRegistry } from './blocks'
 import { AuthProvider } from './shell/AuthContext'
+import { DEFAULT_MOCK_SESSION } from './shell/authTypes'
+import { webDevFlags } from './devFlags'
 import type { RouteHandle } from './shell/routeHandle'
 import { ThemeProvider } from './shell/ThemeProvider'
 import { WorkspaceShell } from './shell/WorkspaceShell'
@@ -90,7 +92,7 @@ export function App() {
   return (
     <BlockRegistryProvider registry={blockRegistry}>
       <ThemeProvider>
-        <AuthProvider>
+        <AuthProvider initialSession={webDevFlags.devAutoLogin ? DEFAULT_MOCK_SESSION : null}>
           <RouterProvider router={router} />
         </AuthProvider>
       </ThemeProvider>

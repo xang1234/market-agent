@@ -290,6 +290,43 @@ test("runtime module env vars default to in-repo durable local stack wiring", as
   await rm(fixture.root, { recursive: true, force: true });
 });
 
+test("the web app signs in with the dev mock session by default, unless opted out", async () => {
+  const on = await createShellFixture();
+  const onResult = await runBash(
+    ["MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh", 'printf "%s" "$VITE_MA_FLAG_DEV_AUTO_LOGIN"'].join("\n"),
+    on.root,
+  );
+  await rm(on.root, { recursive: true, force: true });
+  assert.equal(onResult.code, 0, onResult.stderr);
+  assert.equal(onResult.stdout.trim(), "true");
+
+  const off = await createShellFixture({ VITE_MA_FLAG_DEV_AUTO_LOGIN: "false" });
+  const offResult = await runBash(
+    ["MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh", 'printf "%s" "$VITE_MA_FLAG_DEV_AUTO_LOGIN"'].join("\n"),
+    off.root,
+  );
+  await rm(off.root, { recursive: true, force: true });
+  assert.equal(offResult.stdout.trim(), "false");
+});
+
+test("up restarts a running web process when its VITE_* settings changed, and only then", async () => {
+  const { result, trace } = await traceUp({}, [
+    'stop_process(){ printf "stop:%s\\n" "$1" >> "$TRACE_FILE"; kill "$(cat "$PID_DIR/$1.pid")" 2>/dev/null; rm -f "$PID_DIR/$1.pid"; }',
+    "port_listening(){ return 1; }",
+    "up",
+    'printf "mark:unchanged\\n" >> "$TRACE_FILE"',
+    "up",
+    'printf "mark:opt-out\\n" >> "$TRACE_FILE"',
+    "export VITE_MA_FLAG_DEV_AUTO_LOGIN=false",
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  const [first, unchanged, optOut] = trace.split(/mark:\S+\n/);
+  assert.match(first, /^start:web$/m);
+  assert.doesNotMatch(unchanged, /^(stop|start):web$/m, "same VITE_* settings: web keeps running");
+  assert.match(optOut, /^stop:web$/m, "a changed VITE_* setting restarts web");
+  assert.match(optOut, /^start:web$/m);
+});
+
 test("unofficial dev providers are opt-in and set a local sidecar origin", async () => {
   const disabled = await createShellFixture();
   const disabledResult = await runBash(
