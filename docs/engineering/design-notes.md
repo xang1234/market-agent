@@ -87,11 +87,12 @@ fixed rule, not a tool loop.
   for comparison cells, `{metric, value}` / `{metric, period, value}` for single-company blocks. A comparison figure
   must also be credited to its company, even when a claim repeats the number: every company named between the
   previous such figure (or the sentence start) and this one must own it; if none is named there, the first one named
-  after it when a preposition ties them ("49.2% for AMD", not "49.2%, exceeding AMD"), which is then used up, else
+  after it when for/at/in ties them ("49.2% for AMD", not "49.2%, exceeding AMD" or "from AMD's"), which is then used up, else
   the company of the previous figure in the sentence, else the one company named by the last kept sentence naming
   any on the line (none if it named several: "NVDA trails AMD. Its..." is ambiguous). A company introduced as a
   comparison ("compared with", "unlike", "versus") yields to another company or a pronoun as the figure's subject
-  ("Compared with AMD, its margin was 49.2%" credits "its"). Naming another company in that stretch is ambiguous and drops the sentence, as does a "respectively" construction, so a real figure quoted for the
+  ("Compared with AMD, its margin was 49.2%" credits "its"), and a sentence naming a company only that way leaves
+  the carried subject unchanged. Naming another company in that stretch is ambiguous and drops the sentence, as does a "respectively" construction, so a real figure quoted for the
   wrong company never survives; the cost is some valid sentences dropped (tracked for tuning against the eval).
   Companies are recognized by their displayed label (ticker), case-sensitively, which the prompt tells the model to
   use; digits inside a label are not figures.

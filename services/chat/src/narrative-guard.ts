@@ -34,10 +34,11 @@ const NUMBER = /(?:(?<![A-Za-z0-9.])[-−][$€£¥]?)?\d+(?:,\d{3})*(?:\.\d+)?/
 const SENTENCE_BREAK = /(?<=[.!?])\s+/;
 // Between a figure and the company that owns it: its unit, then a preposition
 // ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
-// comparison ("74.6%, ahead of NVDA", "beaten by NVDA") never reads as owner.
+// comparison ("74.6%, ahead of NVDA", "beaten by NVDA", "49.2% from AMD's
+// level") never reads as owner.
 const COMPARED_WITH = /(?:compared (?:with|to)|unlike|versus|vs\.?|than|relative to|against)\s+$/i;
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
-const OWNED_BY = /^[^\s,;:]*\s*(?:(?:percent|billion|million|trillion|bn|mn)\s+)?(?:for|at|from|in)\s+$/i;
+const OWNED_BY = /^[^\s,;:]*\s*(?:(?:percent|billion|million|trillion|bn|mn)\s+)?(?:for|at|in)\s+$/i;
 
 export type AttributedFigure = { company: string; value: string };
 
@@ -112,10 +113,13 @@ export function keepSupportedSentences(
         return credited.length > 0 && credited.every((company) => owners.get(number)!.has(company));
       });
       // Only a sentence the user will see can name the company for the next one,
-      // and only when it names one: "NVDA trails AMD. Its..." is ambiguous.
-      if (isSupported && named.length > 0) {
-        const distinct = new Set(named.map((mention) => mention.company));
-        lastNamed = distinct.size === 1 ? named[0].company : undefined;
+      // and only when it names one: "NVDA trails AMD. Its..." is ambiguous. A
+      // company named only as a comparison ("Unlike AMD, it...") leaves the
+      // carried subject as it was.
+      const subjects = named.filter((mention) => !COMPARED_WITH.test(sentence.slice(0, mention.index)));
+      if (isSupported && subjects.length > 0) {
+        const distinct = new Set(subjects.map((mention) => mention.company));
+        lastNamed = distinct.size === 1 ? subjects[0].company : undefined;
       }
       if (!isSupported) removed.push(sentence);
       return isSupported;

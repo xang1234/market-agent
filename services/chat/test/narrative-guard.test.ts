@@ -197,3 +197,17 @@ test("negative zero keeps its sign", () => {
   assert.equal(keepSupportedSentences("NVDA's revenue growth was 0.0%.", [], flat).removed.length, 1);
   assert.deepEqual(keepSupportedSentences("NVDA's revenue growth was -0.0%.", [], flat).removed, []);
 });
+
+test("a sentence naming a company only as a comparison keeps the carried subject", () => {
+  const result = keepSupportedSentences(
+    "NVDA leads. Unlike AMD, it has stronger margins. Its gross margin is 49.2%.",
+    [],
+    COMPARED,
+  );
+  assert.deepEqual(result.removed, ["Its gross margin is 49.2%."]);
+});
+
+test("'from' after a figure names a comparison, not its owner", () => {
+  const result = keepSupportedSentences("NVDA led. Its margin rose to 49.2% from AMD's level.", [], COMPARED);
+  assert.deepEqual(result.removed, ["Its margin rose to 49.2% from AMD's level."]);
+});
