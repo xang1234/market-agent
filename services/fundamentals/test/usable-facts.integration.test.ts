@@ -95,6 +95,37 @@ test("loadUsableFacts applies every rule for facts that ground a sealed answer",
     assert.ok(!(await years()).includes(2008));
   });
 
+  await t.test("currency: a per-share monetary fact must state its currency too", async () => {
+    await fact(2013, { unit: "currency_per_share", currency: null } as Partial<FactInput>);
+    assert.ok(!(await years()).includes(2013));
+  });
+
+  await t.test("cutoff: a fact replaced or invalidated after the cutoff was still the one known then", async () => {
+    // Superseded by a fact observed after the cutoff.
+    const original = await fact(2014, { value_num: 1 });
+    const replacement = await fact(2014, { value_num: 2, source_id: sourceB, as_of: AFTER, observed_at: AFTER });
+    await client.query(`update facts set superseded_by = $2::uuid where fact_id = $1::uuid`, [original.fact_id, replacement.fact_id]);
+    // Invalidated after the cutoff.
+    const withdrawn = await fact(2015);
+    await client.query(`update facts set invalidated_at = $2::timestamptz where fact_id = $1::uuid`, [withdrawn.fact_id, AFTER]);
+
+    const atCutoff = await loadUsableFacts(client, { subjectKind: "issuer", subjectIds: [ISSUER_ID], cutoff: CUTOFF });
+    assert.deepEqual(atCutoff.filter((row) => row.fiscal_year === 2014).map((row) => row.value_num), [1]);
+    assert.ok(atCutoff.some((row) => row.fiscal_year === 2015));
+    // Now: the replacement, and the withdrawn fact is gone.
+    const now = await loadUsableFacts(client, { subjectKind: "issuer", subjectIds: [ISSUER_ID] });
+    assert.deepEqual(now.filter((row) => row.fiscal_year === 2014).map((row) => row.value_num), [2]);
+    assert.ok(!now.some((row) => row.fiscal_year === 2015));
+  });
+
+  await t.test("numeric-only callers keep an older figure over a newer text-only fact", async () => {
+    await fact(2016, { value_num: 7, as_of: "2026-04-01T00:00:00.000Z", observed_at: "2026-04-01T00:00:00.000Z" });
+    await fact(2016, { value_num: null, value_text: "see note", source_id: sourceB } as Partial<FactInput>);
+    const numeric = (await loadUsableFacts(client, { subjectKind: "issuer", subjectIds: [ISSUER_ID], numericOnly: true }))
+      .filter((row) => row.fiscal_year === 2016);
+    assert.deepEqual(numeric.map((row) => row.value_num), [7]);
+  });
+
   await t.test("canonical: one fact per period, the latest as_of winning", async () => {
     await fact(2009, { value_num: 1, as_of: "2026-04-01T00:00:00.000Z", observed_at: "2026-04-01T00:00:00.000Z" });
     await fact(2009, { value_num: 2, source_id: sourceB });

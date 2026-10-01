@@ -109,6 +109,8 @@ export async function loadPostgresScreenerCandidates(
           channel: "app",
           periodKind: "fiscal_y",
           metricKeys: SCREENER_FUNDAMENTAL_METRICS,
+          // The screener computes with these; a text-only fact has no value.
+          numericOnly: true,
         },
       ),
     );

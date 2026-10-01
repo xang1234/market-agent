@@ -46,6 +46,9 @@ export type LoadRecentIssuerFundamentalsOptions = {
   limit?: number;
   // Snapshot cutoff: only facts known by then (see loadUsableFacts). Omit ⇒ now.
   cutoff?: string;
+  // True for callers that show or compute figures: a newer text-only fact must
+  // not displace an older numeric one. Default false keeps text for model context.
+  numericOnly?: boolean;
 };
 
 export async function loadRecentIssuerFundamentals(
@@ -54,12 +57,11 @@ export async function loadRecentIssuerFundamentals(
   options: LoadRecentIssuerFundamentalsOptions,
 ): Promise<IssuerFundamentalFact[]> {
   // The rules live in loadUsableFacts (#159); this keeps the issuer-shaped API.
-  // Text-only facts stay in (numericOnly: false) for callers like model context.
   const facts = await loadUsableFacts(db, {
     subjectKind: "issuer",
     subjectIds: [issuer.id],
     channel: options.channel ?? "app",
-    numericOnly: false,
+    numericOnly: options.numericOnly ?? false,
     ...(options.cutoff === undefined ? {} : { cutoff: options.cutoff }),
     ...(options.periodKind === undefined ? {} : { periodKind: options.periodKind }),
     ...(options.metricKeys === undefined ? {} : { metricKeys: options.metricKeys }),

@@ -4,12 +4,13 @@
 // - eligibility: reported, active, entitled for the channel, display-verified;
 // - numeric (by default): a text-only fact has no figure to show;
 // - dated: a fiscal period needs its year and period (point facts need neither);
-// - currency: a currency-denominated fact must state its currency, never assumed;
+// - currency: a monetary fact (currency, currency_per_share) states its currency;
 // - canonical: one fact per subject, metric and period, the latest as_of winning
 //   when sources overlap;
 // - cutoff (when given): as_of, observed_at and reported_at all at or before it,
 //   so a snapshot never uses what was not yet known (a backdated filing ingested
-//   later included).
+//   later included); and "active" is judged at the cutoff, so a fact replaced
+//   or withdrawn afterwards is still the one that was known then.
 
 import { DISPLAYABLE_VERIFICATION_STATUSES } from "../../evidence/src/promotion-rules.ts";
 import type { FactEntitlementChannel, FactSubjectKind } from "../../evidence/src/fact-repo.ts";
@@ -72,6 +73,10 @@ export async function loadUsableFacts(db: QueryExecutor, query: UsableFactsQuery
     [...DISPLAYABLE_VERIFICATION_STATUSES],
   ];
   let filters = "";
+  // Active now, or (for a historical cutoff) active at the cutoff: invalidated
+  // later, or superseded by a fact observed later, still counts as known then.
+  let activity = `f.superseded_by is null
+          and f.invalidated_at is null`;
   if (query.numericOnly ?? true) filters += `\n        and f.value_num is not null`;
   if (query.periodKind !== undefined) {
     params.push(query.periodKind);
@@ -88,6 +93,9 @@ export async function loadUsableFacts(db: QueryExecutor, query: UsableFactsQuery
         and f.as_of <= ${cutoff}
         and f.observed_at <= ${cutoff}
         and (f.reported_at is null or f.reported_at <= ${cutoff})`;
+    activity = `(f.invalidated_at is null or f.invalidated_at > ${cutoff})
+          and (f.superseded_by is null
+               or exists (select 1 from facts n where n.fact_id = f.superseded_by and n.observed_at > ${cutoff}))`;
   }
 
   let limitClause = "";
@@ -119,12 +127,12 @@ export async function loadUsableFacts(db: QueryExecutor, query: UsableFactsQuery
         where f.subject_kind = $1::subject_kind
           and f.subject_id = any($2::uuid[])
           and f.method = 'reported'
-          and f.superseded_by is null
-          and f.invalidated_at is null
+          and ${activity}
           and f.entitlement_channels ? $3
           and f.verification_status = any($4::verification_status[])
           and (f.period_kind not in ('fiscal_q', 'fiscal_y') or (f.fiscal_year is not null and f.fiscal_period is not null))
-          and (f.unit <> 'currency' or f.currency is not null)${filters}
+          -- Any monetary unit (currency, currency_per_share) states its currency.
+          and (f.unit not like 'currency%' or f.currency is not null)${filters}
         order by f.subject_id, f.metric_id, f.period_kind, f.fiscal_year, f.fiscal_period, f.period_start, f.period_end,
                  f.as_of desc, f.fact_id
      )

@@ -79,3 +79,11 @@ test("loadRecentIssuerFundamentals coerces numeric/Date columns and preserves pr
   assert.equal(fact.display_name, "Revenue");
   assert.equal(fact.source_id, "00000000-0000-4000-a000-000000000001");
 });
+
+test("loadRecentIssuerFundamentals passes numericOnly through for figure callers", async () => {
+  const { db, calls } = recordingDb([]);
+  await loadRecentIssuerFundamentals(db, ISSUER, { numericOnly: true });
+  assert.match(calls[0].text, /f\.value_num is not null/);
+  await loadRecentIssuerFundamentals(db, ISSUER, {});
+  assert.doesNotMatch(calls[1].text, /f\.value_num is not null/);
+});
