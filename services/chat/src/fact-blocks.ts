@@ -15,6 +15,7 @@ import { buildMetricsComparisonBlock } from "../../analyze/src/metrics-compariso
 import { materializePeerMetricFacts } from "../../analyze/src/metrics-comparison-materializer.ts";
 import { buildRevenueBarsBlock } from "../../analyze/src/revenue-bars-block-builder.ts";
 import { loadVerifierFactsForRefs } from "../../evidence/src/local-runtime-evidence.ts";
+import { DISPLAYABLE_VERIFICATION_STATUSES } from "../../evidence/src/promotion-rules.ts";
 import {
   loadRecentIssuerFundamentals,
   type IssuerFundamentalFact,
@@ -182,8 +183,12 @@ async function loadSegmentBlocks(
   input: { issuer: IssuerSubjectRef; snapshotId: string; asOf: string },
 ): Promise<ReadonlyArray<Block>> {
   try {
+    // The same eligibility as every user-facing fact (loadRecentIssuerFundamentals):
+    // reported, active, app-entitled, display-verified; numeric only; and one fact
+    // per segment and quarter, the latest as_of winning when sources overlap.
     const { rows } = await db.query<SegmentRevenueRow>(
-      `select f.fact_id::text as fact_id,
+      `select distinct on (s.segment_id, f.fiscal_year, f.fiscal_period)
+              f.fact_id::text as fact_id,
               s.name,
               (f.value_num * f.scale)::float8 as value,
               f.currency,
@@ -196,9 +201,14 @@ async function loadSegmentBlocks(
           and s.axis = 'business'
           and m.metric_key = 'revenue'
           and f.period_kind = 'fiscal_q'
+          and f.method = 'reported'
           and f.superseded_by is null
-          and f.invalidated_at is null`,
-      [input.issuer.id],
+          and f.invalidated_at is null
+          and f.entitlement_channels ? 'app'
+          and f.verification_status = any($2::verification_status[])
+          and f.value_num is not null
+        order by s.segment_id, f.fiscal_year, f.fiscal_period, f.as_of desc, f.fact_id`,
+      [input.issuer.id, [...DISPLAYABLE_VERIFICATION_STATUSES]],
     );
     const breakdown = segmentRevenueItems(rows);
     if (!breakdown) return [];
