@@ -1,12 +1,14 @@
 // Data mode (#123): the golden conversation (#118) against a live stack, as an opt-in
 // check. Live figures and model wording vary, so this checks structure only (turns
 // complete; the charts and tables the frozen golden test pins appear), never values.
-// Prerequisite: NVDA's and AMD's live identities and SEC facts are already in the
-// database (chat reads persisted facts only); a fresh database fails until #152.
+// It first warms NVDA's and AMD's live identities and SEC facts through the stack
+// (golden-live-warmup.ts, #152), since chat reads persisted facts only.
 //
 //   npm run golden:live -- [base URL, default http://127.0.0.1:5173]
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
+
+import { warmGoldenLiveData } from "./golden-live-warmup.ts";
 
 type Block = { id?: string; kind?: string };
 type TurnOutcome = "turn.completed" | "turn.error" | "timeout";
@@ -113,8 +115,14 @@ export async function runTurn(
 
 export async function runGoldenLiveCheck(
   base: string,
-  { requestTimeoutMs = REQUEST_TIMEOUT_MS, turnTimeoutMs = 180_000 } = {},
+  { requestTimeoutMs = REQUEST_TIMEOUT_MS, turnTimeoutMs = 180_000, warmup = warmGoldenLiveData } = {},
 ): Promise<number> {
+  const warmupFailures = await warmup(base);
+  if (warmupFailures.length > 0) {
+    // The turns would only fail on missing data; don't spend live LLM calls on them.
+    for (const failure of warmupFailures) console.log(`FAIL  warm-up  ${failure}`);
+    return 1;
+  }
   const bounded = () => AbortSignal.timeout(requestTimeoutMs);
   const thread = await api<{ thread_id: string }>(
     base, "POST", "/v1/chat/threads", { title: "Golden (live data)" }, bounded(),
@@ -134,12 +142,6 @@ export async function runGoldenLiveCheck(
     failed += failures.length === 0 ? 0 : 1;
   }
   console.log(`thread: ${base}/chat/${thread.thread_id}`);
-  if (failed > 0) {
-    console.log(
-      "hint: on a fresh database NVDA/AMD live identities and SEC facts aren't ingested yet; " +
-        "chat reads persisted facts only (see #152).",
-    );
-  }
   return failed === 0 ? 0 : 1;
 }
 
