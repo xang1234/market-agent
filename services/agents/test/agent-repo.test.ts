@@ -167,6 +167,7 @@ test("updateAgent rejects null clears for nullable fields instead of silently pr
   const { db, queries } = fakeDb(() => []);
 
   await assert.rejects(
+    // @ts-expect-error: a null clear is invalid input; the test checks it is rejected.
     updateAgent(db, AGENT_ID, { prompt_template: null }),
     (error: Error) => error instanceof AgentValidationError && /prompt_template/.test(error.message),
   );

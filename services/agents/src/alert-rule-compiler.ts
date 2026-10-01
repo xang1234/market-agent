@@ -88,8 +88,9 @@ export function compileAlertRule(rawRule: unknown): CompiledAlertRule {
       const unmet: string[] = [];
       const triggerRefs: AlertTriggerRef[] = [{ kind: "finding", id: finding.finding_id }];
 
-      if (rule.subject) {
-        const matchedSubject = finding.subject_refs.find((ref) => sameSubjectRef(ref, rule.subject));
+      const subject = rule.subject;
+      if (subject) {
+        const matchedSubject = finding.subject_refs.find((ref) => sameSubjectRef(ref, subject));
         if (matchedSubject) {
           triggerRefs.push({ kind: "subject", subject: matchedSubject });
         } else {

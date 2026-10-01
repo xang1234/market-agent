@@ -3,6 +3,7 @@ import test from "node:test";
 import type { QueryResult } from "pg";
 
 import { runAgentLoop } from "../src/agent-loop.ts";
+import type { FindingRow } from "../src/finding-generator.ts";
 
 const AGENT_ID = "22222222-2222-4222-8222-222222222222";
 const RUN_ID = "33333333-3333-4333-8333-333333333333";
@@ -10,6 +11,10 @@ const FINDING_ID = "44444444-4444-4444-8444-444444444444";
 const ALERT_FIRED_ID = "55555555-5555-4555-8555-555555555555";
 
 type Captured = { text: string; values?: unknown[] };
+
+// A fake's rows are whatever the test hands back; asserting them as R[] is the
+// fake's contract, kept in one place (as chat's fakeQuery does).
+const rowsAs = <R,>(rows: unknown[]): R[] => rows as R[];
 
 type TxClient = {
   query<R extends Record<string, unknown> = Record<string, unknown>>(
@@ -50,7 +55,14 @@ test("runAgentLoop executes injectable stages in order and advances watermarks a
   const order: string[] = [];
   const { pool, queries, released } = fakePool();
 
-  const result = await runAgentLoop({
+  // Stage types are given explicitly: each stage's input is the previous one's
+  // output, which TypeScript cannot infer through the callbacks.
+  const result = await runAgentLoop<
+    { documents: number },
+    { claims: number },
+    { clusters: number },
+    { findings: Array<{ headline: string }> }
+  >({
     pool,
     agent_id: AGENT_ID,
     current_watermarks: { source_cursor: "old" },
@@ -147,7 +159,7 @@ test("runAgentLoop evaluates alert rules inside the side-effect transaction afte
       queries.push({ text, values });
       if (/insert into alerts_fired/.test(text)) {
         return {
-          rows: [
+          rows: rowsAs<R>([
             {
               alert_fired_id: ALERT_FIRED_ID,
               agent_id: AGENT_ID,
@@ -159,7 +171,7 @@ test("runAgentLoop evaluates alert rules inside the side-effect transaction afte
               status: "pending_notification",
               fired_at: "2026-05-04T00:00:00.000Z",
             },
-          ] as R[],
+          ]),
           rowCount: 1,
           command: "",
           oid: 0,
@@ -195,7 +207,7 @@ test("runAgentLoop evaluates alert rules inside the side-effect transaction afte
       readDeltas: async () => ({}),
       extractEvidence: async () => ({}),
       clusterEvidence: async () => ({}),
-      analyze: async () => ({
+      analyze: async (): Promise<{ findings: FindingRow[] }> => ({
         findings: [
           {
             finding_id: FINDING_ID,
