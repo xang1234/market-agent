@@ -97,6 +97,25 @@ test("pi adapter joins text blocks and ignores non-text output", async () => {
   assert.equal(result.text, "Part A\nPart B");
 });
 
+test("pi adapter passes the provider's token usage through", async () => {
+  const client = createPiLlmChatClient({
+    complete: async () => ({
+      content: [{ type: "text", text: "ok" }],
+      usage: { input: 120, output: 40, cacheRead: 0, cacheWrite: 0, totalTokens: 160 },
+    }),
+  });
+
+  const result = await client(deployment(), { messages: [{ role: "user", content: "hello" }] });
+
+  assert.deepEqual(result.usage, { inputTokens: 120, outputTokens: 40, totalTokens: 160 });
+});
+
+test("pi adapter leaves usage out when the provider reports none", async () => {
+  const client = createPiLlmChatClient({ complete: async () => ({ content: [{ type: "text", text: "ok" }] }) });
+  const result = await client(deployment(), { messages: [{ role: "user", content: "hello" }] });
+  assert.equal(result.usage, undefined);
+});
+
 test("pi adapter maps auth and model errors to provider errors", async () => {
   const authClient = createPiLlmChatClient({
     complete: async () => {

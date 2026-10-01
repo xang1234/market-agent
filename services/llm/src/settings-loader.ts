@@ -12,6 +12,7 @@ import { createReplayLlmChatClient } from "./replay-client.ts";
 import {
   createLlmRouter,
   type LlmChatClient,
+  type LlmCompletion,
 } from "./router.ts";
 
 export { buildLlmDeploymentOrder };
@@ -19,6 +20,8 @@ export { buildLlmDeploymentOrder };
 export type LlmSettingsLoaderEnv = LlmEnv & {
   LLM_SETTINGS_ENV_FILE?: string;
   LLM_REPLAY_FILE?: string;
+  /** "true": log model, latency and tokens for every completion (analyst mode, #123). */
+  LLM_USAGE_LOG?: string;
 };
 
 export async function loadLlmSettingsFromEnv(
@@ -46,6 +49,8 @@ export type LlmRouterFromEnv = ReturnType<typeof createLlmRouter>;
 
 export type CreateLlmRouterFromEnvOptions = {
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
+  /** Where LLM_USAGE_LOG lines go; console.log by default. */
+  log?: (line: string) => void;
 };
 
 export async function createLlmRouterFromEnv(
@@ -59,7 +64,24 @@ export async function createLlmRouterFromEnv(
     options.createClient ??
     (replayFile ? () => createReplayLlmChatClient(replayFile) : createDefaultPiLlmChatClient)
   )();
-  return createLlmRouter({ settings, client });
+  const log = options.log ?? console.log;
+  return createLlmRouter({
+    settings,
+    client,
+    ...(env.LLM_USAGE_LOG?.trim() === "true" ? { onCompletion: (c) => log(formatCompletion(c)) } : {}),
+  });
+}
+
+// ponytail: tokens only; dollar cost needs per-model prices, which aren't configured.
+function formatCompletion(completion: LlmCompletion): string {
+  const { channel, model } = completion.deployment;
+  if (completion.outcome === "failed") {
+    return `[llm] ${channel}/${model} ${completion.latencyMs}ms failed (${completion.code ?? "unknown"})`;
+  }
+  const tokens = completion.usage
+    ? `tokens in=${completion.usage.inputTokens} out=${completion.usage.outputTokens} total=${completion.usage.totalTokens}`
+    : "tokens n/a";
+  return `[llm] ${channel}/${model} ${completion.latencyMs}ms ${tokens}`;
 }
 
 function readTrimmed(value: string | undefined): string | null {

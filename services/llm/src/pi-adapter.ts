@@ -19,6 +19,7 @@ type PiAssistantMessage = {
   content?: ReadonlyArray<PiContentBlock>;
   stopReason?: string;
   errorMessage?: string;
+  usage?: { input?: number; output?: number; totalTokens?: number };
 };
 
 type PiContext = {
@@ -155,7 +156,18 @@ function resultFromMessage(message: PiAssistantMessage): LlmChatResult {
     .map((block) => block.text)
     .join("\n")
     .trim();
-  return Object.freeze({ text });
+  const usage = message.usage;
+  if (usage === undefined || typeof usage.input !== "number" || typeof usage.output !== "number") {
+    return Object.freeze({ text });
+  }
+  return Object.freeze({
+    text,
+    usage: Object.freeze({
+      inputTokens: usage.input,
+      outputTokens: usage.output,
+      totalTokens: usage.totalTokens ?? usage.input + usage.output,
+    }),
+  });
 }
 
 function providerErrorFromMessage(message: PiAssistantMessage): LlmProviderError {

@@ -16,10 +16,29 @@ export type LlmChatRequest = {
   maxTokens?: number;
 };
 
+export type LlmUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+};
+
 export type LlmChatResult = {
   text: string;
   /** Optional audit record created by the concrete provider transport. */
   tool_call_id?: string;
+  /** Token counts, when the provider reports them. */
+  usage?: LlmUsage;
+};
+
+/** One provider attempt, for cost/latency logging (analyst mode, #123). A failed
+ * attempt is reported too: it may still have been billed, and it explains a fallback. */
+export type LlmCompletion = {
+  deployment: Pick<LlmDeployment, "channel" | "model">;
+  latencyMs: number;
+  outcome: "ok" | "failed";
+  /** Failure code, for a failed attempt. */
+  code?: LlmProviderErrorCode | "unknown";
+  usage?: LlmUsage;
 };
 
 export type LlmClientExecutionOptions = {
@@ -95,10 +114,23 @@ export class LlmRouterError extends Error {
 export type CreateLlmRouterInput = {
   settings: LlmSettings;
   client: LlmChatClient;
+  onCompletion?: (completion: LlmCompletion) => void;
 };
 
 export function createLlmRouter(input: CreateLlmRouterInput): ControlledRouter {
   const deployments = buildLlmDeploymentOrder(input.settings);
+  // Telemetry must never change routing: a throwing hook or log sink can't turn a
+  // (billed) success into a failure or stop a fallback.
+  const report = (completion: LlmCompletion) => {
+    try {
+      // An async hook may return a promise: consume its rejection without awaiting
+      // telemetry on the routing path.
+      const returned: unknown = input.onCompletion?.(completion);
+      if (returned instanceof Promise) returned.catch(() => {});
+    } catch {
+      // ponytail: dropped silently; a broken sink shouldn't also flood the logs.
+    }
+  };
   return Object.freeze({
     async complete(request, controls = {}) {
       const selectedDeployments = selectDeployments(deployments, controls.deploymentOrder);
@@ -114,6 +146,11 @@ export function createLlmRouter(input: CreateLlmRouterInput): ControlledRouter {
         const attempt = Object.freeze({ index, channel: deployment.channel, model: deployment.model });
         await controls.beforeAttempt?.(attempt);
         throwIfAborted(controls.signal);
+        const startedAt = performance.now();
+        const attemptDeployment = Object.freeze({
+          channel: deployment.channel,
+          model: deployment.model,
+        });
         try {
           const dispatch = async (attemptSignal?: AbortSignal): Promise<LlmChatResult> => {
             const signal = combineSignals(controls.signal, attemptSignal);
@@ -132,16 +169,25 @@ export function createLlmRouter(input: CreateLlmRouterInput): ControlledRouter {
           const result = controls.executeAttempt === undefined
             ? await dispatch()
             : await controls.executeAttempt(attempt, dispatch);
+          report({
+            deployment: attemptDeployment,
+            latencyMs: Math.round(performance.now() - startedAt),
+            outcome: "ok",
+            ...(result.usage === undefined ? {} : { usage: result.usage }),
+          });
           return Object.freeze({
             ...result,
-            deployment: Object.freeze({
-              channel: deployment.channel,
-              model: deployment.model,
-            }),
+            deployment: attemptDeployment,
           });
         } catch (error) {
           if (!(error instanceof ProviderDispatchError)) throw error;
           const providerAttempt = attemptFromError(deployment, error.cause);
+          report({
+            deployment: attemptDeployment,
+            latencyMs: Math.round(performance.now() - startedAt),
+            outcome: "failed",
+            code: providerAttempt.code,
+          });
           attempts.push(providerAttempt);
           if (isTerminalProviderCode(providerAttempt.code)) {
             throw new LlmRouterError(providerAttempt.code, providerAttempt.message, attempts);

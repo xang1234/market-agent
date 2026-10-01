@@ -425,6 +425,113 @@ test("launch-env stamps are checksums, so LLM API keys are not copied into .dev"
   assert.doesNotMatch(result.stdout, /sk-secret-value/);
 });
 
+const NPM_TRACE = ['npm(){ printf "npm:%s:%s\\n" "${PWD##*/}" "$*" >> "$TRACE_FILE"; }', "export -f npm", 'mkdir -p "$ROOT/services/chat"'];
+const LIVE_LLM = { LLM_CHANNELS: "openai", LLM_OPENAI_MODELS: "gpt-4.1", LITELLM_MODEL: "openai/gpt-4.1" };
+
+test("DEV_MODE=analyst: frozen dataset + the developer's live LLM, with per-completion usage logging", async () => {
+  const fixture = await createShellFixture({ DEV_MODE: "analyst", ...LIVE_LLM });
+  const result = await runBash(
+    [
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      'printf "%s|%s|<%s>|%s" "$LLM_CHANNELS" "$LITELLM_MODEL" "${LLM_REPLAY_FILE:-}" "${LLM_USAGE_LOG:-}"',
+    ].join("\n"),
+    fixture.root,
+  );
+  await rm(fixture.root, { recursive: true, force: true });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout.trim(), "openai|openai/gpt-4.1|<>|true");
+
+  const { result: up, lines } = await traceUp({ DEV_MODE: "analyst", ...LIVE_LLM }, NPM_TRACE);
+  assert.equal(up.code, 0, up.stderr);
+  assert.ok(lines("npm:").includes("chat:run seed:golden"), "the frozen dataset is seeded");
+});
+
+test("DEV_MODE=analyst fails fast without a deployable LLM, pointing at DEV_NO_KEYS", async () => {
+  // LITELLM_MODEL is set but names no configured channel: the llm check says no.
+  const { result, trace } = await traceUp({ DEV_MODE: "analyst", LITELLM_MODEL: "openai/gpt-4.1" }, [
+    "llm_deployable(){ return 1; }",
+  ]);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /analyst.*live LLM.*LITELLM_MODEL.*DEV_NO_KEYS/s);
+  assert.equal(trace, "", "nothing starts");
+});
+
+test("the live-mode LLM preflight sees the same settings file the services will load", async () => {
+  // The services reparse LLM_SETTINGS_ENV_FILE (default $ROOT/.env.dev); the preflight
+  // must check that file, not just the shell-sourced values.
+  const { result, lines } = await traceUp({ DEV_MODE: "analyst", ...LIVE_LLM }, [
+    ...NPM_TRACE,
+    'llm_deployable(){ printf "llm-settings-file:%s\\n" "${LLM_SETTINGS_ENV_FILE:-}" >> "$TRACE_FILE"; }',
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  const [file] = lines("llm-settings-file:");
+  assert.ok(file && file.endsWith("/.env.dev"), `preflight saw LLM_SETTINGS_ENV_FILE=${file}`);
+});
+
+test("DEV_MODE=data needs live provider credentials and does not seed frozen data", async () => {
+  const missing = await traceUp({ DEV_MODE: "data", ...LIVE_LLM });
+  assert.notEqual(missing.result.code, 0);
+  assert.match(missing.result.stderr, /data.*POLYGON_API_KEY.*SEC_EDGAR_USER_AGENT/s);
+
+  const { result, lines } = await traceUp(
+    // No space: the fixture writes the env file unquoted.
+    { DEV_MODE: "data", ...LIVE_LLM, POLYGON_API_KEY: "pk", SEC_EDGAR_USER_AGENT: "market-agent-dev@example.com" },
+    NPM_TRACE,
+  );
+  assert.equal(result.code, 0, result.stderr);
+  // It only checks the golden dataset is absent; it never seeds it.
+  assert.ok(!lines("npm:").includes("chat:run seed:golden"), lines("npm:").join(", "));
+});
+
+test("DEV_MODE=data refuses a database that still holds the frozen golden dataset", async () => {
+  const LIVE = { DEV_MODE: "data", ...LIVE_LLM, POLYGON_API_KEY: "pk", SEC_EDGAR_USER_AGENT: "market-agent-dev@example.com" };
+  const { result, lines } = await traceUp(LIVE, NPM_TRACE);
+  assert.equal(result.code, 0, result.stderr);
+  const npm = lines("npm:");
+  assert.ok(npm.indexOf("chat:run seed:golden -- --assert-absent") > npm.indexOf("db:run migrate -- up"), npm.join(", "));
+
+  // The check fails: up stops and rolls back instead of starting on frozen data.
+  const frozen = await traceUp(LIVE, [
+    'npm(){ printf "npm:%s:%s\\n" "${PWD##*/}" "$*" >> "$TRACE_FILE"; [[ "$*" != *--assert-absent* ]]; }',
+    "export -f npm",
+    'mkdir -p "$ROOT/services/chat"',
+  ]);
+  assert.notEqual(frozen.result.code, 0);
+  assert.deepEqual(frozen.lines("start:"), [], "nothing starts on frozen data");
+});
+
+test("an unknown DEV_MODE, or DEV_NO_KEYS with a live mode, fails before starting anything", async () => {
+  const unknown = await traceUp({ DEV_MODE: "turbo" });
+  assert.notEqual(unknown.result.code, 0);
+  assert.match(unknown.result.stderr, /DEV_MODE.*turbo/);
+
+  const clash = await traceUp({ DEV_MODE: "analyst", DEV_NO_KEYS: "true", ...LIVE_LLM });
+  assert.notEqual(clash.result.code, 0);
+  assert.match(clash.result.stderr, /DEV_NO_KEYS.*DEV_MODE=analyst/);
+  assert.equal(clash.trace, "");
+});
+
+test("an explicitly empty DEV_MODE on the command line returns to the default mode", async () => {
+  const fixture = await createShellFixture({ DEV_MODE: "analyst" });
+  const result = await runBash(
+    ["export DEV_MODE=", "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh", 'printf "<%s>" "$DEV_MODE"'].join("\n"),
+    fixture.root,
+  );
+  await rm(fixture.root, { recursive: true, force: true });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout.trim(), "<>");
+});
+
+test("DEV_MODE from the command line wins over the env file", async () => {
+  const fixture = await createShellFixture({ DEV_MODE: "data" });
+  const result = await runBash(
+    ["export DEV_MODE=analyst", "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh", 'printf "%s" "$DEV_MODE"'].join("\n"),
+    fixture.root,
+  );
+  await rm(fixture.root, { recursive: true, force: true });
+  assert.equal(result.stdout.trim(), "analyst");
+});
+
 test("DEV_NO_KEYS=true seeds the golden dataset after the dev seeds", async () => {
   const { result, lines } = await traceUp({ DEV_NO_KEYS: "true" }, [
     'npm(){ printf "npm:%s:%s\\n" "${PWD##*/}" "$*" >> "$TRACE_FILE"; }',
@@ -596,6 +703,8 @@ async function traceUp(envOverrides: Record<string, string> = {}, preamble: stri
       'start_process(){ local name="$1"; printf "start:%s\\n" "$name" >> "$TRACE_FILE"; sleep 60 >/dev/null 2>&1 & echo $! > "$PID_DIR/$name.pid"; }',
       'wait_for_service(){ printf "ready:%s\\n" "$1" >> "$TRACE_FILE"; }',
       "status(){ :; }",
+      // The real check runs services/llm, absent from the fixture; tests opt in to failure.
+      "llm_deployable(){ :; }",
       ...preamble,
       "up",
     ].join("\n"),

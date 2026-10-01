@@ -7,19 +7,24 @@ if [[ ! -f "$ENV_FILE" ]]; then
   ENV_FILE="$ROOT/.env.dev.example"
 fi
 
-# DEV_PROFILE and DEV_NO_KEYS are per-invocation switches
-# (DEV_PROFILE=chat DEV_NO_KEYS=true ./scripts/dev-shell.sh up), so the caller's value
-# beats the env file's.
-CALLER_DEV_PROFILE="${DEV_PROFILE:-}"
-CALLER_DEV_NO_KEYS="${DEV_NO_KEYS:-}"
+# DEV_PROFILE, DEV_NO_KEYS and DEV_MODE are per-invocation switches
+# (DEV_PROFILE=chat DEV_NO_KEYS=true ./scripts/dev-shell.sh up), so a value the caller
+# set beats the env file's, even an empty one (DEV_MODE= returns to the default mode).
+CALLER_SWITCHES=()
+for switch in DEV_PROFILE DEV_NO_KEYS DEV_MODE; do
+  if [[ -n "${!switch+set}" ]]; then
+    CALLER_SWITCHES+=("$switch=${!switch}")
+  fi
+done
 
 set -a
 # shellcheck source=/dev/null
 source "$ENV_FILE"
 set +a
 
-DEV_PROFILE="${CALLER_DEV_PROFILE:-${DEV_PROFILE:-}}"
-DEV_NO_KEYS="${CALLER_DEV_NO_KEYS:-${DEV_NO_KEYS:-}}"
+for assignment in ${CALLER_SWITCHES[@]+"${CALLER_SWITCHES[@]}"}; do
+  export "$assignment"
+done
 
 # Defaults for variables that may be missing from an older .env.dev so `set -u`
 # expansion below doesn't abort, and so child processes receive them.
@@ -35,9 +40,11 @@ DEV_NO_KEYS="${CALLER_DEV_NO_KEYS:-${DEV_NO_KEYS:-}}"
 : "${DEV_PROFILE:=full}"
 # No API keys needed: recorded LLM replies + the golden frozen dataset (#122).
 : "${DEV_NO_KEYS:=false}"
+# Development mode (#123): analyst (frozen data + live LLM) or data (live providers).
+: "${DEV_MODE:=}"
 # The one-process chat-profile app serves the web UI, so it takes the web port.
 : "${APP_PORT:=${WEB_PORT:-5173}}"
-export HOME_PORT EVIDENCE_PORT DEV_PROVIDERS_PORT ANALYST_GRIDS_PORT HOME_PULSE_TICKERS ENABLE_UNOFFICIAL_DEV_PROVIDERS DISCOVERY_ENABLED DISCOVERY_WORKER_POLL_MS DEV_PROFILE DEV_NO_KEYS APP_PORT
+export HOME_PORT EVIDENCE_PORT DEV_PROVIDERS_PORT ANALYST_GRIDS_PORT HOME_PULSE_TICKERS ENABLE_UNOFFICIAL_DEV_PROVIDERS DISCOVERY_ENABLED DISCOVERY_WORKER_POLL_MS DEV_PROFILE DEV_NO_KEYS DEV_MODE APP_PORT
 
 # HTTP dev services, in start order. DEV_PROFILE=chat runs only what the golden chat
 # conversation needs (#117), as one process: services/app hosts APP_SERVES (#122).
@@ -321,6 +328,10 @@ configure_runtime_env() {
     export LLM_REPLAY_FILE="$ROOT/services/chat/test/golden/llm-replies.json"
     export LLM_SETTINGS_ENV_FILE="" MA_FLAG_LLM_SETTINGS=false VITE_MA_FLAG_LLM_SETTINGS=false
   fi
+  if [[ "$DEV_MODE" == "analyst" ]]; then
+    # One line per model completion: model, latency, tokens (services/llm).
+    export LLM_USAGE_LOG=true
+  fi
   if [[ "$ENABLE_UNOFFICIAL_DEV_PROVIDERS" == "true" ]]; then
     export DEV_PROVIDERS_ORIGIN
     DEV_PROVIDERS_ORIGIN="${DEV_PROVIDERS_ORIGIN:-http://127.0.0.1:$DEV_PROVIDERS_PORT}"
@@ -350,6 +361,50 @@ cleanup_failed_up() {
   if [[ "$COMPOSE_STARTED" -eq 1 ]]; then
     compose down >/dev/null 2>&1 || true
   fi
+}
+
+# Whether the LLM settings the services will load yield a deployable model; asks the llm
+# package itself (it prints the settings issues when not).
+llm_deployable() {
+  node --experimental-strip-types "$ROOT/services/llm/scripts/check-deployments.ts" >/dev/null
+}
+
+# Validates DEV_MODE (#123) and fails fast when a mode's live credentials are missing.
+check_dev_mode() {
+  local missing=()
+  case "$DEV_MODE" in
+    "") return 0 ;;
+    analyst | data) ;;
+    *)
+      echo "Unknown DEV_MODE '$DEV_MODE' (expected analyst or data, or unset)" >&2
+      return 1
+      ;;
+  esac
+  if [[ "$DEV_NO_KEYS" == "true" ]]; then
+    echo "DEV_NO_KEYS=true (recorded replies) contradicts DEV_MODE=$DEV_MODE (live LLM); pick one" >&2
+    return 1
+  fi
+  if [[ "$DEV_MODE" == "data" ]]; then
+    [[ -n "${POLYGON_API_KEY:-}" ]] || missing+=(POLYGON_API_KEY)
+    [[ -n "${SEC_EDGAR_USER_AGENT:-}" ]] || missing+=(SEC_EDGAR_USER_AGENT)
+  fi
+  if ((${#missing[@]} > 0)); then
+    echo "DEV_MODE=$DEV_MODE needs live credentials in .env.dev: ${missing[*]} is not set" >&2
+    return 1
+  fi
+  # A set LITELLM_MODEL isn't enough: it must name a configured channel and model.
+  if ! llm_deployable; then
+    echo "DEV_MODE=$DEV_MODE needs a live LLM: set LLM_CHANNELS, the channel's settings and LITELLM_MODEL in .env.dev" >&2
+    if [[ "$DEV_MODE" == "analyst" ]]; then
+      echo "  (analyst mode runs a live LLM; for no keys at all use DEV_NO_KEYS=true)" >&2
+    fi
+    return 1
+  fi
+}
+
+# The golden conversation's frozen dataset backs the no-keys and analyst modes.
+seeds_frozen_data() {
+  [[ "$DEV_NO_KEYS" == "true" || "$DEV_MODE" == "analyst" ]]
 }
 
 profile_services() {
@@ -491,6 +546,7 @@ up() {
   # Unquoted on use: empty means every compose service.
   local compose_services=""
 
+  check_dev_mode || return 1
   services="$(active_services)" || return 1
   if [[ "$DEV_PROFILE" == "chat" ]]; then
     compose_services="postgres"
@@ -584,7 +640,14 @@ up() {
   fi
 
   # Idempotent; fails (all-or-nothing) if provider-hydrated tickers already clash.
-  if [[ "$DEV_NO_KEYS" == "true" ]] && ! (cd "$ROOT/services/chat" && npm run seed:golden); then
+  # Data mode must not run on a database a frozen mode seeded: its golden facts and
+  # long-lived caches would let a live check pass on frozen values.
+  if [[ "$DEV_MODE" == "data" ]] && ! (cd "$ROOT/services/chat" && npm run seed:golden -- --assert-absent); then
+    cleanup_failed_up
+    return 1
+  fi
+
+  if seeds_frozen_data && ! (cd "$ROOT/services/chat" && npm run seed:golden); then
     cleanup_failed_up
     return 1
   fi

@@ -26,6 +26,91 @@ test("LLM router returns the primary deployment response", async () => {
   assert.deepEqual(result.deployment, { channel: "openai", model: "gpt-4.1" });
 });
 
+test("LLM router reports each completion's deployment, latency and usage", async () => {
+  const completions: unknown[] = [];
+  const router = createLlmRouter({
+    settings: settings(),
+    client: async () => ({ text: "ok", usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 } }),
+    onCompletion: (completion) => completions.push(completion),
+  });
+
+  await router.complete({ messages: [{ role: "user", content: "hello" }] });
+
+  assert.equal(completions.length, 1);
+  const [completion] = completions as Array<{ deployment: unknown; latencyMs: number; usage: unknown }>;
+  assert.deepEqual(completion.deployment, { channel: "openai", model: "gpt-4.1" });
+  assert.ok(Number.isFinite(completion.latencyMs) && completion.latencyMs >= 0);
+  assert.deepEqual(completion.usage, { inputTokens: 10, outputTokens: 5, totalTokens: 15 });
+});
+
+test("LLM router reports a failed attempt before its fallback, with the failure code", async () => {
+  const completions: Array<{ deployment: { channel: string; model: string }; outcome: string; code?: string; latencyMs: number }> = [];
+  let calls = 0;
+  const router = createLlmRouter({
+    settings: settings(),
+    client: async () => {
+      calls += 1;
+      if (calls === 1) throw new LlmProviderError("rate_limited", "slow down");
+      return { text: "fallback ok" };
+    },
+    onCompletion: (completion) => completions.push(completion as never),
+  });
+
+  await router.complete({ messages: [{ role: "user", content: "hello" }] });
+
+  assert.deepEqual(
+    completions.map((c) => [`${c.deployment.channel}/${c.deployment.model}`, c.outcome, c.code]),
+    [["openai/gpt-4.1", "failed", "rate_limited"], ["deepseek/deepseek-chat", "ok", undefined]],
+  );
+  assert.ok(completions.every((c) => Number.isFinite(c.latencyMs)));
+});
+
+test("LLM router isolates a throwing completion hook from the model result and the fallback", async () => {
+  const throwingHook = () => {
+    throw new Error("logging sink down");
+  };
+  const ok = createLlmRouter({
+    settings: settings(),
+    client: async () => ({ text: "billable answer" }),
+    onCompletion: throwingHook,
+  });
+  assert.equal((await ok.complete({ messages: [{ role: "user", content: "hello" }] })).text, "billable answer");
+
+  let calls = 0;
+  const withFallback = createLlmRouter({
+    settings: settings(),
+    client: async () => {
+      calls += 1;
+      if (calls === 1) throw new LlmProviderError("rate_limited", "slow down");
+      return { text: "fallback ok" };
+    },
+    onCompletion: throwingHook,
+  });
+  assert.equal((await withFallback.complete({ messages: [{ role: "user", content: "hello" }] })).text, "fallback ok");
+});
+
+test("LLM router consumes a rejected async completion hook instead of leaving it unhandled", async () => {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    const router = createLlmRouter({
+      settings: settings(),
+      client: async () => ({ text: "ok" }),
+      onCompletion: (async () => {
+        throw new Error("async sink down");
+      }) as unknown as () => void,
+    });
+    assert.equal((await router.complete({ messages: [{ role: "user", content: "hello" }] })).text, "ok");
+    // Let any unhandled rejection surface.
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+  assert.deepEqual(unhandled, []);
+});
+
 test("LLM router falls back after retryable provider failure", async () => {
   const calls: string[] = [];
   const client: LlmChatClient = async (deployment) => {
