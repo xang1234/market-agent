@@ -17,6 +17,7 @@ import {
 } from "../src/news-ingest.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { RecordingObjectStore } from "./recording-object-store.ts";
+import { fakeRows } from "./fakes.ts";
 
 const SOURCE_ID = "11111111-1111-4111-a111-111111111111";
 const DOCUMENT_ID = "22222222-2222-4222-a222-222222222222";
@@ -59,7 +60,7 @@ function recordingDb() {
             updated_at: new Date("2026-05-03T00:00:00.000Z"),
           };
       return {
-        rows: [row] as R[],
+        rows: fakeRows<R>([row]),
         command: "INSERT",
         rowCount: 1,
         oid: 0,
@@ -824,7 +825,7 @@ test("ingestNewsArticle deletes the created source when document ingest fails", 
       queries.push({ text, values });
       if (/insert into sources/.test(text)) {
         return {
-          rows: [
+          rows: fakeRows<R>([
             {
               source_id: SOURCE_ID,
               provider: values?.[0],
@@ -837,7 +838,7 @@ test("ingestNewsArticle deletes the created source when document ingest fails", 
               user_id: values?.[7],
               created_at: new Date("2026-05-03T00:00:00.000Z"),
             },
-          ] as R[],
+          ]),
           command: "INSERT",
           rowCount: 1,
           oid: 0,

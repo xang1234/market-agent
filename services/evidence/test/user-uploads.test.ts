@@ -11,6 +11,7 @@ import {
 } from "../src/user-uploads.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { RecordingObjectStore } from "./recording-object-store.ts";
+import { fakeRows } from "./fakes.ts";
 
 const USER_A = "11111111-1111-4111-a111-111111111111";
 const USER_B = "22222222-2222-4222-a222-222222222222";
@@ -58,7 +59,7 @@ function recordingDb() {
             updated_at: new Date("2026-05-02T00:00:00.000Z"),
           };
       return {
-        rows: [row] as R[],
+        rows: fakeRows<R>([row]),
         command: "INSERT",
         rowCount: 1,
         oid: 0,

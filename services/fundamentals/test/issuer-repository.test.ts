@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createPostgresIssuerProfileRepository } from "../src/issuer-repository.ts";
+import { fakeQuery } from "./fakes.ts";
 
 test("postgres issuer profile repository builds profile records from canonical identity tables", async () => {
   const queries: Array<{ text: string; values?: unknown[] }> = [];
   const repo = createPostgresIssuerProfileRepository({
-    query: async (text, values) => {
+    query: fakeQuery(async (text, values) => {
       queries.push({ text, values });
       if (text.includes("from issuers")) {
         return {
@@ -37,7 +38,7 @@ test("postgres issuer profile repository builds profile records from canonical i
         };
       }
       throw new Error(`unexpected query: ${text}`);
-    },
+    }),
   });
 
   const profile = await repo.find("99999999-9999-4999-9999-999999999999");

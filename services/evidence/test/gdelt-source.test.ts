@@ -18,6 +18,7 @@ import {
 import { createSource } from "../src/source-repo.ts";
 import { decideStoragePolicy } from "../src/license-policy.ts";
 import type { QueryExecutor } from "../src/types.ts";
+import { fakeRows } from "./fakes.ts";
 
 test("GDELT discovery constants encode metadata-only article provenance", () => {
   assert.equal(GDELT_ARTICLE_DISCOVERY_PROVIDER, "gdelt_article_discovery");
@@ -42,7 +43,7 @@ test("createSource accepts GDELT discovery as tertiary ephemeral article metadat
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       queries.push({ text, values });
       return {
-        rows: [
+        rows: fakeRows<R>([
           {
             source_id: "00000000-0000-4000-a000-00000000000d",
             provider: values?.[0],
@@ -55,7 +56,7 @@ test("createSource accepts GDELT discovery as tertiary ephemeral article metadat
             user_id: values?.[7],
             created_at: new Date("2026-05-30T00:00:00.000Z"),
           },
-        ] as R[],
+        ]),
         command: "INSERT",
         rowCount: 1,
         oid: 0,

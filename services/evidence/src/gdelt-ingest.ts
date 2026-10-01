@@ -366,7 +366,8 @@ async function persistGdeltArticle(
       },
     );
   } catch (error) {
-    await cleanupSourceAfterFailedIngest(deps.db, source.source_id, error);
+    // Always throws; returning it lets the compiler see that `ingest` is set below.
+    return cleanupSourceAfterFailedIngest(deps.db, source.source_id, error);
   }
 
   return Object.freeze({

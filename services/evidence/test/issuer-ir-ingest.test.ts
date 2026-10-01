@@ -1,3 +1,4 @@
+import type { QueryResult } from "pg";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -8,7 +9,8 @@ import type { IrSourceRegistryRow } from "../src/issuer-ir-registry.ts";
 import { MemoryObjectStore, rawBlobIdFromBytes } from "../src/object-store.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { RecordingObjectStore } from "./recording-object-store.ts";
-import { recordingPoolExecutor } from "./recording-query-executor.ts";
+import { recordingPoolExecutor, type RecordingQueryTarget } from "./recording-query-executor.ts";
+import { fakeRows } from "./fakes.ts";
 
 const ISSUER_ID = "33333333-3333-4333-a333-333333333333";
 const SOURCE_ID = "11111111-1111-4111-a111-111111111111";
@@ -46,11 +48,11 @@ function recordingDb() {
       queries.push({ text, values });
       if (/from ir_document_assets/i.test(text)) {
         const row = assets.get(`${values?.[0]}:${values?.[1]}`);
-        return result(row ? [row] : []);
+        return result<R>(row ? [row] : []);
       }
       if (/insert into sources/i.test(text)) {
         sourceCounter += 1;
-        return result([{
+        return result<R>([{
           source_id: sourceCounter === 1 ? SOURCE_ID : `11111111-1111-4111-a111-11111111111${sourceCounter}`,
           provider: values?.[0],
           kind: values?.[1],
@@ -65,7 +67,7 @@ function recordingDb() {
       }
       if (/insert into documents/i.test(text)) {
         documentCounter += 1;
-        return result([{
+        return result<R>([{
           inserted: true,
           document_id: documentCounter === 1 ? DOCUMENT_ID : `22222222-2222-4222-a222-22222222222${documentCounter}`,
           source_id: values?.[0],
@@ -102,10 +104,10 @@ function recordingDb() {
           created_at: new Date("2026-05-30T00:00:00.000Z"),
         };
         assets.set(`${values?.[1]}:${values?.[5]}`, row);
-        return result([row]);
+        return result<R>([row]);
       }
       if (/insert into mentions/i.test(text)) {
-        return result([{
+        return result<R>([{
           mention_id: "77777777-7777-4777-a777-777777777777",
           document_id: values?.[0],
           subject_kind: values?.[1],
@@ -117,7 +119,7 @@ function recordingDb() {
         }]);
       }
       if (/insert into claims/i.test(text)) {
-        return result([{
+        return result<R>([{
           claim_id: CLAIM_ID,
           document_id: values?.[0],
           predicate: values?.[1],
@@ -135,7 +137,7 @@ function recordingDb() {
         }]);
       }
       if (/insert into claim_arguments/i.test(text)) {
-        return result([{
+        return result<R>([{
           claim_argument_id: "88888888-8888-4888-a888-888888888888",
           claim_id: values?.[0],
           subject_kind: values?.[1],
@@ -145,7 +147,7 @@ function recordingDb() {
         }]);
       }
       if (/insert into claim_evidence/i.test(text)) {
-        return result([{
+        return result<R>([{
           claim_evidence_id: "99999999-9999-4999-a999-999999999999",
           claim_id: values?.[0],
           document_id: values?.[1],
@@ -156,7 +158,7 @@ function recordingDb() {
         }]);
       }
       if (/insert into events/i.test(text)) {
-        return result([{
+        return result<R>([{
           event_id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
           event_type: values?.[0],
           occurred_at: new Date(String(values?.[1])),
@@ -169,7 +171,7 @@ function recordingDb() {
         }]);
       }
       if (/insert into event_subjects/i.test(text)) {
-        return result([{
+        return result<R>([{
           event_subject_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb",
           event_id: values?.[0],
           subject_kind: values?.[1],
@@ -178,9 +180,9 @@ function recordingDb() {
           created_at: new Date("2026-05-30T00:00:00.000Z"),
         }]);
       }
-      if (/update ir_source_registry/i.test(text)) return result([]);
-      if (/from sources/i.test(text)) return result([{ source_id: values?.[0] }]);
-      if (/^begin|^commit|^rollback|pg_advisory_xact_lock/i.test(text)) return result([]);
+      if (/update ir_source_registry/i.test(text)) return result<R>([]);
+      if (/from sources/i.test(text)) return result<R>([{ source_id: values?.[0] }]);
+      if (/^begin|^commit|^rollback|pg_advisory_xact_lock/i.test(text)) return result<R>([]);
       throw new Error(`unexpected query: ${text}`);
     },
   };
@@ -189,7 +191,7 @@ function recordingDb() {
 
 function recordingPoolDb() {
   const base = recordingDb();
-  return recordingPoolExecutor(async <R extends Record<string, unknown>>(target, text: string, values?: unknown[]) => {
+  return recordingPoolExecutor(async <R extends Record<string, unknown>>(target: RecordingQueryTarget, text: string, values?: unknown[]) => {
     if (target === "pool" && (/^(begin|commit|rollback)$/i.test(text) || /insert into/i.test(text))) {
       throw new Error(`candidate persistence used the pool instead of an acquired client: ${text}`);
     }
@@ -197,8 +199,8 @@ function recordingPoolDb() {
   });
 }
 
-function result<R extends Record<string, unknown>>(rows: R[]) {
-  return { rows, command: rows.length ? "INSERT" : "SELECT", rowCount: rows.length, oid: 0, fields: [] };
+function result<R extends Record<string, unknown>>(rows: readonly unknown[]): QueryResult<R> {
+  return { rows: fakeRows<R>(rows), command: rows.length ? "INSERT" : "SELECT", rowCount: rows.length, oid: 0, fields: [] };
 }
 
 test("ingestIssuerIrSource stores issuer releases, links IR asset metadata, and extracts guidance claims", async () => {

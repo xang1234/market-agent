@@ -8,6 +8,7 @@ import type { MetricDefinition } from "../src/metric-mapper.ts";
 import {
   SecEdgarFetchError,
   type SecEdgarFetcher,
+  type SecConceptValue,
 } from "../src/sec-edgar.ts";
 import { FundamentalsDataUnavailableError } from "../src/availability.ts";
 
@@ -342,8 +343,9 @@ class FakeFundamentalsDb {
   }
 }
 
-function rows<R extends Record<string, unknown>>(rows: R[]): { rows: R[] } {
-  return { rows };
+// The fake decides the rows; R is inferred from the calling query's return type.
+function rows<R>(rows: readonly unknown[]): { rows: R[] } {
+  return { rows: rows as R[] };
 }
 
 function metricDefinitions(): MetricDefinition[] {
@@ -502,7 +504,7 @@ function annualShares(current: number, prior: number) {
   return { label: "", description: "", units: { shares: annualValues(current, prior) } };
 }
 
-function annualValues(current: number, prior: number) {
+function annualValues(current: number, prior: number): SecConceptValue[] {
   return [
     {
       start: "2024-01-01",

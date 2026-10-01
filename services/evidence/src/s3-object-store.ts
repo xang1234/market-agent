@@ -5,6 +5,7 @@ import {
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
+  type GetObjectCommandOutput,
   type S3Client,
 } from "@aws-sdk/client-s3";
 
@@ -78,13 +79,11 @@ export class S3ObjectStore implements ObjectStore {
     assertRawBlobId(rawBlobId);
     const key = this.#keyFor(rawBlobId);
 
-    let response: Awaited<ReturnType<S3Client["send"]>> & {
-      Body?: { transformToByteArray(): Promise<Uint8Array> };
-    };
+    let response: GetObjectCommandOutput;
     try {
-      response = (await this.#client.send(
+      response = await this.#client.send(
         new GetObjectCommand({ Bucket: this.#bucket, Key: key }),
-      )) as typeof response;
+      );
     } catch (error) {
       if (isNotFoundError(error)) return null;
       throw error;

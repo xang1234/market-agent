@@ -243,6 +243,7 @@ test("normalizedStatement requires fiscal_period to align with period_kind", () 
   );
 
   assert.throws(
+    // @ts-expect-error -- "H1" is not a FiscalPeriod; the validator must reject it.
     () => normalizedStatement({ ...valid, fiscal_period: "H1" }),
     /fiscal_period/,
   );
@@ -462,7 +463,7 @@ test("assertStatementContract rejects a statement missing required fields", () =
     delete tampered[drop];
     assert.throws(
       () => assertStatementContract(tampered),
-      undefined,
+      Error,
       `expected missing ${drop} to be rejected`,
     );
   }

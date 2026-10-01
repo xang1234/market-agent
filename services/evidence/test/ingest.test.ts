@@ -12,6 +12,7 @@ import {
 import { withTransaction } from "../src/transaction.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { RecordingObjectStore } from "./recording-object-store.ts";
+import { fakeRows } from "./fakes.ts";
 
 const SOURCE_ID = "11111111-1111-4111-a111-111111111111";
 const DOCUMENT_ID = "22222222-2222-4222-a222-222222222222";
@@ -25,7 +26,7 @@ function recordingDb() {
       queries.push({ text, values });
       if (/from sources/i.test(text) && /for key share/i.test(text)) {
         return {
-          rows: [{ source_id: values?.[0] }] as R[],
+          rows: fakeRows<R>([{ source_id: values?.[0] }]),
           command: "SELECT",
           rowCount: 1,
           oid: 0,
@@ -33,7 +34,7 @@ function recordingDb() {
         };
       }
       return {
-        rows: [
+        rows: fakeRows<R>([
           {
             inserted: true,
             document_id: DOCUMENT_ID,
@@ -53,7 +54,7 @@ function recordingDb() {
             created_at: new Date("2026-05-02T00:00:00.000Z"),
             updated_at: new Date("2026-05-02T00:00:00.000Z"),
           },
-        ] as R[],
+        ]),
         command: "INSERT",
         rowCount: 1,
         oid: 0,

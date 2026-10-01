@@ -11,13 +11,14 @@ import {
   loadLocalRuntimeEvidence,
   loadVerifierRowsForRefs,
 } from "../src/local-runtime-evidence.ts";
+import { fakePgQuery } from "./fakes.ts";
 
 const SUBJECT_ID = "55555555-5555-4555-a555-555555555555";
 
 test("loadVerifierRowsForRefs scopes hydrated verifier rows to public or same-user sources", async () => {
   const queries: Array<{ text: string; values: unknown[] }> = [];
   const db = {
-    async query(text: string, values?: unknown[]) {
+    query: fakePgQuery(async (text: string, values?: unknown[]) => {
       queries.push({ text, values: values ?? [] });
       if (/from sources/i.test(text)) return { rows: [{ source_id: "11111111-1111-4111-8111-111111111111" }] };
       if (/from documents/i.test(text)) {
@@ -41,7 +42,7 @@ test("loadVerifierRowsForRefs scopes hydrated verifier rows to public or same-us
         };
       }
       return { rows: [] };
-    },
+    }),
   };
 
   const rows = await loadVerifierRowsForRefs(db, {
@@ -65,7 +66,7 @@ test("loadVerifierRowsForRefs scopes hydrated verifier rows to public or same-us
 
 test("loadLocalRuntimeEvidence carries GDELT discovery disclosure with claim citations", async () => {
   const db = {
-    async query(text: string) {
+    query: fakePgQuery(async (text: string) => {
       assert.match(text, /s\.provider/i);
       assert.match(text, /s\.license_class/i);
       assert.match(text, /s\.canonical_url/i);
@@ -91,7 +92,7 @@ test("loadLocalRuntimeEvidence carries GDELT discovery disclosure with claim cit
           },
         ],
       };
-    },
+    }),
   };
 
   const evidence = await loadLocalRuntimeEvidence(db, {
@@ -116,10 +117,10 @@ test("loadLocalRuntimeEvidence carries GDELT discovery disclosure with claim cit
 test("loadLocalRuntimeEvidence hides IR-only claims unless issuer_ir is selected", async () => {
   const queries: Array<{ text: string; values: unknown[] }> = [];
   const db = {
-    async query(text: string, values?: unknown[]) {
+    query: fakePgQuery(async (text: string, values?: unknown[]) => {
       queries.push({ text, values: values ?? [] });
       return { rows: [] };
-    },
+    }),
   };
 
   await loadLocalRuntimeEvidence(db, {

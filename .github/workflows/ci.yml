@@ -382,7 +382,7 @@ jobs:
         run: npm test
 
   evidence:
-    name: evidence (integration tests)
+    name: evidence (typecheck, integration tests)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -395,6 +395,8 @@ jobs:
           cache-dependency-path: |
             db/package-lock.json
             services/evidence/package-lock.json
+            services/financial-core/package-lock.json
+            services/llm/package-lock.json
 
       # Evidence tests use the shared db/test Docker harness and invoke
       # `npm run apply:schema` inside db/, so db dependencies must be present.
@@ -402,9 +404,24 @@ jobs:
         working-directory: db
         run: npm ci
 
+      # Typechecking follows evidence's imports into financial-core (ajv,
+      # decimal.js) and llm (provider SDK types), which resolve their own
+      # dependencies from their node_modules.
+      - name: Install financial-core deps (types reached by the evidence typecheck)
+        working-directory: services/financial-core
+        run: npm ci
+
+      - name: Install llm deps (types reached by the evidence typecheck)
+        working-directory: services/llm
+        run: npm ci
+
       - name: Install evidence deps
         working-directory: services/evidence
         run: npm ci
+
+      - name: Typecheck evidence
+        working-directory: services/evidence
+        run: npm run typecheck
 
       - name: Run evidence tests
         working-directory: services/evidence
@@ -583,7 +600,7 @@ jobs:
         run: npm test
 
   fundamentals:
-    name: fundamentals (integration tests)
+    name: fundamentals (typecheck, integration tests)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -593,7 +610,10 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: db/package-lock.json
+          cache-dependency-path: |
+            db/package-lock.json
+            services/financial-core/package-lock.json
+            services/fundamentals/package-lock.json
 
       # Fundamentals reader integration test imports the shared db/test Docker harness.
       - name: Install db deps (needed by fundamentals integration harness)
@@ -601,9 +621,19 @@ jobs:
         run: npm ci
 
       # The SEC fetch boundary parses company facts with lossless-json.
+      # Typechecking follows fundamentals' imports into financial-core, whose
+      # dependencies (ajv, decimal.js) resolve from its own node_modules.
+      - name: Install financial-core deps (types reached by the fundamentals typecheck)
+        working-directory: services/financial-core
+        run: npm ci
+
       - name: Install fundamentals deps
         working-directory: services/fundamentals
         run: npm ci
+
+      - name: Typecheck fundamentals
+        working-directory: services/fundamentals
+        run: npm run typecheck
 
       - name: Run fundamentals tests
         working-directory: services/fundamentals

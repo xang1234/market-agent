@@ -70,7 +70,7 @@ async function startServer(t: TestContext, deps: FundamentalsServerDeps): Promis
   return `http://127.0.0.1:${port}`;
 }
 
-function statByKey(stats: ReadonlyArray<KeyStat>, key: KeyStat["stat_key"]): KeyStat {
+function statByKey<S extends Pick<KeyStat, "stat_key">>(stats: ReadonlyArray<S>, key: KeyStat["stat_key"]): S {
   const found = stats.find((s) => s.stat_key === key);
   if (!found) throw new Error(`stat "${key}" missing from envelope`);
   return found;

@@ -13,6 +13,7 @@ import {
   connectedClient,
   dockerAvailable,
 } from "../../../db/test/docker-pg.ts";
+import { fakeRows } from "./fakes.ts";
 
 test("createSource inserts trust tier and license class metadata", async () => {
   const queries: Array<{ text: string; values?: unknown[] }> = [];
@@ -21,7 +22,7 @@ test("createSource inserts trust tier and license class metadata", async () => {
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       queries.push({ text, values });
       return {
-        rows: [
+        rows: fakeRows<R>([
           {
             source_id: sourceId,
             provider: "sec_edgar",
@@ -34,7 +35,7 @@ test("createSource inserts trust tier and license class metadata", async () => {
             user_id: null,
             created_at: new Date("2026-04-29T00:00:01.000Z"),
           },
-        ] as R[],
+        ]),
         command: "INSERT",
         rowCount: 1,
         oid: 0,
@@ -87,7 +88,7 @@ test("createSource carries user_id through to the insert and back on the returne
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       queries.push({ text, values });
       return {
-        rows: [
+        rows: fakeRows<R>([
           {
             source_id: "00000000-0000-4000-8000-000000000002",
             provider: "user_upload",
@@ -100,7 +101,7 @@ test("createSource carries user_id through to the insert and back on the returne
             user_id: userId,
             created_at: new Date("2026-05-02T00:00:01.000Z"),
           },
-        ] as R[],
+        ]),
         command: "INSERT",
         rowCount: 1,
         oid: 0,
@@ -217,7 +218,7 @@ test("createSource accepts reference_data and market_data registry sources", asy
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       queries.push({ text, values });
       return {
-        rows: [
+        rows: fakeRows<R>([
           {
             source_id: "00000000-0000-4000-a000-00000000000e",
             provider: values?.[0],
@@ -230,7 +231,7 @@ test("createSource accepts reference_data and market_data registry sources", asy
             user_id: values?.[7],
             created_at: new Date("2026-05-30T00:00:00.000Z"),
           },
-        ] as R[],
+        ]),
         command: "INSERT",
         rowCount: 1,
         oid: 0,

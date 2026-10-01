@@ -14,6 +14,7 @@ import {
   GDELT_DISCOVERY_TRUST_TIER,
 } from "../src/gdelt-source.ts";
 import type { QueryExecutor } from "../src/types.ts";
+import { fakeRows } from "./fakes.ts";
 
 const CLAIM_A = "11111111-1111-4111-a111-111111111111";
 const CLAIM_B = "22222222-2222-4222-a222-222222222222";
@@ -30,7 +31,7 @@ function recordingDb(rows: Record<string, unknown>[], storedBundleRows: Record<s
       queries.push({ text, values });
       if (/insert into evidence_bundles/i.test(text)) {
         return {
-          rows: (storedBundleRows.length > 0 ? [] : [{ bundle: JSON.parse(String(values?.[1])) }]) as R[],
+          rows: fakeRows<R>((storedBundleRows.length > 0 ? [] : [{ bundle: JSON.parse(String(values?.[1])) }])),
           command: "INSERT",
           rowCount: storedBundleRows.length > 0 ? 0 : 1,
           oid: 0,

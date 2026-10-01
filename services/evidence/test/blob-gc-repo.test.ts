@@ -21,6 +21,7 @@ import {
   connectedPool,
   dockerAvailable,
 } from "../../../db/test/docker-pg.ts";
+import { fakeRows } from "./fakes.ts";
 
 type Query = { text: string; values?: unknown[] };
 
@@ -48,18 +49,18 @@ class FakeDb implements QueryExecutor {
         this.queued.add(rawBlobId);
         this.deletedQueueRows.delete(rawBlobId);
       }
-      return { rows: [{ raw_blob_id: STORED_BLOB_ID }, { raw_blob_id: SHARED_BLOB_ID }] as R[], rowCount: 2 } as never;
+      return { rows: fakeRows<R>([{ raw_blob_id: STORED_BLOB_ID }, { raw_blob_id: SHARED_BLOB_ID }]), rowCount: 2 } as never;
     }
     if (/delete from users/i.test(text)) {
-      return { rows: [{ user_id: values?.[0] }] as R[], rowCount: 1 } as never;
+      return { rows: fakeRows<R>([{ user_id: values?.[0] }]), rowCount: 1 } as never;
     }
     if (/from object_blob_gc_queue/i.test(text) && /for update skip locked/i.test(text)) {
       const limit = values?.[0] as number;
       return {
-        rows: Array.from(this.queued)
+        rows: fakeRows<R>(Array.from(this.queued)
           .filter((raw_blob_id) => !this.deferred.has(raw_blob_id))
           .slice(0, limit)
-          .map((raw_blob_id) => ({ raw_blob_id })) as R[],
+          .map((raw_blob_id) => ({ raw_blob_id }))),
         rowCount: this.queued.size,
       } as never;
     }
@@ -67,7 +68,7 @@ class FakeDb implements QueryExecutor {
       return { rows: [], rowCount: 1 } as never;
     }
     if (/select exists/i.test(text) && /from documents/i.test(text)) {
-      return { rows: [{ referenced: this.referenced.has(values?.[0] as string) }] as R[], rowCount: 1 } as never;
+      return { rows: fakeRows<R>([{ referenced: this.referenced.has(values?.[0] as string) }]), rowCount: 1 } as never;
     }
     if (/set deleted_at = now\(\)/i.test(text)) {
       this.queued.delete(values?.[0] as string);
@@ -82,7 +83,7 @@ class FakeDb implements QueryExecutor {
       return { rows: [], rowCount: 1 } as never;
     }
     if (/delete from analyze_template_runs/i.test(text)) {
-      return { rows: [{ run_id: "run-1" }] as R[], rowCount: 1 } as never;
+      return { rows: fakeRows<R>([{ run_id: "run-1" }]), rowCount: 1 } as never;
     }
     return { rows: [], rowCount: 0 } as never;
   }

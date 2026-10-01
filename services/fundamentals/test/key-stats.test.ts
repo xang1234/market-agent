@@ -143,7 +143,10 @@ test("buildKeyStats computes revenue growth from a prior period with both period
     expression: "(revenue - prior.revenue) / prior.revenue",
   });
   assert.deepEqual(
-    growth.inputs.map((input) => [input.role, input.metric_key, input.period_end, input.as_of]),
+    growth.inputs.map((input) => {
+      assert.ok(input.kind === "statement_line");
+      return [input.role, input.metric_key, input.period_end, input.as_of];
+    }),
     [
       ["current", "revenue", "2024-09-28", "2024-11-01T20:30:00.000Z"],
       ["prior", "revenue", "2023-09-30", "2023-11-03T20:30:00.000Z"],
@@ -174,7 +177,9 @@ test("buildKeyStats resolves AAPL P/E as a price fact and ratio computation with
     ],
   );
   assert.equal(pe.inputs[0].fact_id, MARKET_PRICE_FACT_ID);
-  assert.deepEqual(pe.inputs[0].subject, aaplIssuer);
+  const priceRef = pe.inputs[0];
+  assert.ok(priceRef.kind === "market_fact");
+  assert.deepEqual(priceRef.subject, aaplIssuer);
   assert.deepEqual(pe.warnings, []);
 });
 

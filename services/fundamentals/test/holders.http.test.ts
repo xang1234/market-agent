@@ -83,7 +83,8 @@ test("GET /v1/fundamentals/holders?kind=institutional returns the institutional 
     const top = body.holders.holders[0];
     assert.ok(top.holder_name.length > 0);
     assert.ok(Number.isInteger(top.shares_held) && top.shares_held > 0);
-    assert.ok(top.percent_of_shares_outstanding >= 0 && top.percent_of_shares_outstanding <= 100);
+    const percent = top.percent_of_shares_outstanding;
+    assert.ok(percent === null || (percent >= 0 && percent <= 100));
   }
 });
 
