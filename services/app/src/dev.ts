@@ -9,7 +9,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createCapture, createReplayHandler, loadReplayFixture } from "./replay.ts";
-import { routeFor, type DevService } from "./routes.ts";
+import { isApiPath, routeFor, type DevService } from "./routes.ts";
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => void;
 type ViteModule = {
@@ -58,9 +58,13 @@ if (uiMode) {
     const route = routeFor(new URL(req.url ?? "/", "http://app.local").pathname);
     if (route.kind === "service") {
       handlers[route.service](req, res);
-    } else {
+    } else if (route.kind === "parked") {
       res.writeHead(503, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: `${route.kind === "parked" ? route.prefix : req.url} is parked under DEV_PROFILE=chat; use DEV_PROFILE=full` }));
+      res.end(JSON.stringify({ error: `${route.prefix} is parked under DEV_PROFILE=chat; use DEV_PROFILE=full` }));
+    } else {
+      // A /v1 prefix the route table doesn't know (services/app/src/routes.ts).
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: `unknown API route ${req.url}; add its prefix to services/app/src/routes.ts` }));
     }
   };
   const captureFile = process.env.DEV_CAPTURE_FILE;
@@ -81,12 +85,12 @@ const vite = await createViteServer({
 });
 
 httpServer.on("request", (req: IncomingMessage, res: ServerResponse) => {
-  // Every API prefix (served or parked) goes to the API side; the rest is the web app.
-  const route = routeFor(new URL(req.url ?? "/", "http://app.local").pathname);
-  if (route.kind === "web") {
-    vite.middlewares(req, res);
-  } else {
+  // Every /v1 request goes to the API side (served, parked, replayed or unknown), so it
+  // gets a JSON answer; the rest is the web app.
+  if (isApiPath(new URL(req.url ?? "/", "http://app.local").pathname)) {
     api(req, res);
+  } else {
+    vite.middlewares(req, res);
   }
 });
 

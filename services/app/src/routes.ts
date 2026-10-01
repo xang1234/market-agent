@@ -35,6 +35,12 @@ const PARKED = [
 // Longest prefix first, so /v1/evidence/inspect (served) beats /v1/evidence (parked).
 const PREFIXES = [...Object.keys(SERVED), ...PARKED].sort((a, b) => b.length - a.length);
 
+// Every /v1 request belongs to the API side, even under a prefix the table doesn't list
+// yet: it must get a JSON answer (a 404, or UI mode's "not recorded"), never the SPA HTML.
+export function isApiPath(pathname: string): boolean {
+  return pathname === "/v1" || pathname.startsWith("/v1/");
+}
+
 export function routeFor(pathname: string): Route {
   // Whole path segments only: /v1/chatter is not /v1/chat.
   const prefix = PREFIXES.find((p) => pathname === p || pathname.startsWith(`${p}/`));
