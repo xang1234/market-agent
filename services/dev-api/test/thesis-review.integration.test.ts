@@ -108,7 +108,8 @@ test('a newer assessment is detected at microsecond precision, not lost to milli
     `update agent_thesis_assessments set assessed_at = $1::timestamptz + interval '1 microsecond'`,
     [cutoff],
   );
-  await run(() => cutoff).catch(() => undefined);
+  // It must fail on the conflict itself, not on any unrelated error.
+  await assert.rejects(run(() => cutoff), { name: 'ThesisConflictError', message: /A newer assessment finished during this run/ });
   assert.equal((await history()).assessments.length, 1, 'the run must yield to the newer assessment');
 });
 
