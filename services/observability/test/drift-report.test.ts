@@ -10,6 +10,7 @@ import type {
   GoldenEvalRunResultJson,
 } from "../src/golden-eval-runner.ts";
 import type { QueryExecutor } from "../src/types.ts";
+import { fakeRows } from "../../shared/test/fake-query.ts";
 
 function runJson(
   overrides: Partial<GoldenEvalRunResultJson> = {},
@@ -122,7 +123,7 @@ test("readLatestGoldenEvalDriftReport compares the newest two runs for a suite",
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       queries.push({ text, values });
       return {
-        rows: [
+        rows: fakeRows<R>([
           {
             eval_run_result_id: "00000000-0000-4000-8000-000000000002",
             suite_name: "golden-nightly",
@@ -147,7 +148,7 @@ test("readLatestGoldenEvalDriftReport compares the newest two runs for a suite",
             created_at: new Date("2026-04-29T00:00:00.000Z"),
             result_json: runJson(),
           },
-        ] as R[],
+        ]),
         command: "SELECT",
         rowCount: 2,
         oid: 0,

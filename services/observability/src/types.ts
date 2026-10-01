@@ -13,6 +13,13 @@ import type { JsonObject, JsonValue } from "../../shared/src/json.ts";
 
 export type { JsonObject, JsonValue };
 
+export function assertJsonObject(value: unknown, path: string): asserts value is JsonObject {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${path}: must be an object`);
+  }
+  assertJsonValue(value, path, new Set());
+}
+
 function assertJsonValue(value: unknown, path: string, seen: Set<object>): asserts value is JsonValue {
   if (value === null) return;
 

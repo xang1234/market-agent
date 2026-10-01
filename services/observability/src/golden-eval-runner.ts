@@ -6,7 +6,7 @@ import {
   writeEvalRunResult,
   type EvalRunResultRow,
 } from "./eval-run.ts";
-import type { JsonObject, JsonValue, QueryExecutor } from "./types.ts";
+import { assertJsonObject, type JsonObject, type JsonValue, type QueryExecutor } from "./types.ts";
 
 export const GOLDEN_EVAL_CATEGORIES = Object.freeze([
   "ticker_name_disambiguation",
@@ -191,10 +191,8 @@ function parseGoldenEvalCase(value: unknown, label: string): GoldenEvalCase {
   const id = nonEmptyString(raw.id, `${label}.id`);
   const category = categoryValue(raw.category, `${label}.category`);
   const prompt = nonEmptyString(raw.prompt, `${label}.prompt`);
-  const expected =
-    raw.expected === undefined
-      ? undefined
-      : record(raw.expected, `${label}.expected`);
+  const expected = raw.expected;
+  if (expected !== undefined) assertJsonObject(expected, `${label}.expected`);
 
   return Object.freeze({
     id,

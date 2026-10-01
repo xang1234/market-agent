@@ -12,6 +12,7 @@ import {
   runGoldenEvalSuite,
 } from "../src/golden-eval-runner.ts";
 import type { QueryExecutor } from "../src/types.ts";
+import { fakeRows } from "../../shared/test/fake-query.ts";
 
 test("default golden eval cases cover every required category", () => {
   const cases = loadGoldenEvalCases(DEFAULT_GOLDEN_EVAL_CASES_DIR);
@@ -91,12 +92,12 @@ test("runGoldenEvalSuite evaluates cases and persists summarized results", async
       assert.match(text, /insert into eval_run_results/);
       inserted.push(values ?? []);
       return {
-        rows: [
+        rows: fakeRows<R>([
           {
             eval_run_result_id: "00000000-0000-4000-8000-000000000001",
             created_at: new Date("2026-04-29T00:00:00.000Z"),
           },
-        ] as R[],
+        ]),
         command: "INSERT",
         rowCount: 1,
         oid: 0,
