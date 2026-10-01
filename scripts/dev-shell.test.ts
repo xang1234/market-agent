@@ -729,6 +729,22 @@ test("down works without Docker installed (UI mode needs none): it skips Compose
   assert.doesNotMatch(trace, /compose:/);
 });
 
+test("down still succeeds when the Docker daemon is unavailable, warning instead", async () => {
+  const fixture = await createShellFixture();
+  const result = await runBash(
+    [
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      "have_docker(){ return 0; }",
+      'compose(){ echo "Cannot connect to the Docker daemon" >&2; return 1; }',
+      "down",
+    ].join("\n"),
+    fixture.root,
+  );
+  await rm(fixture.root, { recursive: true, force: true });
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stderr, /docker compose stop failed.*daemon/i);
+});
+
 test("docker compose declares persistent storage for Postgres dev data", async () => {
   const composeFile = await readFile(join(REPO_ROOT, "docker-compose.dev.yml"), "utf8");
 

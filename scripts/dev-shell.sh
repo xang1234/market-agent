@@ -738,9 +738,10 @@ have_docker() {
 
 down() {
   stop_processes
-  # UI mode needs no Docker at all; without it there are no containers to stop.
-  if have_docker; then
-    compose stop
+  # UI mode needs no Docker at all; without it, or with its daemon down, no containers
+  # can be running, so a failed stop is a warning, not a failed teardown.
+  if have_docker && ! compose stop; then
+    echo "docker compose stop failed (is the Docker daemon running?); no containers stopped" >&2
   fi
 }
 
