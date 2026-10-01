@@ -24,6 +24,8 @@ export type ThesisRuntimeInput = {
   getModel?: () => Promise<Model>;
   /** Verified numerical conditions (THESIS_FINANCIAL_MODE=enforce); absent, metric conditions use the stored-fact checks. */
   financial?: SavedRuleDeps;
+  /** The run's cutoff clock. Defaults to the database's now(), the clock that stamps facts and assessments. */
+  now?: () => string | Promise<string>;
 };
 type ThesisRunStart = { thesis_version_id: string; as_of: string };
 type PreparedAssessment = {
@@ -44,7 +46,11 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
   let findings: FindingRow[] = [];
   return {
     async readDeltas() {
-      return { thesis_version_id: input.thesis.thesis_version_id, as_of: new Date().toISOString() };
+      // By default the cutoff comes from the database clock, the one that stamps
+      // facts (now()) and assessments (assessed_at). Taking it from the app clock
+      // let skew hide a just-ingested fact or fake a newer-assessment conflict (#143).
+      const asOf = input.now ? new Date(await input.now()).toISOString() : await databaseNow(input.db);
+      return { thesis_version_id: input.thesis.thesis_version_id, as_of: asOf };
     },
     async extractEvidence({ deltas }) {
       return loadThesisPacket(input.db, { thesis: input.thesis, userId: input.userId, asOf: deltas.as_of });
@@ -56,14 +62,16 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
       // Verified conditions are computed at this run's pinned cutoff; a retry of the run resumes them.
       const metricResults = input.financial
         ? await evaluateFinancialThesisConditions(input.financial, { user_id: input.userId, thesis: input.thesis, run_key: input.runId, as_of: deltas.as_of })
-        : evaluateThesisMetrics(input.thesis.conditions, evidence.facts, deltas.as_of);
+        // The cutoff is the run's own (database) clock, so it is the reference
+        // for "not in the future", not the host's, which may lag it.
+        : evaluateThesisMetrics(input.thesis.conditions, evidence.facts, deltas.as_of, Date.parse(deltas.as_of));
       // The reuse key compares definitions, inputs, and outcomes — never run or snapshot identities.
       const metricKey = input.financial ? thesisReuseProjection(metricResults) : metricResults;
       const packetHash = hashJsonValue({ metricResults: metricKey, version: input.thesis.thesis_version_id, packet: evidence, day: deltas.as_of.slice(0, 10), model: model.identity, prompt: THESIS_PROMPT_VERSION });
       const previous = await getLatestThesisAssessment(input.db, input.thesis.thesis_version_id);
       const reused = previous?.input_hash.split('/')[0] === packetHash;
       const evaluation = reused && previous ? previous : await evaluateThesis({
-        thesis: input.thesis, claims: evidence.claims, facts: evidence.facts, as_of: deltas.as_of, llm: model.llm,
+        thesis: input.thesis, claims: evidence.claims, facts: evidence.facts, as_of: deltas.as_of, now: Date.parse(deltas.as_of), llm: model.llm,
         ...(input.financial ? { metric_results: metricResults } : {}),
       });
       const packetFacts = new Set(evidence.facts.map(fact => fact.fact_id));
@@ -100,7 +108,13 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
         await activity(tx, input, 'dismissed', 'No new thesis changes: this evidence packet was already assessed.');
         return { findings: 0, assessments: 0, reused: true };
       }
-      if (previous && Date.parse(previous.assessed_at) > Date.parse(deltas.as_of))
+      // Compared in the database, at its microsecond precision: through JS Dates
+      // an assessment finished later in the cutoff's millisecond looked equal.
+      const newer = await tx.query(
+        'select 1 from agent_thesis_assessments where thesis_version_id = $1::uuid and assessed_at > $2::timestamptz limit 1',
+        [input.thesis.thesis_version_id, deltas.as_of],
+      );
+      if (newer.rows.length > 0)
         throw new ThesisConflictError('A newer assessment finished during this run; run again.');
       const snapshot = await sealThesisPacket(tx, {
         thesis: input.thesis, packet: evidence, results: analysis.results, asOf: deltas.as_of,
@@ -136,4 +150,13 @@ async function configuredModel(): Promise<Model> {
 }
 async function activity(db: QueryExecutor, input: ThesisRuntimeInput, stage: 'reading' | 'investigating' | 'found' | 'dismissed', summary: string) {
   return writeRunActivity(db, { user_id: input.userId, agent_id: input.agent.agent_id, stage, subject_refs: [input.thesis.subject_ref], summary, ts: new Date() });
+}
+
+// As ISO text with microseconds: through a JS Date the cutoff would round down
+// to the millisecond and fall before a fact stamped earlier in that millisecond.
+async function databaseNow(db: QueryExecutor): Promise<string> {
+  const { rows } = await db.query<{ now: string }>(
+    `select to_char(now() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as now`,
+  );
+  return rows[0].now;
 }

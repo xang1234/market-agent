@@ -47,11 +47,13 @@ export async function evaluateThesis(input: {
   llm: ThesisLlm | null;
   /** Metric conditions already assessed by the verified financial engine; they replace the stored-fact checks. */
   metric_results?: ReadonlyArray<ConditionAssessment>;
+  /** The clock as_of must not be ahead of (epoch ms); defaults to the host's. */
+  now?: number;
 }): Promise<{ results: ConditionAssessment[]; model_version: string | null }> {
   const thesisText = parseThesisText(input.thesis.thesis);
   const conditions = parseThesisConditions(input.thesis.conditions);
   const metricResults = new Map(
-    (input.metric_results ?? evaluateThesisMetrics(conditions, input.facts, input.as_of)).map(result => [result.condition_id, result]),
+    (input.metric_results ?? evaluateThesisMetrics(conditions, input.facts, input.as_of, input.now)).map(result => [result.condition_id, result]),
   );
   const narrativeConditions = conditions.filter(condition => condition.metric === undefined);
 
@@ -160,8 +162,12 @@ export function evaluateThesisMetrics(
   conditions: ReadonlyArray<ThesisCondition>,
   facts: ReadonlyArray<ThesisFact>,
   asOf: string,
+  // The clock as_of must not be ahead of. The host's by default; a caller whose
+  // as_of comes from a trusted clock (the thesis runtime's database cutoff,
+  // which may run ahead of the host) passes that clock instead.
+  now: number = Date.now(),
 ): ConditionAssessment[] {
-  const assessmentTime = parseAssessmentTime(asOf);
+  const assessmentTime = parseAssessmentTime(asOf, now);
   return parseThesisConditions(conditions).flatMap(condition => condition.metric === undefined
     ? []
     : [evaluateMetricCondition(condition, condition.metric, facts, assessmentTime)]);
@@ -309,9 +315,9 @@ function noNarrativeEvidence(conditionId: string): ConditionAssessment {
   };
 }
 
-function parseAssessmentTime(value: string): number {
+function parseAssessmentTime(value: string, now: number): number {
   const time = parseFiniteDate(value);
-  if (time === null || time > Date.now()) {
+  if (time === null || time > now) {
     throw new ThesisValidationError("as_of must be a valid date that is not in the future");
   }
   return time;

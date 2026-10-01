@@ -34,9 +34,10 @@ async function fixture(t: TestContext, name: string) {
       values($1,'issuer',$2,$3,'point',$4,200,'USD',1,$5,$5,$6,'reported','authoritative','filing_time','full',1)`, [id,ISSUER,metricId,periodEnd,asOf,source]);
     return id;
   }
-  async function run() {
+  // now: the run's cutoff clock (tests that move time pass their mocked clock).
+  async function run(now?: () => string) {
     const fresh = (await getAgent(db, agent.agent_id))!;
-    const stages = createThesisAgentLoopStages({ db: pool, userId: USER, runId: randomUUID(), agent: fresh, thesis });
+    const stages = createThesisAgentLoopStages({ db: pool, userId: USER, runId: randomUUID(), agent: fresh, thesis, ...(now ? { now } : {}) });
     return runAgentLoop({ pool, agent_id: agent.agent_id, current_watermarks: fresh.watermarks, stages });
   }
   const history = () => loadThesisHistory(db, { user_id: USER, agent_id: agent.agent_id });
@@ -74,21 +75,51 @@ test('unchanged facts expire at their exact freshness boundary within the same U
   tomorrow.setUTCHours(12, 0, 0, 0);
   const deadline = tomorrow.getTime();
   t.mock.timers.enable({ apis: ['Date'], now: deadline - 1_000 });
+  // This test moves time with a mocked host clock, so it drives the run's cutoff with it.
+  const hostNow = () => new Date().toISOString();
   const observed = new Date(deadline - 86_400_000).toISOString();
   await insertFact(observed, observed.slice(0, 10));
-  await run();
+  await run(hostNow);
   assert.equal((await history()).assessments[0].results[0].status, 'supported');
   t.mock.timers.setTime(deadline);
-  await run();
+  await run(hostNow);
   assert.equal((await history()).assessments.length, 1, 'the maximum age is inclusive');
   t.mock.timers.setTime(deadline + 1);
-  await run();
+  await run(hostNow);
   const expired = await history();
   assert.equal(expired.assessments[0].results[0].status, 'unresolved');
   assert.equal(expired.assessments.length, 2);
   t.mock.timers.setTime(deadline + 1_000);
-  await run();
+  await run(hostNow);
   assert.equal((await history()).assessments.length, 2, 'unchanged expired results still deduplicate');
+});
+
+test('a newer assessment is detected at microsecond precision, not lost to millisecond rounding', options, async t => {
+  const { db, insertFact, run, history } = await fixture(t, 'thesis-review-conflict-precision');
+  const earlier = new Date(Date.now() - 60_000).toISOString();
+  await insertFact(earlier, earlier.slice(0, 10));
+  await run(() => new Date(Date.now() - 30_000).toISOString());
+  assert.equal((await history()).assessments.length, 1);
+  // New evidence for the next run, whose cutoff is a whole millisecond...
+  const cutoff = new Date(Date.now() - 10_000).toISOString();
+  await insertFact(new Date(Date.parse(cutoff) - 1_000).toISOString(), cutoff.slice(0, 10));
+  // ...while another assessment finished 1 microsecond after it.
+  await db.query(
+    `update agent_thesis_assessments set assessed_at = $1::timestamptz + interval '1 microsecond'`,
+    [cutoff],
+  );
+  // It must fail on the conflict itself, not on any unrelated error.
+  await assert.rejects(run(() => cutoff), { name: 'ThesisConflictError', message: /A newer assessment finished during this run/ });
+  assert.equal((await history()).assessments.length, 1, 'the run must yield to the newer assessment');
+});
+
+test('a run whose clock is ahead of the host still assesses its evidence', options, async t => {
+  const { insertFact, run, history } = await fixture(t, 'thesis-review-clock-ahead');
+  const observed = new Date().toISOString();
+  await insertFact(observed, observed.slice(0, 10));
+  // The database clock may run ahead of the app host's: its cutoff is trusted, not "in the future".
+  await run(() => new Date(Date.now() + 3_600_000).toISOString());
+  assert.equal((await history()).assessments[0].results[0].status, 'supported');
 });
 
 test('thesis snapshots preserve document sources separately from claim reporters', options, async t => {

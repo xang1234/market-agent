@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   draftThesisConditions,
   evaluateThesis,
+  evaluateThesisMetrics,
   type ThesisFact,
   type ThesisLlm,
 } from "../src/thesis-evaluator.ts";
@@ -390,4 +391,13 @@ test('narrative reasons normalize whitespace and reject values that cannot be pe
   const normalized=await evaluateThesis({...input,llm:response('  Demand slowed.  ')});
   assert.equal(normalized.results[0].reason,'Demand slowed.');
   await assert.rejects(evaluateThesis({...input,llm:response('x'.repeat(2001))}),ThesisValidationError);
+});
+
+test("evaluateThesisMetrics judges 'not in the future' against the caller's clock", () => {
+  const ahead = new Date(Date.now() + 3_600_000).toISOString();
+  // Default: the host clock, so a future as_of is rejected.
+  const narrative = [condition(BULL_ID)];
+  assert.throws(() => evaluateThesisMetrics(narrative, [], ahead), /not in the future/);
+  // A trusted clock (the thesis runtime's database cutoff) may run ahead of the host.
+  assert.deepEqual(evaluateThesisMetrics(narrative, [], ahead, Date.parse(ahead)), []);
 });
