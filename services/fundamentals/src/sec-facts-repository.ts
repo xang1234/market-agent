@@ -20,6 +20,7 @@ import {
 import { recordFactPrecisionAttestation } from "../../evidence/src/financial-attestations.ts";
 import { withPinnedTransaction, type TransactionalQueryExecutor } from "./pinned-transaction.ts";
 import { createHash } from "node:crypto";
+import { factActiveSql, factKnownAtSql } from "../../evidence/src/fact-activity.ts";
 import { FundamentalsDataUnavailableError } from "./availability.ts";
 import {
   normalizedStatement,
@@ -52,6 +53,8 @@ export type FundamentalsTransactionalQueryExecutor = TransactionalQueryExecutor<
 export type SecBackedStatementRepositoryOptions = {
   fetcher?: SecEdgarFetcher | null;
   sourceId: UUID;
+  // Snapshot cutoff: read only facts known by then (fact-activity.ts). Omit ⇒ now.
+  cutoff?: string;
   clock?: () => Date;
   logger?: Pick<Console, "warn">;
 };
@@ -65,7 +68,7 @@ export function createSecBackedStatementRepository(
 
   return {
     async find(lookup: StatementLookup): Promise<NormalizedStatement | null> {
-      const existing = await loadStatementFromFacts(db, lookup);
+      const existing = await loadStatementFromFacts(db, lookup, options.cutoff);
       if (existing) return existing.normalized;
 
       if (lookup.family !== "income" || lookup.basis !== "as_reported") {
@@ -199,6 +202,8 @@ function statementAccession(
 
 export type SecBackedStatsRepositoryOptions = {
   statements: StatementRepository;
+  // Snapshot cutoff for the latest-year lookup (pass the same to `statements`).
+  cutoff?: string;
   fetcher?: SecEdgarFetcher | null;
   clock?: () => Date;
   logger?: Pick<Console, "warn">;
@@ -213,7 +218,7 @@ export function createSecBackedStatsRepository(
 
   return {
     async find(issuer_id: UUID): Promise<KeyStatsEnvelope | null> {
-      const latest = await loadLatestFiscalYear(db, issuer_id)
+      const latest = await loadLatestFiscalYear(db, issuer_id, options.cutoff)
         ?? await discoverLatestFiscalYear(db, issuer_id, options.fetcher ?? null, logger);
       if (!latest) return null;
 
@@ -385,6 +390,7 @@ type StatementFactRow = {
 async function loadStatementFromFacts(
   db: FundamentalsQueryExecutor,
   lookup: StatementLookup,
+  cutoff?: string,
 ): Promise<{ normalized: NormalizedStatement; mapped: MappedStatement } | null> {
   if (lookup.family !== "income" || lookup.basis !== "as_reported") {
     return null;
@@ -418,11 +424,10 @@ async function loadStatementFromFacts(
         and f.fiscal_year = $3
         and f.fiscal_period = $4
         and f.method = 'reported'
-        and f.invalidated_at is null
-        and f.superseded_by is null
+        and ${cutoff === undefined ? factActiveSql("f") : factKnownAtSql("f", "$6::timestamptz")}
         and m.metric_key = any($5::text[])
       order by m.metric_key, f.as_of desc, f.created_at desc`,
-    [lookup.issuer_id, periodKind, lookup.fiscal_year, lookup.fiscal_period, SEC_INCOME_METRIC_KEYS],
+    [lookup.issuer_id, periodKind, lookup.fiscal_year, lookup.fiscal_period, SEC_INCOME_METRIC_KEYS, ...(cutoff === undefined ? [] : [cutoff])],
   );
   if (result.rows.length === 0) return null;
 
@@ -558,6 +563,7 @@ function secTokenProofHash(cik: number, token: SecSourceToken): string {
 async function loadLatestFiscalYear(
   db: FundamentalsQueryExecutor,
   issuerId: UUID,
+  cutoff?: string,
 ): Promise<{ fiscal_year: number } | null> {
   const result = await db.query<{ fiscal_year: number }>(
     `select max(f.fiscal_year)::int as fiscal_year
@@ -568,10 +574,9 @@ async function loadLatestFiscalYear(
         and f.period_kind = 'fiscal_y'
         and f.fiscal_period = 'FY'
         and f.method = 'reported'
-        and f.invalidated_at is null
-        and f.superseded_by is null
+        and ${cutoff === undefined ? factActiveSql("f") : factKnownAtSql("f", "$2::timestamptz")}
         and m.metric_key = 'revenue'`,
-    [issuerId],
+    cutoff === undefined ? [issuerId] : [issuerId, cutoff],
   );
   const fiscalYear = result.rows[0]?.fiscal_year;
   return typeof fiscalYear === "number" ? { fiscal_year: fiscalYear } : null;

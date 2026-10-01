@@ -13,7 +13,7 @@
 //   later included); and "active" is judged at the cutoff, so a fact replaced
 //   or withdrawn afterwards is still the one that was known then.
 
-import { factActiveSql } from "../../evidence/src/fact-activity.ts";
+import { factActiveSql, factKnownAtSql } from "../../evidence/src/fact-activity.ts";
 import { DISPLAYABLE_VERIFICATION_STATUSES } from "../../evidence/src/promotion-rules.ts";
 import type { FactEntitlementChannel, FactSubjectKind } from "../../evidence/src/fact-repo.ts";
 import type { PeriodKind } from "./statement.ts";
@@ -92,11 +92,7 @@ export async function loadUsableFacts(db: QueryExecutor, query: UsableFactsQuery
   if (query.cutoff !== undefined) {
     params.push(query.cutoff);
     const cutoff = `$${params.length}::timestamptz`;
-    filters += `
-        and f.as_of <= ${cutoff}
-        and f.observed_at <= ${cutoff}
-        and (f.reported_at is null or f.reported_at <= ${cutoff})`;
-    activity = factActiveSql("f", cutoff);
+    activity = factKnownAtSql("f", cutoff);
   }
 
   let limitClause = "";

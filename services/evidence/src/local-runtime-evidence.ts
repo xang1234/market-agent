@@ -1,5 +1,5 @@
 import type { SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
-import { factActiveSql } from "./fact-activity.ts";
+import { factActiveSql, factKnownAtSql } from "./fact-activity.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 
 import { sourceDisclosure } from "./source-disclosure.ts";
@@ -276,8 +276,10 @@ export async function loadVerifierRowsForRefs(
 export async function loadVerifierFactsForRefs(
   db: QueryExecutor,
   // cutoff: judge activity at the snapshot's moment, as the reader that chose
-  // these facts did (see fact-activity.ts); omit for "now".
-  input: { fact_refs: ReadonlyArray<string>; cutoff?: string },
+  // these facts did (see fact-activity.ts); omit for "now". requireKnownByCutoff
+  // also requires the facts dated, observed and reported by then (fact blocks);
+  // the seal leaves it off, since tool evidence is not read at the cutoff.
+  input: { fact_refs: ReadonlyArray<string>; cutoff?: string; requireKnownByCutoff?: boolean },
 ): Promise<ReadonlyArray<VerifierFact>> {
   const factIds = unique(input.fact_refs);
   if (factIds.length === 0) return Object.freeze([]);
@@ -303,7 +305,11 @@ export async function loadVerifierFactsForRefs(
             fiscal_period
        from facts f
       where f.fact_id = any($1::uuid[])
-        and ${factActiveSql("f", input.cutoff === undefined ? undefined : "$2::timestamptz")}`,
+        and ${input.cutoff === undefined
+          ? factActiveSql("f")
+          : input.requireKnownByCutoff
+          ? factKnownAtSql("f", "$2::timestamptz")
+          : factActiveSql("f", "$2::timestamptz")}`,
     input.cutoff === undefined ? [factIds] : [factIds, input.cutoff],
   );
   return Object.freeze(
