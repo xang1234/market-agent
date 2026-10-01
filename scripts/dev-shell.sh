@@ -374,9 +374,17 @@ check_dev_mode() {
   local missing=()
   case "$DEV_MODE" in
     "") return 0 ;;
+    ui)
+      # Replays a recorded fixture through the one-process app: no keys, DB or LLM.
+      if [[ "$DEV_PROFILE" != "chat" ]]; then
+        echo "DEV_MODE=ui replays through the one-process app; run it with DEV_PROFILE=chat" >&2
+        return 1
+      fi
+      return 0
+      ;;
     analyst | data) ;;
     *)
-      echo "Unknown DEV_MODE '$DEV_MODE' (expected analyst or data, or unset)" >&2
+      echo "Unknown DEV_MODE '$DEV_MODE' (expected ui, analyst or data, or unset)" >&2
       return 1
       ;;
   esac
@@ -483,7 +491,8 @@ launch_env_pattern() {
   local llm='LLM_|LITELLM_|AGENT_LITELLM_'
   case "$1" in
     web) printf '^VITE_' ;;
-    app) printf '^(VITE_|%s)' "$llm" ;;
+    # DEV_MODE switches app between live services and the UI-mode replay.
+    app) printf '^(VITE_|DEV_MODE=|DEV_REPLAY_FILE=|DEV_CAPTURE_FILE=|%s)' "$llm" ;;
     chat | dev-api) printf '^(%s)' "$llm" ;;
     *) return 1 ;;
   esac
@@ -539,6 +548,33 @@ start_and_track_process() {
   STARTED_SERVICES+=("$name")
 }
 
+export_web_flags() {
+  export VITE_MA_FLAG_PLACEHOLDER_API="$MA_FLAG_PLACEHOLDER_API"
+  export VITE_MA_FLAG_SHOW_DEV_BANNER="$MA_FLAG_SHOW_DEV_BANNER"
+}
+
+# UI mode (#123): only the one-process app, replaying a recorded fixture, so there are
+# no containers, migrations, seeds, keys or LLM.
+up_ui() {
+  ensure_command lsof
+  ensure_command npm
+  configure_runtime_env
+  STARTED_SERVICES=()
+  COMPOSE_STARTED=0
+  ensure_install "$ROOT/web"
+  stop_parked_processes "app"
+  assert_port_available app "$(service_port app)"
+  export_web_flags
+  restart_if_launch_env_changed app
+  start_and_track_process app "$(service_dir app)" "$(service_command app)"
+  if ! wait_for_service app "$(service_port app)"; then
+    cleanup_failed_up
+    return 1
+  fi
+  write_launch_env_stamp app
+  status
+}
+
 up() {
   local postgres_was_running=0
   local redis_was_running=0
@@ -547,6 +583,10 @@ up() {
   local compose_services=""
 
   check_dev_mode || return 1
+  if [[ "$DEV_MODE" == "ui" ]]; then
+    up_ui
+    return
+  fi
   services="$(active_services)" || return 1
   if [[ "$DEV_PROFILE" == "chat" ]]; then
     compose_services="postgres"
@@ -657,8 +697,7 @@ up() {
     return 1
   fi
 
-  export VITE_MA_FLAG_PLACEHOLDER_API="$MA_FLAG_PLACEHOLDER_API"
-  export VITE_MA_FLAG_SHOW_DEV_BANNER="$MA_FLAG_SHOW_DEV_BANNER"
+  export_web_flags
   export DEV_API_ORIGIN="${DEV_API_ORIGIN:-http://127.0.0.1:$DEV_API_PORT}"
   export CHAT_ORIGIN="${CHAT_ORIGIN:-http://127.0.0.1:$CHAT_PORT}"
   export RESOLVER_ORIGIN="${RESOLVER_ORIGIN:-http://127.0.0.1:$RESOLVER_PORT}"

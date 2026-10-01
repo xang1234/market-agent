@@ -111,16 +111,18 @@ Each mode reuses the golden conversation's fixtures (`services/chat/test/golden/
 
 | Mode | Command | Model | Data | For |
 |---|---|---|---|---|
+| **UI** | `DEV_PROFILE=chat DEV_MODE=ui ./scripts/dev-shell.sh up` | none (replayed) | none (replayed) | block rendering and layout: no database, services, keys or network |
 | **No keys** | `DEV_PROFILE=chat DEV_NO_KEYS=true ./scripts/dev-shell.sh up` | recorded replies | frozen | offline work and the browser smoke test (CI) |
 | **Analyst** | `DEV_PROFILE=chat DEV_MODE=analyst ./scripts/dev-shell.sh up` | your live LLM (`.env.dev`) | frozen | tuning prompts, block rules and reasoning |
 | **Data** | `DEV_MODE=data ./scripts/dev-shell.sh up`, then `cd services/chat && npm run golden:live` | your live LLM | live providers | checking the golden conversation against live data |
 
+- **UI:** the app serves the web UI and replays the golden conversation's recorded API traffic (`services/app/fixtures/golden-conversation.replay.json`): threads, both turns' streams, the reloaded messages and the evidence lookups. It builds no services and starts no containers. Ask the golden questions in a new thread; anything unrecorded answers `404` naming the request. **Recapture** after an API or block change (on a fresh database): `DEV_CAPTURE_FILE=$PWD/services/app/fixtures/golden-conversation.replay.json DEV_PROFILE=chat DEV_NO_KEYS=true ./scripts/dev-shell.sh up`, then `cd web && npm run e2e`, then `./scripts/dev-shell.sh down`.
 - **No keys:** the golden conversation works offline: *Analyze NVDA* → *Compare it with AMD* → *Explain the differences and show the evidence*. Other questions have no recorded reply and fail, and the LLM settings in `.env.dev` are ignored.
 - **Analyst:** the same frozen data, answered by the model configured in `.env.dev` (fails fast unless `LLM_CHANNELS`/`LITELLM_MODEL` yield a deployable model, printing why). Every model call logs one line to the chat/app log: `[llm] <channel>/<model> <latency>ms tokens in=… out=… total=…`. Dollar cost isn't shown; it needs per-model prices, which aren't configured.
 - **Data:** live Polygon/SEC/model (fails fast without `POLYGON_API_KEY`, `SEC_EDGAR_USER_AGENT` and a deployable LLM). Test providers on their own with each service's `npm test`. `npm run golden:live [base URL]` then runs the three golden turns against the running stack and checks structure only (turns complete; the chart, metric row and comparison table appear), since live figures and wording vary. **Prerequisite:** NVDA's and AMD's live identities and SEC statement facts must already be in the database. Chat reads persisted facts only, and startup hydrates just `HOME_PULSE_TICKERS`, so on a fresh database the check fails until a data-mode warm-up exists (#152).
 - Frozen and live data don't share a database. The frozen modes need one without provider-hydrated NVDA/AMD/AAPL, and data mode refuses one a frozen mode seeded, since the frozen facts would let a live check pass without touching Polygon or SEC. Either way, reset with `docker compose -f docker-compose.dev.yml --env-file .env.dev down -v`.
 
-**Browser smoke test** (`web/e2e/`, also run in CI): with the no-keys stack up, run `cd web && npx playwright install chromium && npm run e2e`. Set `E2E_BASE_URL` if `WEB_PORT` isn't 5173.
+**Browser smoke test** (`web/e2e/`): with the UI-mode or no-keys stack up, run `cd web && npx playwright install chromium && npm run e2e`. Set `E2E_BASE_URL` if `WEB_PORT` isn't 5173. CI runs it against both: UI mode (the committed fixture) and the real no-keys backend, which also catches a fixture that's gone stale.
 
 ### Bring your own keys & models
 
