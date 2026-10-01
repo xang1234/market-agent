@@ -3,9 +3,7 @@
 // carries the rendered string so the web stays a dumb renderer.
 
 export function formatCompactCurrency(value: number, currency: string): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
+  return currencyFormat(currency, {
     notation: "compact",
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
@@ -15,10 +13,17 @@ export function formatCompactCurrency(value: number, currency: string): string {
 // Precise currency for price points (e.g. "$214.50") — unlike formatCompactCurrency,
 // which compacts large statement values (e.g. "$3.2B").
 export function formatCurrency(value: number, currency: string): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
+  return currencyFormat(currency, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);
+}
+
+// A currency whose symbol contains a dot (XCG's "Cg.") is written with its ISO
+// code instead ("-XCG 3.1B"): a dotted prefix reads as a sentence end to chat's
+// narrative guard (#150).
+function currencyFormat(currency: string, options: Intl.NumberFormatOptions): Intl.NumberFormat {
+  const symbol = new Intl.NumberFormat("en-US", { style: "currency", currency, ...options });
+  const dotted = symbol.formatToParts(1).some((part) => part.type === "currency" && part.value.includes("."));
+  return dotted ? new Intl.NumberFormat("en-US", { style: "currency", currency, currencyDisplay: "code", ...options }) : symbol;
 }

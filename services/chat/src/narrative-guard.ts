@@ -30,17 +30,16 @@
 
 // A leading minus is part of the figure ("-10.0%" is not "10.0%"), across any
 // currency prefix the formatter writes ("-$3.1B", "-CN¥3.1B", "-CHF 3.1B",
-// "-F CFA 3.1B", "-Cg. 3.1B"; a test checks every supported currency), unless
+// "-F CFA 3.1B", "-XCG 3.1B"; a test checks every supported currency), unless
 // it joins two numbers or words ("2025-2026").
 // A space after the minus only follows a currency prefix; a bare minus touches
 // its digits, so a Markdown bullet ("- 3.1%") is not a sign.
 const NUMBER =
   /(?:(?<![A-Za-z0-9.])[-−](?:(?:[A-Za-z]{1,4}\.?(?:[ \u00a0\u202f][A-Za-z]{1,4})?\p{Sc}?|\p{Sc})[ \u00a0\u202f]?)?)?\d+(?:,\d{3})*(?:\.\d+)?/gu;
-// Not inside the formatter's one dotted prefix: a signed "-Cg.", a no-break
-// space and a complete currency amount ("-Cg. 3.1B" is one figure; prose
-// "in Cg. 74.6%" or "-Cg. 74.6%" still splits); the all-currency test flags
-// any new dotted prefix.
-const SENTENCE_BREAK = /(?<=[.!?])(?!(?<=[-−]Cg\.)\u00a0\d+(?:,\d{3})*(?:\.\d+)?[KMBT]?(?![\d%]|[.,]\d))\s+/;
+// The formatter writes no dotted currency prefix (a dotted symbol becomes its
+// ISO code, #150), so every period before whitespace ends a sentence; the
+// all-currency test fails if one appears.
+const SENTENCE_BREAK = /(?<=[.!?])\s+/;
 const COMPARED_WITH = /(?:compared (?:with|to)|unlike|versus|vs\.?|than|relative to|against)\s+$/i;
 // Between a comparison company and a figure it owns: nothing but a possessive
 // or "at"/"with" ("versus AMD's 49.2%", "compared with AMD at 49.2%").
@@ -177,7 +176,7 @@ function companyMentions(
 // The comparable value: "62.1" for "$62.1B", "-10" for "-10.0%", and "-0" kept
 // apart from "0" ("-0.0%" is a displayed decline).
 function numberKey(raw: string): string {
-  // The sign plus the digits: a currency prefix ("-Cg. ") must not leak in.
+  // The sign plus the digits: a currency prefix ("-CHF ") must not leak in.
   const sign = /^[-−]/.test(raw) ? "-" : "";
   const value = Number(sign + raw.match(/\d+(?:,\d{3})*(?:\.\d+)?$/)![0].replaceAll(",", ""));
   return Object.is(value, -0) ? "-0" : String(value);

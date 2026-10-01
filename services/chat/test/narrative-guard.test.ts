@@ -273,11 +273,25 @@ test("the sign survives every currency prefix the formatter can write", () => {
   }
 });
 
-test("a dotted currency prefix still compares the amount", () => {
+test("no currency is written with a dotted prefix, so a period always ends a sentence (#150)", () => {
+  for (const currency of Intl.supportedValuesOf("currency")) {
+    const loss = formatCompactCurrency(-3.1e9, currency);
+    assert.doesNotMatch(loss, /\.[\s\u00a0\u202f]/u, `${currency}: ${loss}`);
+  }
+  // XCG's symbol is "Cg."; it is written as its ISO code, and its amount still compares.
   const loss = formatCompactCurrency(-3.1e9, "XCG");
-  const other = formatCompactCurrency(-8.7e9, "XCG");
-  assert.equal(keepSupportedSentences(`Operating income was ${other}.`, [loss]).removed.length, 1);
-  assert.equal(keepSupportedSentences("Operating income was -Foo. 8.7B.", [loss]).removed.length, 1);
+  assert.match(loss, /^-XCG[\s\u00a0]3\.1B$/u);
+  assert.equal(keepSupportedSentences(`Operating income was ${formatCompactCurrency(-8.7e9, "XCG")}.`, [loss]).removed.length, 1);
+  assert.deepEqual(keepSupportedSentences(`Operating income was ${loss}.`, [loss]).removed, []);
+});
+
+test("prose 'Cg.' ends a sentence even before an amount (#150)", () => {
+  // Before #150 a signed "-Cg." plus a no-break space kept this together, so the
+  // second clause's figure took NVDA's attribution.
+  const figures = [{ company: "NVDA", value: "-Cg.\u00a074.6B" }, { company: "AMD", value: "$49.2B" }];
+  const result = keepSupportedSentences("NVDA reports in -Cg.\u00a074.6B was AMD's revenue.", [], figures);
+  assert.deepEqual(result.removed, ["74.6B was AMD's revenue."]);
+  assert.deepEqual(keepSupportedSentences("NVDA reports in Cg. 74.6% was AMD's margin.", [], COMPARED).removed, ["74.6% was AMD's margin."]);
 });
 
 test("a sentence starting with a digit is still its own sentence", () => {
@@ -293,21 +307,10 @@ test("sentences separated by a no-break space are still split", () => {
   }
 });
 
-test("only the formatter's own 'Cg.' plus no-break space is kept together", () => {
-  const result = keepSupportedSentences("NVDA reports in Cg. 74.6% was AMD's margin.", [], COMPARED);
-  assert.equal(result.removed.length, 1);
-  assert.deepEqual(result.removed, ["74.6% was AMD's margin."]);
-});
-
 test("a Markdown bullet marker is not a minus sign", () => {
   assert.equal(keepSupportedSentences("- 3.1% revenue growth", ["-3.1%"]).removed.length, 1);
   assert.deepEqual(keepSupportedSentences("- -3.1% revenue growth", ["-3.1%"]).removed, []);
   assert.deepEqual(keepSupportedSentences("- 3.1% revenue growth", ["3.1%"]).removed, []);
-});
-
-test("'Cg.' plus a no-break space is kept together only inside a signed figure", () => {
-  const result = keepSupportedSentences("NVDA reports in Cg. 74.6% was AMD's margin.", [], COMPARED);
-  assert.deepEqual(result.removed, ["74.6% was AMD's margin."]);
 });
 
 test("an unattached comparison company blocks the carried owner", () => {
@@ -328,13 +331,6 @@ test("a ticker that is also a currency prefix does not break that currency's fig
   const figures = [{ company: "CHF", value: "-CHF 3.1B" }, { company: "AMD", value: "$3.1B" }];
   assert.deepEqual(keepSupportedSentences("CHF's operating income was -CHF 3.1B.", [], figures).removed, []);
   assert.equal(keepSupportedSentences("AMD's operating income was -CHF 3.1B.", [], figures).removed.length, 1);
-});
-
-test("'-Cg.' ends a sentence unless a complete currency figure follows", () => {
-  const figures = [{ company: "NVDA", value: "-74.6%" }, { company: "AMD", value: "74.6%" }];
-  const result = keepSupportedSentences("NVDA reports in -Cg. 74.6% was AMD's margin.", [], figures);
-  // Split: NVDA no longer lends its name to a figure in the next sentence.
-  assert.deepEqual(result.removed, ["74.6% was AMD's margin."]);
 });
 
 test("a company label starting with a digit is still a mention", () => {
