@@ -865,8 +865,10 @@ test("server: POST /v1/subjects/hydrate returns hydrated context for a bare subj
   assert.equal(res.headers.get("content-type"), "application/json");
   const body = await res.json();
   assertHydrateResponseShape(body);
-  assert.equal(body.subject.context.issuer.subject_ref.id, hydratedAppleIssuer);
-  assert.equal(body.subject.context.listing.ticker, "AAPL");
+  const context = body.subject.context;
+  assert.ok(context?.issuer && context.listing, "a hydrated listing carries issuer and listing context");
+  assert.equal(context.issuer.subject_ref.id, hydratedAppleIssuer);
+  assert.equal(context.listing.ticker, "AAPL");
 });
 
 test("server: POST /v1/subjects/hydrate returns 404 for an unknown subject_ref", async (t) => {

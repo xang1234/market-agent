@@ -4,6 +4,7 @@ import {
   upsertDiscoveredListing,
   type DiscoveredListing,
 } from "./discovery.ts";
+import type { QueryExecutor } from "./lookup.ts";
 
 type LegacyIdentity = {
   ticker: string;
@@ -50,13 +51,6 @@ const LEGACY_IDENTITIES: ReadonlyArray<LegacyIdentity> = Object.freeze([
     listingId: "55555555-5555-4555-a555-555555555555",
   },
 ]);
-
-type QueryExecutor = {
-  query<R extends Record<string, unknown> = Record<string, unknown>>(
-    text: string,
-    values?: unknown[],
-  ): Promise<{ rows: R[]; rowCount?: number | null }>;
-};
 
 type TransactionClient = QueryExecutor & {
   release(): void;

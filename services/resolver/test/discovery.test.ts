@@ -4,7 +4,9 @@ import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db
 import {
   createPolygonTickerDiscoveryProvider,
   upsertDiscoveredListing,
+  type DiscoveredListing,
 } from "../src/discovery.ts";
+import { fakePgQuery } from "../../shared/test/fake-query.ts";
 
 test("polygon discovery maps active stock rows and skips malformed rows", async () => {
   const requestedPaths: string[] = [];
@@ -72,27 +74,24 @@ test("polygon discovery maps active stock rows and skips malformed rows", async 
 test("upsertDiscoveredListing writes optional open reference identifiers through the insert contract", async () => {
   const queries: Array<{ text: string; values?: unknown[] }> = [];
   const db = {
-    query: async <R extends Record<string, unknown> = Record<string, unknown>>(
-      text: string,
-      values?: unknown[],
-    ) => {
+    query: fakePgQuery(async (text: string, values?: unknown[]) => {
       queries.push({ text, values });
-      if (text.includes("select issuer_id from issuers")) return { rows: [] as R[] };
+      if (text.includes("select issuer_id from issuers")) return { rows: [] };
       if (text.includes("insert into issuers")) {
-        return { rows: [{ issuer_id: "11111111-1111-4111-a111-111111111111" } as R] };
+        return { rows: [{ issuer_id: "11111111-1111-4111-a111-111111111111" }] };
       }
       if (text.includes("select instrument_id") && text.includes("from instruments")) {
-        return { rows: [] as R[] };
+        return { rows: [] };
       }
       if (text.includes("insert into instruments")) {
-        return { rows: [{ instrument_id: "22222222-2222-4222-a222-222222222222" } as R] };
+        return { rows: [{ instrument_id: "22222222-2222-4222-a222-222222222222" }] };
       }
-      if (text.includes("select listing_id")) return { rows: [] as R[] };
+      if (text.includes("select listing_id")) return { rows: [] };
       if (text.includes("insert into listings")) {
-        return { rows: [{ listing_id: "33333333-3333-4333-a333-333333333333" } as R] };
+        return { rows: [{ listing_id: "33333333-3333-4333-a333-333333333333" }] };
       }
       throw new Error(`Unexpected query: ${text}`);
-    },
+    }),
   };
 
   const subject = await upsertDiscoveredListing(db, {
@@ -133,16 +132,16 @@ test("upsertDiscoveredListing writes optional open reference identifiers through
 test("upsertDiscoveredListing writes a normalized cusip through the insert contract", async () => {
   const queries: Array<{ text: string; values?: unknown[] }> = [];
   const db = {
-    query: async <R extends Record<string, unknown> = Record<string, unknown>>(text: string, values?: unknown[]) => {
+    query: fakePgQuery(async (text: string, values?: unknown[]) => {
       queries.push({ text, values });
-      if (text.includes("select issuer_id from issuers")) return { rows: [] as R[] };
-      if (text.includes("insert into issuers")) return { rows: [{ issuer_id: "11111111-1111-4111-a111-111111111111" } as R] };
-      if (text.includes("select instrument_id") && text.includes("from instruments")) return { rows: [] as R[] };
-      if (text.includes("insert into instruments")) return { rows: [{ instrument_id: "22222222-2222-4222-a222-222222222222" } as R] };
-      if (text.includes("select listing_id")) return { rows: [] as R[] };
-      if (text.includes("insert into listings")) return { rows: [{ listing_id: "33333333-3333-4333-a333-333333333333" } as R] };
+      if (text.includes("select issuer_id from issuers")) return { rows: [] };
+      if (text.includes("insert into issuers")) return { rows: [{ issuer_id: "11111111-1111-4111-a111-111111111111" }] };
+      if (text.includes("select instrument_id") && text.includes("from instruments")) return { rows: [] };
+      if (text.includes("insert into instruments")) return { rows: [{ instrument_id: "22222222-2222-4222-a222-222222222222" }] };
+      if (text.includes("select listing_id")) return { rows: [] };
+      if (text.includes("insert into listings")) return { rows: [{ listing_id: "33333333-3333-4333-a333-333333333333" }] };
       throw new Error(`Unexpected query: ${text}`);
-    },
+    }),
   };
 
   await upsertDiscoveredListing(db, {
@@ -164,33 +163,30 @@ test("upsertDiscoveredListing writes a normalized cusip through the insert contr
 test("upsertDiscoveredListing enriches one exact legal-name issuer instead of inserting a duplicate", async () => {
   const queries: string[] = [];
   const db = {
-    query: async <R extends Record<string, unknown> = Record<string, unknown>>(
-      text: string,
-      values?: unknown[],
-    ) => {
+    query: fakePgQuery(async (text: string, values?: unknown[]) => {
       queries.push(text);
-      if (text.includes("select issuer_id from issuers where cik")) return { rows: [] as R[] };
-      if (text.includes("select issuer_id from issuers where upper(lei)")) return { rows: [] as R[] };
+      if (text.includes("select issuer_id from issuers where cik")) return { rows: [] };
+      if (text.includes("select issuer_id from issuers where upper(lei)")) return { rows: [] };
       if (text.includes("from issuers where legal_name = $1")) {
         assert.deepEqual(values, ["Advanced Micro Devices, Inc."]);
-        return { rows: [{ issuer_id: "11111111-1111-4111-a111-111111111111" } as R] };
+        return { rows: [{ issuer_id: "11111111-1111-4111-a111-111111111111" }] };
       }
-      if (text.includes("update issuers")) return { rows: [] as R[] };
+      if (text.includes("update issuers")) return { rows: [] };
       if (text.includes("insert into issuers")) {
         throw new Error("must not insert a duplicate issuer");
       }
       if (text.includes("select instrument_id") && text.includes("from instruments")) {
-        return { rows: [] as R[] };
+        return { rows: [] };
       }
       if (text.includes("insert into instruments")) {
-        return { rows: [{ instrument_id: "22222222-2222-4222-a222-222222222222" } as R] };
+        return { rows: [{ instrument_id: "22222222-2222-4222-a222-222222222222" }] };
       }
-      if (text.includes("select listing_id")) return { rows: [] as R[] };
+      if (text.includes("select listing_id")) return { rows: [] };
       if (text.includes("insert into listings")) {
-        return { rows: [{ listing_id: "33333333-3333-4333-a333-333333333333" } as R] };
+        return { rows: [{ listing_id: "33333333-3333-4333-a333-333333333333" }] };
       }
       throw new Error(`Unexpected query: ${text}`);
-    },
+    }),
   };
 
   await upsertDiscoveredListing(db, {
@@ -213,10 +209,7 @@ test("upsertDiscoveredListing enriches one exact legal-name issuer instead of in
 test("upsertDiscoveredListing resolves existing instrument identity before creating an issuer", async () => {
   const queries: Array<{ text: string; values?: unknown[] }> = [];
   const db = {
-    query: async <R extends Record<string, unknown> = Record<string, unknown>>(
-      text: string,
-      values?: unknown[],
-    ) => {
+    query: fakePgQuery(async (text: string, values?: unknown[]) => {
       queries.push({ text, values });
       if (text.includes("select instrument_id, issuer_id from instruments where isin")) {
         assert.deepEqual(values, ["US0079031078"]);
@@ -224,15 +217,15 @@ test("upsertDiscoveredListing resolves existing instrument identity before creat
           rows: [{
             instrument_id: "22222222-2222-4222-a222-222222222222",
             issuer_id: "11111111-1111-4111-a111-111111111111",
-          } as R],
+          }],
         };
       }
       if (text.includes("insert into issuers")) {
         throw new Error("must not create an orphan issuer when instrument identity already exists");
       }
-      if (text.includes("update issuers")) return { rows: [] as R[] };
-      if (text.includes("update instruments")) return { rows: [] as R[] };
-      if (text.includes("select listing_id")) return { rows: [] as R[] };
+      if (text.includes("update issuers")) return { rows: [] };
+      if (text.includes("update instruments")) return { rows: [] };
+      if (text.includes("select listing_id")) return { rows: [] };
       if (text.includes("insert into listings")) {
         assert.deepEqual(values, [
           "22222222-2222-4222-a222-222222222222",
@@ -241,10 +234,10 @@ test("upsertDiscoveredListing resolves existing instrument identity before creat
           "USD",
           "America/New_York",
         ]);
-        return { rows: [{ listing_id: "33333333-3333-4333-a333-333333333333" } as R] };
+        return { rows: [{ listing_id: "33333333-3333-4333-a333-333333333333" }] };
       }
       throw new Error(`Unexpected query: ${text}`);
-    },
+    }),
   };
 
   const subject = await upsertDiscoveredListing(db, {
@@ -274,7 +267,7 @@ test("upsertDiscoveredListing is idempotent and dedupes issuer/instrument/listin
 
   const { databaseUrl } = await bootstrapDatabase(t, "fra-nff-discovery");
   const client = await connectedClient(t, databaseUrl);
-  const discovered = {
+  const discovered: DiscoveredListing = {
     ticker: "AMD",
     legal_name: "Advanced Micro Devices, Inc.",
     market: "stocks" as const,
