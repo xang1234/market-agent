@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
-import { dockerAvailable } from "../../../db/test/docker-pg.ts";
-import { IDS } from "../../financial-engine/test/db-fixtures.ts";
+import { connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
+import { databaseUrl, IDS } from "../../financial-engine/test/db-fixtures.ts";
 import { createChatServer } from "../src/http.ts";
 import { chatDatabase, chatHarness, completed, INSTRUMENT_A, LISTING_A, revenueModel } from "./financial-fixtures.ts";
 
@@ -55,7 +55,7 @@ test("financial clarifications", { timeout: 300_000 }, async (t) => {
     assert.equal(block.financial.results.length, 2);
   });
 
-  await t.test("a listing chosen for the explicit subject's issuer is planned once (#154)", async () => {
+  await t.test("a listing chosen for the explicit subject's issuer is planned once (#154)", { timeout: 60_000 }, async (st) => {
     await db.query(`insert into instruments (instrument_id, issuer_id, asset_type) values ($1::uuid, $2::uuid, 'common_stock')`, [INSTRUMENT_A, IDS.issuerA]);
     await db.query(
       `insert into listings (listing_id, instrument_id, mic, ticker, trading_currency, timezone)
@@ -64,8 +64,10 @@ test("financial clarifications", { timeout: 300_000 }, async (t) => {
     );
     // The explicit subject is a legal name (an issuer ref); the answered mention is a listing of that issuer.
     const explicit = { threadId, userId: IDS.owner, subjectText: "ALPHA", userIntent: "Compare revenue for AMBL and BBB" };
+    // One connection: the issuer lookup must reuse the client planning already holds.
+    const single = await connectedPool(st, databaseUrl(db), { max: 1 });
     const run = (clarificationAnswer?: { clarification_id: string; choice_id: string }) =>
-      chatHarness(pool, { model: revenueModel(["ALPHA", "BBB"]) }).run({ ...explicit, ...(clarificationAnswer ? { clarificationAnswer } : {}) });
+      chatHarness(single, { model: revenueModel(["ALPHA", "BBB"]) }).run({ ...explicit, ...(clarificationAnswer ? { clarificationAnswer } : {}) });
     const asked = completed((await run()).events).financial_clarification as Offered;
     const listing = asked.choices.find((choice) => choice.label === "Alpha Industries Inc. (XNAS)")!;
     const done = completed((await run({ clarification_id: asked.clarification_id, choice_id: listing.choice_id })).events);

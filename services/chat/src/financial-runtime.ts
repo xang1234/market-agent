@@ -103,7 +103,9 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       request_key: turnId,
       // Shadow mode validates that the request plans; the narrative analyst still answers it.
       mode: deps.mode === "shadow" ? "shadow" : "enforce",
-      plan: () => planTurn(deps, context, text, authority, new Date()),
+      // Planning runs on the client publishRequest has checked out; a second
+      // pool acquire here could wait forever on a one-connection pool.
+      plan: (db) => planTurn(deps, db, context, text, authority, new Date()),
       evidence: deps.evidence,
       persistParent: persistAssistantMessage(context.threadId, messageId),
     });
@@ -134,6 +136,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
 
 async function planTurn(
   deps: ChatFinancialRuntimeDeps,
+  db: SqlExecutor,
   context: ChatFinancialTurnContext,
   text: string,
   authority: FinancialRuntimeAuthority,
@@ -174,7 +177,7 @@ async function planTurn(
   if (context.clarificationAnswer) {
     // The chosen company may already be requested (the explicit subject), so
     // de-duplicate again once the answer resolves the ambiguous mention.
-    subjects = await distinctRequested(deps.pool, await applyAnswer(subjects, context.clarificationAnswer, planningContext, text));
+    subjects = await distinctRequested(db, await applyAnswer(subjects, context.clarificationAnswer, planningContext, text));
   }
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
   return planFinancialRequest(planningContext(subjects), text, deps.planningModel ?? noModel);
