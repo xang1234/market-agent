@@ -138,6 +138,8 @@ export async function loadUsableFacts(db: QueryExecutor, query: UsableFactsQuery
           and f.entitlement_channels ? $3
           and f.verification_status = any($4::verification_status[])
           and (f.period_kind not in ('fiscal_q', 'fiscal_y') or (f.fiscal_year is not null and f.fiscal_period is not null))
+          -- A malformed multiplier makes the fact unusable, never a default.
+          and f.scale not in ('NaN', 'Infinity', '-Infinity')
           -- Any monetary unit (currency, currency_per_share) states its currency.
           and (f.unit not like 'currency%' or f.currency is not null)${filters}
         order by f.subject_id, f.metric_id, f.period_kind,
@@ -154,6 +156,7 @@ export async function loadUsableFacts(db: QueryExecutor, query: UsableFactsQuery
   return rows.map((row) => Object.freeze({
     ...row,
     value_num: finiteOrNull(row.value_num),
+    // Non-finite scales are excluded in SQL; scale is non-null in the schema.
     scale: finiteOrNull(row.scale) ?? 1,
     as_of: row.as_of instanceof Date ? row.as_of.toISOString() : new Date(row.as_of).toISOString(),
   }));

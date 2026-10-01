@@ -160,6 +160,13 @@ test("loadUsableFacts applies every rule for facts that ground a sealed answer",
     assert.deepEqual(rows.map((row) => row.value_num), [2]);
   });
 
+  await t.test("numeric: a non-finite scale makes the fact unusable, never 1", async () => {
+    const badScale = await fact(2023);
+    await client.query(`update facts set scale = 'Infinity'::numeric where fact_id = $1::uuid`, [badScale.fact_id]);
+    assert.ok(!(await years()).includes(2023));
+    assert.ok(!(await years({ numericOnly: false })).includes(2023));
+  });
+
   await t.test("numeric-only callers keep an older figure over a newer text-only fact", async () => {
     await fact(2016, { value_num: 7, as_of: "2026-04-01T00:00:00.000Z", observed_at: "2026-04-01T00:00:00.000Z" });
     await fact(2016, { value_num: null, value_text: "see note", source_id: sourceB } as Partial<FactInput>);
