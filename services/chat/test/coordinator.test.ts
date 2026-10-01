@@ -1098,6 +1098,23 @@ test("default analyst runner surfaces bundle_id on turn.started for no-subject t
   assert.equal(completedEvent.bundle_id, "theme_research");
 });
 
+test("turn.completed reports the narrative sentences the guard dropped, only when there are any (#144)", async () => {
+  const removed = ["At 74.6%, NVDA had a higher gross margin than AMD at 49.2%."];
+  const guarded = createChatCoordinator({
+    analystToolRuntime: async (context) => ({ ...(await successfulRuntime(context)), narrative_removed: removed }),
+  });
+  const guardedTurn = guarded.getOrCreateTurn({ threadId: "t", runId: "r" });
+  await guardedTurn.completed;
+  const completed = guardedTurn.events.at(-1)!;
+  assert.equal(completed.type, "turn.completed");
+  assert.deepEqual(completed.narrative_removed, removed);
+
+  const clean = createChatCoordinator({ analystToolRuntime: successfulRuntime });
+  const cleanTurn = clean.getOrCreateTurn({ threadId: "t", runId: "r" });
+  await cleanTurn.completed;
+  assert.equal("narrative_removed" in cleanTurn.events.at(-1)!, false);
+});
+
 test("subject-aware runner emits bundle_id on turn.started before any tool events", async () => {
   // Regression: tool events emitted before turn.started used to trigger
   // an auto-fabricated empty turn.started, which left SSE consumers

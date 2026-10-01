@@ -164,12 +164,16 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     }),
     loadRecentConversation(pool(), { threadId: context.threadId, limit: CONVERSATION_MESSAGES }),
   ]);
+  let narrativeRemoved: ReadonlyArray<string> = [];
   const llmBlocks = await composeAnalystBlocksWithLlm({
     context,
     blocks: result.blocks,
     toolCalls,
     factBlocks,
     conversation,
+    onNarrativeRemoved: (sentences) => {
+      narrativeRemoved = sentences;
+    },
   });
   const normalize = (block: Record<string, unknown>, refs: typeof defaultRefs) =>
     normalizeAssistantBlock(block, {
@@ -187,6 +191,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
       // default claim/document refs would demand sources they do not show.
       ...factBlocks.map((block) => normalize(block, NO_DEFAULT_REFS)),
     ],
+    ...(narrativeRemoved.length > 0 ? { narrative_removed: narrativeRemoved } : {}),
   } satisfies ChatAnalystToolRuntimeResult;
 };
 

@@ -66,6 +66,8 @@ export async function composeAnalystBlocksWithLlm(input: {
   // Recent thread messages, oldest first, so the answer reads as a reply.
   conversation?: ReadonlyArray<{ role: string; text: string }>;
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
+  // Receives the sentences the narrative guard dropped, so evals can count them (#144).
+  onNarrativeRemoved?: (sentences: ReadonlyArray<string>) => void;
 }): Promise<ReadonlyArray<Record<string, unknown>>> {
   const router = await createLlmRouterFromEnv(input.env ?? process.env, {
     createClient: input.createClient,
@@ -118,6 +120,7 @@ export async function composeAnalystBlocksWithLlm(input: {
   );
   if (guarded.removed.length > 0) {
     console.warn(`[chat] removed ${guarded.removed.length} narrative sentence(s) quoting figures not shown to the user`);
+    input.onNarrativeRemoved?.(guarded.removed);
   }
   return rewriteFirstRichTextBlock(input.blocks, guarded.text || FACT_BLOCKS_FALLBACK_TEXT);
 }
