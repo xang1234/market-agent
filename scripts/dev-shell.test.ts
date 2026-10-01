@@ -697,6 +697,7 @@ test("down stops compose services without deleting dev database containers", asy
       "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
       `TRACE_FILE="${traceFile}"`,
       'compose(){ printf "compose:%s\\n" "$*" >> "$TRACE_FILE"; }',
+      "have_docker(){ return 0; }", // the contract holds on a Docker-free machine too
       "down",
     ].join("\n"),
     fixture.root,

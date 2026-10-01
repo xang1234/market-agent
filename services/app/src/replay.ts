@@ -100,6 +100,9 @@ const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 const shape = (text: string) => text.replace(UUID, ":id");
 const isRead = (e: RecordedExchange) => e.method === "GET" && !e.contentType.startsWith("text/event-stream");
 const signature = (path: string, query: string, body: string) => `${path}?${query}\n${body}`;
+// ponytail: evidence inspection is the only side-effect-free POST the chat flow makes;
+// list others here if the UI grows more.
+const isLookup = (e: RecordedExchange) => e.method === "POST" && e.path.startsWith("/v1/evidence/");
 
 // Serves the recorded exchanges. A request matches a recording with the same method and
 // the same path/query/body once ids are blanked out (so the question text must match).
@@ -109,8 +112,10 @@ const signature = (path: string, query: string, body: string) => `${path}?${quer
 //   - Reads (non-stream GETs) are state snapshots: one recorded after the last matched
 //     write and before the next recorded write is "current"; otherwise the latest one
 //     before that is re-read. So a duplicate read never jumps ahead of a turn.
-//   - Writes and streams prefer an exact recording (evidence lookups, by their ids),
-//     else the next unused one in recorded order.
+//   - Writes and streams prefer an exact recording, else the next unused one in recorded
+//     order.
+//   - Lookups (evidence inspection) match their recording by its ids and leave the
+//     timeline where it is.
 export function createReplayHandler(fixture: ReplayFixture): Handler {
   const exchanges = fixture.exchanges;
   const recordedToActual = new Map<string, string>();
@@ -121,16 +126,22 @@ export function createReplayHandler(fixture: ReplayFixture): Handler {
   const toRecorded = (text: string) => text.replace(UUID, (id) => actualToRecorded.get(id) ?? id);
   const toActual = (text: string) => text.replace(UUID, (id) => recordedToActual.get(id) ?? id);
 
-  // Ids the server issued: they appear in recorded responses (a thread id, a fact id in a
-  // block). The client sends them back verbatim, so they must match the recording
-  // exactly; only ids the client generates fresh may differ. Without this, a lookup of a
-  // fact that wasn't inspected during capture would get another fact's evidence.
-  const serverIds = new Set(exchanges.flatMap((e) => e.body.match(UUID) ?? []));
+  // Only ids the client generated may differ from the recording: those that first appear
+  // in a request (message, snapshot, run ids). Ids the server issued first appear in a
+  // response (a thread id, a fact id in a block); the client sends them back verbatim, so
+  // they must match exactly. Without this, a lookup of a fact that wasn't inspected during
+  // capture would get another fact's evidence (and alias that fact's id to it).
+  const serverIds = new Set<string>();
+  const clientIds = new Set<string>();
+  for (const e of exchanges) {
+    for (const id of signature(e.path, e.query, e.requestBody).match(UUID) ?? []) if (!serverIds.has(id)) clientIds.add(id);
+    for (const id of e.body.match(UUID) ?? []) if (!clientIds.has(id)) serverIds.add(id);
+  }
   const idsCompatible = (recorded: string, actual: string) => {
     const recordedIds = recorded.match(UUID) ?? [];
     const actualIds = toRecorded(actual).match(UUID) ?? [];
     return recordedIds.length === actualIds.length &&
-      recordedIds.every((id, i) => id === actualIds[i] || !serverIds.has(actualIds[i]!));
+      recordedIds.every((id, i) => id === actualIds[i] || (clientIds.has(id) && !serverIds.has(actualIds[i]!)));
   };
 
   function match(method: string, path: string, query: string, body: string): number | undefined {
@@ -145,6 +156,8 @@ export function createReplayHandler(fixture: ReplayFixture): Handler {
       });
     if (candidates.length === 0) return undefined;
 
+    // Only exact-id recordings are left for a lookup (it sends only server ids).
+    if (isLookup(candidates[0]!.e)) return candidates[0]!.index;
     if (isRead(candidates[0]!.e)) {
       const nextWrite = exchanges.findIndex((e, index) => index > cursor && !isRead(e));
       const windowEnd = nextWrite === -1 ? exchanges.length : nextWrite;
@@ -189,19 +202,22 @@ export function createReplayHandler(fixture: ReplayFixture): Handler {
       return;
     }
     const e = exchanges[index]!;
-    // A write or stream that only matches at or before the cursor means the client has
-    // started the recorded flow again (another new thread): rewind there, so the replay
-    // doesn't carry the last run's state into it. Learned ids are kept; a new run's ids
-    // override them (a repeated evidence lookup also rewinds, harmlessly). ponytail: one
-    // replay session per app; concurrent tabs share it (the recorded thread id can't
-    // tell them apart).
-    if (!isRead(e) && index <= cursor) {
-      for (const usedIndex of [...used]) if (usedIndex >= index) used.delete(usedIndex);
-      cursor = index - 1;
+    // A lookup is off the conversation's timeline: inspecting a fact early must not jump
+    // the replay past turns the user hasn't asked yet.
+    if (!isLookup(e)) {
+      // A write or stream that only matches at or before the cursor means the client has
+      // started the recorded flow again (another new thread): rewind there, so the replay
+      // doesn't carry the last run's state into it. Learned ids are kept; a new run's ids
+      // override them. ponytail: one replay session per app; concurrent tabs share it (the
+      // recorded thread id can't tell them apart).
+      if (!isRead(e) && index <= cursor) {
+        for (const usedIndex of [...used]) if (usedIndex >= index) used.delete(usedIndex);
+        cursor = index - 1;
+      }
+      learnIds(signature(e.path, e.query, e.requestBody), signature(url.pathname, query, body));
+      used.add(index);
+      cursor = Math.max(cursor, index);
     }
-    learnIds(signature(e.path, e.query, e.requestBody), signature(url.pathname, query, body));
-    used.add(index);
-    cursor = Math.max(cursor, index);
     res.writeHead(e.status, e.contentType ? { "content-type": e.contentType } : {});
     res.end(toActual(e.body));
   };

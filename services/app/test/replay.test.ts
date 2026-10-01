@@ -54,7 +54,7 @@ const FIXTURE: ReplayFixture = {
       method: "GET", path: `/v1/chat/threads/${THREAD}/messages`, query: "", requestBody: "", status: 200, contentType: "application/json",
       body: json({ messages: [{ message_id: USER_MSG, role: "user" }, { message_id: ANSWER, role: "assistant", facts: [FACT, OTHER_FACT] }] }),
     },
-    { method: "POST", path: "/v1/evidence/inspect", query: "", requestBody: json({ ref: { kind: "fact", id: FACT } }), status: 200, contentType: "application/json", body: json({ title: "revenue" }) },
+    { method: "POST", path: "/v1/evidence/inspect", query: "", requestBody: json({ ref: { kind: "fact", id: FACT } }), status: 200, contentType: "application/json", body: json({ title: "revenue", source_id: SOURCE }) },
     { method: "POST", path: "/v1/evidence/inspect", query: "", requestBody: json({ ref: { kind: "source", id: SOURCE } }), status: 200, contentType: "application/json", body: json({ title: "sec_edgar filing" }) },
   ],
 };
@@ -128,10 +128,40 @@ test("replay starts over when the client starts the recorded flow again (a secon
 
 test("replay never answers an evidence lookup with another fact's evidence", async (t) => {
   const base = await serve(t, createReplayHandler(FIXTURE));
+  const inspect = (id: string) => fetch(`${base}/v1/evidence/inspect`, { method: "POST", body: json({ ref: { kind: "fact", id } }) });
   // OTHER_FACT is on screen (the server issued it) but wasn't inspected during capture.
-  const response = await fetch(`${base}/v1/evidence/inspect`, { method: "POST", body: json({ ref: { kind: "fact", id: OTHER_FACT } }) });
+  const response = await inspect(OTHER_FACT);
   assert.equal(response.status, 404);
   assert.match((await response.json()).error, /no recorded response/);
+  // An id the recording has never seen isn't taken for a fresh client id either...
+  assert.equal((await inspect("99999999-9999-4999-8999-999999999999")).status, 404);
+  // ...so it isn't aliased to FACT: FACT's own evidence still comes back untouched.
+  assert.equal(await (await inspect(FACT)).text(), json({ title: "revenue", source_id: SOURCE }));
+});
+
+test("replay keeps an evidence lookup from jumping the conversation ahead", async (t) => {
+  const SECOND_MSG = "99999999-9999-4999-8999-999999999990";
+  const fixture: ReplayFixture = {
+    version: 1,
+    exchanges: [
+      ...FIXTURE.exchanges.slice(0, 3),
+      { method: "GET", path: `/v1/chat/threads/${THREAD}/messages`, query: "", requestBody: "", status: 200, contentType: "application/json", body: json({ turns: 1, facts: [FACT] }) },
+      { method: "POST", path: `/v1/chat/threads/${THREAD}/messages`, query: "", requestBody: json({ message_id: SECOND_MSG, content: "Compare AMD" }), status: 201, contentType: "application/json", body: json({ message_id: SECOND_MSG }) },
+      { method: "GET", path: `/v1/chat/threads/${THREAD}/messages`, query: "", requestBody: "", status: 200, contentType: "application/json", body: json({ turns: 2 }) },
+      FIXTURE.exchanges[5]!,
+    ],
+  };
+  const base = await serve(t, createReplayHandler(fixture));
+  const call = async (method: string, path: string, body?: unknown) =>
+    (await fetch(`${base}${path}`, { method, ...(body ? { body: json(body) } : {}) })).text();
+
+  await call("POST", "/v1/chat/threads", { title: "" });
+  await call("POST", `/v1/chat/threads/${THREAD}/messages`, { message_id: USER_MSG, snapshot_id: USER_SNAP, content: intent });
+  assert.equal(JSON.parse(await call("GET", `/v1/chat/threads/${THREAD}/messages`)).turns, 1);
+  // Inspecting a fact from the first answer, recorded after the second turn...
+  assert.equal(JSON.parse(await call("POST", "/v1/evidence/inspect", { ref: { kind: "fact", id: FACT } })).title, "revenue");
+  // ...doesn't show a second turn the user never asked.
+  assert.equal(JSON.parse(await call("GET", `/v1/chat/threads/${THREAD}/messages`)).turns, 1);
 });
 
 test("replay answers an unrecorded request with a clear 404, not a guess", async (t) => {
