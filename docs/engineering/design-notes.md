@@ -110,7 +110,10 @@ figures goes through it, directly or via `loadRecentIssuerFundamentals`. Its rul
   yet known.
 
 A new data path adds only what's specific to it (e.g. segment hierarchy and reconciliation) and passes the snapshot's
-`asOf` as `cutoff`. The rules are tested together in `services/fundamentals/test/usable-facts.integration.test.ts`.
+`asOf` as `cutoff`. "Known at a cutoff" is one SQL helper, `factKnownAtSql` (`services/evidence/src/fact-activity.ts`),
+shared by `loadUsableFacts`, the SEC statement/stats repositories (comparison inputs) and
+`loadVerifierFactsForRefs` (`requireKnownByCutoff`). Derived facts the comparison materializes are stamped at the
+cutoff (`clock`), so they pass the same check (#161). The rules are tested together in `services/fundamentals/test/usable-facts.integration.test.ts`.
 
 ## Which companies a chat turn covers
 

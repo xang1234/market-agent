@@ -11,3 +11,12 @@ export function factActiveSql(alias: string, cutoff?: string): string {
                            where successor.fact_id = ${alias}.superseded_by
                              and successor.observed_at > ${cutoff}))`;
 }
+
+// Known by the cutoff: active then (above), and dated, observed and reported at
+// or before it, so a backdated filing ingested later does not count.
+export function factKnownAtSql(alias: string, cutoff: string): string {
+  return `${factActiveSql(alias, cutoff)}
+          and ${alias}.as_of <= ${cutoff}
+          and ${alias}.observed_at <= ${cutoff}
+          and (${alias}.reported_at is null or ${alias}.reported_at <= ${cutoff})`;
+}
