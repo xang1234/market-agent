@@ -106,7 +106,13 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
         await activity(tx, input, 'dismissed', 'No new thesis changes: this evidence packet was already assessed.');
         return { findings: 0, assessments: 0, reused: true };
       }
-      if (previous && Date.parse(previous.assessed_at) > Date.parse(deltas.as_of))
+      // Compared in the database, at its microsecond precision: through JS Dates
+      // an assessment finished later in the cutoff's millisecond looked equal.
+      const newer = await tx.query(
+        'select 1 from agent_thesis_assessments where thesis_version_id = $1::uuid and assessed_at > $2::timestamptz limit 1',
+        [input.thesis.thesis_version_id, deltas.as_of],
+      );
+      if (newer.rows.length > 0)
         throw new ThesisConflictError('A newer assessment finished during this run; run again.');
       const snapshot = await sealThesisPacket(tx, {
         thesis: input.thesis, packet: evidence, results: analysis.results, asOf: deltas.as_of,

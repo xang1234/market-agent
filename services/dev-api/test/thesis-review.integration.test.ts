@@ -94,6 +94,24 @@ test('unchanged facts expire at their exact freshness boundary within the same U
   assert.equal((await history()).assessments.length, 2, 'unchanged expired results still deduplicate');
 });
 
+test('a newer assessment is detected at microsecond precision, not lost to millisecond rounding', options, async t => {
+  const { db, insertFact, run, history } = await fixture(t, 'thesis-review-conflict-precision');
+  const earlier = new Date(Date.now() - 60_000).toISOString();
+  await insertFact(earlier, earlier.slice(0, 10));
+  await run(() => new Date(Date.now() - 30_000).toISOString());
+  assert.equal((await history()).assessments.length, 1);
+  // New evidence for the next run, whose cutoff is a whole millisecond...
+  const cutoff = new Date(Date.now() - 10_000).toISOString();
+  await insertFact(new Date(Date.parse(cutoff) - 1_000).toISOString(), cutoff.slice(0, 10));
+  // ...while another assessment finished 1 microsecond after it.
+  await db.query(
+    `update agent_thesis_assessments set assessed_at = $1::timestamptz + interval '1 microsecond'`,
+    [cutoff],
+  );
+  await run(() => cutoff).catch(() => undefined);
+  assert.equal((await history()).assessments.length, 1, 'the run must yield to the newer assessment');
+});
+
 test('thesis snapshots preserve document sources separately from claim reporters', options, async t => {
   const { db, pool, agent, source, history } = await fixture(t, 'thesis-review-document');
   const reporter = randomUUID();
