@@ -106,18 +106,21 @@ test("replay starts over when the client starts the recorded flow again (a secon
   const call = async (method: string, path: string, body?: unknown) =>
     (await fetch(`${base}${path}`, { method, ...(body ? { body: json(body) } : {}) })).text();
   const runConversation = async (msg: string, run: string) => {
-    await call("POST", "/v1/chat/threads", { title: "" });
-    const before = JSON.parse(await call("GET", `/v1/chat/threads/${THREAD}/messages`)).messages;
-    await call("POST", `/v1/chat/threads/${THREAD}/messages`, { message_id: msg, snapshot_id: USER_SNAP, content: intent });
+    const thread = JSON.parse(await call("POST", "/v1/chat/threads", { title: "" })).thread_id as string;
+    const before = JSON.parse(await call("GET", `/v1/chat/threads/${thread}/messages`)).messages;
+    await call("POST", `/v1/chat/threads/${thread}/messages`, { message_id: msg, snapshot_id: USER_SNAP, content: intent });
     const query = new URLSearchParams({ run_id: run, turn_id: msg, user_intent: intent, user_id: USER }).toString();
-    const stream = await call("GET", `/v1/chat/threads/${THREAD}/stream?${query}`);
-    const after = JSON.parse(await call("GET", `/v1/chat/threads/${THREAD}/messages`)).messages;
-    return { before, stream, after };
+    const stream = await call("GET", `/v1/chat/threads/${thread}/stream?${query}`);
+    const after = JSON.parse(await call("GET", `/v1/chat/threads/${thread}/messages`)).messages;
+    return { thread, before, stream, after };
   };
 
-  await runConversation("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+  const first = await runConversation("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "cccccccc-cccc-4ccc-8ccc-cccccccccccc");
   const second = await runConversation("dddddddd-dddd-4ddd-8ddd-dddddddddddd", "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
 
+  assert.equal(first.thread, THREAD);
+  // A new id, so the client navigates to a new URL (the same one would keep the old view).
+  assert.notEqual(second.thread, THREAD);
   assert.deepEqual(second.before, [], "the new thread opens empty, not with the last run's messages");
   assert.match(second.stream, /"turn_id":"dddddddd-dddd-4ddd-8ddd-dddddddddddd"/);
   assert.deepEqual(

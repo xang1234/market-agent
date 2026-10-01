@@ -1,6 +1,7 @@
 // UI mode (#123): record the web client's /v1 traffic against a real stack (capture), then
 // serve it back with no services, database or network (replay), so block rendering and
 // layout can be iterated on deterministically.
+import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -103,6 +104,9 @@ const signature = (path: string, query: string, body: string) => `${path}?${quer
 // ponytail: evidence inspection is the only side-effect-free POST the chat flow makes;
 // list others here if the UI grows more.
 const isLookup = (e: RecordedExchange) => e.method === "POST" && e.path.startsWith("/v1/evidence/");
+// The thread id a recorded "new thread" write issued, if that's what it is.
+const issuedThreadId = (e: RecordedExchange) =>
+  e.method === "POST" && e.path === "/v1/chat/threads" ? e.body.match(/"thread_id":"([^"]+)"/)?.[1] : undefined;
 
 // Serves the recorded exchanges. A request matches a recording with the same method and
 // the same path/query/body once ids are blanked out (so the question text must match).
@@ -213,6 +217,14 @@ export function createReplayHandler(fixture: ReplayFixture): Handler {
       if (!isRead(e) && index <= cursor) {
         for (const usedIndex of [...used]) if (usedIndex >= index) used.delete(usedIndex);
         cursor = index - 1;
+        // A new thread gets a new id: the client navigates to it, and the URL it is already
+        // on would keep the last conversation on screen. Requests using it map back.
+        const threadId = issuedThreadId(e);
+        if (threadId) {
+          const fresh = randomUUID();
+          recordedToActual.set(threadId, fresh);
+          actualToRecorded.set(fresh, threadId);
+        }
       }
       learnIds(signature(e.path, e.query, e.requestBody), signature(url.pathname, query, body));
       used.add(index);
