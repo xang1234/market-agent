@@ -275,7 +275,8 @@ async function sealAssistantMessageSnapshot(input: ChatAssistantMessagePersisten
       claim_refs: manifest.claim_refs,
       user_id: userId,
     }),
-    loadVerifierFactsForRefs(pool(), { fact_refs: manifest.fact_refs }),
+    // As of the snapshot, like the readers that chose these facts (#159).
+    loadVerifierFactsForRefs(pool(), { fact_refs: manifest.fact_refs, cutoff: asOf }),
   ]);
   return sealSnapshotWithPool(pool(), {
     snapshot_id: snapshotId,

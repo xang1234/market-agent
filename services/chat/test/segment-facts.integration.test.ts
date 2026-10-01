@@ -121,9 +121,10 @@ test("a segment breakdown shows only eligible, numeric facts, one per segment", 
   );
 
   // A segment whose Q4 fact is missing leaves the rest short of the quarter's
-  // revenue: no breakdown rather than an incomplete one shown as whole.
+  // revenue: no breakdown rather than an incomplete one shown as whole. It is
+  // withdrawn before the cutoff; one withdrawn later was still known then.
   await client.query(
-    `update facts set invalidated_at = now()
+    `update facts set invalidated_at = '2026-08-01T00:00:00Z'
       where subject_kind = 'segment'
         and subject_id = (select segment_id from segments where issuer_id = $1::uuid and name = 'Automotive')`,
     [NVDA.issuer_id],

@@ -12,6 +12,7 @@
 //   later included); and "active" is judged at the cutoff, so a fact replaced
 //   or withdrawn afterwards is still the one that was known then.
 
+import { factActiveSql } from "../../evidence/src/fact-activity.ts";
 import { DISPLAYABLE_VERIFICATION_STATUSES } from "../../evidence/src/promotion-rules.ts";
 import type { FactEntitlementChannel, FactSubjectKind } from "../../evidence/src/fact-repo.ts";
 import type { PeriodKind } from "./statement.ts";
@@ -73,10 +74,8 @@ export async function loadUsableFacts(db: QueryExecutor, query: UsableFactsQuery
     [...DISPLAYABLE_VERIFICATION_STATUSES],
   ];
   let filters = "";
-  // Active now, or (for a historical cutoff) active at the cutoff: invalidated
-  // later, or superseded by a fact observed later, still counts as known then.
-  let activity = `f.superseded_by is null
-          and f.invalidated_at is null`;
+  // Active now, or (for a historical cutoff) active at the cutoff.
+  let activity = factActiveSql("f");
   if (query.numericOnly ?? true) filters += `\n        and f.value_num is not null`;
   if (query.periodKind !== undefined) {
     params.push(query.periodKind);
@@ -93,9 +92,7 @@ export async function loadUsableFacts(db: QueryExecutor, query: UsableFactsQuery
         and f.as_of <= ${cutoff}
         and f.observed_at <= ${cutoff}
         and (f.reported_at is null or f.reported_at <= ${cutoff})`;
-    activity = `(f.invalidated_at is null or f.invalidated_at > ${cutoff})
-          and (f.superseded_by is null
-               or exists (select 1 from facts n where n.fact_id = f.superseded_by and n.observed_at > ${cutoff}))`;
+    activity = factActiveSql("f", cutoff);
   }
 
   let limitClause = "";
@@ -106,7 +103,11 @@ export async function loadUsableFacts(db: QueryExecutor, query: UsableFactsQuery
 
   const { rows } = await db.query<Row>(
     `with usable as (
-       select distinct on (f.subject_id, f.metric_id, f.period_kind, f.fiscal_year, f.fiscal_period, f.period_start, f.period_end)
+       -- A fiscal fact is identified by its fiscal year and period (sources may
+       -- draw the date boundaries differently); other kinds by their dates.
+       select distinct on (f.subject_id, f.metric_id, f.period_kind, f.fiscal_year, f.fiscal_period,
+                           case when f.period_kind in ('fiscal_q', 'fiscal_y') then null else f.period_start end,
+                           case when f.period_kind in ('fiscal_q', 'fiscal_y') then null else f.period_end end)
               f.fact_id::text as fact_id,
               f.subject_id::text as subject_id,
               m.metric_key,
@@ -133,7 +134,9 @@ export async function loadUsableFacts(db: QueryExecutor, query: UsableFactsQuery
           and (f.period_kind not in ('fiscal_q', 'fiscal_y') or (f.fiscal_year is not null and f.fiscal_period is not null))
           -- Any monetary unit (currency, currency_per_share) states its currency.
           and (f.unit not like 'currency%' or f.currency is not null)${filters}
-        order by f.subject_id, f.metric_id, f.period_kind, f.fiscal_year, f.fiscal_period, f.period_start, f.period_end,
+        order by f.subject_id, f.metric_id, f.period_kind, f.fiscal_year, f.fiscal_period,
+                 case when f.period_kind in ('fiscal_q', 'fiscal_y') then null else f.period_start end,
+                 case when f.period_kind in ('fiscal_q', 'fiscal_y') then null else f.period_end end,
                  f.as_of desc, f.fact_id
      )
      select * from usable

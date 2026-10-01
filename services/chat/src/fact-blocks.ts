@@ -140,7 +140,7 @@ async function loadMetricsComparisonBlocks(
     );
     const factIds = [...new Set(materialized.flatMap((peer) => peer.metrics.map((metric) => metric.value_ref)))];
     const loadable = new Map(
-      (await loadVerifierFactsForRefs(db, { fact_refs: factIds })).map((fact) => [fact.fact_id, fact]),
+      (await loadVerifierFactsForRefs(db, { fact_refs: factIds, cutoff: input.asOf })).map((fact) => [fact.fact_id, fact]),
     );
     // Only cells the seal can load and bind render; the rest show as gaps.
     const peers = materialized.map((peer) => ({
@@ -234,7 +234,7 @@ async function loadSegmentBlocks(
     if (!(await reconcilesToReportedRevenue(db, input, breakdown))) return [];
     const factIds = breakdown.items.map((item) => item.value_ref);
     const loadable = new Map(
-      (await loadVerifierFactsForRefs(db, { fact_refs: factIds })).map((fact) => [fact.fact_id, fact]),
+      (await loadVerifierFactsForRefs(db, { fact_refs: factIds, cutoff: input.asOf })).map((fact) => [fact.fact_id, fact]),
     );
     const cited = factIds.filter((id) => loadable.has(id)).map((id) => citedFact(loadable.get(id)!));
     if (cited.length !== factIds.length) return [];
@@ -401,7 +401,7 @@ export async function loadIssuerFactBlocks(
       cutoff: input.asOf,
       numericOnly: true,
     });
-    const verifierFacts = await loadVerifierFactsForRefs(db, { fact_refs: facts.map((fact) => fact.fact_id) });
+    const verifierFacts = await loadVerifierFactsForRefs(db, { fact_refs: facts.map((fact) => fact.fact_id), cutoff: input.asOf });
     return buildIssuerFactBlocks({ facts, verifierFacts, snapshotId: input.snapshotId, asOf: input.asOf });
   } catch (reason) {
     console.warn("[chat] fact blocks unavailable; answering with narrative only", reason);

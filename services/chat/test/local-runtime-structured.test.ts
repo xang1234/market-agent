@@ -354,3 +354,17 @@ test("loadStructuredSubjectContext yields null fact_recency when the issuer has 
 
   assert.equal(ctx.fact_recency, null);
 });
+
+test("loadStructuredSubjectContext reads facts as of the turn's timestamp (#159)", async () => {
+  const factQueries: Array<{ text: string; values: unknown[] }> = [];
+  const db = {
+    query: (async (text: string, values?: unknown[]) => {
+      if (text.includes("from facts")) factQueries.push({ text, values: values ?? [] });
+      return { rows: [] };
+    }) as unknown as QueryExecutor["query"],
+  };
+  await loadStructuredSubjectContext(db, REFS_WITH_LISTING, { now: "2026-06-02T08:50:00.000Z" });
+  assert.equal(factQueries.length, 1);
+  assert.match(factQueries[0].text, /f\.observed_at <= /);
+  assert.ok(factQueries[0].values.includes("2026-06-02T08:50:00.000Z"));
+});

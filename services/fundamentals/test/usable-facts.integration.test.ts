@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { Client } from "pg";
 import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { createFact, type FactInput } from "../../evidence/src/fact-repo.ts";
+import { loadVerifierFactsForRefs } from "../../evidence/src/local-runtime-evidence.ts";
 import { loadUsableFacts } from "../src/usable-facts.ts";
 
 // One rule per subtest (#159). Each fact gets its own fiscal year, so a rule's
@@ -116,6 +117,24 @@ test("loadUsableFacts applies every rule for facts that ground a sealed answer",
     const now = await loadUsableFacts(client, { subjectKind: "issuer", subjectIds: [ISSUER_ID] });
     assert.deepEqual(now.filter((row) => row.fiscal_year === 2014).map((row) => row.value_num), [2]);
     assert.ok(!now.some((row) => row.fiscal_year === 2015));
+  });
+
+  await t.test("the verifier's fact loader judges activity at the same cutoff", async () => {
+    const original = await fact(2018, { value_num: 1 });
+    const replacement = await fact(2018, { value_num: 2, source_id: sourceB, as_of: AFTER, observed_at: AFTER });
+    await client.query(`update facts set superseded_by = $2::uuid where fact_id = $1::uuid`, [original.fact_id, replacement.fact_id]);
+    const atCutoff = await loadVerifierFactsForRefs(client, { fact_refs: [original.fact_id], cutoff: CUTOFF });
+    assert.deepEqual(atCutoff.map((row) => row.fact_id), [original.fact_id]);
+    // Now it is superseded, so it no longer loads.
+    assert.deepEqual(await loadVerifierFactsForRefs(client, { fact_refs: [original.fact_id] }), []);
+  });
+
+  await t.test("canonical: fiscal facts match on fiscal year and period, not their date boundaries", async () => {
+    await fact(2019, { value_num: 1, period_end: "2019-12-31", as_of: "2026-04-01T00:00:00.000Z", observed_at: "2026-04-01T00:00:00.000Z" } as Partial<FactInput>);
+    await fact(2019, { value_num: 2, period_end: "2019-12-28", source_id: sourceB } as Partial<FactInput>);
+    const rows = (await loadUsableFacts(client, { subjectKind: "issuer", subjectIds: [ISSUER_ID] }))
+      .filter((row) => row.fiscal_year === 2019);
+    assert.deepEqual(rows.map((row) => row.value_num), [2]);
   });
 
   await t.test("numeric-only callers keep an older figure over a newer text-only fact", async () => {

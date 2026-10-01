@@ -110,7 +110,7 @@ export async function loadStructuredSubjectContext(
   // facts query doesn't discard a good quote (or vice-versa). The caller degrades
   // the whole structured context only when it truly has nothing.
   const [factsResult, quoteResult] = await Promise.allSettled([
-    loadIssuerFacts(db, refs.issuer, options.factLimit ?? DEFAULT_FACT_LIMIT),
+    loadIssuerFacts(db, refs.issuer, options.factLimit ?? DEFAULT_FACT_LIMIT, now),
     loadLatestListingQuote(db, refs.listings, now),
   ]);
   if (factsResult.status === "rejected") {
@@ -139,11 +139,13 @@ async function loadIssuerFacts(
   db: QueryExecutor,
   issuer: (SubjectRef & { kind: "issuer" }) | null,
   limit: number,
+  // The turn's timestamp: the model must not see a fact the sealed figures can't.
+  cutoff: string,
 ): Promise<IssuerFactSummary[]> {
   if (issuer === null) return [];
   // The canonical reader owns the eligibility filter (reported, active, entitled
   // for the "app" channel, display-verified). Chat answers render on "app".
-  return loadRecentIssuerFundamentals(db, issuer, { channel: "app", limit });
+  return loadRecentIssuerFundamentals(db, issuer, { channel: "app", limit, cutoff });
 }
 
 // Reads each listing's latest quote through the canonical market cache repository
