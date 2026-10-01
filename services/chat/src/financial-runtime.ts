@@ -103,7 +103,9 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
       request_key: turnId,
       // Shadow mode validates that the request plans; the narrative analyst still answers it.
       mode: deps.mode === "shadow" ? "shadow" : "enforce",
-      plan: () => planTurn(deps, context, text, authority, new Date()),
+      // Planning runs on the client publishRequest has checked out; a second
+      // pool acquire here could wait forever on a one-connection pool.
+      plan: (db) => planTurn(deps, db, context, text, authority, new Date()),
       evidence: deps.evidence,
       persistParent: persistAssistantMessage(context.threadId, messageId),
     });
@@ -134,6 +136,7 @@ export function createChatFinancialRuntime(deps: ChatFinancialRuntimeDeps): Chat
 
 async function planTurn(
   deps: ChatFinancialRuntimeDeps,
+  db: SqlExecutor,
   context: ChatFinancialTurnContext,
   text: string,
   authority: FinancialRuntimeAuthority,
@@ -174,7 +177,7 @@ async function planTurn(
   if (context.clarificationAnswer) {
     // The chosen company may already be requested (the explicit subject), so
     // de-duplicate again once the answer resolves the ambiguous mention.
-    subjects = distinctRequested(await applyAnswer(subjects, context.clarificationAnswer, planningContext, text));
+    subjects = await distinctRequested(db, await applyAnswer(subjects, context.clarificationAnswer, planningContext, text));
   }
   // A failing or unreachable model is a planning gap (publishRequest); the narrative composer is never a fallback for numbers.
   return planFinancialRequest(planningContext(subjects), text, deps.planningModel ?? noModel);
@@ -231,14 +234,34 @@ function financialRef(ref: { kind: string; id: string }): FinancialSubjectRef | 
   return ref.kind === "issuer" || ref.kind === "listing" ? { kind: ref.kind, id: ref.id } : null;
 }
 
-function distinctRequested(subjects: ReadonlyArray<RequestedSubject>): ReadonlyArray<RequestedSubject> {
-  return subjects.filter((subject, index) => {
-    const { resolution } = subject;
-    if (resolution.status !== "resolved") return true;
-    return !subjects.slice(0, index).some((earlier) =>
-      earlier.resolution.status === "resolved" && sameRef(earlier.resolution.subject_ref, resolution.subject_ref)
-    );
+// One entry per company, the earlier one kept. A clarification choice is a bare
+// ref with no handoff, and the resolver offers listings for a ticker but an
+// issuer for a legal name, so a listing counts as its issuer (#154).
+async function distinctRequested(
+  db: SqlExecutor,
+  subjects: ReadonlyArray<RequestedSubject>,
+): Promise<ReadonlyArray<RequestedSubject>> {
+  const keys = await Promise.all(subjects.map((subject) =>
+    subject.resolution.status === "resolved" ? companyRefKey(db, subject.resolution.subject_ref) : null));
+  const seen = new Set<string>();
+  return subjects.filter((_, index) => {
+    const key = keys[index];
+    if (key === null || key === undefined) return true;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
+}
+
+async function companyRefKey(db: SqlExecutor, ref: FinancialSubjectRef): Promise<string> {
+  if (ref.kind === "issuer") return `issuer:${ref.id}`;
+  const { rows } = await db.query<{ issuer_id: string }>(
+    `select i.issuer_id::text as issuer_id
+       from listings l join instruments i on i.instrument_id = l.instrument_id
+      where l.listing_id = $1::uuid`,
+    [ref.id],
+  );
+  return rows[0] ? `issuer:${rows[0].issuer_id}` : `listing:${ref.id}`;
 }
 
 function sameRef(left: FinancialSubjectRef, right: FinancialSubjectRef): boolean {
