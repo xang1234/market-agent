@@ -16,7 +16,7 @@ test("every request the check makes is bounded: a server that never answers fail
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
   const startedAt = Date.now();
-  await assert.rejects(() => runGoldenLiveCheck(base, { requestTimeoutMs: 300, turnTimeoutMs: 300 }), /timeout|aborted/i);
+  await assert.rejects(() => runGoldenLiveCheck(base, { requestTimeoutMs: 300, turnTimeoutMs: 300, warmup: async () => [] }), /timeout|aborted/i);
   assert.ok(Date.now() - startedAt < 5_000, "failed near the deadline, not hung");
 });
 
