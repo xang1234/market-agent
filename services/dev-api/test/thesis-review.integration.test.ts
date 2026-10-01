@@ -34,9 +34,10 @@ async function fixture(t: TestContext, name: string) {
       values($1,'issuer',$2,$3,'point',$4,200,'USD',1,$5,$5,$6,'reported','authoritative','filing_time','full',1)`, [id,ISSUER,metricId,periodEnd,asOf,source]);
     return id;
   }
-  async function run() {
+  // now: the run's cutoff clock (tests that move time pass their mocked clock).
+  async function run(now?: () => string) {
     const fresh = (await getAgent(db, agent.agent_id))!;
-    const stages = createThesisAgentLoopStages({ db: pool, userId: USER, runId: randomUUID(), agent: fresh, thesis });
+    const stages = createThesisAgentLoopStages({ db: pool, userId: USER, runId: randomUUID(), agent: fresh, thesis, ...(now ? { now } : {}) });
     return runAgentLoop({ pool, agent_id: agent.agent_id, current_watermarks: fresh.watermarks, stages });
   }
   const history = () => loadThesisHistory(db, { user_id: USER, agent_id: agent.agent_id });
@@ -74,20 +75,22 @@ test('unchanged facts expire at their exact freshness boundary within the same U
   tomorrow.setUTCHours(12, 0, 0, 0);
   const deadline = tomorrow.getTime();
   t.mock.timers.enable({ apis: ['Date'], now: deadline - 1_000 });
+  // This test moves time with a mocked host clock, so it drives the run's cutoff with it.
+  const hostNow = () => new Date().toISOString();
   const observed = new Date(deadline - 86_400_000).toISOString();
   await insertFact(observed, observed.slice(0, 10));
-  await run();
+  await run(hostNow);
   assert.equal((await history()).assessments[0].results[0].status, 'supported');
   t.mock.timers.setTime(deadline);
-  await run();
+  await run(hostNow);
   assert.equal((await history()).assessments.length, 1, 'the maximum age is inclusive');
   t.mock.timers.setTime(deadline + 1);
-  await run();
+  await run(hostNow);
   const expired = await history();
   assert.equal(expired.assessments[0].results[0].status, 'unresolved');
   assert.equal(expired.assessments.length, 2);
   t.mock.timers.setTime(deadline + 1_000);
-  await run();
+  await run(hostNow);
   assert.equal((await history()).assessments.length, 2, 'unchanged expired results still deduplicate');
 });
 

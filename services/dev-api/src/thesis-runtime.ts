@@ -24,6 +24,8 @@ export type ThesisRuntimeInput = {
   getModel?: () => Promise<Model>;
   /** Verified numerical conditions (THESIS_FINANCIAL_MODE=enforce); absent, metric conditions use the stored-fact checks. */
   financial?: SavedRuleDeps;
+  /** The run's cutoff clock. Defaults to the database's now(), the clock that stamps facts and assessments. */
+  now?: () => string | Promise<string>;
 };
 type ThesisRunStart = { thesis_version_id: string; as_of: string };
 type PreparedAssessment = {
@@ -44,7 +46,11 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
   let findings: FindingRow[] = [];
   return {
     async readDeltas() {
-      return { thesis_version_id: input.thesis.thesis_version_id, as_of: new Date().toISOString() };
+      // By default the cutoff comes from the database clock, the one that stamps
+      // facts (now()) and assessments (assessed_at). Taking it from the app clock
+      // let skew hide a just-ingested fact or fake a newer-assessment conflict (#143).
+      const asOf = input.now ? await input.now() : await databaseNow(input.db);
+      return { thesis_version_id: input.thesis.thesis_version_id, as_of: new Date(asOf).toISOString() };
     },
     async extractEvidence({ deltas }) {
       return loadThesisPacket(input.db, { thesis: input.thesis, userId: input.userId, asOf: deltas.as_of });
@@ -136,4 +142,9 @@ async function configuredModel(): Promise<Model> {
 }
 async function activity(db: QueryExecutor, input: ThesisRuntimeInput, stage: 'reading' | 'investigating' | 'found' | 'dismissed', summary: string) {
   return writeRunActivity(db, { user_id: input.userId, agent_id: input.agent.agent_id, stage, subject_refs: [input.thesis.subject_ref], summary, ts: new Date() });
+}
+
+async function databaseNow(db: QueryExecutor): Promise<string> {
+  const { rows } = await db.query<{ now: Date | string }>('select now() as now');
+  return new Date(rows[0].now).toISOString();
 }
