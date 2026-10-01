@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
-import { createCapture, createReplayHandler, type ReplayFixture } from "../src/replay.ts";
+import { createCapture, createReplayHandler, type RecordedExchange, type ReplayFixture } from "../src/replay.ts";
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => void;
 
@@ -165,6 +165,25 @@ test("replay keeps an evidence lookup from jumping the conversation ahead", asyn
   assert.equal(JSON.parse(await call("POST", "/v1/evidence/inspect", { ref: { kind: "fact", id: FACT } })).title, "revenue");
   // ...doesn't show a second turn the user never asked.
   assert.equal(JSON.parse(await call("GET", `/v1/chat/threads/${THREAD}/messages`)).turns, 1);
+});
+
+test("replay reaches reads recorded after an evidence lookup (a lookup isn't a write)", async (t) => {
+  const threads = (body: unknown): RecordedExchange => ({
+    method: "GET", path: "/v1/chat/threads", query: "", requestBody: "", status: 200, contentType: "application/json", body: json(body),
+  });
+  const fixture: ReplayFixture = {
+    version: 1,
+    exchanges: [threads({ threads: [] }), FIXTURE.exchanges[0]!, FIXTURE.exchanges[2]!, FIXTURE.exchanges[5]!, threads({ threads: [THREAD] })],
+  };
+  const base = await serve(t, createReplayHandler(fixture));
+  const call = async (method: string, path: string, body?: unknown) =>
+    (await fetch(`${base}${path}`, { method, ...(body ? { body: json(body) } : {}) })).text();
+
+  assert.deepEqual(JSON.parse(await call("GET", "/v1/chat/threads")).threads, []);
+  await call("POST", "/v1/chat/threads", { title: "" });
+  await call("POST", `/v1/chat/threads/${THREAD}/messages`, { message_id: USER_MSG, snapshot_id: USER_SNAP, content: intent });
+  // The sidebar after the turn lists the new thread, not the empty list from before it.
+  assert.deepEqual(JSON.parse(await call("GET", "/v1/chat/threads")).threads, [THREAD]);
 });
 
 test("replay answers an unrecorded request with a clear 404, not a guess", async (t) => {

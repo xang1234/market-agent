@@ -163,7 +163,8 @@ export function createReplayHandler(fixture: ReplayFixture): Handler {
     // Only exact-id recordings are left for a lookup (it sends only server ids).
     if (isLookup(candidates[0]!.e)) return candidates[0]!.index;
     if (isRead(candidates[0]!.e)) {
-      const nextWrite = exchanges.findIndex((e, index) => index > cursor && !isRead(e));
+      // Lookups are off the timeline, so they don't end a read window either.
+      const nextWrite = exchanges.findIndex((e, index) => index > cursor && !isRead(e) && !isLookup(e));
       const windowEnd = nextWrite === -1 ? exchanges.length : nextWrite;
       const current = candidates.find(({ index }) => index > cursor && index < windowEnd);
       const earlier = candidates.filter(({ index }) => index <= cursor).at(-1);
