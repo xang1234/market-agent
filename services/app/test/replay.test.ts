@@ -92,6 +92,36 @@ test("replay serves a recorded turn, with the client's own ids substituted in", 
   assert.equal(JSON.parse((await call("POST", "/v1/evidence/inspect", { ref: { kind: "source", id: SOURCE } })).text).title, "sec_edgar filing");
   assert.equal(JSON.parse((await call("POST", "/v1/evidence/inspect", { ref: { kind: "fact", id: FACT } })).text).title, "revenue");
   assert.equal(JSON.parse((await call("POST", "/v1/evidence/inspect", { ref: { kind: "source", id: SOURCE } })).text).title, "sec_edgar filing");
+  // ...and a reload after them still shows the client's own message id.
+  assert.deepEqual(
+    JSON.parse((await call("GET", `/v1/chat/threads/${THREAD}/messages`)).text).messages.map((m: { message_id: string }) => m.message_id),
+    [myMsg, ANSWER],
+  );
+});
+
+test("replay starts over when the client starts the recorded flow again (a second new thread)", async (t) => {
+  const base = await serve(t, createReplayHandler(FIXTURE));
+  const call = async (method: string, path: string, body?: unknown) =>
+    (await fetch(`${base}${path}`, { method, ...(body ? { body: json(body) } : {}) })).text();
+  const runConversation = async (msg: string, run: string) => {
+    await call("POST", "/v1/chat/threads", { title: "" });
+    const before = JSON.parse(await call("GET", `/v1/chat/threads/${THREAD}/messages`)).messages;
+    await call("POST", `/v1/chat/threads/${THREAD}/messages`, { message_id: msg, snapshot_id: USER_SNAP, content: intent });
+    const query = new URLSearchParams({ run_id: run, turn_id: msg, user_intent: intent, user_id: USER }).toString();
+    const stream = await call("GET", `/v1/chat/threads/${THREAD}/stream?${query}`);
+    const after = JSON.parse(await call("GET", `/v1/chat/threads/${THREAD}/messages`)).messages;
+    return { before, stream, after };
+  };
+
+  await runConversation("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+  const second = await runConversation("dddddddd-dddd-4ddd-8ddd-dddddddddddd", "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
+
+  assert.deepEqual(second.before, [], "the new thread opens empty, not with the last run's messages");
+  assert.match(second.stream, /"turn_id":"dddddddd-dddd-4ddd-8ddd-dddddddddddd"/);
+  assert.deepEqual(
+    second.after.map((m: { message_id: string }) => m.message_id),
+    ["dddddddd-dddd-4ddd-8ddd-dddddddddddd", ANSWER],
+  );
 });
 
 test("replay answers an unrecorded request with a clear 404, not a guess", async (t) => {

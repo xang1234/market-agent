@@ -173,6 +173,16 @@ export function createReplayHandler(fixture: ReplayFixture): Handler {
       return;
     }
     const e = exchanges[index]!;
+    // A write or stream that only matches at or before the cursor means the client has
+    // started the recorded flow again (another new thread): rewind there, so the replay
+    // doesn't carry the last run's state into it. Learned ids are kept; a new run's ids
+    // override them (a repeated evidence lookup also rewinds, harmlessly). ponytail: one
+    // replay session per app; concurrent tabs share it (the recorded thread id can't
+    // tell them apart).
+    if (!isRead(e) && index <= cursor) {
+      for (const usedIndex of [...used]) if (usedIndex >= index) used.delete(usedIndex);
+      cursor = index - 1;
+    }
     learnIds(signature(e.path, e.query, e.requestBody), signature(url.pathname, query, body));
     used.add(index);
     cursor = Math.max(cursor, index);
