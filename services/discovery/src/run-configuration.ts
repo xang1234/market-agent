@@ -17,19 +17,22 @@ export function defaultRunConfiguration(): RunConfigurationSnapshot {
 
 function modelConfigFromValue(value: unknown): ModelConfigSnapshot {
   if (!isRecord(value) || !hasExactKeys(value, ["role", "provider", "model", "max_output_tokens", "as_of"])) throw new DiscoveryError("validation", "model_config is invalid");
-  if (!roles.has(value.role as ModelConfigSnapshot["role"]) || !shortText(value.provider) || !shortText(value.model) || !Number.isInteger(value.max_output_tokens) || value.max_output_tokens < 1 || value.max_output_tokens > 10_000 || !isoTimestamp(value.as_of)) {
+  if (!roles.has(value.role as ModelConfigSnapshot["role"]) || !shortText(value.provider) || !shortText(value.model) || !positiveInt(value.max_output_tokens, 10_000) || !isoTimestamp(value.as_of)) {
     throw new DiscoveryError("validation", "model_config is invalid");
   }
   return { role: value.role as ModelConfigSnapshot["role"], provider: value.provider, model: value.model, max_output_tokens: value.max_output_tokens, as_of: value.as_of };
 }
 
 function limitsFromValue(value: unknown): Limits {
-  if (!isRecord(value) || !hasExactKeys(value, ["candidates", "research", "shortlist", "attempts", "input_chars", "output_tokens", "request_timeout_ms", "run_timeout_ms"]) || !isRecord(value.attempts) || !hasExactKeys(value.attempts, resources)) throw new DiscoveryError("validation", "limits are invalid");
+  if (!isRecord(value) || !hasExactKeys(value, ["candidates", "research", "shortlist", "attempts", "input_chars", "output_tokens", "request_timeout_ms", "run_timeout_ms"])) throw new DiscoveryError("validation", "limits are invalid");
+  const attempts = value.attempts;
+  if (!isRecord(attempts) || !hasExactKeys(attempts, resources)) throw new DiscoveryError("validation", "limits are invalid");
   const fields = ["candidates", "research", "shortlist", "input_chars", "output_tokens", "request_timeout_ms", "run_timeout_ms"] as const;
-  if (fields.some((field) => !Number.isInteger(value[field]) || value[field] < 1) || resources.some((resource) => !Number.isInteger(value.attempts[resource]) || value.attempts[resource] < 1)) throw new DiscoveryError("validation", "limits are invalid");
+  if (fields.some((field) => !positiveInt(value[field])) || resources.some((resource) => !positiveInt(attempts[resource]))) throw new DiscoveryError("validation", "limits are invalid");
   return structuredClone(value) as Limits;
 }
 
+function positiveInt(value: unknown, max = Number.POSITIVE_INFINITY): value is number { return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= max; }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean { return Object.keys(value).length === keys.length && keys.every((key) => key in value); }
 function shortText(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0 && value.length <= 200; }

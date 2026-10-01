@@ -56,6 +56,5 @@ function run(runId: string): RunRecord {
     started_at: "2026-09-10T12:00:00.000Z",
     finished_at: null,
     cancel_requested_at: null,
-    created_at: "2026-09-10T12:00:00.000Z",
   };
 }

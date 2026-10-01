@@ -15,7 +15,8 @@ type EligibleIdentityRecord = Omit<CanonicalIdentityRecord, "asset_type"> & { as
 
 export type CanonicalIdentityLookup = {
   findCached(input: { query: string; hit_ids: readonly string[] }): Promise<readonly CanonicalIdentityRecord[]>;
-  discover(input: { query: string; hit_ids: readonly string[] }): Promise<readonly CanonicalIdentityRecord[]>;
+  // operation_key names the reserved identity attempt this live lookup runs under.
+  discover(input: { query: string; hit_ids: readonly string[]; operation_key: string }): Promise<readonly CanonicalIdentityRecord[]>;
 };
 
 export type CanonicalIdentityProviderOptions = { lookup: CanonicalIdentityLookup };

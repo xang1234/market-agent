@@ -25,6 +25,11 @@ test("filtered candidate cursors remain valid when the cursor row changes state"
 function candidate(index: number): StoredCandidate {
   return {
     candidate_id: `90000000-0000-4000-8000-${index.toString().padStart(12, "0")}`,
+    lead_key: `candidate-${index}`,
+    seed: false,
+    primary_domain_lead: false,
+    first_seen: [index, 0],
+    lead_hit_ids: [],
     identity: null,
     name: `Candidate ${index}`,
     origins: [],

@@ -3,6 +3,7 @@ import type { TestContext } from "node:test";
 import { hashJsonValue } from "../../observability/src/tool-call.ts";
 import { bootstrapDatabase, connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { createDiscoveryRepository } from "../src/repository.ts";
+import { defaultRunConfiguration } from "../src/run-configuration.ts";
 import { briefFixture } from "./fixtures.ts";
 import type { RunConfigurationSnapshot } from "../src/types.ts";
 
@@ -41,7 +42,7 @@ export async function withCampaignDb(t: TestContext) {
       brief_version: saved.version,
       brief_hash: saved.hash,
       request_key: crypto.randomUUID(),
-      ...configuration,
+      ...(configuration ?? defaultRunConfiguration()),
     });
     return { campaign, brief: saved, run };
   }

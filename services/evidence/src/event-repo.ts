@@ -314,6 +314,7 @@ function parseOptionalJsonObject(
   if (value === null) return null;
   const parsed: unknown = typeof value === "string" ? JSON.parse(value) : value;
   assertOptionalJsonObject(parsed, label);
+  if (parsed == null) return null;
   return Object.freeze(parsed);
 }
 

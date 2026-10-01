@@ -124,7 +124,7 @@ test("a controllable slow transport is aborted per attempt and production keeps 
       reservations += 1;
       return { state: "dispatch", attempt_id: `00000000-0000-4000-8000-00000000000${reservations}`, attempt_number: reservations as 1 | 2, result: null };
     },
-    async finishAttempt(_scope, input) { finished.push({ outcome: input.outcome, name: (input.result as { name?: string }).name ?? "unknown" }); },
+    async finishAttempt(_scope: unknown, input: { outcome: string; result: unknown }) { finished.push({ outcome: input.outcome, name: (input.result as { name?: string }).name ?? "unknown" }); },
   } as never, {
     run_id: "30000000-0000-4000-8000-000000000001", user_id: "10000000-0000-4000-8000-000000000001", worker_id: "task10", epoch: 1, expires_at: "2026-09-10T00:00:00.000Z",
   }, new AbortController().signal);
