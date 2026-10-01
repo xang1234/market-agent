@@ -88,6 +88,9 @@ export type ChatAnalystToolRuntimeResult = {
   blocks: ReadonlyArray<Record<string, unknown>>;
   verification: ChatAnalystToolRuntimeVerification;
   tool_calls?: ReadonlyArray<ChatAnalystToolRuntimeToolCall>;
+  // Narrative sentences the guard dropped for quoting figures it could not
+  // attribute; reported on turn.completed so evals can count them (#144).
+  narrative_removed?: ReadonlyArray<string>;
 };
 
 export type ChatAnalystToolRuntime = (
@@ -1096,6 +1099,7 @@ async function toolBackedAnalystTurnRunner(
     message_id: messageId,
     bundle_id: context.bundleId,
     ...subjectRef,
+    ...(result.narrative_removed?.length ? { narrative_removed: result.narrative_removed } : {}),
   });
 }
 

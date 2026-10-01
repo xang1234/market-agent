@@ -191,6 +191,7 @@ const FACT_BLOCKS = [{
 
 async function composeWithReply(reply: string) {
   let prompt = "";
+  let removed: ReadonlyArray<string> = [];
   const blocks = await composeAnalystBlocksWithLlm({
     env: BASE_ENV,
     context: { userIntent: "Analyze NVDA", bundleId: "single_subject_analysis" },
@@ -201,16 +202,21 @@ async function composeWithReply(reply: string) {
       prompt = request.messages.map((message) => message.content).join("\n");
       return { text: reply };
     },
+    onNarrativeRemoved: (sentences) => {
+      removed = sentences;
+    },
   });
   const text = (blocks[0].segments as Array<{ text: string }>)[0].text;
-  return { text, prompt };
+  return { text, prompt, removed };
 }
 
 test("a replayed reply quoting a figure the user is not shown has that sentence stripped", async () => {
-  const { text, prompt } = await composeWithReply(
+  const { text, prompt, removed } = await composeWithReply(
     "Revenue reached $62.1B in Q4 2026. That is 38% growth year over year.",
   );
   assert.equal(text, "Revenue reached $62.1B in Q4 2026.");
+  // The dropped sentence is reported, so an eval can count guarded drops (#144).
+  assert.deepEqual(removed, ["That is 38% growth year over year."]);
   // The model is told which figures it may quote.
   assert.match(prompt, /displayed_figures/);
   assert.match(prompt, /\$62\.1B/);
