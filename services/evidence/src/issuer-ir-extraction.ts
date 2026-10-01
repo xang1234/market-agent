@@ -13,9 +13,12 @@ export type IssuerIrExtractionInput = {
   effective_time?: string | null;
 };
 
+// The rules extractor only writes JSON payloads, so readers can surface them as tool items.
+export type IssuerIrEvent = EventInput & { payload_json: JsonObject };
+
 export type IssuerIrExtractionResult = Readonly<{
   claims: ReadonlyArray<ClaimInput>;
-  events: ReadonlyArray<EventInput>;
+  events: ReadonlyArray<IssuerIrEvent>;
   candidate_facts: ReadonlyArray<JsonObject>;
   sentiment: ReadonlyArray<JsonObject>;
 }>;
@@ -34,7 +37,7 @@ export function extractIssuerIrEvidence(input: IssuerIrExtractionInput): IssuerI
   const text = normalizeDocumentText(input.text);
   const sentences = sentenceCandidates(text);
   const claims: ClaimInput[] = [];
-  const events: EventInput[] = [];
+  const events: IssuerIrEvent[] = [];
   const candidateFacts: JsonObject[] = [];
   const sentiment: JsonObject[] = [];
   const effectiveTime = input.effective_time ?? input.asset?.fetched_at ?? null;

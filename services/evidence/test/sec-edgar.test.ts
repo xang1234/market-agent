@@ -17,6 +17,7 @@ import {
 import { MemoryObjectStore } from "../src/object-store.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import { RecordingObjectStore } from "./recording-object-store.ts";
+import { fakeRows } from "./fakes.ts";
 
 const VALID_USER_AGENT = "Market-Agent/0.1 (ops@example.com)";
 
@@ -545,7 +546,7 @@ function recordingDb() {
             updated_at: new Date("2026-05-02T00:00:00.000Z"),
           };
       return {
-        rows: [row] as R[],
+        rows: fakeRows<R>([row]),
         command: "INSERT",
         rowCount: 1,
         oid: 0,
@@ -734,7 +735,7 @@ test("ingestSecFiling end-to-end through real createSource (regression guard for
       calls.push(text);
       if (/insert into sources/.test(text)) {
         return {
-          rows: [
+          rows: fakeRows<R>([
             {
               source_id: SOURCE_ID,
               provider: values?.[0],
@@ -746,7 +747,7 @@ test("ingestSecFiling end-to-end through real createSource (regression guard for
               content_hash: values?.[6],
               created_at: new Date("2026-05-02T00:00:00.000Z"),
             },
-          ] as R[],
+          ]),
           command: "INSERT",
           rowCount: 1,
           oid: 0,
@@ -754,7 +755,7 @@ test("ingestSecFiling end-to-end through real createSource (regression guard for
         };
       }
       return {
-        rows: [
+        rows: fakeRows<R>([
           {
             inserted: true,
             document_id: DOCUMENT_ID,
@@ -774,7 +775,7 @@ test("ingestSecFiling end-to-end through real createSource (regression guard for
             created_at: new Date(),
             updated_at: new Date(),
           },
-        ] as R[],
+        ]),
         command: "INSERT",
         rowCount: 1,
         oid: 0,

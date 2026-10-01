@@ -12,7 +12,9 @@ import { loadToolRegistry } from "../../tools/src/registry.ts";
 import { createEvidenceReaderToolHandlers } from "../src/reader/extract-tools.ts";
 import { MemoryObjectStore, rawBlobIdFromBytes } from "../src/object-store.ts";
 import type { QueryExecutor } from "../src/types.ts";
-import { recordingPoolExecutor } from "./recording-query-executor.ts";
+import type { JsonValue } from "../../shared/src/json.ts";
+import { recordingPoolExecutor, type RecordingQueryTarget } from "./recording-query-executor.ts";
+import { fakeRows } from "./fakes.ts";
 
 const SAMPLE_DOC_UUID = "70a0cc2e-e198-4b59-a5c9-9bd2da4a359b";
 const SAMPLE_SOURCE_UUID = "11111111-1111-4111-a111-111111111111";
@@ -61,7 +63,7 @@ function documentResearchDb() {
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       queries.push({ text, values });
       return {
-        rows: [{
+        rows: fakeRows<R>([{
           document_id: SAMPLE_DOC_UUID,
           source_id: SAMPLE_SOURCE_UUID,
           kind: "article",
@@ -73,7 +75,7 @@ function documentResearchDb() {
           trust_tier: "tertiary",
           license_class: "ephemeral",
           raw_blob_id: `ephemeral:${SAMPLE_SOURCE_UUID}`,
-        }] as R[],
+        }]),
         command: "SELECT",
         rowCount: 1,
         oid: 0,
@@ -216,8 +218,10 @@ test("dispatcher + handler factory: success path returns the structured shape on
   assert.equal(result.ok, true);
   if (result.ok === true) {
     assert.equal(result.tool_name, "extract_mentions");
-    assert.deepEqual([...result.result.items], []);
-    assert.deepEqual([...result.result.source_ids], [SAMPLE_SOURCE_UUID]);
+    const output = result.result;
+    assert.ok("items" in output, "an extraction tool returns items");
+    assert.deepEqual([...output.items], []);
+    assert.deepEqual([...output.source_ids], [SAMPLE_SOURCE_UUID]);
   }
 });
 
@@ -315,7 +319,7 @@ test("extract_mentions persists resolved candidates and returns mention items", 
       };
       insertedMentions.push(row);
       return {
-        rows: [row] as R[],
+        rows: fakeRows<R>([row]),
         command: "INSERT",
         rowCount: 1,
         oid: 0,
@@ -399,7 +403,7 @@ test("extract_mentions links and deletes stale mentions in one transaction", asy
       }
       if (/insert into mentions/.test(text)) {
         return {
-          rows: [{
+          rows: fakeRows<R>([{
             mention_id: mentionId,
             document_id: SAMPLE_DOC_UUID,
             subject_kind: values?.[1],
@@ -408,7 +412,7 @@ test("extract_mentions links and deletes stale mentions in one transaction", asy
             mention_count: values?.[4],
             confidence: values?.[5],
             created_at: new Date("2026-05-03T00:00:00.000Z"),
-          }] as R[],
+          }]),
           command: "INSERT",
           rowCount: 1,
           oid: 0,
@@ -420,7 +424,7 @@ test("extract_mentions links and deletes stale mentions in one transaction", asy
       }
       if (/from mentions/.test(text)) {
         return {
-          rows: [{
+          rows: fakeRows<R>([{
             mention_id: mentionId,
             document_id: SAMPLE_DOC_UUID,
             subject_kind: "issuer",
@@ -429,7 +433,7 @@ test("extract_mentions links and deletes stale mentions in one transaction", asy
             mention_count: 1,
             confidence: 0.8,
             created_at: new Date("2026-05-03T00:00:00.000Z"),
-          }] as R[],
+          }]),
           command: "SELECT",
           rowCount: 1,
           oid: 0,
@@ -469,7 +473,7 @@ test("extract_mentions uses an acquired client for transactional mention writes 
   const mentionId = "22222222-2222-4222-a222-222222222222";
   const issuerId = "33333333-3333-4333-a333-333333333333";
   const { db, poolQueries, txQueries, releases } = recordingPoolExecutor(async <R extends Record<string, unknown>>(
-    target,
+    target: RecordingQueryTarget,
     text: string,
     values?: unknown[],
   ) => {
@@ -487,7 +491,7 @@ test("extract_mentions uses an acquired client for transactional mention writes 
     }
     if (/insert into mentions/.test(text)) {
       return {
-        rows: [{
+        rows: fakeRows<R>([{
           mention_id: mentionId,
           document_id: SAMPLE_DOC_UUID,
           subject_kind: values?.[1],
@@ -496,7 +500,7 @@ test("extract_mentions uses an acquired client for transactional mention writes 
           mention_count: values?.[4],
           confidence: values?.[5],
           created_at: new Date("2026-05-03T00:00:00.000Z"),
-        }] as R[],
+        }]),
         command: "INSERT",
         rowCount: 1,
         oid: 0,
@@ -508,7 +512,7 @@ test("extract_mentions uses an acquired client for transactional mention writes 
     }
     if (/from mentions/.test(text)) {
       return {
-        rows: [{
+        rows: fakeRows<R>([{
           mention_id: mentionId,
           document_id: SAMPLE_DOC_UUID,
           subject_kind: "issuer",
@@ -517,7 +521,7 @@ test("extract_mentions uses an acquired client for transactional mention writes 
           mention_count: 1,
           confidence: 0.8,
           created_at: new Date("2026-05-03T00:00:00.000Z"),
-        }] as R[],
+        }]),
         command: "SELECT",
         rowCount: 1,
         oid: 0,
@@ -568,7 +572,7 @@ test("extract_mentions rolls back when stale mention deletion fails", async () =
       }
       if (/insert into mentions/.test(text)) {
         return {
-          rows: [{
+          rows: fakeRows<R>([{
             mention_id: "22222222-2222-4222-a222-222222222222",
             document_id: SAMPLE_DOC_UUID,
             subject_kind: values?.[1],
@@ -577,7 +581,7 @@ test("extract_mentions rolls back when stale mention deletion fails", async () =
             mention_count: values?.[4],
             confidence: values?.[5],
             created_at: new Date("2026-05-03T00:00:00.000Z"),
-          }] as R[],
+          }]),
           command: "INSERT",
           rowCount: 1,
           oid: 0,
@@ -666,7 +670,7 @@ test("extract_mentions reruns extraction and does not return stale stored mentio
       };
       storedMentions.push(row);
       return {
-        rows: [row] as R[],
+        rows: fakeRows<R>([row]),
         command: "INSERT",
         rowCount: 1,
         oid: 0,
@@ -834,7 +838,7 @@ test("extract_candidate_facts loads filing XBRL bytes and returns segment plus e
   assert.equal(out.items.some((item) => item.item_type === "xbrl_segment_fact"), true);
   assert.equal(out.items.some((item) => item.item_type === "xbrl_extension_fact"), true);
   const iphone = out.items.find(
-    (item) => item.item_type === "xbrl_segment_fact" && item.member?.name === "aapl:IPhoneMember",
+    (item) => item.item_type === "xbrl_segment_fact" && fieldOf(item.member, "name") === "aapl:IPhoneMember",
   );
   assert.ok(iphone);
   assert.equal(iphone.definition_as_of, "2024-11-01");
@@ -882,8 +886,8 @@ test("extract_candidate_facts includes non-GAAP reconciliations with GAAP mappin
   const reconciliation = out.items.find((item) => item.item_type === "non_gaap_reconciliation");
   assert.ok(reconciliation);
   assert.equal(reconciliation.measure_key, "net_income");
-  assert.equal(reconciliation.gaap?.label, "GAAP net income");
-  assert.equal(reconciliation.non_gaap?.label, "Non-GAAP net income");
+  assert.equal(fieldOf(reconciliation.gaap, "label"), "GAAP net income");
+  assert.equal(fieldOf(reconciliation.non_gaap, "label"), "Non-GAAP net income");
 });
 
 test("extract_candidate_facts maps object-store read failures to UPSTREAM_UNAVAILABLE", async () => {
@@ -986,3 +990,14 @@ test("extract_claims reads stored issuer IR bytes and returns structured IR clai
   assert.deepEqual([...out.source_ids], [SAMPLE_SOURCE_UUID]);
   assert.equal(out.items.some((item) => item.predicate === "guidance.change"), true);
 });
+
+// A tool item's nested JSON field, or undefined when the value is not an object.
+function fieldOf(value: JsonValue | undefined, key: string): JsonValue | undefined {
+  if (value === null || value === undefined || typeof value !== "object" || isJsonArray(value)) return undefined;
+  return value[key];
+}
+
+// Array.isArray does not narrow a readonly array out of a union.
+function isJsonArray(value: JsonValue): value is ReadonlyArray<JsonValue> {
+  return Array.isArray(value);
+}

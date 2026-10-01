@@ -19,13 +19,14 @@
 // without renegotiating the wire shape.
 
 import {
-  READER_TOOL_NAMES,
   ReaderToolError,
-  type ReaderToolName,
+  type ReaderExtractionToolInput,
+  type ReaderExtractionToolOutput,
   type ReaderToolHandler,
   type ReaderToolHandlerMap,
 } from "../../../tools/src/reader-tool-dispatcher.ts";
 import type { JsonObject } from "../../../tools/src/registry.ts";
+import { isSubjectRef, type SubjectRef } from "../../../shared/src/subject-ref.ts";
 import {
   fetchEvidenceDocumentMetadata,
   searchEvidenceDocuments,
@@ -62,6 +63,9 @@ import {
 import { extractNonGaapReconciliations } from "./non-gaap-reconciliation-extractor.ts";
 import { extractXbrlExtensionSegments } from "./xbrl-segment-extractor.ts";
 
+// Every extraction tool shares one input/output shape.
+type ExtractionToolHandler = (input: ReaderExtractionToolInput) => Promise<ReaderExtractionToolOutput>;
+
 export type EvidenceReaderToolDeps = {
   db: QueryExecutor;
   objectStore?: ObjectStore;
@@ -73,24 +77,17 @@ export function createEvidenceReaderToolHandlers(
   deps: EvidenceReaderToolDeps,
 ): Required<ReaderToolHandlerMap> {
   // `Required<>` so callers (and tests) can index by tool name without
-  // an undefined check — the dispatcher already requires every entry.
-  const handlers = {} as { [K in ReaderToolName]: ReaderToolHandler<K> };
-  for (const name of READER_TOOL_NAMES) {
-    if (name === "search_raw_documents") {
-      handlers[name] = makeSearchRawDocumentsHandler(deps);
-    } else if (name === "fetch_raw_document") {
-      handlers[name] = makeFetchRawDocumentHandler(deps);
-    } else if (name === "extract_mentions") {
-      handlers[name] = makeExtractMentionsHandler(deps);
-    } else if (name === "extract_claims" || name === "extract_events" || name === "classify_sentiment") {
-      handlers[name] = makeIssuerIrExtractionHandler(deps, name);
-    } else if (name === "extract_candidate_facts") {
-      handlers[name] = makeExtractCandidateFactsHandler(deps);
-    } else {
-      handlers[name] = makeStubHandler(deps);
-    }
-  }
-  return handlers;
+  // an undefined check — the dispatcher already requires every entry, and a
+  // missing tool fails to compile here.
+  return {
+    search_raw_documents: makeSearchRawDocumentsHandler(deps),
+    fetch_raw_document: makeFetchRawDocumentHandler(deps),
+    extract_mentions: makeExtractMentionsHandler(deps),
+    extract_claims: makeIssuerIrExtractionHandler(deps, "extract_claims"),
+    extract_events: makeIssuerIrExtractionHandler(deps, "extract_events"),
+    classify_sentiment: makeIssuerIrExtractionHandler(deps, "classify_sentiment"),
+    extract_candidate_facts: makeExtractCandidateFactsHandler(deps),
+  };
 }
 
 function makeSearchRawDocumentsHandler(deps: EvidenceReaderToolDeps): ReaderToolHandler<"search_raw_documents"> {
@@ -99,7 +96,7 @@ function makeSearchRawDocumentsHandler(deps: EvidenceReaderToolDeps): ReaderTool
     try {
       result = await searchEvidenceDocuments(deps.db, {
         query: input.query,
-        subjectRefs: input.subject_refs?.map((ref) => ({ kind: ref.kind, id: ref.id })),
+        subjectRefs: input.subject_refs?.map(readerSubjectRef),
         canonicalUrl: input.canonical_url ?? input.url,
         domain: input.domain,
         kind: parseDocumentKind(input.kind),
@@ -144,24 +141,7 @@ function makeFetchRawDocumentHandler(deps: EvidenceReaderToolDeps): ReaderToolHa
   };
 }
 
-function makeStubHandler(deps: EvidenceReaderToolDeps): ReaderToolHandler {
-  return async (input) => {
-    const document = await getDocument(deps.db, input.document_id);
-    if (!document) {
-      throw new ReaderToolError(
-        "NOT_FOUND",
-        `document_id "${input.document_id}" not found`,
-      );
-    }
-
-    return {
-      items: [],
-      source_ids: [document.source_id],
-    };
-  };
-}
-
-function makeExtractMentionsHandler(deps: EvidenceReaderToolDeps): ReaderToolHandler {
+function makeExtractMentionsHandler(deps: EvidenceReaderToolDeps): ExtractionToolHandler {
   return async (input) => {
     const hasExtractor = Boolean(deps.extractMentionCandidates);
     const hasResolver = Boolean(deps.resolveMention);
@@ -211,7 +191,7 @@ function makeExtractMentionsHandler(deps: EvidenceReaderToolDeps): ReaderToolHan
   };
 }
 
-function makeExtractCandidateFactsHandler(deps: EvidenceReaderToolDeps): ReaderToolHandler {
+function makeExtractCandidateFactsHandler(deps: EvidenceReaderToolDeps): ExtractionToolHandler {
   return async (input) => {
     const document = await getDocument(deps.db, input.document_id);
     if (!document) {
@@ -287,7 +267,7 @@ function makeExtractCandidateFactsHandler(deps: EvidenceReaderToolDeps): ReaderT
 function makeIssuerIrExtractionHandler(
   deps: EvidenceReaderToolDeps,
   name: "extract_claims" | "extract_events" | "classify_sentiment",
-): ReaderToolHandler {
+): ExtractionToolHandler {
   return async (input) => {
     const document = await getDocument(deps.db, input.document_id);
     if (!document) {
@@ -425,4 +405,11 @@ function errorMessage(error: unknown): string {
 function isDocumentResearchInputError(error: unknown): boolean {
   return error instanceof Error &&
     /^(searchEvidenceDocuments|query|canonical_url|domain|kind|publishedFrom|publishedTo|limit|subjectRefs|document_id|user_id):/.test(error.message);
+}
+
+function readerSubjectRef(ref: { kind: string; id: string }, index: number): SubjectRef {
+  if (!isSubjectRef(ref)) {
+    throw new ReaderToolError("INVALID_ARGUMENT", `subject_refs[${index}]: must be a valid subject ref`);
+  }
+  return { kind: ref.kind, id: ref.id };
 }

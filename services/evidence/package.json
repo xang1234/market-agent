@@ -14,13 +14,16 @@
     "backfill:sec-8k": "node --experimental-strip-types src/sec-8k-backfill-cli.ts",
     "enrich:sec-8k": "node --experimental-strip-types src/sec-8k-enrichment-cli.ts",
     "reprocess:sec-13f": "node --experimental-strip-types src/sec-13f-reprocess-cli.ts",
-    "crawl:sec-daily": "node --experimental-strip-types src/sec-daily-crawl-cli.ts"
+    "crawl:sec-daily": "node --experimental-strip-types src/sec-daily-crawl-cli.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1039.0",
     "pg": "^8.20.0"
   },
   "devDependencies": {
-    "@types/pg": "^8.20.0"
+    "@types/node": "^24.19.0",
+    "@types/pg": "^8.20.0",
+    "typescript": "~6.0.2"
   }
 }

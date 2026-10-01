@@ -4,6 +4,7 @@ import test, { type TestContext } from "node:test";
 
 import { createEvidenceReviewServer } from "../src/review-http.ts";
 import type { FactInput, FactPoolClient } from "../src/fact-repo.ts";
+import { fakePgQuery } from "./fakes.ts";
 
 const REVIEW_ID = "66666666-6666-4666-8666-666666666666";
 const FACT_ID = "11111111-1111-4111-a111-111111111111";
@@ -23,7 +24,7 @@ class FakeReviewDb implements FactPoolClient {
     return this;
   }
 
-  async query(text: string, values?: unknown[]) {
+  readonly query = fakePgQuery(async (text: string, values?: unknown[]) => {
     this.queries.push({ text, values });
 
     if (/extract\(epoch from/i.test(text) && /from fact_review_queue/i.test(text)) {
@@ -95,7 +96,7 @@ class FakeReviewDb implements FactPoolClient {
     }
 
     return { rows: [], rowCount: 0 };
-  }
+  });
 
   release(destroy = false): void {
     this.releaseArgs.push(destroy);

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { extractXbrlExtensionSegments } from "../src/reader/xbrl-segment-extractor.ts";
+import { extractXbrlExtensionSegments, type XbrlSegmentFactItem } from "../src/reader/xbrl-segment-extractor.ts";
 
 const SAMPLE_SOURCE_UUID = "11111111-1111-4111-a111-111111111111";
 
@@ -140,7 +140,8 @@ test("extractXbrlExtensionSegments honors Inline XBRL sign attributes", () => {
   });
 
   const operatingLoss = result.items.find(
-    (item) => item.item_type === "xbrl_segment_fact" && item.concept.local_name === "OperatingIncomeLoss",
+    (item): item is XbrlSegmentFactItem =>
+      item.item_type === "xbrl_segment_fact" && item.concept.local_name === "OperatingIncomeLoss",
   );
   assert.ok(operatingLoss);
   assert.equal(operatingLoss.value_num, -1_234_000_000);

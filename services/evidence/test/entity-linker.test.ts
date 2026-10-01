@@ -9,6 +9,7 @@ import {
   type DetectedMentionCandidate,
 } from "../src/reader/entity-linker.ts";
 import type { QueryExecutor } from "../src/types.ts";
+import { fakeRows } from "./fakes.ts";
 
 const DOCUMENT_ID = "11111111-1111-4111-a111-111111111111";
 const ISSUER_ID = "22222222-2222-4222-a222-222222222222";
@@ -20,7 +21,7 @@ function recordingDb() {
     async query<R extends Record<string, unknown>>(_text: string, values?: unknown[]) {
       inserts.push(values ?? []);
       return {
-        rows: [
+        rows: fakeRows<R>([
           {
             mention_id: `44444444-4444-4444-a444-44444444444${inserts.length}`,
             document_id: values?.[0],
@@ -31,7 +32,7 @@ function recordingDb() {
             confidence: values?.[5],
             created_at: new Date("2026-05-03T00:00:00.000Z"),
           },
-        ] as R[],
+        ]),
         command: "INSERT",
         rowCount: 1,
         oid: 0,

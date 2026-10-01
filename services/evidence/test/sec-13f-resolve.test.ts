@@ -11,7 +11,7 @@ function holding(over: Partial<Form13fHolding>): Form13fHolding {
   return { nameOfIssuer: "X", cusip: "000000000", valueRaw: 0, shares: 0, sshPrnamtType: "SH", putCall: null, ...over };
 }
 function filing(holdings: Form13fHolding[]): Form13fFiling {
-  return { periodOfReport: "2026-03-31", holdings };
+  return { periodOfReport: "2026-03-31", amendmentType: null, holdings };
 }
 
 test("resolveHoldingsByIssuer sums multi-class CUSIPs by issuer and returns the misses", async (t) => {

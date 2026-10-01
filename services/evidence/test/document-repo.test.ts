@@ -13,6 +13,7 @@ import {
   connectedClient,
   dockerAvailable,
 } from "../../../db/test/docker-pg.ts";
+import { fakeRows } from "./fakes.ts";
 
 const SOURCE_ID = "00000000-0000-4000-8000-000000000001";
 const DOCUMENT_ID = "00000000-0000-4000-8000-000000000101";
@@ -29,7 +30,7 @@ test("createDocument inserts metadata and returns created status", async () => {
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       queries.push({ text, values });
       return {
-        rows: [
+        rows: fakeRows<R>([
           {
             inserted: true,
             document_id: DOCUMENT_ID,
@@ -49,7 +50,7 @@ test("createDocument inserts metadata and returns created status", async () => {
             created_at: new Date("2026-04-29T00:00:00.000Z"),
             updated_at: new Date("2026-04-29T00:00:00.000Z"),
           },
-        ] as R[],
+        ]),
         command: "INSERT",
         rowCount: 1,
         oid: 0,
@@ -100,7 +101,7 @@ test("createDocument returns existing row when content hash and raw blob id alre
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       queries.push({ text, values });
       return {
-        rows: [
+        rows: fakeRows<R>([
           {
             inserted: false,
             document_id: DOCUMENT_ID,
@@ -120,7 +121,7 @@ test("createDocument returns existing row when content hash and raw blob id alre
             created_at: new Date("2026-04-29T00:00:00.000Z"),
             updated_at: new Date("2026-04-29T00:00:00.000Z"),
           },
-        ] as R[],
+        ]),
         command: "INSERT",
         rowCount: 1,
         oid: 0,
@@ -153,7 +154,7 @@ test("getDocument returns a document row by id", async () => {
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       queries.push({ text, values });
       return {
-        rows: [
+        rows: fakeRows<R>([
           {
             document_id: DOCUMENT_ID,
             source_id: SOURCE_ID,
@@ -172,7 +173,7 @@ test("getDocument returns a document row by id", async () => {
             created_at: new Date("2026-04-29T00:00:00.000Z"),
             updated_at: new Date("2026-04-29T00:00:00.000Z"),
           },
-        ] as R[],
+        ]),
         command: "SELECT",
         rowCount: 1,
         oid: 0,

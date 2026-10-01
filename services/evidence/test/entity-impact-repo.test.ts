@@ -10,6 +10,7 @@ import {
   listEntityImpactsForClaim,
 } from "../src/entity-impact-repo.ts";
 import type { QueryExecutor } from "../src/types.ts";
+import { fakeRows } from "./fakes.ts";
 
 const ENTITY_IMPACT_ID = "11111111-1111-4111-a111-111111111111";
 const CLAIM_ID = "22222222-2222-4222-a222-222222222222";
@@ -36,7 +37,7 @@ function recordingDb(rows = [impactRow()]) {
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       queries.push({ text, values });
       return {
-        rows: rows as R[],
+        rows: fakeRows<R>(rows),
         command: text.includes("insert") ? "INSERT" : "SELECT",
         rowCount: rows.length,
         oid: 0,

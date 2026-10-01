@@ -322,7 +322,8 @@ async function persistKindedSource(
       },
     );
   } catch (err) {
-    await cleanupSourceAfterFailedIngest(deps.db, source.source_id, err);
+    // Always throws; returning it lets the compiler see that `ingest` is set below.
+    return cleanupSourceAfterFailedIngest(deps.db, source.source_id, err);
   }
 
   return Object.freeze({ source, ingest });

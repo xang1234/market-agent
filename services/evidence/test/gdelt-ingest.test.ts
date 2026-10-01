@@ -16,6 +16,7 @@ import type { GdeltArticleDiscovery } from "../src/providers/gdelt.ts";
 import type { QueryExecutor } from "../src/types.ts";
 import type { ReaderToolInput, ReaderToolOutput } from "../../tools/src/reader-tool-dispatcher.ts";
 import { RecordingObjectStore } from "./recording-object-store.ts";
+import { fakeRows } from "./fakes.ts";
 
 const SUBJECT_ID = "33333333-3333-4333-a333-333333333333";
 const SOURCE_ID = "11111111-1111-4111-a111-111111111111";
@@ -79,7 +80,7 @@ function recordingDb(existing: ReadonlyArray<GdeltArticleDiscovery> = []) {
         });
         sources.set(String(values?.[2]), row);
         return {
-          rows: [row] as R[],
+          rows: fakeRows<R>([row]),
           command: "INSERT",
           rowCount: 1,
           oid: 0,
@@ -101,7 +102,7 @@ function recordingDb(existing: ReadonlyArray<GdeltArticleDiscovery> = []) {
         });
         if (canonicalUrl) documents.set(canonicalUrl, row);
         return {
-          rows: [row] as R[],
+          rows: fakeRows<R>([row]),
           command: "INSERT",
           rowCount: 1,
           oid: 0,
@@ -111,7 +112,7 @@ function recordingDb(existing: ReadonlyArray<GdeltArticleDiscovery> = []) {
 
       if (/insert into mentions/i.test(text)) {
         return {
-          rows: [{
+          rows: fakeRows<R>([{
             mention_id: "44444444-4444-4444-a444-444444444444",
             document_id: values?.[0],
             subject_kind: values?.[1],
@@ -120,7 +121,7 @@ function recordingDb(existing: ReadonlyArray<GdeltArticleDiscovery> = []) {
             mention_count: values?.[4],
             confidence: values?.[5],
             created_at: new Date("2026-05-30T01:00:00.000Z"),
-          }] as R[],
+          }]),
           command: "INSERT",
           rowCount: 1,
           oid: 0,
@@ -350,7 +351,9 @@ test("ingestGdeltArticleDiscoveries stores metadata-only GDELT articles and rout
     routed.map((call) => call.toolName),
     ["extract_mentions", "extract_claims", "extract_events", "classify_sentiment"],
   );
-  const hint = routed[0]?.input.schema_hint as Record<string, unknown>;
+  const firstInput = routed[0]?.input;
+  assert.ok(firstInput && "schema_hint" in firstInput, "extraction routes carry a schema hint");
+  const hint = firstInput.schema_hint as Record<string, unknown>;
   assert.equal(hint.storage_policy, "metadata_only");
   assert.equal(hint.provider, GDELT_ARTICLE_DISCOVERY_PROVIDER);
   assert.match(String(hint.allowed_text), /Acme Robotics Holdings lifted guidance/);

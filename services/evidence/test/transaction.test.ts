@@ -78,9 +78,9 @@ test("withTransaction runs registered rollback cleanups in reverse order", async
 
   await assert.rejects(
     withTransaction(db, async (tx) => {
-      tx.onRollback(() => cleanupCalls.push("first"));
-      const unregister = tx.onRollback(() => cleanupCalls.push("removed"));
-      tx.onRollback(() => cleanupCalls.push("second"));
+      tx.onRollback(() => { cleanupCalls.push("first"); });
+      const unregister = tx.onRollback(() => { cleanupCalls.push("removed"); });
+      tx.onRollback(() => { cleanupCalls.push("second"); });
       unregister();
       await tx.db.query("insert into things");
       throw new Error("insert failed");
@@ -107,7 +107,7 @@ test("withTransaction does not run rollback cleanups after an uncertain commit",
 
   await assert.rejects(
     withTransaction(db, async (tx) => {
-      tx.onRollback(() => cleanupCalls.push("cleanup"));
+      tx.onRollback(() => { cleanupCalls.push("cleanup"); });
       await tx.db.query("insert into things");
     }),
     /commit connection lost/,

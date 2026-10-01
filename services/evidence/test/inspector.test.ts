@@ -12,6 +12,7 @@ import {
   GDELT_DISCOVERY_LICENSE_CLASS,
   GDELT_DISCOVERY_TRUST_TIER,
 } from "../src/gdelt-source.ts";
+import { fakePgQuery } from "./fakes.ts";
 
 type QueryCall = { text: string; values?: unknown[] };
 
@@ -30,10 +31,10 @@ function stubDb(rowsByQuery: (text: string, values?: unknown[]) => unknown[]) {
   return {
     calls,
     db: {
-      async query<T extends Record<string, unknown> = Record<string, unknown>>(text: string, values?: unknown[]) {
+      query: fakePgQuery((text, values) => {
         calls.push({ text, values });
-        return { rows: rowsByQuery(text, values) as T[] };
-      },
+        return { rows: rowsByQuery(text, values) };
+      }),
     },
   };
 }

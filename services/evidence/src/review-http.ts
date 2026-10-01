@@ -227,9 +227,12 @@ async function readBody(req: IncomingMessage): Promise<string> {
 }
 
 function optionalNotes(body: Record<string, unknown>): string | null {
-  if (body.notes == null) return null;
-  assertClientValidation(() => assertNonEmptyString(body.notes, "notes"));
-  return body.notes;
+  const notes = body.notes;
+  if (notes == null) return null;
+  return assertClientValidation(() => {
+    assertNonEmptyString(notes, "notes");
+    return notes;
+  });
 }
 
 function optionalCandidate(body: Record<string, unknown>): FactInput | undefined {
@@ -257,9 +260,9 @@ function isClientError(error: Error): boolean {
   );
 }
 
-function assertClientValidation(assertion: () => void): void {
+function assertClientValidation<T>(assertion: () => T): T {
   try {
-    assertion();
+    return assertion();
   } catch (error) {
     if (error instanceof Error) throw new ClientRequestError(error.message);
     throw error;
