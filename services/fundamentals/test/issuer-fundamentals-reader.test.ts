@@ -27,16 +27,17 @@ test("loadRecentIssuerFundamentals filters on channel + displayable verification
   const { text, values } = calls[0];
   // fact_id is selected for provenance (fra-eegq).
   assert.match(text, /f\.fact_id::text as fact_id/);
-  // The two new eligibility predicates are present...
-  assert.match(text, /entitlement_channels \? \$2/);
-  assert.match(text, /verification_status = any\(\$3::verification_status\[\]\)/);
+  // The eligibility predicates (owned by loadUsableFacts) are present...
+  assert.match(text, /entitlement_channels \? \$3/);
+  assert.match(text, /verification_status = any\(\$4::verification_status\[\]\)/);
   // ...alongside the pre-existing ones.
   assert.match(text, /f\.method = 'reported'/);
   assert.match(text, /f\.superseded_by is null/);
   assert.match(text, /f\.invalidated_at is null/);
-  // Params: issuer id, default channel 'app', displayable statuses, limit.
+  // Params: subject kind, issuer id, default channel 'app', displayable statuses, limit.
   assert.deepEqual(values, [
-    ISSUER.id,
+    "issuer",
+    [ISSUER.id],
     "app",
     ["authoritative", "corroborated"],
     24,
@@ -47,7 +48,8 @@ test("loadRecentIssuerFundamentals honors an explicit channel", async () => {
   const { db, calls } = recordingDb([]);
   await loadRecentIssuerFundamentals(db, ISSUER, { channel: "export", limit: 5 });
   assert.deepEqual(calls[0].values, [
-    ISSUER.id,
+    "issuer",
+    [ISSUER.id],
     "export",
     ["authoritative", "corroborated"],
     5,

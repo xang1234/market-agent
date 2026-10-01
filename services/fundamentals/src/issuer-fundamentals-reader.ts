@@ -1,7 +1,7 @@
-import { DISPLAYABLE_VERIFICATION_STATUSES } from "../../evidence/src/promotion-rules.ts";
 import type { FactEntitlementChannel } from "../../evidence/src/fact-repo.ts";
 import type { PeriodKind } from "./statement.ts";
 import type { IssuerSubjectRef } from "./subject-ref.ts";
+import { loadUsableFacts } from "./usable-facts.ts";
 
 // The reader only reads `.rows`. A pg.Pool/Client and the screener's narrower
 // ScreenerCandidateQueryExecutor both satisfy this minimal shape, so callers
@@ -13,10 +13,10 @@ type IssuerFundamentalsQueryExecutor = {
   ): Promise<{ rows: R[] }>;
 };
 
-// Canonical "recent fundamentals for an issuer" reader. Owns the single
-// definition of which facts may ground a user-facing answer: reported, active,
-// entitled for the egress channel, and display-verified. Chat reads through
-// this; the screener follow-up (fra-savt sibling) will reuse it.
+// Canonical "recent fundamentals for an issuer" reader, used by chat and the
+// screener. Which facts may ground an answer is decided by loadUsableFacts
+// (usable-facts.ts): eligibility, dated, currency, canonical, and the optional
+// snapshot cutoff.
 export type IssuerFundamentalFact = {
   fact_id: string;
   metric_key: string;
@@ -44,21 +44,8 @@ export type LoadRecentIssuerFundamentalsOptions = {
   // Row cap. Omit ⇒ no LIMIT clause (the caller bounds the query another way,
   // e.g. the screener's periodKind + metricKeys filters).
   limit?: number;
-};
-
-type FactRow = {
-  fact_id: string;
-  metric_key: string;
-  display_name: string | null;
-  value_num: number | string | null;
-  value_text: string | null;
-  unit: string | null;
-  currency: string | null;
-  scale: number | string | null;
-  fiscal_year: number | null;
-  fiscal_period: string | null;
-  as_of: Date | string;
-  source_id: string;
+  // Snapshot cutoff: only facts known by then (see loadUsableFacts). Omit ⇒ now.
+  cutoff?: string;
 };
 
 export async function loadRecentIssuerFundamentals(
@@ -66,83 +53,30 @@ export async function loadRecentIssuerFundamentals(
   issuer: IssuerSubjectRef,
   options: LoadRecentIssuerFundamentalsOptions,
 ): Promise<IssuerFundamentalFact[]> {
-  const channel = options.channel ?? "app";
-  const params: unknown[] = [issuer.id, channel, [...DISPLAYABLE_VERIFICATION_STATUSES]];
-
-  let filters = "";
-  if (options.periodKind !== undefined) {
-    params.push(options.periodKind);
-    filters += `\n        and f.period_kind = $${params.length}`;
-  }
-  if (options.metricKeys !== undefined) {
-    params.push([...options.metricKeys]);
-    filters += `\n        and m.metric_key = any($${params.length}::text[])`;
-  }
-
-  let limitClause = "";
-  if (options.limit !== undefined) {
-    params.push(options.limit);
-    limitClause = `\n      limit $${params.length}`;
-  }
-
-  const { rows } = await db.query<FactRow>(
-    // Eligibility filter — the one place chat + screener share. method='reported'
-    // keeps derived/estimated out; entitlement_channels and verification_status
-    // give parity with the egress guard (fact-repo.listFactsForEgress) and the
-    // promotion rules (only promoted facts ground answers). periodKind/metricKeys
-    // are optional narrowings used by the screener's annual fixed-metric path.
-    `select f.fact_id::text as fact_id,
-            m.metric_key,
-            m.display_name,
-            f.value_num,
-            f.value_text,
-            f.unit,
-            f.currency,
-            f.scale,
-            f.fiscal_year,
-            f.fiscal_period,
-            f.as_of,
-            f.source_id::text as source_id
-       from facts f
-       join metrics m on m.metric_id = f.metric_id
-      where f.subject_kind = 'issuer'
-        and f.subject_id = $1::uuid
-        and f.method = 'reported'
-        and f.superseded_by is null
-        and f.invalidated_at is null
-        and f.entitlement_channels ? $2
-        and f.verification_status = any($3::verification_status[])${filters}
-      order by f.fiscal_year desc nulls last,
-               f.as_of desc,
-               m.metric_key${limitClause}`,
-    params,
-  );
-  return rows.map(factFromRow);
-}
-
-function factFromRow(row: FactRow): IssuerFundamentalFact {
-  return Object.freeze({
-    fact_id: row.fact_id,
-    metric_key: row.metric_key,
-    display_name: row.display_name,
-    value_num: numericOrNull(row.value_num),
-    value_text: row.value_text,
-    unit: row.unit,
-    currency: row.currency,
-    scale: numericOrNull(row.scale) ?? 1,
-    fiscal_year: row.fiscal_year,
-    fiscal_period: row.fiscal_period,
-    as_of: isoString(row.as_of),
-    source_id: row.source_id,
+  // The rules live in loadUsableFacts (#159); this keeps the issuer-shaped API.
+  // Text-only facts stay in (numericOnly: false) for callers like model context.
+  const facts = await loadUsableFacts(db, {
+    subjectKind: "issuer",
+    subjectIds: [issuer.id],
+    channel: options.channel ?? "app",
+    numericOnly: false,
+    ...(options.cutoff === undefined ? {} : { cutoff: options.cutoff }),
+    ...(options.periodKind === undefined ? {} : { periodKind: options.periodKind }),
+    ...(options.metricKeys === undefined ? {} : { metricKeys: options.metricKeys }),
+    ...(options.limit === undefined ? {} : { limit: options.limit }),
   });
-}
-
-function numericOrNull(value: number | string | null): number | null {
-  if (value === null) return null;
-  const n = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
-function isoString(value: Date | string): string {
-  return value instanceof Date ? value.toISOString() : value;
+  return facts.map((fact) => Object.freeze({
+    fact_id: fact.fact_id,
+    metric_key: fact.metric_key,
+    display_name: fact.display_name,
+    value_num: fact.value_num,
+    value_text: fact.value_text,
+    unit: fact.unit,
+    currency: fact.currency,
+    scale: fact.scale,
+    fiscal_year: fact.fiscal_year,
+    fiscal_period: fact.fiscal_period,
+    as_of: fact.as_of,
+    source_id: fact.source_id,
+  }));
 }
