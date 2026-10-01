@@ -70,6 +70,9 @@ export function createSecBackedStatementRepository(
     async find(lookup: StatementLookup): Promise<NormalizedStatement | null> {
       const existing = await loadStatementFromFacts(db, lookup, options.cutoff);
       if (existing) return existing.normalized;
+      // A cutoff-scoped lookup never fetches live: whatever SEC returns now was
+      // not known at the cutoff.
+      if (options.cutoff !== undefined) return null;
 
       if (lookup.family !== "income" || lookup.basis !== "as_reported") {
         return null;
@@ -219,7 +222,10 @@ export function createSecBackedStatsRepository(
   return {
     async find(issuer_id: UUID): Promise<KeyStatsEnvelope | null> {
       const latest = await loadLatestFiscalYear(db, issuer_id, options.cutoff)
-        ?? await discoverLatestFiscalYear(db, issuer_id, options.fetcher ?? null, logger);
+        // A cutoff-scoped lookup never discovers live (see the statement repository).
+        ?? (options.cutoff === undefined
+          ? await discoverLatestFiscalYear(db, issuer_id, options.fetcher ?? null, logger)
+          : null);
       if (!latest) return null;
 
       const current = await options.statements.find({

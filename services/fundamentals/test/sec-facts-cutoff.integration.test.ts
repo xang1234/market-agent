@@ -80,6 +80,16 @@ test("the SEC statement and stats repositories read as of the cutoff", { skip: !
     assert.equal((await stats().find(ISSUER_ID))?.fiscal_year, 2025);
   });
 
+  await t.test("with a cutoff, a miss never falls through to the live SEC fetcher", async () => {
+    const fetcher = (async () => assert.fail("a cutoff-scoped lookup must not fetch live data")) as never;
+    const statements = createSecBackedStatementRepository(client as never, { fetcher, sourceId: sourceA, cutoff: CUTOFF });
+    assert.equal(await statements.find({ ...lookup, fiscal_year: 2030 }), null);
+    const otherIssuer = "22222222-2222-4222-8222-222222222222";
+    await client.query(`insert into issuers (issuer_id, legal_name, cik) values ($1::uuid, 'Other Co', '0000000001')`, [otherIssuer]);
+    const stats = createSecBackedStatsRepository(client, { statements, fetcher, cutoff: CUTOFF });
+    assert.equal(await stats.find(otherIssuer), null);
+  });
+
   await t.test("the cited-fact loader can require facts known by the cutoff", async () => {
     assert.deepEqual(await loadVerifierFactsForRefs(client, { fact_refs: [late.fact_id], cutoff: CUTOFF, requireKnownByCutoff: true }), []);
     // Activity only (as the seal uses it): the fact is active, so it loads.
