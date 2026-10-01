@@ -500,6 +500,41 @@ test("DEV_MODE=data refuses a database that still holds the frozen golden datase
   assert.deepEqual(frozen.lines("start:"), [], "nothing starts on frozen data");
 });
 
+test("DEV_MODE=ui runs only the app, replaying a fixture: no containers, migrations, seeds or LLM", async () => {
+  const { result, lines, trace } = await traceUp({ DEV_PROFILE: "chat", DEV_MODE: "ui" }, [
+    ...NPM_TRACE,
+    'llm_deployable(){ printf "llm-check\\n" >> "$TRACE_FILE"; }',
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(lines("start:"), ["app"]);
+  assert.deepEqual(lines("ready:"), ["app"]);
+  assert.deepEqual(lines("compose:"), [], "no containers");
+  assert.deepEqual(lines("npm:").filter((l) => /migrate|seed/.test(l)), [], "no database work");
+  assert.doesNotMatch(trace, /llm-check/, "no LLM needed");
+});
+
+test("DEV_MODE=ui needs the one-process chat profile", async () => {
+  const { result, trace } = await traceUp({ DEV_MODE: "ui" });
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /DEV_MODE=ui.*DEV_PROFILE=chat/);
+  assert.equal(trace, "");
+});
+
+test("switching a running chat stack into DEV_MODE=ui restarts the app", async () => {
+  const { result, trace } = await traceUp({ DEV_PROFILE: "chat" }, [
+    ...NPM_TRACE,
+    'stop_process(){ printf "stop:%s\\n" "$1" >> "$TRACE_FILE"; kill "$(cat "$PID_DIR/$1.pid")" 2>/dev/null; rm -f "$PID_DIR/$1.pid"; }',
+    "port_listening(){ return 1; }",
+    "up",
+    'printf "mark:ui\\n" >> "$TRACE_FILE"',
+    "export DEV_MODE=ui",
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  const [, ui] = trace.split(/mark:\S+\n/);
+  assert.match(ui, /^stop:app$/m);
+  assert.match(ui, /^start:app$/m);
+});
+
 test("an unknown DEV_MODE, or DEV_NO_KEYS with a live mode, fails before starting anything", async () => {
   const unknown = await traceUp({ DEV_MODE: "turbo" });
   assert.notEqual(unknown.result.code, 0);
@@ -662,6 +697,7 @@ test("down stops compose services without deleting dev database containers", asy
       "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
       `TRACE_FILE="${traceFile}"`,
       'compose(){ printf "compose:%s\\n" "$*" >> "$TRACE_FILE"; }',
+      "have_docker(){ return 0; }", // the contract holds on a Docker-free machine too
       "down",
     ].join("\n"),
     fixture.root,
@@ -673,6 +709,41 @@ test("down stops compose services without deleting dev database containers", asy
   assert.doesNotMatch(trace, /compose:down/);
 
   await rm(fixture.root, { recursive: true, force: true });
+});
+
+test("down works without Docker installed (UI mode needs none): it skips Compose", async () => {
+  const fixture = await createShellFixture();
+  const traceFile = join(fixture.root, "trace.log");
+  const result = await runBash(
+    [
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      `TRACE_FILE="${traceFile}"`,
+      "have_docker(){ return 1; }",
+      'compose(){ printf "compose:%s\\n" "$*" >> "$TRACE_FILE"; return 127; }',
+      "down",
+    ].join("\n"),
+    fixture.root,
+  );
+  const trace = await readFile(traceFile, "utf8").catch(() => "");
+  await rm(fixture.root, { recursive: true, force: true });
+  assert.equal(result.code, 0, result.stderr);
+  assert.doesNotMatch(trace, /compose:/);
+});
+
+test("down still succeeds when the Docker daemon is unavailable, warning instead", async () => {
+  const fixture = await createShellFixture();
+  const result = await runBash(
+    [
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      "have_docker(){ return 0; }",
+      'compose(){ echo "Cannot connect to the Docker daemon" >&2; return 1; }',
+      "down",
+    ].join("\n"),
+    fixture.root,
+  );
+  await rm(fixture.root, { recursive: true, force: true });
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stderr, /docker compose stop failed.*daemon/i);
 });
 
 test("docker compose declares persistent storage for Postgres dev data", async () => {

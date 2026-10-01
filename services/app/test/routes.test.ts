@@ -2,7 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import viteConfig from "../../../web/vite.config.ts";
-import { routeFor } from "../src/routes.ts";
+import { isApiPath, routeFor } from "../src/routes.ts";
+
+test("every /v1 path is an API path, registered prefix or not (never the SPA's HTML)", () => {
+  assert.equal(isApiPath("/v1/chat/threads"), true);
+  assert.equal(isApiPath("/v1/settings"), true, "a prefix not in the route table yet");
+  assert.equal(isApiPath("/v1"), true);
+  assert.equal(isApiPath("/chat"), false);
+  assert.equal(isApiPath("/v1x/thing"), false);
+  assert.equal(isApiPath("/src/main.tsx"), false);
+});
 
 test("every prefix the Vite dev proxy knows is either served in-process or parked", () => {
   const prefixes = Object.keys(viteConfig.server?.proxy ?? {});

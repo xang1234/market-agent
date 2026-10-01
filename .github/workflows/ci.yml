@@ -81,6 +81,48 @@ jobs:
         if: always()
         run: ./scripts/dev-shell.sh down
 
+  golden-e2e-ui:
+    name: golden conversation (Playwright, UI replay)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # UI mode (#123): the one-process app replays the committed golden fixture
+      # (services/app/fixtures), with no database, services, keys or network. The job
+      # above runs the same spec against the real no-keys backend.
+      - name: Start UI mode
+        run: DEV_PROFILE=chat DEV_MODE=ui ./scripts/dev-shell.sh up
+
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the golden conversation against the replay
+        working-directory: web
+        run: npm run e2e
+
+      - name: Upload Playwright report and app log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-e2e-ui-debug
+          path: |
+            web/playwright-report
+            web/test-results
+            .dev/logs
+          retention-days: 7
+
+      - name: Stop the app
+        if: always()
+        run: ./scripts/dev-shell.sh down
+
   db:
     name: db (integration tests)
     runs-on: ubuntu-latest
