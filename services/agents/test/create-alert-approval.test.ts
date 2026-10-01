@@ -162,6 +162,7 @@ test("applyApprovedCreateAlert rejects pending actions that have not been approv
   });
 
   await assert.rejects(
+    // @ts-expect-error: an unapproved pending action on purpose; it must be rejected.
     applyApprovedCreateAlert(db, intent.pending_action),
     /approved create_alert action/i,
   );

@@ -8,6 +8,10 @@ import {
 } from "../src/http.ts";
 import { ANALYZE_BASE_BUNDLE_ID } from "../../analyze/src/index.ts";
 import { EvidenceInspectionError } from "../../evidence/src/inspector.ts";
+import type { AgentLoopStages } from "../../agents/src/agent-loop.ts";
+import type { FindingRow } from "../../agents/src/finding-generator.ts";
+import type { JsonValue } from "../../shared/src/json.ts";
+import { fakePgQuery, sealedSnapshot } from "./fakes.ts";
 
 const EARNINGS_TEMPLATE_ID = "11111111-1111-4111-8111-111111111111";
 
@@ -296,7 +300,7 @@ test("POST /v1/evidence/inspect returns adapter inspection", async (t) => {
           related_refs: [],
         }),
       },
-    } as never,
+    },
   });
 
   const response = await fetch(`${base}/v1/evidence/inspect`, {
@@ -686,7 +690,7 @@ test("service Analyze adapter writes blocks with the sealed snapshot id", async 
   const primarySubject = { kind: "listing", id: "22222222-2222-4222-8222-222222222222" } as const;
   const addedSubject = { kind: "issuer", id: "33333333-3333-4333-8333-333333333333" } as const;
   const insertedBlocks: unknown[] = [];
-  let workflowInput: Parameters<NonNullable<Parameters<typeof createServiceDevApiAdapters>[0]["runAnalyzeWorkflow"]>>[0] | null = null;
+  const workflowInputs: Array<Parameters<NonNullable<Parameters<typeof createServiceDevApiAdapters>[0]["runAnalyzeWorkflow"]>>[0]> = [];
   const db = fakeAnalyzeDb({
     userId,
     templateId,
@@ -696,7 +700,7 @@ test("service Analyze adapter writes blocks with the sealed snapshot id", async 
   const adapters = createServiceDevApiAdapters({
     db,
     async runAnalyzeWorkflow(input) {
-      workflowInput = input;
+      workflowInputs.push(input);
       return {
         blocks: [
           {
@@ -722,26 +726,7 @@ test("service Analyze adapter writes blocks with the sealed snapshot id", async 
       assert.equal(input.snapshotId, (input.blocks[0] as { snapshot_id?: string }).snapshot_id);
       return {
         ok: true,
-        snapshot: {
-          snapshot_id: input.snapshotId,
-          subject_refs: [],
-          fact_refs: [],
-          claim_refs: [],
-          event_refs: [],
-          document_refs: [],
-          series_specs: [],
-          source_ids: [],
-          tool_call_ids: [],
-          tool_call_result_hashes: [],
-          as_of: "2026-05-06T00:00:00.000Z",
-          basis: "test",
-          normalization: {},
-          coverage_start: null,
-          allowed_transforms: null,
-          model_version: "test",
-          parent_snapshot: null,
-          created_at: "2026-05-06T00:00:00.000Z",
-        },
+        snapshot: sealedSnapshot(input.snapshotId),
         verification: { ok: true, failures: [] },
       };
     },
@@ -757,6 +742,7 @@ test("service Analyze adapter writes blocks with the sealed snapshot id", async 
     },
   });
 
+  const [workflowInput] = workflowInputs;
   assert.ok(workflowInput);
   assert.deepEqual(workflowInput.sourceCategories, ["filings", "news"]);
   assert.deepEqual(workflowInput.subjectRefs, [primarySubject, addedSubject]);
@@ -891,7 +877,7 @@ test("service Agent adapter lets durable loop stages create findings and evaluat
       },
     ],
   });
-  const finding = {
+  const finding: FindingRow = {
     finding_id: findingId,
     agent_id: agentId,
     snapshot_id: "55555555-5555-4555-8555-555555555555",
@@ -905,7 +891,7 @@ test("service Agent adapter lets durable loop stages create findings and evaluat
   const adapters = createServiceDevApiAdapters({
     db,
     createAgentLoopStages() {
-      return {
+      const stages: AgentLoopStages<JsonValue, JsonValue, JsonValue, { findings: FindingRow[] }> = {
         readDeltas: async () => ({ cursor: "old" }),
         extractEvidence: async () => ({ docs: 1 }),
         clusterEvidence: async () => ({ clusters: 1 }),
@@ -926,6 +912,7 @@ test("service Agent adapter lets durable loop stages create findings and evaluat
         },
         alertFindings: async ({ analysis }) => analysis.findings,
       };
+      return stages;
     },
     async sealAnalyzeSnapshot() {
       throw new Error("analyze seal is not used by agent runs");
@@ -1143,11 +1130,11 @@ test("service Analyze adapter honors explicit empty source categories as base bu
   const userId = "00000000-0000-4000-8000-000000000001";
   const templateId = "11111111-1111-4111-8111-111111111111";
   const insertedBlocks: unknown[] = [];
-  let workflowInput: Parameters<NonNullable<Parameters<typeof createServiceDevApiAdapters>[0]["runAnalyzeWorkflow"]>>[0] | null = null;
+  const workflowInputs: Array<Parameters<NonNullable<Parameters<typeof createServiceDevApiAdapters>[0]["runAnalyzeWorkflow"]>>[0]> = [];
   const adapters = createServiceDevApiAdapters({
     db: fakeAnalyzeDb({ userId, templateId, insertedBlocks }),
     runAnalyzeWorkflow(input) {
-      workflowInput = input;
+      workflowInputs.push(input);
       return {
         blocks: [
           {
@@ -1164,18 +1151,7 @@ test("service Analyze adapter honors explicit empty source categories as base bu
     async sealAnalyzeSnapshot(input) {
       return {
         ok: true,
-        snapshot: {
-          snapshot_id: input.snapshotId,
-          subject_refs: [],
-          as_of: "2026-05-06T00:00:00.000Z",
-          basis: "reported",
-          normalization: "none",
-          source_ids: [],
-          fact_refs: [],
-          claim_refs: [],
-          event_refs: [],
-          allowed_transforms: {},
-        },
+        snapshot: sealedSnapshot(input.snapshotId),
         verification: { ok: true, failures: [] },
       };
     },
@@ -1186,6 +1162,7 @@ test("service Analyze adapter honors explicit empty source categories as base bu
     body: { template_id: templateId, source_categories: [] },
   });
 
+  const [workflowInput] = workflowInputs;
   assert.ok(workflowInput);
   assert.deepEqual(workflowInput.sourceCategories, []);
   assert.deepEqual(workflowInput.bundleIds, [ANALYZE_BASE_BUNDLE_ID]);
@@ -1219,7 +1196,7 @@ test("POST /v1/analyze/runs rejects verifier failures before persistence", async
           ok: false,
           failures: [
             {
-              reason_code: "missing_ref",
+              reason_code: "missing_claim_ref",
               details: { ref: "claim:missing" },
             },
           ],
@@ -1513,7 +1490,7 @@ function fakeAnalyzeDb(input: {
   insertedBlocks: unknown[];
 }) {
   const client = {
-    async query(text: string, values?: unknown[]) {
+    query: fakePgQuery(async (text: string, values?: unknown[]) => {
       if (text === "begin" || text === "commit" || text === "rollback") {
         return { rows: [], rowCount: null };
       }
@@ -1559,7 +1536,7 @@ function fakeAnalyzeDb(input: {
         };
       }
       throw new Error(`unexpected query: ${text}`);
-    },
+    }),
     release() {
       // No-op test pool client.
     },
@@ -1608,7 +1585,7 @@ function fakeAnalyzeRunHistoryDb(input: {
     async connect() {
       throw new Error("history read tests must not acquire a write client");
     },
-    async query(text: string, values?: unknown[]) {
+    query: fakePgQuery(async (text: string, values?: unknown[]) => {
       if (text.includes("from analyze_template_runs r") && text.includes("order by r.created_at")) {
         assert.equal(values?.[0], input.userId);
         return { rows: [runRow], rowCount: 1 };
@@ -1623,7 +1600,7 @@ function fakeAnalyzeRunHistoryDb(input: {
         return { rows: input.activeTemplate ? [templateRow] : [], rowCount: input.activeTemplate ? 1 : 0 };
       }
       throw new Error(`unexpected query: ${text}`);
-    },
+    }),
   };
 }
 
@@ -1661,7 +1638,7 @@ function fakeAgentLoopDb(input: {
     release() {
       // No-op test pool client.
     },
-    async query(text: string, values?: unknown[]) {
+    query: fakePgQuery(async (text: string, values?: unknown[]) => {
       queries.push({ text, values });
       if (text === "begin" || text === "commit" || text === "rollback") {
         return { rows: [], rowCount: null };
@@ -1790,7 +1767,7 @@ function fakeAgentLoopDb(input: {
         };
       }
       throw new Error(`unexpected query: ${text}`);
-    },
+    }),
   };
   return db;
 }
@@ -1821,7 +1798,7 @@ function fakeAgentDetailsDb(input: {
     release() {
       // No-op test pool client.
     },
-    async query(text: string, values?: unknown[]) {
+    query: fakePgQuery(async (text: string, values?: unknown[]) => {
       if (text.includes("from agents") && text.includes("where agent_id")) {
         return { rows: values?.[0] === input.agentId ? [agentRow] : [], rowCount: null };
       }
@@ -1860,7 +1837,7 @@ function fakeAgentDetailsDb(input: {
         };
       }
       throw new Error(`unexpected query: ${text}`);
-    },
+    }),
   };
 }
 
@@ -1898,7 +1875,7 @@ function fakeArtifactShareDb(input: {
     release() {
       // No-op test pool client.
     },
-    async query(text: string, values?: unknown[]) {
+    query: fakePgQuery(async (text: string, values?: unknown[]) => {
       queries.push({ text, values });
       if (text === "begin" || text === "commit" || text === "rollback") {
         return { rows: [], rowCount: null };
@@ -1994,7 +1971,7 @@ function fakeArtifactShareDb(input: {
         };
       }
       throw new Error(`unexpected query: ${text}`);
-    },
+    }),
   };
   return db;
 }

@@ -16,9 +16,10 @@ import {
   type AgentRow,
   type AgentRunRow,
   type AgentUniverse,
+  type AgentWatermarkClientPool,
   type QueryExecutor,
 } from "../../agents/src/index.ts";
-import type { JsonValue } from "../../observability/src/types.ts";
+import type { JsonObject, JsonValue } from "../../observability/src/types.ts";
 import { isSubjectRef, isUuid, type SubjectRef } from "../../shared/src/subject-ref.ts";
 import { readDevFlags } from "../../shared/src/devFlags.ts";
 import {
@@ -696,6 +697,8 @@ export function createFixtureDevApiAdapters(): DevApiAdapters {
 }
 
 export type DevApiServiceAdapterDeps = AnalyzeServiceDeps & {
+  // The agent loop takes the same pool for its watermark transaction.
+  db: AgentWatermarkClientPool;
   discovery?: DiscoveryService;
   createAgentLoopStages?: DevApiAgentLoopStageFactory;
   inspectEvidence?(input: {
@@ -950,10 +953,15 @@ function readAlertRules(value: unknown): JsonValue {
   return value as JsonValue;
 }
 
-function jsonObjectOrEmpty(value: JsonValue | null | undefined): Record<string, JsonValue> {
-  return value !== null && value !== undefined && typeof value === "object" && !Array.isArray(value)
+function jsonObjectOrEmpty(value: JsonValue | null | undefined): JsonObject {
+  return value !== null && value !== undefined && typeof value === "object" && !isJsonArray(value)
     ? value
     : {};
+}
+
+// Array.isArray does not narrow a readonly array out of a union.
+function isJsonArray(value: JsonValue): value is ReadonlyArray<JsonValue> {
+  return Array.isArray(value);
 }
 
 function jsonArrayOrEmpty(value: JsonValue | null | undefined): JsonValue {

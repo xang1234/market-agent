@@ -7,12 +7,15 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "test": "node --experimental-strip-types --test \"test/**/*.test.ts\""
+    "test": "node --experimental-strip-types --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "pg": "^8.20.0"
   },
   "devDependencies": {
-    "@types/pg": "^8.20.0"
+    "@types/node": "^24.19.0",
+    "@types/pg": "^8.23.1",
+    "typescript": "~6.0.2"
   }
 }

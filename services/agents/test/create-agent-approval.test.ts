@@ -156,6 +156,7 @@ test("applyApprovedCreateAgent rejects a raw pending action that has not been ap
   });
 
   await assert.rejects(
+    // @ts-expect-error: an unapproved pending action on purpose; it must be rejected.
     applyApprovedCreateAgent(db, intent.pending_action),
     /approved create_agent action/i,
   );

@@ -83,6 +83,6 @@ test("mapDelayClassToFreshness maps every delay class", () => {
 });
 
 test("materializePriceFact throws when the price metric is not registered", async () => {
-  const db: QueryExecutor = { async query() { return { rows: [] }; } };
+  const db: QueryExecutor = { async query() { return { rows: [], rowCount: 0, command: "", oid: 0, fields: [] }; } };
   await assert.rejects(() => materializePriceFact(db, { quote: quote() }), /no metric_id registered/);
 });

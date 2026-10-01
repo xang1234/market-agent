@@ -12,7 +12,7 @@ test('thesis routes authenticate before reading or saving and preserve owner sco
   const server = createDevApiServer({}, { adapters: {
     ...createFixtureDevApiAdapters(),
     theses: {
-      async get(input: unknown) { seen.push(input); return { thesis: null, versions: [], assessments: [] }; },
+      async get(input: unknown) { seen.push(input); return { thesis: null, versions: [], assessments: [], metrics: [] }; },
       async save(input: unknown) { seen.push(input); return { thesis: { thesis_version_id: AGENT, agent_id: AGENT, version: 1, thesis: 'Margins recover', subject_ref: {kind: 'issuer' as const, id: AGENT}, conditions: [], created_at: new Date().toISOString() } }; },
       async draft(input: unknown) { seen.push(input); return { conditions: [] }; },
     },
@@ -24,7 +24,7 @@ test('thesis routes authenticate before reading or saving and preserve owner sco
   assert.equal(seen.length, 0);
   const response = await fetch(url, { headers: { 'x-user-id': USER } });
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { thesis: null, versions: [], assessments: [] });
+  assert.deepEqual(await response.json(), { thesis: null, versions: [], assessments: [], metrics: [] });
   assert.deepEqual(seen[0], { agentId: AGENT, userId: USER });
   const save = await fetch(url, { method: 'PUT', headers: { 'x-user-id': USER }, body: JSON.stringify({ expected_version: 0 }) });
   assert.equal(save.status, 200);

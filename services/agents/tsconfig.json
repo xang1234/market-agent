@@ -1,0 +1,21 @@
+{
+  // Services run with `node --experimental-strip-types`, which never checks
+  // types; `npm run typecheck` is the gate. It follows imports into sibling
+  // services, so what it checks is this package plus everything it reaches.
+  "compilerOptions": {
+    "target": "ES2024",
+    // Bundler resolution matches how the services import each other's .ts
+    // sources and keeps CommonJS packages (ajv, decimal.js) default-importable.
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    // Sibling services import `pg` too, but their node_modules are not
+    // installed in this package's CI job; resolve its types from here.
+    "paths": { "pg": ["./node_modules/@types/pg"] }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

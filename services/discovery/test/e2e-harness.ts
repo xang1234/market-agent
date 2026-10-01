@@ -6,6 +6,8 @@ import type { AddressInfo } from "node:net";
 import { persistCampaignQuotes } from "../../evidence/src/campaign-claims.ts";
 import type { CampaignDocument } from "../../evidence/src/campaign-documents.ts";
 import { hashJsonValue } from "../../observability/src/tool-call.ts";
+import type { QueryResult } from "pg";
+import type { QueryExecutor } from "../../observability/src/types.ts";
 import { verifySnapshotSeal } from "../../snapshot/src/snapshot-verifier.ts";
 import { createDiscoveryDevApiAdapter } from "../../dev-api/src/discovery-adapter.ts";
 import { createDevApiServer, createFixtureDevApiAdapters } from "../../dev-api/src/http.ts";
@@ -28,7 +30,7 @@ import { withCampaignDb } from "./db-fixture.ts";
 
 type TestContext = Parameters<typeof withCampaignDb>[0];
 type FixtureName = "power-infrastructure" | "industrial-automation" | "supply-disruption" | "unsupported-theme";
-type FixtureRoleResponse = { exposure: "weak" | "moderate" | "strong"; criterion_outcome: "pass" | "fail" | "unknown"; criterion_source: "primary" | "counter" };
+type FixtureRoleResponse = { exposure: "weak" | "mixed" | "strong"; criterion_outcome: "pass" | "fail" | "unknown"; criterion_source: "primary" | "counter" };
 type FixtureCandidate = {
   candidate_id: string;
   assessment_id: string;
@@ -327,14 +329,14 @@ export async function createCampaignE2eHarness(t: TestContext, name: FixtureName
         const candidate = candidates.find((item) => item.candidate_id === runtimeCandidateId(fixture, runId!, fixtureCandidate));
         assert.ok(candidate, `fixture candidate ${fixtureCandidate.candidate_id} is identifiable by its recorded lead`);
         const expectedHit = fixture.search_hits.find((hit) => hit.url === fixtureCandidate.search_url)!;
-        const provenance = await db.query<{ origins: string[]; lead_hit_ids: string[] }>(
+        const provenance: QueryResult<{ origins: string[]; lead_hit_ids: string[] }> = await db.query(
           "select origins,lead_hit_ids from discovery_candidates where run_id=$1::uuid and candidate_id=$2::uuid",
           [runId, candidate.candidate_id],
         );
         assert.equal(provenance.rowCount, 1);
         assert.deepEqual(provenance.rows[0]!.origins, ["web"], "candidate is admitted from the recorded web lead, never existing evidence");
         assert.deepEqual(provenance.rows[0]!.lead_hit_ids, [searchHitId(fixture, expectedHit)]);
-        const identityAttempts = await db.query<{ outcome: string }>(
+        const identityAttempts: QueryResult<{ outcome: string }> = await db.query(
           "select outcome from discovery_attempts where run_id=$1::uuid and operation_key=$2 and resource='identity' order by attempt_number",
           [runId, `${runId}/discovery/${candidate.candidate_id}/identity`],
         );
@@ -418,9 +420,7 @@ export async function createCampaignE2eHarness(t: TestContext, name: FixtureName
           subject_refs: row.subject_refs as never, fact_refs: row.fact_refs as never, claim_refs: row.claim_refs as never,
           event_refs: row.event_refs as never, document_refs: row.document_refs as never, series_specs: row.series_specs as never,
           source_ids: row.source_ids as never, as_of: isoTimestamp(row.as_of), basis: row.basis as never,
-          normalization: row.normalization as never, coverage_start: row.coverage_start === null ? null : isoTimestamp(row.coverage_start),
-          allowed_transforms: row.allowed_transforms as never, model_version: row.model_version as string | null,
-          tool_call_ids: row.tool_call_ids as never, tool_call_result_hashes: row.tool_call_result_hashes as never,
+          normalization: row.normalization as never, allowed_transforms: row.allowed_transforms as never,
         },
         blocks: [{ id: `campaign-assessment-${snapshotId}`, kind: "rich_text", snapshot_id: snapshotId, data_ref: { kind: "rich_text", id: snapshotId }, source_refs: row.source_ids as string[], as_of: isoTimestamp(row.as_of), claim_refs: row.claim_refs as string[], document_refs: row.document_refs as string[], subject_refs: row.subject_refs as never, segments: [] }],
         claims: claims.rows as never, documents: documents.rows as never, sources: (row.source_ids as string[]).map((source_id) => ({ source_id })),
@@ -520,7 +520,7 @@ export async function recordedFixtureAssessments() {
  * IDs after the real worker has finished in one database. The query below can
  * therefore detect reuse that per-run assertions cannot observe.
  */
-export async function assertRecordedAssessmentCorpus(db: { query: Function }, executions: readonly CorpusExecution[]): Promise<void> {
+export async function assertRecordedAssessmentCorpus(db: QueryExecutor, executions: readonly CorpusExecution[]): Promise<void> {
   const requiredFixtures: CandidateBearingFixture[] = ["power-infrastructure", "industrial-automation", "supply-disruption"];
   assert.deepEqual(executions.map((execution) => execution.fixture), requiredFixtures, "the corpus executes every candidate-bearing fixture once in its required order");
   assert.equal(new Set(executions.map((execution) => execution.run_id)).size, requiredFixtures.length, "the corpus uses distinct persisted runs");
@@ -736,7 +736,7 @@ function fixtureRoleResponses(value: unknown, label: string): FixtureCandidate["
   const result = {} as FixtureCandidate["role_responses"];
   for (const role of ["analyst", "skeptic"] as const) {
     const response = fixtureRecord(roles[role], `${label}.${role}`, ["exposure", "criterion_outcome", "criterion_source"]);
-    assert.ok(response.exposure === "weak" || response.exposure === "moderate" || response.exposure === "strong", `${role}.exposure`);
+    assert.ok(response.exposure === "weak" || response.exposure === "mixed" || response.exposure === "strong", `${role}.exposure`);
     assert.ok(response.criterion_outcome === "pass" || response.criterion_outcome === "fail" || response.criterion_outcome === "unknown", `${role}.criterion_outcome`);
     assert.ok(response.criterion_source === "primary" || response.criterion_source === "counter", `${role}.criterion_source`);
     result[role] = response as FixtureCandidate["role_responses"][typeof role];
@@ -870,14 +870,14 @@ function campaignDocument(excerpt: EvidencePacket["excerpts"][number]): Campaign
   });
 }
 
-async function seedIdentityPrerequisite(db: { query: Function }, identity: CompanyIdentity): Promise<void> {
+async function seedIdentityPrerequisite(db: QueryExecutor, identity: CompanyIdentity): Promise<void> {
   const instrumentId = randomUUID();
   await db.query("insert into issuers (issuer_id,legal_name,former_names) values ($1::uuid,$2,'[]'::jsonb) on conflict (issuer_id) do nothing", [identity.issuer_id, identity.legal_name]);
   await db.query("insert into instruments (instrument_id,issuer_id,asset_type) values ($1::uuid,$2::uuid,$3) on conflict (instrument_id) do nothing", [instrumentId, identity.issuer_id, identity.asset_type]);
   await db.query("insert into listings (listing_id,instrument_id,mic,ticker,trading_currency,timezone) values ($1::uuid,$2::uuid,$3,$4,$5,'America/New_York') on conflict (listing_id) do nothing", [identity.listing_id, instrumentId, identity.mic, identity.ticker, identity.currency]);
 }
 
-async function seedRecordedDocument(db: { query: Function }, issuerId: string, excerpt: EvidencePacket["excerpts"][number]): Promise<void> {
+async function seedRecordedDocument(db: QueryExecutor, issuerId: string, excerpt: EvidencePacket["excerpts"][number]): Promise<void> {
   await db.query("insert into sources (source_id,provider,kind,canonical_url,trust_tier,license_class,retrieved_at) values ($1::uuid,'sec_edgar','filing',$2,'primary','test',$3::timestamptz) on conflict (source_id) do nothing", [excerpt.source_id, excerpt.url, excerpt.retrieved_at]);
   await db.query("insert into documents (document_id,source_id,kind,title,published_at,content_hash,raw_blob_id,parse_status) values ($1::uuid,$2::uuid,'filing',$3,$4::timestamptz,$5,$5,'parsed') on conflict (document_id) do nothing", [excerpt.document_id, excerpt.source_id, excerpt.title, excerpt.published_at, excerpt.document_hash]);
   await db.query("insert into mentions (document_id,subject_kind,subject_id,prominence,confidence) values ($1::uuid,'issuer',$2::uuid,'body',1) on conflict do nothing", [excerpt.document_id, issuerId]);

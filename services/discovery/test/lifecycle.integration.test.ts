@@ -4,6 +4,7 @@ import test from "node:test";
 import { deleteUserAndQueueObjectBlobsWithPool } from "../../evidence/src/blob-gc-repo.ts";
 import { persistCampaignQuotes } from "../../evidence/src/campaign-claims.ts";
 import { createDiscoveryReadModel } from "../src/read-model.ts";
+import { defaultRunConfiguration } from "../src/run-configuration.ts";
 import { createDiscoveryService } from "../src/service.ts";
 import { dbOptions, withCampaignDb } from "./db-fixture.ts";
 import { createRunnerHarness } from "./runner-harness.ts";
@@ -91,6 +92,7 @@ test("campaign deletion preserves a quote mapping reused by another campaign", d
     brief_version: secondBrief.version,
     brief_hash: secondBrief.hash,
     request_key: crypto.randomUUID(),
+    ...defaultRunConfiguration(),
   });
   const quote = await h.db.query<{
     quote_key: string; claim_id: string; document_id: string; source_id: string;

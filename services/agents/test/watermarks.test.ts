@@ -116,6 +116,7 @@ test("advanceWatermarksWithSideEffects rejects unbranded query executors before 
   const { db, queries } = fakeDb();
 
   await assert.rejects(
+    // @ts-expect-error: an unbranded executor on purpose; it must be rejected.
     advanceWatermarksWithSideEffects(db, {
       agent_id: AGENT_ID,
       next_watermarks: {},

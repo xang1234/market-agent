@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { QueryResult } from "pg";
 import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
 import { createPacketStore } from "../src/packet-repo.ts";
 import { requestHash } from "../src/scout-support.ts";
@@ -236,6 +237,6 @@ async function insertPublicSource(db: QueryExecutor, sourceId: string): Promise<
   );
 }
 
-function result<R extends Record<string, unknown>>(rows: R[], rowCount = rows.length) {
-  return { rows, rowCount };
+function result<R extends Record<string, unknown>>(rows: R[], rowCount = rows.length): QueryResult<R> {
+  return { rows, rowCount, command: "", oid: 0, fields: [] };
 }

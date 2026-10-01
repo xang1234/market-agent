@@ -5,6 +5,7 @@ import type { QueryExecutor } from "../../agents/src/agent-repo.ts";
 import { hashJsonValue } from "../../observability/src/tool-call.ts";
 import { createOperationRunner } from "../src/operations.ts";
 import { DEFAULT_LIMITS } from "../src/policy.ts";
+import { defaultRunConfiguration } from "../src/run-configuration.ts";
 import type { DiscoveryContext, Providers } from "../src/ports.ts";
 import { discoverCandidates } from "../src/scout.ts";
 import type { CompanyIdentity, DiscoveredCandidate, Origin, RankedDecision, SearchHit } from "../src/types.ts";
@@ -46,15 +47,15 @@ test("starts are idempotent per request and serialize active work per user", dbO
   const firstBrief = await repo.saveBrief(userId, first.campaign_id, 0, briefFixture());
   const secondBrief = await repo.saveBrief(userId, second.campaign_id, 0, briefFixture());
   const requestKey = crypto.randomUUID();
-  const started = await repo.startRun(userId, first.campaign_id, { brief_version: firstBrief.version, brief_hash: firstBrief.hash, request_key: requestKey });
-  const repeated = await repo.startRun(userId, first.campaign_id, { brief_version: firstBrief.version, brief_hash: firstBrief.hash, request_key: requestKey });
+  const started = await repo.startRun(userId, first.campaign_id, { brief_version: firstBrief.version, brief_hash: firstBrief.hash, request_key: requestKey, ...defaultRunConfiguration() });
+  const repeated = await repo.startRun(userId, first.campaign_id, { brief_version: firstBrief.version, brief_hash: firstBrief.hash, request_key: requestKey, ...defaultRunConfiguration() });
   assert.equal(repeated.run_id, started.run_id);
   await assert.rejects(
-    repo.startRun(userId, first.campaign_id, { brief_version: firstBrief.version, brief_hash: hashJsonValue({ changed: true }), request_key: requestKey }),
+    repo.startRun(userId, first.campaign_id, { brief_version: firstBrief.version, brief_hash: hashJsonValue({ changed: true }), request_key: requestKey, ...defaultRunConfiguration() }),
     { code: "request_conflict" },
   );
   await assert.rejects(
-    repo.startRun(userId, second.campaign_id, { brief_version: secondBrief.version, brief_hash: secondBrief.hash, request_key: crypto.randomUUID() }),
+    repo.startRun(userId, second.campaign_id, { brief_version: secondBrief.version, brief_hash: secondBrief.hash, request_key: crypto.randomUUID(), ...defaultRunConfiguration() }),
     { code: "active_run" },
   );
 });
@@ -91,8 +92,8 @@ test("concurrent starts across campaigns allow one active run", dbOptions, async
     repo.saveBrief(userId, second.campaign_id, 0, briefFixture()),
   ]);
   const results = await Promise.allSettled([
-    repo.startRun(userId, first.campaign_id, { brief_version: firstBrief.version, brief_hash: firstBrief.hash, request_key: crypto.randomUUID() }),
-    repo.startRun(userId, second.campaign_id, { brief_version: secondBrief.version, brief_hash: secondBrief.hash, request_key: crypto.randomUUID() }),
+    repo.startRun(userId, first.campaign_id, { brief_version: firstBrief.version, brief_hash: firstBrief.hash, request_key: crypto.randomUUID(), ...defaultRunConfiguration() }),
+    repo.startRun(userId, second.campaign_id, { brief_version: secondBrief.version, brief_hash: secondBrief.hash, request_key: crypto.randomUUID(), ...defaultRunConfiguration() }),
   ]);
   assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
   const rejected = results.find((result) => result.status === "rejected");
@@ -104,7 +105,7 @@ test("run starts reject stale versions and foreign ownership", dbOptions, async 
   const { campaign, brief } = await createApprovedRun();
   await assert.rejects(repo.getCampaign(otherUserId, campaign.campaign_id), { code: "not_found" });
   await assert.rejects(
-    repo.startRun(userId, campaign.campaign_id, { brief_version: brief.version, brief_hash: hashJsonValue({ stale: true }), request_key: crypto.randomUUID() }),
+    repo.startRun(userId, campaign.campaign_id, { brief_version: brief.version, brief_hash: hashJsonValue({ stale: true }), request_key: crypto.randomUUID(), ...defaultRunConfiguration() }),
     { code: "stale_brief" },
   );
 });
@@ -134,11 +135,11 @@ test("unresolved admissions remain visible without entering research selection",
   const { run } = await createApprovedRun();
   const lease = await repo.claimNextRun("worker-1");
   assert.ok(lease);
-  const unresolved = {
+  const unresolved: DiscoveredCandidate = {
     candidate_id: crypto.randomUUID(), lead_key: "unresolved", name: "Unresolved lead", identity: null,
     origins: ["web"], mechanism_ids: ["40000000-0000-4000-8000-000000000001"], seed: false,
     primary_domain_lead: false, first_seen: [0, 0], lead_hit_ids: [], reason_codes: ["identity_unresolved"],
-  } as const;
+  };
   await repo.admitCandidate(lease, unresolved);
   await repo.admitCandidate(lease, unresolved);
 

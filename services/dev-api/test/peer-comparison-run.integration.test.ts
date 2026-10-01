@@ -10,6 +10,7 @@ import { createSqlPeerSetResolver } from "../../fundamentals/src/peer-set-resolv
 import {
   createSecBackedStatementRepository,
   createSecBackedStatsRepository,
+  type FundamentalsTransactionalQueryExecutor,
 } from "../../fundamentals/src/sec-facts-repository.ts";
 import { SEC_EDGAR_FILING_SOURCE_ID } from "../../fundamentals/src/provider-sources.ts";
 import { verifySnapshotSeal } from "../../snapshot/src/snapshot-verifier.ts";
@@ -70,7 +71,15 @@ test(
       E2E_INDUSTRY,
     ]);
 
-    const statements = createSecBackedStatementRepository(db, {
+    // fetcher: null only reads, so the repository never pins its own
+    // transaction; every query stays on the rolled-back test client.
+    const reads: FundamentalsTransactionalQueryExecutor = {
+      query: <R extends Record<string, unknown>>(text: string, values?: unknown[]) => db.query<R>(text, values),
+      async connect() {
+        throw new Error("a read-only repository must not pin a transaction");
+      },
+    };
+    const statements = createSecBackedStatementRepository(reads, {
       fetcher: null,
       sourceId: SEC_EDGAR_FILING_SOURCE_ID,
     });

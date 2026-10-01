@@ -202,7 +202,7 @@ jobs:
         run: npm test
 
   dev-api:
-    name: dev-api (integration tests)
+    name: dev-api (typecheck, integration tests)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -220,6 +220,7 @@ jobs:
             services/dev-api/package-lock.json
             services/fundamentals/package-lock.json
             services/financial-core/package-lock.json
+            services/llm/package-lock.json
 
       # Dev-api tests import the shared db/test Docker harness and invoke
       # `npm run apply:schema` inside db/, so db dependencies must be present.
@@ -238,8 +239,17 @@ jobs:
         working-directory: services/financial-core
         run: npm ci
 
+      # Typechecking follows the dev runtime's imports into llm, whose provider
+      # SDK types resolve from services/llm/node_modules.
+      - name: Install llm deps (types reached by the dev-api typecheck)
+        working-directory: services/llm
+        run: npm ci
+
       - name: Install dev-api deps
         run: npm ci
+
+      - name: Typecheck dev-api
+        run: npm run typecheck
 
       - name: Run dev-api tests
         run: npm test
@@ -401,7 +411,7 @@ jobs:
         run: npm test
 
   agents:
-    name: agents (tests)
+    name: agents (typecheck, tests)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -430,12 +440,16 @@ jobs:
         working-directory: services/agents
         run: npm ci
 
+      - name: Typecheck agents
+        working-directory: services/agents
+        run: npm run typecheck
+
       - name: Run agents tests
         working-directory: services/agents
         run: npm test
 
   analyze:
-    name: analyze (integration tests)
+    name: analyze (typecheck, integration tests)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -447,7 +461,9 @@ jobs:
           cache: npm
           cache-dependency-path: |
             db/package-lock.json
+            services/analyze/package-lock.json
             services/financial-core/package-lock.json
+            services/fundamentals/package-lock.json
 
       # Analyze integration tests import the shared db/test Docker harness.
       - name: Install db deps (needed by analyze integration harness)
@@ -459,6 +475,20 @@ jobs:
       - name: Install financial-core deps (imported by analyze financial sections)
         working-directory: services/financial-core
         run: npm ci
+
+      # Typechecking follows analyze's imports into fundamentals, whose SEC
+      # fetch boundary resolves lossless-json from its own node_modules.
+      - name: Install fundamentals deps (types reached by the analyze typecheck)
+        working-directory: services/fundamentals
+        run: npm ci
+
+      - name: Install analyze deps
+        working-directory: services/analyze
+        run: npm ci
+
+      - name: Typecheck analyze
+        working-directory: services/analyze
+        run: npm run typecheck
 
       - name: Run analyze tests
         working-directory: services/analyze
@@ -662,7 +692,7 @@ jobs:
         run: npm test
 
   discovery:
-    name: discovery (synthetic integration tests)
+    name: discovery (typecheck, synthetic integration tests)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -704,6 +734,10 @@ jobs:
           npm --prefix services/llm ci
           npm --prefix services/observability ci
           npm --prefix services/snapshot ci
+
+      - name: Typecheck discovery
+        working-directory: services/discovery
+        run: npm run typecheck
 
       - name: Run recorded synthetic discovery tests
         working-directory: services/discovery
