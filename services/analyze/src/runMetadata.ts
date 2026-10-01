@@ -69,11 +69,12 @@ export function parseAnalyzeRunMetadata(value: unknown): AnalyzeRunMetadataV1 {
   }
 
   return serializeAnalyzeRunMetadataV1({
-    template_id: value.template_id,
-    template_version: value.template_version,
-    playbook_id: value.playbook_id ?? null,
-    playbook_version: value.playbook_version ?? null,
-    instructions: value.instructions,
+    // Validated here, at the boundary, so the serializer receives typed values.
+    template_id: expectString(value.template_id, "template_id"),
+    template_version: expectPositiveInteger(value.template_version, "template_version"),
+    playbook_id: nullableString(value.playbook_id ?? null, "playbook_id"),
+    playbook_version: nullablePositiveInteger(value.playbook_version ?? null, "playbook_version"),
+    instructions: expectString(value.instructions, "instructions"),
     source_categories: expectStringArray(value.source_categories, "source_categories"),
     subject_refs: expectSubjectRefs(value.subject_refs),
     rerun_of_run_id: typeof value.rerun_of_run_id === "string" ? value.rerun_of_run_id : undefined,

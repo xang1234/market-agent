@@ -97,7 +97,7 @@ function failedSeal(): SnapshotSealResult {
       ok: false,
       failures: Object.freeze([
         Object.freeze({
-          reason_code: "missing_subject_refs" as const,
+          reason_code: "missing_subject_ref" as const,
           details: Object.freeze({}),
         }),
       ]),
@@ -262,6 +262,7 @@ test("persistAnalyzeTemplateRunAfterSnapshotSeal validates inputs before invokin
       template_id: "",
       template_version: 1,
       blocks: sampleBlocks,
+      run_metadata: sampleRunMetadata,
       sealSnapshot: async () => {
         sealInvocations += 1;
         return okSeal();
@@ -284,6 +285,7 @@ test("persistAnalyzeTemplateRunAfterSnapshotSeal rejects a non-positive integer 
         template_id: TEMPLATE_ID,
         template_version: bad,
         blocks: sampleBlocks,
+        run_metadata: sampleRunMetadata,
         sealSnapshot: async () => okSeal(),
       }),
       (err: Error) =>
@@ -302,7 +304,9 @@ test("persistAnalyzeTemplateRunAfterSnapshotSeal rejects a non-array blocks payl
     persistAnalyzeTemplateRunAfterSnapshotSeal(analyzeTemplateRunTransactionClient(db), {
       template_id: TEMPLATE_ID,
       template_version: 1,
-      blocks: { not: "an array" } as unknown as JsonValue,
+      // @ts-expect-error: a non-array payload on purpose; it must be rejected.
+      blocks: { not: "an array" },
+      run_metadata: sampleRunMetadata,
       sealSnapshot: async () => okSeal(),
     }),
     (err: Error) =>

@@ -11,7 +11,7 @@ export function buildPriceTargetRangeSealInput(input: {
   block: PriceTargetRangeBlock;
   facts: ReadonlyArray<FactRow>;
   primary: IssuerSubjectRef;
-  listing: { kind: string; id: string };
+  listing: { kind: "listing"; id: string };
   modelVersion?: string | null;
 }): SnapshotSealInput {
   const seal = buildFactBackedSealInput({

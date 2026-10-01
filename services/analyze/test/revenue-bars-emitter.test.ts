@@ -47,7 +47,7 @@ test("emitRevenueBarsBlock builds an 8-bar block that passes the real verifier",
   const seal = await emitRevenueBarsBlock({ db: fakeDb(quarterRows()) }, INPUT);
   assert.ok(seal, "a seal input was emitted");
   assert.equal(seal.blocks[0].kind, "revenue_bars");
-  assert.equal((seal.blocks[0] as { bars: unknown[] }).bars.length, 8);
+  assert.equal(barsOf(seal.blocks[0]).length, 8);
   assert.equal(seal.manifest.fact_refs.length, 8);
 
   const verification = await verifySnapshotSeal(seal);
@@ -64,5 +64,13 @@ test("emitRevenueBarsBlock skips facts with a null value_num", async () => {
   (rows[0] as { value_num: number | null }).value_num = null;
   const seal = await emitRevenueBarsBlock({ db: fakeDb(rows) }, INPUT);
   assert.ok(seal);
-  assert.equal((seal.blocks[0] as { bars: unknown[] }).bars.length, 7);
+  assert.equal(barsOf(seal.blocks[0]).length, 7);
 });
+
+// A revenue_bars block's bars, narrowed from the verifier's general block shape.
+function barsOf(block: object): unknown[] {
+  const fields: Record<string, unknown> = { ...block };
+  const bars = fields.bars;
+  assert.ok(Array.isArray(bars), "a revenue_bars block has bars");
+  return bars;
+}

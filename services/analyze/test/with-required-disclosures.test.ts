@@ -2,14 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildFactBackedSealInput, withRequiredDisclosures, type FactRow } from "../src/block-seal-input.ts";
+import type { FreshnessClass } from "../../snapshot/src/disclosure-policy.ts";
 
 const SNAP = "11111111-1111-4111-a111-111111111111";
 const SRC = "00000000-0000-4000-a000-0000000000aa";
-const ISSUER = { kind: "issuer", id: "22222222-2222-4222-a222-222222222222" };
+const ISSUER = { kind: "issuer", id: "22222222-2222-4222-a222-222222222222" } as const;
 const FACT = "fac00000-0000-4000-8000-000000000001";
 
-function baseSeal(freshness?: string) {
-  const row: FactRow & { freshness_class?: string } = {
+function baseSeal(freshness?: FreshnessClass) {
+  const row: FactRow & { freshness_class?: FreshnessClass } = {
     fact_id: FACT, source_id: SRC, unit: "currency", period_kind: "point",
     period_start: null, period_end: "2026-06-04", fiscal_year: null, fiscal_period: null,
     ...(freshness === undefined ? {} : { freshness_class: freshness }),
@@ -25,11 +26,11 @@ function baseSeal(freshness?: string) {
 test("withRequiredDisclosures appends a pricing disclosure for an eod fact", () => {
   const sealed = withRequiredDisclosures(baseSeal("eod"));
   assert.equal(sealed.blocks.length, 2);
-  const disclosure = sealed.blocks[1] as { kind: string; disclosure_tier: string; items: string[]; source_refs: string[] };
+  const disclosure: Record<string, unknown> = { ...sealed.blocks[1] };
   assert.equal(disclosure.kind, "disclosure");
   assert.equal(disclosure.disclosure_tier, "eod");
-  assert.ok(disclosure.items.some((i) => /end-of-day/i.test(i)));
-  assert.ok(disclosure.source_refs.includes(SRC));
+  assert.ok(Array.isArray(disclosure.items) && disclosure.items.some((i) => /end-of-day/i.test(String(i))));
+  assert.ok(Array.isArray(disclosure.source_refs) && disclosure.source_refs.includes(SRC));
 });
 
 test("withRequiredDisclosures is a no-op when no fact surfaces freshness", () => {

@@ -301,7 +301,7 @@ test(
             ok: false,
             failures: Object.freeze([
               Object.freeze({
-                reason_code: "missing_subject_refs" as const,
+                reason_code: "missing_subject_ref" as const,
                 details: Object.freeze({}),
               }),
             ]),
