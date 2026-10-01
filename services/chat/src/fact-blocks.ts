@@ -208,7 +208,6 @@ async function loadSegmentBlocks(
     // cutoff (a redefined segment is a new version under the same name).
     const byNameAndQuarter = new Map<string, { row: SegmentRevenueRow; defined: number }>();
     for (const fact of facts) {
-      if (!(fact.fiscal_period! in QUARTER_ORDER)) continue; // a quarter, Q1-Q4
       const segment = segmentById.get(fact.subject_id)!;
       const key = `${segment.name}|${fact.fiscal_year}|${fact.fiscal_period}`;
       const defined = new Date(segment.definition_as_of).getTime();
@@ -297,6 +296,8 @@ export function segmentRevenueItems(
   currency: string;
   items: Array<{ label: string; value_ref: string; format: string }>;
 } | null {
+  // Quarters only (own keys: "toString" is not a quarter).
+  rows = rows.filter((row) => Object.hasOwn(QUARTER_ORDER, row.fiscal_period));
   const latest = [...rows].sort((a, b) =>
     (b.fiscal_year - a.fiscal_year) || ((QUARTER_ORDER[b.fiscal_period] ?? 0) - (QUARTER_ORDER[a.fiscal_period] ?? 0))
   )[0];

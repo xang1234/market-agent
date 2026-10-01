@@ -76,7 +76,10 @@ export async function loadUsableFacts(db: QueryExecutor, query: UsableFactsQuery
   let filters = "";
   // Active now, or (for a historical cutoff) active at the cutoff.
   let activity = factActiveSql("f");
-  if (query.numericOnly ?? true) filters += `\n        and f.value_num is not null`;
+  // A figure is a finite number: numeric columns can also hold NaN/Infinity.
+  if (query.numericOnly ?? true) {
+    filters += `\n        and f.value_num is not null and f.value_num not in ('NaN', 'Infinity', '-Infinity')`;
+  }
   if (query.periodKind !== undefined) {
     params.push(query.periodKind);
     filters += `\n        and f.period_kind = $${params.length}`;
@@ -145,8 +148,14 @@ export async function loadUsableFacts(db: QueryExecutor, query: UsableFactsQuery
   );
   return rows.map((row) => Object.freeze({
     ...row,
-    value_num: row.value_num === null ? null : Number(row.value_num),
-    scale: row.scale === null ? 1 : Number(row.scale),
+    value_num: finiteOrNull(row.value_num),
+    scale: finiteOrNull(row.scale) ?? 1,
     as_of: row.as_of instanceof Date ? row.as_of.toISOString() : new Date(row.as_of).toISOString(),
   }));
+}
+
+function finiteOrNull(value: number | string | null): number | null {
+  if (value === null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }

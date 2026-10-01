@@ -137,6 +137,19 @@ test("loadUsableFacts applies every rule for facts that ground a sealed answer",
     assert.deepEqual(rows.map((row) => row.value_num), [2]);
   });
 
+  await t.test("numeric: a non-finite value (NaN, Infinity) is no figure", async () => {
+    await fact(2020, { value_num: 3, as_of: "2026-04-01T00:00:00.000Z", observed_at: "2026-04-01T00:00:00.000Z" });
+    const broken = await fact(2020, { value_num: 4, source_id: sourceB });
+    await client.query(`update facts set value_num = 'NaN'::numeric where fact_id = $1::uuid`, [broken.fact_id]);
+    // Numeric callers keep the older finite figure; others see no number.
+    const numeric = (await loadUsableFacts(client, { subjectKind: "issuer", subjectIds: [ISSUER_ID], numericOnly: true }))
+      .filter((row) => row.fiscal_year === 2020);
+    assert.deepEqual(numeric.map((row) => row.value_num), [3]);
+    const any = (await loadUsableFacts(client, { subjectKind: "issuer", subjectIds: [ISSUER_ID], numericOnly: false }))
+      .filter((row) => row.fiscal_year === 2020);
+    assert.deepEqual(any.map((row) => row.value_num), [null]);
+  });
+
   await t.test("numeric-only callers keep an older figure over a newer text-only fact", async () => {
     await fact(2016, { value_num: 7, as_of: "2026-04-01T00:00:00.000Z", observed_at: "2026-04-01T00:00:00.000Z" });
     await fact(2016, { value_num: null, value_text: "see note", source_id: sourceB } as Partial<FactInput>);

@@ -227,6 +227,8 @@ test("a segment breakdown lists the latest quarter's segments, largest first, ea
   assert.deepEqual(breakdown.items.map((item) => item.value_ref), ["Data Center-2026-Q4", "Gaming-2026-Q4"]);
   assert.equal(breakdown.items[0].format, "$55.2B");
   assert.equal(segmentRevenueItems([]), null);
+  // An inherited property name is not a quarter.
+  assert.equal(segmentRevenueItems([row("Data Center", 55.2e9, 2026, "toString")])?.period ?? null, null);
   // A partial segment would pass an incomplete breakdown off as whole: show none.
   assert.equal(segmentRevenueItems([row("Data Center", 55.2e9, 2026, "Q4"), row("Gaming", 4.3e9, 2026, "Q4", "partial")]), null);
   // An unknown currency is not USD.
