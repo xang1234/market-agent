@@ -2,11 +2,11 @@
 // `services/market/src/dev-fixtures.ts` so a click-through from
 // screener to symbol-detail lands on the same canonical identity.
 
-import type { ScreenerCandidate } from "./candidate.ts";
+import type { ScreenerCandidateInput } from "./candidate.ts";
 
 const AS_OF = "2026-04-22T15:30:00.000Z";
 
-export const DEV_SCREENER_CANDIDATES: ReadonlyArray<ScreenerCandidate> = [
+export const DEV_SCREENER_CANDIDATES: ReadonlyArray<ScreenerCandidateInput> = [
   {
     subject_ref: { kind: "listing", id: "11111111-1111-4111-a111-111111111111" },
     display: { primary: "Apple Inc.", ticker: "AAPL", mic: "XNAS", legal_name: "Apple Inc." },

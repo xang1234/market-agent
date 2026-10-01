@@ -52,6 +52,13 @@ function fundamentalsSummary(
     operating_margin: 0.30,
     net_margin: 0.25,
     revenue_growth_yoy: 0.08,
+    forward_pe: null,
+    roic: null,
+    perf_quarter: null,
+    perf_year: null,
+    rsi_14: null,
+    week_52_high_distance: null,
+    insider_net_shares_90d: null,
     ...overrides,
   };
 }

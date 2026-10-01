@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   createInMemoryCandidateRepository,
   type ScreenerCandidate,
+  type ScreenerCandidateInput,
+  type ScreenerFundamentalsInput,
 } from "../src/candidate.ts";
 import { executeScreenerQuery, type ExecutorDeps } from "../src/executor.ts";
 import type { ScreenerQuery } from "../src/query.ts";
@@ -21,8 +23,8 @@ function fixedClock(): Date {
 
 function candidate(
   id: string,
-  overrides: { display?: Partial<ScreenerCandidate["display"]>; universe?: Partial<ScreenerCandidate["universe"]>; quote?: Partial<ScreenerCandidate["quote"]>; fundamentals?: Partial<ScreenerCandidate["fundamentals"]> } = {},
-): ScreenerCandidate {
+  overrides: { display?: Partial<ScreenerCandidate["display"]>; universe?: Partial<ScreenerCandidate["universe"]>; quote?: Partial<ScreenerCandidate["quote"]>; fundamentals?: Partial<ScreenerFundamentalsInput> } = {},
+): ScreenerCandidateInput {
   return {
     subject_ref: { kind: "issuer", id },
     display: { primary: "Test Co", ticker: "TST", ...overrides.display },
@@ -57,7 +59,7 @@ function candidate(
   };
 }
 
-function deps(records: ReadonlyArray<ScreenerCandidate>): ExecutorDeps {
+function deps(records: ReadonlyArray<ScreenerCandidateInput>): ExecutorDeps {
   return {
     candidates: createInMemoryCandidateRepository(records),
     clock: fixedClock,
