@@ -1821,6 +1821,9 @@ create table segments (
   issuer_id uuid not null references issuers(issuer_id),
   axis text not null check (axis in ('business', 'geography')),
   name text not null,
+  -- A sub-segment's parent (e.g. Compute within Data Center); top-level
+  -- segments, the ones a breakdown sums, have none.
+  parent_segment_id uuid references segments(segment_id),
   definition_as_of timestamptz not null,
   created_at timestamptz not null default now(),
   unique (issuer_id, axis, name)

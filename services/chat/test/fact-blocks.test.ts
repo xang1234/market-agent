@@ -207,13 +207,14 @@ test("a comparison keeps its price chart when the fundamentals are unavailable",
 });
 
 test("a segment breakdown lists the latest quarter's segments, largest first, each citing its fact", () => {
-  const row = (name: string, value: number, fiscal_year: number, fiscal_period: string) => ({
+  const row = (name: string, value: number, fiscal_year: number, fiscal_period: string, coverage_level = "full") => ({
     fact_id: `${name}-${fiscal_year}-${fiscal_period}`,
     name,
     value,
     currency: "USD",
     fiscal_year,
     fiscal_period,
+    coverage_level,
   });
   const breakdown = segmentRevenueItems([
     row("Gaming", 4.3e9, 2026, "Q4"),
@@ -226,4 +227,6 @@ test("a segment breakdown lists the latest quarter's segments, largest first, ea
   assert.deepEqual(breakdown.items.map((item) => item.value_ref), ["Data Center-2026-Q4", "Gaming-2026-Q4"]);
   assert.equal(breakdown.items[0].format, "$55.2B");
   assert.equal(segmentRevenueItems([]), null);
+  // A partial segment would pass an incomplete breakdown off as whole: show none.
+  assert.equal(segmentRevenueItems([row("Data Center", 55.2e9, 2026, "Q4"), row("Gaming", 4.3e9, 2026, "Q4", "partial")]), null);
 });

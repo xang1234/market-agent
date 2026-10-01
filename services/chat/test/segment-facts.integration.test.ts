@@ -61,6 +61,17 @@ test("a segment breakdown shows only eligible, numeric facts, one per segment", 
   await segmentFact("Estimated Segment", { method: "estimated" });
   await segmentFact("Export-only Segment", { entitlement_channels: ["export"] });
   await segmentFact("Text Segment", { value_num: null, value_text: "not disclosed" });
+  // A child of Data Center: listing it beside its parent would double-count.
+  const { rows: [{ segment_id: dataCenterId }] } = await client.query<{ segment_id: string }>(
+    `select segment_id::text as segment_id from segments where issuer_id = $1::uuid and name = 'Data Center'`,
+    [NVDA.issuer_id],
+  );
+  await client.query(
+    `insert into segments (issuer_id, axis, name, definition_as_of, parent_segment_id)
+     values ($1::uuid, 'business', 'Compute', $2, $3::uuid)`,
+    [NVDA.issuer_id, GOLDEN_AS_OF, dataCenterId],
+  );
+  await segmentFact("Compute", { value_num: 48e9 });
   // An undated quarter cannot be placed in time.
   await segmentFact("Undated Segment", { fiscal_year: null, fiscal_period: null });
   // Data Center from two more sources: an earlier one loses to the golden fact

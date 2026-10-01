@@ -194,12 +194,15 @@ async function loadSegmentBlocks(
               (f.value_num * f.scale)::float8 as value,
               f.currency,
               f.fiscal_year,
-              f.fiscal_period
+              f.fiscal_period,
+              f.coverage_level
          from segments s
          join facts f on f.subject_kind = 'segment' and f.subject_id = s.segment_id
          join metrics m on m.metric_id = f.metric_id
         where s.issuer_id = $1::uuid
           and s.axis = 'business'
+          -- Top-level segments only: a child listed beside its parent double-counts.
+          and s.parent_segment_id is null
           and m.metric_key = 'revenue'
           and f.period_kind = 'fiscal_q'
           and f.method = 'reported'
@@ -240,9 +243,12 @@ type SegmentRevenueRow = {
   currency: string | null;
   fiscal_year: number;
   fiscal_period: string;
+  coverage_level: string;
 };
 
-// The latest quarter's segments, largest first, each item citing its fact.
+// The latest quarter's segments, largest first, each item citing its fact. Null
+// when any of them is not fully covered: a partial value would pass an
+// incomplete breakdown off as whole, and dropping it would hide a segment.
 export function segmentRevenueItems(
   rows: ReadonlyArray<SegmentRevenueRow>,
 ): { period: string; items: Array<{ label: string; value_ref: string; format: string }> } | null {
@@ -250,8 +256,9 @@ export function segmentRevenueItems(
     (b.fiscal_year - a.fiscal_year) || ((QUARTER_ORDER[b.fiscal_period] ?? 0) - (QUARTER_ORDER[a.fiscal_period] ?? 0))
   )[0];
   if (!latest) return null;
-  const items = rows
-    .filter((row) => row.fiscal_year === latest.fiscal_year && row.fiscal_period === latest.fiscal_period)
+  const quarter = rows.filter((row) => row.fiscal_year === latest.fiscal_year && row.fiscal_period === latest.fiscal_period);
+  if (quarter.some((row) => row.coverage_level !== "full")) return null;
+  const items = quarter
     .sort((a, b) => b.value - a.value)
     .map((row) => ({ label: row.name, value_ref: row.fact_id, format: formatCompactCurrency(row.value, row.currency ?? "USD") }));
   return { period: `${latest.fiscal_period} ${latest.fiscal_year}`, items };
