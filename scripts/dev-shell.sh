@@ -732,9 +732,16 @@ up() {
   status
 }
 
+have_docker() {
+  command -v docker >/dev/null 2>&1
+}
+
 down() {
   stop_processes
-  compose stop
+  # UI mode needs no Docker at all; without it there are no containers to stop.
+  if have_docker; then
+    compose stop
+  fi
 }
 
 status() {

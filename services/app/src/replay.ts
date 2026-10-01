@@ -121,12 +121,28 @@ export function createReplayHandler(fixture: ReplayFixture): Handler {
   const toRecorded = (text: string) => text.replace(UUID, (id) => actualToRecorded.get(id) ?? id);
   const toActual = (text: string) => text.replace(UUID, (id) => recordedToActual.get(id) ?? id);
 
+  // Ids the server issued: they appear in recorded responses (a thread id, a fact id in a
+  // block). The client sends them back verbatim, so they must match the recording
+  // exactly; only ids the client generates fresh may differ. Without this, a lookup of a
+  // fact that wasn't inspected during capture would get another fact's evidence.
+  const serverIds = new Set(exchanges.flatMap((e) => e.body.match(UUID) ?? []));
+  const idsCompatible = (recorded: string, actual: string) => {
+    const recordedIds = recorded.match(UUID) ?? [];
+    const actualIds = toRecorded(actual).match(UUID) ?? [];
+    return recordedIds.length === actualIds.length &&
+      recordedIds.every((id, i) => id === actualIds[i] || !serverIds.has(actualIds[i]!));
+  };
+
   function match(method: string, path: string, query: string, body: string): number | undefined {
-    const wanted = shape(signature(path, query, body));
-    const exact = toRecorded(signature(path, query, body));
+    const actual = signature(path, query, body);
+    const wanted = shape(actual);
+    const exact = toRecorded(actual);
     const candidates = exchanges
       .map((e, index) => ({ e, index }))
-      .filter(({ e }) => e.method === method && shape(signature(e.path, e.query, e.requestBody)) === wanted);
+      .filter(({ e }) => {
+        const recorded = signature(e.path, e.query, e.requestBody);
+        return e.method === method && shape(recorded) === wanted && idsCompatible(recorded, actual);
+      });
     if (candidates.length === 0) return undefined;
 
     if (isRead(candidates[0]!.e)) {

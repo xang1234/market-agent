@@ -710,6 +710,25 @@ test("down stops compose services without deleting dev database containers", asy
   await rm(fixture.root, { recursive: true, force: true });
 });
 
+test("down works without Docker installed (UI mode needs none): it skips Compose", async () => {
+  const fixture = await createShellFixture();
+  const traceFile = join(fixture.root, "trace.log");
+  const result = await runBash(
+    [
+      "MARKET_AGENT_DEV_SHELL_SOURCE_ONLY=1 source ./scripts/dev-shell.sh",
+      `TRACE_FILE="${traceFile}"`,
+      "have_docker(){ return 1; }",
+      'compose(){ printf "compose:%s\\n" "$*" >> "$TRACE_FILE"; return 127; }',
+      "down",
+    ].join("\n"),
+    fixture.root,
+  );
+  const trace = await readFile(traceFile, "utf8").catch(() => "");
+  await rm(fixture.root, { recursive: true, force: true });
+  assert.equal(result.code, 0, result.stderr);
+  assert.doesNotMatch(trace, /compose:/);
+});
+
 test("docker compose declares persistent storage for Postgres dev data", async () => {
   const composeFile = await readFile(join(REPO_ROOT, "docker-compose.dev.yml"), "utf8");
 

@@ -27,6 +27,8 @@ const USER_SNAP = "33333333-3333-4333-8333-333333333333";
 const RUN = "44444444-4444-4444-8444-444444444444";
 const ANSWER = "55555555-5555-4555-8555-555555555555";
 const FACT = "66666666-6666-4666-8666-666666666666";
+// Shown in the recorded blocks (so the server issued it) but never inspected during capture.
+const OTHER_FACT = "88888888-8888-4888-8888-888888888888";
 const SOURCE = "77777777-7777-4777-8777-777777777777";
 const USER = "00000000-0000-4000-8000-000000000001";
 
@@ -50,7 +52,7 @@ const FIXTURE: ReplayFixture = {
     },
     {
       method: "GET", path: `/v1/chat/threads/${THREAD}/messages`, query: "", requestBody: "", status: 200, contentType: "application/json",
-      body: json({ messages: [{ message_id: USER_MSG, role: "user" }, { message_id: ANSWER, role: "assistant", fact: FACT }] }),
+      body: json({ messages: [{ message_id: USER_MSG, role: "user" }, { message_id: ANSWER, role: "assistant", facts: [FACT, OTHER_FACT] }] }),
     },
     { method: "POST", path: "/v1/evidence/inspect", query: "", requestBody: json({ ref: { kind: "fact", id: FACT } }), status: 200, contentType: "application/json", body: json({ title: "revenue" }) },
     { method: "POST", path: "/v1/evidence/inspect", query: "", requestBody: json({ ref: { kind: "source", id: SOURCE } }), status: 200, contentType: "application/json", body: json({ title: "sec_edgar filing" }) },
@@ -122,6 +124,14 @@ test("replay starts over when the client starts the recorded flow again (a secon
     second.after.map((m: { message_id: string }) => m.message_id),
     ["dddddddd-dddd-4ddd-8ddd-dddddddddddd", ANSWER],
   );
+});
+
+test("replay never answers an evidence lookup with another fact's evidence", async (t) => {
+  const base = await serve(t, createReplayHandler(FIXTURE));
+  // OTHER_FACT is on screen (the server issued it) but wasn't inspected during capture.
+  const response = await fetch(`${base}/v1/evidence/inspect`, { method: "POST", body: json({ ref: { kind: "fact", id: OTHER_FACT } }) });
+  assert.equal(response.status, 404);
+  assert.match((await response.json()).error, /no recorded response/);
 });
 
 test("replay answers an unrecorded request with a clear 404, not a guess", async (t) => {
