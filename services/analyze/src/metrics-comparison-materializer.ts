@@ -4,15 +4,16 @@
 // Two cases, per the emitter design:
 //   - A metric that IS already a stored fact (revenue, a reported statement
 //     line) reuses that fact — the cell points straight at it, no duplicate.
-//   - A computed metric (margins, growth, P/E) gets a fresh method='derived'
-//     fact via the canonical createFact path, with lineage to its input facts
+//   - A computed metric (margins, growth, P/E) gets a method='derived' fact via
+//     the canonical createFact path (or reuses an identical one already known,
+//     #134), with lineage to its input facts
 //     recorded in quality_flags (no schema migration — see the emitter design
 //     doc, fra-36y8 spike).
 //
 // Output is the per-(subject, metric) value_ref the block builder (fra-ipv4)
 // needs, plus the value/format it carries through for tone + display.
 
-import { createFact, type FactInput } from "../../evidence/src/fact-repo.ts";
+import { createFact, findKnownIdenticalFact, type FactInput } from "../../evidence/src/fact-repo.ts";
 import { resolveMetricIds } from "../../evidence/src/metric-repo.ts";
 import type { QueryExecutor } from "../../evidence/src/types.ts";
 import type {
@@ -102,8 +103,10 @@ async function materializeCell(
     );
   }
 
-  const fact = await createFact(db, derivedFactInput(subjectId, value, metricId, clock));
-  return fact.fact_id;
+  // The same computation (inputs, value, lineage) already stored and known at
+  // this clock is reused, so repeated comparisons don't re-mint it (#134).
+  const input = derivedFactInput(subjectId, value, metricId, clock);
+  return (await findKnownIdenticalFact(db, input, input.observed_at)) ?? (await createFact(db, input)).fact_id;
 }
 
 function derivedFactInput(

@@ -181,8 +181,13 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
   });
 
   await t.test("'Explain the differences and show the evidence' keeps both companies and cites facts from each", async () => {
+    const derivedFacts = async () =>
+      (await client.query<{ n: number }>(`select count(*)::int as n from facts where method = 'derived'`)).rows[0]!.n;
+    const derivedBefore = await derivedFacts();
     const turnEvents = await runTurn(base, thread.thread_id, "Explain the differences and show the evidence");
     assert.deepEqual(completedTurn(turnEvents).data.subject_refs, BOTH_LISTINGS);
+    // The same comparison reuses turn 2's derived facts instead of re-minting them (#134).
+    assert.equal(await derivedFacts(), derivedBefore, "turn 3 added derived facts");
 
     const answer = await latestAssistantMessage(base, thread.thread_id);
     assert.match(JSON.stringify(answer.blocks), /each figure links to its filing/);
