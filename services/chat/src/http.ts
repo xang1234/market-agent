@@ -15,6 +15,7 @@ import {
   type ChatVerificationMode,
 } from "./coordinator.ts";
 import type { ChatClarificationAnswer, ChatFinancialRuntime } from "./financial-runtime.ts";
+import { withLlmConversation } from "../../llm/src/pi-adapter.ts";
 import type { ChatSseEvent } from "./sse.ts";
 import type { ChatSubjectPreResolver } from "./subjects.ts";
 import { tryHandleThreadsRequest } from "./threads-http.ts";
@@ -164,7 +165,8 @@ export function createChatServer(options: ChatServerOptions = {}): Server {
       ...(userId ? { userId } : {}),
       ...(route.clarificationAnswer ? { clarificationAnswer: route.clarificationAnswer } : {}),
     };
-    const turn = getTurnForRoute(coordinator, turnInput, resumeAfterSeq > 0);
+    // Every model call the turn makes (and work it starts) is one conversation: the thread.
+    const turn = withLlmConversation(route.threadId, () => getTurnForRoute(coordinator, turnInput, resumeAfterSeq > 0));
     if (turn === INPUT_MISMATCH) {
       respondJson(res, 409, { error: "turn input does not match the existing turn" });
       return;

@@ -1,3 +1,6 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
+
 import {
   type LlmChatClient,
   type LlmClientExecutionOptions,
@@ -53,10 +56,26 @@ type PiModel = {
 
 type PiCompleteOptions = {
   apiKey?: string;
+  headers?: Record<string, string>;
   temperature?: number;
   maxTokens?: number;
   signal?: AbortSignal;
 };
+
+// Providers see this app by name, not the SDK's generic user agent; OpenCode Go
+// requires it, along with a stable per-conversation session id (below).
+export const LLM_USER_AGENT = "market-agent/0.1";
+
+const conversation = new AsyncLocalStorage<string>();
+
+/**
+ * Runs `fn` with every LLM call made inside it, including async work it starts,
+ * tagged as one conversation (a chat thread), so the provider can route and cache
+ * the conversation's calls together.
+ */
+export function withLlmConversation<T>(conversationId: string, fn: () => T): T {
+  return conversation.run(conversationId, fn);
+}
 
 export type PiComplete = (
   model: PiModel,
@@ -144,6 +163,12 @@ function optionsFromDeployment(
 ): PiCompleteOptions {
   return Object.freeze({
     ...(deployment.apiKeys[0] ? { apiKey: deployment.apiKeys[0] } : {}),
+    // ponytail: sent to every provider (others ignore x-opencode-session; it's an opaque
+    // thread id). A call outside any conversation (a title, a channel test) is its own.
+    headers: {
+      "User-Agent": LLM_USER_AGENT,
+      "x-opencode-session": conversation.getStore() ?? randomUUID(),
+    },
     ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
     ...(request.maxTokens === undefined ? {} : { maxTokens: request.maxTokens }),
     ...(execution.signal === undefined ? {} : { signal: execution.signal }),

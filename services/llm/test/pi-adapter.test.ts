@@ -5,6 +5,7 @@ import { LlmProviderError } from "../src/router.ts";
 import {
   createPiLlmChatClient,
   type PiComplete,
+  withLlmConversation,
 } from "../src/pi-adapter.ts";
 
 test("pi adapter calls complete with a custom OpenAI-compatible model", async () => {
@@ -54,11 +55,37 @@ test("pi adapter calls complete with a custom OpenAI-compatible model", async ()
     systemPrompt: "You are concise.",
     messages: [{ role: "user", content: "Say OK." }],
   });
-  assert.deepEqual(calls[0].options, {
+  const { headers, ...options } = calls[0].options as { headers: Record<string, string> };
+  assert.deepEqual(options, {
     apiKey: "ds-key",
     temperature: 0,
     maxTokens: 32,
   });
+  assert.equal(headers["User-Agent"], "market-agent/0.1");
+  assert.match(headers["x-opencode-session"]!, /^[0-9a-f-]{36}$/, "a call outside a conversation is its own session");
+});
+
+test("pi adapter tags every call in a conversation with the same session id", async () => {
+  const sessions: string[] = [];
+  const client = createPiLlmChatClient({
+    complete: async (_model, _context, options) => {
+      sessions.push(options.headers!["x-opencode-session"]!);
+      return { content: [{ type: "text", text: "Reply OK" }] };
+    },
+  });
+  const ask = () => client(deployment(), { messages: [{ role: "user", content: "hello" }] });
+
+  await withLlmConversation("thread-1", async () => {
+    await ask();
+    // Work the conversation starts later (a title after the answer) keeps its id.
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    await ask();
+  });
+  await withLlmConversation("thread-2", ask);
+  await ask();
+
+  assert.deepEqual(sessions.slice(0, 3), ["thread-1", "thread-1", "thread-2"]);
+  assert.notEqual(sessions[3], "thread-2", "outside a conversation, no id leaks from the last one");
 });
 
 test("pi adapter forwards an abort signal to the provider", async () => {
