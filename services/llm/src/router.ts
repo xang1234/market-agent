@@ -123,7 +123,10 @@ export function createLlmRouter(input: CreateLlmRouterInput): ControlledRouter {
   // (billed) success into a failure or stop a fallback.
   const report = (completion: LlmCompletion) => {
     try {
-      input.onCompletion?.(completion);
+      // An async hook may return a promise: consume its rejection without awaiting
+      // telemetry on the routing path.
+      const returned: unknown = input.onCompletion?.(completion);
+      if (returned instanceof Promise) returned.catch(() => {});
     } catch {
       // ponytail: dropped silently; a broken sink shouldn't also flood the logs.
     }

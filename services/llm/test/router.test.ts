@@ -89,6 +89,28 @@ test("LLM router isolates a throwing completion hook from the model result and t
   assert.equal((await withFallback.complete({ messages: [{ role: "user", content: "hello" }] })).text, "fallback ok");
 });
 
+test("LLM router consumes a rejected async completion hook instead of leaving it unhandled", async () => {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    const router = createLlmRouter({
+      settings: settings(),
+      client: async () => ({ text: "ok" }),
+      onCompletion: (async () => {
+        throw new Error("async sink down");
+      }) as unknown as () => void,
+    });
+    assert.equal((await router.complete({ messages: [{ role: "user", content: "hello" }] })).text, "ok");
+    // Let any unhandled rejection surface.
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+  assert.deepEqual(unhandled, []);
+});
+
 test("LLM router falls back after retryable provider failure", async () => {
   const calls: string[] = [];
   const client: LlmChatClient = async (deployment) => {

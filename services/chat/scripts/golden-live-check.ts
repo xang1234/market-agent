@@ -48,11 +48,12 @@ export function evaluateGoldenTurn(
 
 const USER_ID = "00000000-0000-4000-8000-000000000001";
 
-async function api<T>(base: string, method: string, path: string, body?: unknown): Promise<T> {
+async function api<T>(base: string, method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`${base}${path}`, {
     method,
     headers: { "x-user-id": USER_ID, ...(body ? { "content-type": "application/json" } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}),
+    ...(signal ? { signal } : {}),
   });
   if (!response.ok) throw new Error(`${method} ${path} -> ${response.status} ${await response.text()}`);
   return (await response.json()) as T;
@@ -66,19 +67,20 @@ export async function runTurn(
   timeoutMs = 180_000,
 ): Promise<TurnOutcome> {
   const messageId = randomUUID();
-  await api(base, "POST", `/v1/chat/threads/${threadId}/messages`, {
-    message_id: messageId,
-    snapshot_id: randomUUID(),
-    content: question,
-  });
-  const params = new URLSearchParams({ run_id: randomUUID(), turn_id: messageId, user_intent: question, user_id: USER_ID });
-  // The signal also rejects a pending body read, so a stream that goes silent (server
-  // crash, half-open connection) still ends at the deadline instead of hanging.
+  // One deadline for the whole turn: the message POST, the stream request, and every
+  // body read (it rejects a pending read too), so a server that stops answering at any
+  // point (crash, half-open connection) ends the turn instead of hanging the check.
   const signal = AbortSignal.timeout(timeoutMs);
+  const params = new URLSearchParams({ run_id: randomUUID(), turn_id: messageId, user_intent: question, user_id: USER_ID });
   const decoder = new TextDecoder();
   let transcript = "";
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   try {
+    await api(base, "POST", `/v1/chat/threads/${threadId}/messages`, {
+      message_id: messageId,
+      snapshot_id: randomUUID(),
+      content: question,
+    }, signal);
     const response = await fetch(`${base}/v1/chat/threads/${threadId}/stream?${params}`, {
       headers: { "x-user-id": USER_ID },
       signal,

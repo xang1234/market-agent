@@ -29,6 +29,21 @@ test("runTurn gives up at its deadline when the stream goes silent", async (t) =
 
 const blocks = (...kinds: string[]) => kinds.map((kind, index) => ({ id: `b${index}`, kind }));
 
+test("runTurn's deadline also covers a message POST that never answers", async (t) => {
+  // Accepts the connection, then never responds to anything.
+  const server = createServer(() => {});
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+  const startedAt = Date.now();
+  assert.equal(await runTurn(base, "thread-1", "Analyze NVDA", 300), "timeout");
+  assert.ok(Date.now() - startedAt < 5_000, "returned near the deadline, not hung");
+});
+
 test("the live check asks the golden conversation's three questions, in order", () => {
   assert.deepEqual(GOLDEN_TURNS.map((turn) => turn.question), [
     "Analyze NVDA",
