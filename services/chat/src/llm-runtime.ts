@@ -103,7 +103,9 @@ export async function composeAnalystBlocksWithLlm(input: {
       },
     ],
     temperature: 0.2,
-    maxTokens: 800,
+    // A ceiling, not a target: reasoning models think before answering, and at 800
+    // they spent it all thinking and returned no text (#124 baseline). Same as the planner.
+    maxTokens: 4096,
   });
   const text = result.text.trim();
   if (text.length === 0) return input.blocks;

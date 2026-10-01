@@ -52,6 +52,23 @@ test("createLlmThreadTitleModel gives reasoning models enough output budget", as
   assert.ok((observedMaxTokens ?? 0) >= 256, `expected a generous title budget for reasoning models, got ${observedMaxTokens}`);
 });
 
+test("composeAnalystBlocksWithLlm gives reasoning models room to think and still answer", async () => {
+  let observedMaxTokens: number | undefined;
+  await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
+    blocks: [richTextBlock("Deterministic note")],
+    toolCalls: [],
+    createClient: () => async (_deployment, request) => {
+      observedMaxTokens = request.maxTokens;
+      return { text: "Apple's revenue rose." };
+    },
+  });
+
+  // At 800, qwen3.8-max spent the whole budget reasoning and returned no text (#124).
+  assert.ok((observedMaxTokens ?? 0) >= 4096, `expected an answer budget that survives reasoning, got ${observedMaxTokens}`);
+});
+
 test("composeAnalystBlocksWithLlm returns original blocks when no deployment is configured", async () => {
   const blocks = [richTextBlock("Deterministic note")];
   const result = await composeAnalystBlocksWithLlm({
