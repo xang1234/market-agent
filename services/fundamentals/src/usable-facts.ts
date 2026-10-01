@@ -4,7 +4,8 @@
 // - eligibility: reported, active, entitled for the channel, display-verified;
 // - numeric (by default): a text-only fact has no figure to show;
 // - dated: a fiscal period needs its year and period (point facts need neither);
-// - currency: a monetary fact (currency, currency_per_share) states its currency;
+// - currency: a monetary fact (by its metric's unit_class, or a currency unit)
+//   states its currency, never assumed;
 // - canonical: one fact per subject, metric and period, the latest as_of winning
 //   when sources overlap;
 // - cutoff (when given): as_of, observed_at and reported_at all at or before it,
@@ -140,8 +141,9 @@ export async function loadUsableFacts(db: QueryExecutor, query: UsableFactsQuery
           and (f.period_kind not in ('fiscal_q', 'fiscal_y') or (f.fiscal_year is not null and f.fiscal_period is not null))
           -- A malformed multiplier makes the fact unusable, never a default.
           and f.scale not in ('NaN', 'Infinity', '-Infinity')
-          -- Any monetary unit (currency, currency_per_share) states its currency.
-          and (f.unit not like 'currency%' or f.currency is not null)${filters}
+          -- A monetary fact states its currency: by the metric's unit_class (EPS
+          -- included) or a currency unit, however the fact spells it ('USD').
+          and ((m.unit_class <> 'currency' and f.unit not like 'currency%') or f.currency is not null)${filters}
         order by f.subject_id, f.metric_id, f.period_kind,
                  case when f.period_kind in ('fiscal_q', 'fiscal_y') then f.fiscal_year end,
                  case when f.period_kind in ('fiscal_q', 'fiscal_y') then f.fiscal_period end,

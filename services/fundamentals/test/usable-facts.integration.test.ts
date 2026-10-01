@@ -101,6 +101,12 @@ test("loadUsableFacts applies every rule for facts that ground a sealed answer",
     assert.ok(!(await years()).includes(2013));
   });
 
+  await t.test("currency: a monetary metric needs its currency whatever the unit is spelled", async () => {
+    // Revenue's metric is unit_class 'currency'; a 'USD' unit with no currency is not usable.
+    await fact(2024, { unit: "USD", currency: null } as Partial<FactInput>);
+    assert.ok(!(await years()).includes(2024));
+  });
+
   await t.test("cutoff: a fact replaced or invalidated after the cutoff was still the one known then", async () => {
     // Superseded by a fact observed after the cutoff.
     const original = await fact(2014, { value_num: 1 });
