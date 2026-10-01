@@ -6,11 +6,13 @@ import { createThesisAgentLoopStages } from '../src/thesis-runtime.ts';
 // facts (now()) and assessments (assessed_at), so app/DB clock skew can neither
 // hide a just-ingested fact nor fake a "newer assessment" conflict.
 test('a thesis run takes its cutoff from the database clock, not the host clock', async () => {
-  const dbNow = '2030-01-02T03:04:05.678Z'; // far from the host clock on purpose
+  // Far from the host clock on purpose, and with microseconds: a Date would
+  // round them away and move the cutoff before a fact stamped in the same ms.
+  const dbNow = '2030-01-02T03:04:05.678901Z';
   const db = {
     async query(text: string) {
-      assert.match(text, /select now\(\)/i);
-      return { rows: [{ now: new Date(dbNow) }], rowCount: 1 };
+      assert.match(text, /now\(\)/i);
+      return { rows: [{ now: dbNow }], rowCount: 1 };
     },
   };
   const stages = createThesisAgentLoopStages({

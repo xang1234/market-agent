@@ -49,8 +49,8 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
       // By default the cutoff comes from the database clock, the one that stamps
       // facts (now()) and assessments (assessed_at). Taking it from the app clock
       // let skew hide a just-ingested fact or fake a newer-assessment conflict (#143).
-      const asOf = input.now ? await input.now() : await databaseNow(input.db);
-      return { thesis_version_id: input.thesis.thesis_version_id, as_of: new Date(asOf).toISOString() };
+      const asOf = input.now ? new Date(await input.now()).toISOString() : await databaseNow(input.db);
+      return { thesis_version_id: input.thesis.thesis_version_id, as_of: asOf };
     },
     async extractEvidence({ deltas }) {
       return loadThesisPacket(input.db, { thesis: input.thesis, userId: input.userId, asOf: deltas.as_of });
@@ -144,7 +144,11 @@ async function activity(db: QueryExecutor, input: ThesisRuntimeInput, stage: 're
   return writeRunActivity(db, { user_id: input.userId, agent_id: input.agent.agent_id, stage, subject_refs: [input.thesis.subject_ref], summary, ts: new Date() });
 }
 
+// As ISO text with microseconds: through a JS Date the cutoff would round down
+// to the millisecond and fall before a fact stamped earlier in that millisecond.
 async function databaseNow(db: QueryExecutor): Promise<string> {
-  const { rows } = await db.query<{ now: Date | string }>('select now() as now');
-  return new Date(rows[0].now).toISOString();
+  const { rows } = await db.query<{ now: string }>(
+    `select to_char(now() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as now`,
+  );
+  return rows[0].now;
 }
