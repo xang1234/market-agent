@@ -456,6 +456,18 @@ test("DEV_MODE=analyst fails fast without a deployable LLM, pointing at DEV_NO_K
   assert.equal(trace, "", "nothing starts");
 });
 
+test("the live-mode LLM preflight sees the same settings file the services will load", async () => {
+  // The services reparse LLM_SETTINGS_ENV_FILE (default $ROOT/.env.dev); the preflight
+  // must check that file, not just the shell-sourced values.
+  const { result, lines } = await traceUp({ DEV_MODE: "analyst", ...LIVE_LLM }, [
+    ...NPM_TRACE,
+    'llm_deployable(){ printf "llm-settings-file:%s\\n" "${LLM_SETTINGS_ENV_FILE:-}" >> "$TRACE_FILE"; }',
+  ]);
+  assert.equal(result.code, 0, result.stderr);
+  const [file] = lines("llm-settings-file:");
+  assert.ok(file && file.endsWith("/.env.dev"), `preflight saw LLM_SETTINGS_ENV_FILE=${file}`);
+});
+
 test("DEV_MODE=data needs live provider credentials and does not seed frozen data", async () => {
   const missing = await traceUp({ DEV_MODE: "data", ...LIVE_LLM });
   assert.notEqual(missing.result.code, 0);
