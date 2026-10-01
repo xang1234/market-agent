@@ -1023,6 +1023,8 @@ async function toolBackedAnalystTurnRunner(
     withUnresolvedNote(result.blocks, context.unresolvedMentions ?? []).map((block) => Object.freeze({ ...block })),
   );
   const contentHash = contentHashForText(JSON.stringify(assistantBlocks));
+  // The guard's drops, on every completion that shows the answer (#144).
+  const narrativeRemoved = result.narrative_removed?.length ? { narrative_removed: result.narrative_removed } : {};
 
   // display_unverified: show what failed verification, labelled, and save nothing.
   // turn.completed carries the full blocks because there is no message to reload.
@@ -1036,6 +1038,7 @@ async function toolBackedAnalystTurnRunner(
     emit("turn.completed", {
       bundle_id: context.bundleId,
       ...subjectRef,
+      ...narrativeRemoved,
       unverified: { persisted: false, failures, blocks: assistantBlocks },
     });
   };
@@ -1099,7 +1102,7 @@ async function toolBackedAnalystTurnRunner(
     message_id: messageId,
     bundle_id: context.bundleId,
     ...subjectRef,
-    ...(result.narrative_removed?.length ? { narrative_removed: result.narrative_removed } : {}),
+    ...narrativeRemoved,
   });
 }
 
