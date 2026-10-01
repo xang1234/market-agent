@@ -8,6 +8,7 @@ import {
   toolCallArgsDigest,
   writeToolCallLog,
 } from "../src/tool-call.ts";
+import { fakeRows } from "../../shared/test/fake-query.ts";
 
 test("writeToolCallLog persists a full row and returns the generated id", { timeout: 120000 }, async (t) => {
   if (!dockerAvailable()) {
@@ -94,12 +95,12 @@ test("runLoggedToolCall records a successful tool invocation", async () => {
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       calls.push({ text, values });
       return {
-        rows: [
+        rows: fakeRows<R>([
           {
             tool_call_id: "00000000-0000-4000-8000-000000000001",
             created_at: new Date("2026-04-29T00:00:00.000Z"),
           },
-        ] as R[],
+        ]),
         command: "INSERT",
         rowCount: 1,
         oid: 0,
@@ -135,12 +136,12 @@ test("runLoggedToolCall records failed tool invocations and rethrows", async () 
     async query<R extends Record<string, unknown>>(text: string, values?: unknown[]) {
       calls.push({ text, values });
       return {
-        rows: [
+        rows: fakeRows<R>([
           {
             tool_call_id: "00000000-0000-4000-8000-000000000002",
             created_at: new Date("2026-04-29T00:00:00.000Z"),
           },
-        ] as R[],
+        ]),
         command: "INSERT",
         rowCount: 1,
         oid: 0,

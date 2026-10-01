@@ -15,6 +15,7 @@ import {
   parseInferredMembershipSpec,
 } from "../src/inferred-membership.ts";
 import type { ThemeRow } from "../src/theme-repo.ts";
+import { fakeRows } from "../../shared/test/fake-query.ts";
 
 const THEME_ID = "11111111-1111-4111-8111-111111111111";
 const CLUSTER_ID_A = "22222222-2222-4222-8222-222222222222";
@@ -569,7 +570,7 @@ test("applyInferredThemeMembershipWithPool rolls back and releases the client wh
             return { rows: [] as R[], rowCount: 0, command: "", oid: 0, fields: [] };
           }
           if (text.includes("claim_cluster_members")) {
-            return { rows: candidateRows as R[], rowCount: 1, command: "", oid: 0, fields: [] };
+            return { rows: fakeRows<R>(candidateRows), rowCount: 1, command: "", oid: 0, fields: [] };
           }
           if (text.includes("insert into theme_memberships")) {
             throw new Error("insert failed");

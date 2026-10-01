@@ -22,7 +22,7 @@ import {
   normalizedScreenerQuery,
   type ScreenerQuery,
 } from "./query.ts";
-import { type UUID } from "./subject-ref.ts";
+import type { UUID } from "../../shared/src/subject-ref.ts";
 import {
   assertIso8601Utc,
   assertNonEmptyString,

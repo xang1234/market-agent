@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   listThemeMembershipRationalesBySubject,
 } from "../src/theme-repo.ts";
+import { fakePgQuery } from "../../shared/test/fake-query.ts";
 
 const THEME_ID = "11111111-1111-4111-8111-111111111111";
 const MEMBERSHIP_ID = "22222222-2222-4222-8222-222222222222";
@@ -14,7 +15,7 @@ const CLAIM_B = "55555555-5555-4555-8555-555555555555";
 test("listThemeMembershipRationalesBySubject joins theme mode/spec with membership rationale", async () => {
   const queries: Array<{ text: string; values: unknown[] }> = [];
   const db = {
-    async query(text: string, values?: unknown[]) {
+    query: fakePgQuery(async (text: string, values?: unknown[]) => {
       queries.push({ text, values: values ?? [] });
       return {
         rows: [
@@ -34,7 +35,7 @@ test("listThemeMembershipRationalesBySubject joins theme mode/spec with membersh
           },
         ],
       };
-    },
+    }),
   };
 
   const page = await listThemeMembershipRationalesBySubject(
@@ -55,7 +56,7 @@ test("listThemeMembershipRationalesBySubject joins theme mode/spec with membersh
 
 test("listThemeMembershipRationalesBySubject marks manual memberships as unsupported rationale", async () => {
   const db = {
-    async query() {
+    query: fakePgQuery(async () => {
       return {
         rows: [
           {
@@ -74,7 +75,7 @@ test("listThemeMembershipRationalesBySubject marks manual memberships as unsuppo
           },
         ],
       };
-    },
+    }),
   };
 
   const page = await listThemeMembershipRationalesBySubject(db, { kind: "issuer", id: SUBJECT_ID });
@@ -86,7 +87,7 @@ test("listThemeMembershipRationalesBySubject marks manual memberships as unsuppo
 
 test("listThemeMembershipRationalesBySubject exposes explicit rule-based claim rationale", async () => {
   const db = {
-    async query() {
+    query: fakePgQuery(async () => {
       return {
         rows: [
           {
@@ -105,7 +106,7 @@ test("listThemeMembershipRationalesBySubject exposes explicit rule-based claim r
           },
         ],
       };
-    },
+    }),
   };
 
   const page = await listThemeMembershipRationalesBySubject(db, { kind: "issuer", id: SUBJECT_ID });

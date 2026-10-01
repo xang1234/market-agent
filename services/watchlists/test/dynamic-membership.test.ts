@@ -6,6 +6,7 @@ import {
   type DynamicWatchlistDeps,
 } from "../src/dynamic-membership.ts";
 import type { QueryExecutor } from "../src/queries.ts";
+import { fakePgQuery } from "../../shared/test/fake-query.ts";
 
 type QueryCall = {
   text: string;
@@ -20,19 +21,16 @@ class FakeDb implements QueryExecutor {
   themeMembers = new Map<string, ReadonlyArray<Record<string, unknown>>>();
   portfolioHoldings = new Map<string, ReadonlyArray<Record<string, unknown>>>();
 
-  async query<R>(
-    text: string,
-    values: ReadonlyArray<unknown> = [],
-  ): Promise<{ rows: R[] }> {
+  readonly query = fakePgQuery(async (text: string, values: ReadonlyArray<unknown> = []) => {
     this.calls.push({ text, values });
     const normalized = text.replace(/\s+/g, " ").trim().toLowerCase();
 
     if (normalized.startsWith("select") && normalized.includes("from watchlists")) {
       const watchlist = this.watchlists.get(String(values[0]));
-      return { rows: watchlist ? [watchlist as R] : [] };
+      return { rows: watchlist ? [watchlist] : [] };
     }
     if (normalized.startsWith("select") && normalized.includes("from watchlist_members")) {
-      return { rows: [...(this.manualMembers.get(String(values[0])) ?? [])] as R[] };
+      return { rows: [...(this.manualMembers.get(String(values[0])) ?? [])] };
     }
     if (normalized.startsWith("select") && normalized.includes("from theme_memberships")) {
       const asOf = values[1] === undefined ? null : Date.parse(String(values[1]));
@@ -44,13 +42,13 @@ class FakeDb implements QueryExecutor {
           : Date.parse(String(row.expires_at));
         return effectiveAt <= asOf && (expiresAt === null || expiresAt > asOf);
       });
-      return { rows: rows as R[] };
+      return { rows: rows };
     }
     if (normalized.startsWith("select") && normalized.includes("from portfolio_holdings")) {
-      return { rows: [...(this.portfolioHoldings.get(String(values[0])) ?? [])] as R[] };
+      return { rows: [...(this.portfolioHoldings.get(String(values[0])) ?? [])] };
     }
     return { rows: [] };
-  }
+  });
 
   writeCalls(): ReadonlyArray<QueryCall> {
     return this.calls.filter(({ text }) => /insert|update|delete/i.test(text));

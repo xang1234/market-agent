@@ -208,6 +208,7 @@ test("replay → execute round-trip: save + reopen runs the query against fresh 
           operating_margin: 0.3,
           net_margin: 0.25,
           revenue_growth_yoy: 0.08,
+          ...NO_VENDOR_FUNDAMENTALS,
         },
       },
     ],
@@ -241,6 +242,7 @@ test("replay → execute round-trip: save + reopen runs the query against fresh 
           operating_margin: 0.31,
           net_margin: 0.26,
           revenue_growth_yoy: 0.09,
+          ...NO_VENDOR_FUNDAMENTALS,
         },
       },
     ],
@@ -322,3 +324,14 @@ test("persistScreen does not mutate caller objects", () => {
   assert.equal(input.created_at, CREATED_AT);
   assert.equal(input.updated_at, UPDATED_AT);
 });
+
+// The vendor and insider fundamentals a reported-only row leaves null.
+const NO_VENDOR_FUNDAMENTALS = {
+  forward_pe: null,
+  roic: null,
+  perf_quarter: null,
+  perf_year: null,
+  rsi_14: null,
+  week_52_high_distance: null,
+  insider_net_shares_90d: null,
+};

@@ -1,3 +1,5 @@
+import type { JsonValue } from "../../shared/src/json.ts";
+
 export const NOTIFICATION_CHANNELS = [
   "email",
   "web_push",
@@ -55,7 +57,6 @@ export type ProcessPendingNotificationsResult = {
   channel_receipts: ReadonlyArray<DeliveryChannelReceipt>;
 };
 
-type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 type QueryExecutor = {
   query<R extends Record<string, unknown> = Record<string, unknown>>(

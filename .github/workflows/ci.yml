@@ -144,7 +144,7 @@ jobs:
       - run: npm test
 
   market:
-    name: market (tests)
+    name: market (typecheck, tests)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -161,10 +161,12 @@ jobs:
 
       - run: npm ci
 
+      - run: npm run typecheck
+
       - run: npm test
 
   home:
-    name: home (tests)
+    name: home (typecheck, tests)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -181,10 +183,12 @@ jobs:
 
       - run: npm ci
 
+      - run: npm run typecheck
+
       - run: npm test
 
   resolver:
-    name: resolver (integration tests)
+    name: resolver (typecheck, integration tests)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -208,12 +212,16 @@ jobs:
         working-directory: services/resolver
         run: npm ci
 
+      - name: Typecheck resolver
+        working-directory: services/resolver
+        run: npm run typecheck
+
       - name: Run resolver tests
         working-directory: services/resolver
         run: npm test
 
   screener-artifacts:
-    name: screener-artifacts (integration tests)
+    name: screener-artifacts (typecheck, integration tests)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -238,6 +246,10 @@ jobs:
       - name: Install screener-artifacts deps
         working-directory: services/screener-artifacts
         run: npm ci
+
+      - name: Typecheck screener-artifacts
+        working-directory: services/screener-artifacts
+        run: npm run typecheck
 
       - name: Run screener-artifacts tests
         working-directory: services/screener-artifacts
@@ -297,7 +309,7 @@ jobs:
         run: npm test
 
   watchlists:
-    name: watchlists (integration tests)
+    name: watchlists (typecheck, integration tests)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -321,12 +333,16 @@ jobs:
         working-directory: services/watchlists
         run: npm ci
 
+      - name: Typecheck watchlists
+        working-directory: services/watchlists
+        run: npm run typecheck
+
       - name: Run watchlists tests
         working-directory: services/watchlists
         run: npm test
 
   tools:
-    name: tools (tests)
+    name: tools (typecheck, tests)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -338,6 +354,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      - run: npm ci
+
+      - run: npm run typecheck
 
       - run: npm test
 
@@ -395,7 +415,7 @@ jobs:
       - run: npm test
 
   observability:
-    name: observability (integration tests)
+    name: observability (typecheck, integration tests)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -418,6 +438,10 @@ jobs:
       - name: Install observability deps
         working-directory: services/observability
         run: npm ci
+
+      - name: Typecheck observability
+        working-directory: services/observability
+        run: npm run typecheck
 
       - name: Run observability tests
         working-directory: services/observability
@@ -554,7 +578,7 @@ jobs:
         run: npm test
 
   artifact:
-    name: artifact (tests)
+    name: artifact (typecheck, tests)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -567,10 +591,33 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - run: npm ci
+
+      - run: npm run typecheck
+
       - run: npm test
 
+  shared:
+    name: shared (typecheck, tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/shared
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm test
   notifications:
-    name: notifications (tests)
+    name: notifications (typecheck, tests)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -586,6 +633,8 @@ jobs:
           cache-dependency-path: services/notifications/package-lock.json
 
       - run: npm ci
+      - run: npm run typecheck
+
       - run: npm test
 
   chat:
@@ -682,7 +731,7 @@ jobs:
         run: npm test
 
   portfolio:
-    name: portfolio (integration tests)
+    name: portfolio (typecheck, integration tests)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -705,12 +754,16 @@ jobs:
         working-directory: services/portfolio
         run: npm ci
 
+      - name: Typecheck portfolio
+        working-directory: services/portfolio
+        run: npm run typecheck
+
       - name: Run portfolio tests
         working-directory: services/portfolio
         run: npm test
 
   screener:
-    name: screener (tests)
+    name: screener (typecheck, tests)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -723,10 +776,14 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - run: npm ci
+
+      - run: npm run typecheck
+
       - run: npm test
 
   summary:
-    name: summary (tests)
+    name: summary (typecheck, tests)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -739,10 +796,14 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - run: npm ci
+
+      - run: npm run typecheck
+
       - run: npm test
 
   themes:
-    name: themes (integration tests)
+    name: themes (typecheck, integration tests)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -758,6 +819,14 @@ jobs:
       - name: Install db deps (needed by themes integration harness)
         working-directory: db
         run: npm ci
+
+      - name: Install themes deps
+        working-directory: services/themes
+        run: npm ci
+
+      - name: Typecheck themes
+        working-directory: services/themes
+        run: npm run typecheck
 
       - name: Run themes tests
         working-directory: services/themes
@@ -816,7 +885,7 @@ jobs:
         run: npm test
 
   analyst-grids:
-    name: analyst-grids (integration tests)
+    name: analyst-grids (typecheck, integration tests)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -854,12 +923,24 @@ jobs:
         working-directory: services/analyst-grids
         run: npm ci
 
+      - name: Install fundamentals deps (types reached by the analyst-grids typecheck)
+        working-directory: services/fundamentals
+        run: npm ci
+
+      - name: Install llm deps (types reached by the analyst-grids typecheck)
+        working-directory: services/llm
+        run: npm ci
+
+      - name: Typecheck analyst-grids
+        working-directory: services/analyst-grids
+        run: npm run typecheck
+
       - name: Run analyst-grids tests
         working-directory: services/analyst-grids
         run: npm test
 
   financial-core:
-    name: financial-core (tests)
+    name: financial-core (typecheck, tests)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -876,10 +957,12 @@ jobs:
 
       - run: npm ci
 
+      - run: npm run typecheck
+
       - run: npm test
 
   app:
-    name: app (tests)
+    name: app (typecheck, tests)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -899,12 +982,32 @@ jobs:
         working-directory: web
         run: npm ci
 
+      - name: Install financial-core deps (types reached by the app typecheck)
+        working-directory: services/financial-core
+        run: npm ci
+
+      - name: Install fundamentals deps (types reached by the app typecheck)
+        working-directory: services/fundamentals
+        run: npm ci
+
+      - name: Install llm deps (types reached by the app typecheck)
+        working-directory: services/llm
+        run: npm ci
+
+      - name: Install app deps
+        working-directory: services/app
+        run: npm ci
+
+      - name: Typecheck app
+        working-directory: services/app
+        run: npm run typecheck
+
       - name: Run app tests
         working-directory: services/app
         run: npm test
 
   financial-engine:
-    name: financial-engine (tests)
+    name: financial-engine (typecheck, tests)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -933,6 +1036,14 @@ jobs:
       - name: Install financial-engine deps
         working-directory: services/financial-engine
         run: npm ci
+
+      - name: Install fundamentals deps (types reached by the financial-engine typecheck)
+        working-directory: services/fundamentals
+        run: npm ci
+
+      - name: Typecheck financial-engine
+        working-directory: services/financial-engine
+        run: npm run typecheck
 
       - name: Run financial-engine tests
         working-directory: services/financial-engine

@@ -282,7 +282,7 @@ function parseHomeCardDestination(value: unknown): HomeCardDestination {
     if (subject_ref.kind !== "theme") {
       throw new HomeFindingFeedError("preferred_surface.subject_ref.kind must be theme");
     }
-    return { kind: "theme", subject_ref };
+    return { kind: "theme", subject_ref: { kind: "theme", id: subject_ref.id } };
   }
   if (destination.kind === "analyze") {
     const intent = parseAnalyzeIntent(destination.intent);

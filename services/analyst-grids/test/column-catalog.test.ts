@@ -54,6 +54,8 @@ test("latest_market_cap produces a sealable ok cell for a seeded fact", async (t
       period: null,
       snapshotId: randomUUID(),
       asOf: new Date().toISOString(),
+      userId: randomUUID(),
+      params: null,
     },
   );
 
@@ -73,7 +75,7 @@ test("latest_market_cap returns missing_data when no fact exists", async (t) => 
   const db = client as unknown as QueryExecutor;
   const result = await getColumn("latest_market_cap")!.producer(
     { db },
-    { subject: { kind: "issuer", id: randomUUID() }, period: null, snapshotId: randomUUID(), asOf: new Date().toISOString() },
+    { subject: { kind: "issuer", id: randomUUID() }, period: null, snapshotId: randomUUID(), asOf: new Date().toISOString(), userId: randomUUID(), params: null },
   );
   assert.equal(result.status, "missing_data");
   assert.equal(result.seal, undefined);

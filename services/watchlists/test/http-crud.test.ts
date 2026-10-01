@@ -5,6 +5,7 @@ import type { QueryResult } from "pg";
 
 import { createWatchlistsServer } from "../src/http.ts";
 import type { QueryExecutor } from "../src/queries.ts";
+import { fakeRows } from "../../shared/test/fake-query.ts";
 
 const USER_ID = "11111111-1111-4111-a111-111111111111";
 const DEFAULT_WATCHLIST_ID = "22222222-2222-4222-a222-222222222222";
@@ -103,9 +104,10 @@ function watchlistRow(overrides: Partial<WatchlistRecord> = {}): WatchlistRecord
   };
 }
 
-function result<R extends Record<string, unknown>>(rows: R[]): QueryResult<R> {
+// R is inferred from the calling query's return type.
+function result<R extends Record<string, unknown>>(rows: readonly unknown[]): QueryResult<R> {
   return {
-    rows,
+    rows: fakeRows<R>(rows),
     rowCount: rows.length,
     command: "",
     oid: 0,

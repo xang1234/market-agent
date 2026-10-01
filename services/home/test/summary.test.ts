@@ -75,6 +75,7 @@ test("getHomeSummary composes findings + four secondary sections", async () => {
     listSavedScreens: staticSavedScreens([
       {
         screen_id: SCREEN_A,
+        user_id: USER_ID,
         name: "Saved screen",
         created_at: "2026-04-01T00:00:00.000Z",
         updated_at: "2026-05-05T00:00:00.000Z",
@@ -85,7 +86,7 @@ test("getHomeSummary composes findings + four secondary sections", async () => {
           sort: [],
           page: { limit: 50 },
         },
-      } as ScreenSubject,
+      },
     ]),
     pulseSubjects: [],
   }, {

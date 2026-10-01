@@ -45,6 +45,16 @@ export type ScreenerCandidate = {
   fundamentals: ScreenerFundamentalsSummary;
 };
 
+// What a candidate source supplies: the six SEC/reported fundamentals are
+// required; the vendor and insider fields are null-defaulted when frozen.
+export type ScreenerFundamentalsInput =
+  Pick<ScreenerFundamentalsSummary, "market_cap" | "pe_ratio" | "gross_margin" | "operating_margin" | "net_margin" | "revenue_growth_yoy">
+  & Partial<ScreenerFundamentalsSummary>;
+
+export type ScreenerCandidateInput = Omit<ScreenerCandidate, "fundamentals"> & {
+  fundamentals: ScreenerFundamentalsInput;
+};
+
 export type ScreenerCandidateRepository = {
   list(): ReadonlyArray<ScreenerCandidate> | Promise<ReadonlyArray<ScreenerCandidate>>;
   findByRef(ref: ScreenerSubjectRef): ScreenerCandidate | null | Promise<ScreenerCandidate | null>;
@@ -59,9 +69,16 @@ const UNIVERSE_FIELDS = [
   "industry",
 ] as const;
 
+// Synchronous, unlike the repository contract: callers holding the concrete
+// in-memory repository may read it directly.
+export type InMemoryCandidateRepository = {
+  list(): ReadonlyArray<ScreenerCandidate>;
+  findByRef(ref: ScreenerSubjectRef): ScreenerCandidate | null;
+};
+
 export function createInMemoryCandidateRepository(
-  records: ReadonlyArray<ScreenerCandidate>,
-): ScreenerCandidateRepository {
+  records: ReadonlyArray<ScreenerCandidateInput>,
+): InMemoryCandidateRepository {
   // Pre-validate + freeze at construction so per-query reads never have to
   // re-check shape. Mirrors the listing/holders/issuer repos in the sibling
   // services.
