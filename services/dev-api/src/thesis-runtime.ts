@@ -62,14 +62,16 @@ export function createThesisAgentLoopStages(input: ThesisRuntimeInput): AgentLoo
       // Verified conditions are computed at this run's pinned cutoff; a retry of the run resumes them.
       const metricResults = input.financial
         ? await evaluateFinancialThesisConditions(input.financial, { user_id: input.userId, thesis: input.thesis, run_key: input.runId, as_of: deltas.as_of })
-        : evaluateThesisMetrics(input.thesis.conditions, evidence.facts, deltas.as_of);
+        // The cutoff is the run's own (database) clock, so it is the reference
+        // for "not in the future", not the host's, which may lag it.
+        : evaluateThesisMetrics(input.thesis.conditions, evidence.facts, deltas.as_of, Date.parse(deltas.as_of));
       // The reuse key compares definitions, inputs, and outcomes — never run or snapshot identities.
       const metricKey = input.financial ? thesisReuseProjection(metricResults) : metricResults;
       const packetHash = hashJsonValue({ metricResults: metricKey, version: input.thesis.thesis_version_id, packet: evidence, day: deltas.as_of.slice(0, 10), model: model.identity, prompt: THESIS_PROMPT_VERSION });
       const previous = await getLatestThesisAssessment(input.db, input.thesis.thesis_version_id);
       const reused = previous?.input_hash.split('/')[0] === packetHash;
       const evaluation = reused && previous ? previous : await evaluateThesis({
-        thesis: input.thesis, claims: evidence.claims, facts: evidence.facts, as_of: deltas.as_of, llm: model.llm,
+        thesis: input.thesis, claims: evidence.claims, facts: evidence.facts, as_of: deltas.as_of, now: Date.parse(deltas.as_of), llm: model.llm,
         ...(input.financial ? { metric_results: metricResults } : {}),
       });
       const packetFacts = new Set(evidence.facts.map(fact => fact.fact_id));

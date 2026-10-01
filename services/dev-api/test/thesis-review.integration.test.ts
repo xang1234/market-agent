@@ -113,6 +113,15 @@ test('a newer assessment is detected at microsecond precision, not lost to milli
   assert.equal((await history()).assessments.length, 1, 'the run must yield to the newer assessment');
 });
 
+test('a run whose clock is ahead of the host still assesses its evidence', options, async t => {
+  const { insertFact, run, history } = await fixture(t, 'thesis-review-clock-ahead');
+  const observed = new Date().toISOString();
+  await insertFact(observed, observed.slice(0, 10));
+  // The database clock may run ahead of the app host's: its cutoff is trusted, not "in the future".
+  await run(() => new Date(Date.now() + 3_600_000).toISOString());
+  assert.equal((await history()).assessments[0].results[0].status, 'supported');
+});
+
 test('thesis snapshots preserve document sources separately from claim reporters', options, async t => {
   const { db, pool, agent, source, history } = await fixture(t, 'thesis-review-document');
   const reporter = randomUUID();
