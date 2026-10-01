@@ -184,8 +184,9 @@ async function loadSegmentBlocks(
 ): Promise<ReadonlyArray<Block>> {
   try {
     // The same eligibility as every user-facing fact (loadRecentIssuerFundamentals):
-    // reported, active, app-entitled, display-verified; numeric only; and one fact
-    // per segment and quarter, the latest as_of winning when sources overlap.
+    // reported, active, app-entitled, display-verified; numeric, dated quarters
+    // known by the snapshot's cutoff; and one fact per segment and quarter, the
+    // latest as_of winning when sources overlap.
     const { rows } = await db.query<SegmentRevenueRow>(
       `select distinct on (s.segment_id, f.fiscal_year, f.fiscal_period)
               f.fact_id::text as fact_id,
@@ -207,8 +208,11 @@ async function loadSegmentBlocks(
           and f.entitlement_channels ? 'app'
           and f.verification_status = any($2::verification_status[])
           and f.value_num is not null
+          and f.fiscal_year is not null
+          and f.fiscal_period in ('Q1', 'Q2', 'Q3', 'Q4')
+          and f.as_of <= $3::timestamptz
         order by s.segment_id, f.fiscal_year, f.fiscal_period, f.as_of desc, f.fact_id`,
-      [input.issuer.id, [...DISPLAYABLE_VERIFICATION_STATUSES]],
+      [input.issuer.id, [...DISPLAYABLE_VERIFICATION_STATUSES], input.asOf],
     );
     const breakdown = segmentRevenueItems(rows);
     if (!breakdown) return [];

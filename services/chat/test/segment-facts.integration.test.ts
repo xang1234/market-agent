@@ -7,6 +7,8 @@ import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db
 import { GOLDEN_AS_OF, GOLDEN_COMPANIES, MARKET_SOURCE_ID, SEC_FILING_SOURCE_ID, seedGoldenDataset } from "./golden/dataset.ts";
 
 const NVDA = GOLDEN_COMPANIES.find((company) => company.ticker === "NVDA")!;
+// Another seeded source (db/seed/sources.sql).
+const OTHER_SOURCE_ID = "00000000-0000-4000-a000-000000000002";
 
 test("a segment breakdown shows only eligible, numeric facts, one per segment", { timeout: 300_000 }, async (t) => {
   if (!dockerAvailable()) {
@@ -59,7 +61,11 @@ test("a segment breakdown shows only eligible, numeric facts, one per segment", 
   await segmentFact("Estimated Segment", { method: "estimated" });
   await segmentFact("Export-only Segment", { entitlement_channels: ["export"] });
   await segmentFact("Text Segment", { value_num: null, value_text: "not disclosed" });
-  // A second, later Data Center fact from another source: one line, the later one.
+  // An undated quarter cannot be placed in time.
+  await segmentFact("Undated Segment", { fiscal_year: null, fiscal_period: null });
+  // Data Center from two more sources: an earlier one loses to the golden fact
+  // (latest as_of within the cutoff wins); one after the cutoff did not exist yet.
+  await segmentFact("Data Center", { source_id: OTHER_SOURCE_ID, value_num: 55.0e9, as_of: "2026-08-15T00:00:00.000Z" });
   await segmentFact("Data Center", { source_id: MARKET_SOURCE_ID, value_num: 55.3e9, as_of: "2026-09-02T00:00:00.000Z" });
 
   // Typed for a pool; a single client serves this single-company path.
@@ -74,5 +80,6 @@ test("a segment breakdown shows only eligible, numeric facts, one per segment", 
   assert.ok(breakdown);
   const items = breakdown.items as Array<{ label: string; format: string }>;
   assert.deepEqual(items.map((item) => item.label), ["Data Center", "Gaming", "OEM & Other", "Professional Visualization", "Automotive"]);
-  assert.equal(items[0].format, "$55.3B");
+  assert.equal(items[0].format, "$55.2B");
+  assert.equal(breakdown.title, "Revenue by segment (Q4 2026)");
 });
