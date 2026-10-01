@@ -11,14 +11,26 @@
 // ponytail: the runner that sends these through analyst mode and writes the
 // dated report waits on #123 (analyst mode, PR #149); scoring is manual.
 
+export type CriterionId =
+  | "correct_companies"
+  | "comparable_periods"
+  | "figures_match_sources"
+  | "conclusions_justified"
+  | "counterarguments"
+  | "no_invented_numbers";
+
 export type Criterion = Readonly<{
-  id: string;
+  id: CriterionId;
   question: string;
   // What 0, 1 and 2 mean, so scores are comparable run to run.
   anchors: readonly [string, string, string];
 }>;
 
-/** Scored 0–2 per answer. A 0 on `no_invented_numbers` becomes a regression test. */
+/**
+ * Scored 0–2 per answer, or N/A where a question lists the criterion as not
+ * applicable (N/A is left out of totals). A 0 on `no_invented_numbers` becomes
+ * a regression test.
+ */
 export const RUBRIC: ReadonlyArray<Criterion> = [
   {
     id: "correct_companies",
@@ -59,7 +71,19 @@ export type EvalQuestion = Readonly<{
   turns: ReadonlyArray<Readonly<{ message: string; subjectText?: string }>>;
   // What a good answer does, and the trap, so the scorer need not re-derive it.
   expect: string;
+  // Criteria that cannot apply to a correct answer (an honest "not available"
+  // has no figures or periods to judge); scored N/A, not 0.
+  notApplicable?: ReadonlyArray<CriterionId>;
 }>;
+
+// A correct missing-data answer is a plain "not available": judge only whether
+// it names the right company and invents nothing.
+const MISSING_DATA_NA: ReadonlyArray<CriterionId> = [
+  "comparable_periods",
+  "figures_match_sources",
+  "conclusions_justified",
+  "counterarguments",
+];
 
 export const QUESTIONS: ReadonlyArray<EvalQuestion> = [
   {
@@ -103,12 +127,14 @@ export const QUESTIONS: ReadonlyArray<EvalQuestion> = [
     kind: "missing data",
     turns: [{ message: "Break down NVDA's revenue by segment." }],
     expect: "Segment data is not seeded. Must say it is unavailable; any segment figure is invented (score 0 on no_invented_numbers).",
+    notApplicable: MISSING_DATA_NA,
   },
   {
     id: "missing-cash-flow",
     kind: "missing data",
     turns: [{ message: "What is AMD's free cash flow?" }],
     expect: "Cash flow is not seeded. Must say so; net income is not free cash flow and must not be passed off as it.",
+    notApplicable: MISSING_DATA_NA,
   },
   {
     id: "follow-up-memory",

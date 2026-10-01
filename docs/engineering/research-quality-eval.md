@@ -14,7 +14,8 @@ the owner scores by hand, so answer quality can be compared from one run to the 
   5. counterarguments;
   6. no invented numbers.
   Each question carries an `expect` note (what a good answer does, and the trap), so the scorer doesn't have to work it
-  out from the data.
+  out from the data. A question can mark criteria `notApplicable`. Those are scored N/A and left out of totals, so an
+  honest "not available" answer isn't penalized for having no figures to judge.
 - **Coverage:** single company, margin trend, what changed, peer comparison (two and three companies), a
   mismatched-fiscal-year trap, two missing-data questions, a three-turn follow-up, and a thread opened from a ticker
   page.
