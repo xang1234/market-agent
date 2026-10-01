@@ -219,6 +219,9 @@ async function loadSegmentBlocks(
     );
     const breakdown = segmentRevenueItems(rows);
     if (!breakdown) return [];
+    // Complete only if the segments add up to the company's reported revenue for
+    // that quarter; a segment with no eligible fact would otherwise just vanish.
+    if (!(await reconcilesToReportedRevenue(db, input, breakdown))) return [];
     const factIds = breakdown.items.map((item) => item.value_ref);
     const loadable = new Map(
       (await loadVerifierFactsForRefs(db, { fact_refs: factIds })).map((fact) => [fact.fact_id, fact]),
@@ -236,6 +239,41 @@ async function loadSegmentBlocks(
   }
 }
 
+// ponytail: 0.1% covers reported segment figures rounded to millions; a
+// disclosure with intersegment eliminations needs an explicit reconciling line.
+const SEGMENT_RECONCILIATION_TOLERANCE = 0.001;
+
+async function reconcilesToReportedRevenue(
+  db: QueryExecutor,
+  input: { issuer: IssuerSubjectRef; asOf: string },
+  breakdown: { fiscal_year: number; fiscal_period: string; total: number },
+): Promise<boolean> {
+  const { rows } = await db.query<{ value: number }>(
+    `select (f.value_num * f.scale)::float8 as value
+       from facts f
+       join metrics m on m.metric_id = f.metric_id
+      where f.subject_kind = 'issuer'
+        and f.subject_id = $1::uuid
+        and m.metric_key = 'revenue'
+        and f.period_kind = 'fiscal_q'
+        and f.fiscal_year = $2
+        and f.fiscal_period = $3
+        and f.method = 'reported'
+        and f.superseded_by is null
+        and f.invalidated_at is null
+        and f.entitlement_channels ? 'app'
+        and f.verification_status = any($4::verification_status[])
+        and f.value_num is not null
+        and f.as_of <= $5::timestamptz
+      order by f.as_of desc, f.fact_id
+      limit 1`,
+    [input.issuer.id, breakdown.fiscal_year, breakdown.fiscal_period, [...DISPLAYABLE_VERIFICATION_STATUSES], input.asOf],
+  );
+  const reported = rows[0]?.value;
+  if (reported === undefined || reported <= 0) return false;
+  return Math.abs(breakdown.total - reported) <= reported * SEGMENT_RECONCILIATION_TOLERANCE;
+}
+
 type SegmentRevenueRow = {
   fact_id: string;
   name: string;
@@ -251,7 +289,13 @@ type SegmentRevenueRow = {
 // incomplete breakdown off as whole, and dropping it would hide a segment.
 export function segmentRevenueItems(
   rows: ReadonlyArray<SegmentRevenueRow>,
-): { period: string; items: Array<{ label: string; value_ref: string; format: string }> } | null {
+): {
+  period: string;
+  fiscal_year: number;
+  fiscal_period: string;
+  total: number;
+  items: Array<{ label: string; value_ref: string; format: string }>;
+} | null {
   const latest = [...rows].sort((a, b) =>
     (b.fiscal_year - a.fiscal_year) || ((QUARTER_ORDER[b.fiscal_period] ?? 0) - (QUARTER_ORDER[a.fiscal_period] ?? 0))
   )[0];
@@ -261,7 +305,13 @@ export function segmentRevenueItems(
   const items = quarter
     .sort((a, b) => b.value - a.value)
     .map((row) => ({ label: row.name, value_ref: row.fact_id, format: formatCompactCurrency(row.value, row.currency ?? "USD") }));
-  return { period: `${latest.fiscal_period} ${latest.fiscal_year}`, items };
+  return {
+    period: `${latest.fiscal_period} ${latest.fiscal_year}`,
+    fiscal_year: latest.fiscal_year,
+    fiscal_period: latest.fiscal_period,
+    total: quarter.reduce((sum, row) => sum + row.value, 0),
+    items,
+  };
 }
 
 export type CompanyListing = { listing_id: string | null; label: string };

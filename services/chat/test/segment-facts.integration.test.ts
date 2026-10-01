@@ -93,4 +93,32 @@ test("a segment breakdown shows only eligible, numeric facts, one per segment", 
   assert.deepEqual(items.map((item) => item.label), ["Data Center", "Gaming", "OEM & Other", "Professional Visualization", "Automotive"]);
   assert.equal(items[0].format, "$55.2B");
   assert.equal(breakdown.title, "Revenue by segment (Q4 2026)");
+
+  // A parent must be the same company's segment on the same axis.
+  const amd = GOLDEN_COMPANIES.find((company) => company.ticker === "AMD")!;
+  await assert.rejects(
+    client.query(
+      `insert into segments (issuer_id, axis, name, definition_as_of, parent_segment_id)
+       values ($1::uuid, 'business', 'Foreign child', $2, $3::uuid)`,
+      [amd.issuer_id, GOLDEN_AS_OF, dataCenterId],
+    ),
+    /foreign key/,
+  );
+
+  // A segment whose Q4 fact is missing leaves the rest short of the quarter's
+  // revenue: no breakdown rather than an incomplete one shown as whole.
+  await client.query(
+    `update facts set invalidated_at = now()
+      where subject_kind = 'segment'
+        and subject_id = (select segment_id from segments where issuer_id = $1::uuid and name = 'Automotive')`,
+    [NVDA.issuer_id],
+  );
+  const afterGap = await loadTurnFactBlocks(client as unknown as Parameters<typeof loadTurnFactBlocks>[0], {
+    issuers: [{ kind: "issuer", id: NVDA.issuer_id }],
+    wantsPeers: false,
+    wantsSegments: true,
+    snapshotId: "63000000-0000-4000-8000-0000000000ab",
+    asOf: GOLDEN_AS_OF,
+  });
+  assert.equal(afterGap.some((block) => /by segment/.test(String(block.title))), false);
 });

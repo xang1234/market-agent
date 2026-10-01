@@ -1822,9 +1822,12 @@ create table segments (
   axis text not null check (axis in ('business', 'geography')),
   name text not null,
   -- A sub-segment's parent (e.g. Compute within Data Center); top-level
-  -- segments, the ones a breakdown sums, have none.
-  parent_segment_id uuid references segments(segment_id),
+  -- segments, the ones a breakdown sums, have none. The parent must be the
+  -- same issuer's segment on the same axis (composite key below).
+  parent_segment_id uuid,
   definition_as_of timestamptz not null,
   created_at timestamptz not null default now(),
-  unique (issuer_id, axis, name)
+  unique (issuer_id, axis, name),
+  unique (segment_id, issuer_id, axis),
+  foreign key (parent_segment_id, issuer_id, axis) references segments(segment_id, issuer_id, axis)
 );
