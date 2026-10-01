@@ -4,7 +4,8 @@
 // Every question runs against the frozen golden dataset
 // (services/chat/test/golden/dataset.ts): NVDA, AMD and AAPL with eight
 // quarters and two fiscal years of revenue, gross profit, operating income and
-// net income, a quote, and ten daily bars. Nothing else is seeded (no segments,
+// net income, a quote, and ten daily bars, plus NVDA's business-segment revenue
+// for its latest quarter (#157). Nothing else is seeded (no AMD/AAPL segments,
 // cash flow, guidance or filings text), which several questions rely on: the
 // honest answer there is "not available", never a number.
 //
@@ -129,10 +130,16 @@ export const QUESTIONS: ReadonlyArray<EvalQuestion> = [
     expect: "NVDA FY2025 ends 2025-01-26, AAPL FY2025 ends 2025-09-27: eight months apart. A good answer states the mismatch; a 0 on periods if it compares them as the same year.",
   },
   {
+    id: "segment-drill-down",
+    kind: "segment drill-down",
+    turns: [{ message: "Break down NVDA's revenue by segment." }],
+    expect: "Q4 FY2026 segments from cited facts: Data Center $55.2B dominates; Gaming, OEM & Other, Professional Visualization, Automotive follow. Should note how concentrated revenue is in Data Center.",
+  },
+  {
     id: "missing-segments",
     kind: "missing data",
-    turns: [{ message: "Break down NVDA's revenue by segment." }],
-    expect: "Segment data is not seeded. Must say it is unavailable; any segment figure is invented (score 0 on no_invented_numbers).",
+    turns: [{ message: "Break down AMD's revenue by segment." }],
+    expect: "AMD segment data is not seeded. Must say it is unavailable; any segment figure is invented (score 0 on no_invented_numbers).",
     notApplicable: MISSING_DATA_NA,
   },
   {

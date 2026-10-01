@@ -56,6 +56,8 @@ export async function loadTurnFactBlocks(
   input: {
     issuers: ReadonlyArray<IssuerSubjectRef>;
     wantsPeers: boolean;
+    // A single-company turn that asks about segments also gets the breakdown.
+    wantsSegments?: boolean;
     snapshotId: string;
     asOf: string;
     // The listing the user asked for, per issuer (see listingsForComparison).
@@ -67,7 +69,11 @@ export async function loadTurnFactBlocks(
   const companies = input.issuers.length === 1 && input.wantsPeers
     ? [primary, ...(await peersOf(db, primary))]
     : input.issuers;
-  if (companies.length === 1) return loadIssuerFactBlocks(db, { issuer: primary, snapshotId: input.snapshotId, asOf: input.asOf });
+  if (companies.length === 1) {
+    const blocks = await loadIssuerFactBlocks(db, { issuer: primary, snapshotId: input.snapshotId, asOf: input.asOf });
+    if (!input.wantsSegments) return blocks;
+    return Object.freeze([...blocks, ...(await loadSegmentBlocks(db, { issuer: primary, snapshotId: input.snapshotId, asOf: input.asOf }))]);
+  }
   return loadComparisonFactBlocks(db, {
     companies,
     snapshotId: input.snapshotId,
@@ -165,6 +171,76 @@ async function loadMetricsComparisonBlocks(
     console.warn("[chat] metrics comparison unavailable", reason);
     return [];
   }
+}
+
+// Revenue by business segment for the latest quarter that has any (#157). Each
+// segment is a `segments` row; its revenue is a fact whose subject is that
+// segment, so every value cites a sealed fact. No segment facts, no block: the
+// narrative then says the breakdown is not available.
+async function loadSegmentBlocks(
+  db: QueryExecutor,
+  input: { issuer: IssuerSubjectRef; snapshotId: string; asOf: string },
+): Promise<ReadonlyArray<Block>> {
+  try {
+    const { rows } = await db.query<SegmentRevenueRow>(
+      `select f.fact_id::text as fact_id,
+              s.name,
+              (f.value_num * f.scale)::float8 as value,
+              f.currency,
+              f.fiscal_year,
+              f.fiscal_period
+         from segments s
+         join facts f on f.subject_kind = 'segment' and f.subject_id = s.segment_id
+         join metrics m on m.metric_id = f.metric_id
+        where s.issuer_id = $1::uuid
+          and s.axis = 'business'
+          and m.metric_key = 'revenue'
+          and f.period_kind = 'fiscal_q'
+          and f.superseded_by is null
+          and f.invalidated_at is null`,
+      [input.issuer.id],
+    );
+    const breakdown = segmentRevenueItems(rows);
+    if (!breakdown) return [];
+    const factIds = breakdown.items.map((item) => item.value_ref);
+    const loadable = new Map(
+      (await loadVerifierFactsForRefs(db, { fact_refs: factIds })).map((fact) => [fact.fact_id, fact]),
+    );
+    const cited = factIds.filter((id) => loadable.has(id)).map((id) => citedFact(loadable.get(id)!));
+    if (cited.length !== factIds.length) return [];
+    return [{
+      ...blockBase("metric_row", input, cited, loadable, "segment_revenue"),
+      title: `Revenue by segment (${breakdown.period})`,
+      items: breakdown.items,
+    }];
+  } catch (reason) {
+    console.warn("[chat] segment facts unavailable; answering without the breakdown", reason);
+    return [];
+  }
+}
+
+type SegmentRevenueRow = {
+  fact_id: string;
+  name: string;
+  value: number;
+  currency: string | null;
+  fiscal_year: number;
+  fiscal_period: string;
+};
+
+// The latest quarter's segments, largest first, each item citing its fact.
+export function segmentRevenueItems(
+  rows: ReadonlyArray<SegmentRevenueRow>,
+): { period: string; items: Array<{ label: string; value_ref: string; format: string }> } | null {
+  const latest = [...rows].sort((a, b) =>
+    (b.fiscal_year - a.fiscal_year) || ((QUARTER_ORDER[b.fiscal_period] ?? 0) - (QUARTER_ORDER[a.fiscal_period] ?? 0))
+  )[0];
+  if (!latest) return null;
+  const items = rows
+    .filter((row) => row.fiscal_year === latest.fiscal_year && row.fiscal_period === latest.fiscal_period)
+    .sort((a, b) => b.value - a.value)
+    .map((row) => ({ label: row.name, value_ref: row.fact_id, format: formatCompactCurrency(row.value, row.currency ?? "USD") }));
+  return { period: `${latest.fiscal_period} ${latest.fiscal_year}`, items };
 }
 
 export type CompanyListing = { listing_id: string | null; label: string };
@@ -321,8 +397,10 @@ function blockBase(
   input: { snapshotId: string; asOf: string },
   facts: ReadonlyArray<CitedFact>,
   loadable: ReadonlyMap<string, VerifierFact>,
+  // Distinguishes two blocks of one kind in a snapshot (the segment metric_row).
+  idKey: string = kind,
 ): Block {
-  const id = blockId(kind, input.snapshotId);
+  const id = blockId(idKey, input.snapshotId);
   return {
     id,
     kind,
