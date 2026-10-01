@@ -229,6 +229,8 @@ test("a segment breakdown lists the latest quarter's segments, largest first, ea
   assert.equal(segmentRevenueItems([]), null);
   // A partial segment would pass an incomplete breakdown off as whole: show none.
   assert.equal(segmentRevenueItems([row("Data Center", 55.2e9, 2026, "Q4"), row("Gaming", 4.3e9, 2026, "Q4", "partial")]), null);
+  // An unknown currency is not USD.
+  assert.equal(segmentRevenueItems([row("Data Center", 55.2e9, 2026, "Q4", "full", null as unknown as string)]), null);
   // Values in different currencies cannot be ranked or summed.
   assert.equal(segmentRevenueItems([row("Data Center", 55.2e9, 2026, "Q4"), row("Gaming", 4.3e9, 2026, "Q4", "full", "EUR")]), null);
 });

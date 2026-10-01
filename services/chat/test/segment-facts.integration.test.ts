@@ -24,7 +24,7 @@ test("a segment breakdown shows only eligible, numeric facts, one per segment", 
   const segmentId = async (name: string) => {
     const { rows } = await client.query<{ segment_id: string }>(
       `insert into segments (issuer_id, axis, name, definition_as_of) values ($1::uuid, 'business', $2, $3)
-       on conflict (issuer_id, axis, name) do update set name = excluded.name
+       on conflict (issuer_id, axis, name, definition_as_of) do update set name = excluded.name
        returning segment_id::text as segment_id`,
       [NVDA.issuer_id, name, GOLDEN_AS_OF],
     );
@@ -73,11 +73,20 @@ test("a segment breakdown shows only eligible, numeric facts, one per segment", 
   );
   await segmentFact("Compute", { value_num: 48e9 });
   // Defined after the cutoff: it did not exist yet, even with a backdated fact.
-  await client.query(
-    `insert into segments (issuer_id, axis, name, definition_as_of) values ($1::uuid, 'business', 'Future Segment', '2026-12-01T00:00:00Z')`,
+  const { rows: [{ segment_id: futureId }] } = await client.query<{ segment_id: string }>(
+    `insert into segments (issuer_id, axis, name, definition_as_of) values ($1::uuid, 'business', 'Future Segment', '2026-12-01T00:00:00Z')
+     returning segment_id::text as segment_id`,
     [NVDA.issuer_id],
   );
-  await segmentFact("Future Segment", {});
+  await segmentFact("Future Segment", { subject_id: futureId });
+  // Dated before the cutoff but only learned after it: not known at the cutoff.
+  await segmentFact("Late-observed Segment", { observed_at: "2026-09-05T00:00:00.000Z" });
+  // A later definition of Gaming (same name, new version): one Gaming line, from
+  // the version known by the cutoff, still reconciling.
+  await client.query(
+    `insert into segments (issuer_id, axis, name, definition_as_of) values ($1::uuid, 'business', 'Gaming', '2026-10-01T00:00:00Z')`,
+    [NVDA.issuer_id],
+  );
   // An undated quarter cannot be placed in time.
   await segmentFact("Undated Segment", { fiscal_year: null, fiscal_period: null });
   // Data Center from two more sources: an earlier one loses to the golden fact

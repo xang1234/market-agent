@@ -1827,7 +1827,9 @@ create table segments (
   parent_segment_id uuid,
   definition_as_of timestamptz not null,
   created_at timestamptz not null default now(),
-  unique (issuer_id, axis, name),
+  -- A redefined segment (new parent or scope, same name) is a new version, so
+  -- facts keep the definition they were reported under.
+  unique (issuer_id, axis, name, definition_as_of),
   unique (segment_id, issuer_id, axis),
   foreign key (parent_segment_id, issuer_id, axis) references segments(segment_id, issuer_id, axis)
 );

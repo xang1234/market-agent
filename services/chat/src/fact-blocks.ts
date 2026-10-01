@@ -188,7 +188,7 @@ async function loadSegmentBlocks(
     // known by the snapshot's cutoff; and one fact per segment and quarter, the
     // latest as_of winning when sources overlap.
     const { rows } = await db.query<SegmentRevenueRow>(
-      `select distinct on (s.segment_id, f.fiscal_year, f.fiscal_period)
+      `select distinct on (s.name, f.fiscal_year, f.fiscal_period)
               f.fact_id::text as fact_id,
               s.name,
               (f.value_num * f.scale)::float8 as value,
@@ -216,7 +216,13 @@ async function loadSegmentBlocks(
           and f.fiscal_year is not null
           and f.fiscal_period in ('Q1', 'Q2', 'Q3', 'Q4')
           and f.as_of <= $3::timestamptz
-        order by s.segment_id, f.fiscal_year, f.fiscal_period, f.as_of desc, f.fact_id`,
+          -- Known by the cutoff, not just dated before it: a backdated filing
+          -- ingested later did not exist for this snapshot.
+          and f.observed_at <= $3::timestamptz
+          and (f.reported_at is null or f.reported_at <= $3::timestamptz)
+        -- One row per segment name and quarter: the latest definition known by the
+        -- cutoff, then the latest fact.
+        order by s.name, f.fiscal_year, f.fiscal_period, s.definition_as_of desc, f.as_of desc, f.fact_id`,
       [input.issuer.id, [...DISPLAYABLE_VERIFICATION_STATUSES], input.asOf],
     );
     const breakdown = segmentRevenueItems(rows);
@@ -267,14 +273,16 @@ async function reconcilesToReportedRevenue(
         and f.verification_status = any($4::verification_status[])
         and f.value_num is not null
         and f.as_of <= $5::timestamptz
+        and f.observed_at <= $5::timestamptz
+        and (f.reported_at is null or f.reported_at <= $5::timestamptz)
       order by f.as_of desc, f.fact_id
       limit 1`,
     [input.issuer.id, breakdown.fiscal_year, breakdown.fiscal_period, [...DISPLAYABLE_VERIFICATION_STATUSES], input.asOf],
   );
   const reported = rows[0];
   if (reported === undefined || reported.value <= 0) return false;
-  // Same reporting currency, or the sum means nothing.
-  if ((reported.currency ?? "USD") !== breakdown.currency) return false;
+  // Same, known reporting currency, or the sum means nothing.
+  if (reported.currency === null || reported.currency !== breakdown.currency) return false;
   return Math.abs(breakdown.total - reported.value) <= reported.value * SEGMENT_RECONCILIATION_TOLERANCE;
 }
 
@@ -307,12 +315,12 @@ export function segmentRevenueItems(
   if (!latest) return null;
   const quarter = rows.filter((row) => row.fiscal_year === latest.fiscal_year && row.fiscal_period === latest.fiscal_period);
   if (quarter.some((row) => row.coverage_level !== "full")) return null;
-  // One currency, or values cannot be ranked or summed.
-  const currencies = new Set(quarter.map((row) => row.currency ?? "USD"));
-  if (currencies.size !== 1) return null;
+  // One known currency, or values cannot be ranked or summed (unknown is not USD).
+  const currencies = new Set(quarter.map((row) => row.currency));
+  if (currencies.size !== 1 || currencies.has(null)) return null;
   const items = quarter
     .sort((a, b) => b.value - a.value)
-    .map((row) => ({ label: row.name, value_ref: row.fact_id, format: formatCompactCurrency(row.value, row.currency ?? "USD") }));
+    .map((row) => ({ label: row.name, value_ref: row.fact_id, format: formatCompactCurrency(row.value, row.currency!) }));
   return {
     period: `${latest.fiscal_period} ${latest.fiscal_year}`,
     fiscal_year: latest.fiscal_year,
