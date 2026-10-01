@@ -212,6 +212,28 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.deepEqual(comparison.subject_labels, ["NVDA", "AMD"]);
   });
 
+  await t.test("'Break down NVDA's revenue by segment' shows each segment from cited facts (#157)", async () => {
+    const segmentsThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Segments" });
+    completedTurn(await runTurn(base, segmentsThread.thread_id, "Break down NVDA's revenue by segment"));
+
+    const answer = await latestAssistantMessage(base, segmentsThread.thread_id);
+    const breakdown = answer.blocks.find((block) => block.kind === "metric_row" && /by segment/.test(String(block.title)));
+    assert.ok(breakdown, `expected a segment breakdown; got [${answer.blocks.map((b) => `${b.kind}:${b.title}`).join(", ")}]`);
+    assert.equal(breakdown.title, "Revenue by segment (Q4 2026)");
+    const items = breakdown.items as Array<{ label: string; format: string }>;
+    assert.deepEqual(items.map((item) => item.label), ["Data Center", "Gaming", "OEM & Other", "Professional Visualization", "Automotive"]);
+    assert.equal(items[0].format, "$55.2B");
+    const cited = await citedFacts(answer);
+    for (const ref of valueRefs(breakdown)) assert.ok(cited.has(ref), `segment value_ref ${ref} is not a cited fact`);
+  });
+
+  await t.test("a company with no segment facts gets no breakdown block", async () => {
+    const amdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "AMD segments" });
+    completedTurn(await runTurn(base, amdThread.thread_id, "Break down AMD's revenue by segment"));
+    const answer = await latestAssistantMessage(base, amdThread.thread_id);
+    assert.equal(answer.blocks.some((block) => /by segment/.test(String(block.title))), false);
+  });
+
   function completedTurn(turnEvents: ParsedSseEvent[]): ParsedSseEvent {
     const error = turnEvents.find((event) => event.event === "turn.error");
     assert.equal(error, undefined, `turn.error: ${JSON.stringify(error?.data)}`);

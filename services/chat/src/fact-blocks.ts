@@ -15,6 +15,7 @@ import { buildMetricsComparisonBlock } from "../../analyze/src/metrics-compariso
 import { materializePeerMetricFacts } from "../../analyze/src/metrics-comparison-materializer.ts";
 import { buildRevenueBarsBlock } from "../../analyze/src/revenue-bars-block-builder.ts";
 import { loadVerifierFactsForRefs } from "../../evidence/src/local-runtime-evidence.ts";
+import { DISPLAYABLE_VERIFICATION_STATUSES } from "../../evidence/src/promotion-rules.ts";
 import {
   loadRecentIssuerFundamentals,
   type IssuerFundamentalFact,
@@ -56,6 +57,8 @@ export async function loadTurnFactBlocks(
   input: {
     issuers: ReadonlyArray<IssuerSubjectRef>;
     wantsPeers: boolean;
+    // A single-company turn that asks about segments also gets the breakdown.
+    wantsSegments?: boolean;
     snapshotId: string;
     asOf: string;
     // The listing the user asked for, per issuer (see listingsForComparison).
@@ -67,7 +70,11 @@ export async function loadTurnFactBlocks(
   const companies = input.issuers.length === 1 && input.wantsPeers
     ? [primary, ...(await peersOf(db, primary))]
     : input.issuers;
-  if (companies.length === 1) return loadIssuerFactBlocks(db, { issuer: primary, snapshotId: input.snapshotId, asOf: input.asOf });
+  if (companies.length === 1) {
+    const blocks = await loadIssuerFactBlocks(db, { issuer: primary, snapshotId: input.snapshotId, asOf: input.asOf });
+    if (!input.wantsSegments) return blocks;
+    return Object.freeze([...blocks, ...(await loadSegmentBlocks(db, { issuer: primary, snapshotId: input.snapshotId, asOf: input.asOf }))]);
+  }
   return loadComparisonFactBlocks(db, {
     companies,
     snapshotId: input.snapshotId,
@@ -165,6 +172,163 @@ async function loadMetricsComparisonBlocks(
     console.warn("[chat] metrics comparison unavailable", reason);
     return [];
   }
+}
+
+// Revenue by business segment for the latest quarter that has any (#157). Each
+// segment is a `segments` row; its revenue is a fact whose subject is that
+// segment, so every value cites a sealed fact. No segment facts, no block: the
+// narrative then says the breakdown is not available.
+async function loadSegmentBlocks(
+  db: QueryExecutor,
+  input: { issuer: IssuerSubjectRef; snapshotId: string; asOf: string },
+): Promise<ReadonlyArray<Block>> {
+  try {
+    // The same eligibility as every user-facing fact (loadRecentIssuerFundamentals):
+    // reported, active, app-entitled, display-verified; numeric, dated quarters
+    // known by the snapshot's cutoff; and one fact per segment and quarter, the
+    // latest as_of winning when sources overlap.
+    const { rows } = await db.query<SegmentRevenueRow>(
+      `select distinct on (s.name, f.fiscal_year, f.fiscal_period)
+              f.fact_id::text as fact_id,
+              s.name,
+              (f.value_num * f.scale)::float8 as value,
+              f.currency,
+              f.fiscal_year,
+              f.fiscal_period,
+              f.coverage_level
+         from segments s
+         join facts f on f.subject_kind = 'segment' and f.subject_id = s.segment_id
+         join metrics m on m.metric_id = f.metric_id
+        where s.issuer_id = $1::uuid
+          and s.axis = 'business'
+          -- Top-level segments only: a child listed beside its parent double-counts.
+          and s.parent_segment_id is null
+          -- A segment defined after the cutoff did not exist yet.
+          and s.definition_as_of <= $3::timestamptz
+          and m.metric_key = 'revenue'
+          and f.period_kind = 'fiscal_q'
+          and f.method = 'reported'
+          and f.superseded_by is null
+          and f.invalidated_at is null
+          and f.entitlement_channels ? 'app'
+          and f.verification_status = any($2::verification_status[])
+          and f.value_num is not null
+          and f.fiscal_year is not null
+          and f.fiscal_period in ('Q1', 'Q2', 'Q3', 'Q4')
+          and f.as_of <= $3::timestamptz
+          -- Known by the cutoff, not just dated before it: a backdated filing
+          -- ingested later did not exist for this snapshot.
+          and f.observed_at <= $3::timestamptz
+          and (f.reported_at is null or f.reported_at <= $3::timestamptz)
+        -- One row per segment name and quarter: the latest definition known by the
+        -- cutoff, then the latest fact.
+        order by s.name, f.fiscal_year, f.fiscal_period, s.definition_as_of desc, f.as_of desc, f.fact_id`,
+      [input.issuer.id, [...DISPLAYABLE_VERIFICATION_STATUSES], input.asOf],
+    );
+    const breakdown = segmentRevenueItems(rows);
+    if (!breakdown) return [];
+    // Complete only if the segments add up to the company's reported revenue for
+    // that quarter; a segment with no eligible fact would otherwise just vanish.
+    if (!(await reconcilesToReportedRevenue(db, input, breakdown))) return [];
+    const factIds = breakdown.items.map((item) => item.value_ref);
+    const loadable = new Map(
+      (await loadVerifierFactsForRefs(db, { fact_refs: factIds })).map((fact) => [fact.fact_id, fact]),
+    );
+    const cited = factIds.filter((id) => loadable.has(id)).map((id) => citedFact(loadable.get(id)!));
+    if (cited.length !== factIds.length) return [];
+    return [{
+      ...blockBase("metric_row", input, cited, loadable, "segment_revenue"),
+      title: `Revenue by segment (${breakdown.period})`,
+      items: breakdown.items,
+    }];
+  } catch (reason) {
+    console.warn("[chat] segment facts unavailable; answering without the breakdown", reason);
+    return [];
+  }
+}
+
+// ponytail: 0.1% covers reported segment figures rounded to millions; a
+// disclosure with intersegment eliminations needs an explicit reconciling line.
+const SEGMENT_RECONCILIATION_TOLERANCE = 0.001;
+
+async function reconcilesToReportedRevenue(
+  db: QueryExecutor,
+  input: { issuer: IssuerSubjectRef; asOf: string },
+  breakdown: { fiscal_year: number; fiscal_period: string; total: number; currency: string },
+): Promise<boolean> {
+  const { rows } = await db.query<{ value: number; currency: string | null }>(
+    `select (f.value_num * f.scale)::float8 as value, f.currency
+       from facts f
+       join metrics m on m.metric_id = f.metric_id
+      where f.subject_kind = 'issuer'
+        and f.subject_id = $1::uuid
+        and m.metric_key = 'revenue'
+        and f.period_kind = 'fiscal_q'
+        and f.fiscal_year = $2
+        and f.fiscal_period = $3
+        and f.method = 'reported'
+        and f.superseded_by is null
+        and f.invalidated_at is null
+        and f.entitlement_channels ? 'app'
+        and f.verification_status = any($4::verification_status[])
+        and f.value_num is not null
+        and f.as_of <= $5::timestamptz
+        and f.observed_at <= $5::timestamptz
+        and (f.reported_at is null or f.reported_at <= $5::timestamptz)
+      order by f.as_of desc, f.fact_id
+      limit 1`,
+    [input.issuer.id, breakdown.fiscal_year, breakdown.fiscal_period, [...DISPLAYABLE_VERIFICATION_STATUSES], input.asOf],
+  );
+  const reported = rows[0];
+  if (reported === undefined || reported.value <= 0) return false;
+  // Same, known reporting currency, or the sum means nothing.
+  if (reported.currency === null || reported.currency !== breakdown.currency) return false;
+  return Math.abs(breakdown.total - reported.value) <= reported.value * SEGMENT_RECONCILIATION_TOLERANCE;
+}
+
+type SegmentRevenueRow = {
+  fact_id: string;
+  name: string;
+  value: number;
+  currency: string | null;
+  fiscal_year: number;
+  fiscal_period: string;
+  coverage_level: string;
+};
+
+// The latest quarter's segments, largest first, each item citing its fact. Null
+// when any of them is not fully covered: a partial value would pass an
+// incomplete breakdown off as whole, and dropping it would hide a segment.
+export function segmentRevenueItems(
+  rows: ReadonlyArray<SegmentRevenueRow>,
+): {
+  period: string;
+  fiscal_year: number;
+  fiscal_period: string;
+  total: number;
+  currency: string;
+  items: Array<{ label: string; value_ref: string; format: string }>;
+} | null {
+  const latest = [...rows].sort((a, b) =>
+    (b.fiscal_year - a.fiscal_year) || ((QUARTER_ORDER[b.fiscal_period] ?? 0) - (QUARTER_ORDER[a.fiscal_period] ?? 0))
+  )[0];
+  if (!latest) return null;
+  const quarter = rows.filter((row) => row.fiscal_year === latest.fiscal_year && row.fiscal_period === latest.fiscal_period);
+  if (quarter.some((row) => row.coverage_level !== "full")) return null;
+  // One known currency, or values cannot be ranked or summed (unknown is not USD).
+  const currencies = new Set(quarter.map((row) => row.currency));
+  if (currencies.size !== 1 || currencies.has(null)) return null;
+  const items = quarter
+    .sort((a, b) => b.value - a.value)
+    .map((row) => ({ label: row.name, value_ref: row.fact_id, format: formatCompactCurrency(row.value, row.currency!) }));
+  return {
+    period: `${latest.fiscal_period} ${latest.fiscal_year}`,
+    fiscal_year: latest.fiscal_year,
+    fiscal_period: latest.fiscal_period,
+    total: quarter.reduce((sum, row) => sum + row.value, 0),
+    currency: [...currencies][0]!,
+    items,
+  };
 }
 
 export type CompanyListing = { listing_id: string | null; label: string };
@@ -321,8 +485,10 @@ function blockBase(
   input: { snapshotId: string; asOf: string },
   facts: ReadonlyArray<CitedFact>,
   loadable: ReadonlyMap<string, VerifierFact>,
+  // Distinguishes two blocks of one kind in a snapshot (the segment metric_row).
+  idKey: string = kind,
 ): Block {
-  const id = blockId(kind, input.snapshotId);
+  const id = blockId(idKey, input.snapshotId);
   return {
     id,
     kind,

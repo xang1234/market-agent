@@ -16,6 +16,8 @@ export const FACT_SUBJECT_KINDS = Object.freeze([
   "macro_topic",
   "portfolio",
   "screen",
+  // A business or geographic segment (#157); see the segments table.
+  "segment",
 ] as const);
 
 export const FACT_PERIOD_KINDS = Object.freeze(["point", "fiscal_q", "fiscal_y", "ttm", "range"] as const);

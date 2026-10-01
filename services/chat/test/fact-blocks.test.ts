@@ -8,6 +8,7 @@ import {
   listingsForComparison,
   loadTurnFactBlocks,
   priceListingsForComparison,
+  segmentRevenueItems,
 } from "../src/fact-blocks.ts";
 import { fakeQuery } from "./fake-query.ts";
 
@@ -203,4 +204,33 @@ test("a comparison keeps its price chart when the fundamentals are unavailable",
   });
   assert.deepEqual(blocks.map((block) => block.kind), ["perf_comparison", "disclosure"]);
   assert.deepEqual(blocks[0].subject_labels, ["T0", "T1"]);
+});
+
+test("a segment breakdown lists the latest quarter's segments, largest first, each citing its fact", () => {
+  const row = (name: string, value: number, fiscal_year: number, fiscal_period: string, coverage_level = "full", currency = "USD") => ({
+    fact_id: `${name}-${fiscal_year}-${fiscal_period}`,
+    name,
+    value,
+    currency,
+    fiscal_year,
+    fiscal_period,
+    coverage_level,
+  });
+  const breakdown = segmentRevenueItems([
+    row("Gaming", 4.3e9, 2026, "Q4"),
+    row("Data Center", 55.2e9, 2026, "Q4"),
+    row("Data Center", 51e9, 2026, "Q3"),
+  ]);
+  assert.ok(breakdown);
+  assert.equal(breakdown.period, "Q4 2026");
+  assert.deepEqual(breakdown.items.map((item) => item.label), ["Data Center", "Gaming"]);
+  assert.deepEqual(breakdown.items.map((item) => item.value_ref), ["Data Center-2026-Q4", "Gaming-2026-Q4"]);
+  assert.equal(breakdown.items[0].format, "$55.2B");
+  assert.equal(segmentRevenueItems([]), null);
+  // A partial segment would pass an incomplete breakdown off as whole: show none.
+  assert.equal(segmentRevenueItems([row("Data Center", 55.2e9, 2026, "Q4"), row("Gaming", 4.3e9, 2026, "Q4", "partial")]), null);
+  // An unknown currency is not USD.
+  assert.equal(segmentRevenueItems([row("Data Center", 55.2e9, 2026, "Q4", "full", null as unknown as string)]), null);
+  // Values in different currencies cannot be ranked or summed.
+  assert.equal(segmentRevenueItems([row("Data Center", 55.2e9, 2026, "Q4"), row("Gaming", 4.3e9, 2026, "Q4", "full", "EUR")]), null);
 });

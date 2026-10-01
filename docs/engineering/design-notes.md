@@ -118,7 +118,12 @@ The turn's fact blocks follow from that list:
 - one company gets the metric row and revenue chart;
 - two or more get a `metrics_comparison` of the latest fiscal year, via analyze's peer pipeline (key stats, then the
   materializer, then the builder);
-- one company plus "peers" uses the industry peer set (`createSqlPeerSetResolver`).
+- one company plus "peers" uses the industry peer set (`createSqlPeerSetResolver`);
+- one company plus "segment(s)" adds a `metric_row` "Revenue by segment (…)" for the latest quarter that has segment
+  facts. A segment is a `segments` row (issuer, axis, name), and its revenue is a fact with `subject_kind = 'segment'`,
+  `subject_id = segment_id` (#157). So each value is an ordinary cited fact, and consolidated readers
+  (`subject_kind = 'issuer'`) never see segment rows. No segment facts means no block, and the narrative says the
+  breakdown isn't available.
 
 A block that names its own subjects (a comparison's issuers) adds them to the snapshot's subject refs. The model also
 sees the last 6 messages of the thread. The price-performance chart is tracked separately (#133).

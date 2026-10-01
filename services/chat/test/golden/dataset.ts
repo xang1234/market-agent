@@ -7,9 +7,10 @@
 // provenance, not a bypass. Values are approximate, illustrative figures for tests and offline
 // development; they are not a data source.
 //
-// ponytail: NVDA segment facts are not seeded. The default chat path has no
-// DB-backed segment store (segments come from providers / dev fixtures); add
-// them with the segment drill-down step.
+// NVDA also has business-segment revenue for its latest quarter (#157): each
+// segment is a `segments` row and its revenue a fact whose subject is that
+// segment, so a segment drill-down cites real facts. AMD and AAPL have none, so
+// asking for theirs exercises the honest "not available" answer.
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -53,6 +54,13 @@ export type GoldenCompany = {
   // year-over-year growth: [fiscal_year, start, end, revenue, gross_profit,
   // operating_income, net_income] in USD millions.
   years: ReadonlyArray<readonly [number, string, string, number, number, number, number]>;
+  // Business-segment revenue for one quarter, USD millions, summing to that
+  // quarter's revenue.
+  segments?: Readonly<{
+    fiscal_year: number;
+    fiscal_period: Quarter["fiscal_period"];
+    revenue: ReadonlyArray<readonly [string, number]>;
+  }>;
 };
 
 // USD millions, oldest first.
@@ -96,6 +104,17 @@ export const GOLDEN_COMPANIES: ReadonlyArray<GoldenCompany> = Object.freeze([
       [2025, "2024-01-29", "2025-01-26", 130497, 97859, 81454, 72880],
       [2026, "2025-01-27", "2026-01-25", 209911, 148570, 126388, 112507],
     ],
+    segments: {
+      fiscal_year: 2026,
+      fiscal_period: "Q4",
+      revenue: [
+        ["Data Center", 55200],
+        ["Gaming", 4300],
+        ["Professional Visualization", 900],
+        ["Automotive", 650],
+        ["OEM & Other", 1050],
+      ],
+    },
   },
   {
     ticker: "AMD",
@@ -231,8 +250,46 @@ export async function seedGoldenDataset(client: Client): Promise<void> {
       }
     }
 
+    await seedSegments(client, company, metricIds.get("revenue")!);
     await seedQuote(client, company);
     await seedDailyBars(client, company);
+  }
+}
+
+async function seedSegments(client: Client, company: GoldenCompany, revenueMetricId: string): Promise<void> {
+  if (!company.segments) return;
+  const { fiscal_year, fiscal_period, revenue } = company.segments;
+  const quarter = company.quarters.find((q) => q.fiscal_year === fiscal_year && q.fiscal_period === fiscal_period)!;
+  for (const [name, value] of revenue) {
+    const { rows } = await client.query<{ segment_id: string }>(
+      `insert into segments (issuer_id, axis, name, definition_as_of)
+       values ($1::uuid, 'business', $2, $3::timestamptz)
+       returning segment_id::text as segment_id`,
+      [company.issuer_id, name, GOLDEN_AS_OF],
+    );
+    await createFact(client, {
+      subject_kind: "segment",
+      subject_id: rows[0]!.segment_id,
+      metric_id: revenueMetricId,
+      period_kind: "fiscal_q",
+      period_start: quarter.period_start,
+      period_end: quarter.period_end,
+      fiscal_year,
+      fiscal_period,
+      value_num: value * 1e6,
+      unit: "currency",
+      currency: "USD",
+      as_of: GOLDEN_AS_OF,
+      reported_at: GOLDEN_AS_OF,
+      observed_at: GOLDEN_AS_OF,
+      source_id: SEC_FILING_SOURCE_ID,
+      method: "reported",
+      verification_status: "authoritative",
+      freshness_class: "filing_time",
+      coverage_level: "full",
+      entitlement_channels: ["app"],
+      confidence: 1,
+    });
   }
 }
 

@@ -16,7 +16,7 @@
 create extension if not exists pgcrypto;
 
 create type subject_kind as enum (
-  'issuer', 'instrument', 'listing', 'theme', 'macro_topic', 'portfolio', 'screen'
+  'issuer', 'instrument', 'listing', 'theme', 'macro_topic', 'portfolio', 'screen', 'segment'
 );
 
 create type asset_type as enum (
@@ -1812,3 +1812,24 @@ for each row execute function erase_financial_runs_referencing($$run_id in (sele
 create trigger source_publication_attestations_erase_financial_runs
 before delete on source_publication_attestations
 for each row execute function erase_financial_runs_referencing($$run_id in (select run_id from financial_run_inputs where publication_attestation_id = $1)$$, 'attestation_id');
+
+-- A business or geographic segment of an issuer: the subject of segment facts
+-- (subject_kind = 'segment', subject_id = segment_id), so consolidated readers
+-- (subject_kind = 'issuer') never see them.
+create table segments (
+  segment_id uuid primary key default gen_random_uuid(),
+  issuer_id uuid not null references issuers(issuer_id),
+  axis text not null check (axis in ('business', 'geography')),
+  name text not null,
+  -- A sub-segment's parent (e.g. Compute within Data Center); top-level
+  -- segments, the ones a breakdown sums, have none. The parent must be the
+  -- same issuer's segment on the same axis (composite key below).
+  parent_segment_id uuid,
+  definition_as_of timestamptz not null,
+  created_at timestamptz not null default now(),
+  -- A redefined segment (new parent or scope, same name) is a new version, so
+  -- facts keep the definition they were reported under.
+  unique (issuer_id, axis, name, definition_as_of),
+  unique (segment_id, issuer_id, axis),
+  foreign key (parent_segment_id, issuer_id, axis) references segments(segment_id, issuer_id, axis)
+);

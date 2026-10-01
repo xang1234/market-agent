@@ -157,6 +157,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     loadTurnFactBlocks(pool(), {
       issuers: issuersOf(covered),
       wantsPeers: /\bpeers?\b/i.test(context.userIntent ?? ""),
+      wantsSegments: /\bsegments?\b/i.test(context.userIntent ?? ""),
       requestedListings: requestedListingsOf(covered),
       snapshotId: result.snapshot_id,
       asOf,
