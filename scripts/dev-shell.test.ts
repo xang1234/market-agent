@@ -204,7 +204,7 @@ test("up rolls back already-started services when a later readiness check fails"
   await rm(fixture.root, { recursive: true, force: true });
 });
 
-test("up rolls back when postgres never becomes ready", async () => {
+test("up rolls back when postgres never accepts TCP, even if its socket is ready", async () => {
   const fixture = await createShellFixture();
   const traceFile = join(fixture.root, "trace.log");
 
@@ -217,7 +217,9 @@ test("up rolls back when postgres never becomes ready", async () => {
       "ensure_install(){ :; }",
       "assert_port_available(){ :; }",
       "sleep(){ :; }",
-      'compose(){ printf "compose:%s\\n" "$*" >> "$TRACE_FILE"; case "$*" in "exec -T postgres pg_isready"*) return 1 ;; esac; return 0; }',
+      'npm(){ printf "npm:%s\\n" "$*" >> "$TRACE_FILE"; return 0; }',
+      // The init-time temporary server (#172): ready on the Unix socket, never on TCP.
+      'compose(){ printf "compose:%s\\n" "$*" >> "$TRACE_FILE"; case "$*" in "exec -T postgres pg_isready -h 127.0.0.1"*) return 1 ;; "exec -T postgres pg_isready"*) return 0 ;; esac; return 0; }',
       'start_process(){ local name="$1"; printf "start:%s\\n" "$name" >> "$TRACE_FILE"; sleep 60 & echo $! > "$PID_DIR/$name.pid"; }',
       'status(){ printf "status\\n" >> "$TRACE_FILE"; }',
       "up",
@@ -230,6 +232,7 @@ test("up rolls back when postgres never becomes ready", async () => {
   const trace = await readFile(traceFile, "utf8");
   assert.match(trace, /compose:up -d/);
   assert.match(trace, /compose:down/);
+  assert.doesNotMatch(trace, /npm:run migrate/, "migrate must not run against the socket-only init server");
   assert.doesNotMatch(trace, /start:/);
   assert.doesNotMatch(trace, /^status$/m);
 
