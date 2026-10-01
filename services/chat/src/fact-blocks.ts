@@ -203,6 +203,8 @@ async function loadSegmentBlocks(
           and s.axis = 'business'
           -- Top-level segments only: a child listed beside its parent double-counts.
           and s.parent_segment_id is null
+          -- A segment defined after the cutoff did not exist yet.
+          and s.definition_as_of <= $3::timestamptz
           and m.metric_key = 'revenue'
           and f.period_kind = 'fiscal_q'
           and f.method = 'reported'
@@ -246,10 +248,10 @@ const SEGMENT_RECONCILIATION_TOLERANCE = 0.001;
 async function reconcilesToReportedRevenue(
   db: QueryExecutor,
   input: { issuer: IssuerSubjectRef; asOf: string },
-  breakdown: { fiscal_year: number; fiscal_period: string; total: number },
+  breakdown: { fiscal_year: number; fiscal_period: string; total: number; currency: string },
 ): Promise<boolean> {
-  const { rows } = await db.query<{ value: number }>(
-    `select (f.value_num * f.scale)::float8 as value
+  const { rows } = await db.query<{ value: number; currency: string | null }>(
+    `select (f.value_num * f.scale)::float8 as value, f.currency
        from facts f
        join metrics m on m.metric_id = f.metric_id
       where f.subject_kind = 'issuer'
@@ -269,9 +271,11 @@ async function reconcilesToReportedRevenue(
       limit 1`,
     [input.issuer.id, breakdown.fiscal_year, breakdown.fiscal_period, [...DISPLAYABLE_VERIFICATION_STATUSES], input.asOf],
   );
-  const reported = rows[0]?.value;
-  if (reported === undefined || reported <= 0) return false;
-  return Math.abs(breakdown.total - reported) <= reported * SEGMENT_RECONCILIATION_TOLERANCE;
+  const reported = rows[0];
+  if (reported === undefined || reported.value <= 0) return false;
+  // Same reporting currency, or the sum means nothing.
+  if ((reported.currency ?? "USD") !== breakdown.currency) return false;
+  return Math.abs(breakdown.total - reported.value) <= reported.value * SEGMENT_RECONCILIATION_TOLERANCE;
 }
 
 type SegmentRevenueRow = {
@@ -294,6 +298,7 @@ export function segmentRevenueItems(
   fiscal_year: number;
   fiscal_period: string;
   total: number;
+  currency: string;
   items: Array<{ label: string; value_ref: string; format: string }>;
 } | null {
   const latest = [...rows].sort((a, b) =>
@@ -302,6 +307,9 @@ export function segmentRevenueItems(
   if (!latest) return null;
   const quarter = rows.filter((row) => row.fiscal_year === latest.fiscal_year && row.fiscal_period === latest.fiscal_period);
   if (quarter.some((row) => row.coverage_level !== "full")) return null;
+  // One currency, or values cannot be ranked or summed.
+  const currencies = new Set(quarter.map((row) => row.currency ?? "USD"));
+  if (currencies.size !== 1) return null;
   const items = quarter
     .sort((a, b) => b.value - a.value)
     .map((row) => ({ label: row.name, value_ref: row.fact_id, format: formatCompactCurrency(row.value, row.currency ?? "USD") }));
@@ -310,6 +318,7 @@ export function segmentRevenueItems(
     fiscal_year: latest.fiscal_year,
     fiscal_period: latest.fiscal_period,
     total: quarter.reduce((sum, row) => sum + row.value, 0),
+    currency: [...currencies][0]!,
     items,
   };
 }

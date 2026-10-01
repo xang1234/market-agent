@@ -207,11 +207,11 @@ test("a comparison keeps its price chart when the fundamentals are unavailable",
 });
 
 test("a segment breakdown lists the latest quarter's segments, largest first, each citing its fact", () => {
-  const row = (name: string, value: number, fiscal_year: number, fiscal_period: string, coverage_level = "full") => ({
+  const row = (name: string, value: number, fiscal_year: number, fiscal_period: string, coverage_level = "full", currency = "USD") => ({
     fact_id: `${name}-${fiscal_year}-${fiscal_period}`,
     name,
     value,
-    currency: "USD",
+    currency,
     fiscal_year,
     fiscal_period,
     coverage_level,
@@ -229,4 +229,6 @@ test("a segment breakdown lists the latest quarter's segments, largest first, ea
   assert.equal(segmentRevenueItems([]), null);
   // A partial segment would pass an incomplete breakdown off as whole: show none.
   assert.equal(segmentRevenueItems([row("Data Center", 55.2e9, 2026, "Q4"), row("Gaming", 4.3e9, 2026, "Q4", "partial")]), null);
+  // Values in different currencies cannot be ranked or summed.
+  assert.equal(segmentRevenueItems([row("Data Center", 55.2e9, 2026, "Q4"), row("Gaming", 4.3e9, 2026, "Q4", "full", "EUR")]), null);
 });

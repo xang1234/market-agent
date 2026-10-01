@@ -72,6 +72,12 @@ test("a segment breakdown shows only eligible, numeric facts, one per segment", 
     [NVDA.issuer_id, GOLDEN_AS_OF, dataCenterId],
   );
   await segmentFact("Compute", { value_num: 48e9 });
+  // Defined after the cutoff: it did not exist yet, even with a backdated fact.
+  await client.query(
+    `insert into segments (issuer_id, axis, name, definition_as_of) values ($1::uuid, 'business', 'Future Segment', '2026-12-01T00:00:00Z')`,
+    [NVDA.issuer_id],
+  );
+  await segmentFact("Future Segment", {});
   // An undated quarter cannot be placed in time.
   await segmentFact("Undated Segment", { fiscal_year: null, fiscal_period: null });
   // Data Center from two more sources: an earlier one loses to the golden fact
