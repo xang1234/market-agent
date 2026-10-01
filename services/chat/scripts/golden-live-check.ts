@@ -48,12 +48,22 @@ export function evaluateGoldenTurn(
 
 const USER_ID = "00000000-0000-4000-8000-000000000001";
 
-async function api<T>(base: string, method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+const REQUEST_TIMEOUT_MS = 60_000;
+
+// Every request is bounded: by the caller's signal, else by a per-request timeout, so a
+// server that accepts a connection and never answers fails the check instead of hanging it.
+async function api<T>(
+  base: string,
+  method: string,
+  path: string,
+  body?: unknown,
+  signal: AbortSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+): Promise<T> {
   const response = await fetch(`${base}${path}`, {
     method,
     headers: { "x-user-id": USER_ID, ...(body ? { "content-type": "application/json" } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}),
-    ...(signal ? { signal } : {}),
+    signal,
   });
   if (!response.ok) throw new Error(`${method} ${path} -> ${response.status} ${await response.text()}`);
   return (await response.json()) as T;
@@ -101,14 +111,20 @@ export async function runTurn(
   }
 }
 
-async function main(base: string): Promise<number> {
-  const thread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Golden (live data)" });
+export async function runGoldenLiveCheck(
+  base: string,
+  { requestTimeoutMs = REQUEST_TIMEOUT_MS, turnTimeoutMs = 180_000 } = {},
+): Promise<number> {
+  const bounded = () => AbortSignal.timeout(requestTimeoutMs);
+  const thread = await api<{ thread_id: string }>(
+    base, "POST", "/v1/chat/threads", { title: "Golden (live data)" }, bounded(),
+  );
   let failed = 0;
   for (const turn of GOLDEN_TURNS) {
     const startedAt = Date.now();
-    const outcome = await runTurn(base, thread.thread_id, turn.question);
+    const outcome = await runTurn(base, thread.thread_id, turn.question, turnTimeoutMs);
     const { messages } = await api<{ messages: Array<{ role: string; blocks: Block[] }> }>(
-      base, "GET", `/v1/chat/threads/${thread.thread_id}/messages`,
+      base, "GET", `/v1/chat/threads/${thread.thread_id}/messages`, undefined, bounded(),
     );
     const answer = messages.filter((message) => message.role === "assistant").at(-1);
     const { failures, notes } = evaluateGoldenTurn(turn, { outcome, blocks: answer?.blocks ?? [] });
@@ -128,5 +144,5 @@ async function main(base: string): Promise<number> {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  process.exitCode = await main(process.argv[2] ?? process.env.GOLDEN_BASE_URL ?? "http://127.0.0.1:5173");
+  process.exitCode = await runGoldenLiveCheck(process.argv[2] ?? process.env.GOLDEN_BASE_URL ?? "http://127.0.0.1:5173");
 }

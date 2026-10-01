@@ -3,7 +3,22 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 
-import { GOLDEN_TURNS, evaluateGoldenTurn, runTurn } from "../scripts/golden-live-check.ts";
+import { GOLDEN_TURNS, evaluateGoldenTurn, runGoldenLiveCheck, runTurn } from "../scripts/golden-live-check.ts";
+
+test("every request the check makes is bounded: a server that never answers fails it, not hangs it", async (t) => {
+  // Accepts connections, never responds: thread creation is the first request to hang.
+  const server = createServer(() => {});
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+  const startedAt = Date.now();
+  await assert.rejects(() => runGoldenLiveCheck(base, { requestTimeoutMs: 300, turnTimeoutMs: 300 }), /timeout|aborted/i);
+  assert.ok(Date.now() - startedAt < 5_000, "failed near the deadline, not hung");
+});
 
 test("runTurn gives up at its deadline when the stream goes silent", async (t) => {
   // Accepts the user's message, then opens the turn stream and never writes to it.
