@@ -6,7 +6,7 @@ import { GridValidationError } from "../src/types.ts";
 const USER = "11111111-1111-4111-a111-111111111111";
 const SCREEN = "55555555-5555-4555-a555-555555555555";
 
-const FAKE_SCREEN = { screen_id: SCREEN, user_id: USER, name: "s", definition: { market: [], sort: [], page: { limit: 10 } }, created_at: "x", updated_at: "x" };
+const FAKE_SCREEN = { screen_id: SCREEN, user_id: USER, name: "s", definition: { universe: [], market: [], fundamentals: [], sort: [], page: { limit: 10 } }, created_at: "x", updated_at: "x" };
 
 test("resolveScreenWith maps executed screen rows to subject refs", async () => {
   const refs = await resolveScreenWith(

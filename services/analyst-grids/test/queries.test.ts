@@ -75,6 +75,7 @@ test("createRun inserts a pending run and returns its id", async () => {
     asOf: "2026-06-09T00:00:00.000Z",
     cellTotal: 6,
     droppedRowCount: 0,
+    columnInstances: [],
   });
   assert.equal(runId, RUN_ID);
   assert.ok(queries[0].values?.includes(6));
@@ -85,7 +86,7 @@ test("updateCellResult writes status, display, snapshot and primary_ref", async 
   const { db, queries } = fakeDb(() => [{}]);
   await updateCellResult(db, {
     gridRowId: ROW_ID,
-    columnKey: "latest_market_cap",
+    columnInstanceId: "88888888-8888-4888-a888-888888888888",
     status: "ok",
     display: { value: "$3.2T", tone: null },
     snapshotId: SNAP_ID,
@@ -102,7 +103,7 @@ test("updateCellResult throws when no cell row matched", async () => {
     () =>
       updateCellResult(db, {
         gridRowId: ROW_ID,
-        columnKey: "latest_market_cap",
+        columnInstanceId: "88888888-8888-4888-a888-888888888888",
         status: "ok",
         display: { value: "$3.2T", tone: null },
         snapshotId: SNAP_ID,
