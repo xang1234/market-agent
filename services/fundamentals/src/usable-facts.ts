@@ -107,8 +107,11 @@ export async function loadUsableFacts(db: QueryExecutor, query: UsableFactsQuery
   const { rows } = await db.query<Row>(
     `with usable as (
        -- A fiscal fact is identified by its fiscal year and period (sources may
-       -- draw the date boundaries differently); other kinds by their dates.
-       select distinct on (f.subject_id, f.metric_id, f.period_kind, f.fiscal_year, f.fiscal_period,
+       -- draw the date boundaries differently); other kinds only by their dates
+       -- (sources may label them with a fiscal period or not).
+       select distinct on (f.subject_id, f.metric_id, f.period_kind,
+                           case when f.period_kind in ('fiscal_q', 'fiscal_y') then f.fiscal_year end,
+                           case when f.period_kind in ('fiscal_q', 'fiscal_y') then f.fiscal_period end,
                            case when f.period_kind in ('fiscal_q', 'fiscal_y') then null else f.period_start end,
                            case when f.period_kind in ('fiscal_q', 'fiscal_y') then null else f.period_end end)
               f.fact_id::text as fact_id,
@@ -137,7 +140,9 @@ export async function loadUsableFacts(db: QueryExecutor, query: UsableFactsQuery
           and (f.period_kind not in ('fiscal_q', 'fiscal_y') or (f.fiscal_year is not null and f.fiscal_period is not null))
           -- Any monetary unit (currency, currency_per_share) states its currency.
           and (f.unit not like 'currency%' or f.currency is not null)${filters}
-        order by f.subject_id, f.metric_id, f.period_kind, f.fiscal_year, f.fiscal_period,
+        order by f.subject_id, f.metric_id, f.period_kind,
+                 case when f.period_kind in ('fiscal_q', 'fiscal_y') then f.fiscal_year end,
+                 case when f.period_kind in ('fiscal_q', 'fiscal_y') then f.fiscal_period end,
                  case when f.period_kind in ('fiscal_q', 'fiscal_y') then null else f.period_start end,
                  case when f.period_kind in ('fiscal_q', 'fiscal_y') then null else f.period_end end,
                  f.as_of desc, f.fact_id

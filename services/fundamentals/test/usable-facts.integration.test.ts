@@ -150,6 +150,16 @@ test("loadUsableFacts applies every rule for facts that ground a sealed answer",
     assert.deepEqual(any.map((row) => row.value_num), [null]);
   });
 
+  await t.test("canonical: a point fact is identified by its date, not by any fiscal label", async () => {
+    await fact(2021, { period_kind: "point", fiscal_period: null, period_end: "2021-06-30", value_num: 1,
+      as_of: "2026-04-01T00:00:00.000Z", observed_at: "2026-04-01T00:00:00.000Z" } as Partial<FactInput>);
+    await fact(2022, { period_kind: "point", fiscal_period: null, period_end: "2021-06-30", value_num: 2,
+      source_id: sourceB } as Partial<FactInput>);
+    const rows = (await loadUsableFacts(client, { subjectKind: "issuer", subjectIds: [ISSUER_ID], periodKind: "point" }))
+      .filter((row) => row.value_num === 1 || row.value_num === 2);
+    assert.deepEqual(rows.map((row) => row.value_num), [2]);
+  });
+
   await t.test("numeric-only callers keep an older figure over a newer text-only fact", async () => {
     await fact(2016, { value_num: 7, as_of: "2026-04-01T00:00:00.000Z", observed_at: "2026-04-01T00:00:00.000Z" });
     await fact(2016, { value_num: null, value_text: "see note", source_id: sourceB } as Partial<FactInput>);
