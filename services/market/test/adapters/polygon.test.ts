@@ -370,7 +370,7 @@ test("polygon adapter unavailable envelope never carries raw provider field name
     assert.equal(banned in outcome, false, `vendor field "${banned}" leaked into envelope`);
   }
   // ...nor pass them through verbatim in the human-readable detail string.
-  assert.equal(typeof outcome.detail, "string");
+  assert.ok(typeof outcome.detail === "string");
   assert.equal(outcome.detail.includes(vendorErr), false);
   for (const banned of ["ticker", "lastTrade", "request_id", "results"]) {
     assert.equal(

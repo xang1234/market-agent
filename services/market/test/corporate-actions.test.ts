@@ -6,6 +6,7 @@ import {
   CORPORATE_ACTION_KINDS,
   type CashDividend,
   type CorporateAction,
+  type CorporateActionKind,
   type SpinOff,
   type Split,
   type StockDividend,

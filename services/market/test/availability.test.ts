@@ -118,7 +118,7 @@ test("assertUnavailableContract rejects envelopes missing required fields", () =
     delete tampered[drop];
     assert.throws(
       () => assertUnavailableContract(tampered),
-      undefined,
+      Error,
       `expected missing ${drop} to be rejected`,
     );
   }

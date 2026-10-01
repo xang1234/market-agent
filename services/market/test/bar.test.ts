@@ -189,7 +189,7 @@ test("assertBarsContract rejects a result missing required metadata fields", () 
     delete tampered[drop];
     assert.throws(
       () => assertBarsContract(tampered),
-      undefined,
+      Error,
       `expected missing ${drop} to be rejected`,
     );
   }

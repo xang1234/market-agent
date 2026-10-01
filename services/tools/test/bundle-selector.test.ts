@@ -160,6 +160,7 @@ test("selectToolBundle rejects missing or invalid runtime audiences", () => {
 
   assert.throws(
     () =>
+      // @ts-expect-error -- audience is required; the selector must reject its absence at runtime.
       selectToolBundle({
         registry,
         classification: classification("document_research"),
@@ -170,6 +171,7 @@ test("selectToolBundle rejects missing or invalid runtime audiences", () => {
     () =>
       selectToolBundle({
         registry,
+        // @ts-expect-error -- not a ToolAudience; the selector must reject it at runtime.
         audience: "portfolio_manager",
         classification: classification("document_research"),
       }),

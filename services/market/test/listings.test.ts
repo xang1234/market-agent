@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createPostgresListingRepository } from "../src/listings.ts";
+import { fakeQuery } from "../../shared/test/fake-query.ts";
 
 test("postgres listing repository returns listing context by id", async () => {
   const queries: Array<{ text: string; values?: unknown[] }> = [];
   const repo = createPostgresListingRepository({
-    query: async (text, values) => {
+    query: fakeQuery(async (text, values) => {
       queries.push({ text, values });
       return {
         rows: [
@@ -18,7 +19,7 @@ test("postgres listing repository returns listing context by id", async () => {
           },
         ],
       };
-    },
+    }),
   });
 
   const record = await repo.find("66666666-6666-4666-a666-666666666666");

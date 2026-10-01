@@ -24,7 +24,9 @@ test("loadToolRegistry reads the default finance research registry", () => {
   assert.equal(createAlert.approval_required, true);
   assert.equal(createAlert.cost_class, "low");
   assert.equal(createAlert.freshness_expectation, "varies");
-  assert.deepEqual(createAlert.input_json_schema.properties.agent_id, {
+  const properties = createAlert.input_json_schema.properties;
+  assert.ok(properties !== null && typeof properties === "object" && "agent_id" in properties);
+  assert.deepEqual(properties.agent_id, {
     type: "string",
     format: "uuid",
   });
