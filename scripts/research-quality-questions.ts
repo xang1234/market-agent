@@ -60,7 +60,13 @@ export const RUBRIC: ReadonlyArray<Criterion> = [
   {
     id: "no_invented_numbers",
     question: "Is missing data stated honestly, with no invented numbers?",
-    anchors: ["A number not in the data, or missing data papered over", "No invented numbers, but a gap left unstated", "Gaps stated plainly; every number is from the data"],
+    // 0 only for a number that is wrong, since every 0 becomes a regression test;
+    // a gap merely left unstated is a 1.
+    anchors: [
+      "A number not in the data, or one misrepresented (e.g. net income passed off as free cash flow)",
+      "No invented numbers, but a data gap left unstated or glossed over",
+      "Gaps stated plainly; every number is from the data",
+    ],
   },
 ];
 
