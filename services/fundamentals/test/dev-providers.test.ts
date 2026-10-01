@@ -10,13 +10,15 @@ import {
 import { FundamentalsDataUnavailableError } from "../src/availability.ts";
 import { YAHOO_FINANCE_DEV_FUNDAMENTALS_SOURCE_ID } from "../src/provider-sources.ts";
 import type { IssuerProfileRecord, IssuerProfileRepository } from "../src/issuer-repository.ts";
+import { fakeQuery } from "./fakes.ts";
 
 const ISSUER_ID = "99999999-9999-4999-9999-999999999999";
 const LISTING_ID = "88888888-8888-4888-8888-888888888888";
 
 type DbQuery = (text: string, values?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>;
 
-function testDb(query: DbQuery) {
+function testDb(handler: DbQuery) {
+  const query = fakeQuery(handler);
   return {
     query,
     async connect() {

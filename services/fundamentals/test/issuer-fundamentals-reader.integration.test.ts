@@ -42,15 +42,8 @@ async function seedMetric(
 function revenueFact(
   metricId: string,
   sourceId: string,
-  overrides: Pick<
-    FactInput,
-    | "fiscal_year"
-    | "value_num"
-    | "verification_status"
-    | "entitlement_channels"
-    | "period_kind"
-    | "fiscal_period"
-  >,
+  overrides: Pick<FactInput, "fiscal_year" | "value_num" | "verification_status" | "entitlement_channels">
+    & Partial<Pick<FactInput, "period_kind" | "fiscal_period">>,
 ): FactInput {
   return {
     subject_kind: "issuer",
