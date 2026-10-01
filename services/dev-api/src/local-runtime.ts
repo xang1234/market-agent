@@ -20,7 +20,7 @@ import {
 } from "../../evidence/src/local-runtime-evidence.ts";
 import { loadEvidenceInspection } from "../../evidence/src/inspector.ts";
 import { hashJsonValue, toolCallArgsDigest } from "../../observability/src/tool-call.ts";
-import type { JsonValue } from "../../observability/src/types.ts";
+import type { JsonValue, QueryExecutor } from "../../observability/src/types.ts";
 import { serializeJsonValue } from "../../observability/src/types.ts";
 import { writeRunActivity } from "../../observability/src/run-activity.ts";
 import { generateFinding, type FindingRow } from "../../agents/src/finding-generator.ts";
@@ -711,7 +711,7 @@ async function manifestFromBlockRefs(input: {
 }): Promise<SnapshotManifestDraft> {
   const toolCallIds = uuidRefsFromBlocks(input.blocks, "tool_call_ids");
   const toolCallResultHashes = await loadToolCallResultHashes(toolCallIds);
-  return Object.freeze({
+  return Object.freeze<SnapshotManifestDraft>({
     [STAGED_SNAPSHOT_MANIFEST]: true,
     subject_refs: Object.freeze([...input.subjectRefs]),
     fact_refs: Object.freeze([]),
@@ -856,7 +856,7 @@ function subjectRefsFromUniverse(universe: unknown): ReadonlyArray<SnapshotSubje
   if (typeof universe.mode === "string" && typeof universe[`${universe.mode}_id`] === "string") {
     const kind = universe.mode === "agent" ? "screen" : universe.mode;
     const id = universe[`${universe.mode}_id`];
-    if (isSnapshotSubjectKind(kind) && isUuid(id)) return [{ kind, id }];
+    if (isSnapshotSubjectKind(kind) && typeof id === "string" && isUuid(id)) return [{ kind, id }];
   }
   return [];
 }

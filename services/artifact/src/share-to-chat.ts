@@ -23,7 +23,8 @@ export type ShareableArtifactSourceKind = (typeof SHAREABLE_ARTIFACT_SOURCE_KIND
 export type ShareableArtifactSource = {
   source_kind: ShareableArtifactSourceKind;
   origin_snapshot_id: string;
-  blocks: ReadonlyArray<ShareableArtifactBlock>;
+  // Untrusted: each block is shape-checked before it is shared.
+  blocks: ReadonlyArray<unknown>;
 };
 
 export type ShareToChatInput = {

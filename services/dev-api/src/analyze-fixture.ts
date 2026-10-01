@@ -220,7 +220,7 @@ function fixtureThread(input: {
 function emptyEgressDb(): QueryExecutor {
   return {
     async query() {
-      return { rows: [], rowCount: 0 };
+      return { rows: [], rowCount: 0, command: "", oid: 0, fields: [] };
     },
   };
 }

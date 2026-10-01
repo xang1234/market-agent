@@ -5,7 +5,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AnalyzeFinancialRun } from "../../analyze/src/financial-section.ts";
+import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
 import { createServiceDevApiAdapters } from "../src/http.ts";
+import { fakePgQuery, sealedSnapshot } from "./fakes.ts";
 
 const USER = "00000000-0000-4000-8000-000000000001";
 const TEMPLATE = "11111111-1111-4111-8111-111111111111";
@@ -15,7 +17,7 @@ const ISSUER = "33333333-3333-4333-8333-333333333333";
 function fakeDb() {
   let metadata: unknown = null;
   const client = {
-    async query(text: string, values?: unknown[]) {
+    query: fakePgQuery(async (text: string, values?: unknown[]) => {
       if (text === "begin" || text === "commit" || text === "rollback") return { rows: [] };
       if (text.includes("insert into analyze_template_runs")) {
         metadata = JSON.parse(String(values?.[3]));
@@ -41,29 +43,21 @@ function fakeDb() {
         };
       }
       throw new Error(`unexpected query: ${text}`);
-    },
+    }),
     release() {},
   };
   return { connect: async () => client, query: client.query };
 }
 
-function okSeal(snapshotId: string) {
-  return {
-    ok: true as const,
-    snapshot: {
-      snapshot_id: snapshotId, subject_refs: [], fact_refs: [], claim_refs: [], event_refs: [], document_refs: [], series_specs: [], source_ids: [],
-      tool_call_ids: [], tool_call_result_hashes: [], as_of: "2026-05-06T00:00:00.000Z", basis: "test", normalization: {}, coverage_start: null,
-      allowed_transforms: null, model_version: "test", parent_snapshot: null, created_at: "2026-05-06T00:00:00.000Z",
-    },
-    verification: { ok: true, failures: [] },
-  };
+function okSeal(snapshotId: string): SnapshotSealResult {
+  return { ok: true, snapshot: sealedSnapshot(snapshotId), verification: { ok: true, failures: [] } };
 }
 
 test("a memo run declares its frozen financial context and publishes it against the committed run", async () => {
   const published: AnalyzeFinancialRun[] = [];
   let served: ReadonlySet<string> | undefined;
   const adapters = createServiceDevApiAdapters({
-    db: fakeDb() as never,
+    db: fakeDb(),
     runAnalyzeWorkflow: (input) => ({
       blocks: [{ id: "memo-1", kind: "rich_text", snapshot_id: input.snapshotId, as_of: "2026-05-06T00:00:00.000Z", segments: [{ type: "text", text: "Narrative." }] }],
     }),
@@ -72,7 +66,7 @@ test("a memo run declares its frozen financial context and publishes it against 
     },
     buildAnalyzeRunSeals: async (input) => {
       served = input.servedByEngine;
-      return { blocks: input.memoBlocks, sealSnapshot: async () => okSeal(input.snapshotId) as never };
+      return { blocks: input.memoBlocks, sealSnapshot: async () => okSeal(input.snapshotId) };
     },
     analyzeFinancial: {
       mode: "enforce",
@@ -84,7 +78,7 @@ test("a memo run declares its frozen financial context and publishes it against 
         return { coverage: "none", sections: [] };
       },
     },
-  } as never);
+  });
 
   const run = await adapters.analyze.createRun({
     userId: USER,

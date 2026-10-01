@@ -57,6 +57,7 @@ import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
 import type { QueryExecutor } from "../../agents/src/index.ts";
 import {
   DevApiHttpError,
+  isObjectRecord,
   nonEmptyString,
 } from "./dev-api-shared.ts";
 
@@ -269,7 +270,7 @@ async function persistAnalyzeRun(
     run_id: runId,
     template_id: input.template.template_id,
     template_version: input.template.version,
-    blocks: blocks as JsonValue,
+    blocks: blocks as ReadonlyArray<JsonValue>,
     playbook_id: input.playbookId,
     run_metadata: input.runMetadata,
     sealSnapshot: async () => {
@@ -619,28 +620,20 @@ function analyzeSubjectRefs(input: {
 }
 
 export function enrichAnalyzeRunBlocks(
-  blocks: ReadonlyArray<Record<string, unknown> | JsonValue>,
+  blocks: ReadonlyArray<unknown>,
   run: Pick<AnalyzeTemplateRunRow | DevAnalyzeRun, "run_id" | "template_id" | "template_version" | "snapshot_id" | "created_at">,
-): ShareableArtifactBlock[] {
+): unknown[] {
+  // Non-object blocks pass through; shareArtifactToChat rejects them by shape.
   return blocks.map((block) => {
-    if (block === null || typeof block !== "object" || Array.isArray(block)) {
-      return block as ShareableArtifactBlock;
-    }
-    const record = block as Record<string, JsonValue>;
-    const dataRef = record.data_ref;
-    const dataRefRecord = dataRef !== null && typeof dataRef === "object" && !Array.isArray(dataRef)
-      ? dataRef as Record<string, JsonValue>
-      : { kind: "analyze_run", id: run.run_id };
-    const params = dataRefRecord.params;
-    const paramsRecord = params !== null && typeof params === "object" && !Array.isArray(params)
-      ? params as Record<string, JsonValue>
-      : {};
+    if (!isObjectRecord(block)) return block;
+    const dataRef = isObjectRecord(block.data_ref) ? block.data_ref : { kind: "analyze_run", id: run.run_id };
+    const params = isObjectRecord(dataRef.params) ? dataRef.params : {};
     return {
-      ...record,
+      ...block,
       data_ref: {
-        ...dataRefRecord,
+        ...dataRef,
         params: {
-          ...paramsRecord,
+          ...params,
           analyze_run_id: run.run_id,
           analyze_template_id: run.template_id,
           analyze_template_version: run.template_version,
@@ -648,7 +641,7 @@ export function enrichAnalyzeRunBlocks(
           origin_snapshot_id: run.snapshot_id,
         },
       },
-    } as ShareableArtifactBlock;
+    };
   });
 }
 
