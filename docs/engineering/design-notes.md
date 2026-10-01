@@ -97,6 +97,21 @@ fixed rule, not a tool loop.
   a one-letter ticker; digits inside a label are not figures.
 - A failure while building fact blocks degrades to a narrative-only answer; it never costs the user the answer.
 
+## Which facts may ground an answer
+
+`loadUsableFacts` (`services/fundamentals/src/usable-facts.ts`) is the one definition (#159). Every reader that shows
+figures goes through it, directly or via `loadRecentIssuerFundamentals`. Its rules:
+- **eligibility:** reported, active, entitled for the channel, display-verified;
+- **numeric** values only (by default);
+- **dated:** a fiscal period has its year and period;
+- **currency:** a currency fact states its currency, never assumed;
+- **canonical:** one fact per subject, metric and period, the latest `as_of` winning;
+- **cutoff** (when given): `as_of`, `observed_at` and `reported_at` at or before it, so a snapshot never uses what wasn't
+  yet known.
+
+A new data path adds only what's specific to it (e.g. segment hierarchy and reconciliation) and passes the snapshot's
+`asOf` as `cutoff`. The rules are tested together in `services/fundamentals/test/usable-facts.integration.test.ts`.
+
 ## Which companies a chat turn covers
 
 `resolveTurnSubjects` (`services/chat/src/coordinator.ts`) decides a turn's companies, primary first:

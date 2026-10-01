@@ -15,7 +15,6 @@ import { buildMetricsComparisonBlock } from "../../analyze/src/metrics-compariso
 import { materializePeerMetricFacts } from "../../analyze/src/metrics-comparison-materializer.ts";
 import { buildRevenueBarsBlock } from "../../analyze/src/revenue-bars-block-builder.ts";
 import { loadVerifierFactsForRefs } from "../../evidence/src/local-runtime-evidence.ts";
-import { DISPLAYABLE_VERIFICATION_STATUSES } from "../../evidence/src/promotion-rules.ts";
 import {
   loadRecentIssuerFundamentals,
   type IssuerFundamentalFact,
@@ -28,6 +27,7 @@ import {
   createSecBackedStatsRepository,
 } from "../../fundamentals/src/sec-facts-repository.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
+import { loadUsableFacts } from "../../fundamentals/src/usable-facts.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 import { stableUuid } from "./chat-ids.ts";
 import { loadPerfComparisonBlocks } from "./perf-block.ts";
@@ -140,7 +140,7 @@ async function loadMetricsComparisonBlocks(
     );
     const factIds = [...new Set(materialized.flatMap((peer) => peer.metrics.map((metric) => metric.value_ref)))];
     const loadable = new Map(
-      (await loadVerifierFactsForRefs(db, { fact_refs: factIds })).map((fact) => [fact.fact_id, fact]),
+      (await loadVerifierFactsForRefs(db, { fact_refs: factIds, cutoff: input.asOf })).map((fact) => [fact.fact_id, fact]),
     );
     // Only cells the seal can load and bind render; the rest show as gaps.
     const peers = materialized.map((peer) => ({
@@ -183,48 +183,49 @@ async function loadSegmentBlocks(
   input: { issuer: IssuerSubjectRef; snapshotId: string; asOf: string },
 ): Promise<ReadonlyArray<Block>> {
   try {
-    // The same eligibility as every user-facing fact (loadRecentIssuerFundamentals):
-    // reported, active, app-entitled, display-verified; numeric, dated quarters
-    // known by the snapshot's cutoff; and one fact per segment and quarter, the
-    // latest as_of winning when sources overlap.
-    const { rows } = await db.query<SegmentRevenueRow>(
-      `select distinct on (s.name, f.fiscal_year, f.fiscal_period)
-              f.fact_id::text as fact_id,
-              s.name,
-              (f.value_num * f.scale)::float8 as value,
-              f.currency,
-              f.fiscal_year,
-              f.fiscal_period,
-              f.coverage_level
-         from segments s
-         join facts f on f.subject_kind = 'segment' and f.subject_id = s.segment_id
-         join metrics m on m.metric_id = f.metric_id
-        where s.issuer_id = $1::uuid
-          and s.axis = 'business'
-          -- Top-level segments only: a child listed beside its parent double-counts.
-          and s.parent_segment_id is null
-          -- A segment defined after the cutoff did not exist yet.
-          and s.definition_as_of <= $3::timestamptz
-          and m.metric_key = 'revenue'
-          and f.period_kind = 'fiscal_q'
-          and f.method = 'reported'
-          and f.superseded_by is null
-          and f.invalidated_at is null
-          and f.entitlement_channels ? 'app'
-          and f.verification_status = any($2::verification_status[])
-          and f.value_num is not null
-          and f.fiscal_year is not null
-          and f.fiscal_period in ('Q1', 'Q2', 'Q3', 'Q4')
-          and f.as_of <= $3::timestamptz
-          -- Known by the cutoff, not just dated before it: a backdated filing
-          -- ingested later did not exist for this snapshot.
-          and f.observed_at <= $3::timestamptz
-          and (f.reported_at is null or f.reported_at <= $3::timestamptz)
-        -- One row per segment name and quarter: the latest definition known by the
-        -- cutoff, then the latest fact.
-        order by s.name, f.fiscal_year, f.fiscal_period, s.definition_as_of desc, f.as_of desc, f.fact_id`,
-      [input.issuer.id, [...DISPLAYABLE_VERIFICATION_STATUSES], input.asOf],
+    // Which facts are usable (eligibility, numeric, dated, currency, canonical,
+    // known by the cutoff) is loadUsableFacts' rule (#159). What is segment-
+    // specific stays here: top-level segments only (a child listed beside its
+    // parent double-counts) whose definition existed at the cutoff.
+    const { rows: segments } = await db.query<{ segment_id: string; name: string; definition_as_of: Date | string }>(
+      `select segment_id::text as segment_id, name, definition_as_of
+         from segments
+        where issuer_id = $1::uuid
+          and axis = 'business'
+          and parent_segment_id is null
+          and definition_as_of <= $2::timestamptz`,
+      [input.issuer.id, input.asOf],
     );
+    const segmentById = new Map(segments.map((segment) => [segment.segment_id, segment]));
+    const facts = await loadUsableFacts(db, {
+      subjectKind: "segment",
+      subjectIds: segments.map((segment) => segment.segment_id),
+      metricKeys: ["revenue"],
+      periodKind: "fiscal_q",
+      cutoff: input.asOf,
+    });
+    // One row per segment name and quarter: the latest definition known by the
+    // cutoff (a redefined segment is a new version under the same name).
+    const byNameAndQuarter = new Map<string, { row: SegmentRevenueRow; defined: number }>();
+    for (const fact of facts) {
+      const segment = segmentById.get(fact.subject_id)!;
+      const key = `${segment.name}|${fact.fiscal_year}|${fact.fiscal_period}`;
+      const defined = new Date(segment.definition_as_of).getTime();
+      if ((byNameAndQuarter.get(key)?.defined ?? -Infinity) >= defined) continue;
+      byNameAndQuarter.set(key, {
+        defined,
+        row: {
+          fact_id: fact.fact_id,
+          name: segment.name,
+          value: fact.value_num! * fact.scale,
+          currency: fact.currency,
+          fiscal_year: fact.fiscal_year!,
+          fiscal_period: fact.fiscal_period!,
+          coverage_level: fact.coverage_level,
+        },
+      });
+    }
+    const rows = [...byNameAndQuarter.values()].map((entry) => entry.row);
     const breakdown = segmentRevenueItems(rows);
     if (!breakdown) return [];
     // Complete only if the segments add up to the company's reported revenue for
@@ -232,7 +233,7 @@ async function loadSegmentBlocks(
     if (!(await reconcilesToReportedRevenue(db, input, breakdown))) return [];
     const factIds = breakdown.items.map((item) => item.value_ref);
     const loadable = new Map(
-      (await loadVerifierFactsForRefs(db, { fact_refs: factIds })).map((fact) => [fact.fact_id, fact]),
+      (await loadVerifierFactsForRefs(db, { fact_refs: factIds, cutoff: input.asOf })).map((fact) => [fact.fact_id, fact]),
     );
     const cited = factIds.filter((id) => loadable.has(id)).map((id) => citedFact(loadable.get(id)!));
     if (cited.length !== factIds.length) return [];
@@ -256,34 +257,20 @@ async function reconcilesToReportedRevenue(
   input: { issuer: IssuerSubjectRef; asOf: string },
   breakdown: { fiscal_year: number; fiscal_period: string; total: number; currency: string },
 ): Promise<boolean> {
-  const { rows } = await db.query<{ value: number; currency: string | null }>(
-    `select (f.value_num * f.scale)::float8 as value, f.currency
-       from facts f
-       join metrics m on m.metric_id = f.metric_id
-      where f.subject_kind = 'issuer'
-        and f.subject_id = $1::uuid
-        and m.metric_key = 'revenue'
-        and f.period_kind = 'fiscal_q'
-        and f.fiscal_year = $2
-        and f.fiscal_period = $3
-        and f.method = 'reported'
-        and f.superseded_by is null
-        and f.invalidated_at is null
-        and f.entitlement_channels ? 'app'
-        and f.verification_status = any($4::verification_status[])
-        and f.value_num is not null
-        and f.as_of <= $5::timestamptz
-        and f.observed_at <= $5::timestamptz
-        and (f.reported_at is null or f.reported_at <= $5::timestamptz)
-      order by f.as_of desc, f.fact_id
-      limit 1`,
-    [input.issuer.id, breakdown.fiscal_year, breakdown.fiscal_period, [...DISPLAYABLE_VERIFICATION_STATUSES], input.asOf],
-  );
-  const reported = rows[0];
-  if (reported === undefined || reported.value <= 0) return false;
-  // Same, known reporting currency, or the sum means nothing.
-  if (reported.currency === null || reported.currency !== breakdown.currency) return false;
-  return Math.abs(breakdown.total - reported.value) <= reported.value * SEGMENT_RECONCILIATION_TOLERANCE;
+  const reported = (await loadUsableFacts(db, {
+    subjectKind: "issuer",
+    subjectIds: [input.issuer.id],
+    metricKeys: ["revenue"],
+    periodKind: "fiscal_q",
+    cutoff: input.asOf,
+  })).find((fact) => fact.fiscal_year === breakdown.fiscal_year && fact.fiscal_period === breakdown.fiscal_period);
+  if (reported === undefined) return false;
+  const value = reported.value_num! * reported.scale;
+  if (value <= 0) return false;
+  // Same reporting currency, or the sum means nothing (loadUsableFacts already
+  // requires a currency-denominated fact to state one).
+  if (reported.currency !== breakdown.currency) return false;
+  return Math.abs(breakdown.total - value) <= value * SEGMENT_RECONCILIATION_TOLERANCE;
 }
 
 type SegmentRevenueRow = {
@@ -309,6 +296,8 @@ export function segmentRevenueItems(
   currency: string;
   items: Array<{ label: string; value_ref: string; format: string }>;
 } | null {
+  // Quarters only (own keys: "toString" is not a quarter).
+  rows = rows.filter((row) => Object.hasOwn(QUARTER_ORDER, row.fiscal_period));
   const latest = [...rows].sort((a, b) =>
     (b.fiscal_year - a.fiscal_year) || ((QUARTER_ORDER[b.fiscal_period] ?? 0) - (QUARTER_ORDER[a.fiscal_period] ?? 0))
   )[0];
@@ -409,8 +398,11 @@ export async function loadIssuerFactBlocks(
       channel: "app",
       periodKind: "fiscal_q",
       metricKeys: METRIC_KEYS,
+      // Only what was known at the snapshot's moment (#159), and only figures.
+      cutoff: input.asOf,
+      numericOnly: true,
     });
-    const verifierFacts = await loadVerifierFactsForRefs(db, { fact_refs: facts.map((fact) => fact.fact_id) });
+    const verifierFacts = await loadVerifierFactsForRefs(db, { fact_refs: facts.map((fact) => fact.fact_id), cutoff: input.asOf });
     return buildIssuerFactBlocks({ facts, verifierFacts, snapshotId: input.snapshotId, asOf: input.asOf });
   } catch (reason) {
     console.warn("[chat] fact blocks unavailable; answering with narrative only", reason);

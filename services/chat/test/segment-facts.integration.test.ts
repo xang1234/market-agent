@@ -121,9 +121,10 @@ test("a segment breakdown shows only eligible, numeric facts, one per segment", 
   );
 
   // A segment whose Q4 fact is missing leaves the rest short of the quarter's
-  // revenue: no breakdown rather than an incomplete one shown as whole.
+  // revenue: no breakdown rather than an incomplete one shown as whole. It is
+  // withdrawn before the cutoff; one withdrawn later was still known then.
   await client.query(
-    `update facts set invalidated_at = now()
+    `update facts set invalidated_at = '2026-08-01T00:00:00Z'
       where subject_kind = 'segment'
         and subject_id = (select segment_id from segments where issuer_id = $1::uuid and name = 'Automotive')`,
     [NVDA.issuer_id],
@@ -136,4 +137,39 @@ test("a segment breakdown shows only eligible, numeric facts, one per segment", 
     asOf: GOLDEN_AS_OF,
   });
   assert.equal(afterGap.some((block) => /by segment/.test(String(block.title))), false);
+
+  // The issuer's own figures respect the cutoff too (#159): a restated Q4 revenue
+  // published after it does not replace the one known at the cutoff.
+  await createFact(client, {
+    subject_kind: "issuer",
+    subject_id: NVDA.issuer_id,
+    metric_id: revenueMetricId,
+    period_kind: "fiscal_q",
+    period_start: "2025-10-27",
+    period_end: "2026-01-25",
+    fiscal_year: 2026,
+    fiscal_period: "Q4",
+    value_num: 70e9,
+    unit: "currency",
+    currency: "USD",
+    as_of: "2026-09-03T00:00:00.000Z",
+    reported_at: "2026-09-03T00:00:00.000Z",
+    observed_at: "2026-09-03T00:00:00.000Z",
+    source_id: OTHER_SOURCE_ID,
+    method: "reported",
+    verification_status: "authoritative",
+    freshness_class: "filing_time",
+    coverage_level: "full",
+    entitlement_channels: ["app"],
+    confidence: 1,
+  });
+  const issuerBlocks = await loadTurnFactBlocks(client as unknown as Parameters<typeof loadTurnFactBlocks>[0], {
+    issuers: [{ kind: "issuer", id: NVDA.issuer_id }],
+    wantsPeers: false,
+    snapshotId: "63000000-0000-4000-8000-0000000000ac",
+    asOf: GOLDEN_AS_OF,
+  });
+  const metricRow = issuerBlocks.find((block) => block.kind === "metric_row");
+  const revenue = (metricRow?.items as Array<{ label: string; format: string }> | undefined)?.find((item) => item.label === "Revenue");
+  assert.equal(revenue?.format, "$62.1B", "the post-cutoff restatement must not show");
 });
