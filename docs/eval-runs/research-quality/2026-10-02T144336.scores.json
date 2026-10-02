@@ -1,0 +1,105 @@
+{
+  "run": "2026-10-02T144336",
+  "model": "opencode-go/qwen3.8-max (fallbacks: opencode-go/kimi-k2.7-code)",
+  "scores": {
+    "single-latest-quarter": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Counterpoint claims the Q3->Q4 increase ($57.0B->$62.1B, i.e. $5.1B) exceeded revenue four quarters earlier ($39.3B): false (Codex review, PR #227)."
+    },
+    "margin-trend-loss-quarter": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Explains the Q2 2025 loss as 'likely a one-time charge' while conceding the cause isn't in the data (Codex review, PR #227)."
+    },
+    "what-changed-gross-margin": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": ""
+    },
+    "peer-two": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": ""
+    },
+    "peer-three": {
+      "correct_companies": 2,
+      "comparable_periods": 1,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 1,
+      "no_invented_numbers": 2,
+      "notes": "does not know that AAPL is in a differnt industry; Claims AAPL's 6.4% growth on $416.2B (about $25.0B) adds more than AMD's whole $34.7B revenue: false (Codex review, PR #227).; Compares fiscal years ending January (NVDA), December (AMD) and September (AAPL) as one 'latest fiscal year' without saying so (Codex review, PR #227)."
+    },
+    "fiscal-year-trap": {
+      "correct_companies": 2,
+      "comparable_periods": 1,
+      "figures_match_sources": 1,
+      "conclusions_justified": 1,
+      "counterarguments": 1,
+      "no_invented_numbers": 2,
+      "notes": ""
+    },
+    "segment-drill-down": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": ""
+    },
+    "missing-segments": {
+      "correct_companies": 2,
+      "comparable_periods": "n/a",
+      "figures_match_sources": "n/a",
+      "conclusions_justified": "n/a",
+      "counterarguments": "n/a",
+      "no_invented_numbers": 2,
+      "notes": ""
+    },
+    "missing-cash-flow": {
+      "correct_companies": 2,
+      "comparable_periods": "n/a",
+      "figures_match_sources": "n/a",
+      "conclusions_justified": "n/a",
+      "counterarguments": "n/a",
+      "no_invented_numbers": 2,
+      "notes": ""
+    },
+    "follow-up-memory": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Attributes NVDA's margins to supply-constrained AI-accelerator dominance and AMD's to reinvestment limits, neither in the data shown (Codex review, PR #227)."
+    },
+    "ticker-page-compare": {
+      "correct_companies": 2,
+      "comparable_periods": 1,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 2,
+      "no_invented_numbers": 2,
+      "notes": "Calls both rows 'latest fiscal year' without stating AAPL's September vs NVDA's January year end (Codex review, PR #227).; Claims AAPL has a larger absolute earnings base; displayed figures give about $111.9B net income vs NVDA's $112.5B (Codex review, PR #227)."
+    }
+  }
+}
