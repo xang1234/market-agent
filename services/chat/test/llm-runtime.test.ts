@@ -192,6 +192,41 @@ test("only attempts the total can finish are made, so a failure names each timeo
   assert.deepEqual(calls, ["gpt-4.1"]);
 });
 
+test("deadlines that leave no room for a whole attempt are rejected before any model call", async () => {
+  let called = 0;
+  for (const deadlines of [{ attemptMs: 100, totalMs: 100 }, { attemptMs: 200, totalMs: 100 }, { attemptMs: 0, totalMs: 100 }]) {
+    await assert.rejects(composeAnalystBlocksWithLlm({
+      env: TWO_DEPLOYMENTS,
+      context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
+      blocks: [richTextBlock("Deterministic note")],
+      toolCalls: [],
+      deadlines,
+      createClient: () => () => {
+        called += 1;
+        return { text: "unexpected" };
+      },
+    }), RangeError, JSON.stringify(deadlines));
+  }
+  assert.equal(called, 0);
+});
+
+test("an exact fit leaves the last attempt out, so the total never cuts one", async (t) => {
+  // 2 × 60 ms equals the 120 ms total: the second attempt would race the total, so one is made.
+  const calls: string[] = [];
+  await assert.rejects(composeAnalystBlocksWithLlm({
+    env: TWO_DEPLOYMENTS,
+    context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
+    blocks: [richTextBlock("Deterministic note")],
+    toolCalls: [],
+    deadlines: { attemptMs: 60, totalMs: 120 },
+    createClient: () => (deployment) => {
+      calls.push(deployment.model);
+      return hang(t);
+    },
+  }), (error) => error instanceof LlmRouterError && error.attempts.length === 1);
+  assert.deepEqual(calls, ["gpt-4.1"]);
+});
+
 test("the production deadlines bound the answer and the title calls", () => {
   for (const deadlines of [ANSWER_DEADLINES, TITLE_DEADLINES]) {
     // A primary and its fallback both fit, with headroom, so the total never cuts an attempt.

@@ -28,9 +28,14 @@ export const ANSWER_DEADLINES: ModelDeadlines = { attemptMs: 80_000, totalMs: 18
 export const TITLE_DEADLINES: ModelDeadlines = { attemptMs: 20_000, totalMs: 45_000 };
 
 function withDeadlines(deadlines: ModelDeadlines): LlmExecutionControls {
+  const { attemptMs, totalMs } = deadlines;
+  if (!Number.isInteger(attemptMs) || !Number.isInteger(totalMs) || attemptMs <= 0 || attemptMs >= totalMs) {
+    throw new RangeError(`model deadlines need 0 < attemptMs < totalMs (integers); got ${attemptMs} and ${totalMs}`);
+  }
   return {
-    signal: AbortSignal.timeout(deadlines.totalMs),
-    maxAttempts: Math.max(1, Math.floor(deadlines.totalMs / deadlines.attemptMs)),
+    signal: AbortSignal.timeout(totalMs),
+    // Attempts whose deadlines sum to strictly less than the total, so none is cut by it.
+    maxAttempts: Math.ceil(totalMs / attemptMs) - 1,
     executeAttempt: (_attempt, dispatch) => dispatch(AbortSignal.timeout(deadlines.attemptMs)),
   };
 }
