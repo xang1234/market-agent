@@ -575,7 +575,8 @@ function findLineByKey(
   return undefined;
 }
 
-function worstCoverage(inputs: ReadonlyArray<{ coverage_level: CoverageLevel }>): CoverageLevel {
+// A value computed from several facts is only as complete as its least complete input.
+export function worstCoverage(inputs: ReadonlyArray<{ coverage_level: CoverageLevel }>): CoverageLevel {
   let worst: CoverageLevel = "full";
   for (const input of inputs) {
     if (COVERAGE_ORDER[input.coverage_level] > COVERAGE_ORDER[worst]) {

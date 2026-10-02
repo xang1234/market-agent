@@ -5,6 +5,7 @@
 
 import type { DerivedFactSpec } from "../../analyze/src/metrics-comparison-materializer.ts";
 import type { IssuerFundamentalFact } from "../../fundamentals/src/issuer-fundamentals-reader.ts";
+import { worstCoverage } from "../../fundamentals/src/key-stats.ts";
 import type { CoverageLevel, FiscalPeriod, PeriodKind } from "../../fundamentals/src/statement.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 
@@ -71,8 +72,8 @@ export function deriveQuarterMetrics(input: {
 }
 
 // The derived fact carries the quarter of `at` (its period dates from the
-// verifier), the latest as_of of its inputs, `at`'s source and coverage, and
-// every input fact as lineage. No period dates, no fact.
+// verifier), the latest as_of of its inputs, `at`'s source, the worst coverage of
+// its inputs, and every input fact as lineage. No period dates, no fact.
 function derived(
   metric: string,
   label: string,
@@ -97,7 +98,7 @@ function derived(
       fiscal_year: at.fiscal_year!,
       fiscal_period: at.fiscal_period! as FiscalPeriod,
     },
-    coverage_level: at.coverage_level as CoverageLevel,
+    coverage_level: worstCoverage(inputs.map((input) => ({ coverage_level: input.coverage_level as CoverageLevel }))),
     input_fact_ids: inputs.map((input) => input.fact_id),
   };
 }

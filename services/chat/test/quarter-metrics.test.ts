@@ -62,6 +62,13 @@ test("margins are each statement line over revenue, with lineage to both facts",
   assert.equal(metrics.find((m) => m.metric === "net_margin"), undefined);
 });
 
+test("a derived value is only as complete as its least complete input", () => {
+  const revenue = fact("revenue", 2026, "Q1", 10e9);
+  const gross = { ...fact("gross_profit", 2026, "Q1", 5e9), coverage_level: "partial" };
+  const margin = derive([revenue, gross]).find((m) => m.metric === "gross_margin")!;
+  assert.equal(margin.coverage_level, "partial");
+});
+
 test("no margin from mixed currencies, zero revenue, or a quarter without period dates", () => {
   const eur = fact("revenue", 2026, "Q1", 10e9, "EUR");
   assert.deepEqual(derive([eur, fact("gross_profit", 2026, "Q1", 5e9, "USD")]), []);
