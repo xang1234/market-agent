@@ -191,14 +191,14 @@ test("LLM router dispatch uses the attempt signal supplied by execution control"
   assert.equal(received, controller.signal);
 });
 
-test("a hung attempt ends at its deadline and falls back, even if the client ignores the signal (#184)", async () => {
+test("a hung attempt ends at its deadline and falls back, even if the client ignores the signal (#184)", async (t) => {
   const called: string[] = [];
   const router = createLlmRouter({
     settings: settings(),
     client: async (deployment) => {
       called.push(deployment.model);
       // The first provider accepts the request and never answers, ignoring the signal.
-      if (called.length === 1) return new Promise<never>(() => {});
+      if (called.length === 1) return hang(t);
       return { text: "fallback answer" };
     },
   });
@@ -214,8 +214,8 @@ test("a hung attempt ends at its deadline and falls back, even if the client ign
   assert.ok(Date.now() - startedAt < 2_000, "the hung attempt cost about its deadline, not forever");
 });
 
-test("every attempt hanging is a router error naming each timeout (#184)", async () => {
-  const router = createLlmRouter({ settings: settings(), client: () => new Promise<never>(() => {}) });
+test("every attempt hanging is a router error naming each timeout (#184)", async (t) => {
+  const router = createLlmRouter({ settings: settings(), client: () => hang(t) });
   await assert.rejects(
     router.complete(
       { messages: [{ role: "user", content: "hello" }] },
@@ -225,10 +225,10 @@ test("every attempt hanging is a router error naming each timeout (#184)", async
   );
 });
 
-test("the outer signal also ends a hung attempt, as the caller's abort", async () => {
+test("the outer signal also ends a hung attempt, as the caller's abort", async (t) => {
   const reason = new Error("turn deadline");
   const controller = new AbortController();
-  const router = createLlmRouter({ settings: settings(), client: () => new Promise<never>(() => {}) });
+  const router = createLlmRouter({ settings: settings(), client: () => hang(t) });
   setTimeout(() => controller.abort(reason), 20);
   await assert.rejects(
     router.complete({ messages: [{ role: "user", content: "hello" }] }, { signal: controller.signal }),
@@ -318,4 +318,14 @@ function settings() {
     LITELLM_MODEL: "openai/gpt-4.1",
     LITELLM_FALLBACK_MODELS: "deepseek/deepseek-chat,openai/o3",
   });
+}
+
+// A provider that accepts the request and never answers. A real one holds an open
+// connection, which keeps the event loop alive; a bare pending promise doesn't, and
+// AbortSignal.timeout's timer is unref'd, so the test runner would see an idle loop
+// and cancel the test. The interval stands in for the connection.
+function hang(t: { after(fn: () => void): void }): Promise<never> {
+  const connection = setInterval(() => {}, 1_000);
+  t.after(() => clearInterval(connection));
+  return new Promise<never>(() => {});
 }

@@ -140,7 +140,7 @@ const TWO_DEPLOYMENTS = {
   LITELLM_FALLBACK_MODELS: "deepseek/deepseek-chat",
 };
 
-test("an answer model that hangs falls back at its attempt deadline (#184)", async () => {
+test("an answer model that hangs falls back at its attempt deadline (#184)", async (t) => {
   const calls: string[] = [];
   const startedAt = Date.now();
   const result = await composeAnalystBlocksWithLlm({
@@ -152,7 +152,7 @@ test("an answer model that hangs falls back at its attempt deadline (#184)", asy
     createClient: () => async (deployment) => {
       calls.push(deployment.model);
       // The primary accepts the request and never answers.
-      if (calls.length === 1) return new Promise<never>(() => {});
+      if (calls.length === 1) return hang(t);
       return { text: "fallback note" };
     },
   });
@@ -162,7 +162,7 @@ test("an answer model that hangs falls back at its attempt deadline (#184)", asy
   assert.ok(Date.now() - startedAt < 2_000, "the hang cost about the attempt deadline");
 });
 
-test("when every model hangs, the answer call ends with an error at its deadline (#184)", async () => {
+test("when every model hangs, the answer call ends with an error at its deadline (#184)", async (t) => {
   const startedAt = Date.now();
   await assert.rejects(composeAnalystBlocksWithLlm({
     env: TWO_DEPLOYMENTS,
@@ -170,7 +170,7 @@ test("when every model hangs, the answer call ends with an error at its deadline
     blocks: [richTextBlock("Deterministic note")],
     toolCalls: [],
     deadlines: { attemptMs: 50, totalMs: 5_000 },
-    createClient: () => () => new Promise<never>(() => {}),
+    createClient: () => () => hang(t),
   }), /all LLM deployments failed/);
   assert.ok(Date.now() - startedAt < 2_000);
 });
@@ -393,3 +393,12 @@ test("a replayed reply crediting AMD's margin to NVIDIA loses that sentence; the
   const right = await compareWithReply("AMD's gross margin is 49.2%. NVDA is larger.");
   assert.equal(right.text, "AMD's gross margin is 49.2%. NVDA is larger.");
 });
+
+// A provider that accepts the request and never answers. Its open connection keeps
+// the event loop alive; a bare pending promise doesn't (AbortSignal.timeout's timer is
+// unref'd), so the interval stands in for it.
+function hang(t: { after(fn: () => void): void }): Promise<never> {
+  const connection = setInterval(() => {}, 1_000);
+  t.after(() => clearInterval(connection));
+  return new Promise<never>(() => {});
+}
