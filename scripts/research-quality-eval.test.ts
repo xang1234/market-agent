@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   blankScores,
   modelForRun,
+  modelLabel,
   readRuns,
   renderBlock,
   renderReport,
@@ -105,6 +106,15 @@ test("a run names its model or doesn't start, and its files are stamped to the s
   assert.throws(() => modelForRun(undefined, undefined, "reading /v1/dev/llm-settings failed: 403"), /403.*EVAL_MODEL/);
   assert.throws(() => modelForRun(null, "  "), /EVAL_MODEL/);
   assert.equal(runStamp(new Date("2026-10-02T04:55:12.345Z")), "2026-10-02T045512");
+});
+
+test("a run with fallbacks configured is labelled with them, and its report warns", () => {
+  assert.equal(modelLabel("opencode-go/qwen3.8-max", []), "opencode-go/qwen3.8-max");
+  assert.equal(modelLabel("opencode-go/qwen3.8-max", undefined), "opencode-go/qwen3.8-max");
+  const label = modelLabel("opencode-go/qwen3.8-max", ["opencode-go/kimi-k2.7-code"]);
+  assert.equal(label, "opencode-go/qwen3.8-max (fallbacks: opencode-go/kimi-k2.7-code)");
+  assert.match(renderReport("r", label, "http://app", []), /Fallbacks were configured/);
+  assert.doesNotMatch(renderReport("r", "opencode-go/qwen3.8-max", "http://app", []), /Fallbacks were configured/);
 });
 
 test("summary on a fresh checkout reads no runs instead of failing", async () => {

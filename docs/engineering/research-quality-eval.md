@@ -37,4 +37,7 @@ the owner scores by hand, so answer quality can be compared from one run to the 
    `no_invented_numbers`, and each of those becomes a regression test.
 
 The first scored run is the baseline. Each run records the primary model from the LLM settings, since a model change
-alone can move scores.
+alone can move scores. If the settings can't be read, the run stops before sending anything; set
+`EVAL_MODEL=<channel/model>` to name the model yourself. When fallbacks are configured, the run is labelled with them and
+the report warns, because chat doesn't yet record which model answered each turn (#183). The report is saved after each
+question, so an error late in a run keeps the answers before it.

@@ -76,6 +76,9 @@ export function renderReport(run: string, model: string, base: string, answered:
   const lines = [
     `# Research-quality eval: ${run}`,
     "",
+    ...(model.includes("(fallbacks:")
+      ? ["**Fallbacks were configured:** any answer may come from one. The app log's `[llm]` lines show which model answered each call.", ""]
+      : []),
     `Model: \`${model}\`. Data: frozen golden dataset. Score each question in \`${run}.scores.json\` (rubric below),`,
     "then run `node --experimental-strip-types scripts/research-quality-eval.ts summary`.",
     "Bold figures are cited (linked to a fact); open the thread link for charts and sources.",
@@ -189,12 +192,22 @@ export function modelForRun(primaryModel: string | null | undefined, override: s
 export const runStamp = (date: Date) => date.toISOString().slice(0, 19).replace(/[:]/gu, "");
 
 async function run(base: string): Promise<void> {
-  const settings = await api<{ settings?: { primaryModel?: string | null } }>(base, "GET", "/v1/dev/llm-settings")
-    .then((read) => ({ primaryModel: read.settings?.primaryModel, why: "no primary model is set" }))
-    .catch((error: unknown) => ({ primaryModel: undefined, why: `reading /v1/dev/llm-settings failed: ${error instanceof Error ? error.message : error}` }));
-  const model = modelForRun(settings.primaryModel, process.env.EVAL_MODEL, settings.why);
+  type Settings = { primaryModel?: string | null; fallbackModels?: string[] };
+  const settings = await api<{ settings?: Settings }>(base, "GET", "/v1/dev/llm-settings")
+    .then((read) => ({ ...read.settings, why: "no primary model is set" }))
+    .catch((error: unknown) => ({ primaryModel: undefined, fallbackModels: undefined, why: `reading /v1/dev/llm-settings failed: ${error instanceof Error ? error.message : error}` }));
+  const model = modelLabel(modelForRun(settings.primaryModel, process.env.EVAL_MODEL, settings.why), process.env.EVAL_MODEL ? [] : settings.fallbackModels);
   const stamp = runStamp(new Date());
   const answered: AnsweredQuestion[] = [];
+  // Both files exist from the start, created exclusively (a run never overwrites
+  // another); the report is rewritten after each question, so an error late in the run
+  // keeps every billed answer before it.
+  mkdirSync(RUNS_DIR, { recursive: true });
+  const report = join(RUNS_DIR, `${stamp}.md`);
+  const scores = join(RUNS_DIR, `${stamp}.scores.json`);
+  writeFileSync(scores, `${JSON.stringify(blankScores(stamp, model), null, 2)}\n`, { flag: "wx" });
+  writeFileSync(report, renderReport(stamp, model, base, answered), { flag: "wx" });
+  console.log(`report: ${report}\nscore:  ${scores}\n`);
   for (const question of QUESTIONS) {
     const { thread_id: threadId } = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: `Eval: ${question.id}` });
     const turns: AnsweredQuestion["turns"] = [];
@@ -216,13 +229,15 @@ async function run(base: string): Promise<void> {
       answersSoFar = answers.length;
     }
     answered.push({ question, threadId, turns });
+    writeFileSync(report, renderReport(stamp, model, base, answered));
   }
-  mkdirSync(RUNS_DIR, { recursive: true });
-  const report = join(RUNS_DIR, `${stamp}.md`);
-  const scores = join(RUNS_DIR, `${stamp}.scores.json`);
-  writeFileSync(report, renderReport(stamp, model, base, answered), { flag: "wx" });
-  writeFileSync(scores, `${JSON.stringify(blankScores(stamp, model), null, 2)}\n`, { flag: "wx" });
-  console.log(`\nreport: ${report}\nscore:  ${scores}`);
+  console.log(`\ndone: ${answered.length} questions in ${report}`);
+}
+
+// The router falls back silently and chat doesn't record which deployment answered a
+// turn (#183), so a run whose settings list fallbacks says so: any answer may be theirs.
+export function modelLabel(model: string, fallbackModels: ReadonlyArray<string> | undefined): string {
+  return fallbackModels?.length ? `${model} (fallbacks: ${fallbackModels.join(", ")})` : model;
 }
 
 // Every run's scores, oldest first; none yet (no runs folder on a fresh checkout) is [].
