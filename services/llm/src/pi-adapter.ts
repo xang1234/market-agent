@@ -112,22 +112,40 @@ export async function createDefaultPiLlmChatClient(): Promise<LlmChatClient> {
     import("@earendil-works/pi-ai/api/openai-completions"),
     import("@earendil-works/pi-ai/providers/all"),
   ]);
-  // Indexed once by endpoint and model id, so a channel named anything still finds its
-  // model; only the OpenAI-compatible API, which is what every channel speaks here.
-  const catalog = new Map<string, PiCatalogModel>();
-  for (const provider of builtins.getBuiltinProviders()) {
-    for (const model of builtins.getBuiltinModels(provider)) {
-      if (model.api === "openai-completions") catalog.set(catalogKey(model.baseUrl, model.id), model as PiCatalogModel);
-    }
-  }
   type StreamSimple = (model: unknown, context: unknown, options: unknown) => { result(): Promise<PiAssistantMessage> };
   return createPiLlmChatClient({
     complete: (model, context, options) =>
       (completions.streamSimple as unknown as StreamSimple)(model, pi.normalizeContext(context as never), options).result(),
-    catalogModel: (deployment) =>
-      deployment.baseUrl === null ? undefined : catalog.get(catalogKey(deployment.baseUrl, deployment.model)),
+    catalogModel: createCatalogLookup(
+      builtins.getBuiltinProviders().flatMap((provider) => builtins.getBuiltinModels(provider) as PiCatalogEntry[]),
+    ),
     clampLevel: (model, level) => pi.clampThinkingLevel(model as never, level) as LlmReasoningLevel,
   });
+}
+
+export type PiCatalogEntry = PiCatalogModel & { id: string; baseUrl: string; api: string };
+
+// The endpoint a protocol uses when its channel sets no base URL.
+const IMPLICIT_BASE_URLS: Readonly<Record<string, string>> = { openai: "https://api.openai.com/v1" };
+
+/**
+ * Finds a deployment's model in pi-ai's catalog by endpoint and model id, so a channel
+ * named anything still finds it. The catalog may list a model under another API (OpenAI's
+ * o3 is openai-responses); whether it reasons, its levels and limits still hold, but its
+ * compat flags describe that API, so they're kept only for openai-completions entries,
+ * the API every channel speaks here.
+ */
+export function createCatalogLookup(entries: Iterable<PiCatalogEntry>): (deployment: LlmDeployment) => PiCatalogModel | undefined {
+  const catalog = new Map<string, PiCatalogModel>();
+  for (const entry of entries) {
+    const key = catalogKey(entry.baseUrl, entry.id);
+    if (entry.api === "openai-completions") catalog.set(key, entry);
+    else if (!catalog.has(key)) catalog.set(key, { ...entry, compat: undefined });
+  }
+  return (deployment) => {
+    const baseUrl = deployment.baseUrl ?? IMPLICIT_BASE_URLS[deployment.protocol];
+    return baseUrl === undefined ? undefined : catalog.get(catalogKey(baseUrl, deployment.model));
+  };
 }
 
 const catalogKey = (baseUrl: string, modelId: string) => `${baseUrl.replace(/\/+$/u, "")}\u0000${modelId}`;

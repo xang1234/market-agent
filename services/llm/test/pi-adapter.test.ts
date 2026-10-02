@@ -5,8 +5,10 @@ import test from "node:test";
 
 import { LlmProviderError } from "../src/router.ts";
 import {
+  createCatalogLookup,
   createDefaultPiLlmChatClient,
   createPiLlmChatClient,
+  type PiCatalogEntry,
   type PiComplete,
   type PiModel,
   withLlmConversation,
@@ -221,6 +223,24 @@ test("a model the catalog knows gets its reasoning metadata, and the nearest lev
   assert.deepEqual(calls[0]!.model.compat, { supportsStore: false, maxTokensField: "max_tokens" });
   assert.equal(calls[0]!.model.contextWindow, 131072);
   assert.equal(calls[0]!.options.reasoning, "low");
+});
+
+test("the catalog lookup finds models by endpoint, under any API, and on a protocol's implicit endpoint", async () => {
+  const builtins = await import("@earendil-works/pi-ai/providers/all");
+  const lookup = createCatalogLookup(
+    builtins.getBuiltinProviders().flatMap((provider) => builtins.getBuiltinModels(provider) as PiCatalogEntry[]),
+  );
+  const opencode = { channel: "my-gateway", model: "qwen3.8-max", protocol: "openai-compatible", baseUrl: "https://opencode.ai/zen/go/v1/", apiKeys: [] };
+  // OpenAI's o3 is catalogued under openai-responses; a protocol=openai channel may omit its base URL.
+  const o3 = { channel: "openai", model: "o3", protocol: "openai", baseUrl: null, apiKeys: [] };
+
+  assert.equal(lookup(opencode)?.reasoning, true, "any channel name, trailing slash ignored");
+  assert.ok(lookup(opencode)?.compat, "an openai-completions entry keeps its compat flags");
+  assert.equal(lookup(o3)?.reasoning, true);
+  assert.equal(lookup(o3)?.thinkingLevelMap?.low, "low");
+  assert.equal(lookup(o3)?.compat, undefined, "another API's compat flags don't apply");
+  assert.equal(lookup({ ...o3, protocol: "openai-compatible" }), undefined, "no endpoint, no guess");
+  assert.equal(lookup({ ...opencode, model: "not-a-model" }), undefined);
 });
 
 test("a request for more output than the catalog says the model allows is capped to its limit", async () => {
