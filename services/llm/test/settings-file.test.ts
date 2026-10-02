@@ -32,6 +32,8 @@ test("writeLlmSettingsEnvFile preserves masked secrets and unrelated env lines",
     "LLM_CHANNELS=openai",
     "LLM_OPENAI_API_KEY=sk-old",
     "LLM_OPENAI_MODELS=gpt-4.1",
+    // Not in the Settings UI: a save must keep it (#175).
+    "LLM_OPENAI_REASONING_MODELS=o3",
     "LITELLM_MODEL=openai/gpt-4.1",
     "",
   ].join("\n"));
@@ -55,6 +57,7 @@ test("writeLlmSettingsEnvFile preserves masked secrets and unrelated env lines",
   assert.match(text, /DATABASE_URL=postgres:\/\/local/);
   assert.match(text, /LLM_OPENAI_API_KEY=sk-old/);
   assert.match(text, /LLM_OPENAI_MODELS=gpt-4\.1,o3/);
+  assert.match(text, /LLM_OPENAI_REASONING_MODELS=o3/);
   assert.match(text, /LITELLM_MODEL=openai\/o3/);
   assert.equal(written.version, versionForText(text));
 });
