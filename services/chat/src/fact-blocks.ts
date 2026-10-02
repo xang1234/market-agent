@@ -8,7 +8,8 @@
 // - one company: the latest quarter as a metric_row plus revenue over the last
 //   8 quarters;
 // - several companies (or one plus "peers"): a metrics_comparison of the latest
-//   fiscal year, built by analyze's peer-comparison pipeline.
+//   fiscal year, or the one the question names, built by analyze's
+//   peer-comparison pipeline.
 
 import { formatCompactCurrency, formatPercent } from "../../analyze/src/block-format.ts";
 import { buildMetricsComparisonBlock } from "../../analyze/src/metrics-comparison-block-builder.ts";
@@ -66,6 +67,8 @@ export async function loadTurnFactBlocks(
     asOf: string;
     // The listing the user asked for, per issuer (see listingsForComparison).
     requestedListings?: ReadonlyMap<string, CompanyListing>;
+    // A comparison of the fiscal year the question names (requestedFiscalYear).
+    fiscalYear?: number;
   },
 ): Promise<ReadonlyArray<Block>> {
   const [primary] = input.issuers;
@@ -88,7 +91,19 @@ export async function loadTurnFactBlocks(
     snapshotId: input.snapshotId,
     asOf: input.asOf,
     requestedListings: input.requestedListings ?? new Map(),
+    fiscalYear: input.fiscalYear,
   });
+}
+
+// The fiscal year a question names ("fiscal 2025", "FY25", "2025 fiscal year").
+// ponytail: years only; a named quarter still gets the latest fiscal year.
+const FISCAL_YEAR = /\b(?:FY\s?'?|fiscal\s+(?:year\s+)?)(\d{4}|\d{2})\b|\b(\d{4})\s+fiscal\b/i;
+
+export function requestedFiscalYear(question: string): number | undefined {
+  const match = FISCAL_YEAR.exec(question);
+  const year = match?.[1] ?? match?.[2];
+  if (year === undefined) return undefined;
+  return year.length === 2 ? 2000 + Number(year) : Number(year);
 }
 
 async function peersOf(db: QueryExecutor, issuer: IssuerSubjectRef): Promise<ReadonlyArray<IssuerSubjectRef>> {
@@ -100,7 +115,7 @@ async function peersOf(db: QueryExecutor, issuer: IssuerSubjectRef): Promise<Rea
   }
 }
 
-// Side-by-side latest-fiscal-year metrics (revenue, margins, growth). Margins
+// Side-by-side fiscal-year metrics (revenue, margins, growth). Margins
 // and growth are minted as derived facts with lineage by analyze's materializer,
 // so every cell still cites a fact.
 // ponytail: the materializer inserts fresh derived facts on each call (as
@@ -112,6 +127,7 @@ async function loadComparisonFactBlocks(
     snapshotId: string;
     asOf: string;
     requestedListings: ReadonlyMap<string, CompanyListing>;
+    fiscalYear?: number;
   },
 ): Promise<ReadonlyArray<Block>> {
   const issuerIds = input.companies.map((company) => company.id);
@@ -136,7 +152,7 @@ async function loadComparisonFactBlocks(
 
 async function loadMetricsComparisonBlocks(
   db: QueryExecutor,
-  input: { companies: ReadonlyArray<IssuerSubjectRef>; snapshotId: string; asOf: string },
+  input: { companies: ReadonlyArray<IssuerSubjectRef>; snapshotId: string; asOf: string; fiscalYear?: number },
   labelOf: (issuerId: string) => string,
 ): Promise<ReadonlyArray<Block>> {
   try {
@@ -145,7 +161,7 @@ async function loadMetricsComparisonBlocks(
     const cutoff = input.asOf;
     const atCutoff = () => new Date(cutoff);
     const statements = createSecBackedStatementRepository(db, { fetcher: null, sourceId: SEC_EDGAR_FILING_SOURCE_ID, cutoff });
-    const stats = createSecBackedStatsRepository(db, { statements, fetcher: null, cutoff, clock: atCutoff });
+    const stats = createSecBackedStatsRepository(db, { statements, fetcher: null, cutoff, fiscalYear: input.fiscalYear, clock: atCutoff });
     const materialized = await materializePeerMetricFacts(
       db,
       await fetchPeerMetrics(stats, input.companies.map((company) => company.id)),
@@ -162,6 +178,7 @@ async function loadMetricsComparisonBlocks(
     }));
     const cited = peers.flatMap((peer) => peer.metrics.map((metric) => loadable.get(metric.value_ref)!));
     if (cited.length === 0) return [];
+    const labels = peers.map((peer) => labelOf(peer.subject.id));
     const block = buildMetricsComparisonBlock({
       peers,
       primary: input.companies[0],
@@ -170,14 +187,18 @@ async function loadMetricsComparisonBlocks(
         snapshot_id: input.snapshotId,
         as_of: input.asOf,
         source_refs: [],
-        title: "Side by side (latest fiscal year)",
+        title: comparisonTitle(
+          labels,
+          peers.map((peer) => peer.metrics[0] && loadable.get(peer.metrics[0].value_ref)),
+          input.fiscalYear,
+        ),
       },
     });
     return [
       {
         ...block,
         // Rows are shown by ticker (or name), not by reference id.
-        subject_labels: block.subjects.map((subject) => labelOf(subject.id)),
+        subject_labels: labels,
         ...blockBase("metrics_comparison", input, cited.map(citedFact), loadable),
       },
     ];
@@ -185,6 +206,29 @@ async function loadMetricsComparisonBlocks(
     console.warn("[chat] metrics comparison unavailable", reason);
     return [];
   }
+}
+
+// The title names each company's fiscal year and when it ended, and how far
+// apart those ends are (#180): calendars differ (NVDA's year ends in January,
+// AAPL's in September), so "fiscal 2025" is not the same months for both. The
+// gap is computed here from the period dates, never left to the model.
+const MONTH_MS = 30.44 * 24 * 60 * 60 * 1000;
+
+export function comparisonTitle(
+  labels: ReadonlyArray<string>,
+  periods: ReadonlyArray<Pick<VerifierFact, "fiscal_year" | "period_end"> | undefined>,
+  fiscalYear: number | undefined,
+): string {
+  const parts = labels.map((label, index) => {
+    const period = periods[index];
+    return period?.period_end && typeof period.fiscal_year === "number"
+      ? `${label} FY${period.fiscal_year} (ended ${period.period_end})`
+      : `${label}: no ${fiscalYear === undefined ? "annual" : `FY${fiscalYear}`} figures`;
+  });
+  const ends = periods.flatMap((period) => period?.period_end ? [Date.parse(period.period_end)] : []);
+  const months = ends.length > 1 ? Math.round((Math.max(...ends) - Math.min(...ends)) / MONTH_MS) : 0;
+  const gap = months >= 2 ? `; fiscal years end ${ends.length > 2 ? "up to " : ""}${months} months apart` : "";
+  return `Side by side: ${parts.join(", ")}${gap}`;
 }
 
 // Revenue by business segment for the latest quarter that has any (#157). Each
@@ -646,7 +690,14 @@ function byFiscalQuarter(a: IssuerFundamentalFact, b: IssuerFundamentalFact): nu
 // Each figure the fact blocks display, with what it belongs to: the company
 // (comparison cells), the metric, and where it is shown. The model reads these
 // to quote figures, so it knows whose value each one is.
-export type DisplayedFigure = { company?: string; metric: string; period?: string; value: string; shown_in?: string };
+export type DisplayedFigure = {
+  company?: string;
+  metric: string;
+  period?: string;
+  period_end?: string;
+  value: string;
+  shown_in?: string;
+};
 
 export function displayedFigures(blocks: ReadonlyArray<Block>): DisplayedFigure[] {
   return blocks.flatMap((block): DisplayedFigure[] => {
@@ -654,11 +705,20 @@ export function displayedFigures(blocks: ReadonlyArray<Block>): DisplayedFigure[
     if (block.kind === "metrics_comparison") {
       const labels = (block.subject_labels ?? []) as ReadonlyArray<string>;
       const metrics = (block.metrics ?? []) as ReadonlyArray<string>;
-      const cells = (block.cells ?? []) as ReadonlyArray<ReadonlyArray<{ format?: string } | null>>;
+      const cells = (block.cells ?? []) as ReadonlyArray<ReadonlyArray<{ value_ref?: string; format?: string } | null>>;
+      // Each cell's period, from the fact it cites (#180).
+      const bindings = ((block.data_ref as { params?: { fact_bindings?: unknown } } | undefined)?.params?.fact_bindings ?? []) as
+        ReadonlyArray<Pick<VerifierFact, "fact_id" | "fiscal_year" | "fiscal_period" | "period_end">>;
+      const periodOf = (factId: string | undefined) => {
+        const binding = bindings.find((candidate) => candidate.fact_id === factId);
+        return binding?.period_end && typeof binding.fiscal_year === "number"
+          ? { period: `${binding.fiscal_period ?? ""}${binding.fiscal_year}`, period_end: binding.period_end }
+          : {};
+      };
       return cells.flatMap((row, subjectIndex) =>
         row.flatMap((cell, metricIndex) =>
           cell?.format && labels[subjectIndex] && metrics[metricIndex]
-            ? [{ company: labels[subjectIndex], metric: metrics[metricIndex], value: cell.format, ...shownIn }]
+            ? [{ company: labels[subjectIndex], metric: metrics[metricIndex], ...periodOf(cell.value_ref), value: cell.format, ...shownIn }]
             : []
         )
       );

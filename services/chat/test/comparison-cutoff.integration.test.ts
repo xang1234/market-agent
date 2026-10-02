@@ -9,6 +9,7 @@ import { GOLDEN_AS_OF, GOLDEN_COMPANIES, seedGoldenDataset } from "./golden/data
 const company = (ticker: string) => GOLDEN_COMPANIES.find((candidate) => candidate.ticker === ticker)!;
 const NVDA = company("NVDA");
 const AMD = company("AMD");
+const AAPL = company("AAPL");
 // Another seeded source (db/seed/sources.sql).
 const OTHER_SOURCE_ID = "00000000-0000-4000-a000-000000000002";
 
@@ -64,4 +65,41 @@ test("a comparison is built from what was known at the snapshot cutoff (#161)", 
   // Derived margins are stamped at the cutoff, so they still load and cite.
   assert.ok(cells[amdRow][metrics.indexOf("Gross Margin")], "a derived margin must survive the full cutoff check");
   assert.ok(((comparison.provenance_fact_refs as string[]) ?? []).length >= 4);
+});
+
+test("a comparison of a named fiscal year shows that year for each company, with the calendar gap (#180)", { timeout: 300_000 }, async (t) => {
+  if (!dockerAvailable()) {
+    t.skip("Docker is required for fiscal-year comparison coverage");
+    return;
+  }
+  const { databaseUrl } = await bootstrapDatabase(t, "chat-comparison-fiscal-year");
+  const client = await connectedClient(t, databaseUrl);
+  await seedGoldenDataset(client);
+  const load = (fiscalYear?: number) =>
+    loadTurnFactBlocks(client as unknown as Parameters<typeof loadTurnFactBlocks>[0], {
+      issuers: [{ kind: "issuer", id: NVDA.issuer_id }, { kind: "issuer", id: AAPL.issuer_id }],
+      wantsPeers: false,
+      snapshotId: "64000000-0000-4000-8000-0000000000cd",
+      asOf: GOLDEN_AS_OF,
+      fiscalYear,
+    });
+  const revenueOf = (blocks: ReadonlyArray<Record<string, unknown>>, issuerId: string) => {
+    const comparison = blocks.find((block) => block.kind === "metrics_comparison")!;
+    const row = (comparison.subjects as ReadonlyArray<{ id: string }>).findIndex((subject) => subject.id === issuerId);
+    const cells = comparison.cells as ReadonlyArray<ReadonlyArray<{ format: string } | null>>;
+    return cells[row][(comparison.metrics as ReadonlyArray<string>).indexOf("Revenue")]?.format;
+  };
+
+  const fy2025 = await load(2025);
+  assert.equal(revenueOf(fy2025, NVDA.issuer_id), "$130.5B", "NVDA's FY2025, not its latest FY2026");
+  assert.equal(revenueOf(fy2025, AAPL.issuer_id), "$416.2B");
+  assert.equal(
+    fy2025.find((block) => block.kind === "metrics_comparison")!.title,
+    "Side by side: NVDA FY2025 (ended 2025-01-26), AAPL FY2025 (ended 2025-09-27); fiscal years end 8 months apart",
+  );
+
+  // Without a named year: each company's latest, labelled as such.
+  const latest = await load();
+  assert.equal(revenueOf(latest, NVDA.issuer_id), "$209.9B");
+  assert.match(String(latest.find((block) => block.kind === "metrics_comparison")!.title), /NVDA FY2026 \(ended 2026-01-25\), AAPL FY2025 \(ended 2025-09-27\); fiscal years end 4 months apart/);
 });

@@ -5,10 +5,12 @@ import type { IssuerFundamentalFact } from "../../fundamentals/src/issuer-fundam
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 import {
   buildIssuerFactBlocks,
+  comparisonTitle,
   displayedFigures,
   listingsForComparison,
   loadTurnFactBlocks,
   priceListingsForComparison,
+  requestedFiscalYear,
   segmentRevenueItems,
   type DerivedQuarterFact,
 } from "../src/fact-blocks.ts";
@@ -316,4 +318,60 @@ test("a segment breakdown lists the latest quarter's segments, largest first, ea
   assert.equal(segmentRevenueItems([row("Data Center", 55.2e9, 2026, "Q4", "full", null as unknown as string)]), null);
   // Values in different currencies cannot be ranked or summed.
   assert.equal(segmentRevenueItems([row("Data Center", 55.2e9, 2026, "Q4"), row("Gaming", 4.3e9, 2026, "Q4", "full", "EUR")]), null);
+});
+
+test("a question's named fiscal year is read in its common spellings (#180)", () => {
+  assert.equal(requestedFiscalYear("Compare NVDA's and AAPL's fiscal 2025 revenue."), 2025);
+  assert.equal(requestedFiscalYear("NVDA vs AMD fiscal year 2024 margins"), 2024);
+  assert.equal(requestedFiscalYear("FY25 revenue for AAPL and NVDA"), 2025);
+  assert.equal(requestedFiscalYear("their FY 2026 results"), 2026);
+  assert.equal(requestedFiscalYear("the 2025 fiscal year"), 2025);
+  assert.equal(requestedFiscalYear("Compare NVDA and AMD revenue in 2025"), undefined, "a calendar year is not a fiscal one");
+  assert.equal(requestedFiscalYear("Compare NVDA and AMD"), undefined);
+});
+
+test("the comparison title names each company's period and end, and a fiscal-calendar gap (#180)", () => {
+  assert.equal(
+    comparisonTitle(["NVDA", "AAPL"], [
+      { fiscal_year: 2025, period_end: "2025-01-26" },
+      { fiscal_year: 2025, period_end: "2025-09-27" },
+    ], 2025),
+    "Side by side: NVDA FY2025 (ended 2025-01-26), AAPL FY2025 (ended 2025-09-27); fiscal years end 8 months apart",
+  );
+  // Ends a month apart are the same season: no note.
+  assert.equal(
+    comparisonTitle(["NVDA", "AMD"], [
+      { fiscal_year: 2026, period_end: "2026-01-25" },
+      { fiscal_year: 2025, period_end: "2025-12-27" },
+    ], undefined),
+    "Side by side: NVDA FY2026 (ended 2026-01-25), AMD FY2025 (ended 2025-12-27)",
+  );
+  // A company without the year asked for says so; nothing is substituted.
+  assert.equal(
+    comparisonTitle(["NVDA", "AMD", "AAPL"], [
+      { fiscal_year: 2025, period_end: "2025-01-26" },
+      undefined,
+      { fiscal_year: 2025, period_end: "2025-09-27" },
+    ], 2025),
+    "Side by side: NVDA FY2025 (ended 2025-01-26), AMD: no FY2025 figures, AAPL FY2025 (ended 2025-09-27); fiscal years end 8 months apart",
+  );
+});
+
+test("the model sees each comparison figure's period and end date (#180)", () => {
+  const [figure] = displayedFigures([{
+    kind: "metrics_comparison",
+    title: "Side by side",
+    subject_labels: ["NVDA"],
+    metrics: ["Revenue"],
+    cells: [[{ value_ref: "fact-1", format: "$130.5B" }]],
+    data_ref: { params: { fact_bindings: [{ fact_id: "fact-1", fiscal_year: 2025, fiscal_period: "FY", period_end: "2025-01-26" }] } },
+  }]);
+  assert.deepEqual(figure, {
+    company: "NVDA",
+    metric: "Revenue",
+    period: "FY2025",
+    period_end: "2025-01-26",
+    value: "$130.5B",
+    shown_in: "Side by side",
+  });
 });

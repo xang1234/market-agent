@@ -133,6 +133,10 @@ export async function composeAnalystBlocksWithLlm(input: {
           "appears there, in a sentence that names its company exactly as given in company",
           "(e.g. NVDA), and never compute new figures such as growth rates,",
           "margins, or ratios; describe direction and comparison in words instead.",
+          // Fiscal calendars differ (#180): the period and its end date come with each figure.
+          "Name the fiscal period each figure is for (its period and period_end). When a",
+          "comparison's title says the fiscal years end months apart, say so: the same fiscal",
+          "year covers different months for each company.",
           "If the tool context flags data as stale (quote.stale, or",
           "fact_recency.stale / a large fact_recency.age_days), explicitly note",
           "that the figure may be out of date and say how old it is.",
