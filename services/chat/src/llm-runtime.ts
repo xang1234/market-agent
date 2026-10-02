@@ -19,15 +19,18 @@ const FACT_BLOCKS_FALLBACK_TEXT =
 const NO_ANSWER_FALLBACK_TEXT = "No written answer is available for this question; try asking again.";
 
 // A provider can accept a request and never answer (one held a turn 516 s, #184).
-// Each attempt gets a deadline, after which the router tries the next deployment, and
-// the whole call one more, so the fallback chain is bounded too.
+// Each attempt gets a deadline, after which the router tries the next deployment. Only
+// as many attempts as fit in the total are made, so every attempt ends on its own
+// deadline and a failure is the router's error naming each one; the total is a
+// backstop. Two attempts (a primary and its fallback) fit in each budget below.
 export type ModelDeadlines = { attemptMs: number; totalMs: number };
-export const ANSWER_DEADLINES: ModelDeadlines = { attemptMs: 90_000, totalMs: 180_000 };
+export const ANSWER_DEADLINES: ModelDeadlines = { attemptMs: 80_000, totalMs: 180_000 };
 export const TITLE_DEADLINES: ModelDeadlines = { attemptMs: 20_000, totalMs: 45_000 };
 
 function withDeadlines(deadlines: ModelDeadlines): LlmExecutionControls {
   return {
     signal: AbortSignal.timeout(deadlines.totalMs),
+    maxAttempts: Math.max(1, Math.floor(deadlines.totalMs / deadlines.attemptMs)),
     executeAttempt: (_attempt, dispatch) => dispatch(AbortSignal.timeout(deadlines.attemptMs)),
   };
 }

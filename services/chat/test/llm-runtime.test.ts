@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { LlmProviderError } from "../../llm/src/index.ts";
+import { LlmProviderError, LlmRouterError } from "../../llm/src/index.ts";
 import {
   ANSWER_DEADLINES,
   composeAnalystBlocksWithLlm,
@@ -175,9 +175,27 @@ test("when every model hangs, the answer call ends with an error at its deadline
   assert.ok(Date.now() - startedAt < 2_000);
 });
 
+test("only attempts the total can finish are made, so a failure names each timeout (#184)", async (t) => {
+  // Two 60 ms attempts can't finish in 100 ms: one is made, and it ends on its own deadline.
+  const calls: string[] = [];
+  await assert.rejects(composeAnalystBlocksWithLlm({
+    env: TWO_DEPLOYMENTS,
+    context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
+    blocks: [richTextBlock("Deterministic note")],
+    toolCalls: [],
+    deadlines: { attemptMs: 60, totalMs: 100 },
+    createClient: () => (deployment) => {
+      calls.push(deployment.model);
+      return hang(t);
+    },
+  }), (error) => error instanceof LlmRouterError && error.attempts.length === 1 && error.attempts[0]!.code === "timeout");
+  assert.deepEqual(calls, ["gpt-4.1"]);
+});
+
 test("the production deadlines bound the answer and the title calls", () => {
   for (const deadlines of [ANSWER_DEADLINES, TITLE_DEADLINES]) {
-    assert.ok(deadlines.attemptMs > 0 && deadlines.attemptMs < deadlines.totalMs);
+    // A primary and its fallback both fit, with headroom, so the total never cuts an attempt.
+    assert.ok(deadlines.attemptMs > 0 && 2 * deadlines.attemptMs < deadlines.totalMs);
   }
   assert.ok(ANSWER_DEADLINES.totalMs <= 180_000, "a hung provider costs a user minutes, not the 516 s of #184");
   assert.ok(TITLE_DEADLINES.attemptMs < ANSWER_DEADLINES.attemptMs);
