@@ -44,6 +44,8 @@ export type PiCatalogModel = {
   thinkingLevelMap?: Readonly<Record<string, string | null | undefined>>;
   compat?: Readonly<Record<string, unknown>>;
   contextWindow?: number;
+  /** The model's output limit; a request for more is capped to it. */
+  maxTokens?: number;
 };
 
 export type PiModel = {
@@ -131,9 +133,15 @@ export async function createDefaultPiLlmChatClient(): Promise<LlmChatClient> {
 const catalogKey = (baseUrl: string, modelId: string) => `${baseUrl.replace(/\/+$/u, "")}\u0000${modelId}`;
 
 export function createPiLlmChatClient(input: CreatePiLlmChatClientInput): LlmChatClient {
-  return async (deployment, request, execution = {}) => {
+  return async (deployment, requested, execution = {}) => {
     try {
-      const model = modelFromDeployment(deployment, request, input.catalogModel?.(deployment));
+      const known = input.catalogModel?.(deployment);
+      // Never ask for more output than the model allows: the provider may reject it.
+      // ponytail: unknown models get the request as is; their limit isn't known.
+      const request = known?.maxTokens !== undefined && (requested.maxTokens ?? 0) > known.maxTokens
+        ? { ...requested, maxTokens: known.maxTokens }
+        : requested;
+      const model = modelFromDeployment(deployment, request, known);
       const message = await input.complete(
         model,
         contextFromRequest(request),

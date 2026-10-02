@@ -223,6 +223,22 @@ test("a model the catalog knows gets its reasoning metadata, and the nearest lev
   assert.equal(calls[0]!.options.reasoning, "low");
 });
 
+test("a request for more output than the catalog says the model allows is capped to its limit", async () => {
+  const sent: Array<{ model: number; option: number | undefined }> = [];
+  const client = createPiLlmChatClient({
+    complete: async (model, _context, options) => {
+      sent.push({ model: model.maxTokens, option: options.maxTokens });
+      return { content: [{ type: "text", text: "OK" }] };
+    },
+    catalogModel: () => ({ reasoning: true, maxTokens: 4096 }),
+  });
+
+  await client(deployment(), { messages: [{ role: "user", content: "hi" }], maxTokens: 8192 });
+  await client(deployment(), { messages: [{ role: "user", content: "hi" }], maxTokens: 512 });
+
+  assert.deepEqual(sent, [{ model: 4096, option: 4096 }, { model: 512, option: 512 }]);
+});
+
 test("a model only the channel config marks as reasoning gets OpenAI-style reasoning_effort", async () => {
   const calls: Array<{ model: PiModel; options: { reasoning?: string } }> = [];
   const client = createPiLlmChatClient({
