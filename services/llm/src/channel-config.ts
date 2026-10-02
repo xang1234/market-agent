@@ -7,6 +7,8 @@ export type LlmChannelConfig = {
   baseUrl: string | null;
   apiKeys: ReadonlyArray<string>;
   models: ReadonlyArray<string>;
+  /** Models to treat as reasoning models when pi-ai's catalog doesn't list them yet. */
+  reasoningModels: ReadonlyArray<string>;
   enabled: boolean;
 };
 
@@ -29,6 +31,8 @@ export type LlmDeployment = {
   protocol: string;
   baseUrl: string | null;
   apiKeys: ReadonlyArray<string>;
+  /** Set when the channel's LLM_<NAME>_REASONING_MODELS lists this model. */
+  reasoning?: boolean;
 };
 
 export function parseLlmEnv(env: LlmEnv): LlmSettings {
@@ -78,6 +82,7 @@ export function buildLlmDeploymentOrder(settings: LlmSettings): ReadonlyArray<Ll
           protocol: channel.protocol,
           baseUrl: channel.baseUrl,
           apiKeys: channel.apiKeys,
+          ...(channel.reasoningModels.includes(ref.model) ? { reasoning: true } : {}),
         }),
       ];
     }),
@@ -132,6 +137,7 @@ function channelFromEnv(env: LlmEnv, name: string): LlmChannelConfig {
       ...splitCsv(env[`LLM_${envName}_API_KEYS`]),
     ]),
     models: Object.freeze(splitCsv(env[`LLM_${envName}_MODELS`])),
+    reasoningModels: Object.freeze(splitCsv(env[`LLM_${envName}_REASONING_MODELS`])),
     enabled: parseEnabled(env[`LLM_${envName}_ENABLED`]),
   });
 }

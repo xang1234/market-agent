@@ -40,7 +40,7 @@ test("services/llm owns the pi-ai dependency and import smoke", async () => {
   const packageJson = await readPackageJson("services/llm");
 
   assert.equal(packageJson.name, "llm");
-  assert.equal(packageJson.dependencies?.["@earendil-works/pi-ai"], "0.78.0");
+  assert.equal(packageJson.dependencies?.["@earendil-works/pi-ai"], "1.0.0");
   assert.equal(packageJson.scripts?.test, 'node --experimental-strip-types --test "test/**/*.test.ts"');
   assert.equal(packageJson.scripts?.typecheck, "tsc --noEmit");
 
