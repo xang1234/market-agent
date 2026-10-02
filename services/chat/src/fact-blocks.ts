@@ -416,7 +416,7 @@ export async function loadIssuerFactBlocks(
       numericOnly: true,
     });
     const verifierFacts = await loadVerifierFactsForRefs(db, { fact_refs: facts.map((fact) => fact.fact_id), cutoff: input.asOf, requireKnownByCutoff: true });
-    const derived = await loadDerivedQuarterMetrics(db, input.issuer, facts, verifierFacts, input.asOf);
+    const derived = await loadDerivedQuarterMetrics(db, input.issuer, facts, verifierFacts, input.asOf, input.wantsMarginTrend ?? false);
     return buildIssuerFactBlocks({ facts, verifierFacts, derived, wantsMarginTrend: input.wantsMarginTrend ?? false, snapshotId: input.snapshotId, asOf: input.asOf });
   } catch (reason) {
     console.warn("[chat] fact blocks unavailable; answering with narrative only", reason);
@@ -436,12 +436,15 @@ async function loadDerivedQuarterMetrics(
   facts: ReadonlyArray<IssuerFundamentalFact>,
   verifierFacts: ReadonlyArray<VerifierFact>,
   asOf: string,
+  wantsMarginTrend: boolean,
 ): Promise<ReadonlyArray<DerivedQuarterFact>> {
   try {
     const loadable = new Map(verifierFacts.map((fact) => [fact.fact_id, fact]));
     const { byQuarter, revenue } = selectQuarters(facts, loadable);
     const specs = deriveQuarterMetrics({
-      shownRevenue: revenue,
+      // Only the latest quarter renders unless the margin trend was asked for, so
+      // mint just what is shown: each derived fact is a lookup and maybe an insert.
+      shownRevenue: wantsMarginTrend ? revenue : revenue.slice(-1),
       fact: (metricKey, fiscalYear, fiscalPeriod) => byQuarter.get(quarterKey(metricKey, fiscalYear, fiscalPeriod)),
       period: (factId) => loadable.get(factId),
     });
