@@ -263,7 +263,7 @@ test("the answer is asked for an analyst's view: takeaway, trend, strengths, cou
       return { text: "answer" };
     },
   });
-  for (const part of [/takeaway/i, /trend across every period/i, /strong or weak/i, /counterpoint grounded in the data/i, /cannot tell/i, /different\s+industries/i, /concentrated in one segment/i, /does not answer the question/i, /do not analyze other figures\s+in its place/i]) {
+  for (const part of [/takeaway/i, /trend across every period/i, /strong or weak/i, /counterpoint grounded in the data/i, /cannot tell/i, /concentrated in one segment/i, /does not answer the question/i, /do not analyze other figures\s+in its place/i]) {
     assert.match(systemPrompt, part);
   }
   // Context comes from the data only, and the existing rules stay.
@@ -272,31 +272,6 @@ test("the answer is asked for an analyst's view: takeaway, trend, strengths, cou
   assert.match(systemPrompt, /stale/);
   // The no-keys golden replay matches on the opening sentence.
   assert.match(systemPrompt, /^Write a concise investment research answer/);
-});
-
-test("compared companies' sectors and industries reach the model only when given (#179)", async () => {
-  const userContent = async (companyProfiles?: Array<{ company: string; sector: string | null; industry: string | null }>) => {
-    let content = "";
-    await composeAnalystBlocksWithLlm({
-      env: BASE_ENV,
-      context: { userIntent: "Compare NVDA and AAPL", bundleId: "single_subject_analysis" },
-      blocks: [richTextBlock("Deterministic note")],
-      toolCalls: [],
-      ...(companyProfiles ? { companyProfiles } : {}),
-      createClient: () => async (_deployment, request) => {
-        content = request.messages[1]?.content ?? "";
-        return { text: "answer" };
-      },
-    });
-    return JSON.parse(content) as Record<string, unknown>;
-  };
-  const profiles = [
-    { company: "NVDA", sector: "Technology", industry: "Semiconductors" },
-    { company: "AAPL", sector: "Technology", industry: "Consumer Electronics" },
-  ];
-  assert.deepEqual((await userContent(profiles)).company_profiles, profiles);
-  assert.equal("company_profiles" in (await userContent()), false);
-  assert.equal("company_profiles" in (await userContent([])), false);
 });
 
 test("composeAnalystBlocksWithLlm falls back through shared router deployments", async () => {

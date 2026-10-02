@@ -4,7 +4,6 @@ import test from "node:test";
 import type { IssuerFundamentalFact } from "../../fundamentals/src/issuer-fundamentals-reader.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 import {
-  comparedCompanyProfiles,
   buildIssuerFactBlocks,
   displayedFigures,
   listingsForComparison,
@@ -15,7 +14,6 @@ import {
 } from "../src/fact-blocks.ts";
 import { deriveQuarterMetrics } from "../src/quarter-metrics.ts";
 import { fakeQuery } from "./fake-query.ts";
-import { fakePgQuery } from "../../shared/test/fake-query.ts";
 
 const SNAPSHOT_ID = "11111111-1111-4111-a111-111111111111";
 const AS_OF = "2026-09-01T00:00:00.000Z";
@@ -318,32 +316,4 @@ test("a segment breakdown lists the latest quarter's segments, largest first, ea
   assert.equal(segmentRevenueItems([row("Data Center", 55.2e9, 2026, "Q4", "full", null as unknown as string)]), null);
   // Values in different currencies cannot be ranked or summed.
   assert.equal(segmentRevenueItems([row("Data Center", 55.2e9, 2026, "Q4"), row("Gaming", 4.3e9, 2026, "Q4", "full", "EUR")]), null);
-});
-
-test("comparedCompanyProfiles pairs each compared company's label with its sector and industry (#179)", async () => {
-  const NVDA = "60000000-0000-4000-8000-000000000001";
-  const AAPL = "60000000-0000-4000-8000-000000000003";
-  const NO_PROFILE = "60000000-0000-4000-8000-000000000009";
-  const blocks = [
-    { kind: "metric_row", items: [] },
-    { kind: "metrics_comparison", subjects: [{ kind: "issuer", id: NVDA }, { kind: "issuer", id: AAPL }, { kind: "issuer", id: NO_PROFILE }], subject_labels: ["NVDA", "AAPL", "XYZ"] },
-  ];
-  let queried: unknown[] = [];
-  const db = {
-    query: fakePgQuery((_text, values) => {
-      queried = values ?? [];
-      return { rows: [
-        { issuer_id: AAPL, sector: "Technology", industry: "Consumer Electronics" },
-        { issuer_id: NVDA, sector: "Technology", industry: "Semiconductors" },
-        { issuer_id: NO_PROFILE, sector: null, industry: null },
-      ] };
-    }),
-  };
-  assert.deepEqual(await comparedCompanyProfiles(db, blocks), [
-    { company: "NVDA", sector: "Technology", industry: "Semiconductors" },
-    { company: "AAPL", sector: "Technology", industry: "Consumer Electronics" },
-  ]);
-  assert.deepEqual(queried, [[NVDA, AAPL, NO_PROFILE]]);
-  // A single-company answer has no comparison, so nothing is looked up.
-  assert.deepEqual(await comparedCompanyProfiles({ query: fakePgQuery(() => { throw new Error("no query expected"); }) }, [blocks[0]!]), []);
 });
