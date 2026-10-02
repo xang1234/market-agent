@@ -191,6 +191,51 @@ test("LLM router dispatch uses the attempt signal supplied by execution control"
   assert.equal(received, controller.signal);
 });
 
+test("a hung attempt ends at its deadline and falls back, even if the client ignores the signal (#184)", async () => {
+  const called: string[] = [];
+  const router = createLlmRouter({
+    settings: settings(),
+    client: async (deployment) => {
+      called.push(deployment.model);
+      // The first provider accepts the request and never answers, ignoring the signal.
+      if (called.length === 1) return new Promise<never>(() => {});
+      return { text: "fallback answer" };
+    },
+  });
+
+  const startedAt = Date.now();
+  const result = await router.complete(
+    { messages: [{ role: "user", content: "hello" }] },
+    { executeAttempt: async (_attempt, dispatch) => dispatch(AbortSignal.timeout(50)) },
+  );
+
+  assert.equal(result.text, "fallback answer");
+  assert.equal(called.length, 2);
+  assert.ok(Date.now() - startedAt < 2_000, "the hung attempt cost about its deadline, not forever");
+});
+
+test("every attempt hanging is a router error naming each timeout (#184)", async () => {
+  const router = createLlmRouter({ settings: settings(), client: () => new Promise<never>(() => {}) });
+  await assert.rejects(
+    router.complete(
+      { messages: [{ role: "user", content: "hello" }] },
+      { executeAttempt: async (_attempt, dispatch) => dispatch(AbortSignal.timeout(20)) },
+    ),
+    (error) => error instanceof LlmRouterError && error.code === "all_deployments_failed" && error.attempts.every((attempt) => attempt.code === "timeout"),
+  );
+});
+
+test("the outer signal also ends a hung attempt, as the caller's abort", async () => {
+  const reason = new Error("turn deadline");
+  const controller = new AbortController();
+  const router = createLlmRouter({ settings: settings(), client: () => new Promise<never>(() => {}) });
+  setTimeout(() => controller.abort(reason), 20);
+  await assert.rejects(
+    router.complete({ messages: [{ role: "user", content: "hello" }] }, { signal: controller.signal }),
+    (error) => error === reason,
+  );
+});
+
 test("LLM router stops before dispatch when its outer signal is aborted", async () => {
   const controller = new AbortController();
   const reason = new Error("campaign cancelled");

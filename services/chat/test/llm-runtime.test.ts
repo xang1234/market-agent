@@ -6,7 +6,9 @@ import test from "node:test";
 
 import { LlmProviderError } from "../../llm/src/index.ts";
 import {
+  ANSWER_DEADLINES,
   composeAnalystBlocksWithLlm,
+  TITLE_DEADLINES,
   createLlmThreadTitleModel,
 } from "../src/llm-runtime.ts";
 
@@ -126,6 +128,59 @@ test("composeAnalystBlocksWithLlm instructs the analyst to caveat stale data", a
   // prompt tells the analyst to honor them.
   assert.match(systemPrompt, /stale/i);
   assert.match(systemPrompt, /fact_recency|out of date|age_days/i);
+});
+
+const TWO_DEPLOYMENTS = {
+  LLM_CHANNELS: "openai,deepseek",
+  LLM_OPENAI_PROTOCOL: "openai",
+  LLM_OPENAI_MODELS: "gpt-4.1",
+  LLM_DEEPSEEK_BASE_URL: "https://api.deepseek.com/v1",
+  LLM_DEEPSEEK_MODELS: "deepseek-chat",
+  LITELLM_MODEL: "openai/gpt-4.1",
+  LITELLM_FALLBACK_MODELS: "deepseek/deepseek-chat",
+};
+
+test("an answer model that hangs falls back at its attempt deadline (#184)", async () => {
+  const calls: string[] = [];
+  const startedAt = Date.now();
+  const result = await composeAnalystBlocksWithLlm({
+    env: TWO_DEPLOYMENTS,
+    context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
+    blocks: [richTextBlock("Deterministic note")],
+    toolCalls: [],
+    deadlines: { attemptMs: 50, totalMs: 5_000 },
+    createClient: () => async (deployment) => {
+      calls.push(deployment.model);
+      // The primary accepts the request and never answers.
+      if (calls.length === 1) return new Promise<never>(() => {});
+      return { text: "fallback note" };
+    },
+  });
+
+  assert.deepEqual(calls, ["gpt-4.1", "deepseek-chat"]);
+  assert.equal((result[0].segments as Array<{ text: string }>)[0].text, "fallback note");
+  assert.ok(Date.now() - startedAt < 2_000, "the hang cost about the attempt deadline");
+});
+
+test("when every model hangs, the answer call ends with an error at its deadline (#184)", async () => {
+  const startedAt = Date.now();
+  await assert.rejects(composeAnalystBlocksWithLlm({
+    env: TWO_DEPLOYMENTS,
+    context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
+    blocks: [richTextBlock("Deterministic note")],
+    toolCalls: [],
+    deadlines: { attemptMs: 50, totalMs: 5_000 },
+    createClient: () => () => new Promise<never>(() => {}),
+  }), /all LLM deployments failed/);
+  assert.ok(Date.now() - startedAt < 2_000);
+});
+
+test("the production deadlines bound the answer and the title calls", () => {
+  for (const deadlines of [ANSWER_DEADLINES, TITLE_DEADLINES]) {
+    assert.ok(deadlines.attemptMs > 0 && deadlines.attemptMs < deadlines.totalMs);
+  }
+  assert.ok(ANSWER_DEADLINES.totalMs <= 180_000, "a hung provider costs a user minutes, not the 516 s of #184");
+  assert.ok(TITLE_DEADLINES.attemptMs < ANSWER_DEADLINES.attemptMs);
 });
 
 test("composeAnalystBlocksWithLlm falls back through shared router deployments", async () => {

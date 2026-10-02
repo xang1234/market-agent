@@ -166,13 +166,17 @@ export function createLlmRouter(input: CreateLlmRouterInput): ControlledRouter {
             const signal = combineSignals(controls.signal, attemptSignal);
             throwIfAborted(signal);
             try {
-              const result = await input.client(deployment, request, { signal });
+              // Ends at the signal even when the client ignores it: a provider that
+              // accepts the request and never answers must not hold the turn (#184).
+              const result = await untilAborted(Promise.resolve(input.client(deployment, request, { signal })), signal);
               if (controls.signal?.aborted) throw abortReason(controls.signal);
               if (signal?.aborted) throw new LlmProviderError("timeout", "LLM provider attempt timed out");
               return result;
             } catch (error) {
               if (controls.signal?.aborted) throw abortReason(controls.signal);
               if (error instanceof ProviderDispatchError) throw error;
+              // The attempt's own deadline: a timeout, so the router tries the next deployment.
+              if (signal?.aborted) throw new ProviderDispatchError(new LlmProviderError("timeout", "LLM provider attempt timed out"));
               throw new ProviderDispatchError(error);
             }
           };
@@ -235,6 +239,25 @@ function maxAttemptsFor(deploymentCount: number, requested: number | undefined):
     throw new RangeError("maxAttempts must be a positive integer");
   }
   return Math.min(deploymentCount, requested);
+}
+
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (signal === undefined) return work;
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortReason(signal));
+    if (signal.aborted) return onAbort();
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
