@@ -277,19 +277,37 @@ test("a model only the channel config marks as reasoning gets OpenAI-style reaso
 });
 
 test("no reasoning setting goes to a non-reasoning model, or when the caller leaves it to the provider", async () => {
-  const sent: Array<string | undefined> = [];
+  const sent: Array<{ modelReasons: boolean; level: string | undefined }> = [];
   const client = (reasoning: boolean) => createPiLlmChatClient({
-    complete: async (_model, _context, options) => {
-      sent.push(options.reasoning);
+    complete: async (model, _context, options) => {
+      sent.push({ modelReasons: model.reasoning, level: options.reasoning });
       return { content: [{ type: "text", text: "OK" }] };
     },
     catalogModel: () => ({ reasoning }),
   });
 
   await client(false)(deployment(), { messages: [{ role: "user", content: "hi" }], reasoning: "low" });
+  // A known reasoning model with no level asked for is declared non-reasoning: pi-ai would
+  // otherwise read the missing level as "off" and change the provider default.
   await client(true)(deployment(), { messages: [{ role: "user", content: "hi" }] });
 
-  assert.deepEqual(sent, [undefined, undefined]);
+  assert.deepEqual(sent, [{ modelReasons: false, level: undefined }, { modelReasons: false, level: undefined }]);
+});
+
+test("an explicit off goes through, so pi-ai disables thinking in the model's own format", async () => {
+  const sent: Array<string | undefined> = [];
+  const client = createPiLlmChatClient({
+    complete: async (_model, _context, options) => {
+      sent.push(options.reasoning);
+      return { content: [{ type: "text", text: "OK" }] };
+    },
+    catalogModel: () => ({ reasoning: true, thinkingLevelMap: { off: "none" } }),
+    clampLevel: (_model, level) => level,
+  });
+
+  await client(deployment(), { messages: [{ role: "user", content: "hi" }], reasoning: "off" });
+
+  assert.deepEqual(sent, ["off"]);
 });
 
 test("a reply cut off at the token limit is reported as truncated, with its reasoning tokens", async () => {
@@ -341,6 +359,18 @@ test("the default client completes through pi-ai's OpenAI-compatible API, reason
   assert.equal((body.messages as Array<{ role: string }>).length, 2);
   assert.equal(headers["user-agent"], "market-agent/0.1");
   assert.equal(headers["x-opencode-session"], "thread-9");
+
+  // A caller that sets no level sends no reasoning parameter at all: the provider default.
+  await client(
+    { channel: "local", model: "thinker", protocol: "openai-compatible", baseUrl: `http://127.0.0.1:${port}/v1`, apiKeys: ["k"], reasoning: true },
+    { messages: [{ role: "user", content: "hi" }], maxTokens: 256 },
+  );
+  const untouched = requests[1]!.body;
+  assert.deepEqual(
+    Object.keys(untouched).filter((key) => /reasoning|thinking/u.test(key)),
+    [],
+    "no reasoning_effort, enable_thinking or thinking field",
+  );
 });
 
 function deployment() {

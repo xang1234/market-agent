@@ -74,7 +74,8 @@ type PiCompleteOptions = {
   temperature?: number;
   maxTokens?: number;
   signal?: AbortSignal;
-  reasoning?: Exclude<LlmReasoningLevel, "off">;
+  // pi-ai's streamSimple clamps the level and reads "off" as thinking disabled.
+  reasoning?: LlmReasoningLevel;
 };
 
 // Providers see this app by name, not the SDK's generic user agent; OpenCode Go
@@ -180,7 +181,10 @@ export function createPiLlmChatClient(input: CreatePiLlmChatClientInput): LlmCha
 // config names as reasoning (LLM_<NAME>_REASONING_MODELS) gets pi-ai's default,
 // OpenAI-style reasoning_effort, and any other model is treated as non-reasoning.
 function modelFromDeployment(deployment: LlmDeployment, request: LlmChatRequest, known: PiCatalogModel | undefined): PiModel {
-  const reasoning = known?.reasoning ?? deployment.reasoning === true;
+  // With no level requested the model is declared non-reasoning, so pi-ai sends nothing
+  // and the provider default applies; for a reasoning model pi-ai would read a missing
+  // level as "off" (e.g. DeepSeek's thinking: disabled), changing callers that never asked.
+  const reasoning = request.reasoning !== undefined && (known?.reasoning ?? deployment.reasoning === true);
   return {
     id: deployment.model,
     name: `${deployment.channel}/${deployment.model}`,
@@ -207,16 +211,16 @@ function modelFromDeployment(deployment: LlmDeployment, request: LlmChatRequest,
 }
 
 // The requested level, moved to the nearest one the model supports (a model that can't
-// switch reasoning off gets its lowest). Nothing is sent for a non-reasoning model, or
-// when the caller leaves it to the provider.
+// switch reasoning off gets its lowest). An explicit "off" goes through, so pi-ai
+// disables thinking in the model's own format. Nothing is sent for a non-reasoning
+// model, or when the caller leaves it to the provider.
 function reasoningFor(
   model: PiModel,
   request: LlmChatRequest,
   clamp: CreatePiLlmChatClientInput["clampLevel"],
 ): PiCompleteOptions["reasoning"] {
   if (!model.reasoning || request.reasoning === undefined) return undefined;
-  const level = clamp ? clamp(model, request.reasoning) : request.reasoning;
-  return level === "off" ? undefined : level;
+  return clamp ? clamp(model, request.reasoning) : request.reasoning;
 }
 
 function contextFromRequest(request: LlmChatRequest): PiContext {
