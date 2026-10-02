@@ -1,3 +1,4 @@
+import { factKnownAtSql } from "./fact-activity.ts";
 import type { QueryExecutor } from "./types.ts";
 import {
   assertIso8601WithOffset,
@@ -305,6 +306,50 @@ const FACT_REVIEW_ACTION_COLUMNS = `action_id,
                candidate_after,
                fact_id,
                created_at`;
+
+// The id of a fact identical to what createFact(input) would insert, apart from
+// observed_at and batch: every value, period, source, method, standing and
+// lineage (quality_flags) column equal, active, and known at `knownAt`
+// (fact-activity.ts), so a caller sealing as of a cutoff never cites a fact
+// that cutoff could not know. The oldest match wins. Lets derived facts be
+// reused instead of re-minted on every computation (#134).
+// ponytail: a lookup, not a unique index; two concurrent first computations
+// can still both insert. Add a partial unique index if that ever matters.
+export async function findKnownIdenticalFact(
+  db: QueryExecutor,
+  input: FactInput,
+  knownAt: string,
+): Promise<string | null> {
+  const n = normalizeFactInput(input);
+  const { rows } = await db.query<{ fact_id: string }>(
+    `select f.fact_id::text as fact_id
+       from facts f
+      where f.subject_kind = $1::subject_kind and f.subject_id = $2::uuid and f.metric_id = $3::uuid
+        and f.period_kind = $4
+        and f.period_start is not distinct from $5::date and f.period_end is not distinct from $6::date
+        and f.fiscal_year is not distinct from $7::int and f.fiscal_period is not distinct from $8
+        and f.value_num is not distinct from $9::numeric and f.value_text is not distinct from $10
+        and f.unit = $11 and f.currency is not distinct from $12 and f.scale = $13::numeric
+        and f.as_of = $14::timestamptz and f.reported_at is not distinct from $15::timestamptz
+        and f.source_id = $16::uuid and f.method = $17::fact_method
+        and f.adjustment_basis is not distinct from $18 and f.definition_version = $19::int
+        and f.verification_status = $20::verification_status and f.freshness_class = $21::freshness_class
+        and f.coverage_level = $22::coverage_level
+        and f.quality_flags = $23::jsonb and f.entitlement_channels = $24::jsonb
+        and f.confidence = $25::numeric
+        and ${factKnownAtSql("f", "$26::timestamptz")}
+      order by f.observed_at, f.fact_id
+      limit 1`,
+    [
+      n.subject_kind, n.subject_id, n.metric_id, n.period_kind, n.period_start, n.period_end,
+      n.fiscal_year, n.fiscal_period, n.value_num, n.value_text, n.unit, n.currency, n.scale,
+      n.as_of, n.reported_at, n.source_id, n.method, n.adjustment_basis, n.definition_version,
+      n.verification_status, n.freshness_class, n.coverage_level,
+      JSON.stringify(n.quality_flags), JSON.stringify(n.entitlement_channels), n.confidence, knownAt,
+    ],
+  );
+  return rows[0]?.fact_id ?? null;
+}
 
 export async function createFact(
   db: QueryExecutor,

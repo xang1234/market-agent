@@ -76,6 +76,8 @@ function mockDb(metricIds: Readonly<Record<string, string>> = { gross_margin: GR
         const keys = (params?.[0] as string[]) ?? [];
         return { rows: keys.filter((k) => metricIds[k]).map((k) => ({ metric_key: k, metric_id: metricIds[k] })) };
       }
+      // The reuse lookup (#134): no identical derived fact is stored yet.
+      if (/select f\.fact_id::text as fact_id/i.test(text)) return { rows: [] };
       if (/insert into facts/i.test(text)) {
         const values = params ?? [];
         inserts.push({ values });
