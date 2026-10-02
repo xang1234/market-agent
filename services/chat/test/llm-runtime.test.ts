@@ -275,7 +275,7 @@ test("a thread title cut off at the token limit falls back instead of being save
     env: BASE_ENV,
     createClient: () => async () => ({ text: "Apple Margin Wa", truncated: true }),
   });
-  await assert.rejects(model({ userIntent: "Why did Apple sell off?", assistantText: "Margins compressed." }), /cut off/);
+  await assert.rejects(async () => model({ userIntent: "Why did Apple sell off?", assistantText: "Margins compressed." }), /cut off/);
 });
 
 test("without fact blocks the narrative is passed through unguarded, as before", async () => {
