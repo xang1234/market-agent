@@ -191,6 +191,51 @@ test("LLM router dispatch uses the attempt signal supplied by execution control"
   assert.equal(received, controller.signal);
 });
 
+test("a hung attempt ends at its deadline and falls back, even if the client ignores the signal (#184)", async (t) => {
+  const called: string[] = [];
+  const router = createLlmRouter({
+    settings: settings(),
+    client: async (deployment) => {
+      called.push(deployment.model);
+      // The first provider accepts the request and never answers, ignoring the signal.
+      if (called.length === 1) return hang(t);
+      return { text: "fallback answer" };
+    },
+  });
+
+  const startedAt = Date.now();
+  const result = await router.complete(
+    { messages: [{ role: "user", content: "hello" }] },
+    { executeAttempt: async (_attempt, dispatch) => dispatch(AbortSignal.timeout(50)) },
+  );
+
+  assert.equal(result.text, "fallback answer");
+  assert.equal(called.length, 2);
+  assert.ok(Date.now() - startedAt < 2_000, "the hung attempt cost about its deadline, not forever");
+});
+
+test("every attempt hanging is a router error naming each timeout (#184)", async (t) => {
+  const router = createLlmRouter({ settings: settings(), client: () => hang(t) });
+  await assert.rejects(
+    router.complete(
+      { messages: [{ role: "user", content: "hello" }] },
+      { executeAttempt: async (_attempt, dispatch) => dispatch(AbortSignal.timeout(20)) },
+    ),
+    (error) => error instanceof LlmRouterError && error.code === "all_deployments_failed" && error.attempts.every((attempt) => attempt.code === "timeout"),
+  );
+});
+
+test("the outer signal also ends a hung attempt, as the caller's abort", async (t) => {
+  const reason = new Error("turn deadline");
+  const controller = new AbortController();
+  const router = createLlmRouter({ settings: settings(), client: () => hang(t) });
+  setTimeout(() => controller.abort(reason), 20);
+  await assert.rejects(
+    router.complete({ messages: [{ role: "user", content: "hello" }] }, { signal: controller.signal }),
+    (error) => error === reason,
+  );
+});
+
 test("LLM router stops before dispatch when its outer signal is aborted", async () => {
   const controller = new AbortController();
   const reason = new Error("campaign cancelled");
@@ -273,4 +318,14 @@ function settings() {
     LITELLM_MODEL: "openai/gpt-4.1",
     LITELLM_FALLBACK_MODELS: "deepseek/deepseek-chat,openai/o3",
   });
+}
+
+// A provider that accepts the request and never answers. A real one holds an open
+// connection, which keeps the event loop alive; a bare pending promise doesn't, and
+// AbortSignal.timeout's timer is unref'd, so the test runner would see an idle loop
+// and cancel the test. The interval stands in for the connection.
+function hang(t: { after(fn: () => void): void }): Promise<never> {
+  const connection = setInterval(() => {}, 1_000);
+  t.after(() => clearInterval(connection));
+  return new Promise<never>(() => {});
 }

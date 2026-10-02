@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { LlmProviderError } from "../../llm/src/index.ts";
+import { LlmProviderError, LlmRouterError } from "../../llm/src/index.ts";
 import {
+  ANSWER_DEADLINES,
   composeAnalystBlocksWithLlm,
+  TITLE_DEADLINES,
   createLlmThreadTitleModel,
 } from "../src/llm-runtime.ts";
 
@@ -126,6 +128,127 @@ test("composeAnalystBlocksWithLlm instructs the analyst to caveat stale data", a
   // prompt tells the analyst to honor them.
   assert.match(systemPrompt, /stale/i);
   assert.match(systemPrompt, /fact_recency|out of date|age_days/i);
+});
+
+const TWO_DEPLOYMENTS = {
+  LLM_CHANNELS: "openai,deepseek",
+  LLM_OPENAI_PROTOCOL: "openai",
+  LLM_OPENAI_MODELS: "gpt-4.1",
+  LLM_DEEPSEEK_BASE_URL: "https://api.deepseek.com/v1",
+  LLM_DEEPSEEK_MODELS: "deepseek-chat",
+  LITELLM_MODEL: "openai/gpt-4.1",
+  LITELLM_FALLBACK_MODELS: "deepseek/deepseek-chat",
+};
+
+test("an answer model that hangs falls back at its attempt deadline (#184)", async (t) => {
+  const calls: string[] = [];
+  const startedAt = Date.now();
+  const result = await composeAnalystBlocksWithLlm({
+    env: TWO_DEPLOYMENTS,
+    context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
+    blocks: [richTextBlock("Deterministic note")],
+    toolCalls: [],
+    deadlines: { attemptMs: 50, totalMs: 5_000 },
+    createClient: () => async (deployment) => {
+      calls.push(deployment.model);
+      // The primary accepts the request and never answers.
+      if (calls.length === 1) return hang(t);
+      return { text: "fallback note" };
+    },
+  });
+
+  assert.deepEqual(calls, ["gpt-4.1", "deepseek-chat"]);
+  assert.equal((result[0].segments as Array<{ text: string }>)[0].text, "fallback note");
+  assert.ok(Date.now() - startedAt < 2_000, "the hang cost about the attempt deadline");
+});
+
+test("when every model hangs, the answer call ends with an error at its deadline (#184)", async (t) => {
+  const startedAt = Date.now();
+  await assert.rejects(composeAnalystBlocksWithLlm({
+    env: TWO_DEPLOYMENTS,
+    context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
+    blocks: [richTextBlock("Deterministic note")],
+    toolCalls: [],
+    deadlines: { attemptMs: 50, totalMs: 5_000 },
+    createClient: () => () => hang(t),
+  }), /all LLM deployments failed/);
+  assert.ok(Date.now() - startedAt < 2_000);
+});
+
+test("only attempts the total can finish are made, so a failure names each timeout (#184)", async (t) => {
+  // Two 60 ms attempts can't finish in 100 ms: one is made, and it ends on its own deadline.
+  const calls: string[] = [];
+  await assert.rejects(composeAnalystBlocksWithLlm({
+    env: TWO_DEPLOYMENTS,
+    context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
+    blocks: [richTextBlock("Deterministic note")],
+    toolCalls: [],
+    deadlines: { attemptMs: 60, totalMs: 100 },
+    createClient: () => (deployment) => {
+      calls.push(deployment.model);
+      return hang(t);
+    },
+  }), (error) => error instanceof LlmRouterError && error.attempts.length === 1 && error.attempts[0]!.code === "timeout");
+  assert.deepEqual(calls, ["gpt-4.1"]);
+});
+
+test("deadlines that leave no room for a whole attempt are rejected before any model call", async () => {
+  let called = 0;
+  for (const deadlines of [{ attemptMs: 100, totalMs: 100 }, { attemptMs: 200, totalMs: 100 }, { attemptMs: 0, totalMs: 100 }]) {
+    await assert.rejects(composeAnalystBlocksWithLlm({
+      env: TWO_DEPLOYMENTS,
+      context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
+      blocks: [richTextBlock("Deterministic note")],
+      toolCalls: [],
+      deadlines,
+      createClient: () => () => {
+        called += 1;
+        return { text: "unexpected" };
+      },
+    }), RangeError, JSON.stringify(deadlines));
+  }
+  assert.equal(called, 0);
+});
+
+test("an exact fit leaves the last attempt out, so the total never cuts one", async (t) => {
+  // 2 × 60 ms equals the 120 ms total: the second attempt would race the total, so one is made.
+  const calls: string[] = [];
+  await assert.rejects(composeAnalystBlocksWithLlm({
+    env: TWO_DEPLOYMENTS,
+    context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
+    blocks: [richTextBlock("Deterministic note")],
+    toolCalls: [],
+    deadlines: { attemptMs: 60, totalMs: 120 },
+    createClient: () => (deployment) => {
+      calls.push(deployment.model);
+      return hang(t);
+    },
+  }), (error) => error instanceof LlmRouterError && error.attempts.length === 1);
+  assert.deepEqual(calls, ["gpt-4.1"]);
+});
+
+test("the last attempt gets only what is left of the total, so it still fails as a router timeout", async (t) => {
+  // 2 × 50 ms in 101 ms leaves 1 ms of headroom; routing overhead can use it up, so the
+  // second attempt's deadline comes from the remaining budget rather than racing a total timer.
+  const startedAt = Date.now();
+  await assert.rejects(composeAnalystBlocksWithLlm({
+    env: TWO_DEPLOYMENTS,
+    context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
+    blocks: [richTextBlock("Deterministic note")],
+    toolCalls: [],
+    deadlines: { attemptMs: 50, totalMs: 101 },
+    createClient: () => () => hang(t),
+  }), (error) => error instanceof LlmRouterError && error.attempts.length === 2 && error.attempts.every((a) => a.code === "timeout"));
+  assert.ok(Date.now() - startedAt < 1_000, "the chain ends near its total");
+});
+
+test("the production deadlines bound the answer and the title calls", () => {
+  for (const deadlines of [ANSWER_DEADLINES, TITLE_DEADLINES]) {
+    // A primary and its fallback both fit, with headroom, so the total never cuts an attempt.
+    assert.ok(deadlines.attemptMs > 0 && 2 * deadlines.attemptMs < deadlines.totalMs);
+  }
+  assert.ok(ANSWER_DEADLINES.totalMs <= 180_000, "a hung provider costs a user minutes, not the 516 s of #184");
+  assert.ok(TITLE_DEADLINES.attemptMs < ANSWER_DEADLINES.attemptMs);
 });
 
 test("composeAnalystBlocksWithLlm falls back through shared router deployments", async () => {
@@ -338,3 +461,12 @@ test("a replayed reply crediting AMD's margin to NVIDIA loses that sentence; the
   const right = await compareWithReply("AMD's gross margin is 49.2%. NVDA is larger.");
   assert.equal(right.text, "AMD's gross margin is 49.2%. NVDA is larger.");
 });
+
+// A provider that accepts the request and never answers. Its open connection keeps
+// the event loop alive; a bare pending promise doesn't (AbortSignal.timeout's timer is
+// unref'd), so the interval stands in for it.
+function hang(t: { after(fn: () => void): void }): Promise<never> {
+  const connection = setInterval(() => {}, 1_000);
+  t.after(() => clearInterval(connection));
+  return new Promise<never>(() => {});
+}

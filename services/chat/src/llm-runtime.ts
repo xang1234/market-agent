@@ -1,6 +1,7 @@
 import {
   createLlmRouterFromEnv,
   type LlmChatClient,
+  type LlmExecutionControls,
   type LlmSettingsLoaderEnv,
 } from "../../llm/src/index.ts";
 import type { ThreadTitleModel } from "../../summary/src/title-generator.ts";
@@ -17,6 +18,30 @@ const FACT_BLOCKS_FALLBACK_TEXT =
 // The same case for an answer without figures to point to.
 const NO_ANSWER_FALLBACK_TEXT = "No written answer is available for this question; try asking again.";
 
+// A provider can accept a request and never answer (one held a turn 516 s, #184).
+// Each attempt gets a deadline, after which the router tries the next deployment: the
+// smaller of its own limit and what is left of the total. There is no separate timer
+// on the whole call, so every attempt ends on its own deadline and a failure is the
+// router's error naming each one, while the chain still ends by the total. Two
+// attempts (a primary and its fallback) fit in each budget below.
+export type ModelDeadlines = { attemptMs: number; totalMs: number };
+export const ANSWER_DEADLINES: ModelDeadlines = { attemptMs: 80_000, totalMs: 180_000 };
+export const TITLE_DEADLINES: ModelDeadlines = { attemptMs: 20_000, totalMs: 45_000 };
+
+function withDeadlines(deadlines: ModelDeadlines): LlmExecutionControls {
+  const { attemptMs, totalMs } = deadlines;
+  if (!Number.isInteger(attemptMs) || !Number.isInteger(totalMs) || attemptMs <= 0 || attemptMs >= totalMs) {
+    throw new RangeError(`model deadlines need 0 < attemptMs < totalMs (integers); got ${attemptMs} and ${totalMs}`);
+  }
+  const endsAt = performance.now() + totalMs;
+  return {
+    // Only attempts that a full deadline could fit in the total are started.
+    maxAttempts: Math.ceil(totalMs / attemptMs) - 1,
+    executeAttempt: (_attempt, dispatch) =>
+      dispatch(AbortSignal.timeout(Math.max(1, Math.min(attemptMs, Math.floor(endsAt - performance.now()))))),
+  };
+}
+
 type LlmRuntimeContext = {
   userIntent?: string;
   bundleId: string;
@@ -25,6 +50,7 @@ type LlmRuntimeContext = {
 type LlmRuntimeOptions = {
   env?: LlmSettingsLoaderEnv;
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
+  deadlines?: ModelDeadlines;
 };
 
 export function createLlmThreadTitleModel(options: LlmRuntimeOptions = {}): ThreadTitleModel {
@@ -54,7 +80,7 @@ export function createLlmThreadTitleModel(options: LlmRuntimeOptions = {}): Thre
       // truncates them mid-thought and yields an empty title. Leave room to reason.
       maxTokens: 512,
       reasoning: "off",
-    });
+    }, withDeadlines(options.deadlines ?? TITLE_DEADLINES));
     // A cut-off title reads as a typo; the generator falls back to the default one.
     if (result.truncated) throw new Error("thread title was cut off at the token limit");
     return result.text;
@@ -74,6 +100,7 @@ export async function composeAnalystBlocksWithLlm(input: {
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
   // Receives the sentences the narrative guard dropped, so evals can count them (#144).
   onNarrativeRemoved?: (sentences: ReadonlyArray<string>) => void;
+  deadlines?: ModelDeadlines;
 }): Promise<ReadonlyArray<Record<string, unknown>>> {
   const router = await createLlmRouterFromEnv(input.env ?? process.env, {
     createClient: input.createClient,
@@ -116,7 +143,7 @@ export async function composeAnalystBlocksWithLlm(input: {
     // reasoning model spent it all thinking and answered nothing (#124 baseline, #175).
     reasoning: "low",
     maxTokens: 8192,
-  });
+  }, withDeadlines(input.deadlines ?? ANSWER_DEADLINES));
   const text = result.text.trim();
   // Never show a sentence cut off mid-way, or the placeholder the turn started with.
   if (result.truncated || text.length === 0) {
