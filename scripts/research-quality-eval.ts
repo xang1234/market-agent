@@ -77,7 +77,7 @@ export function renderReport(run: string, model: string, base: string, answered:
     `# Research-quality eval: ${run}`,
     "",
     ...(model.includes("(fallbacks:")
-      ? ["**Fallbacks were configured:** any answer may come from one. The app log's `[llm]` lines show which model answered each call.", ""]
+      ? ["**Fallbacks may have answered:** they were configured (or the settings couldn't be read), so any answer may come from one. The app log's `[llm]` lines show which model answered each call.", ""]
       : []),
     `Model: \`${model}\`. Data: frozen golden dataset. Score each question in \`${run}.scores.json\` (rubric below),`,
     "then run `node --experimental-strip-types scripts/research-quality-eval.ts summary`.",
@@ -194,9 +194,11 @@ export const runStamp = (date: Date) => date.toISOString().slice(0, 19).replace(
 async function run(base: string): Promise<void> {
   type Settings = { primaryModel?: string | null; fallbackModels?: string[] };
   const settings = await api<{ settings?: Settings }>(base, "GET", "/v1/dev/llm-settings")
-    .then((read) => ({ ...read.settings, why: "no primary model is set" }))
-    .catch((error: unknown) => ({ primaryModel: undefined, fallbackModels: undefined, why: `reading /v1/dev/llm-settings failed: ${error instanceof Error ? error.message : error}` }));
-  const model = modelLabel(modelForRun(settings.primaryModel, process.env.EVAL_MODEL, settings.why), process.env.EVAL_MODEL ? [] : settings.fallbackModels);
+    .then((read) => ({ primaryModel: read.settings?.primaryModel, fallbackModels: read.settings?.fallbackModels ?? [], why: "no primary model is set" }))
+    // Unreadable settings: the fallbacks are unknown (null), not absent.
+    .catch((error: unknown) => ({ primaryModel: undefined, fallbackModels: null, why: `reading /v1/dev/llm-settings failed: ${error instanceof Error ? error.message : error}` }));
+  // EVAL_MODEL only names the run; the running stack still falls back as configured.
+  const model = modelLabel(modelForRun(settings.primaryModel, process.env.EVAL_MODEL, settings.why), settings.fallbackModels);
   const stamp = runStamp(new Date());
   const answered: AnsweredQuestion[] = [];
   // Both files exist from the start, created exclusively (a run never overwrites
@@ -236,8 +238,10 @@ async function run(base: string): Promise<void> {
 
 // The router falls back silently and chat doesn't record which deployment answered a
 // turn (#183), so a run whose settings list fallbacks says so: any answer may be theirs.
-export function modelLabel(model: string, fallbackModels: ReadonlyArray<string> | undefined): string {
-  return fallbackModels?.length ? `${model} (fallbacks: ${fallbackModels.join(", ")})` : model;
+// null means the settings couldn't be read, so whether there are fallbacks is unknown.
+export function modelLabel(model: string, fallbackModels: ReadonlyArray<string> | null): string {
+  if (fallbackModels === null) return `${model} (fallbacks: unknown)`;
+  return fallbackModels.length > 0 ? `${model} (fallbacks: ${fallbackModels.join(", ")})` : model;
 }
 
 // Every run's scores, oldest first; none yet (no runs folder on a fresh checkout) is [].

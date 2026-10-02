@@ -110,11 +110,14 @@ test("a run names its model or doesn't start, and its files are stamped to the s
 
 test("a run with fallbacks configured is labelled with them, and its report warns", () => {
   assert.equal(modelLabel("opencode-go/qwen3.8-max", []), "opencode-go/qwen3.8-max");
-  assert.equal(modelLabel("opencode-go/qwen3.8-max", undefined), "opencode-go/qwen3.8-max");
   const label = modelLabel("opencode-go/qwen3.8-max", ["opencode-go/kimi-k2.7-code"]);
   assert.equal(label, "opencode-go/qwen3.8-max (fallbacks: opencode-go/kimi-k2.7-code)");
-  assert.match(renderReport("r", label, "http://app", []), /Fallbacks were configured/);
-  assert.doesNotMatch(renderReport("r", "opencode-go/qwen3.8-max", "http://app", []), /Fallbacks were configured/);
+  // Settings unreadable (EVAL_MODEL named the run): fallbacks are unknown, not absent.
+  const unknown = modelLabel("openai/o3", null);
+  assert.equal(unknown, "openai/o3 (fallbacks: unknown)");
+  assert.match(renderReport("r", label, "http://app", []), /Fallbacks may have answered/);
+  assert.match(renderReport("r", unknown, "http://app", []), /Fallbacks may have answered/);
+  assert.doesNotMatch(renderReport("r", "opencode-go/qwen3.8-max", "http://app", []), /Fallbacks may have answered/);
 });
 
 test("summary on a fresh checkout reads no runs instead of failing", async () => {
