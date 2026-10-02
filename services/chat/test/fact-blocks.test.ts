@@ -5,11 +5,14 @@ import type { IssuerFundamentalFact } from "../../fundamentals/src/issuer-fundam
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 import {
   buildIssuerFactBlocks,
+  displayedFigures,
   listingsForComparison,
   loadTurnFactBlocks,
   priceListingsForComparison,
   segmentRevenueItems,
+  type DerivedQuarterFact,
 } from "../src/fact-blocks.ts";
+import { deriveQuarterMetrics } from "../src/quarter-metrics.ts";
 import { fakeQuery } from "./fake-query.ts";
 
 const SNAPSHOT_ID = "11111111-1111-4111-a111-111111111111";
@@ -32,6 +35,7 @@ function fact(metric_key: string, fiscal_year: number, fiscal_period: string, va
     fiscal_period,
     as_of: AS_OF,
     source_id: SOURCE_ID,
+    coverage_level: "full",
   };
 }
 
@@ -102,6 +106,83 @@ test("every rendered value is a cited, bound fact with its source on the block",
     assert.equal(block.snapshot_id, SNAPSHOT_ID);
     assert.deepEqual((block.data_ref as { kind: string }).kind, block.kind);
   }
+});
+
+// Margins and growth as the loader mints them: computed from the facts, given ids
+// and the verifier's bindings (derived facts carry the quarter's period dates).
+function derivedFor(facts: ReadonlyArray<IssuerFundamentalFact>): DerivedQuarterFact[] {
+  const key = (m: string, y: number, p: string) => `${m}|${y}|${p}`;
+  const byKey = new Map(facts.map((f) => [key(f.metric_key, f.fiscal_year!, f.fiscal_period!), f]));
+  const revenue = facts.filter((f) => f.metric_key === "revenue").slice(-8);
+  const specs = deriveQuarterMetrics({
+    shownRevenue: revenue,
+    fact: (m, y, p) => byKey.get(key(m, y, p)),
+    period: (id) => ({ fact_id: id, period_kind: "fiscal_q", period_start: null, period_end: "2026-01-25" }),
+  });
+  return specs.map((spec, index) => {
+    const fact_id = `d0000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+    return { ...spec, fact_id, binding: { fact_id, source_id: SOURCE_ID, unit: "ratio", period_kind: "fiscal_q", as_of: AS_OF } };
+  });
+}
+
+function blocksWithDerived(facts: ReadonlyArray<IssuerFundamentalFact>, wantsMarginTrend: boolean) {
+  return buildIssuerFactBlocks({
+    facts,
+    verifierFacts: verifierFacts(facts),
+    derived: derivedFor(facts),
+    wantsMarginTrend,
+    snapshotId: SNAPSHOT_ID,
+    asOf: AS_OF,
+  });
+}
+
+test("the latest quarter shows its margins and QoQ/YoY revenue growth, each a cited derived fact", () => {
+  const [metricRow] = blocksWithDerived(quarters(10), false);
+  const items = metricRow.items as Array<{ label: string; format: string; value_ref: string }>;
+  assert.deepEqual(items.map((item) => item.label), [
+    "Revenue", "Gross profit", "Operating income", "Net income",
+    "Gross margin", "Operating margin", "Net margin", "Revenue growth (QoQ)", "Revenue growth (YoY)",
+  ]);
+  // quarters(): margins 60/40/30%; revenue 10B after 9B (QoQ 11.1%) and 6B a year earlier (YoY 66.7%).
+  assert.deepEqual(items.slice(4).map((item) => item.format), ["60.0%", "40.0%", "30.0%", "11.1%", "66.7%"]);
+  const cited = new Set(metricRow.provenance_fact_refs as string[]);
+  for (const item of items) assert.ok(cited.has(item.value_ref), `${item.label} is not cited`);
+});
+
+test("a derived figure cites every input's fact and source, not only revenue's", () => {
+  const OTHER_SOURCE = "00000000-0000-4000-a000-000000000002";
+  // The latest gross profit comes from a different filing than its revenue.
+  const facts = quarters(10).map((f, i, all) =>
+    f.metric_key === "gross_profit" && i === all.findLastIndex((g) => g.metric_key === "gross_profit") ? { ...f, source_id: OTHER_SOURCE } : f);
+  const [metricRow] = blocksWithDerived(facts, false);
+  assert.ok((metricRow.source_refs as string[]).includes(OTHER_SOURCE), "the margin's numerator source is cited");
+  const cited = new Set(metricRow.provenance_fact_refs as string[]);
+  const derived = derivedFor(facts).filter((d) => (metricRow.items as Array<{ value_ref: string }>).some((item) => item.value_ref === d.fact_id));
+  for (const d of derived) for (const input of d.input_fact_ids) assert.ok(cited.has(input), `${d.metric} input ${input} is not cited`);
+  // Each cited fact is bound, so the seal can load it.
+  const bound = new Set((metricRow.data_ref as { params: { fact_bindings: Array<{ fact_id: string }> } }).params.fact_bindings.map((b) => b.fact_id));
+  for (const ref of cited) assert.ok(bound.has(ref), `${ref} is cited but not bound`);
+});
+
+test("a margin question also gets each margin across the quarters shown; others don't", () => {
+  const facts = quarters(10);
+  assert.equal(blocksWithDerived(facts, false).length, 2);
+  const trend = blocksWithDerived(facts, true).slice(2);
+  assert.deepEqual(trend.map((block) => block.title), ["Gross margin by quarter", "Operating margin by quarter", "Net margin by quarter"]);
+  const cells = trend[1]!.items as Array<{ label: string; format: string }>;
+  assert.deepEqual([cells.length, cells[0]!.label, cells.at(-1)!.label, cells[0]!.format], [8, "Q3 2024", "Q2 2026", "40.0%"]);
+  // Each row is its own block (distinct ids) and every cell cites a bound fact.
+  assert.equal(new Set(trend.map((block) => block.id)).size, 3);
+  for (const block of trend) {
+    const bound = new Set((block.data_ref as { params: { fact_bindings: Array<{ fact_id: string }> } }).params.fact_bindings.map((b) => b.fact_id));
+    for (const cell of block.items as Array<{ value_ref: string }>) assert.ok(bound.has(cell.value_ref));
+  }
+});
+
+test("the model sees a margin-trend cell as that margin in that quarter", () => {
+  const figures = displayedFigures(blocksWithDerived(quarters(10), true));
+  assert.ok(figures.some((f) => f.metric === "Operating margin" && f.period === "Q3 2024" && f.value === "40.0%"));
+  assert.ok(figures.some((f) => f.metric === "Gross margin" && f.period === undefined && f.value === "60.0%"), "latest-quarter row");
 });
 
 test("bindings carry the verifier's fact metadata without the source id", () => {

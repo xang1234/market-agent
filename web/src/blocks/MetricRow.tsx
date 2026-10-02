@@ -10,7 +10,7 @@ type MetricRowProps = { block: MetricRowBlock }
 
 export function MetricRow({ block }: MetricRowProps): ReactElement {
   const inspectableRefs = extractInspectableRefs(block)
-  return (
+  const row = (
     <ul
       data-testid={`block-metric-row-${block.id}`}
       data-block-kind="metric_row"
@@ -27,6 +27,18 @@ export function MetricRow({ block }: MetricRowProps): ReactElement {
         />
       ))}
     </ul>
+  )
+  // The title says what the cells are when their labels alone can't: a period
+  // ("Latest quarter (Q4 2026)"), or the metric of a row whose cells are quarters.
+  const title = block.title?.trim()
+  if (!title) return row
+  return (
+    <section aria-label={title} className="flex flex-col gap-1.5">
+      <h4 className="text-sm font-medium text-fg" data-testid={`block-metric-row-${block.id}-title`}>
+        {title}
+      </h4>
+      {row}
+    </section>
   )
 }
 

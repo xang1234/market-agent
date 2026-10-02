@@ -11,7 +11,7 @@
 // dropped.
 
 import { columnTones, type MetricTone } from "./metric-direction.ts";
-import { formatCompactCurrency } from "./block-format.ts";
+import { formatCompactCurrency, formatPercent } from "./block-format.ts";
 import type {
   MaterializedMetric,
   MaterializedPeer,
@@ -137,7 +137,7 @@ function columnToneBySubject(
 function formatValue(value: number, format: PeerMetricFormat, currency?: string): string {
   switch (format) {
     case "percent":
-      return `${(value * 100).toFixed(1)}%`;
+      return formatPercent(value);
     case "multiple":
       return `${value.toFixed(1)}×`;
     case "currency":

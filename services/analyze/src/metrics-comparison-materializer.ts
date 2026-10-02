@@ -86,6 +86,28 @@ export async function materializePeerMetricFacts(
   return out;
 }
 
+// A derived value of any registered metric (chat's quarterly margins and growth,
+// #178, as well as the comparison's): what a derived fact records.
+export type DerivedFactSpec = Pick<
+  DerivedPeerMetric,
+  "value_num" | "unit" | "as_of" | "source_id" | "period" | "coverage_level" | "input_fact_ids"
+> & { metric: string };
+
+// Mints one derived fact per spec, in order (or reuses an identical one already
+// known, #134), and returns their fact ids.
+export async function materializeDerivedFacts(
+  db: QueryExecutor,
+  subjectId: UUID,
+  specs: ReadonlyArray<DerivedFactSpec>,
+  options: MaterializeOptions = {},
+): Promise<UUID[]> {
+  const clock = options.clock ?? (() => new Date());
+  const metricIds = await resolveMetricIds(db, [...new Set(specs.map((spec) => spec.metric))]);
+  const ids: UUID[] = [];
+  for (const spec of specs) ids.push(await materializeDerived(db, subjectId, spec, metricIds, clock));
+  return ids;
+}
+
 async function materializeCell(
   db: QueryExecutor,
   subjectId: UUID,
@@ -95,7 +117,16 @@ async function materializeCell(
 ): Promise<UUID> {
   // A reused metric already IS a fact; point the cell straight at it.
   if (value.kind === "reused") return value.fact_id;
+  return materializeDerived(db, subjectId, value, metricIds, clock);
+}
 
+async function materializeDerived(
+  db: QueryExecutor,
+  subjectId: UUID,
+  value: DerivedFactSpec,
+  metricIds: ReadonlyMap<string, string>,
+  clock: () => Date,
+): Promise<UUID> {
   const metricId = metricIds.get(value.metric);
   if (metricId === undefined) {
     throw new Error(
@@ -111,7 +142,7 @@ async function materializeCell(
 
 function derivedFactInput(
   subjectId: UUID,
-  value: DerivedPeerMetric,
+  value: DerivedFactSpec,
   metricId: UUID,
   clock: () => Date,
 ): FactInput {
@@ -142,7 +173,7 @@ function derivedFactInput(
 // computed from. Stored in quality_flags (no first-class lineage column — see
 // the fra-36y8 spike). A cell can trace back to its components without a schema
 // change; the snapshot seal does not enforce these (soft lineage).
-function derivationLineage(value: DerivedPeerMetric): Readonly<Record<string, unknown>> {
+function derivationLineage(value: DerivedFactSpec): Readonly<Record<string, unknown>> {
   return Object.freeze({
     kind: "derivation",
     metric: value.metric,

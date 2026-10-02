@@ -65,3 +65,39 @@ test('MetricRow inspectable controls render outside the shell inspector provider
   assert.match(html, /\$85\.8B/)
   assert.match(html, /data-inspection-disabled="true"/)
 })
+
+test('MetricRow shows its title, so a row of quarterly cells says which margin it is', () => {
+  const trend = (title: string): MetricRowBlock => ({
+    id: `trend-${title.length}`,
+    kind: 'metric_row',
+    snapshot_id: SNAPSHOT_ID,
+    data_ref: { kind: 'metric_row', id: `trend-${title.length}` },
+    source_refs: [],
+    as_of: '2026-09-01T00:00:00.000Z',
+    title,
+    items: [{ label: 'Q2 2025', value_ref: VALUE_REF, format: '-1.7%' }],
+  })
+  const operating = renderToStaticMarkup(createElement(MetricRow, { block: trend('Operating margin by quarter') }))
+  const gross = renderToStaticMarkup(createElement(MetricRow, { block: trend('Gross margin by quarter') }))
+
+  assert.match(operating, /<h4[^>]*>Operating margin by quarter<\/h4>/)
+  assert.match(gross, /<h4[^>]*>Gross margin by quarter<\/h4>/)
+  assert.match(operating, /aria-label="Operating margin by quarter"/)
+})
+
+test('MetricRow without a title renders just the cells', () => {
+  const block: MetricRowBlock = {
+    id: 'untitled',
+    kind: 'metric_row',
+    snapshot_id: SNAPSHOT_ID,
+    data_ref: { kind: 'metric_row', id: 'untitled' },
+    source_refs: [],
+    as_of: '2026-09-01T00:00:00.000Z',
+    items: [{ label: 'Revenue', value_ref: VALUE_REF, format: '$85.8B' }],
+  }
+
+  const html = renderToStaticMarkup(createElement(MetricRow, { block }))
+
+  assert.doesNotMatch(html, /<h4/)
+  assert.match(html, /^<ul/)
+})

@@ -262,6 +262,7 @@ function factAt(as_of: string, fiscal_year: number | null, fiscal_period: string
     fiscal_period,
     as_of,
     source_id: POLYGON_SOURCE_ID,
+    coverage_level: "full",
   };
 }
 

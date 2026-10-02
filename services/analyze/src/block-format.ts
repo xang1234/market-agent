@@ -10,6 +10,12 @@ export function formatCompactCurrency(value: number, currency: string): string {
   }).format(value);
 }
 
+// A ratio (0.708) as a percentage to one decimal ("70.8%"): margins and growth,
+// in comparison cells and chat's metric rows alike.
+export function formatPercent(ratio: number): string {
+  return `${(ratio * 100).toFixed(1)}%`;
+}
+
 // Precise currency for price points (e.g. "$214.50") — unlike formatCompactCurrency,
 // which compacts large statement values (e.g. "$3.2B").
 export function formatCurrency(value: number, currency: string): string {

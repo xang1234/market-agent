@@ -10,9 +10,9 @@
 // - several companies (or one plus "peers"): a metrics_comparison of the latest
 //   fiscal year, built by analyze's peer-comparison pipeline.
 
-import { formatCompactCurrency } from "../../analyze/src/block-format.ts";
+import { formatCompactCurrency, formatPercent } from "../../analyze/src/block-format.ts";
 import { buildMetricsComparisonBlock } from "../../analyze/src/metrics-comparison-block-builder.ts";
-import { materializePeerMetricFacts } from "../../analyze/src/metrics-comparison-materializer.ts";
+import { materializeDerivedFacts, materializePeerMetricFacts } from "../../analyze/src/metrics-comparison-materializer.ts";
 import { buildRevenueBarsBlock } from "../../analyze/src/revenue-bars-block-builder.ts";
 import { loadVerifierFactsForRefs } from "../../evidence/src/local-runtime-evidence.ts";
 import {
@@ -31,6 +31,7 @@ import { loadUsableFacts } from "../../fundamentals/src/usable-facts.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 import { stableUuid } from "./chat-ids.ts";
 import { loadPerfComparisonBlocks } from "./perf-block.ts";
+import { deriveQuarterMetrics, GROWTH, MARGINS, type QuarterMetric } from "./quarter-metrics.ts";
 
 const QUARTERS_SHOWN = 8;
 const LATEST_QUARTER_METRICS = [
@@ -59,6 +60,8 @@ export async function loadTurnFactBlocks(
     wantsPeers: boolean;
     // A single-company turn that asks about segments also gets the breakdown.
     wantsSegments?: boolean;
+    // ...and one about margins, each margin across the quarters shown (#178).
+    wantsMarginTrend?: boolean;
     snapshotId: string;
     asOf: string;
     // The listing the user asked for, per issuer (see listingsForComparison).
@@ -71,7 +74,12 @@ export async function loadTurnFactBlocks(
     ? [primary, ...(await peersOf(db, primary))]
     : input.issuers;
   if (companies.length === 1) {
-    const blocks = await loadIssuerFactBlocks(db, { issuer: primary, snapshotId: input.snapshotId, asOf: input.asOf });
+    const blocks = await loadIssuerFactBlocks(db, {
+      issuer: primary,
+      snapshotId: input.snapshotId,
+      asOf: input.asOf,
+      wantsMarginTrend: input.wantsMarginTrend ?? false,
+    });
     if (!input.wantsSegments) return blocks;
     return Object.freeze([...blocks, ...(await loadSegmentBlocks(db, { issuer: primary, snapshotId: input.snapshotId, asOf: input.asOf }))]);
   }
@@ -386,6 +394,22 @@ export async function companyListings(
   return new Map(rows.map((row) => [row.issuer_id, { listing_id: row.listing_id, label: row.ticker ?? row.legal_name }]));
 }
 
+// A derived figure cites the facts it was computed from too, so its block's sources
+// include every input's filing (a margin's numerator may come from another source
+// than revenue's) and the inspector can reach each one.
+function withInputs(
+  cited: ReadonlyArray<CitedFact>,
+  derived: ReadonlyArray<DerivedQuarterFact>,
+  loadable: ReadonlyMap<string, VerifierFact>,
+): CitedFact[] {
+  const out = new Map(cited.map((fact) => [fact.fact_id, fact]));
+  for (const id of derived.flatMap((fact) => fact.input_fact_ids)) {
+    const input = loadable.get(id);
+    if (input && !out.has(id)) out.set(id, citedFact(input));
+  }
+  return [...out.values()];
+}
+
 function citedFact(fact: VerifierFact): CitedFact {
   return { fact_id: fact.fact_id, source_id: fact.source_id ?? "" };
 }
@@ -395,7 +419,7 @@ function citedFact(fact: VerifierFact): CitedFact {
 // answer, so a failed read degrades to narrative only.
 export async function loadIssuerFactBlocks(
   db: QueryExecutor,
-  input: { issuer: IssuerSubjectRef | null; snapshotId: string; asOf: string },
+  input: { issuer: IssuerSubjectRef | null; snapshotId: string; asOf: string; wantsMarginTrend?: boolean },
 ): Promise<ReadonlyArray<Block>> {
   if (input.issuer === null) return [];
   try {
@@ -408,52 +432,134 @@ export async function loadIssuerFactBlocks(
       numericOnly: true,
     });
     const verifierFacts = await loadVerifierFactsForRefs(db, { fact_refs: facts.map((fact) => fact.fact_id), cutoff: input.asOf, requireKnownByCutoff: true });
-    return buildIssuerFactBlocks({ facts, verifierFacts, snapshotId: input.snapshotId, asOf: input.asOf });
+    const derived = await loadDerivedQuarterMetrics(db, input.issuer, facts, verifierFacts, input.asOf, input.wantsMarginTrend ?? false);
+    return buildIssuerFactBlocks({ facts, verifierFacts, derived, wantsMarginTrend: input.wantsMarginTrend ?? false, snapshotId: input.snapshotId, asOf: input.asOf });
   } catch (reason) {
     console.warn("[chat] fact blocks unavailable; answering with narrative only", reason);
     return [];
   }
 }
 
-export function buildIssuerFactBlocks(input: {
-  facts: ReadonlyArray<IssuerFundamentalFact>;
-  verifierFacts: ReadonlyArray<VerifierFact>;
-  snapshotId: string;
-  asOf: string;
-}): ReadonlyArray<Block> {
-  // Only facts the seal can load and bind may render.
-  const loadable = new Map(input.verifierFacts.map((fact) => [fact.fact_id, fact]));
-  // The reader returns newest first, so the first fact per metric and quarter wins.
+// A derived metric minted as a fact, with the verifier's binding for it.
+export type DerivedQuarterFact = QuarterMetric & { fact_id: string; binding: VerifierFact };
+
+// Margins and growth (#178), minted as derived facts stamped at the cutoff (so
+// known by it, like the comparison's) and loaded back for the seal. A failure only
+// costs these figures: the reported ones still render.
+async function loadDerivedQuarterMetrics(
+  db: QueryExecutor,
+  issuer: IssuerSubjectRef,
+  facts: ReadonlyArray<IssuerFundamentalFact>,
+  verifierFacts: ReadonlyArray<VerifierFact>,
+  asOf: string,
+  wantsMarginTrend: boolean,
+): Promise<ReadonlyArray<DerivedQuarterFact>> {
+  try {
+    const loadable = new Map(verifierFacts.map((fact) => [fact.fact_id, fact]));
+    const { byQuarter, revenue } = selectQuarters(facts, loadable);
+    const specs = deriveQuarterMetrics({
+      // Only the latest quarter renders unless the margin trend was asked for, so
+      // mint just what is shown: each derived fact is a lookup and maybe an insert.
+      shownRevenue: wantsMarginTrend ? revenue : revenue.slice(-1),
+      fact: (metricKey, fiscalYear, fiscalPeriod) => byQuarter.get(quarterKey(metricKey, fiscalYear, fiscalPeriod)),
+      period: (factId) => loadable.get(factId),
+    });
+    if (specs.length === 0) return [];
+    const ids = await materializeDerivedFacts(db, issuer.id, specs, { clock: () => new Date(asOf) });
+    const bindings = new Map(
+      (await loadVerifierFactsForRefs(db, { fact_refs: ids, cutoff: asOf, requireKnownByCutoff: true })).map((fact) => [fact.fact_id, fact]),
+    );
+    return specs.flatMap((spec, index) => {
+      const binding = bindings.get(ids[index]!);
+      return binding ? [{ ...spec, fact_id: ids[index]!, binding }] : [];
+    });
+  } catch (reason) {
+    console.warn("[chat] margins and growth unavailable; showing reported figures only", reason);
+    return [];
+  }
+}
+
+// The facts the blocks may show: per metric and quarter, the first (newest) fact the
+// seal can load; and the last QUARTERS_SHOWN quarters of revenue, oldest first.
+function selectQuarters(
+  facts: ReadonlyArray<IssuerFundamentalFact>,
+  loadable: ReadonlyMap<string, VerifierFact>,
+): { byQuarter: ReadonlyMap<string, IssuerFundamentalFact>; revenue: IssuerFundamentalFact[] } {
   const byQuarter = new Map<string, IssuerFundamentalFact>();
-  for (const fact of input.facts) {
+  for (const fact of facts) {
     if (fact.value_num === null || fact.fiscal_year === null || !fact.fiscal_period) continue;
     if (!loadable.has(fact.fact_id)) continue;
     const key = quarterKey(fact.metric_key, fact.fiscal_year, fact.fiscal_period);
     if (!byQuarter.has(key)) byQuarter.set(key, fact);
   }
-
   const revenue = [...byQuarter.values()]
     .filter((fact) => fact.metric_key === "revenue")
     .sort(byFiscalQuarter)
     .slice(-QUARTERS_SHOWN);
+  return { byQuarter, revenue };
+}
+
+export function buildIssuerFactBlocks(input: {
+  facts: ReadonlyArray<IssuerFundamentalFact>;
+  verifierFacts: ReadonlyArray<VerifierFact>;
+  // Margins and growth computed from these facts (#178); none, none shown.
+  derived?: ReadonlyArray<DerivedQuarterFact>;
+  // Per-quarter margin rows, for a question about margins.
+  wantsMarginTrend?: boolean;
+  snapshotId: string;
+  asOf: string;
+}): ReadonlyArray<Block> {
+  // Only facts the seal can load and bind may render.
+  const loadable = new Map(input.verifierFacts.map((fact) => [fact.fact_id, fact]));
+  const { byQuarter, revenue } = selectQuarters(input.facts, loadable);
   const latest = revenue.at(-1);
   if (latest === undefined) return [];
+  const derived = input.derived ?? [];
+  for (const fact of derived) loadable.set(fact.fact_id, fact.binding);
+  const derivedAt = (metric: string, at: IssuerFundamentalFact) =>
+    derived.find((fact) => fact.metric === metric && fact.period.fiscal_year === at.fiscal_year && fact.period.fiscal_period === at.fiscal_period);
 
   const latestFacts = LATEST_QUARTER_METRICS.flatMap(([key, label]) => {
     const fact = byQuarter.get(quarterKey(key, latest.fiscal_year!, latest.fiscal_period!));
     return fact ? [{ fact, label }] : [];
   });
+  // The latest quarter's margins, then its QoQ and YoY revenue growth.
+  const latestDerived = [...MARGINS, ...GROWTH].flatMap(({ metric }) => {
+    const fact = derivedAt(metric, latest);
+    return fact ? [fact] : [];
+  });
   const period = quarterLabel(latest);
 
   const metricRow: Block = {
-    ...blockBase("metric_row", input, latestFacts.map(({ fact }) => fact), loadable),
+    ...blockBase("metric_row", input, withInputs([...latestFacts.map(({ fact }) => fact), ...latestDerived], latestDerived, loadable), loadable),
     title: `Latest quarter (${period})`,
-    items: latestFacts.map(({ fact, label }) => ({
-      label,
-      value_ref: fact.fact_id,
-      format: formatCompactCurrency(nativeValue(fact), fact.currency ?? "USD"),
-    })),
+    items: [
+      ...latestFacts.map(({ fact, label }) => ({
+        label,
+        value_ref: fact.fact_id,
+        format: formatCompactCurrency(nativeValue(fact), fact.currency ?? "USD"),
+      })),
+      ...latestDerived.map(percentItem),
+    ],
   };
+
+  // One row per margin across the quarters shown, so a trend (and a loss quarter)
+  // is on screen to quote.
+  const marginTrend: Block[] = input.wantsMarginTrend
+    ? MARGINS.flatMap(({ metric, label }) => {
+      const cells = revenue.flatMap((quarter) => {
+        const fact = derivedAt(metric, quarter);
+        return fact ? [{ ...percentItem(fact), label: quarterLabel(quarter) }] : [];
+      });
+      if (cells.length < 2) return [];
+      const facts = derived.filter((fact) => cells.some((cell) => cell.value_ref === fact.fact_id));
+      return [{
+        ...blockBase("metric_row", input, withInputs(facts, facts, loadable), loadable, `margin_trend_${metric}`),
+        title: `${label}${BY_QUARTER}`,
+        items: cells,
+      }];
+    })
+    : [];
 
   const bars = buildRevenueBarsBlock({
     facts: revenue.map((fact) => ({
@@ -474,7 +580,14 @@ export function buildIssuerFactBlocks(input: {
   });
   const revenueBars: Block = { ...bars, ...blockBase("revenue_bars", input, revenue, loadable) };
 
-  return Object.freeze([metricRow, revenueBars]);
+  return Object.freeze([metricRow, revenueBars, ...marginTrend]);
+}
+
+// A margin-trend row's title ends with this; its cells are labelled by quarter.
+const BY_QUARTER = " by quarter";
+
+function percentItem(fact: DerivedQuarterFact): { label: string; value_ref: string; format: string } {
+  return { label: fact.label, value_ref: fact.fact_id, format: formatPercent(fact.value_num) };
 }
 
 function blockBase(
@@ -552,7 +665,16 @@ export function displayedFigures(blocks: ReadonlyArray<Block>): DisplayedFigure[
     }
     if (block.kind === "metric_row") {
       const items = (block.items ?? []) as ReadonlyArray<{ label?: string; format?: string }>;
-      return items.flatMap((item) => item.label && item.format ? [{ metric: item.label, value: item.format, ...shownIn }] : []);
+      // A margin-trend row: the metric is in the title and each cell is a quarter.
+      const trendMetric = typeof block.title === "string" && block.title.endsWith(BY_QUARTER)
+        ? block.title.slice(0, -BY_QUARTER.length)
+        : undefined;
+      return items.flatMap((item) => {
+        if (!item.label || !item.format) return [];
+        return [trendMetric
+          ? { metric: trendMetric, period: item.label, value: item.format, ...shownIn }
+          : { metric: item.label, value: item.format, ...shownIn }];
+      });
     }
     if (block.kind === "revenue_bars") {
       const bars = (block.bars ?? []) as ReadonlyArray<{ label?: string; format?: string }>;

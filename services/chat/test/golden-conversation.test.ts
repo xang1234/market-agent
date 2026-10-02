@@ -128,6 +128,14 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
       assert.ok(refs.length > 0, `${block.kind} carries no value_ref`);
       for (const ref of refs) assert.ok(cited.has(ref), `${block.kind} value_ref ${ref} is not a cited fact`);
     }
+    // No margin trend was asked for, so only the latest quarter's margins and growth
+    // are minted: unused historical ones would cost lookups and inserts every turn.
+    const minted = await client.query<{ quarter: string }>(
+      `select distinct fiscal_year::text || fiscal_period as quarter from facts
+        where method = 'derived' and period_kind = 'fiscal_q' and subject_id = $1::uuid`,
+      [NVDA.issuer_id],
+    );
+    assert.equal(minted.rows.length, 1, `derived facts minted for quarters ${minted.rows.map((row) => row.quarter).join(", ")}`);
   });
 
   await t.test("follow-up 'Compare it with AMD' sets both companies side by side", async () => {
