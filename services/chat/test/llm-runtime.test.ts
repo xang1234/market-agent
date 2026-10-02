@@ -485,6 +485,38 @@ test("a replayed reply crediting AMD's margin to NVIDIA loses that sentence; the
   assert.equal(right.text, "AMD's gross margin is 49.2%. NVDA is larger.");
 });
 
+test("a fiscal-year end credited to the wrong company loses that sentence (#180)", async () => {
+  const blocks = [{
+    kind: "metrics_comparison",
+    title: "Side by side: NVDA FY2025 (ended 2025-01-26), AAPL FY2025 (ended 2025-09-27); fiscal years end 8 months apart",
+    subject_labels: ["NVDA", "AAPL"],
+    metrics: ["Revenue"],
+    cells: [[{ value_ref: "f1", format: "$130.5B" }], [{ value_ref: "f2", format: "$416.2B" }]],
+    data_ref: {
+      params: {
+        fact_bindings: [
+          { fact_id: "f1", fiscal_year: 2025, fiscal_period: "FY", period_end: "2025-01-26" },
+          { fact_id: "f2", fiscal_year: 2025, fiscal_period: "FY", period_end: "2025-09-27" },
+        ],
+      },
+    },
+  }];
+  const narrate = async (reply: string) => {
+    const composed = await composeAnalystBlocksWithLlm({
+      env: BASE_ENV,
+      context: { userIntent: "Compare NVDA's and AAPL's fiscal 2025 revenue", bundleId: "peer_comparison" },
+      blocks: [NARRATIVE_BLOCK],
+      toolCalls: [],
+      factBlocks: blocks,
+      createClient: () => async () => ({ text: reply }),
+    });
+    return (composed[0].segments as Array<{ text: string }>)[0].text;
+  };
+  const right = "NVDA's fiscal 2025 ended 2025-01-26 and AAPL's ended 2025-09-27, 8 months apart.";
+  assert.equal(await narrate(right), right);
+  assert.equal(await narrate("NVDA's fiscal 2025 ended September 27. In fiscal 2025, NVDA is smaller."), "In fiscal 2025, NVDA is smaller.");
+});
+
 // A provider that accepts the request and never answers. Its open connection keeps
 // the event loop alive; a bare pending promise doesn't (AbortSignal.timeout's timer is
 // unref'd), so the interval stands in for it.

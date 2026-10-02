@@ -177,7 +177,14 @@ export async function composeAnalystBlocksWithLlm(input: {
     text,
     [...displayTextsForBlocks(input.factBlocks), ...claimTextsFromToolCalls(input.toolCalls)],
     displayedFigures(input.factBlocks).flatMap((figure) =>
-      figure.company === undefined ? [] : [{ company: figure.company, value: figure.value }]
+      figure.company === undefined ? [] : [
+        { company: figure.company, value: figure.value },
+        // A fiscal year's end is that company's too: the title shows every company's,
+        // so "NVDA's year ended 2025-09-27" (AAPL's) must not pass as supported (#180).
+        // ponytail: month and day only; the year is shared ("fiscal 2025" for both),
+        // so owning it would drop every sentence that opens with the year.
+        ...(figure.period_end ? [{ company: figure.company, value: figure.period_end.slice(5) }] : []),
+      ]
     ),
   );
   if (guarded.removed.length > 0) {
