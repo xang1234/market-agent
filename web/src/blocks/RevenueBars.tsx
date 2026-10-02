@@ -12,7 +12,9 @@ export function RevenueBars({ block }: RevenueBarsProps): ReactElement {
       blockKind="revenue_bars"
       title={block.title}
     >
-      <div className="flex h-32 items-end gap-2">
+      {/* Columns stretch to the row's fixed height, so each bar's track has a
+          definite height for its percentage (#187). */}
+      <div className="flex h-32 gap-2">
         {block.bars.map((bar, index) => (
           <RevenueBarColumn
             key={`${block.id}-bar-${index}`}
@@ -38,13 +40,17 @@ function RevenueBarColumn({ blockId, snapshotId, index, bar }: RevenueBarColumnP
       data-testid={`block-revenue-bars-${blockId}-bar-${index}`}
       data-value-ref={bar.value_ref}
       data-delta-ref={bar.delta_ref}
-      className="flex flex-1 flex-col items-center justify-end gap-1"
+      className="flex flex-1 flex-col items-center gap-1"
     >
-      <div
-        aria-hidden
-        className="w-full rounded-sm bg-accent-soft"
-        style={{ height: `${heightPct}%` }}
-      />
+      {/* The track fills the space above the labels; the bar is a share of it. */}
+      <div className="relative w-full flex-1">
+        <div
+          aria-hidden
+          data-bar
+          className="absolute inset-x-0 bottom-0 rounded-sm bg-accent-soft"
+          style={{ height: `${heightPct}%` }}
+        />
+      </div>
       {/* The value opens its backing fact in the evidence inspector. */}
       <InspectableRef
         snapshotId={snapshotId}

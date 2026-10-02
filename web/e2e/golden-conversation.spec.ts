@@ -24,6 +24,7 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
   // Fact-built blocks: the metric row's figures and the revenue chart.
   await expect(page.getByText('Revenue', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('Quarterly revenue')).toBeVisible()
+  await expectProportionalBars(page)
 
   await ask(page, 'Compare it with AMD')
   await expect(page.getByText(AMD_NARRATIVE)).toBeVisible()
@@ -42,3 +43,16 @@ test('golden conversation renders charts, metrics and inspectable sources, and s
   await expect(page.getByText(AMD_NARRATIVE)).toBeVisible()
   await expect(page.getByText('Quarterly revenue')).toBeVisible()
 })
+
+// The revenue chart draws real bars (#187): the tallest fills most of the chart, and
+// each bar's height matches its share of the tallest, as its inline percentage says.
+async function expectProportionalBars(page: Page) {
+  const bars = page.locator('[data-testid^="block-revenue-bars-"] [data-bar]')
+  await expect(bars.first()).toBeVisible()
+  const measured = await bars.evaluateAll((nodes) =>
+    nodes.map((node) => ({ px: node.getBoundingClientRect().height, pct: parseFloat((node as HTMLElement).style.height) })))
+  expect(measured.length).toBeGreaterThan(1)
+  const tallest = measured.reduce((a, b) => (b.px > a.px ? b : a))
+  expect(tallest.px).toBeGreaterThan(40)
+  for (const bar of measured) expect(bar.px / tallest.px).toBeCloseTo(bar.pct / tallest.pct, 1)
+}
