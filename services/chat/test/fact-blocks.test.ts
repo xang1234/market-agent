@@ -149,6 +149,21 @@ test("the latest quarter shows its margins and QoQ/YoY revenue growth, each a ci
   for (const item of items) assert.ok(cited.has(item.value_ref), `${item.label} is not cited`);
 });
 
+test("a derived figure cites every input's fact and source, not only revenue's", () => {
+  const OTHER_SOURCE = "00000000-0000-4000-a000-000000000002";
+  // The latest gross profit comes from a different filing than its revenue.
+  const facts = quarters(10).map((f, i, all) =>
+    f.metric_key === "gross_profit" && i === all.findLastIndex((g) => g.metric_key === "gross_profit") ? { ...f, source_id: OTHER_SOURCE } : f);
+  const [metricRow] = blocksWithDerived(facts, false);
+  assert.ok((metricRow.source_refs as string[]).includes(OTHER_SOURCE), "the margin's numerator source is cited");
+  const cited = new Set(metricRow.provenance_fact_refs as string[]);
+  const derived = derivedFor(facts).filter((d) => (metricRow.items as Array<{ value_ref: string }>).some((item) => item.value_ref === d.fact_id));
+  for (const d of derived) for (const input of d.input_fact_ids) assert.ok(cited.has(input), `${d.metric} input ${input} is not cited`);
+  // Each cited fact is bound, so the seal can load it.
+  const bound = new Set((metricRow.data_ref as { params: { fact_bindings: Array<{ fact_id: string }> } }).params.fact_bindings.map((b) => b.fact_id));
+  for (const ref of cited) assert.ok(bound.has(ref), `${ref} is cited but not bound`);
+});
+
 test("a margin question also gets each margin across the quarters shown; others don't", () => {
   const facts = quarters(10);
   assert.equal(blocksWithDerived(facts, false).length, 2);

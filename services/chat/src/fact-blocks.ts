@@ -394,6 +394,22 @@ export async function companyListings(
   return new Map(rows.map((row) => [row.issuer_id, { listing_id: row.listing_id, label: row.ticker ?? row.legal_name }]));
 }
 
+// A derived figure cites the facts it was computed from too, so its block's sources
+// include every input's filing (a margin's numerator may come from another source
+// than revenue's) and the inspector can reach each one.
+function withInputs(
+  cited: ReadonlyArray<CitedFact>,
+  derived: ReadonlyArray<DerivedQuarterFact>,
+  loadable: ReadonlyMap<string, VerifierFact>,
+): CitedFact[] {
+  const out = new Map(cited.map((fact) => [fact.fact_id, fact]));
+  for (const id of derived.flatMap((fact) => fact.input_fact_ids)) {
+    const input = loadable.get(id);
+    if (input && !out.has(id)) out.set(id, citedFact(input));
+  }
+  return [...out.values()];
+}
+
 function citedFact(fact: VerifierFact): CitedFact {
   return { fact_id: fact.fact_id, source_id: fact.source_id ?? "" };
 }
@@ -515,7 +531,7 @@ export function buildIssuerFactBlocks(input: {
   const period = quarterLabel(latest);
 
   const metricRow: Block = {
-    ...blockBase("metric_row", input, [...latestFacts.map(({ fact }) => fact), ...latestDerived], loadable),
+    ...blockBase("metric_row", input, withInputs([...latestFacts.map(({ fact }) => fact), ...latestDerived], latestDerived, loadable), loadable),
     title: `Latest quarter (${period})`,
     items: [
       ...latestFacts.map(({ fact, label }) => ({
@@ -538,7 +554,7 @@ export function buildIssuerFactBlocks(input: {
       if (cells.length < 2) return [];
       const facts = derived.filter((fact) => cells.some((cell) => cell.value_ref === fact.fact_id));
       return [{
-        ...blockBase("metric_row", input, facts, loadable, `margin_trend_${metric}`),
+        ...blockBase("metric_row", input, withInputs(facts, facts, loadable), loadable, `margin_trend_${metric}`),
         title: `${label}${BY_QUARTER}`,
         items: cells,
       }];
