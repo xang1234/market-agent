@@ -13,8 +13,14 @@ import { createChatFinancialRuntime, type ChatFinancialMode } from "../src/finan
 import type { ChatSubjectPreResolution } from "../src/subjects.ts";
 
 export const MISSING_ISSUER = "4f000000-0000-4000-8000-0000000000a9";
+// A listing of issuer A, as the resolver offers for a ticker (seeded by the tests that use AMBL).
+export const LISTING_A = "4f000000-0000-4000-8000-0000000000b1";
+export const INSTRUMENT_A = "4f000000-0000-4000-8000-0000000000c1";
 
-/** AAA and BBB resolve to the seeded issuers; AMB is ambiguous between them; CCC has no name or data; anything else is unknown. */
+/**
+ * AAA and BBB resolve to the seeded issuers; AMB is ambiguous between them, and AMBL
+ * between a listing of A and issuer B; CCC has no name or data; anything else is unknown.
+ */
 export function resolveMention(mention: string): Promise<ChatSubjectPreResolution> {
   const resolved = (id: string, label: string) => ({ status: "resolved", subject_ref: { kind: "issuer", id }, display_label: label }) as unknown as ChatSubjectPreResolution;
   const table: Record<string, ChatSubjectPreResolution> = {
@@ -27,6 +33,13 @@ export function resolveMention(mention: string): Promise<ChatSubjectPreResolutio
       status: "needs_clarification", input_text: mention, normalized_input: mention, message: "ambiguous",
       candidates: [
         { subject_ref: { kind: "issuer", id: IDS.issuerA }, display_name: "Alpha Industries Inc.", confidence: 0.5 },
+        { subject_ref: { kind: "issuer", id: IDS.issuerB }, display_name: "Beta Holdings Corp.", confidence: 0.5 },
+      ],
+    } as ChatSubjectPreResolution,
+    AMBL: {
+      status: "needs_clarification", input_text: mention, normalized_input: mention, message: "ambiguous",
+      candidates: [
+        { subject_ref: { kind: "listing", id: LISTING_A }, display_name: "Alpha Industries Inc. (XNAS)", confidence: 0.5 },
         { subject_ref: { kind: "issuer", id: IDS.issuerB }, display_name: "Beta Holdings Corp.", confidence: 0.5 },
       ],
     } as ChatSubjectPreResolution,

@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import {
   createInMemoryCandidateRepository,
   type ScreenerCandidate,
+  type ScreenerCandidateInput,
 } from "../src/candidate.ts";
 
 const APPLE_ID = "11111111-1111-4111-a111-111111111111";
 const MSFT_ID = "22222222-2222-4222-a222-222222222222";
 const AS_OF = "2026-04-22T15:30:00.000Z";
 
-function candidate(overrides: Partial<ScreenerCandidate> = {}): ScreenerCandidate {
+function candidate(overrides: Partial<ScreenerCandidateInput> = {}): ScreenerCandidateInput {
   return {
     subject_ref: { kind: "issuer", id: APPLE_ID },
     display: { primary: "Apple Inc.", ticker: "AAPL", mic: "XNAS" },
@@ -159,5 +160,5 @@ test("createInMemoryCandidateRepository accepts nullable numerics on quote and f
 test("repository list is frozen — caller cannot mutate the registry", () => {
   const repo = createInMemoryCandidateRepository([candidate()]);
   const list = repo.list();
-  assert.throws(() => (list as ScreenerCandidate[]).push(candidate()));
+  assert.throws(() => (list as ScreenerCandidate[]).push(list[0]!));
 });

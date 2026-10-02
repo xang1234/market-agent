@@ -5,8 +5,8 @@ import {
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
+  S3Client,
   type GetObjectCommandOutput,
-  type S3Client,
 } from "@aws-sdk/client-s3";
 
 import {
@@ -17,6 +17,30 @@ import {
   type PutResult,
   type StoredBlob,
 } from "./object-store.ts";
+
+export type S3ClientSettings = {
+  region?: string;
+  endpoint?: string;
+  forcePathStyle?: boolean;
+  credentials?: { accessKeyId: string; secretAccessKey: string };
+  // Bounds each S3 call, so a stalled read fails instead of hanging its caller.
+  timeouts?: { connectionMs: number; requestMs: number };
+};
+
+// Other services build their client here, from evidence's own SDK install: the
+// store sends evidence's command classes, so a client from a second install (a
+// different SDK version) would mix versions.
+export function createS3Client(settings: S3ClientSettings): S3Client {
+  return new S3Client({
+    region: settings.region,
+    ...(settings.endpoint ? { endpoint: settings.endpoint } : {}),
+    ...(settings.forcePathStyle ? { forcePathStyle: true } : {}),
+    ...(settings.credentials ? { credentials: settings.credentials } : {}),
+    ...(settings.timeouts
+      ? { requestHandler: { connectionTimeout: settings.timeouts.connectionMs, requestTimeout: settings.timeouts.requestMs } }
+      : {}),
+  });
+}
 
 export type S3ObjectStoreConfig = {
   client: S3Client;

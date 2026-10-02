@@ -30,6 +30,7 @@ function screen(
         page: Object.freeze({ limit: 50 }),
       }),
     screen_id: overrides.screen_id,
+    user_id: overrides.user_id ?? USER_ID,
     name: overrides.name,
     updated_at: overrides.updated_at,
   });

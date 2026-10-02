@@ -8,6 +8,8 @@ import {
   READER_TOOL_ERROR_CODES,
   ReaderToolError,
   createReaderToolDispatcher,
+  type ReaderExtractionToolInput,
+  type ReaderExtractionToolOutput,
   type ReaderToolHandler,
   type ReaderToolHandlerMap,
 } from "../src/reader-tool-dispatcher.ts";
@@ -16,7 +18,8 @@ import { loadToolRegistry } from "../src/registry.ts";
 const SAMPLE_DOC_UUID = "70a0cc2e-e198-4b59-a5c9-9bd2da4a359b";
 const SAMPLE_SOURCE_UUID = "11111111-1111-4111-a111-111111111111";
 
-function emptyHandler(): ReaderToolHandler {
+// Every extraction tool shares one input/output shape.
+function emptyHandler(): (input: ReaderExtractionToolInput) => Promise<ReaderExtractionToolOutput> {
   return async () => ({
     items: [],
     source_ids: [SAMPLE_SOURCE_UUID],
@@ -362,6 +365,7 @@ test("dispatch rejects source_policy on search_raw_documents until evidence sear
 
   assert.equal(result.ok, false);
   if (result.ok === false) {
+    assert.ok("error_code" in result, "a handler argument error, not an authorization rejection");
     assert.equal(result.error_code, "INVALID_ARGUMENT");
     assert.match(result.message, /source_policy/);
   }
@@ -430,7 +434,7 @@ test("dispatch returns INVALID_ARGUMENT when arguments is not an object", async 
     bundle_id: "document_research",
     audience: "reader",
     tool_name: "extract_events",
-    arguments: "not-an-object" as unknown as object,
+    arguments: "not-an-object",
   });
 
   assert.equal(result.ok, false);
@@ -470,8 +474,10 @@ test("dispatch invokes the registered handler with the parsed input on the succe
   assert.equal(result.ok, true);
   if (result.ok === true) {
     assert.equal(result.tool_name, "extract_candidate_facts");
-    assert.deepEqual(result.result.items, [{ kind: "candidate_fact", value: 42 }]);
-    assert.deepEqual([...result.result.source_ids], [SAMPLE_SOURCE_UUID]);
+    const output = result.result;
+    assert.ok("items" in output, "an extraction tool returns items");
+    assert.deepEqual(output.items, [{ kind: "candidate_fact", value: 42 }]);
+    assert.deepEqual([...output.source_ids], [SAMPLE_SOURCE_UUID]);
   }
   assert.deepEqual(receivedInput, {
     document_id: SAMPLE_DOC_UUID,

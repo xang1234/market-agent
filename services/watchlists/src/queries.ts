@@ -294,7 +294,7 @@ function validateWatchlistInput(input: WatchlistInput): void {
   if (input.mode !== "manual") {
     const spec = input.membership_spec;
     const requiredKey = `${input.mode}_id`;
-    if (typeof spec !== "object" || spec === null || Array.isArray(spec)) {
+    if (!isSpecObject(spec)) {
       throw new WatchlistValidationError(`membership_spec.${requiredKey}: must be a non-empty string`);
     }
     const value = spec[requiredKey];
@@ -327,4 +327,8 @@ function watchlistRowFromDb(row: WatchlistDbRow | undefined): WatchlistRow {
 
 function isoString(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : String(value);
+}
+
+function isSpecObject(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

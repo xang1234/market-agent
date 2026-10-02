@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createPostgresCandidateRepository } from "../src/db-candidates.ts";
+import { fakeRows } from "../../shared/test/fake-query.ts";
 
 test("Postgres screener candidate repository reloads candidates on each list", async () => {
   const db = new FakeCandidateDb();
@@ -43,7 +44,7 @@ class FakeCandidateDb {
           currency: "USD",
           as_of: "2026-05-08T00:00:00.000Z",
         },
-      ] as R[]);
+      ]);
     }
     if (text.includes("from facts f")) {
       return rows([]);
@@ -55,8 +56,9 @@ class FakeCandidateDb {
   }
 }
 
-function rows<R extends Record<string, unknown>>(rows: R[]): { rows: R[] } {
-  return { rows };
+// R is inferred from the calling query's return type.
+function rows<R>(rows: readonly unknown[]): { rows: R[] } {
+  return { rows: fakeRows<R>(rows) };
 }
 
 test("Postgres screener candidate repository computes current/prior fundamentals", async () => {
@@ -100,7 +102,7 @@ class FakeFundamentalsDb {
           currency: "USD",
           as_of: "2026-05-08T00:00:00.000Z",
         },
-      ] as R[]);
+      ]);
     }
     if (text.includes("f.entitlement_channels")) {
       // Matches the canonical reader's eligibility query (not the legacy CTE,
@@ -115,11 +117,11 @@ class FakeFundamentalsDb {
           fact("eps_diluted", 2024, 2),
           fact("shares_outstanding_diluted", 2024, 10),
           fact("revenue", 2023, 80),
-        ] as R[],
+        ],
       );
     }
     if (text.includes("from insider_transactions")) {
-      return rows([{ net_shares: "5000" }] as R[]);
+      return rows([{ net_shares: "5000" }]);
     }
     throw new Error(`unhandled query: ${text}`);
   }

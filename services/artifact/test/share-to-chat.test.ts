@@ -7,6 +7,8 @@ import {
   type ShareableArtifactSource,
 } from "../src/share-to-chat.ts";
 import type { QueryExecutor } from "../../evidence/src/types.ts";
+import type { FactRow } from "../../evidence/src/fact-repo.ts";
+import { fakeRows } from "../../shared/test/fake-query.ts";
 
 const ANALYZE_SNAPSHOT = "11111111-1111-4111-8111-111111111111";
 const FINDING_SNAPSHOT = "22222222-2222-4222-8222-222222222222";
@@ -45,9 +47,7 @@ class FakeEgressDb implements QueryExecutor {
 
 function block(overrides: Partial<ShareableArtifactBlock> & { snapshot_id: string; id: string }): ShareableArtifactBlock {
   return Object.freeze({
-    id: overrides.id,
     kind: overrides.kind ?? "perf_comparison",
-    snapshot_id: overrides.snapshot_id,
     data_ref: overrides.data_ref ?? Object.freeze({ kind: "snapshot.transform", id: "x" }),
     source_refs: overrides.source_refs ?? Object.freeze([]),
     as_of: overrides.as_of ?? "2026-04-29T00:00:00.000Z",
@@ -203,7 +203,7 @@ test("shareArtifactToChat rejects unauthorized refs when the egress helper filte
     ],
     egress: {
       db: new FakeEgressDb(new Set([FACT_ID, DENIED_FACT_ID])),
-      listFactsForEgress: async () => [factRow({ fact_id: FACT_ID })],
+      listFactsForEgress: async () => fakeRows<FactRow>([factRow({ fact_id: FACT_ID })]),
     },
   });
 

@@ -8,6 +8,7 @@ import {
   writeCitationLog,
   writeCitationLogsForBlocks,
 } from "../src/citation.ts";
+import { fakeRows } from "../../shared/test/fake-query.ts";
 
 async function seedMinimalSnapshot(client: Client): Promise<string> {
   const { rows } = await client.query<{ snapshot_id: string }>(
@@ -299,7 +300,7 @@ test("writeCitationLogsForBlocks writes extracted citation rows in one statement
       assert.match(text, /insert into citation_logs/);
       queries.push(values ?? []);
       return {
-        rows: [
+        rows: fakeRows<R>([
           {
             citation_log_id: randomUUID(),
             created_at: new Date("2026-04-29T00:00:00.000Z"),
@@ -308,7 +309,7 @@ test("writeCitationLogsForBlocks writes extracted citation rows in one statement
             citation_log_id: randomUUID(),
             created_at: new Date("2026-04-29T00:00:01.000Z"),
           },
-        ] as R[],
+        ]),
         command: "INSERT",
         rowCount: 2,
         oid: 0,
@@ -351,12 +352,12 @@ test("writeCitationLogsForBlocks writes every extracted citation row", async () 
       assert.match(text, /insert into citation_logs/);
       inserted.push(values ?? []);
       return {
-        rows: [
+        rows: fakeRows<R>([
           {
             citation_log_id: randomUUID(),
             created_at: new Date("2026-04-29T00:00:00.000Z"),
           },
-        ] as R[],
+        ]),
         command: "INSERT",
         rowCount: 1,
         oid: 0,

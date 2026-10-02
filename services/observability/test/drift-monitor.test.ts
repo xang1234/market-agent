@@ -6,6 +6,7 @@ import {
   runGoldenEvalDriftMonitor,
   type GoldenEvalCase,
 } from "../src/index.ts";
+import { fakePgQuery } from "../../shared/test/fake-query.ts";
 
 test("runGoldenEvalDriftMonitor persists a run, computes drift, and flags policy failure by default", async () => {
   const db = fakeDb();
@@ -109,7 +110,7 @@ function fakeDb(options: { includePrevious?: boolean; driftCurrentRunId?: string
   const includePrevious = options.includePrevious ?? true;
   return {
     queries,
-    async query(text: string, values?: unknown[]) {
+    query: fakePgQuery(async (text: string, values?: unknown[]) => {
       queries.push({ text, values: values ?? [] });
       if (/insert into eval_run_results/i.test(text)) {
         currentResult = JSON.parse(String(values?.[3]));
@@ -149,7 +150,7 @@ function fakeDb(options: { includePrevious?: boolean; driftCurrentRunId?: string
         };
       }
       return { rows: [] };
-    },
+    }),
   };
 }
 

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   createTurnToolPolicy,
+  type TurnToolPolicy,
 } from "../src/turn-policy.ts";
 import { DEFAULT_TOOL_CALL_BUDGET } from "../src/budget-gate.ts";
 import { loadToolRegistry, type ToolDefinition } from "../src/registry.ts";
@@ -128,20 +129,19 @@ test("createTurnToolPolicy validates budget and usage before bundle selection", 
 
 test("turn tool policy stress-limits cost classes and returns an explicit partial-answer note", () => {
   const registry = loadToolRegistry();
-  let policy = createTurnToolPolicy({
+  let policy = activePolicy(createTurnToolPolicy({
     registry,
     audience: "analyst",
     classification: { bundle_id: "single_subject_analysis" },
     budget: { low: 8, medium: 4, high: 2 },
-  });
-  assert.equal(policy.ok, true);
+  }));
 
   for (let i = 0; i < 12; i += 1) {
     const decision = policy.checkToolCall({ tool_name: "get_segment_facts" });
     if (i < 2) {
-      assert.equal(decision.ok, true);
+      assert.ok(decision.ok);
       assert.equal(decision.cost_class, "high");
-      policy = policy.recordAcceptedToolCall(decision);
+      policy = activePolicy(policy.recordAcceptedToolCall(decision));
       continue;
     }
 
@@ -161,7 +161,7 @@ test("turn tool policy stress-limits cost classes and returns an explicit partia
   }
 
   const lowCostDecision = policy.checkToolCall({ tool_name: "resolve_subjects" });
-  assert.equal(lowCostDecision.ok, true);
+  assert.ok(lowCostDecision.ok);
   assert.equal(lowCostDecision.cost_class, "low");
 });
 
@@ -312,3 +312,8 @@ test("turn tool policy keeps model-selected tools inside the system-selected bun
   assert.equal(decision.reason, "tool_not_in_bundle");
   assert.equal(decision.bundle_id, "quote_lookup");
 });
+
+function activePolicy(policy: TurnToolPolicy): Extract<TurnToolPolicy, { ok: true }> {
+  assert.ok(policy.ok, "the turn policy is active");
+  return policy;
+}

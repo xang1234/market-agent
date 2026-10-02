@@ -146,7 +146,7 @@ test("assertQuoteContract rejects a quote missing required metadata fields", () 
     delete tampered[drop];
     assert.throws(
       () => assertQuoteContract(tampered),
-      undefined,
+      Error,
       `expected missing ${drop} to be rejected`,
     );
   }

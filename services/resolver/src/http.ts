@@ -292,8 +292,8 @@ async function readBody(req: NodeJS.ReadableStream): Promise<string> {
   const chunks: Buffer[] = [];
   let totalBytes = 0;
   for await (const chunk of req) {
-    const buffer =
-      Buffer.isBuffer(chunk) ? chunk : chunk instanceof Uint8Array ? Buffer.from(chunk) : Buffer.from(String(chunk));
+    // Buffer.from copies a string or a non-Buffer Uint8Array alike.
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     totalBytes += buffer.length;
     if (totalBytes > MAX_REQUEST_BODY_BYTES) {
       throw new RequestBodyTooLargeError();

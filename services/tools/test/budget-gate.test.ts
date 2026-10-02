@@ -88,9 +88,9 @@ test("checkToolCallBudget stress-limits high-cost tools independently from low-c
     budget: DEFAULT_TOOL_CALL_BUDGET,
   });
 
-  assert.equal(exhausted.ok, false);
+  assert.ok(exhausted.ok === false && "cost_class" in exhausted, "an exhausted budget is a budget rejection");
   assert.equal(exhausted.cost_class, "high");
-  assert.equal(lowCost.ok, true);
+  assert.ok(lowCost.ok);
   assert.equal(lowCost.cost_class, "low");
 });
 

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { MarginNode, PeerCompareNode, PlanThreshold, ThresholdNode } from "../src/contracts.ts";
-import { margin, type FinancialOperand } from "../src/operations.ts";
-import { evaluateComparison, peerCompare, thresholdPredicate, type PredicateOutcome } from "../src/predicates.ts";
+import { margin, type FinancialOperand, type PredicateOutcome } from "../src/operations.ts";
+import { evaluateComparison, peerCompare, thresholdPredicate } from "../src/predicates.ts";
 import { FY2023, operand } from "./operand-fixtures.ts";
 
 const thresholdNode = (comparison: ThresholdNode["comparison"]): ThresholdNode => ({

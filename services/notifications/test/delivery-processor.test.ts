@@ -11,6 +11,7 @@ import {
   type NotificationPayload,
 } from "../src/delivery-processor.ts";
 import { runNotificationWorkerOnce } from "../src/worker.ts";
+import { fakeQuery } from "../../shared/test/fake-query.ts";
 
 const ALERT_ID = "11111111-1111-4111-8111-111111111111";
 const AGENT_ID = "22222222-2222-4222-8222-222222222222";
@@ -88,8 +89,8 @@ test("processPendingNotifications blocks outbound channels when fact entitlement
   assert.equal(result.delivered, 0);
   assert.equal(result.failed, 1);
   assert.equal(db.updates[0]?.status, "failed");
-  assert.match(db.updates[0]?.metadata.channels[0].error, /not entitled for email/);
-  assert.match(db.updates[0]?.metadata.channels[1].error, /not entitled for push/);
+  assert.match(db.updates[0]?.metadata.channels[0].error ?? "", /not entitled for email/);
+  assert.match(db.updates[0]?.metadata.channels[1].error ?? "", /not entitled for push/);
 });
 
 test("processPendingNotifications blocks digest when referenced facts are not push entitled", async () => {
@@ -116,7 +117,7 @@ test("processPendingNotifications blocks digest when referenced facts are not pu
   assert.equal(result.failed, 1);
   assert.equal(db.updates[0]?.status, "failed");
   assert.equal(db.updates[0]?.metadata.channels[0].channel, "digest");
-  assert.match(db.updates[0]?.metadata.channels[0].error, /not entitled for push/);
+  assert.match(db.updates[0]?.metadata.channels[0].error ?? "", /not entitled for push/);
 });
 
 test("processPendingNotifications batches digest rows and throttles burst channels per user", async () => {
@@ -302,7 +303,7 @@ function fakeNotificationDb(options: FakeDbOptions) {
     updates,
     queries,
     queryValues,
-    async query(text: string, values?: unknown[]) {
+    query: fakeQuery(async (text: string, values?: unknown[]) => {
       queries.push(text);
       queryValues.push(values ?? []);
       if (/from alerts_fired/i.test(text)) {
@@ -326,7 +327,7 @@ function fakeNotificationDb(options: FakeDbOptions) {
         return { rows: [] };
       }
       return { rows: [] };
-    },
+    }),
   };
 }
 

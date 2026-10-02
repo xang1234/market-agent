@@ -272,10 +272,13 @@ stop_processes() {
   done
 }
 
+# Ready means accepting TCP: on a fresh volume the image first runs a temporary
+# init server on the Unix socket only, then restarts, so a socket check can pass
+# just before the host's connection (migrate) is reset (#172).
 wait_for_postgres() {
   local attempt
   for attempt in $(seq 1 30); do
-    if compose exec -T postgres pg_isready -U "$DEV_POSTGRES_USER" -d "$DEV_POSTGRES_DB" >/dev/null 2>&1; then
+    if compose exec -T postgres pg_isready -h 127.0.0.1 -U "$DEV_POSTGRES_USER" -d "$DEV_POSTGRES_DB" >/dev/null 2>&1; then
       return
     fi
     sleep 1

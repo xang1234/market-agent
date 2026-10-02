@@ -3,24 +3,25 @@ import assert from "node:assert/strict";
 import {
   buildSeriesCacheAuditDashboard,
   seriesCacheIdentity,
+  type NormalizedSeriesQuery,
   type SeriesCacheAuditEvent,
 } from "../src/series-query.ts";
 import { aaplListing, msftListing } from "./fixtures.ts";
 
-const BASE_QUERY = {
+const BASE_QUERY: NormalizedSeriesQuery = {
   subject_refs: [aaplListing, msftListing],
   range: {
     start: "2026-01-01T00:00:00.000Z",
     end: "2026-04-01T00:00:00.000Z",
   },
-  interval: "1d" as const,
-  basis: "split_and_div_adjusted" as const,
-  normalization: "pct_return" as const,
+  interval: "1d",
+  basis: "split_and_div_adjusted",
+  normalization: "pct_return",
 };
 
 function event(
   result: SeriesCacheAuditEvent["result"],
-  overrides: Partial<typeof BASE_QUERY> = {},
+  overrides: Partial<NormalizedSeriesQuery> = {},
 ): SeriesCacheAuditEvent {
   return {
     cacheName: "series",

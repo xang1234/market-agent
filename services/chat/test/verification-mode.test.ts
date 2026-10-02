@@ -86,6 +86,21 @@ test("display_unverified: a failed snapshot seal still shows the blocks, unsaved
   assert.deepEqual(events.at(-1)?.unverified, { persisted: false, failures: sealFailures, blocks: [BLOCK] });
 });
 
+test("display_unverified: the completion still reports the guard's dropped sentences (#144)", async () => {
+  const removed = ["At 74.6%, NVDA had a higher gross margin than AMD at 49.2%."];
+  const failing = runtime(RUNTIME_FAILURE);
+  const events = await runTurn({
+    analystToolRuntime: async (context) => ({ ...(await failing(context)), narrative_removed: removed }),
+    verificationMode: "display_unverified",
+    persistAssistantMessage: async () => {
+      throw new Error("must not persist an unverified answer");
+    },
+  });
+
+  assert.equal(events.at(-1)?.type, "turn.completed");
+  assert.deepEqual(events.at(-1)?.narrative_removed, removed);
+});
+
 test("strict mode: a failed snapshot seal is still a turn.error", async () => {
   const events = await runTurn({
     analystToolRuntime: runtime({ ok: true, failures: [] }),

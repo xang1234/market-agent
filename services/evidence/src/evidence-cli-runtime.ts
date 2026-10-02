@@ -3,8 +3,7 @@
 // the S3-backed object store, and a Fair-Access SEC client. The caller owns the
 // pool lifecycle — call `await runtime.db.end()` in a finally.
 import { Pool } from "pg";
-import { S3Client } from "@aws-sdk/client-s3";
-import { S3ObjectStore } from "./s3-object-store.ts";
+import { createS3Client, S3ObjectStore } from "./s3-object-store.ts";
 import { SecEdgarClient } from "./sec-edgar.ts";
 
 export type EvidenceCliRuntime = {
@@ -32,10 +31,10 @@ export function createEvidenceCliRuntime(): EvidenceCliRuntime {
   }
 
   const secClient = SecEdgarClient.fromEnv();
-  const s3 = new S3Client({
+  const s3 = createS3Client({
     region: process.env.S3_REGION,
-    ...(process.env.S3_ENDPOINT ? { endpoint: process.env.S3_ENDPOINT } : {}),
-    ...(process.env.S3_FORCE_PATH_STYLE === "true" ? { forcePathStyle: true } : {}),
+    endpoint: process.env.S3_ENDPOINT,
+    forcePathStyle: process.env.S3_FORCE_PATH_STYLE === "true",
     ...(process.env.S3_ACCESS_KEY_ID && process.env.S3_SECRET_ACCESS_KEY
       ? {
           credentials: {
