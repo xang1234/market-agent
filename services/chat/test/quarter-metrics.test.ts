@@ -25,14 +25,16 @@ function fact(metric_key: string, fiscal_year: number, fiscal_period: string, va
   };
 }
 
-function derive(facts: ReadonlyArray<IssuerFundamentalFact>, opts: { noDatesFor?: string } = {}) {
+function derive(facts: ReadonlyArray<IssuerFundamentalFact>, opts: { noDatesFor?: string; shiftedDatesFor?: string } = {}) {
   const key = (m: string, y: number, p: string) => `${m}|${y}|${p}`;
   const byKey = new Map(facts.map((f) => [key(f.metric_key, f.fiscal_year!, f.fiscal_period!), f]));
   const shownRevenue = facts.filter((f) => f.metric_key === "revenue");
   return deriveQuarterMetrics({
     shownRevenue,
     fact: (m, y, p) => byKey.get(key(m, y, p)),
-    period: (id) => id === opts.noDatesFor ? undefined : { fact_id: id, period_kind: "fiscal_q", period_start: "2025-10-27", period_end: "2026-01-25" },
+    period: (id) => id === opts.noDatesFor ? undefined
+      : id === opts.shiftedDatesFor ? { fact_id: id, period_kind: "fiscal_q", period_start: "2025-11-03", period_end: "2026-02-01" }
+      : { fact_id: id, period_kind: "fiscal_q", period_start: "2025-10-27", period_end: "2026-01-25" },
   });
 }
 
@@ -75,6 +77,13 @@ test("no margin from mixed currencies, zero revenue, or a quarter without period
   assert.deepEqual(derive([fact("revenue", 2026, "Q1", 0), fact("gross_profit", 2026, "Q1", 5e9)]), []);
   const revenue = fact("revenue", 2026, "Q1", 10e9);
   assert.deepEqual(derive([revenue, fact("gross_profit", 2026, "Q1", 5e9)], { noDatesFor: revenue.fact_id }), []);
+});
+
+test("no margin when the line and revenue under one quarter label cover different dates", () => {
+  const revenue = fact("revenue", 2026, "Q1", 10e9);
+  const gross = fact("gross_profit", 2026, "Q1", 5e9);
+  assert.deepEqual(derive([revenue, gross], { shiftedDatesFor: gross.fact_id }), []);
+  assert.equal(derive([revenue, gross]).length, 1, "the same dates still derive the margin");
 });
 
 test("the latest quarter gets QoQ and YoY revenue growth from the right earlier quarters", () => {

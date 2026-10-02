@@ -36,7 +36,7 @@ export function quarterBefore(fiscalYear: number, fiscalPeriod: string, back: nu
 /**
  * The derived metrics for the quarters shown (oldest first):
  * - each margin for every shown quarter whose statement line and revenue are both
- *   reported, in one currency, with revenue non-zero;
+ *   reported, for the same dates, in one currency, with revenue non-zero;
  * - QoQ and YoY revenue growth for the latest quarter, when the earlier quarter's
  *   revenue is reported and positive.
  * `fact(metric, fiscal_year, fiscal_period)` finds a reported fact; `period(fact_id)`
@@ -51,7 +51,7 @@ export function deriveQuarterMetrics(input: {
   for (const revenue of input.shownRevenue) {
     for (const margin of MARGINS) {
       const line = input.fact(margin.numerator, revenue.fiscal_year!, revenue.fiscal_period!);
-      if (!line || !sameCurrency(line, revenue) || native(revenue) === 0) continue;
+      if (!line || !sameCurrency(line, revenue) || !samePeriod(line, revenue, input.period) || native(revenue) === 0) continue;
       const spec = derived(margin.metric, margin.label, native(line) / native(revenue), revenue, [line, revenue], input.period);
       if (spec) out.push(spec);
     }
@@ -109,4 +109,17 @@ function native(fact: IssuerFundamentalFact): number {
 
 function sameCurrency(a: IssuerFundamentalFact, b: IssuerFundamentalFact): boolean {
   return (a.currency ?? "USD") === (b.currency ?? "USD");
+}
+
+// Each metric's fiscal facts are made canonical on their own, ignoring dates, so the
+// line and revenue under one FY/Q label can cover different periods; a margin of
+// those would be wrong (#178).
+function samePeriod(
+  a: IssuerFundamentalFact,
+  b: IssuerFundamentalFact,
+  period: (factId: string) => VerifierFact | undefined,
+): boolean {
+  const left = period(a.fact_id);
+  const right = period(b.fact_id);
+  return left?.period_start === right?.period_start && left?.period_end === right?.period_end;
 }
