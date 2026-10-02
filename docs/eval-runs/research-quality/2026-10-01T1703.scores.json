@@ -1,0 +1,105 @@
+{
+  "run": "2026-10-01T1703",
+  "model": "opencode-go/qwen3.8-max",
+  "scores": {
+    "single-latest-quarter": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 0,
+      "counterarguments": 0,
+      "no_invented_numbers": 2,
+      "notes": "numbers cited correct, but no notion of what is strong, does not calculated q-o-q change , growth, margins"
+    },
+    "margin-trend-loss-quarter": {
+      "correct_companies": 2,
+      "comparable_periods": 1,
+      "figures_match_sources": 2,
+      "conclusions_justified": 0,
+      "counterarguments": 0,
+      "no_invented_numbers": 2,
+      "notes": "margins are not part of the data, not sure if agent is instructed to calculate, but they are not in the data and the agent doesn't reason over it in terms of trends, just cites numbers. answer only. questions asked over the last 8 quarters, it just cited 1st and last one without analysis on the 8 quarters. Operating income is not provided - not clear if it be defined or should the agent take initiative to define and calculate it "
+    },
+    "what-changed-gross-margin": {
+      "correct_companies": 2,
+      "comparable_periods": 1,
+      "figures_match_sources": 0,
+      "conclusions_justified": 0,
+      "counterarguments": 0,
+      "no_invented_numbers": 2,
+      "notes": "Did not calculate margins, reasoned over revenue and profit directly"
+    },
+    "peer-two": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 1,
+      "no_invented_numbers": 2,
+      "notes": "did not compare prices"
+    },
+    "peer-three": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 1,
+      "no_invented_numbers": 2,
+      "notes": "Just mechanically cited and compared numbers, did not compare industry or companies"
+    },
+    "fiscal-year-trap": {
+      "correct_companies": 2,
+      "comparable_periods": 0,
+      "figures_match_sources": 0,
+      "conclusions_justified": 0,
+      "counterarguments": 0,
+      "no_invented_numbers": 1,
+      "notes": "fell into the fiscal year trap, did not state fiscal year difference "
+    },
+    "segment-drill-down": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 0,
+      "counterarguments": 0,
+      "no_invented_numbers": 2,
+      "notes": "just a simple breakdown, no mention of concentration"
+    },
+    "missing-segments": {
+      "correct_companies": 2,
+      "comparable_periods": "n/a",
+      "figures_match_sources": "n/a",
+      "conclusions_justified": "n/a",
+      "counterarguments": "n/a",
+      "no_invented_numbers": 2,
+      "notes": "did not invent segment numberss"
+    },
+    "missing-cash-flow": {
+      "correct_companies": 2,
+      "comparable_periods": "n/a",
+      "figures_match_sources": "n/a",
+      "conclusions_justified": "n/a",
+      "counterarguments": "n/a",
+      "no_invented_numbers": 2,
+      "notes": ""
+    },
+    "follow-up-memory": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 2,
+      "counterarguments": 0,
+      "no_invented_numbers": 2,
+      "notes": "no counter arguments "
+    },
+    "ticker-page-compare": {
+      "correct_companies": 2,
+      "comparable_periods": 2,
+      "figures_match_sources": 2,
+      "conclusions_justified": 1,
+      "counterarguments": 0,
+      "no_invented_numbers": 2,
+      "notes": "no counter argument, did not mention fiscal year mismatch"
+    }
+  }
+}

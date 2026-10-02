@@ -23,11 +23,22 @@ the owner scores by hand, so answer quality can be compared from one run to the 
 
 ## Running and scoring
 
-The runner is the remaining part of #124 and waits on analyst mode (#123). It will:
-- send each question's turns through analyst mode (a live model on the frozen data);
-- write a dated report with each answer and links to its blocks and sources;
-- keep the owner's scores beside the answers.
+1. Start analyst mode (a live model on the frozen data; every model call is billed to your keys):
+   `DEV_PROFILE=chat DEV_MODE=analyst ./scripts/dev-shell.sh up`.
+2. Run the questions: `node --experimental-strip-types scripts/research-quality-eval.ts run [base URL]`. It writes two
+   files to `docs/eval-runs/research-quality/`, named by the run's UTC time:
+   - `<run>.md`, the report. For each question it shows the expectation, every turn's answer and a link to the thread.
+     Prose is shown in full with cited figures in bold, comparison tables as tables, and other blocks by their title and
+     figures. Open the thread for charts and sources.
+   - `<run>.scores.json`, the scores. Every score starts as `null`; not-applicable criteria are already set to `"n/a"`.
+3. Score each question 0, 1 or 2 in `<run>.scores.json`, with notes, and commit both files.
+4. Run `node --experimental-strip-types scripts/research-quality-eval.ts summary`. It prints one line per run (total and
+   per criterion, leaving out N/A and unscored), so trends show from run to run. It also lists every 0 on
+   `no_invented_numbers`, and each of those becomes a regression test.
 
-Then:
-- a score of **0 on `no_invented_numbers`** becomes a regression test;
-- the first scored run is the baseline.
+The first scored run is the baseline. Each run records the primary model from the LLM settings, since a model change
+alone can move scores. If the settings can't be read, the run stops before sending anything; set
+`EVAL_MODEL=<channel/model>` to name the model yourself (it only names the run; the app still falls back as configured).
+When fallbacks are configured, or unknown because the settings couldn't be read, the run is labelled with them and the
+report warns, because chat doesn't yet record which model answered each turn (#183). The report is saved after each
+question, so an error late in a run keeps the answers before it.

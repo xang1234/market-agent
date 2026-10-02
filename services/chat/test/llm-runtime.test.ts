@@ -52,6 +52,23 @@ test("createLlmThreadTitleModel gives reasoning models enough output budget", as
   assert.ok((observedMaxTokens ?? 0) >= 256, `expected a generous title budget for reasoning models, got ${observedMaxTokens}`);
 });
 
+test("composeAnalystBlocksWithLlm gives reasoning models room to think and still answer", async () => {
+  let observedMaxTokens: number | undefined;
+  await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
+    blocks: [richTextBlock("Deterministic note")],
+    toolCalls: [],
+    createClient: () => async (_deployment, request) => {
+      observedMaxTokens = request.maxTokens;
+      return { text: "Apple's revenue rose." };
+    },
+  });
+
+  // At 800, qwen3.8-max spent the whole budget reasoning and returned no text (#124).
+  assert.ok((observedMaxTokens ?? 0) >= 4096, `expected an answer budget that survives reasoning, got ${observedMaxTokens}`);
+});
+
 test("composeAnalystBlocksWithLlm returns original blocks when no deployment is configured", async () => {
   const blocks = [richTextBlock("Deterministic note")];
   const result = await composeAnalystBlocksWithLlm({
@@ -226,6 +243,45 @@ test("a reply with no supported sentence falls back to a pointer at the cited fi
   const { text } = await composeWithReply("Revenue grew 45%. EPS hit $3.10.");
   assert.match(text, /select any value to see its source/);
   assert.doesNotMatch(text, /45|3\.10/);
+});
+
+async function composeWith(result: { text: string; truncated?: boolean }, factBlocks?: ReadonlyArray<Record<string, unknown>>) {
+  let reasoning: string | undefined;
+  const blocks = await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "What changed in NVDA's gross margin?", bundleId: "single_subject_analysis" },
+    blocks: [NARRATIVE_BLOCK],
+    toolCalls: [],
+    ...(factBlocks ? { factBlocks } : {}),
+    createClient: () => async (_deployment, request) => {
+      reasoning = request.reasoning;
+      return result;
+    },
+  });
+  return { text: (blocks[0].segments as Array<{ text: string }>)[0].text, reasoning };
+}
+
+test("an answer cut off at the token limit is never shown; the figures pointer is", async () => {
+  // The #124 baseline showed "...The displayed figures do not include a Q".
+  const { text, reasoning } = await composeWith({ text: "Gross margin fell. The displayed figures do not include a Q", truncated: true }, FACT_BLOCKS);
+  assert.match(text, /select any value to see its source/);
+  assert.equal(reasoning, "low", "the answer asks for low reasoning effort");
+});
+
+test("an empty answer replaces the placeholder line instead of leaving it on screen", async () => {
+  assert.match((await composeWith({ text: "" }, FACT_BLOCKS)).text, /select any value to see its source/);
+  // No figures to point to: say there's no answer rather than show the placeholder.
+  const { text } = await composeWith({ text: "  " });
+  assert.notEqual(text, "placeholder");
+  assert.match(text, /No written answer is available/);
+});
+
+test("a thread title cut off at the token limit falls back instead of being saved", async () => {
+  const model = createLlmThreadTitleModel({
+    env: BASE_ENV,
+    createClient: () => async () => ({ text: "Apple Margin Wa", truncated: true }),
+  });
+  await assert.rejects(async () => model({ userIntent: "Why did Apple sell off?", assistantText: "Margins compressed." }), /cut off/);
 });
 
 test("without fact blocks the narrative is passed through unguarded, as before", async () => {

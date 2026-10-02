@@ -9,8 +9,8 @@
 // cash flow, guidance or filings text), which several questions rely on: the
 // honest answer there is "not available", never a number.
 //
-// ponytail: the runner that sends these through analyst mode and writes the
-// dated report waits on #123 (analyst mode, PR #149); scoring is manual.
+// scripts/research-quality-eval.ts runs them through analyst mode and writes the
+// dated report; scoring is manual (docs/engineering/research-quality-eval.md).
 
 export type CriterionId =
   | "correct_companies"

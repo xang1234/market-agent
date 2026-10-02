@@ -32,6 +32,7 @@ test("parseLlmEnv reads flat DSA-compatible channel settings", () => {
       baseUrl: "https://api.openai.com/v1",
       apiKeys: ["sk-openai"],
       models: ["gpt-4.1", "o3"],
+      reasoningModels: [],
       enabled: true,
     },
     {
@@ -41,6 +42,7 @@ test("parseLlmEnv reads flat DSA-compatible channel settings", () => {
       baseUrl: "https://api.deepseek.com/v1",
       apiKeys: ["ds-primary", "ds-fallback"],
       models: ["deepseek-chat"],
+      reasoningModels: [],
       enabled: true,
     },
   ]);
@@ -50,6 +52,19 @@ test("parseLlmEnv reads flat DSA-compatible channel settings", () => {
     { channel: "openai", model: "o3" },
   ]);
   assert.deepEqual(settings.agentModel, { channel: "openai", model: "o3" });
+});
+
+test("a channel can mark models newer than pi-ai's catalog as reasoning models", () => {
+  const deployments = buildLlmDeploymentOrder(parseLlmEnv({
+    LLM_CHANNELS: "gateway",
+    LLM_GATEWAY_BASE_URL: "https://gateway.example/v1",
+    LLM_GATEWAY_MODELS: "brand-new-thinker,plain-model",
+    LLM_GATEWAY_REASONING_MODELS: "brand-new-thinker",
+    LITELLM_MODEL: "gateway/brand-new-thinker",
+    LITELLM_FALLBACK_MODELS: "gateway/plain-model",
+  }));
+
+  assert.deepEqual(deployments.map((d) => [d.model, d.reasoning]), [["brand-new-thinker", true], ["plain-model", undefined]]);
 });
 
 test("parseLlmEnv deduplicates channels and reports malformed model refs", () => {

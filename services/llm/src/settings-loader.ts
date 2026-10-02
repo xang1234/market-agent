@@ -78,8 +78,11 @@ function formatCompletion(completion: LlmCompletion): string {
   if (completion.outcome === "failed") {
     return `[llm] ${channel}/${model} ${completion.latencyMs}ms failed (${completion.code ?? "unknown"})`;
   }
-  const tokens = completion.usage
-    ? `tokens in=${completion.usage.inputTokens} out=${completion.usage.outputTokens} total=${completion.usage.totalTokens}`
+  const usage = completion.usage;
+  const tokens = usage
+    ? `tokens in=${usage.inputTokens} out=${usage.outputTokens}` +
+      (usage.reasoningTokens === undefined ? "" : ` (reasoning=${usage.reasoningTokens})`) +
+      ` total=${usage.totalTokens}`
     : "tokens n/a";
   return `[llm] ${channel}/${model} ${completion.latencyMs}ms ${tokens}`;
 }

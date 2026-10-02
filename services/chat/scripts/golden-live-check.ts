@@ -54,7 +54,7 @@ const REQUEST_TIMEOUT_MS = 60_000;
 
 // Every request is bounded: by the caller's signal, else by a per-request timeout, so a
 // server that accepts a connection and never answers fails the check instead of hanging it.
-async function api<T>(
+export async function api<T>(
   base: string,
   method: string,
   path: string,
@@ -77,13 +77,21 @@ export async function runTurn(
   threadId: string,
   question: string,
   timeoutMs = 180_000,
+  // A thread opened from a ticker page (#138) names its subject on the stream.
+  subject?: string,
 ): Promise<TurnOutcome> {
   const messageId = randomUUID();
   // One deadline for the whole turn: the message POST, the stream request, and every
   // body read (it rejects a pending read too), so a server that stops answering at any
   // point (crash, half-open connection) ends the turn instead of hanging the check.
   const signal = AbortSignal.timeout(timeoutMs);
-  const params = new URLSearchParams({ run_id: randomUUID(), turn_id: messageId, user_intent: question, user_id: USER_ID });
+  const params = new URLSearchParams({
+    run_id: randomUUID(),
+    turn_id: messageId,
+    user_intent: question,
+    user_id: USER_ID,
+    ...(subject ? { subject } : {}),
+  });
   const decoder = new TextDecoder();
   let transcript = "";
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;

@@ -10,9 +10,12 @@ import type {
 import { displayedFigures, displayTextsForBlocks } from "./fact-blocks.ts";
 import { keepSupportedSentences } from "./narrative-guard.ts";
 
-// Shown when the guard strips every sentence of the model's prose.
+// Shown when the guard strips every sentence of the model's prose, or the model gave
+// no usable answer (empty, or cut off at the token limit).
 const FACT_BLOCKS_FALLBACK_TEXT =
   "The reported figures below come from the company's filings; select any value to see its source.";
+// The same case for an answer without figures to point to.
+const NO_ANSWER_FALLBACK_TEXT = "No written answer is available for this question; try asking again.";
 
 type LlmRuntimeContext = {
   userIntent?: string;
@@ -50,7 +53,10 @@ export function createLlmThreadTitleModel(options: LlmRuntimeOptions = {}): Thre
       // A title is short, but reasoning models think before answering; 32 tokens
       // truncates them mid-thought and yields an empty title. Leave room to reason.
       maxTokens: 512,
+      reasoning: "off",
     });
+    // A cut-off title reads as a typo; the generator falls back to the default one.
+    if (result.truncated) throw new Error("thread title was cut off at the token limit");
     return result.text;
   };
 }
@@ -105,10 +111,21 @@ export async function composeAnalystBlocksWithLlm(input: {
       },
     ],
     temperature: 0.2,
-    maxTokens: 800,
+    // Effort is set here; the length of the answer is the prompt's job. The ceiling is a
+    // safety net for reasoning that runs long (it counts reasoning tokens too): at 800 a
+    // reasoning model spent it all thinking and answered nothing (#124 baseline, #175).
+    reasoning: "low",
+    maxTokens: 8192,
   });
   const text = result.text.trim();
-  if (text.length === 0) return input.blocks;
+  // Never show a sentence cut off mid-way, or the placeholder the turn started with.
+  if (result.truncated || text.length === 0) {
+    console.warn(`[chat] model answer was ${result.truncated ? "cut off at the token limit" : "empty"}; showing the fallback sentence`);
+    return rewriteFirstRichTextBlock(
+      input.blocks,
+      input.factBlocks?.length ? FACT_BLOCKS_FALLBACK_TEXT : NO_ANSWER_FALLBACK_TEXT,
+    );
+  }
   if (!input.factBlocks?.length) return rewriteFirstRichTextBlock(input.blocks, text);
 
   const guarded = keepSupportedSentences(

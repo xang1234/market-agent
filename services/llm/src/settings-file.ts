@@ -224,6 +224,10 @@ function isManagedLlmEnvLine(line: string): boolean {
   if (key === "") return false;
   if (key === "LLM_CHANNELS" || key === "LITELLM_MODEL" || key === "LITELLM_FALLBACK_MODELS") return true;
   if (key === "AGENT_LITELLM_MODEL") return true;
+  // Hand-edited, not in the Settings UI, so a save keeps it; without this its
+  // _MODELS suffix would mark it managed and drop it. ponytail: a channel whose own
+  // name ends in "_reasoning" would have its MODELS line kept too (and duplicated).
+  if (/^LLM_[A-Z0-9_]+_REASONING_MODELS$/u.test(key)) return false;
   return /^LLM_[A-Z0-9_]+_(PROTOCOL|BASE_URL|API_KEY|API_KEYS|MODELS|ENABLED)$/u.test(key);
 }
 

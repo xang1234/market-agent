@@ -10,16 +10,24 @@ export type LlmChatMessage = {
   content: string;
 };
 
+/** How much a reasoning model should think; each model gets the nearest level it supports. */
+export type LlmReasoningLevel = "off" | "minimal" | "low" | "medium" | "high";
+
 export type LlmChatRequest = {
   messages: ReadonlyArray<LlmChatMessage>;
   temperature?: number;
+  /** Ceiling on output tokens, reasoning included. */
   maxTokens?: number;
+  /** Omitted: the provider's default (often a lot of reasoning). Ignored by non-reasoning models. */
+  reasoning?: LlmReasoningLevel;
 };
 
 export type LlmUsage = {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  /** The part of outputTokens spent reasoning, when the provider reports it. */
+  reasoningTokens?: number;
 };
 
 export type LlmChatResult = {
@@ -28,6 +36,8 @@ export type LlmChatResult = {
   tool_call_id?: string;
   /** Token counts, when the provider reports them. */
   usage?: LlmUsage;
+  /** The reply stopped at maxTokens, so its text may end mid-sentence (or be empty). */
+  truncated?: boolean;
 };
 
 /** One provider attempt, for cost/latency logging (analyst mode, #123). A failed
