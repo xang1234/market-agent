@@ -8,6 +8,7 @@ import {
   type LlmChatRequest,
   type LlmChatResult,
   LlmProviderError,
+  type LlmReasoningLevel,
 } from "./router.ts";
 import type { LlmDeployment } from "./channel-config.ts";
 
@@ -22,7 +23,7 @@ type PiAssistantMessage = {
   content?: ReadonlyArray<PiContentBlock>;
   stopReason?: string;
   errorMessage?: string;
-  usage?: { input?: number; output?: number; totalTokens?: number };
+  usage?: { input?: number; output?: number; totalTokens?: number; reasoning?: number };
 };
 
 type PiContext = {
@@ -30,16 +31,31 @@ type PiContext = {
   messages: ReadonlyArray<{
     role: "user" | "assistant";
     content: string;
+    timestamp: number;
   }>;
 };
 
-type PiModel = {
+// What pi-ai's model catalog knows about a model: whether it reasons, which effort
+// levels it supports (and their provider values), and its API quirks.
+export type PiCatalogModel = {
+  /** pi-ai keys some provider quirks on this id, whatever the channel is called here. */
+  provider?: string;
+  reasoning: boolean;
+  thinkingLevelMap?: Readonly<Record<string, string | null | undefined>>;
+  compat?: Readonly<Record<string, unknown>>;
+  contextWindow?: number;
+  /** The model's output limit; a request for more is capped to it. */
+  maxTokens?: number;
+};
+
+export type PiModel = {
   id: string;
   name: string;
   api: "openai-completions";
   provider: string;
   baseUrl?: string;
-  reasoning: false;
+  reasoning: boolean;
+  thinkingLevelMap?: PiCatalogModel["thinkingLevelMap"];
   input: Array<"text">;
   cost: {
     input: number;
@@ -49,9 +65,7 @@ type PiModel = {
   };
   contextWindow: number;
   maxTokens: number;
-  compat: {
-    supportsStore: false;
-  };
+  compat: Readonly<Record<string, unknown>>;
 };
 
 type PiCompleteOptions = {
@@ -60,6 +74,8 @@ type PiCompleteOptions = {
   temperature?: number;
   maxTokens?: number;
   signal?: AbortSignal;
+  // pi-ai's streamSimple clamps the level and reads "off" as thinking disabled.
+  reasoning?: LlmReasoningLevel;
 };
 
 // Providers see this app by name, not the SDK's generic user agent; OpenCode Go
@@ -85,22 +101,70 @@ export type PiComplete = (
 
 export type CreatePiLlmChatClientInput = {
   complete: PiComplete;
+  /** The catalog's entry for a deployment's model on its endpoint, if listed. */
+  catalogModel?: (deployment: LlmDeployment) => PiCatalogModel | undefined;
+  /** The nearest reasoning level the model supports (pi-ai's clampThinkingLevel). */
+  clampLevel?: (model: PiModel, level: LlmReasoningLevel) => LlmReasoningLevel;
 };
 
 export async function createDefaultPiLlmChatClient(): Promise<LlmChatClient> {
-  const pi = await import("@earendil-works/pi-ai");
+  const [pi, completions, builtins] = await Promise.all([
+    import("@earendil-works/pi-ai"),
+    import("@earendil-works/pi-ai/api/openai-completions"),
+    import("@earendil-works/pi-ai/providers/all"),
+  ]);
+  type StreamSimple = (model: unknown, context: unknown, options: unknown) => { result(): Promise<PiAssistantMessage> };
   return createPiLlmChatClient({
-    complete: pi.complete as unknown as PiComplete,
+    complete: (model, context, options) =>
+      (completions.streamSimple as unknown as StreamSimple)(model, pi.normalizeContext(context as never), options).result(),
+    catalogModel: createCatalogLookup(
+      builtins.getBuiltinProviders().flatMap((provider) => builtins.getBuiltinModels(provider) as PiCatalogEntry[]),
+    ),
+    clampLevel: (model, level) => pi.clampThinkingLevel(model as never, level) as LlmReasoningLevel,
   });
 }
 
+export type PiCatalogEntry = PiCatalogModel & { id: string; baseUrl: string; api: string };
+
+// The endpoint a protocol uses when its channel sets no base URL.
+const IMPLICIT_BASE_URLS: Readonly<Record<string, string>> = { openai: "https://api.openai.com/v1" };
+
+/**
+ * Finds a deployment's model in pi-ai's catalog by endpoint and model id, so a channel
+ * named anything still finds it. The catalog may list a model under another API (OpenAI's
+ * o3 is openai-responses); whether it reasons, its levels and limits still hold, but its
+ * compat flags describe that API, so they're kept only for openai-completions entries,
+ * the API every channel speaks here.
+ */
+export function createCatalogLookup(entries: Iterable<PiCatalogEntry>): (deployment: LlmDeployment) => PiCatalogModel | undefined {
+  const catalog = new Map<string, PiCatalogModel>();
+  for (const entry of entries) {
+    const key = catalogKey(entry.baseUrl, entry.id);
+    if (entry.api === "openai-completions") catalog.set(key, entry);
+    else if (!catalog.has(key)) catalog.set(key, { ...entry, compat: undefined });
+  }
+  return (deployment) => {
+    const baseUrl = deployment.baseUrl ?? IMPLICIT_BASE_URLS[deployment.protocol];
+    return baseUrl === undefined ? undefined : catalog.get(catalogKey(baseUrl, deployment.model));
+  };
+}
+
+const catalogKey = (baseUrl: string, modelId: string) => `${baseUrl.replace(/\/+$/u, "")}\u0000${modelId}`;
+
 export function createPiLlmChatClient(input: CreatePiLlmChatClientInput): LlmChatClient {
-  return async (deployment, request, execution = {}) => {
+  return async (deployment, requested, execution = {}) => {
     try {
+      const known = input.catalogModel?.(deployment);
+      // Never ask for more output than the model allows: the provider may reject it.
+      // ponytail: unknown models get the request as is; their limit isn't known.
+      const request = known?.maxTokens !== undefined && (requested.maxTokens ?? 0) > known.maxTokens
+        ? { ...requested, maxTokens: known.maxTokens }
+        : requested;
+      const model = modelFromDeployment(deployment, request, known);
       const message = await input.complete(
-        modelFromDeployment(deployment, request),
+        model,
         contextFromRequest(request),
-        optionsFromDeployment(deployment, request, execution),
+        optionsFromDeployment(deployment, request, execution, reasoningFor(model, request, input.clampLevel)),
       );
       if (message.stopReason === "error" || message.stopReason === "aborted") {
         throw providerErrorFromMessage(message);
@@ -113,14 +177,22 @@ export function createPiLlmChatClient(input: CreatePiLlmChatClientInput): LlmCha
   };
 }
 
-function modelFromDeployment(deployment: LlmDeployment, request: LlmChatRequest): PiModel {
+// The catalog describes the model when it lists it; otherwise a model the channel
+// config names as reasoning (LLM_<NAME>_REASONING_MODELS) gets pi-ai's default,
+// OpenAI-style reasoning_effort, and any other model is treated as non-reasoning.
+function modelFromDeployment(deployment: LlmDeployment, request: LlmChatRequest, known: PiCatalogModel | undefined): PiModel {
+  // With no level requested the model is declared non-reasoning, so pi-ai sends nothing
+  // and the provider default applies; for a reasoning model pi-ai would read a missing
+  // level as "off" (e.g. DeepSeek's thinking: disabled), changing callers that never asked.
+  const reasoning = request.reasoning !== undefined && (known?.reasoning ?? deployment.reasoning === true);
   return {
     id: deployment.model,
     name: `${deployment.channel}/${deployment.model}`,
     api: "openai-completions",
-    provider: deployment.channel,
+    provider: known?.provider ?? deployment.channel,
     ...(deployment.baseUrl === null ? {} : { baseUrl: deployment.baseUrl }),
-    reasoning: false,
+    reasoning,
+    ...(known?.thinkingLevelMap ? { thinkingLevelMap: known.thinkingLevelMap } : {}),
     input: ["text"],
     cost: {
       input: 0,
@@ -128,21 +200,38 @@ function modelFromDeployment(deployment: LlmDeployment, request: LlmChatRequest)
       cacheRead: 0,
       cacheWrite: 0,
     },
-    contextWindow: 128000,
+    contextWindow: known?.contextWindow ?? 128000,
     maxTokens: request.maxTokens ?? 16384,
     compat: {
       supportsStore: false,
+      ...(known === undefined && reasoning ? { supportsReasoningEffort: true } : {}),
+      ...known?.compat,
     },
   };
 }
 
+// The requested level, moved to the nearest one the model supports (a model that can't
+// switch reasoning off gets its lowest). An explicit "off" goes through, so pi-ai
+// disables thinking in the model's own format. Nothing is sent for a non-reasoning
+// model, or when the caller leaves it to the provider.
+function reasoningFor(
+  model: PiModel,
+  request: LlmChatRequest,
+  clamp: CreatePiLlmChatClientInput["clampLevel"],
+): PiCompleteOptions["reasoning"] {
+  if (!model.reasoning || request.reasoning === undefined) return undefined;
+  return clamp ? clamp(model, request.reasoning) : request.reasoning;
+}
+
 function contextFromRequest(request: LlmChatRequest): PiContext {
   const systemPrompt = messagesByRole(request.messages, "system").join("\n\n").trim();
+  const timestamp = Date.now();
   const messages = request.messages
     .filter(isConversationMessage)
     .map((message) => Object.freeze({
       role: message.role,
       content: message.content,
+      timestamp,
     }));
   return Object.freeze({
     ...(systemPrompt.length === 0 ? {} : { systemPrompt }),
@@ -160,8 +249,10 @@ function optionsFromDeployment(
   deployment: LlmDeployment,
   request: LlmChatRequest,
   execution: LlmClientExecutionOptions,
+  reasoning: PiCompleteOptions["reasoning"],
 ): PiCompleteOptions {
   return Object.freeze({
+    ...(reasoning === undefined ? {} : { reasoning }),
     ...(deployment.apiKeys[0] ? { apiKey: deployment.apiKeys[0] } : {}),
     // ponytail: sent to every provider (others ignore x-opencode-session; it's an opaque
     // thread id). A call outside any conversation (a title, a channel test) is its own.
@@ -181,16 +272,20 @@ function resultFromMessage(message: PiAssistantMessage): LlmChatResult {
     .map((block) => block.text)
     .join("\n")
     .trim();
+  // A reply that hit maxTokens can look complete; callers decide whether to show it.
+  const truncated = message.stopReason === "length" ? { truncated: true } : {};
   const usage = message.usage;
   if (usage === undefined || typeof usage.input !== "number" || typeof usage.output !== "number") {
-    return Object.freeze({ text });
+    return Object.freeze({ text, ...truncated });
   }
   return Object.freeze({
     text,
+    ...truncated,
     usage: Object.freeze({
       inputTokens: usage.input,
       outputTokens: usage.output,
       totalTokens: usage.totalTokens ?? usage.input + usage.output,
+      ...(typeof usage.reasoning === "number" ? { reasoningTokens: usage.reasoning } : {}),
     }),
   });
 }
