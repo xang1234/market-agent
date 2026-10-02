@@ -42,6 +42,29 @@ test("runTurn gives up at its deadline when the stream goes silent", async (t) =
   assert.ok(Date.now() - startedAt < 5_000, "returned near the deadline, not hung");
 });
 
+test("runTurn ends at its deadline even when the stream ignores the abort (#185)", async (t) => {
+  // An open SSE stream that keeps the turn going and never ends, and that the deadline's
+  // abort doesn't reach: in the eval run a 180 s turn waited 460 s, until the server closed it.
+  const keepAlive = setInterval(() => {}, 1_000);
+  t.after(() => clearInterval(keepAlive));
+  const realFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = realFetch; });
+  globalThis.fetch = async (input) => {
+    if (String(input).includes("/messages")) return new Response("{}", { status: 200 });
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("event: turn.started\ndata: {}\n\n"));
+      },
+      cancel: () => new Promise<void>(() => {}), // cancelling never settles either
+    });
+    return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+
+  const startedAt = Date.now();
+  assert.equal(await runTurn("http://stack.test", "thread-1", "Compare NVDA with AMD.", 300), "timeout");
+  assert.ok(Date.now() - startedAt < 2_000, "returned at the deadline, not when the stream ended");
+});
+
 const blocks = (...kinds: string[]) => kinds.map((kind, index) => ({ id: `b${index}`, kind }));
 
 test("runTurn's deadline also covers a message POST that never answers", async (t) => {

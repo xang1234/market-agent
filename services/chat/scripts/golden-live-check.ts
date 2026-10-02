@@ -107,7 +107,9 @@ export async function runTurn(
     });
     reader = response.body!.getReader();
     for (;;) {
-      const { value, done } = await reader.read();
+      // Raced against the deadline: an abort doesn't always reach a pending read on an
+      // open stream (a 180 s turn waited 460 s, until the server closed it, #185).
+      const { value, done } = await untilAborted(reader.read(), signal);
       if (done) return "timeout"; // the server closed the stream before the turn ended
       transcript += decoder.decode(value, { stream: true });
       if (/event: turn\.completed/.test(transcript)) return "turn.completed";
@@ -117,8 +119,27 @@ export async function runTurn(
     if (signal.aborted) return "timeout";
     throw error;
   } finally {
-    await reader?.cancel().catch(() => {});
+    // Not awaited: cancelling a stalled stream can wait on the same stall.
+    void reader?.cancel().catch(() => {});
   }
+}
+
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    if (signal.aborted) return onAbort();
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
 }
 
 export async function runGoldenLiveCheck(
