@@ -251,6 +251,29 @@ test("the production deadlines bound the answer and the title calls", () => {
   assert.ok(TITLE_DEADLINES.attemptMs < ANSWER_DEADLINES.attemptMs);
 });
 
+test("the answer is asked for an analyst's view: takeaway, trend, strengths, counterpoint, gaps (#179)", async () => {
+  let systemPrompt = "";
+  await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "Analyze NVDA", bundleId: "single_subject_analysis" },
+    blocks: [richTextBlock("Deterministic note")],
+    toolCalls: [],
+    createClient: () => async (_deployment, request) => {
+      systemPrompt = request.messages[0]?.content ?? "";
+      return { text: "answer" };
+    },
+  });
+  for (const part of [/takeaway/i, /trend across every period/i, /strong or weak/i, /counterpoint grounded in the data/i, /cannot tell/i, /concentrated in one segment/i, /does not answer the question/i, /do not analyze other figures\s+in its place/i]) {
+    assert.match(systemPrompt, part);
+  }
+  // Context comes from the data only, and the existing rules stay.
+  assert.match(systemPrompt, /never add facts, numbers, or events that are not in the tool context/);
+  assert.match(systemPrompt, /never compute new figures/);
+  assert.match(systemPrompt, /stale/);
+  // The no-keys golden replay matches on the opening sentence.
+  assert.match(systemPrompt, /^Write a concise investment research answer/);
+});
+
 test("composeAnalystBlocksWithLlm falls back through shared router deployments", async () => {
   const calls: string[] = [];
   const result = await composeAnalystBlocksWithLlm({

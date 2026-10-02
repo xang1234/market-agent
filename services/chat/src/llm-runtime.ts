@@ -112,7 +112,21 @@ export async function composeAnalystBlocksWithLlm(input: {
       {
         role: "system",
         content: [
+          // The golden replay fixture matches on this opening sentence.
           "Write a concise investment research answer for the chat user.",
+          // An analyst's answer, not a list of numbers (#179): the #124 baseline scored
+          // conclusions 6/18 and counterarguments 2/18.
+          "Answer as a buy-side analyst would, in short plain paragraphs, in this order:",
+          "(1) the takeaway: your view, answering the question directly;",
+          "(2) the trend across every period shown, not just the latest, in words;",
+          "(3) what is strong or weak and why, judged against the other periods or companies shown;",
+          "(4) one specific counterpoint grounded in the data that cuts against the takeaway;",
+          "(5) what the data shown cannot tell, such as periods or metrics that are missing.",
+          "If the data shown does not answer the question (the metric or period asked for is",
+          "not there), say so plainly and briefly instead, and do not analyze other figures",
+          "in its place.",
+          "Name context the data itself supports, such as revenue concentrated in one",
+          "segment, but never add facts, numbers, or events that are not in the tool context.",
           "Use the provided tool context only; do not invent citations or data.",
           "The figures shown to the user are listed in displayed_figures, each with the metric",
           "and, in a comparison, the company it belongs to. Quote a figure only exactly as it",
