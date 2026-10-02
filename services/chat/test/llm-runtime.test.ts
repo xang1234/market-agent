@@ -227,6 +227,21 @@ test("an exact fit leaves the last attempt out, so the total never cuts one", as
   assert.deepEqual(calls, ["gpt-4.1"]);
 });
 
+test("the last attempt gets only what is left of the total, so it still fails as a router timeout", async (t) => {
+  // 2 × 50 ms in 101 ms leaves 1 ms of headroom; routing overhead can use it up, so the
+  // second attempt's deadline comes from the remaining budget rather than racing a total timer.
+  const startedAt = Date.now();
+  await assert.rejects(composeAnalystBlocksWithLlm({
+    env: TWO_DEPLOYMENTS,
+    context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
+    blocks: [richTextBlock("Deterministic note")],
+    toolCalls: [],
+    deadlines: { attemptMs: 50, totalMs: 101 },
+    createClient: () => () => hang(t),
+  }), (error) => error instanceof LlmRouterError && error.attempts.length === 2 && error.attempts.every((a) => a.code === "timeout"));
+  assert.ok(Date.now() - startedAt < 1_000, "the chain ends near its total");
+});
+
 test("the production deadlines bound the answer and the title calls", () => {
   for (const deadlines of [ANSWER_DEADLINES, TITLE_DEADLINES]) {
     // A primary and its fallback both fit, with headroom, so the total never cuts an attempt.

@@ -19,10 +19,11 @@ const FACT_BLOCKS_FALLBACK_TEXT =
 const NO_ANSWER_FALLBACK_TEXT = "No written answer is available for this question; try asking again.";
 
 // A provider can accept a request and never answer (one held a turn 516 s, #184).
-// Each attempt gets a deadline, after which the router tries the next deployment. Only
-// as many attempts as fit in the total are made, so every attempt ends on its own
-// deadline and a failure is the router's error naming each one; the total is a
-// backstop. Two attempts (a primary and its fallback) fit in each budget below.
+// Each attempt gets a deadline, after which the router tries the next deployment: the
+// smaller of its own limit and what is left of the total. There is no separate timer
+// on the whole call, so every attempt ends on its own deadline and a failure is the
+// router's error naming each one, while the chain still ends by the total. Two
+// attempts (a primary and its fallback) fit in each budget below.
 export type ModelDeadlines = { attemptMs: number; totalMs: number };
 export const ANSWER_DEADLINES: ModelDeadlines = { attemptMs: 80_000, totalMs: 180_000 };
 export const TITLE_DEADLINES: ModelDeadlines = { attemptMs: 20_000, totalMs: 45_000 };
@@ -32,11 +33,12 @@ function withDeadlines(deadlines: ModelDeadlines): LlmExecutionControls {
   if (!Number.isInteger(attemptMs) || !Number.isInteger(totalMs) || attemptMs <= 0 || attemptMs >= totalMs) {
     throw new RangeError(`model deadlines need 0 < attemptMs < totalMs (integers); got ${attemptMs} and ${totalMs}`);
   }
+  const endsAt = performance.now() + totalMs;
   return {
-    signal: AbortSignal.timeout(totalMs),
-    // Attempts whose deadlines sum to strictly less than the total, so none is cut by it.
+    // Only attempts that a full deadline could fit in the total are started.
     maxAttempts: Math.ceil(totalMs / attemptMs) - 1,
-    executeAttempt: (_attempt, dispatch) => dispatch(AbortSignal.timeout(deadlines.attemptMs)),
+    executeAttempt: (_attempt, dispatch) =>
+      dispatch(AbortSignal.timeout(Math.max(1, Math.min(attemptMs, Math.floor(endsAt - performance.now()))))),
   };
 }
 
