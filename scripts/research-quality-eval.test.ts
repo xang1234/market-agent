@@ -1,7 +1,19 @@
 import assert from "node:assert/strict";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
-import { blankScores, renderBlock, renderReport, summarize, type ScoresFile } from "./research-quality-eval.ts";
+import {
+  blankScores,
+  modelForRun,
+  readRuns,
+  renderBlock,
+  renderReport,
+  runStamp,
+  summarize,
+  type ScoresFile,
+} from "./research-quality-eval.ts";
 import { QUESTIONS, RUBRIC } from "./research-quality-questions.ts";
 
 test("blocks render for scoring: cited figures bold, tables as tables, the rest by title and figures", () => {
@@ -62,4 +74,54 @@ test("summary totals each run, leaves out n/a and unscored, and flags invented n
 
   scored.scores["peer-two"]!.counterarguments = 3 as never;
   assert.throws(() => summarize([scored]), /peer-two\.counterarguments is 3/);
+});
+
+test("summary checks a hand-edited file against the question set before totalling it", () => {
+  const unscoredIn = (file: ScoresFile) => Number(summarize([file]).split("\n")[1]!.split(" | ").at(-1));
+  const complete = blankScores("r", "m");
+
+  // A question deleted from the file still counts, as unscored: an incomplete run can't look complete.
+  const missing = blankScores("r", "m");
+  delete (missing.scores as Record<string, unknown>)["peer-two"];
+  assert.equal(unscoredIn(missing), unscoredIn(complete));
+  assert.equal(unscoredIn({ ...complete, scores: {} as ScoresFile["scores"] }), unscoredIn(complete));
+
+  const typo = blankScores("r", "m");
+  (typo.scores as Record<string, unknown>)["peer-tow"] = typo.scores["peer-two"];
+  assert.throws(() => summarize([typo]), /unknown question 'peer-tow'/);
+
+  // "n/a" only where the question declares it, and only "n/a" there.
+  const hidden = blankScores("r", "m");
+  hidden.scores["peer-two"]!.no_invented_numbers = "n/a";
+  assert.throws(() => summarize([hidden]), /peer-two\.no_invented_numbers is "n\/a", but it applies/);
+  const overwritten = blankScores("r", "m");
+  overwritten.scores["missing-cash-flow"]!.counterarguments = 2;
+  assert.throws(() => summarize([overwritten]), /missing-cash-flow\.counterarguments is 2, but this question declares it N\/A/);
+});
+
+test("a run names its model or doesn't start, and its files are stamped to the second", () => {
+  assert.equal(modelForRun("opencode-go/qwen3.8-max", undefined), "opencode-go/qwen3.8-max");
+  assert.equal(modelForRun(undefined, "openai/o3"), "openai/o3", "EVAL_MODEL names it when settings can't");
+  assert.throws(() => modelForRun(undefined, undefined, "reading /v1/dev/llm-settings failed: 403"), /403.*EVAL_MODEL/);
+  assert.throws(() => modelForRun(null, "  "), /EVAL_MODEL/);
+  assert.equal(runStamp(new Date("2026-10-02T04:55:12.345Z")), "2026-10-02T045512");
+});
+
+test("summary on a fresh checkout reads no runs instead of failing", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "eval-runs-"));
+  assert.deepEqual(readRuns(join(dir, "missing")), []);
+});
+
+test("turns after one that didn't complete are shown as not sent", () => {
+  const question = QUESTIONS.find((q) => q.id === "follow-up-memory")!;
+  const report = renderReport("r", "m", "http://app", [{
+    question,
+    threadId: "t",
+    turns: [
+      { message: question.turns[0]!.message, outcome: "timeout", blocks: [] },
+      { message: question.turns[1]!.message, outcome: "skipped", blocks: [] },
+    ],
+  }]);
+  assert.match(report, /Turn ended with timeout/);
+  assert.match(report, /Not sent: an earlier turn didn't complete/);
 });
