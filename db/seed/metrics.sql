@@ -70,6 +70,7 @@ insert into metrics (metric_key, display_name, unit_class, aggregation, interpre
 
   -- Growth
   ('revenue_growth_yoy',    'Revenue Growth (YoY)',       'percent',  'yoy',          'higher_is_better', 'derived', 1, 'Year-over-year percentage change in revenue.'),
+  ('revenue_growth_qoq',    'Revenue Growth (QoQ)',       'percent',  'qoq',          'higher_is_better', 'derived', 1, 'Quarter-over-quarter percentage change in revenue.'),
   ('eps_growth_yoy',        'EPS Growth (YoY)',           'percent',  'yoy',          'higher_is_better', 'derived', 1, 'Year-over-year percentage change in diluted EPS.'),
 
   -- Analyst consensus (vendor)

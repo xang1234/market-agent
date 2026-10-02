@@ -158,6 +158,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
       issuers: issuersOf(covered),
       wantsPeers: /\bpeers?\b/i.test(context.userIntent ?? ""),
       wantsSegments: /\bsegments?\b/i.test(context.userIntent ?? ""),
+      wantsMarginTrend: /\b(margins?|profitab\w*)\b/i.test(context.userIntent ?? ""),
       requestedListings: requestedListingsOf(covered),
       snapshotId: result.snapshot_id,
       asOf,
