@@ -28,7 +28,7 @@ import {
   type ChatPriorSubjectsLoader,
   type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
-import { loadTurnFactBlocks } from "./fact-blocks.ts";
+import { comparedCompanyProfiles, loadTurnFactBlocks } from "./fact-blocks.ts";
 import { loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import {
@@ -166,7 +166,12 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     loadRecentConversation(pool(), { threadId: context.threadId, limit: CONVERSATION_MESSAGES }),
   ]);
   let narrativeRemoved: ReadonlyArray<string> = [];
+  const companyProfiles = await comparedCompanyProfiles(pool(), factBlocks).catch((reason) => {
+    console.warn("[chat] company profiles unavailable; answering without industry context", reason);
+    return [];
+  });
   const llmBlocks = await composeAnalystBlocksWithLlm({
+    companyProfiles,
     context,
     blocks: result.blocks,
     toolCalls,

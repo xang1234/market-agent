@@ -366,6 +366,29 @@ export function listingsForComparison(
 
 // Each company's active listing (for prices) and display label: its ticker,
 // else its legal name.
+// Each compared company's sector and industry, under the label its figures carry, so
+// the answer can name an industry difference from data rather than from the model's
+// own knowledge (#179). Empty without a comparison.
+export async function comparedCompanyProfiles(
+  db: Pick<QueryExecutor, "query">,
+  blocks: ReadonlyArray<Block>,
+): Promise<Array<{ company: string; sector: string | null; industry: string | null }>> {
+  const comparison = blocks.find((block) => block.kind === "metrics_comparison");
+  const subjects = (comparison?.subjects ?? []) as ReadonlyArray<{ id: string }>;
+  const labels = (comparison?.subject_labels ?? []) as ReadonlyArray<string>;
+  if (subjects.length === 0) return [];
+  const { rows } = await db.query<{ issuer_id: string; sector: string | null; industry: string | null }>(
+    `select issuer_id::text as issuer_id, sector, industry from issuers where issuer_id = any($1::uuid[])`,
+    [subjects.map((subject) => subject.id)],
+  );
+  const byId = new Map(rows.map((row) => [row.issuer_id, row]));
+  return subjects.flatMap((subject, index) => {
+    const row = byId.get(subject.id);
+    const company = labels[index];
+    return row && company && (row.sector || row.industry) ? [{ company, sector: row.sector, industry: row.industry }] : [];
+  });
+}
+
 export async function companyListings(
   db: Pick<QueryExecutor, "query">,
   issuerIds: ReadonlyArray<string>,

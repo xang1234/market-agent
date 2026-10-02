@@ -100,6 +100,8 @@ export async function composeAnalystBlocksWithLlm(input: {
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
   // Receives the sentences the narrative guard dropped, so evals can count them (#144).
   onNarrativeRemoved?: (sentences: ReadonlyArray<string>) => void;
+  // Each compared company's sector and industry (#179).
+  companyProfiles?: ReadonlyArray<{ company: string; sector: string | null; industry: string | null }>;
   deadlines?: ModelDeadlines;
 }): Promise<ReadonlyArray<Record<string, unknown>>> {
   const router = await createLlmRouterFromEnv(input.env ?? process.env, {
@@ -122,9 +124,13 @@ export async function composeAnalystBlocksWithLlm(input: {
           "(3) what is strong or weak and why, judged against the other periods or companies shown;",
           "(4) one specific counterpoint grounded in the data that cuts against the takeaway;",
           "(5) what the data shown cannot tell, such as periods or metrics that are missing.",
-          "Name context the data itself supports, such as companies that work in different",
-          "industries in a comparison, or revenue concentrated in one segment,",
-          "but never add facts, numbers, or events that are not in the tool context.",
+          "If the data shown does not answer the question (the metric or period asked for is",
+          "not there), say so plainly and briefly instead, and do not analyze other figures",
+          "in its place.",
+          "Name context the data itself supports, such as compared companies in different",
+          "industries (company_profiles gives each one's sector and industry), or revenue",
+          "concentrated in one segment, but never add facts, numbers, or events that are",
+          "not in the tool context.",
           "Use the provided tool context only; do not invent citations or data.",
           "The figures shown to the user are listed in displayed_figures, each with the metric",
           "and, in a comparison, the company it belongs to. Quote a figure only exactly as it",
@@ -145,6 +151,7 @@ export async function composeAnalystBlocksWithLlm(input: {
           bundle_id: input.context.bundleId,
           existing_blocks: input.blocks,
           displayed_figures: displayedFigures(input.factBlocks ?? []),
+          ...(input.companyProfiles?.length ? { company_profiles: input.companyProfiles } : {}),
           tool_calls: input.toolCalls.map(summarizeToolCall),
         }),
       },
