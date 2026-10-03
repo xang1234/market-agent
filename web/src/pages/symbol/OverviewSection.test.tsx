@@ -88,7 +88,7 @@ function seriesResponse(query: NormalizedSeriesQuery): GetSeriesResponse {
             delay_class: 'delayed_15m',
             currency: 'USD',
             source_id: SOURCE_ID,
-            adjustment_basis: 'split_and_div_adjusted',
+            adjustment_basis: 'split_adjusted',
           },
         },
       },

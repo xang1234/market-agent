@@ -13,7 +13,12 @@ import {
   SNAPSHOT_NORMALIZATIONS,
   SNAPSHOT_SUBJECT_KINDS,
 } from "./manifest-staging.ts";
-import { compileDisclosurePolicy, type FreshnessClass, type RequiredDisclosure } from "./disclosure-policy.ts";
+import {
+  compileDisclosurePolicy,
+  DISCLOSURE_REASON_CODES,
+  type FreshnessClass,
+  type RequiredDisclosure,
+} from "./disclosure-policy.ts";
 import { validateSnapshotTransformManifest } from "./snapshot-transform.ts";
 import type { FinancialSealClaim } from "./financial-verifier-loader.ts";
 import type { FinancialVerification, FinancialVerifierReasonCode } from "./financial-verifier.ts";
@@ -190,14 +195,6 @@ const ISO_8601_WITH_OFFSET =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d{1,9})?(Z|([+-])(\d{2}):(\d{2}))$/;
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const FACT_PERIOD_KINDS = ["point", "fiscal_q", "fiscal_y", "ttm", "range"] as const;
-const DISCLOSURE_REASON_CODES: ReadonlyArray<RequiredDisclosure["code"]> = [
-  "delayed_pricing",
-  "eod_pricing",
-  "filing_time_basis",
-  "low_coverage",
-  "candidate_data",
-  "fx_converted_values",
-];
 const DISCLOSURE_TIER_RANK: Record<RequiredDisclosure["tier"], number> = {
   real_time: 0,
   delayed_15m: 1,

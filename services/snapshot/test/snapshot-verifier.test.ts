@@ -298,6 +298,33 @@ test("verifySnapshotSeal accepts compiler-generated delayed series disclosures",
   });
 });
 
+test("verifySnapshotSeal accepts the compiler's split-adjusted price-return disclosure (#191)", async () => {
+  const seriesSpecs = [
+    { series_ref: seriesRef, delay_class: "eod", source_id: sourceId, adjustment_basis: "split_adjusted", normalization: "pct_return" },
+  ];
+  const policy = compileDisclosurePolicy({
+    snapshot_id: snapshotId,
+    manifest: {
+      subject_refs: [{ kind: "listing", id: subjectId }],
+      source_ids: [sourceId],
+      as_of: "2026-04-29T00:00:00.000Z",
+      basis: "split_adjusted",
+      normalization: "pct_return",
+      series_specs: seriesSpecs,
+    },
+  });
+  assert.ok(policy.required_disclosures.some((disclosure) => disclosure.code === "split_adjusted_price_return"));
+
+  const result = await verifySnapshotSeal({
+    ...baseInput,
+    manifest: { ...baseInput.manifest, basis: "split_adjusted", normalization: "pct_return", series_specs: seriesSpecs },
+    required_disclosures: policy.required_disclosures,
+    blocks: [baseInput.blocks[0], ...policy.required_disclosure_blocks],
+  });
+
+  assert.deepEqual(result, { ok: true, failures: [] });
+});
+
 test("verifySnapshotSeal accepts compiler-generated disclosure source fallbacks", async () => {
   const policy = compileDisclosurePolicy({
     snapshot_id: snapshotId,
@@ -1161,7 +1188,7 @@ test("verifySnapshotSeal logs malformed late verifier inputs", async () => {
           },
         ],
       },
-      error: "verifySnapshotSeal.required_disclosures[0].code: must be one of delayed_pricing, eod_pricing, filing_time_basis, low_coverage, candidate_data, fx_converted_values",
+      error: "verifySnapshotSeal.required_disclosures[0].code: must be one of delayed_pricing, eod_pricing, filing_time_basis, low_coverage, candidate_data, fx_converted_values, split_adjusted_price_return",
     },
     {
       name: "disclosure tier",

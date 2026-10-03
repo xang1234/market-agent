@@ -8,6 +8,7 @@ from dev_providers.yfinance_fundamentals import (
     select_earnings_events,
 )
 from dev_providers.yfinance_provider import (
+    YFinanceProvider,
     normalize_daily_bars,
     normalize_reference_listing,
     normalize_quote,
@@ -16,6 +17,27 @@ from dev_providers.yfinance_provider import (
 
 
 class YFinanceProviderTests(unittest.TestCase):
+    def test_daily_bars_fold_in_dividends_only_when_asked(self):
+        # Yahoo's raw OHLC is split-adjusted; auto_adjust adds dividends (#191).
+        calls = []
+
+        class Recording(YFinanceProvider):
+            def _ticker_history(self, symbol, timezone, range_start, range_end, dividend_adjusted=True):
+                calls.append(dividend_adjusted)
+                return None
+
+        provider = Recording.__new__(Recording)
+        for dividend_adjusted in (False, True):
+            provider.daily_bars(
+                ticker="AAPL",
+                mic="XNAS",
+                timezone="America/New_York",
+                range_start="2026-01-05T00:00:00.000Z",
+                range_end="2026-01-09T00:00:00.000Z",
+                dividend_adjusted=dividend_adjusted,
+            )
+        self.assertEqual(calls, [False, True])
+
     def test_reference_listing_maps_clean_us_equity(self):
         listing = normalize_reference_listing(
             "amd",

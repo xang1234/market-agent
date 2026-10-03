@@ -170,6 +170,7 @@ test("fixture smoke: paid misses can use open reference identity and Stooq EOD b
   const bars = await market.getBars({
     listing: LISTING,
     interval: "1d",
+    adjustment_basis: "split_and_div_adjusted",
     range: {
       start: "2026-05-28T04:00:00.000Z",
       end: "2026-05-30T04:00:00.000Z",

@@ -87,7 +87,7 @@ function polygonAdapter(opts: { adjusted: boolean }): MarketDataAdapter {
     delayClass: POLYGON_DELAY_CLASS,
     fetcher: makeRouteFetcher({
       [SNAPSHOT_PATH]: aaplSnapshotPayload(),
-      [aaplAggsPath()]: aaplAggsPayload({ adjusted: opts.adjusted }),
+      [aaplAggsPath(opts.adjusted)]: aaplAggsPayload({ adjusted: opts.adjusted }),
     }),
     resolveListing: async () => aaplCtx,
   });
@@ -121,7 +121,7 @@ for (const [name, adapter] of adapters) {
   });
 
   test(`adapter ${name}: getBars output satisfies the spec §6.2.1 bar contract`, async () => {
-    const outcome = await adapter.getBars({
+    const outcome = await adapter.getBars({ adjustment_basis: name === "polygon" ? "split_adjusted" : "split_and_div_adjusted",
       listing: aaplListing,
       interval: "1d",
       range: aaplBarRange,
@@ -161,7 +161,7 @@ for (const [name, adapter] of adapters) {
 for (const adjusted of [true, false]) {
   test(`bar contract gate accepts both adjusted (${adjusted}) and unadjusted polygon responses`, async () => {
     const adapter = polygonAdapter({ adjusted });
-    const outcome = await adapter.getBars({
+    const outcome = await adapter.getBars({ adjustment_basis: adjusted ? "split_adjusted" : "unadjusted",
       listing: aaplListing,
       interval: "1d",
       range: aaplBarRange,
@@ -172,7 +172,7 @@ for (const adjusted of [true, false]) {
     assert.doesNotThrow(() => assertBarsContract(bars));
     assert.equal(
       bars.adjustment_basis,
-      adjusted ? "split_and_div_adjusted" : "unadjusted",
+      adjusted ? "split_adjusted" : "unadjusted",
     );
   });
 }
@@ -237,7 +237,7 @@ test("contract test detects an adapter that emits non-conformant bars", async ()
     },
   };
 
-  const outcome = await brokenAdapter.getBars({
+  const outcome = await brokenAdapter.getBars({ adjustment_basis: "split_and_div_adjusted",
     listing: aaplListing,
     interval: "1d",
     range: aaplBarRange,
@@ -267,7 +267,7 @@ test("contract: a provider 5xx surfaces as a normalized unavailable envelope (no
   assert.equal(quoteOutcome.reason, "provider_error");
   assert.equal(quoteOutcome.retryable, true);
 
-  const barsOutcome = await adapter.getBars({
+  const barsOutcome = await adapter.getBars({ adjustment_basis: "split_adjusted",
     listing: aaplListing,
     interval: "1d",
     range: aaplBarRange,

@@ -284,3 +284,27 @@ test("compileDisclosurePolicy words pricing disclosures by the oldest sealed ser
   assert.equal(eod.code, "eod_pricing");
   assert.match(eod.item, /as of 2026-04-20T21:00:00\.000Z;/);
 });
+
+test("a return series on split-adjusted prices is disclosed as a price return without dividends (#191)", () => {
+  const spec = (adjustment_basis: string, normalization: string) => ({
+    series_ref: delayedSeriesId,
+    source_id: delayedSourceId,
+    adjustment_basis,
+    normalization,
+    delay_class: "eod",
+  });
+  const codes = (series_specs: ReadonlyArray<Record<string, string>>) =>
+    compileDisclosurePolicy({ ...baseInput, manifest: { ...baseInput.manifest, series_specs } })
+      .required_disclosures.map((disclosure) => disclosure.code);
+
+  const policy = compileDisclosurePolicy({
+    ...baseInput,
+    manifest: { ...baseInput.manifest, series_specs: [spec("split_adjusted", "pct_return")] },
+  });
+  assert.deepEqual(policy.required_disclosures.map((disclosure) => disclosure.code), ["eod_pricing", "split_adjusted_price_return"]);
+  assert.equal(policy.required_disclosure_blocks[0].disclosure_tier, "eod", "a basis note never raises the tier");
+  assert.match(policy.required_disclosure_blocks[0].items.join(" "), /split-adjusted price returns; dividends are not included/);
+  // Raw prices are not returns, and dividend-adjusted returns include dividends.
+  assert.deepEqual(codes([spec("split_adjusted", "raw")]), ["eod_pricing"]);
+  assert.deepEqual(codes([spec("split_and_div_adjusted", "pct_return")]), ["eod_pricing"]);
+});

@@ -59,10 +59,10 @@ export const aaplBarRange = {
 
 // Polygon's aggs request param is hardcoded to `adjusted=true` in the adapter;
 // adjusted-vs-unadjusted distinctions live in the response body, not the path.
-export function aaplAggsPath(): string {
+export function aaplAggsPath(adjusted = true): string {
   const startMs = Date.parse(aaplBarRange.start);
   const endMs = Date.parse(aaplBarRange.end);
-  return `/v2/aggs/ticker/AAPL/range/1/day/${startMs}/${endMs}?adjusted=true&sort=asc&limit=50000`;
+  return `/v2/aggs/ticker/AAPL/range/1/day/${startMs}/${endMs}?adjusted=${adjusted}&sort=asc&limit=50000`;
 }
 
 export function aaplAggsPayload(opts: { adjusted?: boolean } = {}): unknown {

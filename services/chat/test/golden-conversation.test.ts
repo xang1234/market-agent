@@ -164,20 +164,24 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.deepEqual(series.map((line) => line.name), ["NVDA", "AMD"]);
     assert.ok(series.every((line) => line.points.length > 1), "each company needs a price line");
     const { rows } = await client.query<{
-      series_specs: Array<{ series_ref: string; bar_range_id: string; as_of: string }>;
+      series_specs: Array<{ series_ref: string; bar_range_id: string; as_of: string; adjustment_basis: string }>;
       basis: string;
       normalization: string;
     }>(
       `select series_specs, basis, normalization from snapshots where snapshot_id = $1::uuid`,
       [answer.snapshot_id],
     );
-    // End-of-day prices are disclosed as such.
-    assert.ok(
-      answer.blocks.some((block) => block.kind === "disclosure"),
-      `expected a pricing disclosure; got [${answer.blocks.map((b) => b.kind).join(", ")}]`,
-    );
-    // The seal describes the chart's data: adjusted prices as percent returns.
-    assert.equal(rows[0]?.basis, "split_and_div_adjusted");
+    // End-of-day prices are disclosed as such, and split-adjusted returns as
+    // price returns without dividends (#191).
+    const disclosure = answer.blocks.find((block) => block.kind === "disclosure");
+    assert.ok(disclosure, `expected a pricing disclosure; got [${answer.blocks.map((b) => b.kind).join(", ")}]`);
+    const items = (disclosure.items as string[]).join(" ");
+    assert.match(items, /end-of-day/);
+    assert.match(items, /split-adjusted price returns; dividends are not included/);
+    assert.equal(performance.title, "Price return (split-adjusted, excluding dividends)");
+    // The seal describes the chart's data: split-adjusted prices as percent returns.
+    assert.equal(rows[0]?.basis, "split_adjusted");
+    assert.ok((rows[0]?.series_specs ?? []).every((spec) => spec.adjustment_basis === "split_adjusted"));
     assert.equal(rows[0]?.normalization, "pct_return");
     const sealed = new Set((rows[0]?.series_specs ?? []).map((spec) => spec.series_ref));
     const seriesRefs = (performance.data_ref as { params: { series_refs: string[] } }).params.series_refs;

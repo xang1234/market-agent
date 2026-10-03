@@ -149,9 +149,23 @@ sees the last 6 messages of the thread. The price-performance chart is tracked s
 ## Sealed price series (`perf_comparison`)
 
 A comparison of two or more listed companies also gets a price-performance chart (`services/chat/src/perf-block.ts`).
-Each company's line comes from its latest stored daily bar range (`market_bar_ranges` / `market_bars`,
-`split_and_div_adjusted`), normalized to percent return. The companies' windows must be identical, or there is no
-chart.
+Each company's line comes from its latest stored daily bar range (`market_bar_ranges` / `market_bars`),
+normalized to percent return. The companies' windows must be identical, or there is no chart.
+
+- **Price basis (#191):** all lines use one adjustment basis that every company has, `split_adjusted` first, then
+  `split_and_div_adjusted`.
+  - Polygon's aggregates are split-adjusted only. A chart on them is titled a price return, and a disclosure says that
+    dividends are not included.
+  - If the companies share no basis, a short note names each company's basis in place of the chart.
+  - Polygon ranges cached under the old `split_and_div_adjusted` label (before #191) are never read. The chart and the
+    market cache share `MISLABELED_POLYGON_RANGE_SQL`. Those ranges are not rewritten either, so snapshots sealed
+    from them still verify.
+- **Requests name a basis:** bar requests carry their `adjustment_basis`. An adapter that can't produce it answers
+  `missing_coverage`, so the fallback chain tries the next provider.
+  - Polygon serves `split_adjusted` and `unadjusted`.
+  - Stooq serves `split_and_div_adjusted`.
+  - yfinance serves both adjusted bases.
+  - Web price charts request `split_adjusted`.
 
 - **Sealing:** every series has a `series_specs` entry in the snapshot manifest. The entry holds the `series_ref`, the
   bar range's `source_id`, `listing_id`, `bar_range_id`, interval, range and `as_of`. The block cites these through

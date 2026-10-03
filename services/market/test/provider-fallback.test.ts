@@ -254,7 +254,7 @@ test("fallback adapter serves bars from fallback provider after retryable primar
     adapters: [primary, fallback],
   });
 
-  const outcome = await adapter.getBars({
+  const outcome = await adapter.getBars({ adjustment_basis: "split_and_div_adjusted",
     listing: aaplListing,
     interval: "1d",
     range: aaplBarRange,

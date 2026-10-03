@@ -140,12 +140,15 @@ export function rangeDays(label: string, anchor: Date): number | null {
 
 // One batched daily-bars query for a labeled range ending at `anchor`. The
 // anchor is the caller's freshness contract: live surfaces pass `new Date()`,
-// sealed blocks pass their pinned as_of so rendering stays deterministic.
+// sealed blocks pass their pinned as_of so rendering stays deterministic. The
+// basis defaults to split-adjusted prices (#191); a block that names its own
+// basis passes it, so the chart is drawn on the basis it displays.
 export function dailySeriesQuery(
   listings: ReadonlyArray<ListingRef>,
   label: string,
   normalization: SeriesNormalization,
   anchor: Date,
+  basis: AdjustmentBasis = 'split_adjusted',
 ): NormalizedSeriesQuery | null {
   const anchorMs = anchor.getTime()
   // Invalid anchor (e.g. a malformed block as_of) → null, keeping callers on
@@ -160,12 +163,13 @@ export function dailySeriesQuery(
       end: new Date(anchorMs).toISOString(),
     },
     interval: '1d',
-    basis: 'split_and_div_adjusted',
+    basis,
     normalization,
   }
 }
 
-// split_and_div_adjusted is the only basis the market service emits today.
+// Price charts use split-adjusted prices (Polygon's aggregates, #191); dividend
+// adjustment would rewrite past prices.
 export function windowedDailyQuery(
   listingId: string,
   days: number,
@@ -177,7 +181,7 @@ export function windowedDailyQuery(
     subject_refs: [{ kind: 'listing', id: listingId }],
     range: { start: new Date(startMs).toISOString(), end: new Date(endMs).toISOString() },
     interval: '1d',
-    basis: 'split_and_div_adjusted',
+    basis: 'split_adjusted',
     normalization: 'raw',
   }
 }

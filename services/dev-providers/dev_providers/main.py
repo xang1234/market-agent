@@ -101,7 +101,13 @@ async def market_daily_bars(request: Request) -> dict[str, Any]:
     bar_range = body.get("range") if isinstance(body.get("range"), dict) else {}
     range_start = str(bar_range.get("start", ""))
     range_end = str(bar_range.get("end", ""))
-    key = f"daily-bars:{ticker}:{mic}:{range_start}:{range_end}"
+    # Yahoo's raw OHLC is split-adjusted; auto_adjust also folds in dividends (#191).
+    adjustment_basis = str(body.get("adjustment_basis", "split_and_div_adjusted"))
+    if adjustment_basis not in ("split_adjusted", "split_and_div_adjusted"):
+        return _unavailable(
+            ProviderUnavailable("missing_coverage", False, f"yfinance: {adjustment_basis} bars are unsupported")
+        )
+    key = f"daily-bars:{ticker}:{mic}:{range_start}:{range_end}:{adjustment_basis}"
     cached = _negative_cache_get(key)
     if cached:
         return cached
@@ -115,6 +121,7 @@ async def market_daily_bars(request: Request) -> dict[str, Any]:
                 timezone=timezone,
                 range_start=range_start,
                 range_end=range_end,
+                dividend_adjusted=adjustment_basis == "split_and_div_adjusted",
             )
         )
     except ValueError as exc:
@@ -136,7 +143,7 @@ async def market_daily_bars(request: Request) -> dict[str, Any]:
             "as_of": bars[-1]["ts"],
             "delay_class": "eod",
             "currency": currency,
-            "adjustment_basis": "split_and_div_adjusted",
+            "adjustment_basis": adjustment_basis,
         }
     )
 

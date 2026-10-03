@@ -73,8 +73,8 @@ test("daily-bars-aware fallback only routes Stooq into eligible daily bar reques
   });
 
   const quote = await adapter.getQuote({ listing: aaplListing });
-  const intraday = await adapter.getBars({ listing: aaplListing, interval: "15m", range: aaplBarRange });
-  const daily = await adapter.getBars({ listing: aaplListing, interval: "1d", range: aaplBarRange });
+  const intraday = await adapter.getBars({ adjustment_basis: "split_and_div_adjusted", listing: aaplListing, interval: "15m", range: aaplBarRange });
+  const daily = await adapter.getBars({ adjustment_basis: "split_and_div_adjusted", listing: aaplListing, interval: "1d", range: aaplBarRange });
 
   assert.equal(quote.outcome, "unavailable");
   assert.equal(intraday.outcome, "unavailable");
