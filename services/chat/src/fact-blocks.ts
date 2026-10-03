@@ -793,12 +793,18 @@ export function displayedFigures(blocks: ReadonlyArray<Block>): DisplayedFigure[
       return series.flatMap((line) => {
         const last = line.points?.at(-1)?.y;
         return line.name && typeof last === "number"
-          ? [{ company: line.name, metric: "Price return", ...period, value: `${last.toFixed(1)}%`, ...shownIn }]
+          ? [{ company: line.name, metric: "Price return", ...period, value: `${chartValue(last)}%`, ...shownIn }]
           : [];
       });
     }
     return [];
   });
+}
+
+// A chart value as its hover tooltip shows it (web SeriesChart formatHoverValue),
+// so the model is given exactly what the user can read off the chart.
+function chartValue(value: number): string {
+  return value.toLocaleString("en-US", { maximumFractionDigits: Math.abs(value) >= 1000 ? 0 : 2 });
 }
 
 // The human-readable text of fact blocks (titles, labels, formatted values):

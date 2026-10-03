@@ -393,10 +393,13 @@ test("the model sees a price chart's return per company over its window (#181)",
     series: [
       { name: "NVDA", unit: "%", points: [{ x: "2025-12-31", y: 0 }, { x: "2026-08-31", y: 20 }] },
       { name: "AMD", unit: "%", points: [{ x: "2025-12-31", y: 0 }, { x: "2026-08-31", y: -4.25 }] },
+      { name: "AAPL", unit: "%", points: [{ x: "2025-12-31", y: 0 }, { x: "2026-08-31", y: -0.04 }] },
     ],
   }]);
+  // At the chart tooltip's precision (up to two decimals), so a small move isn't rounded away.
   assert.deepEqual(figures.map((figure) => [figure.company, figure.metric, figure.value, figure.period]), [
-    ["NVDA", "Price return", "20.0%", "YTD 2026: 2025-12-31 close to 2026-08-31 close"],
-    ["AMD", "Price return", "-4.3%", "YTD 2026: 2025-12-31 close to 2026-08-31 close"],
+    ["NVDA", "Price return", "20%", "YTD 2026: 2025-12-31 close to 2026-08-31 close"],
+    ["AMD", "Price return", "-4.25%", "YTD 2026: 2025-12-31 close to 2026-08-31 close"],
+    ["AAPL", "Price return", "-0.04%", "YTD 2026: 2025-12-31 close to 2026-08-31 close"],
   ]);
 });
