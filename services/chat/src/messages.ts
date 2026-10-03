@@ -4,7 +4,7 @@ import {
   serializeJsonValue,
   type JsonValue,
 } from "../../observability/src/types.ts";
-import { deriveBlockProof, type BlockProof, type SealedSnapshotRecord } from "../../snapshot/src/block-proof.ts";
+import { deriveBlockProof, UNPROVEN, type BlockProof, type SealedSnapshotRecord } from "../../snapshot/src/block-proof.ts";
 import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
 import type {
   ChatAssistantMessagePersistence,
@@ -210,9 +210,15 @@ export async function listChatMessagesForThread(
 function blockProofs(row: ChatMessageRow, snapshots: ReadonlyMap<string, SealedSnapshotRecord>): Record<string, BlockProof> {
   const snapshot = (row.snapshot_id && snapshots.get(row.snapshot_id)) || null;
   const proofs: Record<string, BlockProof> = {};
+  const seen = new Set<string>();
   for (const block of Array.isArray(row.blocks) ? row.blocks : []) {
     const id = block !== null && typeof block === "object" && !Array.isArray(block) ? block.id : undefined;
-    if (typeof id === "string") proofs[id] = deriveBlockProof(block, snapshot);
+    if (typeof id !== "string") continue;
+    // Proofs are keyed by block id: an id used twice cannot say which block a
+    // claim belongs to, so it claims nothing rather than lend one block's
+    // proof to its namesake.
+    proofs[id] = seen.has(id) ? UNPROVEN : deriveBlockProof(block, snapshot);
+    seen.add(id);
   }
   return proofs;
 }
