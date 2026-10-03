@@ -209,7 +209,8 @@ export async function listChatMessagesForThread(
 
 function blockProofs(row: ChatMessageRow, snapshots: ReadonlyMap<string, SealedSnapshotRecord>): Record<string, BlockProof> {
   const snapshot = (row.snapshot_id && snapshots.get(row.snapshot_id)) || null;
-  const proofs: Record<string, BlockProof> = {};
+  // No prototype: any string is a valid block id, "__proto__" included.
+  const proofs: Record<string, BlockProof> = Object.create(null);
   const seen = new Set<string>();
   for (const block of Array.isArray(row.blocks) ? row.blocks : []) {
     const id = block !== null && typeof block === "object" && !Array.isArray(block) ? block.id : undefined;

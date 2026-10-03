@@ -324,11 +324,36 @@ test("a read message carries each block's own proof: only the certified result i
     user_id: "00000000-0000-4000-8000-000000000001",
   });
 
-  assert.deepEqual(result?.messages[0].block_proofs, {
+  assert.deepEqual({ ...result?.messages[0].block_proofs }, {
     certified: { evidence: "linked", calculation: "verified", public_by_cutoff: "proven" },
     narrative: { evidence: "unknown", calculation: "not_verified", public_by_cutoff: "unknown" },
     table: { evidence: "linked", calculation: "not_verified", public_by_cutoff: "unknown" },
   });
+});
+
+test("any string is a block id, __proto__ included: its proof is serialized (#193)", async () => {
+  const db = messageListDb((text) => {
+    if (text.includes("from chat_threads")) return [{ owned: true }];
+    if (text.includes("from chat_messages")) {
+      return [{
+        message_id: "33333333-3333-4333-a333-333333333333",
+        thread_id: "11111111-1111-4111-a111-111111111111",
+        role: "assistant",
+        snapshot_id: null,
+        blocks: [{ id: "__proto__", kind: "financial_answer", presentation_hash: "a".repeat(64), financial: { run_id: "r", unit_id: "u" } }],
+        content_hash: "sha256:abc",
+        created_at: "2026-05-06T00:00:00.000Z",
+      }];
+    }
+    throw new Error(`unexpected query: ${text}`);
+  });
+  const result = await listChatMessagesForThread(db, {
+    thread_id: "11111111-1111-4111-a111-111111111111",
+    user_id: "00000000-0000-4000-8000-000000000001",
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(result?.messages[0].block_proofs)), JSON.parse(
+    '{"__proto__":{"evidence":"unknown","calculation":"not_verified","public_by_cutoff":"unknown"}}',
+  ));
 });
 
 test("blocks sharing an id share no proof: the id claims nothing (#193)", async () => {
@@ -360,7 +385,7 @@ test("blocks sharing an id share no proof: the id claims nothing (#193)", async 
     thread_id: "11111111-1111-4111-a111-111111111111",
     user_id: "00000000-0000-4000-8000-000000000001",
   });
-  assert.deepEqual(result?.messages[0].block_proofs, {
+  assert.deepEqual({ ...result?.messages[0].block_proofs }, {
     same: { evidence: "unknown", calculation: "not_verified", public_by_cutoff: "unknown" },
   });
 });

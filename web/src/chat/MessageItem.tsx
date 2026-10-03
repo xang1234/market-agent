@@ -1,6 +1,7 @@
 import { memo, useLayoutEffect, useRef, type ReactElement } from 'react'
 
 import { MemoizedBlockView } from '../blocks/MemoizedBlockView.tsx'
+import type { BlockProof } from '../blocks/blockProof.ts'
 import type { ChatMessage } from './messageTypes.ts'
 import { AssistantTurn, BlockColumn, USER_BUBBLE_CLASS } from './turnLayout.tsx'
 
@@ -43,7 +44,7 @@ function MessageItemInner({ message, onMeasure }: MessageItemProps): ReactElemen
         <AssistantTurn className="w-full">
           {message.blocks.map((block) => (
             <BlockColumn key={block.id} kind={block.kind}>
-              <MemoizedBlockView block={block} proof={message.block_proofs?.[block.id]} />
+              <MemoizedBlockView block={block} proof={proofFor(message, block.id)} />
             </BlockColumn>
           ))}
         </AssistantTurn>
@@ -51,6 +52,16 @@ function MessageItemInner({ message, onMeasure }: MessageItemProps): ReactElemen
     </div>
   )
 }
+
+// A message the server assessed carries a proof for every block it can claim
+// anything about; a block it has none for is unproven, never unassessed (which
+// would let a certified-looking answer keep its default label).
+function proofFor(message: ChatMessage, blockId: string): BlockProof | undefined {
+  if (message.block_proofs === undefined) return undefined
+  return Object.hasOwn(message.block_proofs, blockId) ? message.block_proofs[blockId] : UNPROVEN
+}
+
+const UNPROVEN: BlockProof = { evidence: 'unknown', calculation: 'not_verified', public_by_cutoff: 'unknown' }
 
 export const MessageItem = memo(
   MessageItemInner,

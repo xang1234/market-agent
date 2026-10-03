@@ -125,3 +125,18 @@ test("a nested block never reads its parent's proof", () => {
   assert.ok(html.includes('data-certified="true"'), 'the unassessed child keeps its own default')
   assert.ok(!html.includes('Not verified'))
 })
+
+test('a block the server sent no proof for, in an assessed message, is unproven', () => {
+  const message: ChatMessage = {
+    message_id: 'm2',
+    thread_id: 't1',
+    role: 'assistant',
+    snapshot_id: financialAnswerFixture.snapshot_id,
+    blocks: [financialAnswerFixture as Block],
+    content_hash: 'h2',
+    created_at: '2026-06-02T00:00:00.000Z',
+    block_proofs: {},
+  }
+  const html = render(<MessageItem message={message} onMeasure={() => {}} />)
+  assert.ok(html.includes('Not verified') && !html.includes('Verified calculation'))
+})
