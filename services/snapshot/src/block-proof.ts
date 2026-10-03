@@ -37,10 +37,21 @@ export type SealedSnapshotRecord = {
   certificates: ReadonlyArray<{ run_id: string; unit_id: string; presentation_hash: string }>;
 };
 
-// Kinds that display literal values with no per-value reference: a binding
-// elsewhere on the block (the seal needs only one) says nothing about the rest,
-// so they are never source-linked.
+// Linkage means the values shown are the evidence cited, not merely that the
+// block cites something sealed. The seal accepts a single fact binding on any
+// block, which says nothing about values displayed as literals, so:
+// - kinds that show literal cells with no per-value reference are never linked;
 const LITERAL_VALUE_KINDS: ReadonlySet<string> = new Set(["table"]);
+// - kinds that draw literal series points are linked only by sealed series
+//   (series_ref/series_refs), at least one per line drawn; their other refs and
+//   fact bindings do not vouch for the points.
+const SERIES_KINDS: ReadonlySet<string> = new Set([
+  "line_chart",
+  "perf_comparison",
+  "segment_trajectory",
+  "sentiment_trend",
+  "mention_volume",
+]);
 
 export const UNPROVEN: BlockProof = Object.freeze({ evidence: "unknown", calculation: "not_verified", public_by_cutoff: "unknown" });
 
@@ -74,6 +85,14 @@ function citesOnlySealed(block: Record<string, unknown>, snapshot: SealedSnapsho
 }
 
 function citedRefsAllSealed(block: Record<string, unknown>, snapshot: SealedSnapshotRecord): boolean {
+  const params = isRecord(block.data_ref) && isRecord(block.data_ref.params) ? block.data_ref.params : {};
+  // Both forms the seal accepts: series_ref and series_refs.
+  const seriesRefs = dataRefSeriesRefs(params as JsonObject);
+  if (typeof block.kind === "string" && SERIES_KINDS.has(block.kind)) {
+    const sealed = new Set(snapshot.series_refs);
+    const lines = Array.isArray(block.series) ? block.series.length : 0;
+    return seriesRefs.length > 0 && seriesRefs.length >= lines && seriesRefs.every((id) => sealed.has(id));
+  }
   const manifest: Record<string, ReadonlySet<string>> = {
     fact: new Set(snapshot.fact_refs),
     claim: new Set(snapshot.claim_refs),
@@ -82,11 +101,9 @@ function citedRefsAllSealed(block: Record<string, unknown>, snapshot: SealedSnap
     source: new Set(snapshot.source_ids),
     series: new Set(snapshot.series_refs),
   };
-  const params = isRecord(block.data_ref) && isRecord(block.data_ref.params) ? block.data_ref.params : {};
   const cited = [
     ...extractBlockRefs(block as unknown as VerifierBlock).map((ref) => [ref.ref_kind, ref.ref_id] as const),
-    // Both forms the seal accepts: series_ref and series_refs.
-    ...dataRefSeriesRefs(params as JsonObject).map((id) => ["series", id] as const),
+    ...seriesRefs.map((id) => ["series", id] as const),
     ...(Array.isArray(params.fact_bindings) ? params.fact_bindings : [])
       .flatMap((binding) => isRecord(binding) && typeof binding.fact_id === "string" ? [["fact", binding.fact_id] as const] : []),
   ];
