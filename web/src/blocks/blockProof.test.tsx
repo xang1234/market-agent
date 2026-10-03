@@ -85,7 +85,9 @@ test('a view without server proof keeps its conservative default label', () => {
 })
 
 test('the inspector explains each claim on its own, conservatively when unknown', () => {
-  assert.deepEqual(proofRows(undefined).map((row) => row.value.split(':')[0]), ['Unknown', 'Not verified', 'Unknown'])
+  // A view the server did not assess makes no claims that could contradict its labels.
+  assert.deepEqual(proofRows(undefined), [{ label: 'Proof', value: 'Not assessed in this view.' }])
+  assert.deepEqual(proofRows(UNPROVEN).map((row) => row.value.split(':')[0]), ['Unknown', 'Not verified', 'Unknown'])
   assert.deepEqual(proofRows(LINKED).map((row) => row.value.split(':')[0]), ['Source-linked', 'Not verified', 'Unknown'])
   assert.deepEqual(proofRows(CERTIFIED).map((row) => row.value.split(':')[0]), ['Source-linked', 'Verified', 'Proven'])
   assert.match(proofRows(LINKED)[2].value, /stored by the cutoff does not prove/)

@@ -25,25 +25,27 @@ export function proofLabels(proof: BlockProof, kind: string): VerificationKind[]
   return kind === 'rich_text' ? [] : ['not_verified']
 }
 
-// What each claim means, for the inspector. Without a proof (a view the server
-// did not assess), every claim reads as unknown or not verified.
+// What each claim means, for the inspector. A view the server did not assess
+// makes no claims here (its blocks keep their own default labels), so the
+// inspector cannot contradict them.
 export function proofRows(proof: BlockProof | undefined): Array<{ label: string; value: string }> {
+  if (proof === undefined) return [{ label: 'Proof', value: 'Not assessed in this view.' }]
   return [
     {
       label: 'Evidence binding',
-      value: proof?.evidence === 'linked'
+      value: proof.evidence === 'linked'
         ? 'Source-linked: the evidence this block cites is sealed in this snapshot.'
         : 'Unknown: no sealed evidence binding is established for this view.',
     },
     {
       label: 'Calculation',
-      value: proof?.calculation === 'verified'
+      value: proof.calculation === 'verified'
         ? 'Verified: the server independently recomputed this result from its recorded inputs.'
         : 'Not verified: values are shown as sourced or derived, not independently recomputed.',
     },
     {
       label: 'Public by cutoff',
-      value: proof?.public_by_cutoff === 'proven'
+      value: proof.public_by_cutoff === 'proven'
         ? 'Proven: each source version was publicly available by the knowledge cutoff.'
         : 'Unknown: being stored by the cutoff does not prove the source was public then.',
     },
