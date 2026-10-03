@@ -257,16 +257,6 @@ export function createPostgresMarketCacheRepository(
         if (!barRangeId) throw new Error("market bar range upsert did not return an id");
         await tx.query(`delete from market_bars where bar_range_id = $1::uuid`, [barRangeId]);
         await insertBars(tx, barRangeId, value.bars);
-        // Stamped last, with the wall clock rather than now() (the transaction's
-        // start), so updated_at is when the range and its bars were written: a
-        // reader with an earlier cutoff never admits a write that finished after
-        // it (chat's price chart, #232).
-        // ponytail: the instant between this statement and commit remains; use
-        // commit timestamps (track_commit_timestamp) if that ever matters.
-        await tx.query(
-          `update market_bar_ranges set updated_at = clock_timestamp() where bar_range_id = $1::uuid`,
-          [barRangeId],
-        );
       });
     },
     async listStaleActiveListings({ now, activeSince, limit }) {

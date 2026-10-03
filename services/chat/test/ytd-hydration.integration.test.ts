@@ -123,21 +123,4 @@ test("a live YTD request with an empty cache fetches, stores, and seals the wind
   const atCutoff = await chart(cutoff);
   assert.notEqual(atCutoff?.kind, "perf_comparison", "the range rewritten after the cutoff is not read at it");
   assert.equal((await chart(new Date().toISOString()))?.kind, "perf_comparison", "a later turn reads it");
-
-  // A write that starts before the cutoff but finishes after it (here, waiting
-  // on a lock) is stamped when it finishes, so the cutoff does not admit it.
-  const locker = await pool.connect();
-  try {
-    await locker.query("begin");
-    await locker.query("lock table market_bars in exclusive mode");
-    const slowWrite = cache.storeBars(late.data, { provider: "polygon", fetched_at: new Date().toISOString(), expires_at: "2126-01-01T00:00:00.000Z" });
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    const midWrite = new Date().toISOString();
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    await locker.query("commit");
-    await slowWrite;
-    assert.notEqual((await chart(midWrite))?.kind, "perf_comparison", "a write finishing after the cutoff is not read at it");
-  } finally {
-    locker.release();
-  }
 });
