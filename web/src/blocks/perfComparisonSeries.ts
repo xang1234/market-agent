@@ -9,7 +9,7 @@
 // snapshots): the same sealed block renders the same chart on any future day,
 // and anything fresher must go through the explicit refresh flow.
 
-import type { GetSeriesResponse, NormalizedSeriesQuery } from '../symbol/series.ts'
+import type { AdjustmentBasis, GetSeriesResponse, NormalizedSeriesQuery } from '../symbol/series.ts'
 import { dailySeriesQuery } from '../symbol/series.ts'
 import { formatSubjectRefShort } from './subjectRef.ts'
 import type { PerfComparisonBlock, Series, SubjectRef } from './types.ts'
@@ -33,7 +33,14 @@ export function perfSeriesQuery(
   const listings = block.subject_refs.filter(
     (ref): ref is SubjectRef & { kind: 'listing' } => ref.kind === 'listing',
   )
-  return dailySeriesQuery(listings, range, 'pct_return', perfAnchor(block))
+  return dailySeriesQuery(listings, range, 'pct_return', perfAnchor(block), blockBasis(block))
+}
+
+const BASES: ReadonlyArray<AdjustmentBasis> = ['unadjusted', 'split_adjusted', 'split_and_div_adjusted']
+
+// The basis the block displays, so its live series are fetched on it (#191).
+function blockBasis(block: PerfComparisonBlock): AdjustmentBasis | undefined {
+  return BASES.find((basis) => basis === block.basis)
 }
 
 export function seriesFromPerfResponse(response: GetSeriesResponse): ReadonlyArray<Series> {

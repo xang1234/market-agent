@@ -94,3 +94,9 @@ test('seriesFromPerfResponse converts bars to chart series named by listing', ()
   assert.equal(series[0].points[1].y, 4.2)
   assert.equal(series[0].points[1].x, '2026-01-03')
 })
+
+test('live series are fetched on the basis the block displays (#191)', () => {
+  assert.equal(perfSeriesQuery(block, 'YTD')?.basis, 'split_and_div_adjusted')
+  const split = { ...block, basis: 'split_adjusted' } as PerfComparisonBlock
+  assert.equal(perfSeriesQuery(split, 'YTD')?.basis, 'split_adjusted')
+})
