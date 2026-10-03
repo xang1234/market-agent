@@ -25,8 +25,8 @@
 //
 // ponytail: uses each listing's latest stored window and requires them to be
 // identical; a shared sub-window across different stored ranges is the upgrade.
-// ponytail: a YTD window comes only from bars already stored; fetching missing
-// ones before the cutoff is #192 part 2.
+// A live YTD turn fetches and stores its window before the cutoff
+// (ytd-hydration.ts); this module still reads only stored bars.
 
 import { createHash } from "node:crypto";
 
@@ -153,7 +153,13 @@ async function loadSealedRanges(
           and adjustment_basis = any($3::text[])
           and not ${MISLABELED_POLYGON_RANGE_SQL}
           -- Nothing stored after the turn's cutoff: a refresh landing mid-turn
-          -- must not seal prices later than the snapshot's as_of.
+          -- must not seal prices later than the snapshot's as_of. The cutoff is
+          -- the prices' market time, not when the cache wrote them: a late write
+          -- of earlier sessions (a YTD fetch outliving its client timeout, #232)
+          -- holds no prices from after the cutoff, and the seal pins exactly the
+          -- bars drawn (bar_range_id + bars_sha256). Filtering on write time would
+          -- compare the database's clock with the app's and let a concurrent
+          -- refresh of the same range hide one this turn just fetched.
           and as_of <= $4::timestamptz
           -- A YTD window: only ranges that reach back over the year-end.
           and ($5::timestamptz is null or range_start <= $5::timestamptz)
@@ -243,7 +249,7 @@ function ytdGapBlock(input: PerfInput, gap: string): Block {
   return noteBlock(input, "perf_ytd_gap", `Year-to-date price performance is not shown: ${gap}.`);
 }
 
-async function listingTimeZones(
+export async function listingTimeZones(
   db: QueryExecutor,
   listings: ReadonlyArray<{ id: string }>,
 ): Promise<Map<string, string>> {

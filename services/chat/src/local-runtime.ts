@@ -28,7 +28,9 @@ import {
   type ChatPriorSubjectsLoader,
   type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
-import { loadTurnFactBlocks, requestedFiscalYear, requestedPriceWindow } from "./fact-blocks.ts";
+import { loadTurnFactBlocks, priceListingsForTurn, requestedFiscalYear, requestedPriceWindow } from "./fact-blocks.ts";
+import { hydrateYtdBars, marketHydrationOrigin } from "./ytd-hydration.ts";
+import { listingTimeZones } from "./perf-block.ts";
 import { loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import {
@@ -82,12 +84,14 @@ export async function loadEvidenceOrEmpty(
 }
 
 export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
-  const asOf = new Date().toISOString();
   const resolved = context.subjectPreResolution?.status === "resolved"
     ? context.subjectPreResolution
     : null;
   // Every company the turn covers (primary first); see resolveTurnSubjects.
   const covered = context.subjectPreResolutions ?? (resolved ? [resolved] : []);
+  // A live YTD request fetches its prices first, so the cutoff below covers them (#232).
+  await hydrateYtdWindow(context.userIntent ?? "", covered);
+  const asOf = new Date().toISOString();
   const subjectRefs = covered.length > 0
     ? covered.map((subject) => subject.subject_ref)
     : [{ kind: "screen" as const, id: context.threadId }];
@@ -156,7 +160,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   const [factBlocks, conversation] = await Promise.all([
     loadTurnFactBlocks(pool(), {
       issuers: issuersOf(covered),
-      wantsPeers: /\bpeers?\b/i.test(context.userIntent ?? ""),
+      wantsPeers: WANTS_PEERS.test(context.userIntent ?? ""),
       wantsSegments: /\bsegments?\b/i.test(context.userIntent ?? ""),
       wantsMarginTrend: /\b(margins?|profitab\w*)\b/i.test(context.userIntent ?? ""),
       requestedListings: requestedListingsOf(covered),
@@ -199,6 +203,35 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
 };
 
 const CONVERSATION_MESSAGES = 6;
+const WANTS_PEERS = /\bpeers?\b/i;
+
+// Live mode only (marketHydrationOrigin): fetches and stores the YTD window's
+// bars for the companies the chart will cover. Never throws; a failure leaves
+// the chart to name what is missing.
+async function hydrateYtdWindow(
+  userIntent: string,
+  covered: ReadonlyArray<ChatResolvedSubjectPreResolution>,
+): Promise<void> {
+  const origin = marketHydrationOrigin(process.env);
+  if (origin === null || requestedPriceWindow(userIntent) !== "ytd") return;
+  const now = new Date().toISOString();
+  try {
+    const listings = await priceListingsForTurn(pool(), {
+      issuers: issuersOf(covered),
+      wantsPeers: WANTS_PEERS.test(userIntent),
+      requestedListings: requestedListingsOf(covered),
+      asOf: now,
+    });
+    const zones = await listingTimeZones(pool(), listings);
+    await hydrateYtdBars({
+      origin,
+      listings: listings.map((listing) => ({ id: listing.id, timeZone: zones.get(listing.id) ?? "UTC" })),
+      now,
+    });
+  } catch (reason) {
+    console.warn("[chat] YTD price fetch skipped; charting from the bars already stored", reason);
+  }
+}
 
 // The previous answer's companies, for follow-ups ("compare it with AMD").
 export const loadPriorSubjects: ChatPriorSubjectsLoader = ({ threadId }) =>

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isCompletedSession, selectYtdWindow, sessionDate, ytdReturns, type DailyClose } from "../src/ytd-window.ts";
+import { completedSessionsEnd, isCompletedSession, selectYtdWindow, sessionDate, ytdReturns, type DailyClose } from "../src/ytd-window.ts";
 
 const NY = "America/New_York";
 // Bars are stamped at the start of their New York session date: 05:00Z in
@@ -114,4 +114,10 @@ test("what can't make a full YTD window is a named gap, never a shorter window",
     gap([{ label: "NVDA", timeZone: NY, bars: [bar("2025-12-31", 100)] }]),
     "no session in 2026 has closed yet",
   );
+});
+
+test("completed sessions end where today's session begins until it closes, then after it (#232)", () => {
+  assert.equal(completedSessionsEnd("2026-08-31T15:00:00.000Z", NY), "2026-08-31T04:00:00.000Z"); // 11:00, trading
+  assert.equal(completedSessionsEnd("2026-08-31T20:00:00.000Z", NY), "2026-09-01T04:00:00.000Z"); // 16:00, closed
+  assert.equal(completedSessionsEnd("2026-12-31T22:00:00.000Z", NY), "2027-01-01T05:00:00.000Z"); // across the year
 });

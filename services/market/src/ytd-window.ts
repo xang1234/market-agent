@@ -16,6 +16,8 @@
 // exchange calendar when finding the baseline; a longer year-end closure
 // reads as a missing baseline.
 
+import { zonedDateStartUtcIso } from "./range-canonicalization.ts";
+
 export type DailyClose = { ts: string; close: number };
 
 export type YtdSeriesInput = {
@@ -40,6 +42,17 @@ export type YtdWindow = {
 export type YtdGap = { ok: false; gap: string };
 
 const SESSION_CLOSE_MINUTES = 16 * 60;
+
+// The exclusive end of the sessions completed by `cutoff` on the exchange's
+// calendar: today's session counts only once it has closed, so a fetch bounded
+// by it never stores a forming bar as a close.
+export function completedSessionsEnd(cutoff: string, timeZone: string): string {
+  const now = localParts(cutoff, timeZone);
+  if (now.minutes < SESSION_CLOSE_MINUTES) return zonedDateStartUtcIso(now.date, timeZone);
+  const next = new Date(`${now.date}T00:00:00.000Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return zonedDateStartUtcIso(next.toISOString().slice(0, 10), timeZone);
+}
 
 // The year a YTD window covers: the cutoff's year on the exchange's calendar.
 export function ytdYear(cutoff: string, timeZone: string): number {

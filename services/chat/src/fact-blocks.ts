@@ -75,9 +75,7 @@ export async function loadTurnFactBlocks(
 ): Promise<ReadonlyArray<Block>> {
   const [primary] = input.issuers;
   if (primary === undefined) return [];
-  const companies = input.issuers.length === 1 && input.wantsPeers
-    ? [primary, ...(await peersOf(db, primary))]
-    : input.issuers;
+  const companies = await turnCompanies(db, input.issuers, input.wantsPeers);
   if (companies.length === 1) {
     const blocks = await loadIssuerFactBlocks(db, {
       issuer: primary,
@@ -96,6 +94,35 @@ export async function loadTurnFactBlocks(
     fiscalYear: input.fiscalYear,
     priceWindow: input.priceWindow,
   });
+}
+
+// The companies a turn compares: the ones it names, or one plus its peers.
+async function turnCompanies(
+  db: QueryExecutor,
+  issuers: ReadonlyArray<IssuerSubjectRef>,
+  wantsPeers: boolean,
+): Promise<ReadonlyArray<IssuerSubjectRef>> {
+  const [primary] = issuers;
+  return issuers.length === 1 && primary !== undefined && wantsPeers ? [primary, ...(await peersOf(db, primary))] : issuers;
+}
+
+// The listings a turn's price chart covers, the same ones loadTurnFactBlocks
+// charts, so their bars can be fetched before the cutoff (#232). None for a
+// single company, which gets no price chart.
+export async function priceListingsForTurn(
+  db: QueryExecutor,
+  input: {
+    issuers: ReadonlyArray<IssuerSubjectRef>;
+    wantsPeers: boolean;
+    requestedListings?: ReadonlyMap<string, CompanyListing>;
+    asOf: string;
+  },
+): Promise<Array<{ id: string; label: string }>> {
+  const companies = await turnCompanies(db, input.issuers, input.wantsPeers);
+  if (companies.length < 2) return [];
+  const issuerIds = companies.map((company) => company.id);
+  const active = await companyListings(db, issuerIds, input.asOf);
+  return priceListingsForComparison(issuerIds, listingsForComparison(issuerIds, input.requestedListings ?? new Map(), active));
 }
 
 // A price window the question names: year to date ("YTD", "year-to-date").
