@@ -23,6 +23,12 @@ test("frozen data modes never fetch live prices; live mode uses the market servi
   assert.equal(marketHydrationOrigin({ MARKET_ORIGIN: "http://127.0.0.1:4321", DEV_NO_KEYS: "true" }), null);
   assert.equal(marketHydrationOrigin({ MARKET_ORIGIN: "http://127.0.0.1:4321", DEV_MODE: "analyst" }), null);
   assert.equal(marketHydrationOrigin({}), null);
+  // The chat profile's one-process app serves market on its own port, not MARKET_ORIGIN's.
+  assert.equal(
+    marketHydrationOrigin({ DEV_PROFILE: "chat", APP_PORT: "5173", MARKET_ORIGIN: "http://127.0.0.1:4321" }),
+    "http://127.0.0.1:5173",
+  );
+  assert.equal(marketHydrationOrigin({ DEV_PROFILE: "chat", DEV_MODE: "analyst", APP_PORT: "5173" }), null);
 });
 
 test("the YTD window is requested from before the prior year's last sessions, split-adjusted (#232)", async () => {

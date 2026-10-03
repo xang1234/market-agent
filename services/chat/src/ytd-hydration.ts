@@ -16,6 +16,12 @@ const BASES = ["split_adjusted", "split_and_div_adjusted"] as const;
 
 export function marketHydrationOrigin(env: NodeJS.ProcessEnv): string | null {
   if (env.DEV_NO_KEYS === "true" || env.DEV_MODE === "analyst") return null;
+  // The chat profile serves market in-process from the one-process app, on its
+  // own host and port (services/app/src/dev.ts); MARKET_ORIGIN then names the
+  // standalone market server, which is not running.
+  if (env.DEV_PROFILE === "chat") {
+    return `http://${env.APP_HOST ?? "127.0.0.1"}:${env.APP_PORT ?? env.WEB_PORT ?? "5173"}`;
+  }
   return env.MARKET_ORIGIN?.trim() || null;
 }
 
