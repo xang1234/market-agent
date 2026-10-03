@@ -120,7 +120,7 @@ export function keepSupportedSentences(
       const named = mentions.filter((m) => !numbers.some((n) =>
         within(m.index, n.index, n.end - n.index) ||
         (n.index >= m.index + m.company.length && prefixed.some(({ prefix, number, unit }) =>
-          number === n.number && unit === unitAfter(sentence, n.end) && n.index - prefix.length <= m.index && spaced(sentence.slice(0, n.index)).endsWith(prefix)
+          number === n.number && unit === unitAfter(sentence, n.end) && spaced(sentence.slice(0, n.index)).endsWith(prefix) && prefix.endsWith(spaced(sentence.slice(m.index, n.index)))
         ))
       ));
       if (numbers.some(({ number }) => !supported.has(number) && !owners.has(number))) {
@@ -240,9 +240,10 @@ function unitAfter(text: string, end: number): string {
   return text.slice(end).trimStart().charAt(0).toLowerCase();
 }
 
-// The formatter writes a no-break space where the model may write a space.
+// The formatter writes a no-break space where the model may write one or more
+// spaces; any run of whitespace compares as one space.
 function spaced(text: string): string {
-  return text.replace(/[\u00a0\u202f]/g, " ");
+  return text.replace(/\s+/g, " ");
 }
 
 function escapeRegExp(text: string): string {

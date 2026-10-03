@@ -373,6 +373,8 @@ test("a ticker that is also a currency prefix does not break that currency's fig
   assert.equal(keepSupportedSentences("AMD's operating income was CHF 3.1B.", [], positive).removed.length, 1);
   // Written with a plain space by the model, it is still the prefix.
   assert.equal(keepSupportedSentences("AMD's operating income was CHF 3.1B.", [], positive).removed.length, 1);
+  assert.equal(keepSupportedSentences("AMD's operating income was CHF  3.1B.", [], positive).removed.length, 1);
+  assert.equal(keepSupportedSentences("AMD's operating income was CHF\t3.1B.", [], positive).removed.length, 1);
   // Nor a label that is a later word of a compound prefix ("CFA" in "F CFA 3.1B").
   const compound = [{ company: "CFA", value: "F CFA 3.1B" }, { company: "AMD", value: "$4.2B" }];
   assert.deepEqual(keepSupportedSentences("CFA's operating income was F CFA 3.1B.", [], compound).removed, []);
