@@ -1127,12 +1127,23 @@ test("the answering model is reported on turn.completed and saved with the messa
   const turn = answered.getOrCreateTurn({ threadId: "t", runId: "r" });
   await turn.completed;
   assert.equal(turn.events.at(-1)!.answered_by, "opencode-go/qwen3.8-max");
+  assert.equal("answer_usage" in turn.events.at(-1)!, false, "no usage reported, none emitted");
   assert.deepEqual(saved, ["opencode-go/qwen3.8-max"]);
 
   const unanswered = createChatCoordinator({ analystToolRuntime: successfulRuntime });
   const quiet = unanswered.getOrCreateTurn({ threadId: "t", runId: "r" });
   await quiet.completed;
   assert.equal("answered_by" in quiet.events.at(-1)!, false);
+});
+
+test("turn.completed carries the answer call's token usage for evals (#181)", async () => {
+  const usage = { input_tokens: 900, output_tokens: 120, reasoning_tokens: 80 };
+  const coordinator = createChatCoordinator({
+    analystToolRuntime: async (context) => ({ ...(await successfulRuntime(context)), answer_usage: usage }),
+  });
+  const turn = coordinator.getOrCreateTurn({ threadId: "t", runId: "r" });
+  await turn.completed;
+  assert.deepEqual(turn.events.at(-1)!.answer_usage, usage);
 });
 
 test("subject-aware runner emits bundle_id on turn.started before any tool events", async () => {

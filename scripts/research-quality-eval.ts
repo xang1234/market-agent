@@ -17,6 +17,7 @@ export const RUNS_DIR = fileURLToPath(new URL("../docs/eval-runs/research-qualit
 
 type Block = Record<string, unknown> & { kind?: string; title?: string };
 type Message = { role: string; blocks: Block[]; answered_by?: string | null };
+type AnswerUsage = { input_tokens: number; output_tokens: number; reasoning_tokens?: number };
 export type Score = 0 | 1 | 2 | "n/a" | null;
 export type ScoresFile = {
   run: string;
@@ -27,7 +28,8 @@ export type AnsweredQuestion = {
   question: EvalQuestion;
   threadId: string;
   // answeredBy: the deployment that wrote the turn's answer, as chat recorded it (#183).
-  turns: Array<{ message: string; outcome: string; blocks: Block[]; answeredBy?: string | null }>;
+  // usage: the answer call's tokens, from turn.completed (#181).
+  turns: Array<{ message: string; outcome: string; blocks: Block[]; answeredBy?: string | null; usage?: AnswerUsage | null }>;
 };
 
 // --- report ----------------------------------------------------------------------
@@ -80,6 +82,8 @@ export function renderReport(run: string, model: string, base: string, answered:
     // Which models actually answered, as chat recorded each turn (#183).
     `Answered by: ${answeredBySummary(answered)}.`,
     "",
+    `Answer tokens: ${usageSummary(answered)}.`,
+    "",
     `Model: \`${model}\`. Data: frozen golden dataset. Score each question in \`${run}.scores.json\` (rubric below),`,
     "then run `node --experimental-strip-types scripts/research-quality-eval.ts summary`.",
     "Bold figures are cited (linked to a fact); open the thread link for charts and sources.",
@@ -96,7 +100,8 @@ export function renderReport(run: string, model: string, base: string, answered:
       lines.push("", `### Q: ${turn.message}${subject ? ` (opened from the ${subject} page)` : ""}`, "");
       if (turn.outcome === "skipped") lines.push("**Not sent: an earlier turn didn't complete.**", "");
       else if (turn.outcome !== "turn.completed") lines.push(`**Turn ended with ${turn.outcome}.**`, "");
-      if (turn.answeredBy) lines.push(`_Answered by \`${turn.answeredBy}\`._`, "");
+      const tokens = turn.usage ? `${turn.usage.input_tokens} input / ${turn.usage.output_tokens} output tokens${turn.usage.reasoning_tokens === undefined ? "" : ` (${turn.usage.reasoning_tokens} reasoning)`}` : null;
+      if (turn.answeredBy || tokens) lines.push(`_${[turn.answeredBy ? `Answered by \`${turn.answeredBy}\`` : null, tokens].filter(Boolean).join("; ")}._`, "");
       lines.push(...turn.blocks.flatMap((block) => [renderBlock(block), ""]));
     }
   }
@@ -116,6 +121,17 @@ export function answeredBySummary(answered: ReadonlyArray<AnsweredQuestion>): st
   const parts = [...counts].map(([model, count]) => `\`${model}\` (${count} turn${count === 1 ? "" : "s"})`);
   if (unrecorded > 0) parts.push(`not recorded (${unrecorded} turn${unrecorded === 1 ? "" : "s"})`);
   return parts.length > 0 ? parts.join(", ") : "no turns yet";
+}
+
+// Mean tokens per answer call across the turns that reported usage.
+export function usageSummary(answered: ReadonlyArray<AnsweredQuestion>): string {
+  const usages = answered.flatMap((question) => question.turns).flatMap((turn) => (turn.usage ? [turn.usage] : []));
+  if (usages.length === 0) return "not reported";
+  const mean = (pick: (usage: AnswerUsage) => number) => Math.round(usages.reduce((sum, usage) => sum + pick(usage), 0) / usages.length);
+  const reasoning = usages.filter((usage) => usage.reasoning_tokens !== undefined);
+  return `mean ${mean((usage) => usage.input_tokens)} input / ${mean((usage) => usage.output_tokens)} output per turn`
+    + (reasoning.length === usages.length ? ` (${mean((usage) => usage.reasoning_tokens!)} reasoning)` : "")
+    + ` over ${usages.length} turn${usages.length === 1 ? "" : "s"}`;
 }
 
 export function blankScores(run: string, model: string): ScoresFile {
@@ -239,13 +255,16 @@ async function run(base: string): Promise<void> {
         continue;
       }
       const startedAt = Date.now();
-      const outcome = await runTurn(base, threadId, turn.message, 180_000, turn.subjectText);
+      let usage: AnswerUsage | null = null;
+      const outcome = await runTurn(base, threadId, turn.message, 180_000, turn.subjectText, (data) => {
+        usage = (data.answer_usage as AnswerUsage | undefined) ?? null;
+      });
       console.log(`${outcome === "turn.completed" ? "done" : outcome}  ${question.id}: ${turn.message}  (${((Date.now() - startedAt) / 1000).toFixed(1)}s)`);
       const { messages } = await api<{ messages: Message[] }>(base, "GET", `/v1/chat/threads/${threadId}/messages`);
       const answers = messages.filter((m) => m.role === "assistant");
       // A failed turn may have saved no answer: show none rather than the previous one.
       const answer = answers.length > answersSoFar ? answers.at(-1)! : null;
-      turns.push({ message: turn.message, outcome, blocks: answer?.blocks ?? [], answeredBy: answer?.answered_by ?? null });
+      turns.push({ message: turn.message, outcome, blocks: answer?.blocks ?? [], answeredBy: answer?.answered_by ?? null, usage });
       answersSoFar = answers.length;
     }
     answered.push({ question, threadId, turns });

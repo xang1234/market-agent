@@ -79,6 +79,8 @@ export async function runTurn(
   timeoutMs = 180_000,
   // A thread opened from a ticker page (#138) names its subject on the stream.
   subject?: string,
+  // Receives turn.completed's data (answered_by, answer_usage, ...), for the eval (#181).
+  onCompleted?: (data: Record<string, unknown>) => void,
 ): Promise<TurnOutcome> {
   const messageId = randomUUID();
   // One deadline for the whole turn: the message POST, the stream request, and every
@@ -112,7 +114,13 @@ export async function runTurn(
       const { value, done } = await untilAborted(reader.read(), signal);
       if (done) return "timeout"; // the server closed the stream before the turn ended
       transcript += decoder.decode(value, { stream: true });
-      if (/event: turn\.completed/.test(transcript)) return "turn.completed";
+      const completed = /event: turn\.completed\ndata: (.*)\n/.exec(transcript);
+      if (completed) {
+        onCompleted?.(JSON.parse(completed[1]) as Record<string, unknown>);
+        return "turn.completed";
+      }
+      // The event line arrived but its data line hasn't yet: keep reading.
+      if (/event: turn\.completed/.test(transcript)) continue;
       if (/event: turn\.error/.test(transcript)) return "turn.error";
     }
   } catch (error) {

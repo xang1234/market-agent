@@ -102,6 +102,8 @@ export async function composeAnalystBlocksWithLlm(input: {
   onNarrativeRemoved?: (sentences: ReadonlyArray<string>) => void;
   // Receives the deployment (channel/model) that wrote the answer (#183).
   onAnswered?: (deployment: string) => void;
+  // Receives the answer call's token usage, so evals can measure it (#181).
+  onUsage?: (usage: AnswerUsage) => void;
   deadlines?: ModelDeadlines;
 }): Promise<ReadonlyArray<Record<string, unknown>>> {
   const router = await createLlmRouterFromEnv(input.env ?? process.env, {
@@ -129,7 +131,7 @@ export async function composeAnalystBlocksWithLlm(input: {
           "in its place.",
           "Name context the data itself supports, such as revenue concentrated in one",
           "segment, but never add facts, numbers, or events that are not in the tool context.",
-          "Use the provided tool context only; do not invent citations or data.",
+          "Use only the context provided; do not invent citations or data.",
           "The figures shown to the user are listed in displayed_figures, each with the metric",
           "and, in a comparison, the company it belongs to. Quote a figure only exactly as it",
           "appears there, in a sentence that names its company exactly as given in company",
@@ -137,9 +139,13 @@ export async function composeAnalystBlocksWithLlm(input: {
           "margins, or ratios; describe direction and comparison in words instead.",
           // Fiscal calendars differ (#180): the period and its end date come with each figure.
           "Name the fiscal period each figure is for (its period, and the month its period_end",
-          "falls in; never the day). When a comparison's title says the fiscal years end months",
+          "falls in; never the day), and a chart's window by month and year. When a comparison's title says the fiscal years end months",
           "apart, say so: the same fiscal year covers different months for each company.",
-          "If the tool context flags data as stale (quote.stale, or",
+          "When displayed_figures is empty, available_data lists the reported values you may use instead;",
+          "a value with a coverage other than full covers only part of its period, so say so.",
+          "Claims in cited_claims are sourced statements you may draw on, dated by effective_time",
+          "and published_at: say when a claim dates from, by month and year, if it is not recent. data_notes say what",
+          "could not be shown. If staleness flags data as stale (quote.stale, or",
           "fact_recency.stale / a large fact_recency.age_days), explicitly note",
           "that the figure may be out of date and say how old it is.",
           "Return plain text suitable for a rich_text block.",
@@ -147,14 +153,7 @@ export async function composeAnalystBlocksWithLlm(input: {
       },
       {
         role: "user",
-        content: JSON.stringify({
-          user_intent: input.context.userIntent ?? "Start a research thread",
-          conversation: input.conversation ?? [],
-          bundle_id: input.context.bundleId,
-          existing_blocks: input.blocks,
-          displayed_figures: displayedFigures(input.factBlocks ?? []),
-          tool_calls: input.toolCalls.map(summarizeToolCall),
-        }),
+        content: JSON.stringify(answerContext(input)),
       },
     ],
     temperature: 0.2,
@@ -164,6 +163,13 @@ export async function composeAnalystBlocksWithLlm(input: {
     reasoning: "low",
     maxTokens: 8192,
   }, withDeadlines(input.deadlines ?? ANSWER_DEADLINES));
+  if (result.usage) {
+    input.onUsage?.({
+      input_tokens: result.usage.inputTokens,
+      output_tokens: result.usage.outputTokens,
+      ...(result.usage.reasoningTokens === undefined ? {} : { reasoning_tokens: result.usage.reasoningTokens }),
+    });
+  }
   // The deployment is reported only when some of its prose is shown: a fallback
   // sentence in its place was written by no model (#183).
   const answered = () => input.onAnswered?.(`${result.deployment.channel}/${result.deployment.model}`);
@@ -176,21 +182,25 @@ export async function composeAnalystBlocksWithLlm(input: {
       input.factBlocks?.length ? FACT_BLOCKS_FALLBACK_TEXT : NO_ANSWER_FALLBACK_TEXT,
     );
   }
-  if (!input.factBlocks?.length) {
+  // The guard limits prose to the figures shown; with none shown (no fact blocks,
+  // or only a gap note or chart), the model answers from available_data
+  // instead, so nothing is guarded (#181). One condition decides both.
+  const shown = displayedFigures(input.factBlocks ?? []);
+  if (shown.length === 0) {
     answered();
     return rewriteFirstRichTextBlock(input.blocks, text);
   }
 
   const guarded = keepSupportedSentences(
     text,
-    [...displayTextsForBlocks(input.factBlocks), ...claimTextsFromToolCalls(input.toolCalls)],
-    displayedFigures(input.factBlocks).flatMap((figure) =>
+    [...displayTextsForBlocks(input.factBlocks ?? []).map(withoutDays), ...claimTextsFromToolCalls(input.toolCalls)],
+    shown.flatMap((figure) =>
       figure.company === undefined ? [] : [
         { company: figure.company, value: figure.value },
         // So is its fiscal year: the title shows every company's, so "NVDA's FY2025"
         // must not pass when NVDA's figures are FY2026 (#180). A year every company
         // shares is no one's in particular (narrative-guard.ts).
-        ...(figure.period ? [{ company: figure.company, value: figure.period }] : []),
+        ...(figure.period ? [{ company: figure.company, value: withoutDays(figure.period) }] : []),
       ]
     ),
   );
@@ -203,26 +213,130 @@ export async function composeAnalystBlocksWithLlm(input: {
 }
 
 // Claim text the answer cites; a figure a claim states is supported.
+// Its dates too, as month and year only: the model is asked to date a claim
+// ("in November 2025"), so that year is supported, while an ISO date's day and
+// time digits ("19", "0") never become supported figures (#181).
 function claimTextsFromToolCalls(toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>): string[] {
+  return citedClaims(toolCalls).flatMap((claim) => [
+    claim.text,
+    ...[claim.effective_time, claim.published_at].flatMap((date) => (date ? [monthYear(date)] : [])),
+  ]);
+}
+
+// A chart's window is shown as dates ("2025-12-31 close to 2026-08-31"); the
+// guard reads them as month and year, so a day ("31") never passes as a return.
+function withoutDays(text: string): string {
+  return text.replace(/\d{4}-\d{2}-\d{2}/g, (date) => monthYear(date));
+}
+
+function monthYear(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? ""
+    : date.toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
+export type AnswerUsage = { input_tokens: number; output_tokens: number; reasoning_tokens?: number };
+
+// What the answer model sees (#181): only what it can use. The figures shown to
+// the user (the only ones it may quote, with company, period and period end),
+// cited claim text, what could not be shown, and staleness flags. Raw tool JSON,
+// the placeholder block, and the routing bundle are left out: the narrative
+// guard drops any figure not shown, so the raw facts behind them only added
+// tokens and reasoning. When no figures are shown (no fact blocks: a quote-only
+// subject, or the fact loader came back empty), nothing is guarded either, and
+// the evidence is then summarized compactly as available_data instead.
+export function answerContext(input: {
+  context: LlmRuntimeContext;
+  toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>;
+  factBlocks?: ReadonlyArray<Record<string, unknown>>;
+  conversation?: ReadonlyArray<{ role: string; text: string }>;
+}): Record<string, unknown> {
+  const results = input.toolCalls.map((toolCall) => (isRecord(toolCall.result) ? toolCall.result : {}));
+  const structured = results.map((result) => (isRecord(result.structured_context) ? result.structured_context : {}));
+  const quotes = structured.flatMap((context) =>
+    isRecord(context.quote) ? [{ ticker: context.quote.ticker, as_of: context.quote.as_of, stale: context.quote.stale }] : []
+  );
+  const factRecency = structured.flatMap((context) => (isRecord(context.fact_recency) ? [context.fact_recency] : []));
+  // Notes the fact blocks show instead of a chart (a named gap), and subjects with no evidence at all.
+  const dataNotes = [
+    ...(input.factBlocks ?? []).flatMap((block) =>
+      block.kind === "rich_text" && Array.isArray(block.segments)
+        ? block.segments.flatMap((segment) => (isRecord(segment) && typeof segment.text === "string" ? [segment.text] : []))
+        : []
+    ),
+    ...(results.some((result) => result.evidence_status === "insufficient_evidence")
+      ? ["No research claims, reported facts, or quote are on file for this subject."]
+      : []),
+  ];
+  const claims = citedClaims(input.toolCalls);
+  const displayed = displayedFigures(input.factBlocks ?? []);
+  const available = displayed.length === 0 ? availableData(structured) : null;
+  return {
+    question: input.context.userIntent ?? "Start a research thread",
+    conversation: input.conversation ?? [],
+    displayed_figures: displayed,
+    ...(available ? { available_data: available } : {}),
+    ...(claims.length > 0 ? { cited_claims: claims } : {}),
+    ...(dataNotes.length > 0 ? { data_notes: dataNotes } : {}),
+    ...(quotes.length > 0 || factRecency.length > 0
+      ? { staleness: { ...(quotes.length > 0 ? { quote: quotes } : {}), ...(factRecency.length > 0 ? { fact_recency: factRecency } : {}) } }
+      : {}),
+  };
+}
+
+// Cited claim text with its dates, so a past claim (an earlier quarter's
+// guidance) is not read as current.
+function citedClaims(toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>): Array<Record<string, string>> {
   return toolCalls.flatMap((toolCall) => {
     const evidence = (toolCall.result as { evidence?: { claims?: unknown } } | undefined)?.evidence;
     if (!Array.isArray(evidence?.claims)) return [];
     return evidence.claims.flatMap((claim: unknown) => {
-      const text = (claim as { text_canonical?: unknown } | null)?.text_canonical;
-      return typeof text === "string" ? [text] : [];
+      if (!isRecord(claim) || typeof claim.text_canonical !== "string") return [];
+      return [{
+        text: claim.text_canonical,
+        ...(typeof claim.effective_time === "string" ? { effective_time: claim.effective_time } : {}),
+        ...(typeof claim.published_at === "string" ? { published_at: claim.published_at } : {}),
+      }];
     });
   });
 }
 
-function summarizeToolCall(toolCall: ChatAnalystToolRuntimeToolCall): Record<string, unknown> {
-  return {
-    tool_call_id: toolCall.tool_call_id,
-    tool_name: toolCall.tool_name,
-    status: toolCall.status,
-    bundle_id: toolCall.bundle_id,
-    ...(toolCall.arguments === undefined ? {} : { arguments: toolCall.arguments }),
-    ...(toolCall.result === undefined ? {} : { result: toolCall.result }),
-  };
+// The quote and reported facts, compactly: what an answer with no displayed
+// figures can stand on. Null when there is neither.
+function availableData(structured: ReadonlyArray<Record<string, unknown>>): Record<string, unknown> | null {
+  const quotes = structured.flatMap((context) => isRecord(context.quote) ? [{
+    ticker: context.quote.ticker,
+    price: context.quote.price,
+    // change_pct is a fraction (0.0078 = 0.78%); sent as the percentage it means.
+    ...(typeof context.quote.change_pct === "number"
+      ? { change: `${context.quote.change_pct >= 0 ? "+" : ""}${(context.quote.change_pct * 100).toFixed(2)}%` }
+      : {}),
+    currency: context.quote.currency,
+    as_of: context.quote.as_of,
+    // Fresh is not live: an end-of-day or delayed quote says so.
+    ...(typeof context.quote.session_state === "string" ? { session_state: context.quote.session_state } : {}),
+    ...(typeof context.quote.delay_class === "string" ? { delay_class: context.quote.delay_class } : {}),
+  }] : []);
+  const facts = structured.flatMap((context) => (Array.isArray(context.facts) ? context.facts : []).flatMap((fact) =>
+    isRecord(fact) && (typeof fact.value_num === "number" || typeof fact.value_text === "string") ? [{
+      metric: fact.display_name ?? fact.metric_key,
+      value: typeof fact.value_num === "number" ? fact.value_num * (typeof fact.scale === "number" ? fact.scale : 1) : fact.value_text,
+      ...(fact.unit ? { unit: fact.unit } : {}),
+      ...(fact.currency ? { currency: fact.currency } : {}),
+      ...(fact.fiscal_year !== null && fact.fiscal_year !== undefined ? { period: `${fact.fiscal_period ?? ""} ${fact.fiscal_year}`.trim() } : {}),
+      // Each value's own date: fact_recency only dates the newest one.
+      ...(typeof fact.as_of === "string" ? { as_of: fact.as_of } : {}),
+      // How completely the period is covered, when it is not fully.
+      ...(typeof fact.coverage_level === "string" && fact.coverage_level !== "full" ? { coverage: fact.coverage_level } : {}),
+    }] : []
+  ));
+  if (quotes.length === 0 && facts.length === 0) return null;
+  return { ...(quotes.length > 0 ? { quotes } : {}), ...(facts.length > 0 ? { facts } : {}) };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function rewriteFirstRichTextBlock(

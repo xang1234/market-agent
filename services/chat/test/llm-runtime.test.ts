@@ -100,7 +100,9 @@ test("composeAnalystBlocksWithLlm rewrites the first rich text block", async () 
       result: { evidence_status: "available" },
     }],
     createClient: () => async (_deployment, request) => {
-      assert.match(request.messages[1]?.content ?? "", /load_evidence/);
+      // The question goes in; the raw tool call does not (#181).
+      assert.match(request.messages[1]?.content ?? "", /"question":"Analyze AAPL"/);
+      assert.doesNotMatch(request.messages[1]?.content ?? "", /load_evidence/);
       return { text: "LLM-grounded note" };
     },
   });
@@ -502,6 +504,185 @@ test("a fallback sentence shown in place of the answer was written by no model (
   // Every sentence quotes a figure the user is not shown: the guard drops them all.
   assert.deepEqual(await answeredBy({ text: "NVDA's margin is 99.9%." }, COMPARISON_BLOCKS), [], "all guarded");
   assert.deepEqual(await answeredBy({ text: "NVDA is larger." }, COMPARISON_BLOCKS), ["openai/gpt-4.1"], "kept");
+});
+
+test("the answer model sees a compact context, not raw tool JSON (#181)", async () => {
+  let prompt = "";
+  const usage: unknown[] = [];
+  const toolCall = {
+    tool_call_id: "tc-1",
+    tool_name: "research_lookup",
+    bundle_id: "peer_comparison",
+    status: "ok",
+    arguments: { query: "Compare NVDA with AMD" },
+    result: {
+      evidence_status: "available",
+      manifest_contribution: { subject_refs: [], claim_refs: ["c1"] },
+      structured_context: {
+        quote: { ticker: "NVDA", price: 178.4, as_of: "2026-09-01T00:00:00.000Z", stale: true, provider: "polygon", source_id: "s" },
+        facts: Array.from({ length: 24 }, (_, i) => ({ fact_id: `f${i}`, metric_key: "revenue", value_num: i })),
+        fact_recency: { latest_as_of: "2026-08-01T00:00:00.000Z", age_days: 31, stale: false },
+      },
+      evidence: { claims: [{ claim_id: "c1", text_canonical: "NVIDIA guided data-center revenue higher.", effective_time: "2025-11-19T00:00:00.000Z", published_at: "2025-11-20T00:00:00.000Z" }] },
+    },
+  } as never;
+  const gap = { kind: "rich_text", segments: [{ type: "text", text: "Year-to-date price performance is not shown: AMD has no prices from before 2026." }] };
+  await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "Compare NVDA with AMD", bundleId: "peer_comparison" },
+    blocks: [NARRATIVE_BLOCK],
+    toolCalls: [toolCall],
+    factBlocks: [...COMPARISON_BLOCKS, gap],
+    createClient: () => async (_deployment, request) => {
+      prompt = request.messages.at(-1)!.content;
+      return { text: "NVDA is larger.", usage: { inputTokens: 900, outputTokens: 120, totalTokens: 1020, reasoningTokens: 80 } };
+    },
+    onUsage: (reported) => usage.push(reported),
+  });
+  const context = JSON.parse(prompt) as Record<string, unknown>;
+  assert.deepEqual(Object.keys(context).sort(), ["conversation", "cited_claims", "data_notes", "displayed_figures", "question", "staleness"].sort());
+  // Each claim keeps its dates, so a past claim is not read as current.
+  assert.deepEqual(context.cited_claims, [{
+    text: "NVIDIA guided data-center revenue higher.",
+    effective_time: "2025-11-19T00:00:00.000Z",
+    published_at: "2025-11-20T00:00:00.000Z",
+  }]);
+  assert.deepEqual(context.data_notes, ["Year-to-date price performance is not shown: AMD has no prices from before 2026."]);
+  assert.deepEqual(context.staleness, {
+    quote: [{ ticker: "NVDA", as_of: "2026-09-01T00:00:00.000Z", stale: true }],
+    fact_recency: [{ latest_as_of: "2026-08-01T00:00:00.000Z", age_days: 31, stale: false }],
+  });
+  // None of the raw tool JSON: no facts, prices, ids, or the placeholder block.
+  for (const absent of ["fact_id", "178.4", "manifest_contribution", "tool_calls", "existing_blocks", "bundle_id"]) {
+    assert.ok(!prompt.includes(absent), absent);
+  }
+  assert.deepEqual(usage, [{ input_tokens: 900, output_tokens: 120, reasoning_tokens: 80 }]);
+});
+
+test("with no figures shown, the model still gets the evidence, compactly, as available_data (#181)", async () => {
+  let prompt = "";
+  const toolCall = {
+    tool_call_id: "tc-1",
+    tool_name: "research_lookup",
+    bundle_id: "single_subject_analysis",
+    status: "ok",
+    result: {
+      evidence_status: "available",
+      structured_context: {
+        quote: { ticker: "AAPL", price: 231.6, change_pct: 0.0078, currency: "USD", as_of: "2026-09-01T00:00:00.000Z", stale: false, session_state: "closed", delay_class: "eod", source_id: "s" },
+        facts: [
+          { fact_id: "f1", metric_key: "revenue", display_name: "Revenue", value_num: 416.161, scale: 1e9, unit: "currency", currency: "USD", fiscal_year: 2025, fiscal_period: "FY", as_of: "2025-10-31T00:00:00.000Z", source_id: "s", coverage_level: "full" },
+          { fact_id: "f2", metric_key: "net_income", display_name: "Net income", value_num: 25, scale: 1e9, unit: "currency", currency: "USD", fiscal_year: 2026, fiscal_period: "Q1", as_of: "2026-01-30T00:00:00.000Z", source_id: "s", coverage_level: "partial" },
+        ],
+      },
+    },
+  } as never;
+  const run = async (factBlocks?: ReadonlyArray<Record<string, unknown>>) => {
+    await composeAnalystBlocksWithLlm({
+      env: BASE_ENV,
+      context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
+      blocks: [NARRATIVE_BLOCK],
+      toolCalls: [toolCall],
+      factBlocks,
+      createClient: () => async (_deployment, request) => {
+        prompt = request.messages.at(-1)!.content;
+        return { text: "AAPL trades at $231.6." };
+      },
+    });
+    return JSON.parse(prompt) as Record<string, unknown>;
+  };
+  assert.deepEqual((await run()).available_data, {
+    quotes: [{ ticker: "AAPL", price: 231.6, change: "+0.78%", currency: "USD", as_of: "2026-09-01T00:00:00.000Z", session_state: "closed", delay_class: "eod" }],
+    facts: [
+      { metric: "Revenue", value: 416161000000, unit: "currency", currency: "USD", period: "FY 2025", as_of: "2025-10-31T00:00:00.000Z" },
+      // A partially covered period says so.
+      { metric: "Net income", value: 25000000000, unit: "currency", currency: "USD", period: "Q1 2026", as_of: "2026-01-30T00:00:00.000Z", coverage: "partial" },
+    ],
+  });
+  assert.ok(!prompt.includes("fact_id") && !prompt.includes('"source_id"'), "still compact: no ids");
+  // With figures shown, only those may be quoted: no available_data.
+  assert.equal("available_data" in (await run(COMPARISON_BLOCKS)), false);
+});
+
+test("blocks that show no figures (a gap note) leave the answer unguarded, like no blocks (#181)", async () => {
+  const gap = { kind: "rich_text", segments: [{ type: "text", text: "Year-to-date price performance is not shown." }] };
+  const blocks = await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "How is AAPL doing YTD?", bundleId: "single_subject_analysis" },
+    blocks: [NARRATIVE_BLOCK],
+    toolCalls: [],
+    factBlocks: [gap],
+    createClient: () => async () => ({ text: "AAPL trades at $231.6 per the latest quote." }),
+  });
+  assert.equal((blocks[0].segments as Array<{ text: string }>)[0].text, "AAPL trades at $231.6 per the latest quote.");
+});
+
+test("a turn showing only a price chart stays guarded against returns it does not show (#181)", async () => {
+  const chart = {
+    kind: "perf_comparison",
+    title: "Price performance",
+    default_range: "YTD 2026: 2025-12-31 close to 2026-08-31",
+    series: [{ name: "NVDA", points: [{ x: "2025-12-31", y: 0 }, { x: "2026-08-31", y: 12.5 }] }],
+  };
+  const narrate = async (text: string) => {
+    const composed = await composeAnalystBlocksWithLlm({
+      env: BASE_ENV,
+      context: { userIntent: "How has NVDA done?", bundleId: "peer_comparison" },
+      blocks: [NARRATIVE_BLOCK],
+      toolCalls: [],
+      factBlocks: [chart],
+      createClient: () => async () => ({ text }),
+    });
+    return (composed[0].segments as Array<{ text: string }>)[0].text;
+  };
+  assert.equal(await narrate("NVDA returned 12.5% over the window."), "NVDA returned 12.5% over the window.");
+  assert.notEqual(await narrate("NVDA returned 40.0% over the window."), "NVDA returned 40.0% over the window.");
+  // The window's dates are no returns: its day and month digits do not pass.
+  assert.notEqual(await narrate("NVDA returned 31% over the window."), "NVDA returned 31% over the window.");
+  assert.notEqual(await narrate("NVDA returned 8% over the window."), "NVDA returned 8% over the window.");
+  assert.equal(
+    await narrate("NVDA returned 12.5% from December 2025 to August 2026."),
+    "NVDA returned 12.5% from December 2025 to August 2026.",
+  );
+});
+
+test("a claim the model dates from its effective time keeps its sentence (#181)", async () => {
+  const toolCall = {
+    tool_call_id: "tc-1",
+    tool_name: "research_lookup",
+    bundle_id: "peer_comparison",
+    status: "ok",
+    result: { evidence: { claims: [{ claim_id: "c1", text_canonical: "NVIDIA guided revenue higher.", effective_time: "2025-11-19T00:00:00.000Z" }] } },
+  } as never;
+  const composed = await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "Compare NVDA with AMD", bundleId: "peer_comparison" },
+    blocks: [NARRATIVE_BLOCK],
+    toolCalls: [toolCall],
+    factBlocks: COMPARISON_BLOCKS,
+    createClient: () => async () => ({ text: "In November 2025, NVIDIA guided revenue higher." }),
+  });
+  assert.equal((composed[0].segments as Array<{ text: string }>)[0].text, "In November 2025, NVIDIA guided revenue higher.");
+});
+
+test("a claim's date supports its month and year, never its day or time as a figure (#181)", async () => {
+  const toolCall = {
+    tool_call_id: "tc-1",
+    tool_name: "research_lookup",
+    bundle_id: "peer_comparison",
+    status: "ok",
+    result: { evidence: { claims: [{ claim_id: "c1", text_canonical: "NVIDIA guided revenue higher.", effective_time: "2025-11-19T00:00:00.000Z" }] } },
+  } as never;
+  const composed = await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "Compare NVDA with AMD", bundleId: "peer_comparison" },
+    blocks: [NARRATIVE_BLOCK],
+    toolCalls: [toolCall],
+    factBlocks: COMPARISON_BLOCKS,
+    // 19 is only the claim's day: an invented margin must not survive on it.
+    createClient: () => async () => ({ text: "Margins reached 19% last year. NVDA is larger." }),
+  });
+  assert.equal((composed[0].segments as Array<{ text: string }>)[0].text, "NVDA is larger.");
 });
 
 test("the model sees each comparison figure with the company and metric it belongs to", async () => {

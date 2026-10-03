@@ -42,6 +42,27 @@ test("runTurn gives up at its deadline when the stream goes silent", async (t) =
   assert.ok(Date.now() - startedAt < 5_000, "returned near the deadline, not hung");
 });
 
+test("runTurn hands turn.completed's data to its caller, even split across chunks (#181)", async (t) => {
+  const server = createServer((req, res) => {
+    if (req.method === "POST") {
+      res.writeHead(200, { "content-type": "application/json" }).end("{}");
+      return;
+    }
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write("id: 9\nevent: turn.completed\n");
+    setTimeout(() => res.end('data: {"answered_by":"a/b","answer_usage":{"input_tokens":5,"output_tokens":2}}\n\n'), 20);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  let data: Record<string, unknown> | undefined;
+  assert.equal(await runTurn(base, "thread-1", "Analyze NVDA", 5_000, undefined, (completed) => { data = completed; }), "turn.completed");
+  assert.deepEqual(data, { answered_by: "a/b", answer_usage: { input_tokens: 5, output_tokens: 2 } });
+});
+
 test("runTurn ends at its deadline even when the stream ignores the abort (#185)", async (t) => {
   // An open SSE stream that keeps the turn going and never ends, and that the deadline's
   // abort doesn't reach: in the eval run a 180 s turn waited 460 s, until the server closed it.
