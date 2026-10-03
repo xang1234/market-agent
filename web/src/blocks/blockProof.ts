@@ -11,10 +11,15 @@ export type BlockProof = {
   public_by_cutoff: 'proven' | 'unknown'
 }
 
+// Kinds that make no claim about values (notices, source lists, containers) or
+// that label themselves (certified financial answers): no outer proof label.
+const NO_CLAIM_KINDS: ReadonlySet<string> = new Set(['disclosure', 'sources', 'section', 'financial_answer'])
+
 // The labels a block's proof earns. Arithmetic and public-time claims come only
 // with a certified result; source linkage alone is labelled as just that.
 // Commentary that cites nothing makes no claim, so it gets no label.
 export function proofLabels(proof: BlockProof, kind: string): VerificationKind[] {
+  if (NO_CLAIM_KINDS.has(kind)) return []
   if (proof.calculation === 'verified') return proof.public_by_cutoff === 'proven' ? ['verified', 'public_by_cutoff'] : ['verified']
   if (proof.evidence === 'linked') return [kind === 'rich_text' ? 'narrative' : 'source_linked']
   return kind === 'rich_text' ? [] : ['not_verified']

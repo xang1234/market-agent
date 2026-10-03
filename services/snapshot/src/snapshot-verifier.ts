@@ -1399,7 +1399,7 @@ function requiresSealedDataSupport(block: VerifierBlock): boolean {
   ].includes(block.kind);
 }
 
-function dataRefSeriesRefs(params: JsonObject | undefined): string[] {
+export function dataRefSeriesRefs(params: JsonObject | undefined): string[] {
   if (params === undefined) return [];
   const refs: string[] = [];
   const { series_ref, series_refs } = params;

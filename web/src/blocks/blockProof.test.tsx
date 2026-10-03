@@ -8,7 +8,7 @@ import type { ChatMessage } from '../chat/messageTypes.ts'
 import { MessageItem } from '../chat/MessageItem.tsx'
 import { blockPropsAreEqual } from './blockMemoization.ts'
 import { proofLabels, proofRows, type BlockProof } from './blockProof.ts'
-import { financialAnswerFixture, metricsComparisonFixture, richTextFixture } from './fixtures.ts'
+import { disclosureFixture, financialAnswerFixture, metricsComparisonFixture, newsClusterFixture, richTextFixture } from './fixtures.ts'
 import { BlockRegistryProvider, BlockView, createDefaultBlockRegistry } from './index.ts'
 import type { Block } from './types.ts'
 
@@ -96,4 +96,19 @@ test('a reloaded proof re-renders a memoized block', () => {
   const block = metricsComparisonFixture as Block
   assert.equal(blockPropsAreEqual({ block, proof: LINKED }, { block, proof: LINKED }), true)
   assert.equal(blockPropsAreEqual({ block }, { block, proof: LINKED }), false)
+})
+
+test('evidence-bearing kinds without a default label still show their proof; notices do not', () => {
+  assert.ok(render(<BlockView block={newsClusterFixture as Block} proof={LINKED} />).includes('Source-linked'))
+  assert.ok(!render(<BlockView block={disclosureFixture as Block} proof={UNPROVEN} />).includes('data-verification='))
+})
+
+test('a newer financial format still shows the server claims, without calling unverified values verified', () => {
+  const newer = { ...financialAnswerFixture, financial: { presentation_version: 'financial-presentation.v99' } } as unknown as Block
+  const certified = render(<BlockView block={newer} proof={CERTIFIED} />)
+  assert.ok(certified.includes('Verified calculation') && certified.includes('Public by cutoff'))
+  assert.ok(!certified.includes('data-inspect-result='), 'no values are shown')
+  const uncertified = render(<BlockView block={newer} proof={UNPROVEN} />)
+  assert.ok(uncertified.includes('Not verified') && !uncertified.includes('Verified calculation'))
+  assert.ok(!uncertified.includes('verified financial answer'))
 })

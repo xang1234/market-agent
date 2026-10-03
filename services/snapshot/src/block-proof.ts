@@ -18,7 +18,8 @@
 // ponytail: claims are per top-level block; a section's children are not
 // assessed separately.
 
-import { extractBlockRefs, type VerifierBlock } from "./snapshot-verifier.ts";
+import { dataRefSeriesRefs, extractBlockRefs, type VerifierBlock } from "./snapshot-verifier.ts";
+import type { JsonObject } from "./manifest-staging.ts";
 
 export type BlockProof = {
   evidence: "linked" | "unknown";
@@ -78,15 +79,12 @@ function citedRefsAllSealed(block: Record<string, unknown>, snapshot: SealedSnap
   const params = isRecord(block.data_ref) && isRecord(block.data_ref.params) ? block.data_ref.params : {};
   const cited = [
     ...extractBlockRefs(block as unknown as VerifierBlock).map((ref) => [ref.ref_kind, ref.ref_id] as const),
-    ...strings(params.series_refs).map((id) => ["series", id] as const),
+    // Both forms the seal accepts: series_ref and series_refs.
+    ...dataRefSeriesRefs(params as JsonObject).map((id) => ["series", id] as const),
     ...(Array.isArray(params.fact_bindings) ? params.fact_bindings : [])
       .flatMap((binding) => isRecord(binding) && typeof binding.fact_id === "string" ? [["fact", binding.fact_id] as const] : []),
   ];
   return cited.length > 0 && cited.every(([kind, id]) => manifest[kind]?.has(id) === true);
-}
-
-function strings(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

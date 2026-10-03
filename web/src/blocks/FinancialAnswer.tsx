@@ -36,9 +36,11 @@ export function FinancialAnswer({ block }: FinancialAnswerProps): ReactElement {
   if (content === null) {
     return (
       <ChartCard testId={`block-financial-answer-${block.id}`} blockKind="financial_answer" title={undefined} dataAttrs={{ 'data-certified': 'false' }}>
-        <VerificationLabel kind="legacy" />
+        {/* The values are not shown, but the server's claims about them still are. */}
+        {proof === null ? <VerificationLabel kind="legacy" /> : <VerificationLabel kind={proof.calculation === 'verified' ? 'verified' : 'not_verified'} />}
+        {proof?.public_by_cutoff === 'proven' ? <VerificationLabel kind="public_by_cutoff" /> : null}
         <p role="note" className="text-sm text-muted" data-testid={`block-financial-answer-${block.id}-unsupported`}>
-          This verified financial answer uses a newer format than this app supports. Refresh or update to view it.
+          This financial answer uses a newer format than this app supports. Refresh or update to view it.
         </p>
       </ChartCard>
     )

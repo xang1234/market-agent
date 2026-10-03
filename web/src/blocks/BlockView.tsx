@@ -60,10 +60,10 @@ export function BlockView({ block, verification: verificationOverride, proof }: 
   // sidesteps the react-hooks/static-components heuristic that treats
   // capitalized JSX identifiers as locally-declared components.
   const content = createElement(renderer, { block })
-  // Kinds that declare no label (disclosures, sources, self-labelling certified
-  // answers) stay unlabelled; the rest show what their proof establishes.
+  // With a server proof, every claim-bearing block shows what it establishes
+  // (proofLabels); without one, the kind's default label (if any) stands.
   const declared = verificationOverride ?? registry.verification(block)
-  const labels: VerificationKind[] = declared === null ? [] : proof && !verificationOverride ? proofLabels(proof, block.kind) : [declared]
+  const labels: VerificationKind[] = proof && !verificationOverride ? proofLabels(proof, block.kind) : declared === null ? [] : [declared]
   // The label sits on the block itself, so neighbouring blocks never borrow each other's status.
   const labelled = labels.length === 0 ? content : (
     <div className="flex flex-col items-start gap-1" data-block-verification={labels.join(' ')}>
