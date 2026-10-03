@@ -73,7 +73,9 @@ export function BlockView({ block, verification: verificationOverride, proof }: 
       <div className="w-full">{content}</div>
     </div>
   )
-  const rendered = proof ? <BlockProofContext.Provider value={proof}>{labelled}</BlockProofContext.Provider> : labelled
+  // Every block sets its own proof, or none: a nested block (a section's child)
+  // never reads its parent's.
+  const rendered = <BlockProofContext.Provider value={proof ?? null}>{labelled}</BlockProofContext.Provider>
   if (inspector === null) return rendered
   return (
     <div className="group relative" data-testid={`block-shell-${block.id}`}>

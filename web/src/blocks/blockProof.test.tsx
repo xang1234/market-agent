@@ -112,3 +112,16 @@ test('a newer financial format still shows the server claims, without calling un
   assert.ok(uncertified.includes('Not verified') && !uncertified.includes('Verified calculation'))
   assert.ok(!uncertified.includes('verified financial answer'))
 })
+
+test("a nested block never reads its parent's proof", () => {
+  const section = {
+    ...richTextFixture,
+    id: 'section',
+    kind: 'section',
+    title: 'Results',
+    children: [financialAnswerFixture],
+  } as unknown as Block
+  const html = render(<BlockView block={section} proof={UNPROVEN} />)
+  assert.ok(html.includes('data-certified="true"'), 'the unassessed child keeps its own default')
+  assert.ok(!html.includes('Not verified'))
+})

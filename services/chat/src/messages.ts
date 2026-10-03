@@ -252,6 +252,12 @@ async function loadSealedSnapshots(
       [ids],
     ),
   ]);
+  const certificatesBySnapshot = new Map<string, Array<{ run_id: string; unit_id: string; presentation_hash: string }>>();
+  for (const certificate of certificates.rows) {
+    const list = certificatesBySnapshot.get(certificate.snapshot_id) ?? [];
+    list.push(certificate);
+    certificatesBySnapshot.set(certificate.snapshot_id, list);
+  }
   return new Map(manifests.rows.map((row) => [row.snapshot_id, {
     fact_refs: row.fact_refs ?? [],
     claim_refs: row.claim_refs ?? [],
@@ -259,7 +265,7 @@ async function loadSealedSnapshots(
     document_refs: row.document_refs ?? [],
     source_ids: row.source_ids ?? [],
     series_refs: (row.series_specs ?? []).flatMap((spec) => typeof spec?.series_ref === "string" ? [spec.series_ref] : []),
-    certificates: certificates.rows.filter((certificate) => certificate.snapshot_id === row.snapshot_id),
+    certificates: certificatesBySnapshot.get(row.snapshot_id) ?? [],
   }]));
 }
 
