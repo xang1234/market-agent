@@ -102,6 +102,8 @@ export async function composeAnalystBlocksWithLlm(input: {
   onNarrativeRemoved?: (sentences: ReadonlyArray<string>) => void;
   // Receives the deployment (channel/model) that wrote the answer (#183).
   onAnswered?: (deployment: string) => void;
+  // Receives the answer call's token usage, so evals can measure it (#181).
+  onUsage?: (usage: AnswerUsage) => void;
   deadlines?: ModelDeadlines;
 }): Promise<ReadonlyArray<Record<string, unknown>>> {
   const router = await createLlmRouterFromEnv(input.env ?? process.env, {
@@ -129,7 +131,7 @@ export async function composeAnalystBlocksWithLlm(input: {
           "in its place.",
           "Name context the data itself supports, such as revenue concentrated in one",
           "segment, but never add facts, numbers, or events that are not in the tool context.",
-          "Use the provided tool context only; do not invent citations or data.",
+          "Use only the context provided; do not invent citations or data.",
           "The figures shown to the user are listed in displayed_figures, each with the metric",
           "and, in a comparison, the company it belongs to. Quote a figure only exactly as it",
           "appears there, in a sentence that names its company exactly as given in company",
@@ -139,7 +141,8 @@ export async function composeAnalystBlocksWithLlm(input: {
           "Name the fiscal period each figure is for (its period, and the month its period_end",
           "falls in; never the day). When a comparison's title says the fiscal years end months",
           "apart, say so: the same fiscal year covers different months for each company.",
-          "If the tool context flags data as stale (quote.stale, or",
+          "Claims in cited_claims are sourced statements you may draw on; data_notes say what",
+          "could not be shown. If staleness flags data as stale (quote.stale, or",
           "fact_recency.stale / a large fact_recency.age_days), explicitly note",
           "that the figure may be out of date and say how old it is.",
           "Return plain text suitable for a rich_text block.",
@@ -147,14 +150,7 @@ export async function composeAnalystBlocksWithLlm(input: {
       },
       {
         role: "user",
-        content: JSON.stringify({
-          user_intent: input.context.userIntent ?? "Start a research thread",
-          conversation: input.conversation ?? [],
-          bundle_id: input.context.bundleId,
-          existing_blocks: input.blocks,
-          displayed_figures: displayedFigures(input.factBlocks ?? []),
-          tool_calls: input.toolCalls.map(summarizeToolCall),
-        }),
+        content: JSON.stringify(answerContext(input)),
       },
     ],
     temperature: 0.2,
@@ -164,6 +160,13 @@ export async function composeAnalystBlocksWithLlm(input: {
     reasoning: "low",
     maxTokens: 8192,
   }, withDeadlines(input.deadlines ?? ANSWER_DEADLINES));
+  if (result.usage) {
+    input.onUsage?.({
+      input_tokens: result.usage.inputTokens,
+      output_tokens: result.usage.outputTokens,
+      ...(result.usage.reasoningTokens === undefined ? {} : { reasoning_tokens: result.usage.reasoningTokens }),
+    });
+  }
   // The deployment is reported only when some of its prose is shown: a fallback
   // sentence in its place was written by no model (#183).
   const answered = () => input.onAnswered?.(`${result.deployment.channel}/${result.deployment.model}`);
@@ -214,15 +217,52 @@ function claimTextsFromToolCalls(toolCalls: ReadonlyArray<ChatAnalystToolRuntime
   });
 }
 
-function summarizeToolCall(toolCall: ChatAnalystToolRuntimeToolCall): Record<string, unknown> {
+export type AnswerUsage = { input_tokens: number; output_tokens: number; reasoning_tokens?: number };
+
+// What the answer model sees (#181): only what it can use. The figures shown to
+// the user (the only ones it may quote, with company, period and period end),
+// cited claim text, what could not be shown, and staleness flags. Raw tool JSON,
+// the placeholder block, and the routing bundle are left out: the narrative
+// guard drops any figure not shown, so the raw facts behind them only added
+// tokens and reasoning.
+export function answerContext(input: {
+  context: LlmRuntimeContext;
+  toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>;
+  factBlocks?: ReadonlyArray<Record<string, unknown>>;
+  conversation?: ReadonlyArray<{ role: string; text: string }>;
+}): Record<string, unknown> {
+  const results = input.toolCalls.map((toolCall) => (isRecord(toolCall.result) ? toolCall.result : {}));
+  const structured = results.map((result) => (isRecord(result.structured_context) ? result.structured_context : {}));
+  const quotes = structured.flatMap((context) =>
+    isRecord(context.quote) ? [{ ticker: context.quote.ticker, as_of: context.quote.as_of, stale: context.quote.stale }] : []
+  );
+  const factRecency = structured.flatMap((context) => (isRecord(context.fact_recency) ? [context.fact_recency] : []));
+  // Notes the fact blocks show instead of a chart (a named gap), and subjects with no evidence at all.
+  const dataNotes = [
+    ...(input.factBlocks ?? []).flatMap((block) =>
+      block.kind === "rich_text" && Array.isArray(block.segments)
+        ? block.segments.flatMap((segment) => (isRecord(segment) && typeof segment.text === "string" ? [segment.text] : []))
+        : []
+    ),
+    ...(results.some((result) => result.evidence_status === "insufficient_evidence")
+      ? ["No research claims, reported facts, or quote are on file for this subject."]
+      : []),
+  ];
+  const claims = claimTextsFromToolCalls(input.toolCalls);
   return {
-    tool_call_id: toolCall.tool_call_id,
-    tool_name: toolCall.tool_name,
-    status: toolCall.status,
-    bundle_id: toolCall.bundle_id,
-    ...(toolCall.arguments === undefined ? {} : { arguments: toolCall.arguments }),
-    ...(toolCall.result === undefined ? {} : { result: toolCall.result }),
+    question: input.context.userIntent ?? "Start a research thread",
+    conversation: input.conversation ?? [],
+    displayed_figures: displayedFigures(input.factBlocks ?? []),
+    ...(claims.length > 0 ? { cited_claims: claims } : {}),
+    ...(dataNotes.length > 0 ? { data_notes: dataNotes } : {}),
+    ...(quotes.length > 0 || factRecency.length > 0
+      ? { staleness: { ...(quotes.length > 0 ? { quote: quotes } : {}), ...(factRecency.length > 0 ? { fact_recency: factRecency } : {}) } }
+      : {}),
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function rewriteFirstRichTextBlock(

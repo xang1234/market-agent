@@ -36,6 +36,7 @@ import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import {
   composeAnalystBlocksWithLlm,
   createLlmThreadTitleModel,
+  type AnswerUsage,
 } from "./llm-runtime.ts";
 import {
   loadStructuredSubjectContext,
@@ -173,6 +174,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
   ]);
   let narrativeRemoved: ReadonlyArray<string> = [];
   let answeredBy: string | undefined;
+  let answerUsage: AnswerUsage | undefined;
   const llmBlocks = await composeAnalystBlocksWithLlm({
     context,
     blocks: result.blocks,
@@ -181,6 +183,9 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     conversation,
     onAnswered: (deployment) => {
       answeredBy = deployment;
+    },
+    onUsage: (usage) => {
+      answerUsage = usage;
     },
     onNarrativeRemoved: (sentences) => {
       narrativeRemoved = sentences;
@@ -204,6 +209,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     ],
     ...(narrativeRemoved.length > 0 ? { narrative_removed: narrativeRemoved } : {}),
     ...(answeredBy ? { answered_by: answeredBy } : {}),
+    ...(answerUsage ? { answer_usage: answerUsage } : {}),
   } satisfies ChatAnalystToolRuntimeResult;
 };
 

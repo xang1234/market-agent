@@ -94,6 +94,9 @@ export type ChatAnalystToolRuntimeResult = {
   // The deployment (channel/model) that wrote the narrative; absent when no
   // model answered (#183).
   answered_by?: string;
+  // The answer call's token usage, reported on turn.completed so evals can
+  // measure it (#181); not saved.
+  answer_usage?: { input_tokens: number; output_tokens: number; reasoning_tokens?: number };
 };
 
 export type ChatAnalystToolRuntime = (
@@ -1031,6 +1034,7 @@ async function toolBackedAnalystTurnRunner(
   const narrativeRemoved = result.narrative_removed?.length ? { narrative_removed: result.narrative_removed } : {};
   // Which model answered, on the completion and the saved message (#183).
   const answeredBy = result.answered_by ? { answered_by: result.answered_by } : {};
+  const answerUsage = result.answer_usage ? { answer_usage: result.answer_usage } : {};
 
   // display_unverified: show what failed verification, labelled, and save nothing.
   // turn.completed carries the full blocks because there is no message to reload.
@@ -1046,6 +1050,7 @@ async function toolBackedAnalystTurnRunner(
       ...subjectRef,
       ...narrativeRemoved,
       ...answeredBy,
+      ...answerUsage,
       unverified: { persisted: false, failures, blocks: assistantBlocks },
     });
   };
@@ -1112,6 +1117,7 @@ async function toolBackedAnalystTurnRunner(
     ...subjectRef,
     ...narrativeRemoved,
     ...answeredBy,
+    ...answerUsage,
   });
 }
 

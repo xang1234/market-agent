@@ -100,7 +100,9 @@ test("composeAnalystBlocksWithLlm rewrites the first rich text block", async () 
       result: { evidence_status: "available" },
     }],
     createClient: () => async (_deployment, request) => {
-      assert.match(request.messages[1]?.content ?? "", /load_evidence/);
+      // The question goes in; the raw tool call does not (#181).
+      assert.match(request.messages[1]?.content ?? "", /"question":"Analyze AAPL"/);
+      assert.doesNotMatch(request.messages[1]?.content ?? "", /load_evidence/);
       return { text: "LLM-grounded note" };
     },
   });
@@ -502,6 +504,54 @@ test("a fallback sentence shown in place of the answer was written by no model (
   // Every sentence quotes a figure the user is not shown: the guard drops them all.
   assert.deepEqual(await answeredBy({ text: "NVDA's margin is 99.9%." }, COMPARISON_BLOCKS), [], "all guarded");
   assert.deepEqual(await answeredBy({ text: "NVDA is larger." }, COMPARISON_BLOCKS), ["openai/gpt-4.1"], "kept");
+});
+
+test("the answer model sees a compact context, not raw tool JSON (#181)", async () => {
+  let prompt = "";
+  const usage: unknown[] = [];
+  const toolCall = {
+    tool_call_id: "tc-1",
+    tool_name: "research_lookup",
+    bundle_id: "peer_comparison",
+    status: "ok",
+    arguments: { query: "Compare NVDA with AMD" },
+    result: {
+      evidence_status: "available",
+      manifest_contribution: { subject_refs: [], claim_refs: ["c1"] },
+      structured_context: {
+        quote: { ticker: "NVDA", price: 178.4, as_of: "2026-09-01T00:00:00.000Z", stale: true, provider: "polygon", source_id: "s" },
+        facts: Array.from({ length: 24 }, (_, i) => ({ fact_id: `f${i}`, metric_key: "revenue", value_num: i })),
+        fact_recency: { latest_as_of: "2026-08-01T00:00:00.000Z", age_days: 31, stale: false },
+      },
+      evidence: { claims: [{ claim_id: "c1", text_canonical: "NVIDIA guided data-center revenue higher." }] },
+    },
+  } as never;
+  const gap = { kind: "rich_text", segments: [{ type: "text", text: "Year-to-date price performance is not shown: AMD has no prices from before 2026." }] };
+  await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "Compare NVDA with AMD", bundleId: "peer_comparison" },
+    blocks: [NARRATIVE_BLOCK],
+    toolCalls: [toolCall],
+    factBlocks: [...COMPARISON_BLOCKS, gap],
+    createClient: () => async (_deployment, request) => {
+      prompt = request.messages.at(-1)!.content;
+      return { text: "NVDA is larger.", usage: { inputTokens: 900, outputTokens: 120, totalTokens: 1020, reasoningTokens: 80 } };
+    },
+    onUsage: (reported) => usage.push(reported),
+  });
+  const context = JSON.parse(prompt) as Record<string, unknown>;
+  assert.deepEqual(Object.keys(context).sort(), ["conversation", "cited_claims", "data_notes", "displayed_figures", "question", "staleness"].sort());
+  assert.deepEqual(context.cited_claims, ["NVIDIA guided data-center revenue higher."]);
+  assert.deepEqual(context.data_notes, ["Year-to-date price performance is not shown: AMD has no prices from before 2026."]);
+  assert.deepEqual(context.staleness, {
+    quote: [{ ticker: "NVDA", as_of: "2026-09-01T00:00:00.000Z", stale: true }],
+    fact_recency: [{ latest_as_of: "2026-08-01T00:00:00.000Z", age_days: 31, stale: false }],
+  });
+  // None of the raw tool JSON: no facts, prices, ids, or the placeholder block.
+  for (const absent of ["fact_id", "178.4", "manifest_contribution", "tool_calls", "existing_blocks", "bundle_id"]) {
+    assert.ok(!prompt.includes(absent), absent);
+  }
+  assert.deepEqual(usage, [{ input_tokens: 900, output_tokens: 120, reasoning_tokens: 80 }]);
 });
 
 test("the model sees each comparison figure with the company and metric it belongs to", async () => {

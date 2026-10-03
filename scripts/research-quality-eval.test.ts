@@ -8,6 +8,7 @@ import {
   blankScores,
   modelForRun,
   answeredBySummary,
+  usageSummary,
   modelLabel,
   readRuns,
   renderBlock,
@@ -147,4 +148,17 @@ test("turns after one that didn't complete are shown as not sent", () => {
   }]);
   assert.match(report, /Turn ended with timeout/);
   assert.match(report, /Not sent: an earlier turn didn't complete/);
+});
+
+test("the report shows each turn's answer tokens and the run's mean (#181)", () => {
+  const [first, second] = QUESTIONS;
+  const answered = [
+    { question: first, threadId: "t1", turns: [{ message: "q1", outcome: "turn.completed", blocks: [], answeredBy: "a/m", usage: { input_tokens: 1000, output_tokens: 200, reasoning_tokens: 100 } }] },
+    { question: second, threadId: "t2", turns: [{ message: "q2", outcome: "turn.completed", blocks: [], answeredBy: "a/m", usage: { input_tokens: 2000, output_tokens: 400, reasoning_tokens: 300 } }] },
+  ];
+  assert.equal(usageSummary(answered), "mean 1500 input / 300 output per turn (200 reasoning) over 2 turns");
+  const report = renderReport("r", "a/m", "http://app", answered);
+  assert.match(report, /Answer tokens: mean 1500 input \/ 300 output per turn \(200 reasoning\) over 2 turns\./);
+  assert.match(report, /_Answered by `a\/m`; 1000 input \/ 200 output tokens \(100 reasoning\)\._/);
+  assert.equal(usageSummary([]), "not reported");
 });
