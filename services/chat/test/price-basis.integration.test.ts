@@ -1,11 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import pg from "pg";
 
 import { createPostgresMarketCacheRepository } from "../../market/src/cache-repository.ts";
 import { normalizedBars } from "../../market/src/bar.ts";
 import { loadPerfComparisonBlocks } from "../src/perf-block.ts";
-import { bootstrapDatabase, connectedClient, dockerAvailable } from "../../../db/test/docker-pg.ts";
+import { bootstrapDatabase, connectedClient, connectedPool, dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { GOLDEN_AS_OF, GOLDEN_COMPANIES, MARKET_SOURCE_ID, seedGoldenDataset } from "./golden/dataset.ts";
 
 const company = (ticker: string) => GOLDEN_COMPANIES.find((candidate) => candidate.ticker === ticker)!;
@@ -60,9 +59,10 @@ test("Polygon ranges cached under the old dividend-adjusted label are never reus
   assert.equal(await chart(), undefined);
 
   // The cache never serves the legacy range; a refetch under the correct basis is served.
-  // A pool: storing bars takes a transaction on its own connection.
-  const pool = new pg.Pool({ connectionString: databaseUrl });
-  t.after(() => pool.end());
+  // A pool: storing bars takes a transaction on its own connection. Closed
+  // before the database goes away (connectedPool), or its idle connection
+  // reports the shutdown as an uncaught error.
+  const pool = await connectedPool(t, databaseUrl);
   const cache = createPostgresMarketCacheRepository(pool);
   const listing = { kind: "listing" as const, id: AMD.listing_id };
   assert.equal(await cache.findLatestBars(listing, "1d", LEGACY_RANGE, "split_and_div_adjusted"), null);

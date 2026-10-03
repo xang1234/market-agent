@@ -11,6 +11,7 @@ import {
   loadTurnFactBlocks,
   priceListingsForComparison,
   requestedFiscalYear,
+  requestedPriceWindow,
   segmentRevenueItems,
   type DerivedQuarterFact,
 } from "../src/fact-blocks.ts";
@@ -375,4 +376,11 @@ test("the model sees each comparison figure's period and end date (#180)", () =>
     value: "$130.5B",
     shown_in: "Side by side",
   });
+});
+
+test("a question asking for year to date gets the YTD price window (#192)", () => {
+  assert.equal(requestedPriceWindow("Compare NVDA with AMD YTD"), "ytd");
+  assert.equal(requestedPriceWindow("How have NVDA and AMD done year-to-date?"), "ytd");
+  assert.equal(requestedPriceWindow("NVDA vs AMD year to date"), "ytd");
+  assert.equal(requestedPriceWindow("Compare NVDA with AMD"), undefined);
 });

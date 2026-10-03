@@ -251,6 +251,33 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.equal(answer.blocks.some((block) => /by segment/.test(String(block.title))), false);
   });
 
+  await t.test("'Compare NVDA with AMD YTD' seals the year-to-date window from the seeded bars (#192)", async () => {
+    const ytdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "YTD" });
+    const turnEvents = await runTurn(base, ytdThread.thread_id, "Compare NVDA with AMD YTD");
+    assert.deepEqual(completedTurn(turnEvents).data.subject_refs, BOTH_LISTINGS);
+    const answer = await latestAssistantMessage(base, ytdThread.thread_id);
+    const performance = answer.blocks.find((block) => block.kind === "perf_comparison");
+    assert.ok(performance, `expected a perf_comparison; got [${answer.blocks.map((b) => b.kind).join(", ")}]`);
+    // The requested year, baseline and end sessions, and the actual basis are shown.
+    assert.equal(performance.title, "Price return YTD 2026 (split-adjusted, excluding dividends)");
+    assert.equal(performance.default_range, "YTD 2026: 2025-12-31 close to 2026-08-31 close");
+    const series = performance.series as Array<{ points: Array<{ x: string; y: number }> }>;
+    assert.ok(series.every((line) => line.points[0].x === "2025-12-31" && line.points[0].y === 0));
+    const { rows } = await client.query<{ series_specs: Array<{ window: unknown; bars_sha256: string }> }>(
+      `select series_specs from snapshots where snapshot_id = $1::uuid`,
+      [answer.snapshot_id],
+    );
+    const specs = rows[0]?.series_specs ?? [];
+    assert.equal(specs.length, 2);
+    for (const spec of specs) {
+      assert.deepEqual(spec.window, { kind: "ytd", year: 2026, baseline_date: "2025-12-31", end_date: "2026-08-31" });
+      assert.match(spec.bars_sha256, /^[0-9a-f]{64}$/);
+    }
+    // Reload returns the same dates, values, and references.
+    const reloaded = await latestAssistantMessage(base, ytdThread.thread_id);
+    assert.deepEqual(reloaded.blocks.find((block) => block.kind === "perf_comparison"), performance);
+  });
+
   function completedTurn(turnEvents: ParsedSseEvent[]): ParsedSseEvent {
     const error = turnEvents.find((event) => event.event === "turn.error");
     assert.equal(error, undefined, `turn.error: ${JSON.stringify(error?.data)}`);

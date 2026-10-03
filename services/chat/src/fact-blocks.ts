@@ -31,7 +31,7 @@ import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import { loadUsableFacts } from "../../fundamentals/src/usable-facts.ts";
 import type { VerifierFact } from "../../snapshot/src/snapshot-verifier.ts";
 import { stableUuid } from "./chat-ids.ts";
-import { loadPerfComparisonBlocks } from "./perf-block.ts";
+import { loadPerfComparisonBlocks, type PriceWindow } from "./perf-block.ts";
 import { deriveQuarterMetrics, GROWTH, MARGINS, type QuarterMetric } from "./quarter-metrics.ts";
 
 const QUARTERS_SHOWN = 8;
@@ -69,6 +69,8 @@ export async function loadTurnFactBlocks(
     requestedListings?: ReadonlyMap<string, CompanyListing>;
     // A comparison of the fiscal year the question names (requestedFiscalYear).
     fiscalYear?: number;
+    // The price window the question names (requestedPriceWindow).
+    priceWindow?: PriceWindow;
   },
 ): Promise<ReadonlyArray<Block>> {
   const [primary] = input.issuers;
@@ -92,7 +94,14 @@ export async function loadTurnFactBlocks(
     asOf: input.asOf,
     requestedListings: input.requestedListings ?? new Map(),
     fiscalYear: input.fiscalYear,
+    priceWindow: input.priceWindow,
   });
+}
+
+// A price window the question names: year to date ("YTD", "year-to-date").
+// ponytail: YTD only; other named windows still chart the latest stored range.
+export function requestedPriceWindow(question: string): PriceWindow | undefined {
+  return /\b(?:ytd|year[- ]to[- ]date)\b/i.test(question) ? "ytd" : undefined;
 }
 
 // The fiscal year a question names ("fiscal 2025", "FY25", "2025 fiscal year").
@@ -128,6 +137,7 @@ async function loadComparisonFactBlocks(
     asOf: string;
     requestedListings: ReadonlyMap<string, CompanyListing>;
     fiscalYear?: number;
+    priceWindow?: PriceWindow;
   },
 ): Promise<ReadonlyArray<Block>> {
   const issuerIds = input.companies.map((company) => company.id);
@@ -146,6 +156,7 @@ async function loadComparisonFactBlocks(
     listings: priceListingsForComparison(issuerIds, companies),
     snapshotId: input.snapshotId,
     asOf: input.asOf,
+    window: input.priceWindow,
   });
   return Object.freeze([...metrics, ...performance]);
 }

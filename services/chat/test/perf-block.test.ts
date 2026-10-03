@@ -249,3 +249,87 @@ test("companies whose prices share no basis get a named gap instead of a chart (
     "Price performance is not shown: the stored prices are on different bases (NVDA's are split-adjusted only; AMD's are split- and dividend-adjusted), so their returns would not be comparable.",
   );
 });
+
+// A YTD request (#192): New York sessions stamped at local midnight.
+const ytdBar = (date: string, close: number) => ({
+  ts: `${date}T${date >= "2026-03-08" ? "04" : "05"}:00:00.000Z`,
+  close,
+});
+function ytdRow(r: SealedPriceRange, bars: Array<{ ts: string; close: number }>) {
+  return { ...storedRow(r), adjustment_basis: "split_adjusted", range_start: "2025-12-01T05:00:00.000Z", bars };
+}
+function ytdDb(rangeRows: Array<Record<string, unknown>>, seen: Array<{ text: string; values?: unknown[] }> = []) {
+  return {
+    query: fakeQuery((text, values) => {
+      seen.push({ text, values });
+      if (text.includes("from listings")) {
+        return { rows: LISTINGS.map((listing) => ({ listing_id: listing.id, timezone: "America/New_York" })) };
+      }
+      return { rows: rangeRows };
+    }),
+  };
+}
+
+test("a YTD request charts from the last close before January 1 to the latest common session (#192)", async () => {
+  const seen: Array<{ text: string; values?: unknown[] }> = [];
+  const nvda = [ytdBar("2025-12-31", 100), ytdBar("2026-01-02", 110), ytdBar("2026-08-31", 120)];
+  const amd = [ytdBar("2025-12-31", 50), ytdBar("2026-01-02", 45), ytdBar("2026-08-31", 60)];
+  const [chart, disclosure] = await loadPerfComparisonBlocks(
+    ytdDb([ytdRow(NVDA, nvda), ytdRow(AMD, amd)], seen),
+    { listings: LISTINGS, snapshotId: SNAPSHOT_ID, asOf: AS_OF, window: "ytd" },
+  );
+  assert.equal(chart?.kind, "perf_comparison");
+  assert.equal(chart.title, "Price return YTD 2026 (split-adjusted, excluding dividends)");
+  assert.equal(chart.default_range, "YTD 2026: 2025-12-31 close to 2026-08-31 close");
+  const series = chart.series as Array<{ name: string; points: Array<{ x: string; y: number }> }>;
+  assert.deepEqual(series[0].points.map((point) => point.x), ["2025-12-31", "2026-01-02", "2026-08-31"]);
+  assert.equal(series[0].points.at(-1)?.y, 20, "from the 100 baseline, not the 110 January close");
+  assert.equal(series[1].points.at(-1)?.y, 20);
+  const specs = chart.provenance_series_specs as Array<{ window: unknown; bars_sha256: string }>;
+  assert.deepEqual(specs[0].window, { kind: "ytd", year: 2026, baseline_date: "2025-12-31", end_date: "2026-08-31" });
+  assert.equal(disclosure?.kind, "disclosure");
+  // Only ranges reaching back over the year-end are read: by the start of Dec 25
+  // UTC, so a New York range from Dec 24 (05:00Z) qualifies.
+  const rangesQuery = seen.find((query) => query.text.includes("market_bar_ranges"))!;
+  assert.equal(rangesQuery.values?.[4], "2025-12-25T00:00:00.000Z");
+});
+
+test("a YTD request that can't be met is a named gap, not a shorter window (#192)", async () => {
+  // AMD has no stored range reaching back over the year-end.
+  const blocks = await loadPerfComparisonBlocks(
+    ytdDb([ytdRow(NVDA, [ytdBar("2025-12-31", 100), ytdBar("2026-08-31", 120)])]),
+    { listings: LISTINGS, snapshotId: SNAPSHOT_ID, asOf: AS_OF, window: "ytd" },
+  );
+  assert.deepEqual(blocks.map((block) => block.kind), ["rich_text"]);
+  assert.equal(
+    (blocks[0].segments as Array<{ text: string }>)[0].text,
+    "Year-to-date price performance is not shown: AMD has no prices from before 2026.",
+  );
+});
+
+test("the YTD gap names the company without pre-year prices, whatever basis the others have (#192)", async () => {
+  // NVDA's only range is dividend-adjusted; AMD has none.
+  const nvda = { ...ytdRow(NVDA, [ytdBar("2025-12-31", 100), ytdBar("2026-08-31", 120)]), adjustment_basis: "split_and_div_adjusted" };
+  const blocks = await loadPerfComparisonBlocks(ytdDb([nvda]), { listings: LISTINGS, snapshotId: SNAPSHOT_ID, asOf: AS_OF, window: "ytd" });
+  assert.equal(
+    (blocks[0].segments as Array<{ text: string }>)[0].text,
+    "Year-to-date price performance is not shown: AMD has no prices from before 2026.",
+  );
+});
+
+test("exchanges in different calendar years at the cutoff are a YTD gap before any range is read (#192)", async () => {
+  const seen: Array<{ text: string; values?: unknown[] }> = [];
+  const db = {
+    query: fakeQuery((text, values) => {
+      seen.push({ text, values });
+      // At 01:00Z on Jan 1, New York is still in 2025 and Tokyo is in 2026.
+      return { rows: [{ listing_id: NVDA.listing_id, timezone: "America/New_York" }, { listing_id: AMD.listing_id, timezone: "Asia/Tokyo" }] };
+    }),
+  };
+  const blocks = await loadPerfComparisonBlocks(db, { listings: LISTINGS, snapshotId: SNAPSHOT_ID, asOf: "2026-01-01T01:00:00.000Z", window: "ytd" });
+  assert.equal(
+    (blocks[0].segments as Array<{ text: string }>)[0].text,
+    "Year-to-date price performance is not shown: the companies' exchanges are in different calendar years at the cutoff.",
+  );
+  assert.ok(seen.every((query) => !query.text.includes("market_bar_ranges")));
+});

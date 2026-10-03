@@ -166,6 +166,17 @@ normalized to percent return. The companies' windows must be identical, or there
   - Stooq serves `split_and_div_adjusted`.
   - yfinance serves both adjusted bases.
   - Web price charts request `split_adjusted`.
+- **Year to date (#192):** a question that says "YTD" or "year-to-date" charts that window instead of the latest
+  stored range. The rules live in `services/market/src/ytd-window.ts`.
+  - The baseline is the final completed close before January 1 of the cutoff's exchange-local year. The end is the
+    latest completed session (from 16:00 local), and every company must have both the same baseline and the same end.
+  - Returns are `(close - baseline) / baseline * 100`. Sessions that not every company traded are skipped and counted
+    in the label, never filled.
+  - Each company's line comes from a stored range that starts by Dec 24 of the prior year, so an unrelated newer
+    range can't change the window. Each series spec seals the window and a digest of exactly the bars drawn.
+  - Anything short of a full window is a named gap, never a shorter window called YTD: a missing baseline, a listing
+    after the year began, a zero baseline, mismatched sessions, a missing endpoint, or mixed bases.
+  - Only stored bars are used. Fetching missing bars live, before the cutoff, is #192 part 2.
 
 - **Sealing:** every series has a `series_specs` entry in the snapshot manifest. The entry holds the `series_ref`, the
   bar range's `source_id`, `listing_id`, `bar_range_id`, interval, range and `as_of`. The block cites these through
