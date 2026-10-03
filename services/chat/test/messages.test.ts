@@ -282,6 +282,8 @@ test("listChatMessagesForThread returns ordered messages for an owned thread", a
   assert.equal(result.messages[0].message_id, "33333333-3333-4333-a333-333333333333");
   assert.deepEqual(result.messages[0].blocks, [{ id: "block-1", kind: "rich_text" }]);
   assert.match(db.queries[1].text, /order by m\.created_at asc, m\.message_id asc/);
+  // The answering model is read back with each message (#183).
+  assert.match(db.queries[1].text, /m\.answered_by/);
   assert.deepEqual(db.queries[0].values, [
     "11111111-1111-4111-a111-111111111111",
     "00000000-0000-4000-8000-000000000001",

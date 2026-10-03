@@ -100,6 +100,8 @@ export async function composeAnalystBlocksWithLlm(input: {
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
   // Receives the sentences the narrative guard dropped, so evals can count them (#144).
   onNarrativeRemoved?: (sentences: ReadonlyArray<string>) => void;
+  // Receives the deployment (channel/model) that wrote the answer (#183).
+  onAnswered?: (deployment: string) => void;
   deadlines?: ModelDeadlines;
 }): Promise<ReadonlyArray<Record<string, unknown>>> {
   const router = await createLlmRouterFromEnv(input.env ?? process.env, {
@@ -162,6 +164,9 @@ export async function composeAnalystBlocksWithLlm(input: {
     reasoning: "low",
     maxTokens: 8192,
   }, withDeadlines(input.deadlines ?? ANSWER_DEADLINES));
+  // The deployment is reported only when some of its prose is shown: a fallback
+  // sentence in its place was written by no model (#183).
+  const answered = () => input.onAnswered?.(`${result.deployment.channel}/${result.deployment.model}`);
   const text = result.text.trim();
   // Never show a sentence cut off mid-way, or the placeholder the turn started with.
   if (result.truncated || text.length === 0) {
@@ -171,7 +176,10 @@ export async function composeAnalystBlocksWithLlm(input: {
       input.factBlocks?.length ? FACT_BLOCKS_FALLBACK_TEXT : NO_ANSWER_FALLBACK_TEXT,
     );
   }
-  if (!input.factBlocks?.length) return rewriteFirstRichTextBlock(input.blocks, text);
+  if (!input.factBlocks?.length) {
+    answered();
+    return rewriteFirstRichTextBlock(input.blocks, text);
+  }
 
   const guarded = keepSupportedSentences(
     text,
@@ -190,6 +198,7 @@ export async function composeAnalystBlocksWithLlm(input: {
     console.warn(`[chat] removed ${guarded.removed.length} narrative sentence(s) quoting figures not shown to the user`);
     input.onNarrativeRemoved?.(guarded.removed);
   }
+  if (guarded.text) answered();
   return rewriteFirstRichTextBlock(input.blocks, guarded.text || FACT_BLOCKS_FALLBACK_TEXT);
 }
 

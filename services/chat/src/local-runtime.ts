@@ -172,12 +172,16 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
     loadRecentConversation(pool(), { threadId: context.threadId, limit: CONVERSATION_MESSAGES }),
   ]);
   let narrativeRemoved: ReadonlyArray<string> = [];
+  let answeredBy: string | undefined;
   const llmBlocks = await composeAnalystBlocksWithLlm({
     context,
     blocks: result.blocks,
     toolCalls,
     factBlocks,
     conversation,
+    onAnswered: (deployment) => {
+      answeredBy = deployment;
+    },
     onNarrativeRemoved: (sentences) => {
       narrativeRemoved = sentences;
     },
@@ -199,6 +203,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
       ...factBlocks.map((block) => normalize(block, NO_DEFAULT_REFS)),
     ],
     ...(narrativeRemoved.length > 0 ? { narrative_removed: narrativeRemoved } : {}),
+    ...(answeredBy ? { answered_by: answeredBy } : {}),
   } satisfies ChatAnalystToolRuntimeResult;
 };
 

@@ -47,7 +47,7 @@ const GOLDEN_ENV: Record<string, string> = {
 };
 
 type Block = Record<string, unknown> & { id?: string; kind?: string };
-type ChatMessage = { message_id: string; role: string; snapshot_id: string; blocks: Block[]; block_proofs?: Record<string, unknown> };
+type ChatMessage = { message_id: string; role: string; snapshot_id: string; blocks: Block[]; block_proofs?: Record<string, unknown>; answered_by?: string | null };
 
 test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
   const { databaseUrl } = await bootstrapDatabase(t, "chat-golden");
@@ -80,6 +80,9 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.equal(assistant.message_id, completed.data.message_id);
     // The narrative comes from the recorded model reply, so the LLM step really ran.
     assert.match(JSON.stringify(assistant.blocks), /NVIDIA's reported revenue rose in every quarter shown/);
+    // ...and the deployment that wrote it is on the completion and saved with the message (#183).
+    assert.equal(completed.data.answered_by, "fixture/recorded");
+    assert.equal(assistant.answered_by, "fixture/recorded");
   });
 
   await t.test("reload returns the streamed blocks", () => {

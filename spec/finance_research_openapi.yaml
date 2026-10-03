@@ -3726,6 +3726,11 @@ components:
         created_at:
           type: string
           format: date-time
+        answered_by:
+          type: ['string', 'null']
+          description: >-
+            The model deployment (channel/model) that wrote an assistant message's narrative. Null for user and
+            tool messages, for answers no model wrote, and for messages saved before it was recorded.
     ChatReadMessage:
       description: >-
         A message as read back. block_proofs holds, per block id, three independent claims the server derives on

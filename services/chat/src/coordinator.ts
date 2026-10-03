@@ -91,6 +91,9 @@ export type ChatAnalystToolRuntimeResult = {
   // Narrative sentences the guard dropped for quoting figures it could not
   // attribute; reported on turn.completed so evals can count them (#144).
   narrative_removed?: ReadonlyArray<string>;
+  // The deployment (channel/model) that wrote the narrative; absent when no
+  // model answered (#183).
+  answered_by?: string;
 };
 
 export type ChatAnalystToolRuntime = (
@@ -151,6 +154,7 @@ export type ChatAssistantMessagePersistenceInput = {
   role: "assistant";
   blocks: ReadonlyArray<Record<string, unknown>>;
   content_hash: string;
+  answered_by?: string;
 };
 
 export type ChatAssistantMessagePersistenceResult = {
@@ -1025,6 +1029,8 @@ async function toolBackedAnalystTurnRunner(
   const contentHash = contentHashForText(JSON.stringify(assistantBlocks));
   // The guard's drops, on every completion that shows the answer (#144).
   const narrativeRemoved = result.narrative_removed?.length ? { narrative_removed: result.narrative_removed } : {};
+  // Which model answered, on the completion and the saved message (#183).
+  const answeredBy = result.answered_by ? { answered_by: result.answered_by } : {};
 
   // display_unverified: show what failed verification, labelled, and save nothing.
   // turn.completed carries the full blocks because there is no message to reload.
@@ -1039,6 +1045,7 @@ async function toolBackedAnalystTurnRunner(
       bundle_id: context.bundleId,
       ...subjectRef,
       ...narrativeRemoved,
+      ...answeredBy,
       unverified: { persisted: false, failures, blocks: assistantBlocks },
     });
   };
@@ -1075,6 +1082,7 @@ async function toolBackedAnalystTurnRunner(
         role: "assistant",
         blocks: assistantBlocks,
         content_hash: contentHash,
+        ...answeredBy,
       });
     } catch (error) {
       if (options.verificationMode === "display_unverified" && error instanceof ChatSnapshotSealError) {
@@ -1103,6 +1111,7 @@ async function toolBackedAnalystTurnRunner(
     bundle_id: context.bundleId,
     ...subjectRef,
     ...narrativeRemoved,
+    ...answeredBy,
   });
 }
 
