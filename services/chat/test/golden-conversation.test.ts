@@ -3,9 +3,11 @@
 // Drives the default chat server the way the web client does — create a thread,
 // save each user message, open the turn stream, reload the thread — against the
 // frozen dataset in test/golden/, with recorded model replies (no provider
-// keys). Three turns: "Analyze NVDA" (chart + metric row, #120), then the
-// follow-ups "Compare it with AMD" and "Explain the differences and show the
-// evidence" (both companies side by side, #121). Every subtest is strict.
+// keys). Three turns, as the browser spec asks them (#194): "Analyze NVDA"
+// (chart + metric row, #120), then the follow-ups "Compare it with AMD YTD"
+// (both companies side by side, with the year-to-date price window, #121/#192)
+// and "Explain the differences and show the evidence"; then a reload of all
+// three. Every subtest is strict.
 
 import assert from "node:assert/strict";
 import { join } from "node:path";
@@ -141,12 +143,17 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.equal(minted.rows.length, 1, `derived facts minted for quarters ${minted.rows.map((row) => row.quarter).join(", ")}`);
   });
 
-  await t.test("follow-up 'Compare it with AMD' sets both companies side by side", async () => {
-    const turnEvents = await runTurn(base, thread.thread_id, "Compare it with AMD");
+  // Each turn's answer as streamed, for the reload check after turn 3.
+  const turns: Array<{ question: string; streamedIds: unknown[]; answer: ChatMessage }> = [];
+  if (assistant) turns.push({ question: "Analyze NVDA", streamedIds: streamedBlockIds(events), answer: assistant });
+
+  await t.test("follow-up 'Compare it with AMD YTD' sets both companies side by side over the year to date", async () => {
+    const turnEvents = await runTurn(base, thread.thread_id, "Compare it with AMD YTD");
     const completed = completedTurn(turnEvents);
     assert.deepEqual(completed.data.subject_refs, BOTH_LISTINGS, "'it' should carry NVDA forward and add AMD");
 
     const answer = await latestAssistantMessage(base, thread.thread_id);
+    turns.push({ question: "Compare it with AMD YTD", streamedIds: streamedBlockIds(turnEvents), answer });
     const comparison = comparisonBlock(answer);
     assert.deepEqual(
       (comparison.subjects as Array<{ id: string }>).map((subject) => subject.id),
@@ -172,11 +179,15 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const performance = answer.blocks.find((block) => block.kind === "perf_comparison");
     assert.ok(performance, `expected a perf_comparison; got [${answer.blocks.map((b) => b.kind).join(", ")}]`);
     assert.deepEqual(performance.subject_labels, ["NVDA", "AMD"]);
-    const series = performance.series as Array<{ name: string; points: unknown[] }>;
+    const series = performance.series as Array<{ name: string; points: Array<{ x: string; y: number }> }>;
     assert.deepEqual(series.map((line) => line.name), ["NVDA", "AMD"]);
     assert.ok(series.every((line) => line.points.length > 1), "each company needs a price line");
+    // The requested year, its baseline and end sessions, and the actual basis are shown (#192).
+    assert.equal(performance.title, "Price return YTD 2026 (split-adjusted, excluding dividends)");
+    assert.equal(performance.default_range, "YTD 2026: 2025-12-31 close to 2026-08-31 close");
+    assert.ok(series.every((line) => line.points[0].x === "2025-12-31" && line.points[0].y === 0));
     const { rows } = await client.query<{
-      series_specs: Array<{ series_ref: string; bar_range_id: string; as_of: string; adjustment_basis: string }>;
+      series_specs: Array<{ series_ref: string; bar_range_id: string; as_of: string; adjustment_basis: string; window: unknown; bars_sha256: string }>;
       basis: string;
       normalization: string;
     }>(
@@ -190,10 +201,14 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     const items = (disclosure.items as string[]).join(" ");
     assert.match(items, /end-of-day/);
     assert.match(items, /split-adjusted price returns; dividends are not included/);
-    assert.equal(performance.title, "Price return (split-adjusted, excluding dividends)");
-    // The seal describes the chart's data: split-adjusted prices as percent returns.
+    // The seal describes the chart's data: split-adjusted prices as percent returns
+    // over the year-to-date window, each pinned to the bars it was drawn from.
     assert.equal(rows[0]?.basis, "split_adjusted");
     assert.ok((rows[0]?.series_specs ?? []).every((spec) => spec.adjustment_basis === "split_adjusted"));
+    for (const spec of rows[0]?.series_specs ?? []) {
+      assert.deepEqual(spec.window, { kind: "ytd", year: 2026, baseline_date: "2025-12-31", end_date: "2026-08-31" });
+      assert.match(spec.bars_sha256, /^[0-9a-f]{64}$/);
+    }
     assert.equal(rows[0]?.normalization, "pct_return");
     const sealed = new Set((rows[0]?.series_specs ?? []).map((spec) => spec.series_ref));
     const seriesRefs = (performance.data_ref as { params: { series_refs: string[] } }).params.series_refs;
@@ -214,17 +229,49 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.equal(await derivedFacts(), derivedBefore, "turn 3 added derived facts");
 
     const answer = await latestAssistantMessage(base, thread.thread_id);
-    assert.match(JSON.stringify(answer.blocks), /each figure links to its filing/);
-    comparisonBlock(answer);
+    turns.push({ question: "Explain the differences and show the evidence", streamedIds: streamedBlockIds(turnEvents), answer });
+    // The model's whole reply is shown: not the placeholder, nor cut off.
+    const narrative = answer.blocks.find((block) => block.kind === "rich_text");
+    assert.deepEqual(
+      (narrative?.segments as Array<{ text?: string }> | undefined)?.map((segment) => segment.text).join(""),
+      "NVIDIA is far larger than AMD and converts more of its revenue into profit, as the table below shows; each figure links to its filing.",
+    );
+    // The figures it points to are displayed for both companies, and cited.
+    const comparison = comparisonBlock(answer);
+    assert.deepEqual(comparison.subject_labels, ["NVDA", "AMD"]);
+    const cited = await citedFacts(answer);
+    const displayed = valueRefs(comparison);
+    for (const ref of displayed) assert.ok(cited.has(ref), `metrics_comparison value_ref ${ref} is not a cited fact`);
     const { rows } = await client.query<{ subject_id: string }>(
       `select distinct subject_id::text as subject_id from facts where fact_id = any($1::uuid[])`,
-      [[...(await citedFacts(answer))]],
+      [displayed],
     );
     assert.deepEqual(
       rows.map((row) => row.subject_id).sort(),
       [NVDA.issuer_id, AMD.issuer_id].sort(),
-      "the answer should cite facts about both companies",
+      "the answer should display cited facts about both companies",
     );
+  });
+
+  await t.test("a reload returns all three turns: questions, figures, chart points and sources", async () => {
+    assert.equal(turns.length, 3, "an earlier turn failed");
+    const { messages } = await api<{ messages: ChatMessage[] }>(base, "GET", `/v1/chat/threads/${thread.thread_id}/messages`);
+    assert.deepEqual(messages.map((message) => message.role), ["user", "assistant", "user", "assistant", "user", "assistant"]);
+    const answers = messages.filter((message) => message.role === "assistant");
+    for (const [i, turn] of turns.entries()) {
+      const reloaded = answers[i]!;
+      assert.match(JSON.stringify(messages[i * 2]!.blocks), new RegExp(turn.question));
+      // The blocks streamed in the turn, then the same content on every read.
+      assert.deepEqual(reloaded.blocks.map((block) => block.id), turn.streamedIds, `turn ${i + 1} streamed other blocks`);
+      assert.deepEqual(reloaded.blocks, turn.answer.blocks, `turn ${i + 1} changed on reload`);
+      assert.deepEqual(reloaded.block_proofs, turn.answer.block_proofs, `turn ${i + 1}'s proofs changed on reload`);
+      // Every block with figures names the sources they came from.
+      for (const block of reloaded.blocks.filter((candidate) => valueRefs(candidate).length > 0)) {
+        assert.ok((block.source_refs as unknown[] | undefined)?.length, `turn ${i + 1} ${block.kind} has no source_refs`);
+      }
+    }
+    const chart = answers[1]!.blocks.find((block) => block.kind === "perf_comparison");
+    assert.ok((chart?.series as Array<{ points: unknown[] }>).every((line) => line.points.length > 1), "the chart lost its points");
   });
 
   await t.test("'How does NVDA compare with its peers?' brings in its industry peers", async () => {
@@ -263,31 +310,20 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     assert.equal(answer.blocks.some((block) => /by segment/.test(String(block.title))), false);
   });
 
-  await t.test("'Compare NVDA with AMD YTD' seals the year-to-date window from the seeded bars (#192)", async () => {
-    const ytdThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "YTD" });
-    const turnEvents = await runTurn(base, ytdThread.thread_id, "Compare NVDA with AMD YTD");
+  await t.test("'Compare NVDA with AMD' without a period charts the shared price history, not YTD", async () => {
+    const defaultThread = await api<{ thread_id: string }>(base, "POST", "/v1/chat/threads", { title: "Default window" });
+    const turnEvents = await runTurn(base, defaultThread.thread_id, "Compare NVDA with AMD");
     assert.deepEqual(completedTurn(turnEvents).data.subject_refs, BOTH_LISTINGS);
-    const answer = await latestAssistantMessage(base, ytdThread.thread_id);
+    const answer = await latestAssistantMessage(base, defaultThread.thread_id);
     const performance = answer.blocks.find((block) => block.kind === "perf_comparison");
     assert.ok(performance, `expected a perf_comparison; got [${answer.blocks.map((b) => b.kind).join(", ")}]`);
-    // The requested year, baseline and end sessions, and the actual basis are shown.
-    assert.equal(performance.title, "Price return YTD 2026 (split-adjusted, excluding dividends)");
-    assert.equal(performance.default_range, "YTD 2026: 2025-12-31 close to 2026-08-31 close");
-    const series = performance.series as Array<{ points: Array<{ x: string; y: number }> }>;
-    assert.ok(series.every((line) => line.points[0].x === "2025-12-31" && line.points[0].y === 0));
-    const { rows } = await client.query<{ series_specs: Array<{ window: unknown; bars_sha256: string }> }>(
+    assert.equal(performance.title, "Price return (split-adjusted, excluding dividends)");
+    assert.doesNotMatch(String(performance.default_range), /YTD/);
+    const { rows } = await client.query<{ series_specs: Array<{ window?: unknown }> }>(
       `select series_specs from snapshots where snapshot_id = $1::uuid`,
       [answer.snapshot_id],
     );
-    const specs = rows[0]?.series_specs ?? [];
-    assert.equal(specs.length, 2);
-    for (const spec of specs) {
-      assert.deepEqual(spec.window, { kind: "ytd", year: 2026, baseline_date: "2025-12-31", end_date: "2026-08-31" });
-      assert.match(spec.bars_sha256, /^[0-9a-f]{64}$/);
-    }
-    // Reload returns the same dates, values, and references.
-    const reloaded = await latestAssistantMessage(base, ytdThread.thread_id);
-    assert.deepEqual(reloaded.blocks.find((block) => block.kind === "perf_comparison"), performance);
+    assert.ok((rows[0]?.series_specs ?? []).every((spec) => spec.window === undefined), "no YTD window was asked for");
   });
 
   function completedTurn(turnEvents: ParsedSseEvent[]): ParsedSseEvent {
@@ -312,6 +348,10 @@ async function latestAssistantMessage(base: string, threadId: string): Promise<C
   const answer = messages.filter((message) => message.role === "assistant").at(-1);
   assert.ok(answer, "no assistant message in the thread");
   return answer;
+}
+
+function streamedBlockIds(events: ParsedSseEvent[]): unknown[] {
+  return events.filter((event) => event.event === "block.completed").map((event) => event.data.block_id);
 }
 
 function comparisonBlock(message: ChatMessage): Block {
