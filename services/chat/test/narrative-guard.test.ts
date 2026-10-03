@@ -368,6 +368,11 @@ test("a ticker that is also a currency prefix does not break that currency's fig
   const compound = [{ company: "CFA", value: "F CFA 3.1B" }, { company: "AMD", value: "$4.2B" }];
   assert.deepEqual(keepSupportedSentences("CFA's operating income was F CFA 3.1B.", [], compound).removed, []);
   assert.equal(keepSupportedSentences("AMD's operating income was F CFA 3.1B.", [], compound).removed.length, 1);
+  // A prefix only covers the figure it is written on: before another figure the
+  // label is the company's own ("CHF 49.2%"), and owns it or not.
+  const mixed = [{ company: "CHF", value: "CHF 3.1B" }, { company: "CHF", value: "49.2%" }, { company: "AMD", value: "74.6%" }];
+  assert.deepEqual(keepSupportedSentences("Margins: CHF 49.2%, AMD 74.6%.", [], mixed).removed, []);
+  assert.equal(keepSupportedSentences("AMD beat CHF 74.6%.", [], mixed).removed.length, 1);
 });
 
 test("a ticker written right before its figure still owns it (#144)", () => {

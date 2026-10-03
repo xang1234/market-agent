@@ -85,10 +85,13 @@ export function keepSupportedSentences(
   }
   // A one-letter ticker ("A") cannot be told from the article, so it is never
   // recognized; sentences quoting its figures are dropped.
-  // The currency prefixes the figures are written with ("CHF ", "F CFA ", "$"),
-  // so a label inside one ("CHF 3.1B", "CFA" in "F CFA 3.1B") is told from a
-  // ticker before a figure ("NVDA 74.6%").
-  const prefixes = new Set(attributedFigures.map((figure) => spaced(figure.value.match(/^[-−]?(\D*)/)![1])).filter(Boolean));
+  // Each figure's currency prefix ("CHF ", "F CFA ", "$") with the figure it
+  // is written on, so a label inside one ("CHF 3.1B", "CFA" in "F CFA 3.1B")
+  // is told from a ticker before a figure ("NVDA 74.6%", "CHF 49.2%").
+  const prefixed = attributedFigures.flatMap((figure) => {
+    const prefix = spaced(figure.value.match(/^[-−]?(\D*)/)![1]);
+    return prefix ? numbersIn(figure.value).slice(0, 1).map((number) => ({ prefix, number })) : [];
+  });
   const companies = [...new Set(attributedFigures.map((figure) => figure.company))]
     .filter((company) => company.length > 1);
 
@@ -114,8 +117,8 @@ export function keepSupportedSentences(
       const numbers = allNumbers.filter((n) => !mentions.some((m) => within(n.index, m.index, m.company.length)));
       const named = mentions.filter((m) => !numbers.some((n) =>
         within(m.index, n.index, n.end - n.index) ||
-        (n.index >= m.index + m.company.length && [...prefixes].some((prefix) =>
-          n.index - prefix.length <= m.index && spaced(sentence.slice(0, n.index)).endsWith(prefix)
+        (n.index >= m.index + m.company.length && prefixed.some(({ prefix, number }) =>
+          number === n.number && n.index - prefix.length <= m.index && spaced(sentence.slice(0, n.index)).endsWith(prefix)
         ))
       ));
       if (numbers.some(({ number }) => !supported.has(number) && !owners.has(number))) {
