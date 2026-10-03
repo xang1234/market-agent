@@ -29,6 +29,11 @@ test("frozen data modes never fetch live prices; live mode uses the market servi
     "http://127.0.0.1:5173",
   );
   assert.equal(marketHydrationOrigin({ DEV_PROFILE: "chat", DEV_MODE: "analyst", APP_PORT: "5173" }), null);
+  // A wildcard bind is reached over loopback; IPv6 hosts are bracketed.
+  assert.equal(marketHydrationOrigin({ DEV_PROFILE: "chat", APP_HOST: "0.0.0.0", APP_PORT: "5173" }), "http://127.0.0.1:5173");
+  assert.equal(marketHydrationOrigin({ DEV_PROFILE: "chat", APP_HOST: "::", APP_PORT: "5173" }), "http://[::1]:5173");
+  assert.equal(marketHydrationOrigin({ DEV_PROFILE: "chat", APP_HOST: "::1", APP_PORT: "5173" }), "http://[::1]:5173");
+  assert.doesNotThrow(() => new URL("/v1/market/series", marketHydrationOrigin({ DEV_PROFILE: "chat", APP_HOST: "::" })!));
 });
 
 test("the YTD window is requested from before the prior year's last sessions, split-adjusted (#232)", async () => {

@@ -20,9 +20,16 @@ export function marketHydrationOrigin(env: NodeJS.ProcessEnv): string | null {
   // own host and port (services/app/src/dev.ts); MARKET_ORIGIN then names the
   // standalone market server, which is not running.
   if (env.DEV_PROFILE === "chat") {
-    return `http://${env.APP_HOST ?? "127.0.0.1"}:${env.APP_PORT ?? env.WEB_PORT ?? "5173"}`;
+    return `http://${selfHost(env.APP_HOST ?? "127.0.0.1")}:${env.APP_PORT ?? env.WEB_PORT ?? "5173"}`;
   }
   return env.MARKET_ORIGIN?.trim() || null;
+}
+
+// The host to reach a server bound to `bindHost`: loopback for a wildcard bind,
+// and an IPv6 literal in brackets.
+function selfHost(bindHost: string): string {
+  const host = bindHost === "0.0.0.0" ? "127.0.0.1" : bindHost === "::" ? "::1" : bindHost;
+  return host.includes(":") ? `[${host}]` : host;
 }
 
 export async function hydrateYtdBars(input: {
