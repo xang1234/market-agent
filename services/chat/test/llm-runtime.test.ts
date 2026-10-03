@@ -589,7 +589,7 @@ test("with no figures shown, the model still gets the evidence, compactly, as av
     return JSON.parse(prompt) as Record<string, unknown>;
   };
   assert.deepEqual((await run()).available_data, {
-    quotes: [{ ticker: "AAPL", price: 231.6, change_pct: 0.0078, currency: "USD", as_of: "2026-09-01T00:00:00.000Z" }],
+    quotes: [{ ticker: "AAPL", price: 231.6, change: "+0.78%", currency: "USD", as_of: "2026-09-01T00:00:00.000Z" }],
     facts: [{ metric: "Revenue", value: 416161000000, unit: "currency", currency: "USD", period: "FY 2025", as_of: "2025-10-31T00:00:00.000Z" }],
   });
   assert.ok(!prompt.includes("fact_id") && !prompt.includes('"source_id"'), "still compact: no ids");
@@ -630,6 +630,25 @@ test("a turn showing only a price chart stays guarded against returns it does no
   };
   assert.equal(await narrate("NVDA returned 12.5% over the window."), "NVDA returned 12.5% over the window.");
   assert.notEqual(await narrate("NVDA returned 40.0% over the window."), "NVDA returned 40.0% over the window.");
+});
+
+test("a claim the model dates from its effective time keeps its sentence (#181)", async () => {
+  const toolCall = {
+    tool_call_id: "tc-1",
+    tool_name: "research_lookup",
+    bundle_id: "peer_comparison",
+    status: "ok",
+    result: { evidence: { claims: [{ claim_id: "c1", text_canonical: "NVIDIA guided revenue higher.", effective_time: "2025-11-19T00:00:00.000Z" }] } },
+  } as never;
+  const composed = await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "Compare NVDA with AMD", bundleId: "peer_comparison" },
+    blocks: [NARRATIVE_BLOCK],
+    toolCalls: [toolCall],
+    factBlocks: COMPARISON_BLOCKS,
+    createClient: () => async () => ({ text: "In November 2025, NVIDIA guided revenue higher." }),
+  });
+  assert.equal((composed[0].segments as Array<{ text: string }>)[0].text, "In November 2025, NVIDIA guided revenue higher.");
 });
 
 test("the model sees each comparison figure with the company and metric it belongs to", async () => {

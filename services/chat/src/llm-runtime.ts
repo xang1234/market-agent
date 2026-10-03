@@ -212,15 +212,10 @@ export async function composeAnalystBlocksWithLlm(input: {
 }
 
 // Claim text the answer cites; a figure a claim states is supported.
+// Its dates too: the model is asked to date a claim ("in November 2025"), so
+// the year it writes is supported (#181).
 function claimTextsFromToolCalls(toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>): string[] {
-  return toolCalls.flatMap((toolCall) => {
-    const evidence = (toolCall.result as { evidence?: { claims?: unknown } } | undefined)?.evidence;
-    if (!Array.isArray(evidence?.claims)) return [];
-    return evidence.claims.flatMap((claim: unknown) => {
-      const text = (claim as { text_canonical?: unknown } | null)?.text_canonical;
-      return typeof text === "string" ? [text] : [];
-    });
-  });
+  return citedClaims(toolCalls).flatMap((claim) => Object.values(claim));
 }
 
 export type AnswerUsage = { input_tokens: number; output_tokens: number; reasoning_tokens?: number };
@@ -295,7 +290,10 @@ function availableData(structured: ReadonlyArray<Record<string, unknown>>): Reco
   const quotes = structured.flatMap((context) => isRecord(context.quote) ? [{
     ticker: context.quote.ticker,
     price: context.quote.price,
-    change_pct: context.quote.change_pct,
+    // change_pct is a fraction (0.0078 = 0.78%); sent as the percentage it means.
+    ...(typeof context.quote.change_pct === "number"
+      ? { change: `${context.quote.change_pct >= 0 ? "+" : ""}${(context.quote.change_pct * 100).toFixed(2)}%` }
+      : {}),
     currency: context.quote.currency,
     as_of: context.quote.as_of,
   }] : []);
