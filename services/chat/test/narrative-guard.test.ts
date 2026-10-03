@@ -61,6 +61,12 @@ test("a heading whose whole section was dropped goes with it; one with content s
     DISPLAYED,
   );
   assert.equal(result.text, "## Revenue\nRevenue reached $62.1B in Q4 2026.");
+  // A parent stays while a subsection under it keeps content.
+  const nested = keepSupportedSentences(
+    "## Analysis\n### Growth\nGrew 38%.\n### Revenue\nRevenue reached $62.1B in Q4 2026.\n## Risks\n### Growth\nGrew 38%.",
+    DISPLAYED,
+  );
+  assert.equal(nested.text, "## Analysis\n### Revenue\nRevenue reached $62.1B in Q4 2026.");
 });
 
 test("keeps paragraph breaks between supported paragraphs", () => {
@@ -348,6 +354,10 @@ test("a ticker that is also a currency prefix does not break that currency's fig
   const figures = [{ company: "CHF", value: "-CHF 3.1B" }, { company: "AMD", value: "$3.1B" }];
   assert.deepEqual(keepSupportedSentences("CHF's operating income was -CHF 3.1B.", [], figures).removed, []);
   assert.equal(keepSupportedSentences("AMD's operating income was -CHF 3.1B.", [], figures).removed.length, 1);
+  // Nor is a positive figure's prefix an attached owner (#144).
+  const positive = [{ company: "CHF", value: "CHF 3.1B" }, { company: "AMD", value: "$4.2B" }];
+  assert.deepEqual(keepSupportedSentences("CHF's operating income was CHF 3.1B.", [], positive).removed, []);
+  assert.equal(keepSupportedSentences("AMD's operating income was CHF 3.1B.", [], positive).removed.length, 1);
 });
 
 test("a company label starting with a digit is still a mention", () => {

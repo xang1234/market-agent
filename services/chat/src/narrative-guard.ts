@@ -46,6 +46,9 @@ const SENTENCE_BREAK = /(?<=[.!?])\s+/;
 // a line that is only "**Margins**").
 const LIST_MARKER = /^\s*(?:[-*+]|\d{1,2}[.)])\s+/;
 const HEADING = /^\s*(?:#{1,6}\s|\*\*[^*]+\*\*:?\s*$)/;
+// The rest of a currency prefix after a label that begins it: "CHF" in
+// "CHF 3.1B", "CN" in "CN¥3.1B".
+const PREFIX_TAIL = /^\.?(?:[ \u00a0\u202f][A-Z]{1,4})?\p{Sc}?[ \u00a0\u202f]?$/u;
 const COMPARED_WITH = /(?:compared (?:with|to)|unlike|versus|vs\.?|than|relative to|against)\s+$/i;
 // Between a company and a figure it owns: nothing but a possessive or
 // "at"/"with", then the figure's currency prefix if any ("versus AMD's 49.2%",
@@ -103,10 +106,14 @@ export function keepSupportedSentences(
       const allNumbers = numberMatches(sentence);
       const mentions = companyMentions(sentence, companies);
       // Digits inside a label ("issuer:12ab34cd") are not figures, and a label
-      // inside a figure ("-CHF 3.1B" when CHF is a ticker) is not a mention.
+      // that is a figure's currency prefix ("-CHF 3.1B", "CHF 3.1B" when CHF is
+      // a ticker) is not a mention.
       const within = (at: number, start: number, length: number) => at >= start && at < start + length;
       const numbers = allNumbers.filter((n) => !mentions.some((m) => within(n.index, m.index, m.company.length)));
-      const named = mentions.filter((m) => !numbers.some((n) => within(m.index, n.index, n.end - n.index)));
+      const named = mentions.filter((m) => !numbers.some((n) =>
+        within(m.index, n.index, n.end - n.index) ||
+        (n.index >= m.index + m.company.length && PREFIX_TAIL.test(sentence.slice(m.index + m.company.length, n.index)))
+      ));
       if (numbers.some(({ number }) => !supported.has(number) && !owners.has(number))) {
         removed.push(sentence);
         return false;
@@ -164,9 +171,19 @@ export function keepSupportedSentences(
     });
     if (kept.length > 0) lines.push(lead + kept.join(" "));
   }
-  // A heading whose section lost everything goes too.
-  const next = (i: number) => lines.slice(i + 1).find((line) => line.trim() !== "");
-  const shown = lines.filter((line, i) => !HEADING.test(line) || (next(i) !== undefined && !HEADING.test(next(i)!)));
+  // A heading whose section lost everything goes too: nothing but blank lines
+  // and empty subheadings before the next heading at its level or above.
+  const level = (line: string) => HEADING.test(line) ? line.trim().match(/^#+/)?.[0].length ?? 7 : 0;
+  const hasContent = (i: number): boolean => {
+    for (const line of lines.slice(i + 1)) {
+      if (line.trim() === "") continue;
+      const sub = level(line);
+      if (sub === 0) return true;
+      if (sub <= level(lines[i])) return false;
+    }
+    return false;
+  };
+  const shown = lines.filter((line, i) => level(line) === 0 || hasContent(i));
   return { text: shown.join("\n").replace(/\n{3,}/g, "\n\n").trim(), removed };
 }
 
