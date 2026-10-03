@@ -25,8 +25,8 @@
 //
 // ponytail: uses each listing's latest stored window and requires them to be
 // identical; a shared sub-window across different stored ranges is the upgrade.
-// ponytail: a YTD window comes only from bars already stored; fetching missing
-// ones before the cutoff is #192 part 2.
+// A live YTD turn fetches and stores its window before the cutoff
+// (ytd-hydration.ts); this module still reads only stored bars.
 
 import { createHash } from "node:crypto";
 

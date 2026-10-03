@@ -176,7 +176,14 @@ normalized to percent return. The companies' windows must be identical, or there
     range can't change the window. Each series spec seals the window and a digest of exactly the bars drawn.
   - Anything short of a full window is a named gap, never a shorter window called YTD: a missing baseline, a listing
     after the year began, a zero baseline, mismatched sessions, a missing endpoint, or mixed bases.
-  - Only stored bars are used. Fetching missing bars live, before the cutoff, is #192 part 2.
+  - The chart only reads stored bars. In live mode (#232), a YTD turn first asks the market service
+    (`MARKET_ORIGIN`, `/v1/market/series`) for the window, from Dec 20 of the prior year to now. The request goes
+    through the cached adapter, so the bars are fetched, stored and reused.
+  - The fetch tries split-adjusted bars first. If any company lacks them, it fetches dividend-adjusted bars for
+    every company, so one basis can chart them all.
+  - The fetch is time-limited and never fails the turn. The turn captures its cutoff only afterwards.
+  - Frozen data modes (`DEV_NO_KEYS=true`, `DEV_MODE=analyst`) never fetch, so live bars can't mix into the golden
+    dataset.
 
 - **Sealing:** every series has a `series_specs` entry in the snapshot manifest. The entry holds the `series_ref`, the
   bar range's `source_id`, `listing_id`, `bar_range_id`, interval, range and `as_of`. The block cites these through
