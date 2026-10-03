@@ -31,7 +31,7 @@
 import { createHash } from "node:crypto";
 
 import { MISLABELED_POLYGON_RANGE_SQL } from "../../market/src/cache-repository.ts";
-import { selectYtdWindow, ytdReturns, type YtdWindow } from "../../market/src/ytd-window.ts";
+import { selectYtdWindow, ytdReturns, ytdYear, type YtdWindow } from "../../market/src/ytd-window.ts";
 import { compileDisclosurePolicy } from "../../snapshot/src/disclosure-policy.ts";
 import type { SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
 import { stableUuid } from "./chat-ids.ts";
@@ -53,8 +53,10 @@ const BASIS_WORDS: Record<ComparableBasis, string> = {
 };
 const NORMALIZATION = "pct_return";
 // A YTD window needs a stored range that starts by Christmas Eve of the prior
-// year, so its last December sessions are in it.
-const YEAR_END_LOOKBACK = "-12-24T00:00:00.000Z";
+// year (exchange-local), so its last December sessions are in it. Ranges are
+// compared against the start of Dec 25 UTC, which is after Dec 24 begins in
+// every exchange's time zone; selectYtdWindow then checks the bars themselves.
+const YEAR_END_LOOKBACK = "-12-25T00:00:00.000Z";
 
 // A price window the question asks for; absent, the latest stored window.
 export type PriceWindow = "ytd";
@@ -120,6 +122,10 @@ async function loadSealedRanges(
   db: QueryExecutor,
   input: PerfInput,
 ): Promise<Block | null> {
+  // A YTD window covers the cutoff's year on the exchanges' calendars.
+  const zones = input.window === "ytd" ? await listingTimeZones(db, input.listings) : new Map<string, string>();
+  const zoneOf = (listingId: string) => zones.get(listingId) ?? "UTC";
+  const year = input.window === "ytd" ? ytdYear(input.asOf, zoneOf(input.listings[0].id)) : undefined;
   // One statement, so the range and its bars come from one consistent view: a
   // cache refresh upserts the same bar_range_id and replaces its bars, and two
   // reads could pair old metadata with new prices.
@@ -166,7 +172,7 @@ async function loadSealedRanges(
       INTERVAL,
       COMPARABLE_BASES,
       input.asOf,
-      input.window === "ytd" ? `${ytdYearBound(input.asOf) - 1}${YEAR_END_LOOKBACK}` : null,
+      year === undefined ? null : `${year - 1}${YEAR_END_LOOKBACK}`,
     ],
   );
   const rangeOf = (listingId: string, basis: ComparableBasis) =>
@@ -189,9 +195,12 @@ async function loadSealedRanges(
   };
   const hasRange = (listing: { id: string }) => ranges.some((range) => range.listing_id === listing.id);
   const shared = COMPARABLE_BASES.filter((basis) => input.listings.every((listing) => rangeOf(listing.id, basis)));
-  if (input.window === "ytd") {
-    if (shared.length === 0 && input.listings.every(hasRange)) return basisGapBlock(input, ranges);
-    return loadYtdBlock(db, input, shared, sealedOf);
+  if (year !== undefined) {
+    // A company with no range reaching back over the year-end is the gap, on any basis.
+    const uncovered = input.listings.find((listing) => !hasRange(listing));
+    if (uncovered) return ytdGapBlock(input, `${uncovered.label} has no prices from before ${year}`);
+    if (shared.length === 0) return basisGapBlock(input, ranges);
+    return ytdBlock(input, shared, sealedOf, zoneOf);
   }
   // Every company or no chart: a chart quietly missing one would cover fewer
   // companies than the comparison beside it.
@@ -206,43 +215,39 @@ async function loadSealedRanges(
 }
 
 // The YTD chart on the first basis every company has that gives a full window;
-// otherwise the reason there is none. A company with no range reaching back over
-// the year-end has no bars here, so the window names it.
-async function loadYtdBlock(
-  db: QueryExecutor,
+// otherwise the reason there is none.
+function ytdBlock(
   input: PerfInput,
   shared: ReadonlyArray<ComparableBasis>,
   sealedOf: (listing: { id: string; label: string }, basis: ComparableBasis) => SealedPriceRange | undefined,
-): Promise<Block> {
-  const { rows } = await db.query<{ listing_id: string; timezone: string }>(
-    `select listing_id::text as listing_id, timezone from listings where listing_id = any($1::uuid[])`,
-    [input.listings.map((listing) => listing.id)],
-  );
-  const zones = new Map(rows.map((row) => [row.listing_id, row.timezone]));
+  zoneOf: (listingId: string) => string,
+): Block {
   let gap = "";
-  for (const basis of shared.length > 0 ? shared : COMPARABLE_BASES.slice(0, 1)) {
-    const sealed = input.listings.map((listing) => sealedOf(listing, basis));
+  for (const basis of shared) {
+    const sealed = input.listings.map((listing) => sealedOf(listing, basis)!);
     const window = selectYtdWindow(
-      input.listings.map((listing, index) => ({
-        label: listing.label,
-        timeZone: zones.get(listing.id) ?? "UTC",
-        bars: sealed[index]?.bars ?? [],
-      })),
+      input.listings.map((listing, index) => ({ label: listing.label, timeZone: zoneOf(listing.id), bars: sealed[index].bars })),
       input.asOf,
     );
-    if (window.ok) {
-      return buildYtdPerfBlock({ ranges: sealed as SealedPriceRange[], window, snapshotId: input.snapshotId });
-    }
+    if (window.ok) return buildYtdPerfBlock({ ranges: sealed, window, snapshotId: input.snapshotId });
     gap ||= window.gap;
   }
+  return ytdGapBlock(input, gap);
+}
+
+function ytdGapBlock(input: PerfInput, gap: string): Block {
   return noteBlock(input, "perf_ytd_gap", `Year-to-date price performance is not shown: ${gap}.`);
 }
 
-// An upper bound on the cutoff's exchange-local year: no exchange is more than
-// 14 hours behind UTC, so the year 14 hours before the cutoff (UTC) may be one
-// too early, never too late; the lookback then only admits more ranges.
-function ytdYearBound(asOf: string): number {
-  return new Date(Date.parse(asOf) - 14 * 60 * 60 * 1000).getUTCFullYear();
+async function listingTimeZones(
+  db: QueryExecutor,
+  listings: ReadonlyArray<{ id: string }>,
+): Promise<Map<string, string>> {
+  const { rows } = await db.query<{ listing_id: string; timezone: string }>(
+    `select listing_id::text as listing_id, timezone from listings where listing_id = any($1::uuid[])`,
+    [listings.map((listing) => listing.id)],
+  );
+  return new Map(rows.map((row) => [row.listing_id, row.timezone]));
 }
 
 // Companies whose stored prices share no basis: say so where the chart would

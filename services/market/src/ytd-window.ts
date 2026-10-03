@@ -41,8 +41,13 @@ export type YtdGap = { ok: false; gap: string };
 
 const SESSION_CLOSE_MINUTES = 16 * 60;
 
+// The year a YTD window covers: the cutoff's year on the exchange's calendar.
+export function ytdYear(cutoff: string, timeZone: string): number {
+  return Number(localParts(cutoff, timeZone).date.slice(0, 4));
+}
+
 export function selectYtdWindow(series: ReadonlyArray<YtdSeriesInput>, cutoff: string): YtdWindow | YtdGap {
-  const years = new Set(series.map((item) => Number(localParts(cutoff, item.timeZone).date.slice(0, 4))));
+  const years = new Set(series.map((item) => ytdYear(cutoff, item.timeZone)));
   if (years.size !== 1) return { ok: false, gap: "the companies' exchanges are in different calendar years at the cutoff" };
   const [year] = years;
   const yearStart = `${year}-01-01`;

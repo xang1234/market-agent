@@ -288,8 +288,10 @@ test("a YTD request charts from the last close before January 1 to the latest co
   const specs = chart.provenance_series_specs as Array<{ window: unknown; bars_sha256: string }>;
   assert.deepEqual(specs[0].window, { kind: "ytd", year: 2026, baseline_date: "2025-12-31", end_date: "2026-08-31" });
   assert.equal(disclosure?.kind, "disclosure");
-  // Only ranges reaching back over the year-end are read.
-  assert.equal(seen[0].values?.[4], "2025-12-24T00:00:00.000Z");
+  // Only ranges reaching back over the year-end are read: by the start of Dec 25
+  // UTC, so a New York range from Dec 24 (05:00Z) qualifies.
+  const rangesQuery = seen.find((query) => query.text.includes("market_bar_ranges"))!;
+  assert.equal(rangesQuery.values?.[4], "2025-12-25T00:00:00.000Z");
 });
 
 test("a YTD request that can't be met is a named gap, not a shorter window (#192)", async () => {
@@ -299,6 +301,16 @@ test("a YTD request that can't be met is a named gap, not a shorter window (#192
     { listings: LISTINGS, snapshotId: SNAPSHOT_ID, asOf: AS_OF, window: "ytd" },
   );
   assert.deepEqual(blocks.map((block) => block.kind), ["rich_text"]);
+  assert.equal(
+    (blocks[0].segments as Array<{ text: string }>)[0].text,
+    "Year-to-date price performance is not shown: AMD has no prices from before 2026.",
+  );
+});
+
+test("the YTD gap names the company without pre-year prices, whatever basis the others have (#192)", async () => {
+  // NVDA's only range is dividend-adjusted; AMD has none.
+  const nvda = { ...ytdRow(NVDA, [ytdBar("2025-12-31", 100), ytdBar("2026-08-31", 120)]), adjustment_basis: "split_and_div_adjusted" };
+  const blocks = await loadPerfComparisonBlocks(ytdDb([nvda]), { listings: LISTINGS, snapshotId: SNAPSHOT_ID, asOf: AS_OF, window: "ytd" });
   assert.equal(
     (blocks[0].segments as Array<{ text: string }>)[0].text,
     "Year-to-date price performance is not shown: AMD has no prices from before 2026.",
