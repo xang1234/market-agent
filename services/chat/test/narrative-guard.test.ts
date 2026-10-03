@@ -378,6 +378,11 @@ test("a ticker that is also a currency prefix does not break that currency's fig
   // Or with no unit at all ("CHF 999.0").
   const bare = [{ company: "CHF", value: "CHF 999.0" }, { company: "AMD", value: "$4.2B" }];
   assert.equal(keepSupportedSentences("AMD's operating income was CHF 999.0.", [], bare).removed.length, 1);
+  // A possessive or "at" ties the label to a figure the prefix doesn't cover.
+  const margin = [{ company: "CHF", value: "CHF 3.1B" }, { company: "CHF", value: "49.2%" }, { company: "AMD", value: "74.6%" }];
+  const kept = "AMD grew faster, while CHF at 49.2% had the lower margin.";
+  assert.deepEqual(keepSupportedSentences(kept, [], margin), { text: kept, removed: [] });
+  assert.equal(keepSupportedSentences("AMD grew faster, while CHF at 74.6% had the higher margin.", [], margin).removed.length, 1);
   // Nor a label that is a later word of a compound prefix ("CFA" in "F CFA 3.1B").
   const compound = [{ company: "CFA", value: "F CFA 3.1B" }, { company: "AMD", value: "$4.2B" }];
   assert.deepEqual(keepSupportedSentences("CFA's operating income was F CFA 3.1B.", [], compound).removed, []);

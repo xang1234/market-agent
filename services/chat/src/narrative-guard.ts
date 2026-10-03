@@ -142,13 +142,14 @@ export function keepSupportedSentences(
         // filing") refers back to an earlier figure's company in the sentence,
         // if any: nothing named near this figure may claim it.
         const pronounSubject = subjects.length === 0 && PRONOUN.test(sentence.slice(from, index));
-        // A currency-word label ("CHF 3.1B") is attached only as a comparison
-        // company with nothing but a possessive or "at"/"with" between, as
-        // before #144: whether "CHF 3.1B" names CHF or the franc is unknowable.
+        // A currency-word label is attached by a possessive or "at"/"with"
+        // ("CHF's 49.2%", "CHF at 49.2%"); right before a figure, only as a
+        // comparison company, as before #144: whether "CHF 3.1B" names CHF or
+        // the franc is unknowable.
         const attached = stretch.filter((mention) => {
           const between = sentence.slice(mention.index + mention.company.length, index);
           return currencyWords.has(mention.company)
-            ? comparisons.includes(mention) && ATTACHED_PLAIN.test(between)
+            ? ATTACHED_PLAIN.test(between) && (between.trim() !== "" || comparisons.includes(mention))
             : ATTACHED.test(between);
         });
         const before = attached.length > 0 ? attached : subjects;
