@@ -658,6 +658,26 @@ test("a claim the model dates from its effective time keeps its sentence (#181)"
   assert.equal((composed[0].segments as Array<{ text: string }>)[0].text, "In November 2025, NVIDIA guided revenue higher.");
 });
 
+test("a claim's date supports its month and year, never its day or time as a figure (#181)", async () => {
+  const toolCall = {
+    tool_call_id: "tc-1",
+    tool_name: "research_lookup",
+    bundle_id: "peer_comparison",
+    status: "ok",
+    result: { evidence: { claims: [{ claim_id: "c1", text_canonical: "NVIDIA guided revenue higher.", effective_time: "2025-11-19T00:00:00.000Z" }] } },
+  } as never;
+  const composed = await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "Compare NVDA with AMD", bundleId: "peer_comparison" },
+    blocks: [NARRATIVE_BLOCK],
+    toolCalls: [toolCall],
+    factBlocks: COMPARISON_BLOCKS,
+    // 19 is only the claim's day: an invented margin must not survive on it.
+    createClient: () => async () => ({ text: "Margins reached 19% last year. NVDA is larger." }),
+  });
+  assert.equal((composed[0].segments as Array<{ text: string }>)[0].text, "NVDA is larger.");
+});
+
 test("the model sees each comparison figure with the company and metric it belongs to", async () => {
   const { prompt } = await compareWithReply("NVDA leads.");
   assert.ok(

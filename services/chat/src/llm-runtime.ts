@@ -144,7 +144,7 @@ export async function composeAnalystBlocksWithLlm(input: {
           "When displayed_figures is empty, available_data lists the reported values you may use instead;",
           "a value with a coverage other than full covers only part of its period, so say so.",
           "Claims in cited_claims are sourced statements you may draw on, dated by effective_time",
-          "and published_at: say when a claim dates from if it is not recent. data_notes say what",
+          "and published_at: say when a claim dates from, by month and year, if it is not recent. data_notes say what",
           "could not be shown. If staleness flags data as stale (quote.stale, or",
           "fact_recency.stale / a large fact_recency.age_days), explicitly note",
           "that the figure may be out of date and say how old it is.",
@@ -213,10 +213,21 @@ export async function composeAnalystBlocksWithLlm(input: {
 }
 
 // Claim text the answer cites; a figure a claim states is supported.
-// Its dates too: the model is asked to date a claim ("in November 2025"), so
-// the year it writes is supported (#181).
+// Its dates too, as month and year only: the model is asked to date a claim
+// ("in November 2025"), so that year is supported, while an ISO date's day and
+// time digits ("19", "0") never become supported figures (#181).
 function claimTextsFromToolCalls(toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>): string[] {
-  return citedClaims(toolCalls).flatMap((claim) => Object.values(claim));
+  return citedClaims(toolCalls).flatMap((claim) => [
+    claim.text,
+    ...[claim.effective_time, claim.published_at].flatMap((date) => (date ? [monthYear(date)] : [])),
+  ]);
+}
+
+function monthYear(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? ""
+    : date.toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
 }
 
 export type AnswerUsage = { input_tokens: number; output_tokens: number; reasoning_tokens?: number };
