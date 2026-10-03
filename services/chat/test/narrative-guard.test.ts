@@ -43,7 +43,24 @@ test("guards each line of a bulleted answer on its own and keeps the line struct
     DISPLAYED,
   );
   assert.equal(result.text, "- Revenue reached $62.1B in Q4 2026\n- Margins held up");
-  assert.deepEqual(result.removed, ["- Grew 38% year over year"]);
+  assert.deepEqual(result.removed, ["Grew 38% year over year"]);
+});
+
+test("a numbered item keeps its marker, and loses it only with the whole item (#144)", () => {
+  const result = keepSupportedSentences(
+    "Highlights:\n\n1. Grew 38% year over year.\n2. Revenue reached $62.1B in Q4 2026.\n3. Margins held up.",
+    DISPLAYED,
+  );
+  assert.equal(result.text, "Highlights:\n\n2. Revenue reached $62.1B in Q4 2026.\n3. Margins held up.");
+  assert.deepEqual(result.removed, ["Grew 38% year over year."]);
+});
+
+test("a heading whose whole section was dropped goes with it; one with content stays (#144)", () => {
+  const result = keepSupportedSentences(
+    "## Revenue\nRevenue reached $62.1B in Q4 2026.\n\n**Growth**\n- Grew 38% year over year.\n\n### Margins\nGrew 38%.",
+    DISPLAYED,
+  );
+  assert.equal(result.text, "## Revenue\nRevenue reached $62.1B in Q4 2026.");
 });
 
 test("keeps paragraph breaks between supported paragraphs", () => {
@@ -337,4 +354,29 @@ test("a company label starting with a digit is still a mention", () => {
   const figures = [{ company: "3M Company", value: "49.2%" }, { company: "NVDA", value: "74.6%" }];
   assert.deepEqual(keepSupportedSentences("3M Company's margin is 49.2%.", [], figures).removed, []);
   assert.equal(keepSupportedSentences("3M Company's margin is 74.6%.", [], figures).removed.length, 1);
+});
+
+// From the #144 eval run (docs/eval-runs/research-quality/2026-10-03T144318.md).
+const SCALE = [
+  { company: "AAPL", value: "$416.2B" },
+  { company: "NVDA", value: "$209.9B" },
+  { company: "AAPL", value: "6.05%" },
+  { company: "NVDA", value: "6.6%" },
+];
+
+test("a company owns a currency figure attached to it, past the currency symbol (#144)", () => {
+  const kept = "AAPL's strength is absolute scale: $416.2B in revenue versus NVDA's $209.9B.";
+  assert.deepEqual(keepSupportedSentences(kept, [], SCALE), { text: kept, removed: [] });
+  // The wrong-company twin still goes.
+  const swapped = "AAPL's strength is absolute scale: $209.9B in revenue versus NVDA's $416.2B.";
+  assert.equal(keepSupportedSentences(swapped, [], SCALE).text, "");
+});
+
+test("a company attached to a figure owns it though another is named earlier (#144)", () => {
+  const kept = "Despite NVDA's higher margins, the price-return chart shows AAPL at 6.05% and NVDA at 6.6%.";
+  assert.deepEqual(keepSupportedSentences(kept, [], SCALE), { text: kept, removed: [] });
+  const swapped = "Despite NVDA's higher margins, the price-return chart shows AAPL at 6.6% and NVDA at 6.05%.";
+  assert.equal(keepSupportedSentences(swapped, [], SCALE).text, "");
+  // Attached to the other company, the figure is not credited to the subject.
+  assert.equal(keepSupportedSentences("NVDA beat AAPL at 6.6%.", [], SCALE).text, "");
 });

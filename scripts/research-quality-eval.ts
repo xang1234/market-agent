@@ -29,7 +29,8 @@ export type AnsweredQuestion = {
   threadId: string;
   // answeredBy: the deployment that wrote the turn's answer, as chat recorded it (#183).
   // usage: the answer call's tokens, from turn.completed (#181).
-  turns: Array<{ message: string; outcome: string; blocks: Block[]; answeredBy?: string | null; usage?: AnswerUsage | null }>;
+  // removed: sentences the narrative guard dropped, from turn.completed (#144).
+  turns: Array<{ message: string; outcome: string; blocks: Block[]; answeredBy?: string | null; usage?: AnswerUsage | null; removed?: string[] }>;
 };
 
 // --- report ----------------------------------------------------------------------
@@ -84,6 +85,8 @@ export function renderReport(run: string, model: string, base: string, answered:
     "",
     `Answer tokens: ${usageSummary(answered)}.`,
     "",
+    `Guard drops: ${removedSummary(answered)}.`,
+    "",
     `Model: \`${model}\`. Data: frozen golden dataset. Score each question in \`${run}.scores.json\` (rubric below),`,
     "then run `node --experimental-strip-types scripts/research-quality-eval.ts summary`.",
     "Bold figures are cited (linked to a fact); open the thread link for charts and sources.",
@@ -102,10 +105,21 @@ export function renderReport(run: string, model: string, base: string, answered:
       else if (turn.outcome !== "turn.completed") lines.push(`**Turn ended with ${turn.outcome}.**`, "");
       const tokens = turn.usage ? `${turn.usage.input_tokens} input / ${turn.usage.output_tokens} output tokens${turn.usage.reasoning_tokens === undefined ? "" : ` (${turn.usage.reasoning_tokens} reasoning)`}` : null;
       if (turn.answeredBy || tokens) lines.push(`_${[turn.answeredBy ? `Answered by \`${turn.answeredBy}\`` : null, tokens].filter(Boolean).join("; ")}._`, "");
+      if (turn.removed?.length) {
+        lines.push(`_Guard dropped ${turn.removed.length} sentence${turn.removed.length === 1 ? "" : "s"}:_`, "", ...turn.removed.map((sentence) => `> ~~${sentence}~~`), "");
+      }
       lines.push(...turn.blocks.flatMap((block) => [renderBlock(block), ""]));
     }
   }
   return `${lines.join("\n").trimEnd()}\n`;
+}
+
+// Sentences the narrative guard dropped, in total and per answered turn.
+export function removedSummary(answered: ReadonlyArray<AnsweredQuestion>): string {
+  const turns = answered.flatMap((question) => question.turns).filter((turn) => turn.outcome === "turn.completed");
+  const removed = turns.reduce((sum, turn) => sum + (turn.removed?.length ?? 0), 0);
+  const hit = turns.filter((turn) => turn.removed?.length).length;
+  return `${removed} sentence${removed === 1 ? "" : "s"} in ${hit} of ${turns.length} answered turn${turns.length === 1 ? "" : "s"}`;
 }
 
 // Each answering model with its turn count; turns whose answer recorded none (no model
@@ -256,15 +270,17 @@ async function run(base: string): Promise<void> {
       }
       const startedAt = Date.now();
       let usage: AnswerUsage | null = null;
+      let removed: string[] = [];
       const outcome = await runTurn(base, threadId, turn.message, 180_000, turn.subjectText, (data) => {
         usage = (data.answer_usage as AnswerUsage | undefined) ?? null;
+        removed = Array.isArray(data.narrative_removed) ? data.narrative_removed as string[] : [];
       });
       console.log(`${outcome === "turn.completed" ? "done" : outcome}  ${question.id}: ${turn.message}  (${((Date.now() - startedAt) / 1000).toFixed(1)}s)`);
       const { messages } = await api<{ messages: Message[] }>(base, "GET", `/v1/chat/threads/${threadId}/messages`);
       const answers = messages.filter((m) => m.role === "assistant");
       // A failed turn may have saved no answer: show none rather than the previous one.
       const answer = answers.length > answersSoFar ? answers.at(-1)! : null;
-      turns.push({ message: turn.message, outcome, blocks: answer?.blocks ?? [], answeredBy: answer?.answered_by ?? null, usage });
+      turns.push({ message: turn.message, outcome, blocks: answer?.blocks ?? [], answeredBy: answer?.answered_by ?? null, usage, removed });
       answersSoFar = answers.length;
     }
     answered.push({ question, threadId, turns });

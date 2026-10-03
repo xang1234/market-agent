@@ -9,6 +9,7 @@ import {
   modelForRun,
   answeredBySummary,
   usageSummary,
+  removedSummary,
   modelLabel,
   readRuns,
   renderBlock,
@@ -161,4 +162,19 @@ test("the report shows each turn's answer tokens and the run's mean (#181)", () 
   assert.match(report, /Answer tokens: mean 1500 input \/ 300 output per turn \(200 reasoning\) over 2 turns\./);
   assert.match(report, /_Answered by `a\/m`; 1000 input \/ 200 output tokens \(100 reasoning\)\._/);
   assert.equal(usageSummary([]), "not reported");
+});
+
+test("the report lists each turn's dropped sentences and the run's total (#144)", () => {
+  const [first, second] = QUESTIONS;
+  const answered = [
+    { question: first, threadId: "t1", turns: [{ message: "q1", outcome: "turn.completed", blocks: [], removed: ["At 74.6%, NVDA leads.", "AMD trails at 49.2%."] }] },
+    { question: second, threadId: "t2", turns: [
+      { message: "q2", outcome: "turn.completed", blocks: [] },
+      { message: "q3", outcome: "turn.failed", blocks: [] },
+    ] },
+  ];
+  assert.equal(removedSummary(answered), "2 sentences in 1 of 2 answered turns");
+  const report = renderReport("r", "a/m", "http://app", answered);
+  assert.match(report, /Guard drops: 2 sentences in 1 of 2 answered turns\./);
+  assert.match(report, /_Guard dropped 2 sentences:_\n\n> ~~At 74\.6%, NVDA leads\.~~\n> ~~AMD trails at 49\.2%\.~~/);
 });
