@@ -207,6 +207,8 @@ export type SecBackedStatsRepositoryOptions = {
   statements: StatementRepository;
   // Snapshot cutoff for the latest-year lookup (pass the same to `statements`).
   cutoff?: string;
+  // The fiscal year to load (a question that names one, #180); default the latest.
+  fiscalYear?: number;
   fetcher?: SecEdgarFetcher | null;
   clock?: () => Date;
   logger?: Pick<Console, "warn">;
@@ -221,18 +223,19 @@ export function createSecBackedStatsRepository(
 
   return {
     async find(issuer_id: UUID): Promise<KeyStatsEnvelope | null> {
-      const latest = await loadLatestFiscalYear(db, issuer_id, options.cutoff)
+      const year = (options.fiscalYear === undefined ? null : { fiscal_year: options.fiscalYear })
+        ?? await loadLatestFiscalYear(db, issuer_id, options.cutoff)
         // A cutoff-scoped lookup never discovers live (see the statement repository).
         ?? (options.cutoff === undefined
           ? await discoverLatestFiscalYear(db, issuer_id, options.fetcher ?? null, logger)
           : null);
-      if (!latest) return null;
+      if (!year) return null;
 
       const current = await options.statements.find({
         issuer_id,
         family: "income",
         basis: "as_reported",
-        fiscal_year: latest.fiscal_year,
+        fiscal_year: year.fiscal_year,
         fiscal_period: "FY",
       });
       if (!current) return null;
@@ -241,7 +244,7 @@ export function createSecBackedStatsRepository(
         issuer_id,
         family: "income",
         basis: "as_reported",
-        fiscal_year: latest.fiscal_year - 1,
+        fiscal_year: year.fiscal_year - 1,
         fiscal_period: "FY",
       });
       const registry = await loadMetricRegistry(

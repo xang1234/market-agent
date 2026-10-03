@@ -67,6 +67,15 @@ export function keepSupportedSentences(
       owners.set(number, companies);
     }
   }
+  // A number every company owns (the fiscal year both report, "FY2025") is no
+  // one's in particular: it needs no company, as long as there are two to share it.
+  const everyone = new Set(attributedFigures.map((figure) => figure.company));
+  for (const [number, companies] of owners) {
+    if (everyone.size > 1 && companies.size === everyone.size) {
+      owners.delete(number);
+      supported.add(number);
+    }
+  }
   // A one-letter ticker ("A") cannot be told from the article, so it is never
   // recognized; sentences quoting its figures are dropped.
   const companies = [...new Set(attributedFigures.map((figure) => figure.company))]

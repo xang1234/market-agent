@@ -133,6 +133,10 @@ export async function composeAnalystBlocksWithLlm(input: {
           "appears there, in a sentence that names its company exactly as given in company",
           "(e.g. NVDA), and never compute new figures such as growth rates,",
           "margins, or ratios; describe direction and comparison in words instead.",
+          // Fiscal calendars differ (#180): the period and its end date come with each figure.
+          "Name the fiscal period each figure is for (its period, and the month its period_end",
+          "falls in; never the day). When a comparison's title says the fiscal years end months",
+          "apart, say so: the same fiscal year covers different months for each company.",
           "If the tool context flags data as stale (quote.stale, or",
           "fact_recency.stale / a large fact_recency.age_days), explicitly note",
           "that the figure may be out of date and say how old it is.",
@@ -173,7 +177,13 @@ export async function composeAnalystBlocksWithLlm(input: {
     text,
     [...displayTextsForBlocks(input.factBlocks), ...claimTextsFromToolCalls(input.toolCalls)],
     displayedFigures(input.factBlocks).flatMap((figure) =>
-      figure.company === undefined ? [] : [{ company: figure.company, value: figure.value }]
+      figure.company === undefined ? [] : [
+        { company: figure.company, value: figure.value },
+        // So is its fiscal year: the title shows every company's, so "NVDA's FY2025"
+        // must not pass when NVDA's figures are FY2026 (#180). A year every company
+        // shares is no one's in particular (narrative-guard.ts).
+        ...(figure.period ? [{ company: figure.company, value: figure.period }] : []),
+      ]
     ),
   );
   if (guarded.removed.length > 0) {
