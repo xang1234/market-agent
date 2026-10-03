@@ -76,6 +76,10 @@ test("a heading whose whole section was dropped goes with it; one with content s
     keepSupportedSentences("**Revenue reached $62.1B in Q4 2026.**\nGrew 38%.", DISPLAYED).text,
     "**Revenue reached $62.1B in Q4 2026.**",
   );
+  // Nor a heading that carries a figure the guard kept.
+  for (const heading of ["**Revenue: $62.1B**", "## Revenue: $62.1B"]) {
+    assert.equal(keepSupportedSentences(`${heading}\nGrew 38%.`, DISPLAYED).text, heading);
+  }
 });
 
 test("keeps paragraph breaks between supported paragraphs", () => {

@@ -182,8 +182,10 @@ export function keepSupportedSentences(
   }
   // A heading whose section lost everything goes too: the guard dropped lines
   // before the next heading at its level or above, and kept none of them.
-  // A bold sentence reads as a heading, so one that lost nothing stays.
-  const level = (line: string | null) => line !== null && HEADING.test(line) ? line.trim().match(/^#+/)?.[0].length ?? 7 : 0;
+  // A heading with a figure in it ("## Revenue: $62.1B") is content: its
+  // figure passed the guard.
+  const level = (line: string | null) =>
+    line !== null && HEADING.test(line) && !/\d/.test(line) ? line.trim().match(/^#+/)?.[0].length ?? 7 : 0;
   const keepHeading = (i: number): boolean => {
     let lost = false;
     for (const line of lines.slice(i + 1)) {
