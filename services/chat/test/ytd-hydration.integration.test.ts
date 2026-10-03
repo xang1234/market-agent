@@ -24,8 +24,8 @@ const LISTINGS = [
 const NY = "America/New_York";
 
 // A provider with split-adjusted weekday closes: 100 (NVDA) or 50 (AMD) before
-// the current year, 20% higher in it (times `scale`). Counts its calls.
-function fakeProvider(yearStart: string, scale = 1) {
+// the current year, 20% higher in it. Counts its calls.
+function fakeProvider(yearStart: string) {
   let calls = 0;
   const adapter: MarketDataAdapter = {
     providerName: "polygon",
@@ -35,7 +35,7 @@ function fakeProvider(yearStart: string, scale = 1) {
     },
     async getBars(request: BarsRequest) {
       calls += 1;
-      const base = (request.listing.id === LISTINGS[0].id ? 100 : 50) * scale;
+      const base = request.listing.id === LISTINGS[0].id ? 100 : 50;
       const bars = [];
       for (let day = new Date(request.range.start); day.getTime() < Date.parse(request.range.end); day.setUTCDate(day.getUTCDate() + 1)) {
         const ts = zonedDateStartUtcIso(day.toISOString().slice(0, 10), NY);
@@ -106,21 +106,4 @@ test("a live YTD request with an empty cache fetches, stores, and seals the wind
   // Asking again reuses what the first ask stored.
   await hydrateYtdBars({ origin, listings: LISTINGS, now: new Date().toISOString() });
   assert.equal(provider.calls(), 2, "the repeat ask is served from the cache");
-
-  // A write landing after the cutoff (a fetch that outlived its client timeout)
-  // is not read at that cutoff, so it can never enter that turn's snapshot.
-  const [nvdaSpec] = drawn.provenance_series_specs as Array<{ range: { start: string; end: string } }>;
-  const late = await fakeProvider(yearStart, 10).adapter.getBars({
-    listing: { kind: "listing", id: LISTINGS[0].id },
-    interval: "1d",
-    range: nvdaSpec.range,
-    adjustment_basis: "split_adjusted",
-  });
-  assert.ok(late.outcome === "available");
-  await new Promise((resolve) => setTimeout(resolve, 5));
-  const storedAt = new Date().toISOString();
-  await cache.storeBars(late.data, { provider: "polygon", fetched_at: storedAt, expires_at: "2126-01-01T00:00:00.000Z" });
-  const atCutoff = await chart(cutoff);
-  assert.notEqual(atCutoff?.kind, "perf_comparison", "the range rewritten after the cutoff is not read at it");
-  assert.equal((await chart(new Date().toISOString()))?.kind, "perf_comparison", "a later turn reads it");
 });

@@ -152,12 +152,15 @@ async function loadSealedRanges(
           and interval = $2
           and adjustment_basis = any($3::text[])
           and not ${MISLABELED_POLYGON_RANGE_SQL}
-          -- Nothing after the turn's cutoff: neither prices later than it, nor a
-          -- range stored after it (a refresh landing mid-turn, or a YTD fetch that
-          -- timed out client-side but still completed, #232). updated_at is
-          -- when the cache last wrote the range and its bars.
+          -- Nothing stored after the turn's cutoff: a refresh landing mid-turn
+          -- must not seal prices later than the snapshot's as_of. The cutoff is
+          -- the prices' market time, not when the cache wrote them: a late write
+          -- of earlier sessions (a YTD fetch outliving its client timeout, #232)
+          -- holds no prices from after the cutoff, and the seal pins exactly the
+          -- bars drawn (bar_range_id + bars_sha256). Filtering on write time would
+          -- compare the database's clock with the app's and let a concurrent
+          -- refresh of the same range hide one this turn just fetched.
           and as_of <= $4::timestamptz
-          and updated_at <= $4::timestamptz
           -- A YTD window: only ranges that reach back over the year-end.
           and ($5::timestamptz is null or range_start <= $5::timestamptz)
         order by listing_id, adjustment_basis, range_end desc, fetched_at desc

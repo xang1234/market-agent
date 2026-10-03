@@ -160,8 +160,6 @@ test("only ranges stored by the turn's cutoff are selected, so a mid-turn refres
   });
   const [ranges] = seen;
   assert.match(ranges.text, /as_of <= \$4::timestamptz/);
-  // ...nor a range the cache wrote after the cutoff (#232).
-  assert.match(ranges.text, /updated_at <= \$4::timestamptz/);
   assert.equal(ranges.values?.[3], AS_OF);
 });
 
