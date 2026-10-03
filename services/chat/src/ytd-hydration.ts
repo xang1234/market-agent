@@ -10,9 +10,12 @@
 // Frozen data modes (no-keys, analyst) never hydrate: the golden dataset
 // answers from seeded bars, and live bars must not mix into it.
 
-import { completedSessionsEnd, selectYtdWindow, type DailyClose } from "../../market/src/ytd-window.ts";
+import { completedSessionsEnd, selectYtdWindow, sessionDate, type DailyClose } from "../../market/src/ytd-window.ts";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
+// How far before the last completed session a window may end and still count
+// as current: a long weekend. ponytail: stands in for an exchange calendar.
+const CURRENT_WITHIN_DAYS = 4;
 // The bases the chart can use, in its order of preference (perf-block.ts).
 const BASES = ["split_adjusted", "split_and_div_adjusted"] as const;
 
@@ -49,18 +52,29 @@ export async function hydrateYtdBars(input: {
   try {
     // Every company on one basis, or the chart cannot compare them. A basis is
     // enough only when what came back makes a full YTD window (an "available"
-    // answer can still hold no bars); otherwise fetch them all on the next.
+    // answer can still hold no bars) that reaches the last completed session
+    // (all series stopping months ago still agree); otherwise fetch them all on
+    // the next.
     for (const basis of BASES) {
       const bars = await fetchWindows(fetchImpl, input.origin, input.listings, input.now, basis, signal);
       const window = selectYtdWindow(
         input.listings.map((listing) => ({ label: listing.id, timeZone: listing.timeZone, bars: bars.get(listing.id) ?? [] })),
         input.now,
       );
-      if (window.ok) return;
+      if (window.ok && window.endDate >= currentFrom(input.now, input.listings[0].timeZone)) return;
     }
   } catch (reason) {
     console.warn("[chat] YTD price fetch failed; charting from the bars already stored", reason);
   }
+}
+
+// The earliest session date that still counts as current: the last completed
+// session's date, less the long-weekend allowance.
+function currentFrom(now: string, timeZone: string): string {
+  const lastCompleted = sessionDate(new Date(Date.parse(completedSessionsEnd(now, timeZone)) - 1).toISOString(), timeZone);
+  const date = new Date(`${lastCompleted}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() - CURRENT_WITHIN_DAYS);
+  return date.toISOString().slice(0, 10);
 }
 
 // One series request per range: from Dec 20 of the prior year (no exchange is

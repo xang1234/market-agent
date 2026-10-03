@@ -11,9 +11,11 @@ const LISTINGS = [
 const NOW = "2026-09-01T00:00:00.000Z"; // 20:00 New York on Aug 31, after the close
 const FULL = [{ ts: "2025-12-31T05:00:00.000Z", close: 100 }, { ts: "2026-08-31T04:00:00.000Z", close: 120 }];
 
-// A market answering each basis with, per listing, a full YTD window, an
-// "available" envelope with no bars, or unavailable.
-function fakeMarket(answers: Record<string, ReadonlyArray<"full" | "empty" | "unavailable">>) {
+const STALE = [{ ts: "2025-12-31T05:00:00.000Z", close: 100 }, { ts: "2026-05-29T04:00:00.000Z", close: 110 }];
+
+// A market answering each basis with, per listing, a full YTD window, one that
+// stopped in May, an "available" envelope with no bars, or unavailable.
+function fakeMarket(answers: Record<string, ReadonlyArray<"full" | "stale" | "empty" | "unavailable">>) {
   const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
   const fetchImpl = (async (url: URL | string, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -24,7 +26,7 @@ function fakeMarket(answers: Record<string, ReadonlyArray<"full" | "empty" | "un
         listing: { kind: "listing", id: ref.id },
         outcome: answer === "unavailable"
           ? { outcome: "unavailable" }
-          : { outcome: "available", data: { bars: answer === "full" ? FULL : [] } },
+          : { outcome: "available", data: { bars: answer === "full" ? FULL : answer === "stale" ? STALE : [] } },
       };
     });
     return new Response(JSON.stringify({ results }), { status: 200 });
@@ -76,6 +78,12 @@ test("if any company lacks a split-adjusted window, all are fetched dividend-adj
 test("an available answer without the bars a YTD window needs still falls back (#232)", async () => {
   // Polygon can answer "available" with no aggregates.
   const market = fakeMarket({ split_adjusted: ["full", "empty"], split_and_div_adjusted: ["full", "full"] });
+  await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: market.fetchImpl });
+  assert.deepEqual(market.requests.map((request) => request.body.basis), ["split_adjusted", "split_and_div_adjusted"]);
+});
+
+test("windows that agree but stop months short of the last completed session still fall back (#232)", async () => {
+  const market = fakeMarket({ split_adjusted: ["stale", "stale"], split_and_div_adjusted: ["full", "full"] });
   await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: market.fetchImpl });
   assert.deepEqual(market.requests.map((request) => request.body.basis), ["split_adjusted", "split_and_div_adjusted"]);
 });
