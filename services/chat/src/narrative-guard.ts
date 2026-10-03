@@ -51,6 +51,8 @@ const COMPARED_WITH = /(?:compared (?:with|to)|unlike|versus|vs\.?|than|relative
 // "at"/"with", then the figure's currency prefix if any ("versus AMD's 49.2%",
 // "compared with AMD at 49.2%", "NVDA's $209.9B", "AMD's CHF 3.1B"; #144).
 const ATTACHED = /^(?:['’]s)?\s*(?:(?:at|with)\s+)?(?:(?:[A-Z]{1,4}\.?(?:[ \u00a0\u202f][A-Z]{1,4})?\p{Sc}?|\p{Sc})[ \u00a0\u202f]?)?$/u;
+// The same without a currency prefix, for a label that is also a currency word.
+const ATTACHED_PLAIN = /^(?:['’]s)?\s*(?:(?:at|with)\s+)?$/i;
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition
 // ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
@@ -85,15 +87,12 @@ export function keepSupportedSentences(
   }
   // A one-letter ticker ("A") cannot be told from the article, so it is never
   // recognized; sentences quoting its figures are dropped.
-  // Each figure's currency prefix ("CHF ", "F CFA ", "$") with the figure it
-  // is written on (its number and unit), so a label inside one ("CHF 3.1B",
-  // "CFA" in "F CFA 3.1B") is told from a ticker before a figure ("NVDA 74.6%",
-  // "CHF 3.1%").
-  const prefixed = attributedFigures.flatMap((figure) => {
-    const prefix = spaced(figure.value.match(/^[-−]?(\D*)/)![1]);
-    const [match] = numberMatches(figure.value);
-    return prefix && match ? [{ prefix, number: match.number, unit: unitAfter(figure.value, match.end) }] : [];
-  });
+  // The words of the figures' currency prefixes ("CHF" in "CHF 3.1B", "F" and
+  // "CFA" in "F CFA 3.1B"): a label that is one can't be told from the
+  // currency before a figure.
+  const currencyWords = new Set(attributedFigures.flatMap((figure) =>
+    figure.value.match(/^[-−]?(\D*)/)![1].match(/[A-Za-z]+/g) ?? []
+  ));
   const companies = [...new Set(attributedFigures.map((figure) => figure.company))]
     .filter((company) => company.length > 1);
 
@@ -113,16 +112,10 @@ export function keepSupportedSentences(
       const allNumbers = numberMatches(sentence);
       const mentions = companyMentions(sentence, companies);
       // Digits inside a label ("issuer:12ab34cd") are not figures, and a label
-      // that is a figure's currency prefix ("-CHF 3.1B", "CHF 3.1B" when CHF is
-      // a ticker) is not a mention.
+      // inside a figure ("-CHF 3.1B" when CHF is a ticker) is not a mention.
       const within = (at: number, start: number, length: number) => at >= start && at < start + length;
       const numbers = allNumbers.filter((n) => !mentions.some((m) => within(n.index, m.index, m.company.length)));
-      const named = mentions.filter((m) => !numbers.some((n) =>
-        within(m.index, n.index, n.end - n.index) ||
-        (n.index >= m.index + m.company.length && prefixed.some(({ prefix, number, unit }) =>
-          number === n.number && unit === unitAfter(sentence, n.end) && spaced(sentence.slice(0, n.index)).endsWith(prefix) && prefix.endsWith(spaced(sentence.slice(m.index, n.index)))
-        ))
-      ));
+      const named = mentions.filter((m) => !numbers.some((n) => within(m.index, n.index, n.end - n.index)));
       if (numbers.some(({ number }) => !supported.has(number) && !owners.has(number))) {
         removed.push(sentence);
         return false;
@@ -149,9 +142,15 @@ export function keepSupportedSentences(
         // filing") refers back to an earlier figure's company in the sentence,
         // if any: nothing named near this figure may claim it.
         const pronounSubject = subjects.length === 0 && PRONOUN.test(sentence.slice(from, index));
-        const attached = stretch.filter((mention) =>
-          ATTACHED.test(sentence.slice(mention.index + mention.company.length, index))
-        );
+        // A currency-word label ("CHF 3.1B") is attached only as a comparison
+        // company with nothing but a possessive or "at"/"with" between, as
+        // before #144: whether "CHF 3.1B" names CHF or the franc is unknowable.
+        const attached = stretch.filter((mention) => {
+          const between = sentence.slice(mention.index + mention.company.length, index);
+          return currencyWords.has(mention.company)
+            ? comparisons.includes(mention) && ATTACHED_PLAIN.test(between)
+            : ATTACHED.test(between);
+        });
         const before = attached.length > 0 ? attached : subjects;
         // An unattached comparison company ("compared with AMD's revenue of
         // $74.6B") may be the figure's real subject, so nothing else may claim
@@ -232,18 +231,6 @@ function numberKey(raw: string): string {
   const sign = /^[-−]/.test(raw) ? "-" : "";
   const value = Number(sign + raw.match(/\d+(?:,\d{3})*(?:\.\d+)?$/)![0].replaceAll(",", ""));
   return Object.is(value, -0) ? "-0" : String(value);
-}
-
-// The first character after a figure's digits, case-folded: "b" for "3.1B"
-// and "3.1 billion", "%" for "3.1%".
-function unitAfter(text: string, end: number): string {
-  return text.slice(end).trimStart().charAt(0).toLowerCase();
-}
-
-// The formatter writes a no-break space where the model may write one or more
-// spaces; any run of whitespace compares as one space.
-function spaced(text: string): string {
-  return text.replace(/\s+/g, " ");
 }
 
 function escapeRegExp(text: string): string {
