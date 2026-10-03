@@ -38,14 +38,14 @@ export type SealedSnapshotRecord = {
 };
 
 // Linkage means the values shown are the evidence cited, not merely that the
-// block cites something sealed. The seal accepts a single fact binding on any
-// block, which says nothing about values displayed as literals, so:
-// - kinds that show literal cells with no per-value reference are never linked;
-const LITERAL_VALUE_KINDS: ReadonlySet<string> = new Set(["table"]);
-// - kinds that draw literal series points are linked only by sealed series
-//   (series_ref/series_refs), at least one per line drawn; their other refs and
-//   fact bindings do not vouch for the points.
-const SERIES_KINDS: ReadonlySet<string> = new Set([
+// block cites something sealed. Kinds that display literal values with no
+// per-value reference are never linked: the seal accepts a single fact binding
+// on any block, and it drops a chart's embedded points without comparing them
+// to the sealed series or their bars_sha256, so nothing ties what is drawn to
+// what is cited.
+// ponytail: charts earn linkage once a point-to-series check exists (#236).
+const LITERAL_VALUE_KINDS: ReadonlySet<string> = new Set([
+  "table",
   "line_chart",
   "perf_comparison",
   "segment_trajectory",
@@ -88,15 +88,6 @@ function citedRefsAllSealed(block: Record<string, unknown>, snapshot: SealedSnap
   const params = isRecord(block.data_ref) && isRecord(block.data_ref.params) ? block.data_ref.params : {};
   // Both forms the seal accepts: series_ref and series_refs.
   const seriesRefs = dataRefSeriesRefs(params as JsonObject);
-  if (typeof block.kind === "string" && SERIES_KINDS.has(block.kind)) {
-    const sealed = new Set(snapshot.series_refs);
-    // Without embedded points the chart renders live (PerfComparison fetches
-    // current, mutable series), so a sealed ref says nothing about what is drawn.
-    const lines = Array.isArray(block.series) ? block.series.length : 0;
-    // Distinct series: one id listed twice cannot back two lines.
-    const distinct = new Set(seriesRefs);
-    return lines > 0 && distinct.size >= lines && [...distinct].every((id) => sealed.has(id));
-  }
   const manifest: Record<string, ReadonlySet<string>> = {
     fact: new Set(snapshot.fact_refs),
     claim: new Set(snapshot.claim_refs),

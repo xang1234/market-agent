@@ -151,13 +151,13 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     );
     // Rows are labelled for people, not by reference id.
     assert.deepEqual(comparison.subject_labels, ["NVDA", "AMD"]);
-    // On reload, each block carries the server's own claims (#193): the table and
-    // chart are source-linked, but neither is a verified calculation nor proven
-    // public by the cutoff; the narrative beside them claims no linkage.
-    const sourceLinked = { evidence: "linked", calculation: "not_verified", public_by_cutoff: "unknown" };
-    assert.deepEqual(answer.block_proofs?.[String(comparison.id)], sourceLinked);
+    // On reload, each block carries the server's own claims (#193): the table is
+    // source-linked, but not a verified calculation nor proven public by the
+    // cutoff. The chart's drawn points are not yet checked against its sealed
+    // series (#236), so it claims no linkage; nor does the narrative.
+    assert.deepEqual(answer.block_proofs?.[String(comparison.id)], { evidence: "linked", calculation: "not_verified", public_by_cutoff: "unknown" });
     const chart = answer.blocks.find((block) => block.kind === "perf_comparison");
-    assert.deepEqual(answer.block_proofs?.[String(chart?.id)], sourceLinked);
+    assert.deepEqual(answer.block_proofs?.[String(chart?.id)], { evidence: "unknown", calculation: "not_verified", public_by_cutoff: "unknown" });
     const narrative = answer.blocks.find((block) => block.kind === "rich_text");
     assert.equal((answer.block_proofs?.[String(narrative?.id)] as { calculation?: string } | undefined)?.calculation, "not_verified");
     const cited = await citedFacts(answer);

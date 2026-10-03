@@ -34,10 +34,10 @@ Each block in a chat message carries three independent claims. They are not a tr
 - **Evidence binding (`linked`/`unknown`):** every value the block cites is in its sealed snapshot's manifest. These
   are the refs the seal verifier checks, plus sealed series. Linkage means the values shown are the evidence cited:
   the seal accepts a single fact binding on any block, which says nothing about literal values.
-  - A `table` of literal cells is never linked.
-  - A chart of literal points (`line_chart`, `perf_comparison`, `segment_trajectory`, `sentiment_trend`,
-    `mention_volume`) is linked only by distinct sealed `series_ref`/`series_refs`, at least one per line drawn. Its points
-    must be embedded: a chart without them renders live, from mutable data.
+  - A `table` of literal cells, or a chart of literal points (`line_chart`, `perf_comparison`, `segment_trajectory`,
+    `sentiment_trend`, `mention_volume`), is never linked. The seal drops a chart's points without comparing them with
+    its sealed series, so chat's price chart also reads "Not verified" until point-to-series verification lands
+    (#236).
 - **Calculation (`verified`/`not_verified`):** the server recomputed the result from its recorded inputs. Only a
   `financial_answer` qualifies, and only one whose run, unit and `presentation_hash` have a certificate
   (`snapshot_financial_runs`) in that snapshot.
