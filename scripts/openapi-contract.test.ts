@@ -6,6 +6,7 @@ import { load } from "../web/node_modules/js-yaml/dist/js-yaml.mjs";
 import Ajv2020 from "../web/node_modules/ajv/dist/2020.js";
 import { parseBrief } from "../services/discovery/src/validation.ts";
 import { briefFixture } from "../services/discovery/test/fixtures.ts";
+import { deriveBlockProof, UNPROVEN } from "../services/snapshot/src/block-proof.ts";
 
 const REPO_ROOT = dirname(dirname(new URL(import.meta.url).pathname));
 const OPENAPI_PATH = join(REPO_ROOT, "spec", "finance_research_openapi.yaml");
@@ -154,6 +155,30 @@ test("OpenAPI documents the Analyze run and share-to-chat payload contract", asy
   for (const expected of ["AnalyzeRunShareInput", "source_kind", "title", "primary_subject_ref"]) {
     assert.match(spec, new RegExp(escapeRegExp(expected)));
   }
+});
+
+test("OpenAPI documents the per-block proofs a chat message read returns (#193)", async () => {
+  const text = await readFile(OPENAPI_PATH, "utf8");
+  const spec = load(text) as {
+    paths: Record<string, Record<string, { responses: Record<string, { content: Record<string, { schema: Record<string, unknown> }> }> }>>;
+    components: { schemas: Record<string, Record<string, unknown>> };
+  };
+  const messages = spec.paths["/v1/chat/threads/{threadId}/messages"];
+  const listed = messages.get.responses["200"].content["application/json"].schema as {
+    properties: { messages: { items: { $ref: string } } };
+  };
+  assert.equal(listed.properties.messages.items.$ref, "#/components/schemas/ChatReadMessage", "reads return proofs");
+  const persisted = messages.post.responses["201"].content["application/json"].schema as {
+    properties: { message: { $ref: string } };
+  };
+  assert.equal(persisted.properties.message.$ref, "#/components/schemas/ChatMessage", "the persist response is unchanged");
+  // Every proof the server derives fits the schema, and nothing else does.
+  const validate = new Ajv2020({ strict: false }).compile(spec.components.schemas.BlockProof);
+  const snapshot = { fact_refs: [], claim_refs: [], event_refs: [], document_refs: [], source_ids: [], series_refs: [], certificates: [{ run_id: "r", unit_id: "u", presentation_hash: "h" }] };
+  for (const proof of [UNPROVEN, deriveBlockProof({ kind: "financial_answer", presentation_hash: "h", financial: { run_id: "r", unit_id: "u" } }, snapshot)]) {
+    assert.ok(validate(proof), JSON.stringify(validate.errors));
+  }
+  assert.equal(validate({ ...UNPROVEN, trust_score: 1 }), false);
 });
 
 test("OpenAPI gives every discovery operation browser-safe response and error schemas", async () => {

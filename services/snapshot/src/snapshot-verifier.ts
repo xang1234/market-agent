@@ -1399,7 +1399,7 @@ function requiresSealedDataSupport(block: VerifierBlock): boolean {
   ].includes(block.kind);
 }
 
-function dataRefSeriesRefs(params: JsonObject | undefined): string[] {
+export function dataRefSeriesRefs(params: JsonObject | undefined): string[] {
   if (params === undefined) return [];
   const refs: string[] = [];
   const { series_ref, series_refs } = params;
@@ -1433,7 +1433,7 @@ function seriesRefsForManifest(manifest: SnapshotVerifierManifest): ReadonlyMap<
   return refs;
 }
 
-type ExtractedBlockRef = {
+export type ExtractedBlockRef = {
   ref_kind: "fact" | "claim" | "event" | "document" | "source";
   ref_id: string;
 };
@@ -1445,7 +1445,7 @@ function extractedRefsForBlock(
   return extractBlockRefs(block).filter((ref) => ref.ref_kind === refKind);
 }
 
-function extractBlockRefs(block: VerifierBlock): ReadonlyArray<ExtractedBlockRef> {
+export function extractBlockRefs(block: VerifierBlock): ReadonlyArray<ExtractedBlockRef> {
   const refs: ExtractedBlockRef[] = [];
 
   if (block.kind === "rich_text") {

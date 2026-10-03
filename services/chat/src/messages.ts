@@ -4,6 +4,7 @@ import {
   serializeJsonValue,
   type JsonValue,
 } from "../../observability/src/types.ts";
+import { deriveBlockProof, UNPROVEN, type BlockProof, type SealedSnapshotRecord } from "../../snapshot/src/block-proof.ts";
 import type { SnapshotSealResult } from "../../snapshot/src/snapshot-sealer.ts";
 import type {
   ChatAssistantMessagePersistence,
@@ -64,8 +65,12 @@ export type ChatMessageRow = {
   created_at: string;
 };
 
+// A read message: each block's evidence, calculation, and public-time claims,
+// derived by the server on every read (#193), never stored or client-supplied.
+export type ChatReadMessage = ChatMessageRow & { block_proofs: Record<string, BlockProof> };
+
 export type ChatThreadMessagesResult = {
-  messages: ChatMessageRow[];
+  messages: ChatReadMessage[];
 };
 
 export type PersistChatMessageAfterSnapshotSealInput = {
@@ -196,9 +201,89 @@ export async function listChatMessagesForThread(
       order by m.created_at asc, m.message_id asc`,
     [input.thread_id],
   );
+  // Every snapshot a message or any of its blocks names: an imported block keeps
+  // the snapshot it came from.
+  const snapshots = await loadSealedSnapshots(db, rows.flatMap((row) => [row.snapshot_id, ...blockSnapshotIds(row.blocks)]));
   return {
-    messages: rows.map((row) => Object.freeze({ ...row })),
+    messages: rows.map((row) => Object.freeze({ ...row, block_proofs: blockProofs(row, snapshots) })),
   };
+}
+
+function blockSnapshotIds(blocks: JsonValue): string[] {
+  return (Array.isArray(blocks) ? blocks : []).flatMap((block) =>
+    block !== null && typeof block === "object" && !Array.isArray(block) && typeof block.snapshot_id === "string" ? [block.snapshot_id] : []
+  );
+}
+
+// Each block is judged against its own snapshot (the message's when it names none).
+function blockProofs(row: ChatMessageRow, snapshots: ReadonlyMap<string, SealedSnapshotRecord>): Record<string, BlockProof> {
+  // No prototype: any string is a valid block id, "__proto__" included.
+  const proofs: Record<string, BlockProof> = Object.create(null);
+  const seen = new Set<string>();
+  for (const block of Array.isArray(row.blocks) ? row.blocks : []) {
+    const id = block !== null && typeof block === "object" && !Array.isArray(block) ? block.id : undefined;
+    if (typeof id !== "string") continue;
+    // Proofs are keyed by block id: an id used twice cannot say which block a
+    // claim belongs to, so it claims nothing rather than lend one block's
+    // proof to its namesake.
+    const snapshotId = typeof (block as { snapshot_id?: unknown }).snapshot_id === "string"
+      ? (block as { snapshot_id: string }).snapshot_id
+      : row.snapshot_id;
+    const snapshot = (snapshotId && snapshots.get(snapshotId)) || null;
+    proofs[id] = seen.has(id) ? UNPROVEN : deriveBlockProof(block, snapshot);
+    seen.add(id);
+  }
+  return proofs;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Each sealed snapshot's manifest and the financial certificates recorded for it.
+async function loadSealedSnapshots(
+  db: ChatMessagePersistenceDb,
+  snapshotIds: ReadonlyArray<string | null>,
+): Promise<Map<string, SealedSnapshotRecord>> {
+  // Only well-formed ids reach the uuid[] cast: a malformed one in a stored
+  // block has no sealed snapshot, and must not fail the whole read.
+  const ids = [...new Set(snapshotIds.filter((id): id is string => typeof id === "string" && UUID.test(id)))];
+  if (ids.length === 0) return new Map();
+  const [manifests, certificates] = await Promise.all([
+    db.query<{
+      snapshot_id: string;
+      fact_refs: string[];
+      claim_refs: string[];
+      event_refs: string[];
+      document_refs: string[];
+      source_ids: string[];
+      series_specs: Array<{ series_ref?: unknown }>;
+    }>(
+      `select snapshot_id::text as snapshot_id, fact_refs, claim_refs, event_refs, document_refs, source_ids, series_specs
+         from snapshots
+        where snapshot_id = any($1::uuid[])`,
+      [ids],
+    ),
+    db.query<{ snapshot_id: string; run_id: string; unit_id: string; presentation_hash: string }>(
+      `select snapshot_id::text as snapshot_id, run_id::text as run_id, unit_id, presentation_hash
+         from snapshot_financial_runs
+        where snapshot_id = any($1::uuid[])`,
+      [ids],
+    ),
+  ]);
+  const certificatesBySnapshot = new Map<string, Array<{ run_id: string; unit_id: string; presentation_hash: string }>>();
+  for (const certificate of certificates.rows) {
+    const list = certificatesBySnapshot.get(certificate.snapshot_id) ?? [];
+    list.push(certificate);
+    certificatesBySnapshot.set(certificate.snapshot_id, list);
+  }
+  return new Map(manifests.rows.map((row) => [row.snapshot_id, {
+    fact_refs: row.fact_refs ?? [],
+    claim_refs: row.claim_refs ?? [],
+    event_refs: row.event_refs ?? [],
+    document_refs: row.document_refs ?? [],
+    source_ids: row.source_ids ?? [],
+    series_refs: (row.series_specs ?? []).flatMap((spec) => typeof spec?.series_ref === "string" ? [spec.series_ref] : []),
+    certificates: certificatesBySnapshot.get(row.snapshot_id) ?? [],
+  }]));
 }
 
 export async function persistImportedArtifactMessage(

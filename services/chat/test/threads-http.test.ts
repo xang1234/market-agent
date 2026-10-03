@@ -308,6 +308,7 @@ test("GET /v1/chat/threads/:id/messages returns persisted messages for the threa
         },
       ];
     }
+    if (text.includes("from snapshots") || text.includes("from snapshot_financial_runs")) return [];
     throw new Error(`unexpected query: ${text}`);
   });
   const base = await startServer(t, db);

@@ -1,6 +1,7 @@
-import { useState, type ReactElement, type ReactNode } from 'react'
+import { useContext, useState, type ReactElement, type ReactNode } from 'react'
 import { ChartCard } from './ChartCard.tsx'
 import { useEvidenceInspector } from '../evidence/useEvidenceInspector.ts'
+import { BlockProofContext } from './blockProof.ts'
 import { VerificationLabel } from './VerificationLabel.tsx'
 import {
   coverageText,
@@ -28,21 +29,28 @@ type FinancialAnswerProps = { block: FinancialAnswerBlock }
 // values, so an unrecognized payload is never shown as verified content.
 export function FinancialAnswer({ block }: FinancialAnswerProps): ReactElement {
   const content = supportedFinancialContent(block)
+  // Where the server assessed this block (chat), its certificate decides the
+  // claims; a block without one is never shown as verified (#193).
+  const proof = useContext(BlockProofContext)
+  const certified = proof === null || proof.calculation === 'verified'
   if (content === null) {
     return (
       <ChartCard testId={`block-financial-answer-${block.id}`} blockKind="financial_answer" title={undefined} dataAttrs={{ 'data-certified': 'false' }}>
-        <VerificationLabel kind="legacy" />
+        {/* The values are not shown, but the server's claims about them still are. */}
+        {proof === null ? <VerificationLabel kind="legacy" /> : <VerificationLabel kind={proof.calculation === 'verified' ? 'verified' : 'not_verified'} />}
+        {proof?.public_by_cutoff === 'proven' ? <VerificationLabel kind="public_by_cutoff" /> : null}
         <p role="note" className="text-sm text-muted" data-testid={`block-financial-answer-${block.id}-unsupported`}>
-          This verified financial answer uses a newer format than this app supports. Refresh or update to view it.
+          This financial answer uses a newer format than this app supports. Refresh or update to view it.
         </p>
       </ChartCard>
     )
   }
   const results = resultsById(content)
   return (
-    <ChartCard testId={`block-financial-answer-${block.id}`} blockKind="financial_answer" title={undefined} dataAttrs={{ 'data-certified': 'true' }}>
+    <ChartCard testId={`block-financial-answer-${block.id}`} blockKind="financial_answer" title={undefined} dataAttrs={{ 'data-certified': String(certified) }}>
       <div className="flex flex-wrap items-center gap-2">
-        <VerificationLabel kind="verified" />
+        <VerificationLabel kind={certified ? 'verified' : 'not_verified'} />
+        {proof?.public_by_cutoff === 'proven' ? <VerificationLabel kind="public_by_cutoff" /> : null}
         {content.coverage.state === 'complete' ? null : <VerificationLabel kind="partial" />}
         <p className="text-xs text-muted" data-testid={`block-financial-answer-${block.id}-coverage`} data-coverage={content.coverage.state}>
           {coverageText(content)}

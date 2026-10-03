@@ -760,7 +760,7 @@ paths:
                   messages:
                     type: array
                     items:
-                      $ref: '#/components/schemas/ChatMessage'
+                      $ref: '#/components/schemas/ChatReadMessage'
         '401':
           description: Missing or malformed user credential
         '404':
@@ -3726,3 +3726,34 @@ components:
         created_at:
           type: string
           format: date-time
+    ChatReadMessage:
+      description: >-
+        A message as read back. block_proofs holds, per block id, three independent claims the server derives on
+        every read from the block's sealed snapshot and financial certificates (#193). They are never stored in
+        blocks or accepted from clients.
+      allOf:
+        - $ref: '#/components/schemas/ChatMessage'
+        - type: object
+          required: [block_proofs]
+          properties:
+            block_proofs:
+              type: object
+              additionalProperties:
+                $ref: '#/components/schemas/BlockProof'
+    BlockProof:
+      type: object
+      required: [evidence, calculation, public_by_cutoff]
+      additionalProperties: false
+      properties:
+        evidence:
+          type: string
+          enum: [linked, unknown]
+          description: linked when every value the block cites binds to its sealed snapshot's manifest.
+        calculation:
+          type: string
+          enum: [verified, not_verified]
+          description: verified only for a financial answer whose certificate recomputed it.
+        public_by_cutoff:
+          type: string
+          enum: [proven, unknown]
+          description: proven only by that certificate's publication proof; being stored by the cutoff does not count.

@@ -47,7 +47,7 @@ const GOLDEN_ENV: Record<string, string> = {
 };
 
 type Block = Record<string, unknown> & { id?: string; kind?: string };
-type ChatMessage = { message_id: string; role: string; snapshot_id: string; blocks: Block[] };
+type ChatMessage = { message_id: string; role: string; snapshot_id: string; blocks: Block[]; block_proofs?: Record<string, unknown> };
 
 test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 180_000 }, async (t) => {
   const { databaseUrl } = await bootstrapDatabase(t, "chat-golden");
@@ -151,6 +151,15 @@ test("golden conversation: Analyze NVDA", { skip: !dockerAvailable(), timeout: 1
     );
     // Rows are labelled for people, not by reference id.
     assert.deepEqual(comparison.subject_labels, ["NVDA", "AMD"]);
+    // On reload, each block carries the server's own claims (#193): the table is
+    // source-linked, but not a verified calculation nor proven public by the
+    // cutoff. The chart's drawn points are not yet checked against its sealed
+    // series (#236), so it claims no linkage; nor does the narrative.
+    assert.deepEqual(answer.block_proofs?.[String(comparison.id)], { evidence: "linked", calculation: "not_verified", public_by_cutoff: "unknown" });
+    const chart = answer.blocks.find((block) => block.kind === "perf_comparison");
+    assert.deepEqual(answer.block_proofs?.[String(chart?.id)], { evidence: "unknown", calculation: "not_verified", public_by_cutoff: "unknown" });
+    const narrative = answer.blocks.find((block) => block.kind === "rich_text");
+    assert.equal((answer.block_proofs?.[String(narrative?.id)] as { calculation?: string } | undefined)?.calculation, "not_verified");
     const cited = await citedFacts(answer);
     const refs = valueRefs(comparison);
     assert.ok(refs.length >= 2, "the comparison shows too few figures");

@@ -268,6 +268,7 @@ test("listChatMessagesForThread returns ordered messages for an owned thread", a
         },
       ];
     }
+    if (text.includes("from snapshots") || text.includes("from snapshot_financial_runs")) return [];
     throw new Error(`unexpected query: ${text}`);
   });
 
@@ -285,6 +286,149 @@ test("listChatMessagesForThread returns ordered messages for an owned thread", a
     "11111111-1111-4111-a111-111111111111",
     "00000000-0000-4000-8000-000000000001",
   ]);
+});
+
+test("a read message carries each block's own proof: only the certified result is verified (#193)", async () => {
+  const SNAPSHOT = "22222222-2222-4222-a222-222222222222";
+  const FACT = "00000000-0000-4000-8000-0000000000f1";
+  const HASH = "a".repeat(64);
+  const db = messageListDb((text) => {
+    if (text.includes("from chat_threads")) return [{ owned: true }];
+    if (text.includes("from chat_messages")) {
+      return [{
+        message_id: "33333333-3333-4333-a333-333333333333",
+        thread_id: "11111111-1111-4111-a111-111111111111",
+        role: "assistant",
+        snapshot_id: SNAPSHOT,
+        blocks: [
+          { id: "certified", kind: "financial_answer", presentation_hash: HASH, financial: { run_id: "run-1", unit_id: "unit-1" } },
+          // Narrative beside it, claiming a status in its own JSON.
+          { id: "narrative", kind: "rich_text", segments: [{ type: "text", text: "Margins widened." }], proof: { calculation: "verified", public_by_cutoff: "proven" } },
+          { id: "table", kind: "metric_row", items: [{ label: "Revenue", value_ref: FACT, format: "$1B" }] },
+        ],
+        content_hash: "sha256:abc",
+        created_at: "2026-05-06T00:00:00.000Z",
+      }];
+    }
+    if (text.includes("from snapshots")) {
+      return [{ snapshot_id: SNAPSHOT, fact_refs: [FACT], claim_refs: [], event_refs: [], document_refs: [], source_ids: [], series_specs: [] }];
+    }
+    if (text.includes("from snapshot_financial_runs")) {
+      return [{ snapshot_id: SNAPSHOT, run_id: "run-1", unit_id: "unit-1", presentation_hash: HASH }];
+    }
+    throw new Error(`unexpected query: ${text}`);
+  });
+
+  const result = await listChatMessagesForThread(db, {
+    thread_id: "11111111-1111-4111-a111-111111111111",
+    user_id: "00000000-0000-4000-8000-000000000001",
+  });
+
+  assert.deepEqual({ ...result?.messages[0].block_proofs }, {
+    certified: { evidence: "linked", calculation: "verified", public_by_cutoff: "proven" },
+    narrative: { evidence: "unknown", calculation: "not_verified", public_by_cutoff: "unknown" },
+    table: { evidence: "linked", calculation: "not_verified", public_by_cutoff: "unknown" },
+  });
+});
+
+test("any string is a block id, __proto__ included: its proof is serialized (#193)", async () => {
+  const db = messageListDb((text) => {
+    if (text.includes("from chat_threads")) return [{ owned: true }];
+    if (text.includes("from chat_messages")) {
+      return [{
+        message_id: "33333333-3333-4333-a333-333333333333",
+        thread_id: "11111111-1111-4111-a111-111111111111",
+        role: "assistant",
+        snapshot_id: null,
+        blocks: [{ id: "__proto__", kind: "financial_answer", presentation_hash: "a".repeat(64), financial: { run_id: "r", unit_id: "u" } }],
+        content_hash: "sha256:abc",
+        created_at: "2026-05-06T00:00:00.000Z",
+      }];
+    }
+    throw new Error(`unexpected query: ${text}`);
+  });
+  const result = await listChatMessagesForThread(db, {
+    thread_id: "11111111-1111-4111-a111-111111111111",
+    user_id: "00000000-0000-4000-8000-000000000001",
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(result?.messages[0].block_proofs)), JSON.parse(
+    '{"__proto__":{"evidence":"unknown","calculation":"not_verified","public_by_cutoff":"unknown"}}',
+  ));
+});
+
+test("each block is judged against its own snapshot, as imported blocks keep theirs (#193)", async () => {
+  const ROW = "22222222-2222-4222-a222-222222222222";
+  const ORIGIN = "44444444-4444-4444-a444-444444444444";
+  const HASH = "a".repeat(64);
+  const queried: unknown[] = [];
+  const db = messageListDb((text, values) => {
+    if (text.includes("from chat_threads")) return [{ owned: true }];
+    if (text.includes("from chat_messages")) {
+      return [{
+        message_id: "33333333-3333-4333-a333-333333333333",
+        thread_id: "11111111-1111-4111-a111-111111111111",
+        role: "assistant",
+        snapshot_id: ROW,
+        blocks: [
+          // Imported from another snapshot, where its certificate lives.
+          { id: "imported", snapshot_id: ORIGIN, kind: "financial_answer", presentation_hash: HASH, financial: { run_id: "run-1", unit_id: "unit-1" } },
+          // Claims the row snapshot's certificate, which does not cover it.
+          { id: "local", snapshot_id: ROW, kind: "financial_answer", presentation_hash: HASH, financial: { run_id: "run-1", unit_id: "unit-1" } },
+          { id: "malformed", snapshot_id: "not-a-uuid", kind: "rich_text", segments: [] },
+        ],
+        content_hash: "sha256:abc",
+        created_at: "2026-05-06T00:00:00.000Z",
+      }];
+    }
+    if (text.includes("from snapshots")) {
+      queried.push(values?.[0]);
+      return [ROW, ORIGIN].map((snapshot_id) => ({ snapshot_id, fact_refs: [], claim_refs: [], event_refs: [], document_refs: [], source_ids: [], series_specs: [] }));
+    }
+    if (text.includes("from snapshot_financial_runs")) return [{ snapshot_id: ORIGIN, run_id: "run-1", unit_id: "unit-1", presentation_hash: HASH }];
+    throw new Error(`unexpected query: ${text}`);
+  });
+  const result = await listChatMessagesForThread(db, {
+    thread_id: "11111111-1111-4111-a111-111111111111",
+    user_id: "00000000-0000-4000-8000-000000000001",
+  });
+  const proofs = { ...result?.messages[0].block_proofs };
+  assert.equal(proofs.imported.calculation, "verified", "certified in the snapshot it came from");
+  assert.equal(proofs.local.calculation, "not_verified", "the row snapshot holds no certificate for it");
+  assert.deepEqual(queried, [[ROW, ORIGIN]], "malformed ids never reach the uuid cast");
+});
+
+test("blocks sharing an id share no proof: the id claims nothing (#193)", async () => {
+  const SNAPSHOT = "22222222-2222-4222-a222-222222222222";
+  const HASH = "a".repeat(64);
+  const db = messageListDb((text) => {
+    if (text.includes("from chat_threads")) return [{ owned: true }];
+    if (text.includes("from chat_messages")) {
+      return [{
+        message_id: "33333333-3333-4333-a333-333333333333",
+        thread_id: "11111111-1111-4111-a111-111111111111",
+        role: "assistant",
+        snapshot_id: SNAPSHOT,
+        blocks: [
+          { id: "same", kind: "financial_answer", presentation_hash: HASH, financial: { run_id: "run-1", unit_id: "unit-1" } },
+          { id: "same", kind: "rich_text", segments: [{ type: "text", text: "Uncertified." }] },
+        ],
+        content_hash: "sha256:abc",
+        created_at: "2026-05-06T00:00:00.000Z",
+      }];
+    }
+    if (text.includes("from snapshots")) {
+      return [{ snapshot_id: SNAPSHOT, fact_refs: [], claim_refs: [], event_refs: [], document_refs: [], source_ids: [], series_specs: [] }];
+    }
+    if (text.includes("from snapshot_financial_runs")) return [{ snapshot_id: SNAPSHOT, run_id: "run-1", unit_id: "unit-1", presentation_hash: HASH }];
+    throw new Error(`unexpected query: ${text}`);
+  });
+  const result = await listChatMessagesForThread(db, {
+    thread_id: "11111111-1111-4111-a111-111111111111",
+    user_id: "00000000-0000-4000-8000-000000000001",
+  });
+  assert.deepEqual({ ...result?.messages[0].block_proofs }, {
+    same: { evidence: "unknown", calculation: "not_verified", public_by_cutoff: "unknown" },
+  });
 });
 
 test("listChatMessagesForThread returns null and does not read messages for wrong-user threads", async () => {
