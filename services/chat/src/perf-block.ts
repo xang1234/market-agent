@@ -249,7 +249,7 @@ function ytdGapBlock(input: PerfInput, gap: string): Block {
   return noteBlock(input, "perf_ytd_gap", `Year-to-date price performance is not shown: ${gap}.`);
 }
 
-async function listingTimeZones(
+export async function listingTimeZones(
   db: QueryExecutor,
   listings: ReadonlyArray<{ id: string }>,
 ): Promise<Map<string, string>> {

@@ -30,6 +30,7 @@ import {
 } from "./coordinator.ts";
 import { loadTurnFactBlocks, priceListingsForTurn, requestedFiscalYear, requestedPriceWindow } from "./fact-blocks.ts";
 import { hydrateYtdBars, marketHydrationOrigin } from "./ytd-hydration.ts";
+import { listingTimeZones } from "./perf-block.ts";
 import { loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import {
@@ -221,7 +222,12 @@ async function hydrateYtdWindow(
       requestedListings: requestedListingsOf(covered),
       asOf: now,
     });
-    await hydrateYtdBars({ origin, listings, now });
+    const zones = await listingTimeZones(pool(), listings);
+    await hydrateYtdBars({
+      origin,
+      listings: listings.map((listing) => ({ id: listing.id, timeZone: zones.get(listing.id) ?? "UTC" })),
+      now,
+    });
   } catch (reason) {
     console.warn("[chat] YTD price fetch skipped; charting from the bars already stored", reason);
   }

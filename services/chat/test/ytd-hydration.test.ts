@@ -3,16 +3,30 @@ import test from "node:test";
 
 import { hydrateYtdBars, marketHydrationOrigin } from "../src/ytd-hydration.ts";
 
-const LISTINGS = [{ id: "62000000-0000-4000-8000-000000000001" }, { id: "62000000-0000-4000-8000-000000000002" }];
-const NOW = "2026-09-01T00:00:00.000Z";
+const NY = "America/New_York";
+const LISTINGS = [
+  { id: "62000000-0000-4000-8000-000000000001", timeZone: NY },
+  { id: "62000000-0000-4000-8000-000000000002", timeZone: NY },
+];
+const NOW = "2026-09-01T00:00:00.000Z"; // 20:00 New York on Aug 31, after the close
+const FULL = [{ ts: "2025-12-31T05:00:00.000Z", close: 100 }, { ts: "2026-08-31T04:00:00.000Z", close: 120 }];
 
-function fakeMarket(availableByBasis: Record<string, number>) {
+// A market answering each basis with, per listing, a full YTD window, an
+// "available" envelope with no bars, or unavailable.
+function fakeMarket(answers: Record<string, ReadonlyArray<"full" | "empty" | "unavailable">>) {
   const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
   const fetchImpl = (async (url: URL | string, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     requests.push({ url: String(url), body });
-    const available = availableByBasis[String(body.basis)] ?? 0;
-    const results = LISTINGS.map((_, index) => ({ outcome: { outcome: index < available ? "available" : "unavailable" } }));
+    const results = (body.subject_refs as Array<{ id: string }>).map((ref, index) => {
+      const answer = answers[String(body.basis)]?.[index] ?? "unavailable";
+      return {
+        listing: { kind: "listing", id: ref.id },
+        outcome: answer === "unavailable"
+          ? { outcome: "unavailable" }
+          : { outcome: "available", data: { bars: answer === "full" ? FULL : [] } },
+      };
+    });
     return new Response(JSON.stringify({ results }), { status: 200 });
   }) as typeof fetch;
   return { requests, fetchImpl };
@@ -37,14 +51,15 @@ test("frozen data modes never fetch live prices; live mode uses the market servi
 });
 
 test("the YTD window is requested from before the prior year's last sessions, split-adjusted (#232)", async () => {
-  const market = fakeMarket({ split_adjusted: 2 });
+  const market = fakeMarket({ split_adjusted: ["full", "full"] });
   await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: market.fetchImpl });
   assert.equal(market.requests.length, 1, "every company had a split-adjusted window");
   const [request] = market.requests;
   assert.equal(request.url, "http://market.test/v1/market/series");
   assert.deepEqual(request.body, {
     subject_refs: LISTINGS.map((listing) => ({ kind: "listing", id: listing.id })),
-    range: { start: "2025-12-20T00:00:00.000Z", end: NOW },
+    // To the end of the last completed New York session (Aug 31 closed at 16:00).
+    range: { start: "2025-12-20T00:00:00.000Z", end: "2026-09-01T04:00:00.000Z" },
     interval: "1d",
     basis: "split_adjusted",
     normalization: "raw",
@@ -52,10 +67,24 @@ test("the YTD window is requested from before the prior year's last sessions, sp
 });
 
 test("if any company lacks a split-adjusted window, all are fetched dividend-adjusted, so one basis can chart them", async () => {
-  const market = fakeMarket({ split_adjusted: 1, split_and_div_adjusted: 2 });
+  const market = fakeMarket({ split_adjusted: ["full", "unavailable"], split_and_div_adjusted: ["full", "full"] });
   await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: market.fetchImpl });
   assert.deepEqual(market.requests.map((request) => request.body.basis), ["split_adjusted", "split_and_div_adjusted"]);
   assert.equal((market.requests[1].body.subject_refs as unknown[]).length, 2);
+});
+
+test("an available answer without the bars a YTD window needs still falls back (#232)", async () => {
+  // Polygon can answer "available" with no aggregates.
+  const market = fakeMarket({ split_adjusted: ["full", "empty"], split_and_div_adjusted: ["full", "full"] });
+  await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: NOW, fetchImpl: market.fetchImpl });
+  assert.deepEqual(market.requests.map((request) => request.body.basis), ["split_adjusted", "split_and_div_adjusted"]);
+});
+
+test("before the close, the fetch stops at the last completed session, never the forming one (#232)", async () => {
+  const market = fakeMarket({ split_adjusted: ["full", "full"] });
+  await hydrateYtdBars({ origin: "http://market.test", listings: LISTINGS, now: "2026-08-31T15:00:00.000Z", fetchImpl: market.fetchImpl });
+  // 11:00 New York on Aug 31: the range ends where Aug 31 begins.
+  assert.equal((market.requests[0].body.range as { end: string }).end, "2026-08-31T04:00:00.000Z");
 });
 
 test("a market failure or a hung market never fails the turn", async (t) => {

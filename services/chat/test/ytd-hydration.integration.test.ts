@@ -17,11 +17,11 @@ import { bootstrapDatabase, connectedPool, dockerAvailable, registerLifoCleanup 
 import { GOLDEN_AS_OF, GOLDEN_COMPANIES, MARKET_SOURCE_ID, seedGoldenDataset } from "./golden/dataset.ts";
 
 const company = (ticker: string) => GOLDEN_COMPANIES.find((candidate) => candidate.ticker === ticker)!;
-const LISTINGS = [
-  { id: company("NVDA").listing_id, label: "NVDA" },
-  { id: company("AMD").listing_id, label: "AMD" },
-];
 const NY = "America/New_York";
+const LISTINGS = [
+  { id: company("NVDA").listing_id, label: "NVDA", timeZone: NY },
+  { id: company("AMD").listing_id, label: "AMD", timeZone: NY },
+];
 
 // A provider with split-adjusted weekday closes: 100 (NVDA) or 50 (AMD) before
 // the current year, 20% higher in it. Counts its calls.
