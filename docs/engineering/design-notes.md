@@ -36,7 +36,8 @@ Each block in a chat message carries three independent claims. They are not a tr
   the seal accepts a single fact binding on any block, which says nothing about literal values.
   - A `table` of literal cells is never linked.
   - A chart of literal points (`line_chart`, `perf_comparison`, `segment_trajectory`, `sentiment_trend`,
-    `mention_volume`) is linked only by distinct sealed `series_ref`/`series_refs`, at least one per line drawn.
+    `mention_volume`) is linked only by distinct sealed `series_ref`/`series_refs`, at least one per line drawn. Its points
+    must be embedded: a chart without them renders live, from mutable data.
 - **Calculation (`verified`/`not_verified`):** the server recomputed the result from its recorded inputs. Only a
   `financial_answer` qualifies, and only one whose run, unit and `presentation_hash` have a certificate
   (`snapshot_financial_runs`) in that snapshot.

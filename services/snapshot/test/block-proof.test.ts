@@ -27,10 +27,11 @@ const narrative = { kind: "rich_text", segments: [{ type: "text", text: "NVDA le
 
 test("an ordinary source-linked table is linked but not a verified calculation (#193)", () => {
   assert.deepEqual(deriveBlockProof(table, SNAPSHOT), { evidence: "linked", calculation: "not_verified", public_by_cutoff: "unknown" });
-  const chart = { kind: "perf_comparison", data_ref: { kind: "perf_comparison", id: "p", params: { series_refs: ["00000000-0000-4000-8000-0000000000e1"] } } };
+  const drawn = [{ name: "NVDA", points: [{ x: "2026-01-02", y: 1 }] }];
+  const chart = { kind: "perf_comparison", data_ref: { kind: "perf_comparison", id: "p", params: { series_refs: ["00000000-0000-4000-8000-0000000000e1"] } }, series: drawn };
   assert.equal(deriveBlockProof(chart, SNAPSHOT).evidence, "linked");
   // The singular form the seal also accepts.
-  const single = { kind: "line_chart", data_ref: { kind: "line_chart", id: "l", params: { series_ref: "00000000-0000-4000-8000-0000000000e1" } } };
+  const single = { kind: "line_chart", data_ref: { kind: "line_chart", id: "l", params: { series_ref: "00000000-0000-4000-8000-0000000000e1" } }, series: drawn };
   assert.equal(deriveBlockProof(single, SNAPSHOT).evidence, "linked");
   const unsealed = { ...single, data_ref: { ...single.data_ref, params: { series_ref: "00000000-0000-4000-8000-0000000000e9", series_refs: ["00000000-0000-4000-8000-0000000000e1"] } } };
   assert.equal(deriveBlockProof(unsealed, SNAPSHOT).evidence, "unknown", "an unsealed singular series is not skipped");
@@ -52,6 +53,9 @@ test("a chart of literal points is linked only by sealed series, one per line (#
   assert.equal(deriveBlockProof(line({ series_ref: SEALED }), SNAPSHOT).evidence, "linked");
   // Two lines drawn, one sealed series: the second line is unbacked.
   assert.equal(deriveBlockProof(line({ series_ref: SEALED }, 2), SNAPSHOT).evidence, "unknown");
+  // A chart with no embedded points renders live: not linked.
+  const live = { kind: "perf_comparison", data_ref: { kind: "perf_comparison", id: "p", params: { series_ref: SEALED } } };
+  assert.equal(deriveBlockProof(live, SNAPSHOT).evidence, "unknown");
   // ...nor does the same sealed series listed twice.
   assert.equal(deriveBlockProof(line({ series_refs: [SEALED, SEALED] }, 2), SNAPSHOT).evidence, "unknown");
 });

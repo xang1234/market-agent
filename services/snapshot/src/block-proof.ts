@@ -90,10 +90,12 @@ function citedRefsAllSealed(block: Record<string, unknown>, snapshot: SealedSnap
   const seriesRefs = dataRefSeriesRefs(params as JsonObject);
   if (typeof block.kind === "string" && SERIES_KINDS.has(block.kind)) {
     const sealed = new Set(snapshot.series_refs);
+    // Without embedded points the chart renders live (PerfComparison fetches
+    // current, mutable series), so a sealed ref says nothing about what is drawn.
     const lines = Array.isArray(block.series) ? block.series.length : 0;
     // Distinct series: one id listed twice cannot back two lines.
     const distinct = new Set(seriesRefs);
-    return distinct.size > 0 && distinct.size >= lines && [...distinct].every((id) => sealed.has(id));
+    return lines > 0 && distinct.size >= lines && [...distinct].every((id) => sealed.has(id));
   }
   const manifest: Record<string, ReadonlySet<string>> = {
     fact: new Set(snapshot.fact_refs),
