@@ -570,7 +570,10 @@ test("with no figures shown, the model still gets the evidence, compactly, as av
       evidence_status: "available",
       structured_context: {
         quote: { ticker: "AAPL", price: 231.6, change_pct: 0.0078, currency: "USD", as_of: "2026-09-01T00:00:00.000Z", stale: false, source_id: "s" },
-        facts: [{ fact_id: "f1", metric_key: "revenue", display_name: "Revenue", value_num: 416.161, scale: 1e9, unit: "currency", currency: "USD", fiscal_year: 2025, fiscal_period: "FY", as_of: "2025-10-31T00:00:00.000Z", source_id: "s" }],
+        facts: [
+          { fact_id: "f1", metric_key: "revenue", display_name: "Revenue", value_num: 416.161, scale: 1e9, unit: "currency", currency: "USD", fiscal_year: 2025, fiscal_period: "FY", as_of: "2025-10-31T00:00:00.000Z", source_id: "s", coverage_level: "full" },
+          { fact_id: "f2", metric_key: "net_income", display_name: "Net income", value_num: 25, scale: 1e9, unit: "currency", currency: "USD", fiscal_year: 2026, fiscal_period: "Q1", as_of: "2026-01-30T00:00:00.000Z", source_id: "s", coverage_level: "partial" },
+        ],
       },
     },
   } as never;
@@ -590,7 +593,11 @@ test("with no figures shown, the model still gets the evidence, compactly, as av
   };
   assert.deepEqual((await run()).available_data, {
     quotes: [{ ticker: "AAPL", price: 231.6, change: "+0.78%", currency: "USD", as_of: "2026-09-01T00:00:00.000Z" }],
-    facts: [{ metric: "Revenue", value: 416161000000, unit: "currency", currency: "USD", period: "FY 2025", as_of: "2025-10-31T00:00:00.000Z" }],
+    facts: [
+      { metric: "Revenue", value: 416161000000, unit: "currency", currency: "USD", period: "FY 2025", as_of: "2025-10-31T00:00:00.000Z" },
+      // A partially covered period says so.
+      { metric: "Net income", value: 25000000000, unit: "currency", currency: "USD", period: "Q1 2026", as_of: "2026-01-30T00:00:00.000Z", coverage: "partial" },
+    ],
   });
   assert.ok(!prompt.includes("fact_id") && !prompt.includes('"source_id"'), "still compact: no ids");
   // With figures shown, only those may be quoted: no available_data.

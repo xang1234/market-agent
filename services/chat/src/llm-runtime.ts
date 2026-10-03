@@ -141,7 +141,8 @@ export async function composeAnalystBlocksWithLlm(input: {
           "Name the fiscal period each figure is for (its period, and the month its period_end",
           "falls in; never the day). When a comparison's title says the fiscal years end months",
           "apart, say so: the same fiscal year covers different months for each company.",
-          "When displayed_figures is empty, available_data lists the reported values you may use instead.",
+          "When displayed_figures is empty, available_data lists the reported values you may use instead;",
+          "a value with a coverage other than full covers only part of its period, so say so.",
           "Claims in cited_claims are sourced statements you may draw on, dated by effective_time",
           "and published_at: say when a claim dates from if it is not recent. data_notes say what",
           "could not be shown. If staleness flags data as stale (quote.stale, or",
@@ -306,6 +307,8 @@ function availableData(structured: ReadonlyArray<Record<string, unknown>>): Reco
       ...(fact.fiscal_year !== null && fact.fiscal_year !== undefined ? { period: `${fact.fiscal_period ?? ""} ${fact.fiscal_year}`.trim() } : {}),
       // Each value's own date: fact_recency only dates the newest one.
       ...(typeof fact.as_of === "string" ? { as_of: fact.as_of } : {}),
+      // How completely the period is covered, when it is not fully.
+      ...(typeof fact.coverage_level === "string" && fact.coverage_level !== "full" ? { coverage: fact.coverage_level } : {}),
     }] : []
   ));
   if (quotes.length === 0 && facts.length === 0) return null;
