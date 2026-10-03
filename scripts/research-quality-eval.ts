@@ -16,7 +16,7 @@ import { QUESTIONS, RUBRIC, type CriterionId, type EvalQuestion } from "./resear
 export const RUNS_DIR = fileURLToPath(new URL("../docs/eval-runs/research-quality/", import.meta.url));
 
 type Block = Record<string, unknown> & { kind?: string; title?: string };
-type Message = { role: string; blocks: Block[] };
+type Message = { role: string; blocks: Block[]; answered_by?: string | null };
 export type Score = 0 | 1 | 2 | "n/a" | null;
 export type ScoresFile = {
   run: string;
@@ -26,7 +26,8 @@ export type ScoresFile = {
 export type AnsweredQuestion = {
   question: EvalQuestion;
   threadId: string;
-  turns: Array<{ message: string; outcome: string; blocks: Block[] }>;
+  // answeredBy: the deployment that wrote the turn's answer, as chat recorded it (#183).
+  turns: Array<{ message: string; outcome: string; blocks: Block[]; answeredBy?: string | null }>;
 };
 
 // --- report ----------------------------------------------------------------------
@@ -76,9 +77,9 @@ export function renderReport(run: string, model: string, base: string, answered:
   const lines = [
     `# Research-quality eval: ${run}`,
     "",
-    ...(model.includes("(fallbacks:")
-      ? ["**Fallbacks may have answered:** they were configured (or the settings couldn't be read), so any answer may come from one. The app log's `[llm]` lines show which model answered each call.", ""]
-      : []),
+    // Which models actually answered, as chat recorded each turn (#183).
+    `Answered by: ${answeredBySummary(answered)}.`,
+    "",
     `Model: \`${model}\`. Data: frozen golden dataset. Score each question in \`${run}.scores.json\` (rubric below),`,
     "then run `node --experimental-strip-types scripts/research-quality-eval.ts summary`.",
     "Bold figures are cited (linked to a fact); open the thread link for charts and sources.",
@@ -95,10 +96,26 @@ export function renderReport(run: string, model: string, base: string, answered:
       lines.push("", `### Q: ${turn.message}${subject ? ` (opened from the ${subject} page)` : ""}`, "");
       if (turn.outcome === "skipped") lines.push("**Not sent: an earlier turn didn't complete.**", "");
       else if (turn.outcome !== "turn.completed") lines.push(`**Turn ended with ${turn.outcome}.**`, "");
+      if (turn.answeredBy) lines.push(`_Answered by \`${turn.answeredBy}\`._`, "");
       lines.push(...turn.blocks.flatMap((block) => [renderBlock(block), ""]));
     }
   }
   return `${lines.join("\n").trimEnd()}\n`;
+}
+
+// Each answering model with its turn count; turns whose answer recorded none (no model
+// wrote it, or a turn that didn't complete) are counted apart.
+export function answeredBySummary(answered: ReadonlyArray<AnsweredQuestion>): string {
+  const counts = new Map<string, number>();
+  let unrecorded = 0;
+  for (const turn of answered.flatMap((question) => question.turns)) {
+    if (turn.outcome === "skipped") continue;
+    if (turn.answeredBy) counts.set(turn.answeredBy, (counts.get(turn.answeredBy) ?? 0) + 1);
+    else unrecorded += 1;
+  }
+  const parts = [...counts].map(([model, count]) => `\`${model}\` (${count} turn${count === 1 ? "" : "s"})`);
+  if (unrecorded > 0) parts.push(`not recorded (${unrecorded} turn${unrecorded === 1 ? "" : "s"})`);
+  return parts.length > 0 ? parts.join(", ") : "no turns yet";
 }
 
 export function blankScores(run: string, model: string): ScoresFile {
@@ -227,7 +244,8 @@ async function run(base: string): Promise<void> {
       const { messages } = await api<{ messages: Message[] }>(base, "GET", `/v1/chat/threads/${threadId}/messages`);
       const answers = messages.filter((m) => m.role === "assistant");
       // A failed turn may have saved no answer: show none rather than the previous one.
-      turns.push({ message: turn.message, outcome, blocks: answers.length > answersSoFar ? answers.at(-1)!.blocks : [] });
+      const answer = answers.length > answersSoFar ? answers.at(-1)! : null;
+      turns.push({ message: turn.message, outcome, blocks: answer?.blocks ?? [], answeredBy: answer?.answered_by ?? null });
       answersSoFar = answers.length;
     }
     answered.push({ question, threadId, turns });
@@ -236,9 +254,9 @@ async function run(base: string): Promise<void> {
   console.log(`\ndone: ${answered.length} questions in ${report}`);
 }
 
-// The router falls back silently and chat doesn't record which deployment answered a
-// turn (#183), so a run whose settings list fallbacks says so: any answer may be theirs.
-// null means the settings couldn't be read, so whether there are fallbacks is unknown.
+// The run's configured models, for the scores file; the report shows which of them
+// actually answered each turn (#183). null means the settings couldn't be read, so
+// whether there are fallbacks is unknown.
 export function modelLabel(model: string, fallbackModels: ReadonlyArray<string> | null): string {
   if (fallbackModels === null) return `${model} (fallbacks: unknown)`;
   return fallbackModels.length > 0 ? `${model} (fallbacks: ${fallbackModels.join(", ")})` : model;

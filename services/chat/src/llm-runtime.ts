@@ -100,6 +100,8 @@ export async function composeAnalystBlocksWithLlm(input: {
   createClient?: () => Promise<LlmChatClient> | LlmChatClient;
   // Receives the sentences the narrative guard dropped, so evals can count them (#144).
   onNarrativeRemoved?: (sentences: ReadonlyArray<string>) => void;
+  // Receives the deployment (channel/model) that wrote the answer (#183).
+  onAnswered?: (deployment: string) => void;
   deadlines?: ModelDeadlines;
 }): Promise<ReadonlyArray<Record<string, unknown>>> {
   const router = await createLlmRouterFromEnv(input.env ?? process.env, {
@@ -162,6 +164,7 @@ export async function composeAnalystBlocksWithLlm(input: {
     reasoning: "low",
     maxTokens: 8192,
   }, withDeadlines(input.deadlines ?? ANSWER_DEADLINES));
+  input.onAnswered?.(`${result.deployment.channel}/${result.deployment.model}`);
   const text = result.text.trim();
   // Never show a sentence cut off mid-way, or the placeholder the turn started with.
   if (result.truncated || text.length === 0) {

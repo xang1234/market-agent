@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   blankScores,
   modelForRun,
+  answeredBySummary,
   modelLabel,
   readRuns,
   renderBlock,
@@ -108,16 +109,25 @@ test("a run names its model or doesn't start, and its files are stamped to the s
   assert.equal(runStamp(new Date("2026-10-02T04:55:12.345Z")), "2026-10-02T045512");
 });
 
-test("a run with fallbacks configured is labelled with them, and its report warns", () => {
+test("a run with fallbacks configured is labelled with them", () => {
   assert.equal(modelLabel("opencode-go/qwen3.8-max", []), "opencode-go/qwen3.8-max");
   const label = modelLabel("opencode-go/qwen3.8-max", ["opencode-go/kimi-k2.7-code"]);
   assert.equal(label, "opencode-go/qwen3.8-max (fallbacks: opencode-go/kimi-k2.7-code)");
   // Settings unreadable (EVAL_MODEL named the run): fallbacks are unknown, not absent.
   const unknown = modelLabel("openai/o3", null);
   assert.equal(unknown, "openai/o3 (fallbacks: unknown)");
-  assert.match(renderReport("r", label, "http://app", []), /Fallbacks may have answered/);
-  assert.match(renderReport("r", unknown, "http://app", []), /Fallbacks may have answered/);
-  assert.doesNotMatch(renderReport("r", "opencode-go/qwen3.8-max", "http://app", []), /Fallbacks may have answered/);
+});
+
+test("the report shows the model that answered each turn, and the mix across the run (#183)", () => {
+  const [first, second] = QUESTIONS;
+  const report = renderReport("r", "opencode-go/qwen3.8-max (fallbacks: opencode-go/kimi-k2.7-code)", "http://app", [
+    { question: first, threadId: "t1", turns: [{ message: "q1", outcome: "turn.completed", blocks: [], answeredBy: "opencode-go/qwen3.8-max" }] },
+    { question: second, threadId: "t2", turns: [{ message: "q2", outcome: "turn.completed", blocks: [], answeredBy: "opencode-go/kimi-k2.7-code" }] },
+  ]);
+  assert.match(report, /Answered by: `opencode-go\/qwen3\.8-max` \(1 turn\), `opencode-go\/kimi-k2\.7-code` \(1 turn\)\./);
+  assert.match(report, /### Q: q2\n\n_Answered by `opencode-go\/kimi-k2\.7-code`\._/);
+  assert.doesNotMatch(report, /Fallbacks may have answered/);
+  assert.equal(answeredBySummary([{ question: first, threadId: "t", turns: [{ message: "q", outcome: "turn.error", blocks: [], answeredBy: null }] }]), "not recorded (1 turn)");
 });
 
 test("summary on a fresh checkout reads no runs instead of failing", async () => {

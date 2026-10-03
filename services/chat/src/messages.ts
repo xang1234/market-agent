@@ -63,6 +63,8 @@ export type ChatMessageRow = {
   blocks: JsonValue;
   content_hash: string;
   created_at: string;
+  // The model deployment that wrote an assistant message (#183); null otherwise.
+  answered_by?: string | null;
 };
 
 // A read message: each block's evidence, calculation, and public-time claims,
@@ -78,6 +80,7 @@ export type PersistChatMessageAfterSnapshotSealInput = {
   role: ChatRole;
   blocks: JsonValue;
   content_hash: string;
+  answered_by?: string;
   sealSnapshot(): Promise<SnapshotSealResult>;
 };
 
@@ -160,6 +163,7 @@ export function createChatMessagePersistence(
       role: message.role,
       blocks: message.blocks as JsonValue,
       content_hash: message.content_hash,
+      ...(message.answered_by ? { answered_by: message.answered_by } : {}),
       sealSnapshot: () => input.sealSnapshot(message),
     });
 
@@ -195,7 +199,8 @@ export async function listChatMessagesForThread(
             m.snapshot_id::text as snapshot_id,
             m.blocks,
             m.content_hash,
-            m.created_at::text as created_at
+            m.created_at::text as created_at,
+            m.answered_by
        from chat_messages m
       where m.thread_id = $1::uuid
       order by m.created_at asc, m.message_id asc`,
@@ -501,8 +506,8 @@ async function persistSealedChatMessage(
   try {
     const { rows } = await db.query<ChatMessageRow>(
       `insert into chat_messages
-         (thread_id, role, snapshot_id, blocks, content_hash)
-       values ($1::uuid, $2::chat_role, $3::uuid, $4::jsonb, $5)
+         (thread_id, role, snapshot_id, blocks, content_hash, answered_by)
+       values ($1::uuid, $2::chat_role, $3::uuid, $4::jsonb, $5, $6)
        returning
          message_id::text as message_id,
          thread_id::text as thread_id,
@@ -510,13 +515,15 @@ async function persistSealedChatMessage(
          snapshot_id::text as snapshot_id,
          blocks,
          content_hash,
-         created_at::text as created_at`,
+         created_at::text as created_at,
+         answered_by`,
       [
         input.thread_id,
         input.role,
         snapshotId,
         serializeJsonValue(input.blocks),
         input.content_hash,
+        input.answered_by ?? null,
       ],
     );
     const message = rows[0];

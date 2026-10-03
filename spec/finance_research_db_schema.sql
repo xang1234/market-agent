@@ -898,7 +898,8 @@ create table chat_messages (
   snapshot_id uuid not null references snapshots(snapshot_id),
   blocks jsonb not null,
   content_hash text not null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  answered_by text
 );
 create index chat_messages_thread_created_idx on chat_messages(thread_id, created_at);
 

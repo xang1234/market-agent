@@ -470,6 +470,19 @@ async function compareWithReply(reply: string) {
   return { text: (blocks[0].segments as Array<{ text: string }>)[0].text, prompt };
 }
 
+test("the composer reports the deployment that wrote the answer (#183)", async () => {
+  const answered: string[] = [];
+  await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "Summarize demand", bundleId: "single_subject_analysis" },
+    blocks: [NARRATIVE_BLOCK],
+    toolCalls: [],
+    createClient: () => async () => ({ text: "Demand rose." }),
+    onAnswered: (deployment) => answered.push(deployment),
+  });
+  assert.deepEqual(answered, ["openai/gpt-4.1"]);
+});
+
 test("the model sees each comparison figure with the company and metric it belongs to", async () => {
   const { prompt } = await compareWithReply("NVDA leads.");
   assert.ok(

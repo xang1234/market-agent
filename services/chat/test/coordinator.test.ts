@@ -1115,6 +1115,26 @@ test("turn.completed reports the narrative sentences the guard dropped, only whe
   assert.equal("narrative_removed" in cleanTurn.events.at(-1)!, false);
 });
 
+test("the answering model is reported on turn.completed and saved with the message, only when one answered (#183)", async () => {
+  const saved: Array<string | undefined> = [];
+  const answered = createChatCoordinator({
+    analystToolRuntime: async (context) => ({ ...(await successfulRuntime(context)), answered_by: "opencode-go/qwen3.8-max" }),
+    persistAssistantMessage: async ({ answered_by }) => {
+      saved.push(answered_by);
+      return { snapshot_id: "00000000-0000-4000-8000-000000000099", message_id: "00000000-0000-4000-8000-000000000098" };
+    },
+  });
+  const turn = answered.getOrCreateTurn({ threadId: "t", runId: "r" });
+  await turn.completed;
+  assert.equal(turn.events.at(-1)!.answered_by, "opencode-go/qwen3.8-max");
+  assert.deepEqual(saved, ["opencode-go/qwen3.8-max"]);
+
+  const unanswered = createChatCoordinator({ analystToolRuntime: successfulRuntime });
+  const quiet = unanswered.getOrCreateTurn({ threadId: "t", runId: "r" });
+  await quiet.completed;
+  assert.equal("answered_by" in quiet.events.at(-1)!, false);
+});
+
 test("subject-aware runner emits bundle_id on turn.started before any tool events", async () => {
   // Regression: tool events emitted before turn.started used to trigger
   // an auto-fabricated empty turn.started, which left SSE consumers
