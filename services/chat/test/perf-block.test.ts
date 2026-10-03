@@ -316,3 +316,20 @@ test("the YTD gap names the company without pre-year prices, whatever basis the 
     "Year-to-date price performance is not shown: AMD has no prices from before 2026.",
   );
 });
+
+test("exchanges in different calendar years at the cutoff are a YTD gap before any range is read (#192)", async () => {
+  const seen: Array<{ text: string; values?: unknown[] }> = [];
+  const db = {
+    query: fakeQuery((text, values) => {
+      seen.push({ text, values });
+      // At 01:00Z on Jan 1, New York is still in 2025 and Tokyo is in 2026.
+      return { rows: [{ listing_id: NVDA.listing_id, timezone: "America/New_York" }, { listing_id: AMD.listing_id, timezone: "Asia/Tokyo" }] };
+    }),
+  };
+  const blocks = await loadPerfComparisonBlocks(db, { listings: LISTINGS, snapshotId: SNAPSHOT_ID, asOf: "2026-01-01T01:00:00.000Z", window: "ytd" });
+  assert.equal(
+    (blocks[0].segments as Array<{ text: string }>)[0].text,
+    "Year-to-date price performance is not shown: the companies' exchanges are in different calendar years at the cutoff.",
+  );
+  assert.ok(seen.every((query) => !query.text.includes("market_bar_ranges")));
+});

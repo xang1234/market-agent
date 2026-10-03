@@ -125,7 +125,11 @@ async function loadSealedRanges(
   // A YTD window covers the cutoff's year on the exchanges' calendars.
   const zones = input.window === "ytd" ? await listingTimeZones(db, input.listings) : new Map<string, string>();
   const zoneOf = (listingId: string) => zones.get(listingId) ?? "UTC";
-  const year = input.window === "ytd" ? ytdYear(input.asOf, zoneOf(input.listings[0].id)) : undefined;
+  const years = new Set(input.listings.map((listing) => ytdYear(input.asOf, zoneOf(listing.id))));
+  if (input.window === "ytd" && years.size > 1) {
+    return ytdGapBlock(input, "the companies' exchanges are in different calendar years at the cutoff");
+  }
+  const year = input.window === "ytd" ? [...years][0] : undefined;
   // One statement, so the range and its bars come from one consistent view: a
   // cache refresh upserts the same bar_range_id and replaces its bars, and two
   // reads could pair old metadata with new prices.
