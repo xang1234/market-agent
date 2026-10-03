@@ -28,7 +28,7 @@ import {
   type ChatPriorSubjectsLoader,
   type ChatThreadTitleGenerator,
 } from "./coordinator.ts";
-import { loadTurnFactBlocks, requestedFiscalYear } from "./fact-blocks.ts";
+import { loadTurnFactBlocks, requestedFiscalYear, requestedPriceWindow } from "./fact-blocks.ts";
 import { loadPriorSubjects as loadThreadPriorSubjects, loadRecentConversation } from "./thread-context.ts";
 import type { IssuerSubjectRef } from "../../fundamentals/src/subject-ref.ts";
 import {
@@ -161,6 +161,7 @@ export const analystToolRuntime: ChatAnalystToolRuntime = async (context) => {
       wantsMarginTrend: /\b(margins?|profitab\w*)\b/i.test(context.userIntent ?? ""),
       requestedListings: requestedListingsOf(covered),
       fiscalYear: requestedFiscalYear(context.userIntent ?? ""),
+      priceWindow: requestedPriceWindow(context.userIntent ?? ""),
       snapshotId: result.snapshot_id,
       asOf,
     }),

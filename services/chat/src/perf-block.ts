@@ -17,12 +17,21 @@
 // instead of a chart. Ranges Polygon wrote under the old dividend-adjusted label
 // are never used (cache-repository.ts).
 //
+// A year-to-date request (#192) charts the requested window instead: from the
+// final close before January 1 to the latest completed session every company
+// has, the same for all (ytd-window.ts). It reads a stored range per company
+// that covers the year-end, and anything short of a full window is a named
+// gap, never a shorter window called YTD.
+//
 // ponytail: uses each listing's latest stored window and requires them to be
 // identical; a shared sub-window across different stored ranges is the upgrade.
+// ponytail: a YTD window comes only from bars already stored; fetching missing
+// ones before the cutoff is #192 part 2.
 
 import { createHash } from "node:crypto";
 
 import { MISLABELED_POLYGON_RANGE_SQL } from "../../market/src/cache-repository.ts";
+import { selectYtdWindow, ytdReturns, type YtdWindow } from "../../market/src/ytd-window.ts";
 import { compileDisclosurePolicy } from "../../snapshot/src/disclosure-policy.ts";
 import type { SnapshotSubjectRef } from "../../snapshot/src/manifest-staging.ts";
 import { stableUuid } from "./chat-ids.ts";
@@ -43,6 +52,19 @@ const BASIS_WORDS: Record<ComparableBasis, string> = {
   split_and_div_adjusted: "split- and dividend-adjusted",
 };
 const NORMALIZATION = "pct_return";
+// A YTD window needs a stored range that starts by Christmas Eve of the prior
+// year, so its last December sessions are in it.
+const YEAR_END_LOOKBACK = "-12-24T00:00:00.000Z";
+
+// A price window the question asks for; absent, the latest stored window.
+export type PriceWindow = "ytd";
+
+type PerfInput = {
+  listings: ReadonlyArray<{ id: string; label: string }>;
+  snapshotId: string;
+  asOf: string;
+  window?: PriceWindow;
+};
 
 export type SealedPriceRange = {
   listing_id: string;
@@ -65,7 +87,7 @@ type Block = Record<string, unknown>;
 // never the comparison it sits next to.
 export async function loadPerfComparisonBlocks(
   db: QueryExecutor,
-  input: { listings: ReadonlyArray<{ id: string; label: string }>; snapshotId: string; asOf: string },
+  input: PerfInput,
 ): Promise<ReadonlyArray<Block>> {
   if (input.listings.length < 2) return [];
   try {
@@ -96,7 +118,7 @@ export function perfDisclosureBlocks(chart: Block): ReadonlyArray<Block> {
 
 async function loadSealedRanges(
   db: QueryExecutor,
-  input: { listings: ReadonlyArray<{ id: string; label: string }>; snapshotId: string; asOf: string },
+  input: PerfInput,
 ): Promise<Block | null> {
   // One statement, so the range and its bars come from one consistent view: a
   // cache refresh upserts the same bar_range_id and replaces its bars, and two
@@ -123,6 +145,8 @@ async function loadSealedRanges(
           -- Nothing stored after the turn's cutoff: a refresh landing mid-turn
           -- must not seal prices later than the snapshot's as_of.
           and as_of <= $4::timestamptz
+          -- A YTD window: only ranges that reach back over the year-end.
+          and ($5::timestamptz is null or range_start <= $5::timestamptz)
         order by listing_id, adjustment_basis, range_end desc, fetched_at desc
      )
      select picked.bar_range_id::text as bar_range_id,
@@ -137,42 +161,94 @@ async function loadSealedRanges(
               '[]'::json
             ) as bars
        from picked`,
-    [input.listings.map((listing) => listing.id), INTERVAL, COMPARABLE_BASES, input.asOf],
+    [
+      input.listings.map((listing) => listing.id),
+      INTERVAL,
+      COMPARABLE_BASES,
+      input.asOf,
+      input.window === "ytd" ? `${ytdYearBound(input.asOf) - 1}${YEAR_END_LOOKBACK}` : null,
+    ],
   );
   const rangeOf = (listingId: string, basis: ComparableBasis) =>
     ranges.find((range) => range.listing_id === listingId && range.adjustment_basis === basis);
+  const sealedOf = (listing: { id: string; label: string }, basis: ComparableBasis): SealedPriceRange | undefined => {
+    const range = rangeOf(listing.id, basis);
+    return range && {
+      listing_id: listing.id,
+      label: listing.label,
+      bar_range_id: range.bar_range_id,
+      source_id: range.source_id,
+      interval: INTERVAL,
+      adjustment_basis: basis,
+      delay_class: range.delay_class,
+      range_start: iso(range.range_start),
+      range_end: iso(range.range_end),
+      as_of: iso(range.as_of),
+      bars: range.bars.map((bar) => ({ ts: iso(bar.ts), close: bar.close })),
+    };
+  };
+  const hasRange = (listing: { id: string }) => ranges.some((range) => range.listing_id === listing.id);
+  const shared = COMPARABLE_BASES.filter((basis) => input.listings.every((listing) => rangeOf(listing.id, basis)));
+  if (input.window === "ytd") {
+    if (shared.length === 0 && input.listings.every(hasRange)) return basisGapBlock(input, ranges);
+    return loadYtdBlock(db, input, shared, sealedOf);
+  }
   // Every company or no chart: a chart quietly missing one would cover fewer
   // companies than the comparison beside it.
-  if (input.listings.some((listing) => !ranges.some((range) => range.listing_id === listing.id))) return null;
-  const shared = COMPARABLE_BASES.filter((basis) => input.listings.every((listing) => rangeOf(listing.id, basis)));
+  if (!input.listings.every(hasRange)) return null;
   if (shared.length === 0) return basisGapBlock(input, ranges);
   for (const basis of shared) {
-    const sealed = input.listings.map((listing): SealedPriceRange => {
-      const range = rangeOf(listing.id, basis)!;
-      return {
-        listing_id: listing.id,
-        label: listing.label,
-        bar_range_id: range.bar_range_id,
-        source_id: range.source_id,
-        interval: INTERVAL,
-        adjustment_basis: basis,
-        delay_class: range.delay_class,
-        range_start: iso(range.range_start),
-        range_end: iso(range.range_end),
-        as_of: iso(range.as_of),
-        bars: range.bars.map((bar) => ({ ts: iso(bar.ts), close: bar.close })),
-      };
-    });
+    const sealed = input.listings.map((listing) => sealedOf(listing, basis)!);
     const chart = buildPerfComparisonBlock({ ranges: sealed, snapshotId: input.snapshotId, asOf: input.asOf });
     if (chart) return chart;
   }
   return null;
 }
 
+// The YTD chart on the first basis every company has that gives a full window;
+// otherwise the reason there is none. A company with no range reaching back over
+// the year-end has no bars here, so the window names it.
+async function loadYtdBlock(
+  db: QueryExecutor,
+  input: PerfInput,
+  shared: ReadonlyArray<ComparableBasis>,
+  sealedOf: (listing: { id: string; label: string }, basis: ComparableBasis) => SealedPriceRange | undefined,
+): Promise<Block> {
+  const { rows } = await db.query<{ listing_id: string; timezone: string }>(
+    `select listing_id::text as listing_id, timezone from listings where listing_id = any($1::uuid[])`,
+    [input.listings.map((listing) => listing.id)],
+  );
+  const zones = new Map(rows.map((row) => [row.listing_id, row.timezone]));
+  let gap = "";
+  for (const basis of shared.length > 0 ? shared : COMPARABLE_BASES.slice(0, 1)) {
+    const sealed = input.listings.map((listing) => sealedOf(listing, basis));
+    const window = selectYtdWindow(
+      input.listings.map((listing, index) => ({
+        label: listing.label,
+        timeZone: zones.get(listing.id) ?? "UTC",
+        bars: sealed[index]?.bars ?? [],
+      })),
+      input.asOf,
+    );
+    if (window.ok) {
+      return buildYtdPerfBlock({ ranges: sealed as SealedPriceRange[], window, snapshotId: input.snapshotId });
+    }
+    gap ||= window.gap;
+  }
+  return noteBlock(input, "perf_ytd_gap", `Year-to-date price performance is not shown: ${gap}.`);
+}
+
+// An upper bound on the cutoff's exchange-local year: no exchange is more than
+// 14 hours behind UTC, so the year 14 hours before the cutoff (UTC) may be one
+// too early, never too late; the lookback then only admits more ranges.
+function ytdYearBound(asOf: string): number {
+  return new Date(Date.parse(asOf) - 14 * 60 * 60 * 1000).getUTCFullYear();
+}
+
 // Companies whose stored prices share no basis: say so where the chart would
 // be, rather than draw returns that do and don't include dividends side by side.
 function basisGapBlock(
-  input: { listings: ReadonlyArray<{ id: string; label: string }>; snapshotId: string; asOf: string },
+  input: PerfInput,
   ranges: ReadonlyArray<{ listing_id: string; adjustment_basis: ComparableBasis }>,
 ): Block {
   const bases = input.listings.map((listing) => {
@@ -181,7 +257,16 @@ function basisGapBlock(
       .map((basis) => BASIS_WORDS[basis]);
     return `${listing.label}'s are ${words.join(" or ")}`;
   });
-  const id = stableUuid(`block:${input.snapshotId}:perf_basis_gap`);
+  return noteBlock(
+    input,
+    "perf_basis_gap",
+    `Price performance is not shown: the stored prices are on different bases (${bases.join("; ")}), so their returns would not be comparable.`,
+  );
+}
+
+// A named gap where the chart would be.
+function noteBlock(input: PerfInput, idKey: string, text: string): Block {
+  const id = stableUuid(`block:${input.snapshotId}:${idKey}`);
   return {
     id,
     kind: "rich_text",
@@ -189,10 +274,7 @@ function basisGapBlock(
     data_ref: { kind: "rich_text", id },
     source_refs: [],
     as_of: input.asOf,
-    segments: [{
-      type: "text",
-      text: `Price performance is not shown: the stored prices are on different bases (${bases.join("; ")}), so their returns would not be comparable.`,
-    }],
+    segments: [{ type: "text", text }],
   };
 }
 
@@ -215,21 +297,81 @@ export function buildPerfComparisonBlock(input: {
     .sort();
   if (sharedDates.length < 2 || closesByDate.some((closes) => !(closes.get(sharedDates[0])! > 0))) return null;
 
-  const specs = ranges.map((range) => ({
+  return assemblePerfBlock({
+    ranges,
+    snapshotId: input.snapshotId,
+    title: chartTitle(first.adjustment_basis, ""),
+    // The window actually drawn: the shared dates, not the stored range.
+    defaultRange: `${sharedDates[0]} to ${sharedDates[sharedDates.length - 1]}`,
+    // The digest pins the whole stored range the line was drawn from.
+    digested: ranges.map((range) => range.bars),
+    points: closesByDate.map((closes) => {
+      const base = closes.get(sharedDates[0])!;
+      return sharedDates.map((date) => ({ x: date, y: (closes.get(date)! / base - 1) * 100 }));
+    }),
+  });
+}
+
+// The YTD chart for a selected window: each line from the shared baseline close,
+// the window stated in the block, and each series' digest over exactly the bars
+// the line uses, so a reload can show nothing else.
+export function buildYtdPerfBlock(input: {
+  ranges: ReadonlyArray<SealedPriceRange>;
+  window: YtdWindow;
+  snapshotId: string;
+}): Block {
+  const { window } = input;
+  const skipped = window.skippedSessions > 0
+    ? `; ${window.skippedSessions} session${window.skippedSessions === 1 ? "" : "s"} not every company traded skipped`
+    : "";
+  return assemblePerfBlock({
+    ranges: input.ranges,
+    snapshotId: input.snapshotId,
+    title: chartTitle(input.ranges[0].adjustment_basis, ` YTD ${window.year}`),
+    defaultRange: `YTD ${window.year}: ${window.baselineDate} close to ${window.endDate} close${skipped}`,
+    digested: window.bars,
+    points: window.bars.map((bars) => {
+      const returns = ytdReturns(bars);
+      return window.dates.map((date, index) => ({ x: date, y: returns[index] }));
+    }),
+    window: { kind: "ytd", year: window.year, baseline_date: window.baselineDate, end_date: window.endDate },
+  });
+}
+
+// Split-adjusted prices give a price return: dividends are not in it.
+function chartTitle(basis: string, period: string): string {
+  return basis === "split_adjusted"
+    ? `Price return${period} (split-adjusted, excluding dividends)`
+    : `Price performance${period}`;
+}
+
+function assemblePerfBlock(input: {
+  ranges: ReadonlyArray<SealedPriceRange>;
+  snapshotId: string;
+  title: string;
+  defaultRange: string;
+  // Per range: the bars its digest pins, and its line.
+  digested: ReadonlyArray<ReadonlyArray<{ ts: string; close: number }>>;
+  points: ReadonlyArray<ReadonlyArray<{ x: string; y: number }>>;
+  window?: Record<string, unknown>;
+}): Block {
+  const { ranges } = input;
+  const specs = ranges.map((range, index) => ({
     series_ref: stableUuid(`series:${input.snapshotId}:${range.bar_range_id}`),
     source_id: range.source_id,
     listing_id: range.listing_id,
     bar_range_id: range.bar_range_id,
     // The cache reuses bar_range_id when it refreshes a range, so the ID alone
-    // does not pin these prices; the digest of the stored bars does.
+    // does not pin these prices; the digest of the bars does.
     bars_sha256: createHash("sha256")
-      .update(JSON.stringify(range.bars.map((bar) => [bar.ts, bar.close])))
+      .update(JSON.stringify(input.digested[index].map((bar) => [bar.ts, bar.close])))
       .digest("hex"),
     interval: range.interval,
     adjustment_basis: range.adjustment_basis,
     normalization: NORMALIZATION,
     delay_class: range.delay_class,
     range: { start: range.range_start, end: range.range_end },
+    ...(input.window ? { window: input.window } : {}),
     as_of: range.as_of,
   }));
   const id = stableUuid(`block:${input.snapshotId}:perf_comparison`);
@@ -242,23 +384,13 @@ export function buildPerfComparisonBlock(input: {
     // As fresh as its oldest stored range, not the answer time: a cached range
     // may be stale, and the pricing disclosure must not overstate freshness.
     as_of: ranges.map((range) => range.as_of).sort()[0],
-    // Split-adjusted prices give a price return: dividends are not in it.
-    title: first.adjustment_basis === "split_adjusted" ? "Price return (split-adjusted, excluding dividends)" : "Price performance",
+    title: input.title,
     subject_refs: ranges.map((range) => ({ kind: "listing", id: range.listing_id })),
     subject_labels: ranges.map((range) => range.label),
-    // The window actually drawn: the shared dates, not the stored range.
-    default_range: `${sharedDates[0]} to ${sharedDates[sharedDates.length - 1]}`,
-    basis: first.adjustment_basis,
+    default_range: input.defaultRange,
+    basis: ranges[0].adjustment_basis,
     normalization: NORMALIZATION,
-    series: ranges.map((range, index) => {
-      const closes = closesByDate[index];
-      const base = closes.get(sharedDates[0])!;
-      return {
-        name: range.label,
-        unit: "%",
-        points: sharedDates.map((date) => ({ x: date, y: (closes.get(date)! / base - 1) * 100 })),
-      };
-    }),
+    series: ranges.map((range, index) => ({ name: range.label, unit: "%", points: input.points[index] })),
     // Promoted to manifest.series_specs when the answer is sealed.
     provenance_series_specs: specs,
   };

@@ -169,7 +169,9 @@ export const GOLDEN_COMPANIES: ReadonlyArray<GoldenCompany> = Object.freeze([
 ]);
 
 const INCOME_METRICS = ["revenue", "gross_profit", "operating_income", "net_income"] as const;
-const BAR_DAYS = 10;
+// Daily bars from early December, so a year-to-date window has its baseline
+// (the last 2025 close) and runs to the session before GOLDEN_AS_OF (#192).
+const BARS_FROM = "2025-12-01";
 
 export async function seedGoldenDataset(client: Client): Promise<void> {
   // The dev seeds provide the metrics registry and the fixed source rows.
@@ -316,12 +318,12 @@ async function seedQuote(client: Client, company: GoldenCompany): Promise<void> 
   );
 }
 
-// A deterministic walk back from prev_close to the quote price over BAR_DAYS
-// sessions; enough for a performance chart, not a market-data source. Stored as
-// Polygon stores daily bars: split-adjusted only (#191).
+// A deterministic walk from 95% of prev_close up to the quote price, one close
+// per weekday session; enough for a performance chart, not a market-data source.
+// Stored as Polygon stores daily bars: split-adjusted only (#191), each stamped
+// at the start of its New York session date.
 async function seedDailyBars(client: Client, company: GoldenCompany): Promise<void> {
-  const end = new Date(GOLDEN_AS_OF);
-  const start = new Date(end.getTime() - BAR_DAYS * 24 * 60 * 60 * 1000);
+  const sessions = weekdaysBefore(BARS_FROM, GOLDEN_AS_OF);
   const { rows } = await client.query<{ bar_range_id: string }>(
     `insert into market_bar_ranges
        (listing_id, source_id, provider, interval, adjustment_basis, range_start, range_end,
@@ -330,17 +332,27 @@ async function seedDailyBars(client: Client, company: GoldenCompany): Promise<vo
              $4::timestamptz, $4::timestamptz, 'eod', 'USD', $4::timestamptz,
              $4::timestamptz + interval '100 years')
      returning bar_range_id::text as bar_range_id`,
-    [company.listing_id, MARKET_SOURCE_ID, start.toISOString(), end.toISOString()],
+    [company.listing_id, MARKET_SOURCE_ID, sessions[0], GOLDEN_AS_OF],
   );
-  const barRangeId = rows[0]!.bar_range_id;
   const { price, prev_close } = company.quote;
-  for (let day = 0; day < BAR_DAYS; day += 1) {
-    const close = prev_close * 0.95 + ((price - prev_close * 0.95) * (day + 1)) / BAR_DAYS;
-    const ts = new Date(start.getTime() + day * 24 * 60 * 60 * 1000);
-    await client.query(
-      `insert into market_bars (bar_range_id, ts, open, high, low, close, volume)
-       values ($1::uuid, $2::timestamptz, $3, $4, $5, $6, $7)`,
-      [barRangeId, ts.toISOString(), close * 0.995, close * 1.01, close * 0.99, close, 1_000_000 + day * 10_000],
-    );
+  const closes = sessions.map((_, day) => prev_close * 0.95 + ((price - prev_close * 0.95) * (day + 1)) / sessions.length);
+  await client.query(
+    `insert into market_bars (bar_range_id, ts, open, high, low, close, volume)
+     select $1::uuid, ts, close * 0.995, close * 1.01, close * 0.99, close, 1000000 + n * 10000
+       from unnest($2::timestamptz[], $3::float8[]) with ordinality as bar(ts, close, n)`,
+    [rows[0]!.bar_range_id, sessions, closes],
+  );
+}
+
+// New York local midnight of each weekday from `from` until the session of
+// `before`, as UTC instants (EDT from 2026-03-08 to 2026-11-01, EST otherwise).
+function weekdaysBefore(from: string, before: string): string[] {
+  const out: string[] = [];
+  for (let day = new Date(`${from}T00:00:00.000Z`); ; day.setUTCDate(day.getUTCDate() + 1)) {
+    const date = day.toISOString().slice(0, 10);
+    const hour = date >= "2026-03-08" && date < "2026-11-01" ? "04" : "05";
+    const ts = `${date}T${hour}:00:00.000Z`;
+    if (ts >= before) return out;
+    if (day.getUTCDay() !== 0 && day.getUTCDay() !== 6) out.push(ts);
   }
 }
