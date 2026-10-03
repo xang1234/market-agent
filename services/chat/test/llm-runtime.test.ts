@@ -570,7 +570,7 @@ test("with no figures shown, the model still gets the evidence, compactly, as av
       evidence_status: "available",
       structured_context: {
         quote: { ticker: "AAPL", price: 231.6, change_pct: 0.0078, currency: "USD", as_of: "2026-09-01T00:00:00.000Z", stale: false, source_id: "s" },
-        facts: [{ fact_id: "f1", metric_key: "revenue", display_name: "Revenue", value_num: 416.161, scale: 1e9, unit: "currency", currency: "USD", fiscal_year: 2025, fiscal_period: "FY", source_id: "s" }],
+        facts: [{ fact_id: "f1", metric_key: "revenue", display_name: "Revenue", value_num: 416.161, scale: 1e9, unit: "currency", currency: "USD", fiscal_year: 2025, fiscal_period: "FY", as_of: "2025-10-31T00:00:00.000Z", source_id: "s" }],
       },
     },
   } as never;
@@ -590,7 +590,7 @@ test("with no figures shown, the model still gets the evidence, compactly, as av
   };
   assert.deepEqual((await run()).available_data, {
     quotes: [{ ticker: "AAPL", price: 231.6, change_pct: 0.0078, currency: "USD", as_of: "2026-09-01T00:00:00.000Z" }],
-    facts: [{ metric: "Revenue", value: 416161000000, unit: "currency", currency: "USD", period: "FY 2025" }],
+    facts: [{ metric: "Revenue", value: 416161000000, unit: "currency", currency: "USD", period: "FY 2025", as_of: "2025-10-31T00:00:00.000Z" }],
   });
   assert.ok(!prompt.includes("fact_id") && !prompt.includes('"source_id"'), "still compact: no ids");
   // With figures shown, only those may be quoted: no available_data.

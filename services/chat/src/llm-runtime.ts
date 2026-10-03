@@ -306,6 +306,8 @@ function availableData(structured: ReadonlyArray<Record<string, unknown>>): Reco
       ...(fact.unit ? { unit: fact.unit } : {}),
       ...(fact.currency ? { currency: fact.currency } : {}),
       ...(fact.fiscal_year !== null && fact.fiscal_year !== undefined ? { period: `${fact.fiscal_period ?? ""} ${fact.fiscal_year}`.trim() } : {}),
+      // Each value's own date: fact_recency only dates the newest one.
+      ...(typeof fact.as_of === "string" ? { as_of: fact.as_of } : {}),
     }] : []
   ));
   if (quotes.length === 0 && facts.length === 0) return null;
