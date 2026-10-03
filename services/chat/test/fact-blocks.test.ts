@@ -336,7 +336,7 @@ test("the comparison title names each company's period and end, and a fiscal-cal
       { fiscal_year: 2025, period_end: "2025-01-26" },
       { fiscal_year: 2025, period_end: "2025-09-27" },
     ], 2025),
-    "Side by side: NVDA FY2025 (ended 2025-01-26), AAPL FY2025 (ended 2025-09-27); fiscal years end 8 months apart",
+    "Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart",
   );
   // Ends a month apart are the same season: no note.
   assert.equal(
@@ -344,7 +344,7 @@ test("the comparison title names each company's period and end, and a fiscal-cal
       { fiscal_year: 2026, period_end: "2026-01-25" },
       { fiscal_year: 2025, period_end: "2025-12-27" },
     ], undefined),
-    "Side by side: NVDA FY2026 (ended 2026-01-25), AMD FY2025 (ended 2025-12-27)",
+    "Side by side: NVDA FY2026 (ended Jan 2026), AMD FY2025 (ended Dec 2025)",
   );
   // A company without the year asked for says so; nothing is substituted.
   assert.equal(
@@ -353,7 +353,7 @@ test("the comparison title names each company's period and end, and a fiscal-cal
       undefined,
       { fiscal_year: 2025, period_end: "2025-09-27" },
     ], 2025),
-    "Side by side: NVDA FY2025 (ended 2025-01-26), AMD: no FY2025 figures, AAPL FY2025 (ended 2025-09-27); fiscal years end 8 months apart",
+    "Side by side: NVDA FY2025 (ended Jan 2025), AMD: no FY2025 figures, AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart",
   );
 });
 

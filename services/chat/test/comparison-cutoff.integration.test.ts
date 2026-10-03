@@ -95,11 +95,11 @@ test("a comparison of a named fiscal year shows that year for each company, with
   assert.equal(revenueOf(fy2025, AAPL.issuer_id), "$416.2B");
   assert.equal(
     fy2025.find((block) => block.kind === "metrics_comparison")!.title,
-    "Side by side: NVDA FY2025 (ended 2025-01-26), AAPL FY2025 (ended 2025-09-27); fiscal years end 8 months apart",
+    "Side by side: NVDA FY2025 (ended Jan 2025), AAPL FY2025 (ended Sep 2025); fiscal years end 8 months apart",
   );
 
   // Without a named year: each company's latest, labelled as such.
   const latest = await load();
   assert.equal(revenueOf(latest, NVDA.issuer_id), "$209.9B");
-  assert.match(String(latest.find((block) => block.kind === "metrics_comparison")!.title), /NVDA FY2026 \(ended 2026-01-25\), AAPL FY2025 \(ended 2025-09-27\); fiscal years end 4 months apart/);
+  assert.match(String(latest.find((block) => block.kind === "metrics_comparison")!.title), /NVDA FY2026 \(ended Jan 2026\), AAPL FY2025 \(ended Sep 2025\); fiscal years end 4 months apart/);
 });

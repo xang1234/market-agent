@@ -222,13 +222,20 @@ export function comparisonTitle(
   const parts = labels.map((label, index) => {
     const period = periods[index];
     return period?.period_end && typeof period.fiscal_year === "number"
-      ? `${label} FY${period.fiscal_year} (ended ${period.period_end})`
+      ? `${label} FY${period.fiscal_year} (ended ${endMonth(period.period_end)})`
       : `${label}: no ${fiscalYear === undefined ? "annual" : `FY${fiscalYear}`} figures`;
   });
   const ends = periods.flatMap((period) => period?.period_end ? [Date.parse(period.period_end)] : []);
   const months = ends.length > 1 ? Math.round((Math.max(...ends) - Math.min(...ends)) / MONTH_MS) : 0;
   const gap = months >= 2 ? `; fiscal years end ${ends.length > 2 ? "up to " : ""}${months} months apart` : "";
   return `Side by side: ${parts.join(", ")}${gap}`;
+}
+
+// "Jan 2025": the month a fiscal year ends, not the day. Every number in a
+// title supports the narrative, and a day ("26") would also match unrelated
+// figures; the exact date goes to the model in displayed_figures.
+function endMonth(periodEnd: string): string {
+  return new Date(`${periodEnd}T00:00:00Z`).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
 }
 
 // Revenue by business segment for the latest quarter that has any (#157). Each

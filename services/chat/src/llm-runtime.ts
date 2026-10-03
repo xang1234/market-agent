@@ -134,9 +134,9 @@ export async function composeAnalystBlocksWithLlm(input: {
           "(e.g. NVDA), and never compute new figures such as growth rates,",
           "margins, or ratios; describe direction and comparison in words instead.",
           // Fiscal calendars differ (#180): the period and its end date come with each figure.
-          "Name the fiscal period each figure is for (its period and period_end). When a",
-          "comparison's title says the fiscal years end months apart, say so: the same fiscal",
-          "year covers different months for each company.",
+          "Name the fiscal period each figure is for (its period, and the month its period_end",
+          "falls in; never the day). When a comparison's title says the fiscal years end months",
+          "apart, say so: the same fiscal year covers different months for each company.",
           "If the tool context flags data as stale (quote.stale, or",
           "fact_recency.stale / a large fact_recency.age_days), explicitly note",
           "that the figure may be out of date and say how old it is.",
@@ -179,11 +179,10 @@ export async function composeAnalystBlocksWithLlm(input: {
     displayedFigures(input.factBlocks).flatMap((figure) =>
       figure.company === undefined ? [] : [
         { company: figure.company, value: figure.value },
-        // A fiscal year's end is that company's too: the title shows every company's,
-        // so "NVDA's year ended 2025-09-27" (AAPL's) must not pass as supported (#180).
-        // ponytail: month and day only; the year is shared ("fiscal 2025" for both),
-        // so owning it would drop every sentence that opens with the year.
-        ...(figure.period_end ? [{ company: figure.company, value: figure.period_end.slice(5) }] : []),
+        // So is its fiscal year: the title shows every company's, so "NVDA's FY2025"
+        // must not pass when NVDA's figures are FY2026 (#180). A year every company
+        // shares is no one's in particular (narrative-guard.ts).
+        ...(figure.period ? [{ company: figure.company, value: figure.period }] : []),
       ]
     ),
   );

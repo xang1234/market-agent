@@ -485,36 +485,46 @@ test("a replayed reply crediting AMD's margin to NVIDIA loses that sentence; the
   assert.equal(right.text, "AMD's gross margin is 49.2%. NVDA is larger.");
 });
 
-test("a fiscal-year end credited to the wrong company loses that sentence (#180)", async () => {
-  const blocks = [{
+function fiscalComparison(nvda: { year: number; end: string; revenue: string }) {
+  return [{
     kind: "metrics_comparison",
-    title: "Side by side: NVDA FY2025 (ended 2025-01-26), AAPL FY2025 (ended 2025-09-27); fiscal years end 8 months apart",
+    title: "Side by side (fiscal years)",
     subject_labels: ["NVDA", "AAPL"],
     metrics: ["Revenue"],
-    cells: [[{ value_ref: "f1", format: "$130.5B" }], [{ value_ref: "f2", format: "$416.2B" }]],
+    cells: [[{ value_ref: "f1", format: nvda.revenue }], [{ value_ref: "f2", format: "$416.2B" }]],
     data_ref: {
       params: {
         fact_bindings: [
-          { fact_id: "f1", fiscal_year: 2025, fiscal_period: "FY", period_end: "2025-01-26" },
+          { fact_id: "f1", fiscal_year: nvda.year, fiscal_period: "FY", period_end: nvda.end },
           { fact_id: "f2", fiscal_year: 2025, fiscal_period: "FY", period_end: "2025-09-27" },
         ],
       },
     },
   }];
-  const narrate = async (reply: string) => {
-    const composed = await composeAnalystBlocksWithLlm({
-      env: BASE_ENV,
-      context: { userIntent: "Compare NVDA's and AAPL's fiscal 2025 revenue", bundleId: "peer_comparison" },
-      blocks: [NARRATIVE_BLOCK],
-      toolCalls: [],
-      factBlocks: blocks,
-      createClient: () => async () => ({ text: reply }),
-    });
-    return (composed[0].segments as Array<{ text: string }>)[0].text;
-  };
-  const right = "NVDA's fiscal 2025 ended 2025-01-26 and AAPL's ended 2025-09-27, 8 months apart.";
-  assert.equal(await narrate(right), right);
-  assert.equal(await narrate("NVDA's fiscal 2025 ended September 27. In fiscal 2025, NVDA is smaller."), "In fiscal 2025, NVDA is smaller.");
+}
+
+async function narrate(factBlocks: ReadonlyArray<Record<string, unknown>>, reply: string) {
+  const composed = await composeAnalystBlocksWithLlm({
+    env: BASE_ENV,
+    context: { userIntent: "Compare NVDA's and AAPL's revenue", bundleId: "peer_comparison" },
+    blocks: [NARRATIVE_BLOCK],
+    toolCalls: [],
+    factBlocks,
+    createClient: () => async () => ({ text: reply }),
+  });
+  return (composed[0].segments as Array<{ text: string }>)[0].text;
+}
+
+test("a fiscal year is credited to the company it belongs to, unless every company shares it (#180)", async () => {
+  // Latest years differ: 2026 is NVDA's, 2025 AAPL's.
+  const latest = fiscalComparison({ year: 2026, end: "2026-01-25", revenue: "$209.9B" });
+  assert.equal(await narrate(latest, "NVDA's FY2025 revenue was $209.9B. NVDA is smaller."), "NVDA is smaller.");
+  const right = "NVDA's FY2026 revenue was $209.9B and AAPL's FY2025 revenue was $416.2B.";
+  assert.equal(await narrate(latest, right), right);
+  // Both FY2025: the year needs no company.
+  const shared = fiscalComparison({ year: 2025, end: "2025-01-26", revenue: "$130.5B" });
+  const opening = "In fiscal 2025, NVDA's revenue was $130.5B.";
+  assert.equal(await narrate(shared, opening), opening);
 });
 
 // A provider that accepts the request and never answers. Its open connection keeps
