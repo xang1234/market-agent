@@ -483,6 +483,27 @@ test("the composer reports the deployment that wrote the answer (#183)", async (
   assert.deepEqual(answered, ["openai/gpt-4.1"]);
 });
 
+test("a fallback sentence shown in place of the answer was written by no model (#183)", async () => {
+  const answeredBy = async (reply: { text: string; truncated?: boolean }, factBlocks?: ReadonlyArray<Record<string, unknown>>) => {
+    const answered: string[] = [];
+    await composeAnalystBlocksWithLlm({
+      env: BASE_ENV,
+      context: { userIntent: "Compare NVDA with AMD", bundleId: "peer_comparison" },
+      blocks: [NARRATIVE_BLOCK],
+      toolCalls: [],
+      factBlocks,
+      createClient: () => async () => reply,
+      onAnswered: (deployment) => answered.push(deployment),
+    });
+    return answered;
+  };
+  assert.deepEqual(await answeredBy({ text: "" }), [], "empty");
+  assert.deepEqual(await answeredBy({ text: "Demand rose and", truncated: true }), [], "cut off");
+  // Every sentence quotes a figure the user is not shown: the guard drops them all.
+  assert.deepEqual(await answeredBy({ text: "NVDA's margin is 99.9%." }, COMPARISON_BLOCKS), [], "all guarded");
+  assert.deepEqual(await answeredBy({ text: "NVDA is larger." }, COMPARISON_BLOCKS), ["openai/gpt-4.1"], "kept");
+});
+
 test("the model sees each comparison figure with the company and metric it belongs to", async () => {
   const { prompt } = await compareWithReply("NVDA leads.");
   assert.ok(
