@@ -32,7 +32,8 @@ This is the path the chat-recovery epic uses to seal chart and table blocks buil
 Each block in a chat message carries three independent claims. They are not a trust score.
 
 - **Evidence binding (`linked`/`unknown`):** every value the block cites is in its sealed snapshot's manifest. These
-  are the refs the seal verifier checks, plus sealed series.
+  are the refs the seal verifier checks, plus sealed series. A `table` of literal cells is never linked: the seal
+  requires only one binding on it, which says nothing about the other cells.
 - **Calculation (`verified`/`not_verified`):** the server recomputed the result from its recorded inputs. Only a
   `financial_answer` qualifies, and only one whose run, unit and `presentation_hash` have a certificate
   (`snapshot_financial_runs`) in that snapshot.

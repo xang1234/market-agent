@@ -37,6 +37,11 @@ export type SealedSnapshotRecord = {
   certificates: ReadonlyArray<{ run_id: string; unit_id: string; presentation_hash: string }>;
 };
 
+// Kinds that display literal values with no per-value reference: a binding
+// elsewhere on the block (the seal needs only one) says nothing about the rest,
+// so they are never source-linked.
+const LITERAL_VALUE_KINDS: ReadonlySet<string> = new Set(["table"]);
+
 export const UNPROVEN: BlockProof = Object.freeze({ evidence: "unknown", calculation: "not_verified", public_by_cutoff: "unknown" });
 
 // `snapshot` is null when the block has no sealed snapshot (a legacy or
@@ -60,6 +65,7 @@ function isCertified(block: Record<string, unknown>, snapshot: SealedSnapshotRec
 // At least one cited value, and every one in the manifest. A block whose refs
 // cannot be read (the seal's extractor rejects them) is not linked.
 function citesOnlySealed(block: Record<string, unknown>, snapshot: SealedSnapshotRecord): boolean {
+  if (typeof block.kind === "string" && LITERAL_VALUE_KINDS.has(block.kind)) return false;
   try {
     return citedRefsAllSealed(block, snapshot);
   } catch {

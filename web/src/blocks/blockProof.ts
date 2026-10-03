@@ -32,7 +32,7 @@ export function proofRows(proof: BlockProof | undefined): Array<{ label: string;
     {
       label: 'Evidence binding',
       value: proof?.evidence === 'linked'
-        ? 'Source-linked: every value shown binds to evidence sealed in this snapshot.'
+        ? 'Source-linked: the evidence this block cites is sealed in this snapshot.'
         : 'Unknown: no sealed evidence binding is established for this view.',
     },
     {

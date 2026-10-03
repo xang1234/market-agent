@@ -36,6 +36,16 @@ test("an ordinary source-linked table is linked but not a verified calculation (
   assert.equal(deriveBlockProof(unsealed, SNAPSHOT).evidence, "unknown", "an unsealed singular series is not skipped");
 });
 
+test("a table of literal cells is not source-linked by one binding elsewhere on it", () => {
+  const literal = {
+    kind: "table",
+    data_ref: { kind: "table", id: "t", params: { fact_bindings: [{ fact_id: "00000000-0000-4000-8000-0000000000f1" }] } },
+    columns: ["Metric", "Value"],
+    rows: [["Revenue", "$1B"], ["Margin", "99%"]],
+  };
+  assert.equal(deriveBlockProof(literal, SNAPSHOT).evidence, "unknown");
+});
+
 test("a certified financial answer carries verified arithmetic and public-by-cutoff proof", () => {
   assert.deepEqual(deriveBlockProof(certified, SNAPSHOT), { evidence: "linked", calculation: "verified", public_by_cutoff: "proven" });
 });
