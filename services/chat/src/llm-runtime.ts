@@ -139,7 +139,7 @@ export async function composeAnalystBlocksWithLlm(input: {
           "margins, or ratios; describe direction and comparison in words instead.",
           // Fiscal calendars differ (#180): the period and its end date come with each figure.
           "Name the fiscal period each figure is for (its period, and the month its period_end",
-          "falls in; never the day). When a comparison's title says the fiscal years end months",
+          "falls in; never the day), and a chart's window by month and year. When a comparison's title says the fiscal years end months",
           "apart, say so: the same fiscal year covers different months for each company.",
           "When displayed_figures is empty, available_data lists the reported values you may use instead;",
           "a value with a coverage other than full covers only part of its period, so say so.",
@@ -193,14 +193,14 @@ export async function composeAnalystBlocksWithLlm(input: {
 
   const guarded = keepSupportedSentences(
     text,
-    [...displayTextsForBlocks(input.factBlocks ?? []), ...claimTextsFromToolCalls(input.toolCalls)],
+    [...displayTextsForBlocks(input.factBlocks ?? []).map(withoutDays), ...claimTextsFromToolCalls(input.toolCalls)],
     shown.flatMap((figure) =>
       figure.company === undefined ? [] : [
         { company: figure.company, value: figure.value },
         // So is its fiscal year: the title shows every company's, so "NVDA's FY2025"
         // must not pass when NVDA's figures are FY2026 (#180). A year every company
         // shares is no one's in particular (narrative-guard.ts).
-        ...(figure.period ? [{ company: figure.company, value: figure.period }] : []),
+        ...(figure.period ? [{ company: figure.company, value: withoutDays(figure.period) }] : []),
       ]
     ),
   );
@@ -221,6 +221,12 @@ function claimTextsFromToolCalls(toolCalls: ReadonlyArray<ChatAnalystToolRuntime
     claim.text,
     ...[claim.effective_time, claim.published_at].flatMap((date) => (date ? [monthYear(date)] : [])),
   ]);
+}
+
+// A chart's window is shown as dates ("2025-12-31 close to 2026-08-31"); the
+// guard reads them as month and year, so a day ("31") never passes as a return.
+function withoutDays(text: string): string {
+  return text.replace(/\d{4}-\d{2}-\d{2}/g, (date) => monthYear(date));
 }
 
 function monthYear(iso: string): string {
@@ -308,6 +314,9 @@ function availableData(structured: ReadonlyArray<Record<string, unknown>>): Reco
       : {}),
     currency: context.quote.currency,
     as_of: context.quote.as_of,
+    // Fresh is not live: an end-of-day or delayed quote says so.
+    ...(typeof context.quote.session_state === "string" ? { session_state: context.quote.session_state } : {}),
+    ...(typeof context.quote.delay_class === "string" ? { delay_class: context.quote.delay_class } : {}),
   }] : []);
   const facts = structured.flatMap((context) => (Array.isArray(context.facts) ? context.facts : []).flatMap((fact) =>
     isRecord(fact) && (typeof fact.value_num === "number" || typeof fact.value_text === "string") ? [{

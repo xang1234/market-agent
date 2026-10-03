@@ -569,7 +569,7 @@ test("with no figures shown, the model still gets the evidence, compactly, as av
     result: {
       evidence_status: "available",
       structured_context: {
-        quote: { ticker: "AAPL", price: 231.6, change_pct: 0.0078, currency: "USD", as_of: "2026-09-01T00:00:00.000Z", stale: false, source_id: "s" },
+        quote: { ticker: "AAPL", price: 231.6, change_pct: 0.0078, currency: "USD", as_of: "2026-09-01T00:00:00.000Z", stale: false, session_state: "closed", delay_class: "eod", source_id: "s" },
         facts: [
           { fact_id: "f1", metric_key: "revenue", display_name: "Revenue", value_num: 416.161, scale: 1e9, unit: "currency", currency: "USD", fiscal_year: 2025, fiscal_period: "FY", as_of: "2025-10-31T00:00:00.000Z", source_id: "s", coverage_level: "full" },
           { fact_id: "f2", metric_key: "net_income", display_name: "Net income", value_num: 25, scale: 1e9, unit: "currency", currency: "USD", fiscal_year: 2026, fiscal_period: "Q1", as_of: "2026-01-30T00:00:00.000Z", source_id: "s", coverage_level: "partial" },
@@ -592,7 +592,7 @@ test("with no figures shown, the model still gets the evidence, compactly, as av
     return JSON.parse(prompt) as Record<string, unknown>;
   };
   assert.deepEqual((await run()).available_data, {
-    quotes: [{ ticker: "AAPL", price: 231.6, change: "+0.78%", currency: "USD", as_of: "2026-09-01T00:00:00.000Z" }],
+    quotes: [{ ticker: "AAPL", price: 231.6, change: "+0.78%", currency: "USD", as_of: "2026-09-01T00:00:00.000Z", session_state: "closed", delay_class: "eod" }],
     facts: [
       { metric: "Revenue", value: 416161000000, unit: "currency", currency: "USD", period: "FY 2025", as_of: "2025-10-31T00:00:00.000Z" },
       // A partially covered period says so.
@@ -621,8 +621,8 @@ test("a turn showing only a price chart stays guarded against returns it does no
   const chart = {
     kind: "perf_comparison",
     title: "Price performance",
-    default_range: "2026-08-22 to 2026-08-31",
-    series: [{ name: "NVDA", points: [{ x: "2026-08-22", y: 0 }, { x: "2026-08-31", y: 12.5 }] }],
+    default_range: "YTD 2026: 2025-12-31 close to 2026-08-31",
+    series: [{ name: "NVDA", points: [{ x: "2025-12-31", y: 0 }, { x: "2026-08-31", y: 12.5 }] }],
   };
   const narrate = async (text: string) => {
     const composed = await composeAnalystBlocksWithLlm({
@@ -637,6 +637,13 @@ test("a turn showing only a price chart stays guarded against returns it does no
   };
   assert.equal(await narrate("NVDA returned 12.5% over the window."), "NVDA returned 12.5% over the window.");
   assert.notEqual(await narrate("NVDA returned 40.0% over the window."), "NVDA returned 40.0% over the window.");
+  // The window's dates are no returns: its day and month digits do not pass.
+  assert.notEqual(await narrate("NVDA returned 31% over the window."), "NVDA returned 31% over the window.");
+  assert.notEqual(await narrate("NVDA returned 8% over the window."), "NVDA returned 8% over the window.");
+  assert.equal(
+    await narrate("NVDA returned 12.5% from December 2025 to August 2026."),
+    "NVDA returned 12.5% from December 2025 to August 2026.",
+  );
 });
 
 test("a claim the model dates from its effective time keeps its sentence (#181)", async () => {
