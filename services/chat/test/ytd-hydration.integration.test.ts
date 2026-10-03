@@ -10,6 +10,7 @@ import { createCachedMarketDataAdapter } from "../../market/src/cached-adapter.t
 import { createMarketServer } from "../../market/src/http.ts";
 import { createPostgresListingRepository } from "../../market/src/listings.ts";
 import { zonedDateStartUtcIso } from "../../market/src/range-canonicalization.ts";
+import { ytdYear } from "../../market/src/ytd-window.ts";
 import { loadPerfComparisonBlocks } from "../src/perf-block.ts";
 import { hydrateYtdBars } from "../src/ytd-hydration.ts";
 import { bootstrapDatabase, connectedPool, dockerAvailable, registerLifoCleanup } from "../../../db/test/docker-pg.ts";
@@ -22,9 +23,9 @@ const LISTINGS = [
 ];
 const NY = "America/New_York";
 
-// A provider with split-adjusted weekday closes: 100 (NVDA) or 50 (AMD) through
-// 2025, then 20% higher. Counts its calls.
-function fakeProvider() {
+// A provider with split-adjusted weekday closes: 100 (NVDA) or 50 (AMD) before
+// the current year, 20% higher in it (times `scale`). Counts its calls.
+function fakeProvider(yearStart: string, scale = 1) {
   let calls = 0;
   const adapter: MarketDataAdapter = {
     providerName: "polygon",
@@ -34,13 +35,13 @@ function fakeProvider() {
     },
     async getBars(request: BarsRequest) {
       calls += 1;
-      const base = request.listing.id === LISTINGS[0].id ? 100 : 50;
+      const base = (request.listing.id === LISTINGS[0].id ? 100 : 50) * scale;
       const bars = [];
       for (let day = new Date(request.range.start); day.getTime() < Date.parse(request.range.end); day.setUTCDate(day.getUTCDate() + 1)) {
         const ts = zonedDateStartUtcIso(day.toISOString().slice(0, 10), NY);
         if (Date.parse(ts) < Date.parse(request.range.start) || Date.parse(ts) >= Date.parse(request.range.end)) continue;
         if (new Date(ts).getUTCDay() === 0 || new Date(ts).getUTCDay() === 6) continue;
-        const close = ts < "2026-01-01" ? base : base * 1.2;
+        const close = ts < yearStart ? base : base * 1.2;
         bars.push({ ts, open: close, high: close, low: close, close, volume: 1 });
       }
       return available(normalizedBars({
@@ -76,29 +77,50 @@ test("a live YTD request with an empty cache fetches, stores, and seals the wind
   await pool.query(`delete from market_bars`);
   await pool.query(`delete from market_bar_ranges`);
 
-  const provider = fakeProvider();
-  const clock = () => new Date(GOLDEN_AS_OF);
+  // A live turn, now: the provider's prices step up 20% at this year's start.
+  const yearStart = zonedDateStartUtcIso(`${ytdYear(new Date().toISOString(), NY)}-01-01`, NY);
+  const provider = fakeProvider(yearStart);
+  const cache = createPostgresMarketCacheRepository(pool);
   const server = createMarketServer({
-    adapter: createCachedMarketDataAdapter({ provider: provider.adapter, cache: createPostgresMarketCacheRepository(pool), clock }),
+    adapter: createCachedMarketDataAdapter({ provider: provider.adapter, cache }),
     listings: createPostgresListingRepository(pool),
-    clock,
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   registerLifoCleanup(t, () => new Promise<void>((resolve) => server.close(() => resolve())));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const chart = async (asOf: string) =>
+    (await loadPerfComparisonBlocks(pool, { listings: LISTINGS, snapshotId: "64000000-0000-4000-8000-0000000000d1", asOf, window: "ytd" }))[0];
 
-  await hydrateYtdBars({ origin, listings: LISTINGS, now: GOLDEN_AS_OF });
+  await hydrateYtdBars({ origin, listings: LISTINGS, now: new Date().toISOString() });
   assert.equal(provider.calls(), 2, "one provider fetch per company");
 
-  // Charted at a cutoff taken after the fetch (local-runtime captures it after
-  // hydrating), so the stored bars are inside it.
-  const [chart] = await loadPerfComparisonBlocks(pool, { listings: LISTINGS, snapshotId: "64000000-0000-4000-8000-0000000000d1", asOf: GOLDEN_AS_OF, window: "ytd" });
-  assert.equal(chart?.kind, "perf_comparison");
-  assert.equal(chart.default_range, "YTD 2026: 2025-12-31 close to 2026-08-31 close");
-  const lines = chart.series as Array<{ points: Array<{ y: number }> }>;
+  // The cutoff is taken after the fetch (as local-runtime does), so the stored
+  // bars are inside it.
+  const cutoff = new Date().toISOString();
+  const drawn = await chart(cutoff);
+  assert.equal(drawn?.kind, "perf_comparison");
+  assert.match(String(drawn.default_range), /^YTD \d{4}: \d{4}-12-\d{2} close to \d{4}-\d{2}-\d{2} close/);
+  const lines = drawn.series as Array<{ points: Array<{ y: number }> }>;
   assert.ok(lines.every((line) => Math.abs(line.points.at(-1)!.y - 20) < 1e-9));
 
   // Asking again reuses what the first ask stored.
-  await hydrateYtdBars({ origin, listings: LISTINGS, now: GOLDEN_AS_OF });
+  await hydrateYtdBars({ origin, listings: LISTINGS, now: new Date().toISOString() });
   assert.equal(provider.calls(), 2, "the repeat ask is served from the cache");
+
+  // A write landing after the cutoff (a fetch that outlived its client timeout)
+  // is not read at that cutoff, so it can never enter that turn's snapshot.
+  const [nvdaSpec] = drawn.provenance_series_specs as Array<{ range: { start: string; end: string } }>;
+  const late = await fakeProvider(yearStart, 10).adapter.getBars({
+    listing: { kind: "listing", id: LISTINGS[0].id },
+    interval: "1d",
+    range: nvdaSpec.range,
+    adjustment_basis: "split_adjusted",
+  });
+  assert.ok(late.outcome === "available");
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const storedAt = new Date().toISOString();
+  await cache.storeBars(late.data, { provider: "polygon", fetched_at: storedAt, expires_at: "2126-01-01T00:00:00.000Z" });
+  const atCutoff = await chart(cutoff);
+  assert.notEqual(atCutoff?.kind, "perf_comparison", "the range rewritten after the cutoff is not read at it");
+  assert.equal((await chart(new Date().toISOString()))?.kind, "perf_comparison", "a later turn reads it");
 });

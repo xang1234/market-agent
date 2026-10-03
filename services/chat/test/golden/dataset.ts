@@ -327,10 +327,10 @@ async function seedDailyBars(client: Client, company: GoldenCompany): Promise<vo
   const { rows } = await client.query<{ bar_range_id: string }>(
     `insert into market_bar_ranges
        (listing_id, source_id, provider, interval, adjustment_basis, range_start, range_end,
-        as_of, delay_class, currency, fetched_at, expires_at)
+        as_of, delay_class, currency, fetched_at, expires_at, created_at, updated_at)
      values ($1::uuid, $2::uuid, 'golden_fixture', '1d', 'split_adjusted', $3::timestamptz,
              $4::timestamptz, $4::timestamptz, 'eod', 'USD', $4::timestamptz,
-             $4::timestamptz + interval '100 years')
+             $4::timestamptz + interval '100 years', $4::timestamptz, $4::timestamptz)
      returning bar_range_id::text as bar_range_id`,
     [company.listing_id, MARKET_SOURCE_ID, sessions[0], GOLDEN_AS_OF],
   );

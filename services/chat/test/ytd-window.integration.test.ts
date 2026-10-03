@@ -27,9 +27,9 @@ test("an unrelated cached range cannot change the requested YTD window (#192)", 
   const { rows } = await client.query<{ bar_range_id: string }>(
     `insert into market_bar_ranges
        (listing_id, source_id, provider, interval, adjustment_basis, range_start, range_end,
-        as_of, delay_class, currency, fetched_at, expires_at)
+        as_of, delay_class, currency, fetched_at, expires_at, updated_at)
      values ($1::uuid, $2::uuid, 'polygon', '1d', 'split_adjusted', '2026-08-03T04:00:00Z', $3::timestamptz,
-             $3::timestamptz, 'eod', 'USD', $3::timestamptz, $3::timestamptz + interval '100 years')
+             $3::timestamptz, 'eod', 'USD', $3::timestamptz, $3::timestamptz + interval '100 years', $3::timestamptz)
      returning bar_range_id::text as bar_range_id`,
     [NVDA.listing_id, MARKET_SOURCE_ID, GOLDEN_AS_OF],
   );
@@ -53,9 +53,9 @@ test("an unrelated cached range cannot change the requested YTD window (#192)", 
     const { rows: [range] } = await client.query<{ bar_range_id: string }>(
       `insert into market_bar_ranges
          (listing_id, source_id, provider, interval, adjustment_basis, range_start, range_end,
-          as_of, delay_class, currency, fetched_at, expires_at)
+          as_of, delay_class, currency, fetched_at, expires_at, updated_at)
        values ($1::uuid, $2::uuid, 'polygon', '1d', 'split_adjusted', '2025-12-24T05:00:00Z', $3::timestamptz,
-               $3::timestamptz, 'eod', 'USD', $3::timestamptz + interval '1 second', $3::timestamptz + interval '100 years')
+               $3::timestamptz, 'eod', 'USD', $3::timestamptz + interval '1 second', $3::timestamptz + interval '100 years', $3::timestamptz)
        returning bar_range_id::text as bar_range_id`,
       [listingId, MARKET_SOURCE_ID, GOLDEN_AS_OF],
     );

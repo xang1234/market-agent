@@ -27,9 +27,9 @@ test("Polygon ranges cached under the old dividend-adjusted label are never reus
     const { rows } = await client.query<{ bar_range_id: string }>(
       `insert into market_bar_ranges
          (listing_id, source_id, provider, interval, adjustment_basis, range_start, range_end,
-          as_of, delay_class, currency, fetched_at, expires_at)
+          as_of, delay_class, currency, fetched_at, expires_at, updated_at)
        values ($1::uuid, $2::uuid, 'polygon', '1d', 'split_and_div_adjusted', $3::timestamptz, $4::timestamptz,
-               $4::timestamptz, 'eod', 'USD', $4::timestamptz, $4::timestamptz + interval '100 years')
+               $4::timestamptz, 'eod', 'USD', $4::timestamptz, $4::timestamptz + interval '100 years', $4::timestamptz)
        returning bar_range_id::text as bar_range_id`,
       [listing_id, MARKET_SOURCE_ID, LEGACY_RANGE.start, LEGACY_RANGE.end],
     );
