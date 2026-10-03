@@ -142,7 +142,8 @@ export async function composeAnalystBlocksWithLlm(input: {
           "falls in; never the day). When a comparison's title says the fiscal years end months",
           "apart, say so: the same fiscal year covers different months for each company.",
           "When displayed_figures is empty, available_data lists the reported values you may use instead.",
-          "Claims in cited_claims are sourced statements you may draw on; data_notes say what",
+          "Claims in cited_claims are sourced statements you may draw on, dated by effective_time",
+          "and published_at: say when a claim dates from if it is not recent. data_notes say what",
           "could not be shown. If staleness flags data as stale (quote.stale, or",
           "fact_recency.stale / a large fact_recency.age_days), explicitly note",
           "that the figure may be out of date and say how old it is.",
@@ -180,15 +181,19 @@ export async function composeAnalystBlocksWithLlm(input: {
       input.factBlocks?.length ? FACT_BLOCKS_FALLBACK_TEXT : NO_ANSWER_FALLBACK_TEXT,
     );
   }
-  if (!input.factBlocks?.length) {
+  // The guard limits prose to the figures shown; with none shown (no fact blocks,
+  // or only a gap note or chart), the model answers from available_data
+  // instead, so nothing is guarded (#181). One condition decides both.
+  const shown = displayedFigures(input.factBlocks ?? []);
+  if (shown.length === 0) {
     answered();
     return rewriteFirstRichTextBlock(input.blocks, text);
   }
 
   const guarded = keepSupportedSentences(
     text,
-    [...displayTextsForBlocks(input.factBlocks), ...claimTextsFromToolCalls(input.toolCalls)],
-    displayedFigures(input.factBlocks).flatMap((figure) =>
+    [...displayTextsForBlocks(input.factBlocks ?? []), ...claimTextsFromToolCalls(input.toolCalls)],
+    shown.flatMap((figure) =>
       figure.company === undefined ? [] : [
         { company: figure.company, value: figure.value },
         // So is its fiscal year: the title shows every company's, so "NVDA's FY2025"
@@ -251,7 +256,7 @@ export function answerContext(input: {
       ? ["No research claims, reported facts, or quote are on file for this subject."]
       : []),
   ];
-  const claims = claimTextsFromToolCalls(input.toolCalls);
+  const claims = citedClaims(input.toolCalls);
   const displayed = displayedFigures(input.factBlocks ?? []);
   const available = displayed.length === 0 ? availableData(structured) : null;
   return {
@@ -265,6 +270,23 @@ export function answerContext(input: {
       ? { staleness: { ...(quotes.length > 0 ? { quote: quotes } : {}), ...(factRecency.length > 0 ? { fact_recency: factRecency } : {}) } }
       : {}),
   };
+}
+
+// Cited claim text with its dates, so a past claim (an earlier quarter's
+// guidance) is not read as current.
+function citedClaims(toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>): Array<Record<string, string>> {
+  return toolCalls.flatMap((toolCall) => {
+    const evidence = (toolCall.result as { evidence?: { claims?: unknown } } | undefined)?.evidence;
+    if (!Array.isArray(evidence?.claims)) return [];
+    return evidence.claims.flatMap((claim: unknown) => {
+      if (!isRecord(claim) || typeof claim.text_canonical !== "string") return [];
+      return [{
+        text: claim.text_canonical,
+        ...(typeof claim.effective_time === "string" ? { effective_time: claim.effective_time } : {}),
+        ...(typeof claim.published_at === "string" ? { published_at: claim.published_at } : {}),
+      }];
+    });
+  });
 }
 
 // The quote and reported facts, compactly: what an answer with no displayed
