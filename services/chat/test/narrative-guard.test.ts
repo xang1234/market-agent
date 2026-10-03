@@ -43,7 +43,43 @@ test("guards each line of a bulleted answer on its own and keeps the line struct
     DISPLAYED,
   );
   assert.equal(result.text, "- Revenue reached $62.1B in Q4 2026\n- Margins held up");
-  assert.deepEqual(result.removed, ["- Grew 38% year over year"]);
+  assert.deepEqual(result.removed, ["Grew 38% year over year"]);
+});
+
+test("a numbered item keeps its marker, and loses it only with the whole item (#144)", () => {
+  const result = keepSupportedSentences(
+    "Highlights:\n\n1. Grew 38% year over year.\n2. Revenue reached $62.1B in Q4 2026.\n3. Margins held up.",
+    DISPLAYED,
+  );
+  assert.equal(result.text, "Highlights:\n\n2. Revenue reached $62.1B in Q4 2026.\n3. Margins held up.");
+  assert.deepEqual(result.removed, ["Grew 38% year over year."]);
+});
+
+test("a heading whose whole section was dropped goes with it; one with content stays (#144)", () => {
+  const result = keepSupportedSentences(
+    "## Revenue\nRevenue reached $62.1B in Q4 2026.\n\n**Growth**\n- Grew 38% year over year.\n\n### Margins\nGrew 38%.",
+    DISPLAYED,
+  );
+  assert.equal(result.text, "## Revenue\nRevenue reached $62.1B in Q4 2026.");
+  // A parent stays while a subsection under it keeps content.
+  const nested = keepSupportedSentences(
+    "## Analysis\n### Growth\nGrew 38%.\n### Revenue\nRevenue reached $62.1B in Q4 2026.\n## Risks\n### Growth\nGrew 38%.",
+    DISPLAYED,
+  );
+  assert.equal(nested.text, "## Analysis\n### Revenue\nRevenue reached $62.1B in Q4 2026.");
+  // A bold sentence the guard kept is no empty heading, last line or not.
+  for (const text of ["**Revenue reached $62.1B in Q4 2026.**", "**Revenue reached $62.1B in Q4 2026.**\n## Margins\nMargins held up."]) {
+    assert.deepEqual(keepSupportedSentences(text, DISPLAYED), { text, removed: [] });
+  }
+  // Nor goes with a dropped sentence after it.
+  assert.equal(
+    keepSupportedSentences("**Revenue reached $62.1B in Q4 2026.**\nGrew 38%.", DISPLAYED).text,
+    "**Revenue reached $62.1B in Q4 2026.**",
+  );
+  // Nor a heading that carries a figure the guard kept.
+  for (const heading of ["**Revenue: $62.1B**", "## Revenue: $62.1B"]) {
+    assert.equal(keepSupportedSentences(`${heading}\nGrew 38%.`, DISPLAYED).text, heading);
+  }
 });
 
 test("keeps paragraph breaks between supported paragraphs", () => {
@@ -331,10 +367,71 @@ test("a ticker that is also a currency prefix does not break that currency's fig
   const figures = [{ company: "CHF", value: "-CHF 3.1B" }, { company: "AMD", value: "$3.1B" }];
   assert.deepEqual(keepSupportedSentences("CHF's operating income was -CHF 3.1B.", [], figures).removed, []);
   assert.equal(keepSupportedSentences("AMD's operating income was -CHF 3.1B.", [], figures).removed.length, 1);
+  // Nor is a positive figure's prefix an attached owner (#144).
+  const positive = [{ company: "CHF", value: "CHF 3.1B" }, { company: "AMD", value: "$4.2B" }];
+  assert.deepEqual(keepSupportedSentences("CHF's operating income was CHF 3.1B.", [], positive).removed, []);
+  assert.equal(keepSupportedSentences("AMD's operating income was CHF 3.1B.", [], positive).removed.length, 1);
+  // Written with a plain space by the model, it is still the prefix.
+  assert.equal(keepSupportedSentences("AMD's operating income was CHF 3.1B.", [], positive).removed.length, 1);
+  assert.equal(keepSupportedSentences("AMD's operating income was CHF  3.1B.", [], positive).removed.length, 1);
+  assert.equal(keepSupportedSentences("AMD's operating income was CHF\t3.1B.", [], positive).removed.length, 1);
+  // Or with no unit at all ("CHF 999.0").
+  const bare = [{ company: "CHF", value: "CHF 999.0" }, { company: "AMD", value: "$4.2B" }];
+  assert.equal(keepSupportedSentences("AMD's operating income was CHF 999.0.", [], bare).removed.length, 1);
+  // A possessive or "at" ties the label to a figure the prefix doesn't cover.
+  const margin = [{ company: "CHF", value: "CHF 3.1B" }, { company: "CHF", value: "49.2%" }, { company: "AMD", value: "74.6%" }];
+  const kept = "AMD grew faster, while CHF at 49.2% had the lower margin.";
+  assert.deepEqual(keepSupportedSentences(kept, [], margin), { text: kept, removed: [] });
+  assert.equal(keepSupportedSentences("AMD grew faster, while CHF at 74.6% had the higher margin.", [], margin).removed.length, 1);
+  // Nor a label that is a later word of a compound prefix ("CFA" in "F CFA 3.1B").
+  const compound = [{ company: "CFA", value: "F CFA 3.1B" }, { company: "AMD", value: "$4.2B" }];
+  assert.deepEqual(keepSupportedSentences("CFA's operating income was F CFA 3.1B.", [], compound).removed, []);
+  assert.equal(keepSupportedSentences("AMD's operating income was F CFA 3.1B.", [], compound).removed.length, 1);
+  // A prefix only covers the figure it is written on: before another figure the
+  // label is the company's own ("CHF 49.2%"), and owns it or not.
+  const mixed = [{ company: "CHF", value: "CHF 3.1B" }, { company: "CHF", value: "49.2%" }, { company: "AMD", value: "74.6%" }];
+  assert.deepEqual(keepSupportedSentences("Margins: CHF 49.2%, AMD 74.6%.", [], mixed).removed, []);
+  assert.equal(keepSupportedSentences("AMD beat CHF 74.6%.", [], mixed).removed.length, 1);
+  // Nor a figure of the same value in another unit ("CHF 3.1%" beside "CHF 3.1B").
+  const units = [{ company: "CHF", value: "CHF 3.1B" }, { company: "CHF", value: "3.1%" }, { company: "AMD", value: "4.2%" }];
+  assert.deepEqual(keepSupportedSentences("Margins: CHF 3.1%, AMD 4.2%.", [], units).removed, []);
+  assert.equal(keepSupportedSentences("AMD's operating income was CHF 3.1B.", [], units).removed.length, 1);
+});
+
+test("a ticker written right before its figure still owns it (#144)", () => {
+  const figures = [{ company: "NVDA", value: "74.6%" }, { company: "AMD", value: "49.2%" }];
+  const kept = "Gross margin: NVDA 74.6%, AMD 49.2%.";
+  assert.deepEqual(keepSupportedSentences(kept, [], figures), { text: kept, removed: [] });
+  assert.equal(keepSupportedSentences("Gross margin: NVDA 49.2%, AMD 74.6%.", [], figures).text, "");
 });
 
 test("a company label starting with a digit is still a mention", () => {
   const figures = [{ company: "3M Company", value: "49.2%" }, { company: "NVDA", value: "74.6%" }];
   assert.deepEqual(keepSupportedSentences("3M Company's margin is 49.2%.", [], figures).removed, []);
   assert.equal(keepSupportedSentences("3M Company's margin is 74.6%.", [], figures).removed.length, 1);
+});
+
+// From the #144 eval run (docs/eval-runs/research-quality/2026-10-03T144318.md).
+const SCALE = [
+  { company: "AAPL", value: "$416.2B" },
+  { company: "NVDA", value: "$209.9B" },
+  { company: "AAPL", value: "6.05%" },
+  { company: "NVDA", value: "6.6%" },
+];
+
+test("a company owns a currency figure attached to it, past the currency symbol (#144)", () => {
+  const kept = "AAPL's strength is absolute scale: $416.2B in revenue versus NVDA's $209.9B.";
+  assert.deepEqual(keepSupportedSentences(kept, [], SCALE), { text: kept, removed: [] });
+  // The wrong-company twin still goes.
+  const swapped = "AAPL's strength is absolute scale: $209.9B in revenue versus NVDA's $416.2B.";
+  assert.equal(keepSupportedSentences(swapped, [], SCALE).text, "");
+});
+
+test("a company attached to a figure owns it though another is named earlier (#144)", () => {
+  const kept = "Despite NVDA's higher margins, the price-return chart shows AAPL at 6.05% and NVDA at 6.6%.";
+  assert.deepEqual(keepSupportedSentences(kept, [], SCALE), { text: kept, removed: [] });
+  const swapped = "Despite NVDA's higher margins, the price-return chart shows AAPL at 6.6% and NVDA at 6.05%.";
+  assert.equal(keepSupportedSentences(swapped, [], SCALE).text, "");
+  // Attached to the other company, the figure is not credited to the subject.
+  assert.equal(keepSupportedSentences("NVDA beat AAPL at 6.6%.", [], SCALE).text, "");
 });

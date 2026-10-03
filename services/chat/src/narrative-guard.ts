@@ -7,7 +7,9 @@
 // credited to that company in the same sentence, even when a claim or title
 // repeats the number. Nothing carries across sentences: "Its margin..." could
 // mean any company named earlier, so it is dropped. Within the sentence:
-// - the companies named between the previous such figure (or the sentence
+// - a company directly attached to the figure owns it ("AMD's 49.2%", "AMD at
+//   49.2%", "NVDA's $209.9B"), whatever else is named before it;
+// - otherwise, the companies named between the previous such figure (or the sentence
 //   start) and this one must all own it ("NVDA's 74.6%, ahead of AMD at 49.2%");
 //   a company introduced as a comparison ("compared with", "unlike", "versus")
 //   yields to another company or a pronoun there;
@@ -16,7 +18,7 @@
 //   unless a pronoun is the subject ("its margin was 49.2% in AMD's filing");
 // - if none, the company of the previous figure ("NVDA's revenue was $130.5B
 //   and margin 74.6%").
-// Anything else (two companies before a figure, "respectively", no company) is
+// Anything else (two unattached companies before a figure, "respectively", no company) is
 // dropped: the guard cannot parse who the figure belongs to, so it only keeps
 // what is unambiguous. The cost, valid sentences dropped, is tracked in #144.
 //
@@ -40,10 +42,17 @@ const NUMBER =
 // ISO code, #150), so every period before whitespace ends a sentence; the
 // all-currency test fails if one appears.
 const SENTENCE_BREAK = /(?<=[.!?])\s+/;
+// Markdown list markers ("- ", "* ", "1. ", "2) ") and headings ("## Margins",
+// a line that is only "**Margins**"; a bold sentence ending "." is prose).
+const LIST_MARKER = /^\s*(?:[-*+]|\d{1,2}[.)])\s+/;
+const HEADING = /^\s*(?:#{1,6}\s|\*\*[^*]*[^*.!?]\*\*:?\s*$)/;
 const COMPARED_WITH = /(?:compared (?:with|to)|unlike|versus|vs\.?|than|relative to|against)\s+$/i;
-// Between a comparison company and a figure it owns: nothing but a possessive
-// or "at"/"with" ("versus AMD's 49.2%", "compared with AMD at 49.2%").
-const ATTACHED = /^(?:['’]s)?\s*(?:(?:at|with)\s+)?$/i;
+// Between a company and a figure it owns: nothing but a possessive or
+// "at"/"with", then the figure's currency prefix if any ("versus AMD's 49.2%",
+// "compared with AMD at 49.2%", "NVDA's $209.9B", "AMD's CHF 3.1B"; #144).
+const ATTACHED = /^(?:['’]s)?\s*(?:(?:at|with)\s+)?(?:(?:[A-Z]{1,4}\.?(?:[ \u00a0\u202f][A-Z]{1,4})?\p{Sc}?|\p{Sc})[ \u00a0\u202f]?)?$/u;
+// The same without a currency prefix, for a label that is also a currency word.
+const ATTACHED_PLAIN = /^(?:['’]s)?\s*(?:(?:at|with)\s+)?$/i;
 const PRONOUN = /\b(?:its|it|their|they|the former|the latter)\b/i;
 // Between a figure and the company that owns it: its unit, then a preposition
 // ("% for ", "B at ", " percent in "). No punctuation and no other words, so a
@@ -78,18 +87,28 @@ export function keepSupportedSentences(
   }
   // A one-letter ticker ("A") cannot be told from the article, so it is never
   // recognized; sentences quoting its figures are dropped.
+  // The words of the figures' currency prefixes ("CHF" in "CHF 3.1B", "F" and
+  // "CFA" in "F CFA 3.1B"): a label that is one can't be told from the
+  // currency before a figure.
+  const currencyWords = new Set(attributedFigures.flatMap((figure) =>
+    figure.value.match(/^[-−]?(\D*)/)![1].match(/[A-Za-z]+/g) ?? []
+  ));
   const companies = [...new Set(attributedFigures.map((figure) => figure.company))]
     .filter((company) => company.length > 1);
 
   const removed: string[] = [];
-  const lines: string[] = [];
+  // null marks a line the guard dropped whole.
+  const lines: Array<string | null> = [];
   // Lines are boundaries too, so each bullet of a list is judged on its own.
   for (const line of text.trim().split(/\r?\n/)) {
     if (line.trim() === "") {
       lines.push("");
       continue;
     }
-    const kept = line.trim().split(SENTENCE_BREAK).filter((sentence) => {
+    // A list marker ("1.", "-") is not a sentence: it is set aside, and stays
+    // with whatever of its item is kept.
+    const lead = line.match(LIST_MARKER)?.[0] ?? line.match(/^\s*/)![0];
+    const kept = line.slice(lead.length).trim().split(SENTENCE_BREAK).filter((sentence) => {
       const allNumbers = numberMatches(sentence);
       const mentions = companyMentions(sentence, companies);
       // Digits inside a label ("issuer:12ab34cd") are not figures, and a label
@@ -114,18 +133,25 @@ export function keepSupportedSentences(
         const stretch = named.filter((mention) => mention.index >= from && mention.index < index);
         // A company introduced as a comparison is not the figure's owner
         // ("Unlike AMD, the company achieved 49.2%"; "Compared with AMD,
-        // NVDA's 74.6%"), unless it is directly attached to the figure
-        // ("NVDA grew faster, versus AMD's 49.2%"), which then outranks any
-        // other company in the stretch.
+        // NVDA's 74.6%"). A company directly attached to the figure ("versus
+        // AMD's 49.2%", "shows AAPL at 6.05%") owns it, comparison or not, and
+        // outranks any other company in the stretch (#144).
         const comparisons = stretch.filter((mention) => COMPARED_WITH.test(sentence.slice(0, mention.index)));
         const subjects = stretch.filter((mention) => !comparisons.includes(mention));
         // A pronoun with no company subject ("Its margin was 49.2% in AMD's
         // filing") refers back to an earlier figure's company in the sentence,
         // if any: nothing named near this figure may claim it.
         const pronounSubject = subjects.length === 0 && PRONOUN.test(sentence.slice(from, index));
-        const attached = comparisons.filter((mention) =>
-          ATTACHED.test(sentence.slice(mention.index + mention.company.length, index))
-        );
+        // A currency-word label is attached by a possessive or "at"/"with"
+        // ("CHF's 49.2%", "CHF at 49.2%"); right before a figure, only as a
+        // comparison company, as before #144: whether "CHF 3.1B" names CHF or
+        // the franc is unknowable.
+        const attached = stretch.filter((mention) => {
+          const between = sentence.slice(mention.index + mention.company.length, index);
+          return currencyWords.has(mention.company)
+            ? ATTACHED_PLAIN.test(between) && (between.trim() !== "" || comparisons.includes(mention))
+            : ATTACHED.test(between);
+        });
         const before = attached.length > 0 ? attached : subjects;
         // An unattached comparison company ("compared with AMD's revenue of
         // $74.6B") may be the figure's real subject, so nothing else may claim
@@ -152,9 +178,26 @@ export function keepSupportedSentences(
       if (!isSupported) removed.push(sentence);
       return isSupported;
     });
-    if (kept.length > 0) lines.push(line.match(/^\s*/)![0] + kept.join(" "));
+    lines.push(kept.length > 0 ? lead + kept.join(" ") : null);
   }
-  return { text: lines.join("\n").replace(/\n{3,}/g, "\n\n").trim(), removed };
+  // A heading whose section lost everything goes too: the guard dropped lines
+  // before the next heading at its level or above, and kept none of them.
+  // A heading with a figure in it ("## Revenue: $62.1B") is content: its
+  // figure passed the guard.
+  const level = (line: string | null) =>
+    line !== null && HEADING.test(line) && !/\d/.test(line) ? line.trim().match(/^#+/)?.[0].length ?? 7 : 0;
+  const keepHeading = (i: number): boolean => {
+    let lost = false;
+    for (const line of lines.slice(i + 1)) {
+      if (line === null) lost = true;
+      else if (line.trim() === "") continue;
+      else if (level(line) === 0) return true;
+      else if (level(line) <= level(lines[i])) break;
+    }
+    return !lost;
+  };
+  const shown = lines.filter((line, i): line is string => line !== null && (level(line) === 0 || keepHeading(i)));
+  return { text: shown.join("\n").replace(/\n{3,}/g, "\n\n").trim(), removed };
 }
 
 function numbersIn(text: string): string[] {
