@@ -43,7 +43,7 @@ function MessageItemInner({ message, onMeasure }: MessageItemProps): ReactElemen
         <AssistantTurn className="w-full">
           {message.blocks.map((block) => (
             <BlockColumn key={block.id} kind={block.kind}>
-              <MemoizedBlockView block={block} />
+              <MemoizedBlockView block={block} proof={message.block_proofs?.[block.id]} />
             </BlockColumn>
           ))}
         </AssistantTurn>

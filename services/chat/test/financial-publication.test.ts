@@ -8,6 +8,7 @@ import type { Client } from "pg";
 import { dockerAvailable } from "../../../db/test/docker-pg.ts";
 import { requestCancellation } from "../../financial-engine/src/run-repo.ts";
 import { IDS } from "../../financial-engine/test/db-fixtures.ts";
+import { listChatMessagesForThread } from "../src/messages.ts";
 import { chatDatabase, chatHarness, completed, revenueModel } from "./financial-fixtures.ts";
 
 async function published(db: Client, threadId: string) {
@@ -44,6 +45,14 @@ test("chat financial publication", { timeout: 300_000 }, async (t) => {
     const retried = completed((await ask(turnId)).events);
     assert.ok(retried.message_id);
     assert.deepEqual(await published(db, threadId), { messages: 1, certificates: 1 });
+  });
+
+  await t.test("read back, the certified answer carries verified arithmetic and public-by-cutoff proof (#193)", async () => {
+    const read = await listChatMessagesForThread(pool, { thread_id: threadId, user_id: IDS.owner });
+    const answer = read?.messages.find((message) => JSON.stringify(message.blocks).includes('"financial_answer"'));
+    assert.ok(answer);
+    const block = (answer.blocks as Array<{ id: string; kind: string }>).find((candidate) => candidate.kind === "financial_answer")!;
+    assert.deepEqual(answer.block_proofs[block.id], { evidence: "linked", calculation: "verified", public_by_cutoff: "proven" });
   });
 
   await t.test("a thread that no longer belongs to the owner cannot receive the answer", async () => {

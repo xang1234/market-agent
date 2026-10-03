@@ -9,6 +9,7 @@ import { extractInspectableRefs } from '../evidence/inspectableRefs.ts'
 import type { EvidenceBlockInspection } from '../evidence/inspectionTypes.ts'
 import { useEvidenceInspector } from '../evidence/useEvidenceInspector.ts'
 import type { SnapshotManifest } from './snapshotManifest.ts'
+import { BlockProofContext, proofLabels, proofRows, type BlockProof } from './blockProof.ts'
 import { VerificationLabel } from './VerificationLabel.tsx'
 import type { VerificationKind } from './verification.ts'
 import { SnapshotManifestContext } from './snapshotManifestContext.ts'
@@ -32,13 +33,15 @@ export function SnapshotManifestProvider({ manifest, children }: SnapshotManifes
 }
 
 // `verification` overrides the kind's own label, e.g. for an answer that failed verification.
-type BlockViewProps = { block: Block; verification?: VerificationKind }
+// `proof` is the server-derived claim set for this block (#193); with it, the
+// label says what is actually established, not the kind's default.
+type BlockViewProps = { block: Block; verification?: VerificationKind; proof?: BlockProof }
 
 // Dispatches a block to its registered renderer. If no renderer is
 // registered for the kind (e.g., a sibling-bead kind hasn't shipped yet),
 // renders an unobtrusive placeholder so a snapshot still surfaces the
 // gap to a reviewer instead of silently dropping content.
-export function BlockView({ block, verification: verificationOverride }: BlockViewProps): ReactElement {
+export function BlockView({ block, verification: verificationOverride, proof }: BlockViewProps): ReactElement {
   const registry = useBlockRegistry()
   const inspector = useEvidenceInspector()
   const renderer = registry.resolve(block.kind)
@@ -57,14 +60,20 @@ export function BlockView({ block, verification: verificationOverride }: BlockVi
   // sidesteps the react-hooks/static-components heuristic that treats
   // capitalized JSX identifiers as locally-declared components.
   const content = createElement(renderer, { block })
-  const verification = verificationOverride ?? registry.verification(block)
+  // Kinds that declare no label (disclosures, sources, self-labelling certified
+  // answers) stay unlabelled; the rest show what their proof establishes.
+  const declared = verificationOverride ?? registry.verification(block)
+  const labels: VerificationKind[] = declared === null ? [] : proof && !verificationOverride ? proofLabels(proof, block.kind) : [declared]
   // The label sits on the block itself, so neighbouring blocks never borrow each other's status.
-  const rendered = verification === null ? content : (
-    <div className="flex flex-col items-start gap-1" data-block-verification={verification}>
-      <VerificationLabel kind={verification} />
+  const labelled = labels.length === 0 ? content : (
+    <div className="flex flex-col items-start gap-1" data-block-verification={labels.join(' ')}>
+      <div className="flex flex-wrap gap-1">
+        {labels.map((kind) => <VerificationLabel key={kind} kind={kind} />)}
+      </div>
       <div className="w-full">{content}</div>
     </div>
   )
+  const rendered = proof ? <BlockProofContext.Provider value={proof}>{labelled}</BlockProofContext.Provider> : labelled
   if (inspector === null) return rendered
   return (
     <div className="group relative" data-testid={`block-shell-${block.id}`}>
@@ -72,7 +81,7 @@ export function BlockView({ block, verification: verificationOverride }: BlockVi
         type="button"
         aria-label="Inspect block metadata"
         data-testid={`block-${block.id}-metadata`}
-        onClick={() => inspector.openBlockInspection(blockInspectionFromBlock(block))}
+        onClick={() => inspector.openBlockInspection(blockInspectionFromBlock(block, proof))}
         className="absolute right-0 top-0 z-10 hidden h-6 w-6 items-center justify-center rounded border border-line-strong bg-surface text-xs font-semibold text-muted shadow-sm group-hover:flex focus:flex"
       >
         i
@@ -82,7 +91,7 @@ export function BlockView({ block, verification: verificationOverride }: BlockVi
   )
 }
 
-function blockInspectionFromBlock(block: Block): EvidenceBlockInspection {
+function blockInspectionFromBlock(block: Block, proof: BlockProof | undefined): EvidenceBlockInspection {
   const relatedRefs = extractInspectableRefs(block).map(({ ref }) => ref)
   return {
     snapshot_id: block.snapshot_id,
@@ -97,6 +106,9 @@ function blockInspectionFromBlock(block: Block): EvidenceBlockInspection {
       { label: 'Snapshot', value: block.snapshot_id },
       { label: 'As of', value: block.as_of },
       { label: 'Data ref', value: data_ref_label(block.data_ref) },
+      // Each claim on its own: a sealed snapshot is not a verified calculation,
+      // and stored-by-cutoff is not public-by-cutoff.
+      ...proofRows(proof),
     ],
     related_refs: relatedRefs,
   }

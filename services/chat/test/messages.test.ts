@@ -268,6 +268,7 @@ test("listChatMessagesForThread returns ordered messages for an owned thread", a
         },
       ];
     }
+    if (text.includes("from snapshots") || text.includes("from snapshot_financial_runs")) return [];
     throw new Error(`unexpected query: ${text}`);
   });
 
@@ -285,6 +286,49 @@ test("listChatMessagesForThread returns ordered messages for an owned thread", a
     "11111111-1111-4111-a111-111111111111",
     "00000000-0000-4000-8000-000000000001",
   ]);
+});
+
+test("a read message carries each block's own proof: only the certified result is verified (#193)", async () => {
+  const SNAPSHOT = "22222222-2222-4222-a222-222222222222";
+  const FACT = "00000000-0000-4000-8000-0000000000f1";
+  const HASH = "a".repeat(64);
+  const db = messageListDb((text) => {
+    if (text.includes("from chat_threads")) return [{ owned: true }];
+    if (text.includes("from chat_messages")) {
+      return [{
+        message_id: "33333333-3333-4333-a333-333333333333",
+        thread_id: "11111111-1111-4111-a111-111111111111",
+        role: "assistant",
+        snapshot_id: SNAPSHOT,
+        blocks: [
+          { id: "certified", kind: "financial_answer", presentation_hash: HASH, financial: { run_id: "run-1", unit_id: "unit-1" } },
+          // Narrative beside it, claiming a status in its own JSON.
+          { id: "narrative", kind: "rich_text", segments: [{ type: "text", text: "Margins widened." }], proof: { calculation: "verified", public_by_cutoff: "proven" } },
+          { id: "table", kind: "metric_row", items: [{ label: "Revenue", value_ref: FACT, format: "$1B" }] },
+        ],
+        content_hash: "sha256:abc",
+        created_at: "2026-05-06T00:00:00.000Z",
+      }];
+    }
+    if (text.includes("from snapshots")) {
+      return [{ snapshot_id: SNAPSHOT, fact_refs: [FACT], claim_refs: [], event_refs: [], document_refs: [], source_ids: [], series_specs: [] }];
+    }
+    if (text.includes("from snapshot_financial_runs")) {
+      return [{ snapshot_id: SNAPSHOT, run_id: "run-1", unit_id: "unit-1", presentation_hash: HASH }];
+    }
+    throw new Error(`unexpected query: ${text}`);
+  });
+
+  const result = await listChatMessagesForThread(db, {
+    thread_id: "11111111-1111-4111-a111-111111111111",
+    user_id: "00000000-0000-4000-8000-000000000001",
+  });
+
+  assert.deepEqual(result?.messages[0].block_proofs, {
+    certified: { evidence: "linked", calculation: "verified", public_by_cutoff: "proven" },
+    narrative: { evidence: "unknown", calculation: "not_verified", public_by_cutoff: "unknown" },
+    table: { evidence: "linked", calculation: "not_verified", public_by_cutoff: "unknown" },
+  });
 });
 
 test("listChatMessagesForThread returns null and does not read messages for wrong-user threads", async () => {

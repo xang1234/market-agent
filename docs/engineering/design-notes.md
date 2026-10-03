@@ -27,6 +27,30 @@ analyze re-exports it). `auditManifestToolCallLog` (`services/snapshot/src/manif
 
 This is the path the chat-recovery epic uses to seal chart and table blocks built from facts.
 
+## What a block's label claims (#193)
+
+Each block in a chat message carries three independent claims. They are not a trust score.
+
+- **Evidence binding (`linked`/`unknown`):** every value the block cites is in its sealed snapshot's manifest. These
+  are the refs the seal verifier checks, plus sealed series.
+- **Calculation (`verified`/`not_verified`):** the server recomputed the result from its recorded inputs. Only a
+  `financial_answer` qualifies, and only one whose run, unit and `presentation_hash` have a certificate
+  (`snapshot_financial_runs`) in that snapshot.
+- **Public by cutoff (`proven`/`unknown`):** the exact source versions were public by the knowledge cutoff. This
+  rests on the same certificate, because the financial verifier seals a unit only when every input's publication
+  proof is public by the cutoff. A fact or bar stored by the cutoff (its `as_of`) does not prove this.
+
+How the claims are produced and shown:
+
+- **On the server:** `deriveBlockProof` (`services/snapshot/src/block-proof.ts`) computes the claims on every
+  message read, and `listChatMessagesForThread` returns them as `block_proofs`. They sit beside the blocks, never
+  in them, so nothing stored in a block, sent by a client, or written by the model can set one.
+- **Missing proof:** with no sealed snapshot, or refs the seal cannot read, every claim is unknown or not verified.
+- **In the web app:** `BlockView` labels a block from its proof. An ordinary fact table or chart reads
+  "Source-linked"; a certified answer reads "Verified calculation" plus "Public by cutoff". Commentary that cites
+  nothing gets no label. The block inspector explains each claim separately.
+- **Elsewhere:** surfaces without proofs, including chat blocks still streaming, keep their kind's default label.
+
 ## Home secondary sections: server-side composition
 
 Home secondary sections are composed server-side in `services/home/` by four functions:
