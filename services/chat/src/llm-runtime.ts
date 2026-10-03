@@ -141,6 +141,7 @@ export async function composeAnalystBlocksWithLlm(input: {
           "Name the fiscal period each figure is for (its period, and the month its period_end",
           "falls in; never the day). When a comparison's title says the fiscal years end months",
           "apart, say so: the same fiscal year covers different months for each company.",
+          "When displayed_figures is empty, available_data lists the reported values you may use instead.",
           "Claims in cited_claims are sourced statements you may draw on; data_notes say what",
           "could not be shown. If staleness flags data as stale (quote.stale, or",
           "fact_recency.stale / a large fact_recency.age_days), explicitly note",
@@ -224,7 +225,9 @@ export type AnswerUsage = { input_tokens: number; output_tokens: number; reasoni
 // cited claim text, what could not be shown, and staleness flags. Raw tool JSON,
 // the placeholder block, and the routing bundle are left out: the narrative
 // guard drops any figure not shown, so the raw facts behind them only added
-// tokens and reasoning.
+// tokens and reasoning. When no figures are shown (no fact blocks: a quote-only
+// subject, or the fact loader came back empty), nothing is guarded either, and
+// the evidence is then summarized compactly as available_data instead.
 export function answerContext(input: {
   context: LlmRuntimeContext;
   toolCalls: ReadonlyArray<ChatAnalystToolRuntimeToolCall>;
@@ -249,16 +252,42 @@ export function answerContext(input: {
       : []),
   ];
   const claims = claimTextsFromToolCalls(input.toolCalls);
+  const displayed = displayedFigures(input.factBlocks ?? []);
+  const available = displayed.length === 0 ? availableData(structured) : null;
   return {
     question: input.context.userIntent ?? "Start a research thread",
     conversation: input.conversation ?? [],
-    displayed_figures: displayedFigures(input.factBlocks ?? []),
+    displayed_figures: displayed,
+    ...(available ? { available_data: available } : {}),
     ...(claims.length > 0 ? { cited_claims: claims } : {}),
     ...(dataNotes.length > 0 ? { data_notes: dataNotes } : {}),
     ...(quotes.length > 0 || factRecency.length > 0
       ? { staleness: { ...(quotes.length > 0 ? { quote: quotes } : {}), ...(factRecency.length > 0 ? { fact_recency: factRecency } : {}) } }
       : {}),
   };
+}
+
+// The quote and reported facts, compactly: what an answer with no displayed
+// figures can stand on. Null when there is neither.
+function availableData(structured: ReadonlyArray<Record<string, unknown>>): Record<string, unknown> | null {
+  const quotes = structured.flatMap((context) => isRecord(context.quote) ? [{
+    ticker: context.quote.ticker,
+    price: context.quote.price,
+    change_pct: context.quote.change_pct,
+    currency: context.quote.currency,
+    as_of: context.quote.as_of,
+  }] : []);
+  const facts = structured.flatMap((context) => (Array.isArray(context.facts) ? context.facts : []).flatMap((fact) =>
+    isRecord(fact) && (typeof fact.value_num === "number" || typeof fact.value_text === "string") ? [{
+      metric: fact.display_name ?? fact.metric_key,
+      value: typeof fact.value_num === "number" ? fact.value_num * (typeof fact.scale === "number" ? fact.scale : 1) : fact.value_text,
+      ...(fact.unit ? { unit: fact.unit } : {}),
+      ...(fact.currency ? { currency: fact.currency } : {}),
+      ...(fact.fiscal_year !== null && fact.fiscal_year !== undefined ? { period: `${fact.fiscal_period ?? ""} ${fact.fiscal_year}`.trim() } : {}),
+    }] : []
+  ));
+  if (quotes.length === 0 && facts.length === 0) return null;
+  return { ...(quotes.length > 0 ? { quotes } : {}), ...(facts.length > 0 ? { facts } : {}) };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

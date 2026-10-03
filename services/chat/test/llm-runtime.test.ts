@@ -554,6 +554,44 @@ test("the answer model sees a compact context, not raw tool JSON (#181)", async 
   assert.deepEqual(usage, [{ input_tokens: 900, output_tokens: 120, reasoning_tokens: 80 }]);
 });
 
+test("with no figures shown, the model still gets the evidence, compactly, as available_data (#181)", async () => {
+  let prompt = "";
+  const toolCall = {
+    tool_call_id: "tc-1",
+    tool_name: "research_lookup",
+    bundle_id: "single_subject_analysis",
+    status: "ok",
+    result: {
+      evidence_status: "available",
+      structured_context: {
+        quote: { ticker: "AAPL", price: 231.6, change_pct: 0.0078, currency: "USD", as_of: "2026-09-01T00:00:00.000Z", stale: false, source_id: "s" },
+        facts: [{ fact_id: "f1", metric_key: "revenue", display_name: "Revenue", value_num: 416.161, scale: 1e9, unit: "currency", currency: "USD", fiscal_year: 2025, fiscal_period: "FY", source_id: "s" }],
+      },
+    },
+  } as never;
+  const run = async (factBlocks?: ReadonlyArray<Record<string, unknown>>) => {
+    await composeAnalystBlocksWithLlm({
+      env: BASE_ENV,
+      context: { userIntent: "Analyze AAPL", bundleId: "single_subject_analysis" },
+      blocks: [NARRATIVE_BLOCK],
+      toolCalls: [toolCall],
+      factBlocks,
+      createClient: () => async (_deployment, request) => {
+        prompt = request.messages.at(-1)!.content;
+        return { text: "AAPL trades at $231.6." };
+      },
+    });
+    return JSON.parse(prompt) as Record<string, unknown>;
+  };
+  assert.deepEqual((await run()).available_data, {
+    quotes: [{ ticker: "AAPL", price: 231.6, change_pct: 0.0078, currency: "USD", as_of: "2026-09-01T00:00:00.000Z" }],
+    facts: [{ metric: "Revenue", value: 416161000000, unit: "currency", currency: "USD", period: "FY 2025" }],
+  });
+  assert.ok(!prompt.includes("fact_id") && !prompt.includes('"source_id"'), "still compact: no ids");
+  // With figures shown, only those may be quoted: no available_data.
+  assert.equal("available_data" in (await run(COMPARISON_BLOCKS)), false);
+});
+
 test("the model sees each comparison figure with the company and metric it belongs to", async () => {
   const { prompt } = await compareWithReply("NVDA leads.");
   assert.ok(
