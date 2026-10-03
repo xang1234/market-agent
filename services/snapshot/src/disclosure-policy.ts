@@ -149,7 +149,8 @@ const UUID_V4 =
 const ISO_8601_WITH_OFFSET =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d{1,9})?(Z|([+-])(\d{2}):(\d{2}))$/;
 
-const DISCLOSURE_ORDER: ReadonlyArray<DisclosureReasonCode> = [
+// Every reason code, in display order; the verifier admits exactly these.
+export const DISCLOSURE_REASON_CODES: ReadonlyArray<DisclosureReasonCode> = [
   "delayed_pricing",
   "eod_pricing",
   "filing_time_basis",
@@ -354,7 +355,7 @@ class RequirementAccumulator {
   }
 
   values(): RequiredDisclosure[] {
-    return DISCLOSURE_ORDER.flatMap((code) => {
+    return DISCLOSURE_REASON_CODES.flatMap((code) => {
       const item = this.byCode.get(code);
       if (item === undefined) return [];
 
