@@ -201,14 +201,22 @@ export async function listChatMessagesForThread(
       order by m.created_at asc, m.message_id asc`,
     [input.thread_id],
   );
-  const snapshots = await loadSealedSnapshots(db, rows.map((row) => row.snapshot_id));
+  // Every snapshot a message or any of its blocks names: an imported block keeps
+  // the snapshot it came from.
+  const snapshots = await loadSealedSnapshots(db, rows.flatMap((row) => [row.snapshot_id, ...blockSnapshotIds(row.blocks)]));
   return {
     messages: rows.map((row) => Object.freeze({ ...row, block_proofs: blockProofs(row, snapshots) })),
   };
 }
 
+function blockSnapshotIds(blocks: JsonValue): string[] {
+  return (Array.isArray(blocks) ? blocks : []).flatMap((block) =>
+    block !== null && typeof block === "object" && !Array.isArray(block) && typeof block.snapshot_id === "string" ? [block.snapshot_id] : []
+  );
+}
+
+// Each block is judged against its own snapshot (the message's when it names none).
 function blockProofs(row: ChatMessageRow, snapshots: ReadonlyMap<string, SealedSnapshotRecord>): Record<string, BlockProof> {
-  const snapshot = (row.snapshot_id && snapshots.get(row.snapshot_id)) || null;
   // No prototype: any string is a valid block id, "__proto__" included.
   const proofs: Record<string, BlockProof> = Object.create(null);
   const seen = new Set<string>();
@@ -218,18 +226,26 @@ function blockProofs(row: ChatMessageRow, snapshots: ReadonlyMap<string, SealedS
     // Proofs are keyed by block id: an id used twice cannot say which block a
     // claim belongs to, so it claims nothing rather than lend one block's
     // proof to its namesake.
+    const snapshotId = typeof (block as { snapshot_id?: unknown }).snapshot_id === "string"
+      ? (block as { snapshot_id: string }).snapshot_id
+      : row.snapshot_id;
+    const snapshot = (snapshotId && snapshots.get(snapshotId)) || null;
     proofs[id] = seen.has(id) ? UNPROVEN : deriveBlockProof(block, snapshot);
     seen.add(id);
   }
   return proofs;
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Each sealed snapshot's manifest and the financial certificates recorded for it.
 async function loadSealedSnapshots(
   db: ChatMessagePersistenceDb,
   snapshotIds: ReadonlyArray<string | null>,
 ): Promise<Map<string, SealedSnapshotRecord>> {
-  const ids = [...new Set(snapshotIds.filter((id): id is string => typeof id === "string" && id !== ""))];
+  // Only well-formed ids reach the uuid[] cast: a malformed one in a stored
+  // block has no sealed snapshot, and must not fail the whole read.
+  const ids = [...new Set(snapshotIds.filter((id): id is string => typeof id === "string" && UUID.test(id)))];
   if (ids.length === 0) return new Map();
   const [manifests, certificates] = await Promise.all([
     db.query<{
