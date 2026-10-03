@@ -384,3 +384,19 @@ test("a question asking for year to date gets the YTD price window (#192)", () =
   assert.equal(requestedPriceWindow("NVDA vs AMD year to date"), "ytd");
   assert.equal(requestedPriceWindow("Compare NVDA with AMD"), undefined);
 });
+
+test("the model sees a price chart's return per company over its window (#181)", () => {
+  const figures = displayedFigures([{
+    kind: "perf_comparison",
+    title: "Price return YTD 2026 (split-adjusted, excluding dividends)",
+    default_range: "YTD 2026: 2025-12-31 close to 2026-08-31 close",
+    series: [
+      { name: "NVDA", unit: "%", points: [{ x: "2025-12-31", y: 0 }, { x: "2026-08-31", y: 20 }] },
+      { name: "AMD", unit: "%", points: [{ x: "2025-12-31", y: 0 }, { x: "2026-08-31", y: -4.25 }] },
+    ],
+  }]);
+  assert.deepEqual(figures.map((figure) => [figure.company, figure.metric, figure.value, figure.period]), [
+    ["NVDA", "Price return", "20.0%", "YTD 2026: 2025-12-31 close to 2026-08-31 close"],
+    ["AMD", "Price return", "-4.3%", "YTD 2026: 2025-12-31 close to 2026-08-31 close"],
+  ]);
+});

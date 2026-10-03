@@ -785,6 +785,18 @@ export function displayedFigures(blocks: ReadonlyArray<Block>): DisplayedFigure[
       const bars = (block.bars ?? []) as ReadonlyArray<{ label?: string; format?: string }>;
       return bars.flatMap((bar) => bar.label && bar.format ? [{ metric: "Revenue", period: bar.label, value: bar.format }] : []);
     }
+    if (block.kind === "perf_comparison") {
+      // Each line's return over the window drawn (its last point), credited to
+      // its company, so the answer can discuss the chart and the guard checks it.
+      const series = (block.series ?? []) as ReadonlyArray<{ name?: string; points?: ReadonlyArray<{ y?: number }> }>;
+      const period = typeof block.default_range === "string" ? { period: block.default_range } : {};
+      return series.flatMap((line) => {
+        const last = line.points?.at(-1)?.y;
+        return line.name && typeof last === "number"
+          ? [{ company: line.name, metric: "Price return", ...period, value: `${last.toFixed(1)}%`, ...shownIn }]
+          : [];
+      });
+    }
     return [];
   });
 }

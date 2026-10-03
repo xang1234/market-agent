@@ -610,6 +610,28 @@ test("blocks that show no figures (a gap note) leave the answer unguarded, like 
   assert.equal((blocks[0].segments as Array<{ text: string }>)[0].text, "AAPL trades at $231.6 per the latest quote.");
 });
 
+test("a turn showing only a price chart stays guarded against returns it does not show (#181)", async () => {
+  const chart = {
+    kind: "perf_comparison",
+    title: "Price performance",
+    default_range: "2026-08-22 to 2026-08-31",
+    series: [{ name: "NVDA", points: [{ x: "2026-08-22", y: 0 }, { x: "2026-08-31", y: 12.5 }] }],
+  };
+  const narrate = async (text: string) => {
+    const composed = await composeAnalystBlocksWithLlm({
+      env: BASE_ENV,
+      context: { userIntent: "How has NVDA done?", bundleId: "peer_comparison" },
+      blocks: [NARRATIVE_BLOCK],
+      toolCalls: [],
+      factBlocks: [chart],
+      createClient: () => async () => ({ text }),
+    });
+    return (composed[0].segments as Array<{ text: string }>)[0].text;
+  };
+  assert.equal(await narrate("NVDA returned 12.5% over the window."), "NVDA returned 12.5% over the window.");
+  assert.notEqual(await narrate("NVDA returned 40.0% over the window."), "NVDA returned 40.0% over the window.");
+});
+
 test("the model sees each comparison figure with the company and metric it belongs to", async () => {
   const { prompt } = await compareWithReply("NVDA leads.");
   assert.ok(
