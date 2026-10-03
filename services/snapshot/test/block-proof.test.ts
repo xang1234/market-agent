@@ -52,6 +52,8 @@ test("a chart of literal points is linked only by sealed series, one per line (#
   assert.equal(deriveBlockProof(line({ series_ref: SEALED }), SNAPSHOT).evidence, "linked");
   // Two lines drawn, one sealed series: the second line is unbacked.
   assert.equal(deriveBlockProof(line({ series_ref: SEALED }, 2), SNAPSHOT).evidence, "unknown");
+  // ...nor does the same sealed series listed twice.
+  assert.equal(deriveBlockProof(line({ series_refs: [SEALED, SEALED] }, 2), SNAPSHOT).evidence, "unknown");
 });
 
 test("a table of literal cells is not source-linked by one binding elsewhere on it", () => {

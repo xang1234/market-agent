@@ -91,7 +91,9 @@ function citedRefsAllSealed(block: Record<string, unknown>, snapshot: SealedSnap
   if (typeof block.kind === "string" && SERIES_KINDS.has(block.kind)) {
     const sealed = new Set(snapshot.series_refs);
     const lines = Array.isArray(block.series) ? block.series.length : 0;
-    return seriesRefs.length > 0 && seriesRefs.length >= lines && seriesRefs.every((id) => sealed.has(id));
+    // Distinct series: one id listed twice cannot back two lines.
+    const distinct = new Set(seriesRefs);
+    return distinct.size > 0 && distinct.size >= lines && [...distinct].every((id) => sealed.has(id));
   }
   const manifest: Record<string, ReadonlySet<string>> = {
     fact: new Set(snapshot.fact_refs),
