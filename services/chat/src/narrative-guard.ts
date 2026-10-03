@@ -43,9 +43,9 @@ const NUMBER =
 // all-currency test fails if one appears.
 const SENTENCE_BREAK = /(?<=[.!?])\s+/;
 // Markdown list markers ("- ", "* ", "1. ", "2) ") and headings ("## Margins",
-// a line that is only "**Margins**").
+// a line that is only "**Margins**"; a bold sentence ending "." is prose).
 const LIST_MARKER = /^\s*(?:[-*+]|\d{1,2}[.)])\s+/;
-const HEADING = /^\s*(?:#{1,6}\s|\*\*[^*]+\*\*:?\s*$)/;
+const HEADING = /^\s*(?:#{1,6}\s|\*\*[^*]*[^*.!?]\*\*:?\s*$)/;
 const COMPARED_WITH = /(?:compared (?:with|to)|unlike|versus|vs\.?|than|relative to|against)\s+$/i;
 // Between a company and a figure it owns: nothing but a possessive or
 // "at"/"with", then the figure's currency prefix if any ("versus AMD's 49.2%",
@@ -86,11 +86,13 @@ export function keepSupportedSentences(
   // A one-letter ticker ("A") cannot be told from the article, so it is never
   // recognized; sentences quoting its figures are dropped.
   // Each figure's currency prefix ("CHF ", "F CFA ", "$") with the figure it
-  // is written on, so a label inside one ("CHF 3.1B", "CFA" in "F CFA 3.1B")
-  // is told from a ticker before a figure ("NVDA 74.6%", "CHF 49.2%").
+  // is written on (its number and unit), so a label inside one ("CHF 3.1B",
+  // "CFA" in "F CFA 3.1B") is told from a ticker before a figure ("NVDA 74.6%",
+  // "CHF 3.1%").
   const prefixed = attributedFigures.flatMap((figure) => {
     const prefix = spaced(figure.value.match(/^[-−]?(\D*)/)![1]);
-    return prefix ? numbersIn(figure.value).slice(0, 1).map((number) => ({ prefix, number })) : [];
+    const [match] = numberMatches(figure.value);
+    return prefix && match ? [{ prefix, number: match.number, unit: unitAfter(figure.value, match.end) }] : [];
   });
   const companies = [...new Set(attributedFigures.map((figure) => figure.company))]
     .filter((company) => company.length > 1);
@@ -117,8 +119,8 @@ export function keepSupportedSentences(
       const numbers = allNumbers.filter((n) => !mentions.some((m) => within(n.index, m.index, m.company.length)));
       const named = mentions.filter((m) => !numbers.some((n) =>
         within(m.index, n.index, n.end - n.index) ||
-        (n.index >= m.index + m.company.length && prefixed.some(({ prefix, number }) =>
-          number === n.number && n.index - prefix.length <= m.index && spaced(sentence.slice(0, n.index)).endsWith(prefix)
+        (n.index >= m.index + m.company.length && prefixed.some(({ prefix, number, unit }) =>
+          number === n.number && unit === unitAfter(sentence, n.end) && n.index - prefix.length <= m.index && spaced(sentence.slice(0, n.index)).endsWith(prefix)
         ))
       ));
       if (numbers.some(({ number }) => !supported.has(number) && !owners.has(number))) {
@@ -228,6 +230,12 @@ function numberKey(raw: string): string {
   const sign = /^[-−]/.test(raw) ? "-" : "";
   const value = Number(sign + raw.match(/\d+(?:,\d{3})*(?:\.\d+)?$/)![0].replaceAll(",", ""));
   return Object.is(value, -0) ? "-0" : String(value);
+}
+
+// The first character after a figure's digits, case-folded: "b" for "3.1B"
+// and "3.1 billion", "%" for "3.1%".
+function unitAfter(text: string, end: number): string {
+  return text.slice(end).trimStart().charAt(0).toLowerCase();
 }
 
 // The formatter writes a no-break space where the model may write a space.

@@ -71,6 +71,11 @@ test("a heading whose whole section was dropped goes with it; one with content s
   for (const text of ["**Revenue reached $62.1B in Q4 2026.**", "**Revenue reached $62.1B in Q4 2026.**\n## Margins\nMargins held up."]) {
     assert.deepEqual(keepSupportedSentences(text, DISPLAYED), { text, removed: [] });
   }
+  // Nor goes with a dropped sentence after it.
+  assert.equal(
+    keepSupportedSentences("**Revenue reached $62.1B in Q4 2026.**\nGrew 38%.", DISPLAYED).text,
+    "**Revenue reached $62.1B in Q4 2026.**",
+  );
 });
 
 test("keeps paragraph breaks between supported paragraphs", () => {
@@ -373,6 +378,10 @@ test("a ticker that is also a currency prefix does not break that currency's fig
   const mixed = [{ company: "CHF", value: "CHF 3.1B" }, { company: "CHF", value: "49.2%" }, { company: "AMD", value: "74.6%" }];
   assert.deepEqual(keepSupportedSentences("Margins: CHF 49.2%, AMD 74.6%.", [], mixed).removed, []);
   assert.equal(keepSupportedSentences("AMD beat CHF 74.6%.", [], mixed).removed.length, 1);
+  // Nor a figure of the same value in another unit ("CHF 3.1%" beside "CHF 3.1B").
+  const units = [{ company: "CHF", value: "CHF 3.1B" }, { company: "CHF", value: "3.1%" }, { company: "AMD", value: "4.2%" }];
+  assert.deepEqual(keepSupportedSentences("Margins: CHF 3.1%, AMD 4.2%.", [], units).removed, []);
+  assert.equal(keepSupportedSentences("AMD's operating income was CHF 3.1B.", [], units).removed.length, 1);
 });
 
 test("a ticker written right before its figure still owns it (#144)", () => {
