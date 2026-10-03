@@ -355,9 +355,18 @@ test("a ticker that is also a currency prefix does not break that currency's fig
   assert.deepEqual(keepSupportedSentences("CHF's operating income was -CHF 3.1B.", [], figures).removed, []);
   assert.equal(keepSupportedSentences("AMD's operating income was -CHF 3.1B.", [], figures).removed.length, 1);
   // Nor is a positive figure's prefix an attached owner (#144).
-  const positive = [{ company: "CHF", value: "CHF 3.1B" }, { company: "AMD", value: "$4.2B" }];
-  assert.deepEqual(keepSupportedSentences("CHF's operating income was CHF 3.1B.", [], positive).removed, []);
+  const positive = [{ company: "CHF", value: "CHF 3.1B" }, { company: "AMD", value: "$4.2B" }];
+  assert.deepEqual(keepSupportedSentences("CHF's operating income was CHF 3.1B.", [], positive).removed, []);
+  assert.equal(keepSupportedSentences("AMD's operating income was CHF 3.1B.", [], positive).removed.length, 1);
+  // Written with a plain space by the model, it is still the prefix.
   assert.equal(keepSupportedSentences("AMD's operating income was CHF 3.1B.", [], positive).removed.length, 1);
+});
+
+test("a ticker written right before its figure still owns it (#144)", () => {
+  const figures = [{ company: "NVDA", value: "74.6%" }, { company: "AMD", value: "49.2%" }];
+  const kept = "Gross margin: NVDA 74.6%, AMD 49.2%.";
+  assert.deepEqual(keepSupportedSentences(kept, [], figures), { text: kept, removed: [] });
+  assert.equal(keepSupportedSentences("Gross margin: NVDA 49.2%, AMD 74.6%.", [], figures).text, "");
 });
 
 test("a company label starting with a digit is still a mention", () => {

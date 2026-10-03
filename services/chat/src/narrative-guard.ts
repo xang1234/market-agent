@@ -46,9 +46,6 @@ const SENTENCE_BREAK = /(?<=[.!?])\s+/;
 // a line that is only "**Margins**").
 const LIST_MARKER = /^\s*(?:[-*+]|\d{1,2}[.)])\s+/;
 const HEADING = /^\s*(?:#{1,6}\s|\*\*[^*]+\*\*:?\s*$)/;
-// The rest of a currency prefix after a label that begins it: "CHF" in
-// "CHF 3.1B", "CN" in "CN¥3.1B".
-const PREFIX_TAIL = /^\.?(?:[ \u00a0\u202f][A-Z]{1,4})?\p{Sc}?[ \u00a0\u202f]?$/u;
 const COMPARED_WITH = /(?:compared (?:with|to)|unlike|versus|vs\.?|than|relative to|against)\s+$/i;
 // Between a company and a figure it owns: nothing but a possessive or
 // "at"/"with", then the figure's currency prefix if any ("versus AMD's 49.2%",
@@ -88,6 +85,10 @@ export function keepSupportedSentences(
   }
   // A one-letter ticker ("A") cannot be told from the article, so it is never
   // recognized; sentences quoting its figures are dropped.
+  // The currency prefixes the figures are written with ("CHF ", "CN¥", "$"),
+  // so a label that is one ("CHF 3.1B") is told from a ticker before a figure
+  // ("NVDA 74.6%").
+  const prefixes = new Set(attributedFigures.map((figure) => spaced(figure.value.match(/^[-−]?(\D*)/)![1])).filter(Boolean));
   const companies = [...new Set(attributedFigures.map((figure) => figure.company))]
     .filter((company) => company.length > 1);
 
@@ -112,7 +113,7 @@ export function keepSupportedSentences(
       const numbers = allNumbers.filter((n) => !mentions.some((m) => within(n.index, m.index, m.company.length)));
       const named = mentions.filter((m) => !numbers.some((n) =>
         within(m.index, n.index, n.end - n.index) ||
-        (n.index >= m.index + m.company.length && PREFIX_TAIL.test(sentence.slice(m.index + m.company.length, n.index)))
+        (n.index >= m.index + m.company.length && prefixes.has(spaced(sentence.slice(m.index, n.index))))
       ));
       if (numbers.some(({ number }) => !supported.has(number) && !owners.has(number))) {
         removed.push(sentence);
@@ -219,6 +220,11 @@ function numberKey(raw: string): string {
   const sign = /^[-−]/.test(raw) ? "-" : "";
   const value = Number(sign + raw.match(/\d+(?:,\d{3})*(?:\.\d+)?$/)![0].replaceAll(",", ""));
   return Object.is(value, -0) ? "-0" : String(value);
+}
+
+// The formatter writes a no-break space where the model may write a space.
+function spaced(text: string): string {
+  return text.replace(/[\u00a0\u202f]/g, " ");
 }
 
 function escapeRegExp(text: string): string {
